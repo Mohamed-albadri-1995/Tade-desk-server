@@ -161,22 +161,54 @@ function getRegisterData(register, date) {
         const sectors = d.sectors || {};
         const bullish = Object.values(sectors).filter(s => s.bias === 'BULLISH').length;
         const bearish = Object.values(sectors).filter(s => s.bias === 'BEARISH').length;
+        const sectorEntries = {};
+        for (const [name, s] of Object.entries(sectors)) {
+          sectorEntries[`sec_${name}_bias`] = s.bias;
+          sectorEntries[`sec_${name}_score`] = s.score;
+          sectorEntries[`sec_${name}_change`] = s.change;
+          sectorEntries[`sec_${name}_hot`] = s.hot;
+        }
         return {
+          date: row.date,
           slot: row.slot,
+          // Indices
           spyClose: d.indices?.SPY?.close,
           spyChange: d.indices?.SPY?.change,
+          spyWeekChg: d.indices?.SPY?.weekChg,
+          spySma5: d.indices?.SPY?.sma5,
+          spySma20: d.indices?.SPY?.sma20,
+          spySma50: d.indices?.SPY?.sma50,
+          spySma200: d.indices?.SPY?.sma200,
+          spyBbUpper: d.indices?.SPY?.bbUpper,
+          spyBbLower: d.indices?.SPY?.bbLower,
           qqqClose: d.indices?.QQQ?.close,
           qqqChange: d.indices?.QQQ?.change,
+          qqqWeekChg: d.indices?.QQQ?.weekChg,
+          qqqSma5: d.indices?.QQQ?.sma5,
+          qqqSma20: d.indices?.QQQ?.sma20,
+          qqqSma50: d.indices?.QQQ?.sma50,
+          qqqSma200: d.indices?.QQQ?.sma200,
+          iwmClose: d.indices?.IWM?.close,
+          iwmChange: d.indices?.IWM?.change,
+          iwmWeekChg: d.indices?.IWM?.weekChg,
+          diaClose: d.indices?.DIA?.close,
+          diaChange: d.indices?.DIA?.change,
           vixClose: d.indices?.VIX?.close,
           vixChange: d.indices?.VIX?.change,
+          vixWeekChg: d.indices?.VIX?.weekChg,
+          // Market bias
           regime: d.regime?.slug,
           regimeLabel: d.regime?.label,
           shortBias: d.shortTerm?.result,
+          shortScore: d.shortTerm?.score,
           midStage: d.midTerm?.result,
           longBias: d.longTerm?.result,
+          // Sector summary
           sectorBullish: bullish,
           sectorBearish: bearish,
           breakouts: d.breakoutNames,
+          // Per-sector columns
+          ...sectorEntries,
           capturedAt: row.captured_at,
         };
       });
@@ -187,6 +219,7 @@ function getRegisterData(register, date) {
         .prepare('SELECT * FROM r3a WHERE date = ? ORDER BY ticker')
         .all(date || toETDate(Date.now()));
       return rows.map(row => ({
+        date: row.date,
         ticker: row.ticker,
         entryPriceA: row.entry_price_a,
         hhA: row.hh_a,
@@ -203,6 +236,7 @@ function getRegisterData(register, date) {
         .prepare('SELECT * FROM r3b WHERE date = ? ORDER BY ticker')
         .all(date || toETDate(Date.now()));
       return rows.map(row => ({
+        date: row.date,
         ticker: row.ticker,
         entryPriceB: row.entry_price_b,
         hhB: row.hh_b,
@@ -224,17 +258,59 @@ function getRegisterData(register, date) {
         const d1 = JSON.parse(row.data);
         const r3a = r3aMap[d1.ticker] || {};
         return {
+          date: row.date,
           ticker: d1.ticker,
+          _score: d1._score,
+          inShortlist: d1.inShortlist,
+          // R1 stock fields at 9:36 AM
           price936: d1.stock?.price,
-          score: d1._score,
+          prevClose: d1.stock?.prevClose,
+          open: d1.stock?.open,
+          change: d1.stock?.change,
+          gapPct: d1.stock?.gapPct,
+          vwap: d1.stock?.vwap,
+          sma5: d1.stock?.sma5,
+          ema9: d1.stock?.ema9,
+          ema13: d1.stock?.ema13,
+          ema20: d1.stock?.ema20,
+          ema50: d1.stock?.ema50,
+          rvol: d1.stock?.rvol,
+          atr: d1.stock?.atr,
+          adrPct: d1.stock?.adrPct,
+          dayHigh: d1.stock?.dayHigh,
+          dayLow: d1.stock?.dayLow,
+          monthHigh: d1.stock?.monthHigh,
+          monthLow: d1.stock?.monthLow,
+          monthRangePos: d1.stock?.monthRangePos,
+          mcap: d1.stock?.mcap,
+          floatShares: d1.stock?.floatShares,
+          shortFloat: d1.stock?.shortFloat,
+          pmHigh: d1.stock?.pmHigh,
+          pmLow: d1.stock?.pmLow,
+          pmRange: d1.stock?.pmRange,
+          pmAdrRatio: d1.stock?.pmAdrRatio,
           sector: d1.stock?.sector,
+          industry: d1.stock?.industry,
+          screenerKeys: d1.screenerKeys,
+          // R1 context
           regime: d1.context?.regime,
+          regimeLabel: d1.context?.regimeLabel,
+          longTerm: d1.context?.longTerm,
+          midTerm: d1.context?.midTerm,
+          shortTerm: d1.context?.shortTerm,
+          broadResolved: d1.context?.broadResolved,
+          secBias: d1.context?.secBias,
+          secScore: d1.context?.secScore,
+          themes: d1.context?.themes,
+          catalyst: d1.catalyst?.label || null,
+          // R3A EOD fields
           entryPriceA: r3a.entry_price_a,
           hhA: r3a.hh_a,
           llA: r3a.ll_a,
+          atr14: r3a.atr14,
           upR_A: r3a.up_r_a,
           downR_A: r3a.down_r_a,
-          atr14: r3a.atr14,
+          capturedAt: r3a.captured_at,
         };
       });
     }
@@ -249,17 +325,59 @@ function getRegisterData(register, date) {
         const d1 = JSON.parse(row.data);
         const r3b = r3bMap[d1.ticker] || {};
         return {
+          date: row.date,
           ticker: d1.ticker,
+          _score: d1._score,
+          inShortlist: d1.inShortlist,
+          // R1 stock fields at 9:36 AM
           price936: d1.stock?.price,
-          score: d1._score,
+          prevClose: d1.stock?.prevClose,
+          open: d1.stock?.open,
+          change: d1.stock?.change,
+          gapPct: d1.stock?.gapPct,
+          vwap: d1.stock?.vwap,
+          sma5: d1.stock?.sma5,
+          ema9: d1.stock?.ema9,
+          ema13: d1.stock?.ema13,
+          ema20: d1.stock?.ema20,
+          ema50: d1.stock?.ema50,
+          rvol: d1.stock?.rvol,
+          atr: d1.stock?.atr,
+          adrPct: d1.stock?.adrPct,
+          dayHigh: d1.stock?.dayHigh,
+          dayLow: d1.stock?.dayLow,
+          monthHigh: d1.stock?.monthHigh,
+          monthLow: d1.stock?.monthLow,
+          monthRangePos: d1.stock?.monthRangePos,
+          mcap: d1.stock?.mcap,
+          floatShares: d1.stock?.floatShares,
+          shortFloat: d1.stock?.shortFloat,
+          pmHigh: d1.stock?.pmHigh,
+          pmLow: d1.stock?.pmLow,
+          pmRange: d1.stock?.pmRange,
+          pmAdrRatio: d1.stock?.pmAdrRatio,
           sector: d1.stock?.sector,
+          industry: d1.stock?.industry,
+          screenerKeys: d1.screenerKeys,
+          // R1 context
           regime: d1.context?.regime,
+          regimeLabel: d1.context?.regimeLabel,
+          longTerm: d1.context?.longTerm,
+          midTerm: d1.context?.midTerm,
+          shortTerm: d1.context?.shortTerm,
+          broadResolved: d1.context?.broadResolved,
+          secBias: d1.context?.secBias,
+          secScore: d1.context?.secScore,
+          themes: d1.context?.themes,
+          catalyst: d1.catalyst?.label || null,
+          // R3B EOD fields
           entryPriceB: r3b.entry_price_b,
           hhB: r3b.hh_b,
           llB: r3b.ll_b,
+          atr14: r3b.atr14,
           upR_B: r3b.up_r_b,
           downR_B: r3b.down_r_b,
-          atr14: r3b.atr14,
+          capturedAt: r3b.captured_at,
         };
       });
     }
@@ -275,6 +393,7 @@ function getRegisterData(register, date) {
           result.push({
             date: row.date,
             ticker: item.ticker,
+            tvSymbol: item.tvSymbol || null,
             addedAt: item.addedAt,
             method: item.method,
             price: item.price,
@@ -282,6 +401,7 @@ function getRegisterData(register, date) {
             sector: item.sector,
             score: item.score,
             exported: row.exported === 1,
+            exportedAt: row.exported_at || null,
           });
         }
       }
