@@ -54,6 +54,42 @@ router.get('/test', async (req, res) => {
   }
 });
 
+// GET /api/scan/health — validate TV response structure against expected column types
+router.get('/health', async (req, res) => {
+  const axios = require('axios');
+  const { COMMON_COLUMNS } = require('../sideA/tvScanner');
+  const TV_URL = 'https://scanner.tradingview.com/america/scan?label-product=screener-stock';
+  const TV_HEADERS = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Origin': 'https://www.tradingview.com', 'Referer': 'https://www.tradingview.com/',
+    'Accept': 'application/json', 'Accept-Language': 'en-US,en;q=0.9',
+  };
+  const body = {
+    columns: COMMON_COLUMNS,
+    filter: [{ left: 'relative_volume_10d_calc', operation: 'greater', right: 10 }, { left: 'close', operation: 'egreater', right: 2 }],
+    filter2: { operator: 'and', operands: [] },
+    ignore_unknown_fields: true, markets: ['america'], options: { lang: 'en' }, range: [0, 3], sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' }, symbols: {},
+  };
+  try {
+    const r = await axios.post(TV_URL, body, { headers: TV_HEADERS, timeout: 15000 });
+    const rows = r.data.data || [];
+    if (!rows.length) return res.json({ ok: true, status: 'no_data', totalCount: r.data.totalCount, columns: COMMON_COLUMNS });
+    const sample = rows[0];
+    const d = sample.d || [];
+    const colReport = COMMON_COLUMNS.map((col, i) => {
+      const val = d[i];
+      const t = val === null || val === undefined ? 'null' : typeof val;
+      const preview = t === 'object' ? JSON.stringify(val).slice(0, 60) : String(val).slice(0, 30);
+      return { col, index: i, type: t, preview };
+    });
+    const issues = colReport.filter(c => c.type === 'object' && c.col !== 'ticker-view');
+    res.json({ ok: true, totalCount: r.data.totalCount, rowCount: rows.length, symbol: sample.s, columnCount: COMMON_COLUMNS.length, responseLength: d.length, issues: issues.length ? issues : 'none', columns: colReport });
+  } catch (e) {
+    res.json({ ok: false, status: e.response?.status, message: e.message, data: e.response?.data });
+  }
+});
+
 // GET /api/scan/debug — run bigmoves scanner and return raw TV response or error
 router.get('/debug', async (req, res) => {
   const axios = require('axios');

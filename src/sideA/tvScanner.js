@@ -139,56 +139,90 @@ const SCANNERS = {
   ),
 };
 
+// Expected types for each column — used for structure validation
+const COLUMN_EXPECTED_TYPES = {
+  'ticker-view': ['string', 'object'], // TV changed this to object; accept both
+  'open': ['number'], 'close': ['number'], 'change': ['number'],
+  'relative_volume_10d_calc': ['number'], 'relative_volume_intraday|5': ['number', 'null'],
+  'market_cap_basic': ['number', 'null'], 'sector': ['string', 'null'],
+  'industry': ['string', 'null'], 'change_from_open': ['number', 'null'],
+  'VWAP': ['number', 'null'], 'High.1M': ['number', 'null'], 'Low.1M': ['number', 'null'],
+  'high': ['number', 'null'], 'low': ['number', 'null'], 'ATR': ['number', 'null'],
+  'short_percentage_of_float': ['number', 'null'], 'float_shares_outstanding': ['number', 'null'],
+  'EMA9': ['number', 'null'], 'EMA13': ['number', 'null'], 'EMA20': ['number', 'null'],
+  'EMA50': ['number', 'null'], 'SMA5': ['number', 'null'],
+  'premarket_high': ['number', 'null'], 'premarket_low': ['number', 'null'],
+};
+
+let _structureWarned = false;
+function validateTVStructure(sampleRow) {
+  if (_structureWarned) return;
+  const d = sampleRow.d || [];
+  const issues = [];
+  COMMON_COLUMNS.forEach((col, i) => {
+    const val = d[i];
+    const expected = COLUMN_EXPECTED_TYPES[col];
+    if (!expected) return;
+    const actual = val === null || val === undefined ? 'null' : typeof val;
+    if (!expected.includes(actual)) {
+      issues.push(`${col}[${i}]: expected ${expected.join('|')} got ${actual}`);
+    }
+  });
+  if (issues.length > 0) {
+    console.warn('[TV Scanner] Structure change detected — update mapTVRow if data looks wrong:');
+    issues.forEach(i => console.warn('  >', i));
+    _structureWarned = true;
+  }
+}
+
+// Safe extractors — return null instead of throwing on unexpected types
+const num = v => (typeof v === 'number' && isFinite(v)) ? v : null;
+const str = v => (typeof v === 'string') ? v : (v && typeof v === 'object' && v.name) ? v.name : null;
+
 function mapTVRow(rawTV) {
   const d = rawTV.d;
   const colIdx = {};
   COMMON_COLUMNS.forEach((col, i) => { colIdx[col] = i; });
 
-  const get = col => {
-    const i = colIdx[col];
-    return i !== undefined ? d[i] : null;
-  };
+  const getRaw = col => { const i = colIdx[col]; return i !== undefined ? d[i] : null; };
+  const getNum = col => num(getRaw(col));
+  const getStr = col => str(getRaw(col));
 
-  // TV now returns ticker-view as a rich object; use rawTV.s (e.g. "NASDAQ:SHPH") instead
+  // Always use rawTV.s for ticker — resilient to ticker-view format changes
   const rawTicker = (typeof rawTV.s === 'string' ? rawTV.s : '') || '';
   const ticker = rawTicker.includes(':') ? rawTicker.split(':')[1] : rawTicker;
 
-  const intraday_rvol = get('relative_volume_intraday|5');
-  const tenDay_rvol = get('relative_volume_10d_calc');
-  let rvol;
-  if (intraday_rvol !== null && intraday_rvol !== undefined && intraday_rvol > 0) {
-    rvol = intraday_rvol;
-  } else {
-    rvol = tenDay_rvol;
-  }
+  const intraday_rvol = getNum('relative_volume_intraday|5');
+  const tenDay_rvol = getNum('relative_volume_10d_calc');
+  const rvol = (intraday_rvol !== null && intraday_rvol > 0) ? intraday_rvol : tenDay_rvol;
 
   return {
     ticker,
     stock: {
       tvSymbol: rawTicker,
-      price: get('close'),
-      open: get('open'),
-      change: get('change'),
-      vwap: get('VWAP'),
-      ema9: get('EMA9'),
-      ema13: get('EMA13'),
-      ema20: get('EMA20'),
-      ema50: get('EMA50'),
-      sma5: get('SMA5'),
-      monthHigh: get('High.1M'),
-      monthLow: get('Low.1M'),
-      dayHigh: get('high'),
-      dayLow: get('low'),
-      atr: get('ATR'),
-      mcap: get('market_cap_basic'),
-      floatShares: get('float_shares_outstanding'),
-      shortFloat: get('short_percentage_of_float'),
-      sector: get('sector'),
-      industry: get('industry'),
-      pmHigh: get('premarket_high'),
-      pmLow: get('premarket_low'),
+      price: getNum('close'),
+      open: getNum('open'),
+      change: getNum('change'),
+      vwap: getNum('VWAP'),
+      ema9: getNum('EMA9'),
+      ema13: getNum('EMA13'),
+      ema20: getNum('EMA20'),
+      ema50: getNum('EMA50'),
+      sma5: getNum('SMA5'),
+      monthHigh: getNum('High.1M'),
+      monthLow: getNum('Low.1M'),
+      dayHigh: getNum('high'),
+      dayLow: getNum('low'),
+      atr: getNum('ATR'),
+      mcap: getNum('market_cap_basic'),
+      floatShares: getNum('float_shares_outstanding'),
+      shortFloat: getNum('short_percentage_of_float'),
+      sector: getStr('sector'),
+      industry: getStr('industry'),
+      pmHigh: getNum('premarket_high'),
+      pmLow: getNum('premarket_low'),
       rvol,
-      _changeFromOpen: get('change_from_open'),
+      _changeFromOpen: getNum('change_from_open'),
     },
   };
 }
@@ -209,15 +243,8 @@ async function runScanner(name) {
     timeout: 15000,
   });
   const rawRows = resp.data.data || [];
-  console.log(`[TV Scanner] ${name}: TV returned ${rawRows.length} raw rows`);
-  const rows = [];
-  for (const raw of rawRows) {
-    try {
-      rows.push(mapTVRow(raw));
-    } catch (e) {
-      console.error(`[TV Scanner] ${name} mapTVRow error:`, e.message, JSON.stringify(raw).slice(0, 150));
-    }
-  }
+  if (rawRows.length > 0) validateTVStructure(rawRows[0]);
+  const rows = rawRows.map(mapTVRow).filter(r => r.ticker);
   return { name, rows };
 }
 
