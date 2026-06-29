@@ -17,9 +17,11 @@ const SETTING_RULES = {
   shortlistTopN:          { type: 'int', min: 1,    max: 50  },
   finnhubApiKey:          { type: 'str', maxLen: 100 },
   githubBackupToken:      { type: 'str', maxLen: 200 },
+  alpacaApiKey:           { type: 'str', maxLen: 100 },
+  alpacaApiSecret:        { type: 'str', maxLen: 100 },
 };
 
-const MASKED_KEYS = new Set(['finnhubApiKey', 'githubBackupToken']);
+const MASKED_KEYS = new Set(['finnhubApiKey', 'githubBackupToken', 'alpacaApiKey', 'alpacaApiSecret']);
 
 // GET /api/settings
 router.get('/', (req, res) => {

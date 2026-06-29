@@ -120,7 +120,7 @@ A browser-accessible settings panel was added to allow runtime control of key va
 | Scoring engine redesign | High | User will design from scratch; `_score` currently shows `—` |
 | Side G — Stale Ticker Refresh | High | See full design below |
 | Pipeline Orchestration & Monitor | High | See full design below |
-| R3A / R3B capture path | High | Schema and read path exist; no write trigger yet — must be designed |
+| R3A / R3B capture path | High | ✅ Complete — Alpaca-based, 4:05 PM EOD job, tickers from R1 |
 | Analysis tab content | Medium | Sub-tabs are empty placeholders |
 | Browser settings for scheduler | Low | User flagged as future item |
 
@@ -264,18 +264,56 @@ Side F failure → non-fatal (inShortlist flags may be wrong until next scan)
 
 ---
 
-## Design: R3A / R3B Capture Path
+## Design: R3A (Target Entry) / R3B (Alternative Entry) — IMPLEMENTED
 
-The DB schema, read path, and warehouse display for R3A and R3B already exist. What is missing is the write path — no code currently populates these tables.
+**Status: ✅ Complete**
 
-**This requires a design session.** R3A and R3B represent trade entry scenarios (entry price, HH, LL, ATR-based R values). The questions to answer before building:
+### Names
+- **R3A = Target Entry** — first entry scenario, earlier in the session
+- **R3B = Alternative Entry** — second entry scenario, later in the session
 
-1. What event triggers a capture? (9:36 AM after R1? User manually submits levels? Something else?)
-2. What is the source of `entryPriceA` / `entryPriceB`? (Live price at capture time? User-specified?)
-3. What is `hhA` / `llA`? (Intraday high/low? Pre-market high/low? User-specified?)
-4. Is R3 per-ticker (you select which tickers to capture) or all-of-r0?
+### Data Source
+Alpaca Market Data API v2 (credentials stored in settings: `alpacaApiKey`, `alpacaApiSecret`).
 
-Until these are answered, R3A/R3B capture should not be built. The read path is already safe to ship.
+### Ticker Universe
+All tickers from today's R1 snapshot (`r1_frozen WHERE date = today`). R3 shares the same universe as R1. If R1 is empty for today, R3 capture is skipped and the reason is reported to the Monitor tab.
+
+### Entry Points
+| Register | Entry Bar | Entry Price |
+|---|---|---|
+| R3A | 9:37 ET 1-min bar | **open** of that bar |
+| R3B | 9:40 ET 1-min bar | **open** of that bar |
+
+### HH / LL
+- `hh_a / ll_a`: highest high / lowest low of all 1-min bars from 9:37 ET through 16:00 ET (inclusive)
+- `hh_b / ll_b`: highest high / lowest low of all 1-min bars from 9:40 ET through 16:00 ET (inclusive)
+- Source: intraday 1-min bars from Alpaca, full session 9:30–16:00 ET in one call per batch
+
+### ATR14
+- Computed from the 14 most recent completed trading days **before today** (today excluded)
+- Source: daily bars from Alpaca, ~30 calendar days back ending the day before capture
+- Formula: `ATR_i = max(H−L, |H−prevC|, |L−prevC|)`, ATR14 = mean of last 14 values
+
+### R Values
+- `up_r_a = (hh_a − entry_price_a) / atr14`
+- `down_r_a = (entry_price_a − ll_a) / atr14`
+- Same formula for B
+
+### Trigger
+Single scheduler job: **`5 16 * * 1-5`** (4:05 PM ET, Mon–Fri).
+Runs after market close so all bars (including 15:59–16:00) are settled.
+Both R3A and R3B are written in a single transaction per ticker.
+
+### Files
+- `src/alpaca/client.js` — `fetchIntradayBars`, `fetchDailyBars`, `computeATR14`
+- `src/sideH/capture.js` — `captureR3(date)` with R1 pre-flight check
+- `src/scheduler.js` — "R3 EOD Capture 4:05 PM" job
+- `src/routes/settings.js` — `alpacaApiKey`, `alpacaApiSecret` (masked)
+- `src/db/index.js` — default empty values for both keys
+
+### Read Path (already existed)
+- `getRegisterData('R3A', date)` and `getRegisterData('R3B', date)` in `src/warehouse/registers.js`
+- `getRegisterData('R4A', date)` and `getRegisterData('R4B', date)` join R1 + R3A/B for combined analysis
 
 ---
 

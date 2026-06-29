@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { runFullScan } = require('./pipeline');
 const { runAutoRule } = require('./sideF/shortlist');
 const { captureR1, captureR2 } = require('./warehouse/registers');
+const { captureR3 } = require('./sideH/capture');
 const { pushBackup } = require('./backup');
 const r0 = require('./r0/registry');
 
@@ -60,6 +61,7 @@ function startScheduler() {
   registerJob('R1 Capture 9:36 AM', '36 9 * * 1-5', 'America/New_York', () => captureR1());
   registerJob('R2 Snapshot 9:25–10:00 AM', '25,30,35,40,45,50,55 9 * * 1-5', 'America/New_York', () => captureR2());
   registerJob('R2 Snapshot 10:00 AM', '0 10 * * 1-5', 'America/New_York', () => captureR2());
+  registerJob('R3 EOD Capture 4:05 PM', '5 16 * * 1-5', 'America/New_York', () => captureR3());
   registerJob('Daily Backup 5:30 PM', '30 17 * * 1-5', 'America/New_York', () => pushBackup());
   registerJob('Midnight r0 Flush', '0 0 * * *', 'America/New_York', () => { r0.clearAll(); });
 

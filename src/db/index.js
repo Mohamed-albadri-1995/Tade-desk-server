@@ -79,6 +79,8 @@ const defaults = [
   ['shortlistTopN', '5'],
   ['finnhubApiKey', ''],
   ['githubBackupToken', ''],
+  ['alpacaApiKey', ''],
+  ['alpacaApiSecret', ''],
 ];
 const insertSetting = db.prepare(
   'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'

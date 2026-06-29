@@ -308,6 +308,7 @@ error — visible in the Monitor tab.
 | R1 Capture | `36 9 * * 1-5` | 9:36 AM ET |
 | R2 Snapshot | `25,30,35,40,45,50,55 9 * * 1-5` | Every 5 min 9:25–9:55 AM ET |
 | R2 Snapshot | `0 10 * * 1-5` | 10:00 AM ET |
+| R3 EOD Capture | `5 16 * * 1-5` | 4:05 PM ET |
 | Daily Backup | `30 17 * * 1-5` | 5:30 PM ET |
 | Midnight r0 Flush | `0 0 * * *` | 12:00 AM ET (every day) |
 
@@ -363,6 +364,15 @@ error — visible in the Monitor tab.
                  Writes to r2_market_snapshots with (date, slot, data_json)
                  Multiple rows per day — one per slot (no unique constraint on slot)
 
+4:05 PM ET     — R3 EOD Capture (Side H)
+                 Checks R1 has rows for today — if not, skips with logged reason
+                 Reads tickers from r1_frozen WHERE date = today
+                 Fetches full-day 1-min bars from Alpaca (9:30–16:00 ET)
+                 Fetches 14 daily bars before today from Alpaca for ATR14
+                 Writes r3a: entry=open of 9:37 bar, hh/ll from 9:37→close
+                 Writes r3b: entry=open of 9:40 bar, hh/ll from 9:40→close
+                 Computes up_r/down_r = (hh−entry)/atr14, (entry−ll)/atr14
+
 5:30 PM ET     — Daily Backup
                  Exports DB tables to JSON: settings, shortlist, r1_frozen,
                  r2_market_snapshots, r3a, r3b
@@ -408,12 +418,32 @@ during the open?"
 If Side D did not run before 9:25 AM, `latestSnapshot` is null and R2 capture
 logs nothing.
 
-### R3A / R3B — Trade Levels (DB)
+### R3A (Target Entry) / R3B (Alternative Entry) — Trade Levels (DB)
 
 **Tables:** `r3a`, `r3b` | **Primary key:** `(date, ticker)`
+**Data source:** Alpaca Market Data API v2 (1-min and daily bars)
+**Ticker universe:** All tickers from today's R1 snapshot
+**Trigger:** Scheduler job at 4:05 PM ET (after market close)
 
-Schema exists. Read path works. **Write path not yet built.**
-Design decisions pending: what triggers capture, what data goes in.
+**Entry prices:**
+- `entry_price_a` = open of the 9:37 ET 1-min bar (Target Entry)
+- `entry_price_b` = open of the 9:40 ET 1-min bar (Alternative Entry)
+
+**HH / LL:**
+- `hh_a / ll_a` = highest high / lowest low of all bars from 9:37 → 16:00 ET
+- `hh_b / ll_b` = highest high / lowest low of all bars from 9:40 → 16:00 ET
+
+**ATR14:** computed from the 14 most recent completed trading days before today (today excluded).
+
+**R values:**
+- `up_r_a = (hh_a − entry_price_a) / atr14`
+- `down_r_a = (entry_price_a − ll_a) / atr14`
+- Same formula for B
+
+**Pre-flight check:** if R1 has no rows for today, R3 capture is skipped and the skip reason
+is reported to the Monitor tab job registry.
+
+**Files:** `src/alpaca/client.js`, `src/sideH/capture.js`
 
 ### R4A / R4B — Combined Analysis (computed)
 
@@ -482,9 +512,11 @@ Sets `exported = true` in the DB entry.
 | `shortlistTopN` | 5 | Side F auto-rule — max picks |
 | `finnhubApiKey` | '' | Side C news — Finnhub API key |
 | `githubBackupToken` | '' | Backup — GitHub personal access token |
+| `alpacaApiKey` | '' | Side H R3 capture — Alpaca API key |
+| `alpacaApiSecret` | '' | Side H R3 capture — Alpaca secret key |
 
-`finnhubApiKey` and `githubBackupToken` are masked in `GET /api/settings`
-(returns `'set'` or `''`). Never returned as actual values.
+`finnhubApiKey`, `githubBackupToken`, `alpacaApiKey`, and `alpacaApiSecret` are masked
+in `GET /api/settings` (returns `'set'` or `''`). Never returned as actual values.
 
 `hotState` (which sectors are currently HOT) lives in memory in `src/sideD/sectors.js`.
 It accumulates across scans. It resets on server restart or via `POST /api/settings/reset-hot`.
@@ -601,6 +633,6 @@ The button is a fallback / manual retry.
 | Item | Status |
 |---|---|
 | Side E scoring engine | Module exists and tested. Disconnected. `_score` is always null. Will be designed from scratch. |
-| R3A / R3B capture | Schema and read path exist. No write trigger yet. Needs design decisions. |
+| R3A / R3B capture | ✅ Implemented — Alpaca-based, 4:05 PM EOD job, tickers from R1 |
 | Analysis tab content | Empty placeholder tabs. |
 | Shortlist auto-rule | Wired up but produces nothing until scoring is connected. |
