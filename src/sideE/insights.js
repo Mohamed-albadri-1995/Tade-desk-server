@@ -59,8 +59,38 @@ function generateRuleBasedInsights(model) {
 
 function callAI(prompt, apiKey, model) {
   const isAnthropic = apiKey.startsWith('sk-ant-');
+  const isGemini = apiKey.startsWith('AIza');
 
-  if (isAnthropic) {
+  if (isGemini) {
+    const resolvedModel = model || 'gemini-2.0-flash';
+    const body = JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 1000 },
+    });
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'generativelanguage.googleapis.com',
+        path: `/v1beta/models/${resolvedModel}:generateContent?key=${apiKey}`,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      };
+      const req = https.request(options, res => {
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) return reject(new Error(parsed.error.message));
+            resolve(parsed.candidates?.[0]?.content?.parts?.[0]?.text || '');
+          } catch (e) { reject(e); }
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
+      req.write(body);
+      req.end();
+    });
+  } else if (isAnthropic) {
     // Anthropic API
     const body = JSON.stringify({
       model: model || 'claude-haiku-4-5',

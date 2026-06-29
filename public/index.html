@@ -754,14 +754,28 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <div class="settings-section-title">Analysis Engine (Side E)</div>
         <div class="settings-grid">
           <div class="settings-field">
-            <label>AI API Key (OpenRouter)</label>
-            <div class="settings-hint">Used for AI-generated insights. Leave blank to use rule-based insights only.</div>
-            <input type="password" class="settings-input" id="s-aiApiKey" placeholder="sk-or-v1-..." autocomplete="off">
+            <label>AI Provider</label>
+            <div class="settings-hint">Choose which AI service to use for generating insights.</div>
+            <select class="settings-input" id="s-aiProvider" onchange="onAiProviderChange()">
+              <option value="openrouter">OpenRouter</option>
+              <option value="anthropic">Claude (Anthropic)</option>
+              <option value="gemini">Gemini (Google)</option>
+            </select>
           </div>
           <div class="settings-field">
             <label>AI Model</label>
-            <div class="settings-hint">OpenRouter model ID (e.g. anthropic/claude-haiku-4-5)</div>
-            <input type="text" class="settings-input" id="s-aiModel" placeholder="anthropic/claude-haiku-4-5">
+            <div class="settings-hint" id="ai-model-hint">OpenRouter model ID (e.g. anthropic/claude-haiku-4-5)</div>
+            <div style="display:flex;gap:6px">
+              <select class="settings-input" id="s-aiModelPreset" onchange="onAiPresetChange()" style="flex:0 0 auto;width:auto;max-width:60%">
+                <option value="">— pick or type below —</option>
+              </select>
+              <input type="text" class="settings-input" id="s-aiModel" placeholder="anthropic/claude-haiku-4-5" style="flex:1">
+            </div>
+          </div>
+          <div class="settings-field">
+            <label>API Key</label>
+            <div class="settings-hint" id="ai-key-hint">Your API key. Leave blank to keep the existing key.</div>
+            <input type="password" class="settings-input" id="s-aiApiKey" placeholder="sk-or-v1-..." autocomplete="off">
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
@@ -1112,6 +1126,68 @@ async function resetHotState(btn) {
   }
 }
 
+const AI_PROVIDERS = {
+  openrouter: {
+    keyHint: 'OpenRouter API key (sk-or-v1-...)',
+    keyPlaceholder: 'sk-or-v1-...',
+    modelHint: 'OpenRouter model ID',
+    models: [
+      { label: 'Claude Haiku 4.5 (fast)', value: 'anthropic/claude-haiku-4-5' },
+      { label: 'Claude Sonnet 4.5', value: 'anthropic/claude-sonnet-4-5' },
+      { label: 'Gemini Flash 2.0', value: 'google/gemini-flash-2.0' },
+      { label: 'GPT-4o Mini', value: 'openai/gpt-4o-mini' },
+    ],
+  },
+  anthropic: {
+    keyHint: 'Anthropic API key (sk-ant-api03-...)',
+    keyPlaceholder: 'sk-ant-api03-...',
+    modelHint: 'Anthropic model ID',
+    models: [
+      { label: 'Claude Haiku 4.5 (fast)', value: 'claude-haiku-4-5' },
+      { label: 'Claude Haiku 4.5 (20251001)', value: 'claude-haiku-4-5-20251001' },
+      { label: 'Claude Sonnet 4.5', value: 'claude-sonnet-4-5' },
+      { label: 'Claude Sonnet 4.6', value: 'claude-sonnet-4-6' },
+    ],
+  },
+  gemini: {
+    keyHint: 'Google AI Studio API key (AIza...)',
+    keyPlaceholder: 'AIza...',
+    modelHint: 'Gemini model ID',
+    models: [
+      { label: 'Gemini 2.0 Flash (fast)', value: 'gemini-2.0-flash' },
+      { label: 'Gemini 2.0 Flash Lite', value: 'gemini-2.0-flash-lite' },
+      { label: 'Gemini 1.5 Flash', value: 'gemini-1.5-flash' },
+      { label: 'Gemini 1.5 Pro', value: 'gemini-1.5-pro' },
+    ],
+  },
+};
+
+function onAiProviderChange() {
+  const provider = document.getElementById('s-aiProvider').value;
+  const cfg = AI_PROVIDERS[provider];
+  document.getElementById('ai-key-hint').textContent = cfg.keyHint;
+  document.getElementById('s-aiApiKey').placeholder = cfg.keyPlaceholder;
+  document.getElementById('ai-model-hint').textContent = cfg.modelHint;
+  const presetEl = document.getElementById('s-aiModelPreset');
+  presetEl.innerHTML = '<option value="">— pick a preset —</option>' +
+    cfg.models.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+  document.getElementById('s-aiModel').value = cfg.models[0].value;
+}
+
+function onAiPresetChange() {
+  const v = document.getElementById('s-aiModelPreset').value;
+  if (v) document.getElementById('s-aiModel').value = v;
+}
+
+// Detect provider from key prefix and update UI
+function detectProviderFromKey(key) {
+  if (!key || key === 'set') return null;
+  if (key.startsWith('sk-ant-')) return 'anthropic';
+  if (key.startsWith('AIza')) return 'gemini';
+  if (key.startsWith('sk-or-')) return 'openrouter';
+  return null;
+}
+
 async function testKey(service, resultId) {
   const el = document.getElementById(resultId);
   el.className = 'settings-test-result loading';
@@ -1151,7 +1227,18 @@ async function loadSettings() {
           val === 'set' ? 'Secret is set on server' : 'No secret set — R3 capture disabled';
         el.placeholder = val === 'set' ? 'Paste new secret to replace' : 'Paste Alpaca secret key';
       } else if (key === 'aiApiKey') {
-        el.placeholder = val === 'set' ? 'Paste new key to replace' : 'sk-...';
+        el.placeholder = val === 'set' ? 'Paste new key to replace' : 'sk-or-v1-...';
+      } else if (key === 'aiModel') {
+        el.value = val;
+        // Detect provider from model ID pattern
+        let provider = 'openrouter';
+        if (val && !val.includes('/')) {
+          if (val.startsWith('claude-')) provider = 'anthropic';
+          else if (val.startsWith('gemini-')) provider = 'gemini';
+        }
+        document.getElementById('s-aiProvider').value = provider;
+        onAiProviderChange();
+        el.value = val; // restore after onAiProviderChange sets default
       } else {
         el.value = val;
       }
@@ -1159,6 +1246,8 @@ async function loadSettings() {
   } catch (e) {
     console.error('[Settings] Load failed', e);
   }
+  // Init provider UI if no model set yet
+  onAiProviderChange();
 }
 
 async function saveSettings(keys, btn) {

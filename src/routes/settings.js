@@ -180,7 +180,8 @@ router.get('/test/:service', async (req, res) => {
       const key = getSetting('aiApiKey');
       if (!key) return res.json({ ok: false, message: 'No key set' });
       const isAnthropic = key.startsWith('sk-ant-');
-      const model = getSetting('aiModel') || (isAnthropic ? 'claude-haiku-4-5' : 'anthropic/claude-haiku-4-5');
+      const isGemini = key.startsWith('AIza');
+      const model = getSetting('aiModel') || (isAnthropic ? 'claude-haiku-4-5' : isGemini ? 'gemini-2.0-flash' : 'anthropic/claude-haiku-4-5');
 
       let r, d;
       if (isAnthropic) {
@@ -191,7 +192,20 @@ router.get('/test/:service', async (req, res) => {
         }, body);
         d = JSON.parse(r.body);
         if (r.status === 200 && d.content?.[0]) {
-          res.json({ ok: true, message: `Connected — Anthropic API — Model: ${model} — Reply: "${d.content[0].text?.trim()}"` });
+          res.json({ ok: true, message: `Connected — Claude (Anthropic) — Model: ${model} — Reply: "${d.content[0].text?.trim()}"` });
+        } else {
+          res.json({ ok: false, message: `Error ${r.status}: ${d.error?.message || r.body.slice(0, 150)}` });
+        }
+      } else if (isGemini) {
+        const body = JSON.stringify({ contents: [{ parts: [{ text: 'Reply with exactly: OK' }] }], generationConfig: { maxOutputTokens: 10 } });
+        r = await httpPost({
+          hostname: 'generativelanguage.googleapis.com', path: `/v1beta/models/${model}:generateContent?key=${key}`, method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        }, body);
+        d = JSON.parse(r.body);
+        const text = d.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (r.status === 200 && text) {
+          res.json({ ok: true, message: `Connected — Gemini (Google) — Model: ${model} — Reply: "${text.trim()}"` });
         } else {
           res.json({ ok: false, message: `Error ${r.status}: ${d.error?.message || r.body.slice(0, 150)}` });
         }
