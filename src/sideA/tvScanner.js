@@ -207,7 +207,16 @@ async function runScanner(name) {
     headers: TV_HEADERS,
     timeout: 15000,
   });
-  const rows = (resp.data.data || []).map(mapTVRow);
+  const rawRows = resp.data.data || [];
+  console.log(`[TV Scanner] ${name}: TV returned ${rawRows.length} raw rows`);
+  const rows = [];
+  for (const raw of rawRows) {
+    try {
+      rows.push(mapTVRow(raw));
+    } catch (e) {
+      console.error(`[TV Scanner] ${name} mapTVRow error:`, e.message, JSON.stringify(raw).slice(0, 150));
+    }
+  }
   return { name, rows };
 }
 
