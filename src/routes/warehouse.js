@@ -5,37 +5,34 @@ const db = require('../db');
 const router = express.Router();
 
 const VALID_REGISTERS = ['R0', 'R1', 'R2', 'R3A', 'R3B', 'R4A', 'R4B', 'Shortlist'];
+const REGISTER_MAP = { r0:'R0', r1:'R1', r2:'R2', r3a:'R3A', r3b:'R3B', r4a:'R4A', r4b:'R4B', shortlist:'Shortlist' };
+function normalizeRegister(r) { return REGISTER_MAP[r.toLowerCase()] || r; }
 
 // GET /api/warehouse/available-dates
 router.get('/available-dates', (req, res) => {
   const { register } = req.query;
-  if (register && !VALID_REGISTERS.includes(register)) {
-    return res.status(400).json({ error: 'Invalid register' });
-  }
-  const reg = register || 'R1';
-  res.json({ register: reg, dates: getAvailableDates(reg) });
+  const reg = register ? normalizeRegister(register) : 'R1';
+  if (!VALID_REGISTERS.includes(reg)) return res.status(400).json({ error: 'Invalid register' });
+  res.json(getAvailableDates(reg));
 });
 
 // GET /api/warehouse/:register/latest
 router.get('/:register/latest', (req, res) => {
-  const { register } = req.params;
-  if (!VALID_REGISTERS.includes(register)) {
-    return res.status(400).json({ error: 'Invalid register' });
-  }
+  const register = normalizeRegister(req.params.register);
+  if (!VALID_REGISTERS.includes(register)) return res.status(400).json({ error: 'Invalid register' });
   const data = getRegisterData(register, null);
   if (data === null) return res.status(404).json({ error: 'Not found' });
-  res.json({ register, data });
+  res.json(data);
 });
 
 // GET /api/warehouse/:register/:date
 router.get('/:register/:date', (req, res) => {
-  const { register, date } = req.params;
-  if (!VALID_REGISTERS.includes(register)) {
-    return res.status(400).json({ error: 'Invalid register' });
-  }
+  const register = normalizeRegister(req.params.register);
+  const { date } = req.params;
+  if (!VALID_REGISTERS.includes(register)) return res.status(400).json({ error: 'Invalid register' });
   const data = getRegisterData(register, date);
   if (data === null) return res.status(404).json({ error: 'Not found' });
-  res.json({ register, date, data });
+  res.json(data);
 });
 
 // GET /api/warehouse/export/:register/:date
