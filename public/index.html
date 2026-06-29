@@ -244,6 +244,15 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .job-toggle.on  { background: #22c55e20; color: var(--green); border: 1px solid #22c55e40; }
 .job-toggle.off { background: #ef444415; color: var(--text3); border: 1px solid #ef444430; }
 .job-cron-display { font-family: monospace; font-size: 11px; color: #aaa; }
+.job-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 10px; }
+.job-card.disabled { opacity: 0.5; }
+.job-card-info { flex: 1; min-width: 0; }
+.job-card-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-card-cron { font-family: monospace; font-size: 11px; color: #aaa; margin-top: 2px; }
+.job-card-meta { font-size: 11px; color: #aaa; margin-top: 3px; }
+.job-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.sched-day-btn { padding: 5px 9px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg3); color: var(--text3); font-size: 12px; cursor: pointer; }
+.sched-day-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
 .job-edit-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); font-family: monospace; font-size: 11px; padding: 3px 7px; border-radius: 4px; width: 160px; }
 .job-action-btn { padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg3); color: var(--text); font-size: 10px; cursor: pointer; margin-left: 3px; min-height: 28px; }
 .job-action-btn:hover { border-color: #555; }
@@ -813,12 +822,8 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 
       <div class="settings-section">
         <div class="settings-section-title">Scheduled Jobs</div>
-        <div style="font-size:11px;color:#aaa;margin-bottom:10px">Toggle enables/disables a job. Edit changes its cron schedule. Reset restores the default.</div>
-        <div class="monitor-table-wrap">
-        <table class="wh-table" id="monitor-jobs-table">
-          <thead><tr><th>Job</th><th>Schedule</th><th>Enabled</th><th>Last Run</th><th>Status</th><th class="monitor-hide">Duration</th><th class="monitor-hide">Last Error</th><th></th></tr></thead>
-          <tbody id="monitor-jobs-body"><tr><td colspan="8" style="color:#aaa">Loading...</td></tr></tbody>
-        </table>
+        <div id="monitor-jobs-cards" style="display:flex;flex-direction:column;gap:8px;margin-top:6px">
+          <div style="color:#aaa;font-size:13px">Loading...</div>
         </div>
       </div>
 
@@ -839,6 +844,51 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <span style="font-size:11px;color:#aaa;margin-left:10px;" id="monitor-refreshed-at"></span>
       </div>
 
+    </div>
+  </div>
+
+  <!-- Schedule Edit Modal -->
+  <div id="sched-modal-overlay" onclick="if(event.target===this)monitorCloseModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;padding:16px">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px;width:100%;max-width:400px">
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px" id="sched-modal-title">Edit Schedule</div>
+      <div style="font-size:11px;color:#aaa;margin-bottom:16px" id="sched-modal-jobname"></div>
+
+      <div style="margin-bottom:14px">
+        <label style="font-size:12px;color:#aaa;display:block;margin-bottom:6px">Days</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap" id="sched-days">
+          <button class="sched-day-btn active" data-day="1">Mon</button>
+          <button class="sched-day-btn active" data-day="2">Tue</button>
+          <button class="sched-day-btn active" data-day="3">Wed</button>
+          <button class="sched-day-btn active" data-day="4">Thu</button>
+          <button class="sched-day-btn active" data-day="5">Fri</button>
+          <button class="sched-day-btn" data-day="6">Sat</button>
+          <button class="sched-day-btn" data-day="0">Sun</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <div>
+          <label style="font-size:12px;color:#aaa;display:block;margin-bottom:6px">Hour(s) <span style="font-size:10px">(ET, 24h)</span></label>
+          <input class="settings-input" id="sched-hours" placeholder="e.g. 9 or 9,13,16" style="width:100%">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#aaa;display:block;margin-bottom:6px">Minute(s)</label>
+          <input class="settings-input" id="sched-minutes" placeholder="e.g. 0 or */5" style="width:100%">
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <label style="font-size:12px;color:#aaa;display:block;margin-bottom:4px">Cron preview</label>
+        <div style="font-family:monospace;font-size:13px;background:var(--bg3);padding:8px 10px;border-radius:6px;color:var(--accent)" id="sched-cron-preview"></div>
+        <div style="font-size:11px;color:#aaa;margin-top:4px" id="sched-cron-desc"></div>
+      </div>
+
+      <div style="display:flex;gap:8px">
+        <button class="settings-save-btn" style="flex:1" onclick="monitorSaveModal()">Save Schedule</button>
+        <button class="settings-reset-btn" onclick="monitorCloseModal()">Cancel</button>
+        <button class="settings-reset-btn" id="sched-reset-btn" onclick="monitorResetFromModal()" style="display:none">Reset Default</button>
+      </div>
+      <div id="sched-modal-error" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></div>
     </div>
   </div>
 
@@ -1454,73 +1504,151 @@ async function loadMonitor() {
 }
 
 function renderMonitorJobs() {
-  const jobsEl = document.getElementById('monitor-jobs-body');
+  const container = document.getElementById('monitor-jobs-cards');
   if (!monitorJobs.length) {
-    jobsEl.innerHTML = '<tr><td colspan="8" style="color:#aaa">No jobs registered</td></tr>';
+    container.innerHTML = '<div style="color:#aaa;font-size:13px">No jobs registered</div>';
     return;
   }
-  jobsEl.innerHTML = monitorJobs.map(j => {
-    const lastRun = j.lastRunAt ? new Date(j.lastRunAt).toLocaleTimeString() : '—';
-    const status = j.lastStatus === 'ok'
-      ? '<span style="color:var(--green)">✅ OK</span>'
+  container.innerHTML = monitorJobs.map(j => {
+    const lastRun = j.lastRunAt ? new Date(j.lastRunAt).toLocaleTimeString() : 'Never';
+    const statusDot = j.lastStatus === 'ok'
+      ? '<span style="color:var(--green)">● OK</span>'
       : j.lastStatus === 'error'
-        ? '<span style="color:var(--red)">❌ FAIL</span>'
-        : '<span style="color:#aaa">Not run</span>';
-    const dur = j.lastDuration != null ? (j.lastDuration/1000).toFixed(2)+'s' : '—';
-    const err = j.lastError ? `<span style="color:var(--red);font-size:11px">${esc(j.lastError)}</span>` : '—';
+        ? '<span style="color:var(--red)">● Error</span>'
+        : '<span style="color:#555">● Not run</span>';
+    const dur = j.lastDuration != null ? ' · ' + (j.lastDuration/1000).toFixed(1) + 's' : '';
     const toggleClass = j.enabled ? 'on' : 'off';
     const toggleLabel = j.enabled ? 'ON' : 'OFF';
-    const isDefault = j.schedule === j.defaultSchedule;
-    return `<tr id="job-row-${j.jobId}">
-      <td style="font-size:12px">${j.name}</td>
-      <td id="job-sched-cell-${j.jobId}">
-        <span class="job-cron-display" id="job-cron-${j.jobId}">${j.schedule}</span>
-      </td>
-      <td><button class="job-toggle ${toggleClass}" onclick="monitorToggle('${j.jobId}')">${toggleLabel}</button></td>
-      <td style="color:#aaa;font-size:11px">${lastRun}</td>
-      <td>${status}</td>
-      <td class="monitor-hide" style="color:#aaa;font-size:11px">${dur}</td>
-      <td class="monitor-hide" style="font-size:11px">${err}</td>
-      <td style="white-space:nowrap">
-        <button class="job-action-btn" onclick="monitorEditStart('${j.jobId}','${j.schedule}')">Edit</button>
-        ${!isDefault ? `<button class="job-action-btn" onclick="monitorReset('${j.jobId}')">Reset</button>` : ''}
-      </td>
-    </tr>`;
+    return `<div class="job-card${j.enabled ? '' : ' disabled'}">
+      <div class="job-card-info">
+        <div class="job-card-name">${esc(j.name)}</div>
+        <div class="job-card-cron">${esc(j.schedule)}</div>
+        <div class="job-card-meta">${statusDot}${dur} · Last: ${lastRun}</div>
+        ${j.lastError ? `<div style="color:var(--red);font-size:11px;margin-top:2px">${esc(j.lastError)}</div>` : ''}
+      </div>
+      <div class="job-card-actions">
+        <button class="job-toggle ${toggleClass}" onclick="monitorToggle('${j.jobId}')">${toggleLabel}</button>
+        <button class="job-action-btn" onclick="monitorOpenModal('${j.jobId}')">Edit</button>
+      </div>
+    </div>`;
   }).join('');
 }
 
-function monitorEditStart(jobId, currentSchedule) {
-  const cell = document.getElementById(`job-sched-cell-${jobId}`);
-  cell.innerHTML = `
-    <input class="job-edit-input" id="job-edit-input-${jobId}" value="${currentSchedule}">
-    <button class="job-action-btn" onclick="monitorSaveSchedule('${jobId}')">Save</button>
-    <button class="job-action-btn" onclick="renderMonitorJobs()">Cancel</button>
-  `;
-  document.getElementById(`job-edit-input-${jobId}`).focus();
+// ── Schedule Edit Modal ────────────────────────────────────────────────────────
+let schedModalJobId = null;
+
+function monitorOpenModal(jobId) {
+  const j = monitorJobs.find(x => x.jobId === jobId);
+  if (!j) return;
+  schedModalJobId = jobId;
+  document.getElementById('sched-modal-title').textContent = 'Edit Schedule';
+  document.getElementById('sched-modal-jobname').textContent = j.name;
+  document.getElementById('sched-modal-error').style.display = 'none';
+  document.getElementById('sched-reset-btn').style.display = j.schedule !== j.defaultSchedule ? '' : 'none';
+
+  // Parse cron: "min hour * * days"
+  const parts = j.schedule.trim().split(/\s+/);
+  const minPart  = parts[0] || '0';
+  const hrPart   = parts[1] || '9';
+  const dayPart  = parts[4] || '1-5';
+
+  document.getElementById('sched-minutes').value = minPart;
+  document.getElementById('sched-hours').value = hrPart;
+
+  // Activate day buttons
+  const activeDays = parseDayPart(dayPart);
+  document.querySelectorAll('.sched-day-btn').forEach(btn => {
+    btn.classList.toggle('active', activeDays.has(Number(btn.dataset.day)));
+    btn.onclick = () => { btn.classList.toggle('active'); updateCronPreview(); };
+  });
+
+  updateCronPreview();
+  document.getElementById('sched-modal-overlay').style.display = 'flex';
+  document.getElementById('sched-hours').oninput = updateCronPreview;
+  document.getElementById('sched-minutes').oninput = updateCronPreview;
 }
 
-async function monitorSaveSchedule(jobId) {
-  const input = document.getElementById(`job-edit-input-${jobId}`);
-  if (!input) return;
-  const schedule = input.value.trim();
-  if (!schedule) return;
+function parseDayPart(part) {
+  const days = new Set();
+  if (part === '*') { [0,1,2,3,4,5,6].forEach(d => days.add(d)); return days; }
+  for (const seg of part.split(',')) {
+    if (seg.includes('-')) {
+      const [a, b] = seg.split('-').map(Number);
+      for (let d = a; d <= b; d++) days.add(d);
+    } else {
+      days.add(Number(seg));
+    }
+  }
+  return days;
+}
+
+function buildDayPart() {
+  const active = [...document.querySelectorAll('.sched-day-btn.active')].map(b => Number(b.dataset.day)).sort((a,b)=>a-b);
+  if (active.length === 7) return '*';
+  if (active.length === 0) return '1-5';
+  // Compress to ranges
+  const ranges = [];
+  let start = active[0], end = active[0];
+  for (let i = 1; i < active.length; i++) {
+    if (active[i] === end + 1) { end = active[i]; }
+    else { ranges.push(start === end ? `${start}` : `${start}-${end}`); start = end = active[i]; }
+  }
+  ranges.push(start === end ? `${start}` : `${start}-${end}`);
+  return ranges.join(',');
+}
+
+function updateCronPreview() {
+  const min = document.getElementById('sched-minutes').value.trim() || '0';
+  const hr  = document.getElementById('sched-hours').value.trim() || '9';
+  const day = buildDayPart();
+  const cron = `${min} ${hr} * * ${day}`;
+  document.getElementById('sched-cron-preview').textContent = cron;
+  // Human description
+  const dayNames = { '1-5': 'Mon–Fri', '1-7': 'every day', '*': 'every day', '6-0': 'weekends', '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' };
+  const dayLabel = dayNames[day] || 'selected days';
+  const hrLabel = hr.startsWith('*/') ? `every ${hr.slice(2)} hours` : `at ${hr.replace(',', ', ')}:00`;
+  const minLabel = min === '0' ? '' : min.startsWith('*/') ? `, every ${min.slice(2)} min` : ` :${min.padStart(2,'0')}`;
+  document.getElementById('sched-cron-desc').textContent = `Runs ${hrLabel}${minLabel} ET, ${dayLabel}`;
+  return cron;
+}
+
+function monitorCloseModal() {
+  document.getElementById('sched-modal-overlay').style.display = 'none';
+  schedModalJobId = null;
+}
+
+async function monitorSaveModal() {
+  const cron = updateCronPreview();
+  const errEl = document.getElementById('sched-modal-error');
+  errEl.style.display = 'none';
   try {
-    const r = await fetch(`/api/monitor/jobs/${jobId}/schedule`, {
+    const r = await fetch(`/api/monitor/jobs/${schedModalJobId}/schedule`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ schedule }),
+      body: JSON.stringify({ schedule: cron }),
     });
     const d = await r.json();
     if (d.ok) {
-      const j = monitorJobs.find(x => x.jobId === jobId);
-      if (j) j.schedule = schedule;
+      const j = monitorJobs.find(x => x.jobId === schedModalJobId);
+      if (j) j.schedule = cron;
+      monitorCloseModal();
       renderMonitorJobs();
     } else {
-      alert('Invalid schedule: ' + (d.error || 'unknown error'));
+      errEl.textContent = 'Invalid schedule: ' + (d.error || 'unknown');
+      errEl.style.display = 'block';
     }
   } catch (e) {
-    alert('Network error: ' + e.message);
+    errEl.textContent = 'Network error: ' + e.message;
+    errEl.style.display = 'block';
   }
+}
+
+async function monitorResetFromModal() {
+  try {
+    const r = await fetch(`/api/monitor/jobs/${schedModalJobId}/reset`, { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) { monitorCloseModal(); await loadMonitor(); }
+  } catch (e) { /* silent */ }
 }
 
 async function monitorToggle(jobId) {
