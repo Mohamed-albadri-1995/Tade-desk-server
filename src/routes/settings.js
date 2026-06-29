@@ -19,9 +19,15 @@ const SETTING_RULES = {
   githubBackupToken:      { type: 'str', maxLen: 200 },
   alpacaApiKey:           { type: 'str', maxLen: 100 },
   alpacaApiSecret:        { type: 'str', maxLen: 100 },
+  analysisEntryType:      { type: 'str', maxLen: 10  },
+  analysisDirectionalBias:{ type: 'str', maxLen: 10  },
+  analysisSuccessThreshold:{ type: 'str', maxLen: 10 },
+  analysisTrainingWindow: { type: 'str', maxLen: 10  },
+  aiApiKey:               { type: 'str', maxLen: 200 },
+  aiModel:                { type: 'str', maxLen: 100 },
 };
 
-const MASKED_KEYS = new Set(['finnhubApiKey', 'githubBackupToken', 'alpacaApiKey', 'alpacaApiSecret']);
+const MASKED_KEYS = new Set(['finnhubApiKey', 'githubBackupToken', 'alpacaApiKey', 'alpacaApiSecret', 'aiApiKey']);
 
 // GET /api/settings
 router.get('/', (req, res) => {
