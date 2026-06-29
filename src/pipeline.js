@@ -2,7 +2,7 @@ const { runAllScanners } = require('./sideA/tvScanner');
 const { mergeScannersIntoR0 } = require('./sideA/merge');
 const { applyDerivedFields } = require('./sideB/calculations');
 const { buildMarketSnapshot, enrichR0WithContext } = require('./sideD/engine');
-const { scoreAllRows } = require('./sideE/scoring');
+// sideE scoring intentionally disconnected — engine pending redesign
 const r0 = require('./r0/registry');
 
 const scanStatus = {
@@ -39,8 +39,8 @@ async function runFullScan() {
       console.error('[Pipeline] Market context failed:', err.message);
     }
 
-    // Side E: Scoring
-    const withScores = scoreAllRows(withContext);
+    // Side E: Scoring — disconnected, _score set to null until engine is rebuilt
+    const withScores = withContext.map(row => ({ ...row, _score: null }));
 
     // Write to r0
     r0.upsertRows(withScores);
