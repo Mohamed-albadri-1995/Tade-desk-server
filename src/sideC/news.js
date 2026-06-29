@@ -26,9 +26,18 @@ function classifyCatalyst(headlines) {
   return null;
 }
 
+function getFinnhubKey() {
+  try {
+    const db = require('../db');
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'finnhubApiKey'").get();
+    if (row && row.value) return row.value;
+  } catch { /* ignore */ }
+  return process.env.FINNHUB_API_KEY || '';
+}
+
 async function fetchFinnhub(ticker) {
   try {
-    const apiKey = process.env.FINNHUB_API_KEY;
+    const apiKey = getFinnhubKey();
     if (!apiKey) return [];
     const to = new Date().toISOString().slice(0, 10);
     const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);

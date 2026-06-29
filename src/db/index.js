@@ -66,7 +66,7 @@ db.exec(`
   );
 `);
 
-// Default hot sector thresholds
+// Default settings
 const defaults = [
   ['hotImmediateThreshold', '60'],
   ['hotSustainedThreshold', '40'],
@@ -75,6 +75,9 @@ const defaults = [
   ['coolOffDays', '2'],
   ['sectorBullishThreshold', '20'],
   ['sectorBearishThreshold', '-20'],
+  ['shortlistMinScore', '70'],
+  ['shortlistTopN', '5'],
+  ['finnhubApiKey', ''],
 ];
 const insertSetting = db.prepare(
   'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'

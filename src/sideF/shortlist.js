@@ -2,6 +2,11 @@ const db = require('../db');
 const r0 = require('../r0/registry');
 const { toETDate } = require('../utils/time');
 
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? parseFloat(row.value) : null;
+}
+
 function getShortlistEntry(date) {
   const row = db.prepare('SELECT * FROM shortlist WHERE date = ?').get(date);
   if (!row) return null;
@@ -34,10 +39,13 @@ function runAutoRule() {
     return null;
   }
 
+  const minScore = getSetting('shortlistMinScore') ?? 70;
+  const topN = getSetting('shortlistTopN') ?? 5;
+
   const eligible = r0.getTodayRows()
-    .filter(row => row._score != null && row._score >= 70)
+    .filter(row => row._score != null && row._score >= minScore)
     .sort((a, b) => b._score - a._score)
-    .slice(0, 5);
+    .slice(0, topN);
 
   if (eligible.length === 0) {
     console.log('[Shortlist] Auto rule: no eligible stocks today');

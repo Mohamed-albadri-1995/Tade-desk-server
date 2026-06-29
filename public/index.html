@@ -310,6 +310,21 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 }
 .sym-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
 
+/* Settings tab */
+.settings-wrap { max-width: 700px; margin: 0 auto; padding: 24px 20px; display: flex; flex-direction: column; gap: 20px; }
+.settings-section { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+.settings-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text3); margin-bottom: 16px; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+.settings-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.settings-hint { font-size: 11px; color: var(--text3); margin-bottom: 6px; line-height: 1.4; }
+.settings-input { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--text); font-size: 13px; font-family: inherit; box-sizing: border-box; }
+.settings-input:focus { outline: none; border-color: var(--accent); }
+.settings-save-btn { background: var(--accent); border: none; border-radius: 6px; padding: 8px 18px; color: #000; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.settings-save-btn:hover { opacity: .85; }
+.settings-save-btn:disabled { opacity: .5; cursor: not-allowed; }
+.settings-msg { font-size: 12px; margin-left: 10px; vertical-align: middle; }
+@media (max-width: 600px) { .settings-grid { grid-template-columns: 1fr; } }
+
 /* ── RESPONSIVE ── */
 @media (max-width: 900px) {
   .market-grid { grid-template-columns: repeat(3, 1fr); }
@@ -335,6 +350,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   <div class="tab" onclick="switchTab('shortlist',this)">Shortlist</div>
   <div class="tab" onclick="switchTab('warehouse',this)">Warehouse</div>
   <div class="tab" onclick="switchTab('analysis',this)">Analysis</div>
+  <div class="tab" onclick="switchTab('settings',this);loadSettings()">Settings</div>
 </div>
 
 <div class="main">
@@ -448,6 +464,98 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
     </div>
   </div>
 
+  <!-- ═══════════════ SETTINGS TAB ═══════════════ -->
+  <div class="tab-pane" id="tab-settings">
+    <div class="settings-wrap">
+
+      <!-- Hot Sector -->
+      <div class="settings-section">
+        <div class="settings-section-title">Hot Sector</div>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label>Immediate entry score</label>
+            <div class="settings-hint">Score that triggers HOT status instantly (one session)</div>
+            <input type="number" class="settings-input" id="s-hotImmediateThreshold" min="0" max="100">
+          </div>
+          <div class="settings-field">
+            <label>Sustained entry score</label>
+            <div class="settings-hint">Score needed to build toward HOT over multiple sessions</div>
+            <input type="number" class="settings-input" id="s-hotSustainedThreshold" min="0" max="100">
+          </div>
+          <div class="settings-field">
+            <label>Sessions to sustain</label>
+            <div class="settings-hint">How many sessions above sustained score = HOT</div>
+            <input type="number" class="settings-input" id="s-hotSustainedSessions" min="1" max="20">
+          </div>
+          <div class="settings-field">
+            <label>Exit floor score</label>
+            <div class="settings-hint">Score below this starts cool-off countdown</div>
+            <input type="number" class="settings-input" id="s-hotFloorThreshold" min="0" max="100">
+          </div>
+          <div class="settings-field">
+            <label>Cool-off days</label>
+            <div class="settings-hint">Sessions below floor before sector loses HOT status</div>
+            <input type="number" class="settings-input" id="s-coolOffDays" min="0" max="30">
+          </div>
+        </div>
+        <button class="settings-save-btn" onclick="saveSettings(['hotImmediateThreshold','hotSustainedThreshold','hotSustainedSessions','hotFloorThreshold','coolOffDays'], this)">Save Hot Sector</button>
+        <span class="settings-msg" id="msg-hot"></span>
+      </div>
+
+      <!-- Sector Bias Thresholds -->
+      <div class="settings-section">
+        <div class="settings-section-title">Sector Bias Thresholds</div>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label>Bullish threshold (score &gt; this = BULLISH)</label>
+            <div class="settings-hint">Sector score above this value is marked BULLISH</div>
+            <input type="number" class="settings-input" id="s-sectorBullishThreshold" min="0" max="100">
+          </div>
+          <div class="settings-field">
+            <label>Bearish threshold (score &lt; this = BEARISH)</label>
+            <div class="settings-hint">Sector score below this value is marked BEARISH (negative number)</div>
+            <input type="number" class="settings-input" id="s-sectorBearishThreshold" min="-100" max="0">
+          </div>
+        </div>
+        <button class="settings-save-btn" onclick="saveSettings(['sectorBullishThreshold','sectorBearishThreshold'], this)">Save Bias Thresholds</button>
+        <span class="settings-msg" id="msg-bias"></span>
+      </div>
+
+      <!-- Shortlist Auto-Rule -->
+      <div class="settings-section">
+        <div class="settings-section-title">Shortlist Auto-Rule</div>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label>Minimum score</label>
+            <div class="settings-hint">Stocks must score at or above this to qualify</div>
+            <input type="number" class="settings-input" id="s-shortlistMinScore" min="0" max="100">
+          </div>
+          <div class="settings-field">
+            <label>Max picks (top N)</label>
+            <div class="settings-hint">Maximum number of stocks added by the auto-rule</div>
+            <input type="number" class="settings-input" id="s-shortlistTopN" min="1" max="50">
+          </div>
+        </div>
+        <button class="settings-save-btn" onclick="saveSettings(['shortlistMinScore','shortlistTopN'], this)">Save Shortlist Rule</button>
+        <span class="settings-msg" id="msg-shortlist"></span>
+      </div>
+
+      <!-- API Keys -->
+      <div class="settings-section">
+        <div class="settings-section-title">API Keys</div>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label>Finnhub API Key</label>
+            <div class="settings-hint" id="finnhub-status">Loading…</div>
+            <input type="password" class="settings-input" id="s-finnhubApiKey" placeholder="Paste new key to update" autocomplete="off">
+          </div>
+        </div>
+        <button class="settings-save-btn" onclick="saveSettings(['finnhubApiKey'], this)">Save API Key</button>
+        <span class="settings-msg" id="msg-api"></span>
+      </div>
+
+    </div>
+  </div>
 
 </div>
 
@@ -501,6 +609,80 @@ function switchAnalysis(name, el) {
   document.querySelectorAll('.analysis-pane').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('apane-' + name).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════════════
+const MSG_IDS = {
+  hotImmediateThreshold: 'msg-hot', hotSustainedThreshold: 'msg-hot',
+  hotSustainedSessions: 'msg-hot', hotFloorThreshold: 'msg-hot', coolOffDays: 'msg-hot',
+  sectorBullishThreshold: 'msg-bias', sectorBearishThreshold: 'msg-bias',
+  shortlistMinScore: 'msg-shortlist', shortlistTopN: 'msg-shortlist',
+  finnhubApiKey: 'msg-api',
+};
+
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    const { settings } = await r.json();
+    for (const [key, val] of Object.entries(settings)) {
+      const el = document.getElementById('s-' + key);
+      if (!el) continue;
+      if (key === 'finnhubApiKey') {
+        document.getElementById('finnhub-status').textContent =
+          val === 'set' ? 'Key is set on server' : 'No key set — news fetch disabled';
+        el.placeholder = val === 'set' ? 'Paste new key to replace' : 'Paste key here';
+      } else {
+        el.value = val;
+      }
+    }
+  } catch (e) {
+    console.error('[Settings] Load failed', e);
+  }
+}
+
+async function saveSettings(keys, btn) {
+  const body = {};
+  for (const key of keys) {
+    const el = document.getElementById('s-' + key);
+    if (!el) continue;
+    const v = el.value.trim();
+    if (key === 'finnhubApiKey' && v === '') continue; // skip if left blank
+    body[key] = el.type === 'number' ? Number(v) : v;
+  }
+  if (Object.keys(body).length === 0) return;
+
+  const msgId = MSG_IDS[keys[0]];
+  const msgEl = document.getElementById(msgId);
+
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      msgEl.textContent = 'Saved';
+      msgEl.style.color = 'var(--green)';
+      if (body.finnhubApiKey) {
+        document.getElementById('finnhub-status').textContent = 'Key is set on server';
+        document.getElementById('s-finnhubApiKey').value = '';
+        document.getElementById('s-finnhubApiKey').placeholder = 'Paste new key to replace';
+      }
+    } else {
+      msgEl.textContent = (data.errors || [data.error]).join(', ');
+      msgEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    msgEl.textContent = 'Network error';
+    msgEl.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { msgEl.textContent = ''; }, 3000);
+  }
 }
 
 // ═══════════════════════════════════════════════════

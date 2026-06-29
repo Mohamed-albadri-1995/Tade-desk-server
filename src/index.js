@@ -17,6 +17,7 @@ app.use('/api/shortlist', require('./routes/shortlist'));
 app.use('/api/market', require('./routes/market'));
 app.use('/api/news', require('./routes/news'));
 app.use('/api/warehouse', require('./routes/warehouse'));
+app.use('/api/settings', require('./routes/settings'));
 
 // Health
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
