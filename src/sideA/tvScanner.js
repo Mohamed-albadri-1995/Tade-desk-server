@@ -63,6 +63,15 @@ const COMMON_BASE_FILTER = {
               ],
             },
           },
+          {
+            operation: {
+              operator: 'and',
+              operands: [
+                { expression: { left: 'type', operation: 'equal', right: 'fund' } },
+                { expression: { left: 'typespecs', operation: 'has_none_of', right: ['etf', 'mutual', 'closedend'] } },
+              ],
+            },
+          },
         ],
       },
     },
