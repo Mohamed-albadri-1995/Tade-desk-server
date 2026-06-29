@@ -64,6 +64,19 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS r0_checkpoint (
+    id INTEGER PRIMARY KEY,
+    date TEXT NOT NULL,
+    data TEXT NOT NULL,
+    saved_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS scheduler_jobs (
+    job_id TEXT PRIMARY KEY,
+    schedule TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1
+  );
 `);
 
 // Default settings

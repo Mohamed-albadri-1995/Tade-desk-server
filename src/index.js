@@ -1,8 +1,10 @@
-require('./db'); // init DB
+const db = require('./db'); // init DB
 
 const express = require('express');
 const path = require('path');
 const { startScheduler } = require('./scheduler');
+const r0 = require('./r0/registry');
+const { toETDate } = require('./utils/time');
 
 const app = express();
 app.use(express.json());
@@ -32,6 +34,20 @@ app.get('/{*path}', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`[Server] Trade Desk running on port ${PORT}`);
+
+  // Restore r0 from today's checkpoint if available (mid-day restart recovery)
+  try {
+    const today = toETDate(Date.now());
+    const cp = db.prepare('SELECT date, data, saved_at FROM r0_checkpoint WHERE id = 1').get();
+    if (cp && cp.date === today) {
+      const rows = JSON.parse(cp.data);
+      r0.restore(rows);
+      console.log(`[Startup] r0 restored from checkpoint: ${rows.length} rows from ${cp.date}`);
+    }
+  } catch (err) {
+    console.warn('[Startup] Checkpoint restore failed:', err.message);
+  }
+
   startScheduler();
 });
 

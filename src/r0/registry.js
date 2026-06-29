@@ -89,6 +89,17 @@ function clearAll() {
   store.clear();
 }
 
+function serialize() {
+  return Array.from(store.values());
+}
+
+function restore(rows) {
+  store.clear();
+  for (const row of rows) {
+    store.set(row.ticker, row);
+  }
+}
+
 function getTodayRows() {
   const today = toETDate(Date.now());
   return getAll().filter(r => r.date === today);
@@ -101,6 +112,8 @@ module.exports = {
   setInShortlist,
   markAllStale,
   clearAll,
+  serialize,
+  restore,
   updateNews,
   updateScore,
   updateContext,

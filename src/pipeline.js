@@ -5,6 +5,7 @@ const { applyDerivedFields } = require('./sideB/calculations');
 const { fetchNewsForTicker } = require('./sideC/news');
 const { buildMarketSnapshot, enrichR0WithContext } = require('./sideD/engine');
 // sideE scoring intentionally disconnected — engine pending redesign
+const db = require('./db');
 const r0 = require('./r0/registry');
 const { syncShortlistToR0 } = require('./sideF/shortlist');
 const { refreshStaleInR0 } = require('./sideG/staleFetch');
@@ -137,6 +138,16 @@ async function runFullScan() {
 
     report.ok = true;
     report.completedAt = Date.now();
+
+    // Checkpoint r0 to DB so a mid-day server restart can restore state
+    try {
+      db.prepare(
+        'INSERT OR REPLACE INTO r0_checkpoint (id, date, data, saved_at) VALUES (1, ?, ?, ?)'
+      ).run(today, JSON.stringify(r0.serialize()), report.completedAt);
+    } catch (cpErr) {
+      console.warn('[Pipeline] Checkpoint save failed:', cpErr.message);
+    }
+
     scanStatus.lastRun = report.completedAt;
     scanStatus.lastRowCount = withScores.length;
     scanStatus.lastReport = report;

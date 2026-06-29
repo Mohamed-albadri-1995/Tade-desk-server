@@ -238,6 +238,14 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .wh-table td { padding: 7px 12px; font-size: 11px; border-bottom: 1px solid #1a1e28; }
 .wh-table tr:last-child td { border-bottom: none; }
 .wh-table tr:hover td { background: var(--bg3); }
+/* Monitor job controls */
+.job-toggle { padding: 3px 10px; border-radius: 4px; border: none; font-size: 11px; font-weight: 700; cursor: pointer; }
+.job-toggle.on  { background: #22c55e20; color: var(--green); border: 1px solid #22c55e40; }
+.job-toggle.off { background: #ef444415; color: var(--text3); border: 1px solid #ef444430; }
+.job-cron-display { font-family: monospace; font-size: 11px; color: #aaa; }
+.job-edit-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); font-family: monospace; font-size: 11px; padding: 3px 7px; border-radius: 4px; width: 180px; }
+.job-action-btn { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg3); color: var(--text); font-size: 10px; cursor: pointer; margin-left: 3px; }
+.job-action-btn:hover { border-color: #555; }
 /* Analysis tab */
 .analysis-subtabs { display: flex; gap: 4px; padding: 16px 20px 0; border-bottom: 1px solid var(--border); }
 .analysis-subtab { padding: 8px 20px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text2); border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
@@ -603,6 +611,15 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
     <div class="settings-wrap">
 
       <div class="settings-section">
+        <div class="settings-section-title">Scheduled Jobs</div>
+        <div style="font-size:11px;color:#aaa;margin-bottom:10px">Toggle enables/disables a job. Edit changes its cron schedule. Reset restores the default.</div>
+        <table class="wh-table" id="monitor-jobs-table">
+          <thead><tr><th>Job</th><th>Schedule</th><th>Enabled</th><th>Last Run</th><th>Status</th><th>Duration</th><th>Last Error</th><th></th></tr></thead>
+          <tbody id="monitor-jobs-body"><tr><td colspan="8" style="color:#aaa">Loading...</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="settings-section">
         <div class="settings-section-title">Last Pipeline Run</div>
         <div id="monitor-pipeline-meta" style="color:#aaa;font-size:12px;margin-bottom:10px;"></div>
         <table class="wh-table" id="monitor-stage-table">
@@ -610,14 +627,6 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
           <tbody id="monitor-stage-body"><tr><td colspan="5" style="color:#aaa">No scan run yet</td></tr></tbody>
         </table>
         <div id="monitor-r0-summary" style="margin-top:10px;font-size:12px;color:#aaa;"></div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-section-title">Scheduled Jobs</div>
-        <table class="wh-table" id="monitor-jobs-table">
-          <thead><tr><th>Job</th><th>Schedule</th><th>Last Run</th><th>Status</th><th>Duration</th><th>Error</th></tr></thead>
-          <tbody id="monitor-jobs-body"><tr><td colspan="6" style="color:#aaa">Loading...</td></tr></tbody>
-        </table>
       </div>
 
       <div style="margin-top:12px;">
@@ -883,10 +892,16 @@ async function runBackupRestore(btn) {
 // ═══════════════════════════════════════════════════
 // MONITOR
 
+let monitorJobs = [];
+
 async function loadMonitor() {
   try {
     const r = await fetch('/api/monitor');
     const d = await r.json();
+    monitorJobs = d.jobs || [];
+
+    // Scheduled jobs table
+    renderMonitorJobs();
 
     // Pipeline report
     const report = d.pipeline?.lastReport;
@@ -923,8 +938,9 @@ async function loadMonitor() {
         if (s.staleCount != null) detail += `stale: ${s.staleCount} refreshed: ${s.refreshed} noSymbol: ${s.noSymbol || 0}`;
         if (s.failed != null && s.failed > 0) detail += ` failed: ${s.failed}`;
         if (s.note) detail = s.note;
+        if (s.skipped) detail = `skipped: ${s.reason || ''}`;
         const dur = s.duration != null ? (s.duration/1000).toFixed(2)+'s' : '—';
-        const err = s.error ? `<span style="color:var(--red);font-size:11px">${s.error}</span>` : '—';
+        const err = s.error ? `<span style="color:var(--red);font-size:11px">${esc(s.error)}</span>` : '—';
         return `<tr><td>${label}</td><td>${status}</td><td style="font-size:11px;color:#aaa">${detail || '—'}</td><td style="color:#aaa">${dur}</td><td>${err}</td></tr>`;
       }).join('');
       bodyEl.innerHTML = rows || '<tr><td colspan="5" style="color:#aaa">—</td></tr>';
@@ -935,34 +951,105 @@ async function loadMonitor() {
       }
     }
 
-    // Scheduled jobs
-    const jobsEl = document.getElementById('monitor-jobs-body');
-    if (!d.jobs || d.jobs.length === 0) {
-      jobsEl.innerHTML = '<tr><td colspan="6" style="color:#aaa">No jobs registered</td></tr>';
-    } else {
-      jobsEl.innerHTML = d.jobs.map(j => {
-        const lastRun = j.lastRunAt ? new Date(j.lastRunAt).toLocaleTimeString() : '—';
-        const status = j.lastStatus === 'ok'
-          ? '<span style="color:var(--green)">✅ OK</span>'
-          : j.lastStatus === 'error'
-            ? '<span style="color:var(--red)">❌ FAIL</span>'
-            : '<span style="color:#aaa">Not run</span>';
-        const dur = j.lastDuration != null ? (j.lastDuration/1000).toFixed(2)+'s' : '—';
-        const err = j.lastError ? `<span style="color:var(--red);font-size:11px">${j.lastError}</span>` : '—';
-        return `<tr>
-          <td>${j.name}</td>
-          <td style="font-size:11px;color:#aaa;font-family:monospace">${j.schedule} (${j.timezone})</td>
-          <td style="color:#aaa">${lastRun}</td>
-          <td>${status}</td>
-          <td style="color:#aaa">${dur}</td>
-          <td>${err}</td>
-        </tr>`;
-      }).join('');
-    }
-
     document.getElementById('monitor-refreshed-at').textContent = `Refreshed at ${new Date().toLocaleTimeString()}`;
   } catch (e) {
     document.getElementById('monitor-pipeline-meta').textContent = 'Failed to load monitor: ' + e.message;
+  }
+}
+
+function renderMonitorJobs() {
+  const jobsEl = document.getElementById('monitor-jobs-body');
+  if (!monitorJobs.length) {
+    jobsEl.innerHTML = '<tr><td colspan="8" style="color:#aaa">No jobs registered</td></tr>';
+    return;
+  }
+  jobsEl.innerHTML = monitorJobs.map(j => {
+    const lastRun = j.lastRunAt ? new Date(j.lastRunAt).toLocaleTimeString() : '—';
+    const status = j.lastStatus === 'ok'
+      ? '<span style="color:var(--green)">✅ OK</span>'
+      : j.lastStatus === 'error'
+        ? '<span style="color:var(--red)">❌ FAIL</span>'
+        : '<span style="color:#aaa">Not run</span>';
+    const dur = j.lastDuration != null ? (j.lastDuration/1000).toFixed(2)+'s' : '—';
+    const err = j.lastError ? `<span style="color:var(--red);font-size:11px">${esc(j.lastError)}</span>` : '—';
+    const toggleClass = j.enabled ? 'on' : 'off';
+    const toggleLabel = j.enabled ? 'ON' : 'OFF';
+    const isDefault = j.schedule === j.defaultSchedule;
+    return `<tr id="job-row-${j.jobId}">
+      <td style="font-size:12px">${j.name}</td>
+      <td id="job-sched-cell-${j.jobId}">
+        <span class="job-cron-display" id="job-cron-${j.jobId}">${j.schedule}</span>
+      </td>
+      <td><button class="job-toggle ${toggleClass}" onclick="monitorToggle('${j.jobId}')">${toggleLabel}</button></td>
+      <td style="color:#aaa;font-size:11px">${lastRun}</td>
+      <td>${status}</td>
+      <td style="color:#aaa;font-size:11px">${dur}</td>
+      <td style="font-size:11px">${err}</td>
+      <td style="white-space:nowrap">
+        <button class="job-action-btn" onclick="monitorEditStart('${j.jobId}','${j.schedule}')">Edit</button>
+        ${!isDefault ? `<button class="job-action-btn" onclick="monitorReset('${j.jobId}')">Reset</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function monitorEditStart(jobId, currentSchedule) {
+  const cell = document.getElementById(`job-sched-cell-${jobId}`);
+  cell.innerHTML = `
+    <input class="job-edit-input" id="job-edit-input-${jobId}" value="${currentSchedule}">
+    <button class="job-action-btn" onclick="monitorSaveSchedule('${jobId}')">Save</button>
+    <button class="job-action-btn" onclick="renderMonitorJobs()">Cancel</button>
+  `;
+  document.getElementById(`job-edit-input-${jobId}`).focus();
+}
+
+async function monitorSaveSchedule(jobId) {
+  const input = document.getElementById(`job-edit-input-${jobId}`);
+  if (!input) return;
+  const schedule = input.value.trim();
+  if (!schedule) return;
+  try {
+    const r = await fetch(`/api/monitor/jobs/${jobId}/schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schedule }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const j = monitorJobs.find(x => x.jobId === jobId);
+      if (j) j.schedule = schedule;
+      renderMonitorJobs();
+    } else {
+      alert('Invalid schedule: ' + (d.error || 'unknown error'));
+    }
+  } catch (e) {
+    alert('Network error: ' + e.message);
+  }
+}
+
+async function monitorToggle(jobId) {
+  try {
+    const r = await fetch(`/api/monitor/jobs/${jobId}/toggle`, { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      const j = monitorJobs.find(x => x.jobId === jobId);
+      if (j) j.enabled = d.enabled;
+      renderMonitorJobs();
+    }
+  } catch (e) {
+    alert('Network error: ' + e.message);
+  }
+}
+
+async function monitorReset(jobId) {
+  try {
+    const r = await fetch(`/api/monitor/jobs/${jobId}/reset`, { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      await loadMonitor();
+    }
+  } catch (e) {
+    alert('Network error: ' + e.message);
   }
 }
 
