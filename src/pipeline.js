@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const { runAllScanners } = require('./sideA/tvScanner');
 const { mergeScannersIntoR0 } = require('./sideA/merge');
 const { applyDerivedFields } = require('./sideB/calculations');
+const { fetchNewsForTicker } = require('./sideC/news');
 const { buildMarketSnapshot, enrichR0WithContext } = require('./sideD/engine');
 // sideE scoring intentionally disconnected — engine pending redesign
 const r0 = require('./r0/registry');
@@ -95,6 +96,18 @@ async function runFullScan() {
     // Side G: Refresh stale tickers with fresh TV quotes (non-fatal)
     await stageWrapSoft(report, 'sideG', async () => {
       return await refreshStaleInR0();
+    })();
+
+    // Side C: News & Catalyst for all live tickers (non-fatal)
+    await stageWrapSoft(report, 'sideC', async () => {
+      const liveRows = r0.getAll().filter(r => r.liveNow);
+      const results = await Promise.allSettled(
+        liveRows.map(row => fetchNewsForTicker(row.ticker).then(({ news, catalyst }) => {
+          r0.updateNews(row.ticker, news, catalyst);
+        }))
+      );
+      const failed = results.filter(r => r.status === 'rejected').length;
+      return { rowCount: liveRows.length, failed };
     })();
 
     // Side F: Restore inShortlist flags from DB (non-fatal)

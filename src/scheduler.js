@@ -5,73 +5,65 @@ const { captureR1, captureR2 } = require('./warehouse/registers');
 const { pushBackup } = require('./backup');
 const r0 = require('./r0/registry');
 
+// Job registry — each entry tracks last run result for the monitor tab
+const jobRegistry = [];
+
+function registerJob(name, schedule, timezone, fn) {
+  const entry = {
+    name,
+    schedule,
+    timezone: timezone || 'America/New_York',
+    lastRunAt: null,
+    lastStatus: null, // 'ok' | 'error'
+    lastError: null,
+    lastDuration: null,
+  };
+  jobRegistry.push(entry);
+
+  cron.schedule(schedule, async () => {
+    const t0 = Date.now();
+    entry.lastRunAt = t0;
+    try {
+      await fn();
+      entry.lastStatus = 'ok';
+      entry.lastError = null;
+    } catch (err) {
+      entry.lastStatus = 'error';
+      entry.lastError = err.message;
+      console.error(`[Scheduler] ${name} failed:`, err.message);
+    }
+    entry.lastDuration = Date.now() - t0;
+  }, { timezone: entry.timezone });
+
+  return entry;
+}
+
+function getJobRegistry() {
+  return jobRegistry.map(j => ({
+    name: j.name,
+    schedule: j.schedule,
+    timezone: j.timezone,
+    lastRunAt: j.lastRunAt,
+    lastStatus: j.lastStatus,
+    lastError: j.lastError,
+    lastDuration: j.lastDuration,
+  }));
+}
+
 function startScheduler() {
   console.log('[Scheduler] Starting...');
 
-  // Full scan: 7:00 AM – 9:00 AM ET every 30 min
-  // Cron: */30 7-8 * * 1-5 (ET = UTC-4/5, assuming UTC-4 EDT: ET 7am = UTC 11am)
-  cron.schedule('0 11,11,12 * * 1-5', async () => {
-    console.log('[Scheduler] 30-min scan (7–9 AM ET window)');
-    try { await runFullScan(); } catch (e) { console.error(e.message); }
-  }, { timezone: 'America/New_York' });
+  registerJob('Full Scan 7–9 AM ET (30 min)', '*/30 7-8 * * 1-5', 'America/New_York', () => runFullScan());
+  registerJob('Full Scan 9–10 AM ET (5 min)', '*/5 9 * * 1-5', 'America/New_York', () => runFullScan());
+  registerJob('Full Scan off-hours (3 hr)', '0 10,13,16,19,22 * * 1-5', 'America/New_York', () => runFullScan());
+  registerJob('Shortlist Auto-Rule 9:35 AM', '35 9 * * 1-5', 'America/New_York', () => runAutoRule());
+  registerJob('R1 Capture 9:36 AM', '36 9 * * 1-5', 'America/New_York', () => captureR1());
+  registerJob('R2 Snapshot 9:25–10:00 AM', '25,30,35,40,45,50,55 9 * * 1-5', 'America/New_York', () => captureR2());
+  registerJob('R2 Snapshot 10:00 AM', '0 10 * * 1-5', 'America/New_York', () => captureR2());
+  registerJob('Daily Backup 5:30 PM', '30 17 * * 1-5', 'America/New_York', () => pushBackup());
+  registerJob('Midnight r0 Flush', '0 0 * * *', 'America/New_York', () => { r0.clearAll(); });
 
-  // Full scan every 30 min: 7:00–9:00 AM ET
-  cron.schedule('*/30 7-8 * * 1-5', async () => {
-    console.log('[Scheduler] 30-min scan (7–9 AM ET)');
-    try { await runFullScan(); } catch (e) { console.error(e.message); }
-  }, { timezone: 'America/New_York' });
-
-  // Full scan every 5 min: 9:00–10:00 AM ET
-  cron.schedule('*/5 9 * * 1-5', async () => {
-    console.log('[Scheduler] 5-min scan (9–10 AM ET)');
-    try { await runFullScan(); } catch (e) { console.error(e.message); }
-  }, { timezone: 'America/New_York' });
-
-  // Full scan every 3 hours: 10 AM – 7 AM next day (off-hours)
-  cron.schedule('0 10,13,16,19,22 * * 1-5', async () => {
-    console.log('[Scheduler] 3-hour scan (10 AM–7 AM ET)');
-    try { await runFullScan(); } catch (e) { console.error(e.message); }
-  }, { timezone: 'America/New_York' });
-
-  // Shortlist auto-rule at 9:35 AM ET daily (weekdays)
-  cron.schedule('35 9 * * 1-5', () => {
-    console.log('[Scheduler] Shortlist auto-rule at 9:35 AM ET');
-    try { runAutoRule(); } catch (e) { console.error(e.message); }
-  }, { timezone: 'America/New_York' });
-
-  // R1 capture at 9:36 AM ET
-  cron.schedule('36 9 * * 1-5', () => {
-    console.log('[Scheduler] R1 capture at 9:36 AM ET');
-    try { captureR1(); } catch (e) { console.error(e.message); }
-  }, { timezone: 'America/New_York' });
-
-  // R2 snapshots: 9:25–10:00 AM ET every 5 min
-  cron.schedule('25,30,35,40,45,50,55 9 * * 1-5', () => {
-    console.log('[Scheduler] R2 market snapshot capture');
-    try { captureR2(); } catch (e) { console.error(e.message); }
-  }, { timezone: 'America/New_York' });
-  cron.schedule('0 10 * * 1-5', () => {
-    try { captureR2(); } catch (e) { console.error(e.message); }
-  }, { timezone: 'America/New_York' });
-
-  // Daily backup at 5:30 PM ET (1 hour after market close) Mon–Fri
-  cron.schedule('30 17 * * 1-5', async () => {
-    console.log('[Scheduler] Daily backup at 5:30 PM ET');
-    try {
-      const result = await pushBackup();
-      console.log('[Scheduler] Backup pushed:', result.exportedAt);
-    } catch (e) {
-      console.error('[Scheduler] Backup failed:', e.message);
-    }
-  }, { timezone: 'America/New_York' });
-
-  // Midnight ET: flush r0 so the new day starts clean
-  cron.schedule('0 0 * * *', () => {
-    console.log('[Scheduler] Midnight flush — clearing r0');
-    r0.clearAll();
-  }, { timezone: 'America/New_York' });
-
-  console.log('[Scheduler] All jobs registered');
+  console.log('[Scheduler] All jobs registered:', jobRegistry.length);
 }
 
-module.exports = { startScheduler };
+module.exports = { startScheduler, getJobRegistry };
