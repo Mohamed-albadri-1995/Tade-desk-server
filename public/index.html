@@ -483,7 +483,7 @@ async function runScan() {
     const r = await fetch('/api/scan/run', { method: 'POST' });
     const d = await r.json();
     setStatus(`Scan complete · ${d.rowsProcessed} rows · ${fmtTime(d.ts)}`);
-    await loadRegistry();
+    await Promise.all([loadRegistry(), loadMarket()]);
   } catch(e) {
     setStatus('Scan error: ' + e.message);
   }
@@ -580,7 +580,7 @@ function buildCard(row) {
     <div class="regime-box">
       <span class="regime-icon">${regimeInfo.icon}</span>
       <div class="regime-info">
-        <div class="regime-label" style="color:${regimeInfo.color}">${ctx.regime}</div>
+        <div class="regime-label" style="color:${regimeInfo.color}">${ctx.regimeLabel || regimeInfo.label || ctx.regime}</div>
         <div class="regime-stance">${regimeInfo.stance || ''}</div>
       </div>
     </div>` : '<span style="color:var(--text3)">—</span>';

@@ -102,7 +102,8 @@ function enrichR0WithContext(r0Rows) {
       context: {
         themes,
         broadResolved: marketKey,
-        regime: regime.label,
+        regime: regime.slug,
+        regimeLabel: regime.label,
         longTerm: longTerm.result,
         midTerm: midTerm.result,
         shortTerm: shortTerm.result,
