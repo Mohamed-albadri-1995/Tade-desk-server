@@ -1,3 +1,4 @@
+const { v4: uuidv4 } = require('uuid');
 const { runAllScanners } = require('./sideA/tvScanner');
 const { mergeScannersIntoR0 } = require('./sideA/merge');
 const { applyDerivedFields } = require('./sideB/calculations');
@@ -5,13 +6,41 @@ const { buildMarketSnapshot, enrichR0WithContext } = require('./sideD/engine');
 // sideE scoring intentionally disconnected — engine pending redesign
 const r0 = require('./r0/registry');
 const { syncShortlistToR0 } = require('./sideF/shortlist');
+const { refreshStaleInR0 } = require('./sideG/staleFetch');
 
 const scanStatus = {
   lastRun: null,
   lastRowCount: 0,
   running: false,
   error: null,
+  lastReport: null,
 };
+
+function stageWrap(report, key, fn) {
+  return async () => {
+    const t0 = Date.now();
+    try {
+      const result = await fn();
+      report.stages[key] = { ok: true, duration: Date.now() - t0, ...result };
+    } catch (err) {
+      report.stages[key] = { ok: false, duration: Date.now() - t0, error: err.message };
+      throw err;
+    }
+  };
+}
+
+function stageWrapSoft(report, key, fn) {
+  return async () => {
+    const t0 = Date.now();
+    try {
+      const result = await fn();
+      report.stages[key] = { ok: true, duration: Date.now() - t0, ...result };
+    } catch (err) {
+      report.stages[key] = { ok: false, duration: Date.now() - t0, error: err.message };
+      console.error(`[Pipeline] ${key} failed (non-fatal):`, err.message);
+    }
+  };
+}
 
 async function runFullScan() {
   if (scanStatus.running) {
@@ -21,45 +50,81 @@ async function runFullScan() {
   scanStatus.running = true;
   scanStatus.error = null;
 
+  const report = {
+    scanId: uuidv4(),
+    startedAt: Date.now(),
+    completedAt: null,
+    ok: false,
+    stages: {},
+  };
+
   try {
     console.log('[Pipeline] Starting full scan...');
 
-    // Side A: TradingView Scanners
-    const scannerResults = await runAllScanners();
-    const merged = mergeScannersIntoR0(scannerResults);
+    // Side A: TradingView Scanners (fatal)
+    let merged;
+    await stageWrap(report, 'sideA', async () => {
+      const scannerResults = await runAllScanners();
+      merged = mergeScannersIntoR0(scannerResults);
+      return { rowCount: merged.length };
+    })();
 
-    // Side B: Internal Calculations
-    const withDerived = applyDerivedFields(merged);
+    // Side B: Internal Calculations (fatal)
+    let withDerived;
+    await stageWrap(report, 'sideB', async () => {
+      withDerived = applyDerivedFields(merged);
+      return { rowCount: withDerived.length };
+    })();
 
-    // Side D: Market Context
+    // Side D: Market Context (non-fatal)
     let withContext = withDerived;
-    try {
+    await stageWrapSoft(report, 'sideD', async () => {
       await buildMarketSnapshot();
       withContext = enrichR0WithContext(withDerived);
-    } catch (err) {
-      console.error('[Pipeline] Market context failed:', err.message);
-    }
+      return { rowCount: withContext.length };
+    })();
 
-    // Side E: Scoring — disconnected, _score set to null until engine is rebuilt
+    // Side E: Scoring — disconnected
     const withScores = withContext.map(row => ({ ...row, _score: null }));
+    report.stages.sideE = { ok: true, note: 'disconnected — _score null' };
 
-    // Mark existing rows stale before writing — rows not in this scan stay in r0
-    // for the rest of the day but with liveNow: false
+    // Mark existing rows stale, then write live scan results
     r0.markAllStale();
-
-    // Write to r0
     r0.upsertRows(withScores);
 
-    // Restore inShortlist flags from DB (survives server restarts)
-    syncShortlistToR0();
+    // Side G: Refresh stale tickers with fresh TV quotes (non-fatal)
+    await stageWrapSoft(report, 'sideG', async () => {
+      return await refreshStaleInR0();
+    })();
 
-    scanStatus.lastRun = Date.now();
+    // Side F: Restore inShortlist flags from DB (non-fatal)
+    await stageWrapSoft(report, 'sideF', async () => {
+      syncShortlistToR0();
+      return {};
+    })();
+
+    // r0 summary
+    const allRows = r0.getAll();
+    report.r0Summary = {
+      total: allRows.length,
+      liveNow: allRows.filter(r => r.liveNow).length,
+      stale: allRows.filter(r => !r.liveNow).length,
+      inShortlist: allRows.filter(r => r.inShortlist).length,
+    };
+
+    report.ok = true;
+    report.completedAt = Date.now();
+    scanStatus.lastRun = report.completedAt;
     scanStatus.lastRowCount = withScores.length;
-    console.log('[Pipeline] Scan complete:', withScores.length, 'rows');
+    scanStatus.lastReport = report;
 
+    console.log('[Pipeline] Scan complete:', withScores.length, 'live,', report.r0Summary.stale, 'stale');
     return { rowsProcessed: withScores.length, ts: scanStatus.lastRun };
   } catch (err) {
+    report.completedAt = Date.now();
+    report.ok = false;
     scanStatus.error = err.message;
+    scanStatus.lastReport = report;
     console.error('[Pipeline] Scan error:', err.message);
     throw err;
   } finally {
@@ -73,6 +138,7 @@ function getScanStatus() {
     lastRowCount: scanStatus.lastRowCount,
     running: scanStatus.running,
     error: scanStatus.error,
+    lastReport: scanStatus.lastReport,
   };
 }
 

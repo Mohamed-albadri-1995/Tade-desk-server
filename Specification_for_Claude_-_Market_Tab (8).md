@@ -443,6 +443,15 @@ POST https://scanner.tradingview.com/america/scan?label-product=screener-stock
                 { "expression": { "left": "type", "operation": "equal", "right": "dr" } }
               ]
             }
+          },
+          {
+            "operation": {
+              "operator": "and",
+              "operands": [
+                { "expression": { "left": "type", "operation": "equal", "right": "fund" } },
+                { "expression": { "left": "typespecs", "operation": "has_none_of", "right": ["etf", "mutual", "closedend"] } }
+              ]
+            }
           }
         ]
       }
@@ -495,7 +504,7 @@ POST https://scanner.tradingview.com/america/scan?label-product=screener-stock
   "columns": [/* common columns */],
   "filter": [/* filters above */],
   "filter2": { /* common base filter */ },
-  "ignore_unknown_fields": false,
+  "ignore_unknown_fields": true,
   "markets": ["america"],
   "options": { "lang": "en" },
   "range": [0, 50],
@@ -534,7 +543,7 @@ POST https://scanner.tradingview.com/america/scan?label-product=screener-stock
   "columns": [/* common columns */],
   "filter": [/* filters above */],
   "filter2": { /* common base filter */ },
-  "ignore_unknown_fields": false,
+  "ignore_unknown_fields": true,
   "markets": ["america"],
   "options": { "lang": "en" },
   "range": [0, 50],
@@ -571,7 +580,7 @@ POST https://scanner.tradingview.com/america/scan?label-product=screener-stock
   "columns": [/* common columns */],
   "filter": [/* filters above */],
   "filter2": { /* common base filter */ },
-  "ignore_unknown_fields": false,
+  "ignore_unknown_fields": true,
   "markets": ["america"],
   "options": { "lang": "en" },
   "range": [0, 50],
@@ -588,7 +597,8 @@ Each scanner returns data in the same format. The server maps each item using th
 
 | TV Column | Internal Field | Notes |
 |---|---|---|
-| ticker-view | ticker | Strip exchange prefix (e.g., NASDAQ:AAPL → AAPL) |
+| rawTV.s (row symbol field) | ticker | Use `rawTV.s`, not `ticker-view` column. TV changed `ticker-view` to a rich object. Strip exchange prefix: `NASDAQ:AAPL → AAPL`. Store full symbol as `stock.tvSymbol` before stripping. |
+| rawTV.s (row symbol field) | stock.tvSymbol | Store full exchange-prefixed symbol (e.g. `NASDAQ:AAPL`). Used for TradingView watchlist export and stale ticker refresh (Side G). |
 | close | stock.price | |
 | open | stock.open | |
 | change | stock.change | Percentage change from previous close |
@@ -658,6 +668,35 @@ Step 4: For each merged row:
           - Keep best available stock.* values
           - All other fields (context, news, scoring) are added by other sides.
 ```
+
+---
+
+## 3.10. Side G — Stale Ticker Refresh (Added)
+
+**Purpose:** After every scan, stocks that no longer meet scanner filter criteria are marked `liveNow: false` but must stay on cards until EOD with fresh price data. Side G fetches updated quotes for those tickers from TradingView using the same API in quote mode (specific symbols, no filter).
+
+**When it runs:** Inside `runFullScan()`, after `upsertRows()` writes the live scan results and before `syncShortlistToR0()`.
+
+**Request format:** Same endpoint as scanners. Use `symbols.tickers` instead of `filter`. No `filter2` needed when fetching by symbol list.
+
+```json
+{
+  "columns": [/* same COMMON_COLUMNS as scanners */],
+  "symbols": { "tickers": ["NASDAQ:AAPL", "NYSE:GME"] },
+  "range": [0, 200],
+  "markets": ["america"],
+  "options": { "lang": "en" },
+  "ignore_unknown_fields": true
+}
+```
+
+**Response mapping:** Identical to scanner — use the same `mapTVRow` function and `applyDerivedFields`.
+
+**What gets updated in r0:** Only `stock.*` fields (all of them, via the same mapping). `liveNow` stays `false`. `context`, `date`, `id`, `firstSeen`, `inShortlist`, `_score` are NOT changed.
+
+**Batching:** Cap at 200 symbols per request. If more than 200 stale tickers exist, batch in groups of 200.
+
+**Failure behavior:** Non-fatal. If Side G fails, pipeline continues. Stale rows keep their last known data. Logged in pipeline monitor.
 
 ---
 
