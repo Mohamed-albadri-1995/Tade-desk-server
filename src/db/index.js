@@ -115,4 +115,7 @@ const insertSetting = db.prepare(
 );
 for (const [k, v] of defaults) insertSetting.run(k, v);
 
+// Force-update aiModel if it still has the old OpenAI default
+db.prepare("UPDATE settings SET value = 'anthropic/claude-haiku-4-5' WHERE key = 'aiModel' AND value = 'gpt-4o-mini'").run();
+
 module.exports = db;

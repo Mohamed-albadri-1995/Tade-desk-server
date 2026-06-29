@@ -742,13 +742,13 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <div class="settings-section-title">Analysis Engine (Side E)</div>
         <div class="settings-grid">
           <div class="settings-field">
-            <label>AI API Key (OpenAI)</label>
+            <label>AI API Key (OpenRouter)</label>
             <div class="settings-hint">Used for AI-generated insights. Leave blank to use rule-based insights only.</div>
-            <input type="password" class="settings-input" id="s-aiApiKey" placeholder="sk-..." autocomplete="off">
+            <input type="password" class="settings-input" id="s-aiApiKey" placeholder="sk-or-v1-..." autocomplete="off">
           </div>
           <div class="settings-field">
             <label>AI Model</label>
-            <div class="settings-hint">OpenAI model for insights generation.</div>
+            <div class="settings-hint">OpenRouter model ID (e.g. anthropic/claude-haiku-4-5)</div>
             <input type="text" class="settings-input" id="s-aiModel" placeholder="gpt-4o-mini">
           </div>
         </div>
