@@ -37,8 +37,9 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .scan-btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ── TABS ── */
-.tabs { display: flex; gap: 2px; padding: 10px 20px 0; background: var(--bg2); border-bottom: 1px solid var(--border); }
-.tab { padding: 8px 18px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text2); border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; user-select: none; }
+.tabs { display: flex; gap: 2px; padding: 10px 20px 0; background: var(--bg2); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; flex-shrink: 0; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { padding: 8px 18px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text2); border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; user-select: none; white-space: nowrap; flex-shrink: 0; }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .tab:hover:not(.active) { color: var(--text); }
 
