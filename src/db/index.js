@@ -77,6 +77,15 @@ db.exec(`
     schedule TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1
   );
+
+  CREATE TABLE IF NOT EXISTS analysis_model (
+    id INTEGER PRIMARY KEY,
+    trained_at INTEGER NOT NULL,
+    config TEXT NOT NULL,
+    features TEXT NOT NULL,
+    backtest TEXT NOT NULL,
+    insights TEXT
+  );
 `);
 
 // Default settings
@@ -94,6 +103,12 @@ const defaults = [
   ['githubBackupToken', ''],
   ['alpacaApiKey', ''],
   ['alpacaApiSecret', ''],
+  ['analysisEntryType', 'A'],
+  ['analysisDirectionalBias', 'Up'],
+  ['analysisSuccessThreshold', '1.5'],
+  ['analysisTrainingWindow', '90'],
+  ['aiApiKey', ''],
+  ['aiModel', 'gpt-4o-mini'],
 ];
 const insertSetting = db.prepare(
   'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'

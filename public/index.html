@@ -255,13 +255,58 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   .settings-wrap { padding: 16px 12px; }
 }
 /* Analysis tab */
-.analysis-subtabs { display: flex; gap: 4px; padding: 16px 20px 0; border-bottom: 1px solid var(--border); }
-.analysis-subtab { padding: 8px 20px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text2); border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
-.analysis-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
-.analysis-subtab:hover:not(.active) { color: var(--text); }
-.analysis-pane { display: none; padding: 40px 20px; }
-.analysis-pane.active { display: block; }
-.analysis-empty { color: var(--text3); font-size: 14px; text-align: center; padding: 60px 0; border: 1px dashed var(--border); border-radius: 8px; }
+.an-header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+.an-header h2 { font-size: 16px; font-weight: 700; color: var(--text); }
+.an-btn { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; color: var(--text2); font-size: 12px; cursor: pointer; font-family: inherit; transition: border-color .15s, color .15s; }
+.an-btn:hover { border-color: var(--accent); color: var(--accent); }
+.an-btn.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
+.an-btn.primary:hover { opacity: .85; }
+.an-btn:disabled { opacity: .4; cursor: not-allowed; }
+.an-status { font-size: 11px; color: var(--text3); background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; }
+.an-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.an-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.an-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.an-card-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text3); margin-bottom: 12px; }
+.an-metric { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.an-metric:last-child { border-bottom: none; }
+.an-metric-label { font-size: 12px; color: var(--text2); }
+.an-metric-value { font-size: 13px; font-weight: 700; color: var(--text); }
+.an-metric-value.green { color: var(--green); }
+.an-metric-value.red { color: var(--red); }
+.an-metric-value.accent { color: var(--accent); }
+.an-section { margin-bottom: 18px; }
+.an-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text3); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.an-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+.an-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+.an-table th { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); padding: 8px 12px; text-align: left; background: var(--bg3); border-bottom: 1px solid var(--border); }
+.an-table td { padding: 7px 12px; font-size: 12px; border-bottom: 1px solid #1a1e28; }
+.an-table tr:last-child td { border-bottom: none; }
+.an-table tr:hover td { background: var(--bg3); }
+.bucket-best { color: var(--green); font-weight: 700; }
+.bucket-avoid { color: var(--red); font-weight: 700; }
+.bucket-neutral { color: var(--text2); }
+.insight-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; gap: 10px; align-items: flex-start; }
+.insight-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; }
+.insight-badge.BEST { background: #22c55e20; border: 1px solid #22c55e50; color: var(--green); }
+.insight-badge.AVOID { background: #ef444420; border: 1px solid #ef444450; color: var(--red); }
+.insight-text { font-size: 12px; color: var(--text); line-height: 1.5; }
+.ai-block { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 16px; white-space: pre-wrap; font-size: 12px; line-height: 1.6; color: var(--text); margin-top: 10px; }
+.perf-bar { height: 8px; border-radius: 4px; background: var(--bg4); display: inline-block; min-width: 4px; }
+.feat-importance-bar { height: 6px; border-radius: 3px; background: var(--accent); display: inline-block; }
+.an-feature-select { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-family: inherit; font-size: 12px; cursor: pointer; }
+.an-no-model { color: var(--text3); font-size: 14px; text-align: center; padding: 60px 0; border: 1px dashed var(--border); border-radius: 8px; }
+.an-config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.an-config-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.an-config-input { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--text); font-size: 12px; font-family: inherit; }
+.an-config-input:focus { outline: none; border-color: var(--accent); }
+.bt-chart { display: flex; align-items: flex-end; gap: 2px; height: 60px; margin-top: 8px; }
+.bt-bar-group { display: flex; gap: 1px; align-items: flex-end; }
+.bt-bar { width: 6px; border-radius: 2px 2px 0 0; cursor: pointer; }
+.bt-bar.top { background: var(--green); }
+.bt-bar.bottom { background: var(--red); }
+.bt-bar.base { background: var(--text3); }
+@media (max-width: 900px) { .an-grid { grid-template-columns: 1fr; } .an-grid-3 { grid-template-columns: 1fr 1fr; } .an-config-grid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .an-grid-3 { grid-template-columns: 1fr; } }
 .wh-paginate { display: flex; gap: 8px; align-items: center; margin-top: 10px; justify-content: flex-end; }
 .page-btn { background: var(--bg3); border: 1px solid var(--border); border-radius: 5px; padding: 5px 12px; color: var(--text2); font-size: 11px; cursor: pointer; font-family: inherit; }
 .page-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
@@ -475,15 +520,136 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 
   <!-- ═══════════════ ANALYSIS TAB ═══════════════ -->
   <div class="tab-pane" id="tab-analysis">
-    <div class="analysis-subtabs">
-      <div class="analysis-subtab active" onclick="switchAnalysis('screener',this)">Screener Analysis</div>
-      <div class="analysis-subtab" onclick="switchAnalysis('trade',this)">Trade Analysis</div>
-    </div>
-    <div class="analysis-pane active" id="apane-screener">
-      <div class="analysis-empty">Screener Analysis — coming soon</div>
-    </div>
-    <div class="analysis-pane" id="apane-trade">
-      <div class="analysis-empty">Trade Analysis — coming soon</div>
+    <div style="padding:16px 0">
+
+      <!-- Header -->
+      <div class="an-header">
+        <h2>Full Analysis Report</h2>
+        <button class="an-btn primary" id="an-train-btn" onclick="anTrain()">&#9654; Train Model</button>
+        <button class="an-btn" onclick="anLoadReport()">&#8635; Refresh</button>
+        <button class="an-btn" onclick="anExportModel()">&#8595; Export JSON</button>
+        <div class="an-status" id="an-status">Not loaded</div>
+      </div>
+
+      <!-- No Model State -->
+      <div id="an-no-model" class="an-no-model" style="display:none">
+        No trained model found. Configure settings below and click <strong>Train Model</strong> to begin.
+      </div>
+
+      <!-- Model Config -->
+      <div class="an-card an-section" id="an-config-card">
+        <div class="an-card-title">Model Configuration</div>
+        <div class="an-config-grid">
+          <div class="an-config-field">
+            <label>Entry Type</label>
+            <select class="an-config-input" id="an-entryType">
+              <option value="A">A (9:36 AM)</option>
+              <option value="B">B (Alternative)</option>
+            </select>
+          </div>
+          <div class="an-config-field">
+            <label>Directional Bias</label>
+            <select class="an-config-input" id="an-directionalBias">
+              <option value="Up">Up (Long)</option>
+              <option value="Down">Down (Short)</option>
+            </select>
+          </div>
+          <div class="an-config-field">
+            <label>Success Threshold (R)</label>
+            <input type="number" class="an-config-input" id="an-successThreshold" value="1.5" step="0.1" min="0.5" max="5">
+          </div>
+          <div class="an-config-field">
+            <label>Training Window (days)</label>
+            <input type="number" class="an-config-input" id="an-trainingWindow" value="90" step="10" min="30" max="365">
+          </div>
+        </div>
+      </div>
+
+      <!-- Content (hidden until model loaded) -->
+      <div id="an-content" style="display:none">
+
+        <!-- Performance Summary -->
+        <div class="an-grid-3 an-section">
+          <div class="an-card">
+            <div class="an-card-title">Model Stats</div>
+            <div class="an-metric"><span class="an-metric-label">Total Rows</span><span class="an-metric-value accent" id="an-totalRows">—</span></div>
+            <div class="an-metric"><span class="an-metric-label">Global Win Rate</span><span class="an-metric-value" id="an-globalWR">—</span></div>
+            <div class="an-metric"><span class="an-metric-label">Trained At</span><span class="an-metric-value" id="an-trainedAt">—</span></div>
+          </div>
+          <div class="an-card">
+            <div class="an-card-title">Walk-Forward Backtest</div>
+            <div class="an-metric"><span class="an-metric-label">Days Tested</span><span class="an-metric-value accent" id="an-btDays">—</span></div>
+            <div class="an-metric"><span class="an-metric-label">Top Decile Win Rate</span><span class="an-metric-value green" id="an-topWR">—</span></div>
+            <div class="an-metric"><span class="an-metric-label">Bottom Decile Win Rate</span><span class="an-metric-value red" id="an-bottomWR">—</span></div>
+            <div class="an-metric"><span class="an-metric-label">Baseline Win Rate</span><span class="an-metric-value" id="an-baseWR">—</span></div>
+          </div>
+          <div class="an-card">
+            <div class="an-card-title">Config Active</div>
+            <div class="an-metric"><span class="an-metric-label">Entry Type</span><span class="an-metric-value" id="an-cfg-entry">—</span></div>
+            <div class="an-metric"><span class="an-metric-label">Bias</span><span class="an-metric-value" id="an-cfg-bias">—</span></div>
+            <div class="an-metric"><span class="an-metric-label">Success Threshold</span><span class="an-metric-value" id="an-cfg-thresh">—</span></div>
+            <div class="an-metric"><span class="an-metric-label">Training Window</span><span class="an-metric-value" id="an-cfg-window">—</span></div>
+          </div>
+        </div>
+
+        <!-- Insights -->
+        <div class="an-card an-section">
+          <div class="an-card-title" style="display:flex;align-items:center;gap:8px">
+            Top Insights
+            <button class="an-btn" style="margin-left:auto;font-size:11px;padding:3px 10px" onclick="anRegenerateInsights()">&#8635; Regenerate</button>
+            <button class="an-btn" style="font-size:11px;padding:3px 10px" onclick="anRegenerateInsights(true)">&#10024; AI Insights</button>
+          </div>
+          <div id="an-insights">
+            <div class="loading">Loading insights...</div>
+          </div>
+          <div id="an-ai-block" style="display:none">
+            <div class="an-section-title" style="margin-top:12px">AI Summary</div>
+            <div class="ai-block" id="an-ai-text"></div>
+          </div>
+        </div>
+
+        <!-- Factor Importance -->
+        <div class="an-card an-section">
+          <div class="an-card-title">Factor Importance (Top 20)</div>
+          <div id="an-importance-list">
+            <div class="loading">Loading...</div>
+          </div>
+        </div>
+
+        <!-- Bucket Analysis -->
+        <div class="an-card an-section">
+          <div class="an-card-title" style="display:flex;align-items:center;gap:10px">
+            Bucket Analysis
+            <select class="an-feature-select" id="an-feature-select" onchange="anLoadBuckets()">
+              <option value="">— Select Factor —</option>
+            </select>
+          </div>
+          <div id="an-bucket-table">
+            <div style="color:var(--text3);font-size:12px;padding:20px 0">Select a factor above to view bucket breakdown.</div>
+          </div>
+        </div>
+
+        <!-- Backtest Chart -->
+        <div class="an-card an-section">
+          <div class="an-card-title">Backtest — Daily Win Rates</div>
+          <div style="display:flex;gap:14px;margin-bottom:8px;font-size:11px">
+            <span><span style="display:inline-block;width:10px;height:10px;background:var(--green);border-radius:2px;margin-right:4px"></span>Top Decile</span>
+            <span><span style="display:inline-block;width:10px;height:10px;background:var(--red);border-radius:2px;margin-right:4px"></span>Bottom Decile</span>
+            <span><span style="display:inline-block;width:10px;height:10px;background:var(--text3);border-radius:2px;margin-right:4px"></span>Baseline</span>
+          </div>
+          <div class="bt-chart" id="an-bt-chart">
+            <div style="color:var(--text3);font-size:12px">No backtest data.</div>
+          </div>
+          <div style="font-size:10px;color:var(--text3);margin-top:4px" id="an-bt-hover"></div>
+        </div>
+
+        <!-- Export -->
+        <div class="an-section" style="display:flex;gap:10px;justify-content:flex-end">
+          <button class="an-btn" onclick="anExportModel()">Export Model JSON</button>
+          <button class="an-btn" onclick="anExportBacktest()">Export Backtest CSV</button>
+        </div>
+
+      </div><!-- /an-content -->
     </div>
   </div>
 
@@ -593,6 +759,25 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <span class="settings-msg" id="msg-api"></span>
       </div>
 
+      <!-- Analysis / AI -->
+      <div class="settings-section">
+        <div class="settings-section-title">Analysis Engine (Side E)</div>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label>AI API Key (OpenAI)</label>
+            <div class="settings-hint">Used for AI-generated insights. Leave blank to use rule-based insights only.</div>
+            <input type="password" class="settings-input" id="s-aiApiKey" placeholder="sk-..." autocomplete="off">
+          </div>
+          <div class="settings-field">
+            <label>AI Model</label>
+            <div class="settings-hint">OpenAI model for insights generation.</div>
+            <input type="text" class="settings-input" id="s-aiModel" placeholder="gpt-4o-mini">
+          </div>
+        </div>
+        <button class="settings-save-btn" onclick="saveSettings(['aiApiKey','aiModel'], this)">Save AI Settings</button>
+        <span class="settings-msg" id="msg-ai"></span>
+      </div>
+
       <!-- Backup & Restore -->
       <div class="settings-section">
         <div class="settings-section-title">Backup &amp; Restore</div>
@@ -694,13 +879,254 @@ function switchTab(name, el) {
   if (name === 'market') loadMarket();
   if (name === 'shortlist') loadShortlist();
   if (name === 'warehouse') loadWarehouseDates();
+  if (name === 'analysis') anLoadReport();
 }
 
-function switchAnalysis(name, el) {
-  document.querySelectorAll('.analysis-subtab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.analysis-pane').forEach(p => p.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('apane-' + name).classList.add('active');
+// ═══════════════════════════════════════════════════
+// ANALYSIS TAB
+// ═══════════════════════════════════════════════════
+let anReport = null;
+
+function anLoadReport() {
+  document.getElementById('an-status').textContent = 'Loading...';
+  fetch('/api/analysis/report')
+    .then(r => {
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error('Server error');
+      return r.json();
+    })
+    .then(data => {
+      if (!data) {
+        document.getElementById('an-no-model').style.display = '';
+        document.getElementById('an-content').style.display = 'none';
+        document.getElementById('an-status').textContent = 'No model — click Train Model';
+        return;
+      }
+      anReport = data;
+      document.getElementById('an-no-model').style.display = 'none';
+      document.getElementById('an-content').style.display = '';
+      anRenderReport(data);
+    })
+    .catch(err => {
+      document.getElementById('an-status').textContent = 'Error: ' + err.message;
+    });
+}
+
+function anRenderReport(d) {
+  const fmt = v => v != null ? (v * 100).toFixed(1) + '%' : '—';
+  const fmtTs = ts => ts ? new Date(ts).toLocaleString('en-US', { timeZone: 'America/New_York', month:'2-digit', day:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }) + ' ET' : '—';
+
+  // Stats
+  document.getElementById('an-totalRows').textContent = d.totalRows || '—';
+  document.getElementById('an-globalWR').textContent = fmt(d.globalWinRate);
+  document.getElementById('an-trainedAt').textContent = fmtTs(d.trainedAt);
+
+  // Backtest
+  const bt = d.backtest || {};
+  document.getElementById('an-btDays').textContent = bt.days?.length || '—';
+  const topEl = document.getElementById('an-topWR');
+  const btmEl = document.getElementById('an-bottomWR');
+  topEl.textContent = fmt(bt.avgTopWR);
+  btmEl.textContent = fmt(bt.avgBottomWR);
+  document.getElementById('an-baseWR').textContent = fmt(bt.avgBaseWR);
+  if (bt.avgTopWR != null && bt.avgBottomWR != null) {
+    topEl.className = 'an-metric-value ' + (bt.avgTopWR > (bt.avgBaseWR || 0) ? 'green' : 'red');
+    btmEl.className = 'an-metric-value ' + (bt.avgBottomWR < (bt.avgBaseWR || 0) ? 'red' : 'green');
+  }
+
+  // Config
+  const cfg = d.config || {};
+  document.getElementById('an-cfg-entry').textContent = cfg.entryType || '—';
+  document.getElementById('an-cfg-bias').textContent = cfg.directionalBias || '—';
+  document.getElementById('an-cfg-thresh').textContent = cfg.successThreshold != null ? cfg.successThreshold + 'R' : '—';
+  document.getElementById('an-cfg-window').textContent = cfg.trainingWindow != null ? cfg.trainingWindow + ' days' : '—';
+
+  // Populate config inputs from loaded model
+  if (cfg.entryType) document.getElementById('an-entryType').value = cfg.entryType;
+  if (cfg.directionalBias) document.getElementById('an-directionalBias').value = cfg.directionalBias;
+  if (cfg.successThreshold) document.getElementById('an-successThreshold').value = cfg.successThreshold;
+  if (cfg.trainingWindow) document.getElementById('an-trainingWindow').value = cfg.trainingWindow;
+
+  // Insights
+  anRenderInsights(d.insights);
+
+  // Factor importance
+  anRenderImportance(d.features || []);
+
+  // Feature dropdown
+  const sel = document.getElementById('an-feature-select');
+  const prevVal = sel.value;
+  sel.innerHTML = '<option value="">— Select Factor —</option>';
+  for (const f of (d.features || [])) {
+    const opt = document.createElement('option');
+    opt.value = f.name;
+    opt.textContent = `${f.name} (${f.importancePct?.toFixed(1)}%)`;
+    sel.appendChild(opt);
+  }
+  if (prevVal) { sel.value = prevVal; anLoadBuckets(); }
+
+  // Backtest chart
+  anRenderBtChart(bt.days || []);
+
+  document.getElementById('an-status').textContent = 'Model trained ' + fmtTs(d.trainedAt);
+}
+
+function anRenderInsights(ins) {
+  const el = document.getElementById('an-insights');
+  if (!ins || !ins.ruleInsights?.length) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0">No insights yet. Train a model first.</div>';
+    return;
+  }
+  el.innerHTML = ins.ruleInsights.map(i => `
+    <div class="insight-card">
+      <span class="insight-badge ${i.type}">${i.type}</span>
+      <span class="insight-text">${i.text}</span>
+    </div>
+  `).join('');
+
+  const aiEl = document.getElementById('an-ai-block');
+  const aiText = document.getElementById('an-ai-text');
+  if (ins.aiText) {
+    aiEl.style.display = '';
+    aiText.textContent = ins.aiText;
+  } else {
+    aiEl.style.display = 'none';
+  }
+}
+
+function anRenderImportance(features) {
+  const top20 = features.slice(0, 20);
+  const maxPct = top20[0]?.importancePct || 1;
+  const el = document.getElementById('an-importance-list');
+  if (!top20.length) { el.innerHTML = '<div class="loading">No features.</div>'; return; }
+
+  el.innerHTML = `<div class="an-table-wrap"><table class="an-table">
+    <thead><tr><th>#</th><th>Feature</th><th>Importance</th><th>Bar</th></tr></thead>
+    <tbody>${top20.map((f, i) => {
+      const barW = Math.round((f.importancePct / maxPct) * 120);
+      return `<tr>
+        <td style="color:var(--text3)">${i+1}</td>
+        <td style="font-weight:600">${f.name}</td>
+        <td style="color:var(--accent)">${f.importancePct?.toFixed(2)}%</td>
+        <td><div class="feat-importance-bar" style="width:${barW}px"></div></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+function anLoadBuckets() {
+  const name = document.getElementById('an-feature-select').value;
+  const el = document.getElementById('an-bucket-table');
+  if (!name) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:20px 0">Select a factor above to view bucket breakdown.</div>'; return; }
+
+  fetch(`/api/analysis/feature/${encodeURIComponent(name)}`)
+    .then(r => r.json())
+    .then(d => {
+      const gwr = d.globalWinRate || 0;
+      el.innerHTML = `<div class="an-table-wrap"><table class="an-table">
+        <thead><tr><th>Bucket</th><th>Count</th><th>Win Rate</th><th>Lift vs Baseline</th><th>Label</th></tr></thead>
+        <tbody>${d.buckets.map(b => {
+          const lift = gwr > 0 ? ((b.winRate - gwr) / gwr * 100) : 0;
+          const liftStr = (lift >= 0 ? '+' : '') + lift.toFixed(1) + '%';
+          const cls = lift > 10 ? 'bucket-best' : lift < -10 ? 'bucket-avoid' : 'bucket-neutral';
+          const label = lift > 10 ? 'BEST' : lift < -10 ? 'AVOID' : '';
+          return `<tr>
+            <td style="font-weight:600">${b.bucket}</td>
+            <td>${b.count}</td>
+            <td>${(b.winRate * 100).toFixed(1)}%</td>
+            <td class="${cls}">${liftStr}</td>
+            <td><span class="${cls}" style="font-size:10px;font-weight:700">${label}</span></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">Baseline win rate: ${(gwr*100).toFixed(1)}% &bull; Factor importance: ${d.importancePct?.toFixed(2)}%</div>`;
+    })
+    .catch(err => { el.innerHTML = `<div style="color:var(--red);font-size:12px">Error: ${err.message}</div>`; });
+}
+
+function anRenderBtChart(days) {
+  const el = document.getElementById('an-bt-chart');
+  if (!days.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px">No backtest data.</div>'; return; }
+
+  const maxWR = Math.max(...days.map(d => Math.max(d.topWR, d.bottomWR, d.baseWR || 0)), 0.01);
+  const H = 60;
+
+  el.innerHTML = days.map(d => {
+    const topH = Math.round((d.topWR / maxWR) * H);
+    const btmH = Math.round((d.bottomWR / maxWR) * H);
+    const baseH = Math.round(((d.baseWR || 0) / maxWR) * H);
+    return `<div class="bt-bar-group" title="${d.date}: Top ${(d.topWR*100).toFixed(1)}% | Bot ${(d.bottomWR*100).toFixed(1)}% | Base ${((d.baseWR||0)*100).toFixed(1)}%">
+      <div class="bt-bar top" style="height:${topH}px"></div>
+      <div class="bt-bar bottom" style="height:${btmH}px"></div>
+      <div class="bt-bar base" style="height:${baseH}px"></div>
+    </div>`;
+  }).join('');
+}
+
+function anTrain() {
+  const btn = document.getElementById('an-train-btn');
+  btn.disabled = true;
+  btn.textContent = 'Training...';
+  document.getElementById('an-status').textContent = 'Training model...';
+
+  const body = {
+    entryType: document.getElementById('an-entryType').value,
+    directionalBias: document.getElementById('an-directionalBias').value,
+    successThreshold: parseFloat(document.getElementById('an-successThreshold').value),
+    trainingWindow: parseInt(document.getElementById('an-trainingWindow').value, 10),
+  };
+
+  fetch('/api/analysis/train', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) throw new Error(d.error || 'Training failed');
+      document.getElementById('an-status').textContent = `Trained on ${d.totalRows} rows`;
+      anLoadReport();
+    })
+    .catch(err => {
+      document.getElementById('an-status').textContent = 'Error: ' + err.message;
+      alert('Training failed: ' + err.message);
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.textContent = '▶ Train Model';
+    });
+}
+
+function anRegenerateInsights(forceAI = false) {
+  document.getElementById('an-insights').innerHTML = '<div class="loading">Generating insights...</div>';
+  const url = '/api/analysis/insights?regenerate=true' + (forceAI ? '&ai=true' : '');
+  fetch(url)
+    .then(r => r.json())
+    .then(ins => {
+      if (anReport) anReport.insights = ins;
+      anRenderInsights(ins);
+    })
+    .catch(err => {
+      document.getElementById('an-insights').innerHTML = `<div style="color:var(--red)">Error: ${err.message}</div>`;
+    });
+}
+
+function anExportModel() {
+  if (!anReport) return alert('No model loaded.');
+  const blob = new Blob([JSON.stringify(anReport, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `analysis_model_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+}
+
+function anExportBacktest() {
+  if (!anReport?.backtest?.days?.length) return alert('No backtest data.');
+  const days = anReport.backtest.days;
+  const csv = ['date,topWR,bottomWR,baseWR,n', ...days.map(d =>
+    `${d.date},${d.topWR.toFixed(4)},${d.bottomWR.toFixed(4)},${(d.baseWR||0).toFixed(4)},${d.n}`
+  )].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `backtest_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
 }
 
 // ═══════════════════════════════════════════════════
@@ -713,6 +1139,7 @@ const MSG_IDS = {
   shortlistMinScore: 'msg-shortlist', shortlistTopN: 'msg-shortlist',
   finnhubApiKey: 'msg-api', githubBackupToken: 'msg-api',
   alpacaApiKey: 'msg-api', alpacaApiSecret: 'msg-api',
+  aiApiKey: 'msg-ai', aiModel: 'msg-ai',
 };
 
 async function resetHotState(btn) {
@@ -761,6 +1188,8 @@ async function loadSettings() {
         document.getElementById('alpaca-secret-status').textContent =
           val === 'set' ? 'Secret is set on server' : 'No secret set — R3 capture disabled';
         el.placeholder = val === 'set' ? 'Paste new secret to replace' : 'Paste Alpaca secret key';
+      } else if (key === 'aiApiKey') {
+        el.placeholder = val === 'set' ? 'Paste new key to replace' : 'sk-...';
       } else {
         el.value = val;
       }
@@ -776,7 +1205,7 @@ async function saveSettings(keys, btn) {
     const el = document.getElementById('s-' + key);
     if (!el) continue;
     const v = el.value.trim();
-    if (['finnhubApiKey','githubBackupToken','alpacaApiKey','alpacaApiSecret'].includes(key) && v === '') continue; // skip if left blank
+    if (['finnhubApiKey','githubBackupToken','alpacaApiKey','alpacaApiSecret','aiApiKey'].includes(key) && v === '') continue; // skip if left blank
     body[key] = el.type === 'number' ? Number(v) : v;
   }
   if (Object.keys(body).length === 0) return;
@@ -815,6 +1244,10 @@ async function saveSettings(keys, btn) {
         document.getElementById('alpaca-secret-status').textContent = 'Secret is set on server';
         document.getElementById('s-alpacaApiSecret').value = '';
         document.getElementById('s-alpacaApiSecret').placeholder = 'Paste new secret to replace';
+      }
+      if (body.aiApiKey) {
+        document.getElementById('s-aiApiKey').value = '';
+        document.getElementById('s-aiApiKey').placeholder = 'Paste new key to replace';
       }
     } else {
       msgEl.textContent = (data.errors || [data.error]).join(', ');
