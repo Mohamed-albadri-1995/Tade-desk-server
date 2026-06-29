@@ -589,7 +589,9 @@ The browser does NO business logic. It only:
    - `row.liveNow` — if `true`: green `●Live` dot. If `false`: grey `●Stale` dot,
      amber border tint, 85% opacity. Both are CSS class + template — no logic in browser.
    - Clicking the ticker name opens a TradingView daily chart modal (same widget as Market tab).
-     `openChart(ticker)` resolves the symbol, sets interval `D`, range `6M`, dark theme.
+     `openChart(ticker)` resolves the symbol, sets `interval: 'D'`, dark theme.
+     `range` is intentionally omitted — passing it causes `tv.js` to auto-select an interval
+     that fits the range, overriding `interval`.
 
 ### When a scan runs from the UI
 
