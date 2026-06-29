@@ -12,7 +12,8 @@ const router = express.Router();
 // POST /api/shortlist/toggle/:ticker
 router.post('/toggle/:ticker', (req, res) => {
   const { ticker } = req.params;
-  const result = toggleTicker(ticker.toUpperCase());
+  const { date } = req.body || {};
+  const result = toggleTicker(ticker.toUpperCase(), date || null);
   res.json(result);
 });
 

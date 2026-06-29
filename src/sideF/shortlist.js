@@ -75,11 +75,11 @@ function runAutoRule() {
   return entry;
 }
 
-function toggleTicker(ticker) {
-  const today = toETDate(Date.now());
-  let entry = getShortlistEntry(today);
+function toggleTicker(ticker, date) {
+  const targetDate = date || toETDate(Date.now());
+  let entry = getShortlistEntry(targetDate);
   if (!entry) {
-    entry = { date: today, items: [], exported: false, exportedAt: null };
+    entry = { date: targetDate, items: [], exported: false, exportedAt: null };
   }
 
   const idx = entry.items.findIndex(i => i.ticker === ticker);
@@ -104,6 +104,15 @@ function toggleTicker(ticker) {
     r0.setInShortlist(ticker, true);
     saveShortlistEntry(entry);
     return { action: 'added', ticker, entry };
+  }
+}
+
+function syncShortlistToR0() {
+  const today = toETDate(Date.now());
+  const entry = getShortlistEntry(today);
+  if (!entry) return;
+  for (const item of entry.items) {
+    r0.setInShortlist(item.ticker, true);
   }
 }
 
@@ -132,4 +141,4 @@ function exportShortlist(date) {
   return lines;
 }
 
-module.exports = { runAutoRule, toggleTicker, getTodayShortlist, getAllShortlists, exportShortlist };
+module.exports = { runAutoRule, toggleTicker, getTodayShortlist, getAllShortlists, exportShortlist, syncShortlistToR0 };

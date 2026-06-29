@@ -4,6 +4,7 @@ const { applyDerivedFields } = require('./sideB/calculations');
 const { buildMarketSnapshot, enrichR0WithContext } = require('./sideD/engine');
 // sideE scoring intentionally disconnected — engine pending redesign
 const r0 = require('./r0/registry');
+const { syncShortlistToR0 } = require('./sideF/shortlist');
 
 const scanStatus = {
   lastRun: null,
@@ -44,6 +45,9 @@ async function runFullScan() {
 
     // Write to r0
     r0.upsertRows(withScores);
+
+    // Restore inShortlist flags from DB (survives server restarts)
+    syncShortlistToR0();
 
     scanStatus.lastRun = Date.now();
     scanStatus.lastRowCount = withScores.length;
