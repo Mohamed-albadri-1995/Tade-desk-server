@@ -118,8 +118,164 @@ A browser-accessible settings panel was added to allow runtime control of key va
 | Item | Priority | Notes |
 |---|---|---|
 | Scoring engine redesign | High | User will design from scratch; `_score` currently shows `—` |
+| Side G — Stale Ticker Refresh | High | See full design below |
+| Pipeline Orchestration & Monitor | High | See full design below |
+| R3A / R3B capture path | High | Schema and read path exist; no write trigger yet — must be designed |
 | Analysis tab content | Medium | Sub-tabs are empty placeholders |
 | Browser settings for scheduler | Low | User flagged as future item |
+
+---
+
+## Design: Side G — Stale Ticker Refresh
+
+### Problem
+
+After every scan, stocks that no longer meet scanner filter criteria are marked `liveNow: false` but remain in r0 with frozen price data from the last time the scanner returned them. The user needs those stocks to stay visible on cards until EOD but with continuously updated prices — not stale numbers.
+
+### Why a new Side
+
+This is a separate data-fetch concern from the scanner (Side A). The scanner is filter-driven — it only returns tickers that qualify. Side G is quote-driven — it fetches specific tickers by name regardless of whether they qualify for any scanner. It uses the same TradingView API and same column definitions, but the request structure is different (ticker list instead of filter rules).
+
+### TradingView API — Quote Mode
+
+The same endpoint (`scanner.tradingview.com/america/scan`) accepts a `symbols` field with a list of full TV symbols (`EXCHANGE:TICKER`). When `symbols` is populated, the `filter` array is ignored — TV returns data for exactly those tickers.
+
+```js
+{
+  columns: COMMON_COLUMNS,        // identical to scanner
+  symbols: { tickers: ['NASDAQ:AAPL', 'NYSE:GME'] },
+  range: [0, 200],
+  markets: ['america'],
+  options: { lang: 'en' },
+  ignore_unknown_fields: true,
+}
+```
+
+The response shape is identical to the scanner response. The same `mapTVRow` function works without modification.
+
+### File: `src/sideG/staleFetch.js`
+
+```
+fetchStaleQuotes(tvSymbols)          → calls TV API, returns [{ ticker, stock }]
+refreshStaleInR0(staleRows)          → extracts tvSymbols, calls fetchStaleQuotes,
+                                        updates r0 stock fields + derived fields,
+                                        preserves liveNow: false + context + inShortlist
+```
+
+**Important constraints on `refreshStaleInR0`:**
+- MUST NOT change `liveNow` — it stays `false`
+- MUST NOT change `date`, `id`, `firstSeen`, `inShortlist`
+- MUST NOT change `context` (regime, secBias etc.) — that is only refreshed by Side D during a full scan
+- MUST update: all `stock.*` fields + re-run `applyDerivedFields` to recompute derived values
+
+### When it runs
+
+After `upsertRows()` in the pipeline, before `syncShortlistToR0()`:
+
+```
+markAllStale()
+upsertRows(withScores)           ← live tickers, liveNow: true
+Side G: refreshStaleInR0()       ← stale tickers, liveNow: false, fresh price data
+syncShortlistToR0()
+```
+
+### Failure behavior
+
+If Side G fails (TV timeout, network error), pipeline continues. The stale rows keep their last known data. This is logged in the pipeline monitor (see below).
+
+### Batching
+
+TV API has no documented rate limit for this endpoint but we cap the symbol list at 200 per request (same as scanner `range`). If more than 200 stale tickers exist (unlikely on a normal day), batch in groups of 200.
+
+### What happens at midnight flush
+
+`r0.clearAll()` removes everything. Side G has nothing to clean up — it only reads from and writes to r0.
+
+---
+
+## Design: Pipeline Orchestration & Monitor
+
+### Problem
+
+Currently `runFullScan()` runs all stages silently. There is no way to know which stage succeeded, how many rows it processed, how long it took, or whether the cards being served reflect a complete or partial run. Side F (shortlist sync) also has no visibility.
+
+### Design
+
+Replace the current minimal `scanStatus` object with a full `PipelineReport` that is built during every scan and exposed via API.
+
+#### `PipelineReport` shape
+
+```js
+{
+  scanId: string,           // uuid, unique per run
+  startedAt: number,        // epoch ms
+  completedAt: number,      // epoch ms, null if in progress
+  ok: boolean,              // true only if ALL non-optional stages succeeded
+  stages: {
+    sideA: { ok, rowCount, duration, error },    // TV scanners → merge result
+    sideB: { ok, rowCount, duration, error },    // derived fields applied
+    sideD: { ok, duration, error },              // market snapshot built
+    sideG: { ok, staleCount, refreshed, duration, error }, // stale refresh
+    sideE: { ok: true, note: 'disconnected — _score null' },
+    sideF: { ok, shortlistCount, duration, error },  // syncShortlistToR0
+  },
+  r0Summary: {
+    total: number,       // all rows in r0 after scan
+    liveNow: number,     // rows with liveNow: true
+    stale: number,       // rows with liveNow: false
+    inShortlist: number, // rows with inShortlist: true
+  },
+}
+```
+
+#### Storage
+
+- Last completed report stored in memory in `src/pipeline.js` as `lastReport`
+- Previous `scanStatus` object updated to include `lastReport`
+
+#### API
+
+`GET /api/scan/status` — already exists, extend to include `lastReport` in response
+
+#### UI
+
+Settings tab or new Monitor section: shows last scan's stage breakdown as a table — which stage ran, how many rows, how long, any error.
+
+### Stage reporting pattern (inside pipeline.js)
+
+Each stage is wrapped:
+```js
+const t0 = Date.now();
+try {
+  const result = await sideX();
+  report.stages.sideX = { ok: true, rowCount: result.length, duration: Date.now() - t0 };
+} catch (err) {
+  report.stages.sideX = { ok: false, duration: Date.now() - t0, error: err.message };
+  // decide: fatal (throw) or non-fatal (continue with partial data)
+}
+```
+
+Side A failure → fatal (nothing to scan)
+Side B failure → fatal (derived fields are required downstream)
+Side D failure → non-fatal (context is enriched best-effort; already handled this way)
+Side G failure → non-fatal (stale rows keep last data)
+Side E → always ok (disconnected, no failure possible)
+Side F failure → non-fatal (inShortlist flags may be wrong until next scan)
+
+---
+
+## Design: R3A / R3B Capture Path
+
+The DB schema, read path, and warehouse display for R3A and R3B already exist. What is missing is the write path — no code currently populates these tables.
+
+**This requires a design session.** R3A and R3B represent trade entry scenarios (entry price, HH, LL, ATR-based R values). The questions to answer before building:
+
+1. What event triggers a capture? (9:36 AM after R1? User manually submits levels? Something else?)
+2. What is the source of `entryPriceA` / `entryPriceB`? (Live price at capture time? User-specified?)
+3. What is `hhA` / `llA`? (Intraday high/low? Pre-market high/low? User-specified?)
+4. Is R3 per-ticker (you select which tickers to capture) or all-of-r0?
+
+Until these are answered, R3A/R3B capture should not be built. The read path is already safe to ship.
 
 ---
 
