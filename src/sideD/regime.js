@@ -178,21 +178,21 @@ const REGIME_MATRIX = {
 };
 
 const REGIME_CATALOG = {
-  EXTENDED_UP:  { bias: 'LONG',    icon: '🟢⬆️', color: '#22c55e', label: 'Uptrend',    stance: 'LONG',    guidance: 'Market extended. Momentum strong. Pullbacks are buying opportunities.' },
-  STRONG_UP:    { bias: 'LONG',    icon: '🟢⬆️', color: '#16a34a', label: 'Uptrend',    stance: 'LONG',    guidance: 'Strong bullish conditions. Favor long setups with momentum.' },
-  UP:           { bias: 'LONG',    icon: '🟢↗️', color: '#4ade80', label: 'Uptrend',    stance: 'LONG',    guidance: 'Bullish but recovering. Favor long setups selectively.' },
-  WEAK_UP:      { bias: 'LONG',    icon: '🟡↗️', color: '#86efac', label: 'Uptrend',    stance: 'LONG',    guidance: 'Recovering from weakness. Light long bias.' },
-  PULLBACK_BULL:{ bias: 'LONG',    icon: '🟠⤵️', color: '#f97316', label: 'Pullback',   stance: 'LONG',    guidance: 'Short-term pullback in a bull market. Watch for long re-entries.' },
-  RECOVERY:     { bias: 'NEUTRAL', icon: '🟡↔️', color: '#eab308', label: 'Recovery',   stance: 'NEUTRAL', guidance: 'Recovering structure. Be selective. Wait for confirmation.' },
-  BASING:       { bias: 'NEUTRAL', icon: '⚪↔️', color: '#6b7280', label: 'Neutral',    stance: 'NEUTRAL', guidance: 'Market is basing. No clear direction. Reduce exposure.' },
-  CHOP_BULL:    { bias: 'NEUTRAL', icon: '🟡↔️', color: '#ca8a04', label: 'Choppy',     stance: 'NEUTRAL', guidance: 'Choppy but leaning bullish. Trade small and be selective.' },
-  CHOP_BEAR:    { bias: 'NEUTRAL', icon: '🟠↔️', color: '#ea580c', label: 'Choppy',     stance: 'NEUTRAL', guidance: 'Choppy with bear undertone. Reduce position size.' },
-  CORRECTION:   { bias: 'NEUTRAL', icon: '🟠⤵️', color: '#f97316', label: 'Correction', stance: 'NEUTRAL', guidance: 'Correction in a bull market. Monitor for stabilization before re-entering.' },
-  TOPPING:      { bias: 'SHORT',   icon: '🔴⬇️', color: '#ef4444', label: 'Topping',    stance: 'SHORT',   guidance: 'Signs of topping. Reduce longs. Hedge or go short on weakness.' },
-  BEAR_RALLY:   { bias: 'NEUTRAL', icon: '🟠↗️', color: '#f87171', label: 'Bear Rally', stance: 'NEUTRAL', guidance: 'Counter-trend rally in bear market. Fade strength cautiously.' },
-  DOWN:         { bias: 'SHORT',   icon: '🔴⬇️', color: '#dc2626', label: 'Downtrend',  stance: 'SHORT',   guidance: 'Bearish conditions. Avoid longs. Short on rallies.' },
-  STRONG_DOWN:  { bias: 'SHORT',   icon: '🔴⬇️', color: '#991b1b', label: 'Downtrend',  stance: 'SHORT',   guidance: 'Strongly bearish. Reduce all risk. Short only.' },
-  CAPITULATION: { bias: 'SHORT',   icon: '🔴💥', color: '#7f1d1d', label: 'Downtrend',  stance: 'SHORT',   guidance: 'Market in capitulation. Extreme caution. Watch for reversal signals.' },
+  EXTENDED_UP:  { bias: 'LONG',    icon: '🟢⬆️', color: '#22c55e', label: 'Extended Up',             stance: 'LONG',    guidance: 'Market extended. Momentum strong. Pullbacks are buying opportunities.' },
+  STRONG_UP:    { bias: 'LONG',    icon: '🟢⬆️', color: '#16a34a', label: 'Strong Uptrend',           stance: 'LONG',    guidance: 'Strong bullish conditions. Favor long setups with momentum.' },
+  UP:           { bias: 'LONG',    icon: '🟢↗️', color: '#4ade80', label: 'Uptrend',                  stance: 'LONG',    guidance: 'Bullish but recovering. Favor long setups selectively.' },
+  WEAK_UP:      { bias: 'LONG',    icon: '🟡↗️', color: '#86efac', label: 'Weak Uptrend',             stance: 'LONG',    guidance: 'Recovering from weakness. Light long bias.' },
+  PULLBACK_BULL:{ bias: 'LONG',    icon: '🟠⤵️', color: '#f97316', label: 'Pullback (bull intact)',   stance: 'LONG',    guidance: 'Short-term pullback in a bull market. Watch for long re-entries.' },
+  RECOVERY:     { bias: 'NEUTRAL', icon: '🟡↔️', color: '#eab308', label: 'Recovery',                 stance: 'NEUTRAL', guidance: 'Recovering structure. Be selective. Wait for confirmation.' },
+  BASING:       { bias: 'NEUTRAL', icon: '⚪↔️', color: '#6b7280', label: 'Basing',                   stance: 'NEUTRAL', guidance: 'Market is basing. No clear direction. Reduce exposure.' },
+  CHOP_BULL:    { bias: 'NEUTRAL', icon: '🟡↔️', color: '#ca8a04', label: 'Chop (bull bias)',         stance: 'NEUTRAL', guidance: 'Choppy but leaning bullish. Trade small and be selective.' },
+  CHOP_BEAR:    { bias: 'NEUTRAL', icon: '🟠↔️', color: '#ea580c', label: 'Chop (bear bias)',         stance: 'NEUTRAL', guidance: 'Choppy with bear undertone. Reduce position size.' },
+  CORRECTION:   { bias: 'NEUTRAL', icon: '🟠⤵️', color: '#f97316', label: 'Correction (bull intact)', stance: 'NEUTRAL', guidance: 'Correction in a bull market. Monitor for stabilization before re-entering.' },
+  TOPPING:      { bias: 'SHORT',   icon: '🔴⬇️', color: '#ef4444', label: 'Topping',                  stance: 'SHORT',   guidance: 'Signs of topping. Reduce longs. Hedge or go short on weakness.' },
+  BEAR_RALLY:   { bias: 'NEUTRAL', icon: '🟠↗️', color: '#f87171', label: 'Bear Rally',               stance: 'NEUTRAL', guidance: 'Counter-trend rally in bear market. Fade strength cautiously.' },
+  DOWN:         { bias: 'SHORT',   icon: '🔴⬇️', color: '#dc2626', label: 'Downtrend',                stance: 'SHORT',   guidance: 'Bearish conditions. Avoid longs. Short on rallies.' },
+  STRONG_DOWN:  { bias: 'SHORT',   icon: '🔴⬇️', color: '#991b1b', label: 'Strong Downtrend',         stance: 'SHORT',   guidance: 'Strongly bearish. Reduce all risk. Short only.' },
+  CAPITULATION: { bias: 'SHORT',   icon: '🔴💥', color: '#7f1d1d', label: 'Capitulation',             stance: 'SHORT',   guidance: 'Market in capitulation. Extreme caution. Watch for reversal signals.' },
 };
 
 function computeRegime(longTerm, midTerm, bbPosition) {
