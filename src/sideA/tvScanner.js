@@ -183,10 +183,19 @@ function mapTVRow(rawTV) {
   };
 }
 
+const TV_HEADERS = {
+  'Content-Type': 'application/json',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Origin': 'https://www.tradingview.com',
+  'Referer': 'https://www.tradingview.com/',
+  'Accept': 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
 async function runScanner(name) {
   const body = SCANNERS[name];
   const resp = await axios.post(TV_URL, body, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: TV_HEADERS,
     timeout: 15000,
   });
   const rows = (resp.data.data || []).map(mapTVRow);

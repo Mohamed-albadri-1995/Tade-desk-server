@@ -3,6 +3,15 @@ const axios = require('axios');
 // TradingView scanner for index data
 const TV_URL = 'https://scanner.tradingview.com/america/scan?label-product=screener-stock';
 
+const TV_HEADERS = {
+  'Content-Type': 'application/json',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Origin': 'https://www.tradingview.com',
+  'Referer': 'https://www.tradingview.com/',
+  'Accept': 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
 // Index symbols with TV exchange prefix for direct symbol lookup
 const INDEX_TICKERS = {
   SPY: 'AMEX:SPY',
@@ -134,8 +143,8 @@ async function fetchMarketData() {
   };
 
   const [indexResp, sectorResp] = await Promise.all([
-    axios.post(TV_URL, indexBody, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }),
-    axios.post(TV_URL, sectorBody, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }),
+    axios.post(TV_URL, indexBody, { headers: TV_HEADERS, timeout: 15000 }),
+    axios.post(TV_URL, sectorBody, { headers: TV_HEADERS, timeout: 15000 }),
   ]);
 
   const result = {};
