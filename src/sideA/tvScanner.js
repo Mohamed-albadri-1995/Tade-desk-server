@@ -90,7 +90,7 @@ function buildRequest(filter, sort) {
     columns: COMMON_COLUMNS,
     filter,
     filter2: COMMON_BASE_FILTER,
-    ignore_unknown_fields: false,
+    ignore_unknown_fields: true,
     markets: ['america'],
     options: { lang: 'en' },
     range: [0, 50],
@@ -223,9 +223,11 @@ async function runAllScanners() {
     if (r.status === 'fulfilled') {
       scannerResults[r.value.name] = r.value.rows;
     } else {
-      console.error('[TV Scanner] Failed:', r.reason?.message);
+      const errData = r.reason?.response?.data;
+      console.error('[TV Scanner] Failed:', r.reason?.message, errData ? JSON.stringify(errData).slice(0, 200) : '');
     }
   }
+  console.log('[TV Scanner] Results:', Object.entries(scannerResults).map(([k,v]) => `${k}:${v.length}`).join(' '));
   return scannerResults;
 }
 
