@@ -178,4 +178,3 @@ Auto-detects provider from key prefix — no separate field stored:
 |---|---|---|
 | Side E scoring reconnect | High | User will review analysis report first, then decide |
 | Shortlist auto-rule (auto picks) | High | Depends on scoring reconnect |
-| Browser settings for scheduler | Low | Future item |

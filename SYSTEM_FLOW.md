@@ -690,3 +690,4 @@ The server auto-detects provider from the key prefix — no separate provider fi
 | Monitor Tab | ✅ Complete |
 | AI Insights (Anthropic / OpenRouter / Gemini) | ✅ Complete |
 | Shortlist Auto-Rule | ⏸ Wired but produces nothing — scoring disconnected |
+| Scheduler browser controls | ✅ Complete — toggle, edit cron, reset from Monitor tab |
