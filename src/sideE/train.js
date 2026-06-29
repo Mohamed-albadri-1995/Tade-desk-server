@@ -116,17 +116,6 @@ function loadR4ARows(days) {
   return rows;
 }
 
-function computeQuantileBoundaries(rows, feature, numBuckets = 6) {
-  const vals = rows.map(r => r[feature]).filter(v => v != null && !isNaN(v)).sort((a, b) => a - b);
-  if (vals.length === 0) return [];
-  const boundaries = [];
-  for (let i = 1; i < numBuckets; i++) {
-    const idx = Math.floor((i / numBuckets) * vals.length);
-    boundaries.push(vals[Math.min(idx, vals.length - 1)]);
-  }
-  return boundaries; // store sorted values for lookup
-}
-
 function assignBuckets(rows, quantileBoundaries) {
   return rows.map(row => {
     const buckets = {};

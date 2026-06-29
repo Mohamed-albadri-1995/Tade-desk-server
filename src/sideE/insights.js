@@ -112,7 +112,7 @@ async function generateInsights(model, forceAI = false) {
   if (aiKey && (forceAI || !model.insights?.aiText)) {
     try {
       const top5 = ruleInsights.slice(0, 5).map(i => `- ${i.text}`).join('\n');
-      const gwr = (model.backtest.globalWinRate * 100).toFixed(1);
+      const gwr = ((model.backtest?.globalWinRate || globalWinRate) * 100).toFixed(1);
       const prompt = `You are analyzing a stock momentum scanning system. The global win rate is ${gwr}%. The top 5 statistical insights from a ${model.config.trainingWindow}-day backtest are:\n${top5}\n\nIn 3-5 bullet points, summarize the key trading conditions this model favors and what traders should watch for. Be specific and actionable. Start directly with the bullets.`;
       aiText = await callOpenAI(prompt, aiKey, aiModel);
     } catch (err) {

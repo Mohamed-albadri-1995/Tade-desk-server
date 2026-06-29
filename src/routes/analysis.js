@@ -89,7 +89,7 @@ router.get('/feature/:name', (req, res) => {
   const fd = model.features[req.params.name];
   if (!fd) return res.status(404).json({ error: 'Feature not found.' });
 
-  const gwr = model.backtest.globalWinRate || 0;
+  const gwr = model.backtest?.globalWinRate || 0;
   const buckets = Object.entries(fd.buckets || {})
     .sort((a, b) => b[1].winRate - a[1].winRate)
     .map(([bucket, stats]) => ({
