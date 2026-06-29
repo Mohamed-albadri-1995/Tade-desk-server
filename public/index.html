@@ -747,12 +747,14 @@ function renderMarket(snap) {
   const mtCls = mt.result === 'UPTREND' ? 'bias-bull' : mt.result === 'DOWNTREND' ? 'bias-bear' : 'bias-neutral';
   const ltCls = lt.result === 'BULLISH' ? 'bias-bull' : lt.result === 'BEARISH' ? 'bias-bear' : 'bias-neutral';
 
-  const stSignals = (st.signals||[]).map(s =>
-    `<div class="signal-item"><span class="signal-name">${s.name||s.label||''}</span><span class="signal-val ${s.points>0?'pos':s.points<0?'neg':'bias-neutral'}">${s.points>0?'+':''}${s.points||0}</span></div>`
-  ).join('');
-  const mtSignals = (mt.signals||[]).map(s =>
-    `<div class="signal-item"><span class="signal-name">${s.name||s.label||''}</span><span class="signal-val ${s.bull?'pos':'neg'}">${s.bull?'✓':'✗'}</span></div>`
-  ).join('');
+  const stSignals = (st.signals||[]).map(s => {
+    const v = s.value ?? s.points ?? 0;
+    return `<div class="signal-item"><span class="signal-name">${s.name||''}</span><span class="signal-val ${v>0?'pos':v<0?'neg':'bias-neutral'}">${v>0?'+':''}${v}</span></div>`;
+  }).join('');
+  const mtSignals = (mt.signals||[]).map(s => {
+    const v = s.value;
+    return `<div class="signal-item"><span class="signal-name">${s.name||''}</span><span class="signal-val ${v?'pos':'neg'}">${v?'✓':'✗'}</span></div>`;
+  }).join('');
 
   document.getElementById('market-analysis').innerHTML = `
     <div class="analysis-card">
@@ -807,7 +809,7 @@ function renderMarket(snap) {
     const score = d.score != null ? (d.score>0?'+':'')+d.score.toFixed(0) : '—';
     return `<tr>
       <td><strong>${name}</strong></td>
-      <td style="color:var(--text3)">${d.etf||''}</td>
+      <td style="color:var(--text3)">${(d.etf||'').replace(/^[A-Z]+:/,'')}</td>
       <td class="${(d.change||0)>=0?'pos':'neg'}">${(d.change||0)>=0?'+':''}${(d.change||0).toFixed(2)}%</td>
       <td class="${(d.weekChg||0)>=0?'pos':'neg'}">${(d.weekChg||0)>=0?'+':''}${(d.weekChg||0).toFixed(2)}%</td>
       <td class="${biasCls}" style="font-weight:600">${d.bias||'—'}</td>

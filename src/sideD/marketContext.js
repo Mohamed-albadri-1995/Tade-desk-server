@@ -15,7 +15,7 @@ const SECTOR_ETF_MAP = {
   'Communication Services': { etf: 'XLC', tvSymbol: 'AMEX:XLC' },
   Utilities: { etf: 'XLU', tvSymbol: 'AMEX:XLU' },
   Materials: { etf: 'XLB', tvSymbol: 'AMEX:XLB' },
-  'Real Estate': { etf: 'AMEX:XLRE', tvSymbol: 'AMEX:XLRE' },
+  'Real Estate': { etf: 'XLRE', tvSymbol: 'AMEX:XLRE' },
   'Consumer Staples': { etf: 'XLP', tvSymbol: 'AMEX:XLP' },
   Semiconductors: { etf: 'SMH', tvSymbol: 'NASDAQ:SMH' },
   Biotechnology: { etf: 'IBB', tvSymbol: 'NASDAQ:IBB' },
