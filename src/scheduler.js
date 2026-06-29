@@ -3,6 +3,7 @@ const { runFullScan } = require('./pipeline');
 const { runAutoRule } = require('./sideF/shortlist');
 const { captureR1, captureR2 } = require('./warehouse/registers');
 const { pushBackup } = require('./backup');
+const r0 = require('./r0/registry');
 
 function startScheduler() {
   console.log('[Scheduler] Starting...');
@@ -62,6 +63,12 @@ function startScheduler() {
     } catch (e) {
       console.error('[Scheduler] Backup failed:', e.message);
     }
+  }, { timezone: 'America/New_York' });
+
+  // Midnight ET: flush r0 so the new day starts clean
+  cron.schedule('0 0 * * *', () => {
+    console.log('[Scheduler] Midnight flush — clearing r0');
+    r0.clearAll();
   }, { timezone: 'America/New_York' });
 
   console.log('[Scheduler] All jobs registered');

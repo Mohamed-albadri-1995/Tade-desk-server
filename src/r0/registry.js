@@ -85,6 +85,10 @@ function updateContext(ticker, context) {
   }
 }
 
+function clearAll() {
+  store.clear();
+}
+
 function getTodayRows() {
   const today = toETDate(Date.now());
   return getAll().filter(r => r.date === today);
@@ -96,6 +100,7 @@ module.exports = {
   upsertRows,
   setInShortlist,
   markAllStale,
+  clearAll,
   updateNews,
   updateScore,
   updateContext,

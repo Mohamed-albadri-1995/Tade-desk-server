@@ -43,6 +43,10 @@ async function runFullScan() {
     // Side E: Scoring — disconnected, _score set to null until engine is rebuilt
     const withScores = withContext.map(row => ({ ...row, _score: null }));
 
+    // Mark existing rows stale before writing — rows not in this scan stay in r0
+    // for the rest of the day but with liveNow: false
+    r0.markAllStale();
+
     // Write to r0
     r0.upsertRows(withScores);
 
