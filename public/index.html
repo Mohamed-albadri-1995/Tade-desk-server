@@ -1617,8 +1617,8 @@ async function loadWarehouse() {
 }
 
 const WH_COLS = {
-  r0: ['ticker','date','price','change','gapPct','vwap','rvol','atr','adrPct','pmRange','pmAdrRatio','sector','industry','screenerKeys','_score','regime','secBias','secScore','liveNow','lastUpdated'],
-  r1: ['ticker','price','change','gapPct','vwap','rvol','atr','adrPct','pmRange','pmAdrRatio','sector','screenerKeys','_score','regime','secBias','secScore','capturedAt'],
+  r0: ['ticker','date','liveNow','inShortlist','_score','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','lastUpdated'],
+  r1: ['ticker','date','inShortlist','_score','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','capturedAt'],
   r2: ['slot','spyClose','spyChange','qqqClose','qqqChange','vixClose','vixChange','regime','regimeLabel','shortBias','midStage','longBias','sectorBullish','sectorBearish','capturedAt'],
   r3a: ['ticker','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
   r3b: ['ticker','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
