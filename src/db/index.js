@@ -77,15 +77,32 @@ db.exec(`
     schedule TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1
   );
+`);
 
+// Migrate analysis_model table to new multi-table schema if needed
+const hasNewSchema = db.prepare(
+  "SELECT 1 FROM pragma_table_info('analysis_model') WHERE name='measure'"
+).get();
+
+if (!hasNewSchema) {
+  db.exec('DROP TABLE IF EXISTS analysis_model');
+}
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS analysis_model (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    measure TEXT NOT NULL,
+    regime TEXT NOT NULL,
     trained_at INTEGER NOT NULL,
     config TEXT NOT NULL,
+    global_stats TEXT NOT NULL,
     features TEXT NOT NULL,
-    backtest TEXT NOT NULL,
+    is_empty INTEGER NOT NULL DEFAULT 0,
+    row_count INTEGER NOT NULL DEFAULT 0,
     insights TEXT
   );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_analysis_model_measure_regime
+    ON analysis_model (measure, regime);
 `);
 
 // Default settings
@@ -104,8 +121,8 @@ const defaults = [
   ['alpacaApiKey', ''],
   ['alpacaApiSecret', ''],
   ['analysisEntryType', 'A'],
-  ['analysisDirectionalBias', 'Up'],
-  ['analysisSuccessThreshold', '1.5'],
+  ['analysisWinThreshold', '1.3'],
+  ['analysisMinRegimeRows', '10'],
   ['analysisTrainingWindow', '90'],
   ['aiApiKey', ''],
   ['aiModel', 'anthropic/claude-haiku-4-5'],

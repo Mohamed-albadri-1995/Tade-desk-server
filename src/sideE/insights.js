@@ -2,9 +2,11 @@ const db = require('../db');
 const https = require('https');
 
 function generateRuleBasedInsights(model) {
-  const { features, globalWinRate } = model;
+  const features = model.features || {};
+  const globalScore = model.globalStats
+    ? (((Math.max(-0.5, Math.min(2.5, model.globalStats.globalExpectancy)) + 0.5) / 3.0) * 100)
+    : 50;
 
-  // Sort features by importance
   const sorted = Object.entries(features)
     .sort((a, b) => b[1].importancePct - a[1].importancePct)
     .slice(0, 15);
@@ -16,40 +18,39 @@ function generateRuleBasedInsights(model) {
 
     const bucketList = Object.entries(fd.buckets)
       .filter(([, b]) => b.count >= 3)
-      .sort((a, b) => b[1].winRate - a[1].winRate);
+      .sort((a, b) => b[1].bucketScore - a[1].bucketScore);
 
     if (bucketList.length < 2) continue;
 
-    const best = bucketList[0];
+    const best  = bucketList[0];
     const worst = bucketList[bucketList.length - 1];
-
-    const bestLift = ((best[1].winRate - globalWinRate) / globalWinRate * 100).toFixed(0);
-    const worstLift = ((worst[1].winRate - globalWinRate) / globalWinRate * 100).toFixed(0);
-
     const label = feat.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').trim();
 
-    if (Math.abs(best[1].winRate - globalWinRate) > 0.05) {
+    const bestLift  = (best[1].lift  || 0).toFixed(0);
+    const worstLift = (worst[1].lift || 0).toFixed(0);
+
+    if (Math.abs(best[1].bucketScore - globalScore) > 5) {
       insights.push({
-        type: bestLift > 0 ? 'BEST' : 'AVOID',
+        type:    best[1].lift > 0 ? 'BEST' : 'AVOID',
         feature: feat,
         label,
-        bucket: best[0],
-        winRate: best[1].winRate,
-        count: best[1].count,
-        lift: bestLift,
-        text: `${label} = ${best[0]}: ${(best[1].winRate * 100).toFixed(1)}% win rate (${bestLift > 0 ? '+' : ''}${bestLift}% vs baseline)`,
+        bucket:      best[0],
+        bucketScore: best[1].bucketScore,
+        count:       best[1].count,
+        lift:        bestLift,
+        text: `${label} = ${best[0]}: score ${best[1].bucketScore.toFixed(1)} (${bestLift > 0 ? '+' : ''}${bestLift} vs baseline)`,
       });
     }
-    if (Math.abs(worst[1].winRate - globalWinRate) > 0.05) {
+    if (Math.abs(worst[1].bucketScore - globalScore) > 5) {
       insights.push({
-        type: worstLift < 0 ? 'AVOID' : 'BEST',
+        type:    worst[1].lift < 0 ? 'AVOID' : 'BEST',
         feature: feat,
         label,
-        bucket: worst[0],
-        winRate: worst[1].winRate,
-        count: worst[1].count,
-        lift: worstLift,
-        text: `${label} = ${worst[0]}: ${(worst[1].winRate * 100).toFixed(1)}% win rate (${worstLift > 0 ? '+' : ''}${worstLift}% vs baseline)`,
+        bucket:      worst[0],
+        bucketScore: worst[1].bucketScore,
+        count:       worst[1].count,
+        lift:        worstLift,
+        text: `${label} = ${worst[0]}: score ${worst[1].bucketScore.toFixed(1)} (${worstLift > 0 ? '+' : ''}${worstLift} vs baseline)`,
       });
     }
   }
@@ -177,8 +178,9 @@ async function generateInsights(model, forceAI = false) {
   if (aiKey && (forceAI || !model.insights?.aiText)) {
     try {
       const top5 = ruleInsights.slice(0, 5).map(i => `- ${i.text}`).join('\n');
-      const gwr = ((model.backtest?.globalWinRate || globalWinRate) * 100).toFixed(1);
-      const prompt = `You are analyzing a stock momentum scanning system. The global win rate is ${gwr}%. The top 5 statistical insights from a ${model.config.trainingWindow}-day backtest are:\n${top5}\n\nIn 3-5 bullet points, summarize the key trading conditions this model favors and what traders should watch for. Be specific and actionable. Start directly with the bullets.`;
+      const gwr = ((model.globalStats?.winRate || 0) * 100).toFixed(1);
+      const window = model.config?.trainingWindow || 90;
+      const prompt = `You are analyzing a stock momentum scanning system. The global win rate is ${gwr}%. The top 5 statistical insights from a ${window}-day backtest are:\n${top5}\n\nIn 3-5 bullet points, summarize the key trading conditions this model favors and what traders should watch for. Be specific and actionable. Start directly with the bullets.`;
       aiText = await callAI(prompt, aiKey, aiModel);
     } catch (err) {
       console.warn('[Insights] AI failed:', err.message);
@@ -187,7 +189,10 @@ async function generateInsights(model, forceAI = false) {
 
   const insights = { ruleInsights, aiText, generatedAt: Date.now() };
 
-  db.prepare('UPDATE analysis_model SET insights = ? WHERE id = 1').run(JSON.stringify(insights));
+  const measure = model.measure || 'up';
+  const regime  = model.regime  || 'general';
+  db.prepare('UPDATE analysis_model SET insights = ? WHERE measure = ? AND regime = ?')
+    .run(JSON.stringify(insights), measure, regime);
 
   return insights;
 }
