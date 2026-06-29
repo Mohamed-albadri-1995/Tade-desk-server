@@ -25,10 +25,9 @@ router.get('/report', (req, res) => {
   res.json({
     trainedAt: model.trainedAt,
     config: model.config,
-    globalWinRate: model.backtest.globalWinRate,
-    totalRows: model.backtest.totalRows,
+    globalWinRate: model.backtest?.globalWinRate,
+    totalRows: model.backtest?.totalRows,
     features: sortedFeatures,
-    backtest: model.backtest,
     insights: model.insights,
   });
 });
@@ -52,11 +51,8 @@ router.post('/train', async (req, res) => {
       ok: true,
       trainedAt: model.trainedAt,
       config: model.config,
-      totalRows: model.backtest.totalRows,
-      globalWinRate: model.backtest.globalWinRate,
-      backtestDays: model.backtest.days?.length || 0,
-      avgTopWR: model.backtest.avgTopWR,
-      avgBottomWR: model.backtest.avgBottomWR,
+      totalRows: model.totalRows,
+      globalWinRate: model.globalWinRate,
       insights: fullModel?.insights,
     });
   } catch (err) {

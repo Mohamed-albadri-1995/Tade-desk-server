@@ -569,19 +569,12 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
       <div id="an-content" style="display:none">
 
         <!-- Performance Summary -->
-        <div class="an-grid-3 an-section">
+        <div class="an-grid an-section">
           <div class="an-card">
             <div class="an-card-title">Model Stats</div>
             <div class="an-metric"><span class="an-metric-label">Total Rows</span><span class="an-metric-value accent" id="an-totalRows">—</span></div>
             <div class="an-metric"><span class="an-metric-label">Global Win Rate</span><span class="an-metric-value" id="an-globalWR">—</span></div>
             <div class="an-metric"><span class="an-metric-label">Trained At</span><span class="an-metric-value" id="an-trainedAt">—</span></div>
-          </div>
-          <div class="an-card">
-            <div class="an-card-title">Walk-Forward Backtest</div>
-            <div class="an-metric"><span class="an-metric-label">Days Tested</span><span class="an-metric-value accent" id="an-btDays">—</span></div>
-            <div class="an-metric"><span class="an-metric-label">Top Decile Win Rate</span><span class="an-metric-value green" id="an-topWR">—</span></div>
-            <div class="an-metric"><span class="an-metric-label">Bottom Decile Win Rate</span><span class="an-metric-value red" id="an-bottomWR">—</span></div>
-            <div class="an-metric"><span class="an-metric-label">Baseline Win Rate</span><span class="an-metric-value" id="an-baseWR">—</span></div>
           </div>
           <div class="an-card">
             <div class="an-card-title">Config Active</div>
@@ -629,24 +622,9 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
           </div>
         </div>
 
-        <!-- Backtest Chart -->
-        <div class="an-card an-section">
-          <div class="an-card-title">Backtest — Daily Win Rates</div>
-          <div style="display:flex;gap:14px;margin-bottom:8px;font-size:11px">
-            <span><span style="display:inline-block;width:10px;height:10px;background:var(--green);border-radius:2px;margin-right:4px"></span>Top Decile</span>
-            <span><span style="display:inline-block;width:10px;height:10px;background:var(--red);border-radius:2px;margin-right:4px"></span>Bottom Decile</span>
-            <span><span style="display:inline-block;width:10px;height:10px;background:var(--text3);border-radius:2px;margin-right:4px"></span>Baseline</span>
-          </div>
-          <div class="bt-chart" id="an-bt-chart">
-            <div style="color:var(--text3);font-size:12px">No backtest data.</div>
-          </div>
-          <div style="font-size:10px;color:var(--text3);margin-top:4px" id="an-bt-hover"></div>
-        </div>
-
         <!-- Export -->
         <div class="an-section" style="display:flex;gap:10px;justify-content:flex-end">
           <button class="an-btn" onclick="anExportModel()">Export Model JSON</button>
-          <button class="an-btn" onclick="anExportBacktest()">Export Backtest CSV</button>
         </div>
 
       </div><!-- /an-content -->
@@ -921,19 +899,6 @@ function anRenderReport(d) {
   document.getElementById('an-globalWR').textContent = fmt(d.globalWinRate);
   document.getElementById('an-trainedAt').textContent = fmtTs(d.trainedAt);
 
-  // Backtest
-  const bt = d.backtest || {};
-  document.getElementById('an-btDays').textContent = bt.days?.length || '—';
-  const topEl = document.getElementById('an-topWR');
-  const btmEl = document.getElementById('an-bottomWR');
-  topEl.textContent = fmt(bt.avgTopWR);
-  btmEl.textContent = fmt(bt.avgBottomWR);
-  document.getElementById('an-baseWR').textContent = fmt(bt.avgBaseWR);
-  if (bt.avgTopWR != null && bt.avgBottomWR != null) {
-    topEl.className = 'an-metric-value ' + (bt.avgTopWR > (bt.avgBaseWR || 0) ? 'green' : 'red');
-    btmEl.className = 'an-metric-value ' + (bt.avgBottomWR < (bt.avgBaseWR || 0) ? 'red' : 'green');
-  }
-
   // Config
   const cfg = d.config || {};
   document.getElementById('an-cfg-entry').textContent = cfg.entryType || '—';
@@ -964,9 +929,6 @@ function anRenderReport(d) {
     sel.appendChild(opt);
   }
   if (prevVal) { sel.value = prevVal; anLoadBuckets(); }
-
-  // Backtest chart
-  anRenderBtChart(bt.days || []);
 
   document.getElementById('an-status').textContent = 'Model trained ' + fmtTs(d.trainedAt);
 }
@@ -1044,25 +1006,6 @@ function anLoadBuckets() {
     .catch(err => { el.innerHTML = `<div style="color:var(--red);font-size:12px">Error: ${err.message}</div>`; });
 }
 
-function anRenderBtChart(days) {
-  const el = document.getElementById('an-bt-chart');
-  if (!days.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px">No backtest data.</div>'; return; }
-
-  const maxWR = Math.max(...days.map(d => Math.max(d.topWR, d.bottomWR, d.baseWR || 0)), 0.01);
-  const H = 60;
-
-  el.innerHTML = days.map(d => {
-    const topH = Math.round((d.topWR / maxWR) * H);
-    const btmH = Math.round((d.bottomWR / maxWR) * H);
-    const baseH = Math.round(((d.baseWR || 0) / maxWR) * H);
-    return `<div class="bt-bar-group" title="${d.date}: Top ${(d.topWR*100).toFixed(1)}% | Bot ${(d.bottomWR*100).toFixed(1)}% | Base ${((d.baseWR||0)*100).toFixed(1)}%">
-      <div class="bt-bar top" style="height:${topH}px"></div>
-      <div class="bt-bar bottom" style="height:${btmH}px"></div>
-      <div class="bt-bar base" style="height:${baseH}px"></div>
-    </div>`;
-  }).join('');
-}
-
 function anTrain() {
   const btn = document.getElementById('an-train-btn');
   btn.disabled = true;
@@ -1116,18 +1059,6 @@ function anExportModel() {
   a.click();
 }
 
-function anExportBacktest() {
-  if (!anReport?.backtest?.days?.length) return alert('No backtest data.');
-  const days = anReport.backtest.days;
-  const csv = ['date,topWR,bottomWR,baseWR,n', ...days.map(d =>
-    `${d.date},${d.topWR.toFixed(4)},${d.bottomWR.toFixed(4)},${(d.baseWR||0).toFixed(4)},${d.n}`
-  )].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `backtest_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-}
 
 // ═══════════════════════════════════════════════════
 // SETTINGS

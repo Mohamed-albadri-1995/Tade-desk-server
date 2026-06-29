@@ -194,140 +194,6 @@ function computeFeatureImportance(rows, successThreshold) {
   return { featureData, globalWinRate, totalRows };
 }
 
-function runWalkForwardBacktest(config) {
-  const { successThreshold, trainingWindow } = config;
-  const allDates = db.prepare('SELECT DISTINCT date FROM r1_frozen ORDER BY date ASC').all().map(r => r.date);
-
-  const backtestDays = [];
-  for (let i = trainingWindow; i < allDates.length; i++) {
-    const testDate = allDates[i];
-    const trainDates = allDates.slice(Math.max(0, i - trainingWindow), i);
-
-    // Load training rows
-    const trainRows = [];
-    for (const d of trainDates) {
-      const r1Rows = db.prepare('SELECT * FROM r1_frozen WHERE date = ?').all(d);
-      const r3aMap = {};
-      for (const r of db.prepare('SELECT * FROM r3a WHERE date = ?').all(d)) {
-        r3aMap[r.ticker] = r;
-      }
-      for (const r1 of r1Rows) {
-        const dj = JSON.parse(r1.data);
-        const r3a = r3aMap[dj.ticker];
-        if (!r3a || r3a.up_r_a == null) continue;
-        trainRows.push({
-          date: d, ticker: dj.ticker,
-          rvol: dj.stock?.rvol, change: dj.stock?.change, gapPct: dj.stock?.gapPct,
-          monthRangePos: dj.stock?.monthRangePos, secScore: dj.context?.secScore,
-          pmAdrRatio: dj.stock?.pmAdrRatio, adrPct: dj.stock?.adrPct,
-          price936: dj.stock?.price, prevClose: dj.stock?.prevClose, open: dj.stock?.open,
-          vwap: dj.stock?.vwap, sma5: dj.stock?.sma5, ema9: dj.stock?.ema9,
-          ema13: dj.stock?.ema13, ema20: dj.stock?.ema20, ema50: dj.stock?.ema50,
-          atr: dj.stock?.atr, dayHigh: dj.stock?.dayHigh, dayLow: dj.stock?.dayLow,
-          monthHigh: dj.stock?.monthHigh, monthLow: dj.stock?.monthLow,
-          mcap: dj.stock?.mcap, floatShares: dj.stock?.floatShares,
-          shortFloat: dj.stock?.shortFloat, pmHigh: dj.stock?.pmHigh,
-          pmLow: dj.stock?.pmLow, pmRange: dj.stock?.pmRange,
-          regime: dj.context?.regime, secBias: dj.context?.secBias,
-          sector: dj.stock?.sector, longTerm: dj.context?.longTerm,
-          midTerm: dj.context?.midTerm, shortTerm: dj.context?.shortTerm,
-          catalyst: dj.catalyst?.label || 'none',
-          screenerKeys: Array.isArray(dj.screenerKeys) ? dj.screenerKeys.sort().join('+') : 'none',
-          secHot: dj.context?.secHot ? 'yes' : 'no',
-          themes: Array.isArray(dj.context?.themes) ? dj.context.themes.sort().join('+') : 'none',
-          dayOfWeek: dayOfWeek(d),
-          upR_A: r3a.up_r_a,
-        });
-      }
-    }
-
-    if (trainRows.length < 10) continue;
-
-    // Compute quantile boundaries from training data
-    const quantileBoundaries = {};
-    for (const feat of QUANTILE_FEATURES) {
-      quantileBoundaries[feat] = trainRows
-        .map(r => r[feat]).filter(v => v != null && !isNaN(v)).sort((a, b) => a - b);
-    }
-
-    const trainWithBuckets = assignBuckets(trainRows, quantileBoundaries);
-    const { featureData, globalWinRate } = computeFeatureImportance(trainWithBuckets, successThreshold);
-
-    // Score test day tickers
-    const testR1 = db.prepare('SELECT * FROM r1_frozen WHERE date = ?').all(testDate);
-    const testR3aMap = {};
-    for (const r of db.prepare('SELECT * FROM r3a WHERE date = ?').all(testDate)) {
-      testR3aMap[r.ticker] = r;
-    }
-
-    const scored = [];
-    for (const r1 of testR1) {
-      const dj = JSON.parse(r1.data);
-      const r3a = testR3aMap[dj.ticker];
-      if (!r3a || r3a.up_r_a == null) continue;
-
-      const testRow = {
-        date: testDate, ticker: dj.ticker,
-        rvol: dj.stock?.rvol, change: dj.stock?.change, gapPct: dj.stock?.gapPct,
-        monthRangePos: dj.stock?.monthRangePos, secScore: dj.context?.secScore,
-        pmAdrRatio: dj.stock?.pmAdrRatio, adrPct: dj.stock?.adrPct,
-        price936: dj.stock?.price, prevClose: dj.stock?.prevClose, open: dj.stock?.open,
-        vwap: dj.stock?.vwap, sma5: dj.stock?.sma5, ema9: dj.stock?.ema9,
-        ema13: dj.stock?.ema13, ema20: dj.stock?.ema20, ema50: dj.stock?.ema50,
-        atr: dj.stock?.atr, dayHigh: dj.stock?.dayHigh, dayLow: dj.stock?.dayLow,
-        monthHigh: dj.stock?.monthHigh, monthLow: dj.stock?.monthLow,
-        mcap: dj.stock?.mcap, floatShares: dj.stock?.floatShares,
-        shortFloat: dj.stock?.shortFloat, pmHigh: dj.stock?.pmHigh,
-        pmLow: dj.stock?.pmLow, pmRange: dj.stock?.pmRange,
-        regime: dj.context?.regime, secBias: dj.context?.secBias,
-        sector: dj.stock?.sector, longTerm: dj.context?.longTerm,
-        midTerm: dj.context?.midTerm, shortTerm: dj.context?.shortTerm,
-        catalyst: dj.catalyst?.label || 'none',
-        screenerKeys: Array.isArray(dj.screenerKeys) ? dj.screenerKeys.sort().join('+') : 'none',
-        secHot: dj.context?.secHot ? 'yes' : 'no',
-        themes: Array.isArray(dj.context?.themes) ? dj.context.themes.sort().join('+') : 'none',
-        dayOfWeek: dayOfWeek(testDate),
-        upR_A: r3a.up_r_a,
-      };
-
-      const rowWithBuckets = assignBuckets([testRow], quantileBoundaries)[0];
-
-      // Score using trained model
-      let weightedWinRate = 0;
-      let totalWeight = 0;
-      for (const [feat, fd] of Object.entries(featureData)) {
-        const b = rowWithBuckets.buckets[feat];
-        if (!b || !fd.buckets[b]) continue;
-        weightedWinRate += fd.importance * fd.buckets[b].winRate;
-        totalWeight += fd.importance;
-      }
-      const rawScore = totalWeight > 0 ? weightedWinRate / totalWeight : globalWinRate;
-      scored.push({ ticker: dj.ticker, score: rawScore, upR_A: r3a.up_r_a });
-    }
-
-    if (scored.length < 5) continue;
-
-    scored.sort((a, b) => b.score - a.score);
-    const n = Math.max(1, Math.floor(scored.length / 10));
-    const top = scored.slice(0, n);
-    const bottom = scored.slice(-n);
-
-    const topWR = top.filter(r => r.upR_A >= successThreshold).length / top.length;
-    const bottomWR = bottom.filter(r => r.upR_A >= successThreshold).length / bottom.length;
-    const baseWR = scored.filter(r => r.upR_A >= successThreshold).length / scored.length;
-
-    backtestDays.push({ date: testDate, topWR, bottomWR, baseWR, n: scored.length });
-  }
-
-  if (backtestDays.length === 0) return { days: [], avgTopWR: null, avgBottomWR: null, avgBaseWR: null };
-
-  const avgTopWR = backtestDays.reduce((s, d) => s + d.topWR, 0) / backtestDays.length;
-  const avgBottomWR = backtestDays.reduce((s, d) => s + d.bottomWR, 0) / backtestDays.length;
-  const avgBaseWR = backtestDays.reduce((s, d) => s + d.baseWR, 0) / backtestDays.length;
-
-  return { days: backtestDays, avgTopWR, avgBottomWR, avgBaseWR };
-}
-
 function trainModel(overrides = {}) {
   const getSetting = k => {
     const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(k);
@@ -359,8 +225,7 @@ function trainModel(overrides = {}) {
   const rowsWithBuckets = assignBuckets(rawRows, quantileBoundaries);
   const { featureData, globalWinRate, totalRows } = computeFeatureImportance(rowsWithBuckets, config.successThreshold);
 
-  console.log('[Train] Feature importance computed, running walk-forward backtest...');
-  const backtest = runWalkForwardBacktest(config);
+  console.log('[Train] Feature importance computed.');
 
   // Serialize: store quantile boundaries as sorted arrays (needed for live scoring)
   const modelFeatures = {};
@@ -378,7 +243,6 @@ function trainModel(overrides = {}) {
     features: modelFeatures,
     globalWinRate,
     totalRows,
-    backtest,
     trainedAt: Date.now(),
   };
 
@@ -389,7 +253,7 @@ function trainModel(overrides = {}) {
     model.trainedAt,
     JSON.stringify(config),
     JSON.stringify(modelFeatures),
-    JSON.stringify({ ...backtest, globalWinRate, totalRows })
+    JSON.stringify({ globalWinRate, totalRows })
   );
 
   console.log('[Train] Model saved to DB');
