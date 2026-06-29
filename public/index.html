@@ -80,7 +80,8 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   background: var(--bg3);
   border-bottom: 1px solid var(--border);
 }
-.card-ticker { font-size: 18px; font-weight: 700; color: #fff; }
+.card-ticker { font-size: 18px; font-weight: 700; color: #fff; cursor: pointer; }
+.card-ticker:hover { color: var(--accent); text-decoration: underline; }
 .card-change { font-size: 13px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
 .card-change.pos { color: var(--green); background: #22c55e15; }
 .card-change.neg { color: var(--red); background: #ef444415; }
@@ -1234,7 +1235,7 @@ function buildCard(row) {
   <div class="card-header">
     <div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-        <span class="card-ticker">${row.ticker}</span>
+        <span class="card-ticker" onclick="openChart('${row.ticker}')">${row.ticker}</span>
         <span class="card-change ${change>=0?'pos':'neg'}">${changeSign}${change.toFixed(2)}%</span>
         ${row.liveNow ? '<span class="live-dot">Live</span>' : '<span class="stale-dot">Stale</span>'}
       </div>

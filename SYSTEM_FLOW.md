@@ -588,6 +588,8 @@ The browser does NO business logic. It only:
    - `row.inShortlist` — star shown filled/empty, card gets class `in-shortlist`
    - `row.liveNow` — if `true`: green `●Live` dot. If `false`: grey `●Stale` dot,
      amber border tint, 85% opacity. Both are CSS class + template — no logic in browser.
+   - Clicking the ticker name opens a TradingView daily chart modal (same widget as Market tab).
+     `openChart(ticker)` resolves the symbol, sets interval `D`, range `6M`, dark theme.
 
 ### When a scan runs from the UI
 
