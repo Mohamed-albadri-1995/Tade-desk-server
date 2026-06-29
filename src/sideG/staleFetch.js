@@ -38,14 +38,21 @@ async function refreshStaleInR0() {
   const today = require('../utils/time').toETDate(Date.now());
   const staleRows = r0.getAll().filter(r => !r.liveNow && r.date === today);
 
-  if (staleRows.length === 0) return { staleCount: 0, refreshed: 0 };
+  if (staleRows.length === 0) return { staleCount: 0, noSymbol: 0, refreshed: 0 };
 
-  const tvSymbols = staleRows
-    .map(r => r.stock?.tvSymbol)
-    .filter(Boolean);
+  // tvSymbol is set by Side A (mapTVRow uses rawTV.s). Any stale row without it
+  // came from a scan where Side A didn't populate the symbol — logged separately.
+  const withSymbol = staleRows.filter(r => r.stock?.tvSymbol);
+  const noSymbol = staleRows.length - withSymbol.length;
 
-  if (tvSymbols.length === 0) return { staleCount: staleRows.length, refreshed: 0 };
+  if (noSymbol > 0) {
+    const missing = staleRows.filter(r => !r.stock?.tvSymbol).map(r => r.ticker);
+    console.warn(`[SideG] ${noSymbol} stale row(s) missing tvSymbol — cannot refresh: ${missing.join(', ')}`);
+  }
 
+  if (withSymbol.length === 0) return { staleCount: staleRows.length, noSymbol, refreshed: 0 };
+
+  const tvSymbols = withSymbol.map(r => r.stock.tvSymbol);
   const fresh = await fetchStaleQuotes(tvSymbols);
 
   let refreshed = 0;
@@ -53,14 +60,13 @@ async function refreshStaleInR0() {
     const existing = r0.getRow(freshRow.ticker);
     if (!existing) continue;
     // Update stock fields + recompute derived fields; preserve everything else
-    const updatedStock = computeDerivedFields(freshRow.stock);
-    existing.stock = updatedStock;
+    existing.stock = computeDerivedFields(freshRow.stock);
     existing.lastUpdated = Date.now();
     refreshed++;
   }
 
-  console.log(`[SideG] Refreshed ${refreshed}/${staleRows.length} stale tickers`);
-  return { staleCount: staleRows.length, refreshed };
+  console.log(`[SideG] Refreshed ${refreshed}/${staleRows.length} stale tickers (${noSymbol} skipped — no tvSymbol)`);
+  return { staleCount: staleRows.length, noSymbol, refreshed };
 }
 
 module.exports = { refreshStaleInR0 };
