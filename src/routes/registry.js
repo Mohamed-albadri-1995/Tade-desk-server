@@ -1,5 +1,6 @@
 const express = require('express');
 const r0 = require('../r0/registry');
+const VALID_BIASES = ['auto', 'long', 'short'];
 
 const router = express.Router();
 
@@ -16,6 +17,25 @@ router.get('/today', (req, res) => {
 router.get('/all', (req, res) => {
   const rows = r0.getAll();
   res.json({ count: rows.length, rows });
+});
+
+// PUT /api/registry/:ticker/bias — set bias (auto|long|short) or cycle if no body
+router.put('/:ticker/bias', express.json(), (req, res) => {
+  const { ticker } = req.params;
+  const row = r0.getRow(ticker);
+  if (!row) return res.status(404).json({ ok: false, error: 'Ticker not in r0' });
+
+  let bias;
+  if (req.body && req.body.bias && VALID_BIASES.includes(req.body.bias)) {
+    bias = req.body.bias;
+  } else {
+    // Cycle: auto → long → short → auto
+    const cycle = { auto: 'long', long: 'short', short: 'auto' };
+    bias = cycle[row.bias || 'auto'] || 'long';
+  }
+
+  r0.updateBias(ticker, bias);
+  res.json({ ok: true, ticker, bias });
 });
 
 module.exports = router;

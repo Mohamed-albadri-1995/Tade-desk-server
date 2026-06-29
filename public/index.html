@@ -105,6 +105,12 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .badge-bigmove { background: #f9731620; color: #fb923c; border: 1px solid #f9731640; }
 .badge-hot { background: #f9731630; color: #fb923c; border: 1px solid #f9731660; }
 .badge-catalyst { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+.bias-btn { display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;border:1px solid;cursor:pointer;background:transparent;transition:opacity .15s; }
+.bias-btn:hover { opacity:.8; }
+.bias-btn.bias-auto { color:var(--text3);border-color:#444;background:#1a1d2e; }
+.bias-btn.bias-long { color:#22c55e;border-color:#22c55e40;background:#22c55e15; }
+.bias-btn.bias-short { color:#ef4444;border-color:#ef444440;background:#ef444415; }
+.bias-auto-label { font-size:10px;color:var(--text3);opacity:.7; }
 
 /* card body sections */
 .card-body { padding: 0; }
@@ -1842,6 +1848,21 @@ function buildCard(row) {
     ? ` <span class="${secScore >= 0 ? 'pos' : 'neg'}">${secScore >= 0 ? '▲' : '▼'} ${Math.abs(secScore).toFixed(0)}</span>`
     : '';
 
+  // Stock bias
+  const bias = row.bias || 'auto';
+  const biasLabels = { auto: '⊙ AUTO', long: '▲ LONG', short: '▼ SHORT' };
+  // Auto-computed: derive from context when bias='auto'
+  function computeAutoBias(ctx) {
+    const short = ctx.shortTerm;
+    const sec = ctx.secBias;
+    if (short === 'BULLISH' && sec === 'BULLISH') return 'long';
+    if (short === 'BEARISH' || sec === 'BEARISH') return 'short';
+    return 'undecided';
+  }
+  const autoBiasResult = bias === 'auto' ? computeAutoBias(ctx) : null;
+  const autoLabel = autoBiasResult ? ` <span class="bias-auto-label">(${autoBiasResult})</span>` : '';
+  const biasHTML = `<button class="bias-btn bias-${bias}" onclick="cycleBias('${row.ticker}',this)">${biasLabels[bias]}${autoLabel}</button>`;
+
   return `
 <div class="card${row.inShortlist?' in-shortlist':''}${!row.liveNow?' stale':''}" id="card-${row.ticker}">
   <div class="card-header">
@@ -1876,6 +1897,7 @@ function buildCard(row) {
       <div class="ctx-row"><span class="ctx-label">Mid term</span><span class="ctx-val ${biasCls(ctx.midTerm)}">${ctx.midTerm||'—'}</span></div>
       <div class="ctx-row"><span class="ctx-label">Short term</span><span class="ctx-val ${biasCls(ctx.shortTerm)}">${ctx.shortTerm||'—'}</span></div>
       ${ctx.broadResolved ? `<div class="ctx-row"><span class="ctx-label">Sector</span><span class="ctx-val"><span class="${biasCls(ctx.secBias)}">${ctx.broadResolved} · ${ctx.secBias||'—'}</span>${secScoreDisplay}</span></div>` : ''}
+      <div class="ctx-row"><span class="ctx-label">Bias</span><span class="ctx-val">${biasHTML}</span></div>
     </div>
 
     <!-- PRICE -->
@@ -1978,6 +2000,24 @@ async function toggleShortlist(ticker, btn) {
     if (row) {
       row.inShortlist = d.action === 'added';
       // re-render just the card
+      const card = document.getElementById('card-' + ticker);
+      if (card) {
+        const newCard = document.createElement('div');
+        newCard.innerHTML = buildCard(row);
+        card.replaceWith(newCard.firstElementChild);
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function cycleBias(ticker, btn) {
+  try {
+    const r = await fetch('/api/registry/' + ticker + '/bias', { method: 'PUT' });
+    const d = await r.json();
+    if (!d.ok) return;
+    const row = r0Data.find(x => x.ticker === ticker);
+    if (row) {
+      row.bias = d.bias;
       const card = document.getElementById('card-' + ticker);
       if (card) {
         const newCard = document.createElement('div');
@@ -2229,12 +2269,12 @@ async function loadWarehouse() {
 }
 
 const WH_COLS = {
-  r0: ['ticker','date','liveNow','inShortlist','_score','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','lastUpdated'],
-  r1: ['ticker','date','inShortlist','_score','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','capturedAt'],
+  r0: ['ticker','date','liveNow','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','lastUpdated'],
+  r1: ['ticker','date','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','capturedAt'],
   r3a: ['date','ticker','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
   r3b: ['date','ticker','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
-  r4a: ['date','ticker','_score','inShortlist','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','themes','catalyst','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
-  r4b: ['date','ticker','_score','inShortlist','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','themes','catalyst','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
+  r4a: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
+  r4b: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
   shortlist: ['date','ticker','tvSymbol','addedAt','method','price','change','sector','score','exported','exportedAt'],
 };
 

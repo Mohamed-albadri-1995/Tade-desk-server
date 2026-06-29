@@ -35,6 +35,7 @@ function upsertRows(rows) {
         liveNow: true,
         date: toETDate(now),
         inShortlist: false,
+        bias: 'auto',
         news: null,
         catalyst: null,
         score_at_entry: null,
@@ -85,6 +86,14 @@ function updateContext(ticker, context) {
   }
 }
 
+function updateBias(ticker, bias) {
+  const row = store.get(ticker);
+  if (!row) return false;
+  row.bias = bias;
+  row.lastUpdated = Date.now();
+  return true;
+}
+
 function clearAll() {
   store.clear();
 }
@@ -117,5 +126,6 @@ module.exports = {
   updateNews,
   updateScore,
   updateContext,
+  updateBias,
   getTodayRows,
 };

@@ -88,6 +88,7 @@ function getRegisterData(register, date) {
         secScore: row.context?.secScore,
         secHot: row.context?.secHot,
         themes: row.context?.themes,
+        bias: row.bias || 'auto',
         // catalyst & news summary
         catalyst: row.catalyst?.label || null,
         lastUpdated: row.lastUpdated,
@@ -146,6 +147,7 @@ function getRegisterData(register, date) {
           secScore: d.context?.secScore,
           secHot: d.context?.secHot,
           themes: d.context?.themes,
+          bias: d.bias || 'auto',
           catalyst: d.catalyst?.label || null,
           capturedAt: row.captured_at,
         };
@@ -301,7 +303,9 @@ function getRegisterData(register, date) {
           broadResolved: d1.context?.broadResolved,
           secBias: d1.context?.secBias,
           secScore: d1.context?.secScore,
+          secHot: d1.context?.secHot,
           themes: d1.context?.themes,
+          bias: d1.bias || 'auto',
           catalyst: d1.catalyst?.label || null,
           // R3A EOD fields
           entryPriceA: r3a.entry_price_a,
@@ -368,7 +372,9 @@ function getRegisterData(register, date) {
           broadResolved: d1.context?.broadResolved,
           secBias: d1.context?.secBias,
           secScore: d1.context?.secScore,
+          secHot: d1.context?.secHot,
           themes: d1.context?.themes,
+          bias: d1.bias || 'auto',
           catalyst: d1.catalyst?.label || null,
           // R3B EOD fields
           entryPriceB: r3b.entry_price_b,
