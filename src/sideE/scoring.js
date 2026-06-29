@@ -61,9 +61,9 @@ function scoreRow(row) {
     const bullishRegimes = ['STRONG_UP', 'UP', 'EXTENDED_UP', 'PULLBACK_BULL', 'WEAK_UP'];
     const bearishRegimes = ['STRONG_DOWN', 'DOWN', 'CAPITULATION', 'TOPPING'];
     const slug = context.regime || '';
-    if (bullishRegimes.includes(slug)) {
+    if (slug && bullishRegimes.includes(slug)) {
       score += model.regimeLong.weight;
-    } else if (!bearishRegimes.includes(slug)) {
+    } else if (slug && !bearishRegimes.includes(slug)) {
       score += Math.round(model.regimeLong.weight * 0.4);
     }
 
