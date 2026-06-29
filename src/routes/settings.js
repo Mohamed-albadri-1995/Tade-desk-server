@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../db');
+const { resetHotState } = require('../sideD/sectors');
 
 const router = express.Router();
 
@@ -83,6 +84,12 @@ router.post('/', (req, res) => {
   upsertAll(Object.entries(validated));
 
   res.json({ ok: true, saved: Object.keys(validated) });
+});
+
+// POST /api/settings/reset-hot — clear in-memory hot sector state
+router.post('/reset-hot', (req, res) => {
+  resetHotState();
+  res.json({ ok: true, message: 'Hot sector state cleared. Run a scan to rebuild under current thresholds.' });
 });
 
 module.exports = router;

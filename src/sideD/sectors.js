@@ -119,4 +119,8 @@ function computeAllSectors(marketData, spyData) {
   return result;
 }
 
-module.exports = { sectorShortTermBias, computeAllSectors, hotState };
+function resetHotState() {
+  for (const key of Object.keys(hotState)) delete hotState[key];
+}
+
+module.exports = { sectorShortTermBias, computeAllSectors, hotState, resetHotState };

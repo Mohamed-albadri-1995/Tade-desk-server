@@ -322,6 +322,9 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .settings-save-btn { background: var(--accent); border: none; border-radius: 6px; padding: 8px 18px; color: #000; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
 .settings-save-btn:hover { opacity: .85; }
 .settings-save-btn:disabled { opacity: .5; cursor: not-allowed; }
+.settings-reset-btn { background: none; border: 1px solid var(--red); border-radius: 6px; padding: 8px 18px; color: var(--red); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; margin-left: 8px; }
+.settings-reset-btn:hover { background: var(--red); color: #fff; }
+.settings-reset-btn:disabled { opacity: .5; cursor: not-allowed; }
 .settings-msg { font-size: 12px; margin-left: 10px; vertical-align: middle; }
 @media (max-width: 600px) { .settings-grid { grid-template-columns: 1fr; } }
 
@@ -499,6 +502,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
           </div>
         </div>
         <button class="settings-save-btn" onclick="saveSettings(['hotImmediateThreshold','hotSustainedThreshold','hotSustainedSessions','hotFloorThreshold','coolOffDays'], this)">Save Hot Sector</button>
+        <button class="settings-reset-btn" onclick="resetHotState(this)">Reset Hot State</button>
         <span class="settings-msg" id="msg-hot"></span>
       </div>
 
@@ -621,6 +625,29 @@ const MSG_IDS = {
   shortlistMinScore: 'msg-shortlist', shortlistTopN: 'msg-shortlist',
   finnhubApiKey: 'msg-api',
 };
+
+async function resetHotState(btn) {
+  if (!confirm('Clear all HOT sector state? All sectors will be re-evaluated from zero on the next scan.')) return;
+  btn.disabled = true;
+  const msgEl = document.getElementById('msg-hot');
+  try {
+    const r = await fetch('/api/settings/reset-hot', { method: 'POST' });
+    const data = await r.json();
+    if (data.ok) {
+      msgEl.textContent = 'Hot state cleared — run a scan to rebuild';
+      msgEl.style.color = 'var(--green)';
+    } else {
+      msgEl.textContent = 'Reset failed';
+      msgEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    msgEl.textContent = 'Network error';
+    msgEl.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { msgEl.textContent = ''; }, 4000);
+  }
+}
 
 async function loadSettings() {
   try {
