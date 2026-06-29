@@ -1,4 +1,6 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { getRegisterData, getAvailableDates } = require('../warehouse/registers');
 const db = require('../db');
 
@@ -45,14 +47,25 @@ router.get('/export/:register/:date', (req, res) => {
   if (!data || data.length === 0) {
     return res.status(404).json({ error: 'No data' });
   }
+  const keys = Object.keys(data[0] || {});
+  const csv = [keys.join(','), ...data.map(row =>
+    keys.map(k => JSON.stringify(row[k] ?? '')).join(',')
+  )].join('\n');
+
+  // ?save=true writes to tmp/ on disk for Python processor
+  if (req.query.save === 'true') {
+    const tmpDir = path.join(__dirname, '..', '..', 'tmp');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const filename = `${register.toLowerCase()}.csv`;
+    const filePath = path.join(tmpDir, filename);
+    fs.writeFileSync(filePath, csv, 'utf8');
+    return res.json({ ok: true, path: filePath, rows: data.length });
+  }
+
   const format = req.query.format || 'csv';
   if (format === 'json') {
     res.json({ register, date, data });
   } else {
-    const keys = Object.keys(data[0] || {});
-    const csv = [keys.join(','), ...data.map(row =>
-      keys.map(k => JSON.stringify(row[k] ?? '')).join(',')
-    )].join('\n');
     res.type('text/csv').send(csv);
   }
 });
