@@ -108,7 +108,7 @@ const defaults = [
   ['analysisSuccessThreshold', '1.5'],
   ['analysisTrainingWindow', '90'],
   ['aiApiKey', ''],
-  ['aiModel', 'gpt-4o-mini'],
+  ['aiModel', 'anthropic/claude-haiku-4-5'],
 ];
 const insertSetting = db.prepare(
   'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'
