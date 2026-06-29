@@ -501,7 +501,8 @@ function setStatus(txt) {
 async function loadRegistry() {
   try {
     const r = await fetch('/api/registry/today');
-    r0Data = await r.json();
+    const data = await r.json();
+    r0Data = data.rows || data;
     renderCards();
     const statusR = await fetch('/api/scan/status');
     const s = await statusR.json();
@@ -518,9 +519,9 @@ function getFilteredSorted() {
     if (query && !row.ticker.toLowerCase().includes(query) && !(row.stock?.sector||'').toLowerCase().includes(query)) return false;
     if (filter !== 'all') {
       const keys = (row.screenerKeys||[]).map(k => k.toLowerCase());
-      if (filter === 'trend' && !keys.includes('trend')) return false;
-      if (filter === 'premarket' && !keys.includes('premarket')) return false;
-      if (filter === 'bigmoves' && !keys.includes('bigmoves')) return false;
+      if (filter === 'trend' && !keys.some(k => k.includes('trend'))) return false;
+      if (filter === 'premarket' && !keys.some(k => k.includes('pre'))) return false;
+      if (filter === 'bigmoves' && !keys.some(k => k.includes('big'))) return false;
     }
     return true;
   });
