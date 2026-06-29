@@ -67,13 +67,14 @@ function callOpenAI(prompt, apiKey, model) {
     });
 
     const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
+      hostname: 'openrouter.ai',
+      path: '/api/v1/chat/completions',
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
+        'HTTP-Referer': 'https://github.com/Mohamed-albadri-1995/Tade-desk-server',
       },
     };
 
