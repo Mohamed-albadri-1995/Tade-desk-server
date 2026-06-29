@@ -390,6 +390,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .settings-reset-btn:hover { background: var(--red); color: #fff; }
 .settings-reset-btn:disabled { opacity: .5; cursor: not-allowed; }
 .settings-msg { font-size: 12px; margin-left: 10px; vertical-align: middle; }
+.settings-test-result { font-size: 12px; margin-top: 8px; padding: 8px 12px; border-radius: 6px; display: none; }
+.settings-test-result.ok { background: #22c55e15; border: 1px solid #22c55e40; color: var(--green); display: block; }
+.settings-test-result.fail { background: #ef444415; border: 1px solid #ef444440; color: var(--red); display: block; }
+.settings-test-result.loading { background: var(--bg3); border: 1px solid var(--border); color: var(--text3); display: block; }
 @media (max-width: 600px) { .settings-grid { grid-template-columns: 1fr; } }
 
 /* ── RESPONSIVE ── */
@@ -733,8 +737,16 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
             <input type="password" class="settings-input" id="s-alpacaApiSecret" placeholder="Paste Alpaca secret key" autocomplete="off">
           </div>
         </div>
-        <button class="settings-save-btn" onclick="saveSettings(['finnhubApiKey','githubBackupToken','alpacaApiKey','alpacaApiSecret'], this)">Save API Keys</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
+          <button class="settings-save-btn" onclick="saveSettings(['finnhubApiKey','githubBackupToken','alpacaApiKey','alpacaApiSecret'], this)">Save API Keys</button>
+          <button class="settings-reset-btn" onclick="testKey('finnhub','test-finnhub')">Test Finnhub</button>
+          <button class="settings-reset-btn" onclick="testKey('github','test-github')">Test GitHub</button>
+          <button class="settings-reset-btn" onclick="testKey('alpaca','test-alpaca')">Test Alpaca</button>
+        </div>
         <span class="settings-msg" id="msg-api"></span>
+        <div id="test-finnhub" class="settings-test-result"></div>
+        <div id="test-github" class="settings-test-result"></div>
+        <div id="test-alpaca" class="settings-test-result"></div>
       </div>
 
       <!-- Analysis / AI -->
@@ -749,11 +761,15 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
           <div class="settings-field">
             <label>AI Model</label>
             <div class="settings-hint">OpenRouter model ID (e.g. anthropic/claude-haiku-4-5)</div>
-            <input type="text" class="settings-input" id="s-aiModel" placeholder="gpt-4o-mini">
+            <input type="text" class="settings-input" id="s-aiModel" placeholder="anthropic/claude-haiku-4-5">
           </div>
         </div>
-        <button class="settings-save-btn" onclick="saveSettings(['aiApiKey','aiModel'], this)">Save AI Settings</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
+          <button class="settings-save-btn" onclick="saveSettings(['aiApiKey','aiModel'], this)">Save AI Settings</button>
+          <button class="settings-reset-btn" onclick="testKey('ai','test-ai')">Test AI</button>
+        </div>
         <span class="settings-msg" id="msg-ai"></span>
+        <div id="test-ai" class="settings-test-result"></div>
       </div>
 
       <!-- Backup & Restore -->
@@ -1093,6 +1109,21 @@ async function resetHotState(btn) {
   } finally {
     btn.disabled = false;
     setTimeout(() => { msgEl.textContent = ''; }, 4000);
+  }
+}
+
+async function testKey(service, resultId) {
+  const el = document.getElementById(resultId);
+  el.className = 'settings-test-result loading';
+  el.textContent = 'Testing...';
+  try {
+    const r = await fetch(`/api/settings/test/${service}`);
+    const d = await r.json();
+    el.className = 'settings-test-result ' + (d.ok ? 'ok' : 'fail');
+    el.textContent = (d.ok ? '✓ ' : '✗ ') + d.message;
+  } catch (e) {
+    el.className = 'settings-test-result fail';
+    el.textContent = '✗ Network error: ' + e.message;
   }
 }
 

@@ -95,6 +95,123 @@ router.post('/', (req, res) => {
   res.json({ ok: true, saved: Object.keys(validated) });
 });
 
+// GET /api/settings/test/:service — live connectivity test for each key
+router.get('/test/:service', async (req, res) => {
+  const https = require('https');
+
+  function httpGet(options) {
+    return new Promise((resolve, reject) => {
+      const req = https.request(options, r => {
+        let data = '';
+        r.on('data', c => data += c);
+        r.on('end', () => resolve({ status: r.statusCode, body: data }));
+      });
+      req.on('error', reject);
+      req.setTimeout(8000, () => { req.destroy(); reject(new Error('Timeout')); });
+      req.end();
+    });
+  }
+
+  function httpPost(options, body) {
+    return new Promise((resolve, reject) => {
+      const r = https.request(options, res => {
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => resolve({ status: res.statusCode, body: data }));
+      });
+      r.on('error', reject);
+      r.setTimeout(10000, () => { r.destroy(); reject(new Error('Timeout')); });
+      r.write(body);
+      r.end();
+    });
+  }
+
+  const getSetting = k => {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(k);
+    return row?.value || '';
+  };
+
+  const service = req.params.service;
+
+  try {
+    if (service === 'finnhub') {
+      const key = getSetting('finnhubApiKey');
+      if (!key) return res.json({ ok: false, message: 'No key set' });
+      const r = await httpGet({ hostname: 'finnhub.io', path: `/api/v1/quote?symbol=SPY&token=${key}` });
+      const d = JSON.parse(r.body);
+      if (r.status === 200 && d.c) {
+        res.json({ ok: true, message: `Connected — SPY current price: $${d.c}` });
+      } else {
+        res.json({ ok: false, message: `Error ${r.status}: ${r.body.slice(0, 100)}` });
+      }
+
+    } else if (service === 'github') {
+      const token = getSetting('githubBackupToken');
+      if (!token) return res.json({ ok: false, message: 'No token set' });
+      const r = await httpGet({
+        hostname: 'api.github.com',
+        path: '/user',
+        headers: { 'Authorization': `token ${token}`, 'User-Agent': 'trade-desk-server' },
+      });
+      const d = JSON.parse(r.body);
+      if (r.status === 200 && d.login) {
+        res.json({ ok: true, message: `Connected — GitHub user: ${d.login}` });
+      } else {
+        res.json({ ok: false, message: `Error ${r.status}: ${d.message || r.body.slice(0, 100)}` });
+      }
+
+    } else if (service === 'alpaca') {
+      const key = getSetting('alpacaApiKey');
+      const secret = getSetting('alpacaApiSecret');
+      if (!key || !secret) return res.json({ ok: false, message: 'Key or secret not set' });
+      const r = await httpGet({
+        hostname: 'paper-api.alpaca.markets',
+        path: '/v2/account',
+        headers: { 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret },
+      });
+      const d = JSON.parse(r.body);
+      if (r.status === 200 && d.account_number) {
+        res.json({ ok: true, message: `Connected — Account: ${d.account_number}, Status: ${d.status}` });
+      } else {
+        res.json({ ok: false, message: `Error ${r.status}: ${d.message || r.body.slice(0, 100)}` });
+      }
+
+    } else if (service === 'ai') {
+      const key = getSetting('aiApiKey');
+      const model = getSetting('aiModel') || 'anthropic/claude-haiku-4-5';
+      if (!key) return res.json({ ok: false, message: 'No key set' });
+      const body = JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+        max_tokens: 10,
+      });
+      const r = await httpPost({
+        hostname: 'openrouter.ai',
+        path: '/api/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          'HTTP-Referer': 'https://github.com/Mohamed-albadri-1995/Tade-desk-server',
+        },
+      }, body);
+      const d = JSON.parse(r.body);
+      if (r.status === 200 && d.choices?.[0]) {
+        const reply = d.choices[0].message?.content?.trim();
+        res.json({ ok: true, message: `Connected — Model: ${model} — Reply: "${reply}"` });
+      } else {
+        res.json({ ok: false, message: `Error ${r.status}: ${d.error?.message || r.body.slice(0, 150)}` });
+      }
+
+    } else {
+      res.status(400).json({ ok: false, message: 'Unknown service' });
+    }
+  } catch (err) {
+    res.json({ ok: false, message: `Network error: ${err.message}` });
+  }
+});
+
 // POST /api/settings/reset-hot — clear in-memory hot sector state
 router.post('/reset-hot', (req, res) => {
   resetHotState();
