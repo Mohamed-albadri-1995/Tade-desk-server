@@ -188,9 +188,6 @@ function mapTVRow(rawTV) {
   const getNum = col => num(getRaw(col));
   const getStr = col => str(getRaw(col));
 
-  // Skip delayed data rows — TV returns these for some symbols with different structure
-  if (rawTV.d && Array.isArray(rawTV.d) && rawTV.d.some(v => v && typeof v === 'object' && v.kind === 'delay')) return { ticker: null };
-
   // Always use rawTV.s for ticker — resilient to ticker-view format changes
   const rawTicker = (typeof rawTV.s === 'string' ? rawTV.s : '') || '';
   const ticker = rawTicker.includes(':') ? rawTicker.split(':')[1] : rawTicker;
@@ -247,9 +244,7 @@ async function runScanner(name) {
   });
   const rawRows = resp.data.data || [];
   if (rawRows.length > 0) validateTVStructure(rawRows[0]);
-  const rows = rawRows.map(row => {
-    try { return mapTVRow(row); } catch (e) { return { ticker: null }; }
-  }).filter(r => r.ticker);
+  const rows = rawRows.map(mapTVRow).filter(r => r.ticker);
   return { name, rows };
 }
 

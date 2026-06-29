@@ -29,9 +29,7 @@ async function fetchStaleQuotes(tvSymbols) {
     };
     const resp = await axios.post(TV_URL, body, { headers: TV_HEADERS, timeout: 15000 });
     const rawRows = resp.data.data || [];
-    results.push(...rawRows.map(row => {
-      try { return mapTVRow(row); } catch (e) { return { ticker: null }; }
-    }).filter(r => r.ticker));
+    results.push(...rawRows.map(mapTVRow).filter(r => r.ticker));
   }
   return results;
 }
