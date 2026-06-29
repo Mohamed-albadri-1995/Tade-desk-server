@@ -1,112 +1,41 @@
 const express = require('express');
-const { trainModel, loadModel } = require('../sideE/train');
-const { generateInsights } = require('../sideE/insights');
-const { invalidateCache } = require('../sideE/score');
+const axios = require('axios');
+const { checkScorer } = require('../sideE/score');
 
+const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
 const router = express.Router();
 
-// GET /api/analysis/report — full model report
-router.get('/report', (req, res) => {
-  const model = loadModel();
-  if (!model) return res.status(404).json({ error: 'No model trained yet. Run POST /api/analysis/train first.' });
-
-  // Sort features by importance for response
-  const sortedFeatures = Object.entries(model.features)
-    .sort((a, b) => b[1].importancePct - a[1].importancePct)
-    .map(([name, fd]) => ({
-      name,
-      importance: fd.importance,
-      importancePct: fd.importancePct,
-      buckets: Object.entries(fd.buckets || {})
-        .sort((a, b) => b[1].winRate - a[1].winRate)
-        .map(([bucket, stats]) => ({ bucket, ...stats })),
-    }));
-
-  res.json({
-    trainedAt: model.trainedAt,
-    config: model.config,
-    globalWinRate: model.backtest?.globalWinRate,
-    totalRows: model.backtest?.totalRows,
-    features: sortedFeatures,
-    insights: model.insights,
-  });
+// GET /api/analysis/status — scorer health
+router.get('/status', async (req, res) => {
+  try {
+    const resp = await axios.get(`${SCORER_URL}/health`, { timeout: 3000 });
+    res.json({ ok: true, ready: resp.data?.ready === true, scorer: resp.data });
+  } catch {
+    res.json({ ok: false, ready: false, error: 'Scorer service not reachable' });
+  }
 });
 
-// POST /api/analysis/train — trigger training
+// POST /api/analysis/train — trigger retraining from R4A/R4B CSVs
 router.post('/train', async (req, res) => {
   try {
-    const overrides = req.body || {};
-    const model = trainModel(overrides);
-    invalidateCache();
-
-    // Auto-generate rule-based insights
-    try {
-      await generateInsights(model, false);
-    } catch (iErr) {
-      console.warn('[Analysis] Insights generation failed:', iErr.message);
-    }
-
-    const fullModel = loadModel();
-    res.json({
-      ok: true,
-      trainedAt: model.trainedAt,
-      config: model.config,
-      totalRows: model.totalRows,
-      globalWinRate: model.globalWinRate,
-      insights: fullModel?.insights,
-    });
+    const body = req.body || {};
+    const resp = await axios.post(`${SCORER_URL}/train`, body, { timeout: 120000 });
+    res.json(resp.data);
   } catch (err) {
-    console.error('[Analysis] Train error:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    const msg = err.response?.data?.error || err.message;
+    res.status(500).json({ ok: false, error: msg });
   }
 });
 
-// GET /api/analysis/insights — get or regenerate insights
-router.get('/insights', async (req, res) => {
-  const model = loadModel();
-  if (!model) return res.status(404).json({ error: 'No model trained yet.' });
-
-  const regenerate = req.query.regenerate === 'true';
-  const forceAI = req.query.ai === 'true';
-
-  if (regenerate || !model.insights) {
-    try {
-      const insights = await generateInsights(model, forceAI);
-      return res.json(insights);
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
-    }
+// POST /api/analysis/score — score a single card (debug/test)
+router.post('/score', async (req, res) => {
+  try {
+    const resp = await axios.post(`${SCORER_URL}/score`, req.body, { timeout: 10000 });
+    res.json(resp.data);
+  } catch (err) {
+    const msg = err.response?.data?.error || err.message;
+    res.status(500).json({ ok: false, error: msg });
   }
-
-  res.json(model.insights);
-});
-
-// GET /api/analysis/feature/:name — single feature bucket breakdown
-router.get('/feature/:name', (req, res) => {
-  const model = loadModel();
-  if (!model) return res.status(404).json({ error: 'No model trained yet.' });
-
-  const fd = model.features[req.params.name];
-  if (!fd) return res.status(404).json({ error: 'Feature not found.' });
-
-  const gwr = model.backtest?.globalWinRate || 0;
-  const buckets = Object.entries(fd.buckets || {})
-    .sort((a, b) => b[1].winRate - a[1].winRate)
-    .map(([bucket, stats]) => ({
-      bucket,
-      count: stats.count,
-      wins: stats.wins,
-      winRate: stats.winRate,
-      lift: gwr > 0 ? ((stats.winRate - gwr) / gwr * 100) : 0,
-    }));
-
-  res.json({
-    name: req.params.name,
-    importance: fd.importance,
-    importancePct: fd.importancePct,
-    globalWinRate: gwr,
-    buckets,
-  });
 });
 
 module.exports = router;

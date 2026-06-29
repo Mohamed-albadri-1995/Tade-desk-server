@@ -9,6 +9,7 @@ const r0 = require('./r0/registry');
 const { syncShortlistToR0 } = require('./sideF/shortlist');
 const { refreshStaleInR0 } = require('./sideG/staleFetch');
 const { toETDate } = require('./utils/time');
+const { scoreAllRows } = require('./sideE/score');
 
 const scanStatus = {
   lastRun: null,
@@ -95,9 +96,16 @@ async function runFullScan() {
       return { rowCount: withContext.length };
     })();
 
-    // Side E: Scoring disconnected — analysis report available separately in Analysis tab
-    const withScores = withContext.map(row => ({ ...row, _score: null }));
-    report.stages.sideE = { ok: true, note: 'disconnected — use Analysis tab to train and view report' };
+    // Side E: Live scoring via Python Flask service (non-fatal — null scores if service down)
+    let withScores = withContext;
+    await stageWrapSoft(report, 'sideE', async () => {
+      withScores = await scoreAllRows(withContext);
+      const scored = withScores.filter(r => r._score !== null).length;
+      return { rowCount: withScores.length, scored };
+    })();
+    if (!report.stages.sideE?.ok) {
+      withScores = withContext.map(row => ({ ...row, _score: null }));
+    }
 
     // Mark existing rows stale, then write live scan results
     r0.markAllStale();

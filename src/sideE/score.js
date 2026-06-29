@@ -1,117 +1,113 @@
-const { loadModel, CRITICAL_BUCKETS, QUANTILE_FEATURES, CATEGORICAL_FEATURES } = require('./train');
+const axios = require('axios');
 
-function getBucket(value, boundaries) {
-  if (value == null || isNaN(value)) return null;
-  for (let i = 0; i < boundaries.length - 1; i++) {
-    if (value >= boundaries[i] && value < boundaries[i + 1]) {
-      return `${boundaries[i]}–${boundaries[i + 1]}`;
-    }
-  }
-  return `>${boundaries[boundaries.length - 2]}`;
+const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
+const SCORER_TIMEOUT = 5000;
+
+// Maps r0 bias field → LiveScorer bias string
+function resolveCardBias(row) {
+  const b = row.bias || 'auto';
+  if (b === 'long') return 'Long';
+  if (b === 'short') return 'Short';
+  // auto: derive from context
+  const short = row.context?.shortTerm;
+  const sec   = row.context?.secBias;
+  if (short === 'BULLISH' && sec === 'BULLISH') return 'Long';
+  if (short === 'BEARISH' || sec === 'BEARISH')  return 'Short';
+  return 'Undefined';
 }
 
-function getQuantileBucket(value, sortedValues, numBuckets = 6) {
-  if (value == null || isNaN(value) || !sortedValues || sortedValues.length === 0) return null;
-  const rank = sortedValues.findIndex(v => value <= v);
-  const idx = rank === -1 ? numBuckets - 1 : Math.floor((rank / sortedValues.length) * numBuckets);
-  return `Q${Math.min(idx + 1, numBuckets)}`;
-}
-
-function dayOfWeek(dateStr) {
-  if (!dateStr) return 'Mon';
-  const d = new Date(dateStr + 'T12:00:00Z');
-  return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()];
-}
-
-function extractFeatures(row) {
-  const s = row.stock || {};
+// Build a flat card dict from r0 row (matches LiveScorer ALL_FEATURES)
+function buildCard(row) {
+  const s   = row.stock   || {};
   const ctx = row.context || {};
   const cat = row.catalyst || {};
   return {
-    rvol: s.rvol, change: s.change, gapPct: s.gapPct,
-    monthRangePos: s.monthRangePos, secScore: ctx.secScore,
-    pmAdrRatio: s.pmAdrRatio, adrPct: s.adrPct,
-    price936: s.price, prevClose: s.prevClose, open: s.open,
-    vwap: s.vwap, sma5: s.sma5, ema9: s.ema9, ema13: s.ema13,
-    ema20: s.ema20, ema50: s.ema50, atr: s.atr,
-    dayHigh: s.dayHigh, dayLow: s.dayLow,
-    monthHigh: s.monthHigh, monthLow: s.monthLow,
-    mcap: s.mcap, floatShares: s.floatShares, shortFloat: s.shortFloat,
-    pmHigh: s.pmHigh, pmLow: s.pmLow, pmRange: s.pmRange,
-    regime: ctx.regime, secBias: ctx.secBias,
-    sector: s.sector, longTerm: ctx.longTerm,
-    midTerm: ctx.midTerm, shortTerm: ctx.shortTerm,
-    catalyst: cat.label || 'none',
-    screenerKeys: Array.isArray(row.screenerKeys) ? row.screenerKeys.sort().join('+') : 'none',
-    secHot: ctx.secHot ? 'yes' : 'no',
-    themes: Array.isArray(ctx.themes) ? ctx.themes.sort().join('+') : 'none',
-    dayOfWeek: dayOfWeek(row.date),
+    ticker:        row.ticker,
+    date:          row.date,
+    // categoricals
+    sector:        s.sector       || null,
+    industry:      s.industry     || null,
+    regime:        ctx.regime     || null,
+    regimeLabel:   ctx.regimeLabel || null,
+    secBias:       ctx.secBias    || null,
+    themes:        Array.isArray(ctx.themes) ? ctx.themes.sort().join('+') : null,
+    catalyst:      cat.label      || null,
+    screenerKeys:  Array.isArray(row.screenerKeys) ? row.screenerKeys.sort().join('+') : null,
+    longTerm:      ctx.longTerm   || null,
+    midTerm:       ctx.midTerm    || null,
+    shortTerm:     ctx.shortTerm  || null,
+    broadResolved: ctx.broadResolved || null,
+    inShortlist:   row.inShortlist ? 'true' : 'false',
+    // numerics
+    _score:        row._score,
+    price:         s.price,
+    prevClose:     s.prevClose,
+    open:          s.open,
+    change:        s.change,
+    gapPct:        s.gapPct,
+    vwap:          s.vwap,
+    sma5:          s.sma5,
+    ema9:          s.ema9,
+    ema13:         s.ema13,
+    ema20:         s.ema20,
+    ema50:         s.ema50,
+    rvol:          s.rvol,
+    atr:           s.atr,
+    adrPct:        s.adrPct,
+    dayHigh:       s.dayHigh,
+    dayLow:        s.dayLow,
+    monthHigh:     s.monthHigh,
+    monthLow:      s.monthLow,
+    monthRangePos: s.monthRangePos,
+    mcap:          s.mcap,
+    floatShares:   s.floatShares,
+    shortFloat:    s.shortFloat,
+    pmHigh:        s.pmHigh,
+    pmLow:         s.pmLow,
+    pmRange:       s.pmRange,
+    pmAdrRatio:    s.pmAdrRatio,
+    secScore:      ctx.secScore,
   };
 }
 
-let _cachedModel = null;
-let _modelLoadedAt = 0;
+let _scorerAvailable = null;
+let _lastCheck = 0;
 
-function getModel() {
+async function checkScorer() {
   const now = Date.now();
-  if (_cachedModel && now - _modelLoadedAt < 60000) return _cachedModel;
-  _cachedModel = loadModel();
-  _modelLoadedAt = now;
-  return _cachedModel;
+  if (now - _lastCheck < 30000) return _scorerAvailable; // cache for 30s
+  _lastCheck = now;
+  try {
+    const resp = await axios.get(`${SCORER_URL}/health`, { timeout: 2000 });
+    _scorerAvailable = resp.data?.ready === true;
+  } catch {
+    _scorerAvailable = false;
+  }
+  return _scorerAvailable;
 }
 
-function scoreRow(row) {
-  const model = getModel();
-  if (!model) return null;
-
-  const { features, globalWinRate } = model;
-  const vals = extractFeatures(row);
-
-  let weightedWinRate = 0;
-  let totalWeight = 0;
-
-  for (const [feat, fd] of Object.entries(features)) {
-    if (!fd || fd.importance === 0) continue;
-
-    let bucket;
-    if (CRITICAL_BUCKETS[feat]) {
-      bucket = getBucket(vals[feat], CRITICAL_BUCKETS[feat]);
-    } else if (QUANTILE_FEATURES.includes(feat)) {
-      bucket = getQuantileBucket(vals[feat], fd.quantileSorted);
-    } else {
-      const v = vals[feat];
-      bucket = v != null ? String(v) : 'unknown';
-    }
-
-    if (!bucket || !fd.buckets[bucket]) continue;
-    weightedWinRate += fd.importance * fd.buckets[bucket].winRate;
-    totalWeight += fd.importance;
+async function scoreRow(row) {
+  if (!(await checkScorer())) return null;
+  try {
+    const bias = resolveCardBias(row);
+    const card = buildCard(row);
+    const resp = await axios.post(`${SCORER_URL}/score`, { card, bias }, { timeout: SCORER_TIMEOUT });
+    if (resp.data?.ok) return Math.round(resp.data.final_score);
+    return null;
+  } catch {
+    return null;
   }
-
-  const rawScore = totalWeight > 0 ? weightedWinRate / totalWeight : (globalWinRate || 0.5);
-
-  // Scale to 0-100 using global win rate as midpoint reference
-  const gwr = globalWinRate || 0.5;
-  let score;
-  if (rawScore >= gwr) {
-    score = 50 + ((rawScore - gwr) / (1 - gwr)) * 50;
-  } else {
-    score = 50 - ((gwr - rawScore) / gwr) * 50;
-  }
-
-  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-function scoreAllRows(rows) {
-  const model = getModel();
-  if (!model) {
+async function scoreAllRows(rows) {
+  if (!(await checkScorer())) {
     return rows.map(row => ({ ...row, _score: null }));
   }
-  return rows.map(row => ({ ...row, _score: scoreRow(row) }));
+  const scored = await Promise.all(rows.map(async row => ({
+    ...row,
+    _score: await scoreRow(row),
+  })));
+  return scored;
 }
 
-function invalidateCache() {
-  _cachedModel = null;
-}
-
-module.exports = { scoreRow, scoreAllRows, invalidateCache };
+module.exports = { scoreRow, scoreAllRows, checkScorer, buildCard };
