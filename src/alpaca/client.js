@@ -56,7 +56,7 @@ async function fetchIntradayBars(tickers, date) {
     end: `${date}T16:00:00-05:00`,
     limit: 10000,
     adjustment: 'raw',
-    feed: 'sip',
+    feed: 'iex',
   });
 
   // Annotate each bar with its ET time string for easy lookup
@@ -88,7 +88,7 @@ async function fetchDailyBars(tickers, beforeDate) {
     end: fmt(endDate),
     limit: 1000,
     adjustment: 'raw',
-    feed: 'sip',
+    feed: 'iex',
   });
 }
 
