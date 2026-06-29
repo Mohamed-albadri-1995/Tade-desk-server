@@ -4,7 +4,6 @@ const { mergeScannersIntoR0 } = require('./sideA/merge');
 const { applyDerivedFields } = require('./sideB/calculations');
 const { fetchNewsForTicker } = require('./sideC/news');
 const { buildMarketSnapshot, enrichR0WithContext } = require('./sideD/engine');
-const { scoreAllRows } = require('./sideE/score');
 const db = require('./db');
 const r0 = require('./r0/registry');
 const { syncShortlistToR0 } = require('./sideF/shortlist');
@@ -96,16 +95,9 @@ async function runFullScan() {
       return { rowCount: withContext.length };
     })();
 
-    // Side E: Score using trained model (non-fatal, falls back to null if no model)
-    let withScores = withContext;
-    await stageWrapSoft(report, 'sideE', async () => {
-      withScores = scoreAllRows(withContext);
-      const scored = withScores.filter(r => r._score != null).length;
-      return { rowCount: withScores.length, scored };
-    })();
-    if (withScores === withContext) {
-      withScores = withContext.map(row => ({ ...row, _score: null }));
-    }
+    // Side E: Scoring disconnected — analysis report available separately in Analysis tab
+    const withScores = withContext.map(row => ({ ...row, _score: null }));
+    report.stages.sideE = { ok: true, note: 'disconnected — use Analysis tab to train and view report' };
 
     // Mark existing rows stale, then write live scan results
     r0.markAllStale();
