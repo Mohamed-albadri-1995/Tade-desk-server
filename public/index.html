@@ -730,6 +730,7 @@ async function saveSettings(keys, btn) {
         document.getElementById('github-token-status').textContent = 'Token is set — auto-backup enabled';
         document.getElementById('s-githubBackupToken').value = '';
         document.getElementById('s-githubBackupToken').placeholder = 'Paste new token to replace';
+        loadBackupStatus();
       }
     } else {
       msgEl.textContent = (data.errors || [data.error]).join(', ');
