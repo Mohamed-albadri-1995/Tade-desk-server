@@ -40,7 +40,10 @@ const SECTOR_ETF_MAP = {
 };
 
 // TV sector name → Market Tab sector key
+// Maps TV scanner sector names → SECTOR_ETF_MAP keys
+// TV scanner returns Morningstar taxonomy; ETF map uses GICS-style keys
 const TV_SECTOR_TO_MARKET_KEY = {
+  // GICS names (TV market/index scanner)
   Technology: 'Technology',
   Financial: 'Financial',
   Industrial: 'Industrial',
@@ -52,6 +55,23 @@ const TV_SECTOR_TO_MARKET_KEY = {
   'Basic Materials': 'Materials',
   'Real Estate': 'Real Estate',
   'Consumer Defensive': 'Consumer Staples',
+  // Morningstar names (TV stock scanner — what actually comes back per stock)
+  'Health Technology': 'Health Care',
+  'Health Services': 'Health Care',
+  'Technology Services': 'Technology',
+  'Electronic Technology': 'Technology',
+  Finance: 'Financial',
+  'Finance/Real Estate': 'Real Estate',
+  'Consumer Services': 'Consumer Discretionary',
+  'Consumer Durables': 'Consumer Discretionary',
+  'Consumer Non-Durables': 'Consumer Staples',
+  'Non-Energy Minerals': 'Materials',
+  'Energy Minerals': 'Energy',
+  'Producer Manufacturing': 'Industrial',
+  'Process Industries': 'Industrial',
+  Communications: 'Communication Services',
+  'Retail Trade': 'Retail',
+  // Direct matches
   Semiconductors: 'Semiconductors',
   Biotechnology: 'Biotechnology',
   Retail: 'Retail',
