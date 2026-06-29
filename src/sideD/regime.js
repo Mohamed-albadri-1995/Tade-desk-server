@@ -204,6 +204,17 @@ function computeRegime(longTerm, midTerm, bbPosition) {
 
   const catalog = REGIME_CATALOG[finalSlug] || REGIME_CATALOG.BASING;
 
+  // Confidence: high when long/mid/short all agree, low when diverging
+  const longBull = ['BULLISH', 'RECOVERING'].includes(longTerm.result);
+  const longBear = ['BEARISH', 'WEAKENING'].includes(longTerm.result);
+  const midBull = ['UPTREND', 'PULLBACK'].includes(midTerm.result);
+  const midBear = ['DOWNTREND'].includes(midTerm.result);
+  const allAgree = (longBull && midBull) || (longBear && midBear);
+  const confidence = allAgree ? 'high' : 'medium';
+
+  // Aligned: long-term and mid-term pointing same direction
+  const aligned = (longBull && midBull) || (longBear && midBear);
+
   return {
     slug: finalSlug,
     label: catalog.label,
@@ -211,8 +222,8 @@ function computeRegime(longTerm, midTerm, bbPosition) {
     color: catalog.color,
     stance: catalog.stance,
     guidance: catalog.guidance,
-    confidence: 'medium',
-    aligned: longTerm.result === 'BULLISH' && midTerm.result === 'UPTREND',
+    confidence,
+    aligned,
   };
 }
 

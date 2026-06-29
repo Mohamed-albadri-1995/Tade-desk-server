@@ -3,7 +3,14 @@ const axios = require('axios');
 // TradingView scanner for index data
 const TV_URL = 'https://scanner.tradingview.com/america/scan?label-product=screener-stock';
 
-const INDEX_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX'];
+// Index symbols with TV exchange prefix for direct symbol lookup
+const INDEX_TICKERS = {
+  SPY: 'AMEX:SPY',
+  QQQ: 'NASDAQ:QQQ',
+  IWM: 'AMEX:IWM',
+  DIA: 'AMEX:DIA',
+  VIX: 'TVC:VIX',
+};
 
 const SECTOR_ETF_MAP = {
   Technology: { etf: 'XLK', tvSymbol: 'AMEX:XLK' },
@@ -100,47 +107,50 @@ async function fetchMarketData() {
     'relative_volume_10d_calc',
   ];
 
-  const allSymbols = [
-    ...INDEX_SYMBOLS,
-    ...Object.values(SECTOR_ETF_MAP).map(s => s.etf),
-  ];
+  // Fetch indices (including VIX via TVC:VIX) using direct symbol tickers
+  const indexTickers = Object.values(INDEX_TICKERS);
+  const indexBody = {
+    columns: cols,
+    symbols: { tickers: indexTickers },
+    ignore_unknown_fields: true,
+    options: { lang: 'en' },
+    range: [0, indexTickers.length + 2],
+  };
 
-  const body = {
+  // Fetch sector ETFs using name filter (all in america market)
+  const sectorEtfs = Object.values(SECTOR_ETF_MAP).map(s => s.etf);
+  const sectorBody = {
     columns: cols,
     filter2: {
       operator: 'and',
-      operands: [
-        {
-          expression: {
-            left: 'name',
-            operation: 'in_range',
-            right: allSymbols,
-          },
-        },
-      ],
+      operands: [{ expression: { left: 'name', operation: 'in_range', right: sectorEtfs } }],
     },
     ignore_unknown_fields: true,
     markets: ['america'],
     options: { lang: 'en' },
-    range: [0, allSymbols.length + 5],
+    range: [0, sectorEtfs.length + 5],
     sort: { sortBy: 'name', sortOrder: 'asc' },
     symbols: {},
   };
 
-  const resp = await axios.post(TV_URL, body, {
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 15000,
-  });
+  const [indexResp, sectorResp] = await Promise.all([
+    axios.post(TV_URL, indexBody, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }),
+    axios.post(TV_URL, sectorBody, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }),
+  ]);
 
   const result = {};
-  for (const row of (resp.data.data || [])) {
-    const sym = row.s ? row.s.split(':').pop() : null;
-    if (!sym) continue;
-    const d = row.d;
-    const obj = {};
-    cols.forEach((c, i) => { obj[c] = d[i]; });
-    result[sym] = obj;
-  }
+  const parseRows = (rows) => {
+    for (const row of rows) {
+      const sym = row.s ? row.s.split(':').pop() : null;
+      if (!sym) continue;
+      const obj = {};
+      cols.forEach((c, i) => { obj[c] = row.d[i]; });
+      result[sym] = obj;
+    }
+  };
+
+  parseRows(indexResp.data.data || []);
+  parseRows(sectorResp.data.data || []);
   return result;
 }
 

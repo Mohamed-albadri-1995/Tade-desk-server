@@ -307,7 +307,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
       <table class="heatmap-table">
         <thead>
           <tr>
-            <th>Sector</th><th>ETF</th><th>Daily</th><th>Week</th><th>Bias</th><th>Score</th><th>ADX</th><th>Status</th>
+            <th>Sector</th><th>ETF</th><th>Daily</th><th>Week</th><th>RS Day</th><th>RS Week</th><th>Bias</th><th>Score</th><th>ADX</th><th>Status</th>
           </tr>
         </thead>
         <tbody id="sector-tbody"><tr><td colspan="8" class="loading">Loading…</td></tr></tbody>
@@ -812,6 +812,8 @@ function renderMarket(snap) {
       <td style="color:var(--text3)">${(d.etf||'').replace(/^[A-Z]+:/,'')}</td>
       <td class="${(d.change||0)>=0?'pos':'neg'}">${(d.change||0)>=0?'+':''}${(d.change||0).toFixed(2)}%</td>
       <td class="${(d.weekChg||0)>=0?'pos':'neg'}">${(d.weekChg||0)>=0?'+':''}${(d.weekChg||0).toFixed(2)}%</td>
+      <td class="${(d.dRS||0)>=0?'pos':'neg'}">${d.dRS!=null?(d.dRS>=0?'+':'')+d.dRS.toFixed(2)+'%':'—'}</td>
+      <td class="${(d.wRS||0)>=0?'pos':'neg'}">${d.wRS!=null?(d.wRS>=0?'+':'')+d.wRS.toFixed(2)+'%':'—'}</td>
       <td class="${biasCls}" style="font-weight:600">${d.bias||'—'}</td>
       <td class="${biasCls}">${score}</td>
       <td>${d.adx != null ? d.adx.toFixed(0) : '—'}</td>

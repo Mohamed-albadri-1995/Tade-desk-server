@@ -11,6 +11,7 @@ const hotState = {};
 
 function sectorShortTermBias(sectorName, etfData, spyData) {
   const spyChange = spyData['change'] || 0;
+  const spyWeekChg = spyData['change|1W'] || 0;
   const etfChange = etfData['change'] || 0;
   const dRS = etfChange - spyChange;
 
@@ -50,9 +51,8 @@ function sectorShortTermBias(sectorName, etfData, spyData) {
   else if (score < bearishThreshold) bias = 'BEARISH';
   else bias = 'NEUTRAL';
 
-  const wRS = weekChg - (0); // vs SPY weekly — SPY weekly not passed here, simplified
-
-  return { bias, score, dRS, wRS: weekChg, adx };
+  const wRS = weekChg - spyWeekChg;
+  return { bias, score, dRS, wRS, adx };
 }
 
 function updateHotSector(sectorName, score) {
