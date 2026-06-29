@@ -353,7 +353,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   <div class="tab" onclick="switchTab('shortlist',this)">Shortlist</div>
   <div class="tab" onclick="switchTab('warehouse',this)">Warehouse</div>
   <div class="tab" onclick="switchTab('analysis',this)">Analysis</div>
-  <div class="tab" onclick="switchTab('settings',this);loadSettings()">Settings</div>
+  <div class="tab" onclick="switchTab('settings',this);loadSettings();loadBackupStatus()">Settings</div>
 </div>
 
 <div class="main">
@@ -553,9 +553,32 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
             <div class="settings-hint" id="finnhub-status">Loading…</div>
             <input type="password" class="settings-input" id="s-finnhubApiKey" placeholder="Paste new key to update" autocomplete="off">
           </div>
+          <div class="settings-field">
+            <label>GitHub Backup Token</label>
+            <div class="settings-hint" id="github-token-status">Loading…</div>
+            <input type="password" class="settings-input" id="s-githubBackupToken" placeholder="Paste GitHub personal access token" autocomplete="off">
+          </div>
         </div>
-        <button class="settings-save-btn" onclick="saveSettings(['finnhubApiKey'], this)">Save API Key</button>
+        <button class="settings-save-btn" onclick="saveSettings(['finnhubApiKey','githubBackupToken'], this)">Save API Keys</button>
         <span class="settings-msg" id="msg-api"></span>
+      </div>
+
+      <!-- Backup & Restore -->
+      <div class="settings-section">
+        <div class="settings-section-title">Backup &amp; Restore</div>
+        <div class="settings-hint" style="margin-bottom:14px">
+          Daily auto-backup runs at <strong>5:30 PM ET</strong> Mon–Fri to
+          <code style="background:var(--bg3);padding:1px 5px;border-radius:3px;font-size:11px">Mohamed-albadri-1995/trade-desk-data</code>.
+          Backs up all settings, shortlists, and register data (R1–R3).
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div id="backup-status-line" style="font-size:12px;color:var(--text3)">Checking…</div>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button class="settings-save-btn" id="backup-push-btn" onclick="runBackupPush(this)">Backup Now</button>
+          <button class="settings-reset-btn" id="backup-restore-btn" onclick="runBackupRestore(this)">Restore from GitHub</button>
+          <span class="settings-msg" id="msg-backup"></span>
+        </div>
       </div>
 
     </div>
@@ -623,7 +646,7 @@ const MSG_IDS = {
   hotSustainedSessions: 'msg-hot', hotFloorThreshold: 'msg-hot', coolOffDays: 'msg-hot',
   sectorBullishThreshold: 'msg-bias', sectorBearishThreshold: 'msg-bias',
   shortlistMinScore: 'msg-shortlist', shortlistTopN: 'msg-shortlist',
-  finnhubApiKey: 'msg-api',
+  finnhubApiKey: 'msg-api', githubBackupToken: 'msg-api',
 };
 
 async function resetHotState(btn) {
@@ -660,6 +683,10 @@ async function loadSettings() {
         document.getElementById('finnhub-status').textContent =
           val === 'set' ? 'Key is set on server' : 'No key set — news fetch disabled';
         el.placeholder = val === 'set' ? 'Paste new key to replace' : 'Paste key here';
+      } else if (key === 'githubBackupToken') {
+        document.getElementById('github-token-status').textContent =
+          val === 'set' ? 'Token is set — auto-backup enabled' : 'No token — backup disabled';
+        el.placeholder = val === 'set' ? 'Paste new token to replace' : 'Paste GitHub PAT here';
       } else {
         el.value = val;
       }
@@ -675,7 +702,7 @@ async function saveSettings(keys, btn) {
     const el = document.getElementById('s-' + key);
     if (!el) continue;
     const v = el.value.trim();
-    if (key === 'finnhubApiKey' && v === '') continue; // skip if left blank
+    if ((key === 'finnhubApiKey' || key === 'githubBackupToken') && v === '') continue; // skip if left blank
     body[key] = el.type === 'number' ? Number(v) : v;
   }
   if (Object.keys(body).length === 0) return;
@@ -699,6 +726,11 @@ async function saveSettings(keys, btn) {
         document.getElementById('s-finnhubApiKey').value = '';
         document.getElementById('s-finnhubApiKey').placeholder = 'Paste new key to replace';
       }
+      if (body.githubBackupToken) {
+        document.getElementById('github-token-status').textContent = 'Token is set — auto-backup enabled';
+        document.getElementById('s-githubBackupToken').value = '';
+        document.getElementById('s-githubBackupToken').placeholder = 'Paste new token to replace';
+      }
     } else {
       msgEl.textContent = (data.errors || [data.error]).join(', ');
       msgEl.style.color = 'var(--red)';
@@ -709,6 +741,78 @@ async function saveSettings(keys, btn) {
   } finally {
     btn.disabled = false;
     setTimeout(() => { msgEl.textContent = ''; }, 3000);
+  }
+}
+
+async function loadBackupStatus() {
+  try {
+    const r = await fetch('/api/backup/status');
+    const d = await r.json();
+    const el = document.getElementById('backup-status-line');
+    if (!el) return;
+    if (!d.tokenConfigured) {
+      el.innerHTML = '<span style="color:var(--red)">No GitHub token set — add it in API Keys above</span>';
+    } else if (d.lastBackupAt) {
+      const dt = new Date(d.lastBackupAt);
+      el.innerHTML = `Last backup: <strong>${dt.toLocaleString()}</strong> &nbsp;→&nbsp; <code style="font-size:11px">${d.repo}/backups/latest.json</code>`;
+    } else {
+      el.innerHTML = '<span style="color:var(--text3)">Token set. No backup yet today — runs at 5:30 PM ET or click Backup Now.</span>';
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function runBackupPush(btn) {
+  const msgEl = document.getElementById('msg-backup');
+  btn.disabled = true;
+  btn.textContent = 'Backing up…';
+  try {
+    const r = await fetch('/api/backup/push', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      msgEl.textContent = `Backed up at ${new Date(d.exportedAt).toLocaleTimeString()}`;
+      msgEl.style.color = 'var(--green)';
+      loadBackupStatus();
+    } else {
+      msgEl.textContent = d.error || 'Backup failed';
+      msgEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    msgEl.textContent = 'Network error';
+    msgEl.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Backup Now';
+    setTimeout(() => { msgEl.textContent = ''; }, 5000);
+  }
+}
+
+async function runBackupRestore(btn) {
+  if (!confirm('Restore from GitHub?\n\nThis will overwrite all local data (settings, shortlists, R1–R3 registers) with the latest GitHub backup.\n\nThis cannot be undone. Continue?')) return;
+  const msgEl = document.getElementById('msg-backup');
+  btn.disabled = true;
+  btn.textContent = 'Restoring…';
+  try {
+    const r = await fetch('/api/backup/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msgEl.textContent = `Restored from backup exported ${new Date(d.exportedAt).toLocaleString()}`;
+      msgEl.style.color = 'var(--green)';
+      loadSettings();
+    } else {
+      msgEl.textContent = d.error || 'Restore failed';
+      msgEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    msgEl.textContent = 'Network error';
+    msgEl.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Restore from GitHub';
+    setTimeout(() => { msgEl.textContent = ''; }, 6000);
   }
 }
 

@@ -16,9 +16,10 @@ const SETTING_RULES = {
   shortlistMinScore:      { type: 'int', min: 0,    max: 100 },
   shortlistTopN:          { type: 'int', min: 1,    max: 50  },
   finnhubApiKey:          { type: 'str', maxLen: 100 },
+  githubBackupToken:      { type: 'str', maxLen: 200 },
 };
 
-const MASKED_KEYS = new Set(['finnhubApiKey']);
+const MASKED_KEYS = new Set(['finnhubApiKey', 'githubBackupToken']);
 
 // GET /api/settings
 router.get('/', (req, res) => {

@@ -78,6 +78,7 @@ const defaults = [
   ['shortlistMinScore', '70'],
   ['shortlistTopN', '5'],
   ['finnhubApiKey', ''],
+  ['githubBackupToken', ''],
 ];
 const insertSetting = db.prepare(
   'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'

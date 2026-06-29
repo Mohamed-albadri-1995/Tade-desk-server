@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { runFullScan } = require('./pipeline');
 const { runAutoRule } = require('./sideF/shortlist');
 const { captureR1, captureR2 } = require('./warehouse/registers');
+const { pushBackup } = require('./backup');
 
 function startScheduler() {
   console.log('[Scheduler] Starting...');
@@ -50,6 +51,17 @@ function startScheduler() {
   }, { timezone: 'America/New_York' });
   cron.schedule('0 10 * * 1-5', () => {
     try { captureR2(); } catch (e) { console.error(e.message); }
+  }, { timezone: 'America/New_York' });
+
+  // Daily backup at 5:30 PM ET (1 hour after market close) Mon–Fri
+  cron.schedule('30 17 * * 1-5', async () => {
+    console.log('[Scheduler] Daily backup at 5:30 PM ET');
+    try {
+      const result = await pushBackup();
+      console.log('[Scheduler] Backup pushed:', result.exportedAt);
+    } catch (e) {
+      console.error('[Scheduler] Backup failed:', e.message);
+    }
   }, { timezone: 'America/New_York' });
 
   console.log('[Scheduler] All jobs registered');
