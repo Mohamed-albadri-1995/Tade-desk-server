@@ -586,7 +586,8 @@ The browser does NO business logic. It only:
    - `row.catalyst` — from Side C
    - `row.news` — from Side C (shown inline if populated)
    - `row.inShortlist` — star shown filled/empty, card gets class `in-shortlist`
-   - `row.liveNow` — green Live dot shown if true
+   - `row.liveNow` — if `true`: green `●Live` dot. If `false`: grey `●Stale` dot,
+     amber border tint, 85% opacity. Both are CSS class + template — no logic in browser.
 
 ### When a scan runs from the UI
 
@@ -634,5 +635,6 @@ The button is a fallback / manual retry.
 |---|---|
 | Side E scoring engine | Module exists and tested. Disconnected. `_score` is always null. Will be designed from scratch. |
 | R3A / R3B capture | ✅ Implemented — Alpaca-based, 4:05 PM EOD job, tickers from R1 |
+| Stale card visual | ✅ Implemented — grey Stale dot, amber border, 85% opacity when `liveNow: false` |
 | Analysis tab content | Empty placeholder tabs. |
 | Shortlist auto-rule | Wired up but produces nothing until scoring is connected. |

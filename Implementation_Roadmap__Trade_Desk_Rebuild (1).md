@@ -121,6 +121,7 @@ A browser-accessible settings panel was added to allow runtime control of key va
 | Side G — Stale Ticker Refresh | High | See full design below |
 | Pipeline Orchestration & Monitor | High | See full design below |
 | R3A / R3B capture path | High | ✅ Complete — Alpaca-based, 4:05 PM EOD job, tickers from R1 |
+| Stale card visual indicator | Medium | ✅ Complete — grey Stale dot, amber border, 85% opacity |
 | Analysis tab content | Medium | Sub-tabs are empty placeholders |
 | Browser settings for scheduler | Low | User flagged as future item |
 
