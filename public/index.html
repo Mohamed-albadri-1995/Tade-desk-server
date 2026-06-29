@@ -1664,7 +1664,13 @@ function renderWarehouseTable(reg) {
         if (Array.isArray(v)) v = v.join(', ');
         if (typeof v === 'boolean') v = v ? '✓' : '—';
         if (v == null) v = '—';
-        if (typeof v === 'number') v = v % 1 ? v.toFixed(2) : v;
+        // Format Unix ms timestamp columns as readable ET time
+        const tsCol = c === 'lastUpdated' || c === 'capturedAt' || c === 'addedAt' || c === 'exportedAt';
+        if (tsCol && typeof v === 'number' && v > 1e12) {
+          v = new Date(v).toLocaleString('en-US', { timeZone: 'America/New_York', month:'2-digit', day:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false }) + ' ET';
+        } else if (typeof v === 'number') {
+          v = v % 1 ? v.toFixed(2) : v;
+        }
         // Color code change/score
         const tag = c.includes('change') || c.includes('Change') || c.includes('score') || c.includes('Score');
         const numV = parseFloat(v);
