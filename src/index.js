@@ -22,7 +22,7 @@ app.use('/api/warehouse', require('./routes/warehouse'));
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
 // Fallback → frontend
-app.get('*', (req, res) => {
+app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
