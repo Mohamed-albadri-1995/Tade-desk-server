@@ -33,6 +33,8 @@ router.get('/export/:date', (req, res) => {
   if (result === null) {
     return res.status(404).json({ error: 'No shortlist for that date' });
   }
+  const filename = `shortlist${req.params.date.replace(/-/g,'')}.txt`;
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.type('text/plain').send(result);
 });
 

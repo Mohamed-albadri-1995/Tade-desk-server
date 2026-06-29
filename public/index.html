@@ -1306,12 +1306,13 @@ async function removeSL(ticker) {
 
 async function exportTV() {
   if (!currentSLDate) return;
-  try {
-    const r = await fetch('/api/shortlist/export/' + currentSLDate);
-    const code = await r.text();
-    document.getElementById('export-tv-code').textContent = code;
-    document.getElementById('sl-export-box').style.display = 'block';
-  } catch(e) { console.error(e); }
+  // Trigger browser download directly
+  const a = document.createElement('a');
+  a.href = '/api/shortlist/export/' + currentSLDate;
+  a.download = 'shortlist' + currentSLDate.replace(/-/g,'') + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 function copyTV() {

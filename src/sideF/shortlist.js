@@ -55,6 +55,7 @@ function runAutoRule() {
   const now = Date.now();
   const items = eligible.map(row => ({
     ticker: row.ticker,
+    tvSymbol: row.stock?.tvSymbol ?? null,
     addedAt: now,
     method: 'auto',
     score: row._score,
@@ -92,6 +93,7 @@ function toggleTicker(ticker) {
     const now = Date.now();
     entry.items.push({
       ticker,
+      tvSymbol: row?.stock?.tvSymbol ?? null,
       addedAt: now,
       method: 'manual',
       score: row?._score ?? null,
@@ -122,12 +124,12 @@ function getAllShortlists() {
 function exportShortlist(date) {
   const entry = getShortlistEntry(date);
   if (!entry) return null;
-  const tickers = entry.items.map(i => i.ticker).join(',');
-  // Mark exported
+  // One symbol per line with exchange prefix for TradingView import
+  const lines = entry.items.map(i => i.tvSymbol || i.ticker).join('\n');
   entry.exported = true;
   entry.exportedAt = Date.now();
   saveShortlistEntry(entry);
-  return tickers;
+  return lines;
 }
 
 module.exports = { runAutoRule, toggleTicker, getTodayShortlist, getAllShortlists, exportShortlist };
