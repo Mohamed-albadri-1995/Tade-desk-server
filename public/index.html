@@ -239,13 +239,20 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .wh-table tr:last-child td { border-bottom: none; }
 .wh-table tr:hover td { background: var(--bg3); }
 /* Monitor job controls */
-.job-toggle { padding: 3px 10px; border-radius: 4px; border: none; font-size: 11px; font-weight: 700; cursor: pointer; }
+.job-toggle { padding: 5px 12px; border-radius: 4px; border: none; font-size: 11px; font-weight: 700; cursor: pointer; min-height: 30px; }
 .job-toggle.on  { background: #22c55e20; color: var(--green); border: 1px solid #22c55e40; }
 .job-toggle.off { background: #ef444415; color: var(--text3); border: 1px solid #ef444430; }
 .job-cron-display { font-family: monospace; font-size: 11px; color: #aaa; }
-.job-edit-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); font-family: monospace; font-size: 11px; padding: 3px 7px; border-radius: 4px; width: 180px; }
-.job-action-btn { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg3); color: var(--text); font-size: 10px; cursor: pointer; margin-left: 3px; }
+.job-edit-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); font-family: monospace; font-size: 11px; padding: 3px 7px; border-radius: 4px; width: 160px; }
+.job-action-btn { padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg3); color: var(--text); font-size: 10px; cursor: pointer; margin-left: 3px; min-height: 28px; }
 .job-action-btn:hover { border-color: #555; }
+.monitor-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (max-width: 600px) {
+  .monitor-hide { display: none !important; }
+  .wh-table td, .wh-table th { padding: 6px 8px; }
+  .job-edit-input { width: 120px; }
+  .settings-wrap { padding: 16px 12px; }
+}
 /* Analysis tab */
 .analysis-subtabs { display: flex; gap: 4px; padding: 16px 20px 0; border-bottom: 1px solid var(--border); }
 .analysis-subtab { padding: 8px 20px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text2); border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
@@ -613,19 +620,23 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
       <div class="settings-section">
         <div class="settings-section-title">Scheduled Jobs</div>
         <div style="font-size:11px;color:#aaa;margin-bottom:10px">Toggle enables/disables a job. Edit changes its cron schedule. Reset restores the default.</div>
+        <div class="monitor-table-wrap">
         <table class="wh-table" id="monitor-jobs-table">
-          <thead><tr><th>Job</th><th>Schedule</th><th>Enabled</th><th>Last Run</th><th>Status</th><th>Duration</th><th>Last Error</th><th></th></tr></thead>
+          <thead><tr><th>Job</th><th>Schedule</th><th>Enabled</th><th>Last Run</th><th>Status</th><th class="monitor-hide">Duration</th><th class="monitor-hide">Last Error</th><th></th></tr></thead>
           <tbody id="monitor-jobs-body"><tr><td colspan="8" style="color:#aaa">Loading...</td></tr></tbody>
         </table>
+        </div>
       </div>
 
       <div class="settings-section">
         <div class="settings-section-title">Last Pipeline Run</div>
         <div id="monitor-pipeline-meta" style="color:#aaa;font-size:12px;margin-bottom:10px;"></div>
+        <div class="monitor-table-wrap">
         <table class="wh-table" id="monitor-stage-table">
-          <thead><tr><th>Stage</th><th>Status</th><th>Detail</th><th>Duration</th><th>Error</th></tr></thead>
+          <thead><tr><th>Stage</th><th>Status</th><th>Detail</th><th class="monitor-hide">Duration</th><th class="monitor-hide">Error</th></tr></thead>
           <tbody id="monitor-stage-body"><tr><td colspan="5" style="color:#aaa">No scan run yet</td></tr></tbody>
         </table>
+        </div>
         <div id="monitor-r0-summary" style="margin-top:10px;font-size:12px;color:#aaa;"></div>
       </div>
 
@@ -941,7 +952,7 @@ async function loadMonitor() {
         if (s.skipped) detail = `skipped: ${s.reason || ''}`;
         const dur = s.duration != null ? (s.duration/1000).toFixed(2)+'s' : '—';
         const err = s.error ? `<span style="color:var(--red);font-size:11px">${esc(s.error)}</span>` : '—';
-        return `<tr><td>${label}</td><td>${status}</td><td style="font-size:11px;color:#aaa">${detail || '—'}</td><td style="color:#aaa">${dur}</td><td>${err}</td></tr>`;
+        return `<tr><td>${label}</td><td>${status}</td><td style="font-size:11px;color:#aaa">${detail || '—'}</td><td class="monitor-hide" style="color:#aaa">${dur}</td><td class="monitor-hide">${err}</td></tr>`;
       }).join('');
       bodyEl.innerHTML = rows || '<tr><td colspan="5" style="color:#aaa">—</td></tr>';
 
@@ -983,8 +994,8 @@ function renderMonitorJobs() {
       <td><button class="job-toggle ${toggleClass}" onclick="monitorToggle('${j.jobId}')">${toggleLabel}</button></td>
       <td style="color:#aaa;font-size:11px">${lastRun}</td>
       <td>${status}</td>
-      <td style="color:#aaa;font-size:11px">${dur}</td>
-      <td style="font-size:11px">${err}</td>
+      <td class="monitor-hide" style="color:#aaa;font-size:11px">${dur}</td>
+      <td class="monitor-hide" style="font-size:11px">${err}</td>
       <td style="white-space:nowrap">
         <button class="job-action-btn" onclick="monitorEditStart('${j.jobId}','${j.schedule}')">Edit</button>
         ${!isDefault ? `<button class="job-action-btn" onclick="monitorReset('${j.jobId}')">Reset</button>` : ''}
