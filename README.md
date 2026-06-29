@@ -190,3 +190,19 @@ All times Eastern (America/New_York), Mon–Fri unless noted.
 | `/api/backup/restore` | POST | Restore from GitHub (`{ date? }`) |
 | `/api/monitor` | GET | Pipeline report + scheduler job statuses |
 | `/health` | GET | `{ ok: true, ts }` |
+
+---
+
+## Development Roadmap
+
+See `Implementation_Roadmap__Trade_Desk_Rebuild (1).md` for full task lists and design notes.
+
+| Phase | Goal | Status |
+|---|---|---|
+| 1 — Test & Debug | Validate all systems end-to-end on live market days | 🔄 Current |
+| 2 — Scoring Engine | Wire `_score` into pipeline; show grade badge on cards; unblock auto-shortlist | ⏳ Next |
+| 3 — Setup Detection & Alerts | Named condition checklists; scan shortlist after each scan; push notification on match | ⏳ |
+| 4 — Dynamic Sizing Engine | Position size = `base_risk × regime_multiplier × grade_multiplier` | ⏳ |
+| 5 — Broker Integration | Alpaca order submission from UI; positions tab; pre-trade checklist gate | ⏳ |
+| 6 — Trade Journal | Full entry + exit snapshot: conditions, market state, checklist, P&L in R-multiples | ⏳ |
+| 7 — Grading Engine | Auto-grade trades A+/A/B/C/D from checklist alignment, score, and regime | ⏳ |

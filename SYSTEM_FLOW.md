@@ -646,6 +646,22 @@ A dropdown selects the provider. The UI updates the key placeholder, hint, and m
 
 The server auto-detects provider from the key prefix — no separate provider field is stored in DB.
 
+### Monitor tab
+
+Calls `GET /api/monitor` on open. Two sections:
+
+**Scheduled Jobs** — renders as cards showing job name, cron expression, last run time, last status (OK / Error / Not run), and duration. Each card has:
+- **ON / OFF toggle** — calls `POST /api/monitor/jobs/:jobId/toggle`
+- **Edit button** — opens a modal with:
+  - Day-of-week toggle buttons (Mon–Sun, tap to select/deselect)
+  - Hour and Minute inputs (supports `9`, `9,13,16`, `*/5` etc.)
+  - Live cron expression preview + human-readable description
+  - Save / Cancel / Reset Default buttons
+  - Tap outside modal to dismiss
+- Changes call `POST /api/monitor/jobs/:jobId/schedule` or `POST /api/monitor/jobs/:jobId/reset`
+
+**Last Pipeline Run** — stage-by-stage table from `lastReport`: status, row count, duration, any error per stage.
+
 ---
 
 ## 11. Backup System
@@ -687,7 +703,23 @@ The server auto-detects provider from the key prefix — no separate provider fi
 | Side H — R3 EOD Capture (Alpaca) | ✅ Complete |
 | Settings System | ✅ Complete — includes AI provider dropdown + live test buttons |
 | Backup / Restore | ✅ Complete |
-| Monitor Tab | ✅ Complete |
+| Monitor Tab | ✅ Complete — card layout, modal schedule editor |
 | AI Insights (Anthropic / OpenRouter / Gemini) | ✅ Complete |
 | Shortlist Auto-Rule | ⏸ Wired but produces nothing — scoring disconnected |
-| Scheduler browser controls | ✅ Complete — toggle, edit cron, reset from Monitor tab |
+| Scheduler browser controls | ✅ Complete — toggle, modal editor with day/hour/minute inputs |
+
+---
+
+## 13. Development Roadmap
+
+See `Implementation_Roadmap__Trade_Desk_Rebuild (1).md` for full task lists and design notes.
+
+| Phase | Goal | Depends on |
+|---|---|---|
+| **1 — Test & Debug** | Validate all existing systems on live market days | — |
+| **2 — Scoring Engine** | Wire `_score` into pipeline, show grade badge on cards | Phase 1 |
+| **3 — Setup Detection & Alerts** | Named condition checklists, scan shortlist, push notification on match | Phase 2 |
+| **4 — Dynamic Sizing Engine** | Size = `base_risk × regime_multiplier × grade_multiplier` | Phase 3 |
+| **5 — Broker Integration** | Alpaca order submission, positions tab, pre-trade checklist gate | Phase 4 |
+| **6 — Trade Journal** | Full entry + exit snapshot: conditions, market state, P&L in R | Phase 5 |
+| **7 — Grading Engine** | Auto-grade trades A+/A/B/C/D from checklist + score + regime | Phase 6 |
