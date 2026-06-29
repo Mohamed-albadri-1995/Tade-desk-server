@@ -51,9 +51,7 @@ on every server restart.
 | `context.*` | Side D | Regime, sector bias, hot status (see Section 3.4) |
 | `news` | Side C | `{ finnhub: [...], yahoo: [...], edgar: [...], fetchedAt: ISO }` or `null` |
 | `catalyst` | Side C | `{ label, sentiment, color }` or `null` |
-| `_score` | Side E | Always `null` — scoring engine disconnected pending redesign |
-| `score_at_entry` | future | Reserved, always `null` currently |
-| `score_model_ts` | future | Reserved, always `null` currently |
+| `_score` | Side E | Always `null` — scoring engine disconnected pending design review |
 
 **Key behaviors:**
 - `upsertRows(rows)`: if ticker exists → merge (preserves `id`, `firstSeen`,
@@ -150,10 +148,10 @@ Fetches SPY, QQQ, IWM, DIA, VIX + 15 sector ETFs (XLK, XLF, XLI, XLY, XLE,
 XLV, XLC, XLU, XLB, XLRE, XLP, SMH, IBB, XRT, XTN) via TradingView symbol mode.
 
 Computes and stores in memory as `latestSnapshot`:
-- Short-term bias (bullish/neutral/bearish) from SPY/QQQ/IWM daily moves
+- Short-term bias (bullish/neutral/bearish) from SPY/QQQ/IWM daily moves + VIX
 - Mid-term stage from moving average relationships and Bollinger Band position
-- Long-term bias from 50/200 SMA and 52-week range
-- Regime: combines all three into a slug (e.g. `UPTREND`, `CORRECTION`, `BEAR`)
+- Long-term bias from 50/200 SMA cross
+- Regime: combines all three into one of 15 slugs (see Regime section below)
 - Per-sector bias (BULLISH/NEUTRAL/BEARISH) and HOT status based on ETF score
   relative to thresholds read from the `settings` DB table
 
@@ -163,11 +161,11 @@ gets sectorData from snapshot. Adds to each row:
 
 ```
 row.context = {
-    regime,          // slug e.g. 'UPTREND'
-    regimeLabel,     // human label e.g. 'Uptrend'
-    longTerm,        // 'BULLISH' | 'NEUTRAL' | 'BEARISH'
-    midTerm,         // stage string
-    shortTerm,       // short-term bias result
+    regime,          // slug e.g. 'STRONG_UP'
+    regimeLabel,     // human label e.g. 'Strong Uptrend'
+    longTerm,        // 'BULLISH' | 'RECOVERING' | 'WEAKENING' | 'BEARISH'
+    midTerm,         // 'UPTREND' | 'PULLBACK' | 'REBOUND' | 'SIDEWAYS' | 'DOWNTREND'
+    shortTerm,       // 'BULLISH' | 'NEUTRAL' | 'BEARISH'
     secBias,         // 'BULLISH' | 'NEUTRAL' | 'BEARISH'
     secScore,        // numeric score
     secHot,          // true | false
@@ -175,6 +173,26 @@ row.context = {
     broadResolved,   // which market sector key was matched
 }
 ```
+
+**Regime slugs (15 total):**
+
+| Slug | Label | Bias |
+|---|---|---|
+| `EXTENDED_UP` | Extended Up | LONG |
+| `STRONG_UP` | Strong Uptrend | LONG |
+| `UP` | Uptrend | LONG |
+| `WEAK_UP` | Weak Uptrend | LONG |
+| `PULLBACK_BULL` | Pullback (bull intact) | LONG |
+| `RECOVERY` | Recovery | NEUTRAL |
+| `BASING` | Basing | NEUTRAL |
+| `CHOP_BULL` | Chop (bull bias) | NEUTRAL |
+| `CHOP_BEAR` | Chop (bear bias) | NEUTRAL |
+| `CORRECTION` | Correction (bull intact) | NEUTRAL |
+| `TOPPING` | Topping | SHORT |
+| `BEAR_RALLY` | Bear Rally | NEUTRAL |
+| `DOWN` | Downtrend | SHORT |
+| `STRONG_DOWN` | Strong Downtrend | SHORT |
+| `CAPITULATION` | Capitulation | SHORT |
 
 **If Side D fails:** `withContext` stays as `withDerived`. Rows have no `context`
 key. New rows in r0 get `context: {}`. Existing rows keep their previous context.
@@ -184,19 +202,19 @@ Scan continues.
 
 ### Step 4 — Side E: Scoring (ALWAYS SKIPPED)
 
-The scoring engine is intentionally disconnected pending redesign.
+The scoring engine is intentionally disconnected pending design review.
 
 ```
 withScores = withContext.map(row => ({ ...row, _score: null }))
 ```
 
-Every row gets `_score: null`. The scoring module (`src/sideE/scoring.js`) exists
-and is tested but is not called from the pipeline.
+Every row gets `_score: null`. The analysis engine (`src/sideE/`) exists for
+the Analysis tab but is not called from the scan pipeline.
 
 ### Step 5 — Write to r0
 
 ```
-r0.markAllStale()        ← every existing row: liveNow = false
+r0.markAllStale()         ← every existing row: liveNow = false
 r0.upsertRows(withScores) ← current scan rows: liveNow = true
 ```
 
@@ -312,12 +330,6 @@ error — visible in the Monitor tab.
 | Daily Backup | `30 17 * * 1-5` | 5:30 PM ET |
 | Midnight r0 Flush | `0 0 * * *` | 12:00 AM ET (every day) |
 
-**Scan frequency summary:**
-- Pre-market (7–9 AM): every 30 minutes
-- Market open hour (9–10 AM): every 5 minutes
-- Off-hours (10 AM–7 PM, 7 PM–midnight): every 3 hours
-- Overnight: no scans
-
 ---
 
 ## 5. r0 Lifecycle Through a Trading Day
@@ -362,7 +374,6 @@ error — visible in the Monitor tab.
 9:25–10:00 AM  — R2 Snapshots (every 5 min, separate job)
                  Reads latestSnapshot from memory (set by last Side D run)
                  Writes to r2_market_snapshots with (date, slot, data_json)
-                 Multiple rows per day — one per slot (no unique constraint on slot)
 
 4:05 PM ET     — R3 EOD Capture (Side H)
                  Checks R1 has rows for today — if not, skips with logged reason
@@ -415,10 +426,7 @@ Multiple snapshots per day. Captures the full `latestSnapshot` object
 Rows accumulate — no deletion. Used for analysis: "what was the market doing
 during the open?"
 
-If Side D did not run before 9:25 AM, `latestSnapshot` is null and R2 capture
-logs nothing.
-
-### R3A (Target Entry) / R3B (Alternative Entry) — Trade Levels (DB)
+### R3A / R3B — Trade Levels (DB)
 
 **Tables:** `r3a`, `r3b` | **Primary key:** `(date, ticker)`
 **Data source:** Alpaca Market Data API v2 (1-min and daily bars)
@@ -433,22 +441,19 @@ logs nothing.
 - `hh_a / ll_a` = highest high / lowest low of all bars from 9:37 → 16:00 ET
 - `hh_b / ll_b` = highest high / lowest low of all bars from 9:40 → 16:00 ET
 
-**ATR14:** computed from the 14 most recent completed trading days before today (today excluded).
+**ATR14:** computed from the 14 most recent completed trading days before today.
 
 **R values:**
 - `up_r_a = (hh_a − entry_price_a) / atr14`
 - `down_r_a = (entry_price_a − ll_a) / atr14`
 - Same formula for B
 
-**Pre-flight check:** if R1 has no rows for today, R3 capture is skipped and the skip reason
-is reported to the Monitor tab job registry.
-
 **Files:** `src/alpaca/client.js`, `src/sideH/capture.js`
 
 ### R4A / R4B — Combined Analysis (computed)
 
 Not stored. Computed on-demand by joining `r1_frozen` + `r3a`/`r3b` for a given date.
-Only has data for dates where both R1 and R3 exist.
+Only has data for dates where both R1 and R3 exist. Used as training data for Side E.
 
 ### Shortlist (DB)
 
@@ -458,40 +463,67 @@ One entry per day, stores all tickers added that day as a JSON array.
 Each item: `{ ticker, tvSymbol, addedAt, method, price, change, sector, score }`.
 
 `method` is `'auto'` (from 9:35 AM rule) or `'manual'` (from star button or shortlist tab).
-`exported` flag is set when TradingView export is downloaded.
-
-Full history kept. Never deleted automatically.
 
 ---
 
-## 7. The Shortlist Flow
+## 7. Side E — Analysis Engine
 
-### Auto-Rule (9:35 AM ET)
+**Files:** `src/sideE/train.js`, `src/sideE/insights.js`, `src/routes/analysis.js`
 
-1. Checks if a shortlist entry already exists for today — if yes, exits (no duplicate)
-2. Reads `shortlistMinScore` and `shortlistTopN` from DB settings
-3. Calls `r0.getTodayRows()` — filters to `_score >= minScore`, sorts by score desc,
-   takes top N
-4. Because scoring is disconnected, `_score` is null on all rows — no rows pass the filter
-5. Auto-rule creates nothing until scoring is reconnected
+The analysis engine trains on historical R4A data and produces feature importance
+rankings and AI-generated insights. It is **completely disconnected from the scan
+pipeline** — it runs only when triggered from the Analysis tab.
 
-### Manual Toggle (star button or shortlist tab)
+### Training Data (R4A)
 
-`POST /api/shortlist/toggle/:ticker` with optional `{ date }` in body:
-- Scanner tab star button: no date in body → uses today
-- Shortlist tab Remove button: sends `currentSLDate` → uses the date being viewed
+Joins `r1_frozen` + `r3a` for a configurable number of past trading days.
+Win condition: `up_r_a >= successThreshold` (default 1.5R).
 
-`toggleTicker(ticker, date)`:
-- If ticker IS in the entry: removes it, sets `r0.setInShortlist(ticker, false)`
-- If ticker is NOT in entry: adds it with current price/sector/score from r0,
-  sets `r0.setInShortlist(ticker, true)`
+### Features (38 total)
 
-### TradingView Export
+**Critical numerical (custom bucket boundaries):**
+- `rvol` — [0, 2, 5, 10, 20, ∞]
+- `change`, `gapPct` — [−∞, −10, −5, −2, 0, 2, 5, 10, ∞]
+- `monthRangePos` — [0, 20, 40, 60, 80, 100]
+- `secScore` — [−100, −40, −20, 0, 20, 40, 100]
+- `pmAdrRatio` — [0, 0.5, 1, 2, 3, ∞]
+- `adrPct` — [0, 5, 10, 15, 20, 30, ∞]
 
-`GET /api/shortlist/export/:date` → returns a `.txt` file for download.
-One line per ticker: uses `item.tvSymbol` if available, else `item.ticker`.
-Format TradingView accepts: `NASDAQ:AAPL` (one per line).
-Sets `exported = true` in the DB entry.
+**Quantile numerical (6 equal-width buckets):**
+price936, vwap, sma5, ema9, ema13, ema20, ema50, atr, mcap, floatShares,
+pmRange, prevClose, monthHigh, monthLow, up_r_a, down_r_a, screenerCount,
+pmVolume, volume, shortlistScore
+
+**Categorical:**
+regime, secBias, sector, longTerm, midTerm, shortTerm, catalyst, screenerKeys,
+secHot, themes, dayOfWeek
+
+### Feature Importance Formula
+
+```
+importance(f) = Σ_b [ (count_b / totalRows) × (winRate_b − globalWinRate)² ]
+```
+
+Normalized so all importances sum to 100%.
+
+### AI Insights
+
+After training, the engine optionally calls an AI provider to generate a
+3–5 bullet point summary of the top 5 statistical insights.
+
+**Provider detection (from stored key prefix):**
+- `sk-ant-` → Anthropic API (`api.anthropic.com/v1/messages`)
+- `AIza` → Google Gemini (`generativelanguage.googleapis.com/v1beta/models/...`)
+- anything else → OpenRouter (`openrouter.ai/api/v1/chat/completions`)
+
+### Analysis API
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/analysis/train` | Train model on R4A data, generate insights |
+| `GET /api/analysis/report` | Full report: features, globalWinRate, totalRows, insights |
+| `GET /api/analysis/insights?ai=true` | Get/regenerate insights (add `&regenerate=true` to force) |
+| `GET /api/analysis/feature/:name` | Bucket breakdown with win rate and lift for one feature |
 
 ---
 
@@ -510,18 +542,22 @@ Sets `exported = true` in the DB entry.
 | `sectorBearishThreshold` | -20 | Side D sectors — score below = BEARISH |
 | `shortlistMinScore` | 70 | Side F auto-rule — minimum score |
 | `shortlistTopN` | 5 | Side F auto-rule — max picks |
-| `finnhubApiKey` | '' | Side C news — Finnhub API key |
-| `githubBackupToken` | '' | Backup — GitHub personal access token |
-| `alpacaApiKey` | '' | Side H R3 capture — Alpaca API key |
-| `alpacaApiSecret` | '' | Side H R3 capture — Alpaca secret key |
+| `finnhubApiKey` | '' | Side C news |
+| `githubBackupToken` | '' | Backup |
+| `alpacaApiKey` | '' | Side H R3 capture |
+| `alpacaApiSecret` | '' | Side H R3 capture |
+| `analysisEntryType` | `A` | Side E — entry type (A or B) |
+| `analysisDirectionalBias` | `Up` | Side E — directional filter |
+| `analysisSuccessThreshold` | `1.5` | Side E — win R-multiple |
+| `analysisTrainingWindow` | `90` | Side E — training days |
+| `aiApiKey` | '' | Side E — AI insights key |
+| `aiModel` | `anthropic/claude-haiku-4-5` | Side E — AI model ID |
 
-`finnhubApiKey`, `githubBackupToken`, `alpacaApiKey`, and `alpacaApiSecret` are masked
-in `GET /api/settings` (returns `'set'` or `''`). Never returned as actual values.
+`finnhubApiKey`, `githubBackupToken`, `alpacaApiKey`, `alpacaApiSecret`, and `aiApiKey`
+are masked in `GET /api/settings` (returns `'set'` or `''`).
 
 `hotState` (which sectors are currently HOT) lives in memory in `src/sideD/sectors.js`.
-It accumulates across scans. It resets on server restart or via `POST /api/settings/reset-hot`.
-Changing threshold settings in the UI does NOT retroactively change HOT status —
-it takes effect on the next scan.
+It resets on server restart or via `POST /api/settings/reset-hot`.
 
 ---
 
@@ -542,8 +578,13 @@ it takes effect on the next scan.
 | `/api/shortlist/run-rule` | POST | Manually trigger shortlist auto-rule. |
 | `/api/warehouse/registers` | GET | List of available registers and their dates. |
 | `/api/warehouse/data/:register` | GET | Data for a register. Query: `?date=YYYY-MM-DD` |
+| `/api/analysis/report` | GET | Full analysis report (features, insights, stats). |
+| `/api/analysis/train` | POST | Train model on R4A data. Body: `{ overrides? }` |
+| `/api/analysis/insights` | GET | Get insights. Query: `?regenerate=true&ai=true` |
+| `/api/analysis/feature/:name` | GET | Bucket breakdown for one feature with lift. |
 | `/api/settings` | GET | All settings (sensitive keys masked). |
-| `/api/settings` | POST | Save one or more settings with validation. |
+| `/api/settings` | POST | Validate and save settings. Body: `{ key: value, ... }` |
+| `/api/settings/test/:service` | GET | Live API connectivity test (`finnhub`/`github`/`alpaca`/`ai`). |
 | `/api/settings/reset-hot` | POST | Clear hotState in memory. |
 | `/api/backup/status` | GET | Last backup time, token configured, repo name. |
 | `/api/backup/push` | POST | Run backup now → push to GitHub. |
@@ -571,7 +612,7 @@ The browser does NO business logic. It only:
 | Market | `GET /api/market/snapshot` | On tab open and after scan |
 | Shortlist | `GET /api/shortlist/today` + `GET /api/shortlist/all` | On tab open |
 | Warehouse | `GET /api/warehouse/registers` + `GET /api/warehouse/data/:register` | On tab open + date change |
-| Analysis | (placeholder) | — |
+| Analysis | `GET /api/analysis/report` | On tab open |
 | Settings | `GET /api/settings` + `GET /api/backup/status` | On tab open |
 | Monitor | `GET /api/monitor` | On tab open + Refresh button |
 
@@ -579,33 +620,31 @@ The browser does NO business logic. It only:
 
 1. Browser calls `GET /api/registry/today`
 2. Server returns array of r0 rows (sorted: live first)
-3. Browser stores in `r0Data` array (in-memory, lives until next load)
-4. `buildCard(row)` renders HTML for each row using fields directly from the row:
+3. Browser stores in `r0Data` array
+4. `buildCard(row)` renders HTML for each row:
    - `row.stock.price`, `row.stock.change`, etc. — from Side A + B
    - `row.context.regime`, `row.context.secBias`, etc. — from Side D
    - `row.catalyst` — from Side C
-   - `row.news` — from Side C (shown inline if populated)
-   - `row.inShortlist` — star shown filled/empty, card gets class `in-shortlist`
-   - `row.liveNow` — if `true`: green `●Live` dot. If `false`: grey `●Stale` dot,
-     amber border tint, 85% opacity. Both are CSS class + template — no logic in browser.
-   - Clicking the ticker name opens a TradingView daily chart modal (same widget as Market tab).
-     `openChart(ticker)` resolves the symbol, sets `interval: 'D'`, dark theme.
-     `range` is intentionally omitted — passing it causes `tv.js` to auto-select an interval
-     that fits the range, overriding `interval`.
+   - `row.inShortlist` — star shown filled/empty
+   - `row.liveNow` — green `●Live` dot or grey `●Stale` dot with amber border
 
-### When a scan runs from the UI
+### Analysis tab
 
-1. User clicks "Run Scan"
-2. Browser: `POST /api/scan/run` — waits for response (pipeline runs all steps)
-3. On response: calls `loadRegistry()` and `loadMarket()` in parallel
-4. Cards re-render with fresh data including news already populated
+Calls `GET /api/analysis/report` on open. Shows:
+- Model stats (total rows, global win rate, trained date)
+- Active config (entry type, bias, threshold, training window)
+- AI-generated insights (with Regenerate + AI Insights buttons)
+- Factor importance ranked list (top 20 with bar chart)
+- Bucket analysis dropdown (select a feature → table with win rate and lift per bucket)
 
-### "Load News" button
+### Settings — AI Provider
 
-Appears on a card only if `news` is null or all news arrays are empty.
-After Side C runs in the pipeline, live tickers will have news populated,
-so this button will not appear for them on the next render.
-The button is a fallback / manual retry.
+A dropdown selects the provider. The UI updates the key placeholder, hint, and model preset list:
+- **OpenRouter** — `sk-or-v1-` key prefix, `provider/model` format
+- **Claude (Anthropic)** — `sk-ant-` key prefix, `claude-*` model format
+- **Gemini (Google)** — `AIza` key prefix, `gemini-*` model format
+
+The server auto-detects provider from the key prefix — no separate provider field is stored in DB.
 
 ---
 
@@ -633,12 +672,21 @@ The button is a fallback / manual retry.
 
 ---
 
-## 12. What Is Not Yet Built
+## 12. Current Status
 
 | Item | Status |
 |---|---|
-| Side E scoring engine | Module exists and tested. Disconnected. `_score` is always null. Will be designed from scratch. |
-| R3A / R3B capture | ✅ Implemented — Alpaca-based, 4:05 PM EOD job, tickers from R1 |
-| Stale card visual | ✅ Implemented — grey Stale dot, amber border, 85% opacity when `liveNow: false` |
-| Analysis tab content | Empty placeholder tabs. |
-| Shortlist auto-rule | Wired up but produces nothing until scoring is connected. |
+| Side A — TradingView Scanner | ✅ Complete |
+| Side B — Derived Calculations | ✅ Complete |
+| Side C — News & Catalyst | ✅ Complete |
+| Side D — Market Context & Regime | ✅ Complete (15 regime labels) |
+| Side E — Analysis Engine (report only) | ✅ Complete — disconnected from pipeline |
+| Side E — Scoring (pipeline integration) | ⏸ Disconnected — `_score` always null |
+| Side F — Shortlist | ✅ Complete |
+| Side G — Stale Ticker Refresh | ✅ Complete |
+| Side H — R3 EOD Capture (Alpaca) | ✅ Complete |
+| Settings System | ✅ Complete — includes AI provider dropdown + live test buttons |
+| Backup / Restore | ✅ Complete |
+| Monitor Tab | ✅ Complete |
+| AI Insights (Anthropic / OpenRouter / Gemini) | ✅ Complete |
+| Shortlist Auto-Rule | ⏸ Wired but produces nothing — scoring disconnected |
