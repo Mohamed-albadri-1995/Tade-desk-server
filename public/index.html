@@ -92,6 +92,9 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .star-btn { background: none; border: none; cursor: pointer; font-size: 18px; padding: 0; line-height: 1; }
 .live-dot { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--green); }
 .live-dot::before { content: '●'; font-size: 8px; }
+.stale-dot { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text3); }
+.stale-dot::before { content: '●'; font-size: 8px; }
+.card.stale { border-color: #78350f40; opacity: 0.85; }
 
 /* badges row */
 .card-badges { padding: 8px 14px; display: flex; gap: 5px; flex-wrap: wrap; background: var(--bg3); border-bottom: 1px solid var(--border); }
@@ -1129,13 +1132,13 @@ function buildCard(row) {
     : '';
 
   return `
-<div class="card${row.inShortlist?' in-shortlist':''}" id="card-${row.ticker}">
+<div class="card${row.inShortlist?' in-shortlist':''}${!row.liveNow?' stale':''}" id="card-${row.ticker}">
   <div class="card-header">
     <div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
         <span class="card-ticker">${row.ticker}</span>
         <span class="card-change ${change>=0?'pos':'neg'}">${changeSign}${change.toFixed(2)}%</span>
-        ${row.liveNow ? '<span class="live-dot">Live</span>' : ''}
+        ${row.liveNow ? '<span class="live-dot">Live</span>' : '<span class="stale-dot">Stale</span>'}
       </div>
       <div style="font-size:11px;color:var(--text2)">${esc(s.sector||'')} · ${esc(s.industry||'')}</div>
     </div>
