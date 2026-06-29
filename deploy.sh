@@ -13,7 +13,7 @@ git checkout claude/test-9d4txv
 git reset --hard origin/claude/test-9d4txv
 
 echo "[3/5] Installing dependencies..."
-npm install --allow-scripts
+npm install
 
 echo "[4/5] Starting server..."
 pm2 start src/index.js --name trade-desk
