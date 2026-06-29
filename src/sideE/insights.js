@@ -57,46 +57,80 @@ function generateRuleBasedInsights(model) {
   return insights.slice(0, 10);
 }
 
-function callOpenAI(prompt, apiKey, model) {
-  return new Promise((resolve, reject) => {
+function callAI(prompt, apiKey, model) {
+  const isAnthropic = apiKey.startsWith('sk-ant-');
+
+  if (isAnthropic) {
+    // Anthropic API
     const body = JSON.stringify({
-      model: model || 'gpt-4o-mini',
+      model: model || 'claude-haiku-4-5',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      };
+      const req = https.request(options, res => {
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) return reject(new Error(parsed.error.message));
+            resolve(parsed.content?.[0]?.text || '');
+          } catch (e) { reject(e); }
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
+      req.write(body);
+      req.end();
+    });
+  } else {
+    // OpenRouter API
+    const body = JSON.stringify({
+      model: model || 'anthropic/claude-haiku-4-5',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1000,
-      temperature: 0.7,
     });
-
-    const options = {
-      hostname: 'openrouter.ai',
-      path: '/api/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
-        'HTTP-Referer': 'https://github.com/Mohamed-albadri-1995/Tade-desk-server',
-      },
-    };
-
-    const req = https.request(options, res => {
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.error) return reject(new Error(parsed.error.message));
-          resolve(parsed.choices?.[0]?.message?.content || '');
-        } catch (e) {
-          reject(e);
-        }
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'openrouter.ai',
+        path: '/api/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          'HTTP-Referer': 'https://github.com/Mohamed-albadri-1995/Tade-desk-server',
+        },
+      };
+      const req = https.request(options, res => {
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) return reject(new Error(parsed.error.message));
+            resolve(parsed.choices?.[0]?.message?.content || '');
+          } catch (e) { reject(e); }
+        });
       });
+      req.on('error', reject);
+      req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
+      req.write(body);
+      req.end();
     });
-
-    req.on('error', reject);
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('OpenAI timeout')); });
-    req.write(body);
-    req.end();
-  });
+  }
 }
 
 async function generateInsights(model, forceAI = false) {
@@ -115,7 +149,7 @@ async function generateInsights(model, forceAI = false) {
       const top5 = ruleInsights.slice(0, 5).map(i => `- ${i.text}`).join('\n');
       const gwr = ((model.backtest?.globalWinRate || globalWinRate) * 100).toFixed(1);
       const prompt = `You are analyzing a stock momentum scanning system. The global win rate is ${gwr}%. The top 5 statistical insights from a ${model.config.trainingWindow}-day backtest are:\n${top5}\n\nIn 3-5 bullet points, summarize the key trading conditions this model favors and what traders should watch for. Be specific and actionable. Start directly with the bullets.`;
-      aiText = await callOpenAI(prompt, aiKey, aiModel);
+      aiText = await callAI(prompt, aiKey, aiModel);
     } catch (err) {
       console.warn('[Insights] AI failed:', err.message);
     }

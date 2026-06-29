@@ -178,30 +178,35 @@ router.get('/test/:service', async (req, res) => {
 
     } else if (service === 'ai') {
       const key = getSetting('aiApiKey');
-      const model = getSetting('aiModel') || 'anthropic/claude-haiku-4-5';
       if (!key) return res.json({ ok: false, message: 'No key set' });
-      const body = JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
-        max_tokens: 10,
-      });
-      const r = await httpPost({
-        hostname: 'openrouter.ai',
-        path: '/api/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${key}`,
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-          'HTTP-Referer': 'https://github.com/Mohamed-albadri-1995/Tade-desk-server',
-        },
-      }, body);
-      const d = JSON.parse(r.body);
-      if (r.status === 200 && d.choices?.[0]) {
-        const reply = d.choices[0].message?.content?.trim();
-        res.json({ ok: true, message: `Connected — Model: ${model} — Reply: "${reply}"` });
+      const isAnthropic = key.startsWith('sk-ant-');
+      const model = getSetting('aiModel') || (isAnthropic ? 'claude-haiku-4-5' : 'anthropic/claude-haiku-4-5');
+
+      let r, d;
+      if (isAnthropic) {
+        const body = JSON.stringify({ model, max_tokens: 10, messages: [{ role: 'user', content: 'Reply with exactly: OK' }] });
+        r = await httpPost({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        }, body);
+        d = JSON.parse(r.body);
+        if (r.status === 200 && d.content?.[0]) {
+          res.json({ ok: true, message: `Connected — Anthropic API — Model: ${model} — Reply: "${d.content[0].text?.trim()}"` });
+        } else {
+          res.json({ ok: false, message: `Error ${r.status}: ${d.error?.message || r.body.slice(0, 150)}` });
+        }
       } else {
-        res.json({ ok: false, message: `Error ${r.status}: ${d.error?.message || r.body.slice(0, 150)}` });
+        const body = JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with exactly: OK' }], max_tokens: 10 });
+        r = await httpPost({
+          hostname: 'openrouter.ai', path: '/api/v1/chat/completions', method: 'POST',
+          headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), 'HTTP-Referer': 'https://github.com/Mohamed-albadri-1995/Tade-desk-server' },
+        }, body);
+        d = JSON.parse(r.body);
+        if (r.status === 200 && d.choices?.[0]) {
+          res.json({ ok: true, message: `Connected — OpenRouter — Model: ${model} — Reply: "${d.choices[0].message?.content?.trim()}"` });
+        } else {
+          res.json({ ok: false, message: `Error ${r.status}: ${d.error?.message || r.body.slice(0, 150)}` });
+        }
       }
 
     } else {
