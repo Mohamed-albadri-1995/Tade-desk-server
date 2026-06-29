@@ -8,6 +8,7 @@ const { buildMarketSnapshot, enrichR0WithContext } = require('./sideD/engine');
 const r0 = require('./r0/registry');
 const { syncShortlistToR0 } = require('./sideF/shortlist');
 const { refreshStaleInR0 } = require('./sideG/staleFetch');
+const { toETDate } = require('./utils/time');
 
 const scanStatus = {
   lastRun: null,
@@ -61,6 +62,15 @@ async function runFullScan() {
 
   try {
     console.log('[Pipeline] Starting full scan...');
+
+    // Day-boundary guard: if r0 has any rows from a previous date, flush before scanning.
+    // This is the primary cleanup mechanism — more reliable than the midnight cron alone.
+    const today = toETDate(Date.now());
+    const hasPreviousDay = r0.getAll().some(row => row.date !== today);
+    if (hasPreviousDay) {
+      console.log('[Pipeline] Day boundary detected — flushing r0');
+      r0.clearAll();
+    }
 
     // Side A: TradingView Scanners (fatal)
     let merged;
