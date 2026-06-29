@@ -2,6 +2,7 @@ const https = require('https');
 const db = require('../db');
 
 const BACKUP_REPO = 'Mohamed-albadri-1995/trade-desk-data';
+const BACKUP_BRANCH = 'fresh';
 const BACKUP_VERSION = '1';
 
 function getGithubToken() {
@@ -44,7 +45,7 @@ function githubRequest(method, path, token, body) {
 }
 
 async function getFileSha(token, filePath) {
-  const res = await githubRequest('GET', `/repos/${BACKUP_REPO}/contents/${filePath}`, token);
+  const res = await githubRequest('GET', `/repos/${BACKUP_REPO}/contents/${filePath}?ref=${BACKUP_BRANCH}`, token);
   if (res.status === 200 && res.body.sha) return res.body.sha;
   return null;
 }
@@ -54,6 +55,7 @@ async function pushFile(token, filePath, content, message) {
   const body = {
     message,
     content: Buffer.from(content).toString('base64'),
+    branch: BACKUP_BRANCH,
     ...(sha ? { sha } : {}),
   };
   const res = await githubRequest('PUT', `/repos/${BACKUP_REPO}/contents/${filePath}`, token, body);
@@ -64,7 +66,7 @@ async function pushFile(token, filePath, content, message) {
 }
 
 async function fetchFile(token, filePath) {
-  const res = await githubRequest('GET', `/repos/${BACKUP_REPO}/contents/${filePath}`, token);
+  const res = await githubRequest('GET', `/repos/${BACKUP_REPO}/contents/${filePath}?ref=${BACKUP_BRANCH}`, token);
   if (res.status !== 200) throw new Error(`GitHub fetch failed (${res.status}): ${res.body.message || ''}`);
   return Buffer.from(res.body.content, 'base64').toString('utf8');
 }
