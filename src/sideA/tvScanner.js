@@ -149,7 +149,8 @@ function mapTVRow(rawTV) {
     return i !== undefined ? d[i] : null;
   };
 
-  const rawTicker = get('ticker-view') || '';
+  // TV now returns ticker-view as a rich object; use rawTV.s (e.g. "NASDAQ:SHPH") instead
+  const rawTicker = (typeof rawTV.s === 'string' ? rawTV.s : '') || '';
   const ticker = rawTicker.includes(':') ? rawTicker.split(':')[1] : rawTicker;
 
   const intraday_rvol = get('relative_volume_intraday|5');
