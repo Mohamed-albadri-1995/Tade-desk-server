@@ -6,6 +6,8 @@ cd ~/Tade-desk-server
 
 echo "[1/6] Stopping all PM2 processes..."
 pm2 delete all 2>/dev/null || true
+# Free port 3001 in case scorer process lingered after PM2 delete
+lsof -t -i:3001 | xargs -r kill -9 2>/dev/null || true
 
 echo "[2/6] Pulling latest code..."
 git fetch origin
