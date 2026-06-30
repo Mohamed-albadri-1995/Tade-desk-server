@@ -99,6 +99,7 @@ const defaults = [
   ['sectorBearishThreshold', '-20'],
   ['shortlistMinScore', '70'],
   ['shortlistTopN', '5'],
+  ['scorerEntryTime', '9:40'],
   ['finnhubApiKey', ''],
   ['githubBackupToken', ''],
   ['alpacaApiKey', ''],

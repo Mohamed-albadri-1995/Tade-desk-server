@@ -77,6 +77,39 @@ class LiveScorer:
         self._bucket_cache[path] = df
         return df
 
+    def get_model_info(self) -> dict:
+        """Return factor compositions (top feature loadings) for all trained bases."""
+        info = {}
+        for base_id in ['B1', 'B2', 'B3', 'B4', 'B5', 'B6']:
+            main_path = os.path.join(self.output_root, base_id, 'main', 'metadata.pkl')
+            if not os.path.exists(main_path):
+                continue
+            meta = self._load_meta(main_path)
+            pca = meta['pca']
+            feature_names = meta['feature_names']
+            k = meta['k_factors']
+            factors = []
+            for i in range(k):
+                loadings = pca.components_[i]
+                top = sorted(
+                    [{'feature': feature_names[j], 'loading': round(float(loadings[j]), 4)}
+                     for j in range(len(feature_names))],
+                    key=lambda x: abs(x['loading']),
+                    reverse=True
+                )[:6]
+                factors.append({
+                    'factor': i + 1,
+                    'explained_variance_pct': round(float(pca.explained_variance_ratio_[i]) * 100, 1)
+                        if hasattr(pca, 'explained_variance_ratio_') else None,
+                    'top_features': top,
+                })
+            info[base_id] = {
+                'factors': factors,
+                'k_factors': k,
+                'total_samples': meta['total_samples'],
+            }
+        return info
+
     def is_ready(self) -> bool:
         """Returns True if at least the B6/main metadata exists."""
         path = os.path.join(self.output_root, 'B6', 'main', 'metadata.pkl')

@@ -392,6 +392,37 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .settings-test-result.loading { background: var(--bg3); border: 1px solid var(--border); color: var(--text3); display: block; }
 @media (max-width: 600px) { .settings-grid { grid-template-columns: 1fr; } }
 
+/* ── SCORE BREAKDOWN ── */
+.score-breakdown { display:none; background:var(--bg4); border-top:1px solid var(--border); padding:10px 14px; font-size:11px; }
+.score-breakdown.open { display:block; }
+.sb-row { display:flex; justify-content:space-between; padding:2px 0; }
+.sb-label { color:var(--text2); }
+.sb-val { font-weight:600; color:var(--text); }
+.sb-factors { margin-top:8px; }
+.sb-factor-row { display:flex; gap:6px; align-items:center; padding:3px 0; border-bottom:1px solid #1e2233; }
+.sb-factor-row:last-child { border-bottom:none; }
+.sb-fnum { font-size:10px; color:var(--text3); min-width:50px; }
+.sb-fbar-wrap { flex:1; height:6px; background:var(--bg3); border-radius:3px; overflow:hidden; }
+.sb-fbar { height:100%; border-radius:3px; transition:width .3s; }
+.sb-fscore { min-width:36px; text-align:right; font-weight:700; font-size:11px; }
+
+/* ── AN UPLOAD ── */
+.an-upload-row { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px; }
+.an-upload-row label { display:block; font-size:11px; font-weight:600; color:var(--text3); margin-bottom:4px; text-transform:uppercase; letter-spacing:.05em; }
+
+/* ── FACTOR PANEL ── */
+.factor-base-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+.factor-base-btn { padding:4px 12px; border-radius:5px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer; font-family:inherit; }
+.factor-base-btn.active { background:var(--accent); border-color:var(--accent); color:#000; font-weight:700; }
+.factor-card { background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:8px; }
+.factor-card-title { font-size:11px; font-weight:700; color:var(--text2); margin-bottom:8px; }
+.feature-row { display:flex; gap:8px; align-items:center; padding:3px 0; }
+.feature-name { font-size:11px; color:var(--text2); min-width:130px; }
+.feature-bar-wrap { flex:1; height:5px; background:var(--bg4); border-radius:3px; overflow:hidden; }
+.feature-bar { height:100%; border-radius:3px; }
+.feature-loading { font-size:11px; color:var(--text3); font-style:italic; }
+.feature-val { min-width:40px; text-align:right; font-size:11px; font-weight:600; color:var(--text3); }
+
 /* ── RESPONSIVE ── */
 @media (max-width: 900px) {
   .market-grid { grid-template-columns: repeat(3, 1fr); }
@@ -593,6 +624,56 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         </div>
       </div>
 
+      <!-- Upload External Training Data -->
+      <div class="an-card">
+        <div class="an-card-title">Upload External Training Data</div>
+        <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
+          Upload your own R4A / R4B CSV files from prior trading days to feed into the model.
+          <strong>Append</strong> adds new rows (skipping header). <strong>Replace</strong> overwrites the file.
+        </p>
+        <div class="an-upload-row">
+          <div>
+            <label>R4A CSV</label>
+            <input type="file" accept=".csv" id="an-upload-r4a" class="settings-input" style="padding:4px 8px;cursor:pointer">
+          </div>
+          <select class="filter-select" id="an-upload-mode-r4a">
+            <option value="append">Append</option>
+            <option value="replace">Replace</option>
+          </select>
+          <button class="an-btn" onclick="anUploadCSV('r4a')">Upload R4A</button>
+        </div>
+        <div class="an-upload-row">
+          <div>
+            <label>R4B CSV</label>
+            <input type="file" accept=".csv" id="an-upload-r4b" class="settings-input" style="padding:4px 8px;cursor:pointer">
+          </div>
+          <select class="filter-select" id="an-upload-mode-r4b">
+            <option value="append">Append</option>
+            <option value="replace">Replace</option>
+          </select>
+          <button class="an-btn" onclick="anUploadCSV('r4b')">Upload R4B</button>
+        </div>
+        <div id="an-upload-status" style="font-size:12px;color:var(--text3);margin-top:4px"></div>
+      </div>
+
+      <!-- Model Factors -->
+      <div class="an-card">
+        <div class="an-card-title">Model Factors (PCA Explainability)</div>
+        <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
+          Shows which features drive each factor in the trained model. Select a base to inspect.
+        </p>
+        <div class="factor-base-row" id="an-base-btns">
+          <button class="factor-base-btn active" onclick="anSelectBase('B6',this)">B6 · 9:40 Any</button>
+          <button class="factor-base-btn" onclick="anSelectBase('B4',this)">B4 · 9:40 Long</button>
+          <button class="factor-base-btn" onclick="anSelectBase('B5',this)">B5 · 9:40 Short</button>
+          <button class="factor-base-btn" onclick="anSelectBase('B3',this)">B3 · 9:37 Any</button>
+          <button class="factor-base-btn" onclick="anSelectBase('B1',this)">B1 · 9:37 Long</button>
+          <button class="factor-base-btn" onclick="anSelectBase('B2',this)">B2 · 9:37 Short</button>
+        </div>
+        <div id="an-factor-panel"><span class="feature-loading">Click "Refresh Status" then select a base to load factors.</span></div>
+        <button class="an-btn" style="margin-top:10px" onclick="anModelInfo()">Load / Refresh Factors</button>
+      </div>
+
     </div>
   </div>
 
@@ -698,6 +779,23 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <div id="test-github" class="settings-test-result"></div>
       </div>
 
+
+      <!-- Scorer -->
+      <div class="settings-section">
+        <div class="settings-section-title">Scorer</div>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label>Entry Time</label>
+            <div class="settings-hint">Which entry slot drives the model — 9:37 uses R4A bases (B1–B3), 9:40 uses R4B bases (B4–B6).</div>
+            <select class="settings-input" id="s-scorerEntryTime">
+              <option value="9:40">9:40 AM (default — R4B)</option>
+              <option value="9:37">9:37 AM — R4A</option>
+            </select>
+          </div>
+        </div>
+        <button class="settings-save-btn" onclick="saveSettings(['scorerEntryTime'], this)">Save Scorer</button>
+        <span class="settings-msg" id="msg-scorer"></span>
+      </div>
 
       <!-- Backup & Restore -->
       <div class="settings-section">
@@ -928,6 +1026,92 @@ function anExportCSV(register) {
 }
 
 
+function toggleScoreBreakdown(ticker) {
+  const el = document.getElementById('sb-' + ticker);
+  if (el) el.classList.toggle('open');
+}
+
+let _modelInfoCache = null;
+let _selectedBase = 'B6';
+
+function anSelectBase(base, btn) {
+  _selectedBase = base;
+  document.querySelectorAll('.factor-base-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderFactorPanel();
+}
+
+function renderFactorPanel() {
+  const panel = document.getElementById('an-factor-panel');
+  if (!_modelInfoCache) {
+    panel.innerHTML = '<span class="feature-loading">No data loaded — click "Load / Refresh Factors".</span>';
+    return;
+  }
+  const base = _modelInfoCache[_selectedBase];
+  if (!base) {
+    panel.innerHTML = `<span class="feature-loading">Base ${_selectedBase} not found in trained model.</span>`;
+    return;
+  }
+  const maxLoading = Math.max(...base.factors.flatMap(f => f.top_features.map(x => Math.abs(x.loading))));
+  panel.innerHTML = `<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Samples: ${base.total_samples} · ${base.k_factors} factors</div>` +
+    base.factors.map(f => {
+      const rows = f.top_features.map(x => {
+        const pct = maxLoading > 0 ? Math.abs(x.loading) / maxLoading * 100 : 0;
+        const color = x.loading >= 0 ? 'var(--accent)' : 'var(--red)';
+        return `<div class="feature-row">
+          <span class="feature-name">${esc(x.feature)}</span>
+          <div class="feature-bar-wrap"><div class="feature-bar" style="width:${pct.toFixed(1)}%;background:${color}"></div></div>
+          <span class="feature-val">${x.loading >= 0 ? '+' : ''}${x.loading.toFixed(3)}</span>
+        </div>`;
+      }).join('');
+      const varPct = f.explained_variance_pct != null ? ` · ${f.explained_variance_pct}% var` : '';
+      return `<div class="factor-card">
+        <div class="factor-card-title">Factor ${f.factor}${varPct}</div>
+        ${rows}
+      </div>`;
+    }).join('');
+}
+
+async function anModelInfo() {
+  const panel = document.getElementById('an-factor-panel');
+  panel.innerHTML = '<span class="feature-loading">Loading model factors…</span>';
+  try {
+    const r = await fetch('/api/analysis/model-info');
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Failed');
+    _modelInfoCache = d.bases;
+    renderFactorPanel();
+  } catch (err) {
+    panel.innerHTML = `<span class="feature-loading" style="color:var(--red)">Error: ${esc(err.message)}</span>`;
+  }
+}
+
+async function anUploadCSV(register) {
+  const input = document.getElementById('an-upload-' + register);
+  const mode = document.getElementById('an-upload-mode-' + register).value;
+  const statusEl = document.getElementById('an-upload-status');
+  if (!input.files || !input.files[0]) {
+    statusEl.textContent = 'Pick a CSV file first.';
+    statusEl.style.color = 'var(--red)';
+    return;
+  }
+  statusEl.textContent = `Uploading ${register.toUpperCase()}…`;
+  statusEl.style.color = 'var(--text3)';
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  try {
+    const r = await fetch(`/api/analysis/upload-csv?register=${register}&mode=${mode}`, { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Upload failed');
+    statusEl.textContent = `${register.toUpperCase()} uploaded (${mode}) — ${d.rows} data rows total`;
+    statusEl.style.color = 'var(--green)';
+    input.value = '';
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
 // ═══════════════════════════════════════════════════
 // SETTINGS
 // ═══════════════════════════════════════════════════
@@ -939,6 +1123,7 @@ const MSG_IDS = {
   finnhubApiKey: 'msg-api', githubBackupToken: 'msg-api',
   alpacaApiKey: 'msg-api', alpacaApiSecret: 'msg-api',
   aiApiKey: 'msg-ai', aiModel: 'msg-ai',
+  scorerEntryTime: 'msg-scorer',
 };
 
 async function resetHotState(btn) {
@@ -1657,7 +1842,7 @@ function buildCard(row) {
       <div style="font-size:11px;color:var(--text2)">${esc(s.sector||'')} · ${esc(s.industry||'')}</div>
     </div>
     <div class="card-right">
-      <div class="card-score ${score != null ? scoreClass : ''}" style="font-size:13px">${score != null ? score : '—'}</div>
+      <div class="card-score ${score != null ? scoreClass : ''}" style="font-size:13px;cursor:${score != null ? 'pointer' : 'default'}" onclick="${score != null ? `toggleScoreBreakdown('${row.ticker}')` : ''}" title="${score != null ? 'Click for breakdown' : ''}">${score != null ? score : '—'}</div>
       <button class="star-btn" style="${starStyle}" onclick="toggleShortlist('${row.ticker}',this)">${starIcon}</button>
     </div>
   </div>
@@ -1744,6 +1929,28 @@ function buildCard(row) {
     </div>
 
   </div>
+
+  ${(() => {
+    const sd = row._scoreDetails;
+    if (!sd) return '';
+    const factorRows = (sd.bucketScores || []).map((bs, i) => {
+      const pct = Math.max(0, Math.min(100, bs));
+      const color = bs >= 70 ? 'var(--green)' : bs >= 40 ? 'var(--orange)' : 'var(--red)';
+      return `<div class="sb-factor-row">
+        <span class="sb-fnum">Factor ${i+1}</span>
+        <div class="sb-fbar-wrap"><div class="sb-fbar" style="width:${pct}%;background:${color}"></div></div>
+        <span class="sb-fscore" style="color:${color}">${bs.toFixed(0)}</span>
+      </div>`;
+    }).join('');
+    return `<div class="score-breakdown" id="sb-${row.ticker}">
+      <div class="sb-row"><span class="sb-label">Table used</span><span class="sb-val" style="font-size:10px">${sd.table || '—'}</span></div>
+      <div class="sb-row"><span class="sb-label">Bias</span><span class="sb-val">${sd.bias || '—'}</span></div>
+      <div class="sb-row"><span class="sb-label">Entry time</span><span class="sb-val">${sd.entryTime || '—'}</span></div>
+      <div class="sb-row"><span class="sb-label">Samples</span><span class="sb-val">${sd.samples != null ? sd.samples : '—'}</span></div>
+      <div class="sb-row"><span class="sb-label">Confidence</span><span class="sb-val">${sd.confidence != null ? sd.confidence + '%' : '—'}</span></div>
+      ${factorRows ? `<div class="sb-factors" style="margin-top:6px"><div style="font-size:10px;color:var(--text3);margin-bottom:4px">Per-factor bucket scores</div>${factorRows}</div>` : ''}
+    </div>`;
+  })()}
 </div>`;
 }
 

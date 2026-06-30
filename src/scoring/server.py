@@ -42,6 +42,17 @@ def score():
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
+@app.route('/model-info', methods=['GET'])
+def model_info():
+    if not scorer.is_ready():
+        return jsonify({'ok': False, 'error': 'Model not trained'}), 503
+    try:
+        info = scorer.get_model_info()
+        return jsonify({'ok': True, 'bases': info})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 @app.route('/train', methods=['POST'])
 def train():
     """Trigger retraining from already-exported R4A/R4B CSVs."""

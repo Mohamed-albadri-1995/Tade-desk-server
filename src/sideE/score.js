@@ -1,7 +1,13 @@
 const axios = require('axios');
+const db = require('../db');
 
 const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
 const SCORER_TIMEOUT = 5000;
+
+function getEntryTime() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'scorerEntryTime'").get();
+  return row?.value || '9:40';
+}
 
 // Maps r0 bias field → LiveScorer bias string
 function resolveCardBias(row) {
@@ -92,8 +98,22 @@ async function scoreRow(row) {
   try {
     const bias = resolveCardBias(row);
     const card = buildCard(row);
-    const resp = await axios.post(`${SCORER_URL}/score`, { card, bias }, { timeout: SCORER_TIMEOUT });
-    if (resp.data?.ok) return Math.round(resp.data.final_score);
+    const entry_time = getEntryTime();
+    const resp = await axios.post(`${SCORER_URL}/score`, { card, bias, entry_time }, { timeout: SCORER_TIMEOUT });
+    if (resp.data?.ok) {
+      return {
+        _score: Math.round(resp.data.final_score),
+        _scoreDetails: {
+          table: resp.data.used_table,
+          confidence: Math.round((resp.data.confidence || 0) * 100),
+          samples: resp.data.total_samples_used,
+          factorScores: resp.data.factor_scores,
+          bucketScores: resp.data.bucket_scores,
+          entryTime: entry_time,
+          bias,
+        },
+      };
+    }
     return null;
   } catch {
     return null;
@@ -102,12 +122,12 @@ async function scoreRow(row) {
 
 async function scoreAllRows(rows) {
   if (!(await checkScorer())) {
-    return rows.map(row => ({ ...row, _score: null }));
+    return rows.map(row => ({ ...row, _score: null, _scoreDetails: null }));
   }
-  const scored = await Promise.all(rows.map(async row => ({
-    ...row,
-    _score: await scoreRow(row),
-  })));
+  const scored = await Promise.all(rows.map(async row => {
+    const result = await scoreRow(row);
+    return result ? { ...row, ...result } : { ...row, _score: null, _scoreDetails: null };
+  }));
   return scored;
 }
 
