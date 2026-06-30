@@ -425,8 +425,7 @@ body {
           <button onclick="closeCondEditor()" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;line-height:1">✕</button>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
-          Define the checklist conditions for this setup. These appear on each trade card in the journal so you can mark whether each condition was met. Over time, the analysis engine grades each condition (A+/A/B/C) based on how much it improves trade expectancy when aligned.
-          <br><span style="color:#f59e0b">Mandatory</span> = signal is blocked if this condition isn't met (future: also reduces position size).
+          Define the analysis conditions for this setup. These appear as a checklist on each journal trade card — you mark whether each was present at entry. Over time, the analysis engine grades each condition (A+/A/B/C) based on how much it improves trade expectancy when aligned.
         </div>
         <div id="cond-list" style="margin-bottom:12px"></div>
         <button onclick="addConditionRow()" style="background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:5px 14px;font-size:11px;color:var(--text2);font-family:inherit;cursor:pointer">+ Add Condition</button>
@@ -1126,7 +1125,7 @@ function renderCondList(conditions) {
     const keyOpts = CONDITION_KEYS.map(k =>
       `<option value="${k.key}" ${c.key === k.key ? 'selected' : ''}>${k.label}</option>`
     ).join('');
-    return `<div style="display:grid;grid-template-columns:1fr 1fr auto auto auto;gap:6px;align-items:center;margin-bottom:6px;padding:6px;background:var(--bg3);border-radius:6px;" data-idx="${i}">
+    return `<div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:6px;align-items:center;margin-bottom:6px;padding:6px;background:var(--bg3);border-radius:6px;" data-idx="${i}">
       <select data-field="key" onchange="updateCondRow(${i},this)" style="background:var(--bg4);border:1px solid var(--border);border-radius:4px;padding:4px 6px;color:var(--text);font-family:inherit;font-size:11px">
         ${keyOpts}
       </select>
@@ -1134,9 +1133,6 @@ function renderCondList(conditions) {
       <select data-field="section" onchange="updateCondRow(${i},this)" style="background:var(--bg4);border:1px solid var(--border);border-radius:4px;padding:4px 6px;color:var(--text);font-family:inherit;font-size:11px">
         ${['Technical','Volume','Context','Setup'].map(s => `<option ${c.section===s?'selected':''}>${s}</option>`).join('')}
       </select>
-      <label style="display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:11px;color:${c.mandatory?'#f59e0b':'var(--text3)'};cursor:pointer">
-        <input type="checkbox" ${c.mandatory?'checked':''} onchange="updateCondRow(${i},this,'mandatory')" style="cursor:pointer"> Mandatory
-      </label>
       <button onclick="removeCondRow(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;line-height:1" title="Remove">✕</button>
     </div>`;
   }).join('');
@@ -1146,13 +1142,7 @@ function updateCondRow(idx, el, field) {
   const condList = document.getElementById('cond-list');
   if (!condList._conditions) return;
   const f = field || el.dataset.field;
-  condList._conditions[idx][f] = el.type === 'checkbox' ? el.checked : el.value;
-  // Update mandatory label color inline
-  if (f === 'mandatory') {
-    const row = el.closest('[data-idx]');
-    const lbl = row.querySelector('label');
-    if (lbl) lbl.style.color = el.checked ? '#f59e0b' : 'var(--text3)';
-  }
+  condList._conditions[idx][f] = el.value;
   // Auto-fill label from key if label is empty
   if (f === 'key' && !condList._conditions[idx].label) {
     const def = CONDITION_KEYS.find(k => k.key === el.value);
@@ -1164,7 +1154,7 @@ function addConditionRow() {
   const condList = document.getElementById('cond-list');
   const existing = condList._conditions || [];
   const def = CONDITION_KEYS[0];
-  existing.push({ key: def.key, label: def.label, section: 'Technical', mandatory: false });
+  existing.push({ key: def.key, label: def.label, section: 'Technical' });
   renderCondList(existing);
 }
 
