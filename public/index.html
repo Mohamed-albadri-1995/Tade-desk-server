@@ -1842,7 +1842,10 @@ function buildCard(row) {
       <div style="font-size:11px;color:var(--text2)">${esc(s.sector||'')} · ${esc(s.industry||'')}</div>
     </div>
     <div class="card-right">
-      <div class="card-score ${score != null ? scoreClass : ''}" style="font-size:13px;cursor:${score != null ? 'pointer' : 'default'}" onclick="${score != null ? `toggleScoreBreakdown('${row.ticker}')` : ''}" title="${score != null ? 'Click for breakdown' : ''}">${score != null ? score : '—'}</div>
+      <div onclick="${score != null ? `toggleScoreBreakdown('${row.ticker}')` : ''}" style="cursor:${score != null ? 'pointer' : 'default'};text-align:right">
+        <div class="card-score ${score != null ? scoreClass : ''}" style="font-size:13px">${score != null ? score : '—'}</div>
+        ${row._scoreDetails ? `<div style="font-size:9px;color:var(--text3);margin-top:2px">${row._scoreDetails.table || ''}</div>` : ''}
+      </div>
       <button class="star-btn" style="${starStyle}" onclick="toggleShortlist('${row.ticker}',this)">${starIcon}</button>
     </div>
   </div>
@@ -2007,29 +2010,14 @@ async function cycleBias(ticker, btn) {
     const row = r0Data.find(x => x.ticker === ticker);
     if (row) {
       row.bias = d.bias;
+      if (d._score !== undefined) row._score = d._score;
+      if (d._scoreDetails !== undefined) row._scoreDetails = d._scoreDetails;
       const card = document.getElementById('card-' + ticker);
       if (card) {
         const newCard = document.createElement('div');
         newCard.innerHTML = buildCard(row);
         card.replaceWith(newCard.firstElementChild);
       }
-      // Re-fetch after 2s to pick up the re-scored value
-      setTimeout(async () => {
-        try {
-          const r2 = await fetch('/api/registry/today');
-          const data = await r2.json();
-          const updated = (data.rows || data).find(x => x.ticker === ticker);
-          if (updated) {
-            Object.assign(row, updated);
-            const card2 = document.getElementById('card-' + ticker);
-            if (card2) {
-              const nc = document.createElement('div');
-              nc.innerHTML = buildCard(row);
-              card2.replaceWith(nc.firstElementChild);
-            }
-          }
-        } catch(e) { /* silent */ }
-      }, 2000);
     }
   } catch(e) { console.error(e); }
 }

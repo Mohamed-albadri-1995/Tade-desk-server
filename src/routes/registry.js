@@ -21,7 +21,7 @@ router.get('/all', (req, res) => {
 });
 
 // PUT /api/registry/:ticker/bias — set bias (auto|long|short) or cycle if no body
-router.put('/:ticker/bias', express.json(), (req, res) => {
+router.put('/:ticker/bias', express.json(), async (req, res) => {
   const { ticker } = req.params;
   const row = r0.getRow(ticker);
   if (!row) return res.status(404).json({ ok: false, error: 'Ticker not in r0' });
@@ -37,12 +37,15 @@ router.put('/:ticker/bias', express.json(), (req, res) => {
 
   r0.updateBias(ticker, bias);
 
-  // Re-score immediately with the new bias so the card reflects the change
-  scoreRow(r0.getRow(ticker)).then(result => {
+  // Await re-score so the response includes the updated score
+  try {
+    const result = await scoreRow(r0.getRow(ticker));
     if (result) r0.upsertRows([{ ...r0.getRow(ticker), ...result }]);
-  }).catch(() => {});
-
-  res.json({ ok: true, ticker, bias });
+    const updated = r0.getRow(ticker);
+    return res.json({ ok: true, ticker, bias, _score: updated._score, _scoreDetails: updated._scoreDetails });
+  } catch {
+    return res.json({ ok: true, ticker, bias });
+  }
 });
 
 module.exports = router;
