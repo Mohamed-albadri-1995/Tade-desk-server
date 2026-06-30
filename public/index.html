@@ -2013,6 +2013,23 @@ async function cycleBias(ticker, btn) {
         newCard.innerHTML = buildCard(row);
         card.replaceWith(newCard.firstElementChild);
       }
+      // Re-fetch after 2s to pick up the re-scored value
+      setTimeout(async () => {
+        try {
+          const r2 = await fetch('/api/registry/today');
+          const data = await r2.json();
+          const updated = (data.rows || data).find(x => x.ticker === ticker);
+          if (updated) {
+            Object.assign(row, updated);
+            const card2 = document.getElementById('card-' + ticker);
+            if (card2) {
+              const nc = document.createElement('div');
+              nc.innerHTML = buildCard(row);
+              card2.replaceWith(nc.firstElementChild);
+            }
+          }
+        } catch(e) { /* silent */ }
+      }, 2000);
     }
   } catch(e) { console.error(e); }
 }

@@ -1,5 +1,6 @@
 const express = require('express');
 const r0 = require('../r0/registry');
+const { scoreRow } = require('../sideE/score');
 const VALID_BIASES = ['auto', 'long', 'short'];
 
 const router = express.Router();
@@ -35,6 +36,12 @@ router.put('/:ticker/bias', express.json(), (req, res) => {
   }
 
   r0.updateBias(ticker, bias);
+
+  // Re-score immediately with the new bias so the card reflects the change
+  scoreRow(r0.getRow(ticker)).then(result => {
+    if (result) r0.upsertRows([{ ...r0.getRow(ticker), ...result }]);
+  }).catch(() => {});
+
   res.json({ ok: true, ticker, bias });
 });
 
