@@ -716,7 +716,7 @@ function renderCenterCard(evt) {
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
         <span class="center-ticker">${e.ticker}</span>
         ${dirBadge}
-        <span style="font-size:11px;color:var(--text3);margin-left:auto">${new Date(e.ts).toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+        <span style="font-size:11px;color:var(--text3);margin-left:auto">${new Date(e.ts ?? e.firedAt).toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
       </div>
       <div class="center-msg">${pnl}</div>
       <div class="center-grid">

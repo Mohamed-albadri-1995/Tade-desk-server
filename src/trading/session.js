@@ -118,7 +118,7 @@ async function start() {
     .map(r => ({ ...r, config: JSON.parse(r.config || '{}') }));
   barPoller.start(sessionId, tickers, activeSetups, (signal, sid) => {
     sideB.onIndicatorFire(signal, sid, (enrichedSignal) => {
-      center.broadcast({ type: 'signal', ...enrichedSignal });
+      center.processSignal({ ...enrichedSignal, sessionId: sid });
     });
   });
 
