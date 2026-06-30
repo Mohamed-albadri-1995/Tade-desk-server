@@ -1983,12 +1983,12 @@ function buildCard(row) {
         <div class="card-score ${score != null ? scoreClass : ''}" style="font-size:13px">${score != null ? score : '—'}</div>
         ${row._scoreDetails ? (() => {
           const sd = row._scoreDetails;
-          const base = sd.base || '';
+          const base = sd.base || '?';
           const tableStr = sd.tableType === 'sub' ? `sub_${sd.subRegimeUsed}` : 'main';
           const label = sd.tableType === 'sub'
-            ? `${base} · sub: ${sd.subRegimeUsed}`
-            : `${base} · main`;
-          return `<div style="font-size:9px;color:var(--accent);margin-top:2px;cursor:pointer;text-decoration:underline dotted;white-space:nowrap" onclick="event.stopPropagation();openTableInspector('${base}','${tableStr}')">${label}</div>`;
+            ? `${base} sub:${sd.subRegimeUsed || '?'}`
+            : `${base} main`;
+          return `<div style="font-size:9px;color:var(--accent);margin-top:2px;cursor:pointer;text-decoration:underline dotted;white-space:nowrap;letter-spacing:.02em" onclick="event.stopPropagation();openTableInspector('${base}','${tableStr}')" title="Click to inspect table">${label}</div>`;
         })() : ''}
       </div>
       <button class="star-btn" style="${starStyle}" onclick="toggleShortlist('${row.ticker}',this)">${starIcon}</button>

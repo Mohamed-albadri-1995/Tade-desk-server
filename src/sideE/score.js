@@ -110,11 +110,11 @@ async function scoreRow(row) {
         _score: Math.round(resp.data.final_score),
         _scoreDetails: {
           table: resp.data.used_table,
-          base: resp.data.used_base,
-          tableType: resp.data.used_table_type,    // 'main' or 'sub'
-          cardRegime: resp.data.card_regime,        // regime the stock has
-          subRegimeUsed: resp.data.sub_regime_used, // regime used for sub-table (null if main)
-          fallbackReason: resp.data.fallback_reason,// why main was used instead of sub
+          base: resp.data.used_base || (resp.data.used_table || '').split('_')[0] || null,
+          tableType: resp.data.used_table_type || ((resp.data.used_table || '').includes('_sub_') ? 'sub' : 'main'),
+          cardRegime: resp.data.card_regime,
+          subRegimeUsed: resp.data.sub_regime_used || ((resp.data.used_table || '').split('_sub_')[1] || null),
+          fallbackReason: resp.data.fallback_reason,
           confidence: Math.round((resp.data.confidence || 0) * 100),
           samples: resp.data.total_samples_used,
           factorScores: resp.data.factor_scores,
