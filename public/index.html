@@ -566,11 +566,11 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         </p>
         <div class="an-field">
           <label>R4A CSV path (on server)</label>
-          <input class="an-path-input" id="an-r4a-path" placeholder="/home/ec2-user/Tade-desk-server/tmp/r4a.csv">
+          <input class="an-path-input" id="an-r4a-path" placeholder="/home/ec2-user/Tade-desk-server/tmp/r4a.csv" value="/home/ec2-user/Tade-desk-server/tmp/r4a.csv">
         </div>
         <div class="an-field">
           <label>R4B CSV path (on server)</label>
-          <input class="an-path-input" id="an-r4b-path" placeholder="/home/ec2-user/Tade-desk-server/tmp/r4b.csv">
+          <input class="an-path-input" id="an-r4b-path" placeholder="/home/ec2-user/Tade-desk-server/tmp/r4b.csv" value="/home/ec2-user/Tade-desk-server/tmp/r4b.csv">
         </div>
         <div style="display:flex;gap:10px;align-items:center;margin-top:4px">
           <button class="an-btn primary" id="an-train-btn" onclick="anTrain()">&#9654; Train Model</button>
@@ -916,6 +916,10 @@ function anExportCSV(register) {
       if (!d.ok) throw new Error(d.error || 'Export failed');
       statusEl.textContent = `${register.toUpperCase()} exported → ${d.path || 'tmp/'}`;
       statusEl.style.color = 'var(--green)';
+      if (d.path) {
+        const inputId = register.toLowerCase() === 'r4a' ? 'an-r4a-path' : 'an-r4b-path';
+        document.getElementById(inputId).value = d.path;
+      }
     })
     .catch(err => {
       statusEl.textContent = 'Error: ' + err.message;
