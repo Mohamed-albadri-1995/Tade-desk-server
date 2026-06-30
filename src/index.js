@@ -24,6 +24,7 @@ app.use('/api/backup', require('./routes/backup'));
 app.use('/api/monitor', require('./routes/monitor'));
 app.use('/api/analysis', require('./routes/analysis'));
 app.use('/api/trading', require('./routes/trading'));
+app.use('/api/journal', require('./routes/journal'));
 
 // Health
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
