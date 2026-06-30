@@ -659,8 +659,8 @@ function jnl_renderTimeTab(trades) {
   var dowRows=jnl_bucketStats(closed,jnl_dowKey,JNL_DOW);
   var priceRows=jnl_bucketStats(closed,jnl_priceKey,JNL_PRICE_BUCKETS.map(function(b){return b[2];}));
   var sizeRows=jnl_bucketStats(closed,jnl_sizeKey,JNL_SIZE_BUCKETS.map(function(b){return b[2];}));
-  var html=jnl_barTable('Hourly — ET entry time',hourRows)+jnl_barTable('Day of week',dowRows)+
-           jnl_barTable('Entry price',priceRows)+jnl_barTable('Position size',sizeRows);
+  var html=jnl_barTable('Entry time — ET (when you entered)',hourRows)+jnl_barTable('Day of week',dowRows)+
+           jnl_barTable('Entry price',priceRows)+jnl_barTable('Position size (shares)',sizeRows);
   var m=jnl_accountMetrics(closed);
   if (m.holdWin!=null||m.holdLoss!=null) {
     var verdict=m.holdWin!=null&&m.holdLoss!=null
@@ -668,7 +668,7 @@ function jnl_renderTimeTab(trades) {
                             :'<span style="color:#22c55e">Winners held longer than losers — healthy trade management.</span>'
       :'';
     html+='<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px 12px">'+
-      '<div style="color:#475569;font-size:9px;font-weight:700;letter-spacing:.08em;margin-bottom:6px">HOLD TIME</div>'+
+      '<div style="color:#475569;font-size:9px;font-weight:700;letter-spacing:.08em;margin-bottom:6px">HOLD TIME (entry → exit duration)</div>'+
       '<div style="font-size:11px;color:#94a3b8">Avg winner <b style="color:#22c55e">'+jnl_fmtDur(m.holdWin)+
       '</b> · avg loser <b style="color:#ef4444">'+jnl_fmtDur(m.holdLoss)+'</b></div>'+
       '<div style="font-size:10px;margin-top:4px">'+verdict+'</div></div>';
