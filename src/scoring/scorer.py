@@ -21,7 +21,7 @@ CATEGORICAL_COLS = [
 ]
 
 NUMERIC_COLS = [
-    '_score', 'price', 'prevClose', 'open', 'change', 'gapPct',
+    'price', 'prevClose', 'open', 'change', 'gapPct',
     'vwap', 'sma5', 'ema9', 'ema13', 'ema20', 'ema50', 'rvol',
     'atr', 'adrPct', 'dayHigh', 'dayLow', 'monthHigh', 'monthLow',
     'monthRangePos', 'mcap', 'floatShares', 'shortFloat', 'pmHigh',

@@ -50,7 +50,6 @@ function buildCard(row) {
     inShortlist:   row.inShortlist ? 'true' : 'false',
     bias:          normalizedBias,
     // numerics
-    _score:        row._score,
     price:         s.price,
     prevClose:     s.prevClose,
     open:          s.open,
