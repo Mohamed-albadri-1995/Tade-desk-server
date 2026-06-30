@@ -86,6 +86,24 @@ db.exec(`
     backtest TEXT NOT NULL,
     insights TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS r4a_train (
+    date TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    data TEXT NOT NULL,
+    source TEXT NOT NULL,
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (date, ticker)
+  );
+
+  CREATE TABLE IF NOT EXISTS r4b_train (
+    date TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    data TEXT NOT NULL,
+    source TEXT NOT NULL,
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (date, ticker)
+  );
 `);
 
 // Default settings

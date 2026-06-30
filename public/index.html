@@ -610,21 +610,16 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 
       <!-- Train Model -->
       <div class="an-card">
-        <div class="an-card-title">Train Model (Re-run Processor)</div>
+        <div class="an-card-title">Train Model</div>
         <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
-          Provide the absolute paths on the server to your R4A and R4B CSV files, then click Train.
-          The Python scorer service must be running.
+          Training pulls <strong>all accumulated rows</strong> from the database (uploads + daily EOD captures, deduped by date+ticker). The Python scorer service must be running.
         </p>
-        <div class="an-field">
-          <label>R4A CSV path (on server)</label>
-          <input class="an-path-input" id="an-r4a-path" placeholder="/home/ec2-user/Tade-desk-server/tmp/r4a.csv" value="/home/ec2-user/Tade-desk-server/tmp/r4a.csv">
-        </div>
-        <div class="an-field">
-          <label>R4B CSV path (on server)</label>
-          <input class="an-path-input" id="an-r4b-path" placeholder="/home/ec2-user/Tade-desk-server/tmp/r4b.csv" value="/home/ec2-user/Tade-desk-server/tmp/r4b.csv">
+        <div id="an-training-summary" style="font-size:12px;color:var(--text2);margin-bottom:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
+          <span style="color:var(--text3)">Loading accumulated data…</span>
         </div>
         <div style="display:flex;gap:10px;align-items:center;margin-top:4px">
           <button class="an-btn primary" id="an-train-btn" onclick="anTrain()">&#9654; Train Model</button>
+          <button class="an-btn" onclick="anLoadTrainingSummary()">Refresh Counts</button>
           <span id="an-train-status" style="font-size:12px;color:var(--text3)"></span>
         </div>
         <div id="an-train-log" class="an-log" style="display:none"></div>
@@ -1004,15 +999,14 @@ function anCheckStatus() {
       document.getElementById('an-svc-status').innerHTML = '<span class="an-pill down">Offline</span>';
       document.getElementById('an-model-ready').innerHTML = '<span class="an-pill down">—</span>';
     });
+  // Always refresh accumulated training counts when the tab opens.
+  if (typeof anLoadTrainingSummary === 'function') anLoadTrainingSummary();
 }
 
 function anTrain() {
   const btn = document.getElementById('an-train-btn');
   const statusEl = document.getElementById('an-train-status');
   const logEl = document.getElementById('an-train-log');
-  const r4a = document.getElementById('an-r4a-path').value.trim();
-  const r4b = document.getElementById('an-r4b-path').value.trim();
-  if (!r4a || !r4b) { statusEl.textContent = 'Enter both CSV paths first.'; statusEl.style.color = 'var(--red)'; return; }
 
   btn.disabled = true;
   btn.textContent = 'Training…';
@@ -1023,14 +1017,22 @@ function anTrain() {
   fetch('/api/analysis/train', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ r4a, r4b }),
+    body: JSON.stringify({}),
   })
     .then(r => r.json())
     .then(d => {
       if (!d.ok) throw new Error(d.error || 'Training failed');
-      statusEl.textContent = d.message || 'Training complete.';
+      const summary = (d.r4aCount != null && d.r4bCount != null)
+        ? ` — trained on R4A=${d.r4aCount}, R4B=${d.r4bCount} rows`
+        : '';
+      statusEl.textContent = (d.message || 'Training complete.') + summary;
       statusEl.style.color = 'var(--green)';
       anCheckStatus();
+      // Force-refresh the cached model info + sample counts so the panel
+      // reflects the new training result without a manual reload.
+      _modelInfoCache = null;
+      if (typeof anModelInfo === 'function') anModelInfo();
+      if (typeof anLoadTrainingSummary === 'function') anLoadTrainingSummary();
     })
     .catch(err => {
       statusEl.textContent = 'Error: ' + err.message;
@@ -1044,21 +1046,38 @@ function anTrain() {
     });
 }
 
+async function anLoadTrainingSummary() {
+  const el = document.getElementById('an-training-summary');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/analysis/training-summary');
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Failed');
+    const fmtDates = arr => !arr.length ? '<span style="color:var(--text3)">none</span>'
+      : arr.length <= 6 ? arr.join(', ')
+      : `${arr.length} days (${arr[0]} … ${arr[arr.length-1]})`;
+    el.innerHTML =
+      `<div><strong>R4A:</strong> ${d.r4a.rows} rows · dates: ${fmtDates(d.r4a.dates)}</div>` +
+      `<div style="margin-top:4px"><strong>R4B:</strong> ${d.r4b.rows} rows · dates: ${fmtDates(d.r4b.dates)}</div>`;
+  } catch (err) {
+    el.innerHTML = '<span style="color:var(--red)">Error: ' + err.message + '</span>';
+  }
+}
+
 function anExportCSV(register) {
   const date = document.getElementById('an-export-date').value;
   const statusEl = document.getElementById('an-export-status');
   if (!date) { statusEl.textContent = 'Pick a date first.'; return; }
   statusEl.textContent = `Exporting ${register.toUpperCase()}…`;
+  // Saves a snapshot CSV to tmp/exports/ on the server for record-keeping.
+  // Training uses the persistent database, not this file — so exporting is
+  // safe and never touches accumulated training data.
   fetch(`/api/warehouse/export/${register}/${date}?save=true`)
     .then(r => r.json())
     .then(d => {
       if (!d.ok) throw new Error(d.error || 'Export failed');
-      statusEl.textContent = `${register.toUpperCase()} exported → ${d.path || 'tmp/'}`;
+      statusEl.textContent = `${register.toUpperCase()} exported → ${d.path || 'tmp/exports/'}`;
       statusEl.style.color = 'var(--green)';
-      if (d.path) {
-        const inputId = register.toLowerCase() === 'r4a' ? 'an-r4a-path' : 'an-r4b-path';
-        document.getElementById(inputId).value = d.path;
-      }
     })
     .catch(err => {
       statusEl.textContent = 'Error: ' + err.message;
@@ -1306,9 +1325,12 @@ async function anUploadCSV(register) {
     const r = await fetch(`/api/analysis/upload-csv?register=${register}&mode=${mode}`, { method: 'POST', body: fd });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'Upload failed');
-    statusEl.textContent = `${register.toUpperCase()} uploaded (${mode}) — ${d.rows} data rows total`;
+    const skippedNote = d.skipped > 0 ? ` (${d.skipped} skipped: missing date/ticker)` : '';
+    statusEl.textContent =
+      `${register.toUpperCase()} uploaded (${mode}) — ${d.inserted} new rows from this file, ${d.rows} total in database${skippedNote}`;
     statusEl.style.color = 'var(--green)';
     input.value = '';
+    if (typeof anLoadTrainingSummary === 'function') anLoadTrainingSummary();
   } catch (err) {
     statusEl.textContent = 'Error: ' + err.message;
     statusEl.style.color = 'var(--red)';

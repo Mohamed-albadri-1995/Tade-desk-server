@@ -7,7 +7,7 @@ const { runAutoRule } = require('./sideF/shortlist');
 const { captureR1, captureR2 } = require('./warehouse/registers');
 const { captureR3 } = require('./sideH/capture');
 const { pushBackup } = require('./backup');
-const { saveRegisterCSV } = require('./routes/warehouse');
+const training = require('./training/trainingData');
 const r0 = require('./r0/registry');
 const { toETDate } = require('./utils/time');
 
@@ -15,14 +15,27 @@ const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
 
 async function autoTrainScorer() {
   const today = toETDate(Date.now());
-  console.log('[Scheduler] Auto-train: exporting R4A/R4B for', today);
+  console.log('[Scheduler] Auto-train: starting for', today);
   try {
-    const r4aPath = saveRegisterCSV('R4A', today);
-    const r4bPath = saveRegisterCSV('R4B', today);
+    // Pull today's R4A/R4B rows into the persistent training tables so the
+    // training run always sees the freshest captured data alongside history.
+    // (Side H already does this after EOD capture; this is a belt-and-braces
+    // sync in case auto-train runs before/without a successful capture.)
+    try { training.syncFromWarehouse(today); } catch (e) { /* non-fatal */ }
+
+    const r4aPath = training.writeTrainingCSV('R4A');
+    const r4bPath = training.writeTrainingCSV('R4B');
+    const r4aCount = training.getRowCount('R4A');
+    const r4bCount = training.getRowCount('R4B');
+
     if (!r4aPath || !r4bPath) {
-      console.warn('[Scheduler] Auto-train skipped: R4A or R4B empty for', today);
+      console.warn(
+        '[Scheduler] Auto-train skipped: not enough accumulated rows — R4A:',
+        r4aCount, 'R4B:', r4bCount
+      );
       return;
     }
+    console.log('[Scheduler] Auto-train: training on R4A=' + r4aCount + ' R4B=' + r4bCount + ' rows');
     const resp = await axios.post(`${SCORER_URL}/train`, { r4a: r4aPath, r4b: r4bPath }, { timeout: 180000 });
     if (resp.data?.ok) {
       console.log('[Scheduler] Auto-train complete for', today);

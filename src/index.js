@@ -72,6 +72,16 @@ app.listen(PORT, () => {
     console.warn('[Startup] Checkpoint restore failed:', err.message);
   }
 
+  // One-time migration: if r4a_train / r4b_train are empty but legacy
+  // tmp/r4a.csv / tmp/r4b.csv exist, import them so existing training
+  // data is preserved across the upgrade.
+  try {
+    const training = require('./training/trainingData');
+    training.migrateFromTmpCSV();
+  } catch (err) {
+    console.warn('[Startup] Training data migration failed:', err.message);
+  }
+
   startScheduler();
 });
 

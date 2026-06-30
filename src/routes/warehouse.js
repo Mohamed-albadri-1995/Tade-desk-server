@@ -22,9 +22,13 @@ function saveRegisterCSV(register, date) {
   const csv = [keys.join(','), ...data.map(row =>
     keys.map(k => csvEscape(row[k])).join(',')
   )].join('\n');
-  const tmpDir = path.join(__dirname, '..', '..', 'tmp');
-  fs.mkdirSync(tmpDir, { recursive: true });
-  const filePath = path.join(tmpDir, `${register.toLowerCase()}.csv`);
+  // Write to a separate exports directory so this snapshot file never
+  // collides with the training CSV (which is regenerated from r4a_train /
+  // r4b_train on every training run).
+  const exportsDir = path.join(__dirname, '..', '..', 'tmp', 'exports');
+  fs.mkdirSync(exportsDir, { recursive: true });
+  const safeDate = String(date || 'all').replace(/[^0-9A-Za-z-]/g, '');
+  const filePath = path.join(exportsDir, `${register.toLowerCase()}_${safeDate}.csv`);
   fs.writeFileSync(filePath, csv, 'utf8');
   return filePath;
 }

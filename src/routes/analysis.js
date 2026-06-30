@@ -3,12 +3,15 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const training = require('../training/trainingData');
 
 const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
 const router = express.Router();
 
 const TMP_DIR = path.join(__dirname, '..', '..', 'tmp');
 const upload = multer({ dest: TMP_DIR });
+const R4A_CSV = path.join(TMP_DIR, 'r4a.csv');
+const R4B_CSV = path.join(TMP_DIR, 'r4b.csv');
 
 // GET /api/analysis/status — scorer health
 router.get('/status', async (req, res) => {
@@ -31,12 +34,29 @@ router.get('/model-info', async (req, res) => {
   }
 });
 
-// POST /api/analysis/train — trigger retraining from R4A/R4B CSVs
+// POST /api/analysis/train — regen CSVs from accumulated DB rows, then train
 router.post('/train', async (req, res) => {
   try {
-    const body = req.body || {};
-    const resp = await axios.post(`${SCORER_URL}/train`, body, { timeout: 120000 });
-    res.json(resp.data);
+    const r4aPath = training.writeTrainingCSV('R4A');
+    const r4bPath = training.writeTrainingCSV('R4B');
+    const r4aCount = training.getRowCount('R4A');
+    const r4bCount = training.getRowCount('R4B');
+
+    if (!r4aPath || !r4bPath) {
+      return res.status(400).json({
+        ok: false,
+        error: `Not enough accumulated data — R4A: ${r4aCount} rows, R4B: ${r4bCount} rows. Upload CSVs or run EOD capture first.`,
+        r4aCount,
+        r4bCount,
+      });
+    }
+
+    const resp = await axios.post(
+      `${SCORER_URL}/train`,
+      { r4a: r4aPath, r4b: r4bPath },
+      { timeout: 180000 }
+    );
+    res.json({ ...resp.data, r4aCount, r4bCount });
   } catch (err) {
     const msg = err.response?.data?.error || err.message;
     res.status(500).json({ ok: false, error: msg });
@@ -55,41 +75,80 @@ router.post('/score', async (req, res) => {
 });
 
 // POST /api/analysis/upload-csv?register=r4a|r4b&mode=replace|append
-// Accepts a CSV file upload and saves/appends to tmp/r4a.csv or tmp/r4b.csv
+// Parses a CSV upload and writes rows into the persistent training table.
+// Rows are deduped by (date, ticker) — re-uploading the same date replaces
+// just those rows, leaving older history intact.
 router.post('/upload-csv', upload.single('file'), (req, res) => {
   try {
-    const register = (req.query.register || '').toLowerCase();
-    if (!['r4a', 'r4b'].includes(register)) {
+    const register = (req.query.register || '').toUpperCase();
+    if (!['R4A', 'R4B'].includes(register)) {
       return res.status(400).json({ ok: false, error: 'register must be r4a or r4b' });
     }
     if (!req.file) {
       return res.status(400).json({ ok: false, error: 'No file uploaded' });
     }
 
-    const mode = req.query.mode || 'append';
-    const destPath = path.join(TMP_DIR, `${register}.csv`);
+    const mode = (req.query.mode || 'append').toLowerCase();
     const uploadedPath = req.file.path;
 
-    fs.mkdirSync(TMP_DIR, { recursive: true });
+    const content = fs.readFileSync(uploadedPath, 'utf8');
+    fs.unlinkSync(uploadedPath);
 
-    if (mode === 'replace' || !fs.existsSync(destPath)) {
-      fs.renameSync(uploadedPath, destPath);
-    } else {
-      // Append: skip header row of uploaded file, append data rows
-      const uploaded = fs.readFileSync(uploadedPath, 'utf8');
-      const lines = uploaded.split('\n');
-      const dataLines = lines.slice(1).filter(l => l.trim()); // skip header
-      const existing = fs.readFileSync(destPath, 'utf8');
-      const needsNewline = existing.length && !existing.endsWith('\n');
-      fs.appendFileSync(destPath, (needsNewline ? '\n' : '') + dataLines.join('\n') + '\n', 'utf8');
-      fs.unlinkSync(uploadedPath);
+    const result = training.ingestUploadedCSV(register, content, mode);
+
+    res.json({
+      ok: true,
+      register,
+      mode,
+      parsed: result.parsed,
+      inserted: result.inserted,
+      skipped: result.skipped,
+      rows: result.total,
+      dates: result.dates,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/analysis/training-summary — accumulated training data overview
+router.get('/training-summary', (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      r4a: {
+        rows: training.getRowCount('R4A'),
+        dates: training.getDistinctDates('R4A'),
+      },
+      r4b: {
+        rows: training.getRowCount('R4B'),
+        dates: training.getDistinctDates('R4B'),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE /api/analysis/training-data?register=r4a|r4b[&date=YYYY-MM-DD]
+// Clear all rows, or just one date's rows.
+router.delete('/training-data', (req, res) => {
+  try {
+    const register = (req.query.register || '').toUpperCase();
+    if (!['R4A', 'R4B'].includes(register)) {
+      return res.status(400).json({ ok: false, error: 'register must be r4a or r4b' });
     }
-
-    // Count rows in the resulting file
-    const content = fs.readFileSync(destPath, 'utf8');
-    const rows = content.split('\n').filter(l => l.trim()).length - 1; // minus header
-
-    res.json({ ok: true, register, mode, path: destPath, rows });
+    if (req.query.date) {
+      training.clearDate(register, req.query.date);
+    } else {
+      training.clearAll(register);
+    }
+    res.json({
+      ok: true,
+      register,
+      rows: training.getRowCount(register),
+      dates: training.getDistinctDates(register),
+    });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

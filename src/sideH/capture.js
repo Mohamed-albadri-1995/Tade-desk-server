@@ -1,6 +1,7 @@
 const db = require('../db');
 const { toETDate } = require('../utils/time');
 const { fetchIntradayBars, fetchDailyBars, computeATR14 } = require('../yahoo/client');
+const { syncFromWarehouse } = require('../training/trainingData');
 
 const ENTRY_TIME_A = '09:37';
 const ENTRY_TIME_B = '09:40';
@@ -105,8 +106,18 @@ async function captureR3(date) {
   if (noEntryA > 0) console.warn('[SideH] R3A: missing 09:37 bar for', noEntryA, 'ticker(s)');
   if (noEntryB > 0) console.warn('[SideH] R3B: missing 09:40 bar for', noEntryB, 'ticker(s)');
 
+  // Push today's joined R4A/R4B rows into the persistent training tables so
+  // they survive the daily auto-train rewrite and accumulate across days.
+  let trainSync = { r4a: 0, r4b: 0 };
+  try {
+    trainSync = syncFromWarehouse(today);
+    console.log('[SideH] Training data synced — R4A:', trainSync.r4a, 'R4B:', trainSync.r4b);
+  } catch (err) {
+    console.warn('[SideH] Training data sync failed (non-fatal):', err.message);
+  }
+
   console.log('[SideH] R3 capture complete — R3A:', r3aWritten, 'R3B:', r3bWritten);
-  return { skipped: false, tickers: tickers.length, r3aWritten, r3bWritten, noEntryA, noEntryB };
+  return { skipped: false, tickers: tickers.length, r3aWritten, r3bWritten, noEntryA, noEntryB, trainSync };
 }
 
 module.exports = { captureR3 };
