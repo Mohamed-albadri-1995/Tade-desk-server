@@ -95,4 +95,72 @@ router.post('/upload-csv', upload.single('file'), (req, res) => {
   }
 });
 
+// GET /api/analysis/table-data?base=B4&table=main
+// Returns factor_importance + all factor bucket CSVs for a given base/table
+const OUTPUTS_DIR = path.join(__dirname, '..', 'scoring', 'outputs');
+const VALID_BASES = ['B1','B2','B3','B4','B5','B6'];
+
+router.get('/table-data', (req, res) => {
+  const base = (req.query.base || '').toUpperCase();
+  const table = req.query.table || 'main'; // 'main' or 'sub_uptrend' etc.
+
+  if (!VALID_BASES.includes(base)) {
+    return res.status(400).json({ ok: false, error: 'base must be B1–B6' });
+  }
+
+  const dir = path.join(OUTPUTS_DIR, base, table);
+  if (!fs.existsSync(dir)) {
+    return res.status(404).json({ ok: false, error: `Table not found: ${base}/${table}` });
+  }
+
+  function parseCSV(filepath) {
+    if (!fs.existsSync(filepath)) return null;
+    const lines = fs.readFileSync(filepath, 'utf8').trim().split('\n');
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(',');
+    return lines.slice(1).map(line => {
+      const vals = line.split(',');
+      const obj = {};
+      headers.forEach((h, i) => {
+        const v = vals[i];
+        obj[h] = isNaN(v) || v === '' ? v : Number(v);
+      });
+      return obj;
+    });
+  }
+
+  // Find all factor bucket files
+  const files = fs.readdirSync(dir);
+  const factorFiles = files.filter(f => /^factor_\d+_buckets\.csv$/.test(f)).sort();
+  const factors = factorFiles.map(fname => {
+    const num = parseInt(fname.match(/factor_(\d+)_buckets/)[1]);
+    return { factor: num, buckets: parseCSV(path.join(dir, fname)) };
+  });
+
+  const importance = parseCSV(path.join(dir, 'factor_importance.csv'));
+
+  // List all available tables for this base
+  const baseDir = path.join(OUTPUTS_DIR, base);
+  const availableTables = fs.existsSync(baseDir)
+    ? fs.readdirSync(baseDir).filter(d => fs.statSync(path.join(baseDir, d)).isDirectory())
+    : [];
+
+  res.json({ ok: true, base, table, importance, factors, availableTables });
+});
+
+// GET /api/analysis/available-tables — list all trained bases and their tables
+router.get('/available-tables', (req, res) => {
+  if (!fs.existsSync(OUTPUTS_DIR)) {
+    return res.json({ ok: true, bases: {} });
+  }
+  const result = {};
+  for (const base of VALID_BASES) {
+    const baseDir = path.join(OUTPUTS_DIR, base);
+    if (!fs.existsSync(baseDir)) continue;
+    result[base] = fs.readdirSync(baseDir)
+      .filter(d => fs.statSync(path.join(baseDir, d)).isDirectory());
+  }
+  res.json({ ok: true, bases: result });
+});
+
 module.exports = router;

@@ -423,6 +423,26 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .feature-loading { font-size:11px; color:var(--text3); font-style:italic; }
 .feature-val { min-width:40px; text-align:right; font-size:11px; font-weight:600; color:var(--text3); }
 
+/* ── TABLE INSPECTOR MODAL ── */
+.ti-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.8); z-index:2000; align-items:flex-start; justify-content:center; padding:20px; overflow-y:auto; }
+.ti-overlay.open { display:flex; }
+.ti-modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:100%; max-width:900px; margin:auto; overflow:hidden; }
+.ti-header { display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--bg3); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.ti-title { font-size:15px; font-weight:700; color:#fff; }
+.ti-table-btns { display:flex; gap:6px; flex-wrap:wrap; }
+.ti-table-btn { padding:3px 10px; border-radius:4px; border:1px solid var(--border); background:var(--bg4); color:var(--text2); font-size:11px; cursor:pointer; font-family:inherit; }
+.ti-table-btn.active { background:var(--accent); border-color:var(--accent); color:#000; font-weight:700; }
+.ti-close { margin-left:auto; background:none; border:1px solid var(--border); border-radius:6px; color:var(--text2); padding:4px 12px; font-size:12px; cursor:pointer; font-family:inherit; }
+.ti-close:hover { border-color:var(--red); color:var(--red); }
+.ti-body { padding:16px; overflow-x:auto; }
+.ti-section-title { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text3); margin:14px 0 8px; }
+.ti-table { width:100%; border-collapse:collapse; white-space:nowrap; font-size:11px; }
+.ti-table th { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text3); padding:6px 10px; text-align:left; background:var(--bg3); border-bottom:1px solid var(--border); }
+.ti-table td { padding:6px 10px; border-bottom:1px solid #1a1e28; }
+.ti-table tr:last-child td { border-bottom:none; }
+.ti-table tr:hover td { background:var(--bg3); }
+.ti-score-bar { display:inline-block; height:8px; border-radius:4px; min-width:2px; vertical-align:middle; margin-right:6px; }
+
 /* ── RESPONSIVE ── */
 @media (max-width: 900px) {
   .market-grid { grid-template-columns: repeat(3, 1fr); }
@@ -896,6 +916,18 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 
 </div>
 
+<!-- Table Inspector Modal -->
+<div class="ti-overlay" id="ti-overlay" onclick="if(event.target===this)closeTI()">
+  <div class="ti-modal">
+    <div class="ti-header">
+      <div class="ti-title" id="ti-title">Table Inspector</div>
+      <div class="ti-table-btns" id="ti-table-btns"></div>
+      <button class="ti-close" onclick="closeTI()">✕ Close</button>
+    </div>
+    <div class="ti-body" id="ti-body"><div class="loading">Loading…</div></div>
+  </div>
+</div>
+
 <!-- Chart Modal -->
 <div class="chart-modal-overlay" id="chart-overlay" onclick="closeChart(event)">
   <div class="chart-modal">
@@ -1084,6 +1116,111 @@ async function anModelInfo() {
   } catch (err) {
     panel.innerHTML = `<span class="feature-loading" style="color:var(--red)">Error: ${esc(err.message)}</span>`;
   }
+}
+
+// ── Table Inspector ──────────────────────────────────────
+let _tiBase = null;
+let _tiTable = null;
+let _tiAvailable = {};
+
+async function openTableInspector(base, table) {
+  _tiBase = base;
+  _tiTable = table;
+  document.getElementById('ti-overlay').classList.add('open');
+  document.getElementById('ti-title').textContent = `Table Inspector — ${base} / ${table}`;
+  document.getElementById('ti-body').innerHTML = '<div class="loading">Loading…</div>';
+  document.getElementById('ti-table-btns').innerHTML = '';
+
+  // Load available tables for this base if not cached
+  if (!_tiAvailable[base]) {
+    try {
+      const r = await fetch('/api/analysis/available-tables');
+      const d = await r.json();
+      _tiAvailable = d.bases || {};
+    } catch {}
+  }
+
+  // Render table selector buttons
+  const tables = _tiAvailable[base] || [table];
+  document.getElementById('ti-table-btns').innerHTML = tables.map(t =>
+    `<button class="ti-table-btn${t === table ? ' active' : ''}" onclick="switchTITable('${t}',this)">${t}</button>`
+  ).join('');
+
+  await loadTIData(base, table);
+}
+
+async function switchTITable(table, btn) {
+  _tiTable = table;
+  document.querySelectorAll('.ti-table-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('ti-title').textContent = `Table Inspector — ${_tiBase} / ${table}`;
+  document.getElementById('ti-body').innerHTML = '<div class="loading">Loading…</div>';
+  await loadTIData(_tiBase, table);
+}
+
+async function loadTIData(base, table) {
+  try {
+    const r = await fetch(`/api/analysis/table-data?base=${base}&table=${encodeURIComponent(table)}`);
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error);
+    renderTI(d);
+  } catch (err) {
+    document.getElementById('ti-body').innerHTML = `<div style="color:var(--red);padding:20px">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+function renderTI(d) {
+  const body = document.getElementById('ti-body');
+  let html = '';
+
+  // Factor Importance table
+  if (d.importance && d.importance.length) {
+    html += `<div class="ti-section-title">Factor Importance</div>
+    <table class="ti-table"><thead><tr>
+      <th>Factor</th><th>Eigenvalue</th><th>Weight %</th><th>Cumulative %</th>
+    </tr></thead><tbody>` +
+    d.importance.map(r => `<tr>
+      <td style="font-weight:700;color:var(--accent)">${esc(String(r.Factor))}</td>
+      <td>${r.Eigenvalue != null ? Number(r.Eigenvalue).toFixed(4) : '—'}</td>
+      <td>${r['Weight_%'] != null ? Number(r['Weight_%']).toFixed(2) + '%' : '—'}</td>
+      <td>${r['Cumulative_%'] != null ? Number(r['Cumulative_%']).toFixed(2) + '%' : '—'}</td>
+    </tr>`).join('') + '</tbody></table>';
+  }
+
+  // Per-factor bucket tables
+  for (const f of (d.factors || [])) {
+    const maxScore = Math.max(...f.buckets.map(b => b.FinalScore || 0), 1);
+    html += `<div class="ti-section-title">Factor ${f.factor} — Bucket Performance</div>
+    <table class="ti-table"><thead><tr>
+      <th>Bucket</th><th>Count</th><th>Mean R</th><th>Win% (≥1.3×)</th>
+      <th>≥1×</th><th>≥1.5×</th><th>≥2×</th>
+      <th>Raw Score</th><th>Confidence</th><th>Final Score</th>
+    </tr></thead><tbody>` +
+    f.buckets.map(b => {
+      const fs = b.FinalScore || 0;
+      const pct = (fs / maxScore) * 100;
+      const color = fs >= 70 ? 'var(--green)' : fs >= 40 ? 'var(--orange)' : 'var(--red)';
+      return `<tr>
+        <td style="color:var(--text2)">${b.Bucket}</td>
+        <td>${b.Count}</td>
+        <td class="${(b.Mean||0)>=1?'pos':'neg'}">${b.Mean != null ? Number(b.Mean).toFixed(3) : '—'}</td>
+        <td>${b['WinRate_%'] != null ? Number(b['WinRate_%']).toFixed(1) + '%' : '—'}</td>
+        <td style="color:var(--text2)">${b['Pct_ge1'] != null ? Number(b['Pct_ge1']).toFixed(0) + '%' : '—'}</td>
+        <td style="color:var(--text2)">${b['Pct_ge1.5'] != null ? Number(b['Pct_ge1.5']).toFixed(0) + '%' : '—'}</td>
+        <td style="color:var(--text2)">${b['Pct_ge2'] != null ? Number(b['Pct_ge2']).toFixed(0) + '%' : '—'}</td>
+        <td style="color:var(--text3)">${b.RawScore != null ? Number(b.RawScore).toFixed(1) : '—'}</td>
+        <td style="color:var(--text3)">${b.Confidence != null ? (Number(b.Confidence)*100).toFixed(0) + '%' : '—'}</td>
+        <td><span class="ti-score-bar" style="width:${pct.toFixed(0)}px;background:${color}"></span><strong style="color:${color}">${fs.toFixed(1)}</strong></td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+  }
+
+  if (!html) html = '<div style="color:var(--text3);padding:20px">No data found in this table.</div>';
+  body.innerHTML = html;
+}
+
+function closeTI() {
+  document.getElementById('ti-overlay').classList.remove('open');
 }
 
 async function anUploadCSV(register) {
@@ -1844,7 +1981,16 @@ function buildCard(row) {
     <div class="card-right">
       <div onclick="${score != null ? `toggleScoreBreakdown('${row.ticker}')` : ''}" style="cursor:${score != null ? 'pointer' : 'default'};text-align:right">
         <div class="card-score ${score != null ? scoreClass : ''}" style="font-size:13px">${score != null ? score : '—'}</div>
-        ${row._scoreDetails ? `<div style="font-size:9px;color:var(--text3);margin-top:2px">${row._scoreDetails.table || ''}</div>` : ''}
+        ${row._scoreDetails ? (() => {
+          const t = row._scoreDetails.table || '';
+          // t is like "B4_main_uptrend" → base=B4, table=main or sub_uptrend
+          const parts = t.split('_');
+          const base = parts[0] || '';
+          const tableStr = parts.slice(1).join('_').replace(/^(main|sub)_?(.*)/, (_, type, regime) =>
+            type === 'main' ? 'main' : `sub_${regime}`
+          ) || 'main';
+          return `<div style="font-size:9px;color:var(--accent);margin-top:2px;cursor:pointer;text-decoration:underline dotted" onclick="event.stopPropagation();openTableInspector('${base}','${tableStr}')">${t}</div>`;
+        })() : ''}
       </div>
       <button class="star-btn" style="${starStyle}" onclick="toggleShortlist('${row.ticker}',this)">${starIcon}</button>
     </div>
@@ -1952,6 +2098,14 @@ function buildCard(row) {
       <div class="sb-row"><span class="sb-label">Samples</span><span class="sb-val">${sd.samples != null ? sd.samples : '—'}</span></div>
       <div class="sb-row"><span class="sb-label">Confidence</span><span class="sb-val">${sd.confidence != null ? sd.confidence + '%' : '—'}</span></div>
       ${factorRows ? `<div class="sb-factors" style="margin-top:6px"><div style="font-size:10px;color:var(--text3);margin-bottom:4px">Per-factor bucket scores</div>${factorRows}</div>` : ''}
+      ${sd.table ? (() => {
+        const parts = sd.table.split('_');
+        const base = parts[0] || '';
+        const tableStr = parts.slice(1).join('_').replace(/^(main|sub)_?(.*)/, (_, type, regime) =>
+          type === 'main' ? 'main' : `sub_${regime}`
+        ) || 'main';
+        return `<div style="margin-top:8px"><button onclick="event.stopPropagation();openTableInspector('${base}','${tableStr}')" style="background:var(--bg3);border:1px solid var(--accent);border-radius:4px;color:var(--accent);font-size:10px;padding:3px 10px;cursor:pointer;font-family:inherit">🔍 View Bucket Table</button></div>`;
+      })() : ''}
     </div>`;
   })()}
 </div>`;
