@@ -14,12 +14,16 @@ function resolveCardBias(row) {
   const b = row.bias || 'auto';
   if (b === 'long') return 'Long';
   if (b === 'short') return 'Short';
-  // auto: derive from context
+  // auto: derive from shortTerm + secBias; fall back to longTerm; default Long
   const short = row.context?.shortTerm;
   const sec   = row.context?.secBias;
-  if (short === 'BULLISH' && sec === 'BULLISH') return 'Long';
-  if (short === 'BEARISH' || sec === 'BEARISH')  return 'Short';
-  return 'Undefined';
+  const lt    = row.context?.longTerm;
+  if (short === 'BEARISH' && sec === 'BEARISH') return 'Short';
+  if (short === 'BEARISH' && sec !== 'BULLISH') return 'Short';
+  if (sec   === 'BEARISH' && short !== 'BULLISH') return 'Short';
+  if (short === 'BULLISH' || sec === 'BULLISH') return 'Long';
+  if (lt === 'BEARISH') return 'Short';
+  return 'Long'; // default to Long in uptrend regimes
 }
 
 // Build a flat card dict from r0 row (matches LiveScorer ALL_FEATURES)

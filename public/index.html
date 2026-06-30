@@ -2020,9 +2020,13 @@ function buildCard(row) {
   function computeAutoBias(ctx) {
     const short = ctx.shortTerm;
     const sec = ctx.secBias;
-    if (short === 'BULLISH' && sec === 'BULLISH') return 'long';
-    if (short === 'BEARISH' || sec === 'BEARISH') return 'short';
-    return 'undecided';
+    const lt = ctx.longTerm;
+    if (short === 'BEARISH' && sec === 'BEARISH') return 'short';
+    if (short === 'BEARISH' && sec !== 'BULLISH') return 'short';
+    if (sec === 'BEARISH' && short !== 'BULLISH') return 'short';
+    if (short === 'BULLISH' || sec === 'BULLISH') return 'long';
+    if (lt === 'BEARISH') return 'short';
+    return 'long';
   }
   const autoBiasResult = bias === 'auto' ? computeAutoBias(ctx) : null;
   const autoLabel = autoBiasResult ? ` <span class="bias-auto-label">(${autoBiasResult})</span>` : '';
