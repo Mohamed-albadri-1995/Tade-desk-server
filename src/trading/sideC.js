@@ -14,7 +14,9 @@ const db = require('../db');
 
 function getSetting(key, fallback) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
-  return row ? parseFloat(row.value) : fallback;
+  if (!row || row.value === '' || row.value == null) return fallback;
+  const n = parseFloat(row.value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function getSettings() {
@@ -66,7 +68,7 @@ function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null }) {
   );
 
   let shares = Math.floor(riskDollars / stopDistance);
-  shares = Math.min(shares, s.maxShares);
+  if (s.maxShares > 0) shares = Math.min(shares, s.maxShares);
 
   const positionValue = shares * entryPrice;
   const actualDollarRisk = shares * stopDistance;
