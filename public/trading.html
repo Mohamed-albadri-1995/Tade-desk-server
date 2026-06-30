@@ -243,8 +243,8 @@ body {
 
 <div class="tabs">
   <button class="tab active" onclick="switchTab('signals')">Watch</button>
-  <button class="tab" onclick="switchTab('center')">Alerts</button>
   <button class="tab" onclick="switchTab('sideA')">Gate</button>
+  <button class="tab" onclick="switchTab('center')">Alerts</button>
   <button class="tab" onclick="switchTab('positions')">Positions</button>
   <button class="tab" onclick="switchTab('journal')">Journal</button>
   <button class="tab" onclick="switchTab('setups')">Setups</button>
@@ -298,14 +298,46 @@ body {
 
   <!-- JOURNAL TAB -->
   <div class="tab-pane" id="tab-journal">
+    <!-- toolbar -->
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
       <input id="jnl-from" type="date" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-family:inherit;font-size:12px">
       <input id="jnl-to" type="date" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-family:inherit;font-size:12px">
       <button onclick="loadJournal()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-family:inherit;cursor:pointer">Load</button>
-      <button onclick="showImport()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 12px;color:var(--text2);font-size:12px;font-family:inherit;cursor:pointer">⬆ Import CSV</button>
+      <button onclick="showImport()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 12px;color:var(--text2);font-size:12px;font-family:inherit;cursor:pointer">⬆ Import</button>
     </div>
-    <div id="jnl-metrics" style="display:none" class="panel" style="margin-bottom:12px"></div>
-    <div id="jnl-trades"></div>
+
+    <!-- sub-tabs -->
+    <div style="display:flex;gap:0;margin-bottom:12px;border-bottom:1px solid var(--border)">
+      <button id="jst-trades" onclick="switchJournalSub('trades')" style="background:none;border:none;border-bottom:2px solid var(--accent);color:var(--accent);font-family:inherit;font-size:12px;font-weight:600;padding:6px 14px;cursor:pointer">Trades</button>
+      <button id="jst-analysis" onclick="switchJournalSub('analysis')" style="background:none;border:none;border-bottom:2px solid transparent;color:var(--text3);font-family:inherit;font-size:12px;font-weight:600;padding:6px 14px;cursor:pointer">Analysis</button>
+    </div>
+
+    <!-- TRADES sub-view -->
+    <div id="jsub-trades">
+      <div id="jnl-metrics" style="display:none;margin-bottom:12px" class="panel"></div>
+      <div id="jnl-trades"></div>
+    </div>
+
+    <!-- ANALYSIS sub-view -->
+    <div id="jsub-analysis" style="display:none">
+      <!-- summary strip -->
+      <div id="jnl-analysis-summary" class="panel" style="margin-bottom:12px">
+        <div class="empty"><div class="empty-icon">📊</div><div class="empty-text">Load a date range then tap Analysis</div></div>
+      </div>
+      <!-- setup performance table -->
+      <div id="jnl-analysis-setups" style="display:none" class="panel" style="margin-bottom:12px">
+        <div class="panel-title" style="margin-bottom:8px">Setup Performance</div>
+        <div id="jnl-setups-table"></div>
+      </div>
+      <!-- condition drill-down -->
+      <div id="jnl-analysis-conditions" style="display:none" class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="panel-title" id="jnl-cond-title">Condition Stats</div>
+          <button onclick="document.getElementById('jnl-analysis-conditions').style.display='none'" style="background:none;border:none;color:var(--text3);font-size:14px;cursor:pointer">✕</button>
+        </div>
+        <div id="jnl-cond-body"></div>
+      </div>
+    </div>
 
     <!-- Import modal -->
     <div id="import-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;display:none;align-items:center;justify-content:center;padding:16px">
@@ -659,6 +691,112 @@ async function closePosition(id) {
 }
 
 // ── Journal ───────────────────────────────────────────────────────────────────
+// ── Journal sub-tabs ─────────────────────────────────────────────────────────
+let _journalSubTab = 'trades';
+function switchJournalSub(name) {
+  _journalSubTab = name;
+  ['trades','analysis'].forEach(n => {
+    document.getElementById('jsub-' + n).style.display = n === name ? 'block' : 'none';
+    const btn = document.getElementById('jst-' + n);
+    btn.style.borderBottomColor = n === name ? 'var(--accent)' : 'transparent';
+    btn.style.color = n === name ? 'var(--accent)' : 'var(--text3)';
+  });
+  if (name === 'analysis') loadAnalysis();
+}
+
+async function loadAnalysis() {
+  const from = document.getElementById('jnl-from').value;
+  const to   = document.getElementById('jnl-to').value;
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to)   params.set('to', to);
+
+  const data = await fetch(`${API}/journal/analysis/account?${params}`).then(r => r.json()).catch(() => null);
+  if (!data || !data.metrics) return;
+
+  const m = data.metrics;
+  const pnlColor = m.netPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const stat = (label, val, color) =>
+    `<div style="text-align:center;flex:1;min-width:80px">
+      <div style="font-size:18px;font-weight:700;color:${color||'var(--text)'}">` + val + `</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">` + label + `</div>
+    </div>`;
+
+  document.getElementById('jnl-analysis-summary').innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0">
+      ${stat('Net P&L', (m.netPnl >= 0 ? '+' : '') + '$' + (m.netPnl||0).toFixed(2), pnlColor)}
+      ${stat('Win Rate', (m.winRate||0).toFixed(0) + '%', m.winRate >= 50 ? 'var(--green)' : 'var(--red)')}
+      ${stat('Expectancy', '$' + (m.expectancy||0).toFixed(2), m.expectancy >= 0 ? 'var(--green)' : 'var(--red)')}
+      ${stat('Avg R', m.avgR != null ? m.avgR + 'R' : '—')}
+      ${stat('Max DD', '-$' + (data.maxDrawdown||0).toFixed(2), 'var(--red)')}
+      ${stat('Trades', m.closed || 0)}
+    </div>`;
+
+  // Setup breakdown table
+  const setups = data.setupContributions || [];
+  const setupsEl = document.getElementById('jnl-analysis-setups');
+  const tableEl  = document.getElementById('jnl-setups-table');
+  if (setups.length) {
+    setupsEl.style.display = 'block';
+    const gradeColor = g => g === 'A+' ? 'var(--green)' : g === 'A' ? '#4caf50' : g === 'B' ? 'var(--text2)' : 'var(--red)';
+    tableEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 42px 52px 58px 64px 32px;gap:4px;font-size:10px;color:var(--text3);padding:0 4px 4px;border-bottom:1px solid var(--border)">
+        <span>Setup</span><span style="text-align:right">Trades</span><span style="text-align:right">Win%</span><span style="text-align:right">Exp</span><span style="text-align:right">Net P&L</span><span style="text-align:center">Grade</span>
+      </div>
+      ` + setups.map(s => {
+        const pnlC = s.netPnl >= 0 ? 'var(--green)' : 'var(--red)';
+        return `<div onclick="loadSetupConditions('${s.setupId}')" style="display:grid;grid-template-columns:1fr 42px 52px 58px 64px 32px;gap:4px;font-size:11px;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;align-items:center" onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background=''">
+          <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.setupId}</span>
+          <span style="text-align:right;color:var(--text3)">${s.trades}</span>
+          <span style="text-align:right">${s.winRate != null ? s.winRate.toFixed(0)+'%' : '—'}</span>
+          <span style="text-align:right">${s.expectancy != null ? '$'+s.expectancy.toFixed(2) : '—'}</span>
+          <span style="text-align:right;color:${pnlC};font-weight:600">${s.netPnl >= 0 ? '+' : ''}$${(s.netPnl||0).toFixed(0)}</span>
+          <span style="text-align:center;font-weight:700;font-size:11px;color:${gradeColor(s.grade?.grade)}">${s.grade?.grade || '—'}</span>
+        </div>`;
+      }).join('');
+  } else {
+    setupsEl.style.display = 'none';
+  }
+  document.getElementById('jnl-analysis-conditions').style.display = 'none';
+}
+
+async function loadSetupConditions(setupId) {
+  const data = await fetch(`${API}/journal/analysis/setup/${encodeURIComponent(setupId)}`).then(r => r.json()).catch(() => null);
+  if (!data) return;
+  const el    = document.getElementById('jnl-analysis-conditions');
+  const body  = document.getElementById('jnl-cond-body');
+  document.getElementById('jnl-cond-title').textContent = setupId + ' — Conditions';
+  const gradeColor = g => g === 'A+' ? 'var(--green)' : g === 'A' ? '#4caf50' : g === 'B' ? 'var(--text2)' : 'var(--red)';
+  const m = data.metrics;
+  let html = `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">
+    ${m.closed} trades · ${(m.winRate||0).toFixed(0)}% win · $${(m.expectancy||0).toFixed(2)} expectancy
+    <span style="font-size:13px;font-weight:700;color:${gradeColor(data.grade?.grade)};margin-left:8px">${data.grade?.grade || '?'}</span>
+    <span style="font-size:10px;color:var(--text3);margin-left:4px">${data.grade?.reason || ''}</span>
+  </div>`;
+  const conds = data.conditions || [];
+  if (!conds.length) {
+    html += `<div style="font-size:11px;color:var(--text3)">No condition data yet — run Compute on trades with this setup.</div>`;
+  } else {
+    html += `<div style="display:grid;grid-template-columns:1fr 38px 38px 56px 32px;gap:4px;font-size:10px;color:var(--text3);padding:0 4px 4px;border-bottom:1px solid var(--border)">
+      <span>Condition</span><span style="text-align:right">✓</span><span style="text-align:right">✗</span><span style="text-align:right">Δ Exp</span><span style="text-align:center">Grade</span>
+    </div>`;
+    html += conds.map(c => {
+      const dColor = c.deltaExpectancy > 0 ? 'var(--green)' : c.deltaExpectancy < 0 ? 'var(--red)' : 'var(--text2)';
+      const req = c.mandatory ? '★ ' : '';
+      return `<div style="display:grid;grid-template-columns:1fr 38px 38px 56px 32px;gap:4px;font-size:11px;padding:6px 4px;border-bottom:1px solid var(--border);align-items:center">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2)">${req}${c.conditionKey}</span>
+        <span style="text-align:right;color:var(--green)">${c.nAligned}</span>
+        <span style="text-align:right;color:var(--red)">${c.nNotAligned}</span>
+        <span style="text-align:right;font-weight:600;color:${dColor}">${c.deltaExpectancy != null ? (c.deltaExpectancy >= 0 ? '+' : '') + '$'+c.deltaExpectancy : '—'}</span>
+        <span style="text-align:center;font-weight:700;font-size:11px;color:${gradeColor(c.grade?.grade)}">${c.grade?.grade || '—'}</span>
+      </div>`;
+    }).join('');
+  }
+  body.innerHTML = html;
+  el.style.display = 'block';
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 async function loadJournal() {
   const from = document.getElementById('jnl-from').value;
   const to   = document.getElementById('jnl-to').value;
@@ -708,6 +846,7 @@ async function loadJournal() {
       ${!t.technical_computed && t.status === 'closed' ? `<button onclick="event.stopPropagation();computeTrade('${t.id}')" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:10px;color:var(--text2);font-family:inherit;cursor:pointer">Compute</button>` : ''}
     </div>`;
   }).join('') + '</div>';
+  if (_journalSubTab === 'analysis') loadAnalysis();
 }
 
 async function computeTrade(id) {

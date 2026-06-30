@@ -203,6 +203,7 @@ function analyzeAccount(filters = {}) {
       riskShare: metrics.totalDollarRisk > 0 ? parseFloat((sm.totalDollarRisk / metrics.totalDollarRisk * 100).toFixed(1)) : null,
       expectancy: sm.expectancy,
       winRate: sm.winRate,
+      grade: gradeSetup(sm, getSetting('journal_min_grade_trades', 20)),
     };
   });
 
