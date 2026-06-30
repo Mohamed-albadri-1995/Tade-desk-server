@@ -27,6 +27,10 @@ function buildCard(row) {
   const s   = row.stock   || {};
   const ctx = row.context || {};
   const cat = row.catalyst || {};
+  // Normalize bias to its resolved value so 'auto' that resolves to long
+  // and explicit 'long' encode identically in the PCA feature matrix.
+  const resolvedBias = resolveCardBias(row); // 'Long' | 'Short' | 'Undefined'
+  const normalizedBias = resolvedBias === 'Long' ? 'long' : resolvedBias === 'Short' ? 'short' : 'auto';
   return {
     ticker:        row.ticker,
     date:          row.date,
@@ -44,7 +48,7 @@ function buildCard(row) {
     shortTerm:     ctx.shortTerm  || null,
     broadResolved: ctx.broadResolved || null,
     inShortlist:   row.inShortlist ? 'true' : 'false',
-    bias:          row.bias || 'auto',
+    bias:          normalizedBias,
     // numerics
     _score:        row._score,
     price:         s.price,
@@ -105,12 +109,16 @@ async function scoreRow(row) {
         _score: Math.round(resp.data.final_score),
         _scoreDetails: {
           table: resp.data.used_table,
+          base: resp.data.used_table?.split('_')[0] || null,
+          tableType: resp.data.used_table?.split('_')[1] || null,
+          regime: resp.data.used_table?.split('_').slice(2).join('_') || null,
           confidence: Math.round((resp.data.confidence || 0) * 100),
           samples: resp.data.total_samples_used,
           factorScores: resp.data.factor_scores,
           bucketScores: resp.data.bucket_scores,
           entryTime: entry_time,
           bias,
+          normalizedBias,
         },
       };
     }

@@ -2092,9 +2092,9 @@ function buildCard(row) {
       </div>`;
     }).join('');
     return `<div class="score-breakdown" id="sb-${row.ticker}">
-      <div class="sb-row"><span class="sb-label">Table used</span><span class="sb-val" style="font-size:10px">${sd.table || '—'}</span></div>
-      <div class="sb-row"><span class="sb-label">Bias</span><span class="sb-val">${sd.bias || '—'}</span></div>
-      <div class="sb-row"><span class="sb-label">Entry time</span><span class="sb-val">${sd.entryTime || '—'}</span></div>
+      <div class="sb-row"><span class="sb-label">Base</span><span class="sb-val">${sd.base || '—'} <span style="color:var(--text3);font-size:10px">(entry ${sd.entryTime || '—'}, ${sd.bias || '—'})</span></span></div>
+      <div class="sb-row"><span class="sb-label">Table type</span><span class="sb-val">${sd.tableType || '—'} <span style="color:var(--text3);font-size:10px">${sd.regime ? '· regime: ' + sd.regime : ''}</span></span></div>
+      <div class="sb-row"><span class="sb-label">Bias in card</span><span class="sb-val">${sd.normalizedBias || '—'} <span style="color:var(--text3);font-size:10px">(raw: ${(sd.bias || '').toLowerCase()})</span></span></div>
       <div class="sb-row"><span class="sb-label">Samples</span><span class="sb-val">${sd.samples != null ? sd.samples : '—'}</span></div>
       <div class="sb-row"><span class="sb-label">Confidence</span><span class="sb-val">${sd.confidence != null ? sd.confidence + '%' : '—'}</span></div>
       ${factorRows ? `<div class="sb-factors" style="margin-top:6px"><div style="font-size:10px;color:var(--text3);margin-bottom:4px">Per-factor bucket scores</div>${factorRows}</div>` : ''}
