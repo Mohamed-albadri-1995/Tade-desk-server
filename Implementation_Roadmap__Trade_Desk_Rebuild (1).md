@@ -94,8 +94,7 @@ Runtime control panel for thresholds and API keys. All keys stored in `settings`
 
 #### Key design decisions
 
-- Scoring is **disconnected from the pipeline** by user request. `_score` is always `null`.
-  The analysis report is view-only until the user reviews it and decides to reconnect scoring.
+- Scoring was **disconnected from the pipeline** pending the PCA scoring engine redesign.
 - Walk-forward backtest was **removed entirely** by user request.
 - Regime labels: simplified to 7, then **restored to full 15** by user request.
 
@@ -109,6 +108,82 @@ Runtime control panel for thresholds and API keys. All keys stored in `settings`
 | `analysisTrainingWindow` | `90` | Training window in days |
 | `aiApiKey` | `''` | AI provider key (masked) |
 | `aiModel` | `anthropic/claude-haiku-4-5` | AI model ID |
+
+---
+
+### Session 5 — PCA Scoring Engine (Phase 2 Complete) + Shortlist Fix
+
+#### Scoring Engine — Full PCA Factor Analysis Model
+
+Replaced the disconnected placeholder with a production-ready two-process architecture:
+
+**Architecture:**
+- **Process 1** — Node.js (`trade-desk`): runs the pipeline, builds card dicts, calls Flask
+- **Process 2** — Python Flask (`scorer`): loads trained PCA models, scores cards, returns `_score`
+- Flask runs at `127.0.0.1:3001`, Node calls `/score` endpoint per ticker (parallel via `Promise.all`)
+
+**Files changed/added:**
+- `src/scoring/processor.py` — `FactorAnalysisProcessor`: trains PCA model from R4A/R4B CSVs
+- `src/scoring/scorer.py` — `LiveScorer`: loads trained model outputs, scores live card dicts
+- `src/scoring/server.py` — Flask app: `/score`, `/train`, `/health`, `/model-info` endpoints
+- `src/sideE/score.js` — `buildCard()`, `resolveCardBias()`, `scoreAllRows()` — Node side
+- `scripts/verify_irdm_score.py` — manual score verification script with hardcoded IRDM card data
+
+**Settings keys added:**
+| Key | Default | Description |
+|---|---|---|
+| `scorerEntryTime` | `9:40` | Entry time for base selection (9:37 or 9:40) |
+
+#### Bug Fixes
+
+**1. `_score` circular feedback in PCA**
+
+| What | Detail |
+|---|---|
+| Bug | `_score` was in `NUMERIC_COLS` in both `processor.py` and `scorer.py`. Model was trained on its own previous output — circular feedback. |
+| Fix | Removed `_score` from `NUMERIC_COLS` in `processor.py`, `scorer.py`, and removed `_score: row._score` from `buildCard()` in `score.js`. |
+
+**2. Auto bias mismatch (UI vs scorer)**
+
+| What | Detail |
+|---|---|
+| Bug | When context was neutral (no clear long/short signal), scorer returned `'Undefined'` → selected B6 (max direction) model. UI displayed `AUTO (long)`. Mismatch caused confusing score swings when bias was changed. |
+| Fix | `resolveCardBias()` in `score.js` now always returns `'Long'` or `'Short'`, never `'Undefined'`. Priority chain: bearish signals → Short, bullish signals → Long, neutral → Long (default). `computeAutoBias()` in `public/index.html` updated to match identical logic. |
+
+**3. Shortlist auto-rule blocked by existing manual entry**
+
+| What | Detail |
+|---|---|
+| Bug | Auto-rule guard was `if (existing) return null` — blocked re-run if ANY entry existed today (including manual stars added before 9:35 AM). Rule never fired if user had starred anything. |
+| Fix | Guard now checks `if (existing && existing.items.some(i => i.method === 'auto'))` — only blocks if an auto entry already exists. Manual trigger (`force: true`) always re-runs and merges auto picks with existing manual picks. |
+
+#### Score Verification
+
+Manually verified IRDM scores against PCA math using `scripts/verify_irdm_score.py`:
+- B4 (LONG bias, 9:40 entry): computed 12.54 → rounds to **13** ✅
+- B5 (SHORT bias, 9:40 entry): computed 11.70 → rounds to **12** ✅
+
+#### Bias Resolution Logic (Final)
+
+```
+Priority chain (highest to lowest):
+
+1. shortTerm=BEARISH  AND  secBias=BEARISH    → Short
+2. shortTerm=BEARISH  AND  secBias≠BULLISH    → Short
+3. secBias=BEARISH    AND  shortTerm≠BULLISH  → Short
+4. shortTerm=BULLISH  OR   secBias=BULLISH    → Long
+5. longTerm=BEARISH                           → Short
+6. (all neutral)                              → Long  ← default
+```
+
+#### Base Selection Table (Final)
+
+| Bias | Entry Time | Base | Target |
+|---|---|---|---|
+| Long | 9:40 | B4 | upR_B (long moves from 9:40 entry) |
+| Short | 9:40 | B5 | downR_B (short moves from 9:40 entry) |
+| Long | 9:37 | B1 | upR_A (long moves from 9:37 entry) |
+| Short | 9:37 | B2 | downR_A (short moves from 9:37 entry) |
 
 ---
 
@@ -159,8 +234,8 @@ Auto-detects provider from key prefix — no separate field stored:
 | Side C — News & Catalyst | ✅ Complete | Finnhub + Yahoo + SEC EDGAR |
 | Side D — Market Context | ✅ Complete | 15 regime labels, Morningstar sector mapping |
 | Side E — Analysis Report | ✅ Complete | Feature importance, bucket analysis, AI insights |
-| Side E — Scoring (pipeline) | ⏸ Disconnected | Pending scoring engine redesign (Phase 2) |
-| Side F — Shortlist | ✅ Complete | Auto-rule wired; produces nothing until scoring reconnected |
+| Side E — PCA Scoring Engine | ✅ Complete | Flask service, 6 bases, live scoring every scan |
+| Side F — Shortlist | ✅ Complete | Auto-rule fixed; force flag; merges with manual picks |
 | Side G — Stale Ticker Refresh | ✅ Complete | |
 | Side H — R3 EOD Capture | ✅ Complete | Alpaca-based, 4:05 PM |
 | Settings System | ✅ Complete | All keys, validation, masking, live test buttons |
@@ -188,23 +263,23 @@ Goal: validate all existing systems work correctly end-to-end on live market day
 
 ---
 
-### Phase 2 — Scoring Engine
+### Phase 2 — Scoring Engine ✅ Complete
 
 Goal: build a proper scoring model that assigns a 0–100 score to each r0 row based on historical factor performance.
 
-**Design inputs:**
-- Feature importance and bucket win rates from Side E analysis report
-- Score = weighted sum of per-feature bucket win rates, normalized 0–100
-- Model loaded once per session, refreshed on retrain
+**Architecture:** Two-process system — Node.js pipeline calls Python Flask scorer at `127.0.0.1:3001`.
 
 **Tasks:**
-- [ ] Review Analysis report — identify top factors and meaningful bucket boundaries
-- [ ] Define scoring formula (likely: weighted sum of bucket win rates from trained model)
-- [ ] Update `src/sideE/score.js` with final formula
-- [ ] Write unit tests for edge cases (missing fields, null buckets)
-- [ ] Connect scoring to pipeline: replace `_score: null` with real score in `pipeline.js`
-- [ ] Expose `_score` on Screener cards — show as badge with color tier (A+/A/B/C/D)
-- [ ] Add `_score` to r0 field docs in SYSTEM_FLOW.md
+- [x] Review Analysis report — identify top factors and meaningful bucket boundaries
+- [x] Define scoring formula — PCA factor analysis with decile bucket win rates
+- [x] Update `src/sideE/score.js` with final formula and bias resolution
+- [x] Connect scoring to pipeline — `_score` live on every scan
+- [x] Expose `_score` on Screener cards — score badge visible
+- [x] Add `_score` to r0 field docs in SYSTEM_FLOW.md
+- [x] Fix `_score` circular feedback — removed from PCA feature set
+- [x] Fix auto bias mismatch — `resolveCardBias()` never returns Undefined
+- [x] Fix shortlist auto-rule — force flag, merge with manual picks
+- [x] Verify scores mathematically — IRDM B4=13, B5=12 confirmed ✅
 
 ---
 

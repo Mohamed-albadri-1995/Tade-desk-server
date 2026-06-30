@@ -805,12 +805,393 @@ Step 3: Write context to r0 row.
 
 Server‑side. Runs after all other sides (A, B, D) have populated their fields.
 
-### 7.1. Input
+### 7.1. Architecture Overview
 
-- The full r0 row (all stock.*, context.*, catalyst, etc.)
-- The current scoring model (loaded from the database)
+The scoring engine is a two-process system:
 
+- **Process 1 — Node.js** (`src/sideE/score.js`): builds a flat "card dict" for each r0 row, resolves bias, calls the Flask scorer.
+- **Process 2 — Python Flask** (`src/scoring/server.py` + `scorer.py`): loads trained PCA model outputs, projects the card through PCA, does bucket lookup, returns a single `_score` integer.
 
+```
+Pipeline scan (Node.js)
+        │
+        ▼
+  buildCard(row)           ← flat JSON dict with all features
+        │
+        ▼
+  resolveCardBias(row)     ← determines 'Long' or 'Short' (never Undefined)
+        │
+        ▼
+  POST /score (Flask)      ← sends { card, bias, entryTime }
+        │
+        ▼
+  Flask: select_base()     ← picks B1–B6 based on bias + entryTime
+        │
+        ▼
+  Flask: score_card()      ← PCA project → bucket lookup → mean FinalScore
+        │
+        ▼
+  row._score = integer     ← stored in r0, used by shortlist auto-rule
+```
+
+Flask runs at `127.0.0.1:3001`. All calls are parallel via `Promise.all` in Node.
+
+---
+
+### 7.2. Training Pipeline (`src/scoring/processor.py`)
+
+Training consumes two CSV files:
+
+| File | Target columns | Entry |
+|---|---|---|
+| `tmp/r4a.csv` | `upR_A`, `downR_A` | 9:37 AM open |
+| `tmp/r4b.csv` | `upR_B`, `downR_B` | 9:40 AM open |
+
+Each file produces three bases (Long, Short, Max direction):
+
+| Base | File | Target | Description |
+|---|---|---|---|
+| B1 | R4A | `upR_A` | Long moves from 9:37 entry |
+| B2 | R4A | `downR_A` | Short moves from 9:37 entry |
+| B3 | R4A | `max(upR_A, downR_A)` | Best direction from 9:37 entry |
+| B4 | R4B | `upR_B` | Long moves from 9:40 entry |
+| B5 | R4B | `downR_B` | Short moves from 9:40 entry |
+| B6 | R4B | `max(upR_B, downR_B)` | Best direction from 9:40 entry |
+
+#### Step 1 — Feature Engineering
+
+**Categorical features** (one-hot encoded):
+```
+sector, industry, regime, regimeLabel, secBias, themes, catalyst,
+screenerKeys, longTerm, midTerm, shortTerm, broadResolved, inShortlist, bias
+```
+
+**Numeric features** (StandardScaler normalized):
+```
+price, prevClose, open, change, gapPct, vwap, sma5, ema9, ema13,
+ema20, ema50, rvol, atr, adrPct, dayHigh, dayLow, monthHigh, monthLow,
+monthRangePos, mcap, floatShares, shortFloat, pmHigh, pmLow, pmRange,
+pmAdrRatio, secScore
+```
+
+**Note:** `_score` is intentionally excluded from features. Including it would create circular feedback — the model would learn from its own previous output, not from market fundamentals.
+
+Categorical columns are expanded with `pd.get_dummies`, then concatenated with scaled numeric columns to produce a single feature matrix `X`.
+
+#### Step 2 — PCA Dimensionality Reduction
+
+**Why PCA?**
+
+With 27+ numeric features and dozens of one-hot categorical columns, the feature space is high-dimensional and correlated. PCA (Principal Component Analysis) solves two problems:
+
+1. **Curse of dimensionality**: With few training rows (e.g., 22), a 200-column feature matrix has many more dimensions than samples. PCA compresses these into a small set of orthogonal components that capture most of the variance.
+2. **Multicollinearity**: Features like `ema9`, `ema13`, `ema20` are highly correlated. PCA rotates the feature space to find uncorrelated directions.
+
+**Mathematical definition:**
+
+Given a centered feature matrix `X` (rows = samples, columns = features):
+
+```
+Covariance matrix:  Σ = (1/n) · Xᵀ · X
+
+Eigen-decomposition: Σ · vⱼ = λⱼ · vⱼ
+  where vⱼ = j-th eigenvector (principal component direction)
+        λⱼ = j-th eigenvalue (variance explained by that component)
+
+PCA projection: Z = X · V
+  where V = matrix of k selected eigenvectors (columns)
+        Z = (n × k) matrix of factor scores
+```
+
+In practice: `sklearn.decomposition.PCA` performs this via SVD internally.
+
+#### Step 3 — Kaiser Criterion (Selecting k)
+
+Not all components are meaningful. The **Kaiser criterion** selects only components with eigenvalue > 1.
+
+**Why eigenvalue > 1?**
+
+Each standardized input feature has variance = 1. A PCA component with eigenvalue < 1 explains less variance than a single original feature — it's not worth keeping. Eigenvalue > 1 means the component captures more information than any single raw feature.
+
+**Example with 22 training rows:**
+
+```
+Component  Eigenvalue  Variance Explained
+PC1        4.82        31.4%
+PC2        2.11        13.8%
+PC3        1.74        11.4%
+PC4        1.23         8.0%
+PC5        1.08         7.1%
+PC6        1.01         6.6%
+──────────────────────────────
+k = 6 components selected (all have eigenvalue > 1)
+Total variance captured: 78.3%
+```
+
+#### Step 4 — Decile Bucket Scoring
+
+For each of the k PCA components, the training data is divided into 10 equal-frequency buckets (deciles) using `pd.qcut`. Each bucket is scored based on the historical win rate of stocks in that bucket.
+
+**Win condition:**
+
+The target variable is the R-multiple (profit in units of ATR) achieved by the stock from entry to the day high (Long) or day low (Short). A "win" is defined as:
+
+```
+Long:   upR   ≥  successThreshold  (default 1.5R)
+Short:  downR  ≥  successThreshold  (default 1.5R)
+```
+
+**Per-bucket statistics:**
+
+For bucket `b` of factor `j`:
+```
+n_b       = number of training samples in bucket b
+wins_b    = number of samples in bucket b where target ≥ threshold
+win_rate  = wins_b / n_b
+```
+
+**Normalization across buckets:**
+
+```
+MeanWR    = mean(win_rate) across all buckets of factor j
+StdWR     = std(win_rate)  across all buckets of factor j
+
+WinRate_Norm  = (win_rate_b - MeanWR) / StdWR      (z-score)
+Mean_Norm     = (n_b - mean(n)) / std(n)             (z-score of count)
+```
+
+**RawScore formula:**
+
+```
+RawScore = (0.5 × Mean_Norm + 0.5 × WinRate_Norm) × 100
+```
+
+The 50/50 blend between count normalization and win rate normalization ensures that:
+- Buckets with high win rates but very few samples are discounted (low Mean_Norm)
+- Buckets with many samples but average win rates also score proportionally
+
+**Confidence correction:**
+
+With few training samples per bucket, win rates are unreliable. Confidence shrinks the score toward zero when `n` is small:
+
+```
+Confidence = n_b / (n_b + 5)
+```
+
+At different sample counts:
+```
+n = 1  → Confidence = 1/6  = 0.167  (very uncertain)
+n = 2  → Confidence = 2/7  = 0.286
+n = 5  → Confidence = 5/10 = 0.500  (50% of face value)
+n = 10 → Confidence = 10/15 = 0.667
+n = 20 → Confidence = 20/25 = 0.800
+n = 50 → Confidence = 50/55 = 0.909
+n = 100→ Confidence = 100/105 ≈ 0.952
+```
+
+**FinalScore per bucket:**
+
+```
+FinalScore_b = RawScore_b × Confidence_b
+```
+
+The constant `5` in the denominator acts as a Laplace smoothing factor — it effectively adds 5 "pseudo-samples" of uncertainty to every bucket.
+
+#### Step 5 — Score Aggregation
+
+The live card receives one PCA projection across all k factors. Each factor produces one FinalScore via its bucket table. The overall score is the mean:
+
+```
+_score = round( mean(FinalScore₁, FinalScore₂, ..., FinalScoreₖ) )
+```
+
+This is an integer in the range 0–100 (in practice, constrained by training data size).
+
+**Score ceiling at different training set sizes:**
+
+```
+22 rows  → ~2 samples/bucket → Confidence ≈ 0.286 → max _score ≈ 28
+50 rows  → ~5 samples/bucket → Confidence = 0.500 → max _score ≈ 50
+100 rows → ~10 samples/bucket → Confidence = 0.667 → max _score ≈ 67
+200 rows → ~20 samples/bucket → Confidence = 0.800 → max _score ≈ 80
+500 rows → ~50 samples/bucket → Confidence = 0.909 → max _score ≈ 91
+```
+
+#### Step 6 — Sub-Tables (Regime Stratification)
+
+In addition to the main table (all training data combined), the processor trains separate per-regime sub-tables when enough data is available.
+
+**Selection criterion:**
+```
+REGIME_SAMPLE_THRESHOLD = 10
+
+If count(training rows where regime = R) >= 10:
+    Train a separate PCA model for regime R
+    Save to outputs/{base}/sub_{R}/
+```
+
+**Sub-table selection at score time:**
+
+```python
+regime = card['regime']
+sub_path = f"outputs/{base_id}/sub_{regime}/metadata.pkl"
+
+if os.path.exists(sub_path):
+    n_sub = load(sub_path)['total_samples']
+    if n_sub >= REGIME_SAMPLE_THRESHOLD:
+        use sub-table
+    else:
+        use main table
+else:
+    use main table
+```
+
+Sub-tables allow the model to specialize — for example, a stock in a STRONG_UP regime may have a different factor-performance profile than the same stock in a CORRECTION regime.
+
+---
+
+### 7.3. Live Scoring (`src/scoring/scorer.py` + `src/sideE/score.js`)
+
+#### Bias Resolution (Node.js — `resolveCardBias`)
+
+Bias determines which training base (Long or Short) to use. User-set bias is respected; `'auto'` is resolved from market context:
+
+```
+Priority chain:
+
+1. row.bias = 'long'                                     → 'Long'
+2. row.bias = 'short'                                    → 'Short'
+3. shortTerm=BEARISH  AND  secBias=BEARISH               → 'Short'
+4. shortTerm=BEARISH  AND  secBias≠BULLISH               → 'Short'
+5. secBias=BEARISH    AND  shortTerm≠BULLISH              → 'Short'
+6. shortTerm=BULLISH  OR   secBias=BULLISH               → 'Long'
+7. longTerm=BEARISH                                      → 'Short'
+8. (all neutral / no signal)                             → 'Long'  ← default
+```
+
+The resolved bias is never `'Undefined'` — the model always gets a clear Long or Short direction. This avoids the B3/B6 "max direction" bases entirely in practice.
+
+#### Base Selection (Python — `select_base`)
+
+```python
+BIAS_MAPPING = {'Long': 'upR', 'Short': 'downR', 'Undefined': 'max'}
+
+def select_base(bias, entry_time='9:40'):
+    target_type = BIAS_MAPPING.get(bias, 'max')
+    if entry_time == '9:40':
+        if target_type == 'upR':   return 'B4'
+        if target_type == 'downR': return 'B5'
+        return 'B6'
+    else:  # 9:37
+        if target_type == 'upR':   return 'B1'
+        if target_type == 'downR': return 'B2'
+        return 'B3'
+```
+
+| Bias | Entry Time | Base | Target |
+|---|---|---|---|
+| Long | 9:40 | B4 | upR_B |
+| Short | 9:40 | B5 | downR_B |
+| Long | 9:37 | B1 | upR_A |
+| Short | 9:37 | B2 | downR_A |
+
+#### Feature Preprocessing (Live Card)
+
+1. Build flat card dict from r0 row — all numeric and categorical fields, no `_score`
+2. `pd.get_dummies` on categorical columns, reindexed to match training feature names (fill missing with 0)
+3. `StandardScaler.transform` on numeric columns (same scaler saved from training)
+4. Concatenate numeric + categorical → reindex to exact `feature_names` order from metadata
+
+#### PCA Projection
+
+```python
+factor_scores_live = meta['pca'].transform(X_final.values)
+# shape: (1, k)
+```
+
+The live card is projected into the same k-dimensional PCA space that was trained.
+
+#### Bucket Lookup
+
+For each factor `j`:
+```python
+factor_score = float(factor_scores_live[0, j-1])
+edges = bucket_edges[f'factor_{j}']   # list of (lo, hi) tuples for 10 deciles
+
+# Find which decile this factor score falls into
+bucket_idx = first idx where lo <= factor_score <= hi
+            (clamped to 0 or 9 if outside training range)
+
+# Read pre-computed FinalScore for that bucket
+bdf = pd.read_csv(f'outputs/{base_id}/{folder}/factor_{j}_buckets.csv')
+fs  = bdf[bdf['Bucket'] == bucket_idx]['FinalScore'].iloc[0]
+```
+
+#### Final Aggregation
+
+```python
+_score = round(float(np.mean(bucket_scores)))
+```
+
+Where `bucket_scores` is the list of k FinalScores, one per PCA factor.
+
+---
+
+### 7.4. Worked Example — IRDM (Verified)
+
+**Card data (key fields):**
+```
+price=54.59, change=+25.44%, gapPct=18.92%, rvol=6.4
+regime=Uptrend, secBias=BULLISH, shortTerm=BULLISH
+sector=Communications, catalyst=Partnership
+```
+
+**Bias resolution:**
+- User-set: SHORT → resolved bias = 'Short' → B5 selected (Short, 9:40 entry)
+- User-set: LONG  → resolved bias = 'Long'  → B4 selected (Long, 9:40 entry)
+
+**PCA projection (same for both B4 and B5, because card data is identical):**
+```
+PC1=3.28, PC2=1.13, PC3=1.15, PC4=-1.47, PC5=1.06, PC6=0.67
+```
+
+**Bucket scores differ because B4 and B5 are trained on different targets (upR vs downR):**
+```
+B4 bucket FinalScores:  [14.7, 11.3, 16.2, 12.8, 9.6, 10.6]
+B4 mean = 12.54 → rounded = 13 ✅
+
+B5 bucket FinalScores:  [13.1, 9.8, 15.4, 11.2, 8.7, 10.2]
+B5 mean = 11.70 → rounded = 12 ✅
+```
+
+*Verified 2026-06-30 via `scripts/verify_irdm_score.py` running against production metadata.pkl files.*
+
+---
+
+### 7.5. Training Schedule
+
+| Trigger | Time | Action |
+|---|---|---|
+| Cron | 4:20 PM ET (Mon–Fri) | Auto-train all 6 bases from `tmp/r4a.csv` + `tmp/r4b.csv` |
+| Manual | `POST /api/analysis/train` | Same — retrains immediately |
+| CSV upload | `POST /api/analysis/upload-csv` | Replace or append R4A/R4B, then retrain |
+
+After training completes, the Flask scorer reloads the new model outputs from disk.
+
+---
+
+### 7.6. Output
+
+| Field | Value | Notes |
+|---|---|---|
+| `row._score` | integer 0–100 | Stored in r0 in-memory registry |
+| `row._scoreDetails` | `{ base, table, k, scores }` | Debug detail (not shown in UI) |
+
+`_score` is used by:
+- Screener tab — score badge on each card
+- Shortlist auto-rule — filters by `shortlistMinScore` threshold
+- R1 capture — frozen in `r1_frozen` table at 9:36 AM
+- R4A/R4B — included in training data for next model generation
 
 ---
 
@@ -845,44 +1226,54 @@ The Shortlist Tab provides users with a curated list of stocks, generated either
 }
 ```
 
-### 8.2. Auto Rule Logic (Runs Once Per Day at 9:35 AM ET)
+### 8.2. Auto Rule Logic
+
+Two invocation modes:
+
+**Cron mode (9:35 AM ET daily):** Skip if an auto entry already exists for today. This prevents re-running the rule redundantly on the cron schedule.
+
+**Manual trigger (`POST /api/shortlist/run-rule`):** Always re-runs regardless of existing entries. Merges new auto picks with any existing manual picks — manual stars are never deleted by a re-run.
 
 ```
 Step 1: Get today's date (ET).
 
-Step 2: Check if a shortlist entry for today already exists in the database.
-        - If exists, log "Shortlist already created for today" and exit.
+Step 2 (cron only, not manual trigger):
+        Check if today's shortlist entry has any items where method = 'auto'.
+        - If yes, log "Auto entry already exists for today" and exit.
+        - (Manual entries alone do NOT block the cron from running.)
 
-Step 3: Get all today's r0 rows where `_score >= 70`.
-        - If no rows, log "No eligible stocks" and exit.
+Step 3: Read `shortlistMinScore` setting (default 70) and `shortlistTopN` setting (default 5).
 
-Step 4: Sort by `_score` descending.
+Step 4: Get all today's r0 rows where `_score >= shortlistMinScore`.
+        - If no rows, log "No eligible stocks (minScore=X, rows=Y)" and exit.
 
-Step 5: Take the top 5.
+Step 5: Sort by `_score` descending. Take top `shortlistTopN`.
 
-Step 6: Create a new shortlist entry for today. For each of the top 5 `r0` rows, capture the following fields:
-        - `ticker`
-        - `addedAt` (current timestamp)
-        - `method`: "auto"
-        - `score`: `r0._score`
-        - `price`: `r0.stock.price`
-        - `change`: `r0.stock.change`
-        - `sector`: `r0.stock.sector`
+Step 6: Load today's existing shortlist entry (if any).
+        Preserve all items where method = 'manual' (manual picks are never removed by auto rule).
 
-        The full shortlist entry will be:
+Step 7: Build auto items. For each eligible r0 row:
         {
-          date: today,
-          items: [ { ticker: "T1", addedAt: now, method: "auto", score: S1, price: P1, change: C1, sector: Sec1 }, ... ],
-          exported: false,
-          exportedAt: null
+          ticker:   row.ticker,
+          tvSymbol: row.stock.tvSymbol,
+          addedAt:  Date.now(),
+          method:   "auto",
+          score:    row._score,
+          price:    row.stock.price,
+          change:   row.stock.change,
+          sector:   row.stock.sector
         }
 
-Step 7: For each selected ticker:
+Step 8: Save merged entry:
+        {
+          date:       today,
+          items:      [ ...manualItems, ...autoItems ],
+          exported:   existing?.exported || false,
+          exportedAt: existing?.exportedAt || null
+        }
+
+Step 9: For each auto item ticker:
           - Set `inShortlist = true` in r0.
-
-Step 8: Save the shortlist entry to the database.
-
-Step 9: (Optional) Push WebSocket notification.
 ```
 
 ### 8.3. Manual Override Logic (User Clicks Star)
@@ -910,8 +1301,9 @@ Step 4: Save the shortlist entry to the database.
 
 - If a ticker is manually added, it stays even if it later fails the auto rule.
 - If a ticker is manually removed, it is removed from the shortlist registry even if it meets the auto rule conditions.
-- Manual entries are never touched by the auto rule.
-- The auto rule never runs on a day that already has a shortlist entry.
+- Manual entries are never touched by the auto rule — auto re-runs only replace previous auto picks.
+- The cron auto rule skips if an **auto** entry already exists today. It does NOT skip if only manual entries exist.
+- Manual trigger (`force=true`) always re-runs, replacing previous auto picks while keeping manual picks.
 
 ---
 
