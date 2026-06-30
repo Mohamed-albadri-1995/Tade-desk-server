@@ -27,17 +27,6 @@ const ENGINE_BY_NAME = {
 let _interval = null;
 let _firedThisSession = new Set(); // prevent duplicate signals per ticker per session
 
-// Live status — what happened on the last poll
-let _status = {
-  running: false,
-  lastPollAt: null,
-  lastPollError: null,
-  tickers: [],
-  evaluations: {}, // ticker → { bars: count, results: [{setupName, fired, reason}], pmHigh }
-};
-
-function getStatus() { return _status; }
-
 function getEngine(setupName) {
   return ENGINE_BY_NAME[(setupName || '').toLowerCase().trim()] || null;
 }
@@ -55,74 +44,45 @@ function start(sessionId, tickers, setups, onSignalFired) {
 
   if (!tickers.length) return;
 
-  _status.running = true;
-  _status.tickers = [...tickers];
-  _status.evaluations = {};
   console.log('[BarPoller] Starting for', tickers.length, 'tickers');
 
   async function poll() {
     const date = toETDate(Date.now());
-    const pollAt = Date.now();
     let barsByTicker;
     try {
       barsByTicker = await fetchIntradayBars(tickers, date);
-      _status.lastPollError = null;
     } catch (e) {
       console.warn('[BarPoller] Alpaca fetch failed:', e.message);
-      _status.lastPollAt = pollAt;
-      _status.lastPollError = e.message;
       return;
     }
-    _status.lastPollAt = pollAt;
 
-    // Reset per-ticker evaluation results for this poll
-    for (const ticker of tickers) {
-      _status.evaluations[ticker] = { bars: 0, pmHigh: null, results: [] };
-    }
+    for (const setup of setups) {
+      const engine = getEngine(setup.name);
+      if (!engine) continue;
 
-    for (const ticker of tickers) {
-      const bars = barsByTicker[ticker];
-      _status.evaluations[ticker].bars = bars ? bars.length : 0;
+      for (const ticker of tickers) {
+        const bars = barsByTicker[ticker];
+        if (!bars || bars.length < 23) continue;
 
-      const r0row = r0.getRow(ticker);
-      const pmHigh = r0row?.stock?.pmHigh ?? null;
-      _status.evaluations[ticker].pmHigh = pmHigh;
-
-      for (const setup of setups) {
-        const engine = getEngine(setup.name);
-        if (!engine) continue;
-
-        if (!bars || bars.length < 23) {
-          _status.evaluations[ticker].results.push({
-            setupName: setup.name,
-            fired: false,
-            reason: bars ? `only ${bars ? bars.length : 0} bars (need 23)` : 'no bars',
-          });
-          continue;
-        }
-
+        // Deduplicate: only fire once per ticker+setup per session
         const key = `${ticker}:${setup.id}`;
-        if (_firedThisSession.has(key)) {
-          _status.evaluations[ticker].results.push({ setupName: setup.name, fired: true, reason: 'already fired this session' });
-          continue;
-        }
+        if (_firedThisSession.has(key)) continue;
+
+        // Get PM high from r0 scanner context
+        const r0row = r0.getRow(ticker);
+        const pmHigh = r0row?.stock?.pmHigh ?? null;
 
         let signal;
         try {
           signal = engine.evaluate(bars, pmHigh);
         } catch (e) {
           console.warn(`[BarPoller] ${ticker} engine error:`, e.message);
-          _status.evaluations[ticker].results.push({ setupName: setup.name, fired: false, reason: `engine error: ${e.message}` });
           continue;
         }
 
-        if (!signal) {
-          _status.evaluations[ticker].results.push({ setupName: setup.name, fired: false, reason: 'conditions not met' });
-          continue;
-        }
+        if (!signal) continue;
 
         _firedThisSession.add(key);
-        _status.evaluations[ticker].results.push({ setupName: setup.name, fired: true, reason: 'signal fired' });
         console.log(`[BarPoller] Signal: ${ticker} ${signal.direction} setup=${setup.name}`);
 
         onSignalFired({
@@ -149,9 +109,7 @@ function stop() {
     _interval = null;
   }
   _firedThisSession.clear();
-  _status.running = false;
-  _status.tickers = [];
   console.log('[BarPoller] Stopped');
 }
 
-module.exports = { start, stop, getEngine, getStatus };
+module.exports = { start, stop, getEngine };
