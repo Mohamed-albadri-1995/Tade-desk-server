@@ -10,7 +10,7 @@ const app = express();
 app.use(express.json());
 
 // Serve frontend
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 
 // Routes
 app.use('/api/registry', require('./routes/registry'));
