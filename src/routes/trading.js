@@ -12,6 +12,7 @@ const sideA = require('../trading/sideA');
 const sideB = require('../trading/sideB');
 const sideC = require('../trading/sideC');
 const center = require('../trading/center');
+const barPoller = require('../trading/barPoller');
 
 const router = express.Router();
 
@@ -193,6 +194,12 @@ router.patch('/positions/:id/close', (req, res) => {
     UPDATE trading_positions SET status='closed', exit_price=?, exit_time=?, pnl=?, closed_at=? WHERE id=?
   `).run(parseFloat(exitPrice), exitTime || new Date().toISOString(), pnl, Date.now(), req.params.id);
   res.json({ ok: true, pnl: parseFloat(pnl.toFixed(2)) });
+});
+
+// ─── Poller status ────────────────────────────────────────────────────────────
+
+router.get('/poller/status', (req, res) => {
+  res.json(barPoller.getStatus());
 });
 
 // ─── SSE — live notifications ─────────────────────────────────────────────────

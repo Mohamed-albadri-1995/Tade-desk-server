@@ -697,8 +697,8 @@ async function loadPollerStatus() {
     return;
   }
 
-  const ago = d.lastPollAt ? Math.round((Date.now() - d.lastPollAt) / 1000) + 's ago' : 'pending first poll';
-  lastEl.textContent = 'Last poll: ' + ago;
+  const ago = d.lastPollAt ? Math.round((Date.now() - d.lastPollAt) / 1000) + 's ago' : 'pending first poll…';
+  lastEl.textContent = 'Poll #' + d.pollCount + ' · ' + ago;
 
   const statusDot = d.lastPollError
     ? '<div class="dot" style="background:var(--red)"></div>'
@@ -707,36 +707,63 @@ async function loadPollerStatus() {
   let html = `<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:8px">
     ${statusDot}
     <span style="color:var(--green);font-weight:600">Running</span>
-    <span style="color:var(--text3)">· polls every 60s · watching ${d.tickers.length} ticker${d.tickers.length !== 1 ? 's' : ''}</span>
-    ${d.lastPollError ? '<span style="color:var(--red)">Error: ' + d.lastPollError + '</span>' : ''}
+    <span style="color:var(--text3)">· every 60s · ${d.tickers.length} ticker${d.tickers.length !== 1 ? 's' : ''} · setups: ${(d.setupNames||[]).join(', ') || 'none'}</span>
+    ${d.lastPollError ? `<span style="color:var(--red)">⚠ ${d.lastPollError}</span>` : ''}
   </div>`;
 
-  const evals = d.evaluations || {};
-  const tickerList = d.tickers;
-  if (!tickerList.length) {
+  const tr = d.tickerResults || {};
+  if (!d.tickers.length) {
     html += '<div style="font-size:11px;color:var(--text3)">No tickers in session.</div>';
   } else {
-    html += '<div style="display:grid;gap:4px">';
-    for (const ticker of tickerList) {
-      const ev = evals[ticker] || {};
-      const bars = ev.bars || 0;
-      const pmHigh = ev.pmHigh != null ? '$' + ev.pmHigh.toFixed(2) : 'no PM data';
-      const results = ev.results || [];
-      const barsColor = bars >= 23 ? 'var(--green)' : bars > 0 ? 'var(--yellow)' : 'var(--red)';
-      let resultBadges = results.map(r => {
-        const color = r.fired ? (r.reason === 'signal fired' ? 'var(--green)' : 'var(--yellow)')
-                               : (r.reason === 'conditions not met' ? 'var(--text3)' : 'var(--red)');
-        const icon = r.fired ? '✓' : '✗';
-        return `<span style="font-size:10px;color:${color};white-space:nowrap">${icon} ${r.setupName}: ${r.reason}</span>`;
-      }).join(' · ');
-      if (!resultBadges) resultBadges = '<span style="font-size:10px;color:var(--text3)">awaiting poll…</span>';
-      html += `<div style="padding:6px 8px;background:var(--bg3);border-radius:6px;display:flex;flex-direction:column;gap:3px">
+    html += '<div style="display:grid;gap:6px">';
+    for (const ticker of d.tickers) {
+      const t = tr[ticker];
+      if (!t) {
+        html += `<div style="padding:6px 8px;background:var(--bg3);border-radius:6px;font-size:11px;color:var(--text3)">${ticker} — awaiting first poll…</div>`;
+        continue;
+      }
+      const barsColor = t.barsReceived >= 23 ? 'var(--green)' : t.barsReceived > 0 ? 'var(--yellow)' : 'var(--red)';
+      const pmHigh = t.pmHigh != null ? '$' + t.pmHigh.toFixed(2) : 'no PM data';
+
+      let setupRows = '';
+      for (const sr of (t.setupResults || [])) {
+        if (!sr.engineFound) {
+          setupRows += `<div style="font-size:10px;color:var(--red)">✗ ${sr.setupName}: no engine registered for this setup name</div>`;
+        } else if (sr.alreadyFired) {
+          setupRows += `<div style="font-size:10px;color:var(--text3)">↩ ${sr.setupName}: already fired this session</div>`;
+        } else if (sr.skipped) {
+          setupRows += `<div style="font-size:10px;color:var(--yellow)">⏸ ${sr.setupName}: ${sr.skipReason}</div>`;
+        } else if (sr.error) {
+          setupRows += `<div style="font-size:10px;color:var(--red)">⚠ ${sr.setupName}: engine error — ${sr.error}</div>`;
+        } else if (sr.signal) {
+          setupRows += `<div style="font-size:10px;color:var(--green);font-weight:600">✓ ${sr.setupName}: SIGNAL ${sr.signal.direction} · SL ${sr.signal.sl} · TP ${sr.signal.tp}</div>`;
+        } else {
+          // No signal — show per-condition results if available
+          const dbg = sr.debugInfo;
+          if (dbg && dbg.canRun && dbg.conditions) {
+            const condHtml = dbg.conditions.map(c => {
+              const icon = c.pass === true ? '✓' : c.pass === false ? '✗' : '—';
+              const col  = c.pass === true ? 'var(--green)' : c.pass === false ? 'var(--red)' : 'var(--text3)';
+              return `<span style="color:${col}">${icon} ${c.name}</span><span style="color:var(--text3);font-size:9px"> (${c.note})</span>`;
+            }).join('<br>');
+            setupRows += `<div style="font-size:10px;color:var(--text3);margin-top:2px">
+              <div style="color:var(--text2);margin-bottom:2px">${sr.setupName}: conditions not met</div>
+              <div style="padding-left:8px;display:grid;gap:1px">${condHtml}</div>
+            </div>`;
+          } else {
+            setupRows += `<div style="font-size:10px;color:var(--text3)">· ${sr.setupName}: conditions not met</div>`;
+          }
+        }
+      }
+      if (!t.setupResults?.length) setupRows = '<div style="font-size:10px;color:var(--text3)">no active setups</div>';
+
+      html += `<div style="padding:8px;background:var(--bg3);border-radius:6px;display:grid;gap:4px">
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-weight:700;font-size:12px;min-width:55px">${ticker}</span>
-          <span style="font-size:10px;color:${barsColor}">${bars} bars</span>
+          <span style="font-weight:700;font-size:13px;min-width:55px">${ticker}</span>
+          <span style="font-size:10px;color:${barsColor}">${t.barsReceived} bars</span>
           <span style="font-size:10px;color:var(--text3)">PM High: ${pmHigh}</span>
         </div>
-        <div>${resultBadges}</div>
+        ${setupRows}
       </div>`;
     }
     html += '</div>';

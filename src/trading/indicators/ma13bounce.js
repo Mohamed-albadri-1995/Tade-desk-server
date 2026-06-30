@@ -98,4 +98,30 @@ function evaluate(bars, pmHigh) {
   };
 }
 
-module.exports = { evaluate };
+/**
+ * Returns per-condition pass/fail detail for debugging (does not fire a signal).
+ */
+function debug(bars, pmHigh) {
+  if (!bars || bars.length < 23) {
+    return { canRun: false, reason: `need 23+ bars, have ${bars?.length ?? 0}` };
+  }
+  const prev = bars[bars.length - 2];
+  const curr = bars[bars.length - 1];
+  const ema13 = calcEMA(bars, 13);
+  const ema20 = calcEMA(bars, 20);
+  const ema13AtPrev = calcEMA(bars.slice(0, bars.length - 1), 13);
+  const vwap = calcVWAP(bars);
+
+  return {
+    canRun: true,
+    conditions: [
+      { name: 'Price > PM High',          pass: pmHigh != null ? curr.c > pmHigh : null,  note: pmHigh != null ? `close ${curr.c?.toFixed(2)} vs pmHigh ${pmHigh?.toFixed(2)}` : 'no PM data (skip)' },
+      { name: 'Prev low ≤ EMA13×1.003',   pass: ema13AtPrev != null ? prev.l <= ema13AtPrev * 1.003 : null, note: ema13AtPrev != null ? `prev.l ${prev.l?.toFixed(2)} vs EMA13 ${ema13AtPrev?.toFixed(2)}` : 'no EMA13' },
+      { name: 'Close > Prev High (HH)',    pass: prev.h != null ? curr.c > prev.h : null,  note: `close ${curr.c?.toFixed(2)} vs prevH ${prev.h?.toFixed(2)}` },
+      { name: 'EMA13 > EMA20 (aligned)',   pass: ema13 != null && ema20 != null ? ema13 > ema20 : null, note: ema13 != null ? `EMA13 ${ema13?.toFixed(2)} vs EMA20 ${ema20?.toFixed(2)}` : 'no EMAs' },
+      { name: 'Close > VWAP',             pass: vwap != null ? curr.c > vwap : null,   note: vwap != null ? `close ${curr.c?.toFixed(2)} vs VWAP ${vwap?.toFixed(2)}` : 'no VWAP' },
+    ],
+  };
+}
+
+module.exports = { evaluate, debug };
