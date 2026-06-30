@@ -27,6 +27,13 @@ const SETTING_RULES = {
   analysisTrainingWindow: { type: 'str', maxLen: 10  },
   aiApiKey:               { type: 'str', maxLen: 200 },
   aiModel:                { type: 'str', maxLen: 100 },
+  trading_equity:         { type: 'float', min: 0, max: 10000000 },
+  trading_risk_pct:       { type: 'float', min: 0, max: 100 },
+  trading_max_shares:     { type: 'int',   min: 0, max: 100000 },
+  trading_max_dollar_risk:{ type: 'float', min: 0, max: 100000 },
+  trading_max_exposure:   { type: 'float', min: 0, max: 10000000 },
+  trading_max_positions:  { type: 'int',   min: 1, max: 20 },
+  trading_daily_loss_limit:{ type: 'float', min: 0, max: 100000 },
 };
 
 const MASKED_KEYS = new Set(['finnhubApiKey', 'githubBackupToken', 'alpacaApiKey', 'alpacaApiSecret', 'aiApiKey']);
@@ -73,6 +80,12 @@ router.post('/', (req, res) => {
         errors.push(`${key} must be between ${rule.min} and ${rule.max}`);
         continue;
       }
+      validated[key] = String(n);
+    } else if (rule.type === 'float') {
+      if (raw === '' || raw == null) { validated[key] = ''; continue; }
+      const n = Number(raw);
+      if (!Number.isFinite(n)) { errors.push(`${key} must be a number`); continue; }
+      if (n < rule.min || n > rule.max) { errors.push(`${key} must be between ${rule.min} and ${rule.max}`); continue; }
       validated[key] = String(n);
     } else if (rule.type === 'str') {
       const s = String(raw || '').trim();
