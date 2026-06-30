@@ -13,6 +13,7 @@ const db = require('../db');
 const sideA = require('./sideA');
 const sideB = require('./sideB');
 const center = require('./center');
+const barPoller = require('./barPoller');
 const { toETDate } = require('../utils/time');
 
 const SCANNER_URL = process.env.SCANNER_URL || 'http://127.0.0.1:3000';
@@ -112,6 +113,15 @@ async function start() {
     }
   }, 30000);
 
+  // Bar poller — runs indicator engines every 60s
+  const activeSetups = db.prepare('SELECT * FROM trading_setups WHERE enabled = 1').all()
+    .map(r => ({ ...r, config: JSON.parse(r.config || '{}') }));
+  barPoller.start(sessionId, tickers, activeSetups, (signal, sid) => {
+    sideB.onIndicatorFire(signal, sid, (enrichedSignal) => {
+      center.broadcast({ type: 'signal', ...enrichedSignal });
+    });
+  });
+
   // Auto-end at 10:00 ET
   _scheduleEnd();
 
@@ -136,6 +146,7 @@ function end(reason = 'manual') {
 
   clearInterval(_contextPollInterval);
   _contextPollInterval = null;
+  barPoller.stop();
 
   db.prepare("UPDATE trading_sessions SET ended_at = ?, status = 'ended' WHERE id = ?")
     .run(Date.now(), _session.id);

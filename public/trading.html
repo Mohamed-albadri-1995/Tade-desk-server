@@ -416,6 +416,17 @@ body {
       <button onclick="showAddSetup()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-family:inherit;font-weight:600;cursor:pointer">+ New Setup</button>
     </div>
     <div id="setups-list"></div>
+
+    <!-- Signal Comparison -->
+    <div class="panel" style="margin-top:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div class="panel-title" style="margin:0">Signal Comparison</div>
+        <input type="date" id="cmp-date" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text);font-family:inherit;font-size:12px">
+        <button onclick="loadComparison()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;font-family:inherit;cursor:pointer">Load</button>
+      </div>
+      <div id="cmp-summary" style="display:flex;gap:16px;margin-bottom:10px;font-size:12px;color:var(--text3)"></div>
+      <div id="cmp-table"></div>
+    </div>
   </div>
 
   <!-- SETTINGS TAB -->
@@ -472,7 +483,7 @@ function switchTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'sideA')     loadSideA();
   if (name === 'positions') loadPositions();
-  if (name === 'setups')    loadSetups();
+  if (name === 'setups')    { loadSetups(); const cd = document.getElementById('cmp-date'); if (cd && !cd.value) cd.value = new Date().toISOString().slice(0,10); }
   if (name === 'settings')  loadSettings();
   if (name === 'journal')   loadJournal();
 }
@@ -1056,6 +1067,55 @@ async function deleteSetup(id) {
   if (!confirm('Delete this setup?')) return;
   await fetch(`${API}/trading/setups/${id}`, { method: 'DELETE' });
   loadSetups();
+}
+
+async function loadComparison() {
+  const date = document.getElementById('cmp-date').value;
+  if (!date) return;
+  const d = await fetch(`${API}/trading/comparison/${date}`).then(r => r.json()).catch(() => null);
+  const summary = document.getElementById('cmp-summary');
+  const table   = document.getElementById('cmp-table');
+  if (!d) { summary.innerHTML = ''; table.innerHTML = '<div style="color:var(--text3);font-size:12px">Failed to load.</div>'; return; }
+  const matchPct = d.nativeCount ? Math.round(d.matchedCount / d.nativeCount * 100) : 0;
+  const matchColor = matchPct === 100 ? 'var(--green)' : matchPct >= 80 ? '#f59e0b' : 'var(--red)';
+  summary.innerHTML =
+    `<span>Native: <b style="color:var(--text)">${d.nativeCount}</b></span>` +
+    `<span>TradingView: <b style="color:var(--text)">${d.webhookCount}</b></span>` +
+    `<span>Matched: <b style="color:${matchColor}">${d.matchedCount} (${matchPct}%)</b></span>`;
+  if (!d.all || !d.all.length) {
+    table.innerHTML = '<div style="color:var(--text3);font-size:12px">No signals for this date.</div>';
+    return;
+  }
+  const rows = d.all.map(r => {
+    const t = new Date(r.fired_at).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const matchBadge = r.matched === 1
+      ? '<span style="color:#22c55e;font-weight:700">✓ Match</span>'
+      : r.matched === 0
+        ? '<span style="color:#ef4444;font-weight:700">✗ Miss</span>'
+        : '<span style="color:#64748b">—</span>';
+    const srcBadge = r.source === 'native'
+      ? '<span style="color:#93c5fd">Server</span>'
+      : '<span style="color:#fbbf24">TradingView</span>';
+    return `<tr>
+      <td style="color:var(--text3)">${t}</td>
+      <td style="font-weight:700">${r.ticker}</td>
+      <td style="color:var(--text3);font-size:10px">${r.setup_id ? r.setup_id.slice(-8) : '—'}</td>
+      <td>${r.direction}</td>
+      <td>${srcBadge}</td>
+      <td>${matchBadge}</td>
+    </tr>`;
+  }).join('');
+  table.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:11px">
+    <thead><tr style="color:#475569;font-size:10px;text-align:left">
+      <th style="padding:4px 6px">Time ET</th>
+      <th style="padding:4px 6px">Ticker</th>
+      <th style="padding:4px 6px">Setup</th>
+      <th style="padding:4px 6px">Direction</th>
+      <th style="padding:4px 6px">Source</th>
+      <th style="padding:4px 6px">Match</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
