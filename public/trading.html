@@ -418,12 +418,12 @@ async function toggleSession() {
         alert('Failed to start: ' + (r.reason || r.error));
       }
     } else {
+      stopSSE();
       await fetch(`${API}/trading/session/end`, { method: 'POST' });
       sessionActive = false;
       setSessionBadge(false);
       btn.textContent = 'Start Session';
       btn.className = 'session-btn start';
-      stopSSE();
     }
   } finally {
     btn.disabled = false;
@@ -465,7 +465,6 @@ function stopSSE() {
 
 function handleEvent(evt) {
   if (evt.type === 'signal') renderCenterCard(evt);
-  if (evt.type === 'session_ended') { sessionActive = false; setSessionBadge(false); stopSSE(); }
   if (evt.type === 'webhook_signal') updateSignalMatch(evt);
 }
 
