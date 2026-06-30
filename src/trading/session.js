@@ -122,21 +122,8 @@ async function start() {
     });
   });
 
-  // Auto-end at 10:00 ET
-  _scheduleEnd();
-
   console.log(`[TradingSession] Started ${sessionId} with ${tickers.length} tickers`);
   return { ok: true, sessionId, tickers, shortlist };
-}
-
-function _scheduleEnd() {
-  const now = new Date();
-  const et10 = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  et10.setHours(10, 0, 0, 0);
-  const msUntil10 = et10 - now;
-  if (msUntil10 > 0) {
-    setTimeout(() => end('auto'), msUntil10);
-  }
 }
 
 // ─── Session end ──────────────────────────────────────────────────────────────
@@ -158,5 +145,34 @@ function end(reason = 'manual') {
   center.broadcast({ type: 'session_ended', reason, ts: Date.now() });
   return { ok: true, session: ended };
 }
+
+// ─── Daily auto start/stop (9:36 ET start, 12:00 ET stop) ─────────────────────
+
+let _lastAutoStartDate = null;
+let _lastAutoEndDate = null;
+
+function _etParts(now) {
+  const hour = parseInt(new Date(now).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+  const min  = parseInt(new Date(now).toLocaleString('en-US', { timeZone: 'America/New_York', minute: 'numeric' }));
+  return { hour, min };
+}
+
+setInterval(() => {
+  const now = Date.now();
+  const today = toETDate(now);
+  const { hour, min } = _etParts(now);
+
+  if (hour === 9 && min === 36 && !isActive() && _lastAutoStartDate !== today) {
+    _lastAutoStartDate = today;
+    start().then(r => {
+      if (!r.ok) console.warn('[TradingSession] Auto-start failed:', r.reason);
+    });
+  }
+
+  if (hour === 12 && min === 0 && isActive() && _lastAutoEndDate !== today) {
+    _lastAutoEndDate = today;
+    end('auto');
+  }
+}, 20000);
 
 module.exports = { start, end, getSession, isActive, pollContext };

@@ -10,7 +10,6 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const sideC = require('./sideC');
-const { analyzeSetup } = require('../journal/analysis');
 
 // Active signal listeners (SSE clients)
 const listeners = new Set();
@@ -98,11 +97,8 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     ? (direction === 'Long' ? currentAsk : currentBid) || ((currentBid + currentAsk) / 2) || null
     : null;
 
-  // Setup historical grade (A+/A/B/C) from journal analysis
-  let setupGrade = null;
-  if (setupId) {
-    try { setupGrade = analyzeSetup(setupId)?.grade?.grade ?? null; } catch { /* no data yet */ }
-  }
+  // Grading is being rebuilt — keep the grade multiplier neutral (1.0) for now
+  const setupGrade = null;
 
   // Sizing
   let sizing = null;
