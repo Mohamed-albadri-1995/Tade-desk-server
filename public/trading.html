@@ -998,7 +998,7 @@ async function loadSetups() {
       <div style="display:flex;align-items:center;gap:8px">
         <span style="font-weight:700">${s.name}</span>
         <span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${s.enabled ? 'rgba(34,197,94,.12)':'rgba(85,93,112,.12)'};color:${s.enabled ? 'var(--green)':'var(--text3)'}">${s.enabled ? 'Active' : 'Disabled'}</span>
-        <span style="font-size:11px;color:var(--text3);margin-left:auto">${s.entry_type} · ${s.window_start}–${s.window_end}</span>
+        <span style="font-size:11px;color:var(--text3);margin-left:auto" title="Entry allowed only within this window">${s.entry_type} · Entry ${s.window_start}–${s.window_end}</span>
         <button onclick="editSetup('${s.id}','${s.name.replace(/'/g,"\\'")}','${(s.description||'').replace(/'/g,"\\'")}','${s.entry_type}','${s.window_start}','${s.window_end}')" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;color:var(--text2);font-family:inherit;cursor:pointer">Edit</button>
         <button onclick="toggleSetup('${s.id}',${s.enabled})" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;color:var(--text2);font-family:inherit;cursor:pointer">${s.enabled ? 'Disable':'Enable'}</button>
         <button onclick="deleteSetup('${s.id}')" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:5px;padding:3px 8px;font-size:11px;color:var(--red);font-family:inherit;cursor:pointer">Delete</button>
@@ -1013,8 +1013,8 @@ function showAddSetup() {
   if (!name) return;
   const desc   = prompt('Description (optional):') || '';
   const type   = prompt('Entry type (market/limit):', 'market') || 'market';
-  const start  = prompt('Window start (HH:MM):', '9:35') || '9:35';
-  const end    = prompt('Window end (HH:MM):', '10:00') || '10:00';
+  const start  = prompt('Entry window start — last time to enter (HH:MM):', '9:35') || '9:35';
+  const end    = prompt('Entry window end — last time to enter (HH:MM):', '10:00') || '10:00';
   fetch(`${API}/trading/setups`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1027,8 +1027,8 @@ async function editSetup(id, name, desc, type, start, end) {
   if (newName === null) return;
   const newDesc  = prompt('Description (optional):', desc) ?? desc;
   const newType  = prompt('Entry type (market/limit):', type) || type;
-  const newStart = prompt('Window start (HH:MM):', start) || start;
-  const newEnd   = prompt('Window end (HH:MM):', end) || end;
+  const newStart = prompt('Entry window start — first time to enter (HH:MM):', start) || start;
+  const newEnd   = prompt('Entry window end — last time to enter (HH:MM):', end) || end;
   await fetch(`${API}/trading/setups/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
