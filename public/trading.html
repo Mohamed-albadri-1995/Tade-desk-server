@@ -418,12 +418,16 @@ async function toggleSession() {
         alert('Failed to start: ' + (r.reason || r.error));
       }
     } else {
-      stopSSE();
-      await fetch(`${API}/trading/session/end`, { method: 'POST' });
+      try {
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 3000);
+        await fetch(`${API}/trading/session/end`, { method: 'POST', signal: ctrl.signal });
+      } catch {}
       sessionActive = false;
       setSessionBadge(false);
       btn.textContent = 'Start Session';
       btn.className = 'session-btn start';
+      stopSSE();
     }
   } finally {
     btn.disabled = false;
