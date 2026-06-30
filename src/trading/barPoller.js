@@ -17,10 +17,12 @@ const INDICATORS = {
 
 // Import all available engines
 const ma13bounce = require('./indicators/ma13bounce');
+const test       = require('./indicators/test');
 
 // Key → engine map (matched against trading_setups.indicator field)
 const ENGINES = {
   'ma13bounce': ma13bounce,
+  'test':       test,
 };
 
 // Legacy name fallback (for setups created before the indicator field existed)

@@ -560,7 +560,7 @@ const API = '/api';
 // ── Tab switching ──────────────────────────────────────────────────────────────
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t, i) => {
-    const names = ['signals','center','sideA','positions','journal','setups','settings'];
+    const names = ['signals','sideA','center','positions','journal','setups','settings'];
     t.classList.toggle('active', names[i] === name);
   });
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
