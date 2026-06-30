@@ -51,28 +51,33 @@ router.get('/setups', (req, res) => {
   res.json(rows.map(r => ({ ...r, config: JSON.parse(r.config || '{}') })));
 });
 
+router.get('/indicators', (req, res) => {
+  res.json(barPoller.listEngines());
+});
+
 router.post('/setups', (req, res) => {
-  const { name, description, entry_type, window_start, window_end, config } = req.body;
+  const { name, description, indicator, entry_type, window_start, window_end, config } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const id = uuidv4();
   db.prepare(`
-    INSERT INTO trading_setups (id, name, description, entry_type, window_start, window_end, enabled, config)
-    VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-  `).run(id, name, description || '', entry_type || 'market', window_start || '9:35', window_end || '10:00', JSON.stringify(config || {}));
+    INSERT INTO trading_setups (id, name, description, indicator, entry_type, window_start, window_end, enabled, config)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+  `).run(id, name, description || '', indicator || null, entry_type || 'market', window_start || '9:35', window_end || '10:00', JSON.stringify(config || {}));
   sideB.loadSetups();
   res.json({ ok: true, id });
 });
 
 router.patch('/setups/:id', (req, res) => {
-  const { name, description, entry_type, window_start, window_end, enabled, config } = req.body;
+  const { name, description, indicator, entry_type, window_start, window_end, enabled, config } = req.body;
   const row = db.prepare('SELECT * FROM trading_setups WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Setup not found' });
   db.prepare(`
-    UPDATE trading_setups SET name=?, description=?, entry_type=?, window_start=?, window_end=?, enabled=?, config=?
+    UPDATE trading_setups SET name=?, description=?, indicator=?, entry_type=?, window_start=?, window_end=?, enabled=?, config=?
     WHERE id=?
   `).run(
     name ?? row.name,
     description ?? row.description,
+    indicator !== undefined ? (indicator || null) : row.indicator,
     entry_type ?? row.entry_type,
     window_start ?? row.window_start,
     window_end ?? row.window_end,

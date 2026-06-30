@@ -9,6 +9,7 @@ db.exec(`
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
+    indicator TEXT,
     entry_type TEXT NOT NULL DEFAULT 'market',
     window_start TEXT NOT NULL DEFAULT '9:35',
     window_end TEXT NOT NULL DEFAULT '10:00',
@@ -92,6 +93,9 @@ db.exec(`
     closed_at INTEGER
   );
 `);
+
+// Migration: add indicator column if missing
+try { db.exec('ALTER TABLE trading_setups ADD COLUMN indicator TEXT'); } catch { /* already exists */ }
 
 // Default trading settings
 const tradingDefaults = [

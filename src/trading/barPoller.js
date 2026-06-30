@@ -18,10 +18,15 @@ const INDICATORS = {
 // Import all available engines
 const ma13bounce = require('./indicators/ma13bounce');
 
-// Name → engine map (matched against trading_setups.name, case-insensitive)
+// Key → engine map (matched against trading_setups.indicator field)
+const ENGINES = {
+  'ma13bounce': ma13bounce,
+};
+
+// Legacy name fallback (for setups created before the indicator field existed)
 const ENGINE_BY_NAME = {
-  '13 ma bounce': ma13bounce,
-  '13ma bounce':  ma13bounce,
+  '13 ma bounce': 'ma13bounce',
+  '13ma bounce':  'ma13bounce',
 };
 
 let _interval = null;
@@ -46,8 +51,16 @@ function getStatus() {
   };
 }
 
-function getEngine(setupName) {
-  return ENGINE_BY_NAME[(setupName || '').toLowerCase().trim()] || null;
+function getEngine(setup) {
+  // Primary: use explicit indicator key from DB
+  if (setup.indicator) return ENGINES[setup.indicator] || null;
+  // Fallback: try to match by name for backwards compatibility
+  const key = ENGINE_BY_NAME[(setup.name || '').toLowerCase().trim()];
+  return key ? ENGINES[key] : null;
+}
+
+function listEngines() {
+  return Object.keys(ENGINES);
 }
 
 /**
@@ -103,7 +116,7 @@ function start(sessionId, tickers, setups, onSignalFired) {
       };
 
       for (const setup of setups) {
-        const engine = getEngine(setup.name);
+        const engine = getEngine(setup);
         const key = `${ticker}:${setup.id}`;
         const alreadyFired = _firedThisSession.has(key);
 
@@ -170,4 +183,4 @@ function stop() {
   console.log('[BarPoller] Stopped');
 }
 
-module.exports = { start, stop, getEngine, getStatus };
+module.exports = { start, stop, getEngine, getStatus, listEngines };
