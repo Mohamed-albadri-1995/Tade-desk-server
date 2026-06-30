@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/index.js",
+    "start:scorer": "python3 src/scoring/server.py",
     "test": "jest tests/"
   },
   "repository": {

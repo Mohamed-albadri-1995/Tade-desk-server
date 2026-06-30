@@ -1,7 +1,20 @@
 const express = require('express');
 const { runFullScan, getScanStatus } = require('../pipeline');
+const { captureR3 } = require('../sideH/capture');
 
 const router = express.Router();
+
+// POST /api/scan/capture-r3 — manually trigger R3 EOD capture
+router.post('/capture-r3', async (req, res) => {
+  const { date } = req.body || {};
+  try {
+    const result = await captureR3(date || undefined);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[R3] Manual capture error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // POST /api/scan/run — manually trigger a full scan
 router.post('/run', async (req, res) => {

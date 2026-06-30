@@ -503,6 +503,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
       </select>
       <button class="export-btn" onclick="exportCSV()">⬇ CSV</button>
       <button class="export-btn" onclick="exportJSON()">⬇ JSON</button>
+      <button class="export-btn" id="r3-capture-btn" onclick="manualR3Capture()" style="background:#1a1d2e;border-color:#7c3aed;color:#a78bfa">⚡ Capture R3</button>
       <span class="wh-status" id="wh-status">No data loaded</span>
     </div>
     <div class="table-wrap">
@@ -686,27 +687,15 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
             <div class="settings-hint" id="github-token-status">Loading…</div>
             <input type="password" class="settings-input" id="s-githubBackupToken" placeholder="Paste GitHub personal access token" autocomplete="off">
           </div>
-          <div class="settings-field">
-            <label>Alpaca API Key</label>
-            <div class="settings-hint" id="alpaca-key-status">Loading…</div>
-            <input type="password" class="settings-input" id="s-alpacaApiKey" placeholder="Paste Alpaca API key" autocomplete="off">
-          </div>
-          <div class="settings-field">
-            <label>Alpaca Secret Key</label>
-            <div class="settings-hint" id="alpaca-secret-status">Loading…</div>
-            <input type="password" class="settings-input" id="s-alpacaApiSecret" placeholder="Paste Alpaca secret key" autocomplete="off">
-          </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
-          <button class="settings-save-btn" onclick="saveSettings(['finnhubApiKey','githubBackupToken','alpacaApiKey','alpacaApiSecret'], this)">Save API Keys</button>
+          <button class="settings-save-btn" onclick="saveSettings(['finnhubApiKey','githubBackupToken'], this)">Save API Keys</button>
           <button class="settings-reset-btn" onclick="testKey('finnhub','test-finnhub')">Test Finnhub</button>
           <button class="settings-reset-btn" onclick="testKey('github','test-github')">Test GitHub</button>
-          <button class="settings-reset-btn" onclick="testKey('alpaca','test-alpaca')">Test Alpaca</button>
         </div>
         <span class="settings-msg" id="msg-api"></span>
         <div id="test-finnhub" class="settings-test-result"></div>
         <div id="test-github" class="settings-test-result"></div>
-        <div id="test-alpaca" class="settings-test-result"></div>
       </div>
 
 
@@ -2163,6 +2152,30 @@ function dlFile(name, content, type) {
   a.href = URL.createObjectURL(new Blob([content], { type }));
   a.download = name;
   a.click();
+}
+
+async function manualR3Capture() {
+  const btn = document.getElementById('r3-capture-btn');
+  const statusEl = document.getElementById('wh-status');
+  btn.disabled = true;
+  btn.textContent = 'Capturing…';
+  statusEl.textContent = 'Running R3 capture — fetching bars from Yahoo Finance…';
+  try {
+    const r = await fetch('/api/scan/capture-r3', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Capture failed');
+    if (d.skipped) {
+      statusEl.textContent = `R3 skipped: ${d.reason}`;
+    } else {
+      statusEl.textContent = `R3 done — R3A: ${d.r3aWritten}, R3B: ${d.r3bWritten} (${d.tickers} tickers)`;
+      loadWarehouseDates();
+    }
+  } catch (err) {
+    statusEl.textContent = 'R3 error: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⚡ Capture R3';
+  }
 }
 
 // ═══════════════════════════════════════════════════
