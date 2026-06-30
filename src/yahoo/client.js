@@ -1,82 +1,96 @@
 const axios = require('axios');
-const { toETTime } = require('../utils/time');
+const { toETTime, toETDate } = require('../utils/time');
 
-const YF_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart';
+// Try query1 first, fall back to query2 (mirrors what the extension does)
+const YF_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
 const YF_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Accept': '*/*',
+  'Accept': 'application/json',
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
-const DELAY_MS = 120; // between per-ticker requests to avoid rate limiting
+const DELAY_MS = 150;
 
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// Fetch raw chart data for one ticker from Yahoo Finance v8 chart API
-async function fetchChart(ticker, interval, period1, period2) {
-  const resp = await axios.get(`${YF_BASE}/${ticker}`, {
-    headers: YF_HEADERS,
-    params: { interval, period1, period2 },
-    timeout: 15000,
-  });
-  const result = resp.data?.chart?.result?.[0];
-  if (!result) return null;
-  return result;
+// Fetch raw chart result from Yahoo Finance v8, trying both hosts
+async function fetchChart(ticker, params) {
+  let lastErr;
+  for (const host of YF_HOSTS) {
+    try {
+      const resp = await axios.get(`https://${host}/v8/finance/chart/${encodeURIComponent(ticker)}`, {
+        headers: YF_HEADERS,
+        params,
+        timeout: 15000,
+      });
+      const result = resp.data?.chart?.result?.[0];
+      if (result) return result;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error(`No chart data for ${ticker}`);
 }
 
-// Fetch 1-min intraday bars for a single ticker on given ET date string (e.g. '2024-01-15')
+// Fetch 1-min intraday bars for a single ticker on a specific ET date.
+// Uses range=5d so Yahoo returns recent trading days without timezone-sensitive period1/period2.
+// We then filter to only the bars for the requested date.
 // Returns [{t, o, h, l, c, v, etTime}]
 async function fetchTickerIntraday(ticker, date) {
-  const start = Math.floor(new Date(`${date}T09:30:00-05:00`).getTime() / 1000);
-  const end   = Math.floor(new Date(`${date}T16:00:00-05:00`).getTime() / 1000);
-
-  const result = await fetchChart(ticker, '1m', start, end);
-  if (!result) return [];
+  const result = await fetchChart(ticker, {
+    interval: '1m',
+    range: '5d',
+    includePrePost: false,
+  });
 
   const timestamps = result.timestamp || [];
   const q = result.indicators?.quote?.[0] || {};
 
-  return timestamps.map((t, i) => ({
-    t: new Date(t * 1000).toISOString(),
-    o: q.open?.[i]   ?? null,
-    h: q.high?.[i]   ?? null,
-    l: q.low?.[i]    ?? null,
-    c: q.close?.[i]  ?? null,
-    v: q.volume?.[i] ?? null,
-    etTime: toETTime(t * 1000),
-  })).filter(b => b.o !== null && b.h !== null && b.l !== null);
+  return timestamps
+    .map((t, i) => {
+      const etDate = toETDate(t * 1000);
+      const etTime = toETTime(t * 1000);
+      return {
+        t:      new Date(t * 1000).toISOString(),
+        o:      q.open?.[i]   ?? null,
+        h:      q.high?.[i]   ?? null,
+        l:      q.low?.[i]    ?? null,
+        c:      q.close?.[i]  ?? null,
+        v:      q.volume?.[i] ?? null,
+        etDate,
+        etTime,
+      };
+    })
+    .filter(b => b.etDate === date && b.o !== null && b.h !== null && b.l !== null);
 }
 
-// Fetch daily bars for a single ticker, strictly before beforeDate (ET date string)
-// Returns [{t, o, h, l, c}] — up to 30 calendar days back
+// Fetch daily bars for a single ticker, for days strictly before beforeDate.
+// Uses range=3mo so Yahoo returns ~63 trading days without exact timestamp math.
+// Returns [{t, o, h, l, c}]
 async function fetchTickerDaily(ticker, beforeDate) {
-  // End = day before beforeDate; Start = 30 calendar days before that
-  const endDate = new Date(`${beforeDate}T00:00:00-05:00`);
-  endDate.setDate(endDate.getDate() - 1);
-  const startDate = new Date(endDate);
-  startDate.setDate(startDate.getDate() - 29);
-
-  const period1 = Math.floor(startDate.getTime() / 1000);
-  const period2 = Math.floor(endDate.getTime() / 1000) + 86400; // include end day
-
-  const result = await fetchChart(ticker, '1d', period1, period2);
-  if (!result) return [];
+  const result = await fetchChart(ticker, {
+    interval: '1d',
+    range: '3mo',
+    includePrePost: false,
+  });
 
   const timestamps = result.timestamp || [];
   const q = result.indicators?.quote?.[0] || {};
 
-  return timestamps.map((t, i) => ({
-    t: new Date(t * 1000).toISOString(),
-    o: q.open?.[i]  ?? null,
-    h: q.high?.[i]  ?? null,
-    l: q.low?.[i]   ?? null,
-    c: q.close?.[i] ?? null,
-  })).filter(b => b.c !== null);
+  return timestamps
+    .map((t, i) => ({
+      t: new Date(t * 1000).toISOString(),
+      o: q.open?.[i]  ?? null,
+      h: q.high?.[i]  ?? null,
+      l: q.low?.[i]   ?? null,
+      c: q.close?.[i] ?? null,
+    }))
+    .filter(b => b.c !== null && toETDate(new Date(b.t).getTime()) < beforeDate);
 }
 
-// Fetch intraday 1-min bars for multiple tickers (sequential with delay)
+// Fetch intraday 1-min bars for multiple tickers sequentially.
 // Returns { TICKER: [{t, o, h, l, c, v, etTime}] }
 async function fetchIntradayBars(tickers, date) {
   const out = {};
@@ -92,7 +106,7 @@ async function fetchIntradayBars(tickers, date) {
   return out;
 }
 
-// Fetch daily bars for multiple tickers (sequential with delay)
+// Fetch daily bars for multiple tickers sequentially.
 // Returns { TICKER: [{t, o, h, l, c}] }
 async function fetchDailyBars(tickers, beforeDate) {
   const out = {};
@@ -115,12 +129,11 @@ function computeATR14(bars) {
   for (let i = 1; i < bars.length; i++) {
     const cur  = bars[i];
     const prev = bars[i - 1];
-    const tr = Math.max(
+    trs.push(Math.max(
       cur.h - cur.l,
       Math.abs(cur.h - prev.c),
       Math.abs(cur.l - prev.c)
-    );
-    trs.push(tr);
+    ));
   }
   const last14 = trs.slice(-14);
   if (last14.length < 14) return null;
