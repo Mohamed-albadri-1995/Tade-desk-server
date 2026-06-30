@@ -816,8 +816,13 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
               <option value="9:37">9:37 AM — R4A</option>
             </select>
           </div>
+          <div class="settings-field">
+            <label>Regime Sub-Table Threshold</label>
+            <div class="settings-hint">Minimum training samples a regime sub-table must have to be used. Falls back to the main table if below this number. Default: 10.</div>
+            <input class="settings-input" type="number" id="s-regimeSampleThreshold" min="1" max="500" step="1" placeholder="10">
+          </div>
         </div>
-        <button class="settings-save-btn" onclick="saveSettings(['scorerEntryTime'], this)">Save Scorer</button>
+        <button class="settings-save-btn" onclick="saveSettings(['scorerEntryTime','regimeSampleThreshold'], this)">Save Scorer</button>
         <span class="settings-msg" id="msg-scorer"></span>
       </div>
 
@@ -1322,6 +1327,7 @@ const MSG_IDS = {
   alpacaApiKey: 'msg-api', alpacaApiSecret: 'msg-api',
   aiApiKey: 'msg-ai', aiModel: 'msg-ai',
   scorerEntryTime: 'msg-scorer',
+  regimeSampleThreshold: 'msg-scorer',
 };
 
 async function resetHotState(btn) {

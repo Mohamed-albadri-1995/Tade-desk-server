@@ -15,6 +15,8 @@ const SETTING_RULES = {
   sectorBearishThreshold: { type: 'int', min: -100, max: 0   },
   shortlistMinScore:      { type: 'int', min: 0,    max: 100 },
   shortlistTopN:          { type: 'int', min: 1,    max: 50  },
+  scorerEntryTime:        { type: 'str', maxLen: 10 },
+  regimeSampleThreshold:  { type: 'int', min: 1,    max: 500 },
   finnhubApiKey:          { type: 'str', maxLen: 100 },
   githubBackupToken:      { type: 'str', maxLen: 200 },
   alpacaApiKey:           { type: 'str', maxLen: 100 },

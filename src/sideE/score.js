@@ -9,6 +9,11 @@ function getEntryTime() {
   return row?.value || '9:40';
 }
 
+function getRegimeSampleThreshold() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'regimeSampleThreshold'").get();
+  return row?.value ? parseInt(row.value, 10) : 10;
+}
+
 // Maps r0 bias field → LiveScorer bias string
 function resolveCardBias(row) {
   const b = row.bias || 'auto';
@@ -107,7 +112,8 @@ async function scoreRow(row) {
     const resolvedBiasLower = bias === 'Long' ? 'long' : bias === 'Short' ? 'short' : 'auto';
     const card = buildCard(row);
     const entry_time = getEntryTime();
-    const resp = await axios.post(`${SCORER_URL}/score`, { card, bias, entry_time }, { timeout: SCORER_TIMEOUT });
+    const regime_sample_threshold = getRegimeSampleThreshold();
+    const resp = await axios.post(`${SCORER_URL}/score`, { card, bias, entry_time, regime_sample_threshold }, { timeout: SCORER_TIMEOUT });
     if (resp.data?.ok) {
       return {
         _score: Math.round(resp.data.final_score),

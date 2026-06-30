@@ -116,7 +116,8 @@ class LiveScorer:
         return os.path.exists(path)
 
     def score_card(self, card_dict: dict, bias: str = 'Undefined',
-                   entry_time: str = DEFAULT_ENTRY_TIME) -> dict:
+                   entry_time: str = DEFAULT_ENTRY_TIME,
+                   regime_sample_threshold: int = REGIME_SAMPLE_THRESHOLD) -> dict:
         base_id = select_base(bias, entry_time)
 
         # Step 2: Select main vs sub table
@@ -126,7 +127,7 @@ class LiveScorer:
 
         if regime_card and os.path.exists(sub_path):
             sub_meta = self._load_meta(sub_path)
-            if sub_meta['total_samples'] >= REGIME_SAMPLE_THRESHOLD:
+            if sub_meta['total_samples'] >= regime_sample_threshold:
                 selected_meta = sub_meta
                 table_type = 'sub'
             else:
@@ -236,7 +237,7 @@ class LiveScorer:
             'sub_regime_used': regime_card if table_type == 'sub' else None,
             'fallback_reason': None if table_type == 'sub' else (
                 'no_sub_table' if not (regime_card and os.path.exists(sub_path)) else
-                f'insufficient_samples (<{REGIME_SAMPLE_THRESHOLD})'
+                f'insufficient_samples (<{regime_sample_threshold})'
             ),
             'total_samples_used': selected_meta['total_samples'],
             'factor_scores': factor_scores_live[0].tolist(),

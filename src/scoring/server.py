@@ -31,12 +31,14 @@ def score():
     card = data.get('card', data)          # accept {card: {...}} or flat card dict
     bias = data.get('bias', 'Undefined')   # 'Long', 'Short', 'Undefined'
     entry_time = data.get('entry_time', '9:40')
+    regime_sample_threshold = int(data.get('regime_sample_threshold', 10))
 
     if not scorer.is_ready():
         return jsonify({'ok': False, 'error': 'Model not trained. Run processor.py first.'}), 503
 
     try:
-        result = scorer.score_card(card, bias=bias, entry_time=entry_time)
+        result = scorer.score_card(card, bias=bias, entry_time=entry_time,
+                                   regime_sample_threshold=regime_sample_threshold)
         return jsonify({'ok': True, **result})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500

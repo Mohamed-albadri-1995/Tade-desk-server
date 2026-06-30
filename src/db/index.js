@@ -100,6 +100,7 @@ const defaults = [
   ['shortlistMinScore', '70'],
   ['shortlistTopN', '5'],
   ['scorerEntryTime', '9:40'],
+  ['regimeSampleThreshold', '10'],
   ['finnhubApiKey', ''],
   ['githubBackupToken', ''],
   ['alpacaApiKey', ''],
