@@ -55,7 +55,8 @@ router.get('/:register/:date', (req, res) => {
 
 // GET /api/warehouse/export/:register/:date
 router.get('/export/:register/:date', (req, res) => {
-  const { register, date } = req.params;
+  const register = normalizeRegister(req.params.register);
+  const { date } = req.params;
   if (!VALID_REGISTERS.includes(register)) {
     return res.status(400).json({ error: 'Invalid register' });
   }
