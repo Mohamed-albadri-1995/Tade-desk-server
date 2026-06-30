@@ -195,6 +195,7 @@ table.jnl-tbl td:first-child{text-align:left;padding-left:0;color:var(--ink);fon
 // ── State ─────────────────────────────────────────────────────────────────────
 var __allTrades = [];   // raw DB format
 var __trades = [];      // adapted format, scope-filtered
+var __setups = [];      // from /api/trading/setups
 
 // ── Adapt DB format → popup.js format ────────────────────────────────────────
 function adaptTrade(t) {
@@ -216,7 +217,9 @@ function adaptTrade(t) {
     csvComm: t.commission || 0, durationMs: t.duration_ms,
     open: t.status !== 'closed',
     entryFills: [], exitFills: [],
-    setup: t.setup_id, sl: t.sl, tp: t.tp,
+    setup_id: t.setup_id,
+    setup: (function(){ var s=__setups.find(function(s){return s.id===t.setup_id;}); return s?s.name:(t.setup_id||null); })(),
+    sl: t.sl, tp: t.tp,
     notes: t.notes,
   };
 }
@@ -225,8 +228,12 @@ function adaptTrade(t) {
 async function loadAll() {
   document.getElementById('load-status').style.display = 'block';
   try {
-    var r = await fetch('/api/journal/trades');
-    __allTrades = await r.json();
+    var results = await Promise.all([
+      fetch('/api/journal/trades').then(function(r){return r.json();}),
+      fetch('/api/trading/setups').then(function(r){return r.json();}).catch(function(){return [];})
+    ]);
+    __allTrades = results[0];
+    __setups = results[1].filter(function(s){return s.enabled;});
     populateFilters();
     applyScope();
     renderAll();
@@ -928,6 +935,18 @@ function renderTrades() {
       await loadAll();
     });
   });
+  c.querySelectorAll('.jnl-setup-sel').forEach(function(sel) {
+    sel.addEventListener('change',async function() {
+      var id=sel.getAttribute('data-id');
+      var setupId=sel.value||null;
+      await fetch('/api/journal/trades/'+id,{
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({setup_id:setupId})
+      });
+      await loadAll();
+    });
+  });
 }
 
 function renderDayHeader(date, dayTrades) {
@@ -987,6 +1006,12 @@ function renderTradeCard(t) {
     (t.tp?stat('TP','$'+t.tp.toFixed(2)):'')+
     '</div>'+
     (t.notes?'<div style="font-size:10px;color:#64748b;margin-top:6px;font-style:italic">'+esc(t.notes)+'</div>':'')+
+    '<div style="margin-top:8px;display:flex;align-items:center;gap:8px">'+
+    '<span style="font-size:10px;color:#475569">Setup:</span>'+
+    '<select class="jnl-setup-sel" data-id="'+t.id+'" style="flex:1;background:#0f172a;border:1px solid #334155;border-radius:5px;color:#94a3b8;font-size:11px;padding:3px 6px;font-family:inherit">'+
+    '<option value="">— untagged —</option>'+
+    __setups.map(function(s){return '<option value="'+esc(s.id)+'"'+(t.setup_id===s.id?' selected':'')+'>'+esc(s.name)+'</option>';}).join('')+
+    '</select></div>'+
     '</div>';
 }
 
