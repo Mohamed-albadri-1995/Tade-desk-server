@@ -1657,7 +1657,7 @@ function buildCard(row) {
       <div style="font-size:11px;color:var(--text2)">${esc(s.sector||'')} · ${esc(s.industry||'')}</div>
     </div>
     <div class="card-right">
-      <div class="card-score" style="color:var(--text3);font-size:13px">—</div>
+      <div class="card-score ${score != null ? scoreClass : ''}" style="font-size:13px">${score != null ? score : '—'}</div>
       <button class="star-btn" style="${starStyle}" onclick="toggleShortlist('${row.ticker}',this)">${starIcon}</button>
     </div>
   </div>
