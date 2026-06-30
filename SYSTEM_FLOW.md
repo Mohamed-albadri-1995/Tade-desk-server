@@ -7,9 +7,11 @@ scheduler, data stores, registers, API, and browser. Read top to bottom.
 
 ## 1. Server Startup
 
-**Entry point:** `src/index.js`
+**Two processes start via PM2:**
 
-Executed once when PM2 starts the process:
+### Process 1 — Node.js (`trade-desk`, port 3000)
+
+Entry point: `src/index.js`
 
 1. `require('./db')` — opens `data/tradedesk.db` (SQLite, WAL mode). Creates all
    tables if they do not exist. Inserts default values for any missing settings keys.
@@ -20,11 +22,25 @@ Executed once when PM2 starts the process:
 
 4. `startScheduler()` is called — registers all cron jobs (see Section 4).
 
+5. **r0 checkpoint restore** — reads `r0_checkpoint` table. If a checkpoint exists
+   for today's ET date, restores r0 from it. This means a mid-day server restart
+   recovers all ticker data from the last completed scan.
+
 **At this point:**
-- r0 is empty (it is in-memory only, does not survive restarts)
+- r0 is either empty (no checkpoint) or restored from today's last scan
 - DB is open with all historical data intact
 - All scheduled jobs are armed
-- No scan has run yet
+
+### Process 2 — Python Flask (`scorer`, port 3001)
+
+Entry point: `src/scoring/server.py`
+
+Loads `LiveScorer` from `src/scoring/scorer.py`. On startup, checks if trained model
+outputs exist in `src/scoring/outputs/`. If `B6/main/metadata.pkl` exists, model is
+ready. Otherwise reports `ready: false` — scoring returns null until trained.
+
+Node.js calls this service via HTTP on every scan (sideE). If the service is down
+or not ready, scoring is skipped and `_score` stays null.
 
 ---
 
@@ -32,8 +48,9 @@ Executed once when PM2 starts the process:
 
 **File:** `src/r0/registry.js`
 
-r0 is a `Map<ticker, row>` stored in Node.js process memory. It resets to empty
-on every server restart.
+r0 is a `Map<ticker, row>` stored in Node.js process memory. It is checkpointed to
+SQLite after every successful scan and restored on startup if the checkpoint date
+matches today.
 
 **What a row contains:**
 
@@ -44,23 +61,27 @@ on every server restart.
 | `firstSeen` | registry | Epoch ms when first inserted today |
 | `lastUpdated` | registry | Epoch ms of most recent write |
 | `date` | registry | ET date string `YYYY-MM-DD` |
-| `liveNow` | registry | `true` = returned by current scan, `false` = was seen today but not in last scan |
+| `liveNow` | registry | `true` = in current scan, `false` = seen today but not in last scan |
 | `inShortlist` | Side F | `true` if in today's shortlist DB entry |
+| `bias` | user / auto | `'auto'` \| `'long'` \| `'short'` — user-set bias for scoring |
 | `stock.*` | Side A + B | All price/volume/technical fields (see Section 3.1) |
 | `screenerKeys` | Side A | Which scanners returned this ticker: `['Trend','Pre-Mkt','Big Move']` |
-| `context.*` | Side D | Regime, sector bias, hot status (see Section 3.4) |
+| `context.*` | Side D | Regime, sector bias, themes (see Section 3.4) |
 | `news` | Side C | `{ finnhub: [...], yahoo: [...], edgar: [...], fetchedAt: ISO }` or `null` |
 | `catalyst` | Side C | `{ label, sentiment, color }` or `null` |
-| `_score` | Side E | Always `null` — scoring engine disconnected pending design review |
+| `_score` | Side E | Integer 0–100 from scoring service, or `null` if service unavailable |
+| `_scoreDetails` | Side E | `{ table, base, tableType, cardRegime, confidence, samples, factorScores, bucketScores, bias, entryTime, ... }` |
 
 **Key behaviors:**
 - `upsertRows(rows)`: if ticker exists → merge (preserves `id`, `firstSeen`,
-  `news`, `catalyst`, `inShortlist`; updates stock, context, screenerKeys).
-  If ticker is new → inserts with defaults.
+  `news`, `catalyst`, `inShortlist`, `bias`; updates stock, context, screenerKeys,
+  `_score`, `_scoreDetails`). If ticker is new → inserts with defaults.
+- `updateBias(ticker, bias)`: sets bias without touching any other field.
 - `markAllStale()`: sets `liveNow = false` on every row.
 - `clearAll()`: empties the entire Map.
 - `getTodayRows()`: returns only rows where `date === today ET`.
 - `getAll()`: returns every row regardless of date.
+- `serialize()` / `restore()`: used for SQLite checkpoint.
 
 ---
 
@@ -68,14 +89,12 @@ on every server restart.
 
 **Function:** `runFullScan()` in `src/pipeline.js`
 
-**Triggered by:** Scheduled cron jobs (Section 4) or manual button in UI.
+**Triggered by:** Scheduled cron jobs (Section 4) or manual Run Scan button in UI.
 
-**Concurrency guard:** If a scan is already running, the new call returns immediately
-without running. Only one scan runs at a time.
+**Concurrency guard:** If a scan is already running, the new call returns immediately.
+Only one scan runs at a time.
 
 ### Step 0 — Day Boundary Guard
-
-Before anything else, check if r0 contains rows from a previous date:
 
 ```
 today = toETDate(now)
@@ -84,8 +103,8 @@ if any row in r0 has date ≠ today:
     log "Day boundary detected"
 ```
 
-This is the primary cleanup. Even if the midnight cron misses, the first scan
-of the new day flushes the old data.
+Primary cleanup. Even if the midnight cron misses, the first scan of the new day
+flushes old data.
 
 ### Step 1 — Side A: TradingView Scanners (FATAL)
 
@@ -100,12 +119,10 @@ Three POST requests to `scanner.tradingview.com/america/scan` run in parallel
 | Premarket | premarket_volume > 1.5M, RVOL > 3 | premarket_volume desc |
 | Big Moves | RVOL > 10, close > $2, avg vol > 2M | RVOL desc |
 
-Each request uses the same 25 columns (close, change, VWAP, ATR, sector, etc.)
-and the same base filter (common stock/preferred/dr/fund types, excludes pre-IPO).
-
-Each TV row is mapped via `mapTVRow()`:
+Each request returns up to 50 rows using 25 common columns. Each TV row is mapped
+via `mapTVRow()`:
 - Ticker: read from `rawTV.s` (NOT the `ticker-view` column — TV changed that format)
-- `stock.tvSymbol` = full symbol e.g. `NASDAQ:AAPL` (needed for export + Side G)
+- `stock.tvSymbol` = full symbol e.g. `NASDAQ:AAPL` (needed for Side G)
 - `stock.rvol` = intraday RVOL if available and > 0, else 10-day RVOL
 
 After all three scanners run, results are merged:
@@ -113,7 +130,8 @@ After all three scanners run, results are merged:
 - `screenerKeys` = union of which scanners returned it
 - If same field appears in multiple scanners, first non-null value wins
 
-**If Side A fails: scan aborts. Nothing writes to r0.**
+**If ALL scanners fail: scan aborts. Nothing writes to r0.**
+**If Side A (merge step) throws: scan aborts.**
 
 **Result:** `merged` — array of `{ ticker, stock, screenerKeys }`
 
@@ -132,6 +150,8 @@ Adds derived fields to `row.stock` for every row from Side A:
 | `monthRangePos` | `(price - monthLow) / (monthHigh - monthLow) * 100` |
 | `pmAdrRatio` | `pmRange / atr` |
 
+Division-safe: `monthRangePos` returns 0 when range is zero; `pmAdrRatio` returns 0 when atr is zero.
+
 **If Side B fails: scan aborts.**
 
 **Result:** `withDerived` — same rows, enriched stock fields
@@ -141,19 +161,16 @@ Adds derived fields to `row.stock` for every row from Side A:
 **Files:** `src/sideD/engine.js`, `src/sideD/marketContext.js`,
 `src/sideD/regime.js`, `src/sideD/sectors.js`, `src/sideD/themes.js`
 
-Two sub-steps:
-
 **3a — `buildMarketSnapshot()`:**
 Fetches SPY, QQQ, IWM, DIA, VIX + 15 sector ETFs (XLK, XLF, XLI, XLY, XLE,
 XLV, XLC, XLU, XLB, XLRE, XLP, SMH, IBB, XRT, XTN) via TradingView symbol mode.
 
 Computes and stores in memory as `latestSnapshot`:
-- Short-term bias (bullish/neutral/bearish) from SPY/QQQ/IWM daily moves + VIX
+- Short-term bias from SPY/QQQ/IWM daily moves + VIX
 - Mid-term stage from moving average relationships and Bollinger Band position
 - Long-term bias from 50/200 SMA cross
-- Regime: combines all three into one of 15 slugs (see Regime section below)
-- Per-sector bias (BULLISH/NEUTRAL/BEARISH) and HOT status based on ETF score
-  relative to thresholds read from the `settings` DB table
+- Regime: combines all three into one of 15 slugs (see below)
+- Per-sector bias (BULLISH/NEUTRAL/BEARISH) and HOT status
 
 **3b — `enrichR0WithContext()`:**
 For every row, looks up the stock's sector → maps to market sector key →
@@ -161,8 +178,8 @@ gets sectorData from snapshot. Adds to each row:
 
 ```
 row.context = {
-    regime,          // slug e.g. 'STRONG_UP'
-    regimeLabel,     // human label e.g. 'Strong Uptrend'
+    regime,          // slug e.g. 'UP'
+    regimeLabel,     // human label e.g. 'Uptrend'
     longTerm,        // 'BULLISH' | 'RECOVERING' | 'WEAKENING' | 'BEARISH'
     midTerm,         // 'UPTREND' | 'PULLBACK' | 'REBOUND' | 'SIDEWAYS' | 'DOWNTREND'
     shortTerm,       // 'BULLISH' | 'NEUTRAL' | 'BEARISH'
@@ -194,22 +211,43 @@ row.context = {
 | `STRONG_DOWN` | Strong Downtrend | SHORT |
 | `CAPITULATION` | Capitulation | SHORT |
 
-**If Side D fails:** `withContext` stays as `withDerived`. Rows have no `context`
-key. New rows in r0 get `context: {}`. Existing rows keep their previous context.
-Scan continues.
+**If Side D fails:** rows have no `context`. Existing rows keep their previous context. Scan continues.
 
 **Result:** `withContext`
 
-### Step 4 — Side E: Scoring (ALWAYS SKIPPED)
+### Step 4 — Side E: Live Scoring (NON-FATAL)
 
-The scoring engine is intentionally disconnected pending design review.
+**File:** `src/sideE/score.js` → calls `http://127.0.0.1:3001/score`
 
+For each row, builds a flat card dict and calls the Flask scoring service:
+
+**Bias resolution (`resolveCardBias`):**
 ```
-withScores = withContext.map(row => ({ ...row, _score: null }))
+if bias = 'long'  → 'Long'
+if bias = 'short' → 'Short'
+if bias = 'auto':
+    if shortTerm=BEARISH and secBias≠BULLISH → 'Short'
+    if secBias=BEARISH and shortTerm≠BULLISH  → 'Short'
+    if shortTerm=BULLISH or secBias=BULLISH   → 'Long'
+    if longTerm=BEARISH                        → 'Short'
+    default                                    → 'Long'
 ```
 
-Every row gets `_score: null`. The analysis engine (`src/sideE/`) exists for
-the Analysis tab but is not called from the scan pipeline.
+**Base selection (in Flask scorer.py):**
+
+| Bias | Entry Time | Base |
+|---|---|---|
+| Long | 9:40 | B4 |
+| Short | 9:40 | B5 |
+| Long/Short/Undefined | 9:37 | B1/B2/B3 |
+
+**Critical:** existing bias (`row.bias`) is preserved from r0 before scoring. This prevents a fresh scan from resetting user-set bias to 'auto'.
+
+**Scorer health check** is cached 30s. If scorer is unavailable (not started, not trained, or timed out), all rows receive `_score: null, _scoreDetails: null`. Scan continues.
+
+All rows scored in parallel (`Promise.all`). Individual row timeout: 5s.
+
+**Result:** `withScores`
 
 ### Step 5 — Write to r0
 
@@ -218,11 +256,10 @@ r0.markAllStale()         ← every existing row: liveNow = false
 r0.upsertRows(withScores) ← current scan rows: liveNow = true
 ```
 
-After this step:
-- Tickers in the current scan: `liveNow: true`, fresh stock + context data,
-  `news`/`catalyst` preserved from last time they were live
-- Tickers seen earlier today but not in this scan: `liveNow: false`,
-  stock data is from their last scan, `news`/`catalyst` preserved
+After this step, r0 is checkpointed to SQLite:
+```sql
+INSERT OR REPLACE INTO r0_checkpoint (id, date, data, saved_at) VALUES (1, today, json, now)
+```
 
 ### Step 6 — Side G: Stale Ticker Refresh (NON-FATAL)
 
@@ -230,56 +267,39 @@ After this step:
 
 Collects all r0 rows where `liveNow = false` AND `date = today`.
 Extracts their `stock.tvSymbol` values.
-Calls TradingView in symbol mode (same API, `symbols.tickers` instead of filter)
-to get fresh quotes for all of them.
-Runs fresh data through `mapTVRow` + `computeDerivedFields`.
-Updates only `row.stock` on each stale row. Does NOT change:
-`liveNow`, `context`, `date`, `id`, `firstSeen`, `inShortlist`, `_score`, `screenerKeys`, `news`, `catalyst`.
+Fetches fresh quotes from TradingView in symbol mode.
+Re-runs `computeDerivedFields`. Updates only `row.stock`. Does NOT change:
+`liveNow`, `context`, `date`, `id`, `firstSeen`, `inShortlist`, `_score`,
+`_scoreDetails`, `bias`, `screenerKeys`, `news`, `catalyst`.
 
-Reports: `{ staleCount, refreshed, noSymbol }` to pipeline monitor.
-
-**If Side G fails:** stale rows keep their data from the last time they were live.
-Scan continues.
+**If Side G fails:** stale rows keep data from when they were last live.
 
 ### Step 7 — Side C: News & Catalyst (NON-FATAL)
 
 **File:** `src/sideC/news.js`
 
-Collects all r0 rows where `liveNow = true`.
-For each ticker, fetches in parallel (Promise.allSettled, 3 sources each):
-- Finnhub: `finnhub.io/api/v1/company-news` (last 7 days, key from DB settings)
-- Yahoo Finance: `query1.finance.yahoo.com/v1/finance/search`
-- SEC EDGAR: `efts.sec.gov/LATEST/search-index` (8-K and S-3 filings)
+All `liveNow = true` rows, fetched in parallel (3 sources per ticker):
+- Finnhub: last 7 days of company news (key from DB settings)
+- Yahoo Finance: search endpoint
+- SEC EDGAR: 8-K and S-3 filings
 
-Combines all headlines, runs through `classifyCatalyst()` pattern matching
-(13 patterns: FDA approval, earnings beat, M&A, dilution, upgrade, downgrade,
-short squeeze, insider buy/sell, partnership, legal risk).
+Headlines run through `classifyCatalyst()` — 13 patterns:
+FDA approval/rejection, earnings beat/miss, M&A, dilution, upgrade, downgrade,
+short squeeze, insider buy/sell, partnership, legal risk.
 
 Writes to r0 via `r0.updateNews(ticker, news, catalyst)`.
 
-Reports: `{ rowCount, failed }` to pipeline monitor.
-
-**If Side C fails entirely or per-ticker:** that ticker's `news` and `catalyst`
-stay at their previous values. Scan continues.
+**If news fails per-ticker:** that ticker's `news` and `catalyst` stay at previous values.
 
 ### Step 8 — Side F: Shortlist Sync (NON-FATAL)
 
 **File:** `src/sideF/shortlist.js`
 
-Reads today's shortlist entry from the DB (`shortlist` table).
-For every ticker in that entry, calls `r0.setInShortlist(ticker, true)`.
-
-This restores `inShortlist` flags into r0 after every scan. Without this,
-upsertRows would reset `inShortlist` to the existing value (which is `false`
-for a new row, or preserved for an existing one). The explicit sync ensures
-tickers manually added to the shortlist between scans do not lose their flag.
-
-**If Side F fails:** `inShortlist` flags may be wrong until the next scan.
-Scan continues.
+Reads today's shortlist entry from DB. For every ticker in that entry, calls
+`r0.setInShortlist(ticker, true)`. This restores `inShortlist` flags after
+every scan so manually-starred tickers do not lose their flag.
 
 ### Step 9 — Pipeline Report
-
-Assembled after all stages complete:
 
 ```json
 {
@@ -291,7 +311,7 @@ Assembled after all stages complete:
         "sideA": { "ok": true, "rowCount": 28, "duration": 1240 },
         "sideB": { "ok": true, "rowCount": 28, "duration": 2 },
         "sideD": { "ok": true, "rowCount": 28, "duration": 890 },
-        "sideE": { "ok": true, "note": "disconnected — _score null" },
+        "sideE": { "ok": true, "rowCount": 28, "scored": 25, "duration": 1100 },
         "sideG": { "ok": true, "staleCount": 5, "refreshed": 5, "noSymbol": 0, "duration": 420 },
         "sideC": { "ok": true, "rowCount": 28, "failed": 0, "duration": 3100 },
         "sideF": { "ok": true, "duration": 1 }
@@ -305,8 +325,6 @@ Assembled after all stages complete:
 }
 ```
 
-Stored in memory. Available at `GET /api/monitor` → `pipeline.lastReport`.
-
 ---
 
 ## 4. Scheduler
@@ -314,8 +332,8 @@ Stored in memory. Available at `GET /api/monitor` → `pipeline.lastReport`.
 **File:** `src/scheduler.js`
 
 All times are Eastern Time (America/New_York). All weekdays only (Mon–Fri)
-unless noted. Every job records its last run time, status, duration, and any
-error — visible in the Monitor tab.
+unless noted. Every job records last run time, status, duration, and error.
+Jobs can be toggled on/off and rescheduled via the Monitor tab.
 
 | Job | Cron | When |
 |---|---|---|
@@ -327,6 +345,7 @@ error — visible in the Monitor tab.
 | R2 Snapshot | `25,30,35,40,45,50,55 9 * * 1-5` | Every 5 min 9:25–9:55 AM ET |
 | R2 Snapshot | `0 10 * * 1-5` | 10:00 AM ET |
 | R3 EOD Capture | `5 16 * * 1-5` | 4:05 PM ET |
+| Scorer Auto-Train | `20 16 * * 1-5` | 4:20 PM ET |
 | Daily Backup | `30 17 * * 1-5` | 5:30 PM ET |
 | Midnight r0 Flush | `0 0 * * *` | 12:00 AM ET (every day) |
 
@@ -337,60 +356,38 @@ error — visible in the Monitor tab.
 ```
 12:00 AM ET    — Midnight cron: clearAll() — r0 is empty
 
-7:00 AM ET     — First scan of day
-                 Day-boundary guard: r0 is empty, nothing to flush
-                 Sides A→B→D run
-                 markAllStale() (nothing to mark)
-                 upsertRows() — e.g. 15 tickers, all liveNow: true
-                 Side G: 0 stale rows, nothing to do
-                 Side C: news fetched for 15 live tickers
-                 Side F: syncs shortlist flags (probably none yet)
-
-7:30 AM ET     — Second scan
-                 Day-boundary guard: all rows are today's, no flush
-                 Sides A→B→D run (e.g. 18 tickers returned)
-                 markAllStale() — all 15 existing rows: liveNow = false
-                 upsertRows() — 18 tickers written: liveNow = true
-                   (13 existing rows updated, 5 new rows inserted)
-                   (2 tickers from 7:00 AM scan not in this scan:
-                    they stay in r0 with liveNow = false)
-                 Side G: 2 stale tickers refreshed with fresh TV quotes
-                 Side C: news fetched for 18 live tickers
-                 Side F: syncs shortlist
+7:00 AM ET     — First scan
+                 Day-boundary guard: r0 empty (or checkpoint date mismatch)
+                 Sides A→B→D→E→upsert→G→C→F
+                 r0 checkpoint saved to SQLite
 
 9:05 AM ET     — High-frequency scan (every 5 min)
-                 Same pattern: stale, upsert, G, C, F
+                 Bias preservation: existing r0 bias copied onto fresh scan rows
+                 before sideE so user-set bias survives scan overwrite
 
-9:35 AM ET     — Shortlist Auto-Rule runs (separate job, not part of scan)
+9:35 AM ET     — Shortlist Auto-Rule
                  Reads r0.getTodayRows()
-                 Filters to _score >= minScore (currently no rows pass — _score is null)
-                 If no eligible rows: logs and exits, nothing saved
+                 Filters to _score >= shortlistMinScore (default 70)
+                 Saves top-N to shortlist DB if no entry exists for today
 
 9:36 AM ET     — R1 Capture
                  Reads r0.getTodayRows() (all today's rows, live AND stale)
-                 Writes one row per ticker to r1_frozen table with (date, ticker, full_row_json)
-                 PRIMARY KEY (date, ticker) — so re-running overwrites
+                 Writes one row per ticker to r1_frozen
 
-9:25–10:00 AM  — R2 Snapshots (every 5 min, separate job)
-                 Reads latestSnapshot from memory (set by last Side D run)
-                 Writes to r2_market_snapshots with (date, slot, data_json)
+9:25–10:00 AM  — R2 Snapshots (every 5 min)
+                 Writes latestSnapshot from Side D to r2_market_snapshots
 
 4:05 PM ET     — R3 EOD Capture (Side H)
-                 Checks R1 has rows for today — if not, skips with logged reason
-                 Reads tickers from r1_frozen WHERE date = today
-                 Fetches full-day 1-min bars from Alpaca (9:30–16:00 ET)
-                 Fetches 14 daily bars before today from Alpaca for ATR14
-                 Writes r3a: entry=open of 9:37 bar, hh/ll from 9:37→close
-                 Writes r3b: entry=open of 9:40 bar, hh/ll from 9:40→close
-                 Computes up_r/down_r = (hh−entry)/atr14, (entry−ll)/atr14
+                 Fetches Alpaca 1-min bars for all R1 tickers
+                 Writes entry prices, HH/LL, R-values to r3a and r3b
+
+4:20 PM ET     — Scorer Auto-Train
+                 Checks tmp/r4a.csv and tmp/r4b.csv exist
+                 Calls POST /api/analysis/train → Flask /train
+                 Flushes scorer cache so next /score uses new model
 
 5:30 PM ET     — Daily Backup
-                 Exports DB tables to JSON: settings, shortlist, r1_frozen,
-                 r2_market_snapshots, r3a, r3b
-                 Pushes to GitHub repo trade-desk-data/fresh branch:
-                   backups/YYYY-MM-DD.json
-                   backups/latest.json
-                 Records lastBackupAt in settings table
+                 Exports DB to JSON, pushes to GitHub
 
 12:00 AM ET    — Midnight flush: clearAll() — r0 empty again
 ```
@@ -401,172 +398,196 @@ error — visible in the Monitor tab.
 
 ### r0 — In-Memory Live Registry
 
-Only exists in RAM. Resets on restart. Holds all stocks seen today (live + stale).
-Not persisted anywhere. See Section 2 for full field list.
+Only exists in RAM during the session. Checkpointed to `r0_checkpoint` SQLite table
+after every successful scan. Restored on startup if today's date matches.
 
-Read by: `/api/registry/today` (returns today's rows, live first)
+Read by: `/api/registry/today` (today's rows, live first)
 
 ### R1 — Opening Snapshot (DB)
 
 **Table:** `r1_frozen` | **Primary key:** `(date, ticker)`
 
-A frozen snapshot of r0 at 9:36 AM. Stores the full row as JSON.
-One row per ticker per day. Used for analysis: "what did this stock look like
-at the open?"
-
-Captured once per day at 9:36 AM. If server is down at 9:36, no R1 for that day.
-`INSERT OR REPLACE` — running R1 capture twice on the same day overwrites.
+Frozen snapshot of r0 at 9:36 AM. Stores full row as JSON. Used as the feature
+source for training R4A/R4B.
 
 ### R2 — Market Context Snapshots (DB)
 
 **Table:** `r2_market_snapshots` | **Primary key:** auto-increment id
 
-Multiple snapshots per day. Captures the full `latestSnapshot` object
-(indices, regime, sectors) every 5 minutes from 9:25–10:00 AM ET.
-Rows accumulate — no deletion. Used for analysis: "what was the market doing
-during the open?"
+Multiple snapshots per day. Full `latestSnapshot` object every 5 minutes 9:25–10:00 AM.
 
 ### R3A / R3B — Trade Levels (DB)
 
 **Tables:** `r3a`, `r3b` | **Primary key:** `(date, ticker)`
-**Data source:** Alpaca Market Data API v2 (1-min and daily bars)
-**Ticker universe:** All tickers from today's R1 snapshot
-**Trigger:** Scheduler job at 4:05 PM ET (after market close)
 
-**Entry prices:**
-- `entry_price_a` = open of the 9:37 ET 1-min bar (Target Entry)
-- `entry_price_b` = open of the 9:40 ET 1-min bar (Alternative Entry)
+| Field | Description |
+|---|---|
+| `entry_price_a` | Open of the 9:37 ET 1-min bar |
+| `entry_price_b` | Open of the 9:40 ET 1-min bar |
+| `hh_a / ll_a` | Highest high / lowest low from 9:37 → 16:00 |
+| `hh_b / ll_b` | Highest high / lowest low from 9:40 → 16:00 |
+| `atr14` | 14-day ATR from daily bars before today |
+| `up_r_a` | `(hh_a − entry_price_a) / atr14` |
+| `down_r_a` | `(entry_price_a − ll_a) / atr14` |
+| `up_r_b / down_r_b` | Same formulas for B entry |
 
-**HH / LL:**
-- `hh_a / ll_a` = highest high / lowest low of all bars from 9:37 → 16:00 ET
-- `hh_b / ll_b` = highest high / lowest low of all bars from 9:40 → 16:00 ET
+### R4A / R4B — Training CSVs
 
-**ATR14:** computed from the 14 most recent completed trading days before today.
+**Files:** `tmp/r4a.csv`, `tmp/r4b.csv`
 
-**R values:**
-- `up_r_a = (hh_a − entry_price_a) / atr14`
-- `down_r_a = (entry_price_a − ll_a) / atr14`
-- Same formula for B
+Built by joining R1 + R3A (or R3B). Contain all R1 feature fields plus outcome
+columns (`upR_A`, `downR_A` for R4A; `upR_B`, `downR_B` for R4B).
+These are the direct training inputs for the PCA processor.
 
-**Files:** `src/alpaca/client.js`, `src/sideH/capture.js`
-
-### R4A / R4B — Combined Analysis (computed)
-
-Not stored. Computed on-demand by joining `r1_frozen` + `r3a`/`r3b` for a given date.
-Only has data for dates where both R1 and R3 exist. Used as training data for Side E.
+Can also be created from legacy data via `scripts/convert_legacy_to_r4.py`.
+Uploaded via the Analysis tab (POST /api/analysis/upload-csv).
 
 ### Shortlist (DB)
 
 **Table:** `shortlist` | **Primary key:** `date`
 
-One entry per day, stores all tickers added that day as a JSON array.
-Each item: `{ ticker, tvSymbol, addedAt, method, price, change, sector, score }`.
-
-`method` is `'auto'` (from 9:35 AM rule) or `'manual'` (from star button or shortlist tab).
+One entry per day. Items: `{ ticker, tvSymbol, addedAt, method, score, price, change, sector }`.
+`method` = `'auto'` or `'manual'`.
 
 ---
 
-## 7. Side E — Analysis Engine
+## 7. Side E — Scoring Engine
 
-**Files:** `src/sideE/train.js`, `src/sideE/insights.js`, `src/routes/analysis.js`
+**Files:** `src/sideE/score.js` (Node), `src/scoring/server.py` + `scorer.py` + `processor.py` (Python)
 
-The analysis engine trains on historical R4A data and produces feature importance
-rankings and AI-generated insights. It is **completely disconnected from the scan
-pipeline** — it runs only when triggered from the Analysis tab.
-
-### Training Data (R4A)
-
-Joins `r1_frozen` + `r3a` for a configurable number of past trading days.
-Win condition: `up_r_a >= successThreshold` (default 1.5R).
-
-### Features (38 total)
-
-**Critical numerical (custom bucket boundaries):**
-- `rvol` — [0, 2, 5, 10, 20, ∞]
-- `change`, `gapPct` — [−∞, −10, −5, −2, 0, 2, 5, 10, ∞]
-- `monthRangePos` — [0, 20, 40, 60, 80, 100]
-- `secScore` — [−100, −40, −20, 0, 20, 40, 100]
-- `pmAdrRatio` — [0, 0.5, 1, 2, 3, ∞]
-- `adrPct` — [0, 5, 10, 15, 20, 30, ∞]
-
-**Quantile numerical (6 equal-width buckets):**
-price936, vwap, sma5, ema9, ema13, ema20, ema50, atr, mcap, floatShares,
-pmRange, prevClose, monthHigh, monthLow, up_r_a, down_r_a, screenerCount,
-pmVolume, volume, shortlistScore
-
-**Categorical:**
-regime, secBias, sector, longTerm, midTerm, shortTerm, catalyst, screenerKeys,
-secHot, themes, dayOfWeek
-
-### Feature Importance Formula
+### Architecture
 
 ```
-importance(f) = Σ_b [ (count_b / totalRows) × (winRate_b − globalWinRate)² ]
+Node pipeline (sideE/score.js)
+    │  POST /score  { card, bias, entry_time }
+    ▼
+Flask service (src/scoring/server.py, port 3001)
+    │
+    ▼
+LiveScorer (src/scoring/scorer.py)
+    │  loads metadata.pkl (scaler + PCA) + factor_N_buckets.csv
+    ▼
+Score returned: { final_score, used_table, factor_scores, bucket_scores, confidence, ... }
 ```
 
-Normalized so all importances sum to 100%.
+### 6 Scoring Bases
 
-### AI Insights
+| Base | File | Target outcome |
+|---|---|---|
+| B1 | R4A | upR_A — 9:37 long moves |
+| B2 | R4A | downR_A — 9:37 short moves |
+| B3 | R4A | max(upR_A, downR_A) |
+| B4 | R4B | upR_B — 9:40 long moves |
+| B5 | R4B | downR_B — 9:40 short moves |
+| B6 | R4B | max(upR_B, downR_B) |
 
-After training, the engine optionally calls an AI provider to generate a
-3–5 bullet point summary of the top 5 statistical insights.
+### Score Calculation
 
-**Provider detection (from stored key prefix):**
-- `sk-ant-` → Anthropic API (`api.anthropic.com/v1/messages`)
-- `AIza` → Google Gemini (`generativelanguage.googleapis.com/v1beta/models/...`)
-- anything else → OpenRouter (`openrouter.ai/api/v1/chat/completions`)
+1. **Preprocess card:** standardize numerics using training scaler; one-hot encode categoricals
+2. **PCA project:** multiply feature vector by k component vectors → k factor scores
+3. **Bucket lookup:** for each factor, find which decile bucket the live score falls in
+4. **FinalScore per bucket:**
+   ```
+   RawScore   = (0.5 × Mean_Norm + 0.5 × WinRate_Norm) × 100
+   Confidence = n / (n + 5)
+   FinalScore = RawScore × Confidence
+   ```
+5. **Aggregate:** `final_score = mean(FinalScore across k factors)`, rounded to int
 
-### Analysis API
+### Sub-Table Selection
 
-| Endpoint | Description |
-|---|---|
-| `POST /api/analysis/train` | Train model on R4A data, generate insights |
-| `GET /api/analysis/report` | Full report: features, globalWinRate, totalRows, insights |
-| `GET /api/analysis/insights?ai=true` | Get/regenerate insights (add `&regenerate=true` to force) |
-| `GET /api/analysis/feature/:name` | Bucket breakdown with win rate and lift for one feature |
+If the card's `regime` matches a trained sub-table (e.g. `B4/sub_Uptrend`) AND
+that sub-table has ≥ 10 training samples, the sub-table is used instead of main.
+
+### Model Outputs Location
+
+`src/scoring/outputs/`
+```
+B1/main/metadata.pkl, factor_importance.csv, factor_1_buckets.csv, ...
+B1/sub_UP/metadata.pkl, ...
+...
+B6/main/...
+```
+
+### Training
+
+**File:** `src/scoring/processor.py`
+
+Reads `tmp/r4a.csv` and `tmp/r4b.csv`. For each of the 6 bases:
+1. Selects target column
+2. Filters regime (sub-tables only)
+3. One-hot encodes categoricals, standardizes numerics
+4. Fits PCA, selects k factors by Kaiser criterion (eigenvalue > 1)
+5. Splits each factor into 10 decile buckets, computes stats
+6. Saves metadata.pkl + CSV files
+
+**Triggered by:**
+- `POST /api/analysis/train` (manual from Analysis tab)
+- 4:20 PM ET scheduler job (`autoTrainScorer`)
+- `POST http://127.0.0.1:3001/train` (Flask direct)
 
 ---
 
-## 8. Settings
+## 8. Analysis Tab
+
+The Analysis tab shows the trained model's structure — not a separate analysis engine.
+
+### Model Factors Panel
+
+- Loads via `GET /api/analysis/model-info` → Flask `/model-info`
+- Shows 6 base selectors (B1–B6)
+- For selected base: lists k PCA factors with explained variance % and top 6 feature loadings per factor
+- Sub-table chips load via `GET /api/analysis/available-tables` — clicking a chip opens Table Inspector
+- "Download All Tables (JSON)" exports all 6 bases × all tables as a dated JSON file
+
+### Bias Change Flow
+
+When user taps the bias button on a card (auto → long → short → auto):
+1. `PUT /api/registry/:ticker/bias` — cycles or sets bias in r0
+2. Server immediately calls `scoreRow()` with updated bias
+3. Returns new `_score` and `_scoreDetails` in the same response
+4. Card updates in the browser without a full scan
+
+---
+
+## 9. Settings
 
 **Table:** `settings` — key/value pairs read per-request (no caching).
 
 | Key | Default | Used by |
 |---|---|---|
-| `hotImmediateThreshold` | 60 | Side D sectors — enter HOT immediately |
-| `hotSustainedThreshold` | 40 | Side D sectors — sustain toward HOT |
-| `hotSustainedSessions` | 3 | Side D sectors — sessions needed |
-| `hotFloorThreshold` | 20 | Side D sectors — floor to stay HOT |
-| `coolOffDays` | 2 | Side D sectors — sessions below floor before losing HOT |
-| `sectorBullishThreshold` | 20 | Side D sectors — score above = BULLISH |
-| `sectorBearishThreshold` | -20 | Side D sectors — score below = BEARISH |
-| `shortlistMinScore` | 70 | Side F auto-rule — minimum score |
-| `shortlistTopN` | 5 | Side F auto-rule — max picks |
+| `hotImmediateThreshold` | 60 | Side D sectors |
+| `hotSustainedThreshold` | 40 | Side D sectors |
+| `hotSustainedSessions` | 3 | Side D sectors |
+| `hotFloorThreshold` | 20 | Side D sectors |
+| `coolOffDays` | 2 | Side D sectors |
+| `sectorBullishThreshold` | 20 | Side D sectors |
+| `sectorBearishThreshold` | -20 | Side D sectors |
+| `shortlistMinScore` | 70 | Side F auto-rule |
+| `shortlistTopN` | 5 | Side F auto-rule |
+| `scorerEntryTime` | `9:40` | Side E base selection |
 | `finnhubApiKey` | '' | Side C news |
 | `githubBackupToken` | '' | Backup |
 | `alpacaApiKey` | '' | Side H R3 capture |
 | `alpacaApiSecret` | '' | Side H R3 capture |
-| `analysisEntryType` | `A` | Side E — entry type (A or B) |
-| `analysisDirectionalBias` | `Up` | Side E — directional filter |
-| `analysisSuccessThreshold` | `1.5` | Side E — win R-multiple |
-| `analysisTrainingWindow` | `90` | Side E — training days |
-| `aiApiKey` | '' | Side E — AI insights key |
-| `aiModel` | `anthropic/claude-haiku-4-5` | Side E — AI model ID |
+| `aiApiKey` | '' | AI insights |
+| `aiModel` | `anthropic/claude-haiku-4-5` | AI insights |
 
 `finnhubApiKey`, `githubBackupToken`, `alpacaApiKey`, `alpacaApiSecret`, and `aiApiKey`
 are masked in `GET /api/settings` (returns `'set'` or `''`).
 
-`hotState` (which sectors are currently HOT) lives in memory in `src/sideD/sectors.js`.
-It resets on server restart or via `POST /api/settings/reset-hot`.
+`hotState` lives in memory in `src/sideD/sectors.js`. Resets on restart or via
+`POST /api/settings/reset-hot`.
 
 ---
 
-## 9. API Endpoints
+## 10. API Endpoints
 
 | Endpoint | Method | What it does |
 |---|---|---|
 | `/api/registry/today` | GET | Today's r0 rows. Live rows first, then stale. |
 | `/api/registry/all` | GET | All r0 rows regardless of date. |
+| `/api/registry/:ticker/bias` | PUT | Set/cycle bias; triggers immediate rescore. Returns new `_score`. |
 | `/api/scan/run` | POST | Triggers `runFullScan()`. Waits for completion. |
 | `/api/scan/status` | GET | `{ lastRun, lastRowCount, running, error, lastReport }` |
 | `/api/market/snapshot` | GET | Latest market snapshot from Side D. |
@@ -578,10 +599,10 @@ It resets on server restart or via `POST /api/settings/reset-hot`.
 | `/api/shortlist/run-rule` | POST | Manually trigger shortlist auto-rule. |
 | `/api/warehouse/registers` | GET | List of available registers and their dates. |
 | `/api/warehouse/data/:register` | GET | Data for a register. Query: `?date=YYYY-MM-DD` |
-| `/api/analysis/report` | GET | Full analysis report (features, insights, stats). |
-| `/api/analysis/train` | POST | Train model on R4A data. Body: `{ overrides? }` |
-| `/api/analysis/insights` | GET | Get insights. Query: `?regenerate=true&ai=true` |
-| `/api/analysis/feature/:name` | GET | Bucket breakdown for one feature with lift. |
+| `/api/analysis/model-info` | GET | PCA factor compositions for all trained bases. |
+| `/api/analysis/available-tables` | GET | All trained bases and sub-table names. |
+| `/api/analysis/train` | POST | Trigger retraining from tmp/r4a.csv + tmp/r4b.csv. |
+| `/api/analysis/upload-csv` | POST | Upload R4A or R4B CSV. Query: `?register=r4a&mode=replace\|append` |
 | `/api/settings` | GET | All settings (sensitive keys masked). |
 | `/api/settings` | POST | Validate and save settings. Body: `{ key: value, ... }` |
 | `/api/settings/test/:service` | GET | Live API connectivity test (`finnhub`/`github`/`alpaca`/`ai`). |
@@ -590,19 +611,25 @@ It resets on server restart or via `POST /api/settings/reset-hot`.
 | `/api/backup/push` | POST | Run backup now → push to GitHub. |
 | `/api/backup/restore` | POST | Restore from GitHub. Body: `{ date? }` (omit for latest). |
 | `/api/monitor` | GET | Pipeline lastReport + all scheduler job statuses. |
-| `/health` | GET | `{ ok: true, ts }` — process health check. |
+| `/health` | GET | `{ ok: true, ts }` — Node process health check. |
+
+**Flask service (port 3001, internal only):**
+
+| Endpoint | Method | What it does |
+|---|---|---|
+| `/health` | GET | `{ ok, ready }` — ready = model trained |
+| `/score` | POST | Score a card. Body: `{ card, bias, entry_time }` |
+| `/train` | POST | Retrain from R4A/R4B paths. Body: `{ r4a?, r4b? }` |
+| `/model-info` | GET | Factor compositions for all bases |
 
 ---
 
-## 10. The Browser (Frontend)
+## 11. The Browser (Frontend)
 
 **File:** `public/index.html` — single HTML file, all JS inline.
 
-The browser does NO business logic. It only:
-- Fetches from the API
-- Renders what it receives
-- Handles user interaction (clicks, inputs)
-- Passes actions back to the server
+The browser does NO business logic. It only fetches from the API, renders, and
+passes actions back to the server.
 
 ### Tabs and their data sources
 
@@ -612,83 +639,63 @@ The browser does NO business logic. It only:
 | Market | `GET /api/market/snapshot` | On tab open and after scan |
 | Shortlist | `GET /api/shortlist/today` + `GET /api/shortlist/all` | On tab open |
 | Warehouse | `GET /api/warehouse/registers` + `GET /api/warehouse/data/:register` | On tab open + date change |
-| Analysis | `GET /api/analysis/report` | On tab open |
+| Analysis | `GET /api/analysis/model-info` | On Load / Refresh button |
 | Settings | `GET /api/settings` + `GET /api/backup/status` | On tab open |
 | Monitor | `GET /api/monitor` | On tab open + Refresh button |
 
-### Scanner card data flow
+### Scanner card fields
 
-1. Browser calls `GET /api/registry/today`
-2. Server returns array of r0 rows (sorted: live first)
-3. Browser stores in `r0Data` array
-4. `buildCard(row)` renders HTML for each row:
-   - `row.stock.price`, `row.stock.change`, etc. — from Side A + B
-   - `row.context.regime`, `row.context.secBias`, etc. — from Side D
-   - `row.catalyst` — from Side C
-   - `row.inShortlist` — star shown filled/empty
-   - `row.liveNow` — green `●Live` dot or grey `●Stale` dot with amber border
+- `row.stock.price`, `row.stock.change`, etc. — from Side A + B
+- `row.context.regime`, `row.context.secBias`, etc. — from Side D
+- `row.catalyst` — from Side C
+- `row._score`, `row._scoreDetails` — from Side E
+- `row.bias` — user-set, displayed as button that cycles auto→long→short→auto
+- `row.inShortlist` — star shown filled/empty
+- `row.liveNow` — green `●Live` dot or grey `●Stale` dot with amber border
 
-### Analysis tab
+### Bias button behavior
 
-Calls `GET /api/analysis/report` on open. Shows:
-- Model stats (total rows, global win rate, trained date)
-- Active config (entry type, bias, threshold, training window)
-- AI-generated insights (with Regenerate + AI Insights buttons)
-- Factor importance ranked list (top 20 with bar chart)
-- Bucket analysis dropdown (select a feature → table with win rate and lift per bucket)
-
-### Settings — AI Provider
-
-A dropdown selects the provider. The UI updates the key placeholder, hint, and model preset list:
-- **OpenRouter** — `sk-or-v1-` key prefix, `provider/model` format
-- **Claude (Anthropic)** — `sk-ant-` key prefix, `claude-*` model format
-- **Gemini (Google)** — `AIza` key prefix, `gemini-*` model format
-
-The server auto-detects provider from the key prefix — no separate provider field is stored in DB.
+Tapping the bias button calls `PUT /api/registry/:ticker/bias` (no body = cycle).
+The response immediately includes the new `_score` and `_scoreDetails` — the card
+updates without a full scan. `auto` bias displays its resolved direction in
+parentheses: `AUTO (long)` or `AUTO (short)`.
 
 ### Monitor tab
 
-Calls `GET /api/monitor` on open. Two sections:
+Two sections:
 
-**Scheduled Jobs** — renders as cards showing job name, cron expression, last run time, last status (OK / Error / Not run), and duration. Each card has:
-- **ON / OFF toggle** — calls `POST /api/monitor/jobs/:jobId/toggle`
-- **Edit button** — opens a modal with:
-  - Day-of-week toggle buttons (Mon–Sun, tap to select/deselect)
-  - Hour and Minute inputs (supports `9`, `9,13,16`, `*/5` etc.)
-  - Live cron expression preview + human-readable description
-  - Save / Cancel / Reset Default buttons
-  - Tap outside modal to dismiss
-- Changes call `POST /api/monitor/jobs/:jobId/schedule` or `POST /api/monitor/jobs/:jobId/reset`
+**Scheduled Jobs** — card per job showing name, cron, last run, status, duration.
+Each card has:
+- ON/OFF toggle → `POST /api/monitor/jobs/:jobId/toggle`
+- Edit button → modal with day-of-week toggles, hour/minute inputs, live cron
+  preview, Save/Cancel/Reset Default buttons
 
-**Last Pipeline Run** — stage-by-stage table from `lastReport`: status, row count, duration, any error per stage.
+**Last Pipeline Run** — stage-by-stage table from `lastReport`.
 
 ---
 
-## 11. Backup System
+## 12. Backup System
 
 **Files:** `src/backup/index.js`, `src/routes/backup.js`
 
-### Push (daily at 5:30 PM ET or manual)
+### Push (daily 5:30 PM ET or manual)
 
 1. Reads GitHub token from `settings` table
-2. Exports DB to JSON — tables: `settings`, `shortlist`, `r1_frozen`,
-   `r2_market_snapshots`, `r3a`, `r3b`
-3. Base64-encodes and pushes two files to GitHub via REST API:
-   - `backups/YYYY-MM-DD.json` (dated snapshot)
-   - `backups/latest.json` (always overwritten with latest)
-4. Target: repo `Mohamed-albadri-1995/trade-desk-data`, branch `fresh`
-5. Records `lastBackupAt` in the `settings` table
+2. Exports: `settings`, `shortlist`, `r1_frozen`, `r2_market_snapshots`, `r3a`, `r3b`
+3. Pushes to repo `Mohamed-albadri-1995/trade-desk-data`, branch `fresh`:
+   - `backups/YYYY-MM-DD.json`
+   - `backups/latest.json`
+4. Records `lastBackupAt` in settings
 
 ### Restore (manual from Settings tab)
 
-1. Fetches `backups/latest.json` (or `backups/YYYY-MM-DD.json` if date specified)
-2. Decodes base64
-3. Clears and repopulates all exported tables in a DB transaction
-4. r0 is not affected — it is in-memory and rebuilds on next scan
+1. Fetches `backups/latest.json` (or dated file)
+2. Clears and repopulates all exported tables in a DB transaction
+3. r0 is not affected — rebuilds on next scan
 
 ---
 
-## 12. Current Status
+## 13. Current Status
 
 | Item | Status |
 |---|---|
@@ -696,30 +703,22 @@ Calls `GET /api/monitor` on open. Two sections:
 | Side B — Derived Calculations | ✅ Complete |
 | Side C — News & Catalyst | ✅ Complete |
 | Side D — Market Context & Regime | ✅ Complete (15 regime labels) |
-| Side E — Analysis Engine (report only) | ✅ Complete — disconnected from pipeline |
-| Side E — Scoring (pipeline integration) | ⏸ Disconnected — `_score` always null |
+| Side E — Live Scoring (pipeline) | ✅ Complete — scores every scan |
+| Side E — Bias preservation across scans | ✅ Complete |
+| Side E — Auto-bias resolution | ✅ Complete — always Long or Short, never Undefined |
+| Side E — Scoring Engine (Flask) | ✅ Complete — B1–B6, PCA, buckets, confidence |
+| Side E — Scorer auto-train (4:20 PM) | ✅ Complete |
 | Side F — Shortlist | ✅ Complete |
 | Side G — Stale Ticker Refresh | ✅ Complete |
 | Side H — R3 EOD Capture (Alpaca) | ✅ Complete |
-| Settings System | ✅ Complete — includes AI provider dropdown + live test buttons |
+| r0 checkpoint (survive restart) | ✅ Complete |
+| Settings System | ✅ Complete |
 | Backup / Restore | ✅ Complete |
-| Monitor Tab | ✅ Complete — card layout, modal schedule editor |
-| AI Insights (Anthropic / OpenRouter / Gemini) | ✅ Complete |
-| Shortlist Auto-Rule | ⏸ Wired but produces nothing — scoring disconnected |
-| Scheduler browser controls | ✅ Complete — toggle, modal editor with day/hour/minute inputs |
-
----
-
-## 13. Development Roadmap
-
-See `Implementation_Roadmap__Trade_Desk_Rebuild (1).md` for full task lists and design notes.
-
-| Phase | Goal | Depends on |
-|---|---|---|
-| **1 — Test & Debug** | Validate all existing systems on live market days | — |
-| **2 — Scoring Engine** | Wire `_score` into pipeline, show grade badge on cards | Phase 1 |
-| **3 — Setup Detection & Alerts** | Named condition checklists, scan shortlist, push notification on match | Phase 2 |
-| **4 — Dynamic Sizing Engine** | Size = `base_risk × regime_multiplier × grade_multiplier` | Phase 3 |
-| **5 — Broker Integration** | Alpaca order submission, positions tab, pre-trade checklist gate | Phase 4 |
-| **6 — Trade Journal** | Full entry + exit snapshot: conditions, market state, P&L in R | Phase 5 |
-| **7 — Grading Engine** | Auto-grade trades A+/A/B/C/D from checklist + score + regime | Phase 6 |
+| Monitor Tab (toggle + schedule editor) | ✅ Complete |
+| Analysis Tab (Model Factors + sub-tables) | ✅ Complete |
+| Shortlist Auto-Rule | ⚠️ Wired — fires at 9:35 AM but needs score ≥ 70 (unlikely until 100+ training rows) |
+| Setup Detection & Alerts | ⏳ Phase 3 |
+| Dynamic Sizing Engine | ⏳ Phase 4 |
+| Broker Integration | ⏳ Phase 5 |
+| Trade Journal | ⏳ Phase 6 |
+| Grading Engine | ⏳ Phase 7 |
