@@ -17,7 +17,7 @@ IDENTIFIER_COLS = ['ticker', 'date', 'capturedAt']
 CATEGORICAL_COLS = [
     'sector', 'industry', 'regime', 'regimeLabel', 'secBias',
     'themes', 'catalyst', 'screenerKeys', 'longTerm', 'midTerm',
-    'shortTerm', 'broadResolved', 'inShortlist',
+    'shortTerm', 'broadResolved', 'inShortlist', 'bias',
 ]
 
 NUMERIC_COLS = [

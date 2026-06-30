@@ -38,6 +38,7 @@ function buildCard(row) {
     shortTerm:     ctx.shortTerm  || null,
     broadResolved: ctx.broadResolved || null,
     inShortlist:   row.inShortlist ? 'true' : 'false',
+    bias:          row.bias || 'auto',
     // numerics
     _score:        row._score,
     price:         s.price,
