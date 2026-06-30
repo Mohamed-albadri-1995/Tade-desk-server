@@ -221,9 +221,23 @@ class LiveScorer:
         # Step 6: Aggregate
         final_score = float(np.mean(bucket_scores)) if bucket_scores else 0.0
 
+        # used_table: only append regime when sub-table was actually used
+        if table_type == 'sub':
+            used_table = f"{base_id}_sub_{regime_card}"
+        else:
+            used_table = f"{base_id}_main"
+
         return {
             'final_score': round(final_score, 2),
-            'used_table': f"{base_id}_{table_type}_{regime_card or 'main'}",
+            'used_table': used_table,
+            'used_base': base_id,
+            'used_table_type': table_type,      # 'main' or 'sub'
+            'card_regime': regime_card,          # what regime the card has (always)
+            'sub_regime_used': regime_card if table_type == 'sub' else None,
+            'fallback_reason': None if table_type == 'sub' else (
+                'no_sub_table' if not (regime_card and os.path.exists(sub_path)) else
+                f'insufficient_samples (<{REGIME_SAMPLE_THRESHOLD})'
+            ),
             'total_samples_used': selected_meta['total_samples'],
             'factor_scores': factor_scores_live[0].tolist(),
             'bucket_scores': bucket_scores,

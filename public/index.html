@@ -1982,14 +1982,13 @@ function buildCard(row) {
       <div onclick="${score != null ? `toggleScoreBreakdown('${row.ticker}')` : ''}" style="cursor:${score != null ? 'pointer' : 'default'};text-align:right">
         <div class="card-score ${score != null ? scoreClass : ''}" style="font-size:13px">${score != null ? score : '—'}</div>
         ${row._scoreDetails ? (() => {
-          const t = row._scoreDetails.table || '';
-          // t is like "B4_main_uptrend" → base=B4, table=main or sub_uptrend
-          const parts = t.split('_');
-          const base = parts[0] || '';
-          const tableStr = parts.slice(1).join('_').replace(/^(main|sub)_?(.*)/, (_, type, regime) =>
-            type === 'main' ? 'main' : `sub_${regime}`
-          ) || 'main';
-          return `<div style="font-size:9px;color:var(--accent);margin-top:2px;cursor:pointer;text-decoration:underline dotted" onclick="event.stopPropagation();openTableInspector('${base}','${tableStr}')">${t}</div>`;
+          const sd = row._scoreDetails;
+          const base = sd.base || '';
+          const tableStr = sd.tableType === 'sub' ? `sub_${sd.subRegimeUsed}` : 'main';
+          const label = sd.tableType === 'sub'
+            ? `${base} · sub: ${sd.subRegimeUsed}`
+            : `${base} · main`;
+          return `<div style="font-size:9px;color:var(--accent);margin-top:2px;cursor:pointer;text-decoration:underline dotted;white-space:nowrap" onclick="event.stopPropagation();openTableInspector('${base}','${tableStr}')">${label}</div>`;
         })() : ''}
       </div>
       <button class="star-btn" style="${starStyle}" onclick="toggleShortlist('${row.ticker}',this)">${starIcon}</button>
@@ -2092,19 +2091,21 @@ function buildCard(row) {
       </div>`;
     }).join('');
     return `<div class="score-breakdown" id="sb-${row.ticker}">
-      <div class="sb-row"><span class="sb-label">Base</span><span class="sb-val">${sd.base || '—'} <span style="color:var(--text3);font-size:10px">(entry ${sd.entryTime || '—'}, ${sd.bias || '—'})</span></span></div>
-      <div class="sb-row"><span class="sb-label">Table type</span><span class="sb-val">${sd.tableType || '—'} <span style="color:var(--text3);font-size:10px">${sd.regime ? '· regime: ' + sd.regime : ''}</span></span></div>
+      <div class="sb-row"><span class="sb-label">Base</span><span class="sb-val">${sd.base || '—'} <span style="color:var(--text3);font-size:10px">· entry ${sd.entryTime || '—'} · ${sd.bias || '—'}</span></span></div>
+      <div class="sb-row"><span class="sb-label">Card regime</span><span class="sb-val">${sd.cardRegime || '—'} <span style="color:var(--text3);font-size:10px">(what this stock's market is)</span></span></div>
+      <div class="sb-row"><span class="sb-label">Table used</span><span class="sb-val">${
+        sd.tableType === 'sub'
+          ? `<span style="color:var(--green)">sub: ${sd.subRegimeUsed}</span> <span style="color:var(--text3);font-size:10px">(regime-specific)</span>`
+          : `<span style="color:var(--orange)">main</span> <span style="color:var(--text3);font-size:10px">(${sd.fallbackReason || 'regime-agnostic'})</span>`
+      }</span></div>
       <div class="sb-row"><span class="sb-label">Bias in card</span><span class="sb-val">${sd.normalizedBias || '—'} <span style="color:var(--text3);font-size:10px">(raw: ${(sd.bias || '').toLowerCase()})</span></span></div>
       <div class="sb-row"><span class="sb-label">Samples</span><span class="sb-val">${sd.samples != null ? sd.samples : '—'}</span></div>
       <div class="sb-row"><span class="sb-label">Confidence</span><span class="sb-val">${sd.confidence != null ? sd.confidence + '%' : '—'}</span></div>
       ${factorRows ? `<div class="sb-factors" style="margin-top:6px"><div style="font-size:10px;color:var(--text3);margin-bottom:4px">Per-factor bucket scores</div>${factorRows}</div>` : ''}
-      ${sd.table ? (() => {
-        const parts = sd.table.split('_');
-        const base = parts[0] || '';
-        const tableStr = parts.slice(1).join('_').replace(/^(main|sub)_?(.*)/, (_, type, regime) =>
-          type === 'main' ? 'main' : `sub_${regime}`
-        ) || 'main';
-        return `<div style="margin-top:8px"><button onclick="event.stopPropagation();openTableInspector('${base}','${tableStr}')" style="background:var(--bg3);border:1px solid var(--accent);border-radius:4px;color:var(--accent);font-size:10px;padding:3px 10px;cursor:pointer;font-family:inherit">🔍 View Bucket Table</button></div>`;
+      ${sd.base ? (() => {
+        const base = sd.base;
+        const tableStr = sd.tableType === 'sub' ? `sub_${sd.subRegimeUsed}` : 'main';
+        return `<div style="margin-top:8px"><button onclick="event.stopPropagation();openTableInspector('${base}','${tableStr}')" style="background:var(--bg3);border:1px solid var(--accent);border-radius:4px;color:var(--accent);font-size:10px;padding:3px 10px;cursor:pointer;font-family:inherit">🔍 View Bucket Table (${base}/${tableStr})</button></div>`;
       })() : ''}
     </div>`;
   })()}
