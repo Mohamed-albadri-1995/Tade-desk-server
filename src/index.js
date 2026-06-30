@@ -38,7 +38,7 @@ app.get('/', (req, res) => {
 app.get('/scanner', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
-app.get('/scanner/*', (req, res) => {
+app.get('/scanner/*path', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
@@ -46,7 +46,7 @@ app.get('/scanner/*', (req, res) => {
 app.get('/trading', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/trading.html'));
 });
-app.get('/trading/*', (req, res) => {
+app.get('/trading/*path', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/trading.html'));
 });
 
