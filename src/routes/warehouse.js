@@ -4,12 +4,23 @@ const path = require('path');
 const { getRegisterData, getAvailableDates } = require('../warehouse/registers');
 const db = require('../db');
 
+function csvEscape(val) {
+  if (val === null || val === undefined) return '';
+  if (Array.isArray(val)) val = val.join('|');
+  else if (typeof val === 'object') val = JSON.stringify(val);
+  const s = String(val);
+  if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
 function saveRegisterCSV(register, date) {
   const data = getRegisterData(register, date);
   if (!data || data.length === 0) return null;
   const keys = Object.keys(data[0]);
   const csv = [keys.join(','), ...data.map(row =>
-    keys.map(k => JSON.stringify(row[k] ?? '')).join(',')
+    keys.map(k => csvEscape(row[k])).join(',')
   )].join('\n');
   const tmpDir = path.join(__dirname, '..', '..', 'tmp');
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -72,7 +83,7 @@ router.get('/export/:register/:date', (req, res) => {
 
   const keys = Object.keys(data[0] || {});
   const csv = [keys.join(','), ...data.map(row =>
-    keys.map(k => JSON.stringify(row[k] ?? '')).join(',')
+    keys.map(k => csvEscape(row[k])).join(',')
   )].join('\n');
 
   const format = req.query.format || 'csv';
