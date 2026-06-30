@@ -39,9 +39,12 @@ router.get('/export/:date', (req, res) => {
   res.type('text/plain').send(result);
 });
 
-// POST /api/shortlist/run-rule — manually trigger auto rule
+// POST /api/shortlist/run-rule — manually trigger auto rule (always re-runs regardless of existing entry)
 router.post('/run-rule', (req, res) => {
-  const entry = runAutoRule();
+  const entry = runAutoRule({ force: true });
+  if (!entry) {
+    return res.json({ ok: false, reason: 'No stocks meet the minimum score threshold' });
+  }
   res.json({ ok: true, entry });
 });
 

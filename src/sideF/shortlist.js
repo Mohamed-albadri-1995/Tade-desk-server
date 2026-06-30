@@ -30,13 +30,17 @@ function saveShortlistEntry(entry) {
   );
 }
 
-function runAutoRule() {
+function runAutoRule({ force = false } = {}) {
   const today = toETDate(Date.now());
 
-  const existing = getShortlistEntry(today);
-  if (existing) {
-    console.log('[Shortlist] Auto rule: entry already exists for', today);
-    return null;
+  // Scheduled cron: skip if an auto entry already exists today.
+  // Manual trigger (force=true): always re-run, merging auto picks into any existing entry.
+  if (!force) {
+    const existing = getShortlistEntry(today);
+    if (existing && existing.items.some(i => i.method === 'auto')) {
+      console.log('[Shortlist] Auto rule: auto entry already exists for', today);
+      return null;
+    }
   }
 
   const minScore = getSetting('shortlistMinScore') ?? 70;
@@ -48,12 +52,16 @@ function runAutoRule() {
     .slice(0, topN);
 
   if (eligible.length === 0) {
-    console.log('[Shortlist] Auto rule: no eligible stocks today');
+    console.log('[Shortlist] Auto rule: no eligible stocks (minScore=' + minScore + ', rows=' + r0.getTodayRows().length + ')');
     return null;
   }
 
   const now = Date.now();
-  const items = eligible.map(row => ({
+  // Load existing entry so manual picks are preserved
+  const existing = getShortlistEntry(today);
+  const manualItems = existing ? existing.items.filter(i => i.method !== 'auto') : [];
+
+  const autoItems = eligible.map(row => ({
     ticker: row.ticker,
     tvSymbol: row.stock?.tvSymbol ?? null,
     addedAt: now,
@@ -64,14 +72,19 @@ function runAutoRule() {
     sector: row.stock?.sector ?? null,
   }));
 
-  const entry = { date: today, items, exported: false, exportedAt: null };
+  const entry = {
+    date: today,
+    items: [...manualItems, ...autoItems],
+    exported: existing?.exported || false,
+    exportedAt: existing?.exportedAt || null,
+  };
   saveShortlistEntry(entry);
 
-  for (const item of items) {
+  for (const item of autoItems) {
     r0.setInShortlist(item.ticker, true);
   }
 
-  console.log('[Shortlist] Auto rule: created entry for', today, 'with', items.length, 'tickers');
+  console.log('[Shortlist] Auto rule: saved', autoItems.length, 'auto picks for', today);
   return entry;
 }
 
