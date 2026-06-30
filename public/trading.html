@@ -428,6 +428,7 @@ async function toggleSession() {
       btn.textContent = 'Start Session';
       btn.className = 'session-btn start';
       stopSSE();
+      clearSignalCards();
     }
   } finally {
     btn.disabled = false;
@@ -480,6 +481,12 @@ function renderShortlistCards(tickers) {
   if (!tickers.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">📡</div><div class="empty-text">No tickers on shortlist</div></div>'; return; }
   tickers.forEach(t => { if (!tickerStatus[t]) tickerStatus[t] = 'watching'; });
   renderSignalList();
+}
+
+function clearSignalCards() {
+  Object.keys(tickerStatus).forEach(k => delete tickerStatus[k]);
+  const el = document.getElementById('signal-list');
+  if (el) el.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">No signals this session</div></div>';
 }
 
 function renderSignalList() {
