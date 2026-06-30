@@ -690,6 +690,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
           <button class="factor-base-btn" onclick="anSelectBase('B1',this)">B1 · 9:37 Long</button>
           <button class="factor-base-btn" onclick="anSelectBase('B2',this)">B2 · 9:37 Short</button>
         </div>
+        <div id="an-subtable-row" style="display:none;margin:8px 0 4px;flex-wrap:wrap;gap:6px"></div>
         <div id="an-factor-panel"><span class="feature-loading">Click "Refresh Status" then select a base to load factors.</span></div>
         <button class="an-btn" style="margin-top:10px" onclick="anModelInfo()">Load / Refresh Factors</button>
       </div>
@@ -1065,12 +1066,33 @@ function toggleScoreBreakdown(ticker) {
 
 let _modelInfoCache = null;
 let _selectedBase = 'B6';
+let _availableTablesCache = {};
 
 function anSelectBase(base, btn) {
   _selectedBase = base;
   document.querySelectorAll('.factor-base-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   renderFactorPanel();
+  renderSubTableRow();
+}
+
+async function renderSubTableRow() {
+  const row = document.getElementById('an-subtable-row');
+  if (!_availableTablesCache[_selectedBase]) {
+    try {
+      const r = await fetch('/api/analysis/available-tables');
+      const d = await r.json();
+      _availableTablesCache = d.bases || {};
+    } catch { return; }
+  }
+  const tables = (_availableTablesCache[_selectedBase] || []).filter(t => t !== 'main').sort();
+  if (!tables.length) { row.style.display = 'none'; return; }
+  row.style.display = 'flex';
+  row.innerHTML = '<span style="font-size:11px;color:var(--text3);align-self:center;margin-right:4px">Sub-tables:</span>' +
+    tables.map(t => {
+      const label = t.replace(/^sub_/, '');
+      return `<button class="factor-base-btn" style="font-size:11px;padding:3px 8px" onclick="openTableInspector('${_selectedBase}','${t}')">${label}</button>`;
+    }).join('');
 }
 
 function renderFactorPanel() {
@@ -1112,7 +1134,9 @@ async function anModelInfo() {
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'Failed');
     _modelInfoCache = d.bases;
+    _availableTablesCache = {};
     renderFactorPanel();
+    renderSubTableRow();
   } catch (err) {
     panel.innerHTML = `<span class="feature-loading" style="color:var(--red)">Error: ${esc(err.message)}</span>`;
   }
