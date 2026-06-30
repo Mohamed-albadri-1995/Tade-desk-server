@@ -328,9 +328,47 @@ body {
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:100%;max-width:480px;padding:20px;margin-top:20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div id="tdm-title" style="font-size:16px;font-weight:700"></div>
-        <button onclick="closeTradeDetail()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer">✕</button>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="tdm-edit-btn" onclick="toggleTradeEdit()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 10px;font-size:11px;font-family:inherit;cursor:pointer">Edit</button>
+          <button id="tdm-del-btn" onclick="deleteTrade()" style="background:none;border:none;color:var(--red);font-size:12px;cursor:pointer;padding:4px 6px">Delete</button>
+          <button onclick="closeTradeDetail()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer">✕</button>
+        </div>
       </div>
       <div id="tdm-body"></div>
+      <div id="tdm-edit-form" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:10px;font-weight:600">EDIT TRADE</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Exit Price</div>
+            <input id="tdm-exit-price" type="number" step="0.01" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 8px;color:var(--text);font-size:12px;font-family:inherit">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Exit Time (HH:MM)</div>
+            <input id="tdm-exit-time" type="time" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 8px;color:var(--text);font-size:12px;font-family:inherit">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Stop Loss</div>
+            <input id="tdm-sl" type="number" step="0.01" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 8px;color:var(--text);font-size:12px;font-family:inherit">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Take Profit</div>
+            <input id="tdm-tp" type="number" step="0.01" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 8px;color:var(--text);font-size:12px;font-family:inherit">
+          </div>
+        </div>
+        <div style="margin-bottom:8px">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Setup ID</div>
+          <input id="tdm-setup" type="text" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 8px;color:var(--text);font-size:12px;font-family:inherit">
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:3px">Notes</div>
+          <textarea id="tdm-notes" rows="3" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 8px;color:var(--text);font-size:12px;font-family:inherit;resize:vertical"></textarea>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="saveTradeEdit()" style="flex:1;background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer">Save</button>
+          <button onclick="toggleTradeEdit()" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:8px;font-size:12px;font-family:inherit;cursor:pointer">Cancel</button>
+        </div>
+        <div id="tdm-edit-msg" style="margin-top:8px;font-size:11px;color:var(--red);display:none"></div>
+      </div>
     </div>
   </div>
 
@@ -673,8 +711,12 @@ async function computeTrade(id) {
   else alert('Compute failed: ' + r.error);
 }
 
+let _currentTradeId = null;
+
 async function openTradeDetail(id) {
+  _currentTradeId = id;
   const t = await fetch(`${API}/journal/trades/${id}`).then(r => r.json());
+  _currentTrade = t;
   const modal = document.getElementById('trade-detail-modal');
   const pnl = t.net_pnl;
   const pnlClass = pnl > 0 ? 'color:var(--green)' : pnl < 0 ? 'color:var(--red)' : 'color:var(--text3)';
@@ -702,11 +744,60 @@ async function openTradeDetail(id) {
     html += `<button onclick="computeTrade('${t.id}');closeTradeDetail()" style="margin-top:12px;width:100%;background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">Compute Technical Data</button>`;
   }
   document.getElementById('tdm-body').innerHTML = html;
+  document.getElementById('tdm-edit-form').style.display = 'none';
+  document.getElementById('tdm-edit-btn').textContent = 'Edit';
+  // Pre-fill edit form
+  document.getElementById('tdm-exit-price').value = t.exit_price || '';
+  document.getElementById('tdm-exit-time').value  = t.exit_time  || '';
+  document.getElementById('tdm-sl').value          = t.sl        || '';
+  document.getElementById('tdm-tp').value          = t.tp        || '';
+  document.getElementById('tdm-setup').value       = t.setup_id  || '';
+  document.getElementById('tdm-notes').value       = t.notes     || '';
   modal.style.display = 'flex';
+}
+
+function toggleTradeEdit() {
+  const form = document.getElementById('tdm-edit-form');
+  const btn  = document.getElementById('tdm-edit-btn');
+  const open = form.style.display !== 'none';
+  form.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? 'Edit' : 'Cancel';
+  document.getElementById('tdm-edit-msg').style.display = 'none';
+}
+
+async function saveTradeEdit() {
+  const msg = document.getElementById('tdm-edit-msg');
+  msg.style.display = 'none';
+  const body = {
+    exit_price: document.getElementById('tdm-exit-price').value !== '' ? parseFloat(document.getElementById('tdm-exit-price').value) : null,
+    exit_time:  document.getElementById('tdm-exit-time').value  || null,
+    sl:         document.getElementById('tdm-sl').value  !== '' ? parseFloat(document.getElementById('tdm-sl').value) : null,
+    tp:         document.getElementById('tdm-tp').value  !== '' ? parseFloat(document.getElementById('tdm-tp').value) : null,
+    setup_id:   document.getElementById('tdm-setup').value.trim() || null,
+    notes:      document.getElementById('tdm-notes').value.trim() || null,
+  };
+  try {
+    const r = await fetch(`${API}/journal/trades/${_currentTradeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => r.json());
+    if (!r.ok) { msg.textContent = r.error || 'Save failed'; msg.style.display='block'; return; }
+    closeTradeDetail();
+    loadJournal();
+  } catch(e) { msg.textContent = e.message; msg.style.display='block'; }
+}
+
+async function deleteTrade() {
+  if (!confirm('Delete this trade? This cannot be undone.')) return;
+  await fetch(`${API}/journal/trades/${_currentTradeId}`, { method: 'DELETE' });
+  closeTradeDetail();
+  loadJournal();
 }
 
 function closeTradeDetail() {
   document.getElementById('trade-detail-modal').style.display = 'none';
+  _currentTradeId = null;
 }
 
 function showImport() { document.getElementById('import-modal').style.display = 'flex'; }
