@@ -1,11 +1,38 @@
 const cron = require('node-cron');
+const path = require('path');
+const axios = require('axios');
 const db = require('./db');
 const { runFullScan } = require('./pipeline');
 const { runAutoRule } = require('./sideF/shortlist');
 const { captureR1, captureR2 } = require('./warehouse/registers');
 const { captureR3 } = require('./sideH/capture');
 const { pushBackup } = require('./backup');
+const { saveRegisterCSV } = require('./routes/warehouse');
 const r0 = require('./r0/registry');
+const { toETDate } = require('./utils/time');
+
+const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
+
+async function autoTrainScorer() {
+  const today = toETDate(Date.now());
+  console.log('[Scheduler] Auto-train: exporting R4A/R4B for', today);
+  try {
+    const r4aPath = saveRegisterCSV('R4A', today);
+    const r4bPath = saveRegisterCSV('R4B', today);
+    if (!r4aPath || !r4bPath) {
+      console.warn('[Scheduler] Auto-train skipped: R4A or R4B empty for', today);
+      return;
+    }
+    const resp = await axios.post(`${SCORER_URL}/train`, { r4a: r4aPath, r4b: r4bPath }, { timeout: 180000 });
+    if (resp.data?.ok) {
+      console.log('[Scheduler] Auto-train complete for', today);
+    } else {
+      console.warn('[Scheduler] Auto-train failed:', resp.data?.error);
+    }
+  } catch (err) {
+    console.warn('[Scheduler] Auto-train error (scorer may be offline):', err.message);
+  }
+}
 
 const jobRegistry = [];
 
@@ -141,6 +168,7 @@ function startScheduler() {
   registerJob('R2 Snapshot 9:26–9:56 AM', '26,31,36,41,46,51,56 9 * * 1-5', 'America/New_York', () => captureR2());
   registerJob('R2 Snapshot 10:01 AM', '1 10 * * 1-5', 'America/New_York', () => captureR2());
   registerJob('R3 EOD Capture 4:05 PM', '5 16 * * 1-5', 'America/New_York', () => captureR3());
+  registerJob('Scorer Auto-Train 4:20 PM', '20 16 * * 1-5', 'America/New_York', () => autoTrainScorer());
   registerJob('Daily Backup 5:30 PM', '30 17 * * 1-5', 'America/New_York', () => pushBackup());
   registerJob('Midnight r0 Flush', '0 0 * * *', 'America/New_York', () => { r0.clearAll(); });
 
