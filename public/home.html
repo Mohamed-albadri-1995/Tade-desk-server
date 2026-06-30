@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trade Desk</title>
+<style>
+:root {
+  --bg: #0d0f14;
+  --bg2: #13161e;
+  --bg3: #1a1e28;
+  --border: #2a2f3f;
+  --text: #e2e6f0;
+  --text2: #8b92a5;
+  --text3: #555d70;
+  --accent: #3b82f6;
+  --cyan: #22d3ee;
+  --green: #22c55e;
+  --purple: #a78bfa;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  background:
+    radial-gradient(900px 500px at 80% 10%, rgba(59,130,246,.07), transparent 60%),
+    radial-gradient(700px 400px at -5% 90%, rgba(167,139,250,.06), transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.logo {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text3);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.title {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+.subtitle {
+  font-size: 13px;
+  color: var(--text3);
+  margin-bottom: 56px;
+}
+
+.cards {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.tool-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 260px;
+  padding: 28px 28px 24px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color .18s, transform .18s, box-shadow .18s;
+  position: relative;
+  overflow: hidden;
+}
+.tool-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  opacity: 0;
+  transition: opacity .18s;
+}
+.tool-card.scanner::before { background: radial-gradient(140px 120px at 60% -10%, rgba(34,211,238,.10), transparent); }
+.tool-card.trading::before { background: radial-gradient(140px 120px at 60% -10%, rgba(167,139,250,.10), transparent); }
+
+.tool-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 40px rgba(0,0,0,.4);
+}
+.tool-card.scanner:hover { border-color: var(--cyan); }
+.tool-card.trading:hover { border-color: var(--purple); }
+.tool-card:hover::before { opacity: 1; }
+
+.card-icon {
+  font-size: 36px;
+  margin-bottom: 18px;
+  line-height: 1;
+}
+.card-name {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  letter-spacing: -0.01em;
+}
+.tool-card.scanner .card-name { color: var(--cyan); }
+.tool-card.trading .card-name { color: var(--purple); }
+
+.card-desc {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tool-card.scanner .tag { background: rgba(34,211,238,.1); color: var(--cyan); border: 1px solid rgba(34,211,238,.2); }
+.tool-card.trading .tag { background: rgba(167,139,250,.1); color: var(--purple); border: 1px solid rgba(167,139,250,.2); }
+
+.arrow {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  font-size: 16px;
+  color: var(--text3);
+  transition: color .18s, transform .18s;
+}
+.tool-card.scanner:hover .arrow { color: var(--cyan); transform: translateX(3px); }
+.tool-card.trading:hover .arrow { color: var(--purple); transform: translateX(3px); }
+
+.version {
+  position: fixed;
+  bottom: 20px;
+  font-size: 11px;
+  color: var(--text3);
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 580px) {
+  .title { font-size: 24px; }
+  .cards { flex-direction: column; align-items: center; }
+  .tool-card { width: 100%; max-width: 320px; }
+}
+</style>
+</head>
+<body>
+
+<div class="logo">Trade Desk</div>
+<div class="title">What are you doing today?</div>
+<div class="subtitle">Choose your tool to get started</div>
+
+<div class="cards">
+
+  <a class="tool-card scanner" href="/scanner">
+    <div class="card-icon">📡</div>
+    <div class="card-name">Scanner</div>
+    <div class="card-desc">
+      Pre-market screening, regime analysis, scoring engine, and shortlist management.
+    </div>
+    <div class="card-tags">
+      <span class="tag">Pre-market</span>
+      <span class="tag">R0 Registry</span>
+      <span class="tag">Scoring</span>
+      <span class="tag">Shortlist</span>
+    </div>
+    <span class="arrow">→</span>
+  </a>
+
+  <a class="tool-card trading" href="/trading">
+    <div class="card-icon">⚡</div>
+    <div class="card-name">Trading</div>
+    <div class="card-desc">
+      Live signal matching, position sizing, execution alerts, and trade journal.
+    </div>
+    <div class="card-tags">
+      <span class="tag">9:35 – 10:00</span>
+      <span class="tag">Signals</span>
+      <span class="tag">Journal</span>
+      <span class="tag">Analysis</span>
+    </div>
+    <span class="arrow">→</span>
+  </a>
+
+</div>
+
+<div class="version">v1.0 · Trade Desk</div>
+
+</body>
+</html>

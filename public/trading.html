@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trade Desk · Trading</title>
+<style>
+:root {
+  --bg: #0d0f14;
+  --bg2: #13161e;
+  --bg3: #1a1e28;
+  --bg4: #212535;
+  --border: #2a2f3f;
+  --text: #e2e6f0;
+  --text2: #8b92a5;
+  --text3: #555d70;
+  --accent: #a78bfa;
+  --accent2: #7c3aed;
+  --green: #22c55e;
+  --red: #ef4444;
+  --cyan: #22d3ee;
+  --yellow: #eab308;
+  --orange: #f97316;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 13px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── HEADER ── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.header-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text3);
+  font-size: 12px;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: color .15s, border-color .15s;
+}
+.header-back:hover { color: var(--text2); border-color: var(--border); }
+.header-logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: 0.04em; }
+.header-date { font-size: 11px; color: var(--text3); margin-left: auto; }
+
+.session-btn {
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: none;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.session-btn.start { background: var(--green); color: #000; }
+.session-btn.end   { background: var(--red);   color: #fff; }
+.session-btn:hover { opacity: .85; }
+
+.session-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 5px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.session-badge.active { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
+.session-badge.idle   { background: rgba(85,93,112,.15); color: var(--text3); border: 1px solid var(--border); }
+
+/* ── TABS ── */
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 10px 20px 0;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  padding: 8px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text2);
+  border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: inherit;
+}
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:hover:not(.active) { color: var(--text); }
+
+/* ── MAIN ── */
+.main { flex: 1; padding: 16px 20px; overflow-y: auto; }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
+/* ── PANEL ── */
+.panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+/* ── TICKER CARD ── */
+.ticker-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.ticker-card.signal { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(167,139,250,.2); }
+.tc-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.tc-ticker { font-size: 15px; font-weight: 700; color: var(--text); }
+.tc-setup  { font-size: 10px; color: var(--text3); }
+.tc-time   { font-size: 10px; color: var(--text3); margin-left: auto; }
+.tc-badge  { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+.badge-long  { background: rgba(34,197,94,.15); color: var(--green); }
+.badge-short { background: rgba(239,68,68,.15);  color: var(--red); }
+.badge-signal { background: rgba(167,139,250,.2); color: var(--accent); }
+.badge-blocked { background: rgba(85,93,112,.15); color: var(--text3); }
+.badge-watching { background: rgba(234,179,8,.1); color: var(--yellow); }
+
+.tc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 12px; font-size: 11px; color: var(--text2); margin-bottom: 10px; }
+.tc-kv span:first-child { color: var(--text3); display: block; font-size: 10px; }
+.tc-kv span:last-child  { color: var(--text); font-weight: 600; }
+
+.tc-actions { display: flex; gap: 8px; }
+.tc-btn { padding: 6px 14px; border-radius: 6px; border: none; font-size: 12px; font-family: inherit; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+.tc-btn.primary { background: var(--accent); color: #fff; }
+.tc-btn.dismiss { background: var(--bg4); color: var(--text2); border: 1px solid var(--border); }
+.tc-btn:hover { opacity: .85; }
+
+/* ── CENTER NOTIFICATION ── */
+.center-card {
+  background: var(--bg2);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 12px;
+  box-shadow: 0 0 0 1px rgba(167,139,250,.15);
+}
+.center-ticker { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+.center-msg { font-size: 14px; color: var(--text2); margin-bottom: 14px; line-height: 1.5; }
+.center-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.center-kv { background: var(--bg3); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; }
+.center-kv .ck-label { font-size: 10px; color: var(--text3); margin-bottom: 3px; }
+.center-kv .ck-val   { font-size: 14px; font-weight: 700; }
+.payload-box { background: var(--bg3); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; font-size: 11px; color: var(--text3); font-family: inherit; white-space: pre-wrap; word-break: break-all; }
+
+/* ── EMPTY STATE ── */
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--text3); gap: 8px; }
+.empty-icon { font-size: 36px; }
+.empty-text { font-size: 13px; }
+
+/* ── SIDE A STATUS ── */
+.side-a-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.side-a-row:last-child { border-bottom: none; }
+.sa-ticker { font-weight: 700; width: 60px; flex-shrink: 0; }
+.sa-gate { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+.sa-gate.ok   { background: rgba(34,197,94,.12); color: var(--green); }
+.sa-gate.no   { background: rgba(239,68,68,.12);  color: var(--red); }
+.sa-gate.na   { background: rgba(85,93,112,.1);   color: var(--text3); }
+.sa-mult { font-size: 11px; color: var(--text3); margin-left: auto; }
+
+/* ── JOURNAL LIST ── */
+.trade-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.trade-row:last-child { border-bottom: none; }
+.tr-ticker { font-weight: 700; width: 55px; flex-shrink: 0; }
+.tr-dir  { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+.tr-pnl  { font-weight: 700; margin-left: auto; }
+.tr-pnl.pos { color: var(--green); }
+.tr-pnl.neg { color: var(--red); }
+.tr-pnl.be  { color: var(--text3); }
+
+/* ── UTIL ── */
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.dot.green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.dot.yellow { background: var(--yellow); }
+.dot.gray   { background: var(--text3); }
+
+@media (max-width: 560px) {
+  .tc-grid { grid-template-columns: repeat(2, 1fr); }
+  .center-grid { grid-template-columns: repeat(2, 1fr); }
+  .tabs { padding-left: 12px; }
+  .main { padding: 12px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <a class="header-back" href="/">← Home</a>
+  <div class="header-logo">⚡ Trading</div>
+  <div id="session-badge" class="session-badge idle">Idle</div>
+  <div class="header-date" id="header-date"></div>
+  <button class="session-btn start" id="session-btn" onclick="toggleSession()">Start Session</button>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('signals')">Signals</button>
+  <button class="tab" onclick="switchTab('center')">Center</button>
+  <button class="tab" onclick="switchTab('sideA')">Side A</button>
+  <button class="tab" onclick="switchTab('positions')">Positions</button>
+  <button class="tab" onclick="switchTab('journal')">Journal</button>
+  <button class="tab" onclick="switchTab('setups')">Setups</button>
+  <button class="tab" onclick="switchTab('settings')">Settings</button>
+</div>
+
+<div class="main">
+
+  <!-- SIGNALS TAB -->
+  <div class="tab-pane active" id="tab-signals">
+    <div class="panel">
+      <div class="panel-title">Active Tickers · Side B</div>
+      <div id="signal-list">
+        <div class="empty"><div class="empty-icon">📡</div><div class="empty-text">Start a session to begin monitoring</div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Signal History</div>
+      <div id="signal-history">
+        <div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">No signals this session</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER TAB -->
+  <div class="tab-pane" id="tab-center">
+    <div id="center-notifications">
+      <div class="empty"><div class="empty-icon">⚡</div><div class="empty-text">Signals that pass the direction gate appear here</div></div>
+    </div>
+  </div>
+
+  <!-- SIDE A TAB -->
+  <div class="tab-pane" id="tab-sideA">
+    <div class="panel">
+      <div class="panel-title">Direction Gate Status</div>
+      <div id="sideA-list">
+        <div class="empty"><div class="empty-icon">🛡</div><div class="empty-text">No tickers loaded — start a session first</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- POSITIONS TAB -->
+  <div class="tab-pane" id="tab-positions">
+    <div class="panel">
+      <div class="panel-title">Open Positions</div>
+      <div id="positions-list">
+        <div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No open positions</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JOURNAL TAB -->
+  <div class="tab-pane" id="tab-journal">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <input id="jnl-from" type="date" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-family:inherit;font-size:12px">
+      <input id="jnl-to" type="date" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-family:inherit;font-size:12px">
+      <button onclick="loadJournal()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-family:inherit;cursor:pointer">Load</button>
+      <button onclick="showImport()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 12px;color:var(--text2);font-size:12px;font-family:inherit;cursor:pointer">⬆ Import CSV</button>
+    </div>
+    <div id="jnl-metrics" style="display:none" class="panel" style="margin-bottom:12px"></div>
+    <div id="jnl-trades"></div>
+
+    <!-- Import modal -->
+    <div id="import-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;display:none;align-items:center;justify-content:center;padding:16px">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:100%;max-width:480px;padding:20px">
+        <div style="font-size:14px;font-weight:700;margin-bottom:12px">Import Fills CSV</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Supported: TradingView, Trade the Pool, DXtrade</div>
+        <input id="import-account" placeholder="Account / broker name (required)" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%;margin-bottom:8px">
+        <textarea id="import-csv" placeholder="Paste CSV here…" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:11px;width:100%;height:120px;resize:vertical;margin-bottom:8px"></textarea>
+        <div style="display:flex;gap:8px">
+          <button onclick="doImport()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:7px 16px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">Import</button>
+          <button onclick="hideImport()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 14px;color:var(--text2);font-family:inherit;font-size:12px;cursor:pointer">Cancel</button>
+        </div>
+        <div id="import-msg" style="font-size:11px;margin-top:8px;min-height:16px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETUPS TAB -->
+  <div class="tab-pane" id="tab-setups">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button onclick="showAddSetup()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-family:inherit;font-weight:600;cursor:pointer">+ New Setup</button>
+    </div>
+    <div id="setups-list"></div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div class="tab-pane" id="tab-settings">
+    <div class="panel">
+      <div class="panel-title">Position Sizing</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Account Equity ($)</div>
+          <input id="s-equity" type="number" data-key="trading_equity" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Risk per Trade (%)</div>
+          <input id="s-risk" type="number" step="0.1" data-key="trading_risk_pct" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Max Shares per Trade</div>
+          <input id="s-maxshares" type="number" data-key="trading_max_shares" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Max Dollar Risk ($)</div>
+          <input id="s-maxrisk" type="number" data-key="trading_max_dollar_risk" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Max Total Exposure ($)</div>
+          <input id="s-maxexposure" type="number" data-key="trading_max_total_exposure" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Max Open Positions</div>
+          <input id="s-maxpos" type="number" data-key="trading_max_open_positions" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Daily Loss Limit ($)</div>
+          <input id="s-dailyloss" type="number" data-key="trading_daily_loss_limit" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+      </div>
+      <button onclick="saveSettings()" style="margin-top:14px;background:var(--accent);color:#fff;border:none;border-radius:6px;padding:7px 18px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">Save</button>
+      <span id="settings-msg" style="font-size:11px;color:var(--green);margin-left:10px;display:none">Saved</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = '/api';
+
+// ── Tab switching ──────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const names = ['signals','center','sideA','positions','journal','setups','settings'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'sideA')     loadSideA();
+  if (name === 'positions') loadPositions();
+  if (name === 'setups')    loadSetups();
+  if (name === 'settings')  loadSettings();
+  if (name === 'journal')   loadJournal();
+}
+
+// ── Date header ───────────────────────────────────────────────────────────────
+function updateDate() {
+  document.getElementById('header-date').textContent =
+    new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday:'short', month:'short', day:'numeric' });
+}
+updateDate();
+setInterval(updateDate, 60000);
+
+// ── Session ───────────────────────────────────────────────────────────────────
+let sessionActive = false;
+
+async function toggleSession() {
+  const btn = document.getElementById('session-btn');
+  btn.disabled = true;
+  try {
+    if (!sessionActive) {
+      const r = await fetch(`${API}/trading/session/start`, { method: 'POST' }).then(r => r.json());
+      if (r.ok) {
+        sessionActive = true;
+        setSessionBadge(true);
+        btn.textContent = 'End Session';
+        btn.className = 'session-btn end';
+        renderShortlistCards(r.tickers || []);
+        startSSE();
+      } else {
+        alert('Failed to start: ' + (r.reason || r.error));
+      }
+    } else {
+      await fetch(`${API}/trading/session/end`, { method: 'POST' });
+      sessionActive = false;
+      setSessionBadge(false);
+      btn.textContent = 'Start Session';
+      btn.className = 'session-btn start';
+      stopSSE();
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function setSessionBadge(active) {
+  const el = document.getElementById('session-badge');
+  el.textContent = active ? 'Active' : 'Idle';
+  el.className = 'session-badge ' + (active ? 'active' : 'idle');
+}
+
+async function loadSession() {
+  const s = await fetch(`${API}/trading/session`).then(r => r.json()).catch(() => null);
+  if (s && s.status === 'active') {
+    sessionActive = true;
+    setSessionBadge(true);
+    document.getElementById('session-btn').textContent = 'End Session';
+    document.getElementById('session-btn').className = 'session-btn end';
+    renderShortlistCards((s.shortlist || []).map(i => i.ticker));
+    startSSE();
+  }
+}
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
+let evtSource = null;
+
+function startSSE() {
+  if (evtSource) return;
+  evtSource = new EventSource(`${API}/trading/stream`);
+  evtSource.onmessage = e => {
+    try { handleEvent(JSON.parse(e.data)); } catch {}
+  };
+}
+
+function stopSSE() {
+  if (evtSource) { evtSource.close(); evtSource = null; }
+}
+
+function handleEvent(evt) {
+  if (evt.type === 'signal') renderCenterCard(evt);
+  if (evt.type === 'session_ended') { sessionActive = false; setSessionBadge(false); stopSSE(); }
+  if (evt.type === 'webhook_signal') updateSignalMatch(evt);
+}
+
+// ── Signal cards (Side B) ─────────────────────────────────────────────────────
+const tickerStatus = {};
+
+function renderShortlistCards(tickers) {
+  const el = document.getElementById('signal-list');
+  if (!tickers.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">📡</div><div class="empty-text">No tickers on shortlist</div></div>'; return; }
+  tickers.forEach(t => { if (!tickerStatus[t]) tickerStatus[t] = 'watching'; });
+  renderSignalList();
+}
+
+function renderSignalList() {
+  const el = document.getElementById('signal-list');
+  const entries = Object.entries(tickerStatus);
+  if (!entries.length) return;
+  el.innerHTML = entries.map(([ticker, status]) => {
+    const badge = status === 'signal'    ? '<span class="tc-badge badge-signal">🔔 Signal</span>'
+                : status === 'dismissed' ? '<span class="tc-badge badge-blocked">Dismissed</span>'
+                : status === 'blocked'   ? '<span class="tc-badge badge-blocked">⛔ Blocked</span>'
+                :                          '<span class="tc-badge badge-watching">⏳ Watching</span>';
+    return `<div class="ticker-card ${status === 'signal' ? 'signal' : ''}" id="card-${ticker}">
+      <div class="tc-head">
+        <span class="tc-ticker">${ticker}</span>
+        ${badge}
+        <span class="tc-time" id="time-${ticker}"></span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Center notifications ──────────────────────────────────────────────────────
+const centerCards = [];
+
+function renderCenterCard(evt) {
+  tickerStatus[evt.ticker] = 'signal';
+  document.getElementById(`time-${evt.ticker}`)?.innerText && null;
+  renderSignalList();
+
+  centerCards.unshift(evt);
+  const el = document.getElementById('center-notifications');
+  el.innerHTML = centerCards.map(e => {
+    const dir = e.direction;
+    const dirBadge = dir === 'Long'
+      ? '<span class="tc-badge badge-long">LONG</span>'
+      : '<span class="tc-badge badge-short">SHORT</span>';
+    const pnl = e.riskCheck?.ok
+      ? `<span style="color:var(--text3);font-size:11px">${e.humanizedMsg}</span>`
+      : `<span style="color:var(--red);font-size:11px">⛔ ${e.riskCheck?.reason}</span>`;
+
+    const payload = e.alpacaPayload ? JSON.stringify(e.alpacaPayload, null, 2) : null;
+
+    return `<div class="center-card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span class="center-ticker">${e.ticker}</span>
+        ${dirBadge}
+        <span style="font-size:11px;color:var(--text3);margin-left:auto">${new Date(e.ts).toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+      </div>
+      <div class="center-msg">${pnl}</div>
+      <div class="center-grid">
+        <div class="center-kv"><div class="ck-label">Entry</div><div class="ck-val">${e.entryType?.toUpperCase() || '—'}</div></div>
+        <div class="center-kv"><div class="ck-label">SL</div><div class="ck-val" style="color:var(--red)">$${e.sl?.toFixed(2) || '—'}</div></div>
+        <div class="center-kv"><div class="ck-label">TP</div><div class="ck-val" style="color:var(--green)">$${e.tp?.toFixed(2) || '—'}</div></div>
+        <div class="center-kv"><div class="ck-label">Shares</div><div class="ck-val">${e.sizing?.shares ?? '—'}</div></div>
+        <div class="center-kv"><div class="ck-label">Risk $</div><div class="ck-val">$${e.sizing?.dollarRisk?.toFixed(0) ?? '—'}</div></div>
+        <div class="center-kv"><div class="ck-label">Score</div><div class="ck-val">${e.sideA?.score ?? '—'}</div></div>
+      </div>
+      ${payload ? `<div style="font-size:10px;color:var(--text3);margin-bottom:4px">Alpaca payload (ready — connection deferred)</div><div class="payload-box">${payload}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function updateSignalMatch(evt) {
+  // Future: show match/mismatch indicator per ticker card
+}
+
+// ── Side A ────────────────────────────────────────────────────────────────────
+async function loadSideA() {
+  const data = await fetch(`${API}/trading/sideA`).then(r => r.json()).catch(() => ({}));
+  const el = document.getElementById('sideA-list');
+  const entries = Object.entries(data);
+  if (!entries.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">🛡</div><div class="empty-text">No tickers loaded</div></div>';
+    return;
+  }
+  el.innerHTML = entries.map(([ticker, d]) => `
+    <div class="side-a-row">
+      <span class="sa-ticker">${ticker}</span>
+      <span class="sa-gate ${d.longAllowed ? 'ok':'no'}">Long ${d.longAllowed ? '✓':'✗'}</span>
+      <span class="sa-gate ${d.shortAllowed ? 'ok':'no'}">Short ${d.shortAllowed ? '✓':'✗'}</span>
+      <span style="font-size:10px;color:var(--text3)">${d.context?.regime || ''} · ${d.context?.secBias || ''}</span>
+      <span class="sa-mult">${d.multiplier != null ? d.multiplier + '×' : ''}</span>
+    </div>
+  `).join('');
+}
+
+// ── Positions ─────────────────────────────────────────────────────────────────
+async function loadPositions() {
+  const rows = await fetch(`${API}/trading/positions`).then(r => r.json()).catch(() => []);
+  const el = document.getElementById('positions-list');
+  const open = rows.filter(r => r.status === 'open');
+  if (!open.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No open positions</div></div>';
+    return;
+  }
+  el.innerHTML = open.map(p => `
+    <div class="trade-row">
+      <span class="tr-ticker">${p.ticker}</span>
+      <span class="tr-dir ${p.direction === 'Long' ? 'badge-long':'badge-short'}">${p.direction}</span>
+      <span style="color:var(--text3)">${p.shares} sh @ $${p.entry_price}</span>
+      <span style="color:var(--text3);margin-left:auto">SL $${p.sl} TP $${p.tp}</span>
+      <button onclick="closePosition('${p.id}')" style="background:var(--red);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Close</button>
+    </div>
+  `).join('');
+}
+
+async function closePosition(id) {
+  const exitPrice = prompt('Exit price:');
+  if (!exitPrice) return;
+  const r = await fetch(`${API}/trading/positions/${id}/close`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ exitPrice: parseFloat(exitPrice) }),
+  }).then(r => r.json());
+  if (r.ok) loadPositions();
+}
+
+// ── Journal ───────────────────────────────────────────────────────────────────
+async function loadJournal() {
+  const from = document.getElementById('jnl-from').value;
+  const to   = document.getElementById('jnl-to').value;
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to)   params.set('to', to);
+
+  const [trades, metrics] = await Promise.all([
+    fetch(`${API}/journal/trades?${params}`).then(r => r.json()).catch(() => []),
+    fetch(`${API}/journal/analysis/metrics?${params}`).then(r => r.json()).catch(() => null),
+  ]);
+
+  // Metrics bar
+  if (metrics && metrics.closed > 0) {
+    const m = metrics;
+    const pnlColor = m.netPnl >= 0 ? 'var(--green)' : 'var(--red)';
+    document.getElementById('jnl-metrics').style.display = 'block';
+    document.getElementById('jnl-metrics').innerHTML = `
+      <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px">
+        <span>Net P&amp;L: <b style="color:${pnlColor}">$${m.netPnl?.toFixed(2)}</b></span>
+        <span>Win rate: <b>${m.winRate?.toFixed(0)}%</b></span>
+        <span>Expectancy: <b style="color:${m.expectancy >= 0 ? 'var(--green)':'var(--red)'}">$${m.expectancy?.toFixed(2)}</b></span>
+        <span>Avg R: <b>${m.avgR != null ? m.avgR + 'R' : '—'}</b></span>
+        <span>Trades: <b>${m.closed}</b></span>
+      </div>`;
+  } else {
+    document.getElementById('jnl-metrics').style.display = 'none';
+  }
+
+  // Trade list
+  const el = document.getElementById('jnl-trades');
+  if (!trades.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📒</div><div class="empty-text">No trades found</div></div>';
+    return;
+  }
+  el.innerHTML = '<div class="panel">' + trades.map(t => {
+    const pnl = t.net_pnl;
+    const pnlClass = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'be';
+    const pnlStr   = pnl != null ? '$' + Math.abs(pnl).toFixed(2) : '—';
+    return `<div class="trade-row">
+      <span class="tr-ticker">${t.ticker}</span>
+      <span class="tr-dir ${t.direction === 'Long' ? 'badge-long':'badge-short'}">${t.direction}</span>
+      <span style="color:var(--text3)">${t.date}</span>
+      <span style="color:var(--text2)">${t.entry_time || '—'} → ${t.exit_time || 'open'}</span>
+      ${t.r_multiple != null ? `<span style="color:var(--text3)">${t.r_multiple}R</span>` : ''}
+      <span class="tr-pnl ${pnlClass}">${pnl < 0 ? '-' : ''}${pnlStr}</span>
+      ${!t.technical_computed && t.status === 'closed' ? `<button onclick="computeTrade('${t.id}')" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:10px;color:var(--text2);font-family:inherit;cursor:pointer">Compute</button>` : ''}
+    </div>`;
+  }).join('') + '</div>';
+}
+
+async function computeTrade(id) {
+  const r = await fetch(`${API}/journal/trades/${id}/compute`, { method: 'POST' }).then(r => r.json());
+  if (r.ok) loadJournal();
+  else alert('Compute failed: ' + r.error);
+}
+
+function showImport() { document.getElementById('import-modal').style.display = 'flex'; }
+function hideImport() { document.getElementById('import-modal').style.display = 'none'; }
+
+async function doImport() {
+  const csv     = document.getElementById('import-csv').value;
+  const account = document.getElementById('import-account').value;
+  const msg     = document.getElementById('import-msg');
+  if (!csv.trim()) { msg.textContent = 'Paste a CSV first'; return; }
+  if (!account.trim()) { msg.textContent = 'Account name is required'; return; }
+  const r = await fetch(`${API}/journal/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ csv, account }),
+  }).then(r => r.json());
+  if (r.ok) {
+    msg.style.color = 'var(--green)';
+    msg.textContent = `Imported ${r.imported} of ${r.total} trades`;
+    setTimeout(() => { hideImport(); loadJournal(); }, 1200);
+  } else {
+    msg.style.color = 'var(--red)';
+    msg.textContent = r.error;
+  }
+}
+
+// ── Setups ────────────────────────────────────────────────────────────────────
+async function loadSetups() {
+  const rows = await fetch(`${API}/trading/setups`).then(r => r.json()).catch(() => []);
+  const el = document.getElementById('setups-list');
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">⚙</div><div class="empty-text">No setups yet — add your first setup</div></div>';
+    return;
+  }
+  el.innerHTML = rows.map(s => `
+    <div class="panel" style="margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-weight:700">${s.name}</span>
+        <span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${s.enabled ? 'rgba(34,197,94,.12)':'rgba(85,93,112,.12)'};color:${s.enabled ? 'var(--green)':'var(--text3)'}">${s.enabled ? 'Active' : 'Disabled'}</span>
+        <span style="font-size:11px;color:var(--text3);margin-left:auto">${s.entry_type} · ${s.window_start}–${s.window_end}</span>
+        <button onclick="toggleSetup('${s.id}',${s.enabled})" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;color:var(--text2);font-family:inherit;cursor:pointer">${s.enabled ? 'Disable':'Enable'}</button>
+        <button onclick="deleteSetup('${s.id}')" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:5px;padding:3px 8px;font-size:11px;color:var(--red);font-family:inherit;cursor:pointer">Delete</button>
+      </div>
+      ${s.description ? `<div style="font-size:11px;color:var(--text3);margin-top:6px">${s.description}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+function showAddSetup() {
+  const name = prompt('Setup name:');
+  if (!name) return;
+  const desc   = prompt('Description (optional):') || '';
+  const type   = prompt('Entry type (market/limit):', 'market') || 'market';
+  const start  = prompt('Window start (HH:MM):', '9:35') || '9:35';
+  const end    = prompt('Window end (HH:MM):', '10:00') || '10:00';
+  fetch(`${API}/trading/setups`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description: desc, entry_type: type, window_start: start, window_end: end }),
+  }).then(() => loadSetups());
+}
+
+async function toggleSetup(id, enabled) {
+  await fetch(`${API}/trading/setups/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: !enabled }),
+  });
+  loadSetups();
+}
+
+async function deleteSetup(id) {
+  if (!confirm('Delete this setup?')) return;
+  await fetch(`${API}/trading/setups/${id}`, { method: 'DELETE' });
+  loadSetups();
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+async function loadSettings() {
+  const keys = ['trading_equity','trading_risk_pct','trading_max_shares','trading_max_dollar_risk','trading_max_total_exposure','trading_max_open_positions','trading_daily_loss_limit'];
+  const fieldIds = ['s-equity','s-risk','s-maxshares','s-maxrisk','s-maxexposure','s-maxpos','s-dailyloss'];
+  for (let i = 0; i < keys.length; i++) {
+    const r = await fetch(`${API}/settings/${keys[i]}`).then(r => r.json()).catch(() => null);
+    if (r?.value != null) document.getElementById(fieldIds[i]).value = r.value;
+  }
+}
+
+async function saveSettings() {
+  const map = {
+    's-equity':      'trading_equity',
+    's-risk':        'trading_risk_pct',
+    's-maxshares':   'trading_max_shares',
+    's-maxrisk':     'trading_max_dollar_risk',
+    's-maxexposure': 'trading_max_total_exposure',
+    's-maxpos':      'trading_max_open_positions',
+    's-dailyloss':   'trading_daily_loss_limit',
+  };
+  const body = {};
+  for (const [id, key] of Object.entries(map)) {
+    const v = document.getElementById(id).value;
+    if (v !== '') body[key] = v;
+  }
+  await fetch(`${API}/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const msg = document.getElementById('settings-msg');
+  msg.style.display = 'inline';
+  setTimeout(() => { msg.style.display = 'none'; }, 2000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadSession();
+</script>
+</body>
+</html>

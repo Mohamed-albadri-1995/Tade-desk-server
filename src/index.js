@@ -29,9 +29,30 @@ app.use('/api/journal', require('./routes/journal'));
 // Health
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// Fallback → frontend
-app.get('/{*path}', (req, res) => {
+// Landing page
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/home.html'));
+});
+
+// Scanner — serves scanner SPA for all /scanner/* paths
+app.get('/scanner', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+app.get('/scanner/*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// Trading tool — serves trading SPA for all /trading/* paths
+app.get('/trading', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/trading.html'));
+});
+app.get('/trading/*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/trading.html'));
+});
+
+// Fallback → home
+app.get('/{*path}', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/home.html'));
 });
 
 const PORT = process.env.PORT || 3000;
