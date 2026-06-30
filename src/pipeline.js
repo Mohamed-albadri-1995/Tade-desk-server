@@ -99,7 +99,12 @@ async function runFullScan() {
     // Side E: Live scoring via Python Flask service (non-fatal — null scores if service down)
     let withScores = withContext;
     await stageWrapSoft(report, 'sideE', async () => {
-      withScores = await scoreAllRows(withContext);
+      // Preserve user-set bias from previous r0 state before scoring
+      const toScore = withContext.map(row => {
+        const prev = r0.getRow(row.ticker);
+        return prev?.bias && prev.bias !== 'auto' ? { ...row, bias: prev.bias } : row;
+      });
+      withScores = await scoreAllRows(toScore);
       const scored = withScores.filter(r => r._score !== null).length;
       return { rowCount: withScores.length, scored };
     })();
