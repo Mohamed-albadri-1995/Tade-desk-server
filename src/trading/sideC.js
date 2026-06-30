@@ -43,6 +43,8 @@ function scoreMultiplier(score, settings) {
   return 1.0;
 }
 
+const GRADE_MULTIPLIERS = { 'A+': 1.2, 'A': 1.0, 'B': 0.85, 'C': 0.7 };
+
 /**
  * Calculate position size.
  *
@@ -51,9 +53,10 @@ function scoreMultiplier(score, settings) {
  * @param {number} params.sl - stop loss price
  * @param {number} params.sideAMultiplier - from Side A register (default 1.0)
  * @param {number|null} params.score - scanner _score (null = no adjustment)
+ * @param {string|null} params.setupGrade - historical setup grade A+/A/B/C (null = no adjustment)
  * @returns {object} { shares, dollarRisk, positionValue, riskPct, equity, ...inputs }
  */
-function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null }) {
+function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null, setupGrade = null }) {
   if (!entryPrice || !sl) throw new Error('entryPrice and sl are required');
 
   const stopDistance = Math.abs(entryPrice - sl);
@@ -61,9 +64,10 @@ function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null }) {
 
   const s = getSettings();
   const scoreMult = scoreMultiplier(score, s);
+  const gradeMult = GRADE_MULTIPLIERS[setupGrade] ?? 1.0;
 
   const riskDollars = Math.min(
-    s.equity * (s.riskPct / 100) * sideAMultiplier * scoreMult,
+    s.equity * (s.riskPct / 100) * sideAMultiplier * scoreMult * gradeMult,
     s.maxDollarRisk
   );
 
@@ -80,6 +84,8 @@ function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null }) {
     stopDistance: parseFloat(stopDistance.toFixed(4)),
     sideAMultiplier,
     scoreMultiplier: scoreMult,
+    gradeMultiplier: gradeMult,
+    setupGrade: setupGrade || null,
     riskPct: s.riskPct,
     equity: s.equity,
   };

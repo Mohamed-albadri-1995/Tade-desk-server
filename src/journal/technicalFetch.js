@@ -12,6 +12,37 @@ const db = require('../db');
 const { fetchIntradayBars } = require('../alpaca/client');
 const volumeBaseline = require('../trading/volumeBaseline');
 
+// ─── R1 lookup helpers ────────────────────────────────────────────────────────
+
+function getR1Row(ticker, date) {
+  const row = db.prepare('SELECT data FROM r1_frozen WHERE date = ? AND ticker = ?').get(date, ticker);
+  if (!row) return null;
+  try { return JSON.parse(row.data); } catch { return null; }
+}
+
+/**
+ * Auto-populate context snapshot from r1_frozen if none exists for this trade.
+ */
+function tryAutoContext(trade) {
+  const existing = db.prepare('SELECT trade_id FROM journal_context_snapshots WHERE trade_id = ?').get(trade.id);
+  if (existing) return;
+  const r1 = getR1Row(trade.ticker, trade.date);
+  if (!r1?.context) return;
+  const ctx = r1.context;
+  db.prepare(`
+    INSERT OR IGNORE INTO journal_context_snapshots
+      (trade_id, regime, regime_label, sec_bias, broad_resolved, short_term, mid_term, long_term,
+       sec_score, sector, industry, scanner_score, scanner_confidence, captured_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    trade.id, ctx.regime || null, ctx.regimeLabel || null, ctx.secBias || null,
+    ctx.broadResolved || null, ctx.shortTerm || null, ctx.midTerm || null, ctx.longTerm || null,
+    r1.stock?.secScore ?? ctx.secScore ?? null,
+    r1.stock?.sector || null, r1.stock?.industry || null,
+    r1._score != null ? Math.round(r1._score) : null, null, Date.now()
+  );
+}
+
 const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart';
 
 // ─── Yahoo Finance fetch ──────────────────────────────────────────────────────
@@ -176,10 +207,10 @@ async function computeTechnical(trade) {
     }
   }
 
-  // Pre-market high/low from bars before 9:30 — not available on Yahoo 1m regular session
-  // Placeholder: null (could add PM fetch separately)
-  const pmHigh = null;
-  const pmLow  = null;
+  // Pre-market high/low — from r1_frozen snapshot if available (captured by scanner at market open)
+  const r1 = getR1Row(ticker, date);
+  const pmHigh = r1?.stock?.pmHigh ?? null;
+  const pmLow  = r1?.stock?.pmLow  ?? null;
 
   return {
     technicalSnapshot: {
@@ -219,6 +250,7 @@ async function computeTechnical(trade) {
  * Returns { technicalSnapshot, outcomes } or throws.
  */
 async function fetchAndStore(trade) {
+  tryAutoContext(trade);
   const { technicalSnapshot: ts, outcomes: out } = await computeTechnical(trade);
   const now = Date.now();
 

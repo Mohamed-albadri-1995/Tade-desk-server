@@ -188,14 +188,36 @@ router.post('/trades/:id/compute', async (req, res) => {
 router.post('/compute-all', async (req, res) => {
   const trades = db.prepare('SELECT * FROM journal_trades WHERE technical_computed = 0 AND status = "closed"').all();
   res.json({ ok: true, queued: trades.length });
-  // Fire-and-forget
-  (async () => {
-    for (const t of trades) {
-      try { await fetchAndStore(t); } catch { /* skip */ }
-      await new Promise(r => setTimeout(r, 300)); // rate limit
-    }
-  })();
+  computeAndEvaluateBatch(trades);
 });
+
+async function computeAndEvaluateBatch(trades) {
+  for (const t of trades) {
+    try {
+      await fetchAndStore(t);
+      if (t.setup_id) await evaluateConditionsForTrade(t);
+    } catch { /* skip */ }
+    await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+function evaluateConditionsForTrade(trade) {
+  const tmplRow = db.prepare('SELECT conditions FROM journal_setup_templates WHERE setup_id = ?').get(trade.setup_id);
+  if (!tmplRow) return;
+  const conditions = JSON.parse(tmplRow.conditions || '[]');
+  const ctx  = db.prepare('SELECT * FROM journal_context_snapshots WHERE trade_id = ?').get(trade.id);
+  const tech = db.prepare('SELECT * FROM journal_technical_snapshots WHERE trade_id = ?').get(trade.id);
+  const evaluated = evaluateAll(conditions, trade.direction, tech || {}, ctx || {});
+  db.prepare('DELETE FROM journal_conditions WHERE trade_id = ?').run(trade.id);
+  const insStmt = db.prepare(`
+    INSERT INTO journal_conditions (id, trade_id, condition_key, label, section, value, aligned, mandatory)
+    VALUES (?,?,?,?,?,?,?,?)
+  `);
+  for (const c of evaluated) {
+    insStmt.run(uuidv4(), trade.id, c.condition_key, c.label, c.section || null,
+      c.value, c.aligned != null ? (c.aligned ? 1 : 0) : null, c.mandatory);
+  }
+}
 
 // ─── Import ───────────────────────────────────────────────────────────────────
 
@@ -204,6 +226,14 @@ router.post('/import', (req, res) => {
   if (!csv) return res.status(400).json({ error: 'csv required' });
   try {
     const result = importCsv(csv, account || null);
+    // Auto-compute technical + conditions for newly imported closed trades
+    if (result.imported > 0) {
+      const newTrades = result.trades
+        .filter(t => t.status === 'closed')
+        .map(t => db.prepare('SELECT * FROM journal_trades WHERE id = ?').get(t.id))
+        .filter(Boolean);
+      computeAndEvaluateBatch(newTrades);
+    }
     res.json({ ok: true, ...result });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
