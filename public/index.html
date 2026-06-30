@@ -682,6 +682,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
           Shows which features drive each factor in the trained model. Select a base to inspect.
         </p>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <button class="an-btn" onclick="anModelInfo()">Load / Refresh Factors</button>
+          <button class="an-btn" onclick="anExportAllTables()">Download All Tables (JSON)</button>
+        </div>
         <div class="factor-base-row" id="an-base-btns">
           <button class="factor-base-btn active" onclick="anSelectBase('B6',this)">B6 · 9:40 Any</button>
           <button class="factor-base-btn" onclick="anSelectBase('B4',this)">B4 · 9:40 Long</button>
@@ -691,8 +695,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
           <button class="factor-base-btn" onclick="anSelectBase('B2',this)">B2 · 9:37 Short</button>
         </div>
         <div id="an-subtable-row" style="display:none;margin:8px 0 4px;flex-wrap:wrap;gap:6px"></div>
-        <div id="an-factor-panel"><span class="feature-loading">Click "Refresh Status" then select a base to load factors.</span></div>
-        <button class="an-btn" style="margin-top:10px" onclick="anModelInfo()">Load / Refresh Factors</button>
+        <div id="an-factor-panel"><span class="feature-loading">Click "Load / Refresh Factors" to begin.</span></div>
       </div>
 
     </div>
@@ -1093,6 +1096,40 @@ async function renderSubTableRow() {
       const label = t.replace(/^sub_/, '');
       return `<button class="factor-base-btn" style="font-size:11px;padding:3px 8px" onclick="openTableInspector('${_selectedBase}','${t}')">${label}</button>`;
     }).join('');
+}
+
+async function anExportAllTables() {
+  const btn = event.target;
+  btn.textContent = 'Collecting…';
+  btn.disabled = true;
+  try {
+    // Get all bases and their tables
+    const r = await fetch('/api/analysis/available-tables');
+    const d = await r.json();
+    const bases = d.bases || {};
+    const all = {};
+    for (const [base, tables] of Object.entries(bases)) {
+      all[base] = {};
+      for (const table of tables) {
+        try {
+          const tr = await fetch(`/api/analysis/table-data?base=${base}&table=${table}`);
+          const td = await tr.json();
+          if (td.ok) all[base][table] = { importance: td.importance, factors: td.factors };
+        } catch {}
+      }
+    }
+    const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `scoring-tables-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Export failed: ' + err.message);
+  }
+  btn.textContent = 'Download All Tables (JSON)';
+  btn.disabled = false;
 }
 
 function renderFactorPanel() {
