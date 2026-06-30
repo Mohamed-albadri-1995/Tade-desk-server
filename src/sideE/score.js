@@ -101,6 +101,7 @@ async function scoreRow(row) {
   if (!(await checkScorer())) return null;
   try {
     const bias = resolveCardBias(row);
+    const resolvedBiasLower = bias === 'Long' ? 'long' : bias === 'Short' ? 'short' : 'auto';
     const card = buildCard(row);
     const entry_time = getEntryTime();
     const resp = await axios.post(`${SCORER_URL}/score`, { card, bias, entry_time }, { timeout: SCORER_TIMEOUT });
@@ -120,7 +121,7 @@ async function scoreRow(row) {
           bucketScores: resp.data.bucket_scores,
           entryTime: entry_time,
           bias,
-          normalizedBias,
+          normalizedBias: resolvedBiasLower,
         },
       };
     }
