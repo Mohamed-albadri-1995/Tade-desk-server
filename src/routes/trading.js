@@ -12,6 +12,7 @@ const sideA = require('../trading/sideA');
 const sideB = require('../trading/sideB');
 const sideC = require('../trading/sideC');
 const center = require('../trading/center');
+const barPoller = require('../trading/barPoller');
 
 const router = express.Router();
 
@@ -29,6 +30,12 @@ router.post('/session/end', (req, res) => {
 router.get('/session', (req, res) => {
   const s = session.getSession();
   res.json(s || { status: 'idle' });
+});
+
+// ─── Bar Poller status ────────────────────────────────────────────────────────
+
+router.get('/poller/status', (req, res) => {
+  res.json(barPoller.getStatus());
 });
 
 // ─── Side A ───────────────────────────────────────────────────────────────────

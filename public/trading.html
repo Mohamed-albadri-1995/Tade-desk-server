@@ -255,6 +255,21 @@ body {
 
   <!-- SIGNALS TAB -->
   <div class="tab-pane active" id="tab-signals">
+
+    <!-- Indicator Engine Status -->
+    <div class="panel" style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="panel-title" style="margin:0">Indicator Engine</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span id="poller-last-poll" style="font-size:10px;color:var(--text3)">—</span>
+          <button onclick="loadPollerStatus()" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:3px 10px;font-size:10px;color:var(--text2);font-family:inherit;cursor:pointer">Refresh</button>
+        </div>
+      </div>
+      <div id="poller-status-body">
+        <div style="font-size:11px;color:var(--text3)">Start a session to activate the engine.</div>
+      </div>
+    </div>
+
     <div class="panel">
       <div class="panel-title">Active Tickers · Side B</div>
       <div id="signal-list">
@@ -498,6 +513,7 @@ function switchTab(name) {
   });
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'signals')   loadPollerStatus();
   if (name === 'sideA')     loadSideA();
   if (name === 'positions') loadPositions();
   if (name === 'setups')    { loadSetups(); const cd = document.getElementById('cmp-date'); if (cd && !cd.value) cd.value = new Date().toISOString().slice(0,10); }
@@ -667,6 +683,72 @@ function renderCenterCard(evt) {
 function updateSignalMatch(evt) {
   // Future: show match/mismatch indicator per ticker card
 }
+
+// ── Poller status ─────────────────────────────────────────────────────────────
+async function loadPollerStatus() {
+  const d = await fetch(`${API}/trading/poller/status`).then(r => r.json()).catch(() => null);
+  const body = document.getElementById('poller-status-body');
+  const lastEl = document.getElementById('poller-last-poll');
+  if (!d) { body.innerHTML = '<div style="font-size:11px;color:var(--text3)">Could not load status.</div>'; return; }
+
+  if (!d.running) {
+    body.innerHTML = '<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text3)"><div class="dot gray"></div>Engine stopped — start a session to activate</div>';
+    lastEl.textContent = '';
+    return;
+  }
+
+  const ago = d.lastPollAt ? Math.round((Date.now() - d.lastPollAt) / 1000) + 's ago' : 'pending first poll';
+  lastEl.textContent = 'Last poll: ' + ago;
+
+  const statusDot = d.lastPollError
+    ? '<div class="dot" style="background:var(--red)"></div>'
+    : '<div class="dot green"></div>';
+
+  let html = `<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:8px">
+    ${statusDot}
+    <span style="color:var(--green);font-weight:600">Running</span>
+    <span style="color:var(--text3)">· polls every 60s · watching ${d.tickers.length} ticker${d.tickers.length !== 1 ? 's' : ''}</span>
+    ${d.lastPollError ? '<span style="color:var(--red)">Error: ' + d.lastPollError + '</span>' : ''}
+  </div>`;
+
+  const evals = d.evaluations || {};
+  const tickerList = d.tickers;
+  if (!tickerList.length) {
+    html += '<div style="font-size:11px;color:var(--text3)">No tickers in session.</div>';
+  } else {
+    html += '<div style="display:grid;gap:4px">';
+    for (const ticker of tickerList) {
+      const ev = evals[ticker] || {};
+      const bars = ev.bars || 0;
+      const pmHigh = ev.pmHigh != null ? '$' + ev.pmHigh.toFixed(2) : 'no PM data';
+      const results = ev.results || [];
+      const barsColor = bars >= 23 ? 'var(--green)' : bars > 0 ? 'var(--yellow)' : 'var(--red)';
+      let resultBadges = results.map(r => {
+        const color = r.fired ? (r.reason === 'signal fired' ? 'var(--green)' : 'var(--yellow)')
+                               : (r.reason === 'conditions not met' ? 'var(--text3)' : 'var(--red)');
+        const icon = r.fired ? '✓' : '✗';
+        return `<span style="font-size:10px;color:${color};white-space:nowrap">${icon} ${r.setupName}: ${r.reason}</span>`;
+      }).join(' · ');
+      if (!resultBadges) resultBadges = '<span style="font-size:10px;color:var(--text3)">awaiting poll…</span>';
+      html += `<div style="padding:6px 8px;background:var(--bg3);border-radius:6px;display:flex;flex-direction:column;gap:3px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-weight:700;font-size:12px;min-width:55px">${ticker}</span>
+          <span style="font-size:10px;color:${barsColor}">${bars} bars</span>
+          <span style="font-size:10px;color:var(--text3)">PM High: ${pmHigh}</span>
+        </div>
+        <div>${resultBadges}</div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  body.innerHTML = html;
+}
+
+// Auto-refresh poller status every 30s when Watch tab is visible
+setInterval(() => {
+  const watchPane = document.getElementById('tab-signals');
+  if (watchPane && watchPane.classList.contains('active')) loadPollerStatus();
+}, 30000);
 
 // ── Side A ────────────────────────────────────────────────────────────────────
 async function loadSideA() {
