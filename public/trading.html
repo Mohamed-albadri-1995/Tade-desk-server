@@ -1445,6 +1445,9 @@ async function loadAnalysis() {
 
   const data = await fetch(`${API}/trading/grading/summary?${params}`).then(r => r.json()).catch(() => null);
   if (!data || !data.metrics) return;
+  // Warm the setup-name cache so the per-setup rows show the friendly
+  // name instead of the raw uuid.
+  await _resolveSetupName(null);
 
   const m = data.metrics;
   const pnlColor = m.netPnl >= 0 ? 'var(--green)' : 'var(--red)';
@@ -1478,7 +1481,7 @@ async function loadAnalysis() {
       ` + setups.map(s => {
         const pnlC = s.netPnl >= 0 ? 'var(--green)' : 'var(--red)';
         return `<div onclick="loadSetupConditions('${s.setupId}')" style="display:grid;grid-template-columns:1fr 42px 52px 58px 64px 32px;gap:4px;font-size:11px;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;align-items:center" onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background=''">
-          <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.setupId}</span>
+          <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_setupNameCache.get(s.setupId) || s.setupId}</span>
           <span style="text-align:right;color:var(--text3)">${s.trades}</span>
           <span style="text-align:right">${s.winRate != null ? s.winRate.toFixed(0)+'%' : '—'}</span>
           <span style="text-align:right">${s.expectancy != null ? s.expectancy.toFixed(2)+'R' : '—'}</span>
@@ -1502,7 +1505,8 @@ async function loadSetupConditions(setupId) {
   if (!statsResp) return;
   const el    = document.getElementById('jnl-analysis-conditions');
   const body  = document.getElementById('jnl-cond-body');
-  document.getElementById('jnl-cond-title').textContent = setupId + ' — Conditions';
+  const setupLabel = _setupNameCache.get(setupId) || (await _resolveSetupName(setupId));
+  document.getElementById('jnl-cond-title').textContent = setupLabel + ' — Conditions';
   const gradeColor = g => g === 'A+' ? 'var(--green)' : g === 'A' ? '#4caf50' : g === 'B' ? 'var(--text2)' : 'var(--red)';
   const s = statsResp.stats || {};
   const winRate = s.winRate != null ? (s.winRate * 100).toFixed(0) : '0';
@@ -1593,11 +1597,24 @@ async function computeTrade(id) {
 }
 
 let _currentTradeId = null;
+// Small cache: setup_id → display name. Populated on demand. Journal is
+// the only place we render raw setup ids so a per-call fetch is fine.
+const _setupNameCache = new Map();
+async function _resolveSetupName(setupId) {
+  if (!setupId) return '—';
+  if (_setupNameCache.has(setupId)) return _setupNameCache.get(setupId);
+  try {
+    const setups = await fetch(`${API}/trading/setups`).then(r => r.json());
+    for (const s of setups) _setupNameCache.set(s.id, s.name);
+  } catch { /* fall through — will render the uuid */ }
+  return _setupNameCache.get(setupId) || setupId;
+}
 
 async function openTradeDetail(id) {
   _currentTradeId = id;
   const t = await fetch(`${API}/journal/trades/${id}`).then(r => r.json());
   _currentTrade = t;
+  const setupName = await _resolveSetupName(t.setup_id);
   const modal = document.getElementById('trade-detail-modal');
   const pnl = t.net_pnl;
   const pnlClass = pnl > 0 ? 'color:var(--green)' : pnl < 0 ? 'color:var(--red)' : 'color:var(--text3)';
@@ -1616,7 +1633,7 @@ async function openTradeDetail(id) {
     <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--text3)">Net P&L</span><span style="${pnlClass};font-weight:700">${pnl != null ? (pnl>=0?'+':'') + '$'+Math.abs(pnl).toFixed(2) : '—'}</span></div>
     ${row('R-Multiple', t.r_multiple != null ? t.r_multiple+'R' : '—')}
     ${row('Duration', t.duration_ms ? Math.round(t.duration_ms/60000)+'m' : '—')}
-    ${row('Setup', t.setup_id || '—')}
+    ${row('Setup', setupName)}
     ${row('Account', t.account || '—')}
     ${row('Source', t.source || '—')}
   `;
