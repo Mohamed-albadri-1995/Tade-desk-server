@@ -83,6 +83,26 @@ tmp/
 | Analysis | Model Factors panel (PCA factor compositions, sub-table chips, download all tables) |
 | Settings | Thresholds, API keys (Finnhub/Alpaca/GitHub/AI), live connection tests |
 | Monitor | Pipeline stage report, scheduler job history with toggle + schedule editor |
+| Trading | Separate app at `/trading.html` — the live execution side. Setups, brokers, grading engine, journal, backtest. See [Trading_Tool_Plan.md](Trading_Tool_Plan.md) for the current architecture. |
+
+---
+
+## Trading Side (`/trading.html`)
+
+The trading tool runs inside the same Node process but operates independently of the scanner. High-level flow:
+
+- **Session** — starts at 9:35 ET, pulls the day's shortlist from the scanner, loads active setups.
+- **Bar poller** — HTTP (60s) or Alpaca WebSocket streams 1-min bars to indicator engines.
+- **Router** — on fire: builds a trade card, sizes via the two-multiplier cascade (setup track record × live signal grade A+/A/B/C), applies the market direction gate + risk gates, opens a local position + fans out to Alpaca broker profiles.
+- **brokerSync** — 15s Alpaca `/v2/orders` poll rewrites `entry_price` with the real fill and closes positions on bracket-leg fills. 60s `/v2/account` poll keeps the sizer's equity live.
+- **Grading engine** — learns from closed `trade_cards`, computes per-setup expectancy and per-check delta, drives both multipliers.
+- **Journal** — every closed position mirrors to `journal_trades` for the trade log. Imported CSV history mirrors the other way into `trade_cards` so grading learns from it too.
+
+Execution modes are **off / paper / live**. Live requires an explicit `trading_live_confirmed` acknowledgement in Settings — three independent gates (env=live, mode=live, confirmed=true) before any real-money order goes out.
+
+Alpaca credentials live in a single place: the Alpaca broker profile in Trading > Brokers. Everything else reads from there.
+
+Full detail: [Trading_Tool_Plan.md](Trading_Tool_Plan.md).
 
 ---
 
