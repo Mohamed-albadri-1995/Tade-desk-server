@@ -180,19 +180,109 @@ const SEED_CHECKS = [
     description: 'Scanner _score at the moment of signal fire is ≥ 70.',
     condition: { op: 'ge', left: { ctx: '_score' }, right: { literal: 70 } },
   },
+
+  // ── Batch 1 · L3 / vwapBounce opt-in additions ───────────────────────────
+  // Each references a field vwapBounce publishes in signal.meta at fire time.
+  // Wire these to a setup that uses the vwapBounce engine and they'll grade
+  // A+/A/B/C over time based on how much each improves expectancy.
+
+  {
+    check_key: 'l3_slope_strong',
+    label:     'L3 · slope score ≥ 5 (strong trend)',
+    category:  'additional',
+    section:   'momentum',
+    description: 'VWAP is climbing quickly enough that the L3 slope counter has moved ≥ 5 steps since the last VWAP cross. Filters out setups on flat/sideways days.',
+    condition: { op: 'ge', left: { field: 'slope_score' }, right: { literal: 5 } },
+  },
+  {
+    check_key: 'l3_slope_very_strong',
+    label:     'L3 · slope score ≥ 10 (very strong trend)',
+    category:  'additional',
+    section:   'momentum',
+    description: 'Trend so persistent the slope counter passed 10. Selects the strongest trending sessions only.',
+    condition: { op: 'ge', left: { field: 'slope_score' }, right: { literal: 10 } },
+  },
+  {
+    check_key: 'l3_all_three_vwaps_touched',
+    label:     'L3 · pullback touched all three VWAPs',
+    category:  'additional',
+    section:   'setup-quality',
+    description: 'Prev bar wick tagged the daily VWAP, 2-day VWAP, AND LL AVWAP simultaneously — a stacked confluence pullback, not just a random VWAP kiss.',
+    condition: {
+      op: 'and',
+      children: [
+        { op: 'eq', left: { field: 'touchedDv' }, right: { literal: true } },
+        { op: 'eq', left: { field: 'touchedV2' }, right: { literal: true } },
+        { op: 'eq', left: { field: 'touchedAv' }, right: { literal: true } },
+      ],
+    },
+  },
+  {
+    check_key: 'l3_deep_wick_bounce',
+    label:     'L3 · lower wick ≥ 40% of range',
+    category:  'additional',
+    section:   'setup-quality',
+    description: 'Prev candle rejected the low aggressively (wick ≥ 40% of range). The default vwapBounce mandatory only requires 15% — this filters for the most emphatic bounces.',
+    condition: { op: 'ge', left: { field: 'prevLwickPct' }, right: { literal: 40 } },
+  },
+  {
+    check_key: 'l3_strict_bias',
+    label:     'L3 · strict bias (all 4 above)',
+    category:  'additional',
+    section:   'trend',
+    description: 'Close is above daily VWAP AND 2-day VWAP AND LL AVWAP AND BB EMA. Full L3 strict-bias filter; needs multi-day historical cache warm.',
+    condition: {
+      op: 'and',
+      children: [
+        { op: 'gt', left: { field: 'close' }, right: { field: 'daily_vwap' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_2day' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'll_avwap' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'bb_ema' } },
+      ],
+    },
+  },
+  {
+    check_key: 'l3_room_to_bb_upper',
+    label:     'L3 · ≥ $1.00 headroom to BB upper',
+    category:  'additional',
+    section:   'setup-quality',
+    description: 'Distance from entry (close) to BB upper is at least $1.00. Filters fires where the trade is already extended toward the band and would run out of room before hitting target.',
+    condition: {
+      op: 'ge',
+      left:  { op: 'sub', operands: [{ field: 'bb_upper' }, { field: 'close' }] },
+      right: { literal: 1.00 },
+    },
+  },
+  {
+    check_key: 'l3_vwap_stack_bullish',
+    label:     'L3 · VWAP stack aligned bullish',
+    category:  'additional',
+    section:   'trend',
+    description: 'daily VWAP > 2-day VWAP AND 2-day VWAP > LL AVWAP — all three anchors stacked upward, confirming a coherent trend rather than a chop bounce.',
+    condition: {
+      op: 'and',
+      children: [
+        { op: 'gt', left: { field: 'daily_vwap' }, right: { field: 'vwap_2day' } },
+        { op: 'gt', left: { field: 'vwap_2day' }, right: { field: 'll_avwap' } },
+      ],
+    },
+  },
 ];
 
 function seedDefaults() {
-  const existing = db.prepare('SELECT COUNT(*) AS n FROM check_library').get().n;
-  if (existing > 0) return;
+  // Idempotent per check_key so subsequent batches of Pine-imported
+  // conditions can be added without wiping user edits or forcing a
+  // manual re-seed. Existing keys are left alone; new ones INSERT.
   const now = Date.now();
+  const existing = new Set(db.prepare('SELECT check_key FROM check_library').all().map(r => r.check_key));
   const stmt = db.prepare(`
     INSERT INTO check_library
-      (id, check_key, label, category, section, description, condition, enabled, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      (id, check_key, label, category, section, description, condition, enabled, created_at, updated_at, version_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1)
   `);
   const txn = db.transaction(() => {
     for (const c of SEED_CHECKS) {
+      if (existing.has(c.check_key)) continue;
       stmt.run(uuidv4(), c.check_key, c.label, c.category, c.section, c.description, JSON.stringify(c.condition), now, now);
     }
   });
