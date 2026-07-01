@@ -250,21 +250,29 @@ body {
   <div class="header-logo">⚡ Trading</div>
   <div id="session-badge" class="session-badge idle">Idle</div>
   <div class="header-date" id="header-date"></div>
+  <span id="mode-pill" style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;background:#374151;color:#fbbf24;text-transform:uppercase;letter-spacing:.05em">paper</span>
   <button class="session-btn start" id="session-btn" onclick="toggleSession()">Start Session</button>
+  <button class="session-btn" id="pause-btn" onclick="togglePause()" style="display:none">Pause</button>
 </div>
 
+<!-- Follows the actual signal flow: Session (start/pause/mode) → Watch (bars, indicators) → Market Gate (Side A view) → Alerts (fires + risk gate) → Positions (open/closed + P&L) → Grading (learning) → Journal → Backtest → Setups → Brokers → Settings -->
 <div class="tabs" style="padding-top:8px">
-  <span class="tab-group-label">Trading</span>
+  <span class="tab-group-label">Live</span>
   <button class="tab active" onclick="switchTab('watch')">Watch</button>
   <button class="tab" onclick="switchTab('gate')">Market Gate</button>
   <button class="tab" onclick="switchTab('alerts')">Alerts</button>
   <button class="tab" onclick="switchTab('positions')">Positions</button>
 </div>
-<div class="tabs" style="border-bottom:1px solid var(--border)">
-  <span class="tab-group-label">Tools</span>
+<div class="tabs">
+  <span class="tab-group-label">Learn</span>
+  <button class="tab" onclick="switchTab('grading')">Grading</button>
   <button class="tab" onclick="switchTab('journal')">Journal</button>
-  <button class="tab" onclick="switchTab('setups')">Setups</button>
   <button class="tab" onclick="switchTab('backtest')">Backtest</button>
+</div>
+<div class="tabs" style="border-bottom:1px solid var(--border)">
+  <span class="tab-group-label">Setup</span>
+  <button class="tab" onclick="switchTab('setups')">Setups</button>
+  <button class="tab" onclick="switchTab('brokers')">Brokers</button>
   <button class="tab" onclick="switchTab('settings')">Settings</button>
 </div>
 
@@ -340,6 +348,30 @@ body {
       <div id="positions-closed-list">
         <div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No closed positions today</div></div>
       </div>
+    </div>
+  </div>
+
+  <!-- GRADING TAB -->
+  <div class="tab-pane" id="tab-grading">
+    <div class="panel">
+      <div class="panel-title">Grading Engine</div>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
+        Every closed trade builds a card. The engine learns from those
+        cards and produces two numbers per setup: an <strong>expectancy</strong>
+        (drives the setup's base position size and, at the extreme, a kill
+        switch) and — at each live signal — a <strong>quality grade</strong>
+        A+/A/B/C from which of the additional checks are aligned right now.
+      </p>
+      <div style="display:flex;gap:10px;align-items:end;margin-bottom:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:180px">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Setup</div>
+          <select id="grading-setup" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%"></select>
+        </div>
+        <button class="an-btn" onclick="loadGrading()">Load</button>
+      </div>
+      <div id="grading-summary" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+      <div class="panel-title" style="margin-top:12px">Check Contributions (delta expectancy)</div>
+      <div id="grading-checks"></div>
     </div>
   </div>
 
@@ -590,8 +622,57 @@ body {
     </div>
   </div>
 
+  <!-- BROKERS TAB -->
+  <div class="tab-pane" id="tab-brokers">
+    <div class="panel">
+      <div class="panel-title">Broker Profiles</div>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
+        Signals can fan out to one or many enabled profiles. <strong>Paper</strong> profiles record locally and never send. <strong>Alpaca</strong> profiles are wired but the live submission is still deferred — orders are logged, not sent.
+      </p>
+      <div id="broker-list" style="margin-bottom:12px"></div>
+      <div class="panel-title" style="margin-top:10px">Add a profile</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end">
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Name</div>
+          <input id="broker-name" placeholder="Alpaca Live" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Type</div>
+          <select id="broker-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+            <option value="paper">Paper (local only)</option>
+            <option value="alpaca">Alpaca</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Config (JSON, optional)</div>
+          <input id="broker-config" placeholder='{"url":"https://paper-api.alpaca.markets"}' style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <button class="an-btn primary" onclick="addBroker()">Add</button>
+      </div>
+      <div id="broker-status" style="font-size:12px;color:var(--text3);margin-top:8px"></div>
+    </div>
+  </div>
+
   <!-- SETTINGS TAB -->
   <div class="tab-pane" id="tab-settings">
+    <div class="panel">
+      <div class="panel-title">Execution Mode</div>
+      <p style="font-size:11px;color:var(--text3);margin:0 0 10px">
+        <strong>Off</strong>: signals fire but no order/position is created and nothing is sent anywhere — good for pure testing.<br>
+        <strong>Paper</strong>: an order + open position are recorded locally, no external broker call — default.<br>
+        <strong>Live</strong>: same local record PLUS the Router fans out to every enabled broker profile. (Alpaca live submission is still stubbed pending your go-ahead.)
+      </p>
+      <div style="display:grid;grid-template-columns:1fr;gap:10px">
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Mode</div>
+          <select id="s-execmode" data-key="trading_execution_mode" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+            <option value="off">Off — block everything</option>
+            <option value="paper">Paper — local record only</option>
+            <option value="live">Live — fan out to enabled brokers</option>
+          </select>
+        </div>
+      </div>
+    </div>
     <div class="panel">
       <div class="panel-title">Data Source</div>
       <p style="font-size:11px;color:var(--text3);margin:0 0 10px">
@@ -660,7 +741,7 @@ const API = '/api';
 
 // ── Tab switching ──────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const order = ['watch','gate','alerts','positions','journal','setups','backtest','settings'];
+  const order = ['watch','gate','alerts','positions','grading','journal','backtest','setups','brokers','settings'];
   document.querySelectorAll('.tab').forEach(t => {
     const fn = t.getAttribute('onclick') || '';
     const m = fn.match(/'(\w+)'/);
@@ -675,6 +756,8 @@ function switchTab(name) {
   if (name === 'settings')  loadSettings();
   if (name === 'journal')   loadJournal();
   if (name === 'backtest')  loadBacktestUI();
+  if (name === 'brokers')   loadBrokers();
+  if (name === 'grading')   loadGradingSetups();
 }
 
 // ── Date header ───────────────────────────────────────────────────────────────
@@ -722,9 +805,9 @@ async function toggleSession() {
   }
 }
 
-function setSessionBadge(active) {
+function setSessionBadge(active, label) {
   const el = document.getElementById('session-badge');
-  el.textContent = active ? 'Active' : 'Idle';
+  el.textContent = label || (active ? 'Active' : 'Idle');
   el.className = 'session-badge ' + (active ? 'active' : 'idle');
 }
 
@@ -737,7 +820,43 @@ async function loadSession() {
     document.getElementById('session-btn').className = 'session-btn end';
     renderShortlistCards((s.shortlist || []).map(i => i.ticker));
     startSSE();
+    updatePauseButton(false);
   }
+  if (s && s.status === 'paused') {
+    setSessionBadge(true, 'Paused');
+    updatePauseButton(true);
+  }
+  refreshModePill();
+}
+
+async function refreshModePill() {
+  try {
+    const r = await fetch(`${API}/settings/trading_execution_mode`).then(r => r.json());
+    const mode = (r.value || 'paper').toLowerCase();
+    const el = document.getElementById('mode-pill');
+    if (!el) return;
+    el.textContent = mode;
+    el.style.background = mode === 'live' ? '#7f1d1d' : mode === 'off' ? '#374151' : '#78350f';
+    el.style.color      = mode === 'live' ? '#fecaca' : mode === 'off' ? '#9ca3af' : '#fbbf24';
+  } catch {}
+}
+
+function updatePauseButton(paused) {
+  const btn = document.getElementById('pause-btn');
+  if (!btn) return;
+  btn.style.display = sessionActive ? 'inline-block' : 'none';
+  btn.textContent   = paused ? 'Resume' : 'Pause';
+  btn.className     = 'session-btn ' + (paused ? 'start' : 'end');
+}
+
+async function togglePause() {
+  const s = await fetch(`${API}/trading/session`).then(r => r.json()).catch(() => null);
+  const paused = s?.status === 'paused';
+  const url = paused ? '/session/resume' : '/session/pause';
+  const r = await fetch(`${API}/trading${url}`, { method: 'POST' }).then(r => r.json());
+  if (!r.ok) return alert('Failed: ' + (r.reason || r.error));
+  updatePauseButton(!paused);
+  setSessionBadge(true, paused ? 'Active' : 'Paused');
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
@@ -1699,12 +1818,12 @@ async function loadComparison() {
 // ── Settings ──────────────────────────────────────────────────────────────────
 async function loadSettings() {
   const keys = [
-    'trading_data_source','alpacaMarketFeed',
+    'trading_execution_mode','trading_data_source','alpacaMarketFeed',
     'trading_equity','trading_risk_pct','trading_max_shares','trading_max_dollar_risk',
     'trading_max_total_exposure','trading_max_open_positions','trading_daily_loss_limit',
   ];
   const fieldIds = [
-    's-datasource','s-marketfeed',
+    's-execmode','s-datasource','s-marketfeed',
     's-equity','s-risk','s-maxshares','s-maxrisk','s-maxexposure','s-maxpos','s-dailyloss',
   ];
   for (let i = 0; i < keys.length; i++) {
@@ -1715,6 +1834,7 @@ async function loadSettings() {
 
 async function saveSettings() {
   const map = {
+    's-execmode':    'trading_execution_mode',
     's-datasource':  'trading_data_source',
     's-marketfeed':  'alpacaMarketFeed',
     's-equity':      'trading_equity',
@@ -1738,10 +1858,122 @@ async function saveSettings() {
   const msg = document.getElementById('settings-msg');
   msg.style.display = 'inline';
   setTimeout(() => { msg.style.display = 'none'; }, 2000);
+  refreshModePill();
+}
+
+// ── Brokers ──────────────────────────────────────────────────────────────────
+async function loadBrokers() {
+  const el = document.getElementById('broker-list');
+  const r = await fetch(`${API}/trading/brokers`).then(r => r.json()).catch(() => ({ brokers: [] }));
+  if (!r.brokers?.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">🏦</div><div class="empty-text">No broker profiles yet</div></div>';
+    return;
+  }
+  el.innerHTML = r.brokers.map(b => `
+    <div class="trade-row">
+      <span class="tr-ticker">${b.name}</span>
+      <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">${b.type}</span>
+      ${b.isDefault ? '<span style="font-size:10px;color:var(--yellow, #fbbf24)">default</span>' : ''}
+      <label style="margin-left:auto;font-size:11px;color:var(--text2);cursor:pointer">
+        <input type="checkbox" ${b.enabled ? 'checked' : ''} onchange="toggleBroker('${b.id}', this.checked)"> enabled
+      </label>
+      <button onclick="removeBroker('${b.id}')" style="background:var(--bg3);color:var(--red);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Remove</button>
+    </div>
+  `).join('');
+}
+async function toggleBroker(id, enabled) {
+  await fetch(`${API}/trading/brokers/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  loadBrokers();
+}
+async function removeBroker(id) {
+  if (!confirm('Remove this broker profile?')) return;
+  await fetch(`${API}/trading/brokers/${id}`, { method: 'DELETE' });
+  loadBrokers();
+}
+async function addBroker() {
+  const status = document.getElementById('broker-status');
+  const name = document.getElementById('broker-name').value.trim();
+  const type = document.getElementById('broker-type').value;
+  const cfgRaw = document.getElementById('broker-config').value.trim();
+  if (!name) { status.textContent = 'Enter a name.'; status.style.color = 'var(--red)'; return; }
+  let config = {};
+  if (cfgRaw) {
+    try { config = JSON.parse(cfgRaw); } catch { status.textContent = 'Config must be valid JSON.'; status.style.color = 'var(--red)'; return; }
+  }
+  const r = await fetch(`${API}/trading/brokers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, type, config, enabled: true }),
+  }).then(r => r.json());
+  if (!r.ok) { status.textContent = 'Failed: ' + (r.error || 'unknown'); status.style.color = 'var(--red)'; return; }
+  status.textContent = 'Added.'; status.style.color = 'var(--green)';
+  document.getElementById('broker-name').value = '';
+  document.getElementById('broker-config').value = '';
+  loadBrokers();
+}
+
+// ── Grading ──────────────────────────────────────────────────────────────────
+async function loadGradingSetups() {
+  const setups = await fetch(`${API}/trading/setups`).then(r => r.json()).catch(() => []);
+  const sel = document.getElementById('grading-setup');
+  sel.innerHTML = setups.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  if (setups.length) loadGrading();
+}
+async function loadGrading() {
+  const setupId = document.getElementById('grading-setup').value;
+  if (!setupId) return;
+  const summaryEl = document.getElementById('grading-summary');
+  const checksEl  = document.getElementById('grading-checks');
+  summaryEl.innerHTML = '<span style="color:var(--text3)">Loading…</span>';
+  checksEl.innerHTML  = '';
+  try {
+    const [s, c] = await Promise.all([
+      fetch(`${API}/trading/grading/setup/${setupId}`).then(r => r.json()),
+      fetch(`${API}/trading/grading/setup/${setupId}/checks`).then(r => r.json()),
+    ]);
+    const st = s.stats || {};
+    const winRate = st.winRate != null ? (st.winRate * 100).toFixed(0) + '%' : '—';
+    summaryEl.innerHTML =
+      `<span>Trades: <strong style="color:var(--text)">${st.n ?? 0}</strong></span>` +
+      `<span>Win rate: <strong style="color:var(--text)">${winRate}</strong></span>` +
+      `<span>Avg win: <strong style="color:var(--green)">${st.avgWinR != null ? '+' + st.avgWinR.toFixed(2) + 'R' : '—'}</strong></span>` +
+      `<span>Avg loss: <strong style="color:var(--red)">${st.avgLossR != null ? '-' + st.avgLossR.toFixed(2) + 'R' : '—'}</strong></span>` +
+      `<span>Expectancy: <strong style="color:${st.expectancyR > 0 ? 'var(--green)' : st.expectancyR < 0 ? 'var(--red)' : 'var(--text)'}">${st.expectancyR != null ? st.expectancyR.toFixed(2) + 'R' : '—'}</strong></span>` +
+      `<span>Setup grade: <strong style="color:var(--text)">${st.grade}</strong></span>`;
+    const contribs = c.contributions || [];
+    if (!contribs.length) {
+      checksEl.innerHTML = '<div class="empty" style="padding:16px 0"><div class="empty-icon">•</div><div class="empty-text">No additional checks have been recorded on trades yet.</div></div>';
+      return;
+    }
+    checksEl.innerHTML =
+      '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:6px">' +
+      '<thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
+      '<th style="padding:6px 8px">Check</th><th style="padding:6px 8px">n aligned</th><th style="padding:6px 8px">n not</th>' +
+      '<th style="padding:6px 8px">E aligned</th><th style="padding:6px 8px">E not</th><th style="padding:6px 8px">Δ expectancy</th></tr></thead><tbody>' +
+      contribs.map(row => `
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:6px 8px">${row.label}</td>
+          <td style="padding:6px 8px">${row.nAligned}</td>
+          <td style="padding:6px 8px">${row.nNotAligned}</td>
+          <td style="padding:6px 8px">${row.expectancyR_aligned != null ? row.expectancyR_aligned.toFixed(2) + 'R' : '—'}</td>
+          <td style="padding:6px 8px">${row.expectancyR_notAligned != null ? row.expectancyR_notAligned.toFixed(2) + 'R' : '—'}</td>
+          <td style="padding:6px 8px;color:${row.deltaExpectancyR > 0 ? 'var(--green)' : row.deltaExpectancyR < 0 ? 'var(--red)' : 'var(--text3)'};font-weight:600">
+            ${row.deltaExpectancyR != null ? (row.deltaExpectancyR > 0 ? '+' : '') + row.deltaExpectancyR.toFixed(2) + 'R' : '—'}
+          </td>
+        </tr>`).join('') +
+      '</tbody></table>';
+  } catch (err) {
+    summaryEl.innerHTML = '<span style="color:var(--red)">Error: ' + err.message + '</span>';
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadSession();
+refreshModePill();
 </script>
 </body>
 </html>
