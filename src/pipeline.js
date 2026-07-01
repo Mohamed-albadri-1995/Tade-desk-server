@@ -106,7 +106,14 @@ async function runFullScan() {
       });
       withScores = await scoreAllRows(toScore);
       const scored = withScores.filter(r => r._score !== null).length;
-      return { rowCount: withScores.length, scored };
+      const { checkScorer } = require('./sideE/score');
+      const scorerAvailable = await checkScorer();
+      const scorerNote = !scorerAvailable
+        ? 'Python scorer service is offline or reports ready:false — run `pm2 restart scorer` (or full deploy.sh) and check /api/analysis/status'
+        : scored === 0 && withScores.length > 0
+        ? 'Scorer online but returned no scores — model may not be trained. Retrain via the Analysis tab.'
+        : null;
+      return { rowCount: withScores.length, scored, scorerAvailable, note: scorerNote };
     })();
     if (!report.stages.sideE?.ok) {
       withScores = withContext.map(row => ({ ...row, _score: null }));
