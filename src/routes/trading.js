@@ -285,8 +285,19 @@ router.post('/positions', (req, res) => {
   res.json({ ok: true, id });
 });
 
-router.post('/positions/:id/close', (req, res) => {
-  const { exitPrice } = req.body || {};
+router.post('/positions/:id/close', async (req, res) => {
+  const { exitPrice, mode } = req.body || {};
+  // 'market' → route to Alpaca DELETE /v2/positions when possible; falls
+  // back to closing at latest-bar close if no Alpaca profile is active.
+  if (mode === 'market') {
+    try {
+      const result = await router0.marketClosePosition(req.params.id);
+      if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  }
   const result = router0.closePosition(req.params.id, parseFloat(exitPrice), 'manual');
   if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
   res.json({ ok: true, position: result.position, pnl: result.position.pnl });

@@ -477,6 +477,29 @@ body {
     </div>
   </div>
 
+  <!-- CLOSE POSITION MODAL -->
+  <div id="close-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center;padding:16px">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:100%;max-width:380px;padding:18px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div id="close-modal-title" style="font-size:14px;font-weight:700">Close position</div>
+        <button onclick="closeCloseModal()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;line-height:1">✕</button>
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin:0 0 12px">
+        <strong>Market</strong> submits a market order via Alpaca and closes at whatever price fills next. If no Alpaca profile is enabled, it closes locally at the latest bar's close.<br>
+        <strong>Limit</strong> closes at the price you enter — used for scaling out at a specific level.
+      </p>
+      <div style="margin-bottom:10px">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Limit price (only used for Limit close)</div>
+        <input id="close-modal-price" type="number" step="0.001" placeholder="e.g. 10.50" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-family:monospace;font-size:13px;width:100%">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button onclick="submitClose('market')" style="flex:1;background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer">Market Close</button>
+        <button onclick="submitClose('limit')" style="flex:1;background:var(--bg3);color:var(--text2);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;font-family:inherit;cursor:pointer">Limit Close</button>
+      </div>
+      <div id="close-modal-err" style="color:var(--red);font-size:11px;margin-top:8px;min-height:14px"></div>
+    </div>
+  </div>
+
   <!-- TRADE DETAIL MODAL -->
   <div id="trade-detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto">
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:100%;max-width:480px;padding:20px;margin-top:20px">
@@ -1518,9 +1541,9 @@ async function loadPositions() {
         p.setup_name ? `<span style="color:var(--text3)">setup: <strong style="color:var(--text2)">${p.setup_name}</strong></span>` : '',
         p.account    ? `<span style="color:var(--text3)">account: <strong style="color:var(--text2)">${p.account}</strong></span>` : '',
       ].filter(Boolean).join(' · ');
-      const cardLink = p.card_id ? `<button onclick="showCard('${p.card_id}')" style="background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Card</button>` : '';
+      const cardLink = p.card_id ? `<button onclick="openCardFromPosition('${p.card_id}')" style="background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Card</button>` : '';
       return `
-      <div class="trade-row" style="flex-direction:column;align-items:stretch;gap:4px">
+      <div class="trade-row" data-position-id="${p.id}" data-ticker="${p.ticker}" data-current="${p.current_price ?? ''}" style="flex-direction:column;align-items:stretch;gap:4px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span class="tr-ticker">${p.ticker}</span>
           <span class="tr-dir ${p.direction === 'Long' ? 'badge-long':'badge-short'}">${p.direction}</span>
@@ -1548,28 +1571,74 @@ async function loadPositions() {
     closedEl.innerHTML = filteredClosed.map(p => {
       const pnl = Number(p.pnl) || 0;
       const color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--text3)';
+      const cardBtn = p.card_id ? `<button onclick="openCardFromPosition('${p.card_id}')" style="background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Card</button>` : '';
+      const meta = [
+        p.setup_name ? `setup: <strong style="color:var(--text2)">${p.setup_name}</strong>` : '',
+        p.account    ? `account: <strong style="color:var(--text2)">${p.account}</strong>` : '',
+      ].filter(Boolean).join(' · ');
       return `
-        <div class="trade-row">
-          <span class="tr-ticker">${p.ticker}</span>
-          <span class="tr-dir ${p.direction === 'Long' ? 'badge-long':'badge-short'}">${p.direction}</span>
-          <span style="color:var(--text3)">${p.shares} sh · in $${p.entry_price} → out $${p.exit_price}</span>
-          <span style="margin-left:auto;color:${color};font-weight:600">${fmtMoney(pnl)}</span>
+        <div class="trade-row" style="flex-direction:column;align-items:stretch;gap:4px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="tr-ticker">${p.ticker}</span>
+            <span class="tr-dir ${p.direction === 'Long' ? 'badge-long':'badge-short'}">${p.direction}</span>
+            <span style="color:var(--text3)">${p.shares} sh · in $${p.entry_price} → out $${p.exit_price}</span>
+            <span style="margin-left:auto;color:${color};font-weight:600">${fmtMoney(pnl)}</span>
+            ${cardBtn}
+          </div>
+          ${meta ? `<div style="font-size:10px;color:var(--text3)">${meta}</div>` : ''}
         </div>
       `;
     }).join('');
   }
 }
 
-async function closePosition(id) {
-  const exitPrice = prompt('Exit price:');
-  if (!exitPrice) return;
-  const r = await fetch(`${API}/trading/positions/${id}/close`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ exitPrice: parseFloat(exitPrice) }),
-  }).then(r => r.json());
-  if (r.ok) loadPositions();
-  else if (r.error) alert('Close failed: ' + r.error);
+let _closePositionId = null;
+function closePosition(id) {
+  // Show the modal — user picks market or limit and confirms.
+  _closePositionId = id;
+  const row = document.querySelector(`[data-position-id="${id}"]`);
+  const ticker = row?.dataset.ticker || '';
+  const currentPrice = row?.dataset.current || '';
+  document.getElementById('close-modal-title').textContent = `Close ${ticker}`;
+  document.getElementById('close-modal-price').value = currentPrice;
+  document.getElementById('close-modal-err').textContent = '';
+  document.getElementById('close-modal').style.display = 'flex';
+}
+function closeCloseModal() {
+  document.getElementById('close-modal').style.display = 'none';
+  _closePositionId = null;
+}
+async function submitClose(mode) {
+  if (!_closePositionId) return;
+  const err = document.getElementById('close-modal-err');
+  err.textContent = '';
+  const body = { mode };
+  if (mode === 'limit') {
+    const p = parseFloat(document.getElementById('close-modal-price').value);
+    if (!Number.isFinite(p) || p <= 0) { err.textContent = 'Enter a valid limit price.'; return; }
+    body.exitPrice = p;
+  }
+  try {
+    const r = await fetch(`${API}/trading/positions/${_closePositionId}/close`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => r.json());
+    if (!r.ok) { err.textContent = 'Close failed: ' + (r.error || 'unknown'); return; }
+    closeCloseModal();
+    loadPositions();
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+// Card button on any position row: hop to the Grading tab (where the
+// card viewer's DOM lives) and open the detail. Same helper the signal
+// history uses.
+function openCardFromPosition(cardId) {
+  if (!cardId) return;
+  switchTab('grading');
+  setTimeout(() => { if (typeof showCard === 'function') showCard(cardId); }, 50);
 }
 
 // ── Journal ───────────────────────────────────────────────────────────────────

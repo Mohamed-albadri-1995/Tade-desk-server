@@ -581,9 +581,66 @@ function listOpenPositions() {
  */
 function listClosedPositionsToday() {
   const today = toETDate(Date.now());
-  return db
-    .prepare("SELECT * FROM trading_positions WHERE status = 'closed' AND DATE(closed_at/1000,'unixepoch') = ? ORDER BY closed_at DESC")
-    .all(today);
+  return db.prepare(`
+    SELECT p.*, c.id AS card_id, c.setup_id, c.account, s.name AS setup_name
+      FROM trading_positions p
+      LEFT JOIN trade_cards c    ON c.position_id = p.id
+      LEFT JOIN trading_setups s ON s.id = c.setup_id
+     WHERE p.status = 'closed'
+       AND DATE(p.closed_at/1000,'unixepoch') = ?
+     ORDER BY p.closed_at DESC
+  `).all(today);
+}
+
+/**
+ * Market-close a position via Alpaca. If the position has an
+ * alpaca_order_id and a matching Alpaca broker profile exists, submit
+ * a DELETE /v2/positions/{ticker} which liquidates the position at
+ * market. The bracket legs get canceled automatically. brokerSync's
+ * fill poller will then rewrite our local record with the real exit
+ * price. If no Alpaca broker exists, fall back to closing at the
+ * latest bar close so paper-only sessions still work.
+ */
+async function marketClosePosition(positionId) {
+  const pos = db.prepare("SELECT * FROM trading_positions WHERE id = ? AND status = 'open'").get(positionId);
+  if (!pos) return { ok: false, error: 'Position not found or already closed' };
+
+  const brokers = require('./brokers');
+  const alpacaProfile = brokers.getActive().find(b => b.type === 'alpaca');
+  if (alpacaProfile) {
+    const cfg = alpacaProfile.config || {};
+    const raw = cfg.url && /alpaca\.markets/i.test(cfg.url) ? cfg.url : 'https://paper-api.alpaca.markets';
+    const base = brokers.normalizeAlpacaBase(raw);
+    try {
+      const resp = await fetch(`${base}/v2/positions/${encodeURIComponent(pos.ticker)}`, {
+        method: 'DELETE',
+        headers: {
+          'APCA-API-KEY-ID':     cfg.key,
+          'APCA-API-SECRET-KEY': cfg.secret,
+        },
+      });
+      if (resp.ok || resp.status === 207) {
+        // brokerSync will close our local record when the fill lands.
+        return { ok: true, submittedTo: 'alpaca', pending: true };
+      }
+      const body = await resp.text().catch(() => '');
+      return { ok: false, error: `Alpaca ${resp.status}: ${body.slice(0, 200)}` };
+    } catch (err) {
+      return { ok: false, error: `Alpaca network error: ${err.message}` };
+    }
+  }
+
+  // No Alpaca profile — fall back to closing at the latest bar close.
+  let latestClose = null;
+  try {
+    const barPoller = require('./barPoller');
+    const bar = barPoller.getLatestBar?.(pos.ticker);
+    if (bar && Number.isFinite(bar.c)) latestClose = bar.c;
+  } catch { /* no session running */ }
+  if (!Number.isFinite(latestClose)) {
+    return { ok: false, error: 'No live bar yet — provide a limit price instead' };
+  }
+  return closePosition(positionId, latestClose, 'manual');
 }
 
 module.exports = {
@@ -592,6 +649,7 @@ module.exports = {
   broadcast,
   checkRisk,
   closePosition,
+  marketClosePosition,
   listOpenPositions,
   listClosedPositionsToday,
 };
