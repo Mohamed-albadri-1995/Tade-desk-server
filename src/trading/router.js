@@ -535,9 +535,44 @@ function _writeJournalFromPosition(pos, exitPrice, reason, closedAt, netPnl) {
 
 /**
  * Read open positions (used by the UI to render the position list).
+ * Enriched with:
+ *   - setup name and account from the trade card
+ *   - live unrealized P&L computed against the latest buffered bar
+ *   - card id so the UI can jump straight to the card viewer
  */
 function listOpenPositions() {
-  return db.prepare("SELECT * FROM trading_positions WHERE status = 'open' ORDER BY opened_at DESC").all();
+  const positions = db.prepare(`
+    SELECT p.*, c.id AS card_id, c.setup_id, c.account, s.name AS setup_name
+      FROM trading_positions p
+      LEFT JOIN trade_cards c    ON c.position_id = p.id
+      LEFT JOIN trading_setups s ON s.id = c.setup_id
+     WHERE p.status = 'open'
+     ORDER BY p.opened_at DESC
+  `).all();
+  // barPoller lives in the same process — requiring it lazily keeps a
+  // clean import cycle for tests that spin up router.js without a session.
+  let barPoller;
+  try { barPoller = require('./barPoller'); } catch { /* not started */ }
+  return positions.map(p => {
+    const latest = barPoller?.getLatestBar ? barPoller.getLatestBar(p.ticker) : null;
+    const currentPrice = latest && Number.isFinite(latest.c) ? latest.c : null;
+    let unrealizedPnl = null;
+    let unrealizedR   = null;
+    if (currentPrice != null && Number.isFinite(p.entry_price) && p.shares > 0) {
+      const move = p.direction === 'Long' ? (currentPrice - p.entry_price) : (p.entry_price - currentPrice);
+      unrealizedPnl = Math.round(move * p.shares * 100) / 100;
+      const stopDist = Number.isFinite(p.sl) ? Math.abs(p.entry_price - p.sl) : null;
+      if (stopDist && stopDist > 0) unrealizedR = Math.round((move / stopDist) * 100) / 100;
+    }
+    return {
+      ...p,
+      setup_name:      p.setup_name || null,
+      current_price:   currentPrice,
+      unrealized_pnl:  unrealizedPnl,
+      unrealized_r:    unrealizedR,
+      bar_at:          latest?.t || null,
+    };
+  });
 }
 
 /**

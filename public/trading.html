@@ -861,9 +861,9 @@ function switchTab(name) {
   });
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
-  if (name === 'watch')     loadPollerStatus();
+  if (name === 'watch')     { loadPollerStatus(); loadSignalHistory(); }
   if (name === 'gate')      loadSideA();
-  if (name === 'positions') loadPositions();
+  if (name === 'positions') { loadPositions(); _startPositionsPoll(); } else { _stopPositionsPoll(); }
   if (name === 'setups')    { loadSetups(); const cd = document.getElementById('cmp-date'); if (cd && !cd.value) cd.value = new Date().toISOString().slice(0,10); }
   if (name === 'settings')  loadSettings();
   if (name === 'journal')   loadJournal();
@@ -1006,6 +1006,7 @@ function handleEvent(evt) {
     // A new signal (if it passed risk check) opens a position — refresh
     // the positions panel so it stays in sync.
     if (typeof loadPositions === 'function') loadPositions();
+    if (typeof loadSignalHistory === 'function') loadSignalHistory();
   }
   if (evt.type === 'webhook_signal') updateSignalMatch(evt);
   if (evt.type === 'position_closed') {
@@ -1027,6 +1028,44 @@ function clearSignalCards() {
   Object.keys(tickerStatus).forEach(k => delete tickerStatus[k]);
   const el = document.getElementById('signal-list');
   if (el) el.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">No signals this session</div></div>';
+}
+
+async function loadSignalHistory() {
+  const el = document.getElementById('signal-history');
+  if (!el) return;
+  try {
+    const r = await fetch(`${API}/trading/signal-history`).then(r => r.json());
+    const signals = (r?.signals) || [];
+    if (!signals.length) {
+      el.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">No signals this session</div></div>';
+      return;
+    }
+    const gradeColor = g => g === 'A+' ? 'var(--green)' : g === 'A' ? '#4caf50' : g === 'B' ? 'var(--text2)' : g === 'C' ? 'var(--red)' : 'var(--text3)';
+    el.innerHTML = signals.map(s => {
+      const et = new Date(s.fired_at).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
+      const canOpenCard = !!s.card_id;
+      const setupLabel = s.setup_name || s.setup_id || '—';
+      const grade = s.grade ? `<span style="font-weight:700;color:${gradeColor(s.grade)}">${s.grade}</span>` : '<span style="color:var(--text3)">—</span>';
+      return `<div ${canOpenCard ? `onclick="openCardFromHistory('${s.card_id}')"` : ''}
+        style="display:grid;grid-template-columns:56px 1fr auto 40px 44px;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border);${canOpenCard ? 'cursor:pointer' : ''};font-size:12px"
+        ${canOpenCard ? `onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background=''"` : ''}>
+        <span style="color:var(--text3);font-family:monospace">${et}</span>
+        <span><strong>${s.ticker}</strong> <span style="color:var(--text3);margin-left:4px">${s.direction}</span> <span style="color:var(--text3);margin-left:6px;font-size:11px">${setupLabel}</span></span>
+        <span style="color:var(--text3);font-size:11px">${s.source}</span>
+        ${grade}
+        ${canOpenCard ? '<span style="color:var(--accent);font-size:11px">Card ▸</span>' : '<span></span>'}
+      </div>`;
+    }).join('');
+  } catch (err) {
+    el.innerHTML = `<div style="color:var(--red);font-size:11px;padding:8px">${err.message}</div>`;
+  }
+}
+
+// Signal-history rows link into the card viewer. Switch to the Grading
+// tab so the viewer's DOM is active, then trigger the detail render.
+function openCardFromHistory(cardId) {
+  switchTab('grading');
+  setTimeout(() => { if (typeof showCard === 'function') showCard(cardId); }, 50);
 }
 
 function renderSignalList() {
@@ -1357,6 +1396,21 @@ function fmtMoney(n) {
   return `${sign}$${Math.abs(v).toFixed(2)}`;
 }
 
+let _positionsPollTimer = null;
+function _startPositionsPoll() {
+  _stopPositionsPoll();
+  // 20s: bars arrive every 60s but this keeps unrealized P&L feeling live
+  // without hammering the endpoint. Cheap DB query, no external calls.
+  _positionsPollTimer = setInterval(() => {
+    const tab = document.getElementById('tab-positions');
+    if (tab && tab.classList.contains('active')) loadPositions();
+    else _stopPositionsPoll();
+  }, 20000);
+}
+function _stopPositionsPoll() {
+  if (_positionsPollTimer) { clearInterval(_positionsPollTimer); _positionsPollTimer = null; }
+}
+
 async function loadPositions() {
   const [openRows, closedRows, settings] = await Promise.all([
     fetch(`${API}/trading/positions/open`).then(r => r.json()).catch(() => []),
@@ -1380,15 +1434,36 @@ async function loadPositions() {
   if (!openRows.length) {
     openEl.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No open positions</div></div>';
   } else {
-    openEl.innerHTML = openRows.map(p => `
-      <div class="trade-row">
-        <span class="tr-ticker">${p.ticker}</span>
-        <span class="tr-dir ${p.direction === 'Long' ? 'badge-long':'badge-short'}">${p.direction}</span>
-        <span style="color:var(--text3)">${p.shares} sh @ $${p.entry_price}</span>
-        <span style="color:var(--text3);margin-left:auto">SL $${p.sl} TP $${p.tp}</span>
-        <button onclick="closePosition('${p.id}')" style="background:var(--red);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Close</button>
-      </div>
-    `).join('');
+    openEl.innerHTML = openRows.map(p => {
+      const uPnl = p.unrealized_pnl;
+      const uR   = p.unrealized_r;
+      const pnlColor = uPnl > 0 ? 'var(--green)' : uPnl < 0 ? 'var(--red)' : 'var(--text3)';
+      const cur = p.current_price != null ? `$${p.current_price}` : '—';
+      const meta = [
+        p.setup_name ? `<span style="color:var(--text3)">setup: <strong style="color:var(--text2)">${p.setup_name}</strong></span>` : '',
+        p.account    ? `<span style="color:var(--text3)">account: <strong style="color:var(--text2)">${p.account}</strong></span>` : '',
+      ].filter(Boolean).join(' · ');
+      const cardLink = p.card_id ? `<button onclick="showCard('${p.card_id}')" style="background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Card</button>` : '';
+      return `
+      <div class="trade-row" style="flex-direction:column;align-items:stretch;gap:4px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span class="tr-ticker">${p.ticker}</span>
+          <span class="tr-dir ${p.direction === 'Long' ? 'badge-long':'badge-short'}">${p.direction}</span>
+          <span style="color:var(--text3)">${p.shares} sh @ $${p.entry_price}</span>
+          <span style="color:var(--text3)">now ${cur}</span>
+          <span style="margin-left:auto;font-weight:600;color:${pnlColor}">
+            ${uPnl != null ? (uPnl >= 0 ? '+' : '') + '$' + Math.abs(uPnl).toFixed(2) : '—'}
+            ${uR != null ? ` <span style="color:var(--text3);font-weight:400;font-size:10px">(${uR >= 0 ? '+' : ''}${uR.toFixed(2)}R)</span>` : ''}
+          </span>
+          ${cardLink}
+          <button onclick="closePosition('${p.id}')" style="background:var(--red);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Close</button>
+        </div>
+        <div style="display:flex;gap:10px;font-size:10px;flex-wrap:wrap">
+          <span style="color:var(--text3)">SL $${p.sl} · TP $${p.tp}</span>
+          ${meta}
+        </div>
+      </div>`;
+    }).join('');
   }
 
   const closedEl = document.getElementById('positions-closed-list');

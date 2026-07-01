@@ -210,6 +210,25 @@ router.get('/positions/closed-today', (req, res) => {
   res.json(router0.listClosedPositionsToday());
 });
 
+// Signal history — every native fire from today with its setup name and
+// the trade card id so the UI can jump straight into the card viewer to
+// see which checks (mandatory/default/additional) were aligned.
+router.get('/signal-history', (req, res) => {
+  const today = require('../utils/time').toETDate(Date.now());
+  const rows = db.prepare(`
+    SELECT l.id, l.ticker, l.direction, l.sl, l.tp, l.fired_at, l.source, l.matched,
+           l.setup_id, s.name AS setup_name,
+           c.id AS card_id, c.grade
+      FROM trading_signal_log l
+      LEFT JOIN trading_setups s ON s.id = l.setup_id
+      LEFT JOIN trade_cards    c ON c.setup_id = l.setup_id AND c.ticker = l.ticker
+                                AND ABS(c.fired_at - l.fired_at) < 60000
+     WHERE l.date = ?
+     ORDER BY l.fired_at DESC
+  `).all(today);
+  res.json({ ok: true, signals: rows });
+});
+
 router.post('/positions', (req, res) => {
   const { orderId, ticker, direction, shares, entryPrice, entryTime, sl, tp } = req.body;
   if (!ticker || !direction || !shares || !entryPrice) {

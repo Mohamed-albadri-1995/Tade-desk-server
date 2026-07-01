@@ -281,6 +281,15 @@ function getLatestQuote(ticker) {
   return _wsClient ? _wsClient.getLatestQuote(ticker) : null;
 }
 
+/**
+ * Latest 1-min bar we've buffered for a ticker. Used by the positions
+ * endpoint to show live unrealized P&L on open trades.
+ */
+function getLatestBar(ticker) {
+  const buf = _barBuffer.get(String(ticker).toUpperCase());
+  return buf && buf.length ? buf[buf.length - 1] : null;
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 function start(sessionId, tickers, setups, onSignalFired) {
@@ -381,4 +390,4 @@ function updateTickers(tickers) {
   }
 }
 
-module.exports = { start, stop, getEngine, getStatus, listEngines, getLatestQuote, updateSetups, updateTickers };
+module.exports = { start, stop, getEngine, getStatus, listEngines, getLatestQuote, getLatestBar, updateSetups, updateTickers };
