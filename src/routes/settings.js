@@ -47,6 +47,14 @@ const SETTING_RULES = {
   trading_sideA_weak_sec_multiplier:{ type: 'float', min: 0, max: 2 },
   alpacaAccountUrl:            { type: 'str', maxLen: 200 },
   alpacaMarketFeed:            { type: 'str', maxLen: 10 },
+  // Grading engine thresholds
+  grading_min_setup_trades:      { type: 'int',   min: 1, max: 1000 },
+  grading_min_check_side_trades: { type: 'int',   min: 1, max: 1000 },
+  grading_kill_expectancy_r:     { type: 'float', min: -10, max: 10 },
+  grading_kill_min_trades:       { type: 'int',   min: 1, max: 1000 },
+  grading_live_aplus_r:          { type: 'float', min: -10, max: 10 },
+  grading_live_a_r:              { type: 'float', min: -10, max: 10 },
+  grading_live_b_r:              { type: 'float', min: -10, max: 10 },
 };
 
 const MASKED_KEYS = new Set(['finnhubApiKey', 'githubBackupToken', 'alpacaApiKey', 'alpacaApiSecret', 'aiApiKey']);

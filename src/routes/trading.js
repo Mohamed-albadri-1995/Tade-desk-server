@@ -14,6 +14,8 @@ const sizer        = require('../trading/sizer');
 const router0      = require('../trading/router');
 const barPoller    = require('../trading/barPoller');
 const backtest     = require('../trading/backtest');
+const brokers      = require('../trading/brokers');
+const grading      = require('../trading/grading');
 const { toETDate } = require('../utils/time');
 
 const router = express.Router();
@@ -233,6 +235,56 @@ router.post('/backtest', async (req, res) => {
     const result = await backtest.runBacktest(req.body || {});
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Brokers ─────────────────────────────────────────────────────────────────
+
+router.get('/brokers', (req, res) => {
+  res.json({ ok: true, brokers: brokers.list() });
+});
+router.get('/brokers/active', (req, res) => {
+  res.json({ ok: true, active: brokers.getActive() });
+});
+router.post('/brokers', (req, res) => {
+  try {
+    const created = brokers.create(req.body || {});
+    res.json({ ok: true, broker: created });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+router.patch('/brokers/:id', (req, res) => {
+  const updated = brokers.update(req.params.id, req.body || {});
+  if (!updated) return res.status(404).json({ ok: false, error: 'Broker not found' });
+  res.json({ ok: true, broker: updated });
+});
+router.delete('/brokers/:id', (req, res) => {
+  brokers.remove(req.params.id);
+  res.json({ ok: true });
+});
+router.get('/broker-types', (req, res) => {
+  res.json({ ok: true, types: brokers.VALID_TYPES });
+});
+
+// ─── Grading ─────────────────────────────────────────────────────────────────
+
+router.get('/grading/setup/:setupId', (req, res) => {
+  const account = req.query.account || null;
+  const stats = grading.setupExpectancy(req.params.setupId, { account });
+  res.json({ ok: true, stats });
+});
+router.get('/grading/setup/:setupId/checks', (req, res) => {
+  const account = req.query.account || null;
+  res.json({ ok: true, contributions: grading.checkContributions(req.params.setupId, { account }) });
+});
+router.post('/grading/preview', (req, res) => {
+  try {
+    const { setupId, additionalChecks = [], account = null } = req.body || {};
+    if (!setupId) return res.status(400).json({ ok: false, error: 'setupId required' });
+    res.json({ ok: true, grade: grading.gradeSignal({ setupId, additionalChecks, account }) });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

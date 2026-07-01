@@ -10,7 +10,15 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const sizer = require('./sizer');
+const brokers = require('./brokers');
+const grading = require('./grading');
 const { toETDate } = require('../utils/time');
+
+function getExecutionMode() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'trading_execution_mode'").get();
+  const v = (row?.value || 'paper').toLowerCase();
+  return ['off', 'paper', 'live'].includes(v) ? v : 'paper';
+}
 
 // Active signal listeners (SSE clients)
 const listeners = new Set();
@@ -114,8 +122,23 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     entrySource = 'signal_bar_close';
   }
 
-  // Grading is being rebuilt — keep the grade multiplier neutral (1.0) for now
-  const setupGrade = null;
+  // Grading engine — grade this specific fire based on the setup's learned
+  // history and the additional checks currently aligned on this bar. The
+  // resulting letter grade feeds the Sizer's per-trade multiplier.
+  const additionalChecks = signal.additionalChecks || [];
+  const mandatoryChecks  = signal.mandatoryChecks  || [];
+  let liveGrade = null;
+  try {
+    liveGrade = grading.gradeSignal({
+      setupId,
+      additionalChecks,
+      account: signal.account || null,
+    });
+  } catch (err) {
+    // Learning table might not have any rows yet — grade defaults to bootstrap.
+    liveGrade = { grade: 'B (bootstrapping)', totalR: 0, baseR: 0, deltaR: 0, alignedKeysCounted: [], inBootstrap: true };
+  }
+  const setupGrade = liveGrade.grade === 'B (bootstrapping)' ? null : liveGrade.grade;
 
   // Sizing — if we still have no entry price, use the indicator's entry as
   // a last resort so the calc runs. If even that isn't set, refuse to size.
@@ -156,25 +179,28 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
 
   const orderId = uuidv4();
 
+  // Execution mode — if 'off', drop everything (still logged via the
+  // notification below so the user sees it happened). 'paper' persists
+  // an order + opens a paper position. 'live' will fan out to enabled
+  // broker profiles (live submission still stubbed in brokers.send()).
+  const mode = getExecutionMode();
+
   let positionId = null;
-  if (riskCheck.ok && shares > 0) {
-    // Persist the notified order + open a paper position so downstream
-    // risk checks (daily loss, max open positions, no duplicate ticker)
-    // actually see it. The position is closed later either manually via
-    // POST /api/trading/positions/:id/close or automatically once we wire
-    // Alpaca order-fill events.
+  const brokerResults = [];
+  if (mode !== 'off' && riskCheck.ok && shares > 0) {
     positionId = uuidv4();
+    const orderStatus = mode === 'live' ? 'submitted' : 'notified';
     const writeAll = db.transaction(() => {
       db.prepare(`
         INSERT INTO trading_orders
           (id, signal_id, session_id, date, ticker, direction, shares, entry_price, sl, tp,
            dollar_risk, position_value, alpaca_payload, humanized_msg, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'notified', ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         orderId, signalId, signal.sessionId || '', today, ticker, direction,
         shares, entryPrice ?? null, sl, tp,
         dollarRisk, positionValue,
-        JSON.stringify(alpacaPayload), humanizedMsg, now
+        JSON.stringify(alpacaPayload), humanizedMsg, orderStatus, now
       );
       db.prepare(`
         INSERT INTO trading_positions
@@ -190,6 +216,42 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
       );
     });
     writeAll();
+
+    // Trade card — created at fire time; the outcome fields (exit,
+    // R-multiple, net P&L) get filled in when the position closes so
+    // the grading engine can learn from it.
+    try {
+      grading.createCardForSignal({
+        ticker, setupId, direction,
+        sessionId: signal.sessionId,
+        entryPrice: entryPrice ?? signalEntry ?? null,
+        sl, tp,
+        firedAt: now,
+        gate,
+        orderId, positionId,
+        mandatoryChecks,
+        additionalChecks,
+        account: signal.account || null,
+        liveGrade,
+      });
+    } catch (err) {
+      console.warn('[Router] Trade card creation failed:', err.message);
+    }
+
+    if (mode === 'live') {
+      // Fan out to every enabled broker profile.
+      for (const b of brokers.getActive()) {
+        try {
+          const r = require('./brokers').send;  // via require to keep it hot-swappable
+          const result = r(b, { ticker, direction, shares, entryType, entryPrice, sl, tp, orderId });
+          // send() is async; keep a Promise handle but don't block the SSE broadcast.
+          brokerResults.push({ brokerId: b.id, brokerName: b.name, brokerType: b.type, pending: true });
+          Promise.resolve(result).catch(() => { /* logged in broker */ });
+        } catch (err) {
+          brokerResults.push({ brokerId: b.id, brokerName: b.name, brokerType: b.type, ok: false, error: err.message });
+        }
+      }
+    }
   }
 
   const notification = {
@@ -215,6 +277,9 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     riskCheck,
     humanizedMsg,
     alpacaPayload: riskCheck.ok ? alpacaPayload : null,
+    executionMode: mode,
+    brokerResults,
+    liveGrade,
     ts: now,
   };
 
@@ -256,11 +321,24 @@ function closePosition(positionId, exitPrice, reason = 'manual') {
     : (pos.entry_price - px) * pos.shares;
 
   const now = Date.now();
+  const roundedPnl = Math.round(pnl * 100) / 100;
   db.prepare(`
     UPDATE trading_positions
        SET exit_price = ?, exit_time = ?, pnl = ?, status = 'closed', closed_at = ?
      WHERE id = ?
-  `).run(px, new Date(now).toISOString(), Math.round(pnl * 100) / 100, now, positionId);
+  `).run(px, new Date(now).toISOString(), roundedPnl, now, positionId);
+
+  // Complete the trade card so the grading engine can learn from this trade.
+  try {
+    grading.completeCardForPosition(positionId, {
+      exitPrice: px,
+      netPnl:    roundedPnl,
+      closedAt:  now,
+      exitReason: reason,
+    });
+  } catch (err) {
+    console.warn('[Router] Trade card completion failed:', err.message);
+  }
 
   const closed = db.prepare('SELECT * FROM trading_positions WHERE id = ?').get(positionId);
   broadcast({ type: 'position_closed', position: closed, reason, ts: now });

@@ -119,6 +119,14 @@ const tradingDefaults = [
   ['trading_gate_neutral_multiplier', '0.75'],
   ['trading_gate_weak_sec_score', '10'],
   ['trading_gate_weak_sec_multiplier', '0.8'],
+  // Grading engine — expectancy and letter-grade thresholds
+  ['grading_min_setup_trades',       '20'],
+  ['grading_min_check_side_trades',  '5'],
+  ['grading_kill_expectancy_r',      '-0.5'],
+  ['grading_kill_min_trades',        '30'],
+  ['grading_live_aplus_r',           '1.5'],
+  ['grading_live_a_r',               '1.0'],
+  ['grading_live_b_r',               '0.5'],
 ];
 
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');

@@ -147,8 +147,9 @@ async function start() {
   }, 30000);
 
   // Bar poller (source is chosen by the trading_data_source setting).
-  const activeSetups = db.prepare('SELECT * FROM trading_setups WHERE enabled = 1').all()
-    .map(r => ({ ...r, config: JSON.parse(r.config || '{}') }));
+  // Single source of truth: setup engine loaded the setups above, so pull
+  // that same list here rather than querying the DB again.
+  const activeSetups = setupEngine.getActiveSetupsArray();
   barPoller.start(sessionId, tickers, activeSetups, (signal, sid) => {
     // Boundary guard: if the session ended (or was paused) while this
     // evaluation was in flight, drop the fire instead of writing it.
@@ -185,8 +186,9 @@ function resume() {
   db.prepare("UPDATE trading_sessions SET status = 'active' WHERE id = ?").run(_session.id);
   // Reload setups in case the user edited them while paused.
   setupEngine.loadSetups();
-  const activeSetups = db.prepare('SELECT * FROM trading_setups WHERE enabled = 1').all()
-    .map(r => ({ ...r, config: JSON.parse(r.config || '{}') }));
+  // Single source of truth: setup engine loaded the setups above, so pull
+  // that same list here rather than querying the DB again.
+  const activeSetups = setupEngine.getActiveSetupsArray();
   const sid = _session.id;
   const tickers = _session.tickers;
   barPoller.start(sid, tickers, activeSetups, (signal, sesid) => {
