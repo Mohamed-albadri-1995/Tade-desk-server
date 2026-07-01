@@ -258,19 +258,22 @@ router.get('/historical-cache/status', (req, res) => {
 router.get('/debug/fetch-bars', async (req, res) => {
   const ticker = String(req.query.ticker || '').toUpperCase();
   const days = Math.max(1, Math.min(30, parseInt(req.query.days, 10) || 5));
+  const source = String(req.query.source || 'yahoo').toLowerCase();
   if (!ticker) return res.status(400).json({ ok: false, error: 'ticker query param required' });
 
-  const { fetchIntradayBars } = require('../alpaca/client');
+  const alpacaClient = require('../alpaca/client');
+  const yahooClient  = require('../yahoo/client');
   const { toETDate } = require('../utils/time');
+  const client = source === 'alpaca' ? alpacaClient : yahooClient;
   const now = Date.now();
-  const out = { ticker, days, byDate: {}, total: 0 };
+  const out = { ticker, days, source, byDate: {}, total: 0 };
   for (let d = days; d >= 1; d--) {
     const dt = new Date(now - d * 24 * 3600 * 1000);
     const iso = toETDate(dt.getTime());
     const wday = new Date(iso + 'T12:00:00-05:00').getDay();
     if (wday === 0 || wday === 6) { out.byDate[iso] = 'weekend-skip'; continue; }
     try {
-      const map = await fetchIntradayBars([ticker], iso);
+      const map = await client.fetchIntradayBars([ticker], iso);
       const n = (map[ticker] || []).length;
       out.byDate[iso] = n;
       out.total += n;

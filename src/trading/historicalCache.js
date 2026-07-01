@@ -23,7 +23,8 @@
  * confirm it's fully warm.
  */
 
-const { fetchIntradayBars } = require('../alpaca/client');
+const alpacaClient = require('../alpaca/client');
+const yahooClient  = require('../yahoo/client');
 const { toETDate } = require('../utils/time');
 
 // ticker → array of 1-min bars sorted chronologically.
@@ -61,16 +62,42 @@ async function warmup(tickers, days = 6) {
 
   console.log(`[HistoricalCache] warming ${upper.length} tickers × ${dates.length} days`);
   for (const date of dates) {
+    // Prefer Yahoo — consolidated tape, dense bars even for illiquid names.
+    // Alpaca IEX is the fallback for anything Yahoo can't serve (rare;
+    // sometimes it 404s on private companies or newly-listed tickers).
+    // Live path stays on Alpaca WebSocket / HTTP — this only affects the
+    // pre-session warmup.
+    let map = null;
     try {
-      const map = await fetchIntradayBars(upper, date);
-      for (const [ticker, bars] of Object.entries(map)) {
-        if (!bars?.length) continue;
-        const list = _cache.get(ticker) || [];
-        list.push(...bars);
-        _cache.set(ticker, list);
-      }
+      map = await yahooClient.fetchIntradayBars(upper, date);
     } catch (err) {
-      console.warn(`[HistoricalCache] ${date} failed:`, err.message);
+      console.warn(`[HistoricalCache] Yahoo ${date} failed, trying Alpaca:`, err.message);
+    }
+    if (!map || Object.values(map).every(b => !b?.length)) {
+      try {
+        map = await alpacaClient.fetchIntradayBars(upper, date);
+      } catch (err) {
+        console.warn(`[HistoricalCache] Alpaca ${date} also failed:`, err.message);
+        continue;
+      }
+    } else {
+      // Per-ticker fallback: if Yahoo returned nothing for a particular
+      // ticker but returned data for others, hit Alpaca just for that one.
+      const emptyTickers = upper.filter(t => !map[t]?.length);
+      if (emptyTickers.length) {
+        try {
+          const alpacaMap = await alpacaClient.fetchIntradayBars(emptyTickers, date);
+          for (const [t, bars] of Object.entries(alpacaMap)) {
+            if (bars?.length) map[t] = bars;
+          }
+        } catch { /* stick with Yahoo's empty */ }
+      }
+    }
+    for (const [ticker, bars] of Object.entries(map)) {
+      if (!bars?.length) continue;
+      const list = _cache.get(ticker) || [];
+      list.push(...bars);
+      _cache.set(ticker, list);
     }
   }
   // Ensure chronological order.
