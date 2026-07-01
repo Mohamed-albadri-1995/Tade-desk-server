@@ -112,14 +112,38 @@ const tradingDefaults = [
   ['trading_equity', '25000'],
   // Data source — 'polling' (60s HTTP) or 'websocket' (Alpaca live stream)
   ['trading_data_source', 'polling'],
-  // Side A — Market Conditions Register (rules configurable per the plan)
-  ['trading_sideA_gate_enabled', '1'],
-  ['trading_sideA_neutral_multiplier', '0.75'],
-  ['trading_sideA_weak_sec_score', '10'],
-  ['trading_sideA_weak_sec_multiplier', '0.8'],
+  // Execution mode — 'off' (block everything) | 'paper' (notify only) | 'live' (send to broker)
+  ['trading_execution_mode', 'paper'],
+  // Market Gate rules (was 'sideA_' settings)
+  ['trading_gate_enabled', '1'],
+  ['trading_gate_neutral_multiplier', '0.75'],
+  ['trading_gate_weak_sec_score', '10'],
+  ['trading_gate_weak_sec_multiplier', '0.8'],
 ];
 
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
 for (const [k, v] of tradingDefaults) insertSetting.run(k, v);
+
+// One-time migration of old sideA_* keys → new trading_gate_* keys so a
+// user upgrading doesn't lose their tuned thresholds.
+const migrations = [
+  ['trading_sideA_gate_enabled',        'trading_gate_enabled'],
+  ['trading_sideA_neutral_multiplier',  'trading_gate_neutral_multiplier'],
+  ['trading_sideA_weak_sec_score',      'trading_gate_weak_sec_score'],
+  ['trading_sideA_weak_sec_multiplier', 'trading_gate_weak_sec_multiplier'],
+];
+const readVal   = db.prepare('SELECT value FROM settings WHERE key = ?');
+const writeVal  = db.prepare('UPDATE settings SET value = ? WHERE key = ?');
+const dropOld   = db.prepare('DELETE FROM settings WHERE key = ?');
+for (const [oldKey, newKey] of migrations) {
+  const oldRow = readVal.get(oldKey);
+  if (!oldRow) continue;
+  const newRow = readVal.get(newKey);
+  // Only carry the old value forward if the new key is still at its default —
+  // avoids overwriting a value the user just typed on the new key.
+  if (newRow && newRow.value === oldRow.value) { dropOld.run(oldKey); continue; }
+  writeVal.run(oldRow.value, newKey);
+  dropOld.run(oldKey);
+}
 
 module.exports = db;

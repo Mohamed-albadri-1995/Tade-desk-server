@@ -1,15 +1,16 @@
 /**
- * Center — Execution & Risk Gate
+ * Router (was "Center — Execution & Risk Gate")
  *
- * Receives a signal from Side B (already direction-gated).
- * Runs pre-trade risk checks, computes sizing via Side C,
- * builds the Alpaca-ready payload and humanized message,
- * and notifies without submitting to Alpaca (deferred).
+ * Receives a gated signal from the Setup Engine, runs pre-trade risk
+ * checks, sizes it with the Sizer, applies the grading multiplier, and
+ * either notifies (paper/off mode) or forwards to a configured broker
+ * (live mode). Broadcasts every step over SSE for the UI.
  */
 
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
-const sideC = require('./sideC');
+const sizer = require('./sizer');
+const { toETDate } = require('../utils/time');
 
 // Active signal listeners (SSE clients)
 const listeners = new Set();
@@ -44,7 +45,7 @@ function checkRisk(ticker, direction, dollarRisk) {
   // Daily loss limit — realized P&L from positions closed today (ET).
   // Using closed_at rather than opened_at so a bad trade closed today
   // counts against today's limit even if it was opened earlier.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toETDate(Date.now());
   const pnlRow = db.prepare(
     "SELECT COALESCE(SUM(pnl), 0) AS total FROM trading_positions WHERE status = 'closed' AND DATE(closed_at/1000,'unixepoch') = ?"
   ).get(today);
@@ -86,13 +87,13 @@ function buildAlpacaPayload({ ticker, direction, shares, entryType, entryPrice, 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 /**
- * Process a signal from Side B.
- * @param {object} signal - from sideB.onIndicatorFire callback
- * @param {number|null} currentBid - current bid price from Alpaca stream (or null)
- * @param {number|null} currentAsk - current ask price from Alpaca stream (or null)
+ * Process a gated signal from the Setup Engine.
+ * @param {object} signal - from setupEngine.onIndicatorFire callback
+ * @param {number|null} currentBid - live bid from Alpaca stream (or null)
+ * @param {number|null} currentAsk - live ask from Alpaca stream (or null)
  */
 function processSignal(signal, currentBid = null, currentAsk = null) {
-  const { signalId, ticker, setupId, setupName, direction, entryType, sl, tp, firedAt, sideA, entry: signalEntry } = signal;
+  const { signalId, ticker, setupId, setupName, direction, entryType, sl, tp, firedAt, gate, entry: signalEntry } = signal;
 
   // Entry price preference for market orders (in order):
   //   1. Real live quote from Alpaca WS (currentAsk for long, currentBid for short)
@@ -125,11 +126,11 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     sizingError = 'No entry price available (no bid/ask, no signal entry)';
   } else {
     try {
-      sizing = sideC.calculate({
+      sizing = sizer.calculate({
         entryPrice: sizingEntry,
         sl,
-        sideAMultiplier: sideA?.multiplier ?? 1.0,
-        score: sideA?.score ?? null,
+        gateMultiplier: gate?.multiplier ?? 1.0,
+        score: gate?.score ?? null,
         setupGrade,
       });
     } catch (e) {
@@ -143,7 +144,7 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     : { ok: false, reason: sizingError || 'Sizing failed' };
 
   const now = Date.now();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toETDate(now); // was UTC — use ET so log date matches session date
 
   // Build order record even if risk check fails (for audit)
   const shares = sizing?.shares ?? 0;
@@ -208,7 +209,7 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     firedAt,
     sizing,
     sizingError: sizingError || null,
-    sideA,
+    gate,
     bid: currentBid,
     ask: currentAsk,
     riskCheck,
@@ -278,7 +279,7 @@ function listOpenPositions() {
  * and by the UI to show session results).
  */
 function listClosedPositionsToday() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toETDate(Date.now());
   return db
     .prepare("SELECT * FROM trading_positions WHERE status = 'closed' AND DATE(closed_at/1000,'unixepoch') = ? ORDER BY closed_at DESC")
     .all(today);

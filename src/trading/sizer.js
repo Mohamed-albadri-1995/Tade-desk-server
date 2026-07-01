@@ -1,13 +1,14 @@
 /**
- * Side C — Position Size Calculator
+ * Sizer (was "Side C — Position Size Calculator")
  *
- * Computes recommended share count and dollar risk given:
- *   - Account equity
+ * Computes recommended share count and dollar risk from:
+ *   - Account equity (from Alpaca or the trading_equity setting)
  *   - Risk % per trade
  *   - Stop distance (|entry - SL|)
- *   - Side A sizing multiplier
+ *   - Market Gate multiplier (was "Side A multiplier")
  *   - Scanner _score multiplier
- *   - Hard caps
+ *   - Grading engine A+/A/B/C multiplier
+ *   - Hard caps (max shares, max dollar risk, max total exposure)
  */
 
 const db = require('../db');
@@ -91,12 +92,16 @@ function currentOpenExposure() {
  * @param {object} params
  * @param {number} params.entryPrice - expected entry price
  * @param {number} params.sl - stop loss price
- * @param {number} params.sideAMultiplier - from Side A register (default 1.0)
+ * @param {number} params.gateMultiplier - from Market Gate (default 1.0)
  * @param {number|null} params.score - scanner _score (null = no adjustment)
  * @param {string|null} params.setupGrade - historical setup grade A+/A/B/C (null = no adjustment)
  * @returns {object} { shares, dollarRisk, positionValue, riskPct, equity, ...inputs }
  */
-function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null, setupGrade = null }) {
+function calculate({ entryPrice, sl, gateMultiplier = 1.0, score = null, setupGrade = null, sideAMultiplier }) {
+  // Accept the old sideAMultiplier name for backwards compatibility with
+  // any lingering caller until they're all migrated.
+  if (gateMultiplier == null && sideAMultiplier != null) gateMultiplier = sideAMultiplier;
+
   if (!entryPrice || !sl) throw new Error('entryPrice and sl are required');
 
   const stopDistance = Math.abs(entryPrice - sl);
@@ -107,7 +112,7 @@ function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null, setupG
   const gradeMult = GRADE_MULTIPLIERS[setupGrade] ?? 1.0;
 
   const riskDollars = Math.min(
-    s.equity * (s.riskPct / 100) * sideAMultiplier * scoreMult * gradeMult,
+    s.equity * (s.riskPct / 100) * gateMultiplier * scoreMult * gradeMult,
     s.maxDollarRisk
   );
 
@@ -135,7 +140,7 @@ function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null, setupG
     dollarRisk: parseFloat(actualDollarRisk.toFixed(2)),
     positionValue: parseFloat(positionValue.toFixed(2)),
     stopDistance: parseFloat(stopDistance.toFixed(4)),
-    sideAMultiplier,
+    gateMultiplier,
     scoreMultiplier: scoreMult,
     gradeMultiplier: gradeMult,
     setupGrade: setupGrade || null,

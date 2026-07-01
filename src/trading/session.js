@@ -1,20 +1,20 @@
 /**
  * Trading Session Manager
  *
- * Manages the lifecycle of a trading session:
- *   - Pull shortlist from scanner at 9:35
- *   - Poll scanner context every 30s (9:35–10:00), update Side A
- *   - Load setups for Side B
- *   - Graceful end at 10:00
+ * Lifecycle of a trading session:
+ *   - Pull shortlist from scanner at 9:35 ET
+ *   - Poll scanner context every 30s (9:35–10:00), update Market Gate
+ *   - Load Setup Engine's setups
+ *   - Graceful end at 10:00 ET
  */
 
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
-const sideA = require('./sideA');
-const sideB = require('./sideB');
-const sideC = require('./sideC');
-const center = require('./center');
-const barPoller = require('./barPoller');
+const marketGate    = require('./marketGate');   // was sideA
+const setupEngine   = require('./setupEngine');  // was sideB
+const sizer         = require('./sizer');        // was sideC
+const router        = require('./router');       // was center
+const barPoller     = require('./barPoller');
 const volumeBaseline = require('./volumeBaseline');
 const { toETDate } = require('../utils/time');
 
@@ -22,6 +22,7 @@ const SCANNER_URL = process.env.SCANNER_URL || 'http://127.0.0.1:3000';
 
 let _session = null;
 let _contextPollInterval = null;
+let _initialPollDone = false;
 
 function getSession() {
   return _session;
@@ -31,7 +32,24 @@ function isActive() {
   return _session?.status === 'active';
 }
 
-// ─── Shortlist fetch ──────────────────────────────────────────────────────────
+function isPaused() {
+  return _session?.status === 'paused';
+}
+
+function isRunning() {
+  return isActive() || isPaused();
+}
+
+/**
+ * True once the first context poll has populated the Market Gate for
+ * this session's tickers. Signals that fire before this returns true
+ * should be treated as "gate not ready" and blocked (fail-safe default).
+ */
+function isGateReady() {
+  return isActive() && _initialPollDone;
+}
+
+// ─── Shortlist fetch ─────────────────────────────────────────────────────────
 
 async function fetchShortlist() {
   const res = await fetch(`${SCANNER_URL}/api/shortlist/today`);
@@ -39,12 +57,11 @@ async function fetchShortlist() {
   return res.json();
 }
 
-// ─── Context poll ─────────────────────────────────────────────────────────────
+// ─── Context poll ────────────────────────────────────────────────────────────
 
 async function pollContext(tickers) {
   if (!tickers.length) return;
   try {
-    // Fetch r0 rows for shortlisted tickers from scanner's registry
     const res = await fetch(`${SCANNER_URL}/api/registry?tickers=${tickers.join(',')}`);
     if (!res.ok) return;
     const rows = await res.json();
@@ -56,21 +73,21 @@ async function pollContext(tickers) {
         _score: r._score,
         _scoreDetails: r._scoreDetails,
       }));
-    sideA.updateAll(entries);
+    marketGate.updateAll(entries);
+    _initialPollDone = true;
   } catch (e) {
     console.warn('[TradingSession] Context poll failed:', e.message);
   }
 }
 
-// ─── Session start ────────────────────────────────────────────────────────────
+// ─── Session start ───────────────────────────────────────────────────────────
 
 async function start() {
-  if (isActive()) return { ok: false, reason: 'Session already active' };
+  if (isRunning()) return { ok: false, reason: 'Session already running' };
 
   const today = toETDate(Date.now());
   const sessionId = uuidv4();
 
-  // Pull shortlist
   let shortlistEntry;
   try {
     shortlistEntry = await fetchShortlist();
@@ -81,44 +98,42 @@ async function start() {
   const shortlist = shortlistEntry?.items || [];
   const tickers = shortlist.map(i => i.ticker).filter(Boolean);
 
-  // Persist session
   db.prepare(`
     INSERT INTO trading_sessions (id, date, started_at, shortlist, status)
     VALUES (?, ?, ?, ?, 'active')
   `).run(sessionId, today, Date.now(), JSON.stringify(shortlist));
 
-  // Load Side A with initial data (shortlist items may carry _score)
-  sideA.clear();
+  // Prime the Market Gate with initial data from the shortlist. Context
+  // fields are still empty here — the first pollContext() below fills them.
+  marketGate.clear();
   for (const item of shortlist) {
-    sideA.update(item.ticker, {}, item._score, item._scoreDetails);
+    marketGate.update(item.ticker, {}, item._score, item._scoreDetails);
   }
 
-  // Load setups for Side B
-  sideB.loadSetups();
-  sideB.clearSessionLog();
+  // Load setups for the Setup Engine.
+  setupEngine.loadSetups();
+  setupEngine.clearSessionLog();
 
-  // Refresh live equity from Alpaca (per plan). Non-fatal — if the call
-  // fails, Side C falls back to the trading_equity setting.
-  sideC.refreshAlpacaEquity().then(eq => {
+  // Refresh live account equity for the Sizer. Non-fatal.
+  sizer.refreshAlpacaEquity().then(eq => {
     if (eq.source === 'alpaca') {
       console.log('[TradingSession] Alpaca equity refreshed:', eq.value);
     } else {
       console.log('[TradingSession] Alpaca equity unavailable — using trading_equity setting');
     }
-  }).catch(() => { /* logged inside sideC */ });
+  }).catch(() => { /* logged inside sizer */ });
 
-  // Build historical volume baselines for the shortlist tickers so
-  // indicator engines and the UI can compute rvol (per plan). Non-fatal.
   volumeBaseline.ensureBuilt(tickers, today).catch(err => {
     console.warn('[TradingSession] Volume baseline build failed:', err.message);
   });
 
   _session = { id: sessionId, date: today, tickers, shortlist, status: 'active', startedAt: Date.now() };
+  _initialPollDone = false;
 
-  // Initial context poll
+  // First context poll runs before we let the bar poller emit signals so
+  // the direction gate is populated by the time signals arrive.
   await pollContext(tickers);
 
-  // Context poll every 30s
   _contextPollInterval = setInterval(() => {
     if (!isActive()) return;
     const now = Date.now();
@@ -131,16 +146,16 @@ async function start() {
     }
   }, 30000);
 
-  // Bar poller — runs indicator engines every 60s
+  // Bar poller (source is chosen by the trading_data_source setting).
   const activeSetups = db.prepare('SELECT * FROM trading_setups WHERE enabled = 1').all()
     .map(r => ({ ...r, config: JSON.parse(r.config || '{}') }));
   barPoller.start(sessionId, tickers, activeSetups, (signal, sid) => {
-    sideB.onIndicatorFire(signal, sid, (enrichedSignal) => {
-      // In websocket mode barPoller carries a live bid/ask quote; in polling
-      // mode this comes back null and Center falls back to the signal's own
-      // entry (bar close). Either way the pipeline gets a real number.
+    // Boundary guard: if the session ended (or was paused) while this
+    // evaluation was in flight, drop the fire instead of writing it.
+    if (!isActive()) return;
+    setupEngine.onIndicatorFire(signal, sid, (enrichedSignal) => {
       const q = barPoller.getLatestQuote(enrichedSignal.ticker);
-      center.processSignal(
+      router.processSignal(
         { ...enrichedSignal, sessionId: sid },
         q?.bid ?? null,
         q?.ask ?? null
@@ -152,7 +167,45 @@ async function start() {
   return { ok: true, sessionId, tickers, shortlist };
 }
 
-// ─── Session end ──────────────────────────────────────────────────────────────
+// ─── Pause / Resume ──────────────────────────────────────────────────────────
+
+function pause(reason = 'manual') {
+  if (!isActive()) return { ok: false, reason: 'No active session to pause' };
+  _session.status = 'paused';
+  db.prepare("UPDATE trading_sessions SET status = 'paused' WHERE id = ?").run(_session.id);
+  barPoller.stop();
+  console.log(`[TradingSession] Paused ${_session.id} (${reason})`);
+  router.broadcast({ type: 'session_paused', reason, ts: Date.now() });
+  return { ok: true };
+}
+
+function resume() {
+  if (!isPaused()) return { ok: false, reason: 'No paused session to resume' };
+  _session.status = 'active';
+  db.prepare("UPDATE trading_sessions SET status = 'active' WHERE id = ?").run(_session.id);
+  // Reload setups in case the user edited them while paused.
+  setupEngine.loadSetups();
+  const activeSetups = db.prepare('SELECT * FROM trading_setups WHERE enabled = 1').all()
+    .map(r => ({ ...r, config: JSON.parse(r.config || '{}') }));
+  const sid = _session.id;
+  const tickers = _session.tickers;
+  barPoller.start(sid, tickers, activeSetups, (signal, sesid) => {
+    if (!isActive()) return;
+    setupEngine.onIndicatorFire(signal, sesid, (enrichedSignal) => {
+      const q = barPoller.getLatestQuote(enrichedSignal.ticker);
+      router.processSignal(
+        { ...enrichedSignal, sessionId: sesid },
+        q?.bid ?? null,
+        q?.ask ?? null
+      );
+    });
+  });
+  console.log(`[TradingSession] Resumed ${_session.id}`);
+  router.broadcast({ type: 'session_resumed', ts: Date.now() });
+  return { ok: true };
+}
+
+// ─── Session end ─────────────────────────────────────────────────────────────
 
 function end(reason = 'manual') {
   if (!_session) return { ok: false, reason: 'No active session' };
@@ -167,8 +220,9 @@ function end(reason = 'manual') {
   console.log(`[TradingSession] Ended ${_session.id} (${reason})`);
   const ended = { ..._session, status: 'ended' };
   _session = null;
+  _initialPollDone = false;
 
-  center.broadcast({ type: 'session_ended', reason, ts: Date.now() });
+  router.broadcast({ type: 'session_ended', reason, ts: Date.now() });
   return { ok: true, session: ended };
 }
 
@@ -188,17 +242,17 @@ setInterval(() => {
   const today = toETDate(now);
   const { hour, min } = _etParts(now);
 
-  if (hour === 9 && min === 35 && !isActive() && _lastAutoStartDate !== today) {
+  if (hour === 9 && min === 35 && !isRunning() && _lastAutoStartDate !== today) {
     _lastAutoStartDate = today;
     start().then(r => {
       if (!r.ok) console.warn('[TradingSession] Auto-start failed:', r.reason);
     });
   }
 
-  if (hour === 10 && min === 0 && isActive() && _lastAutoEndDate !== today) {
+  if (hour === 10 && min === 0 && isRunning() && _lastAutoEndDate !== today) {
     _lastAutoEndDate = today;
     end('auto');
   }
 }, 20000);
 
-module.exports = { start, end, getSession, isActive, pollContext };
+module.exports = { start, end, pause, resume, getSession, isActive, isPaused, isRunning, isGateReady, pollContext };

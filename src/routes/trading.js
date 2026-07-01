@@ -7,45 +7,55 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 require('../trading/db'); // ensure tables exist
-const session = require('../trading/session');
-const sideA = require('../trading/sideA');
-const sideB = require('../trading/sideB');
-const sideC = require('../trading/sideC');
-const center = require('../trading/center');
-const barPoller = require('../trading/barPoller');
-const backtest = require('../trading/backtest');
+const session      = require('../trading/session');
+const marketGate   = require('../trading/marketGate');
+const setupEngine  = require('../trading/setupEngine');
+const sizer        = require('../trading/sizer');
+const router0      = require('../trading/router');
+const barPoller    = require('../trading/barPoller');
+const backtest     = require('../trading/backtest');
+const { toETDate } = require('../utils/time');
 
 const router = express.Router();
 
-// ─── Session ──────────────────────────────────────────────────────────────────
+// ─── Session ─────────────────────────────────────────────────────────────────
 
 router.post('/session/start', async (req, res) => {
-  const result = await session.start();
-  res.json(result);
+  res.json(await session.start());
 });
-
 router.post('/session/end', (req, res) => {
   res.json(session.end('manual'));
 });
-
+router.post('/session/pause', (req, res) => {
+  res.json(session.pause('manual'));
+});
+router.post('/session/resume', (req, res) => {
+  res.json(session.resume());
+});
 router.get('/session', (req, res) => {
   const s = session.getSession();
   res.json(s || { status: 'idle' });
 });
 
-// ─── Side A ───────────────────────────────────────────────────────────────────
+// ─── Market Gate (was Side A) ────────────────────────────────────────────────
 
-router.get('/sideA', (req, res) => {
-  res.json(sideA.getAll());
+router.get('/gate', (req, res) => {
+  res.json({ ready: session.isGateReady(), tickers: marketGate.getAll() });
 });
-
-router.get('/sideA/:ticker', (req, res) => {
-  const entry = sideA.get(req.params.ticker.toUpperCase());
-  if (!entry) return res.status(404).json({ error: 'Ticker not in register' });
+router.get('/gate/:ticker', (req, res) => {
+  const entry = marketGate.get(req.params.ticker.toUpperCase());
+  if (!entry) return res.status(404).json({ error: 'Ticker not in gate' });
+  res.json(entry);
+});
+// Legacy aliases for anything still calling the old paths
+router.get('/sideA',          (req, res) => res.json(marketGate.getAll()));
+router.get('/sideA/:ticker',  (req, res) => {
+  const entry = marketGate.get(req.params.ticker.toUpperCase());
+  if (!entry) return res.status(404).json({ error: 'Ticker not in gate' });
   res.json(entry);
 });
 
-// ─── Side B — Setups ─────────────────────────────────────────────────────────
+// ─── Setup Engine — Setups (was Side B) ──────────────────────────────────────
 
 router.get('/setups', (req, res) => {
   const rows = db.prepare('SELECT * FROM trading_setups ORDER BY name').all();
@@ -64,7 +74,7 @@ router.post('/setups', (req, res) => {
     INSERT INTO trading_setups (id, name, description, indicator, entry_type, window_start, window_end, enabled, config)
     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
   `).run(id, name, description || '', indicator || null, entry_type || 'market', window_start || '9:35', window_end || '10:00', JSON.stringify(config || {}));
-  sideB.loadSetups();
+  setupEngine.loadSetups();
   res.json({ ok: true, id });
 });
 
@@ -86,43 +96,41 @@ router.patch('/setups/:id', (req, res) => {
     config ? JSON.stringify(config) : row.config,
     req.params.id
   );
-  sideB.loadSetups();
+  setupEngine.loadSetups();
   res.json({ ok: true });
 });
 
 router.delete('/setups/:id', (req, res) => {
   db.prepare('DELETE FROM trading_setups WHERE id = ?').run(req.params.id);
-  sideB.loadSetups();
+  setupEngine.loadSetups();
   res.json({ ok: true });
 });
 
-// ─── Side B — Signals ────────────────────────────────────────────────────────
+// ─── Setup Engine — Signals ──────────────────────────────────────────────────
 
-// Webhook endpoint: TradingView → server (for comparison)
 router.post('/webhook', (req, res) => {
   const payload = req.body;
   if (!payload?.ticker || !payload?.direction) {
     return res.status(400).json({ error: 'ticker and direction required' });
   }
-  const result = sideB.receiveWebhook(payload);
-  center.broadcast({ type: 'webhook_signal', ...result, payload, ts: Date.now() });
+  const result = setupEngine.receiveWebhook(payload);
+  router0.broadcast({ type: 'webhook_signal', ...result, payload, ts: Date.now() });
   res.json({ ok: true, ...result });
 });
 
-// Manual test: fire a signal (for debugging/testing without live data)
 router.post('/signal/test', (req, res) => {
   const { ticker, setupId, direction, sl, tp, entryType } = req.body;
   if (!ticker || !setupId || !direction || !sl || !tp) {
     return res.status(400).json({ error: 'ticker, setupId, direction, sl, tp required' });
   }
   const s = session.getSession();
-  sideB.onIndicatorFire(
+  setupEngine.onIndicatorFire(
     { ticker, setupId, direction, sl: parseFloat(sl), tp: parseFloat(tp), entryType: entryType || 'market' },
     s?.id || 'manual',
     (sig) => {
       const bid = req.body.bid || null;
       const ask = req.body.ask || null;
-      center.processSignal({ ...sig, sessionId: s?.id || 'manual' }, bid, ask);
+      router0.processSignal({ ...sig, sessionId: s?.id || 'manual' }, bid, ask);
     }
   );
   res.json({ ok: true });
@@ -138,21 +146,20 @@ router.get('/signals', (req, res) => {
   res.json(db.prepare(q).all(...params));
 });
 
-// End-of-day comparison report
 router.get('/comparison/:date', (req, res) => {
-  res.json(sideB.comparisonReport(req.params.date));
+  res.json(setupEngine.comparisonReport(req.params.date));
 });
 
-// ─── Side C ───────────────────────────────────────────────────────────────────
+// ─── Sizer (was Side C) ──────────────────────────────────────────────────────
 
 router.post('/size', (req, res) => {
-  const { entryPrice, sl, sideAMultiplier, score } = req.body;
+  const { entryPrice, sl, gateMultiplier, sideAMultiplier, score } = req.body;
   if (!entryPrice || !sl) return res.status(400).json({ error: 'entryPrice and sl required' });
   try {
-    const result = sideC.calculate({
+    const result = sizer.calculate({
       entryPrice: parseFloat(entryPrice),
       sl: parseFloat(sl),
-      sideAMultiplier: parseFloat(sideAMultiplier) || 1.0,
+      gateMultiplier: parseFloat(gateMultiplier ?? sideAMultiplier ?? 1.0),
       score: score != null ? parseFloat(score) : null,
     });
     res.json({ ok: true, ...result });
@@ -161,28 +168,26 @@ router.post('/size', (req, res) => {
   }
 });
 
-// ─── Orders (Center) ─────────────────────────────────────────────────────────
+// ─── Orders (Router) ─────────────────────────────────────────────────────────
 
 router.get('/orders', (req, res) => {
   const { date } = req.query;
-  const today = date || new Date().toISOString().slice(0, 10);
+  const today = date || toETDate(Date.now());
   const rows = db.prepare('SELECT * FROM trading_orders WHERE date = ? ORDER BY created_at DESC').all(today);
   res.json(rows.map(r => ({ ...r, alpaca_payload: JSON.parse(r.alpaca_payload) })));
 });
 
-// ─── Positions ────────────────────────────────────────────────────────────────
+// ─── Positions ───────────────────────────────────────────────────────────────
 
 router.get('/positions', (req, res) => {
   const rows = db.prepare("SELECT * FROM trading_positions ORDER BY opened_at DESC").all();
   res.json(rows);
 });
-
 router.get('/positions/open', (req, res) => {
-  res.json(center.listOpenPositions());
+  res.json(router0.listOpenPositions());
 });
-
 router.get('/positions/closed-today', (req, res) => {
-  res.json(center.listClosedPositionsToday());
+  res.json(router0.listClosedPositionsToday());
 });
 
 router.post('/positions', (req, res) => {
@@ -199,34 +204,30 @@ router.post('/positions', (req, res) => {
   res.json({ ok: true, id });
 });
 
-// POST /positions/:id/close — canonical close endpoint (accepts { exitPrice })
 router.post('/positions/:id/close', (req, res) => {
   const { exitPrice } = req.body || {};
-  const result = center.closePosition(req.params.id, parseFloat(exitPrice), 'manual');
+  const result = router0.closePosition(req.params.id, parseFloat(exitPrice), 'manual');
   if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
   res.json({ ok: true, position: result.position, pnl: result.position.pnl });
 });
-
-// Legacy PATCH endpoint kept for compatibility with any older UI code.
 router.patch('/positions/:id/close', (req, res) => {
   const { exitPrice } = req.body || {};
-  const result = center.closePosition(req.params.id, parseFloat(exitPrice), 'manual');
+  const result = router0.closePosition(req.params.id, parseFloat(exitPrice), 'manual');
   if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
   res.json({ ok: true, pnl: result.position.pnl });
 });
 
-// ─── Poller status ────────────────────────────────────────────────────────────
+// ─── Poller ──────────────────────────────────────────────────────────────────
 
 router.get('/poller/status', (req, res) => {
   res.json(barPoller.getStatus());
 });
 
-// ─── Backtest (Path B — user-triggered indicator verification) ────────────────
+// ─── Backtest (Path B) ───────────────────────────────────────────────────────
 
 router.get('/backtest/indicators', (req, res) => {
   res.json({ ok: true, indicators: backtest.listIndicators() });
 });
-
 router.post('/backtest', async (req, res) => {
   try {
     const result = await backtest.runBacktest(req.body || {});
@@ -237,7 +238,7 @@ router.post('/backtest', async (req, res) => {
   }
 });
 
-// ─── SSE — live notifications ─────────────────────────────────────────────────
+// ─── SSE — live notifications ────────────────────────────────────────────────
 
 router.get('/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -245,7 +246,7 @@ router.get('/stream', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
   res.write('data: {"type":"connected"}\n\n');
-  center.addListener(res);
+  router0.addListener(res);
 });
 
 module.exports = router;
