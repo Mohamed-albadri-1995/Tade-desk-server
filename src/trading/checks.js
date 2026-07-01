@@ -110,6 +110,15 @@ db.exec(`
 // old-logic evaluations with new-logic ones.
 try { db.exec('ALTER TABLE check_library ADD COLUMN version_id INTEGER NOT NULL DEFAULT 1'); } catch { /* already exists */ }
 
+// Direction column lets a check declare which signal side it applies to.
+//   'both'  — evaluated on every fire regardless of direction (rvol, sector hot)
+//   'long'  — bullish alignment; skipped on short signals (EMA9 > VWAP)
+//   'short' — bearish alignment; skipped on long signals (EMA9 < VWAP)
+// Skipped checks don't count against the grade — they're simply absent from
+// the trade card, matching the behavior a user would expect from a filter
+// that "doesn't apply here."
+try { db.exec("ALTER TABLE check_library ADD COLUMN direction TEXT NOT NULL DEFAULT 'both'"); } catch { /* already exists */ }
+
 // ─── Seeds ───────────────────────────────────────────────────────────────────
 // A small handful of common conditions so the library isn't empty on
 // first run. These are TYPICAL defaults for the ma13bounce style setup;
@@ -423,13 +432,13 @@ function seedDefaults() {
   const existing = new Set(db.prepare('SELECT check_key FROM check_library').all().map(r => r.check_key));
   const stmt = db.prepare(`
     INSERT INTO check_library
-      (id, check_key, label, category, section, description, condition, enabled, created_at, updated_at, version_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1)
+      (id, check_key, label, category, section, description, condition, enabled, created_at, updated_at, version_id, direction)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1, ?)
   `);
   const txn = db.transaction(() => {
     for (const c of SEED_CHECKS) {
       if (existing.has(c.check_key)) continue;
-      stmt.run(uuidv4(), c.check_key, c.label, c.category, c.section, c.description, JSON.stringify(c.condition), now, now);
+      stmt.run(uuidv4(), c.check_key, c.label, c.category, c.section, c.description, JSON.stringify(c.condition), now, now, c.direction || 'both');
     }
   });
   txn();
@@ -449,6 +458,7 @@ function _row(r) {
     description: r.description,
     condition:   safeParse(r.condition, {}),
     enabled:     r.enabled === 1,
+    direction:   r.direction || 'both',
     versionId:   r.version_id || 1,
     createdAt:   r.created_at,
     updatedAt:   r.updated_at,
@@ -471,10 +481,11 @@ function getCheck(id) {
   return _row(db.prepare('SELECT * FROM check_library WHERE id = ?').get(id));
 }
 
-function createCheck({ check_key, label, category, section = null, description = null, condition, enabled = true }) {
+function createCheck({ check_key, label, category, section = null, description = null, condition, enabled = true, direction = 'both' }) {
   if (!check_key) throw new Error('check_key required');
   if (!label)     throw new Error('label required');
   if (!['default', 'additional'].includes(category)) throw new Error("category must be 'default' or 'additional'");
+  if (!['both', 'long', 'short'].includes(direction)) throw new Error("direction must be 'both', 'long', or 'short'");
   if (!condition || typeof condition !== 'object') throw new Error('condition (JSON object) required');
   const validation = validateCondition(condition);
   if (!validation.ok) throw new Error(`condition invalid: ${validation.error}`);
@@ -482,9 +493,9 @@ function createCheck({ check_key, label, category, section = null, description =
   const now = Date.now();
   db.prepare(`
     INSERT INTO check_library
-      (id, check_key, label, category, section, description, condition, enabled, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, check_key, label, category, section, description, JSON.stringify(condition), enabled ? 1 : 0, now, now);
+      (id, check_key, label, category, section, description, condition, enabled, created_at, updated_at, direction)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, check_key, label, category, section, description, JSON.stringify(condition), enabled ? 1 : 0, now, now, direction);
   return getCheck(id);
 }
 
@@ -499,8 +510,10 @@ function updateCheck(id, patch) {
     description: patch.description !== undefined ? patch.description : cur.description,
     condition:   patch.condition   != null ? JSON.stringify(patch.condition) : cur.condition,
     enabled:     patch.enabled     != null ? (patch.enabled ? 1 : 0) : cur.enabled,
+    direction:   patch.direction   ?? cur.direction ?? 'both',
   };
   if (!['default', 'additional'].includes(next.category)) throw new Error("category must be 'default' or 'additional'");
+  if (!['both', 'long', 'short'].includes(next.direction)) throw new Error("direction must be 'both', 'long', or 'short'");
   if (patch.condition != null) {
     const v = validateCondition(patch.condition);
     if (!v.ok) throw new Error(`condition invalid: ${v.error}`);
@@ -511,9 +524,9 @@ function updateCheck(id, patch) {
   const nextVersion = conditionChanged ? (cur.version_id || 1) + 1 : (cur.version_id || 1);
   db.prepare(`
     UPDATE check_library
-       SET check_key=?, label=?, category=?, section=?, description=?, condition=?, enabled=?, updated_at=?, version_id=?
+       SET check_key=?, label=?, category=?, section=?, description=?, condition=?, enabled=?, updated_at=?, version_id=?, direction=?
      WHERE id=?
-  `).run(next.check_key, next.label, next.category, next.section, next.description, next.condition, next.enabled, Date.now(), nextVersion, id);
+  `).run(next.check_key, next.label, next.category, next.section, next.description, next.condition, next.enabled, Date.now(), nextVersion, next.direction, id);
   return getCheck(id);
 }
 
@@ -873,10 +886,20 @@ function evaluateCondition(node, ctx) {
  * All three arrays share the same shape:
  *   { key, label, section?, value, aligned }
  */
-function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicatorExtras = {}, scannerContext = {}, historySeries = {}, engineCtx = {} }) {
+function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicatorExtras = {}, scannerContext = {}, historySeries = {}, engineCtx = {}, direction = null }) {
   const ctx = buildIndicatorContext(bars, indicatorExtras);
   ctx.scanner = scannerContext;
   ctx.history = historySeries;
+
+  // Direction filter: a check with direction='long' shouldn't evaluate on a
+  // short signal (and vice versa). 'both' always applies. Missing direction
+  // == 'both' for back-compat with rows written before the column existed.
+  const dirMatches = (checkDir) => {
+    const d = checkDir || 'both';
+    if (d === 'both') return true;
+    if (!direction) return true;   // called without a direction; play it safe and include all
+    return d === String(direction).toLowerCase();
+  };
 
   // Mandatory — reuse the engine's debug() so the fired conditions are
   // recorded on the card without re-implementing them.
@@ -910,8 +933,12 @@ function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicato
     };
   };
 
-  const defaultChecks    = listChecks({ category: 'default',    enabledOnly: true }).map(evaluate);
-  const additionalChecks = setupId ? assignmentsForSetup(setupId).filter(r => r.enabled).map(evaluate) : [];
+  const defaultChecks    = listChecks({ category: 'default', enabledOnly: true })
+    .filter(r => dirMatches(r.direction))
+    .map(evaluate);
+  const additionalChecks = setupId
+    ? assignmentsForSetup(setupId).filter(r => r.enabled && dirMatches(r.direction)).map(evaluate)
+    : [];
 
   return { mandatoryChecks, defaultChecks, additionalChecks };
 }

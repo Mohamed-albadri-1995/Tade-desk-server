@@ -199,6 +199,7 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
       scannerContext:  scannerSnapshot || {},
       historySeries:   signal.history  || {},
       engineCtx:       { rvol: signal.rvol ?? null },
+      direction:       direction,
     });
     mandatoryChecks  = collected.mandatoryChecks.length  ? collected.mandatoryChecks  : mandatoryChecks;
     defaultChecks    = collected.defaultChecks;
