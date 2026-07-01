@@ -149,7 +149,8 @@ router.post('/signal/test', (req, res) => {
     (sig) => {
       const bid = req.body.bid || null;
       const ask = req.body.ask || null;
-      router0.processSignal({ ...sig, sessionId: s?.id || 'manual' }, bid, ask);
+      router0.processSignal({ ...sig, sessionId: s?.id || 'manual' }, bid, ask)
+        .catch(err => console.warn('[Trading] test-signal processSignal error:', err.message));
     }
   );
   res.json({ ok: true });
