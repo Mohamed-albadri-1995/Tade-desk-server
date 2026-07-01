@@ -247,6 +247,40 @@ router.get('/historical-cache/status', (req, res) => {
   res.json({ ok: true, ...historicalCache.getStatus() });
 });
 
+/**
+ * Debug helper: fetch N days of Alpaca 1-min bars for any ticker and
+ * return a count per date. Used to distinguish "our cache is broken"
+ * from "the ticker just doesn't trade every minute" — a well-known
+ * liquid stock (AAPL, SPY) should return ~390 bars/day.
+ *
+ * GET /api/trading/debug/fetch-bars?ticker=AAPL&days=5
+ */
+router.get('/debug/fetch-bars', async (req, res) => {
+  const ticker = String(req.query.ticker || '').toUpperCase();
+  const days = Math.max(1, Math.min(30, parseInt(req.query.days, 10) || 5));
+  if (!ticker) return res.status(400).json({ ok: false, error: 'ticker query param required' });
+
+  const { fetchIntradayBars } = require('../alpaca/client');
+  const { toETDate } = require('../utils/time');
+  const now = Date.now();
+  const out = { ticker, days, byDate: {}, total: 0 };
+  for (let d = days; d >= 1; d--) {
+    const dt = new Date(now - d * 24 * 3600 * 1000);
+    const iso = toETDate(dt.getTime());
+    const wday = new Date(iso + 'T12:00:00-05:00').getDay();
+    if (wday === 0 || wday === 6) { out.byDate[iso] = 'weekend-skip'; continue; }
+    try {
+      const map = await fetchIntradayBars([ticker], iso);
+      const n = (map[ticker] || []).length;
+      out.byDate[iso] = n;
+      out.total += n;
+    } catch (err) {
+      out.byDate[iso] = `error: ${err.message}`;
+    }
+  }
+  res.json({ ok: true, ...out });
+});
+
 // Live account balances — one row per enabled Alpaca broker profile.
 // Hits /v2/account synchronously so the numbers on-screen match what
 // Alpaca reports right now (not the sizer's cached copy).
