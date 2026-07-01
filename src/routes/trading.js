@@ -330,6 +330,41 @@ router.post('/checks/validate', (req, res) => {
   res.json({ ok: v.ok, error: v.error || null });
 });
 
+// Preview a candidate condition against a caller-supplied context (or a
+// default synthetic context) so the user can verify the JSON before saving.
+router.post('/checks/test', (req, res) => {
+  const body = req.body || {};
+  const defaultCtx = {
+    ind: {
+      close: 105, open: 104, high: 106, low: 103.5, volume: 250000,
+      vwap:  102, ema9: 104.8, ema13: 104.2, ema20: 103.1, ema50: 100,
+      sma5:  103, sma20: 101.5, pmHigh: 101, pmLow: 99, prevClose: 100,
+      rvol:  3.2, atr: 1.2,
+    },
+    scanner: {
+      regime: 'STRONG_UP', longTerm: 'BULLISH', midTerm: 'UPTREND',
+      shortTerm: 'BULLISH', secBias: 'BULLISH', secScore: 45,
+      secHot: true, sector: 'Technology', industry: 'Semiconductors',
+      themes: ['AI'], broadResolved: 'Technology', _score: 82,
+    },
+    bars: (() => {
+      const bs = [];
+      for (let i = 0; i < 30; i++) {
+        bs.push({ o: 100+i*0.1, h: 100.5+i*0.1, l: 99.5+i*0.1, c: 100.2+i*0.1, v: 10000+i*500 });
+      }
+      return bs;
+    })(),
+    history: {
+      ema9:  [102, 103, 103.5, 104.2, 104.8],
+      ema13: [101.5, 102, 102.5, 103, 104.2],
+      vwap:  [100, 100.5, 101, 101.5, 102],
+    },
+  };
+  const ctx = body.ctx || defaultCtx;
+  const result = checks.testCondition(body.condition, ctx);
+  res.json(result);
+});
+
 // Per-setup additional-check assignments
 router.get('/setups/:id/checks', (req, res) => {
   res.json({ ok: true, additional: checks.assignmentsForSetup(req.params.id) });

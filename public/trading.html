@@ -689,11 +689,13 @@ body {
             Ops: <code>gt ge lt le eq ne in and or not</code>.
           </div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="an-btn primary" onclick="saveCheck()">Save</button>
+          <button class="an-btn" onclick="testCheck()">Test</button>
           <button class="an-btn" onclick="closeCheckEditor()">Cancel</button>
           <span id="check-status" style="font-size:12px;color:var(--text3)"></span>
         </div>
+        <div id="check-test-result" style="display:none;margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:12px"></div>
       </div>
     </div>
   </div>
@@ -2191,6 +2193,36 @@ async function deleteCheck(id) {
   if (!confirm('Delete this check? (Also removes it from every setup that had it assigned as additional.)')) return;
   await fetch(`${API}/trading/checks/${id}`, { method: 'DELETE' });
   loadChecks();
+}
+
+async function testCheck() {
+  const result = document.getElementById('check-test-result');
+  let condition;
+  try { condition = JSON.parse(document.getElementById('check-condition').value); }
+  catch (err) {
+    result.style.display = 'block';
+    result.style.color = 'var(--red)';
+    result.textContent = 'Condition JSON invalid: ' + err.message;
+    return;
+  }
+  const r = await fetch(`${API}/trading/checks/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ condition }),
+  }).then(r => r.json());
+  result.style.display = 'block';
+  if (!r.ok) {
+    result.style.color = 'var(--red)';
+    result.textContent = 'Error: ' + r.error;
+    return;
+  }
+  const glyph = r.aligned === true ? '✓' : r.aligned === false ? '✗' : '?';
+  const color = r.aligned === true ? 'var(--green)' : r.aligned === false ? 'var(--red)' : 'var(--text3)';
+  result.style.color = color;
+  result.innerHTML =
+    `<strong style="font-size:14px">${glyph} ${r.aligned === true ? 'ALIGNED' : r.aligned === false ? 'NOT ALIGNED' : 'INDETERMINATE'}</strong>` +
+    `<span style="margin-left:12px;font-family:monospace;color:var(--text2)">${r.value || ''}</span>` +
+    `<div style="font-size:10px;color:var(--text3);margin-top:4px">Tested against a synthetic bullish context (ema9=104.8, vwap=102, secBias=BULLISH, secHot=true, _score=82). Live behaviour will use real data.</div>`;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

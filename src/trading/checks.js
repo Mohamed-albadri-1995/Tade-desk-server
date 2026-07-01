@@ -17,17 +17,32 @@
  *                    (setup_id, check_id) rows.
  *
  * Condition grammar (JSON):
- *   Value nodes:
- *     { "field":   "ema9"        }   ← indicator context
- *     { "ctx":     "secBias"     }   ← scanner context field (from r0)
- *     { "literal": 100           }
- *     { "slope":   "ema9", "bars": 5 } ← slope of series over last N bars
  *
- *   Operators:
+ *   Comparisons (return true/false):
  *     { "op": "gt|ge|lt|le|eq|ne", "left": …, "right": … }
- *     { "op": "and|or",            "operands": [ …, … ] }
- *     { "op": "not",               "operand": … }
- *     { "op": "in",                "left": …, "list": [ …, … ] }
+ *     { "op": "in",                "left": …, "list": [ … ] }
+ *
+ *   Combinators:
+ *     { "op": "and|or", "operands": [ …, … ] }
+ *     { "op": "not",    "operand":  … }
+ *
+ *   Value nodes (used as `left` / `right` / `operands`):
+ *     { "field":   "ema9"           }  ← indicator context
+ *     { "ctx":     "secBias"        }  ← scanner context field (from r0)
+ *     { "literal": 100              }
+ *     { "slope":   "ema9", "bars": 5 } ← slope of series over last N bars
+ *     { "history": "vwap", "barsAgo": 5 } ← value N bars ago
+ *     { "expr":    "add|sub|mul|div|min|max|abs|neg|pct_change|avg|weighted_avg", ... }
+ *
+ *   Expression forms (all return numbers):
+ *     { "expr": "add|sub|mul|div|min|max", "operands": [a, b, ...] }
+ *     { "expr": "abs|neg",                 "operand":  a }
+ *     { "expr": "pct_change", "series": "vwap", "bars": 5 }
+ *         → (value_now − value_5_bars_ago) / value_5_bars_ago
+ *     { "expr": "avg",  "series": "close", "bars": 5 }
+ *         → simple average of the series over the last N bars
+ *     { "expr": "weighted_avg", "series": "close", "bars": 5, "weights": [1,2,3,4,5] }
+ *         → weighted average; weights.length must equal bars, oldest first
  *
  * Available field names (indicators): close, open, high, low, volume,
  *   vwap, ema9, ema13, ema20, ema50, sma5, sma20, pmHigh, pmLow,
@@ -36,6 +51,29 @@
  * Available ctx names (scanner): regime, regimeLabel, longTerm, midTerm,
  *   shortTerm, secBias, secScore, secHot, sector, industry, themes,
  *   broadResolved, _score, screenerKeys, inShortlist.
+ *
+ * Example — "VWAP up-slope, custom equation":
+ *     Custom slope = (vwap now − vwap 5 bars ago) / vwap now × 100
+ *     Fires when it exceeds 0.05 % :
+ *     {
+ *       "op": "gt",
+ *       "left": {
+ *         "expr": "mul",
+ *         "operands": [
+ *           { "expr": "div",
+ *             "operands": [
+ *               { "expr": "sub", "operands": [
+ *                   { "field": "vwap" },
+ *                   { "history": "vwap", "barsAgo": 5 }
+ *               ]},
+ *               { "field": "vwap" }
+ *             ]
+ *           },
+ *           { "literal": 100 }
+ *         ]
+ *       },
+ *       "right": { "literal": 0.05 }
+ *     }
  */
 
 const { v4: uuidv4 } = require('uuid');
@@ -269,7 +307,8 @@ function setAssignmentsForSetup(setupId, checkIds) {
 
 const COMPARISON_OPS = new Set(['gt', 'ge', 'lt', 'le', 'eq', 'ne', 'in']);
 const COMBINATOR_OPS = new Set(['and', 'or', 'not']);
-const VALUE_KINDS    = new Set(['field', 'ctx', 'literal', 'slope']);
+const VALUE_KINDS    = new Set(['field', 'ctx', 'literal', 'slope', 'history', 'expr']);
+const EXPR_OPS       = new Set(['add', 'sub', 'mul', 'div', 'min', 'max', 'abs', 'neg', 'pct_change', 'avg', 'weighted_avg']);
 
 function validateCondition(node, path = '$') {
   if (!node || typeof node !== 'object') return { ok: false, error: `${path}: expected object` };
@@ -311,7 +350,33 @@ function validateValue(node, path) {
   if (!node || typeof node !== 'object') return { ok: false, error: `${path}: expected object` };
   const kinds = Object.keys(node).filter(k => VALUE_KINDS.has(k));
   if (kinds.length === 0) return { ok: false, error: `${path}: must have one of ${[...VALUE_KINDS].join('/')}` };
-  if (node.slope && node.bars == null) return { ok: false, error: `${path}.slope requires 'bars' (int ≥ 2)` };
+  if (node.slope && node.bars == null)       return { ok: false, error: `${path}.slope requires 'bars' (int ≥ 2)` };
+  if ('history' in node && node.barsAgo == null) return { ok: false, error: `${path}.history requires 'barsAgo' (int ≥ 0)` };
+  if ('expr' in node) {
+    if (!EXPR_OPS.has(node.expr)) return { ok: false, error: `${path}.expr must be one of: ${[...EXPR_OPS].join(', ')}` };
+    if (['abs', 'neg'].includes(node.expr)) {
+      if (!node.operand) return { ok: false, error: `${path}.${node.expr} requires 'operand'` };
+      return validateValue(node.operand, `${path}.operand`);
+    }
+    if (['pct_change', 'avg', 'weighted_avg'].includes(node.expr)) {
+      if (!node.series || typeof node.series !== 'string') return { ok: false, error: `${path}.${node.expr} requires string 'series'` };
+      if (!Number.isFinite(Number(node.bars)) || node.bars < 1) return { ok: false, error: `${path}.${node.expr} requires 'bars' ≥ 1` };
+      if (node.expr === 'weighted_avg') {
+        if (!Array.isArray(node.weights) || node.weights.length !== Number(node.bars)) {
+          return { ok: false, error: `${path}.weighted_avg 'weights' must be an array of length 'bars'` };
+        }
+      }
+      return { ok: true };
+    }
+    // Binary/nary ops
+    if (!Array.isArray(node.operands) || node.operands.length < 1) {
+      return { ok: false, error: `${path}.${node.expr}.operands must be a non-empty array` };
+    }
+    for (let i = 0; i < node.operands.length; i++) {
+      const v = validateValue(node.operands[i], `${path}.operands[${i}]`);
+      if (!v.ok) return v;
+    }
+  }
   return { ok: true };
 }
 
@@ -378,11 +443,120 @@ function slopeValue(ctx, seriesName, barCount) {
   return (lastV - first) / (barCount - 1);
 }
 
+/**
+ * Returns the value of `seriesName` at `barsAgo` bars back (0 = current bar).
+ *
+ * Prefers a per-series history array supplied by the indicator engine
+ * (ctx.history[seriesName]) because indicator values like EMA/VWAP aren't
+ * on the raw bars. Falls back to raw OHLCV fields for bar-level series.
+ */
+function historyValue(ctx, seriesName, barsAgo) {
+  const idx = Math.max(0, Math.floor(barsAgo));
+  const series = ctx.history?.[seriesName];
+  if (Array.isArray(series) && series.length > idx) {
+    return series[series.length - 1 - idx];
+  }
+  const bars = ctx.bars || [];
+  if (!bars.length || idx >= bars.length) return null;
+  const bar = bars[bars.length - 1 - idx];
+  if (!bar) return null;
+  switch (seriesName) {
+    case 'close':  return bar.c;
+    case 'open':   return bar.o;
+    case 'high':   return bar.h;
+    case 'low':    return bar.l;
+    case 'volume': return bar.v;
+    default:       return null;
+  }
+}
+
+function evalExpr(op, node, ctx) {
+  const val = n => Number(resolveValue(n, ctx));
+  switch (op) {
+    case 'add': {
+      const nums = (node.operands || []).map(val);
+      if (nums.some(n => !Number.isFinite(n))) return null;
+      return nums.reduce((a, b) => a + b, 0);
+    }
+    case 'sub': {
+      const nums = (node.operands || []).map(val);
+      if (nums.length === 0 || nums.some(n => !Number.isFinite(n))) return null;
+      return nums.slice(1).reduce((a, b) => a - b, nums[0]);
+    }
+    case 'mul': {
+      const nums = (node.operands || []).map(val);
+      if (nums.some(n => !Number.isFinite(n))) return null;
+      return nums.reduce((a, b) => a * b, 1);
+    }
+    case 'div': {
+      const nums = (node.operands || []).map(val);
+      if (nums.length === 0 || nums.some(n => !Number.isFinite(n))) return null;
+      let acc = nums[0];
+      for (let i = 1; i < nums.length; i++) {
+        if (nums[i] === 0) return null;
+        acc /= nums[i];
+      }
+      return acc;
+    }
+    case 'min': {
+      const nums = (node.operands || []).map(val).filter(Number.isFinite);
+      return nums.length ? Math.min(...nums) : null;
+    }
+    case 'max': {
+      const nums = (node.operands || []).map(val).filter(Number.isFinite);
+      return nums.length ? Math.max(...nums) : null;
+    }
+    case 'abs': {
+      const v = val(node.operand);
+      return Number.isFinite(v) ? Math.abs(v) : null;
+    }
+    case 'neg': {
+      const v = val(node.operand);
+      return Number.isFinite(v) ? -v : null;
+    }
+    case 'pct_change': {
+      const bars = Math.max(1, Number(node.bars) | 0);
+      const now  = historyValue(ctx, node.series, 0);
+      const then = historyValue(ctx, node.series, bars);
+      if (!Number.isFinite(now) || !Number.isFinite(then) || then === 0) return null;
+      return (now - then) / then;
+    }
+    case 'avg': {
+      const bars = Math.max(1, Number(node.bars) | 0);
+      let sum = 0;
+      for (let i = 0; i < bars; i++) {
+        const v = historyValue(ctx, node.series, i);
+        if (!Number.isFinite(v)) return null;
+        sum += v;
+      }
+      return sum / bars;
+    }
+    case 'weighted_avg': {
+      const bars = Math.max(1, Number(node.bars) | 0);
+      const weights = node.weights;
+      if (!Array.isArray(weights) || weights.length !== bars) return null;
+      let sum = 0, wsum = 0;
+      for (let i = 0; i < bars; i++) {
+        // weights are oldest-first, so weights[0] pairs with the oldest bar.
+        const v = historyValue(ctx, node.series, bars - 1 - i);
+        if (!Number.isFinite(v)) return null;
+        sum  += v * Number(weights[i]);
+        wsum += Number(weights[i]);
+      }
+      return wsum > 0 ? sum / wsum : null;
+    }
+  }
+  return null;
+}
+
 function resolveValue(node, ctx) {
+  if (!node || typeof node !== 'object') return null;
   if ('field'   in node) return fieldValue(ctx, node.field);
   if ('ctx'     in node) return ctxValue(ctx, node.ctx);
   if ('literal' in node) return node.literal;
   if ('slope'   in node) return slopeValue(ctx, node.slope, Math.max(2, node.bars | 0));
+  if ('history' in node) return historyValue(ctx, node.history, node.barsAgo | 0);
+  if ('expr'    in node) return evalExpr(node.expr, node, ctx);
   return null;
 }
 
@@ -495,6 +669,33 @@ function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicato
   return { mandatoryChecks, defaultChecks, additionalChecks };
 }
 
+/**
+ * Preview a condition against a caller-supplied context.
+ *
+ * `ctx` shape:
+ *   {
+ *     ind:      { close, ema9, vwap, ... },
+ *     scanner:  { secBias, sector, ... },
+ *     bars:     [ { c, o, h, l, v }, ... ],
+ *     history:  { ema13: [...], vwap: [...] }
+ *   }
+ *
+ * All fields optional. Returns { aligned, value, resolved } where
+ * `resolved` is a small trace of the left/right sides for debugging.
+ */
+function testCondition(condition, ctx = {}) {
+  const validation = validateCondition(condition);
+  if (!validation.ok) return { ok: false, error: validation.error };
+  const filledCtx = {
+    bars:    ctx.bars    || [],
+    ind:     ctx.ind     || {},
+    scanner: ctx.scanner || {},
+    history: ctx.history || {},
+  };
+  const result = evaluateCondition(condition, filledCtx);
+  return { ok: true, aligned: result.aligned, value: result.value };
+}
+
 module.exports = {
   // Library
   listChecks,
@@ -510,4 +711,5 @@ module.exports = {
   evaluateCondition,
   buildIndicatorContext,
   collectChecksForFire,
+  testCondition,
 };
