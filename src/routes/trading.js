@@ -35,6 +35,12 @@ router.post('/session/pause', (req, res) => {
 router.post('/session/resume', (req, res) => {
   res.json(session.resume());
 });
+router.post('/session/refresh-setups', async (req, res) => {
+  res.json(await session.refreshSetups());
+});
+router.post('/session/refresh-shortlist', async (req, res) => {
+  res.json(await session.refreshShortlist());
+});
 router.get('/session', (req, res) => {
   const s = session.getSession();
   res.json(s || { status: 'idle' });
@@ -100,12 +106,22 @@ router.patch('/setups/:id', (req, res) => {
     req.params.id
   );
   setupEngine.loadSetups();
+  // If a session is running, hot-reload the poller so the change takes
+  // effect on the next tick without a pause/resume.
+  if (session.isRunning()) {
+    try { session.refreshSetups(); } catch { /* non-fatal */ }
+  }
   res.json({ ok: true });
 });
 
 router.delete('/setups/:id', (req, res) => {
   db.prepare('DELETE FROM trading_setups WHERE id = ?').run(req.params.id);
   setupEngine.loadSetups();
+  // If a session is running, hot-reload the poller so the change takes
+  // effect on the next tick without a pause/resume.
+  if (session.isRunning()) {
+    try { session.refreshSetups(); } catch { /* non-fatal */ }
+  }
   res.json({ ok: true });
 });
 

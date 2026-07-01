@@ -245,26 +245,45 @@ function _classifySetup(expectancyR, winRate, n, minTrades) {
 }
 
 /**
- * Multiplier the setup contributes to base position size. Derived from
- * the setup's expectancy grade so an A+ setup runs bigger than a C setup.
- * Kill switch: expectancy < killThreshold over enough samples returns 0.
+ * Multiplier the setup contributes to base position size.
+ *
+ * Design (per user's rule): default is 1.0 and stays 1.0 until we have
+ * enough closed trades on this setup to trust an expectancy measurement.
+ * Only once the sample size crosses `grading_min_setup_trades` do we
+ * start to scale (or, at the extreme, kill).
+ *
+ * That means a brand-new setup runs at its full configured risk; it
+ * doesn't get punished for having no history yet. Only once the data
+ * says something meaningful does the multiplier move away from 1.0.
  */
 function setupSizeMultiplier(setupId, opts = {}) {
   const s = setupExpectancy(setupId, opts);
-  const minTrades   = _getIntSetting('grading_min_setup_trades', 20);
-  const killR       = _getSetting('grading_kill_expectancy_r', -0.5);
-  const killMinTr   = _getIntSetting('grading_kill_min_trades', 30);
-  if (s.n >= killMinTr && s.expectancyR != null && s.expectancyR <= killR) {
-    return { multiplier: 0, reason: 'kill-switch: negative expectancy', stats: s };
+  const minTrades = _getIntSetting('grading_min_setup_trades', 20);
+  const killR     = _getSetting('grading_kill_expectancy_r', -0.5);
+  const killMinTr = _getIntSetting('grading_kill_min_trades', 30);
+
+  // Bootstrap guard: not enough data → neutral multiplier, no adjustment.
+  if (!Number.isFinite(s.expectancyR) || s.n < minTrades) {
+    return {
+      multiplier: 1.0,
+      reason:     `bootstrap: ${s.n}/${minTrades} closed trades — multiplier held at 1.0×`,
+      stats:      s,
+    };
   }
+
+  // Kill switch: enough evidence that the setup is losing money.
+  if (s.n >= killMinTr && s.expectancyR <= killR) {
+    return { multiplier: 0, reason: 'kill-switch: negative expectancy over threshold', stats: s };
+  }
+
+  // Enough data — scale by the setup's letter grade.
   const table = {
-    'A+':                1.20,
-    'A':                 1.00,
-    'B':                 0.75,
-    'B (bootstrapping)': 0.50,
-    'C':                 0.40,
+    'A+': 1.20,
+    'A':  1.00,
+    'B':  0.75,
+    'C':  0.40,
   };
-  return { multiplier: table[s.grade] ?? 0.75, reason: `setup grade ${s.grade}`, stats: s };
+  return { multiplier: table[s.grade] ?? 1.0, reason: `setup grade ${s.grade}`, stats: s };
 }
 
 // ─── Learning: per-check delta expectancy ────────────────────────────────────

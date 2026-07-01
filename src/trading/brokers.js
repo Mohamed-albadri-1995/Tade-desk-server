@@ -33,17 +33,28 @@ db.exec(`
 
 const VALID_TYPES = ['paper', 'alpaca'];
 
-function _row(r) {
+function _row(r, opts = {}) {
   if (!r) return null;
+  const cfg = safeParse(r.config);
+  // Mask secrets in list responses — the raw config is still available
+  // for internal callers via getRaw(id).
+  const config = opts.masked === false ? cfg : maskSecrets(cfg);
   return {
     id:        r.id,
     name:      r.name,
     type:      r.type,
-    config:    safeParse(r.config),
+    config,
     enabled:   r.enabled === 1,
     isDefault: r.is_default === 1,
     createdAt: r.created_at,
   };
+}
+
+function maskSecrets(cfg) {
+  const out = { ...cfg };
+  if (out.secret) out.secret = 'set';
+  // Key stays visible so the user can eyeball which profile is which.
+  return out;
 }
 
 function safeParse(s) {
@@ -92,10 +103,14 @@ function create({ name, type, config = {}, enabled = true, isDefault = false }) 
 function update(id, patch) {
   const row = db.prepare('SELECT * FROM trading_brokers WHERE id = ?').get(id);
   if (!row) return null;
+  // Merge config on top of the existing one so a partial patch
+  // (e.g. no `secret` field) doesn't wipe fields the caller didn't touch.
+  const existingCfg = safeParse(row.config);
+  const mergedCfg   = patch.config != null ? { ...existingCfg, ...patch.config } : existingCfg;
   const next = {
     name:      patch.name    ?? row.name,
     type:      patch.type    ?? row.type,
-    config:    patch.config  != null ? JSON.stringify(patch.config) : row.config,
+    config:    JSON.stringify(mergedCfg),
     enabled:   patch.enabled != null ? (patch.enabled ? 1 : 0) : row.enabled,
     isDefault: patch.isDefault != null ? (patch.isDefault ? 1 : 0) : row.is_default,
   };
@@ -115,14 +130,23 @@ function remove(id) {
 
 /**
  * The Router asks for "who should this order be sent to." Returns the
- * currently enabled profiles. If the user hasn't enabled any, this falls
- * back to the seeded Local Paper profile so the pipeline never routes
- * an order into nowhere.
+ * currently enabled profiles WITH raw config (unmasked) so the caller
+ * has the real key/secret needed to actually submit.
  */
 function getActive() {
-  const active = db.prepare("SELECT * FROM trading_brokers WHERE enabled = 1").all().map(_row);
-  if (active.length > 0) return active;
-  return db.prepare("SELECT * FROM trading_brokers WHERE type = 'paper' LIMIT 1").all().map(_row);
+  const rows = db.prepare("SELECT * FROM trading_brokers WHERE enabled = 1").all();
+  const mapped = rows.map(r => _row(r, { masked: false }));
+  if (mapped.length > 0) return mapped;
+  return db.prepare("SELECT * FROM trading_brokers WHERE type = 'paper' LIMIT 1")
+    .all().map(r => _row(r, { masked: false }));
+}
+
+/**
+ * Unmasked lookup for internal callers (e.g. when actually submitting
+ * to Alpaca and we need the real secret). NEVER expose over HTTP.
+ */
+function getRaw(id) {
+  return _row(db.prepare('SELECT * FROM trading_brokers WHERE id = ?').get(id), { masked: false });
 }
 
 /**
@@ -154,6 +178,7 @@ async function send(broker, order) {
 module.exports = {
   list,
   get,
+  getRaw,
   create,
   update,
   remove,

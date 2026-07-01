@@ -15,6 +15,7 @@ const { fetchIntradayBars } = require('../alpaca/client');
 const { toETDate } = require('../utils/time');
 const r0 = require('../r0/registry');
 const volumeBaseline = require('./volumeBaseline');
+const positionMonitor = require('./positionMonitor');
 const { AlpacaStream } = require('./alpacaStream');
 
 // ─── Time-window helpers ─────────────────────────────────────────────────────
@@ -71,6 +72,14 @@ function listEngines() {
 let _pollingInterval = null;
 let _wsClient        = null;
 let _firedThisSession = new Set();
+
+// Live-mutable working copies of setups + tickers. Session calls
+// updateSetups() and updateTickers() to hot-reload without restarting
+// the whole loop.
+let _currentSetups  = [];
+let _currentTickers = [];
+let _currentSessionId = null;
+let _currentOnFire    = null;
 
 // Only populated in websocket mode — rolling per-ticker bar buffer.
 const _barBuffer = new Map(); // ticker → bar[]
@@ -185,6 +194,13 @@ function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
   }
 
   _status.tickerResults[ticker] = tickerStatus;
+
+  // After the indicator eval, check open positions for this ticker
+  // against the latest bar — auto-close on SL / TP hits (paper mode).
+  if (latestBar) {
+    try { positionMonitor.checkBar(ticker, latestBar); }
+    catch (e) { console.warn('[BarPoller] positionMonitor error:', e.message); }
+  }
 }
 
 // ─── HTTP polling mode ──────────────────────────────────────────────────────
@@ -196,17 +212,21 @@ function _startPollingMode(sessionId, tickers, setups, onSignalFired) {
     _status.pollCount++;
     _status.lastPollError = null;
 
+    // Pick up hot-reloaded lists on every tick (no restart needed).
+    const activeTickers = _currentTickers.length ? _currentTickers : tickers;
+    const activeSetups  = _currentSetups.length  ? _currentSetups  : setups;
+
     let barsByTicker;
     try {
-      barsByTicker = await fetchIntradayBars(tickers, date);
+      barsByTicker = await fetchIntradayBars(activeTickers, date);
     } catch (e) {
       _status.lastPollError = e.message;
       console.warn('[BarPoller] Alpaca fetch failed:', e.message);
       return;
     }
 
-    for (const ticker of tickers) {
-      _evaluateTicker(ticker, barsByTicker[ticker], setups, sessionId, onSignalFired);
+    for (const ticker of activeTickers) {
+      _evaluateTicker(ticker, barsByTicker[ticker], activeSetups, sessionId, onSignalFired);
     }
   }
 
@@ -237,13 +257,17 @@ function _startWsMode(sessionId, tickers, setups, onSignalFired) {
   _wsClient = new AlpacaStream({
     tickers,
     onBar: (ticker, bar) => {
+      // Skip bars for tickers that have been hot-removed since subscribe.
+      const activeTickers = _currentTickers.length ? _currentTickers : tickers;
+      if (!activeTickers.includes(ticker)) return;
+      const activeSetups  = _currentSetups.length  ? _currentSetups  : setups;
       const buf = _barBuffer.get(ticker) || [];
       buf.push(bar);
       if (buf.length > MAX_BUFFERED_BARS) buf.shift();
       _barBuffer.set(ticker, buf);
       _status.lastPollAt = Date.now();
       _status.pollCount++;
-      _evaluateTicker(ticker, buf, setups, sessionId, onSignalFired);
+      _evaluateTicker(ticker, buf, activeSetups, sessionId, onSignalFired);
     },
     onError: (err) => {
       _status.lastPollError = err.message || String(err);
@@ -274,6 +298,10 @@ function start(sessionId, tickers, setups, onSignalFired) {
   _status.lastPollError = null;
   _status.pollCount = 0;
   _status.tickerResults = {};
+  _currentTickers   = [...tickers];
+  _currentSetups    = [...setups];
+  _currentSessionId = sessionId;
+  _currentOnFire    = onSignalFired;
 
   if (!tickers.length) return;
 
@@ -297,8 +325,59 @@ function stop() {
   }
   _firedThisSession.clear();
   _barBuffer.clear();
+  _currentTickers = [];
+  _currentSetups  = [];
+  _currentSessionId = null;
+  _currentOnFire    = null;
   _status.running = false;
   console.log('[BarPoller] Stopped');
 }
 
-module.exports = { start, stop, getEngine, getStatus, listEngines, getLatestQuote };
+/**
+ * Hot-reload the setup list without restarting the whole loop. The next
+ * evaluation tick will use the new list. If a setup was removed we ALSO
+ * drop its per-fire dedup entries so an added-then-removed-then-re-added
+ * setup can fire again cleanly.
+ */
+function updateSetups(setups) {
+  const oldIds = new Set(_currentSetups.map(s => s.id));
+  const newIds = new Set(setups.map(s => s.id));
+  _currentSetups = [...setups];
+  _status.setupNames = setups.map(s => s.name);
+  // Purge dedup keys tied to setups that are no longer active.
+  for (const key of Array.from(_firedThisSession)) {
+    const setupId = key.split(':')[1];
+    if (!newIds.has(setupId)) _firedThisSession.delete(key);
+  }
+  const added   = [...newIds].filter(id => !oldIds.has(id)).length;
+  const removed = [...oldIds].filter(id => !newIds.has(id)).length;
+  console.log(`[BarPoller] Setups hot-reloaded (+${added}, -${removed})`);
+}
+
+/**
+ * Hot-reload the ticker list. In WS mode this re-connects (simplest
+ * correct behaviour); in HTTP mode the next poll picks up the change.
+ * Drops the bar buffer for tickers that were removed.
+ */
+function updateTickers(tickers) {
+  const oldSet = new Set(_currentTickers);
+  const newSet = new Set(tickers);
+  _currentTickers = [...tickers];
+  _status.tickers = [...tickers];
+  for (const t of oldSet) if (!newSet.has(t)) _barBuffer.delete(t);
+  const added   = [...newSet].filter(t => !oldSet.has(t)).length;
+  const removed = [...oldSet].filter(t => !newSet.has(t)).length;
+  console.log(`[BarPoller] Tickers hot-reloaded (+${added}, -${removed})`);
+  // In WS mode we need to re-subscribe. Simplest reliable path: tear
+  // down and restart the stream. HTTP mode picks up new tickers on the
+  // next poll cycle — no restart needed.
+  if (_status.source === 'websocket' && _wsClient) {
+    try { _wsClient.stop(); } catch { /* ignore */ }
+    _wsClient = null;
+    if (_currentSessionId && _currentOnFire) {
+      _startWsMode(_currentSessionId, _currentTickers, _currentSetups, _currentOnFire);
+    }
+  }
+}
+
+module.exports = { start, stop, getEngine, getStatus, listEngines, getLatestQuote, updateSetups, updateTickers };

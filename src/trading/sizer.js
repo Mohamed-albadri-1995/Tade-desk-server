@@ -97,7 +97,7 @@ function currentOpenExposure() {
  * @param {string|null} params.setupGrade - historical setup grade A+/A/B/C (null = no adjustment)
  * @returns {object} { shares, dollarRisk, positionValue, riskPct, equity, ...inputs }
  */
-function calculate({ entryPrice, sl, gateMultiplier = 1.0, score = null, setupGrade = null, sideAMultiplier }) {
+function calculate({ entryPrice, sl, gateMultiplier = 1.0, score = null, setupGrade = null, setupMultiplier = 1.0, sideAMultiplier }) {
   // Accept the old sideAMultiplier name for backwards compatibility with
   // any lingering caller until they're all migrated.
   if (gateMultiplier == null && sideAMultiplier != null) gateMultiplier = sideAMultiplier;
@@ -110,9 +110,12 @@ function calculate({ entryPrice, sl, gateMultiplier = 1.0, score = null, setupGr
   const s = getSettings();
   const scoreMult = scoreMultiplier(score, s);
   const gradeMult = GRADE_MULTIPLIERS[setupGrade] ?? 1.0;
+  // Setup-level multiplier is 1.0 unless the grading engine has seen
+  // enough closed trades to justify a change (bootstrap guardrail).
+  const setupMult = Number.isFinite(setupMultiplier) ? setupMultiplier : 1.0;
 
   const riskDollars = Math.min(
-    s.equity * (s.riskPct / 100) * gateMultiplier * scoreMult * gradeMult,
+    s.equity * (s.riskPct / 100) * gateMultiplier * scoreMult * gradeMult * setupMult,
     s.maxDollarRisk
   );
 
@@ -143,6 +146,7 @@ function calculate({ entryPrice, sl, gateMultiplier = 1.0, score = null, setupGr
     gateMultiplier,
     scoreMultiplier: scoreMult,
     gradeMultiplier: gradeMult,
+    setupMultiplier: setupMult,
     setupGrade: setupGrade || null,
     riskPct: s.riskPct,
     equity: s.equity,

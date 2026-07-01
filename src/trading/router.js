@@ -158,6 +158,17 @@ function buildAlpacaPayload({ ticker, direction, shares, entryType, entryPrice, 
 async function processSignal(signal, currentBid = null, currentAsk = null) {
   const { signalId, ticker, setupId, setupName, direction, entryType, sl, tp, firedAt, gate, entry: signalEntry } = signal;
 
+  // Which "account" to tag this card with, so the grading engine can
+  // learn per account (e.g. Alpaca Paper vs Alpaca Live separately).
+  // The convention: use the default broker's name. Users who want
+  // per-account learning simply flip which profile is the default.
+  if (!signal.account) {
+    try {
+      const defaultBroker = brokers.list().find(b => b.isDefault) || brokers.getActive()[0];
+      if (defaultBroker) signal.account = defaultBroker.name;
+    } catch { /* no brokers table yet — leave null */ }
+  }
+
   // Fresh-fetch the scanner snapshot so the card records EXACTLY what
   // the scanner knew at the moment of fire. Non-blocking: on failure
   // we fall back to the gate cache (which is up to 30 s old).
@@ -240,12 +251,21 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
     sizingError = 'No entry price available (no bid/ask, no signal entry)';
   } else {
     try {
+      // Setup-level expectancy multiplier (default 1.0; only moves once
+      // we have enough closed trades — see grading.setupSizeMultiplier).
+      let setupMult = 1.0;
+      try {
+        const sm = grading.setupSizeMultiplier(setupId, { account: signal.account || null });
+        setupMult = sm.multiplier;
+      } catch { /* keep 1.0 */ }
+
       sizing = sizer.calculate({
         entryPrice: sizingEntry,
         sl,
         gateMultiplier: gate?.multiplier ?? 1.0,
         score: gate?.score ?? null,
         setupGrade,
+        setupMultiplier: setupMult,
       });
     } catch (e) {
       sizingError = e.message;

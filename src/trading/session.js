@@ -142,7 +142,9 @@ async function start() {
     const minutesSince935 = (parseInt(etHour) - 9) * 60 + parseInt(etMin) - 35;
     const minutesSince1000 = (parseInt(etHour) - 10) * 60 + parseInt(etMin);
     if (minutesSince935 >= 0 && minutesSince1000 < 0) {
-      pollContext(tickers);
+      pollContext(_session?.tickers || tickers);
+      refreshSetups().catch(() => {});
+      refreshShortlist().catch(() => {});
     }
   }, 30000);
 
@@ -166,6 +168,50 @@ async function start() {
 
   console.log(`[TradingSession] Started ${sessionId} with ${tickers.length} tickers`);
   return { ok: true, sessionId, tickers, shortlist };
+}
+
+// ─── Hot reload (setups + tickers) ───────────────────────────────────────────
+
+/**
+ * Re-read enabled setups from the DB and push them into the bar poller
+ * without restarting the whole loop.
+ */
+async function refreshSetups() {
+  if (!isActive() && !isPaused()) return { ok: false, reason: 'No session running' };
+  setupEngine.loadSetups();
+  const setups = setupEngine.getActiveSetupsArray();
+  barPoller.updateSetups(setups);
+  return { ok: true, count: setups.length };
+}
+
+/**
+ * Re-pull today's shortlist and push new tickers into the poller.
+ * Same-list runs are cheap (no-op). Added tickers get the volume baseline
+ * built in the background so their rvol works quickly.
+ */
+async function refreshShortlist() {
+  if (!isActive() && !isPaused()) return { ok: false, reason: 'No session running' };
+  try {
+    const entry = await fetchShortlist();
+    const items = entry?.items || [];
+    const tickers = items.map(i => i.ticker).filter(Boolean);
+    if (!_session) return { ok: false, reason: 'No session record' };
+    // Prime new tickers on the Market Gate so the fail-safe (unknown =>
+    // block) doesn't kick in on the very next fire.
+    for (const t of tickers) {
+      if (!marketGate.get(t)) marketGate.update(t, {}, null, null);
+    }
+    _session.tickers = tickers;
+    _session.shortlist = items;
+    barPoller.updateTickers(tickers);
+    volumeBaseline.ensureBuilt(tickers, toETDate(Date.now())).catch(() => {});
+    // Kick a fresh context poll so the Market Gate for the new tickers
+    // fills in immediately rather than waiting up to 30 s.
+    pollContext(tickers).catch(() => {});
+    return { ok: true, count: tickers.length };
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
 }
 
 // ─── Pause / Resume ──────────────────────────────────────────────────────────
@@ -257,4 +303,4 @@ setInterval(() => {
   }
 }, 20000);
 
-module.exports = { start, end, pause, resume, getSession, isActive, isPaused, isRunning, isGateReady, pollContext };
+module.exports = { start, end, pause, resume, getSession, isActive, isPaused, isRunning, isGateReady, pollContext, refreshSetups, refreshShortlist };
