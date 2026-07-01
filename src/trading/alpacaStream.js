@@ -17,17 +17,8 @@ const RECONNECT_MIN_MS  = 2_000;
 const RECONNECT_MAX_MS  = 30_000;
 
 function getCredentials() {
-  const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key IN ('alpacaApiKey','alpacaApiSecret')")
-    .all();
-  const creds = {};
-  for (const r of rows) creds[r.key] = r.value;
-  if (creds.alpacaApiKey && creds.alpacaApiSecret) {
-    return { key: creds.alpacaApiKey, secret: creds.alpacaApiSecret };
-  }
-  // Fall back to an enabled Alpaca broker profile — same reason as
-  // alpaca/client.js: broker profiles and settings are separate stores
-  // and the user might only have populated one.
+  // Broker profile first — matches alpaca/client.js precedence so bar
+  // polling and the WebSocket stream never disagree on which creds to use.
   const profile = db.prepare(`
     SELECT config FROM trading_brokers
      WHERE type = 'alpaca' AND enabled = 1
@@ -39,7 +30,15 @@ function getCredentials() {
     try { cfg = JSON.parse(profile.config || '{}'); } catch { /* ignore */ }
     if (cfg.key && cfg.secret) return { key: cfg.key, secret: cfg.secret };
   }
-  throw new Error('Alpaca credentials not set — add them in Settings > API Keys, or configure an Alpaca broker profile');
+  const rows = db
+    .prepare("SELECT key, value FROM settings WHERE key IN ('alpacaApiKey','alpacaApiSecret')")
+    .all();
+  const creds = {};
+  for (const r of rows) creds[r.key] = r.value;
+  if (creds.alpacaApiKey && creds.alpacaApiSecret) {
+    return { key: creds.alpacaApiKey, secret: creds.alpacaApiSecret };
+  }
+  throw new Error('Alpaca credentials not set — configure an Alpaca broker profile, or add them in Settings > API Keys');
 }
 
 function getFeedUrl() {

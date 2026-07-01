@@ -11,16 +11,10 @@ function getAccountBaseUrl() {
 }
 
 function getCredentials() {
-  // Primary: settings-based creds (legacy Settings > API Keys path).
-  const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('alpacaApiKey','alpacaApiSecret')").all();
-  const creds = {};
-  for (const r of rows) creds[r.key] = r.value;
-  if (creds.alpacaApiKey && creds.alpacaApiSecret) {
-    return { key: creds.alpacaApiKey, secret: creds.alpacaApiSecret };
-  }
-  // Fallback: an enabled Alpaca broker profile — the user might have
-  // configured creds only there (they're two separate credential stores).
-  // Prefer default profile, then any enabled Alpaca profile.
+  // Primary: an enabled Alpaca broker profile. This is the modern path
+  // and the one the UI now steers users toward, so it wins when it
+  // exists — otherwise a stale settings-based key silently kept
+  // shadowing the fresh broker-profile one and producing 401s.
   const profile = db.prepare(`
     SELECT config FROM trading_brokers
      WHERE type = 'alpaca' AND enabled = 1
@@ -34,7 +28,14 @@ function getCredentials() {
       return { key: cfg.key, secret: cfg.secret };
     }
   }
-  throw new Error('Alpaca credentials not set — add them in Settings > API Keys, or configure an Alpaca broker profile');
+  // Legacy fallback: settings-based creds.
+  const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('alpacaApiKey','alpacaApiSecret')").all();
+  const creds = {};
+  for (const r of rows) creds[r.key] = r.value;
+  if (creds.alpacaApiKey && creds.alpacaApiSecret) {
+    return { key: creds.alpacaApiKey, secret: creds.alpacaApiSecret };
+  }
+  throw new Error('Alpaca credentials not set — configure an Alpaca broker profile, or add them in Settings > API Keys');
 }
 
 function authHeaders() {
@@ -57,7 +58,13 @@ async function fetchAllPages(url, params) {
     const res = await fetch(`${url}?${qs}`, { headers: authHeaders() });
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`Alpaca API error ${res.status}: ${body}`);
+      // Common failure modes get plain-language hints. Everything else
+      // falls through with the raw body attached for debugging.
+      let hint = '';
+      if (res.status === 401)      hint = ' — credentials rejected. Check the Alpaca broker profile (Brokers tab) has a valid paper API key + secret.';
+      else if (res.status === 402) hint = ' — subscription required. SIP feed needs a paid Alpaca subscription; switch to IEX in Trading Settings.';
+      else if (res.status === 403) hint = ' — forbidden. The key may lack market-data access for the requested feed.';
+      throw new Error(`Alpaca API error ${res.status}${hint}\n${body}`);
     }
     const data = await res.json();
     for (const [ticker, bars] of Object.entries(data.bars || {})) {
