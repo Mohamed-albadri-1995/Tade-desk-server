@@ -492,13 +492,14 @@ function accountSummary({ from = null, to = null, account = null } = {}) {
  * Recent trade cards for the viewer — one row per card, no checks joined.
  * `limit` caps output; filters are all optional and additive.
  */
-function listCards({ limit = 50, setupId = null, ticker = null, from = null, to = null } = {}) {
+function listCards({ limit = 50, setupId = null, ticker = null, from = null, to = null, account = null } = {}) {
   const params = [];
   const wheres = [];
   if (setupId) { wheres.push('setup_id = ?'); params.push(setupId); }
   if (ticker)  { wheres.push('ticker = ?');   params.push(ticker.toUpperCase()); }
   if (from)    { wheres.push('date >= ?');    params.push(from); }
   if (to)      { wheres.push('date <= ?');    params.push(to); }
+  if (account) { wheres.push('account = ?');  params.push(account); }
   const whereSql = wheres.length ? 'WHERE ' + wheres.join(' AND ') : '';
   const rows = db.prepare(`
     SELECT id, date, ticker, setup_id, direction, account, entry_price, exit_price,

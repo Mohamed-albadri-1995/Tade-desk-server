@@ -330,12 +330,27 @@ body {
   <!-- POSITIONS TAB -->
   <div class="tab-pane" id="tab-positions">
     <div class="panel">
+      <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Account Balances</span>
+        <button class="an-btn" onclick="loadAccountBalances()" style="padding:3px 10px;font-size:11px">Refresh</button>
+      </div>
+      <div id="account-balances" style="font-size:12px">
+        <div style="color:var(--text3)">Loading…</div>
+      </div>
+    </div>
+    <div class="panel">
       <div class="panel-title">Today's P&amp;L</div>
       <div id="positions-pnl" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
         <span>Realized: <strong id="pnl-realized" style="color:var(--text)">$0.00</strong></span>
         <span>Open positions: <strong id="pnl-open-count" style="color:var(--text)">0</strong></span>
         <span>Closed today: <strong id="pnl-closed-count" style="color:var(--text)">0</strong></span>
         <span style="color:var(--text3)">Daily loss limit: <strong id="pnl-daily-limit">—</strong></span>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text3)">Filter by account:</span>
+        <select id="positions-account-filter" onchange="loadPositions()" style="background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:4px 8px;color:var(--text);font-family:inherit;font-size:11px">
+          <option value="">All accounts</option>
+        </select>
       </div>
     </div>
     <div class="panel">
@@ -367,6 +382,12 @@ body {
         <div style="flex:1;min-width:180px">
           <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Setup</div>
           <select id="grading-setup" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%"></select>
+        </div>
+        <div style="min-width:150px">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Account (filter)</div>
+          <select id="grading-account" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+            <option value="">All accounts</option>
+          </select>
         </div>
         <button class="an-btn" onclick="loadGrading()">Load</button>
       </div>
@@ -863,7 +884,7 @@ function switchTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'watch')     { loadPollerStatus(); loadSignalHistory(); }
   if (name === 'gate')      loadSideA();
-  if (name === 'positions') { loadPositions(); _startPositionsPoll(); } else { _stopPositionsPoll(); }
+  if (name === 'positions') { loadAccountBalances(); loadPositions(); _startPositionsPoll(); } else { _stopPositionsPoll(); }
   if (name === 'setups')    { loadSetups(); const cd = document.getElementById('cmp-date'); if (cd && !cd.value) cd.value = new Date().toISOString().slice(0,10); }
   if (name === 'settings')  loadSettings();
   if (name === 'journal')   loadJournal();
@@ -1237,8 +1258,12 @@ async function loadPollerStatus() {
               return `<span style="color:${col}">${icon} ${c.name}</span><span style="color:var(--text3);font-size:9px"> (${c.note})</span>`;
             }).join('<br>');
             setupRows += `<div style="font-size:10px;color:var(--text3);margin-top:2px">
-              <div style="color:var(--text2);margin-bottom:2px">${sr.setupName}: conditions not met</div>
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+                <span style="color:var(--text2)">${sr.setupName}: conditions not met</span>
+                <span style="background:rgba(239,68,68,0.15);color:var(--red);padding:0 5px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:0.05em">MANDATORY</span>
+              </div>
               <div style="padding-left:8px;display:grid;gap:1px">${condHtml}</div>
+              <div style="padding-left:8px;color:var(--text3);font-size:9px;margin-top:2px;font-style:italic">Default + additional checks are evaluated only after the mandatory ones fire — see the trade card viewer once a signal triggers.</div>
             </div>`;
           } else {
             setupRows += `<div style="font-size:10px;color:var(--text3)">· ${sr.setupName}: conditions not met</div>`;
@@ -1411,12 +1436,62 @@ function _stopPositionsPoll() {
   if (_positionsPollTimer) { clearInterval(_positionsPollTimer); _positionsPollTimer = null; }
 }
 
+async function loadAccountBalances() {
+  const el = document.getElementById('account-balances');
+  if (!el) return;
+  try {
+    const r = await fetch(`${API}/trading/account-balance`).then(r => r.json());
+    const rows = r?.balances || [];
+    if (!rows.length) {
+      el.innerHTML = '<div style="color:var(--text3)">No enabled Alpaca broker profiles. Add one in the Brokers tab.</div>';
+      return;
+    }
+    el.innerHTML = rows.map(b => {
+      const envBadge = b.env === 'live'
+        ? '<span style="background:rgba(239,68,68,0.15);color:var(--red);padding:1px 6px;border-radius:4px;font-size:10px;margin-left:6px">LIVE</span>'
+        : '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:1px 6px;border-radius:4px;font-size:10px;margin-left:6px">PAPER</span>';
+      if (!b.ok) {
+        return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <span><strong>${b.name}</strong>${envBadge}</span>
+          <span style="color:var(--red);font-size:11px">${b.error || 'error'}</span>
+        </div>`;
+      }
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr auto auto auto;gap:14px;align-items:center">
+        <span><strong>${b.name}</strong>${envBadge}</span>
+        <span style="color:var(--text3);font-size:11px">Equity <strong style="color:var(--text);font-family:monospace">$${b.equity.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong></span>
+        <span style="color:var(--text3);font-size:11px">Cash <strong style="color:var(--text);font-family:monospace">$${b.cash.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong></span>
+        <span style="color:var(--text3);font-size:11px">BP <strong style="color:var(--text);font-family:monospace">$${b.buyingPower.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong></span>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    el.innerHTML = `<div style="color:var(--red)">${err.message}</div>`;
+  }
+}
+
 async function loadPositions() {
   const [openRows, closedRows, settings] = await Promise.all([
     fetch(`${API}/trading/positions/open`).then(r => r.json()).catch(() => []),
     fetch(`${API}/trading/positions/closed-today`).then(r => r.json()).catch(() => []),
     fetch(`${API}/settings`).then(r => r.json()).catch(() => ({})),
   ]);
+
+  // Populate account filter with the union of accounts seen today.
+  const accounts = new Set();
+  for (const p of openRows) if (p.account) accounts.add(p.account);
+  const closedCards = await fetch(`${API}/trading/cards?limit=200`).then(r => r.json()).catch(() => null);
+  if (closedCards?.cards) for (const c of closedCards.cards) if (c.account) accounts.add(c.account);
+  const filterEl = document.getElementById('positions-account-filter');
+  if (filterEl) {
+    const current = filterEl.value;
+    filterEl.innerHTML = '<option value="">All accounts</option>' +
+      [...accounts].sort().map(a => `<option value="${a}" ${a === current ? 'selected' : ''}>${a}</option>`).join('');
+  }
+  const accountFilter = filterEl?.value || '';
+  const filteredOpen   = accountFilter ? openRows.filter(p => p.account === accountFilter) : openRows;
+  const filteredClosed = accountFilter ? closedRows.filter(p => {
+    const card = closedCards?.cards?.find(c => c.position_id === p.id);
+    return card?.account === accountFilter;
+  }) : closedRows;
 
   const realized = closedRows.reduce((s, p) => s + (Number(p.pnl) || 0), 0);
   const limit    = parseFloat(settings.trading_daily_loss_limit ?? '0') || 0;
@@ -1431,10 +1506,10 @@ async function loadPositions() {
   document.getElementById('pnl-daily-limit').textContent  = limit > 0 ? `-$${limit.toFixed(0)}` : 'off';
 
   const openEl = document.getElementById('positions-list');
-  if (!openRows.length) {
-    openEl.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No open positions</div></div>';
+  if (!filteredOpen.length) {
+    openEl.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No open positions' + (accountFilter ? ' for ' + accountFilter : '') + '</div></div>';
   } else {
-    openEl.innerHTML = openRows.map(p => {
+    openEl.innerHTML = filteredOpen.map(p => {
       const uPnl = p.unrealized_pnl;
       const uR   = p.unrealized_r;
       const pnlColor = uPnl > 0 ? 'var(--green)' : uPnl < 0 ? 'var(--red)' : 'var(--text3)';
@@ -1467,10 +1542,10 @@ async function loadPositions() {
   }
 
   const closedEl = document.getElementById('positions-closed-list');
-  if (!closedRows.length) {
-    closedEl.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No closed positions today</div></div>';
+  if (!filteredClosed.length) {
+    closedEl.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No closed positions today' + (accountFilter ? ' for ' + accountFilter : '') + '</div></div>';
   } else {
-    closedEl.innerHTML = closedRows.map(p => {
+    closedEl.innerHTML = filteredClosed.map(p => {
       const pnl = Number(p.pnl) || 0;
       const color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--text3)';
       return `
@@ -2183,14 +2258,28 @@ async function loadGradingSetups() {
 async function loadGrading() {
   const setupId = document.getElementById('grading-setup').value;
   if (!setupId) return;
+  const account = document.getElementById('grading-account')?.value || '';
   const summaryEl = document.getElementById('grading-summary');
   const checksEl  = document.getElementById('grading-checks');
   summaryEl.innerHTML = '<span style="color:var(--text3)">Loading…</span>';
   checksEl.innerHTML  = '';
+  // Warm the account filter with distinct accounts from recent cards.
+  try {
+    const cards = await fetch(`${API}/trading/cards?limit=200${account ? '&account=' + encodeURIComponent(account) : ''}`).then(r => r.json());
+    const accts = new Set();
+    for (const c of cards.cards || []) if (c.account) accts.add(c.account);
+    const sel = document.getElementById('grading-account');
+    if (sel) {
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">All accounts</option>' +
+        [...accts].sort().map(a => `<option value="${a}" ${a === cur ? 'selected' : ''}>${a}</option>`).join('');
+    }
+  } catch { /* non-fatal */ }
+  const qs = account ? `?account=${encodeURIComponent(account)}` : '';
   try {
     const [s, c] = await Promise.all([
-      fetch(`${API}/trading/grading/setup/${setupId}`).then(r => r.json()),
-      fetch(`${API}/trading/grading/setup/${setupId}/checks`).then(r => r.json()),
+      fetch(`${API}/trading/grading/setup/${setupId}${qs}`).then(r => r.json()),
+      fetch(`${API}/trading/grading/setup/${setupId}/checks${qs}`).then(r => r.json()),
     ]);
     const st = s.stats || {};
     const winRate = st.winRate != null ? (st.winRate * 100).toFixed(0) + '%' : '—';
@@ -2281,9 +2370,20 @@ async function showCard(id) {
         <div style="color:var(--text3);font-family:monospace">${ck.value ?? ''}</div>
       </div>`;
     };
+    // Split additional-tier rows into default vs additional by looking up
+    // the check_key in the library — the storage flattens both into
+    // kind='additional' but the DSL knows which is which.
+    let libByKey = {};
+    try {
+      const libs = await fetch(`${API}/trading/checks`).then(r => r.json());
+      for (const lc of libs.checks || []) libByKey[lc.key] = lc.category;
+    } catch { /* fall back to all-additional */ }
+    const additionalRows = (c.checks.additional || []).filter(ck => libByKey[ck.check_key] !== 'default');
+    const defaultRows    = (c.checks.additional || []).filter(ck => libByKey[ck.check_key] === 'default');
     const sections = [
-      ['Mandatory (from indicator)', c.checks.mandatory],
-      ['Additional (opt-in per setup)', c.checks.additional],
+      ['MANDATORY',  'from the indicator itself — must all be aligned for the setup to fire', 'var(--red)',   c.checks.mandatory],
+      ['DEFAULT',    'library checks that auto-apply to every setup',                          '#3b82f6',      defaultRows],
+      ['ADDITIONAL', 'opt-in per setup — these drive the A+/A/B/C grade',                      'var(--accent)', additionalRows],
     ];
     el.innerHTML = `
       <div class="panel" style="background:var(--bg3);padding:12px">
@@ -2302,8 +2402,11 @@ async function showCard(id) {
           <span>Reason: <strong>${c.exit_reason || (c.closed_at ? 'closed' : 'open')}</strong></span>
           <span>Account: <strong>${c.account || '—'}</strong></span>
         </div>
-        ${sections.map(([title, rows]) => `
-          <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-top:8px">${title}</div>
+        ${sections.map(([title, hint, color, rows]) => `
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px">
+            <span style="background:${color}20;color:${color};padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:0.05em">${title}</span>
+            <span style="color:var(--text3);font-size:10px">${hint}</span>
+          </div>
           ${rows.length ? rows.map(renderCheck).join('') : '<div style="color:var(--text3);font-size:11px;padding:4px 0">(none)</div>'}
         `).join('')}
         ${c.grade_details ? `

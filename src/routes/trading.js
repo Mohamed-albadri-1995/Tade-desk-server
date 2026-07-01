@@ -210,6 +210,48 @@ router.get('/positions/closed-today', (req, res) => {
   res.json(router0.listClosedPositionsToday());
 });
 
+// Live account balances — one row per enabled Alpaca broker profile.
+// Hits /v2/account synchronously so the numbers on-screen match what
+// Alpaca reports right now (not the sizer's cached copy).
+router.get('/account-balance', async (req, res) => {
+  const brokerMod = require('../trading/brokers');
+  const profiles = brokerMod.getActive().filter(b => b.type === 'alpaca');
+  const out = [];
+  for (const b of profiles) {
+    const cfg = b.config || {};
+    if (!cfg.key || !cfg.secret) {
+      out.push({ brokerId: b.id, name: b.name, ok: false, error: 'missing key/secret' });
+      continue;
+    }
+    const raw = cfg.url && /alpaca\.markets/i.test(cfg.url) ? cfg.url : 'https://paper-api.alpaca.markets';
+    const base = brokerMod.normalizeAlpacaBase(raw);
+    const env = base.includes('paper-api') ? 'paper' : 'live';
+    try {
+      const resp = await fetch(`${base}/v2/account`, {
+        headers: { 'APCA-API-KEY-ID': cfg.key, 'APCA-API-SECRET-KEY': cfg.secret },
+      });
+      if (!resp.ok) {
+        out.push({ brokerId: b.id, name: b.name, env, ok: false, error: `Alpaca ${resp.status}` });
+        continue;
+      }
+      const body = await resp.json();
+      out.push({
+        brokerId:     b.id,
+        name:         b.name,
+        env,
+        ok:           true,
+        equity:       parseFloat(body.equity),
+        cash:         parseFloat(body.cash),
+        buyingPower:  parseFloat(body.buying_power),
+        status:       body.status,
+      });
+    } catch (err) {
+      out.push({ brokerId: b.id, name: b.name, env, ok: false, error: err.message });
+    }
+  }
+  res.json({ ok: true, balances: out });
+});
+
 // Signal history — every native fire from today with its setup name and
 // the trade card id so the UI can jump straight into the card viewer to
 // see which checks (mandatory/default/additional) were aligned.
@@ -337,8 +379,8 @@ router.get('/grading/summary', (req, res) => {
 
 // Trade cards — the actual snapshots grading learns from.
 router.get('/cards', (req, res) => {
-  const { limit, setupId, ticker, from, to } = req.query;
-  res.json({ ok: true, cards: grading.listCards({ limit, setupId, ticker, from, to }) });
+  const { limit, setupId, ticker, from, to, account } = req.query;
+  res.json({ ok: true, cards: grading.listCards({ limit, setupId, ticker, from, to, account }) });
 });
 router.get('/cards/:id', (req, res) => {
   const card = grading.getCard(req.params.id);
