@@ -11,13 +11,30 @@ function getAccountBaseUrl() {
 }
 
 function getCredentials() {
+  // Primary: settings-based creds (legacy Settings > API Keys path).
   const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('alpacaApiKey','alpacaApiSecret')").all();
   const creds = {};
   for (const r of rows) creds[r.key] = r.value;
-  if (!creds.alpacaApiKey || !creds.alpacaApiSecret) {
-    throw new Error('Alpaca credentials not set — add them in Settings > API Keys');
+  if (creds.alpacaApiKey && creds.alpacaApiSecret) {
+    return { key: creds.alpacaApiKey, secret: creds.alpacaApiSecret };
   }
-  return { key: creds.alpacaApiKey, secret: creds.alpacaApiSecret };
+  // Fallback: an enabled Alpaca broker profile — the user might have
+  // configured creds only there (they're two separate credential stores).
+  // Prefer default profile, then any enabled Alpaca profile.
+  const profile = db.prepare(`
+    SELECT config FROM trading_brokers
+     WHERE type = 'alpaca' AND enabled = 1
+     ORDER BY is_default DESC, created_at ASC
+     LIMIT 1
+  `).get();
+  if (profile) {
+    let cfg = {};
+    try { cfg = JSON.parse(profile.config || '{}'); } catch { /* ignore */ }
+    if (cfg.key && cfg.secret) {
+      return { key: cfg.key, secret: cfg.secret };
+    }
+  }
+  throw new Error('Alpaca credentials not set — add them in Settings > API Keys, or configure an Alpaca broker profile');
 }
 
 function authHeaders() {

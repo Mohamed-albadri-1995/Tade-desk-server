@@ -22,10 +22,24 @@ function getCredentials() {
     .all();
   const creds = {};
   for (const r of rows) creds[r.key] = r.value;
-  if (!creds.alpacaApiKey || !creds.alpacaApiSecret) {
-    throw new Error('Alpaca credentials not set — add them in Settings > API Keys');
+  if (creds.alpacaApiKey && creds.alpacaApiSecret) {
+    return { key: creds.alpacaApiKey, secret: creds.alpacaApiSecret };
   }
-  return { key: creds.alpacaApiKey, secret: creds.alpacaApiSecret };
+  // Fall back to an enabled Alpaca broker profile — same reason as
+  // alpaca/client.js: broker profiles and settings are separate stores
+  // and the user might only have populated one.
+  const profile = db.prepare(`
+    SELECT config FROM trading_brokers
+     WHERE type = 'alpaca' AND enabled = 1
+     ORDER BY is_default DESC, created_at ASC
+     LIMIT 1
+  `).get();
+  if (profile) {
+    let cfg = {};
+    try { cfg = JSON.parse(profile.config || '{}'); } catch { /* ignore */ }
+    if (cfg.key && cfg.secret) return { key: cfg.key, secret: cfg.secret };
+  }
+  throw new Error('Alpaca credentials not set — add them in Settings > API Keys, or configure an Alpaca broker profile');
 }
 
 function getFeedUrl() {
