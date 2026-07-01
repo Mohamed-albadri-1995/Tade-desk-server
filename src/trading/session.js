@@ -167,7 +167,8 @@ async function start() {
     });
   });
 
-  brokerSync.start();
+  // brokerSync is started on process boot (index.js) so it survives
+  // session lifecycle; nothing to do here.
 
   console.log(`[TradingSession] Started ${sessionId} with ${tickers.length} tickers`);
   return { ok: true, sessionId, tickers, shortlist };
@@ -224,7 +225,9 @@ function pause(reason = 'manual') {
   _session.status = 'paused';
   db.prepare("UPDATE trading_sessions SET status = 'paused' WHERE id = ?").run(_session.id);
   barPoller.stop();
-  brokerSync.stop();
+  // brokerSync stays running across pause/end — Alpaca fills can still
+  // land afterhours or via manual close on Alpaca's own UI, and we
+  // need to keep our local record in sync regardless of session state.
   console.log(`[TradingSession] Paused ${_session.id} (${reason})`);
   router.broadcast({ type: 'session_paused', reason, ts: Date.now() });
   return { ok: true };
@@ -265,7 +268,9 @@ function end(reason = 'manual') {
   clearInterval(_contextPollInterval);
   _contextPollInterval = null;
   barPoller.stop();
-  brokerSync.stop();
+  // brokerSync stays running across pause/end — Alpaca fills can still
+  // land afterhours or via manual close on Alpaca's own UI, and we
+  // need to keep our local record in sync regardless of session state.
 
   db.prepare("UPDATE trading_sessions SET ended_at = ?, status = 'ended' WHERE id = ?")
     .run(Date.now(), _session.id);

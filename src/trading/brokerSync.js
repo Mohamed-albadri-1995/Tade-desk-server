@@ -50,6 +50,20 @@ async function _pollOnce() {
     if (!profiles.length) return;
 
     for (const pos of rows) {
+      // 1. Authoritative check first: does Alpaca still hold this position?
+      //    /v2/positions/{ticker} returns 404 when the position is gone —
+      //    whether it closed via our bracket, via manual close on Alpaca
+      //    UI, via margin liquidation, or via EOD wash. Any 404 → reconcile
+      //    locally and move on.
+      const positionState = await _fetchPosition(profiles, pos.ticker);
+      if (positionState?.notFound) {
+        await _reconcileClosed(pos, positionState.profile);
+        continue;
+      }
+
+      // 2. Position still open on Alpaca — check the bracket's legs for
+      //    fills so we can stamp the real entry price and detect exit at
+      //    the moment the leg fires (before Alpaca cleans up the row).
       const detail = await _fetchOrder(profiles, pos.alpaca_order_id);
       if (!detail) continue;
       await _reconcile(pos, detail);
@@ -58,6 +72,81 @@ async function _pollOnce() {
     console.warn('[BrokerSync] poll error:', err.message);
   } finally {
     _busy = false;
+  }
+}
+
+/**
+ * Ask Alpaca whether it still holds a position for this ticker. Returns
+ * either the raw position row, or { notFound: true } when Alpaca 404s.
+ * A network / auth error against every profile returns null so the
+ * caller doesn't over-reconcile on transient failures.
+ */
+async function _fetchPosition(profiles, ticker) {
+  let hadAnyAuth404 = false;
+  let hadAnyOk = false;
+  for (const b of profiles) {
+    const cfg = b.config || {};
+    if (!cfg.key || !cfg.secret) continue;
+    const raw = cfg.url && /alpaca\.markets/i.test(cfg.url) ? cfg.url : PAPER_URL;
+    const base = brokers.normalizeAlpacaBase(raw);
+    try {
+      const resp = await fetch(`${base}/v2/positions/${encodeURIComponent(ticker)}`, {
+        headers: { 'APCA-API-KEY-ID': cfg.key, 'APCA-API-SECRET-KEY': cfg.secret },
+      });
+      if (resp.status === 404) {
+        // Alpaca answered — and it says no such position. Believe it.
+        return { notFound: true, profile: b };
+      }
+      if (!resp.ok) { hadAnyAuth404 = false; continue; }
+      hadAnyOk = true;
+      return await resp.json();
+    } catch { /* try next profile */ }
+  }
+  // Every profile errored — don't reconcile off a network blip.
+  return hadAnyOk ? null : null;
+}
+
+/**
+ * Alpaca no longer holds this position. Close ours at the best available
+ * price. Preference order: leg's filled_avg_price if the bracket ended
+ * cleanly and we can still read it, latest buffered bar close, entry
+ * price as a last resort. Marks the exit reason so it's clear in the
+ * ledger that this was a reconciliation rather than a manual close.
+ */
+async function _reconcileClosed(pos, profile) {
+  // Best effort: peek at the parent order — the leg's fill price gives
+  // us the accurate exit if the bracket closed the position.
+  let exitPrice = null;
+  let exitReason = 'reconcile';
+  try {
+    const detail = await _fetchOrder([profile], pos.alpaca_order_id);
+    const legs = Array.isArray(detail?.legs) ? detail.legs : [];
+    const filledLeg = legs.find(l => l.status === 'filled' && Number.isFinite(Number(l.filled_avg_price)));
+    if (filledLeg) {
+      exitPrice = Number(filledLeg.filled_avg_price);
+      exitReason = filledLeg.order_type === 'limit' ? 'target'
+                 : filledLeg.order_type === 'stop'  ? 'stop'
+                 : 'broker';
+    }
+  } catch { /* fall through to bar-close fallback */ }
+
+  if (exitPrice == null) {
+    try {
+      const barPoller = require('./barPoller');
+      const bar = barPoller.getLatestBar?.(pos.ticker);
+      if (bar && Number.isFinite(bar.c)) exitPrice = bar.c;
+    } catch { /* no bars */ }
+  }
+  if (exitPrice == null && Number.isFinite(pos.entry_price)) {
+    exitPrice = pos.entry_price;
+  }
+  if (exitPrice == null) return;   // truly nothing to work with — skip this tick, try again in 15s
+
+  try {
+    router.closePosition(pos.id, exitPrice, exitReason);
+    console.warn(`[BrokerSync] reconciled ${pos.ticker} — Alpaca reported position closed (${exitReason} @ $${exitPrice})`);
+  } catch (err) {
+    console.warn(`[BrokerSync] reconcile ${pos.id} failed:`, err.message);
   }
 }
 
@@ -155,8 +244,9 @@ function start() {
   if (_timer) return;
   _timer = setInterval(_pollOnce, POLL_INTERVAL_MS);
   _balanceTimer = setInterval(_pollBalanceOnce, BALANCE_POLL_MS);
-  // Kick off an immediate balance poll so the first signal of the session
-  // sees the real equity rather than the static settings fallback.
+  // Kick off an immediate poll on start so we sync anything that happened
+  // while the process was down.
+  _pollOnce().catch(() => { /* silent — poller will retry */ });
   _pollBalanceOnce().catch(() => { /* silent — poller will retry */ });
 }
 
@@ -165,4 +255,20 @@ function stop() {
   if (_balanceTimer) { clearInterval(_balanceTimer); _balanceTimer = null; }
 }
 
-module.exports = { start, stop, _pollOnce, _pollBalanceOnce };
+/**
+ * Start the poller on process boot and leave it running. Alpaca fills
+ * can happen after the trading session ends (bracket legs stay live
+ * afterhours; the user might close a position from Alpaca's UI at any
+ * time; margin liquidations don't care about our session state). Tying
+ * lifecycle to the session meant we went deaf the moment End Session
+ * was clicked. Always-on fixes that.
+ *
+ * When no open Alpaca positions exist, _pollOnce short-circuits after
+ * the DB query — so the cost is one indexed COUNT-like SELECT every
+ * 15 seconds. Cheap enough to leave running.
+ */
+function autoStart() {
+  start();
+}
+
+module.exports = { start, stop, autoStart, _pollOnce, _pollBalanceOnce };

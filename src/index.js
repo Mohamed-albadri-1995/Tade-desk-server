@@ -59,6 +59,19 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`[Server] Trade Desk running on port ${PORT}`);
 
+  // Always-on broker reconciler: even without an active trading session,
+  // any position with an alpaca_order_id needs continuous /v2/positions
+  // polling so we notice Alpaca-side closes (manual close via UI, bracket
+  // legs firing afterhours, margin liquidations, etc). Short-circuits
+  // when there are no positions to watch, so cost is trivial.
+  try {
+    const brokerSync = require('./trading/brokerSync');
+    brokerSync.autoStart();
+    console.log('[Startup] brokerSync poller started');
+  } catch (err) {
+    console.warn('[Startup] brokerSync failed to start:', err.message);
+  }
+
   // Restore r0 from today's checkpoint if available (mid-day restart recovery)
   try {
     const today = toETDate(Date.now());
