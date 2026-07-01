@@ -46,6 +46,17 @@ function scoreMultiplier(score, settings) {
 const GRADE_MULTIPLIERS = { 'A+': 1.2, 'A': 1.0, 'B': 0.85, 'C': 0.7 };
 
 /**
+ * Sum position value across currently open positions (used to enforce
+ * the max-total-exposure cap so a new trade can't push us over the limit).
+ */
+function currentOpenExposure() {
+  const row = db
+    .prepare("SELECT COALESCE(SUM(shares * entry_price), 0) AS exp FROM trading_positions WHERE status = 'open'")
+    .get();
+  return row ? Number(row.exp) || 0 : 0;
+}
+
+/**
  * Calculate position size.
  *
  * @param {object} params
@@ -74,6 +85,19 @@ function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null, setupG
   let shares = Math.floor(riskDollars / stopDistance);
   if (s.maxShares > 0) shares = Math.min(shares, s.maxShares);
 
+  // Max total exposure cap — clamp shares so open exposure + this new
+  // position doesn't exceed the configured limit.
+  const capReasons = [];
+  if (s.maxTotalExposure > 0 && entryPrice > 0) {
+    const openExposure = currentOpenExposure();
+    const remaining = s.maxTotalExposure - openExposure;
+    const maxSharesByExposure = remaining > 0 ? Math.floor(remaining / entryPrice) : 0;
+    if (shares > maxSharesByExposure) {
+      shares = Math.max(0, maxSharesByExposure);
+      capReasons.push('maxTotalExposure');
+    }
+  }
+
   const positionValue = shares * entryPrice;
   const actualDollarRisk = shares * stopDistance;
 
@@ -88,7 +112,9 @@ function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null, setupG
     setupGrade: setupGrade || null,
     riskPct: s.riskPct,
     equity: s.equity,
+    maxTotalExposure: s.maxTotalExposure,
+    capsHit: capReasons,
   };
 }
 
-module.exports = { calculate, getSettings };
+module.exports = { calculate, getSettings, currentOpenExposure };

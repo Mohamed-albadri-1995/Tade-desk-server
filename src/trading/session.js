@@ -146,7 +146,7 @@ function end(reason = 'manual') {
   return { ok: true, session: ended };
 }
 
-// ─── Daily auto start/stop (9:36 ET start, 12:00 ET stop) ─────────────────────
+// ─── Daily auto start/stop — 9:35 AM ET start, 10:00 AM ET end (per plan) ────
 
 let _lastAutoStartDate = null;
 let _lastAutoEndDate = null;
@@ -162,14 +162,14 @@ setInterval(() => {
   const today = toETDate(now);
   const { hour, min } = _etParts(now);
 
-  if (hour === 9 && min === 36 && !isActive() && _lastAutoStartDate !== today) {
+  if (hour === 9 && min === 35 && !isActive() && _lastAutoStartDate !== today) {
     _lastAutoStartDate = today;
     start().then(r => {
       if (!r.ok) console.warn('[TradingSession] Auto-start failed:', r.reason);
     });
   }
 
-  if (hour === 12 && min === 0 && isActive() && _lastAutoEndDate !== today) {
+  if (hour === 10 && min === 0 && isActive() && _lastAutoEndDate !== today) {
     _lastAutoEndDate = today;
     end('auto');
   }

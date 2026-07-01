@@ -10,6 +10,38 @@ const { fetchIntradayBars } = require('../alpaca/client');
 const { toETDate } = require('../utils/time');
 const r0 = require('../r0/registry');
 
+// ─── Time-window helpers ─────────────────────────────────────────────────────
+
+function _etHMNow(now) {
+  const hour = parseInt(new Date(now).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+  const min  = parseInt(new Date(now).toLocaleString('en-US', { timeZone: 'America/New_York', minute: 'numeric' }));
+  return hour * 60 + min;
+}
+
+/**
+ * Parse a "9:35" / "10:00" / "H:MM" / "HH:MM" style string into minutes-since-midnight.
+ * Returns null if unparseable.
+ */
+function _hmToMinutes(str) {
+  if (!str || typeof str !== 'string') return null;
+  const m = str.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if (!Number.isFinite(h) || !Number.isFinite(mm)) return null;
+  return h * 60 + mm;
+}
+
+/**
+ * Is `now` inside setup's configured [window_start, window_end) window in ET?
+ * Defaults to the plan-wide 9:35–10:00 window if either bound is missing/invalid.
+ */
+function _setupInWindow(setup, nowMinutes) {
+  const start = _hmToMinutes(setup.window_start) ?? (9 * 60 + 35);
+  const end   = _hmToMinutes(setup.window_end)   ?? (10 * 60);
+  return nowMinutes >= start && nowMinutes < end;
+}
+
 // Indicator registry: setupId → evaluate function
 const INDICATORS = {
   // Populated dynamically from DB setups — matched by setup name
@@ -117,22 +149,27 @@ function start(sessionId, tickers, setups, onSignalFired) {
         setupResults: [],
       };
 
+      const nowMinutes = _etHMNow(_status.lastPollAt);
+
       for (const setup of setups) {
         const engine = getEngine(setup);
         const key = `${ticker}:${setup.id}`;
         const alreadyFired = _firedThisSession.has(key);
+        const inWindow = _setupInWindow(setup, nowMinutes);
 
         const setupResult = {
-          setupName: setup.name,
+          setupName:   setup.name,
           engineFound: !!engine,
           alreadyFired,
-          skipped: !engine || !bars || barsReceived < 23 || alreadyFired,
-          skipReason: !engine ? 'no engine for setup name'
+          window:      { start: setup.window_start || '09:35', end: setup.window_end || '10:00', inWindow },
+          skipped:     !engine || !bars || barsReceived < 23 || alreadyFired || !inWindow,
+          skipReason:  !engine ? 'no engine for setup name'
                     : !bars || barsReceived < 23 ? `only ${barsReceived} bars (need 23)`
                     : alreadyFired ? 'already fired this session'
+                    : !inWindow ? `outside setup window (${setup.window_start || '09:35'}–${setup.window_end || '10:00'} ET)`
                     : null,
           signal: null,
-          error: null,
+          error:  null,
         };
 
         if (!setupResult.skipped) {

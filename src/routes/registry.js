@@ -5,6 +5,22 @@ const VALID_BIASES = ['auto', 'long', 'short'];
 
 const router = express.Router();
 
+// GET /api/registry?tickers=AAPL,MSFT — r0 rows for the given tickers.
+// Used by the trading session's 30-second context poll (9:35–10:00 window)
+// to refresh scanner context (regime, secBias, shortTerm/mid/long, secScore, …)
+// for the shortlisted tickers without pulling the entire registry.
+router.get('/', (req, res) => {
+  const raw = (req.query.tickers || '').trim();
+  if (!raw) {
+    // Fall back to today's rows so the endpoint is self-explanatory.
+    const rows = r0.getTodayRows();
+    return res.json({ count: rows.length, rows });
+  }
+  const wanted = new Set(raw.split(',').map(t => t.trim().toUpperCase()).filter(Boolean));
+  const rows = r0.getAll().filter(row => wanted.has(String(row.ticker || '').toUpperCase()));
+  res.json({ count: rows.length, rows });
+});
+
 // GET /api/registry/today — today's r0 rows, liveNow first then _score desc
 router.get('/today', (req, res) => {
   const rows = r0.getTodayRows().sort((a, b) => {

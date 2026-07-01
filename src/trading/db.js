@@ -110,6 +110,11 @@ const tradingDefaults = [
   ['trading_score_threshold_high', '85'],
   ['trading_score_threshold_low', '70'],
   ['trading_equity', '25000'],
+  // Side A — Market Conditions Register (rules configurable per the plan)
+  ['trading_sideA_gate_enabled', '1'],
+  ['trading_sideA_neutral_multiplier', '0.75'],
+  ['trading_sideA_weak_sec_score', '10'],
+  ['trading_sideA_weak_sec_multiplier', '0.8'],
 ];
 
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
