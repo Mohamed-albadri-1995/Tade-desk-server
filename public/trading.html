@@ -320,9 +320,24 @@ body {
   <!-- POSITIONS TAB -->
   <div class="tab-pane" id="tab-positions">
     <div class="panel">
+      <div class="panel-title">Today's P&amp;L</div>
+      <div id="positions-pnl" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
+        <span>Realized: <strong id="pnl-realized" style="color:var(--text)">$0.00</strong></span>
+        <span>Open positions: <strong id="pnl-open-count" style="color:var(--text)">0</strong></span>
+        <span>Closed today: <strong id="pnl-closed-count" style="color:var(--text)">0</strong></span>
+        <span style="color:var(--text3)">Daily loss limit: <strong id="pnl-daily-limit">—</strong></span>
+      </div>
+    </div>
+    <div class="panel">
       <div class="panel-title">Open Positions</div>
       <div id="positions-list">
         <div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No open positions</div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Closed Today</div>
+      <div id="positions-closed-list">
+        <div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No closed positions today</div></div>
       </div>
     </div>
   </div>
@@ -682,8 +697,17 @@ function pushNotification(evt) {
 }
 
 function handleEvent(evt) {
-  if (evt.type === 'signal') { renderCenterCard(evt); pushNotification(evt); }
+  if (evt.type === 'signal') {
+    renderCenterCard(evt);
+    pushNotification(evt);
+    // A new signal (if it passed risk check) opens a position — refresh
+    // the positions panel so it stays in sync.
+    if (typeof loadPositions === 'function') loadPositions();
+  }
   if (evt.type === 'webhook_signal') updateSignalMatch(evt);
+  if (evt.type === 'position_closed') {
+    if (typeof loadPositions === 'function') loadPositions();
+  }
 }
 
 // ── Signal cards (Side B) ─────────────────────────────────────────────────────
@@ -880,34 +904,75 @@ async function loadSideA() {
 }
 
 // ── Positions ─────────────────────────────────────────────────────────────────
+function fmtMoney(n) {
+  const v = Number(n) || 0;
+  const sign = v < 0 ? '-' : '';
+  return `${sign}$${Math.abs(v).toFixed(2)}`;
+}
+
 async function loadPositions() {
-  const rows = await fetch(`${API}/trading/positions`).then(r => r.json()).catch(() => []);
-  const el = document.getElementById('positions-list');
-  const open = rows.filter(r => r.status === 'open');
-  if (!open.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No open positions</div></div>';
-    return;
+  const [openRows, closedRows, settings] = await Promise.all([
+    fetch(`${API}/trading/positions/open`).then(r => r.json()).catch(() => []),
+    fetch(`${API}/trading/positions/closed-today`).then(r => r.json()).catch(() => []),
+    fetch(`${API}/settings`).then(r => r.json()).catch(() => ({})),
+  ]);
+
+  const realized = closedRows.reduce((s, p) => s + (Number(p.pnl) || 0), 0);
+  const limit    = parseFloat(settings.trading_daily_loss_limit ?? '0') || 0;
+  const nearLimit = limit > 0 && realized <= -limit * 0.5;
+  const hitLimit  = limit > 0 && realized <= -limit;
+
+  document.getElementById('pnl-realized').textContent = fmtMoney(realized);
+  document.getElementById('pnl-realized').style.color =
+    hitLimit ? 'var(--red)' : nearLimit ? 'var(--orange, #f97316)' : realized > 0 ? 'var(--green)' : 'var(--text)';
+  document.getElementById('pnl-open-count').textContent   = String(openRows.length);
+  document.getElementById('pnl-closed-count').textContent = String(closedRows.length);
+  document.getElementById('pnl-daily-limit').textContent  = limit > 0 ? `-$${limit.toFixed(0)}` : 'off';
+
+  const openEl = document.getElementById('positions-list');
+  if (!openRows.length) {
+    openEl.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No open positions</div></div>';
+  } else {
+    openEl.innerHTML = openRows.map(p => `
+      <div class="trade-row">
+        <span class="tr-ticker">${p.ticker}</span>
+        <span class="tr-dir ${p.direction === 'Long' ? 'badge-long':'badge-short'}">${p.direction}</span>
+        <span style="color:var(--text3)">${p.shares} sh @ $${p.entry_price}</span>
+        <span style="color:var(--text3);margin-left:auto">SL $${p.sl} TP $${p.tp}</span>
+        <button onclick="closePosition('${p.id}')" style="background:var(--red);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Close</button>
+      </div>
+    `).join('');
   }
-  el.innerHTML = open.map(p => `
-    <div class="trade-row">
-      <span class="tr-ticker">${p.ticker}</span>
-      <span class="tr-dir ${p.direction === 'Long' ? 'badge-long':'badge-short'}">${p.direction}</span>
-      <span style="color:var(--text3)">${p.shares} sh @ $${p.entry_price}</span>
-      <span style="color:var(--text3);margin-left:auto">SL $${p.sl} TP $${p.tp}</span>
-      <button onclick="closePosition('${p.id}')" style="background:var(--red);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Close</button>
-    </div>
-  `).join('');
+
+  const closedEl = document.getElementById('positions-closed-list');
+  if (!closedRows.length) {
+    closedEl.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No closed positions today</div></div>';
+  } else {
+    closedEl.innerHTML = closedRows.map(p => {
+      const pnl = Number(p.pnl) || 0;
+      const color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--text3)';
+      return `
+        <div class="trade-row">
+          <span class="tr-ticker">${p.ticker}</span>
+          <span class="tr-dir ${p.direction === 'Long' ? 'badge-long':'badge-short'}">${p.direction}</span>
+          <span style="color:var(--text3)">${p.shares} sh · in $${p.entry_price} → out $${p.exit_price}</span>
+          <span style="margin-left:auto;color:${color};font-weight:600">${fmtMoney(pnl)}</span>
+        </div>
+      `;
+    }).join('');
+  }
 }
 
 async function closePosition(id) {
   const exitPrice = prompt('Exit price:');
   if (!exitPrice) return;
   const r = await fetch(`${API}/trading/positions/${id}/close`, {
-    method: 'PATCH',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ exitPrice: parseFloat(exitPrice) }),
   }).then(r => r.json());
   if (r.ok) loadPositions();
+  else if (r.error) alert('Close failed: ' + r.error);
 }
 
 // ── Journal ───────────────────────────────────────────────────────────────────

@@ -176,6 +176,14 @@ router.get('/positions', (req, res) => {
   res.json(rows);
 });
 
+router.get('/positions/open', (req, res) => {
+  res.json(center.listOpenPositions());
+});
+
+router.get('/positions/closed-today', (req, res) => {
+  res.json(center.listClosedPositionsToday());
+});
+
 router.post('/positions', (req, res) => {
   const { orderId, ticker, direction, shares, entryPrice, entryTime, sl, tp } = req.body;
   if (!ticker || !direction || !shares || !entryPrice) {
@@ -190,15 +198,20 @@ router.post('/positions', (req, res) => {
   res.json({ ok: true, id });
 });
 
+// POST /positions/:id/close — canonical close endpoint (accepts { exitPrice })
+router.post('/positions/:id/close', (req, res) => {
+  const { exitPrice } = req.body || {};
+  const result = center.closePosition(req.params.id, parseFloat(exitPrice), 'manual');
+  if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+  res.json({ ok: true, position: result.position, pnl: result.position.pnl });
+});
+
+// Legacy PATCH endpoint kept for compatibility with any older UI code.
 router.patch('/positions/:id/close', (req, res) => {
-  const { exitPrice, exitTime } = req.body;
-  const pos = db.prepare('SELECT * FROM trading_positions WHERE id = ?').get(req.params.id);
-  if (!pos) return res.status(404).json({ error: 'Position not found' });
-  const pnl = (parseFloat(exitPrice) - pos.entry_price) * pos.shares * (pos.direction === 'Long' ? 1 : -1);
-  db.prepare(`
-    UPDATE trading_positions SET status='closed', exit_price=?, exit_time=?, pnl=?, closed_at=? WHERE id=?
-  `).run(parseFloat(exitPrice), exitTime || new Date().toISOString(), pnl, Date.now(), req.params.id);
-  res.json({ ok: true, pnl: parseFloat(pnl.toFixed(2)) });
+  const { exitPrice } = req.body || {};
+  const result = center.closePosition(req.params.id, parseFloat(exitPrice), 'manual');
+  if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+  res.json({ ok: true, pnl: result.position.pnl });
 });
 
 // ─── Poller status ────────────────────────────────────────────────────────────

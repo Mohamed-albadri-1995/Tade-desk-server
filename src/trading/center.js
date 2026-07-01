@@ -41,10 +41,12 @@ function checkRisk(ticker, direction, dollarRisk) {
     return { ok: false, reason: `Already have an open position in ${ticker}` };
   }
 
-  // Daily loss limit
+  // Daily loss limit — realized P&L from positions closed today (ET).
+  // Using closed_at rather than opened_at so a bad trade closed today
+  // counts against today's limit even if it was opened earlier.
   const today = new Date().toISOString().slice(0, 10);
   const pnlRow = db.prepare(
-    "SELECT SUM(pnl) as total FROM trading_positions WHERE DATE(opened_at/1000,'unixepoch') = ? AND status = 'closed'"
+    "SELECT COALESCE(SUM(pnl), 0) AS total FROM trading_positions WHERE status = 'closed' AND DATE(closed_at/1000,'unixepoch') = ?"
   ).get(today);
   const dailyPnl = pnlRow?.total || 0;
   if (dailyPnl <= -dailyLossLimit) {
@@ -133,23 +135,46 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
 
   const orderId = uuidv4();
 
+  let positionId = null;
   if (riskCheck.ok && shares > 0) {
-    db.prepare(`
-      INSERT INTO trading_orders
-        (id, signal_id, session_id, date, ticker, direction, shares, entry_price, sl, tp,
-         dollar_risk, position_value, alpaca_payload, humanized_msg, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'notified', ?)
-    `).run(
-      orderId, signalId, signal.sessionId || '', today, ticker, direction,
-      shares, entryPrice ?? null, sl, tp,
-      dollarRisk, positionValue,
-      JSON.stringify(alpacaPayload), humanizedMsg, now
-    );
+    // Persist the notified order + open a paper position so downstream
+    // risk checks (daily loss, max open positions, no duplicate ticker)
+    // actually see it. The position is closed later either manually via
+    // POST /api/trading/positions/:id/close or automatically once we wire
+    // Alpaca order-fill events.
+    positionId = uuidv4();
+    const writeAll = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO trading_orders
+          (id, signal_id, session_id, date, ticker, direction, shares, entry_price, sl, tp,
+           dollar_risk, position_value, alpaca_payload, humanized_msg, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'notified', ?)
+      `).run(
+        orderId, signalId, signal.sessionId || '', today, ticker, direction,
+        shares, entryPrice ?? null, sl, tp,
+        dollarRisk, positionValue,
+        JSON.stringify(alpacaPayload), humanizedMsg, now
+      );
+      db.prepare(`
+        INSERT INTO trading_positions
+          (id, order_id, ticker, direction, shares, entry_price, entry_time,
+           sl, tp, status, opened_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+      `).run(
+        positionId, orderId, ticker, direction,
+        shares, entryPrice ?? 0,
+        new Date(now).toISOString(),
+        sl, tp,
+        now
+      );
+    });
+    writeAll();
   }
 
   const notification = {
     type: 'signal',
     orderId: riskCheck.ok ? orderId : null,
+    positionId: riskCheck.ok ? positionId : null,
     signalId,
     ticker,
     setupId,
@@ -190,4 +215,59 @@ function addListener(res) {
   res.on('close', () => listeners.delete(res));
 }
 
-module.exports = { processSignal, addListener, broadcast, checkRisk };
+/**
+ * Close an open position and compute realized P&L. Used by the manual
+ * close button in the UI; will also be used by future Alpaca order-fill
+ * event handling.
+ */
+function closePosition(positionId, exitPrice, reason = 'manual') {
+  const pos = db.prepare("SELECT * FROM trading_positions WHERE id = ? AND status = 'open'").get(positionId);
+  if (!pos) return { ok: false, error: 'Position not found or already closed' };
+
+  const px = Number(exitPrice);
+  if (!Number.isFinite(px) || px <= 0) return { ok: false, error: 'Invalid exit price' };
+
+  // P&L: (exit - entry) × shares for long, (entry - exit) × shares for short
+  const pnl = pos.direction === 'Long'
+    ? (px - pos.entry_price) * pos.shares
+    : (pos.entry_price - px) * pos.shares;
+
+  const now = Date.now();
+  db.prepare(`
+    UPDATE trading_positions
+       SET exit_price = ?, exit_time = ?, pnl = ?, status = 'closed', closed_at = ?
+     WHERE id = ?
+  `).run(px, new Date(now).toISOString(), Math.round(pnl * 100) / 100, now, positionId);
+
+  const closed = db.prepare('SELECT * FROM trading_positions WHERE id = ?').get(positionId);
+  broadcast({ type: 'position_closed', position: closed, reason, ts: now });
+  return { ok: true, position: closed };
+}
+
+/**
+ * Read open positions (used by the UI to render the position list).
+ */
+function listOpenPositions() {
+  return db.prepare("SELECT * FROM trading_positions WHERE status = 'open' ORDER BY opened_at DESC").all();
+}
+
+/**
+ * Read today's closed positions with P&L (used by the daily loss check
+ * and by the UI to show session results).
+ */
+function listClosedPositionsToday() {
+  const today = new Date().toISOString().slice(0, 10);
+  return db
+    .prepare("SELECT * FROM trading_positions WHERE status = 'closed' AND DATE(closed_at/1000,'unixepoch') = ? ORDER BY closed_at DESC")
+    .all(today);
+}
+
+module.exports = {
+  processSignal,
+  addListener,
+  broadcast,
+  checkRisk,
+  closePosition,
+  listOpenPositions,
+  listClosedPositionsToday,
+};
