@@ -624,23 +624,47 @@ async function marketClosePosition(positionId) {
         return { ok: true, submittedTo: 'alpaca', pending: true };
       }
       const body = await resp.text().catch(() => '');
+      // 404 = Alpaca has no position for this ticker. Two ways that
+      // happens: the bracket already fired (SL/TP hit and we missed the
+      // update), or the session ended and Alpaca liquidated at EOD. In
+      // both cases the local record is out of sync — close it here at
+      // the latest bar close instead of leaving it stuck open.
+      if (resp.status === 404) {
+        return _localFallbackClose(pos.id, pos.ticker, 'reconcile: Alpaca has no matching position');
+      }
       return { ok: false, error: `Alpaca ${resp.status}: ${body.slice(0, 200)}` };
     } catch (err) {
       return { ok: false, error: `Alpaca network error: ${err.message}` };
     }
   }
 
-  // No Alpaca profile — fall back to closing at the latest bar close.
+  return _localFallbackClose(pos.id, pos.ticker, 'no Alpaca profile');
+}
+
+/**
+ * Close a stuck local position at the latest bar close. Used when the
+ * primary broker path can't act (no profile, or Alpaca doesn't have
+ * the position anymore). Returns the same shape as marketClose.
+ */
+function _localFallbackClose(positionId, ticker, reason) {
   let latestClose = null;
   try {
     const barPoller = require('./barPoller');
-    const bar = barPoller.getLatestBar?.(pos.ticker);
+    const bar = barPoller.getLatestBar?.(ticker);
     if (bar && Number.isFinite(bar.c)) latestClose = bar.c;
   } catch { /* no session running */ }
   if (!Number.isFinite(latestClose)) {
-    return { ok: false, error: 'No live bar yet — provide a limit price instead' };
+    // Fall further back — use the position's own entry price. Worse
+    // than a live bar but better than leaving the row stuck open.
+    const pos = db.prepare('SELECT entry_price FROM trading_positions WHERE id = ?').get(positionId);
+    if (pos && Number.isFinite(pos.entry_price)) latestClose = pos.entry_price;
   }
-  return closePosition(positionId, latestClose, 'manual');
+  if (!Number.isFinite(latestClose)) {
+    return { ok: false, error: 'No price available to close at — supply a limit price manually' };
+  }
+  const result = closePosition(positionId, latestClose, 'reconcile');
+  if (!result.ok) return result;
+  return { ...result, reconciled: true, reason };
 }
 
 module.exports = {
