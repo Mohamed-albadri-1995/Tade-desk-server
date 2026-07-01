@@ -13,6 +13,7 @@ const sideB = require('../trading/sideB');
 const sideC = require('../trading/sideC');
 const center = require('../trading/center');
 const barPoller = require('../trading/barPoller');
+const backtest = require('../trading/backtest');
 
 const router = express.Router();
 
@@ -218,6 +219,22 @@ router.patch('/positions/:id/close', (req, res) => {
 
 router.get('/poller/status', (req, res) => {
   res.json(barPoller.getStatus());
+});
+
+// ─── Backtest (Path B — user-triggered indicator verification) ────────────────
+
+router.get('/backtest/indicators', (req, res) => {
+  res.json({ ok: true, indicators: backtest.listIndicators() });
+});
+
+router.post('/backtest', async (req, res) => {
+  try {
+    const result = await backtest.runBacktest(req.body || {});
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── SSE — live notifications ─────────────────────────────────────────────────

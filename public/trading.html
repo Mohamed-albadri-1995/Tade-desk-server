@@ -264,6 +264,7 @@ body {
   <span class="tab-group-label">Tools</span>
   <button class="tab" onclick="switchTab('journal')">Journal</button>
   <button class="tab" onclick="switchTab('setups')">Setups</button>
+  <button class="tab" onclick="switchTab('backtest')">Backtest</button>
   <button class="tab" onclick="switchTab('settings')">Settings</button>
 </div>
 
@@ -544,6 +545,51 @@ body {
     </div>
   </div>
 
+  <!-- BACKTEST TAB (optional indicator verification, Path B) -->
+  <div class="tab-pane" id="tab-backtest">
+    <div class="panel">
+      <div class="panel-title">Indicator Backtest</div>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
+        Replays a JS indicator over historical Alpaca bars so you can compare
+        the fires to your TradingView Pine Script signal log for the same
+        ticker/date. This is a verification tool — signals do <strong>not</strong>
+        flow through the live pipeline.
+      </p>
+      <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:10px;margin-bottom:10px">
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Ticker</div>
+          <input id="bt-ticker" placeholder="AAPL" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Date</div>
+          <input id="bt-date" type="date" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Indicator</div>
+          <select id="bt-indicator" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%"></select>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">PM High (optional)</div>
+          <input id="bt-pmhigh" type="number" step="0.01" placeholder="auto from R1" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:10px">
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Window Start (optional)</div>
+          <input id="bt-wstart" placeholder="09:35" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Window End (optional)</div>
+          <input id="bt-wend" placeholder="10:00" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <button onclick="runBacktest()" id="bt-run" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px 16px;font-size:12px;font-family:inherit;font-weight:600;cursor:pointer">Run</button>
+      </div>
+      <div id="bt-status" style="font-size:12px;color:var(--text3);margin-bottom:10px"></div>
+      <div id="bt-summary" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2);margin-bottom:10px"></div>
+      <div id="bt-fires"></div>
+    </div>
+  </div>
+
   <!-- SETTINGS TAB -->
   <div class="tab-pane" id="tab-settings">
     <div class="panel">
@@ -590,7 +636,7 @@ const API = '/api';
 
 // ── Tab switching ──────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const order = ['signals','sideA','center','positions','journal','setups','settings'];
+  const order = ['signals','sideA','center','positions','journal','setups','backtest','settings'];
   document.querySelectorAll('.tab').forEach(t => {
     const fn = t.getAttribute('onclick') || '';
     const m = fn.match(/'(\w+)'/);
@@ -604,6 +650,7 @@ function switchTab(name) {
   if (name === 'setups')    { loadSetups(); const cd = document.getElementById('cmp-date'); if (cd && !cd.value) cd.value = new Date().toISOString().slice(0,10); }
   if (name === 'settings')  loadSettings();
   if (name === 'journal')   loadJournal();
+  if (name === 'backtest')  loadBacktestUI();
 }
 
 // ── Date header ───────────────────────────────────────────────────────────────
@@ -901,6 +948,103 @@ async function loadSideA() {
       <span class="sa-mult">${d.multiplier != null ? d.multiplier + '×' : ''}</span>
     </div>
   `).join('');
+}
+
+// ── Backtest (optional indicator verification, Path B) ───────────────────────
+let _backtestIndicatorsLoaded = false;
+async function loadBacktestUI() {
+  if (_backtestIndicatorsLoaded) return;
+  try {
+    const r = await fetch(`${API}/trading/backtest/indicators`).then(r => r.json());
+    const sel = document.getElementById('bt-indicator');
+    sel.innerHTML = (r.indicators || []).map(k => `<option value="${k}">${k}</option>`).join('');
+    _backtestIndicatorsLoaded = true;
+  } catch { /* silent */ }
+  const dateInput = document.getElementById('bt-date');
+  if (dateInput && !dateInput.value) {
+    // Default to yesterday's ET date so a same-day run works before EOD.
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    dateInput.value = d.toISOString().slice(0, 10);
+  }
+}
+
+async function runBacktest() {
+  const btn = document.getElementById('bt-run');
+  const status = document.getElementById('bt-status');
+  const summary = document.getElementById('bt-summary');
+  const fires = document.getElementById('bt-fires');
+
+  const body = {
+    ticker:      document.getElementById('bt-ticker').value.trim(),
+    date:        document.getElementById('bt-date').value,
+    indicator:   document.getElementById('bt-indicator').value,
+    windowStart: document.getElementById('bt-wstart').value.trim() || null,
+    windowEnd:   document.getElementById('bt-wend').value.trim() || null,
+    pmHigh:      document.getElementById('bt-pmhigh').value ? Number(document.getElementById('bt-pmhigh').value) : null,
+  };
+  if (!body.ticker || !body.date || !body.indicator) {
+    status.textContent = 'Enter ticker, date and indicator first.';
+    status.style.color = 'var(--red)';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  status.textContent = 'Fetching Alpaca bars and replaying…';
+  status.style.color = 'var(--text3)';
+  summary.innerHTML = '';
+  fires.innerHTML = '';
+
+  try {
+    const r = await fetch(`${API}/trading/backtest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => r.json());
+    if (!r.ok) throw new Error(r.error || 'Backtest failed');
+
+    status.textContent = 'Done.';
+    status.style.color = 'var(--green)';
+
+    const pmH = r.config.pmHigh == null ? '—' : `$${Number(r.config.pmHigh).toFixed(2)}`;
+    summary.innerHTML =
+      `<span>Bars: <strong style="color:var(--text)">${r.barsTotal}</strong></span>` +
+      `<span>Window: <strong style="color:var(--text)">${r.firstBarET || '—'} → ${r.lastBarET || '—'}</strong></span>` +
+      `<span>PM High: <strong style="color:var(--text)">${pmH}</strong></span>` +
+      `<span>Fires: <strong style="color:${r.fires.length ? 'var(--green)' : 'var(--text3)'}">${r.fires.length}</strong></span>`;
+
+    if (!r.fires.length) {
+      fires.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-icon">•</div><div class="empty-text">No signals fired — indicator either had no valid setups this day, or your Pine Script fires differently (which is what we\'re trying to catch).</div></div>';
+      return;
+    }
+    fires.innerHTML =
+      '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:6px">' +
+      '<thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
+      '<th style="padding:6px 8px">#</th><th style="padding:6px 8px">ET Time</th><th style="padding:6px 8px">Dir</th>' +
+      '<th style="padding:6px 8px">Entry</th><th style="padding:6px 8px">SL</th><th style="padding:6px 8px">TP</th>' +
+      '<th style="padding:6px 8px">Risk/Share</th><th style="padding:6px 8px">Meta</th></tr></thead><tbody>' +
+      r.fires.map((f, i) => `
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:6px 8px;color:var(--text3)">${i+1}</td>
+          <td style="padding:6px 8px;font-weight:600">${f.etTime || '—'}</td>
+          <td style="padding:6px 8px"><span class="tr-dir ${f.direction === 'Long' ? 'badge-long' : 'badge-short'}">${f.direction}</span></td>
+          <td style="padding:6px 8px">$${Number(f.entry).toFixed(2)}</td>
+          <td style="padding:6px 8px">$${Number(f.sl).toFixed(2)}</td>
+          <td style="padding:6px 8px">$${Number(f.tp).toFixed(2)}</td>
+          <td style="padding:6px 8px">$${Number(f.riskPerShare).toFixed(2)}</td>
+          <td style="padding:6px 8px;color:var(--text3);font-size:11px">${
+            f.meta ? Object.entries(f.meta).slice(0, 4).map(([k,v]) => `${k}=${typeof v === 'number' ? v.toFixed(2) : v}`).join(' · ') : ''
+          }</td>
+        </tr>`).join('') +
+      '</tbody></table>';
+  } catch (err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run';
+  }
 }
 
 // ── Positions ─────────────────────────────────────────────────────────────────
