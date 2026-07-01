@@ -44,17 +44,24 @@ function _setupInWindow(setup, nowMinutes) {
 
 // ─── Indicator registry ─────────────────────────────────────────────────────
 
-const ma13bounce = require('./indicators/ma13bounce');
-const test       = require('./indicators/test');
+const ma13bounce     = require('./indicators/ma13bounce');
+const vwapBounce     = require('./indicators/vwapBounce');
+const smaTouchBounce = require('./indicators/smaTouchBounce');
+const test           = require('./indicators/test');
 
 const ENGINES = {
-  'ma13bounce': ma13bounce,
-  'test':       test,
+  'ma13bounce':     ma13bounce,
+  'vwapBounce':     vwapBounce,
+  'smaTouchBounce': smaTouchBounce,
+  'test':           test,
 };
 
 const ENGINE_BY_NAME = {
-  '13 ma bounce': 'ma13bounce',
-  '13ma bounce':  'ma13bounce',
+  '13 ma bounce':    'ma13bounce',
+  '13ma bounce':     'ma13bounce',
+  'vwap bounce':     'vwapBounce',
+  'sma touch bounce':'smaTouchBounce',
+  'ma bounce':       'smaTouchBounce', // convenience alias
 };
 
 function getEngine(setup) {

@@ -15,8 +15,10 @@ const { fetchIntradayBars } = require('../alpaca/client');
 // Lazy-load the indicator engines so a broken engine can't block startup.
 function loadEngines() {
   return {
-    ma13bounce: require('./indicators/ma13bounce'),
-    test:       require('./indicators/test'),
+    ma13bounce:     require('./indicators/ma13bounce'),
+    vwapBounce:     require('./indicators/vwapBounce'),
+    smaTouchBounce: require('./indicators/smaTouchBounce'),
+    test:           require('./indicators/test'),
   };
 }
 
