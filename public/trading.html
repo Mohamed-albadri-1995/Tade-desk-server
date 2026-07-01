@@ -1107,6 +1107,21 @@ function renderCenterCard(evt) {
         <div class="center-kv"><div class="ck-label">Risk $</div><div class="ck-val">$${e.sizing?.dollarRisk?.toFixed(0) ?? '—'}</div></div>
         <div class="center-kv"><div class="ck-label">Score</div><div class="ck-val">${(e.gate?.score ?? e.sideA?.score) ?? '—'}</div></div>
       </div>
+      ${(() => {
+        const setupM  = e.sizing?.setupMultiplier;
+        const signalM = e.sizing?.signalGradeMultiplier ?? e.sizing?.gradeMultiplier;
+        const gateM   = e.sizing?.gateMultiplier;
+        if (setupM == null && signalM == null) return '';
+        const total = (Number(setupM ?? 1) * Number(signalM ?? 1) * Number(gateM ?? 1));
+        const fmt   = n => (n == null) ? '—' : Number(n).toFixed(2) + '×';
+        return `<div style="margin-top:8px;padding:6px 10px;background:var(--bg3);border-radius:6px;font-size:11px;color:var(--text2);display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+          <span>Setup <strong style="color:var(--text)">${fmt(setupM)}</strong></span>
+          <span>Signal <strong style="color:var(--text)">${fmt(signalM)}</strong></span>
+          <span>Gate <strong style="color:var(--text)">${fmt(gateM)}</strong></span>
+          <span style="color:var(--text3)">→</span>
+          <span>Total <strong style="color:${total > 1 ? 'var(--green)' : total < 1 ? 'var(--red)' : 'var(--text)'}">${total.toFixed(2)}×</strong></span>
+        </div>`;
+      })()}
       ${renderChecks(e.checks?.mandatory,  'Mandatory')}
       ${renderChecks(e.checks?.default,    'Default')}
       ${renderChecks(e.checks?.additional, 'Additional')}

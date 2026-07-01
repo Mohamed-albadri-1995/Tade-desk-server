@@ -97,10 +97,29 @@ function currentOpenExposure() {
  * @param {string|null} params.setupGrade - historical setup grade A+/A/B/C (null = no adjustment)
  * @returns {object} { shares, dollarRisk, positionValue, riskPct, equity, ...inputs }
  */
-function calculate({ entryPrice, sl, gateMultiplier = 1.0, score = null, setupGrade = null, setupMultiplier = 1.0, sideAMultiplier }) {
-  // Accept the old sideAMultiplier name for backwards compatibility with
-  // any lingering caller until they're all migrated.
+/**
+ * Position size cascade — two independent grading multipliers, both
+ * multiplied into the base risk:
+ *
+ *   setupMultiplier  ← how has this setup performed OVERALL? ("VWAP
+ *                       bounce is a good setup — I risk 1.2× on it")
+ *   signalGrade      ← how good is THIS specific fire, given which
+ *                       additional checks are aligned right now? ("13
+ *                       and VWAP are both sloping up on this bar → A+")
+ *
+ * They stack: a strong setup running a strong variation gets both boosts.
+ */
+function calculate({
+  entryPrice, sl,
+  gateMultiplier   = 1.0,
+  score            = null,
+  signalGrade      = null,   // per-fire letter grade (A+/A/B/C) — was 'setupGrade'
+  setupMultiplier  = 1.0,    // overall setup track record
+  // Back-compat aliases so older callers keep working during rollout:
+  setupGrade, sideAMultiplier,
+}) {
   if (gateMultiplier == null && sideAMultiplier != null) gateMultiplier = sideAMultiplier;
+  if (signalGrade == null && setupGrade != null) signalGrade = setupGrade;
 
   if (!entryPrice || !sl) throw new Error('entryPrice and sl are required');
 
@@ -108,14 +127,14 @@ function calculate({ entryPrice, sl, gateMultiplier = 1.0, score = null, setupGr
   if (stopDistance === 0) throw new Error('Stop distance is zero');
 
   const s = getSettings();
-  const scoreMult = scoreMultiplier(score, s);
-  const gradeMult = GRADE_MULTIPLIERS[setupGrade] ?? 1.0;
-  // Setup-level multiplier is 1.0 unless the grading engine has seen
-  // enough closed trades to justify a change (bootstrap guardrail).
-  const setupMult = Number.isFinite(setupMultiplier) ? setupMultiplier : 1.0;
+  const scoreMult       = scoreMultiplier(score, s);
+  const signalGradeMult = GRADE_MULTIPLIERS[signalGrade] ?? 1.0;
+  // Setup-level multiplier stays at 1.0 unless the grading engine has
+  // seen enough closed trades to justify a change (bootstrap guardrail).
+  const setupMult       = Number.isFinite(setupMultiplier) ? setupMultiplier : 1.0;
 
   const riskDollars = Math.min(
-    s.equity * (s.riskPct / 100) * gateMultiplier * scoreMult * gradeMult * setupMult,
+    s.equity * (s.riskPct / 100) * gateMultiplier * scoreMult * signalGradeMult * setupMult,
     s.maxDollarRisk
   );
 
@@ -144,9 +163,12 @@ function calculate({ entryPrice, sl, gateMultiplier = 1.0, score = null, setupGr
     positionValue: parseFloat(positionValue.toFixed(2)),
     stopDistance: parseFloat(stopDistance.toFixed(4)),
     gateMultiplier,
-    scoreMultiplier: scoreMult,
-    gradeMultiplier: gradeMult,
-    setupMultiplier: setupMult,
+    scoreMultiplier:       scoreMult,
+    signalGradeMultiplier: signalGradeMult,   // "how good is THIS fire"
+    setupMultiplier:       setupMult,          // "how good is the setup overall"
+    // Retain the legacy name so existing UI code that reads gradeMultiplier
+    // keeps rendering while we transition — remove in a follow-up.
+    gradeMultiplier:       signalGradeMult,
     setupGrade: setupGrade || null,
     riskPct: s.riskPct,
     equity: s.equity,

@@ -240,7 +240,7 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
   } catch (err) {
     liveGrade = { grade: 'B (bootstrapping)', totalR: 0, baseR: 0, deltaR: 0, alignedKeysCounted: [], inBootstrap: true };
   }
-  const setupGrade = liveGrade.grade === 'B (bootstrapping)' ? null : liveGrade.grade;
+  const signalGrade = liveGrade.grade === 'B (bootstrapping)' ? null : liveGrade.grade;
 
   // Sizing — if we still have no entry price, use the indicator's entry as
   // a last resort so the calc runs. If even that isn't set, refuse to size.
@@ -260,12 +260,12 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
       } catch { /* keep 1.0 */ }
 
       sizing = sizer.calculate({
-        entryPrice: sizingEntry,
+        entryPrice:      sizingEntry,
         sl,
-        gateMultiplier: gate?.multiplier ?? 1.0,
-        score: gate?.score ?? null,
-        setupGrade,
-        setupMultiplier: setupMult,
+        gateMultiplier:  gate?.multiplier ?? 1.0,
+        score:           gate?.score ?? null,
+        signalGrade,        // this fire's rating (was setupGrade)
+        setupMultiplier: setupMult,  // the setup's overall track record
       });
     } catch (e) {
       sizingError = e.message;
