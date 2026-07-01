@@ -13,7 +13,7 @@
  * real setup conditions.
  */
 
-function evaluate(bars) {
+function evaluate(bars, pmHigh, ctx = {}) {
   if (!bars || bars.length < 2) return null;
 
   const prev = bars[bars.length - 2];
@@ -40,7 +40,7 @@ function evaluate(bars) {
   };
 }
 
-function debug(bars) {
+function debug(bars, pmHigh, ctx = {}) {
   if (!bars || bars.length < 2) {
     return { canRun: false, reason: `need 2+ bars, have ${bars?.length ?? 0}` };
   }

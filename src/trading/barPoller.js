@@ -158,7 +158,8 @@ function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
 
     if (!setupResult.skipped) {
       try {
-        const signal = engine.evaluate(bars, pmHigh);
+        const engineCtx = { rvol };
+        const signal = engine.evaluate(bars, pmHigh, engineCtx);
         setupResult.signal = signal ? { direction: signal.direction, sl: signal.sl, tp: signal.tp, meta: signal.meta } : null;
 
         if (signal) {
@@ -181,7 +182,7 @@ function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
             indicators: { ...(signal.meta || {}), rvol },
           }, sessionId);
         } else if (engine.debug) {
-          setupResult.debugInfo = engine.debug(bars, pmHigh);
+          setupResult.debugInfo = engine.debug(bars, pmHigh, engineCtx);
         }
       } catch (e) {
         setupResult.error = e.message;

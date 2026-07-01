@@ -98,6 +98,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS trade_card_checks_key_idx  ON trade_card_checks(check_key, aligned);
 `);
 
+// Version stamp on every stored evaluation so an edited check's history
+// doesn't mix logic-versions when the grading engine reads it back.
+// Existing rows default to 1, which matches the seed version_id in
+// check_library so nothing gets orphaned.
+try { db.exec('ALTER TABLE trade_card_checks ADD COLUMN check_version_id INTEGER NOT NULL DEFAULT 1'); } catch { /* already exists */ }
+
 // ─── Card building ───────────────────────────────────────────────────────────
 
 /**
@@ -136,14 +142,19 @@ function createCardForSignal({
     );
 
     const insertCheck = db.prepare(`
-      INSERT INTO trade_card_checks (id, card_id, kind, check_key, label, section, value, aligned)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO trade_card_checks (id, card_id, kind, check_key, label, section, value, aligned, check_version_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const c of mandatoryChecks) {
       insertCheck.run(
         uuidv4(), id, 'mandatory',
         c.key, c.label, c.section || null, c.value != null ? String(c.value) : null,
         c.aligned == null ? null : (c.aligned ? 1 : 0),
+        // Mandatory checks are read from the indicator's debug() output, not
+        // the check_library, so they track the indicator version rather than
+        // a library version. Stamp 1 for now; a future indicator-version
+        // scheme can flow through here without a schema change.
+        1,
       );
     }
     for (const c of additionalChecks) {
@@ -151,6 +162,7 @@ function createCardForSignal({
         uuidv4(), id, 'additional',
         c.key, c.label, c.section || null, c.value != null ? String(c.value) : null,
         c.aligned == null ? null : (c.aligned ? 1 : 0),
+        c.versionId || 1,
       );
     }
   });
@@ -298,10 +310,18 @@ function checkContributions(setupId, opts = {}) {
   let where = 'tc.setup_id = ? AND tc.r_multiple IS NOT NULL';
   if (opts.account) { where += ' AND tc.account = ?'; params.push(opts.account); }
 
+  // Join against check_library on check_key so each learning row must
+  // match the CURRENT version_id of its check. Rows whose check has been
+  // edited since the trade closed get filtered out and the check starts
+  // its expectancy pool over — same effect as resetting learning without
+  // touching the historical trade cards themselves. Rows whose check is
+  // no longer in the library (removed) also drop out here.
   const rows = db.prepare(`
     SELECT tc.r_multiple AS r, cc.check_key AS k, cc.label AS label, cc.aligned AS aligned
       FROM trade_cards tc
       JOIN trade_card_checks cc ON cc.card_id = tc.id AND cc.kind = 'additional'
+      JOIN check_library    cl ON cl.check_key = cc.check_key
+                              AND cl.version_id = cc.check_version_id
      WHERE ${where}
   `).all(...params);
 

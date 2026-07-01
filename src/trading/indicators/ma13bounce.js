@@ -41,9 +41,12 @@ function calcVWAP(bars) {
 /**
  * @param {object[]} bars   - 1-min bars from 9:30 ET, [{t,o,h,l,c,v}], latest last
  * @param {number}   pmHigh - pre-market high from r0 (stock.pmHigh)
+ * @param {object}   [ctx]  - extra runtime context supplied by the poller:
+ *                             { rvol, ... }. Optional — engines only reach
+ *                             into it if they need it.
  * @returns {object|null}   - signal object or null
  */
-function evaluate(bars, pmHigh) {
+function evaluate(bars, pmHigh, ctx = {}) {
   // Need at least 22 bars (for EMA20) + 1 previous + 1 current = 23 minimum
   if (!bars || bars.length < 23) return null;
 
@@ -101,7 +104,7 @@ function evaluate(bars, pmHigh) {
 /**
  * Returns per-condition pass/fail detail for debugging (does not fire a signal).
  */
-function debug(bars, pmHigh) {
+function debug(bars, pmHigh, ctx = {}) {
   if (!bars || bars.length < 23) {
     return { canRun: false, reason: `need 23+ bars, have ${bars?.length ?? 0}` };
   }

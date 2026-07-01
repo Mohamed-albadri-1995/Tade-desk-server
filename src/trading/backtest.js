@@ -109,7 +109,9 @@ async function runBacktest(opts) {
     const window = bars.slice(0, i + 1);
     let signal = null;
     try {
-      signal = engine.evaluate(window, pmHigh);
+      // Historical replay has no live rvol stream. Indicators that need
+      // it will short-circuit on null; ones that don't are unaffected.
+      signal = engine.evaluate(window, pmHigh, { rvol: null });
     } catch { /* engine internal error, skip */ }
     if (!signal) continue;
 

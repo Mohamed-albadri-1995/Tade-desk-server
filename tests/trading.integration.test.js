@@ -27,6 +27,7 @@ const marketGate  = require('../src/trading/marketGate');
 const setupEngine = require('../src/trading/setupEngine');
 const router      = require('../src/trading/router');
 const grading     = require('../src/trading/grading');
+const checks      = require('../src/trading/checks');
 const brokers     = require('../src/trading/brokers');
 const { v4: uuidv4 } = require('uuid');
 
@@ -40,6 +41,7 @@ function cleanDb() {
     DELETE FROM trading_setups;
     DELETE FROM trade_card_checks;
     DELETE FROM trade_cards;
+    DELETE FROM check_library WHERE check_key IN ('good', 'edit_test');
   `);
   marketGate.clear();
   setupEngine.clearSessionLog();
@@ -170,6 +172,15 @@ describe('Trading pipeline — stage boundaries', () => {
   });
 
   test('Grading learns from closed cards and grades a new fire', () => {
+    // Seed a library entry so the version-tag JOIN in checkContributions
+    // finds the linked rows. Any check_key present in trade_card_checks
+    // must also exist in check_library with matching version_id.
+    db.prepare(`
+      INSERT OR IGNORE INTO check_library
+        (id, check_key, label, category, section, description, condition, enabled, created_at, updated_at, version_id)
+      VALUES (?, 'good', 'good check', 'additional', null, null, '{}', 1, ?, ?, 1)
+    `).run(uuidv4(), Date.now(), Date.now());
+
     // Seed 30 completed cards on setup S1 with one aligned check that
     // strongly correlates with wins.
     const setupId = uuidv4();
@@ -181,8 +192,8 @@ describe('Trading pipeline — stage boundaries', () => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(cardId, '2026-06-30', 'TEST', setupId, 'Long', uuidv4(), 100, 1, r, Date.now(), '{}', Date.now());
       db.prepare(`
-        INSERT INTO trade_card_checks (id, card_id, kind, check_key, label, aligned)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO trade_card_checks (id, card_id, kind, check_key, label, aligned, check_version_id)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
       `).run(uuidv4(), cardId, 'additional', 'good', 'good check', r > 0 ? 1 : 0);
     }
     const aligned    = grading.gradeSignal({ setupId, additionalChecks: [{ key: 'good', aligned: true }] });
@@ -196,5 +207,46 @@ describe('Trading pipeline — stage boundaries', () => {
     const active = brokers.getActive();
     expect(active.length).toBeGreaterThan(0);
     expect(active.every(b => b.enabled)).toBe(true);
+  });
+
+  test('Editing a check bumps its version and freezes its old learning', () => {
+    // Create a library entry, seed 20 cards linked at version 1 that make
+    // the check look like a winner, then edit the condition. The learning
+    // pool should reset to empty (0 aligned trades under version 2), so
+    // gradeSignal falls back to the setup baseline instead of citing the
+    // stale expectancy delta.
+    const setupId = uuidv4();
+    const check = checks.createCheck({
+      check_key: 'edit_test',
+      label:     'edit test',
+      category:  'additional',
+      condition: { op: 'gt', left: { field: 'close' }, right: { literal: 0 } },
+    });
+    expect(check.versionId).toBe(1);
+
+    for (let i = 0; i < 20; i++) {
+      const cardId = uuidv4();
+      const r = i < 15 ? 2 : -0.5;
+      db.prepare(`
+        INSERT INTO trade_cards (id, date, ticker, setup_id, direction, position_id, entry_price, stop_distance, r_multiple, closed_at, context, fired_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(cardId, '2026-06-30', 'TEST', setupId, 'Long', uuidv4(), 100, 1, r, Date.now(), '{}', Date.now());
+      db.prepare(`
+        INSERT INTO trade_card_checks (id, card_id, kind, check_key, label, aligned, check_version_id)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+      `).run(uuidv4(), cardId, 'additional', 'edit_test', 'edit test', r > 0 ? 1 : 0);
+    }
+
+    const before = grading.checkContributions(setupId);
+    expect(before.find(c => c.key === 'edit_test')).toBeTruthy();
+
+    // Edit the condition → version bumps to 2, old rows still tagged 1.
+    const bumped = checks.updateCheck(check.id, {
+      condition: { op: 'gt', left: { field: 'close' }, right: { literal: 1 } },
+    });
+    expect(bumped.versionId).toBe(2);
+
+    const after = grading.checkContributions(setupId);
+    expect(after.find(c => c.key === 'edit_test')).toBeFalsy();
   });
 });

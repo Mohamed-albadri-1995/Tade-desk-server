@@ -105,6 +105,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS check_library_category_idx ON check_library(category, enabled);
 `);
 
+// Version column bumps whenever the underlying condition JSON is edited so
+// the grading engine can partition learning history and stop mixing
+// old-logic evaluations with new-logic ones.
+try { db.exec('ALTER TABLE check_library ADD COLUMN version_id INTEGER NOT NULL DEFAULT 1'); } catch { /* already exists */ }
+
 // ─── Seeds ───────────────────────────────────────────────────────────────────
 // A small handful of common conditions so the library isn't empty on
 // first run. These are TYPICAL defaults for the ma13bounce style setup;
@@ -208,6 +213,7 @@ function _row(r) {
     description: r.description,
     condition:   safeParse(r.condition, {}),
     enabled:     r.enabled === 1,
+    versionId:   r.version_id || 1,
     createdAt:   r.created_at,
     updatedAt:   r.updated_at,
   };
@@ -263,11 +269,15 @@ function updateCheck(id, patch) {
     const v = validateCondition(patch.condition);
     if (!v.ok) throw new Error(`condition invalid: ${v.error}`);
   }
+  // Only the condition JSON affects what the check MEASURES; label, section,
+  // etc. are cosmetic so a version bump would waste history unnecessarily.
+  const conditionChanged = next.condition !== cur.condition;
+  const nextVersion = conditionChanged ? (cur.version_id || 1) + 1 : (cur.version_id || 1);
   db.prepare(`
     UPDATE check_library
-       SET check_key=?, label=?, category=?, section=?, description=?, condition=?, enabled=?, updated_at=?
+       SET check_key=?, label=?, category=?, section=?, description=?, condition=?, enabled=?, updated_at=?, version_id=?
      WHERE id=?
-  `).run(next.check_key, next.label, next.category, next.section, next.description, next.condition, next.enabled, Date.now(), id);
+  `).run(next.check_key, next.label, next.category, next.section, next.description, next.condition, next.enabled, Date.now(), nextVersion, id);
   return getCheck(id);
 }
 
@@ -627,7 +637,7 @@ function evaluateCondition(node, ctx) {
  * All three arrays share the same shape:
  *   { key, label, section?, value, aligned }
  */
-function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicatorExtras = {}, scannerContext = {}, historySeries = {} }) {
+function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicatorExtras = {}, scannerContext = {}, historySeries = {}, engineCtx = {} }) {
   const ctx = buildIndicatorContext(bars, indicatorExtras);
   ctx.scanner = scannerContext;
   ctx.history = historySeries;
@@ -637,7 +647,7 @@ function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicato
   const mandatoryChecks = [];
   if (indicatorEngine && typeof indicatorEngine.debug === 'function') {
     let dbg = null;
-    try { dbg = indicatorEngine.debug(bars, pmHigh); } catch { /* ignore */ }
+    try { dbg = indicatorEngine.debug(bars, pmHigh, engineCtx); } catch { /* ignore */ }
     if (dbg && Array.isArray(dbg.conditions)) {
       for (const c of dbg.conditions) {
         mandatoryChecks.push({
@@ -660,6 +670,7 @@ function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicato
       section:   row.section || null,
       value:     r.value,
       aligned:   r.aligned,
+      versionId: row.versionId || 1,
     };
   };
 
