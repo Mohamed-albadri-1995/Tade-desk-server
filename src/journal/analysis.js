@@ -1,15 +1,13 @@
 /**
- * Journal Analysis & Grading Engine
+ * Journal metric helpers.
  *
- * Per-setup expectancy, risk-weighted contribution, condition grading.
+ * Just computeMetrics (arbitrary-filter dollar/win-rate math for the
+ * Journal tab metric bar) and calendarData (daily P&L heatmap) live here.
+ * Expectancy, per-setup grading, and per-check contribution moved to
+ * src/trading/grading.js — one source of truth reading trade_cards.
  */
 
 const db = require('../db');
-
-function getSetting(key, fallback) {
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
-  return row ? parseFloat(row.value) : fallback;
-}
 
 // ─── Core metrics ─────────────────────────────────────────────────────────────
 
@@ -83,150 +81,6 @@ function emptyMetrics(total = 0) {
     avgMaePct: null, avgMfePct: null };
 }
 
-// ─── Grade ────────────────────────────────────────────────────────────────────
-
-function gradeSetup(metrics, minTrades) {
-  if (metrics.closed < minTrades) return { grade: 'B', reason: `bootstrapping (${metrics.closed}/${minTrades} trades)` };
-
-  const { expectancyPerDollarRisk: edr, winRate, expectancy } = metrics;
-  const score = edr ?? (expectancy / 100);  // fallback if no SL data
-
-  if (score >= 0.015 && winRate >= 50) return { grade: 'A+', reason: 'strong expectancy + win rate' };
-  if (score >= 0.010 && winRate >= 40) return { grade: 'A',  reason: 'solid expectancy' };
-  if (score >= 0.005)                  return { grade: 'B',  reason: 'positive expectancy' };
-  return { grade: 'C', reason: 'negative or low expectancy' };
-}
-
-function gradeCondition(deltaExpectancy, n, minTrades) {
-  if (n < minTrades) return { grade: 'B', reason: `bootstrapping (${n}/${minTrades})` };
-  if (deltaExpectancy >= 1.0)  return { grade: 'A+', reason: 'high delta expectancy' };
-  if (deltaExpectancy >= 0.5)  return { grade: 'A',  reason: 'positive delta expectancy' };
-  if (deltaExpectancy >= 0)    return { grade: 'B',  reason: 'slightly positive' };
-  return { grade: 'C', reason: 'negative delta expectancy' };
-}
-
-// ─── Per-setup analysis ───────────────────────────────────────────────────────
-
-function analyzeSetup(setupId) {
-  const minTrades    = getSetting('journal_min_grade_trades', 20);
-  const minCondTrades = getSetting('journal_min_condition_trades', 10);
-
-  const trades = db.prepare(`
-    SELECT t.*, ts.r_multiple, ts.capture_pct
-    FROM journal_trades t
-    LEFT JOIN journal_technical_snapshots ts ON ts.trade_id = t.id
-    WHERE t.setup_id = ?
-  `).all(setupId);
-
-  const metrics = computeMetrics(trades);
-  const gradeResult = gradeSetup(metrics, minTrades);
-
-  // Condition analysis
-  const conditionStats = analyzeConditions(setupId, minCondTrades);
-
-  return { setupId, metrics, grade: gradeResult, conditions: conditionStats };
-}
-
-function analyzeConditions(setupId, minTrades) {
-  // Get all trades for this setup that have conditions computed
-  const rows = db.prepare(`
-    SELECT jc.condition_key, jc.aligned, t.net_pnl, t.r_multiple,
-           t.sl, t.entry_price, t.shares, jc.mandatory
-    FROM journal_conditions jc
-    JOIN journal_trades t ON t.id = jc.trade_id
-    WHERE t.setup_id = ? AND t.status = 'closed' AND t.net_pnl IS NOT NULL
-  `).all(setupId);
-
-  const byKey = {};
-  for (const row of rows) {
-    if (!byKey[row.condition_key]) byKey[row.condition_key] = { aligned: [], notAligned: [], mandatory: row.mandatory };
-    const bucket = row.aligned === 1 ? 'aligned' : 'notAligned';
-    byKey[row.condition_key][bucket].push(row.net_pnl);
-  }
-
-  const result = [];
-  for (const [key, data] of Object.entries(byKey)) {
-    const expAligned    = expectancyFromPnls(data.aligned);
-    const expNotAligned = expectancyFromPnls(data.notAligned);
-    const delta = expAligned != null && expNotAligned != null ? expAligned - expNotAligned : null;
-    const n = data.aligned.length + data.notAligned.length;
-    const grade = delta != null ? gradeCondition(delta, Math.min(data.aligned.length, data.notAligned.length), minTrades) : null;
-
-    result.push({
-      conditionKey: key,
-      mandatory: data.mandatory === 1,
-      nAligned: data.aligned.length,
-      nNotAligned: data.notAligned.length,
-      expectancyAligned: expAligned,
-      expectancyNotAligned: expNotAligned,
-      deltaExpectancy: delta != null ? parseFloat(delta.toFixed(2)) : null,
-      grade,
-    });
-  }
-
-  return result.sort((a, b) => (b.deltaExpectancy ?? -999) - (a.deltaExpectancy ?? -999));
-}
-
-function expectancyFromPnls(pnls) {
-  if (!pnls.length) return null;
-  const wins   = pnls.filter(p => p > 0);
-  const losses = pnls.filter(p => p < 0);
-  const wr = wins.length / pnls.length;
-  const avgW = wins.length   ? wins.reduce((a,b)=>a+b,0)   / wins.length   : 0;
-  const avgL = losses.length ? losses.reduce((a,b)=>a+b,0) / losses.length : 0;
-  return parseFloat((wr * avgW - (1 - wr) * Math.abs(avgL)).toFixed(2));
-}
-
-// ─── Account-level overview ───────────────────────────────────────────────────
-
-function analyzeAccount(filters = {}) {
-  let q = 'SELECT t.* FROM journal_trades t WHERE 1=1';
-  const params = [];
-  if (filters.account) { q += ' AND t.account = ?'; params.push(filters.account); }
-  if (filters.from)    { q += ' AND t.date >= ?';   params.push(filters.from); }
-  if (filters.to)      { q += ' AND t.date <= ?';   params.push(filters.to); }
-
-  const trades  = db.prepare(q).all(...params);
-  const metrics = computeMetrics(trades);
-
-  // Per-setup contribution
-  const setupIds = [...new Set(trades.map(t => t.setup_id).filter(Boolean))];
-  const setupContributions = setupIds.map(sid => {
-    const setupTrades = trades.filter(t => t.setup_id === sid);
-    const sm = computeMetrics(setupTrades);
-    return {
-      setupId: sid,
-      trades: sm.closed,
-      netPnl: sm.netPnl,
-      totalDollarRisk: sm.totalDollarRisk,
-      pnlShare: metrics.netPnl !== 0 ? parseFloat((sm.netPnl / metrics.netPnl * 100).toFixed(1)) : null,
-      riskShare: metrics.totalDollarRisk > 0 ? parseFloat((sm.totalDollarRisk / metrics.totalDollarRisk * 100).toFixed(1)) : null,
-      expectancy: sm.expectancy,
-      winRate: sm.winRate,
-      grade: gradeSetup(sm, getSetting('journal_min_grade_trades', 20)),
-    };
-  });
-
-  // Drawdown
-  const sorted = trades
-    .filter(t => t.status === 'closed' && t.net_pnl != null)
-    .sort((a, b) => a.date.localeCompare(b.date));
-  let peak = 0, equity = 0, maxDD = 0;
-  for (const t of sorted) {
-    equity += t.net_pnl;
-    if (equity > peak) peak = equity;
-    const dd = peak - equity;
-    if (dd > maxDD) maxDD = dd;
-  }
-
-  return {
-    metrics,
-    maxDrawdown: parseFloat(maxDD.toFixed(2)),
-    setupContributions,
-    tradeCount: trades.length,
-  };
-}
-
 // ─── Calendar ─────────────────────────────────────────────────────────────────
 
 function calendarData(filters = {}) {
@@ -240,9 +94,5 @@ function calendarData(filters = {}) {
 
 module.exports = {
   computeMetrics,
-  gradeSetup,
-  gradeCondition,
-  analyzeSetup,
-  analyzeAccount,
   calendarData,
 };

@@ -768,8 +768,8 @@ body {
       <div class="panel-title">Execution Mode</div>
       <p style="font-size:11px;color:var(--text3);margin:0 0 10px">
         <strong>Off</strong>: signals fire but no order/position is created and nothing is sent anywhere — good for pure testing.<br>
-        <strong>Paper</strong>: an order + open position are recorded locally, no external broker call — default.<br>
-        <strong>Live</strong>: same local record PLUS the Router fans out to every enabled broker profile. (Alpaca live submission is still stubbed pending your go-ahead.)
+        <strong>Paper</strong>: local record + fan-out to Alpaca profiles pointing at paper-api. Real fills, no real money.<br>
+        <strong>Live</strong>: local record + real orders to Alpaca profiles pointing at the live URL. <span style="color:var(--red)">Requires the confirmation flag below.</span>
       </p>
       <div style="display:grid;grid-template-columns:1fr;gap:10px">
         <div>
@@ -779,6 +779,15 @@ body {
             <option value="paper">Paper — local record only</option>
             <option value="live">Live — fan out to enabled brokers</option>
           </select>
+        </div>
+        <div style="margin-top:6px;padding:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px">
+          <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text2)">
+            <input type="checkbox" id="s-liveconfirmed" data-key="trading_live_confirmed" data-truthy="true" data-falsy="false" style="margin-top:2px">
+            <span>
+              <strong style="color:var(--red)">I confirm live submission with real money.</strong>
+              Signals still route through the exec-mode + broker-URL gates, but this box has to be checked before ANY order can hit the live Alpaca URL. Leave unchecked for paper-only work. The box does nothing if the mode is not "Live" or the broker URL is not the live endpoint.
+            </span>
+          </label>
         </div>
       </div>
     </div>
@@ -1440,7 +1449,7 @@ async function loadAnalysis() {
   if (from) params.set('from', from);
   if (to)   params.set('to', to);
 
-  const data = await fetch(`${API}/journal/analysis/account?${params}`).then(r => r.json()).catch(() => null);
+  const data = await fetch(`${API}/trading/grading/summary?${params}`).then(r => r.json()).catch(() => null);
   if (!data || !data.metrics) return;
 
   const m = data.metrics;
@@ -1455,8 +1464,8 @@ async function loadAnalysis() {
     <div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0">
       ${stat('Net P&L', (m.netPnl >= 0 ? '+' : '') + '$' + (m.netPnl||0).toFixed(2), pnlColor)}
       ${stat('Win Rate', (m.winRate||0).toFixed(0) + '%', m.winRate >= 50 ? 'var(--green)' : 'var(--red)')}
-      ${stat('Expectancy', '$' + (m.expectancy||0).toFixed(2), m.expectancy >= 0 ? 'var(--green)' : 'var(--red)')}
-      ${stat('Avg R', m.avgR != null ? m.avgR + 'R' : '—')}
+      ${stat('Expectancy R', (m.expectancy||0).toFixed(2) + 'R', m.expectancy >= 0 ? 'var(--green)' : 'var(--red)')}
+      ${stat('Avg R', m.avgR != null ? m.avgR.toFixed(2) + 'R' : '—')}
       ${stat('Max DD', '-$' + (data.maxDrawdown||0).toFixed(2), 'var(--red)')}
       ${stat('Trades', m.closed || 0)}
     </div>`;
@@ -1478,7 +1487,7 @@ async function loadAnalysis() {
           <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.setupId}</span>
           <span style="text-align:right;color:var(--text3)">${s.trades}</span>
           <span style="text-align:right">${s.winRate != null ? s.winRate.toFixed(0)+'%' : '—'}</span>
-          <span style="text-align:right">${s.expectancy != null ? '$'+s.expectancy.toFixed(2) : '—'}</span>
+          <span style="text-align:right">${s.expectancy != null ? s.expectancy.toFixed(2)+'R' : '—'}</span>
           <span style="text-align:right;color:${pnlC};font-weight:600">${s.netPnl >= 0 ? '+' : ''}$${(s.netPnl||0).toFixed(0)}</span>
           <span style="text-align:center;font-weight:700;font-size:11px;color:${gradeColor(s.grade?.grade)}">${s.grade?.grade || '—'}</span>
         </div>`;
@@ -1490,34 +1499,39 @@ async function loadAnalysis() {
 }
 
 async function loadSetupConditions(setupId) {
-  const data = await fetch(`${API}/journal/analysis/setup/${encodeURIComponent(setupId)}`).then(r => r.json()).catch(() => null);
-  if (!data) return;
+  // Pull setup stats + per-check contributions in one round-trip — both
+  // sourced from the grading engine so the numbers match everywhere.
+  const [statsResp, contribResp] = await Promise.all([
+    fetch(`${API}/trading/grading/setup/${encodeURIComponent(setupId)}`).then(r => r.json()).catch(() => null),
+    fetch(`${API}/trading/grading/setup/${encodeURIComponent(setupId)}/checks`).then(r => r.json()).catch(() => null),
+  ]);
+  if (!statsResp) return;
   const el    = document.getElementById('jnl-analysis-conditions');
   const body  = document.getElementById('jnl-cond-body');
   document.getElementById('jnl-cond-title').textContent = setupId + ' — Conditions';
   const gradeColor = g => g === 'A+' ? 'var(--green)' : g === 'A' ? '#4caf50' : g === 'B' ? 'var(--text2)' : 'var(--red)';
-  const m = data.metrics;
+  const s = statsResp.stats || {};
+  const winRate = s.winRate != null ? (s.winRate * 100).toFixed(0) : '0';
+  const expR    = s.expectancyR != null ? s.expectancyR.toFixed(2) : '0.00';
   let html = `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">
-    ${m.closed} trades · ${(m.winRate||0).toFixed(0)}% win · $${(m.expectancy||0).toFixed(2)} expectancy
-    <span style="font-size:13px;font-weight:700;color:${gradeColor(data.grade?.grade)};margin-left:8px">${data.grade?.grade || '?'}</span>
-    <span style="font-size:10px;color:var(--text3);margin-left:4px">${data.grade?.reason || ''}</span>
+    ${s.n ?? 0} trades · ${winRate}% win · ${expR}R expectancy
+    <span style="font-size:13px;font-weight:700;color:${gradeColor(s.grade)};margin-left:8px">${s.grade || '?'}</span>
   </div>`;
-  const conds = data.conditions || [];
-  if (!conds.length) {
-    html += `<div style="font-size:11px;color:var(--text3)">No condition data yet — run Compute on trades with this setup.</div>`;
+  const contribs = (contribResp?.contributions) || [];
+  if (!contribs.length) {
+    html += `<div style="font-size:11px;color:var(--text3)">No check data yet — fires with additional checks populate this.</div>`;
   } else {
-    html += `<div style="display:grid;grid-template-columns:1fr 38px 38px 56px 32px;gap:4px;font-size:10px;color:var(--text3);padding:0 4px 4px;border-bottom:1px solid var(--border)">
-      <span>Condition</span><span style="text-align:right">✓</span><span style="text-align:right">✗</span><span style="text-align:right">Δ Exp</span><span style="text-align:center">Grade</span>
+    html += `<div style="display:grid;grid-template-columns:1fr 38px 38px 60px;gap:4px;font-size:10px;color:var(--text3);padding:0 4px 4px;border-bottom:1px solid var(--border)">
+      <span>Check</span><span style="text-align:right">✓</span><span style="text-align:right">✗</span><span style="text-align:right">Δ R</span>
     </div>`;
-    html += conds.map(c => {
-      const dColor = c.deltaExpectancy > 0 ? 'var(--green)' : c.deltaExpectancy < 0 ? 'var(--red)' : 'var(--text2)';
-      const req = c.mandatory ? '★ ' : '';
-      return `<div style="display:grid;grid-template-columns:1fr 38px 38px 56px 32px;gap:4px;font-size:11px;padding:6px 4px;border-bottom:1px solid var(--border);align-items:center">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2)">${req}${c.conditionKey}</span>
+    html += contribs.map(c => {
+      const d = c.deltaExpectancyR;
+      const dColor = d > 0 ? 'var(--green)' : d < 0 ? 'var(--red)' : 'var(--text2)';
+      return `<div style="display:grid;grid-template-columns:1fr 38px 38px 60px;gap:4px;font-size:11px;padding:6px 4px;border-bottom:1px solid var(--border);align-items:center">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2)">${c.label}</span>
         <span style="text-align:right;color:var(--green)">${c.nAligned}</span>
         <span style="text-align:right;color:var(--red)">${c.nNotAligned}</span>
-        <span style="text-align:right;font-weight:600;color:${dColor}">${c.deltaExpectancy != null ? (c.deltaExpectancy >= 0 ? '+' : '') + '$'+c.deltaExpectancy : '—'}</span>
-        <span style="text-align:center;font-weight:700;font-size:11px;color:${gradeColor(c.grade?.grade)}">${c.grade?.grade || '—'}</span>
+        <span style="text-align:right;font-weight:600;color:${dColor}">${d != null ? (d >= 0 ? '+' : '') + d.toFixed(2) + 'R' : '—'}</span>
       </div>`;
     }).join('');
   }
@@ -1908,6 +1922,10 @@ async function loadSettings() {
     const r = await fetch(`${API}/settings/${keys[i]}`).then(r => r.json()).catch(() => null);
     if (r?.value != null) document.getElementById(fieldIds[i]).value = r.value;
   }
+  // Checkbox — value is a stringified 'true' / 'false' in settings.
+  const liveOk = await fetch(`${API}/settings/trading_live_confirmed`).then(r => r.json()).catch(() => null);
+  const cb = document.getElementById('s-liveconfirmed');
+  if (cb) cb.checked = liveOk?.value === 'true';
 }
 
 async function saveSettings() {
@@ -1928,6 +1946,8 @@ async function saveSettings() {
     const v = document.getElementById(id).value;
     if (v !== '') body[key] = v;
   }
+  const cb = document.getElementById('s-liveconfirmed');
+  if (cb) body['trading_live_confirmed'] = cb.checked ? 'true' : 'false';
   await fetch(`${API}/settings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

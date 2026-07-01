@@ -10,7 +10,10 @@ require('../journal/db'); // ensure tables exist
 const { importCsv } = require('../journal/importer');
 const { fetchAndStore } = require('../journal/technicalFetch');
 const { evaluateAll } = require('../journal/alignment');
-const { analyzeSetup, analyzeAccount, calendarData, computeMetrics } = require('../journal/analysis');
+// analyzeSetup / analyzeAccount removed — grading.js is the single source
+// of truth for expectancy math now. computeMetrics and calendarData stay
+// because they don't duplicate anything in grading.
+const { calendarData, computeMetrics } = require('../journal/analysis');
 const { mirrorTradeToCard, mirrorClosedTrades } = require('../journal/bridgeToGrading');
 
 const router = express.Router();
@@ -304,14 +307,10 @@ router.post('/trades/:id/context', (req, res) => {
 });
 
 // ─── Analysis ─────────────────────────────────────────────────────────────────
-
-router.get('/analysis/account', (req, res) => {
-  res.json(analyzeAccount(req.query));
-});
-
-router.get('/analysis/setup/:setupId', (req, res) => {
-  res.json(analyzeSetup(req.params.setupId));
-});
+// Note: /analysis/account and /analysis/setup were removed. Callers should
+// use /api/trading/grading/summary and /api/trading/grading/setup/:id
+// which read from trade_cards (which now includes journal-imported history
+// via the bridge). Same numbers, one source of truth.
 
 router.get('/analysis/calendar', (req, res) => {
   res.json(calendarData(req.query));

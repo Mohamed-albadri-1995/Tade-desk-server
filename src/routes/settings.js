@@ -36,6 +36,7 @@ const SETTING_RULES = {
   trading_daily_loss_limit:    { type: 'float', min: 0, max: 100000 },
   trading_data_source:              { type: 'str', maxLen: 20 },
   trading_execution_mode:           { type: 'str', maxLen: 10 },
+  trading_live_confirmed:           { type: 'str', maxLen: 5  },
   trading_gate_enabled:             { type: 'str', maxLen: 4  },
   trading_gate_neutral_multiplier:  { type: 'float', min: 0, max: 2 },
   trading_gate_weak_sec_score:      { type: 'float', min: 0, max: 200 },

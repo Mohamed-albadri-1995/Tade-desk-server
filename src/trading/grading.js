@@ -411,6 +411,84 @@ function gradeSignal({ setupId, additionalChecks = [], account = null }) {
 }
 
 /**
+ * Journal-tab summary — overall metrics + per-setup expectancy in one call.
+ * Replaces the old journal/analysis.js analyzeAccount which computed the
+ * same numbers from journal_trades. Now everything reads trade_cards
+ * (which includes journal-imported history via the bridge).
+ *
+ * Filters: from, to (YYYY-MM-DD date strings on trade_cards.date), account.
+ */
+function accountSummary({ from = null, to = null, account = null } = {}) {
+  const params = [];
+  let where = 'closed_at IS NOT NULL';
+  if (from)    { where += ' AND date >= ?';   params.push(from); }
+  if (to)      { where += ' AND date <= ?';   params.push(to); }
+  if (account) { where += ' AND account = ?'; params.push(account); }
+
+  // ALL closed cards for P&L + drawdown; the r_multiple math below
+  // just skips any card whose r_multiple is null (which happens for
+  // imported journal trades missing the SL price).
+  const cards = db.prepare(`
+    SELECT setup_id, r_multiple, net_pnl, closed_at
+      FROM trade_cards
+     WHERE ${where}
+     ORDER BY closed_at ASC
+  `).all(...params);
+
+  const closed = cards.length;
+  // Win/loss + R math only over cards that HAVE an r_multiple; net P&L
+  // is over all closed cards so a fill without SL still counts toward
+  // the dollar total.
+  const rCards = cards.filter(c => Number.isFinite(c.r_multiple));
+  const wins   = rCards.filter(c => c.r_multiple > 0);
+  const losses = rCards.filter(c => c.r_multiple < 0);
+  const netPnl = cards.reduce((s, c) => s + (c.net_pnl || 0), 0);
+  const winRate = rCards.length ? (wins.length / rCards.length) * 100 : 0;
+  const avgWinR   = wins.length   ? wins.reduce((s, c) => s + c.r_multiple, 0) / wins.length : 0;
+  const avgLossR  = losses.length ? Math.abs(losses.reduce((s, c) => s + c.r_multiple, 0) / losses.length) : 0;
+  const expectancy = (winRate / 100) * avgWinR - (1 - winRate / 100) * avgLossR;
+  const rVals = rCards.map(c => c.r_multiple);
+  const avgR = rVals.length ? rVals.reduce((a, b) => a + b, 0) / rVals.length : null;
+
+  // Peak-to-trough drawdown on the equity curve.
+  let peak = 0, cum = 0, maxDrawdown = 0;
+  for (const c of cards) {
+    cum += (c.net_pnl || 0);
+    if (cum > peak) peak = cum;
+    const dd = peak - cum;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+  }
+
+  // Per-setup breakdown — one setupExpectancy call per distinct setup_id.
+  const setupIds = [...new Set(cards.map(c => c.setup_id).filter(Boolean))];
+  const setupContributions = setupIds.map(setupId => {
+    const stats = setupExpectancy(setupId, { account });
+    const bySetup = cards.filter(c => c.setup_id === setupId);
+    const sPnl = bySetup.reduce((s, c) => s + (c.net_pnl || 0), 0);
+    return {
+      setupId,
+      trades:      bySetup.length,
+      winRate:     stats.winRate != null ? stats.winRate * 100 : null,
+      expectancy:  stats.expectancyR,
+      netPnl:      sPnl,
+      grade:       { grade: stats.grade },
+    };
+  }).sort((a, b) => (b.netPnl || 0) - (a.netPnl || 0));
+
+  return {
+    metrics: {
+      total: closed, closed,
+      wins: wins.length, losses: losses.length,
+      winRate, netPnl,
+      avgWinR, avgLossR,
+      expectancy, avgR,
+    },
+    setupContributions,
+    maxDrawdown,
+  };
+}
+
+/**
  * Recent trade cards for the viewer — one row per card, no checks joined.
  * `limit` caps output; filters are all optional and additive.
  */
@@ -469,6 +547,7 @@ module.exports = {
   setupSizeMultiplier,
   checkContributions,
   gradeSignal,
+  accountSummary,
   listCards,
   getCard,
 };

@@ -44,6 +44,7 @@ function cleanDb() {
     DELETE FROM trade_cards;
     DELETE FROM check_library WHERE check_key IN ('good', 'edit_test');
     DELETE FROM journal_trades WHERE ticker = 'JBRIDGE';
+    DELETE FROM trading_brokers WHERE name = 'live-test';
   `);
   marketGate.clear();
   setupEngine.clearSessionLog();
@@ -203,6 +204,43 @@ describe('Trading pipeline — stage boundaries', () => {
     expect(aligned.grade).toBe('A+');
     expect(notAligned.grade).not.toBe('A+');
     expect(aligned.totalR).toBeGreaterThan(notAligned.totalR);
+  });
+
+  test('Live submission requires all safety gates open (mode + confirmed)', async () => {
+    // The broker send() short-circuits BEFORE hitting the network unless
+    // execution_mode='live' AND trading_live_confirmed='true'. Exercise
+    // the gate directly — no fetch mocking needed because the guard fires
+    // before any fetch call.
+    const liveProfile = brokers.create({
+      name: 'live-test',
+      type: 'alpaca',
+      config: { url: 'https://api.alpaca.markets', key: 'FAKE', secret: 'FAKE' },
+      enabled: true,
+    });
+
+    // Default state: exec-mode='paper', confirmed='false'. Live URL → blocked.
+    db.prepare("UPDATE settings SET value = 'paper' WHERE key = 'trading_execution_mode'").run();
+    db.prepare("UPDATE settings SET value = 'false' WHERE key = 'trading_live_confirmed'").run();
+    let r = await brokers.send(liveProfile, { ticker: 'AAA', direction: 'Long', shares: 1, entryPrice: 10, sl: 9, tp: 12, orderId: 'x' });
+    expect(r.submitted).toBe(false);
+    expect(r.mode).toBe('live-blocked');
+    expect(String(r.note)).toMatch(/execution_mode/);
+
+    // Mode flipped to 'live' but confirmed still false → still blocked.
+    db.prepare("UPDATE settings SET value = 'live' WHERE key = 'trading_execution_mode'").run();
+    r = await brokers.send(liveProfile, { ticker: 'AAA', direction: 'Long', shares: 1, entryPrice: 10, sl: 9, tp: 12, orderId: 'x' });
+    expect(r.submitted).toBe(false);
+    expect(r.mode).toBe('live-blocked');
+    expect(String(r.note)).toMatch(/confirmed/);
+
+    // Both gates open → send() would attempt the fetch. We can't hit the
+    // real Alpaca in a unit test, but the network error return still tells
+    // us the guards passed through.
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('trading_live_confirmed','true')").run();
+    r = await brokers.send(liveProfile, { ticker: 'AAA', direction: 'Long', shares: 1, entryPrice: 10, sl: 9, tp: 12, orderId: 'x' });
+    // Whether the fetch succeeded or errored is irrelevant — the point is
+    // that the guard did not short-circuit with 'live-blocked'.
+    expect(r.mode).not.toBe('live-blocked');
   });
 
   test('At least one broker profile always exists (default paper)', () => {

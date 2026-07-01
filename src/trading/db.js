@@ -119,6 +119,10 @@ const tradingDefaults = [
   ['trading_data_source', 'polling'],
   // Execution mode — 'off' (block everything) | 'paper' (notify only) | 'live' (send to broker)
   ['trading_execution_mode', 'paper'],
+  // Live-money safety: brokers.send() checks this before any live POST.
+  // Defaults to 'false' so a fresh install can NEVER send a live order
+  // until the user explicitly acknowledges it in Settings. Values: 'true' | 'false'.
+  ['trading_live_confirmed', 'false'],
   // Market Gate rules (was 'sideA_' settings)
   ['trading_gate_enabled', '1'],
   ['trading_gate_neutral_multiplier', '0.75'],

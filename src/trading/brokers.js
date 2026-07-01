@@ -19,6 +19,11 @@
 const db = require('../db');
 const { v4: uuidv4 } = require('uuid');
 
+function _getSetting(key) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row?.value ?? null;
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS trading_brokers (
     id TEXT PRIMARY KEY,
@@ -194,12 +199,34 @@ async function send(broker, order) {
   const env = cfg.env
     ? String(cfg.env).toLowerCase()
     : (url.includes('paper-api') ? 'paper' : 'live');
+
+  // Live-money safety gates: three independent signals must all say yes
+  // before a real order goes out. This keeps a paper-configured session
+  // from accidentally routing to the live URL if a config changes.
+  //
+  //   1. env resolved to 'live' (URL is api.alpaca.markets, not paper-api)
+  //   2. execution_mode = 'live' (master switch in Settings)
+  //   3. trading_live_confirmed = 'true' (explicit acknowledgement flag
+  //      the user has to flip in Settings; treat it as informed consent)
+  //
+  // Missing any → the submit is stubbed and logged.
   if (env === 'live') {
-    return {
-      ok: true, submitted: false, mode: 'live-stub',
-      brokerId: broker.id, brokerName: broker.name,
-      note: 'Live submission is deliberately stubbed — flip in brokers.js when ready',
-    };
+    const execMode = _getSetting('trading_execution_mode');
+    const liveOk   = _getSetting('trading_live_confirmed') === 'true';
+    if (execMode !== 'live' || !liveOk) {
+      const missing = execMode !== 'live'
+        ? `execution_mode='${execMode || 'off'}' (need 'live')`
+        : `trading_live_confirmed not set — flip it in Settings`;
+      console.warn(`[Broker] LIVE order NOT submitted for ${broker.name}: ${missing}`);
+      return {
+        ok: true, submitted: false, mode: 'live-blocked',
+        brokerId: broker.id, brokerName: broker.name,
+        note: `Live submission blocked: ${missing}`,
+      };
+    }
+    // All gates open — this is a real-money order. Loud log so the
+    // audit trail is unambiguous when reviewing pm2 logs afterwards.
+    console.warn(`[Broker] LIVE submit → ${broker.name}: ${order.direction} ${order.shares} ${order.ticker} @ ${order.entryPrice ?? 'market'}, SL=${order.sl}, TP=${order.tp}`);
   }
 
   if (!cfg.key || !cfg.secret) {
@@ -243,6 +270,9 @@ async function send(broker, order) {
         error: `Alpaca ${resp.status}: ${body.message || body.code || 'submit failed'}`,
         response: body,
       };
+    }
+    if (env === 'live') {
+      console.warn(`[Broker] LIVE fill received: order ${body.id}, status=${body.status}, filled_avg_price=${body.filled_avg_price}`);
     }
     return {
       ok: true, submitted: true, mode: `alpaca-${env}`,

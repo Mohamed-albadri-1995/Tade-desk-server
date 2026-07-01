@@ -308,6 +308,14 @@ router.post('/grading/preview', (req, res) => {
   }
 });
 
+// Journal-tab summary: overall + per-setup, sourced from trade_cards (which
+// includes journal-imported history via the bridge). Replaces the old
+// /api/journal/analysis/account.
+router.get('/grading/summary', (req, res) => {
+  const { from, to, account } = req.query;
+  res.json({ ok: true, ...grading.accountSummary({ from, to, account }) });
+});
+
 // Trade cards — the actual snapshots grading learns from.
 router.get('/cards', (req, res) => {
   const { limit, setupId, ticker, from, to } = req.query;
