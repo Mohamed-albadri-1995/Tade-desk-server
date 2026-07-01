@@ -130,23 +130,44 @@ const SEED_CHECKS = [
     label:     '9 EMA above VWAP',
     category:  'default',
     section:   'trend',
-    description: 'Short-term trend confirms with VWAP.',
+    direction: 'long',
+    description: 'Short-term trend confirms with VWAP — bullish alignment for long signals.',
     condition: { op: 'gt', left: { field: 'ema9' }, right: { field: 'vwap' } },
+  },
+  {
+    check_key: 'ema9_below_vwap',
+    label:     '9 EMA below VWAP',
+    category:  'default',
+    section:   'trend',
+    direction: 'short',
+    description: 'Short-term trend confirms bearish for short signals.',
+    condition: { op: 'lt', left: { field: 'ema9' }, right: { field: 'vwap' } },
   },
   {
     check_key: 'ema_stack_bullish',
     label:     'EMA stack bullish (9 > 20)',
     category:  'default',
     section:   'trend',
-    description: 'Fast EMAs stacked in the intended direction.',
+    direction: 'long',
+    description: 'Fast EMAs stacked in the long direction.',
     condition: { op: 'gt', left: { field: 'ema9' }, right: { field: 'ema20' } },
+  },
+  {
+    check_key: 'ema_stack_bearish',
+    label:     'EMA stack bearish (9 < 20)',
+    category:  'default',
+    section:   'trend',
+    direction: 'short',
+    description: 'Fast EMAs stacked in the short direction.',
+    condition: { op: 'lt', left: { field: 'ema9' }, right: { field: 'ema20' } },
   },
   {
     check_key: 'rvol_above_2',
     label:     'RVOL > 2×',
     category:  'default',
     section:   'volume',
-    description: 'Current-minute volume is at least 2× the 10-day baseline for this minute.',
+    direction: 'both',
+    description: 'Current-minute volume is at least 2× the 10-day baseline. Applies both directions.',
     condition: { op: 'gt', left: { field: 'rvol' }, right: { literal: 2 } },
   },
   {
@@ -154,31 +175,62 @@ const SEED_CHECKS = [
     label:     '13 EMA sloping up',
     category:  'additional',
     section:   'momentum',
+    direction: 'long',
     description: 'EMA13 has a positive slope over the last 5 bars.',
     condition: { op: 'gt', left: { slope: 'ema13', bars: 5 }, right: { literal: 0 } },
+  },
+  {
+    check_key: 'ema13_sloping_down',
+    label:     '13 EMA sloping down',
+    category:  'additional',
+    section:   'momentum',
+    direction: 'short',
+    description: 'EMA13 has a negative slope over the last 5 bars.',
+    condition: { op: 'lt', left: { slope: 'ema13', bars: 5 }, right: { literal: 0 } },
   },
   {
     check_key: 'vwap_sloping_up',
     label:     'VWAP sloping up',
     category:  'additional',
     section:   'momentum',
+    direction: 'long',
     description: 'VWAP has a positive slope over the last 5 bars.',
     condition: { op: 'gt', left: { slope: 'vwap', bars: 5 }, right: { literal: 0 } },
+  },
+  {
+    check_key: 'vwap_sloping_down',
+    label:     'VWAP sloping down',
+    category:  'additional',
+    section:   'momentum',
+    direction: 'short',
+    description: 'VWAP has a negative slope over the last 5 bars.',
+    condition: { op: 'lt', left: { slope: 'vwap', bars: 5 }, right: { literal: 0 } },
   },
   {
     check_key: 'sector_bullish',
     label:     'Sector bias BULLISH',
     category:  'additional',
     section:   'context',
+    direction: 'long',
     description: 'Scanner-side sector bias is BULLISH at signal time.',
     condition: { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BULLISH' } },
+  },
+  {
+    check_key: 'sector_bearish',
+    label:     'Sector bias BEARISH',
+    category:  'additional',
+    section:   'context',
+    direction: 'short',
+    description: 'Scanner-side sector bias is BEARISH at signal time.',
+    condition: { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BEARISH' } },
   },
   {
     check_key: 'sec_hot',
     label:     'Sector hot',
     category:  'additional',
     section:   'context',
-    description: 'Scanner marks the sector as hot right now.',
+    direction: 'both',
+    description: 'Scanner marks the sector as hot. Applies both directions — hot volume is meaningful for either.',
     condition: { op: 'eq', left: { ctx: 'secHot' }, right: { literal: true } },
   },
   {
@@ -186,7 +238,8 @@ const SEED_CHECKS = [
     label:     'Scanner score ≥ 70 at entry',
     category:  'additional',
     section:   'context',
-    description: 'Scanner _score at the moment of signal fire is ≥ 70.',
+    direction: 'both',
+    description: 'Scanner _score at the moment of signal fire is ≥ 70. Direction-neutral quality gate.',
     condition: { op: 'ge', left: { ctx: '_score' }, right: { literal: 70 } },
   },
 
@@ -200,6 +253,7 @@ const SEED_CHECKS = [
     label:     'L3 · slope score ≥ 5 (strong trend)',
     category:  'additional',
     section:   'momentum',
+    direction: 'long',
     description: 'VWAP is climbing quickly enough that the L3 slope counter has moved ≥ 5 steps since the last VWAP cross. Filters out setups on flat/sideways days.',
     condition: { op: 'ge', left: { field: 'slope_score' }, right: { literal: 5 } },
   },
@@ -208,6 +262,7 @@ const SEED_CHECKS = [
     label:     'L3 · slope score ≥ 10 (very strong trend)',
     category:  'additional',
     section:   'momentum',
+    direction: 'long',
     description: 'Trend so persistent the slope counter passed 10. Selects the strongest trending sessions only.',
     condition: { op: 'ge', left: { field: 'slope_score' }, right: { literal: 10 } },
   },
@@ -216,6 +271,7 @@ const SEED_CHECKS = [
     label:     'L3 · pullback touched all three VWAPs',
     category:  'additional',
     section:   'setup-quality',
+    direction: 'long',
     description: 'Prev bar wick tagged the daily VWAP, 2-day VWAP, AND LL AVWAP simultaneously — a stacked confluence pullback, not just a random VWAP kiss.',
     condition: {
       op: 'and',
@@ -231,6 +287,7 @@ const SEED_CHECKS = [
     label:     'L3 · lower wick ≥ 40% of range',
     category:  'additional',
     section:   'setup-quality',
+    direction: 'long',
     description: 'Prev candle rejected the low aggressively (wick ≥ 40% of range). The default vwapBounce mandatory only requires 15% — this filters for the most emphatic bounces.',
     condition: { op: 'ge', left: { field: 'prevLwickPct' }, right: { literal: 40 } },
   },
@@ -239,6 +296,7 @@ const SEED_CHECKS = [
     label:     'L3 · strict bias (all 4 above)',
     category:  'additional',
     section:   'trend',
+    direction: 'long',
     description: 'Close is above daily VWAP AND 2-day VWAP AND LL AVWAP AND BB EMA. Full L3 strict-bias filter; needs multi-day historical cache warm.',
     condition: {
       op: 'and',
@@ -255,6 +313,7 @@ const SEED_CHECKS = [
     label:     'L3 · ≥ $1.00 headroom to BB upper',
     category:  'additional',
     section:   'setup-quality',
+    direction: 'long',
     description: 'Distance from entry (close) to BB upper is at least $1.00. Filters fires where the trade is already extended toward the band and would run out of room before hitting target.',
     condition: {
       op: 'ge',
@@ -267,6 +326,7 @@ const SEED_CHECKS = [
     label:     'L3 · VWAP stack aligned bullish',
     category:  'additional',
     section:   'trend',
+    direction: 'long',
     description: 'daily VWAP > 2-day VWAP AND 2-day VWAP > LL AVWAP — all three anchors stacked upward, confirming a coherent trend rather than a chop bounce.',
     condition: {
       op: 'and',
@@ -287,6 +347,7 @@ const SEED_CHECKS = [
     label:     'BBZ · touched SMA20 (deepest bounce)',
     category:  'additional',
     section:   'setup-quality',
+    direction: 'both',
     description: 'The MA that got tagged was SMA20 rather than 9 or 13. Longest lookback = deepest pullback into the trend — typically higher expectancy than shallower 9/13 taps.',
     condition: { op: 'eq', left: { field: 'maHit' }, right: { literal: 'SMA20' } },
   },
@@ -295,6 +356,7 @@ const SEED_CHECKS = [
     label:     'BBZ · touched SMA9 or SMA13 (shallow bounce)',
     category:  'additional',
     section:   'setup-quality',
+    direction: 'both',
     description: 'MA touched was the shorter SMA9 or SMA13. Faster bounce, usually a lower-conviction setup — grade this against SMA20 fires to see if it earns its own multiplier.',
     condition: {
       op: 'or',
@@ -309,6 +371,7 @@ const SEED_CHECKS = [
     label:     'BBZ · zone quality < 3% (very clean)',
     category:  'additional',
     section:   'setup-quality',
+    direction: 'both',
     description: 'The zone-body % over the lookback window was < 3% (vs the 7% Pine default). Setup ran with almost no time in the wrong zone — the highest-quality lead-up.',
     condition: { op: 'lt', left: { field: 'zonePct' }, right: { literal: 3 } },
   },
@@ -317,6 +380,7 @@ const SEED_CHECKS = [
     label:     'BBZ · body ≥ 0.5 × ATR (large candle)',
     category:  'additional',
     section:   'candle-quality',
+    direction: 'both',
     description: 'Signal-bar body was ≥ 0.5 × ATR14 (vs the 0.2 × Pine mandatory). Filters for emphatic bounce/reject candles rather than marginal ones.',
     condition: {
       op: 'ge',
@@ -329,6 +393,7 @@ const SEED_CHECKS = [
     label:     'BBZ · close ≥ 1.5σ beyond VWAP',
     category:  'additional',
     section:   'setup-quality',
+    direction: 'both',
     description: 'Close is at least 1.5 stdev outside daily VWAP (vs the Pine 0.8σ mandatory). Confirms the σ-band gate fired with real conviction, not marginally.',
     condition: {
       op: 'ge',
@@ -341,12 +406,28 @@ const SEED_CHECKS = [
     label:     'BBZ · SMA stack bullish (9 > 13 > 20)',
     category:  'additional',
     section:   'trend',
+    direction: 'long',
     description: 'SMA9 > SMA13 > SMA20 at fire time — the moving averages are stacked in trend order, confirming a bullish structure for longs.',
     condition: {
       op: 'and',
       children: [
         { op: 'gt', left: { field: 'sma9' },  right: { field: 'sma13' } },
         { op: 'gt', left: { field: 'sma13' }, right: { field: 'sma20' } },
+      ],
+    },
+  },
+  {
+    check_key: 'bbz_sma_stack_bearish',
+    label:     'BBZ · SMA stack bearish (9 < 13 < 20)',
+    category:  'additional',
+    section:   'trend',
+    direction: 'short',
+    description: 'SMA9 < SMA13 < SMA20 at fire time — MAs stacked in short direction, confirming a bearish structure.',
+    condition: {
+      op: 'and',
+      children: [
+        { op: 'lt', left: { field: 'sma9' },  right: { field: 'sma13' } },
+        { op: 'lt', left: { field: 'sma13' }, right: { field: 'sma20' } },
       ],
     },
   },
@@ -362,6 +443,7 @@ const SEED_CHECKS = [
     label:     'RVOL > 5× (very hot)',
     category:  'additional',
     section:   'volume',
+    direction: 'both',
     description: 'Current-minute relative volume is 5× or more the 10-day baseline. Filters for genuinely unusual volume, not just above-average.',
     condition: { op: 'gt', left: { field: 'rvol' }, right: { literal: 5 } },
   },
@@ -370,6 +452,7 @@ const SEED_CHECKS = [
     label:     'RVOL > 10× (extreme)',
     category:  'additional',
     section:   'volume',
+    direction: 'both',
     description: 'RVOL is 10× baseline — the kind of print that usually implies a real news catalyst or breakout.',
     condition: { op: 'gt', left: { field: 'rvol' }, right: { literal: 10 } },
   },
@@ -378,6 +461,7 @@ const SEED_CHECKS = [
     label:     'Sector bullish AND hot',
     category:  'additional',
     section:   'context',
+    direction: 'long',
     description: 'Scanner sector bias is BULLISH AND the sector is currently hot. Both conditions catch stocks riding a broader move, not just isolated pops.',
     condition: {
       op: 'and',
@@ -392,6 +476,7 @@ const SEED_CHECKS = [
     label:     'Sector NOT bearish (safety filter)',
     category:  'additional',
     section:   'context',
+    direction: 'long',
     description: 'Skips longs when the sector is actively bearish. Cheap safety filter that blocks countertrend trades.',
     condition: {
       op: 'not',
@@ -405,6 +490,7 @@ const SEED_CHECKS = [
     label:     'Short + mid-term both bullish',
     category:  'additional',
     section:   'trend',
+    direction: 'long',
     description: 'Scanner-side shortTerm AND midTerm biases both say BULLISH. Confirms multi-timeframe alignment before pulling the trigger.',
     condition: {
       op: 'and',
@@ -419,15 +505,62 @@ const SEED_CHECKS = [
     label:     'Scanner score ≥ 85 (top tier)',
     category:  'additional',
     section:   'context',
+    direction: 'both',
     description: 'Higher bar than the default score_at_entry_70. Filters for the scanner\'s top-scoring names only.',
     condition: { op: 'ge', left: { ctx: '_score' }, right: { literal: 85 } },
+  },
+
+  // ── Batch B · Short counterparts for the bullish-only market filters ────
+  {
+    check_key: 'sector_bearish_and_hot',
+    label:     'Sector bearish AND hot',
+    category:  'additional',
+    section:   'context',
+    direction: 'short',
+    description: 'Sector bias BEARISH AND the sector is hot. Confirms a short is with the sector move, not fighting it.',
+    condition: {
+      op: 'and',
+      children: [
+        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BEARISH' } },
+        { op: 'eq', left: { ctx: 'secHot' }, right: { literal: true } },
+      ],
+    },
+  },
+  {
+    check_key: 'sector_not_bullish',
+    label:     'Sector NOT bullish (safety filter)',
+    category:  'additional',
+    section:   'context',
+    direction: 'short',
+    description: 'Skips shorts when the sector is actively bullish. Cheap safety filter that blocks countertrend shorts.',
+    condition: {
+      op: 'not',
+      children: [
+        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BULLISH' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_and_mid_bearish',
+    label:     'Short + mid-term both bearish',
+    category:  'additional',
+    section:   'trend',
+    direction: 'short',
+    description: 'shortTerm AND midTerm biases both BEARISH. Multi-timeframe alignment for shorts.',
+    condition: {
+      op: 'and',
+      children: [
+        { op: 'eq', left: { ctx: 'shortTerm' }, right: { literal: 'BEARISH' } },
+        { op: 'eq', left: { ctx: 'midTerm' },   right: { literal: 'BEARISH' } },
+      ],
+    },
   },
 ];
 
 function seedDefaults() {
   // Idempotent per check_key so subsequent batches of Pine-imported
   // conditions can be added without wiping user edits or forcing a
-  // manual re-seed. Existing keys are left alone; new ones INSERT.
+  // manual re-seed. Existing keys INSERT nothing; new ones INSERT.
   const now = Date.now();
   const existing = new Set(db.prepare('SELECT check_key FROM check_library').all().map(r => r.check_key));
   const stmt = db.prepare(`
@@ -442,6 +575,26 @@ function seedDefaults() {
     }
   });
   txn();
+
+  // One-time backfill: existing rows that were seeded BEFORE the direction
+  // column existed all default to 'both'. That's technically safe but wrong
+  // for anything with an intrinsic direction ('ema9 > vwap' isn't 'both' —
+  // it's a bullish alignment check). Push each seed's declared direction
+  // into the DB for rows that STILL have the default. User edits (an
+  // explicit UI change to 'both' or a custom direction) are preserved as
+  // long as they're not the raw default AND their condition matches the
+  // seed value — a simple heuristic: only touch rows whose current
+  // direction is the default 'both' AND the seed says otherwise. Once
+  // moved off 'both', the row is considered user-touched.
+  const dirUpdate = db.prepare("UPDATE check_library SET direction = ? WHERE check_key = ? AND direction = 'both'");
+  const backfill = db.transaction(() => {
+    for (const c of SEED_CHECKS) {
+      const dir = c.direction || 'both';
+      if (dir === 'both') continue;
+      dirUpdate.run(dir, c.check_key);
+    }
+  });
+  backfill();
 }
 seedDefaults();
 
