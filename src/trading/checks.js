@@ -341,6 +341,78 @@ const SEED_CHECKS = [
       ],
     },
   },
+
+  // ── Batch 3 · Cross-setup market-context filters ────────────────────────
+  // Not tied to any indicator engine. Reference scanner ctx (broad/mid/long-
+  // term biases, sector, _score) and rvol so they layer on top of any setup.
+  // Useful as DEFAULT tier candidates too — user can promote them via the
+  // Checks tab if they should auto-apply to every setup.
+
+  {
+    check_key: 'rvol_above_5',
+    label:     'RVOL > 5× (very hot)',
+    category:  'additional',
+    section:   'volume',
+    description: 'Current-minute relative volume is 5× or more the 10-day baseline. Filters for genuinely unusual volume, not just above-average.',
+    condition: { op: 'gt', left: { field: 'rvol' }, right: { literal: 5 } },
+  },
+  {
+    check_key: 'rvol_above_10',
+    label:     'RVOL > 10× (extreme)',
+    category:  'additional',
+    section:   'volume',
+    description: 'RVOL is 10× baseline — the kind of print that usually implies a real news catalyst or breakout.',
+    condition: { op: 'gt', left: { field: 'rvol' }, right: { literal: 10 } },
+  },
+  {
+    check_key: 'sector_bullish_and_hot',
+    label:     'Sector bullish AND hot',
+    category:  'additional',
+    section:   'context',
+    description: 'Scanner sector bias is BULLISH AND the sector is currently hot. Both conditions catch stocks riding a broader move, not just isolated pops.',
+    condition: {
+      op: 'and',
+      children: [
+        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BULLISH' } },
+        { op: 'eq', left: { ctx: 'secHot' }, right: { literal: true } },
+      ],
+    },
+  },
+  {
+    check_key: 'sector_not_bearish',
+    label:     'Sector NOT bearish (safety filter)',
+    category:  'additional',
+    section:   'context',
+    description: 'Skips longs when the sector is actively bearish. Cheap safety filter that blocks countertrend trades.',
+    condition: {
+      op: 'not',
+      children: [
+        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BEARISH' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_and_mid_bullish',
+    label:     'Short + mid-term both bullish',
+    category:  'additional',
+    section:   'trend',
+    description: 'Scanner-side shortTerm AND midTerm biases both say BULLISH. Confirms multi-timeframe alignment before pulling the trigger.',
+    condition: {
+      op: 'and',
+      children: [
+        { op: 'eq', left: { ctx: 'shortTerm' }, right: { literal: 'BULLISH' } },
+        { op: 'eq', left: { ctx: 'midTerm' },   right: { literal: 'BULLISH' } },
+      ],
+    },
+  },
+  {
+    check_key: 'score_at_entry_85',
+    label:     'Scanner score ≥ 85 (top tier)',
+    category:  'additional',
+    section:   'context',
+    description: 'Higher bar than the default score_at_entry_70. Filters for the scanner\'s top-scoring names only.',
+    condition: { op: 'ge', left: { ctx: '_score' }, right: { literal: 85 } },
+  },
 ];
 
 function seedDefaults() {
