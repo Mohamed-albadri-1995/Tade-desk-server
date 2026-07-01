@@ -12,8 +12,10 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const sideA = require('./sideA');
 const sideB = require('./sideB');
+const sideC = require('./sideC');
 const center = require('./center');
 const barPoller = require('./barPoller');
+const volumeBaseline = require('./volumeBaseline');
 const { toETDate } = require('../utils/time');
 
 const SCANNER_URL = process.env.SCANNER_URL || 'http://127.0.0.1:3000';
@@ -94,6 +96,22 @@ async function start() {
   // Load setups for Side B
   sideB.loadSetups();
   sideB.clearSessionLog();
+
+  // Refresh live equity from Alpaca (per plan). Non-fatal — if the call
+  // fails, Side C falls back to the trading_equity setting.
+  sideC.refreshAlpacaEquity().then(eq => {
+    if (eq.source === 'alpaca') {
+      console.log('[TradingSession] Alpaca equity refreshed:', eq.value);
+    } else {
+      console.log('[TradingSession] Alpaca equity unavailable — using trading_equity setting');
+    }
+  }).catch(() => { /* logged inside sideC */ });
+
+  // Build historical volume baselines for the shortlist tickers so
+  // indicator engines and the UI can compute rvol (per plan). Non-fatal.
+  volumeBaseline.ensureBuilt(tickers, today).catch(err => {
+    console.warn('[TradingSession] Volume baseline build failed:', err.message);
+  });
 
   _session = { id: sessionId, date: today, tickers, shortlist, status: 'active', startedAt: Date.now() };
 

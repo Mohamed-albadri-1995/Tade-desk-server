@@ -11,6 +11,7 @@
  */
 
 const db = require('../db');
+const { fetchAccountEquity } = require('../alpaca/client');
 
 function getSetting(key, fallback) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
@@ -19,9 +20,37 @@ function getSetting(key, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// ─── Alpaca equity cache ──────────────────────────────────────────────────────
+// The plan calls for equity from the Alpaca account API. We refresh it in
+// the background (see refreshAlpacaEquity below), cache the last good value
+// for a few minutes, and fall back to the static trading_equity setting if
+// Alpaca is unreachable or unconfigured.
+
+const EQUITY_CACHE_MS = 5 * 60 * 1000;
+let _equityCache = { value: null, at: 0, source: 'none' };
+
+async function refreshAlpacaEquity() {
+  const eq = await fetchAccountEquity();
+  if (eq != null && Number.isFinite(eq)) {
+    _equityCache = { value: eq, at: Date.now(), source: 'alpaca' };
+  }
+  return _equityCache;
+}
+
+function getEffectiveEquity() {
+  const fallback = getSetting('trading_equity', 25000);
+  if (_equityCache.value != null && Date.now() - _equityCache.at < EQUITY_CACHE_MS) {
+    return { equity: _equityCache.value, source: 'alpaca', ageMs: Date.now() - _equityCache.at };
+  }
+  return { equity: fallback, source: 'setting', ageMs: null };
+}
+
 function getSettings() {
+  const eq = getEffectiveEquity();
   return {
-    equity:              getSetting('trading_equity', 25000),
+    equity:              eq.equity,
+    equitySource:        eq.source,
+    equityAgeMs:         eq.ageMs,
     riskPct:             getSetting('trading_risk_pct', 1.0),
     maxShares:           getSetting('trading_max_shares', 1000),
     maxDollarRisk:       getSetting('trading_max_dollar_risk', 500),
@@ -117,4 +146,10 @@ function calculate({ entryPrice, sl, sideAMultiplier = 1.0, score = null, setupG
   };
 }
 
-module.exports = { calculate, getSettings, currentOpenExposure };
+module.exports = {
+  calculate,
+  getSettings,
+  currentOpenExposure,
+  refreshAlpacaEquity,
+  getEffectiveEquity,
+};

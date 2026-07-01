@@ -123,6 +123,7 @@ const defaults = [
   ['githubBackupToken', ''],
   ['alpacaApiKey', ''],
   ['alpacaApiSecret', ''],
+  ['alpacaAccountUrl', 'https://paper-api.alpaca.markets'],
   ['analysisEntryType', 'A'],
   ['analysisDirectionalBias', 'Up'],
   ['analysisSuccessThreshold', '1.5'],

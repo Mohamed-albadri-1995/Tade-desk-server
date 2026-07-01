@@ -3,6 +3,13 @@ const { toETTime } = require('../utils/time');
 
 const BASE = 'https://data.alpaca.markets/v2/stocks';
 
+function getAccountBaseUrl() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'alpacaAccountUrl'").get();
+  const raw = row?.value || '';
+  // Default to paper trading so live money isn't accidentally queried.
+  return raw.trim() || 'https://paper-api.alpaca.markets';
+}
+
 function getCredentials() {
   const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('alpacaApiKey','alpacaApiSecret')").all();
   const creds = {};
@@ -112,4 +119,42 @@ function computeATR14(bars) {
   return last14.reduce((a, b) => a + b, 0) / 14;
 }
 
-module.exports = { fetchIntradayBars, fetchDailyBars, computeATR14 };
+/**
+ * Fetch account snapshot from Alpaca (used to source live equity for
+ * sizing calculations, per the trading plan).
+ *
+ * Returns the raw Alpaca account object, or throws if credentials or the
+ * request fail. Callers are expected to cache — this is a network call.
+ */
+async function fetchAccount() {
+  const url = `${getAccountBaseUrl()}/v2/account`;
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Alpaca account fetch ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+/**
+ * Convenience wrapper — returns just the equity as a number, or null
+ * if the call fails or the field is missing.
+ */
+async function fetchAccountEquity() {
+  try {
+    const acct = await fetchAccount();
+    const eq = parseFloat(acct?.equity);
+    return Number.isFinite(eq) ? eq : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+module.exports = {
+  fetchIntradayBars,
+  fetchDailyBars,
+  computeATR14,
+  fetchAccount,
+  fetchAccountEquity,
+  getAccountBaseUrl,
+};

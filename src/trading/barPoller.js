@@ -9,6 +9,7 @@
 const { fetchIntradayBars } = require('../alpaca/client');
 const { toETDate } = require('../utils/time');
 const r0 = require('../r0/registry');
+const volumeBaseline = require('./volumeBaseline');
 
 // ─── Time-window helpers ─────────────────────────────────────────────────────
 
@@ -142,9 +143,18 @@ function start(sessionId, tickers, setups, onSignalFired) {
       const r0row = r0.getRow(ticker);
       const pmHigh = r0row?.stock?.pmHigh ?? null;
 
+      // Compute rvol from the latest bar against the historical baseline
+      // (per plan). Returns null if baseline for this ticker isn't built.
+      const latestBar = bars?.[bars.length - 1];
+      const rvol = (latestBar && latestBar.etTime)
+        ? volumeBaseline.computeRvol(ticker, latestBar.v, latestBar.etTime)
+        : null;
+
       const tickerStatus = {
         barsReceived,
         pmHigh,
+        rvol,
+        baselineBuilt: volumeBaseline.isBuilt(ticker),
         lastCheckedAt: Date.now(),
         setupResults: [],
       };

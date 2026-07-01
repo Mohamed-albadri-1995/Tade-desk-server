@@ -95,6 +95,55 @@ function isBuilt(ticker) {
   return cache.has(ticker) && cache.get(ticker).size > 0;
 }
 
+/**
+ * When was this ticker's baseline last built (any minute row)? Returns 0
+ * if never built. Used to decide whether to refresh.
+ */
+function lastBuiltAt(ticker) {
+  const row = db
+    .prepare('SELECT MAX(built_at) AS at FROM volume_baseline WHERE ticker = ?')
+    .get(ticker);
+  return Number(row?.at) || 0;
+}
+
+const REBUILD_AFTER_MS = 20 * 60 * 60 * 1000; // 20 hours — rebuild once per trading day
+
+/**
+ * Ensure baselines exist for the given tickers. Loads any cached DB rows
+ * into memory first, then rebuilds tickers whose cache is empty or older
+ * than REBUILD_AFTER_MS. Non-fatal — logs and continues on per-ticker
+ * failure so a bad ticker doesn't block the whole session.
+ */
+async function ensureBuilt(tickers, referenceDate) {
+  loadFromDb(tickers);
+  const now = Date.now();
+  const toBuild = [];
+  for (const t of tickers) {
+    const staleOrMissing = !isBuilt(t) || (now - lastBuiltAt(t)) > REBUILD_AFTER_MS;
+    if (staleOrMissing) toBuild.push(t);
+  }
+  if (toBuild.length === 0) return { rebuilt: 0, cached: tickers.length };
+  console.log('[VolumeBaseline] Building baseline for', toBuild.length, 'ticker(s):', toBuild.join(','));
+  try {
+    await build(toBuild, referenceDate);
+  } catch (err) {
+    console.warn('[VolumeBaseline] Build failed (non-fatal):', err.message);
+  }
+  return { rebuilt: toBuild.length, cached: tickers.length - toBuild.length };
+}
+
+function getStatus(tickers) {
+  const out = {};
+  for (const t of tickers) {
+    out[t] = {
+      built: isBuilt(t),
+      lastBuiltAt: lastBuiltAt(t) || null,
+      minutes: cache.get(t)?.size || 0,
+    };
+  }
+  return out;
+}
+
 // Simple weekday date list going back N trading days
 function getLast10TradingDates(fromDate) {
   const dates = [];
@@ -109,4 +158,13 @@ function getLast10TradingDates(fromDate) {
   return dates;
 }
 
-module.exports = { build, loadFromDb, getAvgVolume, computeRvol, isBuilt };
+module.exports = {
+  build,
+  ensureBuilt,
+  loadFromDb,
+  getAvgVolume,
+  computeRvol,
+  isBuilt,
+  lastBuiltAt,
+  getStatus,
+};
