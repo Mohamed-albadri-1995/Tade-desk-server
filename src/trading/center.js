@@ -92,29 +92,49 @@ function buildAlpacaPayload({ ticker, direction, shares, entryType, entryPrice, 
  * @param {number|null} currentAsk - current ask price from Alpaca stream (or null)
  */
 function processSignal(signal, currentBid = null, currentAsk = null) {
-  const { signalId, ticker, setupId, setupName, direction, entryType, sl, tp, firedAt, sideA } = signal;
+  const { signalId, ticker, setupId, setupName, direction, entryType, sl, tp, firedAt, sideA, entry: signalEntry } = signal;
 
-  // Estimate entry price from bid/ask; fall back to midpoint or null
-  const entryPrice = entryType === 'market'
-    ? (direction === 'Long' ? currentAsk : currentBid) || ((currentBid + currentAsk) / 2) || null
-    : null;
+  // Entry price preference for market orders (in order):
+  //   1. Real live quote from Alpaca WS (currentAsk for long, currentBid for short)
+  //   2. Bid/ask midpoint if only one side is known
+  //   3. The indicator's own signal.entry (close of the signal bar)
+  //   4. null → let sizing use the indicator entry too
+  // This replaces the previous `sl × 1.01` fake fallback which produced
+  // absurd sizing when Alpaca quotes weren't available.
+  let entryPrice = null;
+  let entrySource = 'none';
+  if (entryType === 'market') {
+    if (direction === 'Long' && currentAsk) { entryPrice = currentAsk; entrySource = 'ask'; }
+    else if (direction === 'Short' && currentBid) { entryPrice = currentBid; entrySource = 'bid'; }
+    else if (currentBid && currentAsk) { entryPrice = (currentBid + currentAsk) / 2; entrySource = 'mid'; }
+    else if (signalEntry) { entryPrice = signalEntry; entrySource = 'signal_bar_close'; }
+  } else if (signalEntry) {
+    entryPrice = signalEntry;
+    entrySource = 'signal_bar_close';
+  }
 
   // Grading is being rebuilt — keep the grade multiplier neutral (1.0) for now
   const setupGrade = null;
 
-  // Sizing
+  // Sizing — if we still have no entry price, use the indicator's entry as
+  // a last resort so the calc runs. If even that isn't set, refuse to size.
   let sizing = null;
   let sizingError = null;
-  try {
-    sizing = sideC.calculate({
-      entryPrice: entryPrice || sl * 1.01, // rough fallback so sizing doesn't crash
-      sl,
-      sideAMultiplier: sideA?.multiplier ?? 1.0,
-      score: sideA?.score ?? null,
-      setupGrade,
-    });
-  } catch (e) {
-    sizingError = e.message;
+  const sizingEntry = entryPrice ?? signalEntry ?? null;
+  if (!sizingEntry) {
+    sizingError = 'No entry price available (no bid/ask, no signal entry)';
+  } else {
+    try {
+      sizing = sideC.calculate({
+        entryPrice: sizingEntry,
+        sl,
+        sideAMultiplier: sideA?.multiplier ?? 1.0,
+        score: sideA?.score ?? null,
+        setupGrade,
+      });
+    } catch (e) {
+      sizingError = e.message;
+    }
   }
 
   // Risk gate
@@ -181,11 +201,13 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     setupName,
     direction,
     entryType,
-    entryPrice,
+    entryPrice: sizingEntry,
+    entrySource,
     sl,
     tp,
     firedAt,
     sizing,
+    sizingError: sizingError || null,
     sideA,
     bid: currentBid,
     ask: currentAsk,

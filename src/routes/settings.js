@@ -27,16 +27,37 @@ const SETTING_RULES = {
   analysisTrainingWindow: { type: 'str', maxLen: 10  },
   aiApiKey:               { type: 'str', maxLen: 200 },
   aiModel:                { type: 'str', maxLen: 100 },
-  trading_equity:         { type: 'float', min: 0, max: 10000000 },
-  trading_risk_pct:       { type: 'float', min: 0, max: 100 },
-  trading_max_shares:     { type: 'int',   min: 0, max: 100000 },
-  trading_max_dollar_risk:{ type: 'float', min: 0, max: 100000 },
-  trading_max_exposure:   { type: 'float', min: 0, max: 10000000 },
-  trading_max_positions:  { type: 'int',   min: 1, max: 20 },
-  trading_daily_loss_limit:{ type: 'float', min: 0, max: 100000 },
+  trading_equity:              { type: 'float', min: 0, max: 10000000 },
+  trading_risk_pct:            { type: 'float', min: 0, max: 100 },
+  trading_max_shares:          { type: 'int',   min: 0, max: 100000 },
+  trading_max_dollar_risk:     { type: 'float', min: 0, max: 100000 },
+  trading_max_total_exposure:  { type: 'float', min: 0, max: 10000000 },
+  trading_max_open_positions:  { type: 'int',   min: 1, max: 20 },
+  trading_daily_loss_limit:    { type: 'float', min: 0, max: 100000 },
+  trading_data_source:         { type: 'str', maxLen: 20 },
+  trading_sideA_gate_enabled:  { type: 'str', maxLen: 4  },
+  trading_sideA_neutral_multiplier: { type: 'float', min: 0, max: 2 },
+  trading_sideA_weak_sec_score:     { type: 'float', min: 0, max: 200 },
+  trading_sideA_weak_sec_multiplier:{ type: 'float', min: 0, max: 2 },
+  alpacaAccountUrl:            { type: 'str', maxLen: 200 },
+  alpacaMarketFeed:            { type: 'str', maxLen: 10 },
 };
 
 const MASKED_KEYS = new Set(['finnhubApiKey', 'githubBackupToken', 'alpacaApiKey', 'alpacaApiSecret', 'aiApiKey']);
+
+// GET /api/settings/:key — single-value read (used by the trading UI to
+// hydrate individual form fields on tab open). Unknown keys 404; masked
+// keys return 'set' or '' instead of the raw value.
+router.get('/:key', (req, res, next) => {
+  const { key } = req.params;
+  // Reserved names that collide with sub-routers.
+  if (key === 'test' || key === 'reset-hot') return next();
+  if (!SETTING_RULES[key]) return res.status(404).json({ ok: false, error: 'Unknown setting' });
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  const raw = row?.value ?? '';
+  const value = MASKED_KEYS.has(key) ? (raw ? 'set' : '') : raw;
+  res.json({ ok: true, key, value });
+});
 
 // GET /api/settings
 router.get('/', (req, res) => {

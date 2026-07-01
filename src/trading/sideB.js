@@ -48,7 +48,7 @@ function getSetup(id) {
  * @param {Function} onSignalPassed - callback(enrichedSignal) when gate passes
  */
 function onIndicatorFire(signal, sessionId, onSignalPassed) {
-  const { ticker, setupId, direction, sl, tp, entryType } = signal;
+  const { ticker, setupId, direction, sl, tp, entryType, entry } = signal;
   const now = Date.now();
 
   // Log signal regardless of gate outcome
@@ -97,6 +97,7 @@ function onIndicatorFire(signal, sessionId, onSignalPassed) {
     setupName: setup?.name || setupId,
     direction,
     entryType: entryType || setup?.entry_type || 'market',
+    entry: entry ?? null,
     sl,
     tp,
     firedAt: now,

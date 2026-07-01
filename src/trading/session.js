@@ -136,7 +136,15 @@ async function start() {
     .map(r => ({ ...r, config: JSON.parse(r.config || '{}') }));
   barPoller.start(sessionId, tickers, activeSetups, (signal, sid) => {
     sideB.onIndicatorFire(signal, sid, (enrichedSignal) => {
-      center.processSignal({ ...enrichedSignal, sessionId: sid });
+      // In websocket mode barPoller carries a live bid/ask quote; in polling
+      // mode this comes back null and Center falls back to the signal's own
+      // entry (bar close). Either way the pipeline gets a real number.
+      const q = barPoller.getLatestQuote(enrichedSignal.ticker);
+      center.processSignal(
+        { ...enrichedSignal, sessionId: sid },
+        q?.bid ?? null,
+        q?.ask ?? null
+      );
     });
   });
 

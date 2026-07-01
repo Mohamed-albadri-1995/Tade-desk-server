@@ -110,6 +110,8 @@ const tradingDefaults = [
   ['trading_score_threshold_high', '85'],
   ['trading_score_threshold_low', '70'],
   ['trading_equity', '25000'],
+  // Data source — 'polling' (60s HTTP) or 'websocket' (Alpaca live stream)
+  ['trading_data_source', 'polling'],
   // Side A — Market Conditions Register (rules configurable per the plan)
   ['trading_sideA_gate_enabled', '1'],
   ['trading_sideA_neutral_multiplier', '0.75'],
