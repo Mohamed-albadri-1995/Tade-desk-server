@@ -217,12 +217,16 @@ class FactorAnalysisProcessor:
             groups = {}
             for b_idx in sorted(bucket_labels.dropna().unique()):
                 mask = bucket_labels == b_idx
-                y_b = y[mask]
+                # Drop NaN outcomes so a bucket with mixed missing values
+                # doesn't poison the mean/win-rate → FinalScore chain.
+                y_b = y[mask].dropna()
                 n = len(y_b)
                 if n == 0:
                     continue
                 mean_b = float(y_b.mean())
                 wr_b = float((y_b > 1.3).mean() * 100)
+                if not (np.isfinite(mean_b) and np.isfinite(wr_b)):
+                    continue
                 groups[int(b_idx)] = {'n': n, 'mean': mean_b, 'wr': wr_b, 'y': y_b}
                 if max_mean is None or mean_b > max_mean:
                     max_mean = mean_b
@@ -242,6 +246,8 @@ class FactorAnalysisProcessor:
                 raw_score = (ALPHA * mean_norm + (1 - ALPHA) * wr_norm) * 100
                 confidence = n / (n + K_CONFIDENCE)
                 final_score = raw_score * confidence
+                if not np.isfinite(final_score):
+                    final_score = 0.0
 
                 # Edge for this bucket
                 lo = float(bin_edges[b_idx])   if b_idx < len(bin_edges) - 1 else float(bin_edges[-2])

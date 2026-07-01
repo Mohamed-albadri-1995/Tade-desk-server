@@ -217,10 +217,17 @@ class LiveScorer:
             if row.empty:
                 bucket_scores.append(0.0)
             else:
-                bucket_scores.append(float(row['FinalScore'].iloc[0]))
+                val = float(row['FinalScore'].iloc[0])
+                # A retrained model shouldn't produce NaN, but a stale
+                # bucket CSV might — treat as neutral rather than poison
+                # the final mean and hand the UI a null score.
+                bucket_scores.append(val if np.isfinite(val) else 0.0)
 
-        # Step 6: Aggregate
-        final_score = float(np.mean(bucket_scores)) if bucket_scores else 0.0
+        # Step 6: Aggregate — nanmean is a last-line guard, np.mean would
+        # still return NaN if every bucket somehow came back NaN.
+        final_score = float(np.nanmean(bucket_scores)) if bucket_scores else 0.0
+        if not np.isfinite(final_score):
+            final_score = 0.0
 
         # used_table: only append regime when sub-table was actually used
         if table_type == 'sub':

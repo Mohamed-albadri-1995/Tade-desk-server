@@ -115,8 +115,16 @@ async function scoreRow(row) {
     const regime_sample_threshold = getRegimeSampleThreshold();
     const resp = await axios.post(`${SCORER_URL}/score`, { card, bias, entry_time, regime_sample_threshold }, { timeout: SCORER_TIMEOUT });
     if (resp.data?.ok) {
+      const finalScore = resp.data.final_score;
+      if (!Number.isFinite(finalScore)) {
+        // ok:true + NaN happens when the trained model has a NaN
+        // bucket cell — surface as null instead of silently rounding
+        // to NaN → JSON null → mysterious empty score in the UI.
+        console.warn(`[Scorer] ${row.ticker}: non-finite final_score (${finalScore}); buckets=${JSON.stringify(resp.data.bucket_scores)}`);
+        return null;
+      }
       return {
-        _score: Math.round(resp.data.final_score),
+        _score: Math.round(finalScore),
         _scoreDetails: {
           table: resp.data.used_table,
           base: resp.data.used_base || (resp.data.used_table || '').split('_')[0] || null,
