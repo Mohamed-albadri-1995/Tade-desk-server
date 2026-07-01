@@ -16,6 +16,7 @@ const sizer         = require('./sizer');        // was sideC
 const router        = require('./router');       // was center
 const barPoller     = require('./barPoller');
 const brokerSync    = require('./brokerSync');
+const historicalCache = require('./historicalCache');
 const volumeBaseline = require('./volumeBaseline');
 const { toETDate } = require('../utils/time');
 
@@ -148,6 +149,15 @@ async function start() {
       refreshShortlist().catch(() => {});
     }
   }, 30000);
+
+  // Warm the historical cache in the background. Indicator engines that
+  // want multi-day lookback (2-day VWAP, 5-day MA, week/month anchors)
+  // read from it via barPoller merge. Non-blocking: fires the fetches
+  // and moves on — engines that consult it early get today-only bars and
+  // gain the fuller picture as the fetches complete.
+  historicalCache.warmup(tickers, 6).catch(err => {
+    console.warn('[TradingSession] historicalCache warmup failed:', err.message);
+  });
 
   // Bar poller (source is chosen by the trading_data_source setting).
   // Single source of truth: setup engine loaded the setups above, so pull

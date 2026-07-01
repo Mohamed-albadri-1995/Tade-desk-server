@@ -122,11 +122,19 @@ function _readSourceSetting() {
 // ─── Shared evaluation ──────────────────────────────────────────────────────
 
 function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
-  const barsReceived = bars?.length ?? 0;
+  const todayBars = bars || [];
+  const barsReceived = todayBars.length;
   const r0row = r0.getRow(ticker);
   const pmHigh = r0row?.stock?.pmHigh ?? null;
 
-  const latestBar = bars?.[bars.length - 1];
+  // Feed indicators the historical prefix + today's live buffer so
+  // engines that need multi-day lookback see one continuous stream.
+  // Engines that don't reach back that far get identical behavior —
+  // they only look at the tail.
+  const historicalCache = require('./historicalCache');
+  const evalBars = historicalCache.mergeWithLive(ticker, todayBars);
+
+  const latestBar = todayBars[todayBars.length - 1];
   const rvol = (latestBar && latestBar.etTime)
     ? volumeBaseline.computeRvol(ticker, latestBar.v, latestBar.etTime)
     : null;
@@ -166,7 +174,7 @@ function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
     if (!setupResult.skipped) {
       try {
         const engineCtx = { rvol };
-        const signal = engine.evaluate(bars, pmHigh, engineCtx);
+        const signal = engine.evaluate(evalBars, pmHigh, engineCtx);
         setupResult.signal = signal ? { direction: signal.direction, sl: signal.sl, tp: signal.tp, meta: signal.meta } : null;
 
         if (signal) {
@@ -183,13 +191,13 @@ function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
             barData:   signal.meta,
             // Extras the Router needs to evaluate default + additional
             // library checks at this exact bar (per-setup context capture).
-            bars,
+            bars: evalBars,
             pmHigh,
             rvol,
             indicators: { ...(signal.meta || {}), rvol },
           }, sessionId);
         } else if (engine.debug) {
-          setupResult.debugInfo = engine.debug(bars, pmHigh, engineCtx);
+          setupResult.debugInfo = engine.debug(evalBars, pmHigh, engineCtx);
         }
       } catch (e) {
         setupResult.error = e.message;

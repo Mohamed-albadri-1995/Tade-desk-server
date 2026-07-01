@@ -241,6 +241,12 @@ router.get('/positions/closed-today', (req, res) => {
   res.json(router0.listClosedPositionsToday());
 });
 
+// Historical bar cache status — for debugging warmup timing.
+router.get('/historical-cache/status', (req, res) => {
+  const historicalCache = require('../trading/historicalCache');
+  res.json({ ok: true, ...historicalCache.getStatus() });
+});
+
 // Live account balances — one row per enabled Alpaca broker profile.
 // Hits /v2/account synchronously so the numbers on-screen match what
 // Alpaca reports right now (not the sizer's cached copy).

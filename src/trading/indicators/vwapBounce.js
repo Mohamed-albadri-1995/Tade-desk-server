@@ -79,11 +79,61 @@ function calcStdev(vals, period) {
   return Math.sqrt(variance);
 }
 
-// Session VWAP anchored at bars[0]. Assumes buffer starts at session open,
-// which matches the barPoller (it feeds today's 1-min bars from 9:30 ET).
+// Extract the ET date substring from a bar's timestamp. Bars carry `t`
+// as an ISO string from Alpaca; we treat the first 10 chars of the UTC
+// date as good enough for grouping — Alpaca 1-min bars align on minute
+// boundaries so the day flip lands cleanly.
+function _dayKey(bar) {
+  return typeof bar.t === 'string' ? bar.t.slice(0, 10) : new Date(bar.t).toISOString().slice(0, 10);
+}
+
+// Return the index at which the LAST day starts in the buffer. Used by
+// anchored VWAPs so they reset at session open regardless of whether the
+// buffer contains multi-day history.
+function _todayStartIdx(bars) {
+  if (!bars.length) return 0;
+  const lastDay = _dayKey(bars[bars.length - 1]);
+  for (let i = bars.length - 1; i >= 0; i--) {
+    if (_dayKey(bars[i]) !== lastDay) return i + 1;
+  }
+  return 0;
+}
+
+// Session VWAP anchored at the LAST day's first bar. Works whether the
+// buffer contains one day or several.
 function sessionVwap(bars) {
+  if (!bars.length) return null;
+  const start = _todayStartIdx(bars);
   let pv = 0, v = 0;
-  for (const b of bars) {
+  for (let i = start; i < bars.length; i++) {
+    const b = bars[i];
+    const hlc3 = (b.h + b.l + b.c) / 3;
+    pv += hlc3 * b.v;
+    v  += b.v;
+  }
+  return v > 0 ? pv / v : null;
+}
+
+// 2-day VWAP — Pine's vwap_2d anchors every second new day, giving a
+// rolling window of the current + previous day's HLC3-volume mean. If
+// the buffer only holds one day (historical cache still warming), falls
+// back to the single-day VWAP so signals still evaluate reasonably.
+function twoDayVwap(bars) {
+  if (!bars.length) return null;
+  const lastDay = _dayKey(bars[bars.length - 1]);
+  // Find where the day BEFORE lastDay starts.
+  let prevDayStart = -1;
+  let seenPrev = false;
+  for (let i = bars.length - 1; i >= 0; i--) {
+    const d = _dayKey(bars[i]);
+    if (d !== lastDay && !seenPrev) { seenPrev = true; prevDayStart = i; continue; }
+    if (seenPrev && d !== _dayKey(bars[prevDayStart])) { prevDayStart = i + 1; break; }
+    if (seenPrev) prevDayStart = i;
+  }
+  if (!seenPrev) return sessionVwap(bars); // only one day of data
+  let pv = 0, v = 0;
+  for (let i = prevDayStart; i < bars.length; i++) {
+    const b = bars[i];
     const hlc3 = (b.h + b.l + b.c) / 3;
     pv += hlc3 * b.v;
     v  += b.v;
@@ -195,7 +245,7 @@ function evaluate(bars, pmHigh, ctx = {}) {
 
   const daily_vwap  = sessionVwap(bars);
   const ll_avwap    = llAnchoredVwap(bars);
-  const vwap_2day   = daily_vwap; // TODO: swap for real 2-day series once multi-day bars are plumbed
+  const vwap_2day   = twoDayVwap(bars); // real 2-day when historicalCache is warm, single-day fallback otherwise
   const bb = bbSeries(closes);
   const iNow = bars.length - 1;
   const iPrev = bars.length - 2;
@@ -214,7 +264,7 @@ function evaluate(bars, pmHigh, ctx = {}) {
   const prevSliceExcl = bars.slice(0, bars.length - 1);
   const daily_vwap_p = sessionVwap(prevSliceExcl);
   const ll_avwap_p   = llAnchoredVwap(prevSliceExcl);
-  const vwap_2day_p  = daily_vwap_p;
+  const vwap_2day_p  = twoDayVwap(prevSliceExcl);
   const biasBaseP  = prev.c > daily_vwap_p && prev.c > bb_ema_p;
   const biasFullP  = biasBaseP && prev.c > vwap_2day_p && prev.c > ll_avwap_p;
   const bias_c1    = CFG.bias_strict ? biasFullP : biasBaseP;
