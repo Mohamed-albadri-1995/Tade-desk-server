@@ -267,6 +267,80 @@ const SEED_CHECKS = [
       ],
     },
   },
+
+  // ── Batch 2 · BBZ / smaTouchBounce opt-in additions ─────────────────────
+  // Reference fields smaTouchBounce publishes in signal.meta at fire time:
+  // daily_vwap, vwap_stdev, bb_mid, bb_up, bb_lo, sma9, sma13, sma20,
+  // atr14, maHit ('SMA9'|'SMA13'|'SMA20'), zonePct.
+
+  {
+    check_key: 'bbz_touched_sma20',
+    label:     'BBZ · touched SMA20 (deepest bounce)',
+    category:  'additional',
+    section:   'setup-quality',
+    description: 'The MA that got tagged was SMA20 rather than 9 or 13. Longest lookback = deepest pullback into the trend — typically higher expectancy than shallower 9/13 taps.',
+    condition: { op: 'eq', left: { field: 'maHit' }, right: { literal: 'SMA20' } },
+  },
+  {
+    check_key: 'bbz_touched_sma9_or_13',
+    label:     'BBZ · touched SMA9 or SMA13 (shallow bounce)',
+    category:  'additional',
+    section:   'setup-quality',
+    description: 'MA touched was the shorter SMA9 or SMA13. Faster bounce, usually a lower-conviction setup — grade this against SMA20 fires to see if it earns its own multiplier.',
+    condition: {
+      op: 'or',
+      children: [
+        { op: 'eq', left: { field: 'maHit' }, right: { literal: 'SMA9' } },
+        { op: 'eq', left: { field: 'maHit' }, right: { literal: 'SMA13' } },
+      ],
+    },
+  },
+  {
+    check_key: 'bbz_clean_zone',
+    label:     'BBZ · zone quality < 3% (very clean)',
+    category:  'additional',
+    section:   'setup-quality',
+    description: 'The zone-body % over the lookback window was < 3% (vs the 7% Pine default). Setup ran with almost no time in the wrong zone — the highest-quality lead-up.',
+    condition: { op: 'lt', left: { field: 'zonePct' }, right: { literal: 3 } },
+  },
+  {
+    check_key: 'bbz_strong_body',
+    label:     'BBZ · body ≥ 0.5 × ATR (large candle)',
+    category:  'additional',
+    section:   'candle-quality',
+    description: 'Signal-bar body was ≥ 0.5 × ATR14 (vs the 0.2 × Pine mandatory). Filters for emphatic bounce/reject candles rather than marginal ones.',
+    condition: {
+      op: 'ge',
+      left:  { op: 'abs', operands: [{ op: 'sub', operands: [{ field: 'close' }, { field: 'open' }] }] },
+      right: { op: 'mul', operands: [{ field: 'atr14' }, { literal: 0.5 }] },
+    },
+  },
+  {
+    check_key: 'bbz_far_from_vwap',
+    label:     'BBZ · close ≥ 1.5σ beyond VWAP',
+    category:  'additional',
+    section:   'setup-quality',
+    description: 'Close is at least 1.5 stdev outside daily VWAP (vs the Pine 0.8σ mandatory). Confirms the σ-band gate fired with real conviction, not marginally.',
+    condition: {
+      op: 'ge',
+      left:  { op: 'abs', operands: [{ op: 'sub', operands: [{ field: 'close' }, { field: 'daily_vwap' }] }] },
+      right: { op: 'mul', operands: [{ field: 'vwap_stdev' }, { literal: 1.5 }] },
+    },
+  },
+  {
+    check_key: 'bbz_sma_stack_bullish',
+    label:     'BBZ · SMA stack bullish (9 > 13 > 20)',
+    category:  'additional',
+    section:   'trend',
+    description: 'SMA9 > SMA13 > SMA20 at fire time — the moving averages are stacked in trend order, confirming a bullish structure for longs.',
+    condition: {
+      op: 'and',
+      children: [
+        { op: 'gt', left: { field: 'sma9' },  right: { field: 'sma13' } },
+        { op: 'gt', left: { field: 'sma13' }, right: { field: 'sma20' } },
+      ],
+    },
+  },
 ];
 
 function seedDefaults() {
