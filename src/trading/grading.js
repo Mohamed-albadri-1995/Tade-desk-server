@@ -104,6 +104,17 @@ db.exec(`
 // check_library so nothing gets orphaned.
 try { db.exec('ALTER TABLE trade_card_checks ADD COLUMN check_version_id INTEGER NOT NULL DEFAULT 1'); } catch { /* already exists */ }
 
+// Variation records which condition slot resolved at fire time:
+//   'symmetric' — the library's default `condition` was used (direction=both
+//                 with no long/short slots, or a legacy check).
+//   'long'      — the long-side slot resolved (either condition_long for a
+//                 paired 'both' entry, or the base condition for a
+//                 direction='long' entry).
+//   'short'     — the short-side slot resolved (mirror of the above).
+// Grading aggregates per check_key (concept-level), so this is
+// informational — you can inspect on the card which side actually fired.
+try { db.exec("ALTER TABLE trade_card_checks ADD COLUMN variation TEXT NOT NULL DEFAULT 'symmetric'"); } catch { /* already exists */ }
+
 // ─── Card building ───────────────────────────────────────────────────────────
 
 /**
@@ -142,9 +153,15 @@ function createCardForSignal({
     );
 
     const insertCheck = db.prepare(`
-      INSERT INTO trade_card_checks (id, card_id, kind, check_key, label, section, value, aligned, check_version_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO trade_card_checks (id, card_id, kind, check_key, label, section, value, aligned, check_version_id, variation)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+    // Mandatory checks come out of the indicator's own debug() output and
+    // are already direction-specific for the engine that produced them —
+    // they have no "long" or "short" alternate to pick from. Stamp them as
+    // whatever side the trade is being taken on so the card is self-
+    // consistent when you eyeball a row.
+    const mandatoryVariation = direction === 'Long' ? 'long' : direction === 'Short' ? 'short' : 'symmetric';
     for (const c of mandatoryChecks) {
       insertCheck.run(
         uuidv4(), id, 'mandatory',
@@ -155,6 +172,7 @@ function createCardForSignal({
         // a library version. Stamp 1 for now; a future indicator-version
         // scheme can flow through here without a schema change.
         1,
+        mandatoryVariation,
       );
     }
     for (const c of additionalChecks) {
@@ -163,6 +181,7 @@ function createCardForSignal({
         c.key, c.label, c.section || null, c.value != null ? String(c.value) : null,
         c.aligned == null ? null : (c.aligned ? 1 : 0),
         c.versionId || 1,
+        c.variation || 'symmetric',
       );
     }
   });
@@ -521,7 +540,7 @@ function getCard(id) {
   const card = db.prepare('SELECT * FROM trade_cards WHERE id = ?').get(id);
   if (!card) return null;
   const checks = db.prepare(`
-    SELECT kind, check_key, label, section, value, aligned, check_version_id
+    SELECT kind, check_key, label, section, value, aligned, check_version_id, variation
       FROM trade_card_checks
      WHERE card_id = ?
      ORDER BY kind, section, label

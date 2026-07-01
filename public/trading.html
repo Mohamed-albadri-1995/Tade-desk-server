@@ -742,6 +742,14 @@ body {
             </select>
           </div>
           <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Direction</div>
+            <select id="check-direction" onchange="onDirectionChange()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+              <option value="both">Both sides (symmetric or paired)</option>
+              <option value="long">Long only</option>
+              <option value="short">Short only</option>
+            </select>
+          </div>
+          <div style="grid-column:span 2">
             <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Section (optional)</div>
             <input id="check-section" placeholder="trend / momentum / context" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
           </div>
@@ -751,12 +759,29 @@ body {
           <input id="check-description" placeholder="Short-term trend confirms with VWAP." style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
         </div>
         <div style="margin-bottom:10px">
-          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Condition (JSON)</div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Condition (JSON) <span id="check-condition-hint" style="color:var(--text3);text-transform:none;letter-spacing:0"></span></div>
           <textarea id="check-condition" rows="6" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:monospace;font-size:12px;width:100%">{ "op": "gt", "left": { "field": "ema9" }, "right": { "field": "vwap" } }</textarea>
           <div style="font-size:10px;color:var(--text3);margin-top:4px">
             Fields: <code>close open high low volume vwap ema9 ema13 ema20 ema50 sma5 sma20 pmHigh pmLow prevClose rvol atr</code>.
             Scanner ctx: <code>regime longTerm midTerm shortTerm secBias secScore secHot sector industry themes _score</code>.
             Ops: <code>gt ge lt le eq ne in and or not</code>.
+          </div>
+        </div>
+        <!-- Paired variations (only for direction='both' checks that need a mirror) -->
+        <div id="check-variations" style="display:none;margin-bottom:10px;padding:10px;background:var(--bg2);border:1px solid var(--border);border-radius:6px">
+          <div style="font-size:11px;color:var(--text2);margin-bottom:6px">
+            <strong>Paired variations (optional)</strong> — one library concept, two mirrored conditions.
+            When a long signal fires, the engine tests the long slot; short signals use the short slot.
+            Leave both blank for a symmetric check that applies the same rule to both sides
+            (e.g. <code>rvol &gt; 5</code>).
+          </div>
+          <div style="margin-bottom:8px">
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Long-side condition (JSON, blank = fall back to main condition)</div>
+            <textarea id="check-condition-long" rows="4" placeholder='{ "op": "gt", "left": { "field": "ema9" }, "right": { "field": "vwap" } }' style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:monospace;font-size:12px;width:100%"></textarea>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Short-side condition (JSON, blank = fall back to main condition)</div>
+            <textarea id="check-condition-short" rows="4" placeholder='{ "op": "lt", "left": { "field": "ema9" }, "right": { "field": "vwap" } }' style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:monospace;font-size:12px;width:100%"></textarea>
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -2092,6 +2117,7 @@ async function openSetupModal(setup) {
       defList.innerHTML = defaults.map(c => `
         <div style="display:flex;align-items:center;gap:6px;padding:2px 0">
           <span style="color:var(--text2)">${c.label}</span>
+          ${directionBadge(c.direction, c.condition_long, c.condition_short)}
           ${c.section ? `<span style="font-size:10px;color:var(--text3)">${c.section}</span>` : ''}
         </div>
       `).join('');
@@ -2106,6 +2132,7 @@ async function openSetupModal(setup) {
         <label style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px;color:var(--text2);cursor:pointer">
           <input type="checkbox" class="sm-add-chk" value="${c.id}" ${assigned.has(c.id) ? 'checked' : ''}>
           <span>${c.label}</span>
+          ${directionBadge(c.direction, c.condition_long, c.condition_short)}
           ${c.section ? `<span style="font-size:10px;color:var(--text3);margin-left:4px">${c.section}</span>` : ''}
         </label>
       `).join('');
@@ -2521,8 +2548,14 @@ async function showCard(id, opts = {}) {
       const badge = ck.aligned === 1 ? '<span style="color:var(--green)">✓</span>'
                    : ck.aligned === 0 ? '<span style="color:var(--red)">✗</span>'
                    : '<span style="color:var(--text3)">—</span>';
+      // Show which variation of a paired check actually resolved. 'symmetric'
+      // is the default — no tag; a 'long'/'short' tag flags that the mirror
+      // slot was picked based on this signal's direction.
+      const vari = (ck.variation && ck.variation !== 'symmetric')
+        ? ` <span style="font-size:9px;color:${ck.variation==='long'?'var(--green)':'var(--red)'};background:${ck.variation==='long'?'var(--green)':'var(--red)'}22;padding:0 5px;border-radius:3px;font-weight:700">${ck.variation.toUpperCase()}</span>`
+        : '';
       return `<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid var(--border)">
-        <div style="flex:1"><span style="margin-right:6px">${badge}</span>${ck.label}${ck.section ? ` <span style="color:var(--text3);font-size:10px">(${ck.section})</span>` : ''}</div>
+        <div style="flex:1"><span style="margin-right:6px">${badge}</span>${ck.label}${vari}${ck.section ? ` <span style="color:var(--text3);font-size:10px">(${ck.section})</span>` : ''}</div>
         <div style="color:var(--text3);font-family:monospace">${ck.value ?? ''}</div>
       </div>`;
     };
@@ -2591,6 +2624,7 @@ async function loadChecks() {
   el.innerHTML = r.checks.map(c => `
     <div class="trade-row">
       <span class="tr-ticker">${c.label}</span>
+      ${directionBadge(c.direction, c.condition_long, c.condition_short)}
       <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;padding:2px 6px;border-radius:4px;background:${c.category === 'default' ? '#7c2d12' : '#1e3a8a'};color:${c.category === 'default' ? '#fed7aa' : '#bfdbfe'}">${c.category}</span>
       <span style="font-size:10px;color:var(--text3)">${c.section || ''}</span>
       <span style="font-family:monospace;font-size:10px;color:var(--text3);margin-left:auto;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${JSON.stringify(c.condition)}</span>
@@ -2599,16 +2633,45 @@ async function loadChecks() {
     </div>
   `).join('');
 }
+
+// Compact side-tag: LONG / SHORT / BOTH / PAIRED. The colour matches the
+// long/short colours used elsewhere so eyes read side at a glance without
+// re-parsing the JSON. "PAIRED" (both + variations filled) hints that
+// the engine will pick a slot per fire — different from a plain "BOTH".
+function directionBadge(direction, condLong, condShort) {
+  const d = (direction || 'both').toLowerCase();
+  const paired = d === 'both' && (condLong || condShort);
+  const label = paired ? 'PAIRED' : d.toUpperCase();
+  const color = d === 'long' ? 'var(--green)'
+              : d === 'short' ? 'var(--red)'
+              : paired ? '#a78bfa'
+              : 'var(--text3)';
+  return `<span style="font-size:9px;color:${color};background:${color}22;padding:1px 6px;border-radius:4px;font-weight:700;letter-spacing:0.05em">${label}</span>`;
+}
+function onDirectionChange() {
+  // Only show paired-variation slots when direction='both'. For one-sided
+  // checks the base condition IS the mirror; no second slot to fill.
+  const dir = document.getElementById('check-direction').value;
+  document.getElementById('check-variations').style.display = dir === 'both' ? 'block' : 'none';
+  const hint = document.getElementById('check-condition-hint');
+  if (dir === 'long')       hint.textContent = ' — evaluated on long signals only';
+  else if (dir === 'short') hint.textContent = ' — evaluated on short signals only';
+  else                      hint.textContent = ' — default rule; overridden per-side by variations below if set';
+}
 function openCheckEditor() {
   _editingCheckId = null;
   document.getElementById('check-editor-title').textContent = 'New Check';
   document.getElementById('check-key').value = '';
   document.getElementById('check-label').value = '';
   document.getElementById('check-category').value = 'default';
+  document.getElementById('check-direction').value = 'both';
   document.getElementById('check-section').value = '';
   document.getElementById('check-description').value = '';
   document.getElementById('check-condition').value = '{ "op": "gt", "left": { "field": "ema9" }, "right": { "field": "vwap" } }';
+  document.getElementById('check-condition-long').value = '';
+  document.getElementById('check-condition-short').value = '';
   document.getElementById('check-status').textContent = '';
+  onDirectionChange();
   document.getElementById('check-editor').style.display = 'block';
 }
 async function editCheck(id) {
@@ -2619,10 +2682,14 @@ async function editCheck(id) {
   document.getElementById('check-key').value = r.check.key;
   document.getElementById('check-label').value = r.check.label;
   document.getElementById('check-category').value = r.check.category;
+  document.getElementById('check-direction').value = r.check.direction || 'both';
   document.getElementById('check-section').value = r.check.section || '';
   document.getElementById('check-description').value = r.check.description || '';
   document.getElementById('check-condition').value = JSON.stringify(r.check.condition, null, 2);
+  document.getElementById('check-condition-long').value  = r.check.condition_long  ? JSON.stringify(r.check.condition_long,  null, 2) : '';
+  document.getElementById('check-condition-short').value = r.check.condition_short ? JSON.stringify(r.check.condition_short, null, 2) : '';
   document.getElementById('check-status').textContent = '';
+  onDirectionChange();
   document.getElementById('check-editor').style.display = 'block';
 }
 function closeCheckEditor() {
@@ -2633,13 +2700,26 @@ async function saveCheck() {
   let condition;
   try { condition = JSON.parse(document.getElementById('check-condition').value); }
   catch (err) { status.textContent = 'Condition JSON invalid: ' + err.message; status.style.color = 'var(--red)'; return; }
+  const direction = document.getElementById('check-direction').value;
+  let condition_long = null, condition_short = null;
+  if (direction === 'both') {
+    const rawLong  = document.getElementById('check-condition-long').value.trim();
+    const rawShort = document.getElementById('check-condition-short').value.trim();
+    try { if (rawLong)  condition_long  = JSON.parse(rawLong);  }
+    catch (err) { status.textContent = 'Long-side JSON invalid: '  + err.message; status.style.color = 'var(--red)'; return; }
+    try { if (rawShort) condition_short = JSON.parse(rawShort); }
+    catch (err) { status.textContent = 'Short-side JSON invalid: ' + err.message; status.style.color = 'var(--red)'; return; }
+  }
   const body = {
     check_key:   document.getElementById('check-key').value.trim(),
     label:       document.getElementById('check-label').value.trim(),
     category:    document.getElementById('check-category').value,
+    direction,
     section:     document.getElementById('check-section').value.trim() || null,
     description: document.getElementById('check-description').value.trim() || null,
     condition,
+    condition_long,
+    condition_short,
   };
   if (!body.check_key || !body.label) { status.textContent = 'Key and label required.'; status.style.color = 'var(--red)'; return; }
   const url = _editingCheckId ? `${API}/trading/checks/${_editingCheckId}` : `${API}/trading/checks`;

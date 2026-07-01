@@ -119,6 +119,23 @@ try { db.exec('ALTER TABLE check_library ADD COLUMN version_id INTEGER NOT NULL 
 // that "doesn't apply here."
 try { db.exec("ALTER TABLE check_library ADD COLUMN direction TEXT NOT NULL DEFAULT 'both'"); } catch { /* already exists */ }
 
+// Paired-variation columns let a single check_library row express BOTH
+// sides of a mirror pair. Resolver semantics at fire time:
+//   direction='both'  AND condition_long/short set → engine picks the
+//     variation matching signal.direction (paired mode).
+//   direction='both'  AND neither set → `condition` applies both ways
+//     (symmetric mode: rvol > 5 means the same for long and short).
+//   direction='long'|'short' → `condition` used for the matching side,
+//     the other side skipped entirely (one-sided mode).
+// Grading learns per-concept (one library row) rather than per-variation,
+// so a "9 EMA vs VWAP alignment" delta expectancy aggregates data from
+// both long fires (where ema9>vwap was checked) and short fires (where
+// ema9<vwap was checked). The trade card records which variation
+// resolved via a `variation` field so you can still inspect the raw
+// value that was measured.
+try { db.exec("ALTER TABLE check_library ADD COLUMN condition_long TEXT"); } catch { /* already exists */ }
+try { db.exec("ALTER TABLE check_library ADD COLUMN condition_short TEXT"); } catch { /* already exists */ }
+
 // ─── Seeds ───────────────────────────────────────────────────────────────────
 // A small handful of common conditions so the library isn't empty on
 // first run. These are TYPICAL defaults for the ma13bounce style setup;
@@ -565,13 +582,19 @@ function seedDefaults() {
   const existing = new Set(db.prepare('SELECT check_key FROM check_library').all().map(r => r.check_key));
   const stmt = db.prepare(`
     INSERT INTO check_library
-      (id, check_key, label, category, section, description, condition, enabled, created_at, updated_at, version_id, direction)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1, ?)
+      (id, check_key, label, category, section, description, condition, condition_long, condition_short, enabled, created_at, updated_at, version_id, direction)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1, ?)
   `);
   const txn = db.transaction(() => {
     for (const c of SEED_CHECKS) {
       if (existing.has(c.check_key)) continue;
-      stmt.run(uuidv4(), c.check_key, c.label, c.category, c.section, c.description, JSON.stringify(c.condition), now, now, c.direction || 'both');
+      stmt.run(
+        uuidv4(), c.check_key, c.label, c.category, c.section, c.description,
+        JSON.stringify(c.condition),
+        c.condition_long  ? JSON.stringify(c.condition_long)  : null,
+        c.condition_short ? JSON.stringify(c.condition_short) : null,
+        now, now, c.direction || 'both',
+      );
     }
   });
   txn();
@@ -603,18 +626,20 @@ seedDefaults();
 function _row(r) {
   if (!r) return null;
   return {
-    id:          r.id,
-    key:         r.check_key,
-    label:       r.label,
-    category:    r.category,
-    section:     r.section,
-    description: r.description,
-    condition:   safeParse(r.condition, {}),
-    enabled:     r.enabled === 1,
-    direction:   r.direction || 'both',
-    versionId:   r.version_id || 1,
-    createdAt:   r.created_at,
-    updatedAt:   r.updated_at,
+    id:              r.id,
+    key:             r.check_key,
+    label:           r.label,
+    category:        r.category,
+    section:         r.section,
+    description:     r.description,
+    condition:       safeParse(r.condition, {}),
+    condition_long:  r.condition_long  ? safeParse(r.condition_long,  null) : null,
+    condition_short: r.condition_short ? safeParse(r.condition_short, null) : null,
+    enabled:         r.enabled === 1,
+    direction:       r.direction || 'both',
+    versionId:       r.version_id || 1,
+    createdAt:       r.created_at,
+    updatedAt:       r.updated_at,
   };
 }
 
@@ -634,7 +659,7 @@ function getCheck(id) {
   return _row(db.prepare('SELECT * FROM check_library WHERE id = ?').get(id));
 }
 
-function createCheck({ check_key, label, category, section = null, description = null, condition, enabled = true, direction = 'both' }) {
+function createCheck({ check_key, label, category, section = null, description = null, condition, condition_long = null, condition_short = null, enabled = true, direction = 'both' }) {
   if (!check_key) throw new Error('check_key required');
   if (!label)     throw new Error('label required');
   if (!['default', 'additional'].includes(category)) throw new Error("category must be 'default' or 'additional'");
@@ -642,28 +667,40 @@ function createCheck({ check_key, label, category, section = null, description =
   if (!condition || typeof condition !== 'object') throw new Error('condition (JSON object) required');
   const validation = validateCondition(condition);
   if (!validation.ok) throw new Error(`condition invalid: ${validation.error}`);
+  if (condition_long)  { const v = validateCondition(condition_long);  if (!v.ok) throw new Error(`condition_long invalid: ${v.error}`); }
+  if (condition_short) { const v = validateCondition(condition_short); if (!v.ok) throw new Error(`condition_short invalid: ${v.error}`); }
   const id = uuidv4();
   const now = Date.now();
   db.prepare(`
     INSERT INTO check_library
-      (id, check_key, label, category, section, description, condition, enabled, created_at, updated_at, direction)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, check_key, label, category, section, description, JSON.stringify(condition), enabled ? 1 : 0, now, now, direction);
+      (id, check_key, label, category, section, description, condition, condition_long, condition_short, enabled, created_at, updated_at, direction)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, check_key, label, category, section, description,
+    JSON.stringify(condition),
+    condition_long  ? JSON.stringify(condition_long)  : null,
+    condition_short ? JSON.stringify(condition_short) : null,
+    enabled ? 1 : 0, now, now, direction,
+  );
   return getCheck(id);
 }
 
 function updateCheck(id, patch) {
   const cur = db.prepare('SELECT * FROM check_library WHERE id = ?').get(id);
   if (!cur) return null;
+  const nextConditionLong  = patch.condition_long  !== undefined ? (patch.condition_long  ? JSON.stringify(patch.condition_long)  : null) : cur.condition_long;
+  const nextConditionShort = patch.condition_short !== undefined ? (patch.condition_short ? JSON.stringify(patch.condition_short) : null) : cur.condition_short;
   const next = {
-    check_key:   patch.check_key   ?? cur.check_key,
-    label:       patch.label       ?? cur.label,
-    category:    patch.category    ?? cur.category,
-    section:     patch.section     !== undefined ? patch.section : cur.section,
-    description: patch.description !== undefined ? patch.description : cur.description,
-    condition:   patch.condition   != null ? JSON.stringify(patch.condition) : cur.condition,
-    enabled:     patch.enabled     != null ? (patch.enabled ? 1 : 0) : cur.enabled,
-    direction:   patch.direction   ?? cur.direction ?? 'both',
+    check_key:       patch.check_key   ?? cur.check_key,
+    label:           patch.label       ?? cur.label,
+    category:        patch.category    ?? cur.category,
+    section:         patch.section     !== undefined ? patch.section : cur.section,
+    description:     patch.description !== undefined ? patch.description : cur.description,
+    condition:       patch.condition   != null ? JSON.stringify(patch.condition) : cur.condition,
+    condition_long:  nextConditionLong,
+    condition_short: nextConditionShort,
+    enabled:         patch.enabled     != null ? (patch.enabled ? 1 : 0) : cur.enabled,
+    direction:       patch.direction   ?? cur.direction ?? 'both',
   };
   if (!['default', 'additional'].includes(next.category)) throw new Error("category must be 'default' or 'additional'");
   if (!['both', 'long', 'short'].includes(next.direction)) throw new Error("direction must be 'both', 'long', or 'short'");
@@ -671,15 +708,23 @@ function updateCheck(id, patch) {
     const v = validateCondition(patch.condition);
     if (!v.ok) throw new Error(`condition invalid: ${v.error}`);
   }
-  // Only the condition JSON affects what the check MEASURES; label, section,
-  // etc. are cosmetic so a version bump would waste history unnecessarily.
-  const conditionChanged = next.condition !== cur.condition;
+  if (patch.condition_long)  { const v = validateCondition(patch.condition_long);  if (!v.ok) throw new Error(`condition_long invalid: ${v.error}`); }
+  if (patch.condition_short) { const v = validateCondition(patch.condition_short); if (!v.ok) throw new Error(`condition_short invalid: ${v.error}`); }
+  // Only condition JSON changes affect what's MEASURED. Any of the three
+  // condition slots changing bumps the version.
+  const conditionChanged = next.condition !== cur.condition
+    || next.condition_long !== cur.condition_long
+    || next.condition_short !== cur.condition_short;
   const nextVersion = conditionChanged ? (cur.version_id || 1) + 1 : (cur.version_id || 1);
   db.prepare(`
     UPDATE check_library
-       SET check_key=?, label=?, category=?, section=?, description=?, condition=?, enabled=?, updated_at=?, version_id=?, direction=?
+       SET check_key=?, label=?, category=?, section=?, description=?, condition=?, condition_long=?, condition_short=?, enabled=?, updated_at=?, version_id=?, direction=?
      WHERE id=?
-  `).run(next.check_key, next.label, next.category, next.section, next.description, next.condition, next.enabled, Date.now(), nextVersion, next.direction, id);
+  `).run(
+    next.check_key, next.label, next.category, next.section, next.description,
+    next.condition, next.condition_long, next.condition_short,
+    next.enabled, Date.now(), nextVersion, next.direction, id,
+  );
   return getCheck(id);
 }
 
@@ -1073,8 +1118,31 @@ function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicato
     }
   }
 
+  // Resolver: pick which condition slot to evaluate.
+  //   direction='both' + variation set for the signal's side → paired mode
+  //   direction='both' + no variations                        → symmetric
+  //   direction='long'|'short'                                → one-sided
+  // The chosen slot is what actually gets tested. `variation` records which
+  // slot was used so grading can still show the raw value and the trade
+  // card can distinguish "ema9>vwap fired" from "ema9<vwap fired" even
+  // though they belong to the same library concept.
+  const side = direction ? String(direction).toLowerCase() : null;
+  const chooseCondition = (row) => {
+    const rowDir = row.direction || 'both';
+    if (rowDir === 'both' && side === 'long' && row.condition_long) {
+      return { cond: row.condition_long, variation: 'long' };
+    }
+    if (rowDir === 'both' && side === 'short' && row.condition_short) {
+      return { cond: row.condition_short, variation: 'short' };
+    }
+    if (rowDir === 'long')  return { cond: row.condition, variation: 'long' };
+    if (rowDir === 'short') return { cond: row.condition, variation: 'short' };
+    return { cond: row.condition, variation: 'symmetric' };
+  };
+
   const evaluate = (row) => {
-    const r = evaluateCondition(row.condition, ctx);
+    const { cond, variation } = chooseCondition(row);
+    const r = evaluateCondition(cond, ctx);
     return {
       libraryId: row.id,
       key:       row.key,
@@ -1083,6 +1151,7 @@ function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicato
       value:     r.value,
       aligned:   r.aligned,
       versionId: row.versionId || 1,
+      variation,
     };
   };
 
