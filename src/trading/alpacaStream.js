@@ -42,8 +42,24 @@ function getCredentials() {
 }
 
 function getFeedUrl() {
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'alpacaMarketFeed'").get();
-  const feed = (row?.value || 'iex').toLowerCase();
+  // Feed comes from the active Alpaca broker profile — same precedence
+  // as getCredentials(). Legacy setting is a fallback only. That way the
+  // Brokers form is the single place a user picks IEX vs SIP.
+  let feed = 'iex';
+  const profile = db.prepare(`
+    SELECT config FROM trading_brokers
+     WHERE type = 'alpaca' AND enabled = 1
+     ORDER BY is_default DESC, created_at ASC
+     LIMIT 1
+  `).get();
+  if (profile) {
+    let cfg = {};
+    try { cfg = JSON.parse(profile.config || '{}'); } catch { /* ignore */ }
+    if (cfg.feed) feed = String(cfg.feed).toLowerCase();
+  } else {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'alpacaMarketFeed'").get();
+    if (row?.value) feed = String(row.value).toLowerCase();
+  }
   return feed === 'sip' ? SIP_URL : IEX_URL;
 }
 

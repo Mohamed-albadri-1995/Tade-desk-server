@@ -47,6 +47,27 @@ function authHeaders() {
   };
 }
 
+/**
+ * Which market-data feed to request. Same precedence as getCredentials:
+ * active Alpaca broker profile's `feed` field, then legacy setting,
+ * then default 'iex' (the free tier that works without a subscription).
+ */
+function getFeed() {
+  const profile = db.prepare(`
+    SELECT config FROM trading_brokers
+     WHERE type = 'alpaca' AND enabled = 1
+     ORDER BY is_default DESC, created_at ASC
+     LIMIT 1
+  `).get();
+  if (profile) {
+    let cfg = {};
+    try { cfg = JSON.parse(profile.config || '{}'); } catch { /* ignore */ }
+    if (cfg.feed) return String(cfg.feed).toLowerCase();
+  }
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'alpacaMarketFeed'").get();
+  return String(row?.value || 'iex').toLowerCase();
+}
+
 // Fetch all pages for a bars request, returns { TICKER: [{t,o,h,l,c,v}] }
 async function fetchAllPages(url, params) {
   const result = {};
@@ -87,7 +108,7 @@ async function fetchIntradayBars(tickers, date) {
     end: `${date}T16:00:00-05:00`,
     limit: 10000,
     adjustment: 'raw',
-    feed: 'iex',
+    feed: getFeed(),
   });
 
   // Annotate each bar with its ET time string for easy lookup
@@ -119,7 +140,7 @@ async function fetchDailyBars(tickers, beforeDate) {
     end: fmt(endDate),
     limit: 1000,
     adjustment: 'raw',
-    feed: 'iex',
+    feed: getFeed(),
   });
 }
 

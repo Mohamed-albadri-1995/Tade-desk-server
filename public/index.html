@@ -1346,7 +1346,6 @@ const MSG_IDS = {
   sectorBullishThreshold: 'msg-bias', sectorBearishThreshold: 'msg-bias',
   shortlistMinScore: 'msg-shortlist', shortlistTopN: 'msg-shortlist',
   finnhubApiKey: 'msg-api', githubBackupToken: 'msg-api',
-  alpacaApiKey: 'msg-api', alpacaApiSecret: 'msg-api',
   aiApiKey: 'msg-ai', aiModel: 'msg-ai',
   scorerEntryTime: 'msg-scorer',
   regimeSampleThreshold: 'msg-scorer',
@@ -1467,14 +1466,6 @@ async function loadSettings() {
         document.getElementById('github-token-status').textContent =
           val === 'set' ? 'Token is set — auto-backup enabled' : 'No token — backup disabled';
         el.placeholder = val === 'set' ? 'Paste new token to replace' : 'Paste GitHub PAT here';
-      } else if (key === 'alpacaApiKey') {
-        document.getElementById('alpaca-key-status').textContent =
-          val === 'set' ? 'Key is set on server' : 'No key set — R3 capture disabled';
-        el.placeholder = val === 'set' ? 'Paste new key to replace' : 'Paste Alpaca API key';
-      } else if (key === 'alpacaApiSecret') {
-        document.getElementById('alpaca-secret-status').textContent =
-          val === 'set' ? 'Secret is set on server' : 'No secret set — R3 capture disabled';
-        el.placeholder = val === 'set' ? 'Paste new secret to replace' : 'Paste Alpaca secret key';
       } else if (key === 'aiApiKey') {
         el.placeholder = val === 'set' ? 'Paste new key to replace' : 'sk-or-v1-...';
       } else if (key === 'aiModel') {
@@ -1505,7 +1496,7 @@ async function saveSettings(keys, btn) {
     const el = document.getElementById('s-' + key);
     if (!el) continue;
     const v = el.value.trim();
-    if (['finnhubApiKey','githubBackupToken','alpacaApiKey','alpacaApiSecret','aiApiKey'].includes(key) && v === '') continue; // skip if left blank
+    if (['finnhubApiKey','githubBackupToken','aiApiKey'].includes(key) && v === '') continue; // skip if left blank
     body[key] = el.type === 'number' ? Number(v) : v;
   }
   if (Object.keys(body).length === 0) return;
@@ -1534,16 +1525,6 @@ async function saveSettings(keys, btn) {
         document.getElementById('s-githubBackupToken').value = '';
         document.getElementById('s-githubBackupToken').placeholder = 'Paste new token to replace';
         loadBackupStatus();
-      }
-      if (body.alpacaApiKey) {
-        document.getElementById('alpaca-key-status').textContent = 'Key is set on server';
-        document.getElementById('s-alpacaApiKey').value = '';
-        document.getElementById('s-alpacaApiKey').placeholder = 'Paste new key to replace';
-      }
-      if (body.alpacaApiSecret) {
-        document.getElementById('alpaca-secret-status').textContent = 'Secret is set on server';
-        document.getElementById('s-alpacaApiSecret').value = '';
-        document.getElementById('s-alpacaApiSecret').placeholder = 'Paste new secret to replace';
       }
       if (body.aiApiKey) {
         document.getElementById('s-aiApiKey').value = '';

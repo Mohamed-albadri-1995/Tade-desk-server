@@ -796,21 +796,15 @@ body {
       <p style="font-size:11px;color:var(--text3);margin:0 0 10px">
         <strong>Polling</strong> fetches 1-min bars from Alpaca every 60 seconds (simpler; up to 60s lag on signal fire).<br>
         <strong>WebSocket</strong> streams live bars and quotes (real-time entry price; Alpaca creds required).<br>
+        Both use the market-data feed (IEX / SIP) configured on the active Alpaca broker profile in the <strong>Brokers</strong> tab.<br>
         Takes effect the next time a trading session starts.
       </p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div style="display:grid;grid-template-columns:1fr;gap:10px">
         <div>
           <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Source</div>
           <select id="s-datasource" data-key="trading_data_source" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
             <option value="polling">Polling (HTTP, 60s)</option>
             <option value="websocket">WebSocket (real-time)</option>
-          </select>
-        </div>
-        <div>
-          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Alpaca WS Feed</div>
-          <select id="s-marketfeed" data-key="alpacaMarketFeed" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
-            <option value="iex">IEX (free)</option>
-            <option value="sip">SIP (paid)</option>
           </select>
         </div>
       </div>
@@ -1910,12 +1904,12 @@ async function loadComparison() {
 // ── Settings ──────────────────────────────────────────────────────────────────
 async function loadSettings() {
   const keys = [
-    'trading_execution_mode','trading_data_source','alpacaMarketFeed',
+    'trading_execution_mode','trading_data_source',
     'trading_equity','trading_risk_pct','trading_max_shares','trading_max_dollar_risk',
     'trading_max_total_exposure','trading_max_open_positions','trading_daily_loss_limit',
   ];
   const fieldIds = [
-    's-execmode','s-datasource','s-marketfeed',
+    's-execmode','s-datasource',
     's-equity','s-risk','s-maxshares','s-maxrisk','s-maxexposure','s-maxpos','s-dailyloss',
   ];
   for (let i = 0; i < keys.length; i++) {
@@ -1932,7 +1926,6 @@ async function saveSettings() {
   const map = {
     's-execmode':    'trading_execution_mode',
     's-datasource':  'trading_data_source',
-    's-marketfeed':  'alpacaMarketFeed',
     's-equity':      'trading_equity',
     's-risk':        'trading_risk_pct',
     's-maxshares':   'trading_max_shares',
