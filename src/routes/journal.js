@@ -11,6 +11,7 @@ const { importCsv } = require('../journal/importer');
 const { fetchAndStore } = require('../journal/technicalFetch');
 const { evaluateAll } = require('../journal/alignment');
 const { analyzeSetup, analyzeAccount, calendarData, computeMetrics } = require('../journal/analysis');
+const { mirrorTradeToCard, mirrorClosedTrades } = require('../journal/bridgeToGrading');
 
 const router = express.Router();
 
@@ -99,6 +100,13 @@ router.post('/trades', (req, res) => {
     );
   }
 
+  // Bridge: mirror into trade_cards so the grading engine learns from
+  // this trade the same way it learns from live signal fires. Silent
+  // best-effort — the journal write is the primary record.
+  if (status === 'closed') {
+    try { mirrorTradeToCard(id); } catch (err) { console.warn('[Journal] mirror failed:', err.message); }
+  }
+
   res.json({ ok: true, id });
 });
 
@@ -139,6 +147,12 @@ router.patch('/trades/:id', (req, res) => {
     req.params.id
   );
 
+  // Bridge: newly-closed edits mirror into trade_cards for grading.
+  const finalStatus = status || (ep != null ? 'closed' : trade.status);
+  if (finalStatus === 'closed') {
+    try { mirrorTradeToCard(req.params.id); } catch (err) { console.warn('[Journal] mirror failed:', err.message); }
+  }
+
   res.json({ ok: true });
 });
 
@@ -147,6 +161,9 @@ router.delete('/trades/:id', (req, res) => {
   db.prepare('DELETE FROM journal_context_snapshots WHERE trade_id = ?').run(req.params.id);
   db.prepare('DELETE FROM journal_technical_snapshots WHERE trade_id = ?').run(req.params.id);
   db.prepare('DELETE FROM journal_conditions WHERE trade_id = ?').run(req.params.id);
+  // Bridge: also drop the mirrored card so grading doesn't count a
+  // deleted trade toward setup expectancy.
+  try { db.prepare('DELETE FROM trade_cards WHERE id = ?').run(req.params.id); } catch { /* ignore */ }
   res.json({ ok: true });
 });
 
@@ -227,14 +244,19 @@ router.post('/import', (req, res) => {
   try {
     const result = importCsv(csv, account || null);
     // Auto-compute technical + conditions for newly imported closed trades
+    let bridged = { mirrored: 0, skipped: 0 };
     if (result.imported > 0) {
       const newTrades = result.trades
         .filter(t => t.status === 'closed')
         .map(t => db.prepare('SELECT * FROM journal_trades WHERE id = ?').get(t.id))
         .filter(Boolean);
       computeAndEvaluateBatch(newTrades);
+      // Bridge: also mirror into trade_cards so imported history drives
+      // the grading engine's expectancy pool.
+      try { bridged = mirrorClosedTrades(newTrades.map(t => t.id)); }
+      catch (err) { console.warn('[Journal] import bridge failed:', err.message); }
     }
-    res.json({ ok: true, ...result });
+    res.json({ ok: true, ...result, bridged });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
@@ -293,6 +315,15 @@ router.get('/analysis/setup/:setupId', (req, res) => {
 
 router.get('/analysis/calendar', (req, res) => {
   res.json(calendarData(req.query));
+});
+
+// One-shot backfill: mirror every existing closed journal trade into
+// trade_cards so grading picks up all historical data at once. Safe to
+// re-run — the bridge is idempotent on card id = trade id.
+router.post('/analysis/backfill-to-grading', (req, res) => {
+  const ids = db.prepare("SELECT id FROM journal_trades WHERE status = 'closed'").all().map(r => r.id);
+  const result = mirrorClosedTrades(ids);
+  res.json({ ok: true, considered: ids.length, ...result });
 });
 
 router.get('/analysis/metrics', (req, res) => {

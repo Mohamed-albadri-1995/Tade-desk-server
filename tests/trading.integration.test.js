@@ -22,6 +22,7 @@ fs.mkdirSync(TMP_DB_DIR, { recursive: true });
 // Redirect the DB by copying process.cwd() semantics — src/db uses __dirname
 // so instead of trying to point that at TMP_DIR, we wipe rows between tests.
 require('../src/trading/db');
+require('../src/journal/db'); // journal tables so the bridge test can insert
 const db          = require('../src/db');
 const marketGate  = require('../src/trading/marketGate');
 const setupEngine = require('../src/trading/setupEngine');
@@ -42,6 +43,7 @@ function cleanDb() {
     DELETE FROM trade_card_checks;
     DELETE FROM trade_cards;
     DELETE FROM check_library WHERE check_key IN ('good', 'edit_test');
+    DELETE FROM journal_trades WHERE ticker = 'JBRIDGE';
   `);
   marketGate.clear();
   setupEngine.clearSessionLog();
@@ -207,6 +209,40 @@ describe('Trading pipeline — stage boundaries', () => {
     const active = brokers.getActive();
     expect(active.length).toBeGreaterThan(0);
     expect(active.every(b => b.enabled)).toBe(true);
+  });
+
+  test('Journal → grading bridge: imported closed trades drive setupExpectancy', () => {
+    const { mirrorTradeToCard } = require('../src/journal/bridgeToGrading');
+    require('../src/journal/db'); // ensure tables exist
+    const setupId = uuidv4();
+    const tradeId = uuidv4();
+    db.prepare(`
+      INSERT INTO journal_trades
+        (id, date, ticker, direction, setup_id, shares, entry_price, entry_time,
+         exit_price, exit_time, sl, tp, gross_pnl, commission, net_pnl,
+         pct_move, duration_ms, source, account, status, technical_computed, created_at)
+      VALUES (?, '2026-06-30', 'JBRIDGE', 'Long', ?, 100, 10, '09:40', 12, '09:55',
+              9, 15, 200, 0, 200, 20, 900000, 'manual', 'test-acct', 'closed', 0, ?)
+    `).run(tradeId, setupId, Date.now());
+
+    // Before: no card, so setupExpectancy sees zero trades.
+    const beforeCount = grading.setupExpectancy(setupId).n;
+    expect(beforeCount).toBe(0);
+
+    const r = mirrorTradeToCard(tradeId);
+    expect(r.ok).toBe(true);
+    expect(r.skipped).toBeFalsy();
+
+    // After: mirrored card is in the pool.
+    const after = grading.setupExpectancy(setupId);
+    expect(after.n).toBe(1);
+    expect(after.expectancyR).toBeGreaterThan(0);
+
+    // Idempotency — re-running the mirror doesn't clobber or double-count.
+    const r2 = mirrorTradeToCard(tradeId);
+    expect(r2.ok).toBe(true);
+    expect(r2.skipped).toBe(true);
+    expect(grading.setupExpectancy(setupId).n).toBe(1);
   });
 
   test('Editing a check bumps its version and freezes its old learning', () => {
