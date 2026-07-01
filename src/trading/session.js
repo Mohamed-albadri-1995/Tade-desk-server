@@ -15,6 +15,7 @@ const setupEngine   = require('./setupEngine');  // was sideB
 const sizer         = require('./sizer');        // was sideC
 const router        = require('./router');       // was center
 const barPoller     = require('./barPoller');
+const brokerSync    = require('./brokerSync');
 const volumeBaseline = require('./volumeBaseline');
 const { toETDate } = require('../utils/time');
 
@@ -166,6 +167,8 @@ async function start() {
     });
   });
 
+  brokerSync.start();
+
   console.log(`[TradingSession] Started ${sessionId} with ${tickers.length} tickers`);
   return { ok: true, sessionId, tickers, shortlist };
 }
@@ -221,6 +224,7 @@ function pause(reason = 'manual') {
   _session.status = 'paused';
   db.prepare("UPDATE trading_sessions SET status = 'paused' WHERE id = ?").run(_session.id);
   barPoller.stop();
+  brokerSync.stop();
   console.log(`[TradingSession] Paused ${_session.id} (${reason})`);
   router.broadcast({ type: 'session_paused', reason, ts: Date.now() });
   return { ok: true };
@@ -261,6 +265,7 @@ function end(reason = 'manual') {
   clearInterval(_contextPollInterval);
   _contextPollInterval = null;
   barPoller.stop();
+  brokerSync.stop();
 
   db.prepare("UPDATE trading_sessions SET ended_at = ?, status = 'ended' WHERE id = ?")
     .run(Date.now(), _session.id);

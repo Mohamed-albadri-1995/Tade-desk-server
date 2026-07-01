@@ -149,30 +149,103 @@ function getRaw(id) {
   return _row(db.prepare('SELECT * FROM trading_brokers WHERE id = ?').get(id), { masked: false });
 }
 
+const PAPER_URL = 'https://paper-api.alpaca.markets';
+const LIVE_URL  = 'https://api.alpaca.markets';
+
 /**
- * Attempt to send an order via a broker profile.
+ * Submit an order to a broker profile.
  *
- * The alpaca implementation is intentionally a stub for now — it returns
- * `{ ok: true, submitted: false, reason: 'live submission deferred' }`.
- * When you flip the switch, wire it to the Alpaca /v2/orders POST here
- * and no other code needs to change.
+ * paper type ....... offline-only, records nothing external.
+ * alpaca env=paper . POSTs to paper-api.alpaca.markets/v2/orders. Real
+ *                    fills, real slippage, no real money.
+ * alpaca env=live .. still stubbed — flip when the user says go.
+ *
+ * Bracket order: entry + stop_loss + take_profit in one submit so
+ * Alpaca handles exits even if this process dies. Our local
+ * positionMonitor still watches bars but the source of truth for
+ * closed P&L is the Alpaca fill.
  */
 async function send(broker, order) {
   if (!broker) return { ok: false, error: 'No broker profile' };
   if (broker.type === 'paper') {
     return { ok: true, submitted: false, mode: 'paper', brokerId: broker.id, brokerName: broker.name };
   }
-  if (broker.type === 'alpaca') {
+  if (broker.type !== 'alpaca') {
+    return { ok: false, error: `Unknown broker type ${broker.type}` };
+  }
+
+  const cfg = broker.config || {};
+  // env is derived from the profile's URL — the UI lets the user pick
+  // Paper vs Live in the "Base URL" dropdown, so we don't want a second
+  // field to keep in sync. Falls back to explicit `env` if set.
+  const url = (cfg.url || PAPER_URL).toLowerCase();
+  const env = cfg.env
+    ? String(cfg.env).toLowerCase()
+    : (url.includes('paper-api') ? 'paper' : 'live');
+  if (env === 'live') {
     return {
-      ok: true,
-      submitted: false,
-      mode: 'live-stub',
-      brokerId: broker.id,
-      brokerName: broker.name,
-      note: 'Live submission not enabled yet — order recorded, no API call sent',
+      ok: true, submitted: false, mode: 'live-stub',
+      brokerId: broker.id, brokerName: broker.name,
+      note: 'Live submission is deliberately stubbed — flip in brokers.js when ready',
     };
   }
-  return { ok: false, error: `Unknown broker type ${broker.type}` };
+
+  if (!cfg.key || !cfg.secret) {
+    return { ok: false, error: 'Alpaca profile missing key/secret', brokerId: broker.id };
+  }
+
+  // Prefer the user-configured URL if it looks like Alpaca; otherwise
+  // fall back to the paper endpoint.
+  const base = cfg.url && /alpaca\.markets/i.test(cfg.url) ? cfg.url : PAPER_URL;
+  const payload = {
+    symbol:        order.ticker,
+    qty:           String(order.shares),
+    side:          order.direction === 'Long' ? 'buy' : 'sell',
+    type:          order.entryType === 'limit' ? 'limit' : 'market',
+    time_in_force: 'day',
+    client_order_id: order.orderId,
+  };
+  if (payload.type === 'limit' && order.entryPrice) payload.limit_price = String(order.entryPrice);
+  // Bracket: SL + TP legs in the same submit so Alpaca owns the exit.
+  if (order.sl && order.tp) {
+    payload.order_class    = 'bracket';
+    payload.stop_loss      = { stop_price: String(order.sl) };
+    payload.take_profit    = { limit_price: String(order.tp) };
+  }
+
+  try {
+    const resp = await fetch(`${base}/v2/orders`, {
+      method: 'POST',
+      headers: {
+        'APCA-API-KEY-ID':     cfg.key,
+        'APCA-API-SECRET-KEY': cfg.secret,
+        'Content-Type':        'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      return {
+        ok: false, submitted: false,
+        brokerId: broker.id, brokerName: broker.name,
+        error: `Alpaca ${resp.status}: ${body.message || body.code || 'submit failed'}`,
+        response: body,
+      };
+    }
+    return {
+      ok: true, submitted: true, mode: `alpaca-${env}`,
+      brokerId: broker.id, brokerName: broker.name,
+      alpacaOrderId: body.id || null,
+      alpacaStatus:  body.status || null,
+      response: body,
+    };
+  } catch (err) {
+    return {
+      ok: false, submitted: false,
+      brokerId: broker.id, brokerName: broker.name,
+      error: `Alpaca network error: ${err.message}`,
+    };
+  }
 }
 
 module.exports = {

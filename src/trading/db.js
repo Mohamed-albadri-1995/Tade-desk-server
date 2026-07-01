@@ -96,6 +96,11 @@ db.exec(`
 
 // Migration: add indicator column if missing
 try { db.exec('ALTER TABLE trading_setups ADD COLUMN indicator TEXT'); } catch { /* already exists */ }
+// Migration: broker submission traceability — when we fan out to Alpaca
+// paper, its order id is stamped on our order + position rows so the
+// fill-tracking loop can match Alpaca's status updates back to us.
+try { db.exec('ALTER TABLE trading_orders ADD COLUMN alpaca_order_id TEXT'); } catch { /* already exists */ }
+try { db.exec('ALTER TABLE trading_positions ADD COLUMN alpaca_order_id TEXT'); } catch { /* already exists */ }
 
 // Default trading settings
 const tradingDefaults = [

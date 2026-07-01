@@ -352,17 +352,43 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
       console.warn('[Router] Trade card creation failed:', err.message);
     }
 
-    if (mode === 'live') {
-      // Fan out to every enabled broker profile.
+    // Broker fanout — a profile's `env` decides which execution mode it
+    // participates in, not the type alone. That way one alpaca account
+    // can be a paper-only sandbox and another can be live, and both are
+    // gated by the master mode independently.
+    if (mode !== 'off') {
       for (const b of brokers.getActive()) {
+        // 'paper' type is offline-only; skip in paper mode too, it's a no-op record.
+        if (b.type === 'paper') continue;
+        // Match brokers.js derivation: URL wins over an explicit env field.
+        const cfg = b.config || {};
+        const env = cfg.env
+          ? String(cfg.env).toLowerCase()
+          : (String(cfg.url || '').toLowerCase().includes('paper-api') ? 'paper' : 'live');
+        if (mode === 'paper' && env !== 'paper') continue;
+        if (mode === 'live'  && env !== 'live')  continue;
         try {
-          const r = require('./brokers').send;  // via require to keep it hot-swappable
-          const result = r(b, { ticker, direction, shares, entryType, entryPrice, sl, tp, orderId });
-          // send() is async; keep a Promise handle but don't block the SSE broadcast.
-          brokerResults.push({ brokerId: b.id, brokerName: b.name, brokerType: b.type, pending: true });
-          Promise.resolve(result).catch(() => { /* logged in broker */ });
+          const sendFn = require('./brokers').send;  // via require to keep it hot-swappable
+          const result = sendFn(b, { ticker, direction, shares, entryType, entryPrice, sl, tp, orderId });
+          brokerResults.push({ brokerId: b.id, brokerName: b.name, brokerType: b.type, env, pending: true });
+          Promise.resolve(result)
+            .then(r => {
+              if (r?.alpacaOrderId) {
+                // Stamp the position + order so the fill-tracking loop can
+                // match Alpaca's status updates back to our records and let
+                // the grading engine learn from the REAL fill price.
+                try {
+                  db.prepare('UPDATE trading_positions SET alpaca_order_id = ? WHERE id = ?')
+                    .run(r.alpacaOrderId, positionId);
+                  db.prepare('UPDATE trading_orders SET alpaca_order_id = ?, status = ? WHERE id = ?')
+                    .run(r.alpacaOrderId, r.alpacaStatus || 'submitted', orderId);
+                } catch { /* schema migration may not have run yet */ }
+              }
+              if (!r?.ok) console.warn(`[Router] broker ${b.name} submit failed:`, r?.error);
+            })
+            .catch(err => console.warn(`[Router] broker ${b.name} threw:`, err.message));
         } catch (err) {
-          brokerResults.push({ brokerId: b.id, brokerName: b.name, brokerType: b.type, ok: false, error: err.message });
+          brokerResults.push({ brokerId: b.id, brokerName: b.name, brokerType: b.type, env, ok: false, error: err.message });
         }
       }
     }
