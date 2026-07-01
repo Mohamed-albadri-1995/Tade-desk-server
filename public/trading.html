@@ -600,10 +600,27 @@ body {
             <input id="sm-description" placeholder="Brief note about this setup" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
           </div>
           <div id="sm-additional-block" style="display:none">
-            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">
-              Additional Checks
-              <span style="color:var(--text3);font-weight:400;margin-left:6px">(mandatory come from the indicator, default apply to all setups)</span>
-            </label>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="background:rgba(239,68,68,0.15);color:var(--red);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:0.05em">MANDATORY</span>
+              <span style="font-size:11px;color:var(--text3)">from the indicator script — can't be edited here</span>
+            </div>
+            <div id="sm-mandatory-list" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:11px;color:var(--text3);margin-bottom:12px">
+              (loaded when a setup with an indicator is picked)
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="background:rgba(59,130,246,0.15);color:#3b82f6;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:0.05em">DEFAULT</span>
+              <span style="font-size:11px;color:var(--text3)">auto-apply to every setup — edit these in the</span>
+              <a href="javascript:switchTab('checks')" style="font-size:11px;color:var(--accent);text-decoration:underline">Checks tab</a>
+            </div>
+            <div id="sm-default-list" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;max-height:120px;overflow-y:auto;font-size:11px;margin-bottom:12px">
+              (loaded from check library)
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="background:rgba(168,85,247,0.15);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:0.05em">ADDITIONAL</span>
+              <span style="font-size:11px;color:var(--text3)">opt in per setup — drives the A+/A/B/C signal grade</span>
+            </div>
             <div id="sm-additional-list" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;max-height:180px;overflow-y:auto"></div>
           </div>
         </div>
@@ -1162,17 +1179,29 @@ function renderCenterCard(evt) {
       ? `<span style="font-weight:800;font-size:14px;padding:2px 8px;border-radius:6px;background:${gradeColour};color:#0b1220">${gradeLetter}</span>`
       : '';
 
-    const renderChecks = (list, title) => {
+    // Match the trade-card viewer's tier presentation: colored badge +
+    // one-line hint so the tier is unmistakable at fire time, not just
+    // on the closed trade card.
+    const TIER_META = {
+      mandatory:  { color: 'var(--red)',    hint: 'from the indicator — must all be aligned for the setup to fire' },
+      default:    { color: '#3b82f6',       hint: 'library checks that auto-apply to every setup' },
+      additional: { color: 'var(--accent)', hint: 'opt-in per setup — these drive the A+/A/B/C grade' },
+    };
+    const renderChecks = (list, tier) => {
       if (!list?.length) return '';
-      return `<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-top:6px;margin-bottom:3px">${title}</div>` +
-        list.map(c => {
-          const glyph = c.aligned === true ? '✓' : c.aligned === false ? '✗' : '·';
-          const color = c.aligned === true ? 'var(--green)' : c.aligned === false ? 'var(--red)' : 'var(--text3)';
-          return `<div style="display:flex;gap:6px;font-size:11px;color:${color}">
-            <span>${glyph}</span><span style="color:var(--text2)">${c.label}</span>
-            ${c.value ? `<span style="color:var(--text3);margin-left:auto;font-family:monospace;font-size:10px">${c.value}</span>` : ''}
-          </div>`;
-        }).join('');
+      const meta = TIER_META[tier] || { color: 'var(--text3)', hint: '' };
+      const header = `<div style="display:flex;align-items:center;gap:8px;margin-top:10px;margin-bottom:3px">
+        <span style="background:${meta.color}20;color:${meta.color};padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:0.05em">${tier.toUpperCase()}</span>
+        <span style="color:var(--text3);font-size:10px">${meta.hint}</span>
+      </div>`;
+      return header + list.map(c => {
+        const glyph = c.aligned === true ? '✓' : c.aligned === false ? '✗' : '·';
+        const color = c.aligned === true ? 'var(--green)' : c.aligned === false ? 'var(--red)' : 'var(--text3)';
+        return `<div style="display:flex;gap:6px;font-size:11px;color:${color}">
+          <span>${glyph}</span><span style="color:var(--text2)">${c.label}</span>
+          ${c.value ? `<span style="color:var(--text3);margin-left:auto;font-family:monospace;font-size:10px">${c.value}</span>` : ''}
+        </div>`;
+      }).join('');
     };
 
     return `<div class="center-card">
@@ -1206,9 +1235,9 @@ function renderCenterCard(evt) {
           <span>Total <strong style="color:${total > 1 ? 'var(--green)' : total < 1 ? 'var(--red)' : 'var(--text)'}">${total.toFixed(2)}×</strong></span>
         </div>`;
       })()}
-      ${renderChecks(e.checks?.mandatory,  'Mandatory')}
-      ${renderChecks(e.checks?.default,    'Default')}
-      ${renderChecks(e.checks?.additional, 'Additional')}
+      ${renderChecks(e.checks?.mandatory,  'mandatory')}
+      ${renderChecks(e.checks?.default,    'default')}
+      ${renderChecks(e.checks?.additional, 'additional')}
       ${payload ? `<div style="font-size:10px;color:var(--text3);margin-top:8px;margin-bottom:4px">Alpaca payload (ready — connection deferred)</div><div class="payload-box">${payload}</div>` : ''}
     </div>`;
   }).join('');
@@ -2015,12 +2044,46 @@ async function openSetupModal(setup) {
   // Additional-checks picker — only shown when editing (a setupId exists).
   const addBlock = document.getElementById('sm-additional-block');
   const addList  = document.getElementById('sm-additional-list');
+  const mandList = document.getElementById('sm-mandatory-list');
+  const defList  = document.getElementById('sm-default-list');
   if (setup?.id) {
     addBlock.style.display = 'block';
-    const [libraryResp, assignedResp] = await Promise.all([
+    const [libraryResp, assignedResp, defaultsResp, mandatoryResp] = await Promise.all([
       fetch(`${API}/trading/checks?category=additional`).then(r => r.json()),
       fetch(`${API}/trading/setups/${setup.id}/checks`).then(r => r.json()),
+      fetch(`${API}/trading/checks?category=default`).then(r => r.json()),
+      setup?.indicator ? fetch(`${API}/trading/indicators/${setup.indicator}/conditions`).then(r => r.json()).catch(() => null) : Promise.resolve(null),
     ]);
+
+    // Mandatory — pulled straight from the indicator script's debug()
+    // output (via a tiny endpoint) so the list is guaranteed to match
+    // what fires. Read-only here; edit the script to change it.
+    if (!setup?.indicator) {
+      mandList.innerHTML = '<span style="color:var(--text3)">No indicator attached — pick one above to see its mandatory conditions.</span>';
+    } else if (mandatoryResp?.conditions?.length) {
+      mandList.innerHTML = mandatoryResp.conditions.map(c => `
+        <div style="padding:2px 0">
+          <span style="color:var(--text2)">${c.name}</span>
+        </div>
+      `).join('');
+    } else {
+      mandList.innerHTML = `<span style="color:var(--text3)">Mandatory conditions come from <code style="color:var(--text2)">src/trading/indicators/${setup.indicator}.js</code> — none surfaced yet.</span>`;
+    }
+
+    // Default — enabled library entries. Read-only here; user manages
+    // them in the Checks tab where they can toggle enabled/disabled.
+    const defaults = (defaultsResp.checks || []).filter(c => c.enabled);
+    if (!defaults.length) {
+      defList.innerHTML = '<span style="color:var(--text3)">No default checks enabled. Add or enable some in the Checks tab.</span>';
+    } else {
+      defList.innerHTML = defaults.map(c => `
+        <div style="display:flex;align-items:center;gap:6px;padding:2px 0">
+          <span style="color:var(--text2)">${c.label}</span>
+          ${c.section ? `<span style="font-size:10px;color:var(--text3)">${c.section}</span>` : ''}
+        </div>
+      `).join('');
+    }
+
     const library  = libraryResp.checks || [];
     const assigned = new Set((assignedResp.additional || []).map(c => c.id));
     if (!library.length) {
@@ -2037,6 +2100,8 @@ async function openSetupModal(setup) {
   } else {
     addBlock.style.display = 'none';
     addList.innerHTML = '';
+    if (mandList) mandList.innerHTML = '';
+    if (defList) defList.innerHTML = '';
   }
 }
 

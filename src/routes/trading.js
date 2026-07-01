@@ -75,6 +75,37 @@ router.get('/indicators', (req, res) => {
   res.json(barPoller.listEngines());
 });
 
+/**
+ * Return an indicator's mandatory conditions — the list its debug()
+ * function produces. Called from the Setup edit modal so the user can
+ * SEE the same conditions in the UI as are defined in the script,
+ * without editing the script.
+ *
+ * Runs debug() on a synthetic bar sequence just to elicit the condition
+ * NAMES; pass/note fields are ignored (they'd be meaningless without
+ * real market data). Any throw is treated as "engine doesn't expose
+ * conditions" so a partially-implemented indicator doesn't 500 the UI.
+ */
+router.get('/indicators/:key/conditions', (req, res) => {
+  try {
+    const engine = require('../trading/indicators/' + req.params.key);
+    if (typeof engine.debug !== 'function') {
+      return res.json({ ok: true, conditions: [] });
+    }
+    // 30 synthetic 1-min bars — enough for most engines' minimum-bars
+    // guard to pass without triggering any actual signal.
+    const bars = [];
+    for (let i = 0; i < 30; i++) {
+      bars.push({ t: Date.now() - (30 - i) * 60000, o: 100 + i * 0.01, h: 100 + i * 0.01 + 0.05, l: 100 + i * 0.01 - 0.05, c: 100 + i * 0.01, v: 1000, etTime: '09:35' });
+    }
+    const dbg = engine.debug(bars, null, { rvol: 1 });
+    const conditions = (dbg?.conditions || []).map(c => ({ name: c.name }));
+    res.json({ ok: true, conditions });
+  } catch (err) {
+    res.json({ ok: true, conditions: [], warning: err.message });
+  }
+});
+
 router.post('/setups', (req, res) => {
   const { name, description, indicator, entry_type, window_start, window_end, config } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
