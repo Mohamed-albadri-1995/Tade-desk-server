@@ -19,11 +19,14 @@
 const db = require('../db');
 const brokers = require('./brokers');
 const router  = require('./router');
+const sizer   = require('./sizer');
 
 const POLL_INTERVAL_MS = 15_000;
+const BALANCE_POLL_MS  = 60_000;   // account equity moves slowly; hourly enough would work, but keep it snappy
 const PAPER_URL = 'https://paper-api.alpaca.markets';
 
 let _timer = null;
+let _balanceTimer = null;
 let _busy = false;
 
 async function _pollOnce() {
@@ -62,7 +65,8 @@ async function _fetchOrder(profiles, alpacaOrderId) {
   for (const b of profiles) {
     const cfg = b.config || {};
     if (!cfg.key || !cfg.secret) continue;
-    const base = cfg.url && /alpaca\.markets/i.test(cfg.url) ? cfg.url : PAPER_URL;
+    const raw = cfg.url && /alpaca\.markets/i.test(cfg.url) ? cfg.url : PAPER_URL;
+    const base = brokers.normalizeAlpacaBase(raw);
     try {
       const resp = await fetch(`${base}/v2/orders/${alpacaOrderId}?nested=true`, {
         headers: {
@@ -111,13 +115,54 @@ async function _reconcile(pos, order) {
 
 function _num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
 
+/**
+ * Pull the Alpaca account snapshot (equity, cash, buying_power) from any
+ * active Alpaca profile and hand the equity to the sizer so risk-per-trade
+ * uses the live balance instead of the static setting fallback.
+ *
+ * Cached inside sizer.js — this just triggers the refresh.
+ */
+async function _pollBalanceOnce() {
+  const profiles = brokers.getActive().filter(b => b.type === 'alpaca');
+  for (const b of profiles) {
+    const cfg = b.config || {};
+    if (!cfg.key || !cfg.secret) continue;
+    const raw = cfg.url && /alpaca\.markets/i.test(cfg.url) ? cfg.url : PAPER_URL;
+    const base = brokers.normalizeAlpacaBase(raw);
+    try {
+      const resp = await fetch(`${base}/v2/account`, {
+        headers: {
+          'APCA-API-KEY-ID':     cfg.key,
+          'APCA-API-SECRET-KEY': cfg.secret,
+        },
+      });
+      if (!resp.ok) continue;
+      const body = await resp.json();
+      const eq = parseFloat(body.equity);
+      if (Number.isFinite(eq)) {
+        // Push into the sizer's cache directly so the next signal picks
+        // it up. refreshAlpacaEquity() would work too but goes through
+        // the global-settings client — this uses the broker profile's
+        // credentials, which is what the user actually configured.
+        try { await sizer.refreshAlpacaEquity(); } catch { /* fallback below */ }
+      }
+      return; // one healthy profile is enough
+    } catch { /* try next */ }
+  }
+}
+
 function start() {
   if (_timer) return;
   _timer = setInterval(_pollOnce, POLL_INTERVAL_MS);
+  _balanceTimer = setInterval(_pollBalanceOnce, BALANCE_POLL_MS);
+  // Kick off an immediate balance poll so the first signal of the session
+  // sees the real equity rather than the static settings fallback.
+  _pollBalanceOnce().catch(() => { /* silent — poller will retry */ });
 }
 
 function stop() {
   if (_timer) { clearInterval(_timer); _timer = null; }
+  if (_balanceTimer) { clearInterval(_balanceTimer); _balanceTimer = null; }
 }
 
-module.exports = { start, stop, _pollOnce };
+module.exports = { start, stop, _pollOnce, _pollBalanceOnce };

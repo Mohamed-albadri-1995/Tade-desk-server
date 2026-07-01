@@ -153,6 +153,18 @@ const PAPER_URL = 'https://paper-api.alpaca.markets';
 const LIVE_URL  = 'https://api.alpaca.markets';
 
 /**
+ * Alpaca's docs give the base URL as either `https://paper-api.alpaca.markets`
+ * or `https://paper-api.alpaca.markets/v2`, and users copy whichever form
+ * they see. Our code appends `/v2/orders`, so a `/v2` already in the URL
+ * would produce `/v2/v2/orders` and 404. Strip a trailing `/v2` (with
+ * optional slash) so both forms work.
+ */
+function normalizeAlpacaBase(url) {
+  if (!url) return PAPER_URL;
+  return String(url).replace(/\/v2\/?$/i, '').replace(/\/$/, '');
+}
+
+/**
  * Submit an order to a broker profile.
  *
  * paper type ....... offline-only, records nothing external.
@@ -196,7 +208,7 @@ async function send(broker, order) {
 
   // Prefer the user-configured URL if it looks like Alpaca; otherwise
   // fall back to the paper endpoint.
-  const base = cfg.url && /alpaca\.markets/i.test(cfg.url) ? cfg.url : PAPER_URL;
+  const base = normalizeAlpacaBase(cfg.url && /alpaca\.markets/i.test(cfg.url) ? cfg.url : PAPER_URL);
   const payload = {
     symbol:        order.ticker,
     qty:           String(order.shares),
@@ -257,5 +269,6 @@ module.exports = {
   remove,
   getActive,
   send,
+  normalizeAlpacaBase,
   VALID_TYPES,
 };

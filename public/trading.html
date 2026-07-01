@@ -571,23 +571,6 @@ body {
       </div>
     </div>
 
-    <!-- Conditions editor (inline, hidden until a setup's Conditions button is clicked) -->
-    <div id="cond-editor" style="display:none;margin-bottom:16px">
-      <div class="panel">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div style="font-weight:700;font-size:13px" id="cond-editor-title">Conditions</div>
-          <button onclick="closeCondEditor()" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;line-height:1">✕</button>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
-          Define the analysis conditions for this setup. These appear as a checklist on each journal trade card — you mark whether each was present at entry. Over time, the analysis engine grades each condition (A+/A/B/C) based on how much it improves trade expectancy when aligned.
-        </div>
-        <div id="cond-list" style="margin-bottom:12px"></div>
-        <button onclick="addConditionRow()" style="background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:5px 14px;font-size:11px;color:var(--text2);font-family:inherit;cursor:pointer">+ Add Condition</button>
-        <button onclick="saveConditions()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 16px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;margin-left:8px">Save</button>
-        <span id="cond-save-msg" style="font-size:11px;color:var(--green);margin-left:8px;display:none">Saved</span>
-      </div>
-    </div>
-
     <!-- Signal Comparison -->
     <div class="panel" style="margin-top:16px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
@@ -1757,7 +1740,6 @@ async function loadSetups() {
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;margin-top:2px">
           <button onclick="openSetupModal(${JSON.stringify(s).replace(/"/g,'&quot;')})" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:4px 10px;font-size:11px;color:var(--text2);font-family:inherit;cursor:pointer">Edit</button>
-          <button onclick="openCondEditor('${s.id}','${s.name.replace(/'/g,"\\'")}')" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:4px 10px;font-size:11px;color:var(--accent);font-family:inherit;cursor:pointer">Conditions</button>
           <button onclick="toggleSetup('${s.id}',${s.enabled})" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:4px 10px;font-size:11px;color:var(--text2);font-family:inherit;cursor:pointer">${s.enabled ? 'Disable':'Enable'}</button>
           <button onclick="deleteSetup('${s.id}')" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:5px;padding:4px 10px;font-size:11px;color:var(--red);font-family:inherit;cursor:pointer">Delete</button>
         </div>
@@ -1845,113 +1827,6 @@ async function saveSetupModal() {
   }
   closeSetupModal();
   loadSetups();
-}
-
-// ── Conditions editor ─────────────────────────────────────────────────────────
-
-let _condSetupId = null;
-const CONDITION_KEYS = [
-  { key: 'price_vs_vwap',      label: 'Price vs VWAP',        section: 'Technical' },
-  { key: 'price_vs_ema13',     label: 'Price vs EMA13',       section: 'Technical' },
-  { key: 'price_vs_ema20',     label: 'Price vs EMA20',       section: 'Technical' },
-  { key: 'price_vs_ema50',     label: 'Price vs EMA50',       section: 'Technical' },
-  { key: 'ema_stack',          label: 'EMA Stack Bullish',     section: 'Technical' },
-  { key: 'pm_high',            label: 'Price > PM High',       section: 'Technical' },
-  { key: 'pm_low',             label: 'Price > PM Low',        section: 'Technical' },
-  { key: 'rvol',               label: 'RVOL > threshold',     section: 'Volume' },
-  { key: 'sec_bias',           label: 'Sector Bias',          section: 'Context' },
-  { key: 'broad_resolved',     label: 'Broad Market Resolved', section: 'Context' },
-  { key: 'short_term',         label: 'Short-Term Trend',      section: 'Context' },
-  { key: 'mid_term',           label: 'Mid-Term Trend',        section: 'Context' },
-  { key: 'long_term',          label: 'Long-Term Trend',       section: 'Context' },
-  { key: 'hot_sector',         label: 'Hot Sector',            section: 'Context' },
-  { key: 'bb_zone',            label: 'BB Zone',              section: 'Technical' },
-];
-
-async function openCondEditor(setupId, setupName) {
-  _condSetupId = setupId;
-  document.getElementById('cond-editor-title').textContent = setupName + ' — Conditions';
-  document.getElementById('cond-editor').style.display = 'block';
-  document.getElementById('cond-save-msg').style.display = 'none';
-  // Scroll to editor
-  document.getElementById('cond-editor').scrollIntoView({ behavior: 'smooth' });
-
-  // Load existing template
-  const templates = await fetch(`${API}/journal/templates`).then(r => r.json()).catch(() => []);
-  const tmpl = templates.find(t => t.setup_id === setupId);
-  const conditions = tmpl?.conditions || [];
-  renderCondList(conditions);
-}
-
-function closeCondEditor() {
-  document.getElementById('cond-editor').style.display = 'none';
-  _condSetupId = null;
-}
-
-function renderCondList(conditions) {
-  const el = document.getElementById('cond-list');
-  if (!conditions.length) {
-    el.innerHTML = '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">No conditions yet. Add conditions below.</div>';
-    el._conditions = [];
-    return;
-  }
-  el._conditions = JSON.parse(JSON.stringify(conditions));
-  el.innerHTML = conditions.map((c, i) => {
-    const keyOpts = CONDITION_KEYS.map(k =>
-      `<option value="${k.key}" ${c.key === k.key ? 'selected' : ''}>${k.label}</option>`
-    ).join('');
-    return `<div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:6px;align-items:center;margin-bottom:6px;padding:6px;background:var(--bg3);border-radius:6px;" data-idx="${i}">
-      <select data-field="key" onchange="updateCondRow(${i},this)" style="background:var(--bg4);border:1px solid var(--border);border-radius:4px;padding:4px 6px;color:var(--text);font-family:inherit;font-size:11px">
-        ${keyOpts}
-      </select>
-      <input data-field="label" value="${(c.label||'').replace(/"/g,'&quot;')}" onchange="updateCondRow(${i},this)" placeholder="Custom label (optional)" style="background:var(--bg4);border:1px solid var(--border);border-radius:4px;padding:4px 6px;color:var(--text);font-family:inherit;font-size:11px">
-      <select data-field="section" onchange="updateCondRow(${i},this)" style="background:var(--bg4);border:1px solid var(--border);border-radius:4px;padding:4px 6px;color:var(--text);font-family:inherit;font-size:11px">
-        ${['Technical','Volume','Context','Setup'].map(s => `<option ${c.section===s?'selected':''}>${s}</option>`).join('')}
-      </select>
-      <button onclick="removeCondRow(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;line-height:1" title="Remove">✕</button>
-    </div>`;
-  }).join('');
-}
-
-function updateCondRow(idx, el, field) {
-  const condList = document.getElementById('cond-list');
-  if (!condList._conditions) return;
-  const f = field || el.dataset.field;
-  condList._conditions[idx][f] = el.value;
-  // Auto-fill label from key if label is empty
-  if (f === 'key' && !condList._conditions[idx].label) {
-    const def = CONDITION_KEYS.find(k => k.key === el.value);
-    if (def) condList._conditions[idx].label = def.label;
-  }
-}
-
-function addConditionRow() {
-  const condList = document.getElementById('cond-list');
-  const existing = condList._conditions || [];
-  const def = CONDITION_KEYS[0];
-  existing.push({ key: def.key, label: def.label, section: 'Technical' });
-  renderCondList(existing);
-}
-
-function removeCondRow(idx) {
-  const condList = document.getElementById('cond-list');
-  if (!condList._conditions) return;
-  condList._conditions.splice(idx, 1);
-  renderCondList(condList._conditions);
-}
-
-async function saveConditions() {
-  if (!_condSetupId) return;
-  const condList = document.getElementById('cond-list');
-  const conditions = condList._conditions || [];
-  await fetch(`${API}/journal/templates/${encodeURIComponent(_condSetupId)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conditions }),
-  });
-  const msg = document.getElementById('cond-save-msg');
-  msg.style.display = 'inline';
-  setTimeout(() => { msg.style.display = 'none'; }, 2000);
 }
 
 async function toggleSetup(id, enabled) {

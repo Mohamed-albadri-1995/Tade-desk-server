@@ -486,9 +486,51 @@ function closePosition(positionId, exitPrice, reason = 'manual') {
     console.warn('[Router] Trade card completion failed:', err.message);
   }
 
+  // Journal write — mirror this trade into the journal so the trade log
+  // stays complete across live signals, paper broker fills, and manual
+  // closes. Idempotent by design: journal_trades has PK on id, and we
+  // seed with the position id so a re-close (shouldn't happen but safe)
+  // becomes a no-op INSERT OR REPLACE. Silent best-effort — the position
+  // + card writes above are the authoritative record.
+  try {
+    _writeJournalFromPosition(pos, px, reason, now, roundedPnl);
+  } catch (err) {
+    console.warn('[Router] Journal write failed:', err.message);
+  }
+
   const closed = db.prepare('SELECT * FROM trading_positions WHERE id = ?').get(positionId);
   broadcast({ type: 'position_closed', position: closed, reason, ts: now });
   return { ok: true, position: closed };
+}
+
+function _writeJournalFromPosition(pos, exitPrice, reason, closedAt, netPnl) {
+  const openIso  = new Date(pos.opened_at).toISOString();
+  const closeIso = new Date(closedAt).toISOString();
+  const entryTime = openIso.slice(11, 19);
+  const exitTime  = closeIso.slice(11, 19);
+  const date      = toETDate(pos.opened_at);
+  const pctMove = pos.entry_price
+    ? (exitPrice - pos.entry_price) / pos.entry_price * 100 * (pos.direction === 'Long' ? 1 : -1)
+    : null;
+  const durationMs = closedAt - pos.opened_at;
+  const card = db.prepare('SELECT setup_id, account FROM trade_cards WHERE position_id = ?').get(pos.id);
+  db.prepare(`
+    INSERT OR REPLACE INTO journal_trades
+      (id, date, ticker, direction, setup_id, shares, entry_price, entry_time,
+       exit_price, exit_time, sl, tp, gross_pnl, commission, net_pnl,
+       pct_move, duration_ms, source, account, status, technical_computed,
+       created_at, exit_verdict)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    pos.id, date, pos.ticker, pos.direction, card?.setup_id || null,
+    pos.shares, pos.entry_price, entryTime,
+    exitPrice, exitTime, pos.sl, pos.tp,
+    netPnl, 0, netPnl,
+    pctMove != null ? parseFloat(pctMove.toFixed(3)) : null,
+    durationMs,
+    'trading', card?.account || null, 'closed', 0,
+    closedAt, reason,
+  );
 }
 
 /**
