@@ -160,7 +160,7 @@ async function start() {
         { ...enrichedSignal, sessionId: sid },
         q?.bid ?? null,
         q?.ask ?? null
-      );
+      ).catch(err => console.warn('[TradingSession] processSignal error:', err.message));
     });
   });
 
@@ -199,7 +199,7 @@ function resume() {
         { ...enrichedSignal, sessionId: sesid },
         q?.bid ?? null,
         q?.ask ?? null
-      );
+      ).catch(err => console.warn('[TradingSession] processSignal error:', err.message));
     });
   });
   console.log(`[TradingSession] Resumed ${_session.id}`);

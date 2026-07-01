@@ -65,19 +65,17 @@ function seedSetup(overrides = {}) {
   return s;
 }
 
-function fireSignalDirect({ ticker = 'AAPL', setupId, direction = 'Long', entry = 100, sl = 95, tp = 110 } = {}) {
-  return new Promise((resolve) => {
-    setupEngine.onIndicatorFire(
-      { ticker, setupId, direction, entry, sl, tp, entryType: 'market' },
-      'test-session',
-      (enriched) => {
-        router.processSignal({ ...enriched, sessionId: 'test-session' }, null, null);
-        resolve({ passed: true });
-      }
-    );
-    // If gate blocks, callback isn't invoked. Resolve after a tick.
-    setImmediate(() => resolve({ passed: false }));
-  });
+async function fireSignalDirect({ ticker = 'AAPL', setupId, direction = 'Long', entry = 100, sl = 95, tp = 110 } = {}) {
+  let routerPromise = null;
+  setupEngine.onIndicatorFire(
+    { ticker, setupId, direction, entry, sl, tp, entryType: 'market' },
+    'test-session',
+    (enriched) => {
+      routerPromise = router.processSignal({ ...enriched, sessionId: 'test-session' }, null, null);
+    }
+  );
+  if (routerPromise) await routerPromise;
+  return { passed: !!routerPromise };
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

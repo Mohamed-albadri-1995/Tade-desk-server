@@ -164,6 +164,12 @@ function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
             tp:        signal.tp,
             entryType: setup.entry_type || 'market',
             barData:   signal.meta,
+            // Extras the Router needs to evaluate default + additional
+            // library checks at this exact bar (per-setup context capture).
+            bars,
+            pmHigh,
+            rvol,
+            indicators: { ...(signal.meta || {}), rvol },
           }, sessionId);
         } else if (engine.debug) {
           setupResult.debugInfo = engine.debug(bars, pmHigh);

@@ -16,6 +16,7 @@ const barPoller    = require('../trading/barPoller');
 const backtest     = require('../trading/backtest');
 const brokers      = require('../trading/brokers');
 const grading      = require('../trading/grading');
+const checks       = require('../trading/checks');
 const { toETDate } = require('../utils/time');
 
 const router = express.Router();
@@ -288,6 +289,54 @@ router.post('/grading/preview', (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// ─── Check Library (Part A) ──────────────────────────────────────────────────
+// Categories: 'default' (auto-applied to every setup) and 'additional'
+// (opt-in per setup via setup_check_assignments).
+
+router.get('/checks', (req, res) => {
+  const category    = req.query.category || null;
+  const enabledOnly = req.query.enabled === '1';
+  res.json({ ok: true, checks: checks.listChecks({ category, enabledOnly }) });
+});
+router.get('/checks/:id', (req, res) => {
+  const c = checks.getCheck(req.params.id);
+  if (!c) return res.status(404).json({ ok: false, error: 'Not found' });
+  res.json({ ok: true, check: c });
+});
+router.post('/checks', (req, res) => {
+  try {
+    res.json({ ok: true, check: checks.createCheck(req.body || {}) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+router.patch('/checks/:id', (req, res) => {
+  try {
+    const updated = checks.updateCheck(req.params.id, req.body || {});
+    if (!updated) return res.status(404).json({ ok: false, error: 'Not found' });
+    res.json({ ok: true, check: updated });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+router.delete('/checks/:id', (req, res) => {
+  checks.removeCheck(req.params.id);
+  res.json({ ok: true });
+});
+router.post('/checks/validate', (req, res) => {
+  const v = checks.validateCondition(req.body?.condition);
+  res.json({ ok: v.ok, error: v.error || null });
+});
+
+// Per-setup additional-check assignments
+router.get('/setups/:id/checks', (req, res) => {
+  res.json({ ok: true, additional: checks.assignmentsForSetup(req.params.id) });
+});
+router.put('/setups/:id/checks', (req, res) => {
+  const ids = Array.isArray(req.body?.checkIds) ? req.body.checkIds : [];
+  res.json({ ok: true, additional: checks.setAssignmentsForSetup(req.params.id, ids) });
 });
 
 // ─── SSE — live notifications ────────────────────────────────────────────────

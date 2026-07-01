@@ -272,6 +272,7 @@ body {
 <div class="tabs" style="border-bottom:1px solid var(--border)">
   <span class="tab-group-label">Setup</span>
   <button class="tab" onclick="switchTab('setups')">Setups</button>
+  <button class="tab" onclick="switchTab('checks')">Checks</button>
   <button class="tab" onclick="switchTab('brokers')">Brokers</button>
   <button class="tab" onclick="switchTab('settings')">Settings</button>
 </div>
@@ -539,6 +540,13 @@ body {
             <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Description (optional)</label>
             <input id="sm-description" placeholder="Brief note about this setup" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
           </div>
+          <div id="sm-additional-block" style="display:none">
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">
+              Additional Checks
+              <span style="color:var(--text3);font-weight:400;margin-left:6px">(mandatory come from the indicator, default apply to all setups)</span>
+            </label>
+            <div id="sm-additional-list" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;max-height:180px;overflow-y:auto"></div>
+          </div>
         </div>
         <div style="display:flex;gap:8px;margin-top:14px">
           <button onclick="saveSetupModal()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:6px 18px;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer">Save</button>
@@ -619,6 +627,74 @@ body {
       <div id="bt-status" style="font-size:12px;color:var(--text3);margin-bottom:10px"></div>
       <div id="bt-summary" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2);margin-bottom:10px"></div>
       <div id="bt-fires"></div>
+    </div>
+  </div>
+
+  <!-- CHECKS TAB — shared library of default + additional conditions -->
+  <div class="tab-pane" id="tab-checks">
+    <div class="panel">
+      <div class="panel-title">Check Library</div>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
+        A shared library of conditions. <strong>Default</strong> checks auto-apply
+        to every setup — edit/delete here and it changes for all setups.
+        <strong>Additional</strong> checks are picked per-setup in the Setups tab.
+        <strong>Mandatory</strong> checks live inside the indicator script and
+        aren't managed here.
+      </p>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="an-btn primary" onclick="openCheckEditor()">+ New Check</button>
+        <select id="check-filter" onchange="loadChecks()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px">
+          <option value="">All categories</option>
+          <option value="default">Default only</option>
+          <option value="additional">Additional only</option>
+        </select>
+      </div>
+      <div id="checks-list"></div>
+    </div>
+    <!-- Editor modal (inline panel) -->
+    <div id="check-editor" style="display:none">
+      <div class="panel">
+        <div class="panel-title" id="check-editor-title">New Check</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Key (machine)</div>
+            <input id="check-key" placeholder="ema9_above_vwap" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Label (display)</div>
+            <input id="check-label" placeholder="9 EMA above VWAP" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Category</div>
+            <select id="check-category" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+              <option value="default">Default (auto-applied to all setups)</option>
+              <option value="additional">Additional (opt-in per setup)</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Section (optional)</div>
+            <input id="check-section" placeholder="trend / momentum / context" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+          </div>
+        </div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Description (optional)</div>
+          <input id="check-description" placeholder="Short-term trend confirms with VWAP." style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+        </div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Condition (JSON)</div>
+          <textarea id="check-condition" rows="6" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:monospace;font-size:12px;width:100%">{ "op": "gt", "left": { "field": "ema9" }, "right": { "field": "vwap" } }</textarea>
+          <div style="font-size:10px;color:var(--text3);margin-top:4px">
+            Fields: <code>close open high low volume vwap ema9 ema13 ema20 ema50 sma5 sma20 pmHigh pmLow prevClose rvol atr</code>.
+            Scanner ctx: <code>regime longTerm midTerm shortTerm secBias secScore secHot sector industry themes _score</code>.
+            Ops: <code>gt ge lt le eq ne in and or not</code>.
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="an-btn primary" onclick="saveCheck()">Save</button>
+          <button class="an-btn" onclick="closeCheckEditor()">Cancel</button>
+          <span id="check-status" style="font-size:12px;color:var(--text3)"></span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -741,7 +817,7 @@ const API = '/api';
 
 // ── Tab switching ──────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const order = ['watch','gate','alerts','positions','grading','journal','backtest','setups','brokers','settings'];
+  const order = ['watch','gate','alerts','positions','grading','journal','backtest','setups','checks','brokers','settings'];
   document.querySelectorAll('.tab').forEach(t => {
     const fn = t.getAttribute('onclick') || '';
     const m = fn.match(/'(\w+)'/);
@@ -758,6 +834,7 @@ function switchTab(name) {
   if (name === 'backtest')  loadBacktestUI();
   if (name === 'brokers')   loadBrokers();
   if (name === 'grading')   loadGradingSetups();
+  if (name === 'checks')    loadChecks();
 }
 
 // ── Date header ───────────────────────────────────────────────────────────────
@@ -956,10 +1033,34 @@ function renderCenterCard(evt) {
 
     const payload = e.alpacaPayload ? JSON.stringify(e.alpacaPayload, null, 2) : null;
 
+    const gradeLetter = e.liveGrade?.grade || null;
+    const gradeColour = gradeLetter?.startsWith('A+') ? '#22c55e'
+                     : gradeLetter?.startsWith('A')  ? '#4ade80'
+                     : gradeLetter?.startsWith('B')  ? '#fbbf24'
+                     : gradeLetter?.startsWith('C')  ? '#f87171'
+                     : '#94a3b8';
+    const gradeBadge = gradeLetter
+      ? `<span style="font-weight:800;font-size:14px;padding:2px 8px;border-radius:6px;background:${gradeColour};color:#0b1220">${gradeLetter}</span>`
+      : '';
+
+    const renderChecks = (list, title) => {
+      if (!list?.length) return '';
+      return `<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-top:6px;margin-bottom:3px">${title}</div>` +
+        list.map(c => {
+          const glyph = c.aligned === true ? '✓' : c.aligned === false ? '✗' : '·';
+          const color = c.aligned === true ? 'var(--green)' : c.aligned === false ? 'var(--red)' : 'var(--text3)';
+          return `<div style="display:flex;gap:6px;font-size:11px;color:${color}">
+            <span>${glyph}</span><span style="color:var(--text2)">${c.label}</span>
+            ${c.value ? `<span style="color:var(--text3);margin-left:auto;font-family:monospace;font-size:10px">${c.value}</span>` : ''}
+          </div>`;
+        }).join('');
+    };
+
     return `<div class="center-card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
         <span class="center-ticker">${e.ticker}</span>
         ${dirBadge}
+        ${gradeBadge}
         <span style="font-size:11px;color:var(--text3);margin-left:auto">${new Date(e.ts ?? e.firedAt).toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
       </div>
       <div class="center-msg">${pnl}</div>
@@ -971,7 +1072,10 @@ function renderCenterCard(evt) {
         <div class="center-kv"><div class="ck-label">Risk $</div><div class="ck-val">$${e.sizing?.dollarRisk?.toFixed(0) ?? '—'}</div></div>
         <div class="center-kv"><div class="ck-label">Score</div><div class="ck-val">${(e.gate?.score ?? e.sideA?.score) ?? '—'}</div></div>
       </div>
-      ${payload ? `<div style="font-size:10px;color:var(--text3);margin-bottom:4px">Alpaca payload (ready — connection deferred)</div><div class="payload-box">${payload}</div>` : ''}
+      ${renderChecks(e.checks?.mandatory,  'Mandatory')}
+      ${renderChecks(e.checks?.default,    'Default')}
+      ${renderChecks(e.checks?.additional, 'Additional')}
+      ${payload ? `<div style="font-size:10px;color:var(--text3);margin-top:8px;margin-bottom:4px">Alpaca payload (ready — connection deferred)</div><div class="payload-box">${payload}</div>` : ''}
     </div>`;
   }).join('');
 }
@@ -1601,13 +1705,11 @@ let _smEditId = null;
 
 async function openSetupModal(setup) {
   _smEditId = setup?.id || null;
-  // Load available indicators
   const indicators = await fetch(`${API}/trading/indicators`).then(r => r.json()).catch(() => []);
   const sel = document.getElementById('sm-indicator');
   sel.innerHTML = '<option value="">— No script attached —</option>' +
     indicators.map(k => `<option value="${k}">${k}</option>`).join('');
 
-  // Populate fields
   document.getElementById('sm-name').value         = setup?.name || '';
   sel.value                                         = setup?.indicator || '';
   document.getElementById('sm-entry-type').value   = setup?.entry_type || 'market';
@@ -1618,6 +1720,33 @@ async function openSetupModal(setup) {
   document.getElementById('setup-modal-err').textContent = '';
   document.getElementById('setup-modal').style.display = 'block';
   document.getElementById('setup-modal').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  // Additional-checks picker — only shown when editing (a setupId exists).
+  const addBlock = document.getElementById('sm-additional-block');
+  const addList  = document.getElementById('sm-additional-list');
+  if (setup?.id) {
+    addBlock.style.display = 'block';
+    const [libraryResp, assignedResp] = await Promise.all([
+      fetch(`${API}/trading/checks?category=additional`).then(r => r.json()),
+      fetch(`${API}/trading/setups/${setup.id}/checks`).then(r => r.json()),
+    ]);
+    const library  = libraryResp.checks || [];
+    const assigned = new Set((assignedResp.additional || []).map(c => c.id));
+    if (!library.length) {
+      addList.innerHTML = '<span style="font-size:11px;color:var(--text3)">No additional checks in the library yet — add some in the Checks tab.</span>';
+    } else {
+      addList.innerHTML = library.map(c => `
+        <label style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px;color:var(--text2);cursor:pointer">
+          <input type="checkbox" class="sm-add-chk" value="${c.id}" ${assigned.has(c.id) ? 'checked' : ''}>
+          <span>${c.label}</span>
+          ${c.section ? `<span style="font-size:10px;color:var(--text3);margin-left:4px">${c.section}</span>` : ''}
+        </label>
+      `).join('');
+    }
+  } else {
+    addBlock.style.display = 'none';
+    addList.innerHTML = '';
+  }
 }
 
 function closeSetupModal() {
@@ -1640,6 +1769,15 @@ async function saveSetupModal() {
   const method = _smEditId ? 'PATCH' : 'POST';
   const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) { document.getElementById('setup-modal-err').textContent = 'Save failed'; return; }
+  // If this was an edit, persist the additional-check assignments too.
+  if (_smEditId) {
+    const checkIds = Array.from(document.querySelectorAll('.sm-add-chk:checked')).map(el => el.value);
+    await fetch(`${API}/trading/setups/${_smEditId}/checks`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checkIds }),
+    });
+  }
   closeSetupModal();
   loadSetups();
 }
@@ -1969,6 +2107,90 @@ async function loadGrading() {
   } catch (err) {
     summaryEl.innerHTML = '<span style="color:var(--red)">Error: ' + err.message + '</span>';
   }
+}
+
+// ── Check Library (Part A) ──────────────────────────────────────────────────
+let _editingCheckId = null;
+
+async function loadChecks() {
+  const el = document.getElementById('checks-list');
+  const filter = document.getElementById('check-filter').value;
+  const qs = filter ? '?category=' + filter : '';
+  const r = await fetch(`${API}/trading/checks${qs}`).then(r => r.json()).catch(() => ({ checks: [] }));
+  if (!r.checks?.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No checks in library.</div></div>';
+    return;
+  }
+  el.innerHTML = r.checks.map(c => `
+    <div class="trade-row">
+      <span class="tr-ticker">${c.label}</span>
+      <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;padding:2px 6px;border-radius:4px;background:${c.category === 'default' ? '#7c2d12' : '#1e3a8a'};color:${c.category === 'default' ? '#fed7aa' : '#bfdbfe'}">${c.category}</span>
+      <span style="font-size:10px;color:var(--text3)">${c.section || ''}</span>
+      <span style="font-family:monospace;font-size:10px;color:var(--text3);margin-left:auto;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${JSON.stringify(c.condition)}</span>
+      <button onclick='editCheck("${c.id}")' style="background:var(--bg3);color:var(--text2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Edit</button>
+      <button onclick='deleteCheck("${c.id}")' style="background:var(--bg3);color:var(--red);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer">Delete</button>
+    </div>
+  `).join('');
+}
+function openCheckEditor() {
+  _editingCheckId = null;
+  document.getElementById('check-editor-title').textContent = 'New Check';
+  document.getElementById('check-key').value = '';
+  document.getElementById('check-label').value = '';
+  document.getElementById('check-category').value = 'default';
+  document.getElementById('check-section').value = '';
+  document.getElementById('check-description').value = '';
+  document.getElementById('check-condition').value = '{ "op": "gt", "left": { "field": "ema9" }, "right": { "field": "vwap" } }';
+  document.getElementById('check-status').textContent = '';
+  document.getElementById('check-editor').style.display = 'block';
+}
+async function editCheck(id) {
+  const r = await fetch(`${API}/trading/checks/${id}`).then(r => r.json());
+  if (!r.ok) return alert(r.error);
+  _editingCheckId = id;
+  document.getElementById('check-editor-title').textContent = 'Edit: ' + r.check.label;
+  document.getElementById('check-key').value = r.check.key;
+  document.getElementById('check-label').value = r.check.label;
+  document.getElementById('check-category').value = r.check.category;
+  document.getElementById('check-section').value = r.check.section || '';
+  document.getElementById('check-description').value = r.check.description || '';
+  document.getElementById('check-condition').value = JSON.stringify(r.check.condition, null, 2);
+  document.getElementById('check-status').textContent = '';
+  document.getElementById('check-editor').style.display = 'block';
+}
+function closeCheckEditor() {
+  document.getElementById('check-editor').style.display = 'none';
+}
+async function saveCheck() {
+  const status = document.getElementById('check-status');
+  let condition;
+  try { condition = JSON.parse(document.getElementById('check-condition').value); }
+  catch (err) { status.textContent = 'Condition JSON invalid: ' + err.message; status.style.color = 'var(--red)'; return; }
+  const body = {
+    check_key:   document.getElementById('check-key').value.trim(),
+    label:       document.getElementById('check-label').value.trim(),
+    category:    document.getElementById('check-category').value,
+    section:     document.getElementById('check-section').value.trim() || null,
+    description: document.getElementById('check-description').value.trim() || null,
+    condition,
+  };
+  if (!body.check_key || !body.label) { status.textContent = 'Key and label required.'; status.style.color = 'var(--red)'; return; }
+  const url = _editingCheckId ? `${API}/trading/checks/${_editingCheckId}` : `${API}/trading/checks`;
+  const method = _editingCheckId ? 'PATCH' : 'POST';
+  const r = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(r => r.json());
+  if (!r.ok) { status.textContent = 'Save failed: ' + r.error; status.style.color = 'var(--red)'; return; }
+  status.textContent = 'Saved.'; status.style.color = 'var(--green)';
+  closeCheckEditor();
+  loadChecks();
+}
+async function deleteCheck(id) {
+  if (!confirm('Delete this check? (Also removes it from every setup that had it assigned as additional.)')) return;
+  await fetch(`${API}/trading/checks/${id}`, { method: 'DELETE' });
+  loadChecks();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

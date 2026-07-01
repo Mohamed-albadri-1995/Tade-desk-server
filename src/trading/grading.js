@@ -107,7 +107,8 @@ db.exec(`
 function createCardForSignal({
   ticker, setupId, direction, sessionId,
   entryPrice, sl, tp, firedAt,
-  gate, orderId, positionId,
+  gate, scannerSnapshot = null,
+  orderId, positionId,
   mandatoryChecks = [],
   additionalChecks = [],
   account = null,
@@ -129,7 +130,7 @@ function createCardForSignal({
       account, positionId || null, orderId || null,
       entryPrice ?? null, null, stopDistance,
       firedAt || Date.now(),
-      JSON.stringify({ gate }),
+      JSON.stringify({ gate, scannerSnapshot }),
       liveGrade?.grade || null,
       liveGrade ? JSON.stringify(liveGrade) : null,
     );

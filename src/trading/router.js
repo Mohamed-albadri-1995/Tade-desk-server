@@ -12,7 +12,62 @@ const db = require('../db');
 const sizer = require('./sizer');
 const brokers = require('./brokers');
 const grading = require('./grading');
+const checks  = require('./checks');
 const { toETDate } = require('../utils/time');
+
+const SCANNER_URL = process.env.SCANNER_URL || 'http://127.0.0.1:3000';
+
+/**
+ * Fresh-fetch the scanner-side r0 row for a ticker so the trade card
+ * captures "the exact data at the exact time" (per the design brief),
+ * not just what the 30-second gate poll happened to have cached.
+ *
+ * Returns a plain snapshot object (subset of r0 flattened) or null on
+ * any failure — callers fall back to the gate's cached context.
+ */
+async function fetchScannerSnapshot(ticker) {
+  try {
+    const res = await fetch(`${SCANNER_URL}/api/registry?tickers=${encodeURIComponent(ticker)}`);
+    if (!res.ok) return null;
+    const body = await res.json();
+    const row  = (body?.rows || []).find(r => String(r.ticker).toUpperCase() === ticker.toUpperCase());
+    if (!row) return null;
+    const ctx = row.context || {};
+    return {
+      // Scanner classification & scoring at the moment of fire
+      regime:        ctx.regime        ?? null,
+      regimeLabel:   ctx.regimeLabel   ?? null,
+      longTerm:      ctx.longTerm      ?? null,
+      midTerm:       ctx.midTerm       ?? null,
+      shortTerm:     ctx.shortTerm     ?? null,
+      secBias:       ctx.secBias       ?? null,
+      secScore:      ctx.secScore      ?? null,
+      secHot:        ctx.secHot        ?? null,
+      broadResolved: ctx.broadResolved ?? null,
+      themes:        ctx.themes        ?? null,
+      sector:        row.stock?.sector   ?? null,
+      industry:      row.stock?.industry ?? null,
+      _score:        row._score           ?? null,
+      confidence:    row._scoreDetails?.confidence ?? null,
+      screenerKeys:  row.screenerKeys   ?? null,
+      inShortlist:   row.inShortlist    ?? null,
+      // Metadata so the card knows when the snapshot was taken
+      capturedAt:    Date.now(),
+      lastUpdatedAt: row.lastUpdated ?? null,
+    };
+  } catch { return null; }
+}
+
+/**
+ * Look up the engine object for a setupId. barPoller has the same
+ * lookup — duplicate it lightly rather than reaching into internals.
+ */
+function _getIndicatorEngine(setupId) {
+  const row = db.prepare('SELECT indicator FROM trading_setups WHERE id = ?').get(setupId);
+  const key = row?.indicator || null;
+  if (!key) return null;
+  try { return require('./indicators/' + key); } catch { return null; }
+}
 
 function getExecutionMode() {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'trading_execution_mode'").get();
@@ -100,8 +155,45 @@ function buildAlpacaPayload({ ticker, direction, shares, entryType, entryPrice, 
  * @param {number|null} currentBid - live bid from Alpaca stream (or null)
  * @param {number|null} currentAsk - live ask from Alpaca stream (or null)
  */
-function processSignal(signal, currentBid = null, currentAsk = null) {
+async function processSignal(signal, currentBid = null, currentAsk = null) {
   const { signalId, ticker, setupId, setupName, direction, entryType, sl, tp, firedAt, gate, entry: signalEntry } = signal;
+
+  // Fresh-fetch the scanner snapshot so the card records EXACTLY what
+  // the scanner knew at the moment of fire. Non-blocking: on failure
+  // we fall back to the gate cache (which is up to 30 s old).
+  const scannerSnapshot = await fetchScannerSnapshot(ticker)
+    || (gate?.context ? {
+        regime: gate.context.regime, regimeLabel: gate.context.regimeLabel,
+        longTerm: gate.context.longTerm, midTerm: gate.context.midTerm, shortTerm: gate.context.shortTerm,
+        secBias: gate.context.secBias, secScore: gate.context.secScore, secHot: gate.context.secHot,
+        broadResolved: gate.context.broadResolved, themes: gate.context.themes,
+        _score: gate.score, screenerKeys: null, sector: null, industry: null,
+        capturedAt: Date.now(), fallbackSource: 'gate-cache',
+      } : null);
+
+  // Evaluate the three flavours of checks:
+  //   • MANDATORY   ← indicator's debug() at this bar (always aligned on a fire)
+  //   • DEFAULT     ← every enabled library entry, category='default'
+  //   • ADDITIONAL  ← library entries assigned to this setup
+  let mandatoryChecks = signal.mandatoryChecks || [];
+  let defaultChecks    = [];
+  let additionalChecks = signal.additionalChecks || [];
+  try {
+    const collected = checks.collectChecksForFire({
+      indicatorEngine: _getIndicatorEngine(setupId),
+      bars:            signal.bars || [],
+      pmHigh:          signal.pmHigh ?? null,
+      setupId,
+      indicatorExtras: signal.indicators || signal.barData || {},
+      scannerContext:  scannerSnapshot || {},
+      historySeries:   signal.history  || {},
+    });
+    mandatoryChecks  = collected.mandatoryChecks.length  ? collected.mandatoryChecks  : mandatoryChecks;
+    defaultChecks    = collected.defaultChecks;
+    additionalChecks = collected.additionalChecks.length ? collected.additionalChecks : additionalChecks;
+  } catch (err) {
+    console.warn('[Router] Check evaluation failed:', err.message);
+  }
 
   // Entry price preference for market orders (in order):
   //   1. Real live quote from Alpaca WS (currentAsk for long, currentBid for short)
@@ -122,20 +214,19 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     entrySource = 'signal_bar_close';
   }
 
-  // Grading engine — grade this specific fire based on the setup's learned
-  // history and the additional checks currently aligned on this bar. The
-  // resulting letter grade feeds the Sizer's per-trade multiplier.
-  const additionalChecks = signal.additionalChecks || [];
-  const mandatoryChecks  = signal.mandatoryChecks  || [];
+  // Grading engine — combine defaults + additionals for learning; both
+  // categories reflect conditions we're tracking and want to learn from.
+  // The mandatory list is stored on the card but doesn't feed the grader
+  // (mandatory checks are always aligned on a fire — by definition).
+  const gradingChecks = [...defaultChecks, ...additionalChecks];
   let liveGrade = null;
   try {
     liveGrade = grading.gradeSignal({
       setupId,
-      additionalChecks,
+      additionalChecks: gradingChecks,
       account: signal.account || null,
     });
   } catch (err) {
-    // Learning table might not have any rows yet — grade defaults to bootstrap.
     liveGrade = { grade: 'B (bootstrapping)', totalR: 0, baseR: 0, deltaR: 0, alignedKeysCounted: [], inBootstrap: true };
   }
   const setupGrade = liveGrade.grade === 'B (bootstrapping)' ? null : liveGrade.grade;
@@ -217,9 +308,10 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     });
     writeAll();
 
-    // Trade card — created at fire time; the outcome fields (exit,
-    // R-multiple, net P&L) get filled in when the position closes so
-    // the grading engine can learn from it.
+    // Trade card — created at fire time. Card carries three flavours of
+    // checks (mandatory + default + additional) plus the scanner
+    // snapshot from the moment of fire so post-hoc analysis has the
+    // exact classification that was in play.
     try {
       grading.createCardForSignal({
         ticker, setupId, direction,
@@ -228,9 +320,10 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
         sl, tp,
         firedAt: now,
         gate,
+        scannerSnapshot,
         orderId, positionId,
         mandatoryChecks,
-        additionalChecks,
+        additionalChecks: [...defaultChecks, ...additionalChecks],
         account: signal.account || null,
         liveGrade,
       });
@@ -280,6 +373,12 @@ function processSignal(signal, currentBid = null, currentAsk = null) {
     executionMode: mode,
     brokerResults,
     liveGrade,
+    checks: {
+      mandatory:  mandatoryChecks,
+      default:    defaultChecks,
+      additional: additionalChecks,
+    },
+    scannerSnapshot,
     ts: now,
   };
 

@@ -52,7 +52,7 @@ function getActiveSetupsArray() {
  * @param {Function} onSignalPassed  called with the enriched signal on gate pass
  */
 function onIndicatorFire(signal, sessionId, onSignalPassed) {
-  const { ticker, setupId, direction, sl, tp, entryType, entry } = signal;
+  const { ticker, setupId, direction, sl, tp, entryType, entry, bars, pmHigh, rvol, indicators, barData } = signal;
   const now = Date.now();
 
   const logEntry = {
@@ -109,6 +109,12 @@ function onIndicatorFire(signal, sessionId, onSignalPassed) {
     tp,
     firedAt: now,
     gate: gateData, // was `sideA` in the old schema
+    // Pass-through for the Router's check evaluator (Part A wiring).
+    bars,
+    pmHigh,
+    rvol,
+    indicators: indicators || barData || {},
+    barData,
   });
 
   return { blocked: false, signalId };
