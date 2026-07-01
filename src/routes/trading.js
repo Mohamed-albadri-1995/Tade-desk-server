@@ -308,6 +308,17 @@ router.post('/grading/preview', (req, res) => {
   }
 });
 
+// Trade cards — the actual snapshots grading learns from.
+router.get('/cards', (req, res) => {
+  const { limit, setupId, ticker, from, to } = req.query;
+  res.json({ ok: true, cards: grading.listCards({ limit, setupId, ticker, from, to }) });
+});
+router.get('/cards/:id', (req, res) => {
+  const card = grading.getCard(req.params.id);
+  if (!card) return res.status(404).json({ ok: false, error: 'Not found' });
+  res.json({ ok: true, card });
+});
+
 // ─── Check Library (Part A) ──────────────────────────────────────────────────
 // Categories: 'default' (auto-applied to every setup) and 'additional'
 // (opt-in per setup via setup_check_assignments).

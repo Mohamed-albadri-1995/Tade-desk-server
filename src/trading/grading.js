@@ -410,6 +410,58 @@ function gradeSignal({ setupId, additionalChecks = [], account = null }) {
   };
 }
 
+/**
+ * Recent trade cards for the viewer — one row per card, no checks joined.
+ * `limit` caps output; filters are all optional and additive.
+ */
+function listCards({ limit = 50, setupId = null, ticker = null, from = null, to = null } = {}) {
+  const params = [];
+  const wheres = [];
+  if (setupId) { wheres.push('setup_id = ?'); params.push(setupId); }
+  if (ticker)  { wheres.push('ticker = ?');   params.push(ticker.toUpperCase()); }
+  if (from)    { wheres.push('date >= ?');    params.push(from); }
+  if (to)      { wheres.push('date <= ?');    params.push(to); }
+  const whereSql = wheres.length ? 'WHERE ' + wheres.join(' AND ') : '';
+  const rows = db.prepare(`
+    SELECT id, date, ticker, setup_id, direction, account, entry_price, exit_price,
+           shares, stop_distance, r_multiple, net_pnl, exit_reason,
+           fired_at, closed_at, grade
+      FROM trade_cards
+      ${whereSql}
+     ORDER BY fired_at DESC
+     LIMIT ?
+  `).all(...params, Math.max(1, Math.min(500, Number(limit) || 50)));
+  return rows;
+}
+
+/**
+ * Full trade-card detail for the viewer — the card plus every check that
+ * was recorded at fire time (mandatory + default + additional).
+ */
+function getCard(id) {
+  const card = db.prepare('SELECT * FROM trade_cards WHERE id = ?').get(id);
+  if (!card) return null;
+  const checks = db.prepare(`
+    SELECT kind, check_key, label, section, value, aligned, check_version_id
+      FROM trade_card_checks
+     WHERE card_id = ?
+     ORDER BY kind, section, label
+  `).all(id);
+  let context = {};
+  let gradeDetails = null;
+  try { context      = JSON.parse(card.context)       || {}; } catch { /* ignore */ }
+  try { gradeDetails = JSON.parse(card.grade_details) || null; } catch { /* ignore */ }
+  return {
+    ...card,
+    context,
+    grade_details: gradeDetails,
+    checks: {
+      mandatory:  checks.filter(c => c.kind === 'mandatory'),
+      additional: checks.filter(c => c.kind === 'additional'),
+    },
+  };
+}
+
 module.exports = {
   createCardForSignal,
   completeCardForPosition,
@@ -417,4 +469,6 @@ module.exports = {
   setupSizeMultiplier,
   checkContributions,
   gradeSignal,
+  listCards,
+  getCard,
 };
