@@ -14,6 +14,7 @@ const brokers = require('./brokers');
 const grading = require('./grading');
 const checks  = require('./checks');
 const dailyLevels = require('./dailyLevels');
+const setupScorerClient = require('./setupScorerClient');
 const { toETDate } = require('../utils/time');
 
 const SCANNER_URL = process.env.SCANNER_URL || 'http://127.0.0.1:3000';
@@ -240,16 +241,38 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
   // categories reflect conditions we're tracking and want to learn from.
   // The mandatory list is stored on the card but doesn't feed the grader
   // (mandatory checks are always aligned on a fire — by definition).
+  // Two-tier grader:
+  //   1. Preferred: the setup's own trained factor-analysis model (Python
+  //      scorer, per-setup isolation). Tight HTTP timeout so a slow/down
+  //      scoring service can't stall a live fire.
+  //   2. Fallback: naive delta expectancy from grading.gradeSignal.
+  //      Runs when the setup hasn't been trained yet OR the Python
+  //      service is unreachable.
   const gradingChecks = [...defaultChecks, ...additionalChecks];
   let liveGrade = null;
   try {
-    liveGrade = grading.gradeSignal({
-      setupId,
-      additionalChecks: gradingChecks,
-      account: signal.account || null,
-    });
+    const factorGrade = await setupScorerClient.scoreSetup(setupId, gradingChecks);
+    if (factorGrade) {
+      liveGrade = {
+        grade:              factorGrade.grade,
+        totalR:             factorGrade.expectedR,
+        baseR:              null,
+        deltaR:             null,
+        alignedKeysCounted: [],
+        inBootstrap:        false,
+        source:            'factor-analysis',
+        modelInfo:          factorGrade.modelInfo,
+      };
+    } else {
+      liveGrade = grading.gradeSignal({
+        setupId,
+        additionalChecks: gradingChecks,
+        account: signal.account || null,
+      });
+      liveGrade.source = 'naive-delta';
+    }
   } catch (err) {
-    liveGrade = { grade: 'B (bootstrapping)', totalR: 0, baseR: 0, deltaR: 0, alignedKeysCounted: [], inBootstrap: true };
+    liveGrade = { grade: 'B (bootstrapping)', totalR: 0, baseR: 0, deltaR: 0, alignedKeysCounted: [], inBootstrap: true, source: 'error' };
   }
   const signalGrade = liveGrade.grade === 'B (bootstrapping)' ? null : liveGrade.grade;
 

@@ -17,6 +17,7 @@ const backtest     = require('../trading/backtest');
 const brokers      = require('../trading/brokers');
 const grading      = require('../trading/grading');
 const checks       = require('../trading/checks');
+const setupScorerClient = require('../trading/setupScorerClient');
 const { toETDate } = require('../utils/time');
 
 const router = express.Router();
@@ -477,6 +478,29 @@ router.get('/grading/setups-status', (req, res) => {
   }
   res.json({ ok: true, status });
 });
+// ── Per-setup factor-analysis model (Python service proxy) ────────────
+// Each setup gets its own trained model. These endpoints just forward to
+// the Python scorer; if it isn't running the client returns null and the
+// UI treats the setup as "not trained yet, using naive fallback".
+router.get('/grading/setup/:setupId/model', async (req, res) => {
+  try {
+    const m = await setupScorerClient.getSetupModel(req.params.setupId);
+    res.json({ ok: true, ready: !!m?.ready, meta: m?.meta || null });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+router.post('/grading/setup/:setupId/train', async (req, res) => {
+  try {
+    const r = await setupScorerClient.trainSetup(req.params.setupId);
+    res.json(r || { ok: false, error: 'Python scorer unreachable' });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+router.post('/grading/train-all', async (req, res) => {
+  try {
+    const r = await setupScorerClient.trainAll();
+    res.json(r || { ok: false, error: 'Python scorer unreachable' });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 router.get('/grading/setup/:setupId/trend', (req, res) => {
   const account = req.query.account || null;
   const bucketSize = Math.max(1, Math.min(50, parseInt(req.query.bucket || '5', 10)));

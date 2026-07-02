@@ -2251,6 +2251,24 @@ function closeLearningModal() {
   document.getElementById('learning-modal').style.display = 'none';
 }
 
+// Called by the Retrain button on the Learning modal — triggers the
+// Python scorer to retrain THIS setup's model, then reopens the modal
+// to show the fresh model info.
+async function retrainSetupModel(setupId, setupName) {
+  try {
+    const r = await fetch(`${API}/trading/grading/setup/${setupId}/train`, { method: 'POST' })
+      .then(r => r.json());
+    if (r?.ok) {
+      alert(`Retrained: n=${r.n} cards · ${r.features} features · ${r.components} components`);
+    } else {
+      alert(`Retrain failed: ${r?.reason || r?.error || 'unknown'}`);
+    }
+    openLearningModal(setupId, setupName);   // refresh
+  } catch (err) {
+    alert('Retrain failed: ' + err.message);
+  }
+}
+
 async function openLearningModal(setupId, setupName) {
   const body = document.getElementById('learning-modal-body');
   document.getElementById('learning-modal-title').textContent = 'Learning · ' + setupName;
@@ -2260,16 +2278,18 @@ async function openLearningModal(setupId, setupName) {
     // Fire the three fetches in parallel. Each maps to a different aspect:
     // contributions = per-check delta expectancy, trend = expectancy over
     // rolling buckets, events = grading-loop action log.
-    const [contribResp, trendResp, statusResp, eventsResp] = await Promise.all([
+    const [contribResp, trendResp, statusResp, eventsResp, modelResp] = await Promise.all([
       fetch(`${API}/trading/grading/setup/${setupId}/checks`).then(r => r.json()),
       fetch(`${API}/trading/grading/setup/${setupId}/trend?bucket=5`).then(r => r.json()),
       fetch(`${API}/trading/grading/setups-status`).then(r => r.json()),
       fetch(`${API}/trading/grading/events?setupId=${setupId}&limit=25`).then(r => r.json()),
+      fetch(`${API}/trading/grading/setup/${setupId}/model`).then(r => r.json()).catch(() => ({ ok: false })),
     ]);
     const contribs = contribResp.contributions || [];
     const trend    = trendResp.trend || [];
     const status   = (statusResp.status || {})[setupId];
     const events   = eventsResp.events || [];
+    const model    = modelResp.ready ? modelResp.meta : null;
 
     // --- Header: setup baseline + current multiplier ------------------
     // Two rows:
@@ -2357,12 +2377,51 @@ async function openLearningModal(setupId, setupName) {
       return `<div style="font-size:11px;color:var(--text2);padding:3px 0;border-bottom:1px solid var(--border)">${kind} <span style="color:var(--text3)">${when}${detail}</span></div>`;
     }).join('') : '<div style="color:var(--text3);font-size:12px;padding:6px 0">No grading events yet.</div>';
 
+    // --- Factor-analysis model status --------------------------------
+    // Each setup gets its OWN trained model. Panel shows whether one
+    // exists, what it was trained on, and offers a Retrain button that
+    // rebuilds the model from the setup's current closed cards.
+    const modelHtml = model ? `
+      <div style="padding:10px 12px;background:var(--bg3);border-radius:8px;margin-bottom:10px;font-size:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div><strong style="color:var(--accent)">🧠 Factor-analysis model READY</strong></div>
+          <button onclick="retrainSetupModel('${setupId}','${setupName.replace(/'/g,"\\'")}')" style="background:var(--accent);color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:11px;font-family:inherit;cursor:pointer">Retrain</button>
+        </div>
+        <div style="font-size:11px;color:var(--text2)">
+          Trained on <strong>${model.n_trained}</strong> closed cards ·
+          ${model.features.length} features ·
+          <span style="color:var(--text3)">${new Date(model.trained_at * 1000).toLocaleString('en-US', { hour12: false })}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:6px;font-family:monospace">
+          Grade bands (expected R at each cut):<br>
+          A+ ≥ ${model.buckets[0].toFixed(2)}R &nbsp;·&nbsp;
+          A ≥ ${model.buckets[1].toFixed(2)}R &nbsp;·&nbsp;
+          B ≥ ${model.buckets[2].toFixed(2)}R &nbsp;·&nbsp;
+          C &lt; ${model.buckets[2].toFixed(2)}R
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-top:6px">
+          Live fires on this setup use this model. If it goes offline the router
+          falls back to the naive delta-expectancy grader below.
+        </div>
+      </div>` : `
+      <div style="padding:10px 12px;background:var(--bg3);border-radius:8px;margin-bottom:10px;font-size:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div>🧠 <strong>Factor-analysis model NOT TRAINED</strong> <span style="color:var(--text3)">for this setup</span></div>
+          <button onclick="retrainSetupModel('${setupId}','${setupName.replace(/'/g,"\\'")}')" style="background:var(--bg4);color:var(--text2);border:1px solid var(--border);border-radius:5px;padding:4px 10px;font-size:11px;font-family:inherit;cursor:pointer">Train now</button>
+        </div>
+        <div style="font-size:11px;color:var(--text3)">
+          The setup needs ≥ 30 closed cards with recorded check alignments before it can be trained.
+          Until then, live fires get graded by the naive delta-expectancy fallback shown below.
+        </div>
+      </div>`;
+
     body.innerHTML = `
       ${baseHtml}
+      ${modelHtml}
 
-      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin:10px 0 4px">Check contributions (Δ expectancy per check)</div>
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin:10px 0 4px">Check contributions (Δ expectancy per check) · naive-delta fallback</div>
       <div style="font-size:11px;color:var(--text3);margin-bottom:6px">
-        Δ = expectancy(aligned) − expectancy(not aligned). Positive = the check earns its A+/A/B/C contribution; negative = the check is hurting the grade and should be removed from this setup.
+        Δ = expectancy(aligned) − expectancy(not aligned). Used only when the factor-analysis model isn't trained yet. Positive = the check earns its A+/A/B/C contribution; negative = the check is hurting the grade and should be removed.
       </div>
       ${contribHtml}
 
