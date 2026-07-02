@@ -891,6 +891,26 @@ body {
           <input type="checkbox" id="broker-default"> Make default (used for account tagging on trade cards)
         </label>
       </div>
+      <!-- Grade → account routing gate.
+           Signals graded worse than this threshold don't reach the broker
+           (skipped silently, logged on brokerResults). Lets you pipe A+
+           fires to a live account while paper catches everything. -->
+      <div style="display:grid;grid-template-columns:1fr 3fr;gap:10px;margin-bottom:10px;align-items:center">
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">Minimum accepted grade</div>
+          <select id="broker-min-grade" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:inherit;font-size:12px;width:100%">
+            <option value="off">Off — accept every fire</option>
+            <option value="C">C or better (accepts all real grades)</option>
+            <option value="B">B or better</option>
+            <option value="A">A or better</option>
+            <option value="A+">A+ only (strictest — live-money candidates)</option>
+          </select>
+        </div>
+        <div style="font-size:10px;color:var(--text3);align-self:end;padding-bottom:8px">
+          Bootstrap-graded fires (no data yet) are treated as <strong>B</strong> for this gate.
+          Signals below the threshold get skipped for this broker — the alerts card shows a "grade &lt; minGrade" note.
+        </div>
+      </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="an-btn primary" onclick="saveBrokerForm()" id="broker-save-btn">Add</button>
         <button class="an-btn" onclick="resetBrokerForm()" id="broker-cancel-btn" style="display:none">Cancel edit</button>
@@ -2381,6 +2401,35 @@ async function openLearningModal(setupId, setupName) {
     // Each setup gets its OWN trained model. Panel shows whether one
     // exists, what it was trained on, and offers a Retrain button that
     // rebuilds the model from the setup's current closed cards.
+    //
+    // When trained, we ALSO show:
+    //   - Per-grade expected R (from grade_summary) so the user can
+    //     see the concrete outcome behind each letter for THIS setup.
+    //   - Feature importance chart — top N by |weight|, colored by sign.
+    //     This is the "real" answer to "which checks matter to this
+    //     setup" — supersedes the naive delta list below.
+    const fiRows = (model?.feature_importance || []).slice(0, 12);
+    const maxAbsWeight = fiRows.length ? Math.max(...fiRows.map(r => Math.abs(r.weight))) : 1;
+    const fiHtml = fiRows.length ? `
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin:10px 0 4px">Feature importance · what the trained model actually leans on</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px">
+        Effective per-feature weight from PCA loadings × Ridge coefficients. Positive = check helps predict a higher R; negative = check hurts. Correlated checks share credit (unlike the naive Δ below).
+      </div>
+      <div style="background:var(--bg3);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+        ${fiRows.map(r => {
+          const pct = Math.abs(r.weight) / maxAbsWeight * 100;
+          const color = r.weight >= 0 ? 'var(--green)' : 'var(--red)';
+          const sign = r.weight >= 0 ? '+' : '';
+          return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0">
+            <div style="flex:0 0 220px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.feature}">${r.feature}</div>
+            <div style="flex:1;background:var(--bg2);border-radius:3px;height:12px;position:relative;overflow:hidden">
+              <div style="position:absolute;left:0;top:0;bottom:0;width:${pct}%;background:${color};opacity:.7"></div>
+            </div>
+            <div style="flex:0 0 60px;text-align:right;color:${color};font-family:monospace;font-weight:700">${sign}${r.weight.toFixed(3)}</div>
+          </div>`;
+        }).join('')}
+      </div>` : '';
+    const grSum = model?.grade_summary || {};
     const modelHtml = model ? `
       <div style="padding:10px 12px;background:var(--bg3);border-radius:8px;margin-bottom:10px;font-size:12px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -2393,17 +2442,21 @@ async function openLearningModal(setupId, setupName) {
           <span style="color:var(--text3)">${new Date(model.trained_at * 1000).toLocaleString('en-US', { hour12: false })}</span>
         </div>
         <div style="font-size:11px;color:var(--text2);margin-top:6px;font-family:monospace">
-          Grade bands (expected R at each cut):<br>
+          Grade cutoffs (predicted R):
           A+ ≥ ${model.buckets[0].toFixed(2)}R &nbsp;·&nbsp;
           A ≥ ${model.buckets[1].toFixed(2)}R &nbsp;·&nbsp;
           B ≥ ${model.buckets[2].toFixed(2)}R &nbsp;·&nbsp;
           C &lt; ${model.buckets[2].toFixed(2)}R
         </div>
-        <div style="font-size:10px;color:var(--text3);margin-top:6px">
-          Live fires on this setup use this model. If it goes offline the router
-          falls back to the naive delta-expectancy grader below.
+        <div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:monospace">
+          Realised R per grade band:
+          A+ ${grSum['A+_mean_R']?.toFixed(2) ?? '—'} · A ${grSum['A_mean_R']?.toFixed(2) ?? '—'} · B ${grSum['B_mean_R']?.toFixed(2) ?? '—'} · C ${grSum['C_mean_R']?.toFixed(2) ?? '—'}
         </div>
-      </div>` : `
+        <div style="font-size:10px;color:var(--text3);margin-top:6px">
+          Live fires on this setup use this model. If the Python scorer is offline the router falls back to the naive delta-expectancy grader below.
+        </div>
+      </div>
+      ${fiHtml}` : `
       <div style="padding:10px 12px;background:var(--bg3);border-radius:8px;margin-bottom:10px;font-size:12px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <div>🧠 <strong>Factor-analysis model NOT TRAINED</strong> <span style="color:var(--text3)">for this setup</span></div>
@@ -2579,6 +2632,7 @@ async function loadBrokers() {
           <span class="tr-ticker">${b.name}</span>
           <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;padding:1px 6px;border-radius:4px;background:${b.type === 'alpaca' ? '#7c2d12' : '#164e63'};color:${b.type === 'alpaca' ? '#fed7aa' : '#a5f3fc'}">${b.type}</span>
           ${b.isDefault ? '<span style="font-size:10px;color:#fbbf24">default</span>' : ''}
+          ${cfg.minGrade && cfg.minGrade !== 'off' ? `<span title="Only signals graded ${cfg.minGrade} or better reach this broker" style="font-size:10px;color:#a78bfa;background:rgba(167,139,250,.15);padding:1px 7px;border-radius:4px;font-weight:700">min ${cfg.minGrade}</span>` : ''}
         </div>
         ${details}
       </div>
@@ -2618,6 +2672,7 @@ function resetBrokerForm() {
   document.getElementById('broker-alpaca-key').value    = '';
   document.getElementById('broker-alpaca-secret').value = '';
   document.getElementById('broker-default').checked = false;
+  document.getElementById('broker-min-grade').value = 'off';
   document.getElementById('broker-status').textContent = '';
   onBrokerTypeChange();
 }
@@ -2638,6 +2693,7 @@ function editBroker(b) {
   secretInput.value = '';
   secretInput.placeholder = cfg.secret === 'set' ? '(unchanged — leave blank to keep)' : 'Paste secret';
   document.getElementById('broker-default').checked = !!b.isDefault;
+  document.getElementById('broker-min-grade').value = cfg.minGrade || 'off';
   onBrokerTypeChange();
   document.getElementById('broker-form-title').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -2666,6 +2722,10 @@ async function saveBrokerForm() {
       }
     }
   }
+  // Grade → account routing gate applies to both paper and alpaca
+  // profiles (paper profiles are no-ops, but the gate reason still lands
+  // on brokerResults for debugging).
+  config.minGrade = document.getElementById('broker-min-grade').value;
   const body = { name, type, config, enabled: true, isDefault: document.getElementById('broker-default').checked };
   const url    = _editingBrokerId ? `${API}/trading/brokers/${_editingBrokerId}` : `${API}/trading/brokers`;
   const method = _editingBrokerId ? 'PATCH' : 'POST';

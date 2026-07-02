@@ -421,6 +421,19 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
     // participates in, not the type alone. That way one alpaca account
     // can be a paper-only sandbox and another can be live, and both are
     // gated by the master mode independently.
+    //
+    // Per-broker grade gate: config.minGrade is the minimum grade the
+    // profile will accept ('A+' | 'A' | 'B' | 'C'). Signals graded
+    // WORSE than the threshold get skipped for that broker. Empty /
+    // null / 'off' = accept all. That lets a user pipe only A+ fires
+    // to a live account while a paper account catches everything.
+    const gradeRank = { 'A+': 4, 'A': 3, 'B': 2, 'C': 1 };
+    // Bootstrap fires (no trained model + no delta data yet) come through
+    // as 'B (bootstrapping)'. Treat as B for the purpose of the gate —
+    // that way a broker with minGrade='A' won't accept a bootstrap fire,
+    // but a broker with minGrade='B' or 'off' will.
+    const effectiveGrade = signalGrade || String(liveGrade?.grade || '').replace(' (bootstrapping)', '') || 'B';
+    const signalRank = gradeRank[effectiveGrade] ?? 2;
     if (mode !== 'off') {
       for (const b of brokers.getActive()) {
         // 'paper' type is offline-only; skip in paper mode too, it's a no-op record.
@@ -432,6 +445,17 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
           : (String(cfg.url || '').toLowerCase().includes('paper-api') ? 'paper' : 'live');
         if (mode === 'paper' && env !== 'paper') continue;
         if (mode === 'live'  && env !== 'live')  continue;
+        // Grade gate — silently drop this broker if the fire's grade
+        // doesn't meet its minGrade requirement. Recorded on brokerResults
+        // so the UI can show WHY a broker didn't receive the order.
+        const minGrade = cfg.minGrade && cfg.minGrade !== 'off' ? cfg.minGrade : null;
+        if (minGrade && signalRank < (gradeRank[minGrade] || 0)) {
+          brokerResults.push({
+            brokerId: b.id, brokerName: b.name, brokerType: b.type, env,
+            skipped: true, reason: `grade ${liveGrade?.grade || '—'} < minGrade ${minGrade}`,
+          });
+          continue;
+        }
         try {
           const sendFn = require('./brokers').send;  // via require to keep it hot-swappable
           const result = sendFn(b, { ticker, direction, shares, entryType, entryPrice, sl, tp, orderId });

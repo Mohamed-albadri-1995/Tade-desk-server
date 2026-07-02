@@ -157,6 +157,27 @@ class SetupFactorProcessor:
             # to its own baseline, which is what the user wanted.
             cuts = np.quantile(preds, [0.75, 0.50, 0.25]).tolist()
 
+            # Feature importance — effective weight per ORIGINAL feature.
+            # PCA reduces {feature_i} → {component_k} via pca.components_
+            # (shape n_components × n_features), then Ridge weights each
+            # component by ridge.coef_. Multiplying them chains the two
+            # into a single linear coefficient per raw feature — i.e. "how
+            # much does this check's alignment shift the predicted R,
+            # holding everything else constant?"
+            #
+            # We also scale by the feature's original standard deviation
+            # (StandardScaler subtracts mean, divides by std; to get back
+            # into "1 = aligned" units, multiply by std_i / 1). That way
+            # the sign is directly interpretable: positive = check helps,
+            # negative = check hurts.
+            effective_weight = pca.components_.T @ ridge.coef_  # shape (n_features,)
+            feature_importance = []
+            for i, name in enumerate(X.columns):
+                std_i = scaler.scale_[i] if scaler.scale_[i] > 0 else 1.0
+                w = float(effective_weight[i] / std_i)
+                feature_importance.append({'feature': name, 'weight': w})
+            feature_importance.sort(key=lambda x: abs(x['weight']), reverse=True)
+
             model = {
                 'scaler':   scaler,
                 'pca':      pca,
@@ -190,6 +211,11 @@ class SetupFactorProcessor:
                     'min':  float(y.min()),
                     'max':  float(y.max()),
                 },
+                # Effective per-feature weight — positive means the check
+                # SHIFTS PREDICTED R UP when aligned, negative shifts it
+                # down. Sorted by absolute magnitude so the top items are
+                # the ones the model leans on most.
+                'feature_importance': feature_importance,
             }
             with open(os.path.join(setup_dir, 'meta.json'), 'w') as f:
                 json.dump(meta, f, indent=2)
