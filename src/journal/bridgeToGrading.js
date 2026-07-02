@@ -23,6 +23,7 @@
 
 const db = require('../db');
 const { v4: uuidv4 } = require('uuid');
+const checks = require('../trading/checks');
 
 function _rMultiple(entry, exit, sl, direction) {
   if (!Number.isFinite(entry) || !Number.isFinite(exit) || !Number.isFinite(sl)) return null;
@@ -30,6 +31,104 @@ function _rMultiple(entry, exit, sl, direction) {
   if (stopDist === 0) return null;
   const move = direction === 'Long' ? (exit - entry) : (entry - exit);
   return move / stopDist;
+}
+
+/**
+ * Build a check-evaluator context from a journal trade's stored
+ * technical + context snapshots. Maps the journal snapshot column names
+ * to the same field names live signal fires use, so a check_library
+ * condition written for live trading resolves identically against an
+ * imported trade.
+ */
+function _ctxForJournalTrade(tradeId) {
+  const tech = db.prepare('SELECT * FROM journal_technical_snapshots WHERE trade_id = ?').get(tradeId);
+  const ctx  = db.prepare('SELECT * FROM journal_context_snapshots   WHERE trade_id = ?').get(tradeId);
+  const ind = tech ? {
+    close:  tech.price,
+    open:   tech.open   ?? null,
+    high:   tech.high   ?? null,
+    low:    tech.low    ?? null,
+    volume: tech.volume ?? null,
+    prevClose: tech.prev_close ?? null,
+    vwap: tech.vwap, ema9: tech.ema9, ema13: tech.ema13, ema20: tech.ema20, ema50: tech.ema50,
+    sma5: tech.sma5, sma9: tech.sma9, sma13: tech.sma13, sma20: tech.sma20,
+    bb_upper: tech.bb_upper, bb_lower: tech.bb_lower, bb_mid: tech.bb_mid,
+    rvol: tech.rvol, atr: tech.atr, atr14: tech.atr,
+    pmHigh: tech.pm_high, pmLow: tech.pm_low,
+    premarket_high: tech.pm_high, premarket_low: tech.pm_low,
+    daily_vwap: tech.vwap,
+    ma5day: tech.ma5day, ma5day_slope: tech.ma5day_slope,
+    vwap_2day: tech.vwap_2day, vwap_week: tech.vwap_week, vwap_month: tech.vwap_month,
+    week_high: tech.week_high, week_low: tech.week_low,
+    month_high: tech.month_high, month_low: tech.month_low,
+    prev_day_high: tech.prev_day_high, prev_day_low: tech.prev_day_low,
+  } : {};
+  const scanner = ctx ? {
+    regime: ctx.regime, regimeLabel: ctx.regime_label,
+    secBias: ctx.sec_bias, broadResolved: ctx.broad_resolved,
+    shortTerm: ctx.short_term, midTerm: ctx.mid_term, longTerm: ctx.long_term,
+    secScore: ctx.sec_score, secHot: tech?.sec_hot === 1,
+    sector: ctx.sector, industry: ctx.industry,
+    _score: ctx.scanner_score,
+  } : {};
+  return { ind, scanner, bars: [], history: {} };
+}
+
+/**
+ * Evaluate every default + setup-assigned additional check against the
+ * imported trade's stored snapshot and persist rows to trade_card_checks.
+ * Direction-aware: variation resolver picks the right long/short slot per
+ * the trade's direction. Idempotent — cleans any existing rows first.
+ */
+function evaluateChecksForCard(cardId, setupId, direction) {
+  const ctx = _ctxForJournalTrade(cardId);
+  const dir = String(direction).toLowerCase();
+  const dirMatches = (d) => !d || d === 'both' || d === dir;
+
+  const evalOne = (row) => {
+    const rowDir = row.direction || 'both';
+    let cond = row.condition;
+    let variation = 'symmetric';
+    if (rowDir === 'both' && dir === 'long' && row.condition_long) {
+      cond = row.condition_long; variation = 'long';
+    } else if (rowDir === 'both' && dir === 'short' && row.condition_short) {
+      cond = row.condition_short; variation = 'short';
+    } else if (rowDir === 'long') {
+      variation = 'long';
+    } else if (rowDir === 'short') {
+      variation = 'short';
+    }
+    const r = checks.evaluateCondition(cond, ctx);
+    return {
+      key: row.key,
+      label: row.label,
+      section: row.section || null,
+      value: r.value,
+      aligned: r.aligned,
+      versionId: row.versionId || 1,
+      variation,
+    };
+  };
+
+  const defaults    = checks.listChecks({ category: 'default', enabledOnly: true }).filter(r => dirMatches(r.direction));
+  const additionals = setupId ? checks.assignmentsForSetup(setupId).filter(r => r.enabled && dirMatches(r.direction)) : [];
+
+  const rows = [...defaults.map(evalOne), ...additionals.map(evalOne)];
+  const txn = db.transaction(() => {
+    db.prepare("DELETE FROM trade_card_checks WHERE card_id = ? AND kind = 'additional'").run(cardId);
+    const stmt = db.prepare(`
+      INSERT INTO trade_card_checks (id, card_id, kind, check_key, label, section, value, aligned, check_version_id, variation)
+      VALUES (?, ?, 'additional', ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const c of rows) {
+      stmt.run(uuidv4(), cardId, c.key, c.label, c.section,
+        c.value != null ? String(c.value) : null,
+        c.aligned == null ? null : (c.aligned ? 1 : 0),
+        c.versionId, c.variation);
+    }
+  });
+  txn();
+  return rows.length;
 }
 
 /**
@@ -73,11 +172,47 @@ function mirrorTradeToCard(tradeId) {
     null, null,
   );
 
-  // Journal doesn't carry check evaluations, so nothing to insert into
-  // trade_card_checks. Grading engine still reads the r_multiple to
-  // compute setup expectancy and size multipliers — check contributions
-  // simply won't include imported trades, which is correct.
-  return { ok: true, cardId: tradeId };
+  // Retroactively evaluate every default + setup-attached additional check
+  // against the trade's stored technical + context snapshot so the trade
+  // card viewer shows real per-setup alignments AND the learning engine
+  // includes the imported trade in check-contribution stats. Fails
+  // silently if snapshots aren't populated yet (technicalFetch hasn't
+  // run); the card still exists and r_multiple still counts toward setup
+  // expectancy.
+  let checksWritten = 0;
+  try {
+    if (t.setup_id) checksWritten = evaluateChecksForCard(tradeId, t.setup_id, t.direction);
+  } catch (err) {
+    console.warn(`[bridgeToGrading] check eval failed for ${tradeId}: ${err.message}`);
+  }
+  return { ok: true, cardId: tradeId, checksWritten };
+}
+
+/**
+ * Backfill trade_card_checks for previously-bridged journal cards that
+ * were written before per-setup check evaluation existed. Boot-time,
+ * one-shot, only touches cards missing additional-check rows.
+ */
+function backfillCheckEvaluations() {
+  const rows = db.prepare(`
+    SELECT tc.id, tc.setup_id, tc.direction
+      FROM trade_cards tc
+     WHERE tc.context LIKE '%"source":"journal"%'
+       AND NOT EXISTS (
+         SELECT 1 FROM trade_card_checks cc
+          WHERE cc.card_id = tc.id AND cc.kind = 'additional'
+       )
+  `).all();
+  let updated = 0;
+  for (const r of rows) {
+    if (!r.setup_id) continue;
+    try {
+      const n = evaluateChecksForCard(r.id, r.setup_id, r.direction);
+      if (n > 0) updated++;
+    } catch { /* skip */ }
+  }
+  if (updated) console.log(`[bridgeToGrading] backfilled ${updated}/${rows.length} imported cards with check evaluations`);
+  return { processed: rows.length, updated };
 }
 
 /**
@@ -94,4 +229,4 @@ function mirrorClosedTrades(tradeIds) {
   return { mirrored, skipped };
 }
 
-module.exports = { mirrorTradeToCard, mirrorClosedTrades };
+module.exports = { mirrorTradeToCard, mirrorClosedTrades, backfillCheckEvaluations, evaluateChecksForCard };

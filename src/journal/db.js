@@ -113,4 +113,23 @@ db.exec(`
   );
 `);
 
+// Migration: extend journal_technical_snapshots with the multi-day /
+// multi-week / month / premarket levels + extra SMAs so the check-library
+// evaluator has every field it can reference. Populated by technicalFetch
+// (which runs dailyLevels.computeLevels on the fetched bar buffer).
+// Missing values stay null on old imports until they're re-fetched.
+const journalTechExtraColumns = [
+  'sma5 REAL', 'sma9 REAL', 'sma13 REAL',
+  'ma5day REAL', 'ma5day_slope REAL',
+  'vwap_2day REAL', 'vwap_week REAL', 'vwap_month REAL',
+  'week_high REAL', 'week_low REAL',
+  'month_high REAL', 'month_low REAL',
+  'prev_day_high REAL', 'prev_day_low REAL',
+  'open REAL', 'high REAL', 'low REAL', 'volume REAL', 'prev_close REAL',
+  'sec_hot INTEGER',
+];
+for (const col of journalTechExtraColumns) {
+  try { db.exec(`ALTER TABLE journal_technical_snapshots ADD COLUMN ${col}`); } catch { /* exists */ }
+}
+
 module.exports = db;

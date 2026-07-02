@@ -95,6 +95,17 @@ app.listen(PORT, () => {
     console.warn('[Startup] Training data migration failed:', err.message);
   }
 
+  // Boot backfill: previously-bridged journal trades don't have per-setup
+  // check evaluations. Populate them so the trade card viewer shows real
+  // alignments on historical imports and the learning engine can include
+  // them in check-contribution stats.
+  try {
+    const bridge = require('./journal/bridgeToGrading');
+    bridge.backfillCheckEvaluations();
+  } catch (err) {
+    console.warn('[Startup] Journal check backfill failed:', err.message);
+  }
+
   startScheduler();
 });
 

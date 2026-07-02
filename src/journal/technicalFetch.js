@@ -11,6 +11,8 @@
 const db = require('../db');
 const { fetchIntradayBars } = require('../alpaca/client');
 const volumeBaseline = require('../trading/volumeBaseline');
+const dailyLevels = require('../trading/dailyLevels');
+const historicalCache = require('../trading/historicalCache');
 
 // ─── R1 lookup helpers ────────────────────────────────────────────────────────
 
@@ -212,18 +214,40 @@ async function computeTechnical(trade) {
   const pmHigh = r1?.stock?.pmHigh ?? null;
   const pmLow  = r1?.stock?.pmLow  ?? null;
 
+  // Additional SMAs the check library references (Batch 2 BBZ checks).
+  const s5  = sma(closes, 5);
+  const s9  = sma(closes, 9);
+  const s13 = sma(closes, 13);
+
+  // Multi-day / week / month levels — same math the router uses for
+  // native fires. Merge the trade day's fetched bars with any cached
+  // historical bars so the multi-day accumulators actually span days.
+  // If the cache is cold for this ticker (typical for imports), we still
+  // get vwap_week / vwap_month / week_high etc. from the intraday-only
+  // buffer for the trade day, and multi-day fields simply come back null.
+  const merged = historicalCache.mergeWithLive(ticker, bars);
+  const derived = dailyLevels.computeLevels(merged);
+
+  const r4 = v => Number.isFinite(v) ? parseFloat(v.toFixed(4)) : null;
+
+  const entryBar = bars[entryIdx] || {};
+  const prevBar  = entryIdx > 0 ? bars[entryIdx - 1] : {};
+
   return {
     technicalSnapshot: {
       price,
-      vwap:     vwap   != null ? parseFloat(vwap.toFixed(4))   : null,
-      ema9:     e9[entryIdx]  != null ? parseFloat(e9[entryIdx].toFixed(4))  : null,
-      ema13:    e13[entryIdx] != null ? parseFloat(e13[entryIdx].toFixed(4)) : null,
-      ema20:    e20[entryIdx] != null ? parseFloat(e20[entryIdx].toFixed(4)) : null,
-      ema50:    e50[entryIdx] != null ? parseFloat(e50[entryIdx].toFixed(4)) : null,
-      sma20:    s20[entryIdx] != null ? parseFloat(s20[entryIdx].toFixed(4)) : null,
-      bb_upper: bb?.upper != null ? parseFloat(bb.upper.toFixed(4)) : null,
-      bb_lower: bb?.lower != null ? parseFloat(bb.lower.toFixed(4)) : null,
-      bb_mid:   bb?.mid   != null ? parseFloat(bb.mid.toFixed(4))   : null,
+      vwap:     r4(vwap),
+      ema9:     r4(e9[entryIdx]),
+      ema13:    r4(e13[entryIdx]),
+      ema20:    r4(e20[entryIdx]),
+      ema50:    r4(e50[entryIdx]),
+      sma20:    r4(s20[entryIdx]),
+      sma5:     r4(s5[entryIdx]),
+      sma9:     r4(s9[entryIdx]),
+      sma13:    r4(s13[entryIdx]),
+      bb_upper: r4(bb?.upper),
+      bb_lower: r4(bb?.lower),
+      bb_mid:   r4(bb?.mid),
       rvol,
       pm_high: pmHigh,
       pm_low:  pmLow,
@@ -234,6 +258,26 @@ async function computeTechnical(trade) {
       price_rel_ema50: rel(price, e50[entryIdx]),
       ema_stack_bullish: emaStackBullish,
       bb_zone: bbZone,
+      // Multi-day / week / month levels
+      ma5day:        r4(derived.ma5day),
+      ma5day_slope:  r4(derived.ma5day_slope),
+      vwap_2day:     r4(derived.vwap_2day),
+      vwap_week:     r4(derived.vwap_week),
+      vwap_month:    r4(derived.vwap_month),
+      week_high:     r4(derived.week_high),
+      week_low:      r4(derived.week_low),
+      month_high:    r4(derived.month_high),
+      month_low:     r4(derived.month_low),
+      prev_day_high: r4(derived.prev_day_high),
+      prev_day_low:  r4(derived.prev_day_low),
+      // Per-bar OHLCV so field:'open'/'high'/'low'/'volume' resolve
+      open:   r4(entryBar.o),
+      high:   r4(entryBar.h),
+      low:    r4(entryBar.l),
+      volume: entryBar.v ?? null,
+      prev_close: r4(prevBar.c),
+      // Sector-hot flag from r1 snapshot if available
+      sec_hot: r1?.context?.secHot === true ? 1 : (r1?.context?.secHot === false ? 0 : null),
     },
     outcomes: {
       mae_pct:    mae  != null && entry_price ? parseFloat((mae  / entry_price * 100).toFixed(3)) : null,
@@ -259,13 +303,22 @@ async function fetchAndStore(trade) {
       (trade_id, price, vwap, ema9, ema13, ema20, ema50, sma20,
        bb_upper, bb_lower, bb_mid, rvol, pm_high, pm_low,
        price_rel_vwap, price_rel_ema9, price_rel_ema13, price_rel_ema20, price_rel_ema50,
-       ema_stack_bullish, bb_zone, computed_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       ema_stack_bullish, bb_zone, computed_at,
+       sma5, sma9, sma13, ma5day, ma5day_slope,
+       vwap_2day, vwap_week, vwap_month,
+       week_high, week_low, month_high, month_low, prev_day_high, prev_day_low,
+       open, high, low, volume, prev_close, sec_hot)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     trade.id, ts.price, ts.vwap, ts.ema9, ts.ema13, ts.ema20, ts.ema50, ts.sma20,
     ts.bb_upper, ts.bb_lower, ts.bb_mid, ts.rvol, ts.pm_high, ts.pm_low,
     ts.price_rel_vwap, ts.price_rel_ema9, ts.price_rel_ema13, ts.price_rel_ema20, ts.price_rel_ema50,
-    ts.ema_stack_bullish, ts.bb_zone, now
+    ts.ema_stack_bullish, ts.bb_zone, now,
+    ts.sma5, ts.sma9, ts.sma13, ts.ma5day, ts.ma5day_slope,
+    ts.vwap_2day, ts.vwap_week, ts.vwap_month,
+    ts.week_high, ts.week_low, ts.month_high, ts.month_low, ts.prev_day_high, ts.prev_day_low,
+    ts.open, ts.high, ts.low, ts.volume, ts.prev_close, ts.sec_hot,
   );
 
   // Update outcomes on trade record
