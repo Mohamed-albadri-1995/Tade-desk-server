@@ -488,6 +488,17 @@ body {
     </div>
   </div>
 
+  <!-- LEARNING MODAL — per-setup insights: check contributions + expectancy trend + events -->
+  <div id="learning-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:100%;max-width:720px;padding:0;margin-top:20px;position:relative">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
+        <div style="font-size:14px;font-weight:700" id="learning-modal-title">Setup Learning</div>
+        <button onclick="closeLearningModal()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;line-height:1">✕</button>
+      </div>
+      <div id="learning-modal-body" style="padding:12px 16px 20px"></div>
+    </div>
+  </div>
+
   <!-- CLOSE POSITION MODAL -->
   <div id="close-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center;padding:16px">
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:100%;max-width:380px;padding:18px">
@@ -610,6 +621,24 @@ body {
             <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Description (optional)</label>
             <input id="sm-description" placeholder="Brief note about this setup" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
           </div>
+
+          <!-- Grading loop controls — safety valves for the automatic kill/pause behaviour -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Kill-switch override</label>
+              <div style="display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px">
+                <input type="checkbox" id="sm-kill-override">
+                <label for="sm-kill-override" style="font-size:11px;color:var(--text2);cursor:pointer">Trade even if killed</label>
+              </div>
+              <div style="font-size:10px;color:var(--text3);margin-top:2px">When ON, negative-expectancy setups still fire at their grade-based size instead of being blocked.</div>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Auto-pause after N C's</label>
+              <input type="number" id="sm-autopause" min="0" max="20" step="1" placeholder="0 = disabled" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
+              <div style="font-size:10px;color:var(--text3);margin-top:2px">Auto-disable the setup after N consecutive C-graded fires. 0 = don't auto-pause.</div>
+            </div>
+          </div>
+
           <div id="sm-additional-block" style="display:none">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
               <span style="background:rgba(239,68,68,0.15);color:var(--red);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:0.05em">MANDATORY</span>
@@ -2026,7 +2055,13 @@ async function doImport() {
 
 // ── Setups ────────────────────────────────────────────────────────────────────
 async function loadSetups() {
-  const rows = await fetch(`${API}/trading/setups`).then(r => r.json()).catch(() => []);
+  // Load setups + grading status in parallel so the kill-switch state is
+  // reflected on the list without a second render pass.
+  const [rows, statusResp] = await Promise.all([
+    fetch(`${API}/trading/setups`).then(r => r.json()).catch(() => []),
+    fetch(`${API}/trading/grading/setups-status`).then(r => r.json()).catch(() => ({ status: {} })),
+  ]);
+  const statusById = statusResp.status || {};
   const el = document.getElementById('setups-list');
   if (!rows.length) {
     el.innerHTML = '<div class="empty"><div class="empty-icon">⚙</div><div class="empty-text">No setups yet — add your first setup</div></div>';
@@ -2037,6 +2072,16 @@ async function loadSetups() {
     const engineBadge = hasEngine
       ? `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(99,102,241,.12);color:var(--accent);white-space:nowrap">${s.indicator}</span>`
       : `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(239,68,68,.1);color:var(--red);white-space:nowrap">no script</span>`;
+    // Grading badge: KILLED (multiplier 0 without override), OVERRIDE
+    // (multiplier 0 but override_kill_switch=1 so trades still fire), or
+    // hide entirely for non-killed setups.
+    const st = statusById[s.id];
+    let gradingBadge = '';
+    if (st?.killed && st.override) {
+      gradingBadge = `<span title="Kill switch active but override enabled — trades still fire at 1.0× setup multiplier" style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(245,158,11,.15);color:#fbbf24;white-space:nowrap">KILL · OVERRIDE</span>`;
+    } else if (st?.killed) {
+      gradingBadge = `<span title="Setup kill-switch active — trades blocked. expectancy=${(st.expectancyR ?? 0).toFixed(2)}R over ${st.n} closed trades. Enable override in Edit to force through." style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(239,68,68,.15);color:var(--red);white-space:nowrap">KILLED</span>`;
+    }
     return `
     <div class="panel" style="margin-bottom:8px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
@@ -2045,11 +2090,14 @@ async function loadSetups() {
             <span style="font-weight:700;font-size:13px">${s.name}</span>
             <span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${s.enabled ? 'rgba(34,197,94,.12)':'rgba(85,93,112,.12)'};color:${s.enabled ? 'var(--green)':'var(--text3)'};white-space:nowrap">${s.enabled ? 'Active' : 'Disabled'}</span>
             ${engineBadge}
+            ${gradingBadge}
           </div>
           <div style="font-size:11px;color:var(--text3);margin-top:3px">${s.entry_type} · Entry ${s.window_start}–${s.window_end}</div>
+          ${st?.n ? `<div style="font-size:11px;color:var(--text3);margin-top:3px">${st.n} closed · expectancy ${(st.expectancyR ?? 0).toFixed(2)}R · grade ${st.grade}</div>` : ''}
           ${s.description ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">${s.description}</div>` : ''}
         </div>
-        <div style="display:flex;gap:6px;flex-shrink:0;margin-top:2px">
+        <div style="display:flex;gap:6px;flex-shrink:0;margin-top:2px;flex-wrap:wrap;justify-content:flex-end">
+          <button onclick="openLearningModal('${s.id}','${s.name.replace(/'/g,"\\'")}')" style="background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:4px 10px;font-size:11px;color:var(--accent);font-family:inherit;cursor:pointer">Learning</button>
           <button onclick="openSetupModal(${JSON.stringify(s).replace(/"/g,'&quot;')})" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:4px 10px;font-size:11px;color:var(--text2);font-family:inherit;cursor:pointer">Edit</button>
           <button onclick="toggleSetup('${s.id}',${s.enabled})" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:4px 10px;font-size:11px;color:var(--text2);font-family:inherit;cursor:pointer">${s.enabled ? 'Disable':'Enable'}</button>
           <button onclick="deleteSetup('${s.id}')" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:5px;padding:4px 10px;font-size:11px;color:var(--red);font-family:inherit;cursor:pointer">Delete</button>
@@ -2074,6 +2122,8 @@ async function openSetupModal(setup) {
   document.getElementById('sm-window-start').value = setup?.window_start || '9:35';
   document.getElementById('sm-window-end').value   = setup?.window_end || '10:00';
   document.getElementById('sm-description').value  = setup?.description || '';
+  document.getElementById('sm-kill-override').checked = !!(setup?.override_kill_switch);
+  document.getElementById('sm-autopause').value    = setup?.auto_pause_c_streak || 0;
   document.getElementById('setup-modal-title').textContent = setup ? 'Edit Setup' : 'New Setup';
   document.getElementById('setup-modal-err').textContent = '';
   document.getElementById('setup-modal').style.display = 'block';
@@ -2160,6 +2210,8 @@ async function saveSetupModal() {
     window_start: document.getElementById('sm-window-start').value || '9:35',
     window_end:   document.getElementById('sm-window-end').value || '10:00',
     description:  document.getElementById('sm-description').value.trim(),
+    override_kill_switch: document.getElementById('sm-kill-override').checked ? 1 : 0,
+    auto_pause_c_streak:  parseInt(document.getElementById('sm-autopause').value, 10) || 0,
   };
   const url    = _smEditId ? `${API}/trading/setups/${_smEditId}` : `${API}/trading/setups`;
   const method = _smEditId ? 'PATCH' : 'POST';
@@ -2176,6 +2228,119 @@ async function saveSetupModal() {
   }
   closeSetupModal();
   loadSetups();
+}
+
+// ── Setup Learning Modal ──────────────────────────────────────────────────
+// Per-setup view: shows the setup's baseline expectancy, which additional
+// checks are earning positive vs negative delta expectancy, a bucketed
+// expectancy trend, and the grading event log (kill blocks, overrides,
+// auto-pauses). This is how you know what the system has actually LEARNED
+// from a setup's closed trade cards.
+function closeLearningModal() {
+  document.getElementById('learning-modal').style.display = 'none';
+}
+
+async function openLearningModal(setupId, setupName) {
+  const body = document.getElementById('learning-modal-body');
+  document.getElementById('learning-modal-title').textContent = 'Learning · ' + setupName;
+  document.getElementById('learning-modal').style.display = 'flex';
+  body.innerHTML = '<div style="color:var(--text3)">Loading…</div>';
+  try {
+    // Fire the three fetches in parallel. Each maps to a different aspect:
+    // contributions = per-check delta expectancy, trend = expectancy over
+    // rolling buckets, events = grading-loop action log.
+    const [contribResp, trendResp, statusResp, eventsResp] = await Promise.all([
+      fetch(`${API}/trading/grading/setup/${setupId}/checks`).then(r => r.json()),
+      fetch(`${API}/trading/grading/setup/${setupId}/trend?bucket=5`).then(r => r.json()),
+      fetch(`${API}/trading/grading/setups-status`).then(r => r.json()),
+      fetch(`${API}/trading/grading/events?setupId=${setupId}&limit=25`).then(r => r.json()),
+    ]);
+    const contribs = contribResp.contributions || [];
+    const trend    = trendResp.trend || [];
+    const status   = (statusResp.status || {})[setupId];
+    const events   = eventsResp.events || [];
+
+    // --- Header: setup baseline + current multiplier ------------------
+    const baseHtml = status ? `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;padding:10px 12px;background:var(--bg3);border-radius:8px;margin-bottom:10px;font-size:12px">
+        <div>Closed trades: <strong>${status.n}</strong></div>
+        <div>Expectancy: <strong style="color:${(status.expectancyR ?? 0) >= 0 ? 'var(--green)' : 'var(--red)'}">${(status.expectancyR ?? 0).toFixed(2)}R</strong></div>
+        <div>Grade: <strong>${status.grade || '—'}</strong></div>
+        <div>Size multiplier: <strong>${status.multiplier?.toFixed(2) ?? '—'}×</strong></div>
+        ${status.killed ? '<div style="color:var(--red);font-weight:700">⚠ KILL SWITCH ACTIVE</div>' : ''}
+        ${status.killed && status.override ? '<div style="color:#fbbf24;font-weight:700">override ON</div>' : ''}
+      </div>` : '';
+
+    // --- Check contributions: sorted by delta desc so the biggest edge
+    //     is on top. Missing samples (< min per side) show as "—".
+    const contribHtml = contribs.length ? contribs.map(c => {
+      const dE   = c.deltaExpectancyR;
+      const color = dE == null ? 'var(--text3)' : (dE > 0 ? 'var(--green)' : dE < 0 ? 'var(--red)' : 'var(--text3)');
+      const dStr = dE == null ? '—' : (dE >= 0 ? '+' : '') + dE.toFixed(2) + 'R';
+      const eA   = c.expectancyR_aligned    != null ? c.expectancyR_aligned.toFixed(2) + 'R'    : '—';
+      const eN   = c.expectancyR_notAligned != null ? c.expectancyR_notAligned.toFixed(2) + 'R' : '—';
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <div style="flex:1;min-width:0">
+          <div style="color:var(--text)">${c.label}</div>
+          <div style="color:var(--text3);font-size:10px">aligned=${c.nAligned} · not aligned=${c.nNotAligned}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="color:${color};font-weight:700">${dStr}</div>
+          <div style="color:var(--text3);font-size:10px">${eA} vs ${eN}</div>
+        </div>
+      </div>`;
+    }).join('') : '<div style="color:var(--text3);font-size:12px;padding:8px 0">No closed trades with additional checks yet. Contributions populate once trades close.</div>';
+
+    // --- Expectancy trend: inline SVG sparkline, one point per bucket.
+    //     Line color reflects direction of latest bucket vs first bucket.
+    let trendHtml = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Not enough closed trades for a trend yet (need ≥ 5).</div>';
+    if (trend.length >= 2) {
+      const w = 480, h = 90, pad = 8;
+      const rs = trend.map(p => p.expectancyR);
+      const minR = Math.min(...rs, 0);
+      const maxR = Math.max(...rs, 0.1);
+      const scaleX = i => pad + (i / (trend.length - 1)) * (w - 2*pad);
+      const scaleY = r => h - pad - ((r - minR) / (maxR - minR || 1)) * (h - 2*pad);
+      const pathD = trend.map((p, i) => `${i === 0 ? 'M' : 'L'} ${scaleX(i)} ${scaleY(p.expectancyR)}`).join(' ');
+      const zeroY = scaleY(0);
+      const trendColor = rs[rs.length-1] >= rs[0] ? 'var(--green)' : 'var(--red)';
+      trendHtml = `
+        <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="background:var(--bg3);border-radius:6px">
+          <line x1="${pad}" x2="${w-pad}" y1="${zeroY}" y2="${zeroY}" stroke="var(--text3)" stroke-width="0.5" stroke-dasharray="3,3"/>
+          <path d="${pathD}" fill="none" stroke="${trendColor}" stroke-width="2"/>
+          ${trend.map((p, i) => `<circle cx="${scaleX(i)}" cy="${scaleY(p.expectancyR)}" r="2.5" fill="${trendColor}"/>`).join('')}
+        </svg>
+        <div style="font-size:10px;color:var(--text3);padding:2px 0">
+          Trade ${trend[0].tradeIndex} → ${trend[trend.length-1].tradeIndex}, expectancy per bucket of 5 trades
+        </div>`;
+    }
+
+    // --- Grading events (kill blocks, overrides, auto-pauses) --------
+    const evHtml = events.length ? events.slice(0, 12).map(e => {
+      const kind = { kill_block: '🚫 Kill blocked', kill_override: '⚠️ Kill override', auto_pause: '⏸ Auto-paused', grade_drift: '📉 Grade drift' }[e.kind] || e.kind;
+      const when = new Date(e.ts).toLocaleString('en-US', { hour12: false });
+      const detail = Object.keys(e.detail || {}).length ? ' · ' + Object.entries(e.detail).slice(0,3).map(([k,v]) => `${k}=${typeof v === 'number' ? v.toFixed(2) : v}`).join(', ') : '';
+      return `<div style="font-size:11px;color:var(--text2);padding:3px 0;border-bottom:1px solid var(--border)">${kind} <span style="color:var(--text3)">${when}${detail}</span></div>`;
+    }).join('') : '<div style="color:var(--text3);font-size:12px;padding:6px 0">No grading events yet.</div>';
+
+    body.innerHTML = `
+      ${baseHtml}
+
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin:10px 0 4px">Check contributions (Δ expectancy per check)</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px">
+        Δ = expectancy(aligned) − expectancy(not aligned). Positive = the check earns its A+/A/B/C contribution; negative = the check is hurting the grade and should be removed from this setup.
+      </div>
+      ${contribHtml}
+
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin:14px 0 4px">Expectancy trend</div>
+      ${trendHtml}
+
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin:14px 0 4px">Grading events</div>
+      ${evHtml}
+    `;
+  } catch (err) {
+    body.innerHTML = '<div style="color:var(--red);font-size:12px">Load failed: ' + err.message + '</div>';
+  }
 }
 
 async function toggleSetup(id, enabled) {

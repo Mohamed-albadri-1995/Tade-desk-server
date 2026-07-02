@@ -102,6 +102,33 @@ try { db.exec('ALTER TABLE trading_setups ADD COLUMN indicator TEXT'); } catch {
 try { db.exec('ALTER TABLE trading_orders ADD COLUMN alpaca_order_id TEXT'); } catch { /* already exists */ }
 try { db.exec('ALTER TABLE trading_positions ADD COLUMN alpaca_order_id TEXT'); } catch { /* already exists */ }
 
+// Migration: grading-loop overrides + auto-pause config on the setup itself.
+//   override_kill_switch  — 1 means ignore the multiplier=0 kill switch and
+//                           trade the setup at signal-grade sizing anyway.
+//                           User escape hatch when they believe the model
+//                           is wrong (e.g. a market-regime shift the sample
+//                           doesn't reflect yet).
+//   auto_pause_c_streak   — number of consecutive C-graded fires that will
+//                           auto-flip enabled=0 on the setup. 0 disables.
+//                           Default 0 so existing setups aren't affected
+//                           until the user opts in per setup.
+try { db.exec('ALTER TABLE trading_setups ADD COLUMN override_kill_switch INTEGER NOT NULL DEFAULT 0'); } catch { /* already exists */ }
+try { db.exec('ALTER TABLE trading_setups ADD COLUMN auto_pause_c_streak INTEGER NOT NULL DEFAULT 0'); } catch { /* already exists */ }
+
+// Event log for grading-loop actions (kill-switch blocks, overrides,
+// auto-pauses). Feeds the UI's "why did this happen" panel.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS trading_grading_events (
+    id TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    setup_id TEXT NOT NULL,
+    kind TEXT NOT NULL,           -- 'kill_block' | 'kill_override' | 'auto_pause' | 'grade_drift'
+    detail TEXT NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX IF NOT EXISTS trading_grading_events_setup_idx
+    ON trading_grading_events(setup_id, ts DESC);
+`);
+
 // Default trading settings
 const tradingDefaults = [
   ['trading_risk_pct', '1.0'],

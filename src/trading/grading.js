@@ -560,6 +560,78 @@ function getCard(id) {
   };
 }
 
+/**
+ * Rolling expectancy trend for one setup. One point per bucket of
+ * `bucketSize` consecutive closed trades; the chart shows whether the
+ * setup's edge is trending up, flat, or decaying — usually the first
+ * signal that a setup should be retired even before the kill switch
+ * fires.
+ */
+function expectancyTrend(setupId, { account = null, bucketSize = 5, since = null } = {}) {
+  const params = [setupId];
+  let where = 'setup_id = ? AND r_multiple IS NOT NULL';
+  if (account) { where += ' AND account = ?'; params.push(account); }
+  if (since)   { where += ' AND closed_at >= ?'; params.push(since); }
+  const rows = db.prepare(`
+    SELECT r_multiple AS r, closed_at
+      FROM trade_cards
+     WHERE ${where}
+     ORDER BY closed_at ASC
+  `).all(...params);
+  const points = [];
+  for (let i = bucketSize; i <= rows.length; i += bucketSize) {
+    const slice = rows.slice(0, i);
+    const rs = slice.map(x => x.r);
+    const wins = rs.filter(r => r > 0);
+    const losses = rs.filter(r => r < 0);
+    const winRate  = wins.length / rs.length;
+    const avgWinR  = wins.length   ? wins.reduce((s, r) => s + r, 0) / wins.length : 0;
+    const avgLossR = losses.length ? Math.abs(losses.reduce((s, r) => s + r, 0) / losses.length) : 0;
+    const expectancyR = winRate * avgWinR - (1 - winRate) * avgLossR;
+    points.push({ tradeIndex: i, expectancyR, winRate, n: i });
+  }
+  return points;
+}
+
+/**
+ * Return the most recent N grade letters for a setup (oldest → newest).
+ * Feeds the auto-pause loop.
+ */
+function recentGrades(setupId, n = 5) {
+  return db.prepare(`
+    SELECT grade FROM trade_cards
+     WHERE setup_id = ? AND grade IS NOT NULL
+     ORDER BY fired_at DESC LIMIT ?
+  `).all(setupId, n).reverse().map(r => r.grade);
+}
+
+/**
+ * Append a row to trading_grading_events. Thin wrapper so callers don't
+ * have to know the schema.
+ */
+function logEvent(setupId, kind, detail = {}) {
+  db.prepare(`
+    INSERT INTO trading_grading_events (id, ts, setup_id, kind, detail)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(uuidv4(), Date.now(), setupId, kind, JSON.stringify(detail));
+}
+
+function listEvents({ setupId = null, limit = 100 } = {}) {
+  const params = [];
+  let where = '1=1';
+  if (setupId) { where += ' AND setup_id = ?'; params.push(setupId); }
+  const rows = db.prepare(`
+    SELECT * FROM trading_grading_events
+     WHERE ${where}
+     ORDER BY ts DESC LIMIT ?
+  `).all(...params, Math.max(1, Math.min(500, Number(limit) || 100)));
+  return rows.map(r => {
+    let detail = {};
+    try { detail = JSON.parse(r.detail); } catch { /* ignore */ }
+    return { ...r, detail };
+  });
+}
+
 module.exports = {
   createCardForSignal,
   completeCardForPosition,
@@ -570,4 +642,8 @@ module.exports = {
   accountSummary,
   listCards,
   getCard,
+  expectancyTrend,
+  recentGrades,
+  logEvent,
+  listEvents,
 };

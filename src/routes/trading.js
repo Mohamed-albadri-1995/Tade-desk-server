@@ -119,11 +119,13 @@ router.post('/setups', (req, res) => {
 });
 
 router.patch('/setups/:id', (req, res) => {
-  const { name, description, indicator, entry_type, window_start, window_end, enabled, config } = req.body;
+  const { name, description, indicator, entry_type, window_start, window_end, enabled, config,
+          override_kill_switch, auto_pause_c_streak } = req.body;
   const row = db.prepare('SELECT * FROM trading_setups WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Setup not found' });
   db.prepare(`
-    UPDATE trading_setups SET name=?, description=?, indicator=?, entry_type=?, window_start=?, window_end=?, enabled=?, config=?
+    UPDATE trading_setups SET name=?, description=?, indicator=?, entry_type=?, window_start=?, window_end=?, enabled=?, config=?,
+      override_kill_switch=?, auto_pause_c_streak=?
     WHERE id=?
   `).run(
     name ?? row.name,
@@ -134,6 +136,8 @@ router.patch('/setups/:id', (req, res) => {
     window_end ?? row.window_end,
     enabled != null ? (enabled ? 1 : 0) : row.enabled,
     config ? JSON.stringify(config) : row.config,
+    override_kill_switch != null ? (override_kill_switch ? 1 : 0) : (row.override_kill_switch || 0),
+    auto_pause_c_streak != null ? Math.max(0, parseInt(auto_pause_c_streak, 10) || 0) : (row.auto_pause_c_streak || 0),
     req.params.id
   );
   setupEngine.loadSetups();
@@ -443,6 +447,38 @@ router.get('/grading/setup/:setupId', (req, res) => {
 router.get('/grading/setup/:setupId/checks', (req, res) => {
   const account = req.query.account || null;
   res.json({ ok: true, contributions: grading.checkContributions(req.params.setupId, { account }) });
+});
+// One call returns the kill / multiplier state for EVERY setup so the
+// setups list can badge them without N round trips.
+router.get('/grading/setups-status', (req, res) => {
+  const account = req.query.account || null;
+  const rows = db.prepare('SELECT id, override_kill_switch FROM trading_setups').all();
+  const status = {};
+  for (const r of rows) {
+    try {
+      const m = grading.setupSizeMultiplier(r.id, { account });
+      status[r.id] = {
+        multiplier:     m.multiplier,
+        reason:         m.reason,
+        killed:         m.multiplier === 0,
+        override:       r.override_kill_switch === 1,
+        n:              m.stats?.n ?? 0,
+        expectancyR:    m.stats?.expectancyR ?? null,
+        grade:          m.stats?.grade ?? null,
+      };
+    } catch { status[r.id] = null; }
+  }
+  res.json({ ok: true, status });
+});
+router.get('/grading/setup/:setupId/trend', (req, res) => {
+  const account = req.query.account || null;
+  const bucketSize = Math.max(1, Math.min(50, parseInt(req.query.bucket || '5', 10)));
+  res.json({ ok: true, trend: grading.expectancyTrend(req.params.setupId, { account, bucketSize }) });
+});
+router.get('/grading/events', (req, res) => {
+  const setupId = req.query.setupId || null;
+  const limit   = parseInt(req.query.limit || '100', 10);
+  res.json({ ok: true, events: grading.listEvents({ setupId, limit }) });
 });
 router.post('/grading/preview', (req, res) => {
   try {

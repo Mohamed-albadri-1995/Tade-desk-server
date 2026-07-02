@@ -264,10 +264,23 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
     try {
       // Setup-level expectancy multiplier (default 1.0; only moves once
       // we have enough closed trades — see grading.setupSizeMultiplier).
+      // Kill-switch produces multiplier 0. A per-setup override flag lets
+      // the user force the setup back to its grade-based multiplier (1.0×
+      // in this case since C is the max the killed setup would grade to).
       let setupMult = 1.0;
       try {
         const sm = grading.setupSizeMultiplier(setupId, { account: signal.account || null });
-        setupMult = sm.multiplier;
+        const setupRow = db.prepare('SELECT override_kill_switch FROM trading_setups WHERE id = ?').get(setupId);
+        const isKill = sm.multiplier === 0;
+        if (isKill && setupRow?.override_kill_switch === 1) {
+          setupMult = 1.0;
+          grading.logEvent(setupId, 'kill_override', { reason: sm.reason, expectancyR: sm.stats?.expectancyR, n: sm.stats?.n });
+        } else if (isKill) {
+          setupMult = 0;
+          grading.logEvent(setupId, 'kill_block', { reason: sm.reason, expectancyR: sm.stats?.expectancyR, n: sm.stats?.n });
+        } else {
+          setupMult = sm.multiplier;
+        }
       } catch { /* keep 1.0 */ }
 
       sizing = sizer.calculate({
@@ -360,6 +373,25 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
       });
     } catch (err) {
       console.warn('[Router] Trade card creation failed:', err.message);
+    }
+
+    // Auto-pause on grade drift — if the setup has an auto_pause_c_streak
+    // threshold set AND the last N fires (including this one) all graded C,
+    // flip enabled=0 so the setup stops signalling until the user reviews
+    // it. Cheap safeguard against setups whose edge silently decays.
+    try {
+      const setupRow = db.prepare('SELECT auto_pause_c_streak, enabled FROM trading_setups WHERE id = ?').get(setupId);
+      const threshold = setupRow?.auto_pause_c_streak || 0;
+      if (setupRow?.enabled === 1 && threshold > 0 && liveGrade?.grade === 'C') {
+        const recent = grading.recentGrades(setupId, threshold);
+        if (recent.length === threshold && recent.every(g => g === 'C')) {
+          db.prepare('UPDATE trading_setups SET enabled = 0 WHERE id = ?').run(setupId);
+          grading.logEvent(setupId, 'auto_pause', { streak: threshold, grades: recent });
+          console.log(`[Router] Auto-paused setup ${setupId}: ${threshold} consecutive C grades`);
+        }
+      }
+    } catch (err) {
+      console.warn('[Router] Auto-pause check failed:', err.message);
     }
 
     // Broker fanout — a profile's `env` decides which execution mode it
