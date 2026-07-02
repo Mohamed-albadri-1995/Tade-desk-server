@@ -260,7 +260,7 @@ function _startPollingMode(sessionId, tickers, setups, onSignalFired) {
 
 // ─── WebSocket mode ─────────────────────────────────────────────────────────
 
-async function _seedBufferFromHttp(tickers) {
+async function _seedBufferFromHttp(tickers, setups, sessionId, onSignalFired) {
   const date = toETDate(Date.now());
   try {
     const barsByTicker = await fetchIntradayBars(tickers, date);
@@ -269,14 +269,31 @@ async function _seedBufferFromHttp(tickers) {
       _barBuffer.set(ticker, bars.slice(-MAX_BUFFERED_BARS));
     }
     console.log('[BarPoller/WS] Seeded buffer for', tickers.length, 'tickers');
+    // Run one immediate evaluation off the seed so the UI leaves the
+    // "pending first poll…" state even when the WebSocket is silent
+    // (market closed, low-volume tickers, weekend testing). Without this,
+    // users see Poll #0 for hours with no signal that anything is
+    // actually working.
+    if (setups && sessionId && onSignalFired) {
+      for (const ticker of tickers) {
+        _evaluateTicker(ticker, _barBuffer.get(ticker) || [], setups, sessionId, onSignalFired);
+      }
+    }
   } catch (err) {
     console.warn('[BarPoller/WS] Buffer seed failed:', err.message);
+    _status.lastPollError = err.message;
+  } finally {
+    // Mark the initial seed as poll #1 so the UI reflects that the
+    // session has actually done work. Subsequent bar arrivals still
+    // bump pollCount, so the counter tracks activity going forward.
+    _status.pollCount++;
+    _status.lastPollAt = Date.now();
   }
 }
 
 function _startWsMode(sessionId, tickers, setups, onSignalFired) {
   _barBuffer.clear();
-  _seedBufferFromHttp(tickers);
+  _seedBufferFromHttp(tickers, setups, sessionId, onSignalFired);
 
   _wsClient = new AlpacaStream({
     tickers,
