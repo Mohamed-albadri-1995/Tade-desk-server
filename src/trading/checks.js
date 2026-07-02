@@ -292,7 +292,7 @@ const SEED_CHECKS = [
     description: 'Prev bar wick tagged the daily VWAP, 2-day VWAP, AND LL AVWAP simultaneously — a stacked confluence pullback, not just a random VWAP kiss.',
     condition: {
       op: 'and',
-      children: [
+      operands: [
         { op: 'eq', left: { field: 'touchedDv' }, right: { literal: true } },
         { op: 'eq', left: { field: 'touchedV2' }, right: { literal: true } },
         { op: 'eq', left: { field: 'touchedAv' }, right: { literal: true } },
@@ -317,7 +317,7 @@ const SEED_CHECKS = [
     description: 'Close is above daily VWAP AND 2-day VWAP AND LL AVWAP AND BB EMA. Full L3 strict-bias filter; needs multi-day historical cache warm.',
     condition: {
       op: 'and',
-      children: [
+      operands: [
         { op: 'gt', left: { field: 'close' }, right: { field: 'daily_vwap' } },
         { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_2day' } },
         { op: 'gt', left: { field: 'close' }, right: { field: 'll_avwap' } },
@@ -334,7 +334,7 @@ const SEED_CHECKS = [
     description: 'Distance from entry (close) to BB upper is at least $1.00. Filters fires where the trade is already extended toward the band and would run out of room before hitting target.',
     condition: {
       op: 'ge',
-      left:  { op: 'sub', operands: [{ field: 'bb_upper' }, { field: 'close' }] },
+      left:  { expr: 'sub', operands: [{ field: 'bb_upper' }, { field: 'close' }] },
       right: { literal: 1.00 },
     },
   },
@@ -347,7 +347,7 @@ const SEED_CHECKS = [
     description: 'daily VWAP > 2-day VWAP AND 2-day VWAP > LL AVWAP — all three anchors stacked upward, confirming a coherent trend rather than a chop bounce.',
     condition: {
       op: 'and',
-      children: [
+      operands: [
         { op: 'gt', left: { field: 'daily_vwap' }, right: { field: 'vwap_2day' } },
         { op: 'gt', left: { field: 'vwap_2day' }, right: { field: 'll_avwap' } },
       ],
@@ -377,7 +377,7 @@ const SEED_CHECKS = [
     description: 'MA touched was the shorter SMA9 or SMA13. Faster bounce, usually a lower-conviction setup — grade this against SMA20 fires to see if it earns its own multiplier.',
     condition: {
       op: 'or',
-      children: [
+      operands: [
         { op: 'eq', left: { field: 'maHit' }, right: { literal: 'SMA9' } },
         { op: 'eq', left: { field: 'maHit' }, right: { literal: 'SMA13' } },
       ],
@@ -401,8 +401,8 @@ const SEED_CHECKS = [
     description: 'Signal-bar body was ≥ 0.5 × ATR14 (vs the 0.2 × Pine mandatory). Filters for emphatic bounce/reject candles rather than marginal ones.',
     condition: {
       op: 'ge',
-      left:  { op: 'abs', operands: [{ op: 'sub', operands: [{ field: 'close' }, { field: 'open' }] }] },
-      right: { op: 'mul', operands: [{ field: 'atr14' }, { literal: 0.5 }] },
+      left:  { expr: 'abs', operand: { expr: 'sub', operands: [{ field: 'close' }, { field: 'open' }] } },
+      right: { expr: 'mul', operands: [{ field: 'atr14' }, { literal: 0.5 }] },
     },
   },
   {
@@ -414,8 +414,8 @@ const SEED_CHECKS = [
     description: 'Close is at least 1.5 stdev outside daily VWAP (vs the Pine 0.8σ mandatory). Confirms the σ-band gate fired with real conviction, not marginally.',
     condition: {
       op: 'ge',
-      left:  { op: 'abs', operands: [{ op: 'sub', operands: [{ field: 'close' }, { field: 'daily_vwap' }] }] },
-      right: { op: 'mul', operands: [{ field: 'vwap_stdev' }, { literal: 1.5 }] },
+      left:  { expr: 'abs', operand: { expr: 'sub', operands: [{ field: 'close' }, { field: 'daily_vwap' }] } },
+      right: { expr: 'mul', operands: [{ field: 'vwap_stdev' }, { literal: 1.5 }] },
     },
   },
   {
@@ -427,7 +427,7 @@ const SEED_CHECKS = [
     description: 'SMA9 > SMA13 > SMA20 at fire time — the moving averages are stacked in trend order, confirming a bullish structure for longs.',
     condition: {
       op: 'and',
-      children: [
+      operands: [
         { op: 'gt', left: { field: 'sma9' },  right: { field: 'sma13' } },
         { op: 'gt', left: { field: 'sma13' }, right: { field: 'sma20' } },
       ],
@@ -442,7 +442,7 @@ const SEED_CHECKS = [
     description: 'SMA9 < SMA13 < SMA20 at fire time — MAs stacked in short direction, confirming a bearish structure.',
     condition: {
       op: 'and',
-      children: [
+      operands: [
         { op: 'lt', left: { field: 'sma9' },  right: { field: 'sma13' } },
         { op: 'lt', left: { field: 'sma13' }, right: { field: 'sma20' } },
       ],
@@ -482,7 +482,7 @@ const SEED_CHECKS = [
     description: 'Scanner sector bias is BULLISH AND the sector is currently hot. Both conditions catch stocks riding a broader move, not just isolated pops.',
     condition: {
       op: 'and',
-      children: [
+      operands: [
         { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BULLISH' } },
         { op: 'eq', left: { ctx: 'secHot' }, right: { literal: true } },
       ],
@@ -497,9 +497,7 @@ const SEED_CHECKS = [
     description: 'Skips longs when the sector is actively bearish. Cheap safety filter that blocks countertrend trades.',
     condition: {
       op: 'not',
-      children: [
-        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BEARISH' } },
-      ],
+      operand: { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BEARISH' } },
     },
   },
   {
@@ -511,7 +509,7 @@ const SEED_CHECKS = [
     description: 'Scanner-side shortTerm AND midTerm biases both say BULLISH. Confirms multi-timeframe alignment before pulling the trigger.',
     condition: {
       op: 'and',
-      children: [
+      operands: [
         { op: 'eq', left: { ctx: 'shortTerm' }, right: { literal: 'BULLISH' } },
         { op: 'eq', left: { ctx: 'midTerm' },   right: { literal: 'BULLISH' } },
       ],
@@ -537,7 +535,7 @@ const SEED_CHECKS = [
     description: 'Sector bias BEARISH AND the sector is hot. Confirms a short is with the sector move, not fighting it.',
     condition: {
       op: 'and',
-      children: [
+      operands: [
         { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BEARISH' } },
         { op: 'eq', left: { ctx: 'secHot' }, right: { literal: true } },
       ],
@@ -552,9 +550,7 @@ const SEED_CHECKS = [
     description: 'Skips shorts when the sector is actively bullish. Cheap safety filter that blocks countertrend shorts.',
     condition: {
       op: 'not',
-      children: [
-        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BULLISH' } },
-      ],
+      operand: { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BULLISH' } },
     },
   },
   {
@@ -566,7 +562,7 @@ const SEED_CHECKS = [
     description: 'shortTerm AND midTerm biases both BEARISH. Multi-timeframe alignment for shorts.',
     condition: {
       op: 'and',
-      children: [
+      operands: [
         { op: 'eq', left: { ctx: 'shortTerm' }, right: { literal: 'BEARISH' } },
         { op: 'eq', left: { ctx: 'midTerm' },   right: { literal: 'BEARISH' } },
       ],
@@ -618,6 +614,76 @@ function seedDefaults() {
     }
   });
   backfill();
+
+  // One-time repair: earlier Batch 3 seeds shipped with `children` instead
+  // of `operands` for and/or combinators. The evaluator only reads
+  // `operands`, so those DB rows were saved but silently non-functional AND
+  // couldn't be re-saved from the editor (validator rejected them). Rewrite
+  // any surviving row so the JSON matches the grammar. Safe to run every
+  // boot — a no-op once the payload is clean.
+  // Arithmetic nodes belong in the `expr` slot (a value kind), not `op`
+  // (which is reserved for the comparison / combinator layer). Earlier
+  // seeds got this wrong so we detect the shape and rewrite it.
+  const EXPR_OPS_REPAIR = new Set(['add','sub','mul','div','min','max','abs','neg','pct_change','avg','weighted_avg']);
+  const repairNode = (node) => {
+    if (!node || typeof node !== 'object') return node;
+    // `children` → `operands` for and/or
+    if (Array.isArray(node.children) && !node.operands) {
+      node.operands = node.children;
+      delete node.children;
+    }
+    // Arithmetic op leaked into the `op` slot → move to `expr`.
+    if (typeof node.op === 'string' && EXPR_OPS_REPAIR.has(node.op) && !node.expr) {
+      node.expr = node.op;
+      delete node.op;
+    }
+    // `not` with operands array → single `operand`.
+    if (node.op === 'not' && Array.isArray(node.operands) && !node.operand) {
+      node.operand = node.operands[0];
+      delete node.operands;
+    }
+    // Unary arithmetic (`abs`/`neg`) stored with `operands` array →
+    // singular `operand`, per the grammar.
+    if ((node.expr === 'abs' || node.expr === 'neg') && Array.isArray(node.operands) && !node.operand) {
+      node.operand = node.operands[0];
+      delete node.operands;
+    }
+    if (Array.isArray(node.operands)) node.operands = node.operands.map(repairNode);
+    if (node.operand) node.operand = repairNode(node.operand);
+    if (node.left)    node.left    = repairNode(node.left);
+    if (node.right)   node.right   = repairNode(node.right);
+    return node;
+  };
+  const fixStmt = db.prepare('UPDATE check_library SET condition = ?, condition_long = ?, condition_short = ? WHERE id = ?');
+  const repair = db.transaction(() => {
+    // Broad LIKE-net catches anything worth revisiting; the per-row payload
+    // is only rewritten if repairNode actually changed something. Explicit
+    // OR list beats a slow LIKE '%op%' scan and keeps the migration cheap.
+    const netLikes = [
+      "condition LIKE '%\"children\"%'",
+      "condition_long LIKE '%\"children\"%'",
+      "condition_short LIKE '%\"children\"%'",
+      "condition LIKE '%\"op\":\"abs\"%'",
+      "condition LIKE '%\"op\":\"sub\"%'",
+      "condition LIKE '%\"op\":\"mul\"%'",
+      "condition LIKE '%\"op\":\"add\"%'",
+      "condition LIKE '%\"op\":\"div\"%'",
+      "condition LIKE '%\"op\":\"neg\"%'",
+      "condition LIKE '%\"op\":\"min\"%'",
+      "condition LIKE '%\"op\":\"max\"%'",
+      "(condition LIKE '%\"not\"%' AND condition LIKE '%\"operands\"%')",
+    ];
+    const rows = db.prepare(`SELECT id, condition, condition_long, condition_short FROM check_library WHERE ${netLikes.join(' OR ')}`).all();
+    for (const r of rows) {
+      const patch = (raw) => {
+        if (!raw) return raw;
+        try { return JSON.stringify(repairNode(JSON.parse(raw))); } catch { return raw; }
+      };
+      fixStmt.run(patch(r.condition), patch(r.condition_long), patch(r.condition_short), r.id);
+    }
+    if (rows.length) console.log(`[Checks] repaired ${rows.length} rows (children→operands / not shape)`);
+  });
+  repair();
 }
 seedDefaults();
 
