@@ -819,11 +819,17 @@ body {
             <textarea id="check-condition-short" rows="4" placeholder='{ "op": "lt", "left": { "field": "ema9" }, "right": { "field": "vwap" } }' style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:monospace;font-size:12px;width:100%"></textarea>
           </div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <button class="an-btn primary" onclick="saveCheck()">Save</button>
-          <button class="an-btn" onclick="testCheck()">Test</button>
-          <button class="an-btn" onclick="closeCheckEditor()">Cancel</button>
-          <span id="check-status" style="font-size:12px;color:var(--text3)"></span>
+        <!-- Sticky action bar — pinned to the bottom of the modal so
+             Save is always tappable no matter how tall the form gets.
+             Critical on mobile where paired-variation textareas push
+             the buttons off-screen. -->
+        <div style="position:sticky;bottom:-14px;background:var(--bg2);border-top:1px solid var(--border);padding:10px 16px;margin:10px -16px -14px;z-index:2">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="an-btn primary" onclick="saveCheck()">Save</button>
+            <button class="an-btn" onclick="testCheck()">Test</button>
+            <button class="an-btn" onclick="closeCheckEditor()">Cancel</button>
+            <span id="check-status" style="font-size:12px;color:var(--text3)"></span>
+          </div>
         </div>
         <div id="check-test-result" style="display:none;margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:12px"></div>
       </div>
