@@ -568,6 +568,241 @@ const SEED_CHECKS = [
       ],
     },
   },
+
+  // ── Batch 4 · Multi-day / multi-week / premarket levels ─────────────────
+  // These reference fields materialised by dailyLevels.computeLevels() at
+  // fire time, so every setup can use them regardless of which indicator
+  // engine fired. Formulas mirror the L3 / VWAP Cluster / H-L Pine scripts.
+
+  {
+    check_key: 'above_5day_ma',
+    label:     '5-Day MA · price above',
+    category:  'additional',
+    section:   'trend',
+    direction: 'both',
+    description: 'Close is above the 1950-bar SMA (5 trading days on 1m). Mirrors the VWAP Cluster "Above 5D MA" extra nuance.',
+    condition:       { op: 'gt', left: { field: 'close' }, right: { field: 'ma5day' } },
+    condition_long:  { op: 'gt', left: { field: 'close' }, right: { field: 'ma5day' } },
+    condition_short: { op: 'lt', left: { field: 'close' }, right: { field: 'ma5day' } },
+  },
+  {
+    check_key: '5day_ma_rising',
+    label:     '5-Day MA · rising',
+    category:  'additional',
+    section:   'trend',
+    direction: 'both',
+    description: 'Positive/negative slope over the last 60 bars — mirrors the Cluster "5D MA Rising / Falling" extra.',
+    condition:       { op: 'gt', left: { field: 'ma5day_slope' }, right: { literal: 0 } },
+    condition_long:  { op: 'gt', left: { field: 'ma5day_slope' }, right: { literal: 0 } },
+    condition_short: { op: 'lt', left: { field: 'ma5day_slope' }, right: { literal: 0 } },
+  },
+  {
+    check_key: 'above_2day_vwap',
+    label:     '2-Day VWAP · price above',
+    category:  'additional',
+    section:   'trend',
+    direction: 'both',
+    description: 'Close vs 2-day anchored VWAP. Long variant: above. Short variant: below.',
+    condition:       { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_2day' } },
+    condition_long:  { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_2day' } },
+    condition_short: { op: 'lt', left: { field: 'close' }, right: { field: 'vwap_2day' } },
+  },
+  {
+    check_key: 'above_week_vwap',
+    label:     'Weekly VWAP · price above',
+    category:  'additional',
+    section:   'trend',
+    direction: 'both',
+    description: 'Close vs current-week VWAP. Paired: long checks above, short checks below.',
+    condition:       { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_week' } },
+    condition_long:  { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_week' } },
+    condition_short: { op: 'lt', left: { field: 'close' }, right: { field: 'vwap_week' } },
+  },
+  {
+    check_key: 'above_month_vwap',
+    label:     'Monthly VWAP · price above',
+    category:  'additional',
+    section:   'trend',
+    direction: 'both',
+    description: 'Close vs current-month VWAP. Longest-horizon anchor available; paired long/short.',
+    condition:       { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_month' } },
+    condition_long:  { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_month' } },
+    condition_short: { op: 'lt', left: { field: 'close' }, right: { field: 'vwap_month' } },
+  },
+  {
+    check_key: 'above_prev_day_high',
+    label:     'Prior day high · broken',
+    category:  'additional',
+    section:   'levels',
+    direction: 'long',
+    description: 'Close above yesterday\'s regular-session high. Continuation/breakout confirmation for longs.',
+    condition: { op: 'gt', left: { field: 'close' }, right: { field: 'prev_day_high' } },
+  },
+  {
+    check_key: 'below_prev_day_low',
+    label:     'Prior day low · broken',
+    category:  'additional',
+    section:   'levels',
+    direction: 'short',
+    description: 'Close below yesterday\'s regular-session low. Breakdown confirmation for shorts.',
+    condition: { op: 'lt', left: { field: 'close' }, right: { field: 'prev_day_low' } },
+  },
+  {
+    check_key: 'above_premarket_high',
+    label:     'Premarket high · broken',
+    category:  'additional',
+    section:   'levels',
+    direction: 'long',
+    description: 'Close above today\'s premarket (04:00–09:29 ET) high. Fresh breakout confirmation.',
+    condition: { op: 'gt', left: { field: 'close' }, right: { field: 'premarket_high' } },
+  },
+  {
+    check_key: 'below_premarket_low',
+    label:     'Premarket low · broken',
+    category:  'additional',
+    section:   'levels',
+    direction: 'short',
+    description: 'Close below today\'s premarket low. Breakdown confirmation for shorts.',
+    condition: { op: 'lt', left: { field: 'close' }, right: { field: 'premarket_low' } },
+  },
+  {
+    check_key: 'above_week_high',
+    label:     'Weekly high · broken',
+    category:  'additional',
+    section:   'levels',
+    direction: 'long',
+    description: 'Close above the current week\'s prior high — swing-level breakout.',
+    condition: { op: 'gt', left: { field: 'close' }, right: { field: 'week_high' } },
+  },
+  {
+    check_key: 'below_week_low',
+    label:     'Weekly low · broken',
+    category:  'additional',
+    section:   'levels',
+    direction: 'short',
+    description: 'Close below the current week\'s prior low — swing-level breakdown.',
+    condition: { op: 'lt', left: { field: 'close' }, right: { field: 'week_low' } },
+  },
+  {
+    check_key: 'above_month_high',
+    label:     'Monthly high · broken',
+    category:  'additional',
+    section:   'levels',
+    direction: 'long',
+    description: 'Close above the current month\'s prior high — highest-horizon breakout signal.',
+    condition: { op: 'gt', left: { field: 'close' }, right: { field: 'month_high' } },
+  },
+  {
+    check_key: 'below_month_low',
+    label:     'Monthly low · broken',
+    category:  'additional',
+    section:   'levels',
+    direction: 'short',
+    description: 'Close below the current month\'s prior low — highest-horizon breakdown.',
+    condition: { op: 'lt', left: { field: 'close' }, right: { field: 'month_low' } },
+  },
+
+  // ── Batch 5 · Compound "high-confluence" filters ────────────────────────
+  // Layered ANDs of Batch 4 levels + Batch 3 market context, matched to
+  // the kinds of setups you actually run. Each of these is a much stricter
+  // gate than any single check — expected to hit less often but with
+  // meaningfully higher expectancy when it does. Grading learns from the
+  // outcomes just like the singletons.
+
+  {
+    check_key: 'long_hi_confluence_5d_and_sector',
+    label:     'Confluence · 5D MA rising + above 5D MA + sector bullish',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Triple-filter for longs: 5-day MA slope positive, close above 5D MA, and scanner sector bias BULLISH.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'ma5day_slope' }, right: { literal: 0 } },
+        { op: 'gt', left: { field: 'close' },        right: { field: 'ma5day' } },
+        { op: 'eq', left: { ctx: 'secBias' },        right: { literal: 'BULLISH' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_hi_confluence_5d_and_sector',
+    label:     'Confluence · 5D MA falling + below 5D MA + sector bearish',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Mirror of the long confluence for shorts: 5-day MA sloping down, close below 5D MA, sector bias BEARISH.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'lt', left: { field: 'ma5day_slope' }, right: { literal: 0 } },
+        { op: 'lt', left: { field: 'close' },        right: { field: 'ma5day' } },
+        { op: 'eq', left: { ctx: 'secBias' },        right: { literal: 'BEARISH' } },
+      ],
+    },
+  },
+  {
+    check_key: 'long_breakout_stack',
+    label:     'Confluence · above premarket + prior-day highs',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Close cleared BOTH today\'s premarket high AND yesterday\'s regular-session high. Classic continuation breakout.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'close' }, right: { field: 'premarket_high' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'prev_day_high' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_breakdown_stack',
+    label:     'Confluence · below premarket + prior-day lows',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Close broke BOTH today\'s premarket low AND yesterday\'s regular-session low.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'lt', left: { field: 'close' }, right: { field: 'premarket_low' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'prev_day_low' } },
+      ],
+    },
+  },
+  {
+    check_key: 'long_multi_vwap_stack',
+    label:     'Confluence · above 1D + 2D + week VWAPs',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'All three timeframe VWAPs aligned bullish — daily, 2-day and weekly anchors below price.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'close' }, right: { field: 'daily_vwap' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_2day' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_week' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_multi_vwap_stack',
+    label:     'Confluence · below 1D + 2D + week VWAPs',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'All three timeframe VWAPs aligned bearish.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'lt', left: { field: 'close' }, right: { field: 'daily_vwap' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'vwap_2day' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'vwap_week' } },
+      ],
+    },
+  },
 ];
 
 function seedDefaults() {

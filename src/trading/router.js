@@ -13,6 +13,7 @@ const sizer = require('./sizer');
 const brokers = require('./brokers');
 const grading = require('./grading');
 const checks  = require('./checks');
+const dailyLevels = require('./dailyLevels');
 const { toETDate } = require('../utils/time');
 
 const SCANNER_URL = process.env.SCANNER_URL || 'http://127.0.0.1:3000';
@@ -190,12 +191,20 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
   let defaultChecks    = [];
   let additionalChecks = signal.additionalChecks || [];
   try {
+    // Materialise broader levels (5D MA, 2D/week/month VWAPs, week/month
+    // H/L, premarket H/L, prev-day H/L) from the already-merged bar
+    // buffer. These aren't published by any single indicator engine but
+    // check_library entries can reference them via `field: 'ma5day'`,
+    // `field: 'premarket_high'`, etc.
+    const derived = dailyLevels.computeLevels(signal.bars || []);
+    const engineExtras = signal.indicators || signal.barData || {};
+    const indicatorExtras = { ...derived, ...engineExtras };
     const collected = checks.collectChecksForFire({
       indicatorEngine: _getIndicatorEngine(setupId),
       bars:            signal.bars || [],
       pmHigh:          signal.pmHigh ?? null,
       setupId,
-      indicatorExtras: signal.indicators || signal.barData || {},
+      indicatorExtras,
       scannerContext:  scannerSnapshot || {},
       historySeries:   signal.history  || {},
       engineCtx:       { rvol: signal.rvol ?? null },
