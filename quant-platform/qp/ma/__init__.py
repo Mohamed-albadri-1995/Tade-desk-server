@@ -2,19 +2,26 @@
 STAGE 5 — Moving Average Library.
 
 One implementation per MA. Every downstream indicator that needs a
-moving average calls into here — nothing re-implements. The library
-grows one function at a time; each new MA must pass validation against
-TradingView before it becomes trusted.
+moving average calls into here — nothing re-implements.
 
-Currently implemented:
-    - sma  (verified against TradingView)
-    - ema  (verified against TradingView)
+Currently:
+    - sma   (rolling mean façade)
+    - ema   (TradingView ta.ema recursion, seeded at x[0])
+    - rma   (Wilder's smoothing, seeded at SMA of first `length`)
+    - wma   (linear weights, oldest→newest)
+    - vwma  (volume-weighted)
+    - hma   (Hull — 2·WMA(half) − WMA(len), re-smoothed by WMA(√len))
 
-Planned (add each in a follow-up commit, one at a time, with
-validation): rma, wma, vwma, hma.
+All expose the same signature `fn(x, length)` except VWMA which needs
+`vwma(price, volume, length)`. Every MA seeds the same way TradingView
+does so downstream chart comparisons match.
 """
 
 from qp.ma.sma import sma
 from qp.ma.ema import ema
+from qp.ma.rma import rma
+from qp.ma.wma import wma
+from qp.ma.vwma import vwma
+from qp.ma.hma import hma
 
-__all__ = ['sma', 'ema']
+__all__ = ['sma', 'ema', 'rma', 'wma', 'vwma', 'hma']
