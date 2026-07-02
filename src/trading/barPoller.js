@@ -123,7 +123,7 @@ function _readSourceSetting() {
 
 function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
   const todayBars = bars || [];
-  const barsReceived = todayBars.length;
+  const barsReceivedLive = todayBars.length;
   const r0row = r0.getRow(ticker);
   const pmHigh = r0row?.stock?.pmHigh ?? null;
 
@@ -133,6 +133,12 @@ function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
   // they only look at the tail.
   const historicalCache = require('./historicalCache');
   const evalBars = historicalCache.mergeWithLive(ticker, todayBars);
+  // The 23-bar minimum gate compares against the MERGED length —
+  // otherwise a warm cache is useless because the gate still fires on
+  // today-only count. That was the bug the user hit: 9:35 start, warmup
+  // completes with 1000+ historical bars, but the gate said "only 4
+  // bars (need 23)" because it was counting today's live buffer only.
+  const barsReceived = evalBars.length;
 
   const latestBar = todayBars[todayBars.length - 1];
   const rvol = (latestBar && latestBar.etTime)
@@ -140,10 +146,12 @@ function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
     : null;
 
   const tickerStatus = {
-    barsReceived,
+    barsReceived,       // merged — what the engines actually see
+    barsReceivedLive,   // today-only — useful for diagnosing live feed
     pmHigh,
     rvol,
     baselineBuilt: volumeBaseline.isBuilt(ticker),
+    cacheReady: historicalCache.isReady(),
     lastCheckedAt: Date.now(),
     setupResults: [],
   };
@@ -161,9 +169,9 @@ function _evaluateTicker(ticker, bars, setups, sessionId, onSignalFired) {
       engineFound: !!engine,
       alreadyFired,
       window:      { start: setup.window_start || '09:35', end: setup.window_end || '10:00', inWindow },
-      skipped:     !engine || !bars || barsReceived < 23 || alreadyFired || !inWindow,
+      skipped:     !engine || barsReceived < 23 || alreadyFired || !inWindow,
       skipReason:  !engine ? 'no engine for setup name'
-                : !bars || barsReceived < 23 ? `only ${barsReceived} bars (need 23)`
+                : barsReceived < 23 ? `only ${barsReceived} bars (need 23) — live ${barsReceivedLive}, cache ${historicalCache.isReady() ? 'ready' : 'warming'}`
                 : alreadyFired ? 'already fired this session'
                 : !inWindow ? `outside setup window (${setup.window_start || '09:35'}–${setup.window_end || '10:00'} ET)`
                 : null,

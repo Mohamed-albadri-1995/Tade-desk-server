@@ -219,6 +219,10 @@ async function refreshShortlist() {
     _session.shortlist = items;
     barPoller.updateTickers(tickers);
     volumeBaseline.ensureBuilt(tickers, toETDate(Date.now())).catch(() => {});
+    // Warm the historical cache for any newly-added tickers so signals
+    // on them satisfy the 23-bar minimum immediately, without burning
+    // the trade window waiting on live bars alone.
+    historicalCache.warmup(tickers, 6).catch(() => {});
     // Kick a fresh context poll so the Market Gate for the new tickers
     // fills in immediately rather than waiting up to 30 s.
     pollContext(tickers).catch(() => {});
@@ -278,6 +282,9 @@ function end(reason = 'manual') {
   clearInterval(_contextPollInterval);
   _contextPollInterval = null;
   barPoller.stop();
+  // Reset the historical cache so tomorrow's session pulls a fresh
+  // 6-day window ending on the correct date rather than reusing today's.
+  historicalCache.clear();
   // brokerSync stays running across pause/end — Alpaca fills can still
   // land afterhours or via manual close on Alpaca's own UI, and we
   // need to keep our local record in sync regardless of session state.
