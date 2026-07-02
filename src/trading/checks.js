@@ -803,6 +803,417 @@ const SEED_CHECKS = [
       ],
     },
   },
+
+  // ── Batch 6 · High-conviction breakout / breakdown filters ──────────────
+  // Volume + level double-filter. A break-of-level without volume is
+  // usually a fake; a break WITH ≥5× RVOL almost never is. Grade this
+  // against the plain premarket_high break to quantify how much the
+  // volume gate actually improves expectancy.
+  {
+    check_key: 'long_breakout_high_conviction',
+    label:     'Confluence · breakout + prior-day break + RVOL ≥ 5',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Close cleared BOTH premarket high AND yesterday\'s regular-session high AND minute-volume is ≥ 5× baseline. High-conviction volume-confirmed breakout.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'close' }, right: { field: 'premarket_high' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'prev_day_high' } },
+        { op: 'ge', left: { field: 'rvol' },  right: { literal: 5 } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_breakdown_high_conviction',
+    label:     'Confluence · breakdown + prior-day break + RVOL ≥ 5',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Mirror: close below premarket low AND prior-day low AND RVOL ≥ 5.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'lt', left: { field: 'close' }, right: { field: 'premarket_low' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'prev_day_low' } },
+        { op: 'ge', left: { field: 'rvol' },  right: { literal: 5 } },
+      ],
+    },
+  },
+
+  // Trend + volume confluence — long-term trend intact AND volume shows up
+  // to confirm today's move. Filters against low-participation drifts that
+  // don't sustain.
+  {
+    check_key: 'long_trend_and_volume',
+    label:     'Confluence · 5D MA rising + above 5D MA + RVOL ≥ 3',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Uptrend intact (5D MA sloping up, price above it) AND today\'s bar volume ≥ 3× baseline. Trend-with-volume.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'ma5day_slope' }, right: { literal: 0 } },
+        { op: 'gt', left: { field: 'close' },        right: { field: 'ma5day' } },
+        { op: 'ge', left: { field: 'rvol' },         right: { literal: 3 } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_trend_and_volume',
+    label:     'Confluence · 5D MA falling + below 5D MA + RVOL ≥ 3',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Downtrend intact + volume confirmation for shorts.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'lt', left: { field: 'ma5day_slope' }, right: { literal: 0 } },
+        { op: 'lt', left: { field: 'close' },        right: { field: 'ma5day' } },
+        { op: 'ge', left: { field: 'rvol' },         right: { literal: 3 } },
+      ],
+    },
+  },
+
+  // Full 4-timeframe VWAP stack — the strictest possible VWAP alignment
+  // filter. Signals that pass this filter are trading with EVERY anchor
+  // supporting the direction: intraday, 2-day, week, and month.
+  {
+    check_key: 'long_full_vwap_stack',
+    label:     'Confluence · above ALL VWAPs (1D + 2D + W + M)',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Close is above the daily, 2-day, weekly AND monthly VWAP. Strictest anchor alignment possible.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'close' }, right: { field: 'daily_vwap' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_2day' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_week' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'vwap_month' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_full_vwap_stack',
+    label:     'Confluence · below ALL VWAPs (1D + 2D + W + M)',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Mirror of the full long stack for shorts.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'lt', left: { field: 'close' }, right: { field: 'daily_vwap' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'vwap_2day' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'vwap_week' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'vwap_month' } },
+      ],
+    },
+  },
+
+  // Multi-timeframe scanner alignment — the scanner separately labels
+  // shortTerm, midTerm and longTerm biases. If all three agree the tape
+  // is fully aligned across timeframes, not just a scalp-worthy blip.
+  {
+    check_key: 'long_mtf_scanner_align',
+    label:     'Confluence · scanner biases (short + mid + long) all BULLISH',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Every scanner-side bias timeframe agrees BULLISH. Multi-horizon confirmation before pulling the trigger.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'eq', left: { ctx: 'shortTerm' }, right: { literal: 'BULLISH' } },
+        { op: 'eq', left: { ctx: 'midTerm' },   right: { literal: 'BULLISH' } },
+        { op: 'eq', left: { ctx: 'longTerm' },  right: { literal: 'BULLISH' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_mtf_scanner_align',
+    label:     'Confluence · scanner biases (short + mid + long) all BEARISH',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'All three scanner timeframes BEARISH.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'eq', left: { ctx: 'shortTerm' }, right: { literal: 'BEARISH' } },
+        { op: 'eq', left: { ctx: 'midTerm' },   right: { literal: 'BEARISH' } },
+        { op: 'eq', left: { ctx: 'longTerm' },  right: { literal: 'BEARISH' } },
+      ],
+    },
+  },
+
+  // Sector + volume — sector context providing the tailwind AND the stock
+  // itself showing volume commitment.
+  {
+    check_key: 'long_sector_theme_confluence',
+    label:     'Confluence · sector BULLISH + hot + RVOL ≥ 3',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Sector bias BULLISH AND sector hot AND today\'s minute volume ≥ 3× baseline. Rides sector momentum with volume confirmation.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BULLISH' } },
+        { op: 'eq', left: { ctx: 'secHot' },  right: { literal: true } },
+        { op: 'ge', left: { field: 'rvol' },   right: { literal: 3 } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_sector_theme_confluence',
+    label:     'Confluence · sector BEARISH + hot + RVOL ≥ 3',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Mirror sector setup for shorts.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BEARISH' } },
+        { op: 'eq', left: { ctx: 'secHot' },  right: { literal: true } },
+        { op: 'ge', left: { field: 'rvol' },   right: { literal: 3 } },
+      ],
+    },
+  },
+
+  // ── Batch 7 · Safety / anti-nonsense filters ────────────────────────────
+  // These skip fires where the setup is technically valid but geometry
+  // says the trade is already extended, unlikely to see follow-through,
+  // or fighting a stronger signal on another timeframe. Same grading
+  // logic — worth attaching them and seeing whether they earn a positive
+  // delta expectancy.
+
+  {
+    check_key: 'long_room_to_run',
+    label:     'Safety · above premarket high + ≥ $0.50 headroom to BB upper',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Breakout above premarket high AND at least $0.50 of BB-upper headroom. Filters entries too close to the band ceiling.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'close' }, right: { field: 'premarket_high' } },
+        {
+          op: 'ge',
+          left: { expr: 'sub', operands: [{ field: 'bb_upper' }, { field: 'close' }] },
+          right: { literal: 0.50 },
+        },
+      ],
+    },
+  },
+  {
+    check_key: 'long_not_extended',
+    label:     'Safety · not > 2σ above daily VWAP',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Close is within 2σ of daily VWAP — filters chase entries after the move has already extended. Uses vwap_stdev when the BBZ engine populates it.',
+    condition: {
+      op: 'le',
+      left:  {
+        expr: 'sub',
+        operands: [{ field: 'close' }, { field: 'daily_vwap' }],
+      },
+      right: {
+        expr: 'mul',
+        operands: [{ field: 'vwap_stdev' }, { literal: 2 }],
+      },
+    },
+  },
+  {
+    check_key: 'short_not_extended',
+    label:     'Safety · not > 2σ below daily VWAP',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Mirror not-extended filter for shorts.',
+    condition: {
+      op: 'le',
+      left:  {
+        expr: 'sub',
+        operands: [{ field: 'daily_vwap' }, { field: 'close' }],
+      },
+      right: {
+        expr: 'mul',
+        operands: [{ field: 'vwap_stdev' }, { literal: 2 }],
+      },
+    },
+  },
+
+  // Gap-up sustained — the classic morning setup. Gap opened above prior
+  // day high, price has NOT filled back down through it. Long-only.
+  {
+    check_key: 'long_gap_up_sustained',
+    label:     'Confluence · above premarket + prior-day CLOSE (gap held)',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Above today\'s premarket high AND holding above yesterday\'s close — gap-up hasn\'t filled, momentum intact.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'close' }, right: { field: 'premarket_high' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'prevClose' } },
+      ],
+    },
+  },
+
+  // Triple-break — premarket + prior-day + prior-week highs all cleared.
+  // The stock has broken out on every horizon the day-trader cares about.
+  {
+    check_key: 'long_triple_break',
+    label:     'Confluence · above premarket + prev-day + week highs',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Close cleared THREE breakout levels simultaneously: today\'s premarket, yesterday\'s, and this week\'s. Rare, high-confluence.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'close' }, right: { field: 'premarket_high' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'prev_day_high' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'week_high' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_triple_break',
+    label:     'Confluence · below premarket + prev-day + week lows',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Mirror triple-breakdown for shorts.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'lt', left: { field: 'close' }, right: { field: 'premarket_low' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'prev_day_low' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'week_low' } },
+      ],
+    },
+  },
+
+  // Fresh-breakout with sector tailwind. Combines the breakout stack
+  // (premarket + prior-day) with an actively bullish sector context.
+  {
+    check_key: 'long_breakout_with_sector',
+    label:     'Confluence · breakout stack + sector BULLISH',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Premarket + prior-day break AND sector bias BULLISH. Breakout with sector on your side.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'close' }, right: { field: 'premarket_high' } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'prev_day_high' } },
+        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BULLISH' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_breakdown_with_sector',
+    label:     'Confluence · breakdown stack + sector BEARISH',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Mirror breakdown with sector alignment.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'lt', left: { field: 'close' }, right: { field: 'premarket_low' } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'prev_day_low' } },
+        { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BEARISH' } },
+      ],
+    },
+  },
+
+  // Not-against-sector safety — trade doesn't have to be WITH sector but
+  // it can't be AGAINST it. Cheap safety filter to attach broadly.
+  {
+    check_key: 'long_no_sector_headwind',
+    label:     'Safety · sector NOT bearish AND price above prev-day close',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Sector isn\'t actively bearish AND close holding above yesterday\'s close. Blocks countertrend longs into a losing tape.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'not', operand: { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BEARISH' } } },
+        { op: 'gt', left: { field: 'close' }, right: { field: 'prevClose' } },
+      ],
+    },
+  },
+  {
+    check_key: 'short_no_sector_headwind',
+    label:     'Safety · sector NOT bullish AND price below prev-day close',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Mirror safety filter for shorts.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'not', operand: { op: 'eq', left: { ctx: 'secBias' }, right: { literal: 'BULLISH' } } },
+        { op: 'lt', left: { field: 'close' }, right: { field: 'prevClose' } },
+      ],
+    },
+  },
+
+  // Pullback-in-uptrend / bounce-in-downtrend — the classic non-breakout
+  // setup. Trend intact (5D MA rising) but price has come back to touch
+  // an anchor VWAP, offering a lower-risk re-entry.
+  {
+    check_key: 'long_pullback_in_uptrend',
+    label:     'Confluence · 5D rising + close near daily VWAP',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'long',
+    description: 'Uptrend intact (5D MA rising) AND close within 0.5× ATR of daily VWAP. Pullback entry into an existing trend rather than chasing a breakout.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'gt', left: { field: 'ma5day_slope' }, right: { literal: 0 } },
+        {
+          op: 'le',
+          left: { expr: 'abs', operand: { expr: 'sub', operands: [{ field: 'close' }, { field: 'daily_vwap' }] } },
+          right: { expr: 'mul', operands: [{ field: 'atr14' }, { literal: 0.5 }] },
+        },
+      ],
+    },
+  },
+  {
+    check_key: 'short_bounce_in_downtrend',
+    label:     'Confluence · 5D falling + close near daily VWAP',
+    category:  'additional',
+    section:   'confluence',
+    direction: 'short',
+    description: 'Downtrend intact AND close bouncing back to daily VWAP — mean-revert short in an established downtrend.',
+    condition: {
+      op: 'and',
+      operands: [
+        { op: 'lt', left: { field: 'ma5day_slope' }, right: { literal: 0 } },
+        {
+          op: 'le',
+          left: { expr: 'abs', operand: { expr: 'sub', operands: [{ field: 'close' }, { field: 'daily_vwap' }] } },
+          right: { expr: 'mul', operands: [{ field: 'atr14' }, { literal: 0.5 }] },
+        },
+      ],
+    },
+  },
 ];
 
 function seedDefaults() {
@@ -909,14 +1320,25 @@ function seedDefaults() {
       "(condition LIKE '%\"not\"%' AND condition LIKE '%\"operands\"%')",
     ];
     const rows = db.prepare(`SELECT id, condition, condition_long, condition_short FROM check_library WHERE ${netLikes.join(' OR ')}`).all();
+    let touched = 0;
     for (const r of rows) {
       const patch = (raw) => {
         if (!raw) return raw;
         try { return JSON.stringify(repairNode(JSON.parse(raw))); } catch { return raw; }
       };
-      fixStmt.run(patch(r.condition), patch(r.condition_long), patch(r.condition_short), r.id);
+      const nextC  = patch(r.condition);
+      const nextCL = patch(r.condition_long);
+      const nextCS = patch(r.condition_short);
+      // Only touch the row if any slot actually changed. Prevents phantom
+      // "repaired N" messages from LIKE-net false positives on payloads
+      // that happen to contain a substring like `"op":"sub"` inside a
+      // string field (description, label) without any real shape bug.
+      if (nextC !== r.condition || nextCL !== r.condition_long || nextCS !== r.condition_short) {
+        fixStmt.run(nextC, nextCL, nextCS, r.id);
+        touched++;
+      }
     }
-    if (rows.length) console.log(`[Checks] repaired ${rows.length} rows (children→operands / not shape)`);
+    if (touched) console.log(`[Checks] repaired ${touched} rows (children→operands / not shape / arithmetic op→expr)`);
   });
   repair();
 }
