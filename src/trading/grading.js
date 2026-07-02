@@ -238,7 +238,12 @@ function _getIntSetting(key, fallback) {
 }
 
 /**
- * Setup-level stats over the pool of closed trade cards.
+ * Setup-level stats over the pool of closed trade cards. Journal-analysis
+ * style: everything a trader would look at when deciding whether a setup
+ * is working — win rate, average win/loss R, expectancyR, profit factor,
+ * max drawdown in R, longest losing streak. All feed the multiplier
+ * decision downstream.
+ *
  * account: optional filter — 'account = ?'
  */
 function setupExpectancy(setupId, { account = null, since = null } = {}) {
@@ -247,10 +252,15 @@ function setupExpectancy(setupId, { account = null, since = null } = {}) {
   if (account) { where += ' AND account = ?'; params.push(account); }
   if (since)   { where += ' AND closed_at >= ?'; params.push(since); }
 
-  const rows = db.prepare(`SELECT r_multiple FROM trade_cards WHERE ${where}`).all(...params);
+  const rows = db.prepare(`SELECT r_multiple, closed_at FROM trade_cards WHERE ${where} ORDER BY closed_at ASC`).all(...params);
   const n = rows.length;
   if (n === 0) {
-    return { setupId, account, n: 0, expectancyR: null, winRate: null, avgWinR: null, avgLossR: null, grade: 'B (bootstrapping)' };
+    return {
+      setupId, account, n: 0,
+      expectancyR: null, winRate: null, avgWinR: null, avgLossR: null,
+      profitFactor: null, maxDrawdownR: null, longestLossStreak: null,
+      grade: 'B (bootstrapping)',
+    };
   }
 
   const rs = rows.map(r => r.r_multiple);
@@ -261,10 +271,41 @@ function setupExpectancy(setupId, { account = null, since = null } = {}) {
   const avgLossR = losses.length ? Math.abs(losses.reduce((s, r) => s + r, 0) / losses.length) : 0;
   const expectancyR = winRate * avgWinR - (1 - winRate) * avgLossR;
 
+  // Profit factor = sum of R won / |sum of R lost|. > 1 = net winning.
+  // Null when there are no losses (early tiny sample; would divide by 0).
+  const grossWinR  = wins.reduce((s, r) => s + r, 0);
+  const grossLossR = losses.reduce((s, r) => s + Math.abs(r), 0);
+  const profitFactor = grossLossR > 0 ? grossWinR / grossLossR : null;
+
+  // Peak-to-trough drawdown of the cumulative R equity curve. Answers
+  // "if I'd been running this setup live, how many R deep was my worst
+  // drawdown?" — a stronger risk signal than raw expectancy alone.
+  let peakR = 0, cumR = 0, maxDD = 0;
+  let currLoseStreak = 0, longestLoseStreak = 0;
+  for (const r of rs) {
+    cumR += r;
+    if (cumR > peakR) peakR = cumR;
+    const dd = peakR - cumR;
+    if (dd > maxDD) maxDD = dd;
+    if (r < 0) {
+      currLoseStreak++;
+      if (currLoseStreak > longestLoseStreak) longestLoseStreak = currLoseStreak;
+    } else {
+      currLoseStreak = 0;
+    }
+  }
+
   const minTrades = _getIntSetting('grading_min_setup_trades', 20);
   const grade = _classifySetup(expectancyR, winRate, n, minTrades);
 
-  return { setupId, account, n, winRate, avgWinR, avgLossR, expectancyR, grade };
+  return {
+    setupId, account, n,
+    winRate, avgWinR, avgLossR, expectancyR,
+    profitFactor,
+    maxDrawdownR:      parseFloat(maxDD.toFixed(2)),
+    longestLossStreak: longestLoseStreak,
+    grade,
+  };
 }
 
 function _classifySetup(expectancyR, winRate, n, minTrades) {
@@ -278,14 +319,33 @@ function _classifySetup(expectancyR, winRate, n, minTrades) {
 /**
  * Multiplier the setup contributes to base position size.
  *
- * Design (per user's rule): default is 1.0 and stays 1.0 until we have
- * enough closed trades on this setup to trust an expectancy measurement.
- * Only once the sample size crosses `grading_min_setup_trades` do we
- * start to scale (or, at the extreme, kill).
+ * Journal-analysis style: instead of mapping the letter grade to a fixed
+ * table, we compute the multiplier directly from the three metrics a
+ * trader actually cares about — expectancyR, win rate, and drawdown.
+ * Each contributes a factor in [0.5, 1.5] and they multiply, then the
+ * final result is clamped to [0, 1.5]. That way a setup with strong
+ * expectancy but a scary drawdown gets throttled the way a discretionary
+ * trader would, rather than getting the same 1.2× as a low-drawdown A+.
  *
- * That means a brand-new setup runs at its full configured risk; it
- * doesn't get punished for having no history yet. Only once the data
- * says something meaningful does the multiplier move away from 1.0.
+ * Preserved behavior:
+ *   - Bootstrap: n < grading_min_setup_trades → 1.0× (neutral, no punishment)
+ *   - Kill switch: n ≥ grading_kill_min_trades AND expectancyR ≤ threshold → 0
+ *   - `reason` is the ready-to-display breakdown of what went into the number
+ *
+ * Formula (each factor spelled out so a user can eyeball why):
+ *
+ *   expectancyFactor = clamp(0.75 + 0.5 * expectancyR, 0.40, 1.50)
+ *     0R expectancy → 0.75×, 0.5R → 1.00×, 1.5R → 1.50×
+ *
+ *   winRateFactor = 1.00 if winRate ≥ 0.50, 0.90 if ≥ 0.35, 0.80 if ≥ 0.25, else 0.65
+ *     Penalizes streaky low-win-rate setups even when expectancy is fine —
+ *     bigger position sizes on those bleeds account faster on the losers.
+ *
+ *   drawdownFactor = 1.00 if maxDrawdownR < 3, 0.90 if < 6, 0.80 if < 10, else 0.65
+ *     Big historical drawdowns mean the setup can dig a deep hole even if
+ *     it recovers; we want less exposure per fire.
+ *
+ *   multiplier = clamp(expectancyFactor * winRateFactor * drawdownFactor, 0, 1.5)
  */
 function setupSizeMultiplier(setupId, opts = {}) {
   const s = setupExpectancy(setupId, opts);
@@ -298,23 +358,52 @@ function setupSizeMultiplier(setupId, opts = {}) {
     return {
       multiplier: 1.0,
       reason:     `bootstrap: ${s.n}/${minTrades} closed trades — multiplier held at 1.0×`,
+      breakdown:  null,
       stats:      s,
     };
   }
 
   // Kill switch: enough evidence that the setup is losing money.
   if (s.n >= killMinTr && s.expectancyR <= killR) {
-    return { multiplier: 0, reason: 'kill-switch: negative expectancy over threshold', stats: s };
+    return {
+      multiplier: 0,
+      reason:     `kill-switch: expectancy ${s.expectancyR.toFixed(2)}R ≤ ${killR}R over ${s.n} trades`,
+      breakdown:  null,
+      stats:      s,
+    };
   }
 
-  // Enough data — scale by the setup's letter grade.
-  const table = {
-    'A+': 1.20,
-    'A':  1.00,
-    'B':  0.75,
-    'C':  0.40,
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  const expectancyFactor = clamp(0.75 + 0.5 * s.expectancyR, 0.40, 1.50);
+  const winRateFactor = s.winRate >= 0.50 ? 1.00
+                      : s.winRate >= 0.35 ? 0.90
+                      : s.winRate >= 0.25 ? 0.80
+                      : 0.65;
+  const dd = Number.isFinite(s.maxDrawdownR) ? s.maxDrawdownR : 0;
+  const drawdownFactor = dd < 3  ? 1.00
+                       : dd < 6  ? 0.90
+                       : dd < 10 ? 0.80
+                       : 0.65;
+
+  const raw = expectancyFactor * winRateFactor * drawdownFactor;
+  const multiplier = parseFloat(clamp(raw, 0, 1.5).toFixed(2));
+
+  return {
+    multiplier,
+    reason: `expectancy ${expectancyFactor.toFixed(2)} × winRate ${winRateFactor.toFixed(2)} × drawdown ${drawdownFactor.toFixed(2)} = ${multiplier}`,
+    breakdown: {
+      expectancyFactor: parseFloat(expectancyFactor.toFixed(2)),
+      winRateFactor,
+      drawdownFactor,
+      inputs: {
+        expectancyR: s.expectancyR,
+        winRate:     s.winRate,
+        maxDrawdownR: s.maxDrawdownR,
+      },
+    },
+    stats: s,
   };
-  return { multiplier: table[s.grade] ?? 1.0, reason: `setup grade ${s.grade}`, stats: s };
 }
 
 // ─── Learning: per-check delta expectancy ────────────────────────────────────

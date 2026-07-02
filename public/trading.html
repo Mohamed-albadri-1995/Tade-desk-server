@@ -2272,15 +2272,38 @@ async function openLearningModal(setupId, setupName) {
     const events   = eventsResp.events || [];
 
     // --- Header: setup baseline + current multiplier ------------------
+    // Two rows:
+    //   1) headline stats a trader would look at first
+    //   2) the multiplier's factor breakdown so users can see why it
+    //      landed where it did (no more mysterious "grade B → 0.75×")
+    const winRatePct = status?.winRate != null ? (status.winRate * 100).toFixed(0) + '%' : '—';
+    const pf   = status?.profitFactor != null ? status.profitFactor.toFixed(2) : '—';
+    const ddR  = status?.maxDrawdownR != null ? '-' + status.maxDrawdownR.toFixed(2) + 'R' : '—';
+    const lls  = status?.longestLossStreak ?? '—';
+    const bd   = status?.breakdown;
     const baseHtml = status ? `
-      <div style="display:flex;gap:14px;flex-wrap:wrap;padding:10px 12px;background:var(--bg3);border-radius:8px;margin-bottom:10px;font-size:12px">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;padding:10px 12px;background:var(--bg3);border-radius:8px;margin-bottom:6px;font-size:12px">
         <div>Closed trades: <strong>${status.n}</strong></div>
         <div>Expectancy: <strong style="color:${(status.expectancyR ?? 0) >= 0 ? 'var(--green)' : 'var(--red)'}">${(status.expectancyR ?? 0).toFixed(2)}R</strong></div>
+        <div>Win rate: <strong>${winRatePct}</strong></div>
+        <div>Profit factor: <strong>${pf}</strong></div>
+        <div>Max drawdown: <strong style="color:var(--red)">${ddR}</strong></div>
+        <div>Longest losing streak: <strong>${lls}</strong></div>
         <div>Grade: <strong>${status.grade || '—'}</strong></div>
         <div>Size multiplier: <strong>${status.multiplier?.toFixed(2) ?? '—'}×</strong></div>
         ${status.killed ? '<div style="color:var(--red);font-weight:700">⚠ KILL SWITCH ACTIVE</div>' : ''}
         ${status.killed && status.override ? '<div style="color:#fbbf24;font-weight:700">override ON</div>' : ''}
-      </div>` : '';
+      </div>
+      ${bd ? `
+      <div style="padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;font-size:11px;color:var(--text2)">
+        <div style="color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;font-size:10px;margin-bottom:4px">Multiplier breakdown</div>
+        <div style="font-family:monospace">
+          expectancy <strong>${bd.expectancyFactor.toFixed(2)}</strong> × win-rate <strong>${bd.winRateFactor.toFixed(2)}</strong> × drawdown <strong>${bd.drawdownFactor.toFixed(2)}</strong> = <strong style="color:var(--accent)">${status.multiplier.toFixed(2)}×</strong>
+        </div>
+        <div style="color:var(--text3);font-size:10px;margin-top:4px">
+          inputs: expectancy ${bd.inputs.expectancyR.toFixed(2)}R · winRate ${(bd.inputs.winRate * 100).toFixed(0)}% · maxDD ${bd.inputs.maxDrawdownR.toFixed(2)}R
+        </div>
+      </div>` : ''}` : '';
 
     // --- Check contributions: sorted by delta desc so the biggest edge
     //     is on top. Missing samples (< min per side) show as "—".

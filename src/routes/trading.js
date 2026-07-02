@@ -460,10 +460,17 @@ router.get('/grading/setups-status', (req, res) => {
       status[r.id] = {
         multiplier:     m.multiplier,
         reason:         m.reason,
+        breakdown:      m.breakdown ?? null,
         killed:         m.multiplier === 0,
         override:       r.override_kill_switch === 1,
         n:              m.stats?.n ?? 0,
         expectancyR:    m.stats?.expectancyR ?? null,
+        winRate:        m.stats?.winRate ?? null,
+        avgWinR:        m.stats?.avgWinR ?? null,
+        avgLossR:       m.stats?.avgLossR ?? null,
+        profitFactor:   m.stats?.profitFactor ?? null,
+        maxDrawdownR:   m.stats?.maxDrawdownR ?? null,
+        longestLossStreak: m.stats?.longestLossStreak ?? null,
         grade:          m.stats?.grade ?? null,
       };
     } catch { status[r.id] = null; }
