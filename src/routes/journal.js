@@ -131,29 +131,44 @@ router.patch('/trades/:id', (req, res) => {
     ? new Date(`${trade.date}T${et}`).getTime() - new Date(`${trade.date}T${trade.entry_time}`).getTime()
     : trade.duration_ms;
 
+  const resolvedSetupId = setup_id !== undefined ? (setup_id || null) : trade.setup_id;
+  const resolvedStatus  = status || (ep != null ? 'closed' : trade.status);
+
+  // Only reset technical_computed if non-setup fields changed (price/time/sl/tp/notes)
+  // Setup assignment alone should not force a full Alpaca re-fetch
+  const needsRecompute = exit_price != null || exit_time != null || sl != null || tp != null;
+
   db.prepare(`
     UPDATE journal_trades SET
       exit_price=?, exit_time=?, sl=?, tp=?, setup_id=?, notes=?, status=?,
-      gross_pnl=?, net_pnl=?, pct_move=?, duration_ms=?, technical_computed=0
+      gross_pnl=?, net_pnl=?, pct_move=?, duration_ms=?,
+      technical_computed=?
     WHERE id=?
   `).run(
     ep, et,
     sl != null ? parseFloat(sl) : trade.sl,
     tp != null ? parseFloat(tp) : trade.tp,
-    setup_id !== undefined ? (setup_id || null) : trade.setup_id,
+    resolvedSetupId,
     notes !== undefined ? notes : trade.notes,
-    status || (ep != null ? 'closed' : trade.status),
+    resolvedStatus,
     grossPnl != null ? parseFloat(grossPnl.toFixed(2)) : null,
     netPnl != null ? parseFloat(netPnl.toFixed(2)) : null,
     pctMove != null ? parseFloat(pctMove.toFixed(3)) : null,
     durationMs,
+    needsRecompute ? 0 : trade.technical_computed,
     req.params.id
   );
 
   // Bridge: newly-closed edits mirror into trade_cards for grading.
-  const finalStatus = status || (ep != null ? 'closed' : trade.status);
-  if (finalStatus === 'closed') {
+  if (resolvedStatus === 'closed') {
     try { mirrorTradeToCard(req.params.id); } catch (err) { console.warn('[Journal] mirror failed:', err.message); }
+  }
+
+  // If setup was assigned and snapshots already exist, evaluate conditions immediately
+  if (setup_id !== undefined && resolvedSetupId && resolvedStatus === 'closed') {
+    const updatedTrade = db.prepare('SELECT * FROM journal_trades WHERE id = ?').get(req.params.id);
+    const hasSnapshots = db.prepare('SELECT id FROM journal_technical_snapshots WHERE trade_id = ?').get(req.params.id);
+    if (hasSnapshots) evaluateConditionsForTrade(updatedTrade);
   }
 
   res.json({ ok: true });
@@ -209,6 +224,21 @@ router.post('/compute-all', async (req, res) => {
   const trades = db.prepare('SELECT * FROM journal_trades WHERE technical_computed = 0 AND status = "closed"').all();
   res.json({ ok: true, queued: trades.length });
   computeAndEvaluateBatch(trades);
+});
+
+// Re-evaluate conditions for all setup-assigned trades that already have snapshots
+// Does NOT re-fetch Alpaca bars — safe to run anytime
+router.post('/reevaluate-conditions', (req, res) => {
+  const trades = db.prepare(`
+    SELECT t.* FROM journal_trades t
+    INNER JOIN journal_technical_snapshots ts ON ts.trade_id = t.id
+    WHERE t.setup_id IS NOT NULL AND t.status = 'closed'
+  `).all();
+  let evaluated = 0;
+  for (const t of trades) {
+    try { evaluateConditionsForTrade(t); evaluated++; } catch { /* skip */ }
+  }
+  res.json({ ok: true, evaluated });
 });
 
 async function computeAndEvaluateBatch(trades) {

@@ -182,9 +182,10 @@ table.jnl-tbl td:first-child{text-align:left;padding-left:0;color:var(--ink);fon
       </div>
       <div style="font-size:10px;color:var(--faint);margin-bottom:4px">— or paste below —</div>
       <textarea id="import-csv" placeholder="Paste CSV content here…"></textarea>
-      <div style="margin-top:8px;display:flex;gap:8px">
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-primary" onclick="doImport()">Import</button>
         <button class="btn-sec" onclick="document.getElementById('import-csv').value=''">Clear</button>
+        <button class="btn-sec" onclick="doReevaluate()" title="Re-evaluate conditions for all setup-tagged trades that already have bar data">Re-eval Conditions</button>
       </div>
       <div id="import-msg"></div>
     </div>
@@ -1040,6 +1041,17 @@ async function doImport() {
     } else {
       msg.className='err'; msg.textContent='Error: '+(d.error||'Unknown error');
     }
+  } catch(e){msg.className='err';msg.textContent='Error: '+e.message;}
+}
+
+async function doReevaluate() {
+  var msg=document.getElementById('import-msg');
+  msg.className='';msg.textContent='Re-evaluating conditions…';
+  try {
+    var r=await fetch('/api/journal/reevaluate-conditions',{method:'POST'});
+    var d=await r.json();
+    if (d.ok) { msg.className='ok'; msg.textContent='✓ Conditions re-evaluated for '+d.evaluated+' trades'; }
+    else { msg.className='err'; msg.textContent='Error: '+(d.error||'Unknown'); }
   } catch(e){msg.className='err';msg.textContent='Error: '+e.message;}
 }
 
