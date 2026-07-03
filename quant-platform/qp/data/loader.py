@@ -20,6 +20,7 @@ import pandas as pd
 
 from qp.data import cache as _cache
 from qp.data.sources.base import Bars, Source
+from qp.data.sources.csv import CsvSource
 from qp.data.sources.yahoo import YahooSource
 
 
@@ -63,6 +64,9 @@ def _resolve_source(source: Union[str, Source]) -> Source:
         return source
     if source == 'yahoo':
         return YahooSource()
+    if isinstance(source, str) and source.startswith('csv:'):
+        # 'csv:/abs/path/foo.csv' — for compare_server + ad-hoc use.
+        return CsvSource(source[4:])
     raise ValueError(f'unknown source {source!r}')
 
 
