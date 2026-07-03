@@ -79,6 +79,14 @@ PAGE = r"""<!doctype html>
   #readout .v.time { color: #b0f0c0; font-weight: 500; }
   #readout .hint { color: #4d5566; font-size: 10px; text-align: center;
                    margin-top: 4px; padding-top: 4px; border-top: 1px solid #2a2f3a; }
+  #readout .tvinp {
+    background: #0e1116; color: #7ec7ff; border: 1px solid #2a3f5a; border-radius: 3px;
+    padding: 1px 6px; width: 90px; text-align: right; font-family: inherit;
+    font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  #readout .tvinp:focus { outline: 1px solid #4380f7; }
+  #readout .v.match  { color: #5fd8a3; }
+  #readout .v.miss   { color: #ff7a7a; }
 </style></head>
 <body>
 <div id="controls">
@@ -119,8 +127,13 @@ PAGE = r"""<!doctype html>
     <div id="readout">
       <div class="row"><span class="k">Time&nbsp;(ET)</span><span class="v time" id="rTime">—</span></div>
       <div class="row"><span class="k">Close</span><span class="v close" id="rClose">—</span></div>
-      <div class="row"><span class="k" id="rIndK">Indicator</span><span class="v" id="rInd">—</span></div>
-      <div class="hint">hover · click TV crosshair at same time</div>
+      <div class="row"><span class="k" id="rIndK">qp indicator</span><span class="v" id="rInd">—</span></div>
+      <div class="row">
+        <span class="k">TV value</span>
+        <input class="tvinp" id="rTv" type="number" step="0.0001" placeholder="type TV's #">
+      </div>
+      <div class="row"><span class="k">Diff (qp − TV)</span><span class="v" id="rDiff">—</span></div>
+      <div class="hint">hover qp at a time · read TV at same time · type it here</div>
     </div>
     <div id="qp"></div>
   </div>
@@ -165,6 +178,7 @@ PAGE = r"""<!doctype html>
   // ------------------ TradingView pane --------------------------------------
   function makeTV(symbol, tf, ind) {
     document.getElementById('tv').innerHTML = '';
+    tvRangeSubscribed = false;  // widget instance replaced; resubscribe below
     const studies = ind !== 'none' && tvStudyMap[ind] ? [tvStudyMap[ind]] : [];
     tvWidget = new TradingView.widget({
       autosize: true,
@@ -183,24 +197,38 @@ PAGE = r"""<!doctype html>
     });
   }
 
-  // Sync TV's visible range to qp's data window when possible.
-  // The public widget doesn't expose crosshair events, but setVisibleRange
-  // on activeChart works reliably.
+  // Initial range push (qp → TV) and subscribe TV → qp so panning /
+  // zooming TradingView drags qp's visible range to match. The public
+  // widget doesn't expose crosshair events, but onVisibleRangeChanged
+  // fires reliably on user interaction.
+  let tvRangeSubscribed = false;
   function syncTVRange() {
-    if (!tvWidget || currentBars.length === 0) return;
-    const from = currentBars[0].time;
-    const to   = currentBars[currentBars.length - 1].time;
+    if (!tvWidget) return;
     try {
-      if (tvWidget.onChartReady) {
-        tvWidget.onChartReady(() => {
-          try {
-            tvWidget.activeChart().setVisibleRange(
-              { from, to },
-              { applyDefaultRightMargin: false },
-            );
-          } catch (_) { /* setVisibleRange may fail during load */ }
-        });
-      }
+      if (!tvWidget.onChartReady) return;
+      tvWidget.onChartReady(() => {
+        try {
+          const chart = tvWidget.activeChart();
+          if (currentBars.length > 0) {
+            const from = currentBars[0].time;
+            const to   = currentBars[currentBars.length - 1].time;
+            try {
+              chart.setVisibleRange({ from, to }, { applyDefaultRightMargin: false });
+            } catch (_) {}
+          }
+          if (!tvRangeSubscribed && chart.onVisibleRangeChanged) {
+            chart.onVisibleRangeChanged().subscribe(null, (range) => {
+              if (!range || !qpChart) return;
+              try {
+                qpChart.timeScale().setVisibleRange({
+                  from: range.from, to: range.to,
+                });
+              } catch (_) {}
+            });
+            tvRangeSubscribed = true;
+          }
+        } catch (_) {}
+      });
     } catch (_) {}
   }
 
@@ -237,20 +265,37 @@ PAGE = r"""<!doctype html>
   }
 
   // ------------------ Readout box -------------------------------------------
+  let currentQpInd = null;  // remember last qp indicator value under cursor
   function updateReadoutAt(t) {
     const close = closeByTime.get(t);
     const ind   = indByTime.get(t);
+    currentQpInd = ind;
     document.getElementById('rTime').textContent  = t ? fmtCrosshairTime(t) : '—';
     document.getElementById('rClose').textContent = close != null ? close.toFixed(4) : '—';
     document.getElementById('rInd').textContent   = ind   != null ? ind.toFixed(4)   : '—';
+    updateDiff();
   }
   function updateReadoutLast() {
-    if (currentBars.length === 0) {
-      updateReadoutAt(null);
-      return;
+    if (currentBars.length === 0) { updateReadoutAt(null); return; }
+    updateReadoutAt(currentBars[currentBars.length - 1].time);
+  }
+  function updateDiff() {
+    const tvRaw = document.getElementById('rTv').value;
+    const el = document.getElementById('rDiff');
+    if (tvRaw === '' || currentQpInd == null) {
+      el.textContent = '—'; el.classList.remove('match','miss'); return;
     }
-    const last = currentBars[currentBars.length - 1];
-    updateReadoutAt(last.time);
+    const tv = parseFloat(tvRaw);
+    if (isNaN(tv)) {
+      el.textContent = '—'; el.classList.remove('match','miss'); return;
+    }
+    const d = currentQpInd - tv;
+    const signed = (d >= 0 ? '+' : '') + d.toFixed(4);
+    // Relative tolerance: within 5e-4 of the value counts as a match.
+    const tol = Math.max(1e-4, Math.abs(currentQpInd) * 5e-6);
+    el.textContent = signed;
+    el.classList.toggle('match', Math.abs(d) <= tol);
+    el.classList.toggle('miss',  Math.abs(d) >  tol);
   }
 
   // ------------------ Data load ---------------------------------------------
@@ -303,7 +348,10 @@ PAGE = r"""<!doctype html>
     loadData();
   }
 
-  window.addEventListener('load', reload);
+  window.addEventListener('load', () => {
+    document.getElementById('rTv').addEventListener('input', updateDiff);
+    reload();
+  });
 </script></body></html>
 """
 
