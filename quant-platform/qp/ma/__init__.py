@@ -27,9 +27,10 @@ from qp.ma.n_session_ma import n_session_sma
 from qp.ma.anchored_sma import (
     session_sma, weekly_sma, monthly_sma, quarterly_sma, yearly_sma,
 )
+from qp.ma.pine_5day import pine_5day_sma
 
 __all__ = [
     'sma', 'ema', 'rma', 'wma', 'vwma', 'hma',
-    'n_session_sma',
+    'n_session_sma', 'pine_5day_sma',
     'session_sma', 'weekly_sma', 'monthly_sma', 'quarterly_sma', 'yearly_sma',
 ]

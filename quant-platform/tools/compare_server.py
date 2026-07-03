@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qp.data import load
 from qp.ma import (
     ema, sma, rma, wma, vwma, hma,
-    n_session_sma,
+    n_session_sma, pine_5day_sma,
     weekly_sma, monthly_sma, quarterly_sma, yearly_sma,
 )
 from qp.vwap import (
@@ -176,6 +176,7 @@ PAGE = r"""<!doctype html>
       </optgroup>
       <optgroup label="Session-anchored SMA">
         <option value="sma_5d">5-Day Rolling SMA (TF-adaptive)</option>
+        <option value="sma_5d_pine">5-Day SMA (TV Pine parity: SMA(1950) on 1m)</option>
         <option value="sma_week">Weekly Anchored SMA (Mon)</option>
         <option value="sma_month">Monthly Anchored SMA (1st)</option>
         <option value="sma_quarter">Quarterly Anchored SMA</option>
@@ -819,6 +820,27 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         # daily → 5-bar mean. No length parameter — user does not specify it.
         series_out.append(_to_series('5-Day Rolling SMA', 'overlay', ORANGE,
                                      n_session_sma(df, 5), ts))
+    elif ind == 'sma_5d_pine':
+        # TradingView Pine parity: SMA(1950) on 1-minute closes, projected
+        # onto the display bars. Same number on 1m / 5m / 15m / 1h chart.
+        # Requires a source that provides 1-minute history — Alpaca has no
+        # cap, Yahoo caps 1m at ~7 days (enough for warm-up + small window).
+        end_1m = df.index[-1]
+        # Need at least ~1950 1-min RTH bars (5 sessions) for warm-up plus
+        # the display window's worth. Fetch generously; the SMA cost is O(n).
+        start_1m = end_1m - pd.Timedelta(days=max(int(days) + 6, 10))
+        bars_1m = load(
+            symbol,
+            timeframe='1m',
+            start=start_1m,
+            end=end_1m,
+            source=source_arg if data_source != 'yahoo' else 'yahoo',
+            session=None if session == 'all' else session,
+        )
+        display_ts = np.array(ts, dtype='int64')
+        y = pine_5day_sma(bars_1m.df, display_ts)
+        series_out.append(_to_series('5-Day SMA (TV Pine parity)',
+                                     'overlay', ORANGE, y, ts))
     # Anchored SMAs — cumulative mean of closes since the anchor. Match
     # the reset points of the anchored VWAPs of the same name.
     elif ind == 'sma_week':
