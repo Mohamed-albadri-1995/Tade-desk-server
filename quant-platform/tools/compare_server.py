@@ -44,6 +44,15 @@ from qp.price import (
 )
 from qp.volatility import atr, stdev, true_range, bollinger, keltner
 from qp.indicators import rsi, macd, stochastic, cci
+from qp.levels import (
+    today_high, today_low,
+    week_high, week_low,
+    month_high, month_low,
+    prev_day_high, prev_day_low,
+    prev_week_high, prev_week_low,
+    prev_month_high, prev_month_low,
+    rolling_n_day_high, rolling_n_day_low,
+)
 
 
 # Disk cache so we don't thrash Yahoo (which rate-limits AWS IPs).
@@ -205,6 +214,20 @@ PAGE = r"""<!doctype html>
         <option value="macd">MACD</option>
         <option value="stochastic">Stochastic</option>
         <option value="cci">CCI</option>
+      </optgroup>
+      <optgroup label="Levels · developing (anchored)">
+        <option value="today_hl">Today HH / LL</option>
+        <option value="week_hl">Week HH / LL (Mon)</option>
+        <option value="month_hl">Month HH / LL (1st)</option>
+      </optgroup>
+      <optgroup label="Levels · prior period (fixed)">
+        <option value="prev_day_hl">Prev Day HH / LL</option>
+        <option value="prev_week_hl">Prev Week HH / LL</option>
+        <option value="prev_month_hl">Prev Month HH / LL</option>
+      </optgroup>
+      <optgroup label="Levels · rolling N-day (TF-adaptive)">
+        <option value="hl_5d">5-Day Rolling HH / LL</option>
+        <option value="hl_20d">20-Day Rolling HH / LL</option>
       </optgroup>
       <option value="none">— none —</option>
     </select>
@@ -839,6 +862,40 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         series_out.append(_to_series('%D', 'sub', BLUE, s.d, ts))
     elif ind == 'cci':
         series_out.append(_to_series(f'CCI({length})', 'sub', ORANGE, cci(df, length), ts))
+
+    # ── Levels: developing HH/LL (anchored, running) ──────────────────────
+    elif ind == 'today_hl':
+        series_out.append(_to_series('Today HH', 'overlay', GREEN, today_high(df), ts))
+        series_out.append(_to_series('Today LL', 'overlay', RED,   today_low(df),  ts))
+    elif ind == 'week_hl':
+        series_out.append(_to_series('Week HH (Mon)', 'overlay', GREEN, week_high(df), ts))
+        series_out.append(_to_series('Week LL (Mon)', 'overlay', RED,   week_low(df),  ts))
+    elif ind == 'month_hl':
+        series_out.append(_to_series('Month HH (1st)', 'overlay', GREEN, month_high(df), ts))
+        series_out.append(_to_series('Month LL (1st)', 'overlay', RED,   month_low(df),  ts))
+
+    # ── Levels: prior-period HH/LL (fixed, from completed periods) ────────
+    elif ind == 'prev_day_hl':
+        series_out.append(_to_series('Prev Day HH', 'overlay', GREEN, prev_day_high(df), ts))
+        series_out.append(_to_series('Prev Day LL', 'overlay', RED,   prev_day_low(df),  ts))
+    elif ind == 'prev_week_hl':
+        series_out.append(_to_series('Prev Week HH', 'overlay', GREEN, prev_week_high(df), ts))
+        series_out.append(_to_series('Prev Week LL', 'overlay', RED,   prev_week_low(df),  ts))
+    elif ind == 'prev_month_hl':
+        series_out.append(_to_series('Prev Month HH', 'overlay', GREEN, prev_month_high(df), ts))
+        series_out.append(_to_series('Prev Month LL', 'overlay', RED,   prev_month_low(df),  ts))
+
+    # ── Levels: rolling N-day HH/LL (TF-adaptive sliding window) ──────────
+    elif ind == 'hl_5d':
+        series_out.append(_to_series('5-Day Rolling HH', 'overlay', GREEN,
+                                     rolling_n_day_high(df, 5), ts))
+        series_out.append(_to_series('5-Day Rolling LL', 'overlay', RED,
+                                     rolling_n_day_low(df, 5), ts))
+    elif ind == 'hl_20d':
+        series_out.append(_to_series('20-Day Rolling HH', 'overlay', GREEN,
+                                     rolling_n_day_high(df, 20), ts))
+        series_out.append(_to_series('20-Day Rolling LL', 'overlay', RED,
+                                     rolling_n_day_low(df, 20), ts))
 
     else:
         raise ValueError(f'unknown indicator {ind!r}')
