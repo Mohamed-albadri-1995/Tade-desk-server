@@ -20,6 +20,7 @@ from qp.volatility.true_range import true_range
 from qp.volatility.atr import atr
 from qp.volatility.stdev import stdev
 from qp.volatility.bollinger import bollinger, BollingerBands
+from qp.volatility.bollinger_ema import bollinger_ema, BollingerZones
 from qp.volatility.keltner import keltner, KeltnerChannels
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     'atr',
     'stdev',
     'bollinger', 'BollingerBands',
+    'bollinger_ema', 'BollingerZones',
     'keltner', 'KeltnerChannels',
 ]

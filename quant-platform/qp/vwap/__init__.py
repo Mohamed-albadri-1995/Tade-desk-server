@@ -23,9 +23,21 @@ from qp.vwap.sessional import (
     yearly_vwap,
 )
 from qp.vwap.rolling import rolling_n_day_vwap
+from qp.vwap.anchored import (
+    today_hh_vwap, today_ll_vwap,
+    week_hh_vwap, week_ll_vwap,
+    gap_vwap,
+    last_hour_ll_vwap, last_hour_hh_vwap,
+    earnings_vwap,
+)
 
 __all__ = [
     'anchored_vwap',
     'session_vwap', 'n_day_vwap', 'rolling_n_day_vwap',
     'weekly_vwap', 'monthly_vwap', 'quarterly_vwap', 'yearly_vwap',
+    'today_hh_vwap', 'today_ll_vwap',
+    'week_hh_vwap', 'week_ll_vwap',
+    'gap_vwap',
+    'last_hour_ll_vwap', 'last_hour_hh_vwap',
+    'earnings_vwap',
 ]

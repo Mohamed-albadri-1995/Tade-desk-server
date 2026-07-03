@@ -36,13 +36,18 @@ from qp.ma import (
     weekly_sma, monthly_sma, quarterly_sma, yearly_sma,
 )
 from qp.vwap import (
-    session_vwap, rolling_n_day_vwap,
+    session_vwap, rolling_n_day_vwap, n_day_vwap,
     weekly_vwap, monthly_vwap, quarterly_vwap, yearly_vwap,
+    today_hh_vwap, today_ll_vwap,
+    week_hh_vwap, week_ll_vwap,
+    gap_vwap,
+    last_hour_ll_vwap, last_hour_hh_vwap,
+    earnings_vwap,
 )
 from qp.price import (
     hl2, hlc3, ohlc4, typical_price, median_price, weighted_close,
 )
-from qp.volatility import atr, stdev, true_range, bollinger, keltner
+from qp.volatility import atr, stdev, true_range, bollinger, bollinger_ema, keltner
 from qp.indicators import rsi, macd, stochastic, cci
 from qp.levels import (
     today_high, today_low,
@@ -107,6 +112,21 @@ PAGE = r"""<!doctype html>
   #controls button { background:#2a6df4; color:#fff; border:0; padding:6px 14px;
                      border-radius:4px; cursor:pointer; font-size:13px; }
   #controls button:hover { background:#4380f7; }
+  #extraRows { display:flex; flex-direction:column; gap:4px;
+               background:#1a1e26; border-bottom:1px solid #2a2f3a; }
+  #extraRows:empty { display:none; }
+  .extraRow { padding:6px 12px; display:flex; gap:10px; align-items:center;
+              flex-wrap:wrap; border-top:1px solid #2a2f3a; }
+  .extraRow label { font-size:12px; color:#8a94a7; display:flex; align-items:center; gap:4px; }
+  .extraRow input, .extraRow select {
+    background:#0e1116; color:#eee; border:1px solid #2a2f3a; padding:4px 8px;
+    border-radius:4px; font-size:13px;
+  }
+  .extraRow button { background:#5a2a2a; color:#fff; border:0; padding:4px 10px;
+                     border-radius:4px; cursor:pointer; font-size:12px; }
+  .extraRow button:hover { background:#8a3a3a; }
+  input[type=color] { padding:0; width:26px; height:22px; border:1px solid #2a2f3a;
+                      border-radius:4px; background:#0e1116; cursor:pointer; }
   #status { margin-left: auto; color:#8fa; font-size:12px; }
   #main { display:grid; grid-template-columns: 1fr 1fr; height: calc(100vh - 50px); }
   .pane { position: relative; border-right: 1px solid #2a2f3a; overflow: hidden; }
@@ -204,8 +224,19 @@ PAGE = r"""<!doctype html>
         <option value="yearly_vwap">Yearly Anchored VWAP</option>
       </optgroup>
       <optgroup label="Envelopes">
-        <option value="bollinger">Bollinger Bands</option>
+        <option value="bollinger">Bollinger Bands (SMA basis)</option>
+        <option value="bollinger_ema">Bollinger Bands + 25% Zones (EMA basis)</option>
         <option value="keltner">Keltner Channels</option>
+      </optgroup>
+      <optgroup label="Event-anchored VWAP">
+        <option value="vwap_2d_anchored">2-Day Anchored VWAP (reset every 2 sessions)</option>
+        <option value="today_hh_vwap">Today HH-Anchored VWAP</option>
+        <option value="today_ll_vwap">Today LL-Anchored VWAP</option>
+        <option value="week_hh_vwap">Weekly HH-Anchored VWAP</option>
+        <option value="week_ll_vwap">Weekly LL-Anchored VWAP</option>
+        <option value="gap_vwap">Gap VWAP (|open − prev close| ≥ mult × ATR)</option>
+        <option value="last_hour_ll_vwap">Last-Hour LL VWAP (carries into next day)</option>
+        <option value="last_hour_hh_vwap">Last-Hour HH VWAP (carries into next day)</option>
       </optgroup>
       <optgroup label="Volatility (sub-pane)">
         <option value="atr">ATR</option>
@@ -237,6 +268,7 @@ PAGE = r"""<!doctype html>
   </label>
   <label id="lengthLabel">Length <input id="length" type="number" value="9" size="3" min="1" max="500"></label>
   <label id="multLabel" style="display:none">Mult <input id="mult" type="number" value="2" step="0.1" size="3" min="0.1" max="10"></label>
+  <label>Color <input id="color0" type="color" value="#f5a623"></label>
   <label>Days <input id="days" type="number" value="5" size="3" min="1" max="60"></label>
   <label>Session
     <select id="session">
@@ -245,9 +277,11 @@ PAGE = r"""<!doctype html>
       <option value="all">all</option>
     </select>
   </label>
+  <button onclick="addRow()">+ Ind</button>
   <button onclick="reload()">Reload</button>
   <span id="status"></span>
 </div>
+<div id="extraRows"></div>
 <div id="main">
   <div class="pane"><h3>TRADINGVIEW · ET</h3><div id="tv"></div></div>
   <div class="pane">
@@ -352,10 +386,61 @@ PAGE = r"""<!doctype html>
     }
   }
 
-  function onIndChange() {
-    const ind = document.getElementById('ind').value;
-    document.getElementById('lengthLabel').style.display = indUsesLen.has(ind) ? '' : 'none';
-    document.getElementById('multLabel').style.display   = indUsesMult.has(ind) ? '' : 'none';
+  function onIndChange(el) {
+    if (!el) el = document.getElementById('ind');
+    const ind = el.value;
+    // Row 0 has label IDs; extra rows use classes scoped to the row.
+    if (el.id === 'ind') {
+      document.getElementById('lengthLabel').style.display = indUsesLen.has(ind) ? '' : 'none';
+      document.getElementById('multLabel').style.display   = indUsesMult.has(ind) ? '' : 'none';
+    } else {
+      const row = el.closest('.extraRow');
+      if (row) {
+        row.querySelector('.indLength').parentElement.style.display = indUsesLen.has(ind) ? '' : 'none';
+        row.querySelector('.indMult').parentElement.style.display   = indUsesMult.has(ind) ? '' : 'none';
+      }
+    }
+  }
+
+  // ------------------ Multi-indicator rows ---------------------------------
+  const PALETTE = ['#7ec7ff','#5fd8a3','#ef5350','#ba9bff','#ffb84d','#ff77c6'];
+  let nextColorIdx = 0;
+
+  function addRow() {
+    const primary = document.getElementById('ind');
+    const color = PALETTE[nextColorIdx++ % PALETTE.length];
+    const row = document.createElement('div');
+    row.className = 'extraRow';
+    row.innerHTML = `
+      <label>Ind <select class="indSelect" onchange="onIndChange(this)"></select></label>
+      <label>Length <input class="indLength" type="number" value="9" size="3" min="1" max="500"></label>
+      <label>Mult <input class="indMult" type="number" value="2" step="0.1" size="3" min="0.1" max="10" style="display:none"></label>
+      <label>Color <input class="indColor" type="color" value="${color}"></label>
+      <button onclick="this.parentElement.remove()">× remove</button>
+    `;
+    // Copy the giant option list from the primary dropdown.
+    row.querySelector('.indSelect').innerHTML = primary.innerHTML;
+    row.querySelector('.indSelect').value = primary.value;
+    document.getElementById('extraRows').appendChild(row);
+    onIndChange(row.querySelector('.indSelect'));
+  }
+
+  function collectSpecs() {
+    const specs = [{
+      ind:    document.getElementById('ind').value,
+      length: parseInt(document.getElementById('length').value),
+      mult:   parseFloat(document.getElementById('mult').value),
+      color:  document.getElementById('color0').value,
+    }];
+    for (const row of document.querySelectorAll('.extraRow')) {
+      specs.push({
+        ind:    row.querySelector('.indSelect').value,
+        length: parseInt(row.querySelector('.indLength').value),
+        mult:   parseFloat(row.querySelector('.indMult').value),
+        color:  row.querySelector('.indColor').value,
+      });
+    }
+    return specs;
   }
 
   const tvIntervalMap = {'1m':'1','2m':'2','5m':'5','15m':'15','30m':'30','1h':'60','1d':'D'};
@@ -604,18 +689,17 @@ PAGE = r"""<!doctype html>
   async function loadData() {
     const symbol      = document.getElementById('symbol').value.trim().toUpperCase();
     const tf          = document.getElementById('tf').value;
-    const ind         = document.getElementById('ind').value;
-    const length      = document.getElementById('length').value;
-    const mult        = document.getElementById('mult').value;
     const days        = document.getElementById('days').value;
     const session     = document.getElementById('session').value;
     const data_source = document.getElementById('source').value;
+    const indicators  = collectSpecs();
     document.getElementById('status').textContent = 'loading…';
     let r;
     try {
-      r = await fetch(`/data?symbol=${encodeURIComponent(symbol)}&tf=${tf}&ind=${ind}` +
-                      `&length=${length}&mult=${mult}&days=${days}&session=${session}` +
-                      `&data_source=${encodeURIComponent(data_source)}`);
+      r = await fetch(`/data?symbol=${encodeURIComponent(symbol)}&tf=${tf}` +
+                      `&days=${days}&session=${session}` +
+                      `&data_source=${encodeURIComponent(data_source)}` +
+                      `&indicators=${encodeURIComponent(JSON.stringify(indicators))}`);
     } catch (e) {
       document.getElementById('status').textContent = 'network error: ' + e.message;
       return;
@@ -909,6 +993,14 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         series_out.append(_to_series(f'BB Basis({length})', 'overlay', ORANGE, bb.basis, ts))
         series_out.append(_to_series('BB Upper', 'overlay', BLUE, bb.upper, ts))
         series_out.append(_to_series('BB Lower', 'overlay', BLUE, bb.lower, ts))
+    elif ind == 'bollinger_ema':
+        # EMA-based BB with 25% zones (Pine L3 script parity)
+        bbz = bollinger_ema(C, length, mult, zone_pct=25.0)
+        series_out.append(_to_series(f'BB-EMA Basis({length})', 'overlay', ORANGE, bbz.basis, ts))
+        series_out.append(_to_series('BB-EMA Upper', 'overlay', BLUE, bbz.upper, ts))
+        series_out.append(_to_series('BB-EMA Lower', 'overlay', BLUE, bbz.lower, ts))
+        series_out.append(_to_series('Top Zone 25% (bot)', 'overlay', GREEN, bbz.top_zone_bot, ts))
+        series_out.append(_to_series('Bot Zone 25% (top)', 'overlay', RED,   bbz.bot_zone_top, ts))
     elif ind == 'keltner':
         kc = keltner(df, length, mult)
         series_out.append(_to_series(f'KC Basis({length})', 'overlay', ORANGE, kc.basis, ts))
@@ -972,6 +1064,36 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         series_out.append(_to_series('20-Day Rolling LL', 'overlay', RED,
                                      rolling_n_day_low(df, 20), ts))
 
+    # ── Event-anchored VWAPs (Pine "VWAP Cluster Bounce" parity) ──────────
+    elif ind == 'vwap_2d_anchored':
+        # Reset every 2 sessions at session open (Pine ta.vwap with a
+        # dCount % 2 == 0 gate). Distinct from the ROLLING 2-day variant.
+        series_out.append(_to_series('2-Day Anchored VWAP', 'overlay', ORANGE,
+                                     np.asarray(n_day_vwap(df, 2)), ts))
+    elif ind == 'today_hh_vwap':
+        series_out.append(_to_series('Today HH-Anchored VWAP', 'overlay', GREEN,
+                                     today_hh_vwap(df), ts))
+    elif ind == 'today_ll_vwap':
+        series_out.append(_to_series('Today LL-Anchored VWAP', 'overlay', RED,
+                                     today_ll_vwap(df), ts))
+    elif ind == 'week_hh_vwap':
+        series_out.append(_to_series('Weekly HH-Anchored VWAP', 'overlay', GREEN,
+                                     week_hh_vwap(df), ts))
+    elif ind == 'week_ll_vwap':
+        series_out.append(_to_series('Weekly LL-Anchored VWAP', 'overlay', RED,
+                                     week_ll_vwap(df), ts))
+    elif ind == 'gap_vwap':
+        # Anchors on any bar where |open - prev_close| >= mult × ATR(length).
+        series_out.append(_to_series(f'Gap VWAP (ATR{length}×{mult})', 'overlay',
+                                     ORANGE, gap_vwap(df, length, mult), ts))
+    elif ind == 'last_hour_ll_vwap':
+        # Anchor = previous day's last-hour LL bar's (price × volume).
+        series_out.append(_to_series('Last-Hour LL VWAP', 'overlay', RED,
+                                     last_hour_ll_vwap(df, 15), ts))
+    elif ind == 'last_hour_hh_vwap':
+        series_out.append(_to_series('Last-Hour HH VWAP', 'overlay', GREEN,
+                                     last_hour_hh_vwap(df, 15), ts))
+
     else:
         raise ValueError(f'unknown indicator {ind!r}')
 
@@ -1001,17 +1123,42 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/data':
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             try:
-                data = compute_series(
-                    symbol=q.get('symbol', 'SPY'),
-                    tf=q.get('tf', '5m'),
-                    ind=q.get('ind', 'ema'),
-                    length=int(q.get('length', 9)),
-                    days=int(q.get('days', 5)),
-                    session=q.get('session', 'regular'),
-                    data_source=q.get('data_source', 'yahoo'),
-                    mult=float(q.get('mult', 2.0)),
-                )
-                self._send(200, json.dumps(data).encode('utf-8'))
+                # Accept an `indicators` JSON array (multi-indicator UI) or
+                # fall back to the legacy single-indicator params.
+                indicators_raw = q.get('indicators')
+                if indicators_raw:
+                    indicators = json.loads(indicators_raw)
+                else:
+                    indicators = [{
+                        'ind':    q.get('ind', 'ema'),
+                        'length': int(q.get('length', 9)),
+                        'mult':   float(q.get('mult', 2.0)),
+                        'color':  None,
+                    }]
+                merged = None
+                for spec in indicators:
+                    part = compute_series(
+                        symbol=q.get('symbol', 'SPY'),
+                        tf=q.get('tf', '5m'),
+                        ind=str(spec.get('ind', 'ema')),
+                        length=int(spec.get('length', 9)),
+                        days=int(q.get('days', 5)),
+                        session=q.get('session', 'regular'),
+                        data_source=q.get('data_source', 'yahoo'),
+                        mult=float(spec.get('mult', 2.0)),
+                    )
+                    # Override the PRIMARY series colour if the user picked one.
+                    override = spec.get('color')
+                    if override and part.get('series'):
+                        part['series'][0]['color'] = override
+                    if merged is None:
+                        merged = part
+                    else:
+                        merged['series'].extend(part['series'])
+                if merged is None:
+                    merged = {'bars': [], 'series': [], 'session_starts': [],
+                              'first': None, 'last': None}
+                self._send(200, json.dumps(merged).encode('utf-8'))
             except Exception as e:
                 self._send(500, str(e).encode('utf-8'), 'text/plain')
             return
