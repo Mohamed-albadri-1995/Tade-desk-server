@@ -285,7 +285,7 @@ PAGE = r"""<!doctype html>
   }
 
   // ------------------ State --------------------------------------------------
-  let qpChart = null, priceSeries = null;
+  let qpChart = null, priceSeries = null, volumeSeries = null;
   let subChart = null;
   let overlaySerieses = [];   // [{name, color, style, series, byTime: Map}]
   let subSerieses = [];       // same shape
@@ -473,10 +473,23 @@ PAGE = r"""<!doctype html>
       borderUpColor:'#4caf50', borderDownColor:'#ef5350',
       wickUpColor:'#4caf50', wickDownColor:'#ef5350',
     });
+    // Squeeze the price scale up so the bottom 22% is free for volume.
+    priceSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.05, bottom: 0.22 },
+    });
+    // Volume histogram — separate 'volume' price scale pinned to the
+    // bottom 18% of the chart so its raw numbers (thousands / millions)
+    // don't warp the price axis.
+    volumeSeries = qpChart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+      color: 'rgba(95,165,200,0.55)',
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.82, bottom: 0 },
+    });
 
     subChart = LightweightCharts.createChart(subEl, chartOpts());
-    // Hide time axis on the top chart — the bottom one owns it.
-    subChart.applyOptions({ timeScale: { visible: true } });
 
     // Two-way visible-range sync between price and sub panes.
     let syncing = false;
@@ -614,6 +627,24 @@ PAGE = r"""<!doctype html>
     closeByTime = new Map(currentBars.map(b => [b.time, b.close]));
     priceSeries.setData(currentBars);
 
+    // Volume histogram — tint each bar to match its candle direction.
+    volumeSeries.setData(currentBars.map(b => ({
+      time:  b.time,
+      value: b.volume || 0,
+      color: b.close >= b.open ? 'rgba(76,175,80,0.55)' : 'rgba(239,83,80,0.55)',
+    })));
+
+    // Session dividers — small green triangle above the first bar of
+    // each session so you can see day boundaries at a glance.
+    const sessionStarts = j.session_starts || [];
+    priceSeries.setMarkers(sessionStarts.map(t => ({
+      time:     t,
+      position: 'aboveBar',
+      color:    '#5fd8a3',
+      shape:    'arrowDown',
+      size:     0,
+    })));
+
     // Rebuild overlay + sub-pane series from scratch each reload.
     clearSerieses();
     const wrap = document.getElementById('qpWrap');
@@ -627,6 +658,11 @@ PAGE = r"""<!doctype html>
       }
     }
     wrap.classList.toggle('hasSub', hasSub);
+    // Time axis at the bottom: on the sub-chart when it exists, else on the
+    // price chart. Avoids the doubled-up axis in the middle when both are
+    // visible, and always leaves the reader with a time strip at the bottom.
+    qpChart.applyOptions({ timeScale: { visible: !hasSub } });
+    subChart.applyOptions({ timeScale: { visible: hasSub  } });
     // Give the DOM a frame to apply the flex-basis change, then resize.
     requestAnimationFrame(() => {
       const el = document.getElementById('qp');
@@ -726,15 +762,23 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
             session=None if session == 'all' else session,
         )
     if len(bars) == 0:
-        return {'bars': [], 'indicator': [], 'first': None, 'last': None}
+        return {'bars': [], 'series': [], 'session_starts': [], 'first': None, 'last': None}
 
     df = bars.df
     ts = (df.index.view('int64') // 1_000_000_000).tolist()
     bar_list = [
         {'time': int(t), 'open': float(o), 'high': float(h),
-         'low': float(l), 'close': float(c)}
-        for t, o, h, l, c in zip(ts, df['open'], df['high'], df['low'], df['close'])
+         'low': float(l), 'close': float(c), 'volume': float(v)}
+        for t, o, h, l, c, v in zip(ts, df['open'], df['high'], df['low'],
+                                    df['close'], df['volume'])
     ]
+
+    # Session-start timestamps — bars where the RTH session opens (Mon 09:30,
+    # Tue 09:30, …). Client draws dividers at these times.
+    from qp.vwap.sessional import _new_session_mask
+    from qp.session import US_EQUITIES
+    _session_mask = _new_session_mask(df, US_EQUITIES)
+    session_starts_ts = [int(t) for t, m in zip(ts, _session_mask) if m]
 
     C = df['close'].to_numpy()
     V = df['volume'].to_numpy()
@@ -901,10 +945,11 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         raise ValueError(f'unknown indicator {ind!r}')
 
     return {
-        'bars':   bar_list,
-        'series': series_out,
-        'first':  df.index[0].strftime('%Y-%m-%d %H:%M'),
-        'last':   df.index[-1].strftime('%Y-%m-%d %H:%M'),
+        'bars':           bar_list,
+        'series':         series_out,
+        'session_starts': session_starts_ts,
+        'first':          df.index[0].strftime('%Y-%m-%d %H:%M'),
+        'last':           df.index[-1].strftime('%Y-%m-%d %H:%M'),
     }
 
 
