@@ -19,6 +19,7 @@ from typing import Optional, Union
 import pandas as pd
 
 from qp.data import cache as _cache
+from qp.data.sources.alpaca import AlpacaSource
 from qp.data.sources.base import Bars, Source
 from qp.data.sources.csv import CsvSource
 from qp.data.sources.yahoo import YahooSource
@@ -64,6 +65,11 @@ def _resolve_source(source: Union[str, Source]) -> Source:
         return source
     if source == 'yahoo':
         return YahooSource()
+    if source == 'alpaca':
+        return AlpacaSource()
+    if isinstance(source, str) and source.startswith('alpaca:'):
+        # 'alpaca:iex' or 'alpaca:sip' — pick a feed on the fly.
+        return AlpacaSource(feed=source.split(':', 1)[1])
     if isinstance(source, str) and source.startswith('csv:'):
         # 'csv:/abs/path/foo.csv' — for compare_server + ad-hoc use.
         return CsvSource(source[4:])

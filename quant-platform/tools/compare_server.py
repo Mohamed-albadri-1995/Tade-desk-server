@@ -151,6 +151,8 @@ PAGE = r"""<!doctype html>
   <label>Data
     <select id="source" onchange="onSourceChange()">
       <option value="yahoo" selected>Yahoo (live)</option>
+      <option value="alpaca:iex">Alpaca IEX (free tier)</option>
+      <option value="alpaca:sip">Alpaca SIP (paid tier)</option>
       <!-- CSV options injected on load from /sources -->
     </select>
   </label>
@@ -747,18 +749,25 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         )
     else:
         end = pd.Timestamp.now(tz='UTC')
+        # Yahoo 1m maxes out at ~7 calendar days; anything beyond returns
+        # 422. Silently clamp so the UI doesn't need to know.
+        if data_source == 'yahoo' and tf == '1m':
+            days = min(int(days), 7)
         start = end - pd.Timedelta(days=days)
         # Bucket window to nearest 5 minutes so identical requests hit the
         # cache instead of thrashing Yahoo (which rate-limits AWS IPs).
         start = start.floor('5min')
         end = end.floor('5min')
+        # Route to whichever adapter the UI asked for. 'alpaca' uses env
+        # creds; 'alpaca:sip' picks the paid consolidated tape.
+        source_arg = 'yahoo' if data_source == 'yahoo' else data_source
         bars = load(
             symbol,
             timeframe=tf,
             start=start,
             end=end,
-            source='yahoo',
-            cache_dir=CACHE_DIR,
+            source=source_arg,
+            cache_dir=CACHE_DIR if data_source == 'yahoo' else None,
             session=None if session == 'all' else session,
         )
     if len(bars) == 0:
