@@ -34,6 +34,10 @@ from qp.ma import ema, sma, rma, wma
 from qp.vwap import session_vwap
 
 
+# Disk cache so we don't thrash Yahoo (which rate-limits AWS IPs).
+CACHE_DIR = Path.home() / '.qp-cache'
+
+
 PAGE = r"""<!doctype html>
 <html><head><meta charset="utf-8"><title>qp vs TradingView</title>
 <script src="https://s3.tradingview.com/tv.js"></script>
@@ -193,12 +197,17 @@ PAGE = r"""<!doctype html>
 def compute_series(symbol: str, tf: str, ind: str, length: int, days: int, session: str):
     end = pd.Timestamp.now(tz='UTC')
     start = end - pd.Timedelta(days=days)
+    # Bucket window to nearest 5 minutes so identical requests hit the
+    # cache instead of thrashing Yahoo (which rate-limits AWS IPs).
+    start = start.floor('5min')
+    end = end.floor('5min')
     bars = load(
         symbol,
         timeframe=tf,
         start=start,
         end=end,
         source='yahoo',
+        cache_dir=CACHE_DIR,
         session=None if session == 'all' else session,
     )
     if len(bars) == 0:

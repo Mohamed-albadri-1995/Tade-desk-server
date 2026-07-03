@@ -5,12 +5,19 @@ Endpoint:
     https://query1.finance.yahoo.com/v8/finance/chart/{symbol}
         ?interval={interval}&period1={unix}&period2={unix}&includePrePost=true
 
-Free, no auth. Yahoo blocks the default python-requests User-Agent, so
-we send a browser UA. Intraday history is capped by Yahoo:
-    1m/2m ≈ 30 days   5m/15m/30m ≈ 60 days   60m ≈ 730 days
+Free, no auth token. Yahoo aggressively rate-limits datacenter IPs
+(AWS/GCP/etc.) unless the request looks like a real browser: cookies
+from finance.yahoo.com in the session, a Chrome User-Agent, and the
+usual Accept-* / Referer / Origin headers. This adapter does that
+bootstrap once per Source instance, retries on 429 with exponential
+backoff, then falls through with a clear error.
+
+Intraday history caps: 1m/2m ≈ 30 days, 5m/15m/30m ≈ 60 days, 60m ≈ 730 days.
 """
 
 from __future__ import annotations
+
+import time
 
 import pandas as pd
 import requests
@@ -19,15 +26,32 @@ from qp.data.sources.base import Bars, Source
 
 
 CHART_URL = 'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}'
+COOKIE_BOOTSTRAP_URL = 'https://finance.yahoo.com/'
 
-_UA = ('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
        '(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36')
+
+_BROWSER_HEADERS = {
+    'User-Agent': _UA,
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Referer': 'https://finance.yahoo.com/',
+    'Origin': 'https://finance.yahoo.com',
+    'Connection': 'keep-alive',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-site',
+}
 
 _TF_TO_YAHOO = {
     '1m': '1m', '2m': '2m', '5m': '5m', '15m': '15m', '30m': '30m',
     '60m': '60m', '1h': '60m', '90m': '90m',
     '1d': '1d', 'D': '1d', '1wk': '1wk', 'W': '1wk', '1mo': '1mo', 'M': '1mo',
 }
+
+# Retry schedule (seconds) applied on 429 / transient network errors.
+_BACKOFF = (2, 5, 10)
 
 
 class YahooSource(Source):
@@ -36,6 +60,21 @@ class YahooSource(Source):
     def __init__(self, include_pre_post: bool = True, timeout: float = 15.0):
         self.include_pre_post = include_pre_post
         self.timeout = timeout
+        self._session: requests.Session | None = None
+
+    def _get_session(self) -> requests.Session:
+        if self._session is not None:
+            return self._session
+        s = requests.Session()
+        s.headers.update(_BROWSER_HEADERS)
+        try:
+            # Warm up cookies (A1/A3/GUC). Yahoo's EU edge often 302s
+            # into a consent page; we don't follow past the drop.
+            s.get(COOKIE_BOOTSTRAP_URL, timeout=self.timeout, allow_redirects=True)
+        except requests.RequestException:
+            pass  # Best-effort; chart call may still succeed.
+        self._session = s
+        return s
 
     def fetch(self, symbol, timeframe, start, end) -> Bars:
         interval = _TF_TO_YAHOO.get(timeframe)
@@ -49,14 +88,11 @@ class YahooSource(Source):
             'period2': str(int(pd.Timestamp(end).timestamp())),
             'events': 'div,split',
         }
-        r = requests.get(
+        payload = self._get_with_retries(
+            self._get_session(),
             CHART_URL.format(symbol=symbol),
-            params=params,
-            headers={'User-Agent': _UA, 'Accept': 'application/json'},
-            timeout=self.timeout,
+            params,
         )
-        r.raise_for_status()
-        payload = r.json()
 
         err = payload.get('chart', {}).get('error')
         if err:
@@ -89,6 +125,28 @@ class YahooSource(Source):
 
         return Bars(df=df, symbol=symbol, timeframe=timeframe,
                     adjusted=True, source=self.name)
+
+    def _get_with_retries(self, session, url, params) -> dict:
+        last_exc: Exception | None = None
+        for attempt, delay in enumerate((0,) + _BACKOFF):
+            if delay:
+                time.sleep(delay)
+            try:
+                r = session.get(url, params=params, timeout=self.timeout)
+            except requests.RequestException as e:
+                last_exc = e
+                continue
+            if r.status_code == 429:
+                last_exc = RuntimeError(
+                    f'Yahoo 429 Too Many Requests (attempt {attempt + 1})')
+                continue
+            r.raise_for_status()
+            return r.json()
+        raise RuntimeError(
+            'Yahoo rate-limited this IP repeatedly. AWS/GCP/other datacenter '
+            'IPs are often blocked — wait a few minutes and retry, or switch '
+            f'qp.data.load(source=...) to a non-Yahoo adapter. Last: {last_exc}'
+        )
 
 
 def _empty_df() -> pd.DataFrame:
