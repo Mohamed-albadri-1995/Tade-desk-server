@@ -170,6 +170,7 @@ PAGE = r"""<!doctype html>
       <optgroup label="VWAP">
         <option value="vwap">Daily VWAP (TV parity)</option>
         <option value="vwap_2d">2-Day VWAP</option>
+        <option value="vwap_5d">5-Day VWAP</option>
         <option value="vwap_7d">7-Day VWAP</option>
         <option value="vwap_30d">30-Day VWAP</option>
         <option value="weekly_vwap">Weekly VWAP (ISO week reset)</option>
@@ -746,6 +747,9 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
     elif ind == 'vwap_2d':
         series_out.append(_to_series('2-Day VWAP', 'overlay', ORANGE,
                                      np.asarray(n_day_vwap(df, 2)), ts))
+    elif ind == 'vwap_5d':
+        series_out.append(_to_series('5-Day VWAP', 'overlay', ORANGE,
+                                     np.asarray(n_day_vwap(df, 5)), ts))
     elif ind == 'vwap_7d':
         series_out.append(_to_series('7-Day VWAP', 'overlay', ORANGE,
                                      np.asarray(n_day_vwap(df, 7)), ts))
