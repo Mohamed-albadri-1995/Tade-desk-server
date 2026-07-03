@@ -30,9 +30,9 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from qp.data import load
-from qp.ma import ema, sma, rma, wma, vwma, hma
+from qp.ma import ema, sma, rma, wma, vwma, hma, n_session_sma
 from qp.vwap import (
-    session_vwap, n_day_vwap,
+    session_vwap, rolling_n_day_vwap,
     weekly_vwap, monthly_vwap, quarterly_vwap, yearly_vwap,
 )
 from qp.price import (
@@ -158,6 +158,7 @@ PAGE = r"""<!doctype html>
         <option value="wma">WMA</option>
         <option value="hma">HMA (Hull)</option>
         <option value="vwma">VWMA</option>
+        <option value="sma_5d">5-Day Rolling SMA (TF-adaptive)</option>
       </optgroup>
       <optgroup label="Price Refs">
         <option value="hl2">HL2</option>
@@ -345,11 +346,14 @@ PAGE = r"""<!doctype html>
   // Which indicators care about the Mult input.
   const indUsesMult = new Set(['bollinger', 'keltner']);
   // Which indicators care about Length (everything except price refs,
-  // multi-VWAPs, macd, true_range, and 'none').
+  // multi-VWAPs, macd, true_range, session-adaptive MAs, and 'none').
   const indUsesLen = new Set([
     'ema','sma','rma','wma','hma','vwma',
     'bollinger','keltner','atr','stdev','rsi','stochastic','cci',
   ]);
+  // Indicators whose window comes from session-count, not a bar length —
+  // Length input hides for these because there's nothing to configure.
+  // (kept for reference; the exclusion is already implicit in indUsesLen)
 
   // ------------------ TradingView pane --------------------------------------
   function makeTV(symbol, tf, ind) {
@@ -721,6 +725,12 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         series_out.append(_to_series(f'HMA({length})', 'overlay', ORANGE, hma(C, length), ts))
     elif ind == 'vwma':
         series_out.append(_to_series(f'VWMA({length})', 'overlay', ORANGE, vwma(C, V, length), ts))
+    elif ind == 'sma_5d':
+        # 5-session rolling SMA. Window adapts to timeframe: ~78 bars/session
+        # on 5m → 390-bar mean; ~390 bars/session on 1m → 1950-bar mean; on
+        # daily → 5-bar mean. No length parameter — user does not specify it.
+        series_out.append(_to_series('5-Day Rolling SMA', 'overlay', ORANGE,
+                                     n_session_sma(df, 5), ts))
 
     # ── Price references (overlay, single line) ───────────────────────────
     elif ind == 'hl2':
@@ -745,17 +755,17 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
     # Rolling N-session VWAPs — reset every N sessions, all anchored at
     # session opens so premarket bars carry the previous accumulator.
     elif ind == 'vwap_2d':
-        series_out.append(_to_series('2-Day VWAP', 'overlay', ORANGE,
-                                     np.asarray(n_day_vwap(df, 2)), ts))
+        series_out.append(_to_series('2-Day Rolling VWAP', 'overlay', ORANGE,
+                                     np.asarray(rolling_n_day_vwap(df, 2)), ts))
     elif ind == 'vwap_5d':
-        series_out.append(_to_series('5-Day VWAP', 'overlay', ORANGE,
-                                     np.asarray(n_day_vwap(df, 5)), ts))
+        series_out.append(_to_series('5-Day Rolling VWAP', 'overlay', ORANGE,
+                                     np.asarray(rolling_n_day_vwap(df, 5)), ts))
     elif ind == 'vwap_7d':
-        series_out.append(_to_series('7-Day VWAP', 'overlay', ORANGE,
-                                     np.asarray(n_day_vwap(df, 7)), ts))
+        series_out.append(_to_series('7-Day Rolling VWAP', 'overlay', ORANGE,
+                                     np.asarray(rolling_n_day_vwap(df, 7)), ts))
     elif ind == 'vwap_30d':
-        series_out.append(_to_series('30-Day VWAP', 'overlay', ORANGE,
-                                     np.asarray(n_day_vwap(df, 30)), ts))
+        series_out.append(_to_series('30-Day Rolling VWAP', 'overlay', ORANGE,
+                                     np.asarray(rolling_n_day_vwap(df, 30)), ts))
     elif ind == 'weekly_vwap':
         series_out.append(_to_series('Weekly VWAP', 'overlay', ORANGE,
                                      np.asarray(weekly_vwap(df)), ts))

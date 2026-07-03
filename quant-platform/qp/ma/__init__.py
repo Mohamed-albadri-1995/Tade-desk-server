@@ -23,5 +23,6 @@ from qp.ma.rma import rma
 from qp.ma.wma import wma
 from qp.ma.vwma import vwma
 from qp.ma.hma import hma
+from qp.ma.n_session_ma import n_session_sma
 
-__all__ = ['sma', 'ema', 'rma', 'wma', 'vwma', 'hma']
+__all__ = ['sma', 'ema', 'rma', 'wma', 'vwma', 'hma', 'n_session_sma']

@@ -22,9 +22,10 @@ from qp.vwap.sessional import (
     quarterly_vwap,
     yearly_vwap,
 )
+from qp.vwap.rolling import rolling_n_day_vwap
 
 __all__ = [
     'anchored_vwap',
-    'session_vwap', 'n_day_vwap',
+    'session_vwap', 'n_day_vwap', 'rolling_n_day_vwap',
     'weekly_vwap', 'monthly_vwap', 'quarterly_vwap', 'yearly_vwap',
 ]
