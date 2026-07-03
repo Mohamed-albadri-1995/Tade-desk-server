@@ -30,8 +30,15 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from qp.data import load
-from qp.ma import ema, sma, rma, wma
-from qp.vwap import session_vwap
+from qp.ma import ema, sma, rma, wma, vwma, hma
+from qp.vwap import (
+    session_vwap, weekly_vwap, monthly_vwap, quarterly_vwap, yearly_vwap,
+)
+from qp.price import (
+    hl2, hlc3, ohlc4, typical_price, median_price, weighted_close,
+)
+from qp.volatility import atr, stdev, true_range, bollinger, keltner
+from qp.indicators import rsi, macd, stochastic, cci
 
 
 # Disk cache so we don't thrash Yahoo (which rate-limits AWS IPs).
@@ -93,7 +100,13 @@ PAGE = r"""<!doctype html>
   .pane h3 { position:absolute; top:8px; left:14px; z-index:10; margin:0;
              font-size: 11px; letter-spacing:2px; color:#5fd8a3;
              text-shadow: 0 0 4px rgba(0,0,0,0.8); pointer-events:none; }
-  #tv, #qp { width:100%; height:100%; }
+  #tv { width:100%; height:100%; }
+  #qpWrap { display:flex; flex-direction:column; width:100%; height:100%; }
+  #qp    { width:100%; flex: 1 1 auto; min-height: 0; }
+  #qpSub { width:100%; flex: 0 0 0;   min-height: 0; display: none;
+           border-top: 1px solid #2a2f3a; }
+  #qpWrap.hasSub #qp    { flex: 1 1 60%; }
+  #qpWrap.hasSub #qpSub { flex: 0 0 40%; display: block; }
 
   /* Live readout — the box that makes side-by-side comparison actually usable */
   #readout {
@@ -137,15 +150,49 @@ PAGE = r"""<!doctype html>
   </label>
   <label>Indicator
     <select id="ind" onchange="onIndChange()">
-      <option value="ema">EMA</option>
-      <option value="sma">SMA</option>
-      <option value="rma">RMA (Wilder)</option>
-      <option value="wma">WMA</option>
-      <option value="vwap">Session VWAP</option>
+      <optgroup label="Moving Averages">
+        <option value="ema">EMA</option>
+        <option value="sma">SMA</option>
+        <option value="rma">RMA (Wilder)</option>
+        <option value="wma">WMA</option>
+        <option value="hma">HMA (Hull)</option>
+        <option value="vwma">VWMA</option>
+      </optgroup>
+      <optgroup label="Price Refs">
+        <option value="hl2">HL2</option>
+        <option value="hlc3">HLC3</option>
+        <option value="ohlc4">OHLC4</option>
+        <option value="typical_price">Typical Price</option>
+        <option value="median_price">Median Price</option>
+        <option value="weighted_close">Weighted Close</option>
+      </optgroup>
+      <optgroup label="VWAP">
+        <option value="vwap">Session VWAP</option>
+        <option value="weekly_vwap">Weekly VWAP</option>
+        <option value="monthly_vwap">Monthly VWAP</option>
+        <option value="quarterly_vwap">Quarterly VWAP</option>
+        <option value="yearly_vwap">Yearly VWAP</option>
+      </optgroup>
+      <optgroup label="Envelopes">
+        <option value="bollinger">Bollinger Bands</option>
+        <option value="keltner">Keltner Channels</option>
+      </optgroup>
+      <optgroup label="Volatility (sub-pane)">
+        <option value="atr">ATR</option>
+        <option value="stdev">StdDev</option>
+        <option value="true_range">True Range</option>
+      </optgroup>
+      <optgroup label="Oscillators (sub-pane)">
+        <option value="rsi">RSI</option>
+        <option value="macd">MACD</option>
+        <option value="stochastic">Stochastic</option>
+        <option value="cci">CCI</option>
+      </optgroup>
       <option value="none">— none —</option>
     </select>
   </label>
   <label id="lengthLabel">Length <input id="length" type="number" value="9" size="3" min="1" max="500"></label>
+  <label id="multLabel" style="display:none">Mult <input id="mult" type="number" value="2" step="0.1" size="3" min="0.1" max="10"></label>
   <label>Days <input id="days" type="number" value="5" size="3" min="1" max="60"></label>
   <label>Session
     <select id="session">
@@ -164,15 +211,18 @@ PAGE = r"""<!doctype html>
     <div id="readout">
       <div class="row"><span class="k">Time&nbsp;(ET)</span><span class="v time" id="rTime">—</span></div>
       <div class="row"><span class="k">Close</span><span class="v close" id="rClose">—</span></div>
-      <div class="row"><span class="k" id="rIndK">qp indicator</span><span class="v" id="rInd">—</span></div>
+      <div id="rSeries"></div>
       <div class="row">
         <span class="k">TV value</span>
         <input class="tvinp" id="rTv" type="number" step="0.0001" placeholder="type TV's #">
       </div>
       <div class="row"><span class="k">Diff (qp − TV)</span><span class="v" id="rDiff">—</span></div>
-      <div class="hint">hover qp at a time · read TV at same time · type it here</div>
+      <div class="hint">hover qp · read TV at same time · type here · diff vs. first qp series</div>
     </div>
-    <div id="qp"></div>
+    <div id="qpWrap">
+      <div id="qp"></div>
+      <div id="qpSub"></div>
+    </div>
   </div>
 </div>
 <script>
@@ -194,13 +244,13 @@ PAGE = r"""<!doctype html>
   }
 
   // ------------------ State --------------------------------------------------
-  let qpChart = null, priceSeries = null, indSeries = null;
+  let qpChart = null, priceSeries = null;
+  let subChart = null;
+  let overlaySerieses = [];   // [{name, color, style, series, byTime: Map}]
+  let subSerieses = [];       // same shape
   let tvWidget = null;
   let currentBars = [];
-  let currentInd  = [];
-  let indByTime   = new Map();
   let closeByTime = new Map();
-  let currentIndName = 'EMA';
   let csvMeta = {};   // filename -> {first, last, rows}
 
   // ------------------ Sources dropdown --------------------------------------
@@ -258,26 +308,43 @@ PAGE = r"""<!doctype html>
     }
   }
 
-  // Length only applies to windowed indicators (EMA/SMA/RMA/WMA).
-  // Session VWAP is anchored — cumulative from the session open, no length.
-  function indUsesLength(ind) {
-    return ind === 'ema' || ind === 'sma' || ind === 'rma' || ind === 'wma';
-  }
   function onIndChange() {
     const ind = document.getElementById('ind').value;
-    const show = indUsesLength(ind);
-    document.getElementById('lengthLabel').style.display = show ? '' : 'none';
+    document.getElementById('lengthLabel').style.display = indUsesLen.has(ind) ? '' : 'none';
+    document.getElementById('multLabel').style.display   = indUsesMult.has(ind) ? '' : 'none';
   }
 
   const tvIntervalMap = {'1m':'1','2m':'2','5m':'5','15m':'15','30m':'30','1h':'60','1d':'D'};
+  // TradingView study IDs for the free "basicstudies" pack. Where TV has
+  // no direct match (Hull, VWMA, price refs, weekly VWAP, etc.), we
+  // simply skip loading a TV overlay and rely on the user's own overlay.
   const tvStudyMap = {
-    ema:  'MAExp@tv-basicstudies',
-    sma:  'MASimple@tv-basicstudies',
-    rma:  'MASmoothed@tv-basicstudies',   // Wilder / SMMA — same as Pine ta.rma()
-    wma:  'MAWeighted@tv-basicstudies',
-    vwap: 'VWAP@tv-basicstudies',
+    ema:         'MAExp@tv-basicstudies',
+    sma:         'MASimple@tv-basicstudies',
+    rma:         'MASmoothed@tv-basicstudies',   // SMMA = Wilder = Pine ta.rma
+    wma:         'MAWeighted@tv-basicstudies',
+    hma:         'HullMA@tv-basicstudies',
+    vwma:        'MAVolumeWeighted@tv-basicstudies',
+    vwap:        'VWAP@tv-basicstudies',
+    bollinger:   'BB@tv-basicstudies',
+    keltner:     'KLTNR@tv-basicstudies',
+    atr:         'ATR@tv-basicstudies',
+    stdev:       'StdDev@tv-basicstudies',
+    rsi:         'RSI@tv-basicstudies',
+    macd:        'MACD@tv-basicstudies',
+    stochastic:  'Stochastic@tv-basicstudies',
+    cci:         'CCI@tv-basicstudies',
+    // Multi-VWAPs (weekly/monthly/…) and price refs — TV free pack has
+    // no dedicated overlay, so we don't request one.
   };
-  const indLabelMap = { ema:'EMA', sma:'SMA', rma:'RMA', wma:'WMA', vwap:'VWAP' };
+  // Which indicators care about the Mult input.
+  const indUsesMult = new Set(['bollinger', 'keltner']);
+  // Which indicators care about Length (everything except price refs,
+  // multi-VWAPs, macd, true_range, and 'none').
+  const indUsesLen = new Set([
+    'ema','sma','rma','wma','hma','vwma',
+    'bollinger','keltner','atr','stdev','rsi','stochastic','cci',
+  ]);
 
   // ------------------ TradingView pane --------------------------------------
   function makeTV(symbol, tf, ind) {
@@ -337,66 +404,137 @@ PAGE = r"""<!doctype html>
   }
 
   // ------------------ QP pane (lightweight-charts, ET everywhere) -----------
-  function makeQP() {
-    const el = document.getElementById('qp');
-    el.innerHTML = '';
-    qpChart = LightweightCharts.createChart(el, {
+  function chartOpts() {
+    return {
       layout: { background: {color:'#0e1116'}, textColor:'#c8d0dc' },
       grid:   { vertLines:{color:'#171b23'}, horzLines:{color:'#171b23'} },
       timeScale: {
         timeVisible: true, secondsVisible: false, borderColor:'#2a2f3a',
         tickMarkFormatter: (t) => fmtTickTime(t),
       },
-      localization: {
-        timeFormatter: (t) => fmtCrosshairTime(t),
-      },
+      localization: { timeFormatter: (t) => fmtCrosshairTime(t) },
       rightPriceScale: { borderColor:'#2a2f3a' },
-      crosshair: { mode: 1 },  // magnet
-    });
+      crosshair: { mode: 1 },
+    };
+  }
+
+  function makeQP() {
+    const el    = document.getElementById('qp');
+    const subEl = document.getElementById('qpSub');
+    el.innerHTML = ''; subEl.innerHTML = '';
+
+    qpChart = LightweightCharts.createChart(el, chartOpts());
     priceSeries = qpChart.addCandlestickSeries({
       upColor:'#4caf50', downColor:'#ef5350',
       borderUpColor:'#4caf50', borderDownColor:'#ef5350',
       wickUpColor:'#4caf50', wickDownColor:'#ef5350',
     });
-    indSeries = qpChart.addLineSeries({ color:'#f5a623', lineWidth: 2 });
 
-    qpChart.subscribeCrosshairMove((p) => {
+    subChart = LightweightCharts.createChart(subEl, chartOpts());
+    // Hide time axis on the top chart — the bottom one owns it.
+    subChart.applyOptions({ timeScale: { visible: true } });
+
+    // Two-way visible-range sync between price and sub panes.
+    let syncing = false;
+    function sync(from, to) {
+      from.timeScale().subscribeVisibleLogicalRangeChange(r => {
+        if (syncing || !r) return;
+        syncing = true;
+        try { to.timeScale().setVisibleLogicalRange(r); } catch (_) {}
+        syncing = false;
+      });
+    }
+    sync(qpChart, subChart);
+    sync(subChart, qpChart);
+
+    // Crosshair follows across panes; readout updates on either.
+    function onMove(p) {
       if (!p || !p.time) { updateReadoutLast(); return; }
       updateReadoutAt(p.time);
-    });
+    }
+    qpChart.subscribeCrosshairMove(onMove);
+    subChart.subscribeCrosshairMove(onMove);
 
-    new ResizeObserver(() => qpChart.resize(el.clientWidth, el.clientHeight)).observe(el);
+    new ResizeObserver(() => {
+      qpChart.resize(el.clientWidth, el.clientHeight);
+      subChart.resize(subEl.clientWidth, subEl.clientHeight);
+    }).observe(document.getElementById('qpWrap'));
+  }
+
+  function clearSerieses() {
+    for (const s of overlaySerieses) qpChart.removeSeries(s.series);
+    for (const s of subSerieses)     subChart.removeSeries(s.series);
+    overlaySerieses = [];
+    subSerieses = [];
+  }
+
+  function addSeriesFrom(meta, target) {
+    let s;
+    if (meta.style === 'hist') {
+      s = target.addHistogramSeries({ color: meta.color });
+    } else {
+      s = target.addLineSeries({ color: meta.color, lineWidth: 2 });
+    }
+    s.setData(meta.values);
+    const byTime = new Map(meta.values.map(v => [v.time, v.value]));
+    return { name: meta.name, color: meta.color, style: meta.style, series: s, byTime };
   }
 
   // ------------------ Readout box -------------------------------------------
-  let currentQpInd = null;  // remember last qp indicator value under cursor
+  let currentPrimaryVal = null;  // value of the first qp series at cursor
+
+  function rebuildSeriesRows() {
+    const box = document.getElementById('rSeries');
+    box.innerHTML = '';
+    const all = overlaySerieses.concat(subSerieses);
+    for (const s of all) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const k = document.createElement('span'); k.className = 'k';
+      k.textContent = s.name; k.style.color = s.color;
+      const v = document.createElement('span'); v.className = 'v';
+      v.style.color = s.color;
+      v.id = 'rSeries_' + all.indexOf(s);
+      v.textContent = '—';
+      row.appendChild(k); row.appendChild(v);
+      box.appendChild(row);
+    }
+  }
+
   function updateReadoutAt(t) {
     const close = closeByTime.get(t);
-    const ind   = indByTime.get(t);
-    currentQpInd = ind;
     document.getElementById('rTime').textContent  = t ? fmtCrosshairTime(t) : '—';
     document.getElementById('rClose').textContent = close != null ? close.toFixed(4) : '—';
-    document.getElementById('rInd').textContent   = ind   != null ? ind.toFixed(4)   : '—';
+    const all = overlaySerieses.concat(subSerieses);
+    currentPrimaryVal = null;
+    for (let i = 0; i < all.length; i++) {
+      const s = all[i];
+      const v = s.byTime.get(t);
+      const el = document.getElementById('rSeries_' + i);
+      if (el) el.textContent = v != null ? v.toFixed(4) : '—';
+      if (i === 0) currentPrimaryVal = v == null ? null : v;
+    }
     updateDiff();
   }
+
   function updateReadoutLast() {
     if (currentBars.length === 0) { updateReadoutAt(null); return; }
     updateReadoutAt(currentBars[currentBars.length - 1].time);
   }
+
   function updateDiff() {
     const tvRaw = document.getElementById('rTv').value;
     const el = document.getElementById('rDiff');
-    if (tvRaw === '' || currentQpInd == null) {
+    if (tvRaw === '' || currentPrimaryVal == null) {
       el.textContent = '—'; el.classList.remove('match','miss'); return;
     }
     const tv = parseFloat(tvRaw);
     if (isNaN(tv)) {
       el.textContent = '—'; el.classList.remove('match','miss'); return;
     }
-    const d = currentQpInd - tv;
+    const d = currentPrimaryVal - tv;
     const signed = (d >= 0 ? '+' : '') + d.toFixed(4);
-    // Relative tolerance: within 5e-4 of the value counts as a match.
-    const tol = Math.max(1e-4, Math.abs(currentQpInd) * 5e-6);
+    const tol = Math.max(1e-4, Math.abs(currentPrimaryVal) * 5e-6);
     el.textContent = signed;
     el.classList.toggle('match', Math.abs(d) <= tol);
     el.classList.toggle('miss',  Math.abs(d) >  tol);
@@ -408,20 +546,15 @@ PAGE = r"""<!doctype html>
     const tf          = document.getElementById('tf').value;
     const ind         = document.getElementById('ind').value;
     const length      = document.getElementById('length').value;
+    const mult        = document.getElementById('mult').value;
     const days        = document.getElementById('days').value;
     const session     = document.getElementById('session').value;
     const data_source = document.getElementById('source').value;
-    currentIndName = ind === 'none' ? '—' : (indLabelMap[ind] || ind.toUpperCase());
-    let label;
-    if (ind === 'none')          label = 'qp indicator';
-    else if (ind === 'vwap')     label = 'qp VWAP · session';
-    else                         label = `qp ${currentIndName}(${length})`;
-    document.getElementById('rIndK').textContent = label;
     document.getElementById('status').textContent = 'loading…';
     let r;
     try {
       r = await fetch(`/data?symbol=${encodeURIComponent(symbol)}&tf=${tf}&ind=${ind}` +
-                      `&length=${length}&days=${days}&session=${session}` +
+                      `&length=${length}&mult=${mult}&days=${days}&session=${session}` +
                       `&data_source=${encodeURIComponent(data_source)}`);
     } catch (e) {
       document.getElementById('status').textContent = 'network error: ' + e.message;
@@ -434,18 +567,39 @@ PAGE = r"""<!doctype html>
     }
     const j = await r.json();
     currentBars = j.bars || [];
-    currentInd  = j.indicator || [];
     closeByTime = new Map(currentBars.map(b => [b.time, b.close]));
-    indByTime   = new Map(currentInd.map(p => [p.time, p.value]));
-
     priceSeries.setData(currentBars);
-    indSeries.setData(currentInd);
+
+    // Rebuild overlay + sub-pane series from scratch each reload.
+    clearSerieses();
+    const wrap = document.getElementById('qpWrap');
+    let hasSub = false;
+    for (const meta of (j.series || [])) {
+      if (meta.pane === 'sub') {
+        subSerieses.push(addSeriesFrom(meta, subChart));
+        hasSub = true;
+      } else {
+        overlaySerieses.push(addSeriesFrom(meta, qpChart));
+      }
+    }
+    wrap.classList.toggle('hasSub', hasSub);
+    // Give the DOM a frame to apply the flex-basis change, then resize.
+    requestAnimationFrame(() => {
+      const el = document.getElementById('qp');
+      const sub = document.getElementById('qpSub');
+      qpChart.resize(el.clientWidth, el.clientHeight);
+      subChart.resize(sub.clientWidth, sub.clientHeight);
+    });
+
+    rebuildSeriesRows();
     qpChart.timeScale().fitContent();
+    if (hasSub) subChart.timeScale().fitContent();
     updateReadoutLast();
     syncTVRange();
 
     document.getElementById('status').textContent =
-      `${currentBars.length} bars · ${j.first || ''} → ${j.last || ''} (ET)`;
+      `${currentBars.length} bars · ${j.first || ''} → ${j.last || ''} (ET) · ` +
+      `${(j.series || []).length} qp series`;
   }
 
   function reload() {
@@ -467,8 +621,22 @@ PAGE = r"""<!doctype html>
 """
 
 
+def _to_series(name, pane, color, values, ts, style='line'):
+    """Pack a numpy series into the JSON shape the UI expects.
+    `pane` is 'overlay' (price chart) or 'sub' (oscillator pane below).
+    `style` is 'line' (default) or 'hist' (rendered as coloured bars).
+    """
+    out = []
+    for t, v in zip(ts, values):
+        fv = float(v)
+        if fv == fv:  # skip NaN
+            out.append({'time': int(t), 'value': fv})
+    return {'name': name, 'pane': pane, 'color': color, 'style': style, 'values': out}
+
+
 def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
-                   session: str, data_source: str = 'yahoo'):
+                   session: str, data_source: str = 'yahoo',
+                   mult: float = 2.0):
     if data_source.startswith('csv:'):
         # For CSVs the file IS the data — read its full span, then take
         # the last `days` calendar days from its end. No Yahoo, no cache.
@@ -524,35 +692,105 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         for t, o, h, l, c in zip(ts, df['open'], df['high'], df['low'], df['close'])
     ]
 
-    if ind == 'ema':
-        y = ema(df['close'].to_numpy(), length)
+    C = df['close'].to_numpy()
+    V = df['volume'].to_numpy()
+    ORANGE = '#f5a623'
+    BLUE   = '#7ec7ff'
+    GREEN  = '#5fd8a3'
+    RED    = '#ef5350'
+
+    series_out = []
+    if ind == 'none':
+        pass
+
+    # ── Moving averages (overlay, single line) ────────────────────────────
+    elif ind == 'ema':
+        series_out.append(_to_series(f'EMA({length})', 'overlay', ORANGE, ema(C, length), ts))
     elif ind == 'sma':
-        y = sma(df['close'].to_numpy(), length)
+        series_out.append(_to_series(f'SMA({length})', 'overlay', ORANGE, sma(C, length), ts))
     elif ind == 'rma':
-        y = rma(df['close'].to_numpy(), length)
+        series_out.append(_to_series(f'RMA({length})', 'overlay', ORANGE, rma(C, length), ts))
     elif ind == 'wma':
-        y = wma(df['close'].to_numpy(), length)
+        series_out.append(_to_series(f'WMA({length})', 'overlay', ORANGE, wma(C, length), ts))
+    elif ind == 'hma':
+        series_out.append(_to_series(f'HMA({length})', 'overlay', ORANGE, hma(C, length), ts))
+    elif ind == 'vwma':
+        series_out.append(_to_series(f'VWMA({length})', 'overlay', ORANGE, vwma(C, V, length), ts))
+
+    # ── Price references (overlay, single line) ───────────────────────────
+    elif ind == 'hl2':
+        series_out.append(_to_series('HL2', 'overlay', ORANGE, hl2(df), ts))
+    elif ind == 'hlc3':
+        series_out.append(_to_series('HLC3', 'overlay', ORANGE, hlc3(df), ts))
+    elif ind == 'ohlc4':
+        series_out.append(_to_series('OHLC4', 'overlay', ORANGE, ohlc4(df), ts))
+    elif ind == 'typical_price':
+        series_out.append(_to_series('Typical', 'overlay', ORANGE, typical_price(df), ts))
+    elif ind == 'median_price':
+        series_out.append(_to_series('Median', 'overlay', ORANGE, median_price(df), ts))
+    elif ind == 'weighted_close':
+        series_out.append(_to_series('Wt Close', 'overlay', ORANGE, weighted_close(df), ts))
+
+    # ── VWAP flavours (overlay, single line) ──────────────────────────────
     elif ind == 'vwap':
-        # session_vwap may return a Series OR a raw ndarray depending on
-        # implementation — asarray handles both without a to_numpy hop.
-        y = np.asarray(session_vwap(df))
-    elif ind == 'none':
-        y = None
+        series_out.append(_to_series('Session VWAP', 'overlay', ORANGE,
+                                     np.asarray(session_vwap(df)), ts))
+    elif ind == 'weekly_vwap':
+        series_out.append(_to_series('Weekly VWAP', 'overlay', ORANGE,
+                                     np.asarray(weekly_vwap(df)), ts))
+    elif ind == 'monthly_vwap':
+        series_out.append(_to_series('Monthly VWAP', 'overlay', ORANGE,
+                                     np.asarray(monthly_vwap(df)), ts))
+    elif ind == 'quarterly_vwap':
+        series_out.append(_to_series('Quarterly VWAP', 'overlay', ORANGE,
+                                     np.asarray(quarterly_vwap(df)), ts))
+    elif ind == 'yearly_vwap':
+        series_out.append(_to_series('Yearly VWAP', 'overlay', ORANGE,
+                                     np.asarray(yearly_vwap(df)), ts))
+
+    # ── Envelopes (overlay, multi-line) ───────────────────────────────────
+    elif ind == 'bollinger':
+        bb = bollinger(C, length, mult)
+        series_out.append(_to_series(f'BB Basis({length})', 'overlay', ORANGE, bb.basis, ts))
+        series_out.append(_to_series('BB Upper', 'overlay', BLUE, bb.upper, ts))
+        series_out.append(_to_series('BB Lower', 'overlay', BLUE, bb.lower, ts))
+    elif ind == 'keltner':
+        kc = keltner(df, length, mult)
+        series_out.append(_to_series(f'KC Basis({length})', 'overlay', ORANGE, kc.basis, ts))
+        series_out.append(_to_series('KC Upper', 'overlay', BLUE, kc.upper, ts))
+        series_out.append(_to_series('KC Lower', 'overlay', BLUE, kc.lower, ts))
+
+    # ── Volatility (sub-pane, single) ─────────────────────────────────────
+    elif ind == 'atr':
+        series_out.append(_to_series(f'ATR({length})', 'sub', ORANGE, atr(df, length), ts))
+    elif ind == 'stdev':
+        series_out.append(_to_series(f'StdDev({length})', 'sub', ORANGE, stdev(C, length), ts))
+    elif ind == 'true_range':
+        series_out.append(_to_series('True Range', 'sub', ORANGE, true_range(df), ts))
+
+    # ── Oscillators (sub-pane, single or multi) ───────────────────────────
+    elif ind == 'rsi':
+        series_out.append(_to_series(f'RSI({length})', 'sub', ORANGE, rsi(C, length), ts))
+    elif ind == 'macd':
+        m = macd(C)
+        series_out.append(_to_series('MACD', 'sub', ORANGE, m.macd, ts))
+        series_out.append(_to_series('Signal', 'sub', BLUE, m.signal, ts))
+        series_out.append(_to_series('Hist', 'sub', GREEN, m.hist, ts, style='hist'))
+    elif ind == 'stochastic':
+        s = stochastic(df, length)
+        series_out.append(_to_series('%K', 'sub', ORANGE, s.k, ts))
+        series_out.append(_to_series('%D', 'sub', BLUE, s.d, ts))
+    elif ind == 'cci':
+        series_out.append(_to_series(f'CCI({length})', 'sub', ORANGE, cci(df, length), ts))
+
     else:
         raise ValueError(f'unknown indicator {ind!r}')
 
-    ind_list = []
-    if y is not None:
-        for t, v in zip(ts, y):
-            fv = float(v)
-            if fv == fv:  # skip NaN
-                ind_list.append({'time': int(t), 'value': fv})
-
     return {
-        'bars': bar_list,
-        'indicator': ind_list,
-        'first': df.index[0].strftime('%Y-%m-%d %H:%M'),
-        'last':  df.index[-1].strftime('%Y-%m-%d %H:%M'),
+        'bars':   bar_list,
+        'series': series_out,
+        'first':  df.index[0].strftime('%Y-%m-%d %H:%M'),
+        'last':   df.index[-1].strftime('%Y-%m-%d %H:%M'),
     }
 
 
@@ -581,6 +819,7 @@ class Handler(BaseHTTPRequestHandler):
                     days=int(q.get('days', 5)),
                     session=q.get('session', 'regular'),
                     data_source=q.get('data_source', 'yahoo'),
+                    mult=float(q.get('mult', 2.0)),
                 )
                 self._send(200, json.dumps(data).encode('utf-8'))
             except Exception as e:
