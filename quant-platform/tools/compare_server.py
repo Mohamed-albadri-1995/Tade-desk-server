@@ -146,10 +146,23 @@ PAGE = r"""<!doctype html>
   #readout {
     position: absolute; top: 8px; right: 14px; z-index: 10;
     background: rgba(20, 24, 32, 0.92); border: 1px solid #2a3f5a;
-    border-radius: 6px; padding: 8px 12px; font-family: ui-monospace, Menlo, monospace;
-    font-size: 12px; color: #eee; min-width: 200px;
+    border-radius: 6px; padding: 6px 10px; font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; color: #eee; min-width: 190px; max-width: 240px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.4);
   }
+  #readout .rHead { display:flex; justify-content:space-between; align-items:center;
+                    color:#5fd8a3; font-size:10px; letter-spacing:1.5px;
+                    padding-bottom:3px; margin-bottom:3px; border-bottom:1px solid #2a2f3a; }
+  #readout .rHead button { background:none; color:#8a94a7; border:0; cursor:pointer;
+                           font-size:14px; padding:0 4px; line-height:1; }
+  #readout .rHead button:hover { color:#eee; }
+  #readoutShow {
+    position: absolute; top: 8px; right: 14px; z-index: 12; display: none;
+    background: rgba(20, 24, 32, 0.92); color: #eee; border: 1px solid #2a3f5a;
+    border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 11px;
+    letter-spacing: 1px;
+  }
+  #readoutShow:hover { background: rgba(40, 50, 70, 0.95); }
   #readout .row { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
   #readout .k { color: #8a94a7; }
   #readout .v { color: #f5a623; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
@@ -286,7 +299,12 @@ PAGE = r"""<!doctype html>
   <div class="pane"><h3>TRADINGVIEW · ET</h3><div id="tv"></div></div>
   <div class="pane">
     <h3>QP · ET</h3>
+    <button id="readoutShow" onclick="toggleReadout(true)">📊 readout</button>
     <div id="readout">
+      <div class="rHead">
+        <span>READOUT</span>
+        <button onclick="toggleReadout(false)" title="Hide">×</button>
+      </div>
       <div class="row"><span class="k">Time&nbsp;(ET)</span><span class="v time" id="rTime">—</span></div>
       <div class="row"><span class="k">Close</span><span class="v close" id="rClose">—</span></div>
       <div id="rSeries"></div>
@@ -416,13 +434,18 @@ PAGE = r"""<!doctype html>
       <label>Length <input class="indLength" type="number" value="9" size="3" min="1" max="500"></label>
       <label>Mult <input class="indMult" type="number" value="2" step="0.1" size="3" min="0.1" max="10" style="display:none"></label>
       <label>Color <input class="indColor" type="color" value="${color}"></label>
-      <button onclick="this.parentElement.remove()">× remove</button>
+      <button onclick="this.closest('.extraRow').remove()">× remove</button>
     `;
     // Copy the giant option list from the primary dropdown.
     row.querySelector('.indSelect').innerHTML = primary.innerHTML;
     row.querySelector('.indSelect').value = primary.value;
     document.getElementById('extraRows').appendChild(row);
     onIndChange(row.querySelector('.indSelect'));
+  }
+
+  function toggleReadout(show) {
+    document.getElementById('readout').style.display     = show ? '' : 'none';
+    document.getElementById('readoutShow').style.display = show ? 'none' : 'block';
   }
 
   function collectSpecs() {
