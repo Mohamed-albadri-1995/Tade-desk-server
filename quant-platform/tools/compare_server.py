@@ -169,7 +169,7 @@ PAGE = r"""<!doctype html>
   const tvStudyMap = {
     ema:  'MAExp@tv-basicstudies',
     sma:  'MASimple@tv-basicstudies',
-    rma:  'MAExp@tv-basicstudies',   // Wilder — TV has no exact overlay; EMA is nearest visual
+    rma:  'MASmoothed@tv-basicstudies',   // Wilder / SMMA — same as Pine ta.rma()
     wma:  'MAWeighted@tv-basicstudies',
     vwap: 'VWAP@tv-basicstudies',
   };
@@ -392,7 +392,9 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int, sessi
     elif ind == 'wma':
         y = wma(df['close'].to_numpy(), length)
     elif ind == 'vwap':
-        y = session_vwap(df).to_numpy()
+        # session_vwap may return a Series OR a raw ndarray depending on
+        # implementation — asarray handles both without a to_numpy hop.
+        y = np.asarray(session_vwap(df))
     elif ind == 'none':
         y = None
     else:
