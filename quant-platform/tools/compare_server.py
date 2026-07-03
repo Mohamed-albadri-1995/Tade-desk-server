@@ -63,6 +63,22 @@ PAGE = r"""<!doctype html>
              font-size: 11px; letter-spacing:2px; color:#5fd8a3;
              text-shadow: 0 0 4px rgba(0,0,0,0.8); pointer-events:none; }
   #tv, #qp { width:100%; height:100%; }
+
+  /* Live readout — the box that makes side-by-side comparison actually usable */
+  #readout {
+    position: absolute; top: 8px; right: 14px; z-index: 10;
+    background: rgba(20, 24, 32, 0.92); border: 1px solid #2a3f5a;
+    border-radius: 6px; padding: 8px 12px; font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px; color: #eee; min-width: 200px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  #readout .row { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
+  #readout .k { color: #8a94a7; }
+  #readout .v { color: #f5a623; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+  #readout .v.close { color: #7ec7ff; }
+  #readout .v.time { color: #b0f0c0; font-weight: 500; }
+  #readout .hint { color: #4d5566; font-size: 10px; text-align: center;
+                   margin-top: 4px; padding-top: 4px; border-top: 1px solid #2a2f3a; }
 </style></head>
 <body>
 <div id="controls">
@@ -97,29 +113,64 @@ PAGE = r"""<!doctype html>
   <span id="status"></span>
 </div>
 <div id="main">
-  <div class="pane"><h3>TRADINGVIEW</h3><div id="tv"></div></div>
-  <div class="pane"><h3>QP</h3><div id="qp"></div></div>
+  <div class="pane"><h3>TRADINGVIEW · ET</h3><div id="tv"></div></div>
+  <div class="pane">
+    <h3>QP · ET</h3>
+    <div id="readout">
+      <div class="row"><span class="k">Time&nbsp;(ET)</span><span class="v time" id="rTime">—</span></div>
+      <div class="row"><span class="k">Close</span><span class="v close" id="rClose">—</span></div>
+      <div class="row"><span class="k" id="rIndK">Indicator</span><span class="v" id="rInd">—</span></div>
+      <div class="hint">hover · click TV crosshair at same time</div>
+    </div>
+    <div id="qp"></div>
+  </div>
 </div>
 <script>
+  // ------------------ Timezone helpers (force both charts to ET) ---------------
+  const ET = 'America/New_York';
+
+  function fmtET(unixSec, opts) {
+    return new Date(unixSec * 1000).toLocaleString('en-US',
+      Object.assign({ timeZone: ET, hour12: false }, opts));
+  }
+  function fmtTickTime(unixSec) {
+    return fmtET(unixSec, { hour: '2-digit', minute: '2-digit' });
+  }
+  function fmtCrosshairTime(unixSec) {
+    return fmtET(unixSec, {
+      month: 'short', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    });
+  }
+
+  // ------------------ State --------------------------------------------------
   let qpChart = null, priceSeries = null, indSeries = null;
+  let tvWidget = null;
+  let currentBars = [];
+  let currentInd  = [];
+  let indByTime   = new Map();
+  let closeByTime = new Map();
+  let currentIndName = 'EMA';
 
   const tvIntervalMap = {'1m':'1','2m':'2','5m':'5','15m':'15','30m':'30','1h':'60','1d':'D'};
   const tvStudyMap = {
     ema:  'MAExp@tv-basicstudies',
     sma:  'MASimple@tv-basicstudies',
-    rma:  'MAExp@tv-basicstudies',   // Wilder — TV has no exact match, EMA is closest visual
+    rma:  'MAExp@tv-basicstudies',   // Wilder — TV has no exact overlay; EMA is nearest visual
     wma:  'MAWeighted@tv-basicstudies',
     vwap: 'VWAP@tv-basicstudies',
   };
+  const indLabelMap = { ema:'EMA', sma:'SMA', rma:'RMA', wma:'WMA', vwap:'VWAP' };
 
+  // ------------------ TradingView pane --------------------------------------
   function makeTV(symbol, tf, ind) {
     document.getElementById('tv').innerHTML = '';
     const studies = ind !== 'none' && tvStudyMap[ind] ? [tvStudyMap[ind]] : [];
-    new TradingView.widget({
+    tvWidget = new TradingView.widget({
       autosize: true,
       symbol: symbol,
       interval: tvIntervalMap[tf] || '5',
-      timezone: 'America/New_York',
+      timezone: ET,
       theme: 'dark',
       style: '1',
       locale: 'en',
@@ -132,15 +183,43 @@ PAGE = r"""<!doctype html>
     });
   }
 
+  // Sync TV's visible range to qp's data window when possible.
+  // The public widget doesn't expose crosshair events, but setVisibleRange
+  // on activeChart works reliably.
+  function syncTVRange() {
+    if (!tvWidget || currentBars.length === 0) return;
+    const from = currentBars[0].time;
+    const to   = currentBars[currentBars.length - 1].time;
+    try {
+      if (tvWidget.onChartReady) {
+        tvWidget.onChartReady(() => {
+          try {
+            tvWidget.activeChart().setVisibleRange(
+              { from, to },
+              { applyDefaultRightMargin: false },
+            );
+          } catch (_) { /* setVisibleRange may fail during load */ }
+        });
+      }
+    } catch (_) {}
+  }
+
+  // ------------------ QP pane (lightweight-charts, ET everywhere) -----------
   function makeQP() {
     const el = document.getElementById('qp');
     el.innerHTML = '';
     qpChart = LightweightCharts.createChart(el, {
       layout: { background: {color:'#0e1116'}, textColor:'#c8d0dc' },
       grid:   { vertLines:{color:'#171b23'}, horzLines:{color:'#171b23'} },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor:'#2a2f3a' },
+      timeScale: {
+        timeVisible: true, secondsVisible: false, borderColor:'#2a2f3a',
+        tickMarkFormatter: (t) => fmtTickTime(t),
+      },
+      localization: {
+        timeFormatter: (t) => fmtCrosshairTime(t),
+      },
       rightPriceScale: { borderColor:'#2a2f3a' },
-      crosshair: { mode: 1 },
+      crosshair: { mode: 1 },  // magnet
     });
     priceSeries = qpChart.addCandlestickSeries({
       upColor:'#4caf50', downColor:'#ef5350',
@@ -148,9 +227,33 @@ PAGE = r"""<!doctype html>
       wickUpColor:'#4caf50', wickDownColor:'#ef5350',
     });
     indSeries = qpChart.addLineSeries({ color:'#f5a623', lineWidth: 2 });
+
+    qpChart.subscribeCrosshairMove((p) => {
+      if (!p || !p.time) { updateReadoutLast(); return; }
+      updateReadoutAt(p.time);
+    });
+
     new ResizeObserver(() => qpChart.resize(el.clientWidth, el.clientHeight)).observe(el);
   }
 
+  // ------------------ Readout box -------------------------------------------
+  function updateReadoutAt(t) {
+    const close = closeByTime.get(t);
+    const ind   = indByTime.get(t);
+    document.getElementById('rTime').textContent  = t ? fmtCrosshairTime(t) : '—';
+    document.getElementById('rClose').textContent = close != null ? close.toFixed(4) : '—';
+    document.getElementById('rInd').textContent   = ind   != null ? ind.toFixed(4)   : '—';
+  }
+  function updateReadoutLast() {
+    if (currentBars.length === 0) {
+      updateReadoutAt(null);
+      return;
+    }
+    const last = currentBars[currentBars.length - 1];
+    updateReadoutAt(last.time);
+  }
+
+  // ------------------ Data load ---------------------------------------------
   async function loadData() {
     const symbol  = document.getElementById('symbol').value.trim().toUpperCase();
     const tf      = document.getElementById('tf').value;
@@ -158,6 +261,9 @@ PAGE = r"""<!doctype html>
     const length  = document.getElementById('length').value;
     const days    = document.getElementById('days').value;
     const session = document.getElementById('session').value;
+    currentIndName = ind === 'none' ? '—' : (indLabelMap[ind] || ind.toUpperCase());
+    document.getElementById('rIndK').textContent = ind === 'none'
+      ? 'Indicator' : `${currentIndName}(${length})`;
     document.getElementById('status').textContent = 'loading…';
     let r;
     try {
@@ -173,11 +279,19 @@ PAGE = r"""<!doctype html>
       return;
     }
     const j = await r.json();
-    priceSeries.setData(j.bars);
-    indSeries.setData(j.indicator || []);
+    currentBars = j.bars || [];
+    currentInd  = j.indicator || [];
+    closeByTime = new Map(currentBars.map(b => [b.time, b.close]));
+    indByTime   = new Map(currentInd.map(p => [p.time, p.value]));
+
+    priceSeries.setData(currentBars);
+    indSeries.setData(currentInd);
     qpChart.timeScale().fitContent();
+    updateReadoutLast();
+    syncTVRange();
+
     document.getElementById('status').textContent =
-      `${j.bars.length} bars · ${j.first || ''} → ${j.last || ''}`;
+      `${currentBars.length} bars · ${j.first || ''} → ${j.last || ''} (ET)`;
   }
 
   function reload() {
