@@ -30,7 +30,11 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from qp.data import load
-from qp.ma import ema, sma, rma, wma, vwma, hma, n_session_sma
+from qp.ma import (
+    ema, sma, rma, wma, vwma, hma,
+    n_session_sma,
+    weekly_sma, monthly_sma, quarterly_sma, yearly_sma,
+)
 from qp.vwap import (
     session_vwap, rolling_n_day_vwap,
     weekly_vwap, monthly_vwap, quarterly_vwap, yearly_vwap,
@@ -158,7 +162,13 @@ PAGE = r"""<!doctype html>
         <option value="wma">WMA</option>
         <option value="hma">HMA (Hull)</option>
         <option value="vwma">VWMA</option>
+      </optgroup>
+      <optgroup label="Session-anchored SMA">
         <option value="sma_5d">5-Day Rolling SMA (TF-adaptive)</option>
+        <option value="sma_week">Weekly Anchored SMA (Mon)</option>
+        <option value="sma_month">Monthly Anchored SMA (1st)</option>
+        <option value="sma_quarter">Quarterly Anchored SMA</option>
+        <option value="sma_year">Yearly Anchored SMA</option>
       </optgroup>
       <optgroup label="Price Refs">
         <option value="hl2">HL2</option>
@@ -168,16 +178,18 @@ PAGE = r"""<!doctype html>
         <option value="median_price">Median Price</option>
         <option value="weighted_close">Weighted Close</option>
       </optgroup>
-      <optgroup label="VWAP">
+      <optgroup label="Rolling VWAP">
         <option value="vwap">Daily VWAP (TV parity)</option>
-        <option value="vwap_2d">2-Day VWAP</option>
-        <option value="vwap_5d">5-Day VWAP</option>
-        <option value="vwap_7d">7-Day VWAP</option>
-        <option value="vwap_30d">30-Day VWAP</option>
-        <option value="weekly_vwap">Weekly VWAP (ISO week reset)</option>
-        <option value="monthly_vwap">Monthly VWAP (calendar month)</option>
-        <option value="quarterly_vwap">Quarterly VWAP</option>
-        <option value="yearly_vwap">Yearly VWAP</option>
+        <option value="vwap_2d">2-Day Rolling VWAP</option>
+        <option value="vwap_5d">5-Day Rolling VWAP</option>
+        <option value="vwap_7d">7-Day Rolling VWAP</option>
+        <option value="vwap_30d">30-Day Rolling VWAP</option>
+      </optgroup>
+      <optgroup label="Anchored VWAP">
+        <option value="weekly_vwap">Weekly Anchored VWAP (Mon)</option>
+        <option value="monthly_vwap">Monthly Anchored VWAP (1st)</option>
+        <option value="quarterly_vwap">Quarterly Anchored VWAP</option>
+        <option value="yearly_vwap">Yearly Anchored VWAP</option>
       </optgroup>
       <optgroup label="Envelopes">
         <option value="bollinger">Bollinger Bands</option>
@@ -731,6 +743,20 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         # daily → 5-bar mean. No length parameter — user does not specify it.
         series_out.append(_to_series('5-Day Rolling SMA', 'overlay', ORANGE,
                                      n_session_sma(df, 5), ts))
+    # Anchored SMAs — cumulative mean of closes since the anchor. Match
+    # the reset points of the anchored VWAPs of the same name.
+    elif ind == 'sma_week':
+        series_out.append(_to_series('Weekly Anchored SMA (Mon)', 'overlay', ORANGE,
+                                     weekly_sma(df), ts))
+    elif ind == 'sma_month':
+        series_out.append(_to_series('Monthly Anchored SMA (1st)', 'overlay', ORANGE,
+                                     monthly_sma(df), ts))
+    elif ind == 'sma_quarter':
+        series_out.append(_to_series('Quarterly Anchored SMA', 'overlay', ORANGE,
+                                     quarterly_sma(df), ts))
+    elif ind == 'sma_year':
+        series_out.append(_to_series('Yearly Anchored SMA', 'overlay', ORANGE,
+                                     yearly_sma(df), ts))
 
     # ── Price references (overlay, single line) ───────────────────────────
     elif ind == 'hl2':

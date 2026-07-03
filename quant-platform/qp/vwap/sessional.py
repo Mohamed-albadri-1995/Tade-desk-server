@@ -78,32 +78,56 @@ def _new_day_mask(bars: pd.DataFrame, spec: SessionSpec) -> np.ndarray:
     return mask
 
 
+def _shifted_local(bars: pd.DataFrame, spec: SessionSpec) -> pd.DatetimeIndex:
+    """Local time shifted back by spec.regular_open so that a bar at
+    09:30 ET on Monday Jan 6 becomes 00:00 ET Monday Jan 6, and a
+    premarket bar at 04:00 ET Monday Jan 6 becomes 18:30 ET Sunday
+    Jan 5. Downstream week / month / etc. masks use this shifted
+    time so their resets fire on the session's first RTH bar, not
+    on premarket bars of the same calendar date."""
+    r_open = spec.regular_open
+    offset = pd.Timedelta(hours=r_open.hour, minutes=r_open.minute,
+                          seconds=r_open.second)
+    return _local(bars, spec) - offset
+
+
 def _new_week_mask(bars: pd.DataFrame, spec: SessionSpec) -> np.ndarray:
-    local = _local(bars, spec)
-    week = local.isocalendar().week
-    year = local.isocalendar().year
-    key = list(zip(year, week))
+    """Fire True at the first RTH bar of each new ISO week (Monday session)."""
+    shifted = _shifted_local(bars, spec)
+    key = list(zip(shifted.isocalendar().year, shifted.isocalendar().week))
+    if not key:
+        return np.array([], dtype=bool)
     mask = np.array([True] + [k != p for k, p in zip(key[1:], key[:-1])], dtype=bool)
     return mask
 
 
 def _new_month_mask(bars: pd.DataFrame, spec: SessionSpec) -> np.ndarray:
-    local = _local(bars, spec)
-    key = list(zip(local.year, local.month))
+    """Fire True at the first RTH bar of each new calendar month."""
+    shifted = _shifted_local(bars, spec)
+    key = list(zip(shifted.year, shifted.month))
+    if not key:
+        return np.array([], dtype=bool)
     mask = np.array([True] + [k != p for k, p in zip(key[1:], key[:-1])], dtype=bool)
     return mask
 
 
 def _new_quarter_mask(bars: pd.DataFrame, spec: SessionSpec) -> np.ndarray:
-    local = _local(bars, spec)
-    key = list(zip(local.year, ((local.month - 1) // 3 + 1)))
+    """Fire True at the first RTH bar of each new calendar quarter."""
+    shifted = _shifted_local(bars, spec)
+    key = list(zip(shifted.year, ((shifted.month - 1) // 3 + 1)))
+    if not key:
+        return np.array([], dtype=bool)
     mask = np.array([True] + [k != p for k, p in zip(key[1:], key[:-1])], dtype=bool)
     return mask
 
 
 def _new_year_mask(bars: pd.DataFrame, spec: SessionSpec) -> np.ndarray:
-    local = _local(bars, spec)
-    mask = np.array([True] + [y != p for y, p in zip(local.year[1:], local.year[:-1])], dtype=bool)
+    """Fire True at the first RTH bar of each new calendar year."""
+    shifted = _shifted_local(bars, spec)
+    years = shifted.year
+    if len(years) == 0:
+        return np.array([], dtype=bool)
+    mask = np.array([True] + [y != p for y, p in zip(years[1:], years[:-1])], dtype=bool)
     return mask
 
 

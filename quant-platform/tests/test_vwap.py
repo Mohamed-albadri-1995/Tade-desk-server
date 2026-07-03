@@ -219,6 +219,25 @@ class TestNDayVWAP:
 
 
 class TestWeeklyVWAP:
+    def test_premarket_monday_still_in_previous_week(self):
+        # Premarket bar at 08:00 ET Monday belongs to the PREVIOUS
+        # session (Friday's), so the weekly VWAP does NOT reset until
+        # Monday 09:30 ET. Matches the session-anchored behaviour of
+        # session_vwap — no spurious mid-morning weekly reset.
+        idx = pd.DatetimeIndex([
+            pd.Timestamp('2025-01-03 09:30', tz='America/New_York'),  # Friday RTH
+            pd.Timestamp('2025-01-06 08:00', tz='America/New_York'),  # Mon premarket
+            pd.Timestamp('2025-01-06 09:30', tz='America/New_York'),  # Mon RTH — reset
+            pd.Timestamp('2025-01-06 09:31', tz='America/New_York'),  # Mon RTH
+        ])
+        bars = _bars(idx,
+                     high=[10, 20, 100, 200], low=[10, 20, 100, 200],
+                     close=[10, 20, 100, 200], volume=[1, 1, 1, 1])
+        r = weekly_vwap(bars)
+        # Session 1 (Fri + Mon premarket): [10, 15]
+        # Session 2 (Mon RTH+): [100, 150]
+        np.testing.assert_allclose(r, [10.0, 15.0, 100.0, 150.0])
+
     def test_resets_at_iso_week_boundary(self):
         # ISO week 2 of 2025 starts Mon 2025-01-06; week 3 starts Mon 2025-01-13.
         idx = pd.DatetimeIndex([

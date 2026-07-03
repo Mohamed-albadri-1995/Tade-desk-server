@@ -24,5 +24,12 @@ from qp.ma.wma import wma
 from qp.ma.vwma import vwma
 from qp.ma.hma import hma
 from qp.ma.n_session_ma import n_session_sma
+from qp.ma.anchored_sma import (
+    session_sma, weekly_sma, monthly_sma, quarterly_sma, yearly_sma,
+)
 
-__all__ = ['sma', 'ema', 'rma', 'wma', 'vwma', 'hma', 'n_session_sma']
+__all__ = [
+    'sma', 'ema', 'rma', 'wma', 'vwma', 'hma',
+    'n_session_sma',
+    'session_sma', 'weekly_sma', 'monthly_sma', 'quarterly_sma', 'yearly_sma',
+]
