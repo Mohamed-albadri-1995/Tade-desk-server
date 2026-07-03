@@ -136,7 +136,7 @@ PAGE = r"""<!doctype html>
     </select>
   </label>
   <label>Indicator
-    <select id="ind">
+    <select id="ind" onchange="onIndChange()">
       <option value="ema">EMA</option>
       <option value="sma">SMA</option>
       <option value="rma">RMA (Wilder)</option>
@@ -145,7 +145,7 @@ PAGE = r"""<!doctype html>
       <option value="none">— none —</option>
     </select>
   </label>
-  <label>Length <input id="length" type="number" value="9" size="3" min="1" max="500"></label>
+  <label id="lengthLabel">Length <input id="length" type="number" value="9" size="3" min="1" max="500"></label>
   <label>Days <input id="days" type="number" value="5" size="3" min="1" max="60"></label>
   <label>Session
     <select id="session">
@@ -256,6 +256,17 @@ PAGE = r"""<!doctype html>
     } else {
       document.getElementById('symbol').value = 'SPY';
     }
+  }
+
+  // Length only applies to windowed indicators (EMA/SMA/RMA/WMA).
+  // Session VWAP is anchored — cumulative from the session open, no length.
+  function indUsesLength(ind) {
+    return ind === 'ema' || ind === 'sma' || ind === 'rma' || ind === 'wma';
+  }
+  function onIndChange() {
+    const ind = document.getElementById('ind').value;
+    const show = indUsesLength(ind);
+    document.getElementById('lengthLabel').style.display = show ? '' : 'none';
   }
 
   const tvIntervalMap = {'1m':'1','2m':'2','5m':'5','15m':'15','30m':'30','1h':'60','1d':'D'};
@@ -401,8 +412,11 @@ PAGE = r"""<!doctype html>
     const session     = document.getElementById('session').value;
     const data_source = document.getElementById('source').value;
     currentIndName = ind === 'none' ? '—' : (indLabelMap[ind] || ind.toUpperCase());
-    document.getElementById('rIndK').textContent = ind === 'none'
-      ? 'qp indicator' : `qp ${currentIndName}(${length})`;
+    let label;
+    if (ind === 'none')          label = 'qp indicator';
+    else if (ind === 'vwap')     label = 'qp VWAP · session';
+    else                         label = `qp ${currentIndName}(${length})`;
+    document.getElementById('rIndK').textContent = label;
     document.getElementById('status').textContent = 'loading…';
     let r;
     try {
@@ -446,6 +460,7 @@ PAGE = r"""<!doctype html>
   window.addEventListener('load', async () => {
     document.getElementById('rTv').addEventListener('input', updateDiff);
     await loadSources();
+    onIndChange();
     reload();
   });
 </script></body></html>
