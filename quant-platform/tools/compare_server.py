@@ -32,7 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qp.data import load
 from qp.ma import ema, sma, rma, wma, vwma, hma
 from qp.vwap import (
-    session_vwap, weekly_vwap, monthly_vwap, quarterly_vwap, yearly_vwap,
+    session_vwap, n_day_vwap,
+    weekly_vwap, monthly_vwap, quarterly_vwap, yearly_vwap,
 )
 from qp.price import (
     hl2, hlc3, ohlc4, typical_price, median_price, weighted_close,
@@ -167,9 +168,12 @@ PAGE = r"""<!doctype html>
         <option value="weighted_close">Weighted Close</option>
       </optgroup>
       <optgroup label="VWAP">
-        <option value="vwap">Session VWAP</option>
-        <option value="weekly_vwap">Weekly VWAP</option>
-        <option value="monthly_vwap">Monthly VWAP</option>
+        <option value="vwap">Daily VWAP (TV parity)</option>
+        <option value="vwap_2d">2-Day VWAP</option>
+        <option value="vwap_7d">7-Day VWAP</option>
+        <option value="vwap_30d">30-Day VWAP</option>
+        <option value="weekly_vwap">Weekly VWAP (ISO week reset)</option>
+        <option value="monthly_vwap">Monthly VWAP (calendar month)</option>
         <option value="quarterly_vwap">Quarterly VWAP</option>
         <option value="yearly_vwap">Yearly VWAP</option>
       </optgroup>
@@ -732,9 +736,22 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         series_out.append(_to_series('Wt Close', 'overlay', ORANGE, weighted_close(df), ts))
 
     # ── VWAP flavours (overlay, single line) ──────────────────────────────
+    # Daily VWAP == TradingView's built-in "VWAP" study: resets at each
+    # session open (spec.regular_open — 09:30 ET for US equities).
     elif ind == 'vwap':
-        series_out.append(_to_series('Session VWAP', 'overlay', ORANGE,
+        series_out.append(_to_series('Daily VWAP', 'overlay', ORANGE,
                                      np.asarray(session_vwap(df)), ts))
+    # Rolling N-session VWAPs — reset every N sessions, all anchored at
+    # session opens so premarket bars carry the previous accumulator.
+    elif ind == 'vwap_2d':
+        series_out.append(_to_series('2-Day VWAP', 'overlay', ORANGE,
+                                     np.asarray(n_day_vwap(df, 2)), ts))
+    elif ind == 'vwap_7d':
+        series_out.append(_to_series('7-Day VWAP', 'overlay', ORANGE,
+                                     np.asarray(n_day_vwap(df, 7)), ts))
+    elif ind == 'vwap_30d':
+        series_out.append(_to_series('30-Day VWAP', 'overlay', ORANGE,
+                                     np.asarray(n_day_vwap(df, 30)), ts))
     elif ind == 'weekly_vwap':
         series_out.append(_to_series('Weekly VWAP', 'overlay', ORANGE,
                                      np.asarray(weekly_vwap(df)), ts))
