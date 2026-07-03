@@ -140,6 +140,47 @@ class TestSessionVWAP:
         with pytest.raises(ValueError):
             session_vwap(bars)
 
+    def test_resets_at_rth_open_not_calendar_midnight(self):
+        # This is the key TradingView-parity property: even when
+        # premarket bars precede the RTH open, the accumulator must
+        # NOT reset at 04:00 (premarket start) or at 00:00 (calendar
+        # midnight). It resets at 09:30 ET.
+        idx = pd.DatetimeIndex([
+            pd.Timestamp('2025-01-06 08:00', tz='America/New_York'),  # premarket
+            pd.Timestamp('2025-01-06 09:00', tz='America/New_York'),  # premarket
+            pd.Timestamp('2025-01-06 09:30', tz='America/New_York'),  # RTH open — RESET here
+            pd.Timestamp('2025-01-06 09:31', tz='America/New_York'),  # RTH
+        ])
+        bars = _bars(idx,
+                     high=[50, 60, 100, 200],
+                     low=[50, 60, 100, 200],
+                     close=[50, 60, 100, 200],
+                     volume=[1, 1, 1, 1])
+        r = session_vwap(bars)
+        # Premarket bars form their own accumulator until 09:30 hits.
+        # Then RTH starts fresh at 100 and accumulates with 200.
+        np.testing.assert_allclose(r, [50.0, 55.0, 100.0, 150.0])
+
+    def test_premarket_next_day_extends_previous_session(self):
+        # A premarket bar on Jan 7 (before 09:30) belongs to the SAME
+        # session as Jan 6's RTH bars — the accumulator must continue
+        # overnight until Jan 7 09:30 resets it.
+        idx = pd.DatetimeIndex([
+            pd.Timestamp('2025-01-06 09:30', tz='America/New_York'),  # Jan 6 RTH open
+            pd.Timestamp('2025-01-06 15:59', tz='America/New_York'),  # Jan 6 RTH close-ish
+            pd.Timestamp('2025-01-07 08:00', tz='America/New_York'),  # Jan 7 premarket
+            pd.Timestamp('2025-01-07 09:30', tz='America/New_York'),  # Jan 7 RTH — RESET
+        ])
+        bars = _bars(idx,
+                     high=[10, 20, 30, 100],
+                     low=[10, 20, 30, 100],
+                     close=[10, 20, 30, 100],
+                     volume=[1, 1, 1, 1])
+        r = session_vwap(bars)
+        # Session 1: [10, 15, 20]  (all Jan 6 09:30-based session)
+        # Session 2 (Jan 7 09:30): [100]
+        np.testing.assert_allclose(r, [10.0, 15.0, 20.0, 100.0])
+
 
 class TestNDayVWAP:
     def test_n1_matches_session_vwap(self):
