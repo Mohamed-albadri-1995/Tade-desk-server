@@ -259,6 +259,7 @@ body {
 <div class="tabs" style="padding-top:8px">
   <span class="tab-group-label">Live</span>
   <button class="tab active" onclick="switchTab('watch')">Watch</button>
+  <button class="tab" onclick="switchTab('chart')">Chart</button>
   <button class="tab" onclick="switchTab('gate')">Market Gate</button>
   <button class="tab" onclick="switchTab('alerts')">Alerts</button>
   <button class="tab" onclick="switchTab('positions')">Positions</button>
@@ -315,6 +316,47 @@ body {
     <div id="center-notifications">
       <div class="empty"><div class="empty-icon">⚡</div><div class="empty-text">Signals that pass the direction gate appear here</div></div>
     </div>
+  </div>
+
+  <!-- CHART TAB — embeds the qp compare tool. Symbol / setup come from
+       the trade-desk state so the chart follows whatever the user is
+       working on. Compare server has to be running on port 8765
+       (nohup .venv/bin/python quant-platform/tools/compare_server.py). -->
+  <div class="tab-pane" id="tab-chart">
+    <div class="panel" style="display:flex;align-items:center;gap:10px;padding:8px 10px;margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+        Symbol <input id="chart-symbol" value="SPY" style="width:80px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);text-transform:uppercase">
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+        TF
+        <select id="chart-tf" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text)">
+          <option>1m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option>
+        </select>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+        Days <input id="chart-days" type="number" value="5" min="1" max="60" style="width:60px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text)">
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+        Setup
+        <select id="chart-setup" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);min-width:180px">
+          <option value="">— none —</option>
+          <option value="qp:healthy_pullback_l3">Healthy Pullback L3</option>
+          <option value="qp:vwap_cluster_bounce">VWAP Cluster Bounce</option>
+          <option value="qp:bb_zone_ma_touch">BB Zone MA Touch</option>
+        </select>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+        Source
+        <select id="chart-source" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text)">
+          <option value="yahoo">Yahoo</option>
+          <option value="alpaca:iex" selected>Alpaca IEX</option>
+          <option value="alpaca:sip">Alpaca SIP</option>
+        </select>
+      </label>
+      <button onclick="reloadChart()" style="background:var(--accent);color:var(--text);border:none;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">Reload</button>
+      <span id="chart-status" style="font-size:11px;color:var(--text3);margin-left:auto">bridge port 8765</span>
+    </div>
+    <iframe id="chart-frame" style="width:100%;height:calc(100vh - 220px);border:1px solid var(--border);border-radius:6px;background:var(--bg2)"></iframe>
   </div>
 
   <!-- SIDE A TAB -->
@@ -1010,7 +1052,7 @@ const API = '/api';
 
 // ── Tab switching ──────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const order = ['watch','gate','alerts','positions','grading','journal','backtest','setups','checks','brokers','settings'];
+  const order = ['watch','chart','gate','alerts','positions','grading','journal','backtest','setups','checks','brokers','settings'];
   document.querySelectorAll('.tab').forEach(t => {
     const fn = t.getAttribute('onclick') || '';
     const m = fn.match(/'(\w+)'/);
@@ -1019,6 +1061,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'watch')     { loadPollerStatus(); loadSignalHistory(); }
+  if (name === 'chart')     reloadChart();
   if (name === 'gate')      loadSideA();
   if (name === 'positions') { loadAccountBalances(); loadPositions(); _startPositionsPoll(); } else { _stopPositionsPoll(); }
   if (name === 'setups')    { loadSetups(); const cd = document.getElementById('cmp-date'); if (cd && !cd.value) cd.value = new Date().toISOString().slice(0,10); }
@@ -1028,6 +1071,22 @@ function switchTab(name) {
   if (name === 'brokers')   loadBrokers();
   if (name === 'grading')   loadGradingSetups();
   if (name === 'checks')    loadChecks();
+}
+
+// ── Chart tab (iframes the qp compare tool) ──────────────────────────
+function reloadChart() {
+  const symbol = (document.getElementById('chart-symbol').value || 'SPY').toUpperCase();
+  const tf     = document.getElementById('chart-tf').value || '5m';
+  const days   = document.getElementById('chart-days').value || '5';
+  const setup  = document.getElementById('chart-setup').value || '';
+  const source = document.getElementById('chart-source').value || 'alpaca:iex';
+  const params = new URLSearchParams({ symbol, tf, days, session: 'regular', source });
+  if (setup) params.set('setup', setup);
+  // Compare tool listens on port 8765 by default. Same host as the trade desk.
+  const url = `${window.location.protocol}//${window.location.hostname}:8765/?${params}`;
+  document.getElementById('chart-frame').src = url;
+  const st = document.getElementById('chart-status');
+  if (st) st.textContent = 'loading ' + symbol + '…';
 }
 
 // ── Date header ───────────────────────────────────────────────────────────────

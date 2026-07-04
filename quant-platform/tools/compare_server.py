@@ -1005,10 +1005,38 @@ PAGE = r"""<!doctype html>
     loadData();
   }
 
+  // Read URL query params so the compare tool can be driven from another
+  // page (the trade desk's Chart tab uses this).
+  function applyUrlParams() {
+    const q = new URLSearchParams(window.location.search);
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; };
+    set('symbol', (q.get('symbol') || '').toUpperCase());
+    set('tf',     q.get('tf'));
+    set('days',   q.get('days'));
+    set('session', q.get('session'));
+    set('source', q.get('source'));
+    // ?setup=qp:healthy_pullback_l3 selects and applies a setup after
+    // the picker has loaded (loadSetupList sets it up async).
+    return q.get('setup');
+  }
+
   window.addEventListener('load', async () => {
     document.getElementById('rTv').addEventListener('input', updateDiff);
     await loadSources();
     await loadSetupList();
+    const setupParam = applyUrlParams();
+    if (setupParam) {
+      const picker = document.getElementById('setupPicker');
+      if (picker) {
+        picker.value = setupParam;
+        if (picker.value === setupParam) {
+          // loadSetup() reads the picker value and calls reload().
+          loadSetup();
+          onIndChange();
+          return;
+        }
+      }
+    }
     onIndChange();
     reload();
   });
