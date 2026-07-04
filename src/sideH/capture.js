@@ -1,6 +1,6 @@
 const db = require('../db');
 const { toETDate } = require('../utils/time');
-const { fetchIntradayBars, fetchDailyBars, computeATR14 } = require('../yahoo/client');
+const { fetchIntradayBars, fetchDailyBars, computeATR14 } = require('../alpaca/client');
 const { syncFromWarehouse } = require('../training/trainingData');
 
 const ENTRY_TIME_A = '09:37';

@@ -1,5 +1,5 @@
 const db = require('../db');
-const { toETTime } = require('../utils/time');
+const { toETTime, toETIso } = require('../utils/time');
 
 const BASE = 'https://data.alpaca.markets/v2/stocks';
 
@@ -104,8 +104,8 @@ async function fetchIntradayBars(tickers, date) {
   const raw = await fetchAllPages(`${BASE}/bars`, {
     symbols: tickers.join(','),
     timeframe: '1Min',
-    start: `${date}T09:30:00-05:00`,
-    end: `${date}T16:00:00-05:00`,
+    start: toETIso(date, '09:30'),
+    end:   toETIso(date, '16:00'),
     limit: 10000,
     adjustment: 'raw',
     feed: getFeed(),
