@@ -535,9 +535,22 @@ PAGE = r"""<!doctype html>
   // referenced field. Colour cycles through the palette.
   function loadSetup() {
     const id = document.getElementById('setupPicker').value;
-    if (!id) return;                          // "— manual —" chosen
+    // Clear any previously active qp setup — a manual pick (or a DB
+    // setup) shouldn't leave firing markers from the last qp setup.
+    window.activeQpSetupId   = null;
+    window.activeQpSetupSide = null;
+    if (!id) { reload(); return; }            // "— manual —" chosen
     const s = setupsCache[id];
     if (!s || !s.specs || s.specs.length === 0) return;
+    // Track the active qp setup so the next reload adds firing markers.
+    // Trade Desk DB setups don't have a Python evaluate() to run, so we
+    // only mark the qp: ones.
+    if (s.source === 'qp') {
+      window.activeQpSetupId = id;
+      // 'both'-side setups default to 'long' for the marker pass; the
+      // user can toggle side via a URL param later if needed.
+      window.activeQpSetupSide = (s.side === 'short') ? 'short' : 'long';
+    }
     // Clear existing extra rows
     document.getElementById('extraRows').innerHTML = '';
     // First spec goes into row 0; the rest become extra rows
@@ -547,7 +560,6 @@ PAGE = r"""<!doctype html>
     onIndChange(document.getElementById('ind'));
     for (let i = 1; i < s.specs.length; i++) {
       addRow();
-      // The row we just added is the last .extraRow
       const rows = document.querySelectorAll('.extraRow');
       const row = rows[rows.length - 1];
       row.querySelector('.indSelect').value  = s.specs[i].ind;
@@ -911,13 +923,40 @@ PAGE = r"""<!doctype html>
     // Session dividers — small green triangle above the first bar of
     // each session so you can see day boundaries at a glance.
     const sessionStarts = j.session_starts || [];
-    priceSeries.setMarkers(sessionStarts.map(t => ({
+    const markers = sessionStarts.map(t => ({
       time:     t,
       position: 'aboveBar',
       color:    '#5fd8a3',
       shape:    'arrowDown',
       size:     0,
-    })));
+    }));
+
+    // qp setup firing markers — up-arrow below bar for long, down-arrow
+    // above bar for short. Skipped when no qp setup is active.
+    if (window.activeQpSetupId) {
+      try {
+        const params = new URLSearchParams({
+          setup_id:    window.activeQpSetupId,
+          side:        window.activeQpSetupSide || 'long',
+          symbol, tf, days, session, data_source,
+        });
+        const rf = await fetch(`/qp-setup-fire?${params}`);
+        if (rf.ok) {
+          const jf = await rf.json();
+          for (const f of (jf.firings || [])) {
+            markers.push(f.side === 'short'
+              ? { time: f.time, position: 'aboveBar', color: '#ef5350',
+                  shape: 'arrowDown', size: 1, text: 'S' }
+              : { time: f.time, position: 'belowBar', color: '#5fd8a3',
+                  shape: 'arrowUp',   size: 1, text: 'L' });
+          }
+        }
+      } catch (e) {}
+    }
+    // Sort by time — lightweight-charts requires markers ordered
+    // ascending or it drops the ones out of order.
+    markers.sort((a, b) => a.time - b.time);
+    priceSeries.setMarkers(markers);
 
     // Rebuild overlay + sub-pane series from scratch each reload.
     clearSerieses();
@@ -987,6 +1026,73 @@ def _to_series(name, pane, color, values, ts, style='line'):
         if fv == fv:  # skip NaN
             out.append({'time': int(t), 'value': fv})
     return {'name': name, 'pane': pane, 'color': color, 'style': style, 'values': out}
+
+
+def _load_bars_df(symbol: str, tf: str, days: int, session: str,
+                  data_source: str):
+    """Load bars in the same way compute_series does; returns a bars
+    object (with .df) or None if the load produced no rows. Extracted
+    so the firings endpoint reuses the exact same loader."""
+    if data_source.startswith('csv:'):
+        csv_name = data_source[4:]
+        csv_path = (CSV_DIR / csv_name).resolve()
+        if not str(csv_path).startswith(str(CSV_DIR.resolve())):
+            raise ValueError(f'illegal csv path {csv_name!r}')
+        if not csv_path.exists():
+            raise FileNotFoundError(f'CSV not found: {csv_name}')
+        head = pd.read_csv(csv_path, usecols=['time'])
+        ts_col = head['time']
+        if pd.api.types.is_numeric_dtype(ts_col):
+            file_first = pd.to_datetime(ts_col.iloc[0],  unit='s', utc=True)
+            file_last  = pd.to_datetime(ts_col.iloc[-1], unit='s', utc=True)
+        else:
+            file_first = pd.to_datetime(ts_col.iloc[0],  utc=True)
+            file_last  = pd.to_datetime(ts_col.iloc[-1], utc=True)
+        end = file_last
+        start = max(file_first, end - pd.Timedelta(days=days))
+        return load(
+            symbol=symbol or csv_path.stem, timeframe=tf,
+            start=start, end=end, source=f'csv:{csv_path}',
+            session=None if session == 'all' else session,
+        )
+    end = pd.Timestamp.now(tz='UTC')
+    if data_source == 'yahoo' and tf == '1m':
+        days = min(int(days), 7)
+    start = end - pd.Timedelta(days=days)
+    start = start.floor('5min')
+    end = end.floor('5min')
+    source_arg = 'yahoo' if data_source == 'yahoo' else data_source
+    return load(
+        symbol, timeframe=tf, start=start, end=end, source=source_arg,
+        cache_dir=CACHE_DIR if data_source == 'yahoo' else None,
+        session=None if session == 'all' else session,
+    )
+
+
+def compute_qp_setup_firings(setup_id: str, side: str,
+                             symbol: str, tf: str, days: int,
+                             session: str, data_source: str) -> list[dict]:
+    """Run a qp library setup's evaluate() over the current bars window
+    and return a list of firing bar timestamps (Unix seconds, ET side)."""
+    from qp.setups.library import get_setup
+    if not setup_id.startswith('qp:'):
+        raise ValueError(f'expected qp: prefix on {setup_id!r}')
+    mod = get_setup(setup_id[3:])
+    bars = _load_bars_df(symbol, tf, days, session, data_source)
+    if bars is None or len(bars) == 0:
+        return []
+    df = bars.df
+    side_norm = 'long' if side not in ('long', 'short') else side
+    # evaluate() signatures accept `side=...` for 'both' setups, ignore
+    # otherwise. Try with side first; if it's unknown to the setup, retry
+    # without so long-only / short-only setups still work.
+    try:
+        mask = mod.evaluate(df, side=side_norm)
+    except TypeError:
+        mask = mod.evaluate(df)
+    ts = (df.index.view('int64') // 1_000_000_000).tolist()
+    return [{'time': int(t), 'side': side_norm}
+            for t, fired in zip(ts, mask) if bool(fired)]
 
 
 def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
@@ -1478,6 +1584,26 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/qp-setups':
             try:
                 self._send(200, json.dumps(list_qp_setups()).encode('utf-8'))
+            except Exception as e:
+                self._send(500, str(e).encode('utf-8'), 'text/plain')
+            return
+        if u.path == '/qp-setup-fire':
+            q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            try:
+                setup_id = q.get('setup_id', '')
+                if not setup_id:
+                    self._send(400, b'setup_id required', 'text/plain')
+                    return
+                firings = compute_qp_setup_firings(
+                    setup_id=setup_id,
+                    side=q.get('side', 'long'),
+                    symbol=q.get('symbol', 'SPY'),
+                    tf=q.get('tf', '5m'),
+                    days=int(q.get('days', 5)),
+                    session=q.get('session', 'regular'),
+                    data_source=q.get('data_source', 'yahoo'),
+                )
+                self._send(200, json.dumps({'firings': firings}).encode('utf-8'))
             except Exception as e:
                 self._send(500, str(e).encode('utf-8'), 'text/plain')
             return
