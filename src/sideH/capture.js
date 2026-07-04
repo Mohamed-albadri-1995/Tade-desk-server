@@ -69,11 +69,12 @@ async function captureR3(date) {
       const dailyBars = dailyMap[ticker] || [];
       const atr14 = computeATR14(dailyBars);
 
-      // R3A — Target Entry at 09:37
-      const barA = bars.find(b => b.etTime === ENTRY_TIME_A);
+      // R3A — Target Entry at 09:37 (or first bar at/after if the exact
+      // minute is missing from the feed — matches live-entry semantics).
+      const barA = bars.find(b => b.etTime >= ENTRY_TIME_A);
       if (barA) {
         const entryA = barA.o;
-        const barsFromA = bars.filter(b => b.etTime >= ENTRY_TIME_A);
+        const barsFromA = bars.filter(b => b.etTime >= barA.etTime);
         const hhA = barsFromA.length ? Math.max(...barsFromA.map(b => b.h)) : null;
         const llA = barsFromA.length ? Math.min(...barsFromA.map(b => b.l)) : null;
         const upRA = (atr14 && hhA !== null) ? (hhA - entryA) / atr14 : null;
@@ -84,11 +85,11 @@ async function captureR3(date) {
         noEntryA++;
       }
 
-      // R3B — Alternative Entry at 09:40
-      const barB = bars.find(b => b.etTime === ENTRY_TIME_B);
+      // R3B — Alternative Entry at 09:40 (first bar at/after)
+      const barB = bars.find(b => b.etTime >= ENTRY_TIME_B);
       if (barB) {
         const entryB = barB.o;
-        const barsFromB = bars.filter(b => b.etTime >= ENTRY_TIME_B);
+        const barsFromB = bars.filter(b => b.etTime >= barB.etTime);
         const hhB = barsFromB.length ? Math.max(...barsFromB.map(b => b.h)) : null;
         const llB = barsFromB.length ? Math.min(...barsFromB.map(b => b.l)) : null;
         const upRB = (atr14 && hhB !== null) ? (hhB - entryB) / atr14 : null;
