@@ -1074,6 +1074,7 @@ function switchTab(name) {
 }
 
 // ── Chart tab (iframes the qp compare tool) ──────────────────────────
+let _chartReloadTimer = null;
 function reloadChart() {
   const symbol = (document.getElementById('chart-symbol').value || 'SPY').toUpperCase();
   const tf     = document.getElementById('chart-tf').value || '5m';
@@ -1087,6 +1088,18 @@ function reloadChart() {
   document.getElementById('chart-frame').src = url;
   const st = document.getElementById('chart-status');
   if (st) st.textContent = 'loading ' + symbol + '…';
+
+  // Auto-refresh the iframe every 60 s while the Chart tab is visible so
+  // new bars land without a manual reload. Full WebSocket streaming is
+  // a separate step — this is the pragmatic "live-ish" fallback until
+  // the compare tool exposes an event-stream endpoint.
+  if (_chartReloadTimer) clearInterval(_chartReloadTimer);
+  _chartReloadTimer = setInterval(() => {
+    const pane = document.getElementById('tab-chart');
+    if (!pane || !pane.classList.contains('active')) return;
+    document.getElementById('chart-frame').src = url;
+    if (st) st.textContent = 'refreshed ' + new Date().toLocaleTimeString();
+  }, 60_000);
 }
 
 // ── Date header ───────────────────────────────────────────────────────────────
