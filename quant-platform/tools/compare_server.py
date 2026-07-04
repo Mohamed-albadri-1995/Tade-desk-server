@@ -933,7 +933,9 @@ PAGE = r"""<!doctype html>
     }));
 
     // qp setup firing markers — up-arrow below bar for long, down-arrow
-    // above bar for short. Skipped when no qp setup is active.
+    // above bar for short. When the setup exposes stop/target the
+    // markers are augmented with SL/TP short horizontal lines from the
+    // firing bar to the last visible bar.
     if (window.activeQpSetupId) {
       try {
         const params = new URLSearchParams({
@@ -944,12 +946,36 @@ PAGE = r"""<!doctype html>
         const rf = await fetch(`/qp-setup-fire?${params}`);
         if (rf.ok) {
           const jf = await rf.json();
+          // Drop any previous SL/TP overlays so we don't stack them.
+          for (const s of (window._slTpSerieses || [])) {
+            try { qpChart.removeSeries(s); } catch (_) {}
+          }
+          window._slTpSerieses = [];
+          const bars = currentBars || [];
+          const lastTime = bars.length ? bars[bars.length - 1].time : null;
           for (const f of (jf.firings || [])) {
             markers.push(f.side === 'short'
               ? { time: f.time, position: 'aboveBar', color: '#ef5350',
                   shape: 'arrowDown', size: 1, text: 'S' }
               : { time: f.time, position: 'belowBar', color: '#5fd8a3',
                   shape: 'arrowUp',   size: 1, text: 'L' });
+            if (lastTime == null) continue;
+            const trail = [{time: f.time, value: null}, {time: lastTime, value: null}];
+            // Add stop + target as short line series from firing to end.
+            if (f.stop != null && Number.isFinite(f.stop)) {
+              const slSeries = qpChart.addLineSeries({
+                color: '#ef5350', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
+              });
+              slSeries.setData([{time: f.time, value: f.stop}, {time: lastTime, value: f.stop}]);
+              window._slTpSerieses.push(slSeries);
+            }
+            if (f.target != null && Number.isFinite(f.target)) {
+              const tpSeries = qpChart.addLineSeries({
+                color: '#5fd8a3', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
+              });
+              tpSeries.setData([{time: f.time, value: f.target}, {time: lastTime, value: f.target}]);
+              window._slTpSerieses.push(tpSeries);
+            }
           }
         }
       } catch (e) {}
@@ -1228,7 +1254,11 @@ def compute_qp_setup_firings(setup_id: str, side: str,
                              symbol: str, tf: str, days: int,
                              session: str, data_source: str) -> list[dict]:
     """Run a qp library setup's evaluate() over the current bars window
-    and return a list of firing bar timestamps (Unix seconds, ET side)."""
+    and return a list of firing bars.
+
+    Each entry: {time, side, entry, stop, target}. Entry uses the
+    firing bar's close; stop / target derived from the setup module's
+    STOP / TARGET rules (ATR-multiple or R-multiple). NaN → null."""
     from qp.setups.library import get_setup
     if not setup_id.startswith('qp:'):
         raise ValueError(f'expected qp: prefix on {setup_id!r}')
@@ -1238,16 +1268,50 @@ def compute_qp_setup_firings(setup_id: str, side: str,
         return []
     df = bars.df
     side_norm = 'long' if side not in ('long', 'short') else side
-    # evaluate() signatures accept `side=...` for 'both' setups, ignore
-    # otherwise. Try with side first; if it's unknown to the setup, retry
-    # without so long-only / short-only setups still work.
     try:
         mask = mod.evaluate(df, side=side_norm)
     except TypeError:
         mask = mod.evaluate(df)
+
+    stop_rule   = getattr(mod, 'STOP',   None)
+    target_rule = getattr(mod, 'TARGET', None)
+    atr_vals = None
+    if stop_rule is not None and stop_rule.kind == 'atr':
+        from qp.volatility import atr as _atr_fn
+        atr_vals = np.asarray(_atr_fn(df, stop_rule.atr_length))
+
     ts = (df.index.view('int64') // 1_000_000_000).tolist()
-    return [{'time': int(t), 'side': side_norm}
-            for t, fired in zip(ts, mask) if bool(fired)]
+    closes = df['close'].to_numpy(dtype=float)
+    out = []
+    for i, (t, fired) in enumerate(zip(ts, mask)):
+        if not bool(fired):
+            continue
+        entry = float(closes[i])
+        stop_price = None
+        target_price = None
+        stop_dist = None
+        if stop_rule is not None:
+            if stop_rule.kind == 'atr' and atr_vals is not None and np.isfinite(atr_vals[i]):
+                stop_dist = float(stop_rule.mult) * float(atr_vals[i])
+            elif stop_rule.kind == 'percent':
+                stop_dist = float(stop_rule.pct) * entry
+        if stop_dist is not None and stop_dist > 0:
+            stop_price = entry - stop_dist if side_norm == 'long' else entry + stop_dist
+        if target_rule is not None:
+            if target_rule.kind == 'r_multiple' and stop_dist is not None:
+                tgt_dist = float(target_rule.r) * stop_dist
+                target_price = (entry + tgt_dist) if side_norm == 'long' else (entry - tgt_dist)
+            elif target_rule.kind == 'percent':
+                tgt_dist = float(target_rule.pct) * entry
+                target_price = (entry + tgt_dist) if side_norm == 'long' else (entry - tgt_dist)
+        out.append({
+            'time':   int(t),
+            'side':   side_norm,
+            'entry':  entry,
+            'stop':   stop_price,
+            'target': target_price,
+        })
+    return out
 
 
 def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,

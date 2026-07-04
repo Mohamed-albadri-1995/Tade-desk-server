@@ -16,7 +16,8 @@ import numpy as np
 import pandas as pd
 
 from qp.vwap import session_vwap, n_day_vwap, today_ll_vwap
-from qp.volatility import bollinger_ema
+from qp.volatility import bollinger_ema, atr
+from qp.setups.spec import StopRule, TargetRule
 
 
 NAME        = 'Healthy Pullback L3'
@@ -33,6 +34,12 @@ CHART_SPECS = [
     {'ind': 'bollinger_ema',     'length': 21, 'label': 'BB EMA (21)',
      'mult': 2.0},
 ]
+
+# Risk envelope (compare tool + trade desk consume both). ATR-multiple
+# stop with an R-multiple target keeps the scaling honest across
+# ticker prices.
+STOP   = StopRule(kind='atr', mult=1.0, atr_length=14)
+TARGET = TargetRule(kind='r_multiple', r=2.0)
 
 
 def evaluate(bars: pd.DataFrame,

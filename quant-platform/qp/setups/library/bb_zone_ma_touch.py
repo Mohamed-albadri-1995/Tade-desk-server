@@ -20,6 +20,7 @@ from qp.vwap import session_vwap, vwap_stdev_bands
 from qp.volatility import atr, bollinger
 from qp.ma import sma
 from qp.session import US_EQUITIES
+from qp.setups.spec import StopRule, TargetRule
 
 
 NAME        = 'BB Zone MA Touch'
@@ -35,6 +36,12 @@ CHART_SPECS = [
     {'ind': 'sma',       'length': 13, 'label': 'SMA(13)'},
     {'ind': 'sma',       'length': 20, 'label': 'SMA(20)'},
 ]
+
+# BBZ Pine uses SMA20 as the stop reference — we approximate here with
+# a slightly tighter ATR-multiple, keeping the R-target at 3R to match
+# Pine's t2_tp_ticks/t2_sl_ticks ratio (300/90 ≈ 3.3).
+STOP   = StopRule(kind='atr', mult=1.0, atr_length=14)
+TARGET = TargetRule(kind='r_multiple', r=3.0)
 
 
 def _zone_body_ok(o, c, zone_ref, side, lookback, threshold_pct):

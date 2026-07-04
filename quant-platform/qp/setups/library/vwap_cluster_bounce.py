@@ -23,6 +23,7 @@ from qp.vwap import (
     pivot_ll_vwap, pivot_hh_vwap,
 )
 from qp.ma import sma, n_session_sma
+from qp.setups.spec import StopRule, TargetRule
 
 
 NAME        = 'VWAP Cluster Bounce'
@@ -46,6 +47,11 @@ CHART_SPECS = [
     {'ind': 'sma_5d',            'length': 0,  'label': '5-Day Rolling SMA'},
     {'ind': 'sma',               'length': 20, 'label': 'SMA(20)'},
 ]
+
+# Bounce trades tend to have a tighter stop than swings — 1× ATR, 2R
+# target as the default risk envelope.
+STOP   = StopRule(kind='atr', mult=1.0, atr_length=14)
+TARGET = TargetRule(kind='r_multiple', r=2.0)
 
 
 def evaluate(bars: pd.DataFrame,
