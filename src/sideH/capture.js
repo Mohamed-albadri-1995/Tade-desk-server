@@ -1,6 +1,7 @@
 const db = require('../db');
 const { toETDate } = require('../utils/time');
-const { fetchIntradayBars, fetchDailyBars, computeATR14 } = require('../alpaca/client');
+const yahooClient  = require('../yahoo/client');
+const alpacaClient = require('../alpaca/client');
 const { syncFromWarehouse } = require('../training/trainingData');
 
 const ENTRY_TIME_A = '09:37';
@@ -11,6 +12,54 @@ function chunk(arr, size) {
   const out = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+// Yahoo has dense per-minute bars (consolidated tape) so exact-minute
+// matches like 09:37 land reliably. From an AWS IP it rate-limits, so
+// we fall back to Alpaca — either per-batch (Yahoo threw) or per-ticker
+// (Yahoo returned data for some, empties for others). Same pattern the
+// historical cache uses.
+async function fetchIntradayWithFallback(tickers, date) {
+  let map = null;
+  try {
+    map = await yahooClient.fetchIntradayBars(tickers, date);
+  } catch (err) {
+    console.warn(`[SideH] Yahoo intraday failed for ${date}, trying Alpaca:`, err.message);
+  }
+  if (!map || Object.values(map).every(b => !b?.length)) {
+    try {
+      map = await alpacaClient.fetchIntradayBars(tickers, date);
+    } catch (err) {
+      console.warn(`[SideH] Alpaca intraday also failed for ${date}:`, err.message);
+      return {};
+    }
+    return map;
+  }
+  const emptyTickers = tickers.filter(t => !map[t]?.length);
+  if (emptyTickers.length) {
+    try {
+      const alpacaMap = await alpacaClient.fetchIntradayBars(emptyTickers, date);
+      for (const [t, bars] of Object.entries(alpacaMap)) {
+        if (bars?.length) map[t] = bars;
+      }
+    } catch { /* keep Yahoo's empties */ }
+  }
+  return map;
+}
+
+async function fetchDailyWithFallback(tickers, date) {
+  try {
+    const map = await yahooClient.fetchDailyBars(tickers, date);
+    if (map && Object.values(map).some(b => b?.length)) return map;
+  } catch (err) {
+    console.warn(`[SideH] Yahoo daily failed for ${date}, trying Alpaca:`, err.message);
+  }
+  try {
+    return await alpacaClient.fetchDailyBars(tickers, date);
+  } catch (err) {
+    console.warn(`[SideH] Alpaca daily also failed for ${date}:`, err.message);
+    return {};
+  }
 }
 
 async function captureR3(date) {
@@ -34,17 +83,17 @@ async function captureR3(date) {
 
   console.log('[SideH] Fetching R3 data for', tickers.length, 'tickers from R1');
 
-  // Fetch intraday 1-min bars (chunks of 100 to stay safe on URL length)
+  // Fetch intraday 1-min bars (Yahoo first, Alpaca fallback)
   const intradayMap = {};
   for (const batch of chunk(tickers, 100)) {
-    const data = await fetchIntradayBars(batch, today);
+    const data = await fetchIntradayWithFallback(batch, today);
     Object.assign(intradayMap, data);
   }
 
-  // Fetch daily bars excluding today (chunks of 100)
+  // Fetch daily bars excluding today (Yahoo first, Alpaca fallback)
   const dailyMap = {};
   for (const batch of chunk(tickers, 100)) {
-    const data = await fetchDailyBars(batch, today);
+    const data = await fetchDailyWithFallback(batch, today);
     Object.assign(dailyMap, data);
   }
 
@@ -67,7 +116,7 @@ async function captureR3(date) {
     for (const ticker of tickers) {
       const bars = intradayMap[ticker] || [];
       const dailyBars = dailyMap[ticker] || [];
-      const atr14 = computeATR14(dailyBars);
+      const atr14 = alpacaClient.computeATR14(dailyBars);
 
       // R3A — Target Entry at 09:37
       const barA = bars.find(b => b.etTime === ENTRY_TIME_A);
