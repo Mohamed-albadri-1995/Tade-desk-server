@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -65,6 +66,55 @@ CACHE_DIR = Path.home() / '.qp-cache'
 
 # Where to look for user-supplied CSV data files. Set via --csv-dir.
 CSV_DIR: Path = Path(__file__).resolve().parents[1] / 'data' / 'csv'
+
+# The Node trade desk's SQLite DB. Setups + check library live here.
+TRADEDESK_DB: Path = Path(__file__).resolve().parents[2] / 'data' / 'tradedesk.db'
+
+
+def list_setups() -> list[dict]:
+    """Return every enabled setup from the trade desk DB, with the
+    indicator specs implied by its default + assigned additional checks.
+    Returns [] if the DB is missing (dev environment)."""
+    if not TRADEDESK_DB.exists():
+        return []
+    conn = sqlite3.connect(f'file:{TRADEDESK_DB}?mode=ro', uri=True)
+    try:
+        conn.row_factory = sqlite3.Row
+        setups = conn.execute(
+            'SELECT id, name, description FROM trading_setups '
+            'WHERE enabled = 1 ORDER BY name'
+        ).fetchall()
+        # Everything in check_library that's a default check applies to
+        # every setup; the additional checks are joined via
+        # setup_check_assignments.
+        default_conditions = [
+            row['condition'] for row in conn.execute(
+                "SELECT condition FROM check_library "
+                "WHERE category = 'default' AND enabled = 1"
+            ).fetchall()
+        ]
+        out = []
+        for s in setups:
+            extra = conn.execute(
+                'SELECT cl.condition FROM setup_check_assignments a '
+                'JOIN check_library cl ON cl.id = a.check_id '
+                'WHERE a.setup_id = ? AND cl.enabled = 1',
+                (s['id'],),
+            ).fetchall()
+            conditions = default_conditions + [row['condition'] for row in extra]
+            from qp.setups import specs_for_checks
+            specs = specs_for_checks(
+                [{'condition': c} for c in conditions if c]
+            )
+            out.append({
+                'id':          s['id'],
+                'name':        s['name'],
+                'description': s['description'] or '',
+                'specs':       specs,
+            })
+        return out
+    finally:
+        conn.close()
 
 
 def list_csv_files() -> list[dict]:
@@ -291,6 +341,11 @@ PAGE = r"""<!doctype html>
     </select>
   </label>
   <button onclick="addRow()">+ Ind</button>
+  <label>Setup
+    <select id="setupPicker" onchange="loadSetup()">
+      <option value="">— manual —</option>
+    </select>
+  </label>
   <button onclick="reload()">Reload</button>
   <span id="status"></span>
 </div>
@@ -391,6 +446,50 @@ PAGE = r"""<!doctype html>
         sel.appendChild(opt);
       }
     } catch (_) {}
+  }
+
+  // Populate the Setup picker from the trade desk DB.
+  let setupsCache = {};   // id -> { name, specs }
+  async function loadSetupList() {
+    try {
+      const r = await fetch('/setups');
+      if (!r.ok) return;
+      const list = await r.json();
+      const sel = document.getElementById('setupPicker');
+      for (const s of list) {
+        setupsCache[s.id] = s;
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        sel.appendChild(opt);
+      }
+    } catch (_) {}
+  }
+
+  // Apply a setup: clear extra rows, then populate one indicator row per
+  // referenced field. Colour cycles through the palette.
+  function loadSetup() {
+    const id = document.getElementById('setupPicker').value;
+    if (!id) return;                          // "— manual —" chosen
+    const s = setupsCache[id];
+    if (!s || !s.specs || s.specs.length === 0) return;
+    // Clear existing extra rows
+    document.getElementById('extraRows').innerHTML = '';
+    // First spec goes into row 0; the rest become extra rows
+    document.getElementById('ind').value    = s.specs[0].ind;
+    document.getElementById('length').value = s.specs[0].length || 9;
+    document.getElementById('color0').value = PALETTE[0];
+    onIndChange(document.getElementById('ind'));
+    for (let i = 1; i < s.specs.length; i++) {
+      addRow();
+      // The row we just added is the last .extraRow
+      const rows = document.querySelectorAll('.extraRow');
+      const row = rows[rows.length - 1];
+      row.querySelector('.indSelect').value  = s.specs[i].ind;
+      row.querySelector('.indLength').value  = s.specs[i].length || 9;
+      onIndChange(row.querySelector('.indSelect'));
+    }
+    reload();
   }
 
   function onSourceChange() {
@@ -804,6 +903,7 @@ PAGE = r"""<!doctype html>
   window.addEventListener('load', async () => {
     document.getElementById('rTv').addEventListener('input', updateDiff);
     await loadSources();
+    await loadSetupList();
     onIndChange();
     reload();
   });
@@ -1057,6 +1157,16 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
     elif ind == 'today_hl':
         series_out.append(_to_series('Today HH', 'overlay', GREEN, today_high(df), ts))
         series_out.append(_to_series('Today LL', 'overlay', RED,   today_low(df),  ts))
+    elif ind == 'day_high':
+        series_out.append(_to_series('Today HH', 'overlay', GREEN, today_high(df), ts))
+    elif ind == 'day_low':
+        series_out.append(_to_series('Today LL', 'overlay', RED,   today_low(df),  ts))
+    elif ind == 'pm_high':
+        from qp.levels import premarket_high
+        series_out.append(_to_series('Premarket High', 'overlay', GREEN, premarket_high(df), ts))
+    elif ind == 'pm_low':
+        from qp.levels import premarket_low
+        series_out.append(_to_series('Premarket Low', 'overlay', RED, premarket_low(df), ts))
     elif ind == 'week_hl':
         series_out.append(_to_series('Week HH (Mon)', 'overlay', GREEN, week_high(df), ts))
         series_out.append(_to_series('Week LL (Mon)', 'overlay', RED,   week_low(df),  ts))
@@ -1188,6 +1298,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/sources':
             try:
                 self._send(200, json.dumps(list_csv_files()).encode('utf-8'))
+            except Exception as e:
+                self._send(500, str(e).encode('utf-8'), 'text/plain')
+            return
+        if u.path == '/setups':
+            try:
+                self._send(200, json.dumps(list_setups()).encode('utf-8'))
             except Exception as e:
                 self._send(500, str(e).encode('utf-8'), 'text/plain')
             return

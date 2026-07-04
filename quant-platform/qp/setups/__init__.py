@@ -21,8 +21,16 @@ built by callers using this grammar and stored where they need to be.
 
 from qp.setups.spec import Setup, StopRule, TargetRule
 from qp.setups.evaluator import evaluate, EvalResult
+from qp.setups.chart_specs import (
+    extract_field_names,
+    specs_for_condition,
+    specs_for_fields,
+    specs_for_checks,
+)
 
 __all__ = [
     'Setup', 'StopRule', 'TargetRule',
     'evaluate', 'EvalResult',
+    'extract_field_names', 'specs_for_condition',
+    'specs_for_fields', 'specs_for_checks',
 ]
