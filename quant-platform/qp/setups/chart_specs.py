@@ -32,22 +32,23 @@ from typing import Any, Iterable
 
 # field name → indicator spec (matches the compare tool's `ind` values)
 _FIELD_TO_SPEC = {
-    'vwap':    {'ind': 'vwap',   'length': 0,  'label': 'Daily VWAP'},
-    'ema9':    {'ind': 'ema',    'length': 9,  'label': 'EMA(9)'},
-    'ema13':   {'ind': 'ema',    'length': 13, 'label': 'EMA(13)'},
-    'ema20':   {'ind': 'ema',    'length': 20, 'label': 'EMA(20)'},
-    'ema50':   {'ind': 'ema',    'length': 50, 'label': 'EMA(50)'},
-    'sma5':    {'ind': 'sma',    'length': 5,  'label': 'SMA(5)'},
-    'sma20':   {'ind': 'sma',    'length': 20, 'label': 'SMA(20)'},
-    'pmHigh':  {'ind': 'pm_high','length': 0,  'label': 'Premarket High'},
-    'pmLow':   {'ind': 'pm_low', 'length': 0,  'label': 'Premarket Low'},
-    'dayHigh': {'ind': 'day_high','length':0,  'label': 'Today HH'},
-    'dayLow':  {'ind': 'day_low','length': 0,  'label': 'Today LL'},
-    'atr':     {'ind': 'atr',    'length': 14, 'label': 'ATR(14)'},
+    'vwap':      {'ind': 'vwap',       'length': 0,  'label': 'Daily VWAP'},
+    'ema9':      {'ind': 'ema',        'length': 9,  'label': 'EMA(9)'},
+    'ema13':     {'ind': 'ema',        'length': 13, 'label': 'EMA(13)'},
+    'ema20':     {'ind': 'ema',        'length': 20, 'label': 'EMA(20)'},
+    'ema50':     {'ind': 'ema',        'length': 50, 'label': 'EMA(50)'},
+    'sma5':      {'ind': 'sma',        'length': 5,  'label': 'SMA(5)'},
+    'sma20':     {'ind': 'sma',        'length': 20, 'label': 'SMA(20)'},
+    'pmHigh':    {'ind': 'pm_high',    'length': 0,  'label': 'Premarket High'},
+    'pmLow':     {'ind': 'pm_low',     'length': 0,  'label': 'Premarket Low'},
+    'dayHigh':   {'ind': 'day_high',   'length': 0,  'label': 'Today HH'},
+    'dayLow':    {'ind': 'day_low',    'length': 0,  'label': 'Today LL'},
+    'atr':       {'ind': 'atr',        'length': 14, 'label': 'ATR(14)'},
+    'prevClose': {'ind': 'prev_close', 'length': 0,  'label': 'Prev Day Close'},
+    'rvol':      {'ind': 'rvol',       'length': 10, 'label': 'rvol'},
 }
-# Fields that are already on the chart (OHLCV) or aren't chartable overlays.
-_SKIP_FIELDS = {'close', 'open', 'high', 'low', 'volume',
-                'prevClose', 'rvol'}
+# Fields that are already on the chart (OHLCV).
+_SKIP_FIELDS = {'close', 'open', 'high', 'low', 'volume'}
 
 
 def _walk(node: Any, out: set[str]) -> None:

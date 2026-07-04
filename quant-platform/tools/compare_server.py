@@ -306,6 +306,10 @@ PAGE = r"""<!doctype html>
         <option value="stdev">StdDev</option>
         <option value="true_range">True Range</option>
       </optgroup>
+      <optgroup label="Volume / Reference lines">
+        <option value="prev_close">Prev Day Close (horizontal)</option>
+        <option value="rvol">Relative Volume (sub-pane, per-minute)</option>
+      </optgroup>
       <optgroup label="Oscillators (sub-pane)">
         <option value="rsi">RSI</option>
         <option value="macd">MACD</option>
@@ -1137,6 +1141,52 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
         series_out.append(_to_series(f'StdDev({length})', 'sub', ORANGE, stdev(C, length), ts))
     elif ind == 'true_range':
         series_out.append(_to_series('True Range', 'sub', ORANGE, true_range(df), ts))
+
+    # ── Prev-day close (overlay, horizontal step per session) ─────────────
+    elif ind == 'prev_close':
+        # For each session in df, prev_close = last close of the prior session.
+        # First session has no prior → NaN, filtered out by _to_series.
+        idx_local = df.index.tz_convert('America/New_York')
+        session_dates = idx_local.date
+        last_by_date = pd.Series(C, index=session_dates).groupby(level=0).last()
+        prev_close_map = last_by_date.shift(1)
+        pc_values = np.array([prev_close_map.get(d, np.nan) for d in session_dates])
+        series_out.append(_to_series('Prev Day Close', 'overlay', BLUE, pc_values, ts))
+
+    # ── Relative volume (sub-pane, per-minute baseline) ───────────────────
+    elif ind == 'rvol':
+        # Baseline = mean volume at that minute-of-day across the N most
+        # recent prior sessions in the loaded window. Length = N (default 10).
+        n_sessions = max(int(length or 10), 5)
+        idx_local = df.index.tz_convert('America/New_York')
+        session_dates = pd.Series(idx_local.date, index=df.index)
+        minutes = pd.Series(idx_local.strftime('%H:%M'), index=df.index)
+        # (date, minute) → volume for that bar, then average across dates
+        # in a rolling per-minute window keyed by session-position.
+        vol = pd.Series(V, index=df.index)
+        by_key = vol.groupby([session_dates, minutes]).mean()
+        # Index of session dates in appearance order.
+        unique_dates = list(session_dates.drop_duplicates())
+        date_pos = {d: i for i, d in enumerate(unique_dates)}
+        # Build (minute → sorted date list, sorted vol list) once.
+        minute_baseline = {}
+        for (d, m), v in by_key.items():
+            minute_baseline.setdefault(m, []).append((date_pos[d], float(v)))
+        for m in minute_baseline:
+            minute_baseline[m].sort(key=lambda x: x[0])
+        rvol_out = np.full(len(df), np.nan)
+        for i in range(len(df)):
+            d = session_dates.iloc[i]
+            m = minutes.iloc[i]
+            pos = date_pos[d]
+            entries = minute_baseline.get(m, [])
+            prior_vols = [v for (p, v) in entries if p < pos][-n_sessions:]
+            if not prior_vols:
+                continue
+            base_mean = sum(prior_vols) / len(prior_vols)
+            if base_mean > 0:
+                rvol_out[i] = float(V[i]) / base_mean
+        series_out.append(_to_series('rvol', 'sub', ORANGE, rvol_out, ts, style='hist'))
 
     # ── Oscillators (sub-pane, single or multi) ───────────────────────────
     elif ind == 'rsi':
