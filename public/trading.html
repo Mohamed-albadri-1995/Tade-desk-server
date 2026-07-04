@@ -728,6 +728,70 @@ body {
 
   <!-- BACKTEST TAB (optional indicator verification, Path B) -->
   <div class="tab-pane" id="tab-backtest">
+    <!-- R1-replay backtest: iterate a date range, take the top-N R1
+         picks per day, run a qp setup, walk each firing forward using
+         the setup's STOP/TARGET. Needs the compare tool running on
+         port 8765. -->
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">R1-Replay Backtest (qp)</div>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
+        Backtests the full scanner+gate+setup pipeline: each day pulls that
+        day's R1 register, sorts by score, takes the top N, runs the picked
+        qp setup on their historical bars, walks each firing forward using
+        STOP/TARGET. Requires the compare tool bridge on port 8765.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+        <label style="display:flex;flex-direction:column;font-size:11px;color:var(--text3)">
+          Setup
+          <select id="bt-setup" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);min-width:200px">
+            <option value="qp:healthy_pullback_l3">Healthy Pullback L3</option>
+            <option value="qp:vwap_cluster_bounce">VWAP Cluster Bounce</option>
+            <option value="qp:bb_zone_ma_touch">BB Zone MA Touch</option>
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;font-size:11px;color:var(--text3)">
+          Start date
+          <input id="bt-start" type="date" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text)">
+        </label>
+        <label style="display:flex;flex-direction:column;font-size:11px;color:var(--text3)">
+          End date
+          <input id="bt-end" type="date" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text)">
+        </label>
+        <label style="display:flex;flex-direction:column;font-size:11px;color:var(--text3)">
+          Top N
+          <input id="bt-topn" type="number" value="5" min="1" max="50" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);width:70px">
+        </label>
+        <label style="display:flex;flex-direction:column;font-size:11px;color:var(--text3)">
+          Side
+          <select id="bt-side" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text)">
+            <option value="long" selected>Long</option>
+            <option value="short">Short</option>
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;font-size:11px;color:var(--text3)">
+          Timeframe
+          <select id="bt-tf" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text)">
+            <option value="1m">1m</option>
+            <option value="5m" selected>5m</option>
+            <option value="15m">15m</option>
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;font-size:11px;color:var(--text3)">
+          Data source
+          <select id="bt-source" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text)">
+            <option value="alpaca:iex" selected>Alpaca IEX</option>
+            <option value="alpaca:sip">Alpaca SIP</option>
+            <option value="yahoo">Yahoo</option>
+          </select>
+        </label>
+        <button onclick="runR1Backtest()" style="background:var(--accent);color:var(--text);border:none;border-radius:6px;padding:8px 20px;font-size:12px;cursor:pointer">Run</button>
+      </div>
+      <div id="bt-r1-status" style="font-size:12px;color:var(--text3)"></div>
+      <div id="bt-r1-summary" style="margin-top:12px"></div>
+      <div id="bt-r1-perday" style="margin-top:12px"></div>
+      <div id="bt-r1-trades" style="margin-top:12px"></div>
+    </div>
+
     <div class="panel">
       <div class="panel-title">Indicator Backtest</div>
       <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
@@ -1071,6 +1135,76 @@ function switchTab(name) {
   if (name === 'brokers')   loadBrokers();
   if (name === 'grading')   loadGradingSetups();
   if (name === 'checks')    loadChecks();
+}
+
+// ── R1-replay backtest (calls the qp bridge on port 8765) ────────────
+async function runR1Backtest() {
+  const setup_id   = document.getElementById('bt-setup').value;
+  const start_date = document.getElementById('bt-start').value;
+  const end_date   = document.getElementById('bt-end').value;
+  const top_n      = parseInt(document.getElementById('bt-topn').value || '5', 10);
+  const side       = document.getElementById('bt-side').value;
+  const timeframe  = document.getElementById('bt-tf').value;
+  const data_source = document.getElementById('bt-source').value;
+  const status = document.getElementById('bt-r1-status');
+  const summary = document.getElementById('bt-r1-summary');
+  const perday  = document.getElementById('bt-r1-perday');
+  const trades  = document.getElementById('bt-r1-trades');
+  summary.innerHTML = ''; perday.innerHTML = ''; trades.innerHTML = '';
+  if (!start_date || !end_date) { status.textContent = 'pick a start + end date'; return; }
+  status.textContent = 'running…';
+  let r;
+  try {
+    const url = `${window.location.protocol}//${window.location.hostname}:8765/qp/backtest`;
+    r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ setup_id, start_date, end_date, top_n, side, timeframe, data_source }),
+    });
+  } catch (e) { status.textContent = 'bridge unreachable: ' + e.message; return; }
+  if (!r.ok) { status.textContent = 'error: ' + await r.text(); return; }
+  const j = await r.json();
+  if (j.error) { status.textContent = 'error: ' + j.error; return; }
+  status.textContent = `${j.n_days} days · ${j.n_trades} trades`;
+
+  const fmt = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : '—');
+  summary.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:12px">
+      <div class="panel" style="padding:10px"><div style="color:var(--text3)">Trades</div><div style="font-size:20px;font-weight:600">${j.n_trades}</div></div>
+      <div class="panel" style="padding:10px"><div style="color:var(--text3)">Win rate</div><div style="font-size:20px;font-weight:600">${fmt(j.win_rate * 100, 1)}%</div></div>
+      <div class="panel" style="padding:10px"><div style="color:var(--text3)">Total R</div><div style="font-size:20px;font-weight:600;color:${j.total_r >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(j.total_r)}R</div></div>
+      <div class="panel" style="padding:10px"><div style="color:var(--text3)">Expectancy</div><div style="font-size:20px;font-weight:600">${fmt(j.expectancy_r)}R</div></div>
+    </div>`;
+
+  if ((j.per_day || []).length) {
+    perday.innerHTML = `
+      <div class="panel-title" style="margin-bottom:6px">Per-day</div>
+      <div style="max-height:220px;overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="position:sticky;top:0;background:var(--bg2)">
+            <tr><th style="text-align:left;padding:6px">Date</th><th style="text-align:right;padding:6px">Tickers</th><th style="text-align:right;padding:6px">Fired</th><th style="text-align:right;padding:6px">Trades</th><th style="text-align:right;padding:6px">Wins</th><th style="text-align:right;padding:6px">Total R</th></tr>
+          </thead>
+          <tbody>
+            ${j.per_day.map(d => `<tr><td style="padding:6px">${d.date}</td><td style="text-align:right;padding:6px">${d.n_tickers}</td><td style="text-align:right;padding:6px">${d.n_fired}</td><td style="text-align:right;padding:6px">${d.n_trades}</td><td style="text-align:right;padding:6px">${d.n_wins}</td><td style="text-align:right;padding:6px;color:${d.total_r >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(d.total_r)}R</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  if ((j.trades || []).length) {
+    trades.innerHTML = `
+      <div class="panel-title" style="margin-bottom:6px">Trade log (${j.trades.length})</div>
+      <div style="max-height:320px;overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="position:sticky;top:0;background:var(--bg2)">
+            <tr><th style="text-align:left;padding:6px">Date</th><th style="text-align:left;padding:6px">Ticker</th><th style="text-align:right;padding:6px">Entry</th><th style="text-align:right;padding:6px">Stop</th><th style="text-align:right;padding:6px">Target</th><th style="text-align:right;padding:6px">Exit</th><th style="text-align:left;padding:6px">Outcome</th><th style="text-align:right;padding:6px">R</th></tr>
+          </thead>
+          <tbody>
+            ${j.trades.map(t => `<tr><td style="padding:6px">${t.date}</td><td style="padding:6px">${t.ticker}</td><td style="text-align:right;padding:6px">${fmt(t.entry)}</td><td style="text-align:right;padding:6px">${fmt(t.stop)}</td><td style="text-align:right;padding:6px">${fmt(t.target)}</td><td style="text-align:right;padding:6px">${fmt(t.exit_price)}</td><td style="padding:6px">${t.outcome}</td><td style="text-align:right;padding:6px;color:${t.r_multiple >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(t.r_multiple)}R</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
 }
 
 // ── Chart tab (iframes the qp compare tool) ──────────────────────────
