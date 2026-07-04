@@ -25,5 +25,10 @@ lives in Stage 17 (live engine).
 """
 
 from qp.backtest.engine import backtest, backtest_from_eval, TradeLog, Summary
+from qp.backtest.r1_replay import (
+    run_r1_backtest, BacktestResult, BacktestTrade, BacktestDaySummary,
+)
 
-__all__ = ['backtest', 'backtest_from_eval', 'TradeLog', 'Summary']
+__all__ = ['backtest', 'backtest_from_eval', 'TradeLog', 'Summary',
+           'run_r1_backtest', 'BacktestResult',
+           'BacktestTrade', 'BacktestDaySummary']

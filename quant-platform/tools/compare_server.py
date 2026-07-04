@@ -1188,6 +1188,24 @@ def _eval_indicator(df: pd.DataFrame, ind: str, length: int, mult: float) -> np.
     raise ValueError(f'qp/eval: unknown ind {ind!r}')
 
 
+def qp_backtest(body: dict) -> dict:
+    """POST body: {setup_id, start_date, end_date, top_n?, top_pct?,
+                    side?, data_source?, timeframe?}.
+    Returns a BacktestResult dict with per-day + trade breakdowns."""
+    from qp.backtest import run_r1_backtest
+    result = run_r1_backtest(
+        setup_id    = str(body.get('setup_id') or ''),
+        start_date  = str(body.get('start_date') or ''),
+        end_date    = str(body.get('end_date') or ''),
+        top_n       = int(body['top_n']) if body.get('top_n') else 5,
+        top_pct     = float(body['top_pct']) if body.get('top_pct') else None,
+        side        = str(body.get('side') or 'long'),
+        data_source = str(body.get('data_source') or 'alpaca:iex'),
+        timeframe   = str(body.get('timeframe') or '5m'),
+    )
+    return result.__dict__
+
+
 def qp_setup_debug(body: dict) -> dict:
     """POST body: {setup_id, side?, bars: [{t,o,h,l,c,v}, …]}.
     Returns {canRun, conditions: [{name, pass, note}, …]} — the qp
@@ -1863,6 +1881,13 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/qp/setup-debug':
             try:
                 out = qp_setup_debug(body)
+                self._send(200, json.dumps(out).encode('utf-8'))
+            except Exception as e:
+                self._send(500, str(e).encode('utf-8'), 'text/plain')
+            return
+        if u.path == '/qp/backtest':
+            try:
+                out = qp_backtest(body)
                 self._send(200, json.dumps(out).encode('utf-8'))
             except Exception as e:
                 self._send(500, str(e).encode('utf-8'), 'text/plain')
