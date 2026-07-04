@@ -200,7 +200,10 @@ async function processSignal(signal, currentBid = null, currentAsk = null) {
     const derived = dailyLevels.computeLevels(signal.bars || []);
     const engineExtras = signal.indicators || signal.barData || {};
     const indicatorExtras = { ...derived, ...engineExtras };
-    const collected = checks.collectChecksForFire({
+    // Async pre-pass enriches indicatorExtras with qp-computed field
+    // values before the sync check evaluator runs. Falls back to
+    // legacy engine values silently if the qp bridge is offline.
+    const collected = await checks.collectChecksForFireAsync({
       indicatorEngine: _getIndicatorEngine(setupId),
       bars:            signal.bars || [],
       pmHigh:          signal.pmHigh ?? null,

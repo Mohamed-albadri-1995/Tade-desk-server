@@ -1807,6 +1807,61 @@ function evaluateCondition(node, ctx) {
  * All three arrays share the same shape:
  *   { key, label, section?, value, aligned }
  */
+/**
+ * Async pre-pass: for every condition we're about to evaluate, scan
+ * its tree for referenced fields, ask qp for the latest-bar value of
+ * each, and merge those into `indicatorExtras`. Fields the qp bridge
+ * doesn't cover are left untouched — the existing engine-computed
+ * value in `indicatorExtras` continues to win, so this is safe to
+ * enable side-by-side.
+ *
+ * Returns a NEW extras object (does not mutate the input) and the
+ * list of field names actually filled.
+ */
+async function _enrichExtrasFromQp(bars, conditions, extras) {
+  if (!Array.isArray(bars) || bars.length === 0) return { extras, filled: [] };
+  let qpBridge;
+  try { qpBridge = require('./qpBridge'); }
+  catch { return { extras, filled: [] }; }
+  const fields = new Set();
+  for (const c of conditions) {
+    if (!c) continue;
+    for (const f of qpBridge.extractFields(c)) fields.add(f);
+  }
+  if (fields.size === 0) return { extras, filled: [] };
+  let filled = {};
+  try {
+    filled = await qpBridge.latestFieldValues(bars, [...fields]);
+  } catch (err) {
+    // qp bridge offline — silently keep engine-computed values.
+    return { extras, filled: [] };
+  }
+  // Existing extras win: only add qp values for fields the engine
+  // didn't already supply. This makes it safe to run alongside the
+  // legacy indicator engines until we've fully cut over.
+  const merged = { ...filled, ...extras };
+  return { extras: merged, filled: Object.keys(filled) };
+}
+
+
+async function collectChecksForFireAsync(args) {
+  const conditions = [];
+  const defaults = listChecks({ category: 'default', enabledOnly: true });
+  const setupChecks = args.setupId
+    ? assignmentsForSetup(args.setupId).filter(r => r.enabled)
+    : [];
+  for (const row of [...defaults, ...setupChecks]) {
+    if (row.condition)       conditions.push(row.condition);
+    if (row.condition_long)  conditions.push(row.condition_long);
+    if (row.condition_short) conditions.push(row.condition_short);
+  }
+  const { extras: enrichedExtras } = await _enrichExtrasFromQp(
+    args.bars || [], conditions, args.indicatorExtras || {},
+  );
+  return collectChecksForFire({ ...args, indicatorExtras: enrichedExtras });
+}
+
+
 function collectChecksForFire({ indicatorEngine, bars, pmHigh, setupId, indicatorExtras = {}, scannerContext = {}, historySeries = {}, engineCtx = {}, direction = null }) {
   const ctx = buildIndicatorContext(bars, indicatorExtras);
   ctx.scanner = scannerContext;
@@ -1930,5 +1985,6 @@ module.exports = {
   evaluateCondition,
   buildIndicatorContext,
   collectChecksForFire,
+  collectChecksForFireAsync,
   testCondition,
 };
