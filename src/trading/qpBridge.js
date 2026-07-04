@@ -133,6 +133,22 @@ async function enrichContextWithQp(ctx, condition) {
   return Object.keys(filled);
 }
 
+/**
+ * POST /qp/setup-debug — returns per-condition pass/note for the last
+ * bar as computed by the qp setup module. Same shape as an indicator
+ * engine's debug() so the caller can splice it into mandatoryChecks.
+ *
+ * Returns {canRun: false, conditions: []} if the setup doesn't exist
+ * or hasn't shipped debug_last_bar yet.
+ */
+async function setupDebug(setupId, side, bars) {
+  try {
+    return await _post('/qp/setup-debug', { setup_id: setupId, side, bars });
+  } catch (e) {
+    return { canRun: false, reason: `bridge: ${e.message}`, conditions: [] };
+  }
+}
+
 async function ping() {
   try {
     const ctl = new AbortController();
@@ -148,5 +164,6 @@ async function ping() {
 module.exports = {
   evalIndicators, latestFieldValues,
   extractFields, enrichContextWithQp,
+  setupDebug,
   ping, FIELD_TO_QP,
 };

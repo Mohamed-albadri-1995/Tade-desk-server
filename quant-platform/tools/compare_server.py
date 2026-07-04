@@ -1134,6 +1134,33 @@ def _eval_indicator(df: pd.DataFrame, ind: str, length: int, mult: float) -> np.
     raise ValueError(f'qp/eval: unknown ind {ind!r}')
 
 
+def qp_setup_debug(body: dict) -> dict:
+    """POST body: {setup_id, side?, bars: [{t,o,h,l,c,v}, …]}.
+    Returns {canRun, conditions: [{name, pass, note}, …]} — the qp
+    setup's own per-condition status for the LAST bar, so the trade
+    desk can splice it into a signal's mandatoryChecks.
+
+    Setups without a debug_last_bar() (yet) return canRun=False so
+    Node falls back to the legacy engine.debug()."""
+    setup_id = str(body.get('setup_id') or '')
+    if setup_id.startswith('qp:'):
+        setup_id = setup_id[3:]
+    from qp.setups.library import REGISTRY
+    mod = REGISTRY.get(setup_id)
+    if mod is None:
+        return {'canRun': False, 'reason': f'unknown qp setup {setup_id!r}',
+                'conditions': []}
+    if not hasattr(mod, 'debug_last_bar'):
+        return {'canRun': False, 'reason': 'debug_last_bar not implemented',
+                'conditions': []}
+    bars_json = body.get('bars') or []
+    df = _bars_from_json(bars_json)
+    kwargs = {}
+    if body.get('side') in ('long', 'short'):
+        kwargs['side'] = body['side']
+    return mod.debug_last_bar(df, **kwargs)
+
+
 def qp_eval(body: dict) -> dict:
     """Bridge endpoint used by the Node trade desk.
 
@@ -1737,6 +1764,13 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/qp/eval':
             try:
                 out = qp_eval(body)
+                self._send(200, json.dumps(out).encode('utf-8'))
+            except Exception as e:
+                self._send(500, str(e).encode('utf-8'), 'text/plain')
+            return
+        if u.path == '/qp/setup-debug':
+            try:
+                out = qp_setup_debug(body)
                 self._send(200, json.dumps(out).encode('utf-8'))
             except Exception as e:
                 self._send(500, str(e).encode('utf-8'), 'text/plain')

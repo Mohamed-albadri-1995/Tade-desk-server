@@ -114,6 +114,11 @@ try { db.exec('ALTER TABLE trading_positions ADD COLUMN alpaca_order_id TEXT'); 
 //                           until the user opts in per setup.
 try { db.exec('ALTER TABLE trading_setups ADD COLUMN override_kill_switch INTEGER NOT NULL DEFAULT 0'); } catch { /* already exists */ }
 try { db.exec('ALTER TABLE trading_setups ADD COLUMN auto_pause_c_streak INTEGER NOT NULL DEFAULT 0'); } catch { /* already exists */ }
+// If set (e.g. 'vwap_cluster_bounce'), the check evaluator will pull
+// the setup's mandatory conditions from the qp Python library instead
+// of the JS indicator engine's debug(). Same source as the compare
+// tool's setup picker — guarantees no drift between the two.
+try { db.exec("ALTER TABLE trading_setups ADD COLUMN qp_setup_id TEXT"); } catch { /* already exists */ }
 
 // Event log for grading-loop actions (kill-switch blocks, overrides,
 // auto-pauses). Feeds the UI's "why did this happen" panel.

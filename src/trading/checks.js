@@ -1858,7 +1858,44 @@ async function collectChecksForFireAsync(args) {
   const { extras: enrichedExtras } = await _enrichExtrasFromQp(
     args.bars || [], conditions, args.indicatorExtras || {},
   );
-  return collectChecksForFire({ ...args, indicatorExtras: enrichedExtras });
+
+  // If the setup row has qp_setup_id, ask qp for the mandatory checks.
+  // Falls through to the legacy engine.debug() path silently if qp is
+  // offline or hasn't shipped debug_last_bar for this setup yet.
+  let qpMandatory = null;
+  if (args.setupId) {
+    try {
+      const setupsDb = require('./db');
+      const row = setupsDb.prepare(
+        'SELECT qp_setup_id FROM trading_setups WHERE id = ?'
+      ).get(args.setupId);
+      if (row && row.qp_setup_id) {
+        const qpBridge = require('./qpBridge');
+        const dbg = await qpBridge.setupDebug(
+          row.qp_setup_id,
+          args.direction || 'long',
+          args.bars || [],
+        );
+        if (dbg && dbg.canRun && Array.isArray(dbg.conditions)) {
+          qpMandatory = dbg.conditions.map(c => ({
+            key:      c.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+            label:    c.name,
+            section:  'mandatory',
+            value:    c.note ?? null,
+            aligned:  c.pass == null ? null : Boolean(c.pass),
+          }));
+        }
+      }
+    } catch (err) {
+      // Non-fatal — legacy path still runs below.
+    }
+  }
+
+  const collected = collectChecksForFire({ ...args, indicatorExtras: enrichedExtras });
+  if (qpMandatory && qpMandatory.length) {
+    collected.mandatoryChecks = qpMandatory;
+  }
+  return collected;
 }
 
 

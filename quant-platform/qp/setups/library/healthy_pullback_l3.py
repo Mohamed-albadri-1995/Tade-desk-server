@@ -86,3 +86,68 @@ def evaluate(bars: pd.DataFrame,
 
     fired[1:] = bias_c1[1:] & bias[1:] & c1 & c2
     return fired
+
+
+def debug_last_bar(bars: pd.DataFrame,
+                   bb_length: int = 21,
+                   bb_mult: float = 2.0,
+                   min_wick_pct: float = 15.0,
+                   vwap_touch_pct: float = 0.2,
+                   bias_strict: bool = True,
+                   **_ignored) -> dict:
+    """Per-condition pass/note for the LAST bar. Same intermediate calcs
+    as evaluate(). Shape mirrors the JS engine debug() contract so the
+    trade desk can splice it into mandatoryChecks without adapters."""
+    n = len(bars)
+    if n < 2:
+        return {'canRun': False, 'reason': f'need 2+ bars, have {n}',
+                'conditions': []}
+    o = bars['open'].to_numpy(dtype=float)
+    h = bars['high'].to_numpy(dtype=float)
+    l = bars['low'].to_numpy(dtype=float)
+    c = bars['close'].to_numpy(dtype=float)
+    dv  = np.asarray(session_vwap(bars))
+    v2  = np.asarray(n_day_vwap(bars, 2))
+    llv = np.asarray(today_ll_vwap(bars))
+    bb  = bollinger_ema(c, length=bb_length, mult=bb_mult, zone_pct=25.0)
+
+    i, p = n - 1, n - 2
+    biasBase   = (c[i] > dv[i]) and (c[i] > bb.basis[i])
+    biasFull   = biasBase and (c[i] > v2[i]) and (c[i] > llv[i])
+    biasNow    = biasFull if bias_strict else biasBase
+    biasBaseP  = (c[p] > dv[p]) and (c[p] > bb.basis[p])
+    biasFullP  = biasBaseP and (c[p] > v2[p]) and (c[p] > llv[p])
+    biasPrev   = biasFullP if bias_strict else biasBaseP
+    rng_p      = (h[p] - l[p]) if (h[p] - l[p]) > 0 else float('nan')
+    lwick_p    = (min(o[p], c[p]) - l[p])
+    lwick_pct  = (lwick_p / rng_p) * 100.0 if rng_p == rng_p else 0.0
+    redPrev    = c[p] < o[p]
+    notExtnd   = h[p] < bb.upper[p]
+    tol        = vwap_touch_pct / 100.0
+    def _touch(ref): return (l[p] <= ref * (1 + tol)) and (l[p] >= ref * (1 - tol))
+    anyTouch   = _touch(dv[p]) or _touch(v2[p]) or _touch(llv[p])
+    greenNow   = c[i] > o[i]
+    breakout   = c[i] > h[p]
+    return {
+        'canRun': True,
+        'conditions': [
+            {'name': 'Long bias (prev bar)',        'pass': bool(biasPrev),
+             'note': f'close {c[p]:.2f} vs DV {dv[p]:.2f} / BB {bb.basis[p]:.2f}'},
+            {'name': 'Long bias (this bar)',        'pass': bool(biasNow),
+             'note': f'close {c[i]:.2f} vs DV {dv[i]:.2f}'},
+            {'name': 'Prev candle red',             'pass': bool(redPrev),
+             'note': f'prev close {c[p]:.2f} vs open {o[p]:.2f}'},
+            {'name': f'Lower wick ≥ {min_wick_pct}%',
+             'pass': bool(lwick_pct >= min_wick_pct),
+             'note': f'{lwick_pct:.1f}%'},
+            {'name': 'Prev low touched a VWAP',     'pass': bool(anyTouch),
+             'note': f'prev.l {l[p]:.2f} vs 3 VWAPs ±{vwap_touch_pct}%'},
+            {'name': 'Not extended (prev.h < BB upper)',
+             'pass': bool(notExtnd),
+             'note': f'prev.h {h[p]:.2f} vs BB up {bb.upper[p]:.2f}'},
+            {'name': 'This bar green',              'pass': bool(greenNow),
+             'note': f'close {c[i]:.2f} vs open {o[i]:.2f}'},
+            {'name': 'Close > prev high',           'pass': bool(breakout),
+             'note': f'close {c[i]:.2f} vs prev.h {h[p]:.2f}'},
+        ]
+    }
