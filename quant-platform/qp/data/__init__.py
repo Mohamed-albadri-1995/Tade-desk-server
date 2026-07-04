@@ -18,5 +18,7 @@ The built-in `YahooSource` needs no API key.
 from qp.data.cache import list_cached, clear_cache
 from qp.data.loader import load
 from qp.data.sources.base import Bars, Source
+from qp.data.earnings import last_earnings_date, next_earnings_date
 
-__all__ = ['load', 'list_cached', 'clear_cache', 'Bars', 'Source']
+__all__ = ['load', 'list_cached', 'clear_cache', 'Bars', 'Source',
+           'last_earnings_date', 'next_earnings_date']

@@ -321,6 +321,7 @@ PAGE = r"""<!doctype html>
         <option value="gap_vwap">Gap VWAP (|open − prev close| ≥ mult × ATR)</option>
         <option value="last_hour_ll_vwap">Last-Hour LL VWAP (carries into next day)</option>
         <option value="last_hour_hh_vwap">Last-Hour HH VWAP (carries into next day)</option>
+        <option value="earnings_vwap_auto">Earnings VWAP (auto-fetched anchor date)</option>
       </optgroup>
       <optgroup label="Volatility (sub-pane)">
         <option value="atr">ATR</option>
@@ -1500,6 +1501,22 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
     elif ind == 'last_hour_hh_vwap':
         series_out.append(_to_series('Last-Hour HH VWAP', 'overlay', GREEN,
                                      last_hour_hh_vwap(df, 15), ts))
+    elif ind == 'earnings_vwap_auto':
+        # Fetch the ticker's most recent earnings date and anchor VWAP
+        # there. Silently no-ops if Yahoo throttles or the ticker has no
+        # earnings history — the caller sees no line rather than an error.
+        from qp.data import last_earnings_date
+        anchor = last_earnings_date(symbol)
+        if anchor is None:
+            pass
+        else:
+            # If the anchor falls before the loaded window, the VWAP will
+            # accumulate from the first bar (earnings_vwap uses `bfill`
+            # index lookup, which returns the first bar if anchor is
+            # earlier than the window start).
+            series_out.append(_to_series(
+                f'Earnings VWAP (anchor {anchor.date()})', 'overlay',
+                ORANGE, earnings_vwap(df, anchor), ts))
 
     else:
         raise ValueError(f'unknown indicator {ind!r}')
