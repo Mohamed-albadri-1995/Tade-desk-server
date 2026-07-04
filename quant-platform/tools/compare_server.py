@@ -347,6 +347,20 @@ PAGE = r"""<!doctype html>
         <option value="prev_week_hl">Prev Week HH / LL</option>
         <option value="prev_month_hl">Prev Month HH / LL</option>
       </optgroup>
+      <optgroup label="Levels · Script-2 reference lines">
+        <option value="floor_pivots">Floor Pivots (P / R1-3 / S1-3)</option>
+        <option value="overnight_hl">Overnight HH / LL (18:00-09:30 ET)</option>
+        <option value="monday_hl">Monday HH / LL (this week)</option>
+        <option value="daily_open">Daily Open</option>
+        <option value="weekly_open">Weekly Open</option>
+        <option value="monthly_open">Monthly Open</option>
+        <option value="yearly_open">Yearly Open</option>
+        <option value="prev_daily_open">Prev Daily Open</option>
+        <option value="prev_weekly_open">Prev Weekly Open</option>
+        <option value="prev_monthly_open">Prev Monthly Open</option>
+        <option value="prev_yearly_open">Prev Yearly Open</option>
+        <option value="dynamic_sr">Dynamic S/R Zones (LonesomeTheBlue)</option>
+      </optgroup>
       <optgroup label="Levels · rolling N-day (TF-adaptive)">
         <option value="hl_5d">5-Day Rolling HH / LL</option>
         <option value="hl_20d">20-Day Rolling HH / LL</option>
@@ -1293,6 +1307,63 @@ def compute_series(symbol: str, tf: str, ind: str, length: int, days: int,
                                      rolling_n_day_high(df, 20), ts))
         series_out.append(_to_series('20-Day Rolling LL', 'overlay', RED,
                                      rolling_n_day_low(df, 20), ts))
+
+    # ── Levels: Script-2 reference lines ──────────────────────────────────
+    elif ind == 'floor_pivots':
+        from qp.levels import floor_pivots
+        fp = floor_pivots(df)
+        series_out.append(_to_series('Pivot P',  'overlay', ORANGE, fp.P,  ts))
+        series_out.append(_to_series('R1', 'overlay', RED,    fp.R1, ts))
+        series_out.append(_to_series('R2', 'overlay', RED,    fp.R2, ts))
+        series_out.append(_to_series('R3', 'overlay', RED,    fp.R3, ts))
+        series_out.append(_to_series('S1', 'overlay', GREEN,  fp.S1, ts))
+        series_out.append(_to_series('S2', 'overlay', GREEN,  fp.S2, ts))
+        series_out.append(_to_series('S3', 'overlay', GREEN,  fp.S3, ts))
+    elif ind == 'overnight_hl':
+        from qp.levels import overnight_high, overnight_low
+        series_out.append(_to_series('Overnight HH', 'overlay', BLUE,
+                                     overnight_high(df), ts))
+        series_out.append(_to_series('Overnight LL', 'overlay', ORANGE,
+                                     overnight_low(df),  ts))
+    elif ind == 'monday_hl':
+        from qp.levels import monday_high, monday_low
+        series_out.append(_to_series('Monday HH', 'overlay', GREEN,
+                                     monday_high(df), ts))
+        series_out.append(_to_series('Monday LL', 'overlay', RED,
+                                     monday_low(df),  ts))
+    elif ind == 'daily_open':
+        from qp.levels import daily_open
+        series_out.append(_to_series('Daily Open', 'overlay', GREEN, daily_open(df), ts))
+    elif ind == 'weekly_open':
+        from qp.levels import weekly_open
+        series_out.append(_to_series('Weekly Open', 'overlay', ORANGE, weekly_open(df), ts))
+    elif ind == 'monthly_open':
+        from qp.levels import monthly_open
+        series_out.append(_to_series('Monthly Open', 'overlay', RED, monthly_open(df), ts))
+    elif ind == 'yearly_open':
+        from qp.levels import yearly_open
+        series_out.append(_to_series('Yearly Open', 'overlay', BLUE, yearly_open(df), ts))
+    elif ind == 'prev_daily_open':
+        from qp.levels import prev_daily_open
+        series_out.append(_to_series('Prev Daily Open', 'overlay', GREEN, prev_daily_open(df), ts))
+    elif ind == 'prev_weekly_open':
+        from qp.levels import prev_weekly_open
+        series_out.append(_to_series('Prev Weekly Open', 'overlay', ORANGE, prev_weekly_open(df), ts))
+    elif ind == 'prev_monthly_open':
+        from qp.levels import prev_monthly_open
+        series_out.append(_to_series('Prev Monthly Open', 'overlay', RED, prev_monthly_open(df), ts))
+    elif ind == 'prev_yearly_open':
+        from qp.levels import prev_yearly_open
+        series_out.append(_to_series('Prev Yearly Open', 'overlay', BLUE, prev_yearly_open(df), ts))
+    elif ind == 'dynamic_sr':
+        from qp.levels import dynamic_sr_zones
+        zones = dynamic_sr_zones(df, prd=10, max_zones=6)
+        for i, z in enumerate(zones):
+            # Color: above close (last bar) → resistance red; below → support green.
+            last = df['close'].iloc[-1]
+            zmid = z[-1] if np.isfinite(z[-1]) else None
+            col = RED if (zmid is not None and zmid >= last) else GREEN
+            series_out.append(_to_series(f'S/R Zone {i+1}', 'overlay', col, z, ts))
 
     # ── Event-anchored VWAPs (Pine "VWAP Cluster Bounce" parity) ──────────
     elif ind == 'vwap_2d_anchored':
