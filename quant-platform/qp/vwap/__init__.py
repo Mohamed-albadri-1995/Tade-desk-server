@@ -30,6 +30,8 @@ from qp.vwap.anchored import (
     last_hour_ll_vwap, last_hour_hh_vwap,
     earnings_vwap,
 )
+from qp.vwap.pivot_anchored import pivot_ll_vwap, pivot_hh_vwap
+from qp.vwap.stdev_bands import vwap_stdev_bands, VwapBands
 
 __all__ = [
     'anchored_vwap',
@@ -40,4 +42,6 @@ __all__ = [
     'gap_vwap',
     'last_hour_ll_vwap', 'last_hour_hh_vwap',
     'earnings_vwap',
+    'pivot_ll_vwap', 'pivot_hh_vwap',
+    'vwap_stdev_bands', 'VwapBands',
 ]

@@ -71,6 +71,27 @@ CSV_DIR: Path = Path(__file__).resolve().parents[1] / 'data' / 'csv'
 TRADEDESK_DB: Path = Path(__file__).resolve().parents[2] / 'data' / 'tradedesk.db'
 
 
+def list_qp_setups() -> list[dict]:
+    """Return the Python-defined setups from qp.setups.library, in the
+    same shape as list_setups() so the UI can treat them uniformly."""
+    try:
+        from qp.setups.library import list_setups as list_library
+    except Exception as e:
+        print(f'[qp-setups] library import failed: {e}', file=sys.stderr)
+        return []
+    out = []
+    for entry in list_library():
+        out.append({
+            'id':          f"qp:{entry['id']}",
+            'name':        entry['name'],
+            'description': entry['description'],
+            'side':        entry['side'],
+            'specs':       entry['chart_specs'],
+            'source':      'qp',
+        })
+    return out
+
+
 def list_setups() -> list[dict]:
     """Return every enabled setup from the trade desk DB, with the
     indicator specs implied by its default + assigned additional checks.
@@ -452,21 +473,47 @@ PAGE = r"""<!doctype html>
     } catch (_) {}
   }
 
-  // Populate the Setup picker from the trade desk DB.
-  let setupsCache = {};   // id -> { name, specs }
+  // Populate the Setup picker from the trade desk DB + the Python qp
+  // library. Both come back in the same shape, differentiated by id
+  // prefix ("qp:" for library setups). Grouped into optgroups.
+  let setupsCache = {};   // id -> { name, specs, source? }
   async function loadSetupList() {
+    const sel = document.getElementById('setupPicker');
+    // 1) qp library setups (Python).
+    try {
+      const r = await fetch('/qp-setups');
+      if (r.ok) {
+        const list = await r.json();
+        if (list.length) {
+          const og = document.createElement('optgroup');
+          og.label = '── qp Setups (Python library) ──';
+          for (const s of list) {
+            setupsCache[s.id] = s;
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = s.name;
+            og.appendChild(opt);
+          }
+          sel.appendChild(og);
+        }
+      }
+    } catch (_) {}
+    // 2) trade desk DB setups.
     try {
       const r = await fetch('/setups');
       if (!r.ok) return;
       const list = await r.json();
-      const sel = document.getElementById('setupPicker');
+      if (!list.length) return;
+      const og = document.createElement('optgroup');
+      og.label = '── Trade Desk Setups (DB) ──';
       for (const s of list) {
         setupsCache[s.id] = s;
         const opt = document.createElement('option');
         opt.value = s.id;
         opt.textContent = s.name;
-        sel.appendChild(opt);
+        og.appendChild(opt);
       }
+      sel.appendChild(og);
     } catch (_) {}
   }
 
@@ -1354,6 +1401,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/setups':
             try:
                 self._send(200, json.dumps(list_setups()).encode('utf-8'))
+            except Exception as e:
+                self._send(500, str(e).encode('utf-8'), 'text/plain')
+            return
+        if u.path == '/qp-setups':
+            try:
+                self._send(200, json.dumps(list_qp_setups()).encode('utf-8'))
             except Exception as e:
                 self._send(500, str(e).encode('utf-8'), 'text/plain')
             return
