@@ -117,3 +117,96 @@ def evaluate(bars: pd.DataFrame,
 
     fired = has_cluster & candle_ok & vol_ok & directional
     return np.where(np.isnan(fired.astype(float)), False, fired).astype(bool)
+
+
+def debug_last_bar(bars: pd.DataFrame,
+                   cluster_pct: float = 1.5,
+                   vol_mult: float = 1.2,
+                   min_body_pct: float = 0.3,
+                   max_wick_pct: float = 0.5,
+                   lookback: int = 20,
+                   side: str = 'long',
+                   **_ignored) -> dict:
+    """Per-condition status for the last bar. Same intermediate calcs
+    as evaluate()."""
+    n = len(bars)
+    if n < lookback + 1:
+        return {'canRun': False, 'reason': f'need {lookback+1}+ bars, have {n}',
+                'conditions': []}
+    o = bars['open'].to_numpy(dtype=float)
+    h = bars['high'].to_numpy(dtype=float)
+    l = bars['low'].to_numpy(dtype=float)
+    c = bars['close'].to_numpy(dtype=float)
+    v = bars['volume'].to_numpy(dtype=float)
+
+    time_series = {
+        'Daily VWAP':   np.asarray(session_vwap(bars)),
+        '2D VWAP':      np.asarray(n_day_vwap(bars, 2)),
+        'Weekly VWAP':  np.asarray(weekly_vwap(bars)),
+        'Monthly VWAP': np.asarray(monthly_vwap(bars)),
+    }
+    anchor_series = {
+        'Today HH': np.asarray(today_hh_vwap(bars)),
+        'Today LL': np.asarray(today_ll_vwap(bars)),
+        'Week HH':  np.asarray(week_hh_vwap(bars)),
+        'Week LL':  np.asarray(week_ll_vwap(bars)),
+        'Pivot LL': np.asarray(pivot_ll_vwap(bars, lookback=25)),
+        'Pivot HH': np.asarray(pivot_hh_vwap(bars, lookback=25)),
+        'LH LL':    np.asarray(last_hour_ll_vwap(bars)),
+        'LH HH':    np.asarray(last_hour_hh_vwap(bars)),
+        'Gap':      np.asarray(gap_vwap(bars)),
+    }
+    i = n - 1
+    thr = abs(c[i]) * (cluster_pct / 100.0)
+    hits_time   = [k for k, s in time_series.items()
+                   if np.isfinite(s[i]) and abs(s[i] - c[i]) <= thr]
+    hits_anchor = [k for k, s in anchor_series.items()
+                   if np.isfinite(s[i]) and abs(s[i] - c[i]) <= thr]
+    total = len(hits_time) + len(hits_anchor)
+    has_cluster = total >= 2 and len(hits_time) >= 1
+
+    rng   = (h[i] - l[i]) or float('nan')
+    body  = abs(c[i] - o[i])
+    upper = h[i] - max(o[i], c[i])
+    lower = min(o[i], c[i]) - l[i]
+    body_pct       = (body / rng) if rng == rng else 0.0
+    upper_wick_pct = (upper / rng) if rng == rng else 0.0
+    lower_wick_pct = (lower / rng) if rng == rng else 0.0
+
+    vol_ma_prev = float(pd.Series(v).rolling(lookback, min_periods=1).mean().iloc[i - 1])
+    vol_ok = v[i] >= vol_mult * vol_ma_prev
+
+    ma5  = float(np.asarray(n_session_sma(bars, 5))[i])
+    ma20 = float(np.asarray(sma(c, 20))[i])
+
+    if side == 'long':
+        green = c[i] > o[i]
+        candle_ok = green and body_pct >= min_body_pct and upper_wick_pct <= max_wick_pct
+        directional = c[i] > ma5 and c[i] > ma20
+        candle_desc = f'green, body {body_pct*100:.0f}%, upper wick {upper_wick_pct*100:.0f}%'
+        dir_desc = f'close {c[i]:.2f} vs 5D {ma5:.2f} / SMA20 {ma20:.2f}'
+    else:
+        red = c[i] < o[i]
+        candle_ok = red and body_pct >= min_body_pct and lower_wick_pct <= max_wick_pct
+        directional = c[i] < ma5 and c[i] < ma20
+        candle_desc = f'red, body {body_pct*100:.0f}%, lower wick {lower_wick_pct*100:.0f}%'
+        dir_desc = f'close {c[i]:.2f} vs 5D {ma5:.2f} / SMA20 {ma20:.2f}'
+
+    cluster_note = (f'{total} tight VWAPs ({len(hits_time)} time + '
+                    f'{len(hits_anchor)} anchor)' if total else 'no cluster')
+    if hits_time or hits_anchor:
+        cluster_note += ': ' + ' / '.join(hits_time + hits_anchor)
+
+    return {
+        'canRun': True,
+        'conditions': [
+            {'name': f'VWAP cluster within {cluster_pct}%',
+             'pass': bool(has_cluster), 'note': cluster_note},
+            {'name': 'Candle quality', 'pass': bool(candle_ok), 'note': candle_desc},
+            {'name': f'Volume ≥ {vol_mult}× {lookback}-bar mean',
+             'pass': bool(vol_ok),
+             'note': f'v {v[i]:.0f} vs mean {vol_ma_prev:.0f}'},
+            {'name': f'Above 5D + SMA20' if side == 'long' else 'Below 5D + SMA20',
+             'pass': bool(directional), 'note': dir_desc},
+        ]
+    }
