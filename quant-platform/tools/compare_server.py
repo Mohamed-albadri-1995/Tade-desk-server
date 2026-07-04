@@ -1070,6 +1070,105 @@ def _load_bars_df(symbol: str, tf: str, days: int, session: str,
     )
 
 
+def _bars_from_json(payload: list[dict]) -> pd.DataFrame:
+    """Turn a list of {t, o, h, l, c, v} dicts into a tz-aware
+    DataFrame indexed by UTC timestamp. `t` accepted as Unix seconds
+    (int) or ISO string."""
+    if not payload:
+        raise ValueError('empty bars')
+    idx = []
+    rows = []
+    for b in payload:
+        t = b.get('t')
+        if isinstance(t, (int, float)):
+            idx.append(pd.Timestamp(int(t), unit='s', tz='UTC'))
+        else:
+            idx.append(pd.Timestamp(t, tz='UTC'))
+        rows.append({
+            'open':   float(b.get('o') or b.get('open') or 0.0),
+            'high':   float(b.get('h') or b.get('high') or 0.0),
+            'low':    float(b.get('l') or b.get('low')  or 0.0),
+            'close':  float(b.get('c') or b.get('close') or 0.0),
+            'volume': float(b.get('v') or b.get('volume') or 0.0),
+        })
+    df = pd.DataFrame(rows, index=pd.DatetimeIndex(idx, name='t'))
+    df.index = df.index.tz_convert('UTC')
+    return df
+
+
+def _eval_indicator(df: pd.DataFrame, ind: str, length: int, mult: float) -> np.ndarray:
+    """Run a qp indicator against `df` and return the primary series as
+    a 1-D float array. NaN preserved (Node caller nulls them out).
+
+    This dispatch mirrors the check-side field grammar in the Node
+    trade desk. It's the single source of truth the bridge exposes to
+    checks — extending it here means checks.js gets that field the
+    next time it asks."""
+    from qp.ma import ema, sma, rma, wma
+    from qp.volatility import atr
+    from qp.vwap import (session_vwap, n_day_vwap, weekly_vwap, monthly_vwap,
+                         today_hh_vwap, today_ll_vwap, pivot_ll_vwap, pivot_hh_vwap)
+    from qp.levels import (today_high, today_low, premarket_high, premarket_low,
+                            prev_day_high, prev_day_low)
+    c = df['close'].to_numpy(dtype=float)
+
+    if   ind == 'ema':          return ema(c, length or 9)
+    elif ind == 'sma':          return sma(c, length or 9)
+    elif ind == 'rma':          return rma(c, length or 14)
+    elif ind == 'wma':          return wma(c, length or 9)
+    elif ind == 'atr':          return np.asarray(atr(df, length or 14))
+    elif ind == 'vwap':         return np.asarray(session_vwap(df))
+    elif ind == 'vwap_2d':      return np.asarray(n_day_vwap(df, 2))
+    elif ind == 'weekly_vwap':  return np.asarray(weekly_vwap(df))
+    elif ind == 'monthly_vwap': return np.asarray(monthly_vwap(df))
+    elif ind == 'today_hh_vwap':return np.asarray(today_hh_vwap(df))
+    elif ind == 'today_ll_vwap':return np.asarray(today_ll_vwap(df))
+    elif ind == 'day_high':     return np.asarray(today_high(df))
+    elif ind == 'day_low':      return np.asarray(today_low(df))
+    elif ind == 'pm_high':      return np.asarray(premarket_high(df))
+    elif ind == 'pm_low':       return np.asarray(premarket_low(df))
+    elif ind == 'prev_day_high':return np.asarray(prev_day_high(df))
+    elif ind == 'prev_day_low': return np.asarray(prev_day_low(df))
+    elif ind == 'pivot_ll_vwap':return np.asarray(pivot_ll_vwap(df, length or 25))
+    elif ind == 'pivot_hh_vwap':return np.asarray(pivot_hh_vwap(df, length or 25))
+    raise ValueError(f'qp/eval: unknown ind {ind!r}')
+
+
+def qp_eval(body: dict) -> dict:
+    """Bridge endpoint used by the Node trade desk.
+
+    Input : { bars:      [{t, o, h, l, c, v}, …],
+              indicators: [{key, ind, length?, mult?}, …] }
+
+    Output: { keys: [...],
+              values: {key: [n numbers | null-for-NaN, …], …} }
+
+    Each `key` is echoed back with the computed series aligned to the
+    bars array (same length). `key` is Node's own identifier (e.g.
+    'ema9', 'vwap') — lets it stash results directly by field name."""
+    bars_json = body.get('bars') or []
+    inds      = body.get('indicators') or []
+    if not inds:
+        return {'keys': [], 'values': {}}
+    df = _bars_from_json(bars_json)
+    out_keys: list[str] = []
+    out_vals: dict[str, list] = {}
+    for spec in inds:
+        key = str(spec.get('key') or spec.get('ind') or '')
+        ind = str(spec.get('ind') or '')
+        if not key or not ind:
+            continue
+        length = int(spec.get('length', 0) or 0)
+        mult   = float(spec.get('mult',   2.0) or 2.0)
+        try:
+            arr = _eval_indicator(df, ind, length, mult)
+        except ValueError as e:
+            return {'error': str(e)}
+        out_vals[key] = [None if v != v else float(v) for v in arr]
+        out_keys.append(key)
+    return {'keys': out_keys, 'values': out_vals}
+
+
 def compute_qp_setup_firings(setup_id: str, side: str,
                              symbol: str, tf: str, days: int,
                              session: str, data_source: str) -> list[dict]:
@@ -1621,6 +1720,24 @@ class Handler(BaseHTTPRequestHandler):
                     data_source=q.get('data_source', 'yahoo'),
                 )
                 self._send(200, json.dumps({'firings': firings}).encode('utf-8'))
+            except Exception as e:
+                self._send(500, str(e).encode('utf-8'), 'text/plain')
+            return
+        self._send(404, b'not found', 'text/plain')
+
+    def do_POST(self):
+        u = urlparse(self.path)
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            raw = self.rfile.read(length) if length > 0 else b'{}'
+            body = json.loads(raw.decode('utf-8')) if raw else {}
+        except Exception as e:
+            self._send(400, f'bad json: {e}'.encode(), 'text/plain')
+            return
+        if u.path == '/qp/eval':
+            try:
+                out = qp_eval(body)
+                self._send(200, json.dumps(out).encode('utf-8'))
             except Exception as e:
                 self._send(500, str(e).encode('utf-8'), 'text/plain')
             return
