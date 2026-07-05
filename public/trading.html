@@ -633,11 +633,18 @@ body {
             <input id="sm-name" placeholder="e.g. 13 MA Bounce" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
           </div>
           <div>
-            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Indicator Script</label>
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Indicator Script (legacy JS engine)</label>
             <select id="sm-indicator" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
               <option value="">— No script attached —</option>
             </select>
-            <div style="font-size:10px;color:var(--text3);margin-top:3px">The engine that runs this setup's conditions on each bar.</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">The JS engine that runs this setup's conditions on each bar. Keep for a legacy setup.</div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">qp Setup (Python library — recommended)</label>
+            <select id="sm-qp-setup" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
+              <option value="">— No qp setup attached —</option>
+            </select>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">Pine-parity Python setup. When set, the mandatory conditions come from the qp module (same source that decides fires) instead of the JS engine.</div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
@@ -837,6 +844,20 @@ body {
 
   <!-- CHECKS TAB — shared library of default + additional conditions -->
   <div class="tab-pane" id="tab-checks">
+    <!-- qp bridge info panel — tells the user which field names in their
+         conditions now route through the qp Python library so numbers
+         match the compare tool. Not editable; auto-updates when qp gets
+         a new field. -->
+    <div class="panel" style="margin-bottom:12px;border-left:3px solid #22c55e">
+      <div class="panel-title" style="color:#22c55e">qp-enriched fields (auto)</div>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 8px">
+        Any condition that references one of these <code style="color:var(--text1)">field</code>
+        names now uses the qp Python library's math instead of the legacy engine's
+        local implementation. Numbers here match what the compare tool draws.
+        Fields NOT in this list continue to use engine values (unchanged).
+      </p>
+      <div id="qp-fields-list" style="display:flex;flex-wrap:wrap;gap:6px;font-size:11px"></div>
+    </div>
     <div class="panel">
       <div class="panel-title">Check Library</div>
       <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
@@ -2306,9 +2327,15 @@ async function loadSetups() {
   }
   el.innerHTML = rows.map(s => {
     const hasEngine = !!s.indicator;
+    const hasQp = !!s.qp_setup_id;
     const engineBadge = hasEngine
       ? `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(99,102,241,.12);color:var(--accent);white-space:nowrap">${s.indicator}</span>`
-      : `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(239,68,68,.1);color:var(--red);white-space:nowrap">no script</span>`;
+      : (hasQp
+        ? ''
+        : `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(239,68,68,.1);color:var(--red);white-space:nowrap">no script</span>`);
+    const qpBadge = hasQp
+      ? `<span title="Mandatory conditions come from the qp Python module — same source that decides fires" style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(34,197,94,.15);color:#22c55e;white-space:nowrap">qp · ${s.qp_setup_id}</span>`
+      : '';
     // Grading badge: KILLED (multiplier 0 without override), OVERRIDE
     // (multiplier 0 but override_kill_switch=1 so trades still fire), or
     // hide entirely for non-killed setups.
@@ -2327,6 +2354,7 @@ async function loadSetups() {
             <span style="font-weight:700;font-size:13px">${s.name}</span>
             <span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${s.enabled ? 'rgba(34,197,94,.12)':'rgba(85,93,112,.12)'};color:${s.enabled ? 'var(--green)':'var(--text3)'};white-space:nowrap">${s.enabled ? 'Active' : 'Disabled'}</span>
             ${engineBadge}
+            ${qpBadge}
             ${gradingBadge}
           </div>
           <div style="font-size:11px;color:var(--text3);margin-top:3px">${s.entry_type} · Entry ${s.window_start}–${s.window_end}</div>
@@ -2348,13 +2376,24 @@ let _smEditId = null;
 
 async function openSetupModal(setup) {
   _smEditId = setup?.id || null;
-  const indicators = await fetch(`${API}/trading/indicators`).then(r => r.json()).catch(() => []);
+  const [indicators, qpSetups] = await Promise.all([
+    fetch(`${API}/trading/indicators`).then(r => r.json()).catch(() => []),
+    fetch(`${API}/trading/qp-setups`).then(r => r.json()).catch(() => []),
+  ]);
   const sel = document.getElementById('sm-indicator');
   sel.innerHTML = '<option value="">— No script attached —</option>' +
     indicators.map(k => `<option value="${k}">${k}</option>`).join('');
+  // qp Setup dropdown — populated from the compare-tool bridge (with
+  // hardcoded fallback in the Node route so this works offline too).
+  const qpSel = document.getElementById('sm-qp-setup');
+  qpSel.innerHTML = '<option value="">— No qp setup attached —</option>' +
+    (qpSetups || []).map(s => `<option value="${s.id}" title="${(s.description || '').replace(/"/g, '&quot;')}">${s.name} (${s.side})</option>`).join('');
 
   document.getElementById('sm-name').value         = setup?.name || '';
   sel.value                                         = setup?.indicator || '';
+  // qp_setup_id in the DB is bare ('healthy_pullback_l3'); the dropdown
+  // values carry the 'qp:' prefix (matches what /qp-setups returns).
+  qpSel.value                                       = setup?.qp_setup_id ? `qp:${setup.qp_setup_id}` : '';
   document.getElementById('sm-entry-type').value   = setup?.entry_type || 'market';
   document.getElementById('sm-window-start').value = setup?.window_start || '9:35';
   document.getElementById('sm-window-end').value   = setup?.window_end || '10:00';
@@ -2443,6 +2482,7 @@ async function saveSetupModal() {
   const body = {
     name,
     indicator:    document.getElementById('sm-indicator').value || null,
+    qp_setup_id:  document.getElementById('sm-qp-setup').value || null,
     entry_type:   document.getElementById('sm-entry-type').value,
     window_start: document.getElementById('sm-window-start').value || '9:35',
     window_end:   document.getElementById('sm-window-end').value || '10:00',
@@ -3137,6 +3177,19 @@ async function showCard(id, opts = {}) {
 let _editingCheckId = null;
 
 async function loadChecks() {
+  // Populate the qp-enriched fields chip row (top of the Checks tab).
+  // Uses the same list qpBridge.js keeps in Node so field names match
+  // exactly what the check evaluator routes through.
+  const qpFields = ['vwap','ema9','ema13','ema20','ema50','sma5','sma9','sma13','sma20',
+                    'vwap_2d','weekly_vwap','monthly_vwap','today_hh_vwap','today_ll_vwap',
+                    'pivot_ll_vwap','pivot_hh_vwap','atr','dayHigh','dayLow',
+                    'pmHigh','pmLow','prevDayHigh','prevDayLow'];
+  const qpEl = document.getElementById('qp-fields-list');
+  if (qpEl) {
+    qpEl.innerHTML = qpFields.map(f =>
+      `<code style="padding:3px 8px;border-radius:4px;background:rgba(34,197,94,.1);color:#22c55e;border:1px solid rgba(34,197,94,.25)">${f}</code>`
+    ).join('');
+  }
   const el = document.getElementById('checks-list');
   const filter = document.getElementById('check-filter').value;
   const qs = filter ? '?category=' + filter : '';

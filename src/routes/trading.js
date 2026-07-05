@@ -77,6 +77,31 @@ router.get('/indicators', (req, res) => {
 });
 
 /**
+ * List qp setups (the Python library setups exposed via the compare
+ * tool bridge). Falls back to a hardcoded list if the bridge is offline
+ * so the UI still populates. Wired into the Setup edit modal.
+ */
+router.get('/qp-setups', async (req, res) => {
+  const qpBridge = require('../trading/qpBridge');
+  try {
+    const url = (process.env.QP_URL || 'http://127.0.0.1:8765') + '/qp-setups';
+    const r = await fetch(url);
+    if (r.ok) {
+      const list = await r.json();
+      return res.json(list);
+    }
+  } catch (err) { /* fall through to hardcoded fallback */ }
+  res.json([
+    { id: 'qp:healthy_pullback_l3', name: 'Healthy Pullback L3',
+      side: 'long', description: 'Prior bar rejects off Daily/2D/LL VWAP; current bar breaks above.' },
+    { id: 'qp:vwap_cluster_bounce', name: 'VWAP Cluster Bounce',
+      side: 'both', description: 'Two-or-more VWAPs converge; price bounces with candle + volume + direction.' },
+    { id: 'qp:bb_zone_ma_touch',    name: 'BB Zone MA Touch',
+      side: 'both', description: 'MA(9/13/20) touch inside a BB zone with VWAP ±σ + body/wick filters.' },
+  ]);
+});
+
+/**
  * Return an indicator's mandatory conditions — the list its debug()
  * function produces. Called from the Setup edit modal so the user can
  * SEE the same conditions in the UI as are defined in the script,
@@ -108,19 +133,27 @@ router.get('/indicators/:key/conditions', (req, res) => {
 });
 
 router.post('/setups', (req, res) => {
-  const { name, description, indicator, entry_type, window_start, window_end, config } = req.body;
+  const { name, description, indicator, qp_setup_id, entry_type, window_start, window_end, config } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const id = uuidv4();
   db.prepare(`
     INSERT INTO trading_setups (id, name, description, indicator, entry_type, window_start, window_end, enabled, config)
     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
   `).run(id, name, description || '', indicator || null, entry_type || 'market', window_start || '9:35', window_end || '10:00', JSON.stringify(config || {}));
+  if (qp_setup_id) {
+    // Strip the "qp:" prefix if present — the debug-swap logic in
+    // checks.js sends the id straight to the compare-tool bridge which
+    // handles either form, but keeping bare ids in the DB avoids double
+    // prefixes if a caller later concatenates.
+    const bare = String(qp_setup_id).replace(/^qp:/, '');
+    db.prepare('UPDATE trading_setups SET qp_setup_id=? WHERE id=?').run(bare, id);
+  }
   setupEngine.loadSetups();
   res.json({ ok: true, id });
 });
 
 router.patch('/setups/:id', (req, res) => {
-  const { name, description, indicator, entry_type, window_start, window_end, enabled, config,
+  const { name, description, indicator, qp_setup_id, entry_type, window_start, window_end, enabled, config,
           override_kill_switch, auto_pause_c_streak } = req.body;
   const row = db.prepare('SELECT * FROM trading_setups WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Setup not found' });
@@ -141,6 +174,10 @@ router.patch('/setups/:id', (req, res) => {
     auto_pause_c_streak != null ? Math.max(0, parseInt(auto_pause_c_streak, 10) || 0) : (row.auto_pause_c_streak || 0),
     req.params.id
   );
+  if (qp_setup_id !== undefined) {
+    const bare = qp_setup_id ? String(qp_setup_id).replace(/^qp:/, '') : null;
+    db.prepare('UPDATE trading_setups SET qp_setup_id=? WHERE id=?').run(bare, req.params.id);
+  }
   setupEngine.loadSetups();
   // If a session is running, hot-reload the poller so the change takes
   // effect on the next tick without a pause/resume.
