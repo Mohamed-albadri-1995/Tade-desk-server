@@ -23,8 +23,6 @@ app.use('/api/settings', require('./routes/settings'));
 app.use('/api/backup', require('./routes/backup'));
 app.use('/api/monitor', require('./routes/monitor'));
 app.use('/api/analysis', require('./routes/analysis'));
-app.use('/api/trading', require('./routes/trading'));
-app.use('/api/journal', require('./routes/journal'));
 
 // Health
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -42,14 +40,6 @@ app.get('/scanner/*path', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// Trading tool — serves trading SPA for all /trading/* paths
-app.get('/trading', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/trading.html'));
-});
-app.get('/trading/*path', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/trading.html'));
-});
-
 // Fallback → home
 app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/home.html'));
@@ -57,20 +47,7 @@ app.get('/{*path}', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`[Server] Trade Desk running on port ${PORT}`);
-
-  // Always-on broker reconciler: even without an active trading session,
-  // any position with an alpaca_order_id needs continuous /v2/positions
-  // polling so we notice Alpaca-side closes (manual close via UI, bracket
-  // legs firing afterhours, margin liquidations, etc). Short-circuits
-  // when there are no positions to watch, so cost is trivial.
-  try {
-    const brokerSync = require('./trading/brokerSync');
-    brokerSync.autoStart();
-    console.log('[Startup] brokerSync poller started');
-  } catch (err) {
-    console.warn('[Startup] brokerSync failed to start:', err.message);
-  }
+  console.log(`[Server] Screener running on port ${PORT}`);
 
   // Restore r0 from today's checkpoint if available (mid-day restart recovery)
   try {
@@ -93,17 +70,6 @@ app.listen(PORT, () => {
     training.migrateFromTmpCSV();
   } catch (err) {
     console.warn('[Startup] Training data migration failed:', err.message);
-  }
-
-  // Boot backfill: previously-bridged journal trades don't have per-setup
-  // check evaluations. Populate them so the trade card viewer shows real
-  // alignments on historical imports and the learning engine can include
-  // them in check-contribution stats.
-  try {
-    const bridge = require('./journal/bridgeToGrading');
-    bridge.backfillCheckEvaluations();
-  } catch (err) {
-    console.warn('[Startup] Journal check backfill failed:', err.message);
   }
 
   startScheduler();
