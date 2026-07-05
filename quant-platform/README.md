@@ -1,103 +1,113 @@
-# Quant Platform
+# qp — verified primitives library
 
-A validated, TradingView-parity library of market data primitives, indicators, and market-structure logic. Every function has exactly one job and every primitive is proven equivalent to TradingView bar-for-bar before anything depends on it.
+**One rule:** no math outside `qp/primitives/`. Every function in there is
+`@primitive`-decorated. Every downstream caller (compare tool, trading
+tool's `market_data`, backtests, user scripts) reaches the same function
+through the same registry. What you verify in the compare tool is what
+runs in production.
 
-Consumers (screener, backtester, live trader, chart, this repo's Trade Desk) never re-implement calculations. They import from here.
-
----
-
-## Ground rules
-
-1. **One responsibility per function.** No mixed concerns. `rolling_mean` doesn't know what "close" is.
-2. **Never duplicate calculations.** If the capability exists, reuse it. Every layer only depends on layers below it.
-3. **Validate before reuse.** Every primitive is compared against TradingView on multiple timeframes / lengths / symbols before other modules depend on it.
-4. **Lock stable code.** Once a primitive is verified, do not touch it except to fix a confirmed defect. Verified primitives sit at the top of their module docstring: `# VERIFIED YYYY-MM-DD — do not edit without re-validation.`
-5. **Separate concerns.** Data, math, indicators, primitives, strategies stay in independent layers.
-6. **Test continuously.** Every primitive has unit tests. Every module has integration tests.
-7. **Same library everywhere.** Screener, backtester, live trader, chart, Trade Desk consume the same functions. No downstream re-implementations.
-
----
-
-## Layers (bottom-up dependency)
+## Layout
 
 ```
-STAGE 1  Data Management Layer      qp.data
-STAGE 2  Session Engine             qp.session
-STAGE 3  Mathematical Foundation    qp.math_foundation   ← knows nothing about markets
-STAGE 4  Price Foundation           qp.price
-STAGE 5  Moving Average Library     qp.ma
-STAGE 6  VWAP Library               qp.vwap
-STAGE 7  Volatility Library         qp.volatility
-STAGE 8  Level Library              qp.levels
-STAGE 9  Market Structure           qp.structure
-STAGE 10 Primitive Library          qp.primitives
-STAGE 11 Indicator Combinations     qp.indicators
-STAGE 12 Setup Library              qp.setups
-STAGE 13 Screening Engine           qp.screening
-STAGE 14 Chart Engine               qp.chart
-STAGE 15 Validation Mode            qp.validation   ← side-by-side TradingView compare
-STAGE 16 Backtest / Replay          qp.backtest
-STAGE 17 Live Engine                qp.live
-STAGE 18 Statistics Database        qp.stats
-STAGE 19 AI Analysis                qp.ai
+qp/
+  __init__.py          exports primitive, REGISTRY, get_approval, is_approved
+  registry.py          the decorator + REGISTRY + approvals reader/writer
+  primitives/
+    __init__.py        auto-imports every primitives module
+    bars.py            Bars dataclass — the one OHLCV container
+    ma.py              seed: ma.sma
+    # add more here: ema.py, vwap.py, atr.py, ...
+approvals/
+  approvals.json       git-tracked map of approved primitives
+tools/
+  compare_server.py    the compare UI — chart vs TradingView vs primitive
+  data/
+    alpaca.py          bar loader (IEX feed, parquet-cached)
 ```
 
-Anything in `qp.math_foundation` doesn't know that `close` exists. It works on any 1-D array. That's the whole reason you can `Slope(VWAP)`, `Slope(EMA)`, `Slope(BB middle)` with the same function.
+## Adding a primitive
 
----
+1. Pick a group (`ma`, `vwap`, `volatility`, `session`, …). Groups become
+   the picker's optgroups in the compare tool.
+2. Open the group's file under `qp/primitives/` (create it if new — then
+   add one line to `qp/primitives/__init__.py`).
+3. Write the function and decorate it. Example:
 
-## First-pass scope (this commit)
+   ```python
+   from qp.registry import primitive, Param
 
-- **STAGE 1** Data Management — pluggable source adapters (Yahoo first), on-disk parquet cache, cleaning (missing bars, session filter, timezone normalisation).
-- **STAGE 2** Session Engine — trading-hours logic for US equities (regular, premarket, after-hours). Extensible to other markets.
-- **STAGE 3** Math Foundation — rolling operations + slope + linear regression + change/ROC/pct-change. Zero market knowledge.
-- **STAGE 4** Price Foundation — HL2, HLC3, OHLC4, typical, median, weighted-close.
-- **STAGE 5** Moving Averages — SMA, EMA (with tested TradingView parity). Rest of MAs (RMA, WMA, VWMA, HMA) sit next to these once validated.
-- Test suite covering every primitive.
-- One example validation script (`scripts/validate_ema.py`) that dumps calculated values + a CSV you can import to TradingView for side-by-side check.
+   @primitive(
+       name='ema',
+       group='ma',
+       description='Exponential MA. Matches TradingView ta.ema(source, length).',
+       params=(Param('length', 'int', default=9, min=1),),
+       inputs=('source',),
+   )
+   def ema(source, length: int):
+       import pandas as pd
+       return pd.Series(source).ewm(span=length, adjust=False).mean().to_numpy()
+   ```
 
-Stages 6+ follow the same pattern in later commits.
+4. `inputs` is either `('source',)` (any of `close/open/high/low/hl2/hlc3/ohlc4`)
+   or `('bars',)` (a full OHLCV DataFrame with tz-aware index).
+5. Save. Refresh the compare UI. The primitive shows up with a 🚧 badge.
 
----
+## Verifying + approving
 
-## Install
+1. Start the compare tool:
 
-```
-pip install -r requirements.txt
-```
+   ```sh
+   pip install -r requirements.txt
+   export APCA_API_KEY_ID=... APCA_API_SECRET_KEY=...   # paper key is fine
+   python3 tools/compare_server.py --host 127.0.0.1 --port 8765
+   ```
 
-## Run tests
+2. Open `http://127.0.0.1:8765`. Left panel = lightweight-charts driven by
+   your primitive. Right panel = TradingView widget for the same symbol/TF.
+3. Pick symbol, timeframe, days, primitive, source, tweak params, hit
+   **Compute**. Eyeball match against TradingView's built-in overlay of the
+   same indicator (add it in the TV widget on the right).
+4. When it matches bar-for-bar, click **Approve as verified**. This writes
+   an entry to `approvals/approvals.json`:
 
-```
-pytest -q
-```
+   ```json
+   {
+     "ma.sma": {
+       "approved_by":  "mo",
+       "approved_at":  "2026-07-05T15:30:00+00:00",
+       "git_sha":      "abcdef1",
+       "notes":        "matches TV ta.sma(close,9) on SPY 5m 2026-07-02"
+     }
+   }
+   ```
 
-## Consuming from the Trade Desk
+5. Commit the JSON change. An approval is a promise to future callers.
 
-The Trade Desk (Node) will consume this platform's output through one of two channels:
+## Consuming primitives
 
-- **Batch export** (initial): per-symbol, per-day JSON / parquet dropped into a shared directory. Loaded on session start, merged into the `signal.indicators` extras the check evaluator consumes. Same key names (`ma5day`, `vwap_week`, `week_high`, …) as `dailyLevels.computeLevels` publishes today, so zero refactor on the Node side.
-- **Live stream** (later): HTTP / WebSocket subscription.
-
-See `qp/export/` for the exporter modules.
-
----
-
-## What a "VERIFIED" primitive looks like
+**From Python:**
 
 ```python
-# qp/ma/ema.py
-#
-# EMA — Exponential Moving Average
-# VERIFIED 2026-07-02 vs TradingView:
-#   SPY 5m EMA(9)   len 500 bars   max abs diff < 1e-8
-#   SPY 1h EMA(20)  len 500 bars   max abs diff < 1e-8
-#   AAPL 1D EMA(50) len 300 bars   max abs diff < 1e-8
-# Do not edit without re-running scripts/validate_ema.py.
+import qp
+from qp.registry import REGISTRY
 
-def ema(x, length):
-    """Exponential moving average matching TradingView's ta.ema."""
-    ...
+sma_fn = REGISTRY['ma.sma'].fn
+values = sma_fn(close_array, length=9)   # numpy array, NaN warmup
 ```
 
-Once a function carries the `VERIFIED` header it is trusted by every layer above it. Bug reports touching a verified primitive re-open validation, not spot-editing.
+**From the trading tool (planned):** a Node → Python bridge exposes
+`market_data.sma('SPY', '5m', 9)` and internally calls `REGISTRY['ma.sma'].fn`
+on cached bars. The trading tool never re-implements the math — it always
+routes through here.
+
+## Design notes
+
+- **No side effects at import.** `qp/__init__.py` imports the primitives
+  module for the decorator side effect. That's it — no I/O, no network.
+- **Bars are tz-aware, monotonic, OHLCV.** `Bars.from_frame` enforces it.
+- **The compare tool is the ONLY doorway to approvals.** Editing
+  `approvals.json` by hand works but skips the eyeball step — please don't.
+- **Alpaca IEX bars.** Free tier, deterministic, parquet-cached under
+  `~/.qp-cache/`. If you need better fills for backtest, swap in a
+  different loader under `tools/data/` — the compare tool's URL doesn't
+  change.
