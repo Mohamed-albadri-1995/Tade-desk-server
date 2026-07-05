@@ -632,19 +632,19 @@ body {
             <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Setup Name</label>
             <input id="sm-name" placeholder="e.g. 13 MA Bounce" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
           </div>
+          <!-- Legacy JS engine dropdown kept in the DOM but hidden so the
+               modal's existing save logic still reads it as null. New
+               setups go straight to qp. -->
+          <select id="sm-indicator" style="display:none"><option value=""></option></select>
           <div>
-            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Indicator Script (legacy JS engine)</label>
-            <select id="sm-indicator" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
-              <option value="">— No script attached —</option>
-            </select>
-            <div style="font-size:10px;color:var(--text3);margin-top:3px">The JS engine that runs this setup's conditions on each bar. Keep for a legacy setup.</div>
-          </div>
-          <div>
-            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">qp Setup (Python library — recommended)</label>
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">qp Setup</label>
             <select id="sm-qp-setup" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text1);font-size:12px;font-family:inherit;outline:none">
-              <option value="">— No qp setup attached —</option>
+              <option value="">— pick a setup from the qp library —</option>
             </select>
-            <div style="font-size:10px;color:var(--text3);margin-top:3px">Pine-parity Python setup. When set, the mandatory conditions come from the qp module (same source that decides fires) instead of the JS engine.</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">
+              Every setup runs from the qp Python library.
+              <a href="#" onclick="openQpLibrary();return false" style="color:var(--accent)">Browse the library →</a>
+            </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
@@ -844,22 +844,30 @@ body {
 
   <!-- CHECKS TAB — shared library of default + additional conditions -->
   <div class="tab-pane" id="tab-checks">
-    <!-- qp bridge info panel — tells the user which field names in their
-         conditions now route through the qp Python library so numbers
-         match the compare tool. Not editable; auto-updates when qp gets
-         a new field. -->
+    <!-- Checks / conditions live in the qp library modules, not in a
+         DB CRUD panel any more. This tab just points to the library
+         browser. Old CRUD block below is hidden. -->
     <div class="panel" style="margin-bottom:12px;border-left:3px solid #22c55e">
-      <div class="panel-title" style="color:#22c55e">qp-enriched fields (auto)</div>
-      <p style="font-size:12px;color:var(--text2);margin:0 0 8px">
-        Any condition that references one of these <code style="color:var(--text1)">field</code>
-        names now uses the qp Python library's math instead of the legacy engine's
-        local implementation. Numbers here match what the compare tool draws.
-        Fields NOT in this list continue to use engine values (unchanged).
+      <div class="panel-title" style="color:#22c55e">Conditions live in the qp library</div>
+      <p style="font-size:13px;color:var(--text1);margin:0 0 10px">
+        Every check / condition / indicator is defined in the qp Python library.
+        Nothing lives in the trade-desk DB any more.
       </p>
-      <div id="qp-fields-list" style="display:flex;flex-wrap:wrap;gap:6px;font-size:11px"></div>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
+        To tune a check → open the qp Library, find the setup or indicator, edit
+        the Python file listed under its path, save. The trade desk reads the new
+        math on the next signal.
+      </p>
+      <button onclick="openQpLibrary()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:12px;font-weight:600;cursor:pointer">Open qp Library →</button>
+      <div style="margin-top:16px;font-size:11px;color:var(--text3)">
+        Compare-tool bridge must be running (default port 8765).
+      </div>
     </div>
-    <div class="panel">
-      <div class="panel-title">Check Library</div>
+    <!-- Old check-library CRUD panel is DOM-parked so its JS handlers
+         don't 500 the page, but it never renders. Remove entirely once
+         everyone has migrated their existing checks into qp modules. -->
+    <div style="display:none" class="panel">
+      <div class="panel-title">Check Library (deprecated)</div>
       <p style="font-size:12px;color:var(--text2);margin:0 0 12px">
         A shared library of conditions. <strong>Default</strong> checks auto-apply
         to every setup — edit/delete here and it changes for all setups.
@@ -2326,16 +2334,11 @@ async function loadSetups() {
     return;
   }
   el.innerHTML = rows.map(s => {
-    const hasEngine = !!s.indicator;
     const hasQp = !!s.qp_setup_id;
-    const engineBadge = hasEngine
-      ? `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(99,102,241,.12);color:var(--accent);white-space:nowrap">${s.indicator}</span>`
-      : (hasQp
-        ? ''
-        : `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(239,68,68,.1);color:var(--red);white-space:nowrap">no script</span>`);
+    const engineBadge = ''; // legacy JS engine badge retired — qp is the only source now
     const qpBadge = hasQp
-      ? `<span title="Mandatory conditions come from the qp Python module — same source that decides fires" style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(34,197,94,.15);color:#22c55e;white-space:nowrap">qp · ${s.qp_setup_id}</span>`
-      : '';
+      ? `<span title="Setup runs on the qp Python library — edit the module to change behaviour" style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(34,197,94,.15);color:#22c55e;white-space:nowrap">qp · ${s.qp_setup_id}</span>`
+      : `<span title="No qp setup attached yet — pick one via Edit" style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(239,68,68,.1);color:var(--red);white-space:nowrap">no qp setup</span>`;
     // Grading badge: KILLED (multiplier 0 without override), OVERRIDE
     // (multiplier 0 but override_kill_switch=1 so trades still fire), or
     // hide entirely for non-killed setups.
@@ -2405,13 +2408,16 @@ async function openSetupModal(setup) {
   document.getElementById('setup-modal').style.display = 'block';
   document.getElementById('setup-modal').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-  // Additional-checks picker — only shown when editing (a setupId exists).
+  // Legacy additional/default/mandatory pickers — retired. Conditions
+  // are defined inside the qp setup module now, not stored per-setup in
+  // the trade-desk DB, so this block stays hidden. Keeping the DOM refs
+  // so old handlers don't NPE, but nothing is fetched or rendered.
   const addBlock = document.getElementById('sm-additional-block');
   const addList  = document.getElementById('sm-additional-list');
   const mandList = document.getElementById('sm-mandatory-list');
   const defList  = document.getElementById('sm-default-list');
-  if (setup?.id) {
-    addBlock.style.display = 'block';
+  if (addBlock) addBlock.style.display = 'none';
+  if (false && setup?.id) {
     const [libraryResp, assignedResp, defaultsResp, mandatoryResp] = await Promise.all([
       fetch(`${API}/trading/checks?category=additional`).then(r => r.json()),
       fetch(`${API}/trading/setups/${setup.id}/checks`).then(r => r.json()),
@@ -3176,21 +3182,17 @@ async function showCard(id, opts = {}) {
 // ── Check Library (Part A) ──────────────────────────────────────────────────
 let _editingCheckId = null;
 
+function openQpLibrary() {
+  const url = `${window.location.protocol}//${window.location.hostname}:8765/library`;
+  window.open(url, '_blank');
+}
+
 async function loadChecks() {
-  // Populate the qp-enriched fields chip row (top of the Checks tab).
-  // Uses the same list qpBridge.js keeps in Node so field names match
-  // exactly what the check evaluator routes through.
-  const qpFields = ['vwap','ema9','ema13','ema20','ema50','sma5','sma9','sma13','sma20',
-                    'vwap_2d','weekly_vwap','monthly_vwap','today_hh_vwap','today_ll_vwap',
-                    'pivot_ll_vwap','pivot_hh_vwap','atr','dayHigh','dayLow',
-                    'pmHigh','pmLow','prevDayHigh','prevDayLow'];
-  const qpEl = document.getElementById('qp-fields-list');
-  if (qpEl) {
-    qpEl.innerHTML = qpFields.map(f =>
-      `<code style="padding:3px 8px;border-radius:4px;background:rgba(34,197,94,.1);color:#22c55e;border:1px solid rgba(34,197,94,.25)">${f}</code>`
-    ).join('');
-  }
+  // The Checks tab is now a pointer to the qp library — no CRUD here.
+  // The deprecated old library panel stays in the DOM (display:none)
+  // and its list container may not exist any more, so guard the reads.
   const el = document.getElementById('checks-list');
+  if (!el) return;
   const filter = document.getElementById('check-filter').value;
   const qs = filter ? '?category=' + filter : '';
   const r = await fetch(`${API}/trading/checks${qs}`).then(r => r.json()).catch(() => ({ checks: [] }));

@@ -71,6 +71,152 @@ CSV_DIR: Path = Path(__file__).resolve().parents[1] / 'data' / 'csv'
 TRADEDESK_DB: Path = Path(__file__).resolve().parents[2] / 'data' / 'tradedesk.db'
 
 
+def qp_library_manifest() -> dict:
+    """Full inventory of the qp library — every indicator + every setup
+    the compare tool exposes, with module paths so the user knows which
+    file to edit. Powers the /library browser page."""
+    import inspect
+    setups_out = []
+    try:
+        from qp.setups.library import REGISTRY as _SETUP_REGISTRY
+    except Exception:
+        _SETUP_REGISTRY = {}
+    for sid, mod in _SETUP_REGISTRY.items():
+        stop = getattr(mod, 'STOP', None)
+        target = getattr(mod, 'TARGET', None)
+        conditions = []
+        if hasattr(mod, 'debug_last_bar'):
+            try:
+                sig = inspect.signature(mod.debug_last_bar)
+                conditions = [p for p in sig.parameters if p not in
+                              ('bars', 'side', '_ignored', 'kwargs')]
+            except Exception:
+                conditions = []
+        setups_out.append({
+            'id':          f'qp:{sid}',
+            'name':        getattr(mod, 'NAME', sid),
+            'description': getattr(mod, 'DESCRIPTION', ''),
+            'side':        getattr(mod, 'SIDE', 'both'),
+            'chart_specs': getattr(mod, 'CHART_SPECS', []),
+            'stop':   ({'kind': stop.kind, 'mult': stop.mult, 'pct': stop.pct,
+                        'atr_length': stop.atr_length} if stop else None),
+            'target': ({'kind': target.kind, 'mult': target.mult, 'pct': target.pct,
+                        'r': target.r} if target else None),
+            'params':      conditions,
+            'module':      getattr(mod, '__name__', ''),
+            'file':        getattr(mod, '__file__', ''),
+        })
+
+    # Indicator catalog — grouped for the UI. Extend by adding rows here
+    # (single source of truth; the compare-tool dropdown could later
+    # generate itself from this list too).
+    indicators_out = [
+        {'group': 'Moving Averages', 'key': 'ema',  'label': 'EMA(length)',
+         'params': ['length'], 'module': 'qp.ma.ema'},
+        {'group': 'Moving Averages', 'key': 'sma',  'label': 'SMA(length)',
+         'params': ['length'], 'module': 'qp.ma.sma'},
+        {'group': 'Moving Averages', 'key': 'rma',  'label': 'RMA / Wilder(length)',
+         'params': ['length'], 'module': 'qp.ma.rma'},
+        {'group': 'Moving Averages', 'key': 'wma',  'label': 'WMA(length)',
+         'params': ['length'], 'module': 'qp.ma.wma'},
+        {'group': 'Moving Averages', 'key': 'hma',  'label': 'HMA / Hull(length)',
+         'params': ['length'], 'module': 'qp.ma.hma'},
+        {'group': 'Moving Averages', 'key': 'vwma', 'label': 'VWMA(length)',
+         'params': ['length'], 'module': 'qp.ma.vwma'},
+        {'group': 'Moving Averages', 'key': 'sma_5d', 'label': '5-Day Rolling SMA (TF-adaptive)',
+         'params': [], 'module': 'qp.ma.n_session_ma'},
+        {'group': 'Moving Averages', 'key': 'sma_5d_pine', 'label': '5-Day SMA (TV Pine SMA(1950)/1m)',
+         'params': [], 'module': 'qp.ma.pine_5day'},
+        {'group': 'VWAP (session)', 'key': 'vwap', 'label': 'Daily VWAP',
+         'params': [], 'module': 'qp.vwap.sessional'},
+        {'group': 'VWAP (session)', 'key': 'vwap_2d_anchored', 'label': '2-Day Anchored VWAP',
+         'params': [], 'module': 'qp.vwap.sessional'},
+        {'group': 'VWAP (session)', 'key': 'weekly_vwap',  'label': 'Weekly VWAP',
+         'params': [], 'module': 'qp.vwap.sessional'},
+        {'group': 'VWAP (session)', 'key': 'monthly_vwap', 'label': 'Monthly VWAP',
+         'params': [], 'module': 'qp.vwap.sessional'},
+        {'group': 'VWAP (rolling)', 'key': 'vwap_2d',  'label': '2-Day Rolling VWAP',
+         'params': [], 'module': 'qp.vwap.rolling'},
+        {'group': 'VWAP (rolling)', 'key': 'vwap_5d',  'label': '5-Day Rolling VWAP',
+         'params': [], 'module': 'qp.vwap.rolling'},
+        {'group': 'VWAP (anchored)', 'key': 'today_hh_vwap', 'label': 'Today HH-Anchored VWAP',
+         'params': [], 'module': 'qp.vwap.anchored'},
+        {'group': 'VWAP (anchored)', 'key': 'today_ll_vwap', 'label': 'Today LL-Anchored VWAP',
+         'params': [], 'module': 'qp.vwap.anchored'},
+        {'group': 'VWAP (anchored)', 'key': 'week_hh_vwap', 'label': 'Week HH-Anchored VWAP',
+         'params': [], 'module': 'qp.vwap.anchored'},
+        {'group': 'VWAP (anchored)', 'key': 'week_ll_vwap', 'label': 'Week LL-Anchored VWAP',
+         'params': [], 'module': 'qp.vwap.anchored'},
+        {'group': 'VWAP (anchored)', 'key': 'gap_vwap', 'label': 'Gap VWAP',
+         'params': ['atr_length', 'atr_mult'], 'module': 'qp.vwap.anchored'},
+        {'group': 'VWAP (anchored)', 'key': 'last_hour_ll_vwap', 'label': 'Last-Hour LL VWAP',
+         'params': [], 'module': 'qp.vwap.anchored'},
+        {'group': 'VWAP (anchored)', 'key': 'last_hour_hh_vwap', 'label': 'Last-Hour HH VWAP',
+         'params': [], 'module': 'qp.vwap.anchored'},
+        {'group': 'VWAP (anchored)', 'key': 'pivot_ll_vwap', 'label': 'Swing-Pivot LL VWAP',
+         'params': ['lookback'], 'module': 'qp.vwap.pivot_anchored'},
+        {'group': 'VWAP (anchored)', 'key': 'pivot_hh_vwap', 'label': 'Swing-Pivot HH VWAP',
+         'params': ['lookback'], 'module': 'qp.vwap.pivot_anchored'},
+        {'group': 'VWAP (anchored)', 'key': 'earnings_vwap_auto', 'label': 'Earnings VWAP (auto-anchor)',
+         'params': [], 'module': 'qp.vwap.anchored / qp.data.earnings'},
+        {'group': 'VWAP (stdev)', 'key': 'vwap_stdev_bands', 'label': 'VWAP ± σ bands',
+         'params': ['mult'], 'module': 'qp.vwap.stdev_bands'},
+        {'group': 'Volatility', 'key': 'atr',       'label': 'ATR(length)',
+         'params': ['length'], 'module': 'qp.volatility.atr'},
+        {'group': 'Volatility', 'key': 'stdev',     'label': 'StdDev(length)',
+         'params': ['length'], 'module': 'qp.volatility.stdev'},
+        {'group': 'Volatility', 'key': 'true_range','label': 'True Range',
+         'params': [], 'module': 'qp.volatility.true_range'},
+        {'group': 'Envelopes', 'key': 'bollinger',     'label': 'Bollinger Bands (SMA basis)',
+         'params': ['length', 'mult'], 'module': 'qp.volatility.bollinger'},
+        {'group': 'Envelopes', 'key': 'bollinger_ema', 'label': 'Bollinger Bands + 25% zones (EMA basis)',
+         'params': ['length', 'mult', 'zone_pct'], 'module': 'qp.volatility.bollinger_ema'},
+        {'group': 'Envelopes', 'key': 'keltner',       'label': 'Keltner Channels',
+         'params': ['length', 'mult'], 'module': 'qp.volatility.keltner'},
+        {'group': 'Oscillators', 'key': 'rsi',  'label': 'RSI(length)',
+         'params': ['length'], 'module': 'qp.indicators.rsi'},
+        {'group': 'Oscillators', 'key': 'macd', 'label': 'MACD',
+         'params': [], 'module': 'qp.indicators.macd'},
+        {'group': 'Oscillators', 'key': 'stochastic', 'label': 'Stochastic(length)',
+         'params': ['length'], 'module': 'qp.indicators.stochastic'},
+        {'group': 'Oscillators', 'key': 'cci',  'label': 'CCI(length)',
+         'params': ['length'], 'module': 'qp.indicators.cci'},
+        {'group': 'Levels — session', 'key': 'day_high',  'label': 'Today HH (developing)',
+         'params': [], 'module': 'qp.levels.anchored_extremes'},
+        {'group': 'Levels — session', 'key': 'day_low',   'label': 'Today LL (developing)',
+         'params': [], 'module': 'qp.levels.anchored_extremes'},
+        {'group': 'Levels — session', 'key': 'pm_high',   'label': 'Premarket High',
+         'params': [], 'module': 'qp.levels.session_daily'},
+        {'group': 'Levels — session', 'key': 'pm_low',    'label': 'Premarket Low',
+         'params': [], 'module': 'qp.levels.session_daily'},
+        {'group': 'Levels — prior period', 'key': 'prev_day_hl',  'label': 'Prev Day HH / LL',
+         'params': [], 'module': 'qp.levels.session_daily'},
+        {'group': 'Levels — prior period', 'key': 'prev_week_hl', 'label': 'Prev Week HH / LL',
+         'params': [], 'module': 'qp.levels.session_week_month'},
+        {'group': 'Levels — prior period', 'key': 'prev_month_hl','label': 'Prev Month HH / LL',
+         'params': [], 'module': 'qp.levels.session_week_month'},
+        {'group': 'Levels — reference', 'key': 'floor_pivots', 'label': 'Floor Pivots (P/R1-3/S1-3)',
+         'params': [], 'module': 'qp.levels.floor_pivots'},
+        {'group': 'Levels — reference', 'key': 'overnight_hl', 'label': 'Overnight HH / LL',
+         'params': [], 'module': 'qp.levels.overnight_hl'},
+        {'group': 'Levels — reference', 'key': 'monday_hl',    'label': 'Monday HH / LL',
+         'params': [], 'module': 'qp.levels.weekday_hl'},
+        {'group': 'Levels — reference', 'key': 'daily_open',   'label': 'Daily Open',
+         'params': [], 'module': 'qp.levels.session_opens'},
+        {'group': 'Levels — reference', 'key': 'weekly_open',  'label': 'Weekly Open',
+         'params': [], 'module': 'qp.levels.session_opens'},
+        {'group': 'Levels — reference', 'key': 'monthly_open', 'label': 'Monthly Open',
+         'params': [], 'module': 'qp.levels.session_opens'},
+        {'group': 'Levels — reference', 'key': 'dynamic_sr',   'label': 'Dynamic S/R Zones',
+         'params': ['prd', 'max_zones', 'channel_pct'], 'module': 'qp.levels.dynamic_sr'},
+        {'group': 'Volume / Reference lines', 'key': 'prev_close', 'label': 'Prev Day Close',
+         'params': [], 'module': 'qp.data (session close)'},
+        {'group': 'Volume / Reference lines', 'key': 'rvol', 'label': 'Relative Volume',
+         'params': ['length'], 'module': 'qp.data (per-minute baseline)'},
+    ]
+    return {'setups': setups_out, 'indicators': indicators_out}
+
+
 def list_qp_setups() -> list[dict]:
     """Return the Python-defined setups from qp.setups.library, in the
     same shape as list_setups() so the UI can treat them uniformly."""
@@ -1070,6 +1216,119 @@ PAGE = r"""<!doctype html>
 """
 
 
+LIBRARY_PAGE = r"""<!doctype html>
+<html><head><meta charset="utf-8"><title>qp Library</title>
+<style>
+  :root { --bg:#0e1116; --panel:#151a24; --border:#1e2632; --text:#e2e8f0; --text2:#94a3b8; --text3:#64748b; --accent:#22c55e; }
+  html,body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; margin:0; }
+  header { padding:14px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:14px; }
+  header h1 { margin:0; font-size:16px; font-weight:600; }
+  header a { color:var(--accent); text-decoration:none; font-size:12px; }
+  main { padding:16px 20px; display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--text2); margin:0 0 10px; }
+  section { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px; }
+  .setup { padding:12px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; }
+  .setup h3 { margin:0 0 6px; font-size:14px; }
+  .setup .desc { font-size:12px; color:var(--text2); margin:0 0 8px; }
+  .badge { display:inline-block; font-size:10px; padding:2px 7px; border-radius:4px; background:rgba(34,197,94,.14); color:var(--accent); margin-right:6px; }
+  .chip { display:inline-block; font-size:11px; padding:2px 8px; border-radius:4px; background:#1c2431; color:var(--text2); margin:2px 4px 2px 0; font-family:'SF Mono',Consolas,monospace; }
+  .kv { font-size:11px; color:var(--text3); margin-top:4px; }
+  .kv b { color:var(--text2); font-weight:500; }
+  .path { font-size:10px; color:var(--text3); font-family:'SF Mono',Consolas,monospace; margin-top:6px; }
+  .group { margin-bottom:14px; }
+  .group h4 { margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text3); }
+  .ind { display:flex; align-items:baseline; gap:8px; padding:3px 0; font-size:12px; }
+  .ind .key { color:var(--accent); font-family:'SF Mono',Consolas,monospace; min-width:150px; }
+  .ind .label { color:var(--text); }
+  .ind .params { color:var(--text3); font-size:10px; margin-left:auto; font-family:'SF Mono',Consolas,monospace; }
+  .search { width:100%; box-sizing:border-box; background:#1c2431; border:1px solid var(--border); color:var(--text); padding:8px 12px; border-radius:6px; margin-bottom:12px; font-size:12px; outline:none; }
+</style>
+</head><body>
+<header>
+  <h1>qp Library</h1>
+  <a href="/">← chart</a>
+  <span style="color:var(--text3);font-size:11px;margin-left:auto">the single source — edit these files to change behaviour everywhere (compare tool, trading tool, backtest)</span>
+</header>
+<main>
+  <section>
+    <h2>Setups (<span id="n-setups">…</span>)</h2>
+    <input class="search" id="setup-search" placeholder="filter setups…" oninput="renderSetups()">
+    <div id="setups"></div>
+  </section>
+  <section>
+    <h2>Indicators (<span id="n-inds">…</span>)</h2>
+    <input class="search" id="ind-search" placeholder="filter indicators…" oninput="renderIndicators()">
+    <div id="indicators"></div>
+  </section>
+</main>
+<script>
+let MANIFEST = { setups: [], indicators: [] };
+async function loadManifest() {
+  const r = await fetch('/qp-library');
+  MANIFEST = await r.json();
+  document.getElementById('n-setups').textContent = MANIFEST.setups.length;
+  document.getElementById('n-inds').textContent = MANIFEST.indicators.length;
+  renderSetups();
+  renderIndicators();
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtStop(s) {
+  if (!s) return '—';
+  if (s.kind === 'atr')     return `${s.mult}× ATR(${s.atr_length})`;
+  if (s.kind === 'percent') return `${(s.pct*100).toFixed(2)}%`;
+  return s.kind;
+}
+function fmtTarget(t) {
+  if (!t) return '—';
+  if (t.kind === 'r_multiple') return `${t.r}R`;
+  if (t.kind === 'percent')    return `${(t.pct*100).toFixed(2)}%`;
+  if (t.kind === 'atr')        return `${t.mult}× ATR`;
+  return t.kind;
+}
+function renderSetups() {
+  const q = document.getElementById('setup-search').value.toLowerCase();
+  const rows = MANIFEST.setups.filter(s =>
+    !q || s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
+  document.getElementById('setups').innerHTML = rows.map(s => `
+    <div class="setup">
+      <h3>${esc(s.name)} <span class="badge">${esc(s.side)}</span></h3>
+      <p class="desc">${esc(s.description)}</p>
+      <div class="kv"><b>id:</b> <code>${esc(s.id)}</code></div>
+      <div class="kv"><b>stop:</b> ${fmtStop(s.stop)} &nbsp; <b>target:</b> ${fmtTarget(s.target)}</div>
+      <div class="kv"><b>chart specs:</b><br>
+        ${(s.chart_specs || []).map(cs => `<span class="chip">${esc(cs.label || cs.ind)}</span>`).join('')}
+      </div>
+      <div class="path">${esc(s.file || s.module)}</div>
+    </div>
+  `).join('');
+}
+function renderIndicators() {
+  const q = document.getElementById('ind-search').value.toLowerCase();
+  const rows = MANIFEST.indicators.filter(i =>
+    !q || i.label.toLowerCase().includes(q) || i.key.toLowerCase().includes(q) || i.group.toLowerCase().includes(q));
+  // Group into buckets.
+  const byGroup = {};
+  for (const r of rows) (byGroup[r.group] ||= []).push(r);
+  document.getElementById('indicators').innerHTML =
+    Object.entries(byGroup).map(([g, list]) => `
+      <div class="group">
+        <h4>${esc(g)}</h4>
+        ${list.map(i => `
+          <div class="ind">
+            <span class="key">${esc(i.key)}</span>
+            <span class="label">${esc(i.label)}</span>
+            <span class="params">${(i.params || []).join(', ')}</span>
+          </div>
+          <div class="path" style="margin-left:150px">${esc(i.module)}</div>
+        `).join('')}
+      </div>
+    `).join('');
+}
+window.addEventListener('load', loadManifest);
+</script></body></html>
+"""
+
+
 def _to_series(name, pane, color, values, ts, style='line'):
     """Pack a numpy series into the JSON shape the UI expects.
     `pane` is 'overlay' (price chart) or 'sub' (oscillator pane below).
@@ -1779,6 +2038,15 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ('/', '/index.html'):
             self._send(200, PAGE.encode('utf-8'), 'text/html; charset=utf-8')
+            return
+        if u.path == '/library' or u.path == '/library.html':
+            self._send(200, LIBRARY_PAGE.encode('utf-8'), 'text/html; charset=utf-8')
+            return
+        if u.path == '/qp-library':
+            try:
+                self._send(200, json.dumps(qp_library_manifest()).encode('utf-8'))
+            except Exception as e:
+                self._send(500, str(e).encode('utf-8'), 'text/plain')
             return
         if u.path == '/data':
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
