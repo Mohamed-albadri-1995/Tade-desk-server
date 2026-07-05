@@ -1859,10 +1859,24 @@ async function collectChecksForFireAsync(args) {
     args.bars || [], conditions, args.indicatorExtras || {},
   );
 
-  // If the setup row has qp_setup_id, ask qp for the mandatory checks.
+  // If the setup row has qp_setup_id, ask qp for the FULL check bundle:
+  //   mandatory  — the fire-gate conditions (from the setup module's
+  //                evaluate() logic).
+  //   default    — shared defaults every setup runs (qp.setups.library
+  //                .shared_defaults.DEFAULT_CHECKS). Informational.
+  //   additional — per-setup extras exposed by the module's
+  //                ADDITIONAL_CHECKS() function. Informational.
+  //
   // Falls through to the legacy engine.debug() path silently if qp is
   // offline or hasn't shipped debug_last_bar for this setup yet.
-  let qpMandatory = null;
+  let qpMandatory = null, qpDefault = null, qpAdditional = null;
+  const _mkCheck = (section) => (c) => ({
+    key:      c.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+    label:    c.name,
+    section,
+    value:    c.note ?? null,
+    aligned:  c.pass == null ? null : Boolean(c.pass),
+  });
   if (args.setupId) {
     try {
       const setupsDb = require('./db');
@@ -1876,14 +1890,15 @@ async function collectChecksForFireAsync(args) {
           args.direction || 'long',
           args.bars || [],
         );
-        if (dbg && dbg.canRun && Array.isArray(dbg.conditions)) {
-          qpMandatory = dbg.conditions.map(c => ({
-            key:      c.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
-            label:    c.name,
-            section:  'mandatory',
-            value:    c.note ?? null,
-            aligned:  c.pass == null ? null : Boolean(c.pass),
-          }));
+        if (dbg && dbg.canRun) {
+          // New shape (mandatory/default/additional) preferred; falls
+          // back to the flat `conditions` list for older setup modules.
+          const mand = Array.isArray(dbg.mandatory) ? dbg.mandatory
+                     : Array.isArray(dbg.conditions) ? dbg.conditions
+                     : [];
+          qpMandatory  = mand.map(_mkCheck('mandatory'));
+          qpDefault    = (Array.isArray(dbg.default)    ? dbg.default    : []).map(_mkCheck('default'));
+          qpAdditional = (Array.isArray(dbg.additional) ? dbg.additional : []).map(_mkCheck('additional'));
         }
       }
     } catch (err) {
@@ -1894,6 +1909,17 @@ async function collectChecksForFireAsync(args) {
   const collected = collectChecksForFire({ ...args, indicatorExtras: enrichedExtras });
   if (qpMandatory && qpMandatory.length) {
     collected.mandatoryChecks = qpMandatory;
+  }
+  // When qp is the source, we PREPEND its default + additional checks
+  // to whatever the legacy DB-backed evaluator produced. That way live
+  // sessions during the migration still see both while any DB-stored
+  // additional checks are being cleaned up. Once the old surface is
+  // deleted these can just be assigned outright.
+  if (qpDefault && qpDefault.length) {
+    collected.defaultChecks = [...qpDefault, ...(collected.defaultChecks || [])];
+  }
+  if (qpAdditional && qpAdditional.length) {
+    collected.additionalChecks = [...qpAdditional, ...(collected.additionalChecks || [])];
   }
   return collected;
 }

@@ -21,6 +21,7 @@ from qp.volatility import atr, bollinger
 from qp.ma import sma
 from qp.session import US_EQUITIES
 from qp.setups.spec import StopRule, TargetRule
+from qp.setups.library.shared_defaults import evaluate_defaults
 
 
 NAME        = 'BB Zone MA Touch'
@@ -218,25 +219,48 @@ def debug_last_bar(bars: pd.DataFrame,
     if _touch_ma(ma20): touched.append('SMA20')
     touch_ok = bool(touched) and candle_ok
 
+    mandatory = [
+        {'name': 'In trading window', 'pass': bool(in_session),
+         'note': f'{hh[i]:02d}:{mm[i]:02d} vs '
+                 f'{session_start_hh:02d}:{session_start_mm:02d}–'
+                 f'{session_end_hh:02d}:{session_end_mm:02d}'},
+        {'name': ('close > VWAP +σ band' if side == 'long' else 'close < VWAP −σ band'),
+         'pass': bool(vwap_ok),
+         'note': f'close {c[i]:.2f} vs band {(upper_band if side == "long" else lower_band):.2f}'},
+        {'name': f'Body-mass outside {"red" if side == "long" else "green"} zone',
+         'pass': bool(zone_ok),
+         'note': f'{("long" if side == "long" else "short")}-side check over '
+                 f'{long_lookback if side == "long" else short_lookback} bars'},
+        {'name': 'Bounce/reject candle (body vs ATR + capped wick)',
+         'pass': bool(candle_ok),
+         'note': f'body {body:.2f} vs ATR×{body_atr} = {atr14*body_atr:.2f}'},
+        {'name': 'Prev bar crossed a SMA + closed through',
+         'pass': bool(touch_ok),
+         'note': f'touched {"/".join(touched) if touched else "none"}'},
+    ]
     return {
-        'canRun': True,
-        'conditions': [
-            {'name': 'In trading window', 'pass': bool(in_session),
-             'note': f'{hh[i]:02d}:{mm[i]:02d} vs '
-                     f'{session_start_hh:02d}:{session_start_mm:02d}–'
-                     f'{session_end_hh:02d}:{session_end_mm:02d}'},
-            {'name': ('close > VWAP +σ band' if side == 'long' else 'close < VWAP −σ band'),
-             'pass': bool(vwap_ok),
-             'note': f'close {c[i]:.2f} vs band {(upper_band if side == "long" else lower_band):.2f}'},
-            {'name': f'Body-mass outside {"red" if side == "long" else "green"} zone',
-             'pass': bool(zone_ok),
-             'note': f'{("long" if side == "long" else "short")}-side check over '
-                     f'{long_lookback if side == "long" else short_lookback} bars'},
-            {'name': 'Bounce/reject candle (body vs ATR + capped wick)',
-             'pass': bool(candle_ok),
-             'note': f'body {body:.2f} vs ATR×{body_atr} = {atr14*body_atr:.2f}'},
-            {'name': 'Prev bar crossed a SMA + closed through',
-             'pass': bool(touch_ok),
-             'note': f'touched {"/".join(touched) if touched else "none"}'},
-        ]
+        'canRun':     True,
+        'mandatory':  mandatory,
+        'default':    evaluate_defaults(bars, side=side),
+        'additional': ADDITIONAL_CHECKS(bars, side=side),
+        'conditions': mandatory,
     }
+
+
+def ADDITIONAL_CHECKS(bars: pd.DataFrame, side: str = 'long') -> list[dict]:
+    """Per-setup extras — informational, do not gate the fire."""
+    n = len(bars)
+    if n < 15: return []
+    # ATR is elevated vs the 10-bar mean → volatility is expanding into
+    # the touch, a favourable environment for the setup.
+    atr_arr = np.asarray(atr(bars, 14))
+    if not (np.isfinite(atr_arr[-1]) and np.isfinite(atr_arr[-11])):
+        return []
+    atr_now = float(atr_arr[-1])
+    atr_mean = float(np.nanmean(atr_arr[-11:-1]))
+    ratio = atr_now / atr_mean if atr_mean > 0 else 0.0
+    return [{
+        'name': 'ATR expanding (now ≥ 10-bar mean)',
+        'pass': bool(ratio >= 1.0),
+        'note': f'ATR {atr_now:.3f} vs mean {atr_mean:.3f} (ratio {ratio:.2f})',
+    }]

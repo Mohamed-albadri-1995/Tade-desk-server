@@ -24,6 +24,7 @@ from qp.vwap import (
 )
 from qp.ma import sma, n_session_sma
 from qp.setups.spec import StopRule, TargetRule
+from qp.setups.library.shared_defaults import evaluate_defaults
 
 
 NAME        = 'VWAP Cluster Bounce'
@@ -203,16 +204,36 @@ def debug_last_bar(bars: pd.DataFrame,
     if hits_time or hits_anchor:
         cluster_note += ': ' + ' / '.join(hits_time + hits_anchor)
 
+    mandatory = [
+        {'name': f'VWAP cluster within {cluster_pct}%',
+         'pass': bool(has_cluster), 'note': cluster_note},
+        {'name': 'Candle quality', 'pass': bool(candle_ok), 'note': candle_desc},
+        {'name': f'Volume ≥ {vol_mult}× {lookback}-bar mean',
+         'pass': bool(vol_ok),
+         'note': f'v {v[i]:.0f} vs mean {vol_ma_prev:.0f}'},
+        {'name': f'Above 5D + SMA20' if side == 'long' else 'Below 5D + SMA20',
+         'pass': bool(directional), 'note': dir_desc},
+    ]
     return {
-        'canRun': True,
-        'conditions': [
-            {'name': f'VWAP cluster within {cluster_pct}%',
-             'pass': bool(has_cluster), 'note': cluster_note},
-            {'name': 'Candle quality', 'pass': bool(candle_ok), 'note': candle_desc},
-            {'name': f'Volume ≥ {vol_mult}× {lookback}-bar mean',
-             'pass': bool(vol_ok),
-             'note': f'v {v[i]:.0f} vs mean {vol_ma_prev:.0f}'},
-            {'name': f'Above 5D + SMA20' if side == 'long' else 'Below 5D + SMA20',
-             'pass': bool(directional), 'note': dir_desc},
-        ]
+        'canRun':     True,
+        'mandatory':  mandatory,
+        'default':    evaluate_defaults(bars, side=side),
+        'additional': ADDITIONAL_CHECKS(bars, side=side),
+        'conditions': mandatory,
     }
+
+
+def ADDITIONAL_CHECKS(bars: pd.DataFrame, side: str = 'long') -> list[dict]:
+    """Per-setup extras — informational, do not gate the fire."""
+    n = len(bars)
+    if n < 2: return []
+    o = float(bars['open'].iloc[-1]);  h = float(bars['high'].iloc[-1])
+    l = float(bars['low'].iloc[-1]);   cl = float(bars['close'].iloc[-1])
+    rng = h - l
+    # Body >= 40% of range — favours a decisive bounce/rejection candle.
+    body_pct = (abs(cl - o) / rng * 100.0) if rng > 0 else 0.0
+    return [{
+        'name': 'Bounce body ≥ 40% of range',
+        'pass': bool(body_pct >= 40.0),
+        'note': f'body {body_pct:.0f}%',
+    }]

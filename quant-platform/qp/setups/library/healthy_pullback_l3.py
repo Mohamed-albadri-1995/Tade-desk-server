@@ -18,6 +18,7 @@ import pandas as pd
 from qp.vwap import session_vwap, n_day_vwap, today_ll_vwap
 from qp.volatility import bollinger_ema, atr
 from qp.setups.spec import StopRule, TargetRule
+from qp.setups.library.shared_defaults import evaluate_defaults
 
 
 NAME        = 'Healthy Pullback L3'
@@ -135,26 +136,63 @@ def debug_last_bar(bars: pd.DataFrame,
     anyTouch   = _touch(dv[p]) or _touch(v2[p]) or _touch(llv[p])
     greenNow   = c[i] > o[i]
     breakout   = c[i] > h[p]
+    mandatory = [
+        {'name': 'Long bias (prev bar)',        'pass': bool(biasPrev),
+         'note': f'close {c[p]:.2f} vs DV {dv[p]:.2f} / BB {bb.basis[p]:.2f}'},
+        {'name': 'Long bias (this bar)',        'pass': bool(biasNow),
+         'note': f'close {c[i]:.2f} vs DV {dv[i]:.2f}'},
+        {'name': 'Prev candle red',             'pass': bool(redPrev),
+         'note': f'prev close {c[p]:.2f} vs open {o[p]:.2f}'},
+        {'name': f'Lower wick ≥ {min_wick_pct}%',
+         'pass': bool(lwick_pct >= min_wick_pct),
+         'note': f'{lwick_pct:.1f}%'},
+        {'name': 'Prev low touched a VWAP',     'pass': bool(anyTouch),
+         'note': f'prev.l {l[p]:.2f} vs 3 VWAPs ±{vwap_touch_pct}%'},
+        {'name': 'Not extended (prev.h < BB upper)',
+         'pass': bool(notExtnd),
+         'note': f'prev.h {h[p]:.2f} vs BB up {bb.upper[p]:.2f}'},
+        {'name': 'This bar green',              'pass': bool(greenNow),
+         'note': f'close {c[i]:.2f} vs open {o[i]:.2f}'},
+        {'name': 'Close > prev high',           'pass': bool(breakout),
+         'note': f'close {c[i]:.2f} vs prev.h {h[p]:.2f}'},
+    ]
+    # Kept legacy `conditions` for older callers that don't understand
+    # the split. New code should read mandatory/default/additional.
     return {
-        'canRun': True,
-        'conditions': [
-            {'name': 'Long bias (prev bar)',        'pass': bool(biasPrev),
-             'note': f'close {c[p]:.2f} vs DV {dv[p]:.2f} / BB {bb.basis[p]:.2f}'},
-            {'name': 'Long bias (this bar)',        'pass': bool(biasNow),
-             'note': f'close {c[i]:.2f} vs DV {dv[i]:.2f}'},
-            {'name': 'Prev candle red',             'pass': bool(redPrev),
-             'note': f'prev close {c[p]:.2f} vs open {o[p]:.2f}'},
-            {'name': f'Lower wick ≥ {min_wick_pct}%',
-             'pass': bool(lwick_pct >= min_wick_pct),
-             'note': f'{lwick_pct:.1f}%'},
-            {'name': 'Prev low touched a VWAP',     'pass': bool(anyTouch),
-             'note': f'prev.l {l[p]:.2f} vs 3 VWAPs ±{vwap_touch_pct}%'},
-            {'name': 'Not extended (prev.h < BB upper)',
-             'pass': bool(notExtnd),
-             'note': f'prev.h {h[p]:.2f} vs BB up {bb.upper[p]:.2f}'},
-            {'name': 'This bar green',              'pass': bool(greenNow),
-             'note': f'close {c[i]:.2f} vs open {o[i]:.2f}'},
-            {'name': 'Close > prev high',           'pass': bool(breakout),
-             'note': f'close {c[i]:.2f} vs prev.h {h[p]:.2f}'},
-        ]
+        'canRun':     True,
+        'mandatory':  mandatory,
+        'default':    evaluate_defaults(bars, side='long'),
+        'additional': ADDITIONAL_CHECKS(bars, side='long'),
+        'conditions': mandatory,
     }
+
+
+def ADDITIONAL_CHECKS(bars: pd.DataFrame, side: str = 'long') -> list[dict]:
+    """Per-setup extra checks (informational — do not gate the fire).
+    Add or edit here to change what appears in the "Additional" section
+    of this setup's trade card."""
+    n = len(bars)
+    out = []
+    if n < 22:
+        return out
+    c = bars['close'].to_numpy(dtype=float)
+    # Prior 20-bar range compression — a sign the pullback was orderly.
+    hi20 = float(np.max(bars['high'].to_numpy(dtype=float)[-21:-1]))
+    lo20 = float(np.min(bars['low'].to_numpy(dtype=float)[-21:-1]))
+    rng_pct = (hi20 - lo20) / c[-1] * 100.0 if c[-1] else 0.0
+    out.append({
+        'name': '20-bar range < 2% (orderly pullback)',
+        'pass': bool(rng_pct < 2.0),
+        'note': f'range {rng_pct:.2f}%',
+    })
+    # Close in the upper half of the CURRENT bar's range — a strength cue.
+    o = float(bars['open'].iloc[-1]);  h = float(bars['high'].iloc[-1])
+    l = float(bars['low'].iloc[-1]);   cl = float(bars['close'].iloc[-1])
+    rng = h - l
+    upper_half = (cl >= (l + h) / 2.0) if rng > 0 else False
+    out.append({
+        'name': 'Close in upper half of bar range',
+        'pass': bool(upper_half),
+        'note': f'close {cl:.2f} vs midpoint {(l+h)/2.0:.2f}',
+    })
+    return out
