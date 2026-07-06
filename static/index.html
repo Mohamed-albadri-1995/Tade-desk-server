@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade Desk</title>
+<style>
+  :root {
+    --bg: #0f141a; --panel: #171e26; --panel2: #1e2733; --border: #2b3644;
+    --text: #dce5ee; --muted: #8296ab; --green: #35c46f; --red: #e5534b;
+    --amber: #d9a53a; --blue: #4f9cf0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  nav button { background: none; border: none; color: var(--muted); padding: 8px 12px; cursor: pointer; font-size: 14px; border-radius: 6px; }
+  nav button.active { color: var(--text); background: var(--panel2); }
+  #ws-dot { margin-left: auto; font-size: 12px; color: var(--muted); }
+  #ws-dot::before { content: "●"; margin-right: 5px; color: var(--red); }
+  #ws-dot.on::before { color: var(--green); }
+  main { padding: 20px; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .card h3 { margin: 0 0 8px; font-size: 15px; display: flex; justify-content: space-between; }
+  .card h3 .side { font-size: 12px; padding: 2px 8px; border-radius: 10px; }
+  .side.long { background: rgba(53,196,111,.15); color: var(--green); }
+  .side.short { background: rgba(229,83,75,.15); color: var(--red); }
+  .cond { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .cond:last-child { border-bottom: none; }
+  .cond .raw { color: var(--muted); font-size: 12px; }
+  .sect { margin-top: 10px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--muted); font-weight: 600; background: var(--panel2); }
+  tr.expandable { cursor: pointer; }
+  tr.detail { background: var(--panel2); }
+  tr.detail td { padding: 12px 16px; }
+  .pill { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .pill.alerted { background: rgba(79,156,240,.15); color: var(--blue); }
+  .pill.rejected { background: rgba(229,83,75,.15); color: var(--red); }
+  .pill.pending { background: rgba(217,165,58,.15); color: var(--amber); }
+  .pill.closed { background: rgba(130,150,171,.15); color: var(--muted); }
+  form, .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
+  input, select, textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: inherit; }
+  textarea.code { font-family: ui-monospace, monospace; font-size: 12px; min-height: 220px; white-space: pre; }
+  button.btn { background: var(--blue); color: #fff; border: none; border-radius: 6px; padding: 8px 14px; margin-top: 12px; cursor: pointer; font: inherit; }
+  button.btn.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+  button.btn.danger { background: var(--red); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .flash { position: fixed; bottom: 16px; right: 16px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; max-width: 380px; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+  .muted { color: var(--muted); }
+  .breakdown h4 { margin: 8px 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; }
+  .breakdown table { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Trade Desk</h1>
+  <nav id="nav">
+    <button data-tab="watch" class="active">Watch</button>
+    <button data-tab="journal">Journal</button>
+    <button data-tab="setups">Setups</button>
+    <button data-tab="conditions">Conditions</button>
+    <button data-tab="watchlist">Watchlist</button>
+    <button data-tab="gate">Gate &amp; Sizing</button>
+    <button data-tab="brokers">Brokers</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+  <span id="ws-dot">live</span>
+</header>
+<main>
+  <section id="tab-watch" class="tab active">
+    <div class="cards" id="watch-cards"></div>
+    <p class="muted" id="watch-empty">Waiting for live data… cards appear per (stock, setup) once the monitor evaluates.</p>
+  </section>
+
+  <section id="tab-journal" class="tab">
+    <table>
+      <thead><tr><th></th><th>ID</th><th>Stock</th><th>Setup</th><th>Side</th><th>Status</th><th>Signal Time</th><th>Entry</th><th>SL</th><th>TP</th><th>Shares</th><th>Grade</th><th>Gate</th><th>PnL</th></tr></thead>
+      <tbody id="journal-body"></tbody>
+    </table>
+  </section>
+
+  <section id="tab-setups" class="tab">
+    <form id="setup-form">
+      <h3>New / Edit Setup <span class="muted" id="setup-editing"></span></h3>
+      <input type="hidden" id="setup-id">
+      <div class="row">
+        <div><label>Name</label><input id="setup-name" required></div>
+        <div><label>Active</label><select id="setup-active"><option value="true">yes</option><option value="false">no</option></select></div>
+      </div>
+      <div class="row">
+        <div><label>Entry method</label><select id="setup-entry-method"><option>market</option><option>limit</option></select></div>
+        <div><label>Entry price (blank = market)</label><input id="setup-entry-price" type="number" step="any"></div>
+      </div>
+      <label>Mandatory condition names (comma separated)</label><input id="setup-mandatory">
+      <label>Script (must define class SetupIndicator)</label>
+      <textarea class="code" id="setup-script" spellcheck="false"></textarea>
+      <button class="btn" type="submit">Save setup</button>
+      <button class="btn secondary" type="button" id="setup-clear">Clear</button>
+    </form>
+    <table><thead><tr><th>ID</th><th>Name</th><th>Entry</th><th>Active</th><th></th></tr></thead><tbody id="setups-body"></tbody></table>
+  </section>
+
+  <section id="tab-conditions" class="tab">
+    <form id="cond-form">
+      <h3>New / Edit Condition <span class="muted" id="cond-editing"></span></h3>
+      <input type="hidden" id="cond-id">
+      <div class="row">
+        <div><label>Name</label><input id="cond-name" required></div>
+        <div><label>Type</label><select id="cond-type"><option>default</option><option>additional</option></select></div>
+      </div>
+      <div class="row">
+        <div><label>Associated setup IDs (comma separated)</label><input id="cond-setups"></div>
+        <div><label>Active</label><select id="cond-active"><option value="true">yes</option><option value="false">no</option></select></div>
+      </div>
+      <label>Script (must define class ConditionCheck)</label>
+      <textarea class="code" id="cond-script" spellcheck="false"></textarea>
+      <button class="btn" type="submit">Save condition</button>
+      <button class="btn secondary" type="button" id="cond-clear">Clear</button>
+    </form>
+    <table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Setups</th><th>Active</th><th></th></tr></thead><tbody id="conds-body"></tbody></table>
+  </section>
+
+  <section id="tab-watchlist" class="tab">
+    <div class="panel">
+      <h3>Upload watchlist (.csv or .json with a <code>ticker</code> field)</h3>
+      <input type="file" id="wl-file" accept=".csv,.json">
+      <button class="btn" id="wl-upload">Upload</button>
+    </div>
+    <div class="panel"><h3>Current symbols</h3><div id="wl-symbols" class="muted">—</div></div>
+    <div class="panel"><h3>Monitor</h3><div id="monitor-status" class="muted">—</div>
+      <button class="btn" id="mon-start">Start</button>
+      <button class="btn danger" id="mon-stop">Stop</button>
+    </div>
+  </section>
+
+  <section id="tab-gate" class="tab">
+    <div class="panel">
+      <h3>Gate rules</h3>
+      <table><thead><tr><th>Priority</th><th>Name</th><th>Condition (JSON)</th><th>Side allowed</th><th></th></tr></thead><tbody id="gate-body"></tbody></table>
+      <div class="row">
+        <div><label>Rule name</label><input id="gate-name"></div>
+        <div><label>Priority</label><input id="gate-priority" type="number" value="0"></div>
+      </div>
+      <div class="row">
+        <div><label>Condition JSON e.g. {"secBias":"BULLISH","secHot":true}</label><input id="gate-cond" value="{}"></div>
+        <div><label>Side allowed</label><select id="gate-side"><option>both</option><option>long</option><option>short</option></select></div>
+      </div>
+      <button class="btn" id="gate-add">Add rule</button>
+    </div>
+    <div class="panel">
+      <h3>Grade multipliers</h3>
+      <table><thead><tr><th>Grade</th><th>Multiplier</th><th></th></tr></thead><tbody id="grade-body"></tbody></table>
+    </div>
+    <div class="panel">
+      <h3>Regime multipliers</h3>
+      <table><thead><tr><th>Regime key</th><th>Multiplier</th><th></th></tr></thead><tbody id="regime-body"></tbody></table>
+      <div class="row">
+        <div><label>Regime key</label><input id="regime-key"></div>
+        <div><label>Multiplier</label><input id="regime-mult" type="number" step="any" value="1.0"></div>
+      </div>
+      <button class="btn" id="regime-add">Add / update</button>
+    </div>
+  </section>
+
+  <section id="tab-brokers" class="tab">
+    <form id="broker-form">
+      <h3>Add broker</h3>
+      <div class="row">
+        <div><label>Type</label><select id="broker-type"><option>alpaca</option><option>signalstack</option></select></div>
+        <div><label>Name</label><input id="broker-name" required></div>
+      </div>
+      <div class="row">
+        <div><label>API key / webhook URL</label><input id="broker-key"></div>
+        <div><label>Secret</label><input id="broker-secret" type="password"></div>
+      </div>
+      <button class="btn" type="submit">Save broker</button>
+    </form>
+    <table><thead><tr><th>ID</th><th>Type</th><th>Name</th><th>Active</th><th>Credentials</th><th></th></tr></thead><tbody id="brokers-body"></tbody></table>
+  </section>
+
+  <section id="tab-settings" class="tab">
+    <form id="settings-form">
+      <h3>User settings</h3>
+      <div class="row">
+        <div><label>Account size</label><input id="set-account" type="number" step="any"></div>
+        <div><label>Risk per trade (fraction, e.g. 0.01)</label><input id="set-risk" type="number" step="any"></div>
+      </div>
+      <div class="row">
+        <div><label>Session start time (ET, HH:MM)</label><input id="set-session"></div>
+        <div><label>OHLCV lookback bars</label><input id="set-lookback" type="number"></div>
+      </div>
+      <div class="row">
+        <div><label>Market refresh interval (s)</label><input id="set-market" type="number"></div>
+        <div><label>Screener refresh interval (s)</label><input id="set-screener" type="number"></div>
+      </div>
+      <button class="btn" type="submit">Save settings</button>
+    </form>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const api = {
+  get: (u) => fetch(u).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e))),
+  send: (m, u, body) => fetch(u, { method: m, headers: {"Content-Type": "application/json"},
+      body: body === undefined ? undefined : JSON.stringify(body) })
+      .then(r => r.status === 204 ? null : r.json().then(j => r.ok ? j : Promise.reject(j))),
+};
+function flash(msg, ms = 3500) {
+  const el = document.createElement("div");
+  el.className = "flash"; el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
+
+/* ------------------------------------------------------------- tabs */
+$("#nav").addEventListener("click", (e) => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.id === "tab-" + btn.dataset.tab));
+});
+
+/* ------------------------------------------------- watch tab state */
+// key: stock|setup_id -> {mandatory:{name:bool}, conds:{name:{values,status}}, side}
+const watch = new Map();
+let setupNames = {};
+
+function watchCard(stock, setupId) {
+  const key = stock + "|" + setupId;
+  if (!watch.has(key)) watch.set(key, { stock, setupId, mandatory: {}, conds: {}, side: null, time: null });
+  return watch.get(key);
+}
+
+function renderWatch() {
+  const root = $("#watch-cards");
+  root.innerHTML = "";
+  $("#watch-empty").style.display = watch.size ? "none" : "block";
+  for (const card of watch.values()) {
+    const div = document.createElement("div");
+    div.className = "card";
+    const sideHtml = card.side ? `<span class="side ${card.side}">${card.side.toUpperCase()} ${card.time ? new Date(card.time).toLocaleTimeString() : ""}</span>` : "";
+    let html = `<h3>${card.stock} · ${setupNames[card.setupId] || ("setup " + card.setupId)} ${sideHtml}</h3>`;
+    const mand = Object.entries(card.mandatory);
+    if (mand.length) {
+      html += `<div class="sect">Mandatory</div>`;
+      for (const [name, passed] of mand)
+        html += `<div class="cond"><span>${name}</span><span>${passed ? "✅" : "❌"}</span></div>`;
+    }
+    const conds = Object.entries(card.conds);
+    if (conds.length) {
+      html += `<div class="sect">Conditions</div>`;
+      for (const [name, c] of conds) {
+        const st = c.status === "aligned" ? "✅" : c.status === "not_aligned" ? "❌" : "⏳ Unknown";
+        const raw = c.values ? `<span class="raw">${Object.entries(c.values).map(([k,v]) => `${k}: ${typeof v === "number" ? v.toFixed(4) : v}`).join("  ")}</span>` : "";
+        html += `<div class="cond"><span>${name} ${raw}</span><span>${st}</span></div>`;
+      }
+    }
+    div.innerHTML = html;
+    root.appendChild(div);
+  }
+}
+
+/* --------------------------------------------------------- journal */
+let journalRows = [];
+function pill(status) { return `<span class="pill ${status}">${status}</span>`; }
+function fmt(v, d = 2) { return v === null || v === undefined ? "—" : Number(v).toFixed(d); }
+function breakdownTable(title, results) {
+  const entries = Object.entries(results || {});
+  if (!entries.length) return "";
+  return `<h4>${title}</h4><table><thead><tr><th>Condition</th><th>Result</th></tr></thead><tbody>` +
+    entries.map(([k, v]) => `<tr><td>${k}</td><td>${v === true ? "✅" : v === false ? "❌" : v}</td></tr>`).join("") +
+    `</tbody></table>`;
+}
+function renderJournal() {
+  const body = $("#journal-body");
+  body.innerHTML = "";
+  for (const e of journalRows) {
+    const tr = document.createElement("tr");
+    tr.className = "expandable";
+    tr.innerHTML = `<td>▸</td><td>${e.id}</td><td>${e.stock}</td><td>${setupNames[e.setup_id] || e.setup_id}</td>
+      <td><span class="side ${e.signal_side}">${e.signal_side}</span></td><td>${pill(e.status)}</td>
+      <td>${e.entry_signal_time ? new Date(e.entry_signal_time).toLocaleString() : "—"}</td>
+      <td>${fmt(e.entry_price)}</td><td>${fmt(e.entry_sl_price)}</td><td>${fmt(e.entry_tp_price)}</td>
+      <td>${e.entry_shares ?? "—"}</td><td>${e.entry_grade ?? "—"}</td>
+      <td>${e.entry_gate_allowed ? "✅" : "⛔"}</td><td>${fmt(e.exit_pnl)}</td>`;
+    const detail = document.createElement("tr");
+    detail.className = "detail"; detail.style.display = "none";
+    detail.innerHTML = `<td colspan="14"><div class="breakdown">
+      ${breakdownTable("Mandatory", e.entry_mandatory_results)}
+      ${breakdownTable("Default conditions", e.entry_default_results)}
+      ${breakdownTable("Additional conditions", e.entry_additional_results)}
+      <h4>Sizing factors</h4><pre class="muted">${JSON.stringify(e.entry_factors || {}, null, 2)}</pre>
+      <h4>Gate screener snapshot</h4><pre class="muted">${JSON.stringify(e.entry_gate_screener_snapshot || {}, null, 2)}</pre>
+      ${e.exit_time ? `<h4>Exit</h4><pre class="muted">${JSON.stringify({time: e.exit_time, price: e.exit_price, pnl: e.exit_pnl, reason: e.exit_reason}, null, 2)}</pre>` : ""}
+      </div></td>`;
+    tr.addEventListener("click", () => {
+      const open = detail.style.display !== "none";
+      detail.style.display = open ? "none" : "";
+      tr.firstElementChild.textContent = open ? "▸" : "▾";
+    });
+    body.appendChild(tr); body.appendChild(detail);
+  }
+}
+async function loadJournal() { journalRows = await api.get("/api/journal"); renderJournal(); }
+
+/* -------------------------------------------------------- websocket */
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => $("#ws-dot").classList.add("on");
+  ws.onclose = () => { $("#ws-dot").classList.remove("on"); setTimeout(connectWS, 2000); };
+  ws.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    switch (msg.type) {
+      case "mandatory_update": {
+        watchCard(msg.stock, msg.setup_id).mandatory[msg.condition] = msg.passed;
+        renderWatch(); break;
+      }
+      case "raw_display": {
+        const c = watchCard(msg.stock, msg.setup_id);
+        c.conds[msg.condition] = c.conds[msg.condition] || { status: "unknown" };
+        c.conds[msg.condition].values = msg.values;
+        renderWatch(); break;
+      }
+      case "status_change": {
+        const c = watchCard(msg.stock, msg.setup_id);
+        c.conds[msg.condition] = c.conds[msg.condition] || {};
+        c.conds[msg.condition].status = msg.status;
+        if (msg.status === "unknown") { c.side = null; c.time = null; }
+        renderWatch(); break;
+      }
+      case "signal_fire": {
+        const c = watchCard(msg.stock, msg.setup_id);
+        c.side = msg.side; c.time = msg.time;
+        flash(`🔔 Signal: ${msg.stock} ${msg.side.toUpperCase()} (setup ${msg.setup_id})`);
+        renderWatch(); break;
+      }
+      case "new_entry": {
+        const idx = journalRows.findIndex(r => r.id === msg.entry.id);
+        if (idx >= 0) journalRows[idx] = msg.entry; else journalRows.unshift(msg.entry);
+        renderJournal(); break;
+      }
+      case "new_alert": {
+        flash(`🚨 Alert sent: ${msg.alert.stock} ${msg.alert.side} × ${msg.alert.shares} @ ${fmt(msg.alert.entry_price)}`);
+        break;
+      }
+    }
+  };
+}
+connectWS();
+
+/* ----------------------------------------------------------- setups */
+async function loadSetups() {
+  const rows = await api.get("/api/setups");
+  setupNames = Object.fromEntries(rows.map(s => [s.id, s.name]));
+  $("#setups-body").innerHTML = rows.map(s => `<tr>
+    <td>${s.id}</td><td>${s.name}</td><td>${s.entry_method}${s.entry_price ? " @ " + s.entry_price : ""}</td>
+    <td>${s.is_active ? "✅" : "—"}</td>
+    <td><button class="btn secondary" data-edit="${s.id}">edit</button>
+        <button class="btn danger" data-del="${s.id}">delete</button></td></tr>`).join("");
+  $("#setups-body").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => {
+    const s = rows.find(x => x.id == b.dataset.edit);
+    $("#setup-id").value = s.id; $("#setup-name").value = s.name;
+    $("#setup-active").value = String(s.is_active);
+    $("#setup-entry-method").value = s.entry_method;
+    $("#setup-entry-price").value = s.entry_price ?? "";
+    $("#setup-mandatory").value = (s.mandatory_conditions || []).join(", ");
+    $("#setup-script").value = s.script_content;
+    $("#setup-editing").textContent = `(editing #${s.id})`;
+  });
+  $("#setups-body").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    await api.send("DELETE", "/api/setups/" + b.dataset.del); loadSetups();
+  });
+  renderWatch(); renderJournal();
+}
+$("#setup-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const id = $("#setup-id").value;
+  const body = {
+    name: $("#setup-name").value,
+    script_content: $("#setup-script").value,
+    mandatory_conditions: $("#setup-mandatory").value.split(",").map(s => s.trim()).filter(Boolean),
+    entry_method: $("#setup-entry-method").value,
+    entry_price: $("#setup-entry-price").value ? Number($("#setup-entry-price").value) : null,
+    is_active: $("#setup-active").value === "true",
+  };
+  try {
+    if (id) await api.send("PUT", "/api/setups/" + id, body);
+    else await api.send("POST", "/api/setups", body);
+    flash("Setup saved"); $("#setup-clear").click(); loadSetups();
+  } catch (err) { flash("Error: " + (err.detail || JSON.stringify(err))); }
+};
+$("#setup-clear").onclick = () => {
+  $("#setup-form").reset(); $("#setup-id").value = ""; $("#setup-editing").textContent = "";
+};
+
+/* ------------------------------------------------------- conditions */
+async function loadConditions() {
+  const rows = await api.get("/api/conditions");
+  $("#conds-body").innerHTML = rows.map(c => `<tr>
+    <td>${c.id}</td><td>${c.name}</td><td>${c.type}</td>
+    <td>${(c.associated_setups || []).join(", ")}</td><td>${c.is_active ? "✅" : "—"}</td>
+    <td><button class="btn secondary" data-edit="${c.id}">edit</button>
+        <button class="btn danger" data-del="${c.id}">delete</button></td></tr>`).join("");
+  $("#conds-body").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => {
+    const c = rows.find(x => x.id == b.dataset.edit);
+    $("#cond-id").value = c.id; $("#cond-name").value = c.name; $("#cond-type").value = c.type;
+    $("#cond-setups").value = (c.associated_setups || []).join(", ");
+    $("#cond-active").value = String(c.is_active); $("#cond-script").value = c.script_content;
+    $("#cond-editing").textContent = `(editing #${c.id})`;
+  });
+  $("#conds-body").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    await api.send("DELETE", "/api/conditions/" + b.dataset.del); loadConditions();
+  });
+}
+$("#cond-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const id = $("#cond-id").value;
+  const body = {
+    name: $("#cond-name").value, type: $("#cond-type").value,
+    script_content: $("#cond-script").value,
+    associated_setups: $("#cond-setups").value.split(",").map(s => parseInt(s.trim())).filter(Number.isInteger),
+    is_active: $("#cond-active").value === "true",
+  };
+  try {
+    if (id) await api.send("PUT", "/api/conditions/" + id, body);
+    else await api.send("POST", "/api/conditions", body);
+    flash("Condition saved"); $("#cond-clear").click(); loadConditions();
+  } catch (err) { flash("Error: " + (err.detail || JSON.stringify(err))); }
+};
+$("#cond-clear").onclick = () => {
+  $("#cond-form").reset(); $("#cond-id").value = ""; $("#cond-editing").textContent = "";
+};
+
+/* -------------------------------------------------------- watchlist */
+async function loadWatchlist() {
+  const wl = await api.get("/api/watchlist");
+  $("#wl-symbols").textContent = wl && wl.symbols.length ? wl.symbols.join(", ") : "no watchlist uploaded";
+}
+async function loadMonitor() {
+  const st = await api.get("/api/monitor/status");
+  $("#monitor-status").textContent =
+    `monitor: ${st.monitor_running ? "running" : "stopped"} · market feed: ${st.market_data_running ? "on" : "off"}` +
+    ` · screener: ${st.screener_running ? "on" : "off"} · cached: ${st.symbols_cached.length} symbols · session start ${st.session_start_time} ET`;
+}
+$("#wl-upload").onclick = async () => {
+  const file = $("#wl-file").files[0];
+  if (!file) return flash("Choose a .csv or .json file first");
+  const fd = new FormData(); fd.append("file", file);
+  const r = await fetch("/api/watchlist/upload", { method: "POST", body: fd });
+  if (r.ok) { flash("Watchlist uploaded"); loadWatchlist(); loadMonitor(); }
+  else { const e = await r.json(); flash("Error: " + (e.detail || "upload failed")); }
+};
+$("#mon-start").onclick = async () => { await api.send("POST", "/api/monitor/start"); loadMonitor(); };
+$("#mon-stop").onclick = async () => { await api.send("POST", "/api/monitor/stop"); loadMonitor(); };
+
+/* ---------------------------------------------------- gate & sizing */
+async function loadGate() {
+  const rules = await api.get("/api/gate-rules");
+  $("#gate-body").innerHTML = rules.map(r => `<tr>
+    <td>${r.priority}</td><td>${r.rule_name}</td><td><code>${JSON.stringify(r.condition)}</code></td>
+    <td>${r.side_allowed}</td>
+    <td><button class="btn danger" data-del="${r.id}">delete</button></td></tr>`).join("");
+  $("#gate-body").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    await api.send("DELETE", "/api/gate-rules/" + b.dataset.del); loadGate();
+  });
+  const grades = await api.get("/api/multipliers/grade");
+  $("#grade-body").innerHTML = grades.map(g => `<tr><td>${g.grade}</td>
+    <td><input type="number" step="any" value="${g.multiplier}" data-grade="${g.grade}" style="width:110px"></td>
+    <td><button class="btn secondary" data-save="${g.grade}">save</button></td></tr>`).join("");
+  $("#grade-body").querySelectorAll("[data-save]").forEach(b => b.onclick = async () => {
+    const input = $(`#grade-body input[data-grade="${CSS.escape(b.dataset.save)}"]`);
+    await api.send("PUT", "/api/multipliers/grade", { grade: b.dataset.save, multiplier: Number(input.value) });
+    flash("Grade multiplier saved");
+  });
+  const regimes = await api.get("/api/multipliers/regime");
+  $("#regime-body").innerHTML = regimes.map(r => `<tr><td>${r.regime_key}</td><td>${r.multiplier}</td>
+    <td><button class="btn danger" data-del="${r.id}">delete</button></td></tr>`).join("");
+  $("#regime-body").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    await api.send("DELETE", "/api/multipliers/regime/" + b.dataset.del); loadGate();
+  });
+}
+$("#gate-add").onclick = async () => {
+  try {
+    await api.send("POST", "/api/gate-rules", {
+      rule_name: $("#gate-name").value, priority: Number($("#gate-priority").value || 0),
+      condition: JSON.parse($("#gate-cond").value || "{}"), side_allowed: $("#gate-side").value,
+    });
+    flash("Gate rule added"); loadGate();
+  } catch (err) { flash("Error: " + (err.detail || err.message || JSON.stringify(err))); }
+};
+$("#regime-add").onclick = async () => {
+  await api.send("PUT", "/api/multipliers/regime",
+    { regime_key: $("#regime-key").value, multiplier: Number($("#regime-mult").value) });
+  flash("Regime multiplier saved"); loadGate();
+};
+
+/* ----------------------------------------------------------- brokers */
+async function loadBrokers() {
+  const rows = await api.get("/api/brokers");
+  $("#brokers-body").innerHTML = rows.map(b => `<tr>
+    <td>${b.id}</td><td>${b.type}</td><td>${b.name}</td><td>${b.is_active ? "✅" : "—"}</td>
+    <td>${b.has_api_key ? "🔑" : "—"} ${b.has_secret ? "🔒" : ""}</td>
+    <td><button class="btn danger" data-del="${b.id}">delete</button></td></tr>`).join("");
+  $("#brokers-body").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    await api.send("DELETE", "/api/brokers/" + b.dataset.del); loadBrokers();
+  });
+}
+$("#broker-form").onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    await api.send("POST", "/api/brokers", {
+      type: $("#broker-type").value, name: $("#broker-name").value,
+      api_key: $("#broker-key").value, secret: $("#broker-secret").value,
+    });
+    flash("Broker saved"); $("#broker-form").reset(); loadBrokers();
+  } catch (err) { flash("Error: " + (err.detail || JSON.stringify(err))); }
+};
+
+/* ---------------------------------------------------------- settings */
+async function loadSettings() {
+  const s = await api.get("/api/settings");
+  $("#set-account").value = s.account_size; $("#set-risk").value = s.risk_per_trade;
+  $("#set-session").value = s.session_start_time; $("#set-lookback").value = s.ohlcv_lookback_bars;
+  $("#set-market").value = s.market_refresh_interval; $("#set-screener").value = s.screener_refresh_interval;
+}
+$("#settings-form").onsubmit = async (e) => {
+  e.preventDefault();
+  await api.send("PUT", "/api/settings", {
+    account_size: Number($("#set-account").value),
+    risk_per_trade: Number($("#set-risk").value),
+    session_start_time: $("#set-session").value,
+    ohlcv_lookback_bars: Number($("#set-lookback").value),
+    market_refresh_interval: Number($("#set-market").value),
+    screener_refresh_interval: Number($("#set-screener").value),
+  });
+  flash("Settings saved");
+};
+
+/* --------------------------------------------------------- initial */
+loadSetups(); loadConditions(); loadJournal(); loadWatchlist(); loadMonitor();
+loadGate(); loadBrokers(); loadSettings();
+</script>
+</body>
+</html>
