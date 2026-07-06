@@ -196,6 +196,41 @@ def monthly(bars: Bars, rth_only: bool = True):
 
 
 # ────────────────────────────────────────────────────────────
+# User-anchored VWAP (Earnings / News VWAPs in the cluster script)
+# ────────────────────────────────────────────────────────────
+
+@primitive(
+    name='anchored',
+    group='vwap',
+    description=('AVWAP from a user-chosen datetime — the cluster script\'s '
+                 'Earnings/News VWAP A/B. Anchors at the first bar whose '
+                 'timestamp >= `anchor` (Pine: `time >= i_earnDate and '
+                 'time[1] < i_earnDate`). `anchor` is an ET datetime string, '
+                 'e.g. "2026-07-01 09:30". Empty anchor → all NaN.'),
+    params=(
+        Param('anchor',   'str',  default='',
+              description='ET datetime, e.g. 2026-07-01 09:30'),
+        Param('rth_only', 'bool', default=True),
+    ),
+    inputs=('bars',),
+)
+def anchored(bars: Bars, anchor: str = '', rth_only: bool = True):
+    n_full = len(bars.df)
+    if not str(anchor).strip():
+        return np.full(n_full, np.nan)
+    ts = pd.Timestamp(str(anchor).strip())
+    if ts.tz is None:
+        ts = ts.tz_localize(_ET)
+    df, pos = _sub_frame(bars, rth_only)
+    price, vol = _hlc3_vol(df)
+    mask = np.zeros(len(df), dtype=bool)
+    hits = np.nonzero((df.index >= ts))[0]
+    if len(hits):
+        mask[hits[0]] = True
+    return _scatter(_running_vwap(price, vol, mask), pos, n_full)
+
+
+# ────────────────────────────────────────────────────────────
 # Intraday / weekly anchored VWAPs from running HH / LL
 # ────────────────────────────────────────────────────────────
 

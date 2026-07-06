@@ -119,15 +119,19 @@ def list_primitives() -> list[dict]:
 
 
 def _source_series(bars: pd.DataFrame, name: str) -> np.ndarray:
-    """Resolve a `source` name (close/open/high/low/hl2/hlc3/ohlc4)
-    against the loaded bars and return a numpy array."""
+    """Resolve a `source` name against the loaded bars. body_high/body_low
+    are the S/R script's 'Close/Open' pivot sources — max/min(open, close).
+    volume enables verifying volume-MA checks (e.g. sma(volume, 20))."""
     if name == 'close':  return bars['close'].to_numpy(dtype=float)
     if name == 'open':   return bars['open'].to_numpy(dtype=float)
     if name == 'high':   return bars['high'].to_numpy(dtype=float)
     if name == 'low':    return bars['low'].to_numpy(dtype=float)
+    if name == 'volume': return bars['volume'].to_numpy(dtype=float)
     if name == 'hl2':    return ((bars['high'] + bars['low']) / 2.0).to_numpy(dtype=float)
     if name == 'hlc3':   return ((bars['high'] + bars['low'] + bars['close']) / 3.0).to_numpy(dtype=float)
     if name == 'ohlc4':  return ((bars['open'] + bars['high'] + bars['low'] + bars['close']) / 4.0).to_numpy(dtype=float)
+    if name == 'body_high': return np.maximum(bars['open'].to_numpy(dtype=float), bars['close'].to_numpy(dtype=float))
+    if name == 'body_low':  return np.minimum(bars['open'].to_numpy(dtype=float), bars['close'].to_numpy(dtype=float))
     raise ValueError(f'unknown source {name!r}')
 
 
@@ -264,6 +268,7 @@ PAGE = r"""<!doctype html>
   <label>Source <select id="source">
     <option>close</option><option>open</option><option>high</option><option>low</option>
     <option>hl2</option><option>hlc3</option><option>ohlc4</option>
+    <option>volume</option><option>body_high</option><option>body_low</option>
   </select></label>
   <button onclick="reload()">Compute</button>
   <span id="status" style="color:var(--text3)"></span>

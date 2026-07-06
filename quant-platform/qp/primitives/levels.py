@@ -261,10 +261,21 @@ def overnight_low(bars: Bars):
 # Weekly / monthly / monday
 # ────────────────────────────────────────────────────────────
 
+def _period_keys(et, period: str):
+    if period == 'week':
+        iso = et.isocalendar()
+        return list(zip(iso.year.to_numpy(), iso.week.to_numpy()))
+    if period == 'month':
+        return [(t.year, t.month) for t in et]
+    if period == 'year':
+        return [(t.year,) for t in et]
+    raise ValueError(period)
+
+
 def _period_agg(df: pd.DataFrame, which: str, period: str):
-    """Running RTH high/low/open per calendar period (`week` / `month`).
-    RTH-only matches TV weekly/monthly equity bars; the current value is
-    held on non-RTH bars once the period has RTH data (NaN before)."""
+    """Running RTH high/low/open per calendar period (`week` / `month` /
+    `year`). RTH-only matches TV weekly/monthly equity bars; the current
+    value is held on non-RTH bars once the period has RTH data."""
     et = df.index.tz_convert(_ET)
     pred = rth_pred(df)
     high  = df['high'].to_numpy(dtype=float)
@@ -272,11 +283,7 @@ def _period_agg(df: pd.DataFrame, which: str, period: str):
     openp = df['open'].to_numpy(dtype=float)
     n = len(df)
     out = np.full(n, np.nan)
-    if period == 'week':
-        iso = et.isocalendar()
-        keys = list(zip(iso.year.to_numpy(), iso.week.to_numpy()))
-    else:
-        keys = [(t.year, t.month) for t in et]
+    keys = _period_keys(et, period)
     cur_key = None
     cur_high = np.nan; cur_low = np.nan; cur_open = np.nan
     for i in range(n):
@@ -337,6 +344,72 @@ def monthly_high(bars: Bars):
            params=(), inputs=('bars',))
 def monthly_low(bars: Bars):
     return _period_agg(bars.df, 'low', 'month')
+
+
+def _prev_period_val(df: pd.DataFrame, which: str, period: str) -> np.ndarray:
+    """The COMPLETED previous period's open/high/low at every bar of the
+    current period (the S/R script's PWO / PMO / PYO lines). Causal — the
+    previous period is finished by the time any current-period bar prints.
+    The fetch window must reach back into the previous period."""
+    et = df.index.tz_convert(_ET)
+    pred = rth_pred(df)
+    high  = df['high'].to_numpy(dtype=float)
+    low   = df['low'].to_numpy(dtype=float)
+    openp = df['open'].to_numpy(dtype=float)
+    n = len(df)
+    keys = _period_keys(et, period)
+
+    per: dict = {}
+    order: list = []
+    for i in range(n):
+        if not pred(et[i]):
+            continue
+        k = keys[i]
+        if k not in per:
+            per[k] = {'open': openp[i], 'high': high[i], 'low': low[i]}
+            order.append(k)
+        else:
+            per[k]['high'] = max(per[k]['high'], high[i])
+            per[k]['low']  = min(per[k]['low'],  low[i])
+
+    key_pos = {k: j for j, k in enumerate(order)}
+    out = np.full(n, np.nan)
+    for i in range(n):
+        k = keys[i]
+        if k not in key_pos:
+            continue
+        j = key_pos[k] - 1
+        if j >= 0:
+            out[i] = per[order[j]][which]
+    return out
+
+
+@primitive(name='yearly_open', group='levels',
+           description='This year\'s RTH open (first RTH bar of the year — the S/R script\'s YO line). The fetch window must include January for a real value.',
+           params=(), inputs=('bars',))
+def yearly_open(bars: Bars):
+    return _period_agg(bars.df, 'open', 'year')
+
+
+@primitive(name='prev_week_open', group='levels',
+           description='Previous ISO week\'s RTH open (PWO). Fetch window must reach into last week.',
+           params=(), inputs=('bars',))
+def prev_week_open(bars: Bars):
+    return _prev_period_val(bars.df, 'open', 'week')
+
+
+@primitive(name='prev_month_open', group='levels',
+           description='Previous month\'s RTH open (PMO). Fetch window must reach into last month.',
+           params=(), inputs=('bars',))
+def prev_month_open(bars: Bars):
+    return _prev_period_val(bars.df, 'open', 'month')
+
+
+@primitive(name='prev_year_open', group='levels',
+           description='Previous year\'s RTH open (PYO). Fetch window must reach into last year.',
+           params=(), inputs=('bars',))
+def prev_year_open(bars: Bars):
+    return _prev_period_val(bars.df, 'open', 'year')
 
 
 def _monday_extreme(df: pd.DataFrame, which: str) -> np.ndarray:
