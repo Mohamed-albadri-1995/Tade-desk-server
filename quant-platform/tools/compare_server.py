@@ -27,6 +27,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.request
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -41,6 +43,40 @@ from qp.primitives.bars import Bars
 from tools.data import alpaca
 
 _ET = 'America/New_York'
+
+# Local cache of the chart library so the browser doesn't need to reach any
+# external CDN. Populated at server startup from whichever mirror the server
+# itself can reach.
+_STATIC_DIR = Path(__file__).resolve().parent / '.static'
+_CHART_JS   = _STATIC_DIR / 'lightweight-charts.js'
+_CHART_MIRRORS = [
+    'https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js',
+    'https://cdn.jsdelivr.net/npm/lightweight-charts/dist/lightweight-charts.standalone.production.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.min.js',
+]
+
+
+def _ensure_chart_js() -> bool:
+    """Download the chart library once, cache under tools/.static/. Return
+    True on success. If every mirror fails we fall back to a CDN reference
+    in the HTML (which will only work if the browser can reach one)."""
+    if _CHART_JS.exists() and _CHART_JS.stat().st_size > 10_000:
+        return True
+    _STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    for url in _CHART_MIRRORS:
+        try:
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                data = resp.read()
+            if len(data) > 10_000 and b'LightweightCharts' in data:
+                _CHART_JS.write_bytes(data)
+                print(f'[qp] chart library cached from {url} ({len(data)} bytes)',
+                      file=sys.stderr)
+                return True
+        except Exception as e:
+            print(f'[qp] mirror {url} failed: {e}', file=sys.stderr)
+    print('[qp] WARNING: could not cache chart library; HTML will fall back '
+          'to inline CDN and browser must reach it directly', file=sys.stderr)
+    return False
 
 
 def _git_sha() -> str:
@@ -162,7 +198,26 @@ def compute_data(symbol: str, tf: str, days: int, primitive_key: str,
 
 PAGE = r"""<!doctype html>
 <html><head><meta charset="utf-8"><title>qp compare</title>
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<!-- Prefer the local copy the server cached at startup. If it 404s (server
+     failed to download it), fall back to public CDNs. -->
+<script>
+(function(){
+  const srcs = [
+    '/static/lightweight-charts.js',
+    'https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js',
+    'https://cdn.jsdelivr.net/npm/lightweight-charts/dist/lightweight-charts.standalone.production.js',
+  ];
+  function tryLoad(i){
+    if (i >= srcs.length) return;
+    const s = document.createElement('script');
+    s.src = srcs[i]; s.async = false;
+    s.onload = () => { window._chartLibLoaded = true; };
+    s.onerror = () => tryLoad(i + 1);
+    document.head.appendChild(s);
+  }
+  tryLoad(0);
+})();
+</script>
 <style>
   :root { --bg:#0e1116; --panel:#151a24; --border:#1e2632; --text:#e2e8f0; --text2:#94a3b8; --text3:#64748b; --accent:#22c55e; --draft:#f5a623; --red:#ef5350; }
   html,body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; margin:0; height:100%; }
@@ -444,6 +499,11 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ('/', '/index.html'):
             self._send(200, PAGE.encode('utf-8'), 'text/html; charset=utf-8'); return
+        if u.path == '/static/lightweight-charts.js':
+            if _CHART_JS.exists():
+                body = _CHART_JS.read_bytes()
+                self._send(200, body, 'application/javascript; charset=utf-8'); return
+            self._send(404, b'not cached', 'text/plain'); return
         if u.path == '/api/health':
             self._send(200, json.dumps({'ok': True, 'primitives': len(REGISTRY)}).encode('utf-8')); return
         if u.path == '/api/primitives':
@@ -497,8 +557,11 @@ def main():
     p.add_argument('--host', default='127.0.0.1')
     p.add_argument('--port', type=int, default=8765)
     args = p.parse_args()
+    chart_ok = _ensure_chart_js()
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f'qp compare UI on http://{args.host}:{args.port} — {len(REGISTRY)} primitives loaded')
+    print(f'qp compare UI on http://{args.host}:{args.port} — '
+          f'{len(REGISTRY)} primitives loaded — '
+          f'chart lib {"cached locally" if chart_ok else "will use CDN fallback"}')
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
