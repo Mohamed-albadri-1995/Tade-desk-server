@@ -83,6 +83,16 @@ tools/
 
 5. Commit the JSON change. An approval is a promise to future callers.
 
+## HTTP endpoints (compare server)
+
+```
+GET  /                    the page
+GET  /api/health          {"ok": true, "primitives": N}
+GET  /api/primitives      registry + approval status
+GET  /api/data?symbol=... bars + overlay values for the selected primitive
+POST /api/approve         save an approval entry ({key, approved_by, notes})
+```
+
 ## Consuming primitives
 
 **From Python:**

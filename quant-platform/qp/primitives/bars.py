@@ -27,6 +27,8 @@ class Bars:
         missing = required - set(df.columns)
         if missing:
             raise ValueError(f'Bars: missing columns {sorted(missing)}')
+        if not isinstance(df.index, pd.DatetimeIndex):
+            raise ValueError('Bars: index must be a DatetimeIndex')
         if df.index.tz is None:
             raise ValueError('Bars: index must be tz-aware')
         if not df.index.is_monotonic_increasing:

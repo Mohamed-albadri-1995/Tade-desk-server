@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import json
 import os
-import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pandas as pd
 
@@ -39,8 +39,13 @@ def _headers() -> dict:
 
 
 def _cache_path(symbol: str, tf: str, start: pd.Timestamp, end: pd.Timestamp) -> Path:
+    # Minute-bucket both endpoints so an intra-session re-fetch (end moves
+    # forward every 5min because compare_server floors to 5min) busts the
+    # cache and picks up newer bars.
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    key = f'{symbol.upper()}_{tf}_{start.date()}_{end.date()}'
+    key = (f'{symbol.upper()}_{tf}'
+           f'_{start.strftime("%Y%m%dT%H%M")}'
+           f'_{end.strftime("%Y%m%dT%H%M")}')
     return _CACHE_DIR / f'{key}.parquet'
 
 
@@ -70,7 +75,9 @@ def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
             'feed':      feed,
         }
         if page: params['page_token'] = page
-        url = f'{_BASE}/bars?' + '&'.join(f'{k}={v}' for k, v in params.items())
+        # urlencode handles the '+' and ':' in ISO timestamps — bare
+        # concatenation would send raw '+' which Alpaca decodes as space.
+        url = f'{_BASE}/bars?' + urlencode(params)
         req = urllib.request.Request(url, headers=_headers())
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:

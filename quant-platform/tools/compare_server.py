@@ -10,9 +10,10 @@ Single page:
 
 Endpoints:
     GET  /                       → the page (HTML)
-    GET  /primitives             → registry + approval status (JSON)
-    GET  /data?symbol=...&tf=... → bars + overlay values (JSON)
-    POST /approve                → save an approval entry (JSON body)
+    GET  /api/health             → {"ok": true, "primitives": N} — smoke test
+    GET  /api/primitives         → registry + approval status (JSON)
+    GET  /api/data?symbol=...    → bars + overlay values (JSON)
+    POST /api/approve            → save an approval entry (JSON body)
 
 The tool has no logic of its own beyond fetching bars and calling
 qp primitives — every number it shows comes from an @primitive
@@ -36,7 +37,10 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import qp  # noqa: E402  — populates REGISTRY via primitive decorators
 from qp.registry import REGISTRY, get_approval, save_approval
+from qp.primitives.bars import Bars
 from tools.data import alpaca
+
+_ET = 'America/New_York'
 
 
 def _git_sha() -> str:
@@ -111,11 +115,11 @@ def compute_data(symbol: str, tf: str, days: int, primitive_key: str,
             raise ValueError(f'unknown primitive {primitive_key!r}')
         m = REGISTRY[primitive_key]
         # Resolve inputs. Every primitive takes ONE of:
-        #   inputs=('bars',) → pass the DataFrame
-        #   inputs=('source',) → pass the resolved source series
+        #   inputs=('bars',) → pass a Bars dataclass (validated OHLCV)
+        #   inputs=('source',) → pass the resolved source array
         kwargs = dict(params or {})
         if list(m.inputs) == ['bars']:
-            arr = m.fn(bars, **kwargs)
+            arr = m.fn(Bars.from_frame(bars), **kwargs)
         elif list(m.inputs) == ['source']:
             src = _source_series(bars, source)
             arr = m.fn(src, **kwargs)
@@ -135,8 +139,10 @@ def compute_data(symbol: str, tf: str, days: int, primitive_key: str,
     return {
         'bars':   bar_list,
         'series': series_out,
-        'first':  bars.index[0].strftime('%Y-%m-%d %H:%M'),
-        'last':   bars.index[-1].strftime('%Y-%m-%d %H:%M'),
+        # Show ET times in the status line — that's what TradingView shows
+        # on the right panel, so eyeball parity gets the same clock.
+        'first':  bars.index[0].tz_convert(_ET).strftime('%Y-%m-%d %H:%M ET'),
+        'last':   bars.index[-1].tz_convert(_ET).strftime('%Y-%m-%d %H:%M ET'),
     }
 
 
@@ -236,7 +242,7 @@ function loadTV() {
 }
 
 async function loadPrimitives() {
-  const r = await fetch('/primitives');
+  const r = await fetch('/api/primitives');
   PRIMS = await r.json();
   const sel = document.getElementById('prim');
   sel.innerHTML = '';
@@ -314,7 +320,7 @@ async function reload() {
   const params = collectParams();
   document.getElementById('status').textContent = 'loading…';
   const qs = new URLSearchParams({ symbol, tf, days, source, key: p.key, params: JSON.stringify(params) });
-  const r = await fetch('/data?' + qs);
+  const r = await fetch('/api/data?' + qs);
   if (!r.ok) { document.getElementById('status').textContent = 'error: ' + (await r.text()).slice(0, 200); return; }
   const j = await r.json();
   document.getElementById('status').textContent = `${j.first} → ${j.last} · ${(j.bars || []).length} bars`;
@@ -333,7 +339,7 @@ async function approve() {
   const who = prompt('Approving as (your name / initials):', localStorage.getItem('qp_approver') || '') || '';
   if (!who) return;
   localStorage.setItem('qp_approver', who);
-  const r = await fetch('/approve', {
+  const r = await fetch('/api/approve', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ key: p.key, approved_by: who, notes }),
   });
@@ -373,9 +379,11 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ('/', '/index.html'):
             self._send(200, PAGE.encode('utf-8'), 'text/html; charset=utf-8'); return
-        if u.path == '/primitives':
+        if u.path == '/api/health':
+            self._send(200, json.dumps({'ok': True, 'primitives': len(REGISTRY)}).encode('utf-8')); return
+        if u.path == '/api/primitives':
             self._send(200, json.dumps(list_primitives()).encode('utf-8')); return
-        if u.path == '/data':
+        if u.path == '/api/data':
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             try:
                 params = json.loads(q.get('params') or '{}')
@@ -401,7 +409,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw.decode('utf-8'))
         except Exception:
             self._send(400, b'bad json', 'text/plain'); return
-        if u.path == '/approve':
+        if u.path == '/api/approve':
             try:
                 save_approval(
                     key=str(body['key']),
