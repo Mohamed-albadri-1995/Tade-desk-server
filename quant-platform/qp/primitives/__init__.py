@@ -1,11 +1,22 @@
 """
-Auto-import every primitives module so `@primitive` decorators fire on
-first `import qp`. Modules listed here are also the compare tool's
-groups (dropdown labels come from the group= arg of each decorator).
+Auto-import every module in this package so `@primitive` decorators fire on
+first `import qp`. Drop a new file next to bars.py/ma.py, decorate a
+function inside it, and the compare tool picks it up on next reload —
+no wiring here.
 
-Add a new module → list it here → the compare tool sees its primitives
-on next reload. No other wiring.
+Modules whose name starts with `_` are skipped (reserved for helpers).
 """
 
-from qp.primitives import bars  # dataclass, always first
-from qp.primitives import ma    # ma.sma is the seed primitive
+from __future__ import annotations
+
+import importlib
+import pkgutil
+
+# `bars` first so other modules can `from qp.primitives.bars import Bars`
+# without hitting a partially-initialised package.
+from qp.primitives import bars  # noqa: F401
+
+for _finder, _name, _ispkg in pkgutil.iter_modules(__path__):
+    if _name in ('bars',) or _name.startswith('_'):
+        continue
+    importlib.import_module(f'{__name__}.{_name}')

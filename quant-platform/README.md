@@ -29,8 +29,8 @@ tools/
 
 1. Pick a group (`ma`, `vwap`, `volatility`, `session`, …). Groups become
    the picker's optgroups in the compare tool.
-2. Open the group's file under `qp/primitives/` (create it if new — then
-   add one line to `qp/primitives/__init__.py`).
+2. Open the group's file under `qp/primitives/` (create it if new). New
+   files are auto-discovered — no wiring in `__init__.py`.
 3. Write the function and decorate it. Example:
 
    ```python

@@ -226,17 +226,32 @@ function initChart() {
   new ResizeObserver(() => CHART.applyOptions({ width: el.clientWidth, height: el.clientHeight })).observe(el);
 }
 
+// Primitive key → TradingView built-in study ID. When you pick a primitive
+// the TV widget reloads with the matching study attached, so eyeball parity
+// is one page-load instead of clicking through TV's Indicators menu.
+const TV_STUDIES = {
+  'ma.sma':       'MASimple@tv-basicstudies',
+  'ma.ema':       'MAExp@tv-basicstudies',
+  'ma.wma':       'MAWeighted@tv-basicstudies',
+  'vwap.session': 'VWAP@tv-basicstudies',
+};
+
 function loadTV() {
   const symbol = document.getElementById('symbol').value.trim().toUpperCase() || 'SPY';
   const tf = document.getElementById('tf').value;
   const tvInterval = ({ '1m':'1', '5m':'5', '15m':'15', '30m':'30', '1h':'60', '1d':'D' })[tf];
+  const primKey = document.getElementById('prim').value;
+  const study = TV_STUDIES[primKey];
   document.getElementById('tv').innerHTML = '';
   new TradingView.widget({
     autosize: true,
-    symbol: 'NASDAQ:' + symbol,
+    // Bare symbol — TV widget resolves to the primary exchange. Hardcoding
+    // 'NASDAQ:' broke NYSE/AMEX tickers like SPY.
+    symbol: symbol,
     interval: tvInterval, timezone: 'America/New_York',
     theme: 'dark', style: '1', locale: 'en',
     hide_top_toolbar: true, hide_side_toolbar: false,
+    studies: study ? [study] : [],
     container_id: 'tv',
   });
 }
@@ -245,6 +260,7 @@ async function loadPrimitives() {
   const r = await fetch('/api/primitives');
   PRIMS = await r.json();
   const sel = document.getElementById('prim');
+  const savedKey = sel.value || localStorage.getItem('qp_prim') || '';
   sel.innerHTML = '';
   const groups = {};
   for (const p of PRIMS) (groups[p.group] ||= []).push(p);
@@ -259,7 +275,8 @@ async function loadPrimitives() {
     }
     sel.appendChild(og);
   }
-  sel.onchange = onPrimChange;
+  if (savedKey && PRIMS.some(p => p.key === savedKey)) sel.value = savedKey;
+  sel.onchange = () => { onPrimChange(); loadTV(); reload(); };
   onPrimChange();
 }
 
@@ -271,6 +288,7 @@ function currentPrim() {
 function onPrimChange() {
   const p = currentPrim();
   if (!p) return;
+  localStorage.setItem('qp_prim', p.key);
   document.getElementById('primName').textContent = p.name + ' (' + p.key + ')';
   document.getElementById('primDesc').textContent = p.description || '—';
   document.getElementById('primFile').textContent = (p.file || '') + (p.lineno ? ':' + p.lineno : '');
@@ -279,11 +297,20 @@ function onPrimChange() {
   badge.className = 'badge ' + (p.approved ? 'approved' : 'draft');
   const grid = document.getElementById('paramsGrid');
   grid.innerHTML = '';
+  // Per-primitive param cache — remember what you typed last time you looked
+  // at this primitive.
+  const savedParams = JSON.parse(localStorage.getItem('qp_params_' + p.key) || '{}');
+  if (p.params.length === 0) {
+    const note = document.createElement('div');
+    note.style.color = 'var(--text3)'; note.style.gridColumn = '1 / -1';
+    note.textContent = '(no parameters)';
+    grid.appendChild(note);
+  }
   for (const par of p.params) {
     const lab = document.createElement('label'); lab.textContent = par.name; grid.appendChild(lab);
     const inp = document.createElement('input');
     inp.dataset.name = par.name; inp.dataset.kind = par.kind;
-    inp.value = par.default ?? '';
+    inp.value = savedParams[par.name] ?? par.default ?? '';
     if (par.min != null) inp.min = par.min;
     if (par.max != null) inp.max = par.max;
     inp.type = (par.kind === 'int' || par.kind === 'float') ? 'number' : 'text';
@@ -318,6 +345,12 @@ async function reload() {
   const days = document.getElementById('days').value;
   const source = document.getElementById('source').value;
   const params = collectParams();
+  // Persist so a hard-refresh lands you back where you were.
+  localStorage.setItem('qp_symbol', symbol);
+  localStorage.setItem('qp_tf', tf);
+  localStorage.setItem('qp_days', days);
+  localStorage.setItem('qp_source', source);
+  localStorage.setItem('qp_params_' + p.key, JSON.stringify(params));
   document.getElementById('status').textContent = 'loading…';
   const qs = new URLSearchParams({ symbol, tf, days, source, key: p.key, params: JSON.stringify(params) });
   const r = await fetch('/api/data?' + qs);
@@ -352,10 +385,17 @@ async function approve() {
   setTimeout(() => btn.classList.remove('done'), 1500);
 }
 
+function restoreState() {
+  const sym = localStorage.getItem('qp_symbol'); if (sym) document.getElementById('symbol').value = sym;
+  const tf  = localStorage.getItem('qp_tf');     if (tf)  document.getElementById('tf').value = tf;
+  const d   = localStorage.getItem('qp_days');   if (d)   document.getElementById('days').value = d;
+  const s   = localStorage.getItem('qp_source'); if (s)   document.getElementById('source').value = s;
+}
+
 window.addEventListener('load', () => {
+  restoreState();
   initChart();
-  loadTV();
-  loadPrimitives().then(() => reload());
+  loadPrimitives().then(() => { loadTV(); reload(); });
 });
 document.getElementById('symbol').addEventListener('change', () => { loadTV(); reload(); });
 document.getElementById('tf').addEventListener('change',      () => { loadTV(); reload(); });
