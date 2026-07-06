@@ -459,6 +459,11 @@ function connectWS() {
         flash(`🚨 Alert sent: ${msg.alert.stock} ${msg.alert.side} × ${msg.alert.shares} @ ${fmt(msg.alert.entry_price)}`);
         break;
       }
+      case "position_closed": {
+        const p = msg.position;
+        flash(`${p.reason === "take_profit" ? "🎯" : "🛑"} Closed ${p.stock} #${p.journal_id} (${p.reason}) @ ${fmt(p.exit_price)} · PnL ${fmt(p.exit_pnl)}${p.r_multiple != null ? ` (${p.r_multiple}R)` : ""}`);
+        break;
+      }
     }
   };
 }

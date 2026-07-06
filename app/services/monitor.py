@@ -23,7 +23,13 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from app.database import async_session_factory
-from app.models import ConditionModel, SetupModel, UserSettingsModel, WatchlistModel
+from app.models import (
+    ConditionModel,
+    JournalModel,
+    SetupModel,
+    UserSettingsModel,
+    WatchlistModel,
+)
 from app.services.broker_engine import BrokerEngine
 from app.services.capital import CapitalService
 from app.services.condition_engine import ConditionEngine
@@ -170,6 +176,9 @@ class MonitorService:
             await asyncio.sleep(self.market_refresh_interval)
 
     async def _tick(self) -> None:
+        # Open positions are watched whenever data flows, even outside the
+        # session window — an overnight position still needs its stop.
+        await self._monitor_positions()
         if not self._session_open():
             return
         # Refresh DB-backed caches so signal-time lookups are pure memory reads.
@@ -256,6 +265,79 @@ class MonitorService:
 
         self._armed[armed_key] = signal_side
         await self.run_signal_pipeline(stock, setup, conditions, evaluation)
+
+    # ------------------------------------------------ position monitoring
+
+    async def _monitor_positions(self) -> None:
+        """Auto-close open positions whose SL or TP was touched by the
+        latest cached bar (step 10 of the pipeline: fill the exit
+        snapshot). Fill assumption is the level itself; if a bar touches
+        both SL and TP, the stop wins (conservative)."""
+        async with async_session_factory() as session:
+            open_entries = (
+                await session.execute(
+                    select(JournalModel).where(
+                        JournalModel.status.in_(("pending", "alerted")),
+                        JournalModel.exit_pnl == None,  # noqa: E711
+                    )
+                )
+            ).scalars().all()
+
+        closed_any = False
+        for entry in open_entries:
+            cache = self.market_cache.get(entry.stock)
+            if not cache or not cache.get("bars"):
+                continue
+            last_bar = cache["bars"][-1]
+            high, low = float(last_bar["high"]), float(last_bar["low"])
+            sl, tp = entry.entry_sl_price, entry.entry_tp_price
+
+            exit_price = reason = None
+            if entry.signal_side == "long":
+                if sl is not None and low <= sl:
+                    exit_price, reason = sl, "stop_loss"
+                elif tp is not None and high >= tp:
+                    exit_price, reason = tp, "take_profit"
+            else:  # short
+                if sl is not None and high >= sl:
+                    exit_price, reason = sl, "stop_loss"
+                elif tp is not None and low <= tp:
+                    exit_price, reason = tp, "take_profit"
+            if reason is None:
+                continue
+
+            closed = await self.journal_service.update_exit_card(
+                entry.id,
+                {"exit_price": float(exit_price), "exit_reason": reason},
+                bars=cache["bars"],
+            )
+            closed_any = True
+            data = journal_to_dict(closed)
+            await event_bus.publish({"type": "new_entry", "entry": data})
+            await event_bus.publish(
+                {
+                    "type": "position_closed",
+                    "position": {
+                        "journal_id": closed.id,
+                        "stock": closed.stock,
+                        "setup_id": closed.setup_id,
+                        "side": closed.signal_side,
+                        "reason": reason,
+                        "exit_price": closed.exit_price,
+                        "exit_pnl": closed.exit_pnl,
+                        "r_multiple": closed.r_multiple,
+                        "time": closed.exit_time.isoformat() if closed.exit_time else None,
+                    },
+                }
+            )
+            logger.info(
+                "auto-closed %s #%s via %s at %.4f",
+                closed.stock, closed.id, reason, float(exit_price),
+            )
+
+        if closed_any:
+            await self.setup_factor_engine.recompute_all()
+            await self.capital_service.refresh()
 
     # ------------------------------------------------- signal pipeline (§4)
 
