@@ -25,6 +25,7 @@ from sqlalchemy import select
 from app.database import async_session_factory
 from app.models import ConditionModel, SetupModel, UserSettingsModel, WatchlistModel
 from app.services.broker_engine import BrokerEngine
+from app.services.capital import CapitalService
 from app.services.condition_engine import ConditionEngine
 from app.services.event_bus import event_bus
 from app.services.gate_engine import GateEngine
@@ -34,6 +35,7 @@ from app.services.market_data import MarketDataService
 from app.services.market_proxy import MarketDataProxy
 from app.services.screener_data import ScreenerDataService
 from app.services.setup_engine import SetupEngine
+from app.services.setup_factor import SetupFactorEngine
 from app.services.sizer_engine import SizerEngine
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,8 @@ class MonitorService:
         self.gate_engine = GateEngine(self.screener_cache)
         self.sizer_engine = SizerEngine()
         self.grade_engine = GradeEngine()
+        self.setup_factor_engine = SetupFactorEngine()
+        self.capital_service = CapitalService()
         self.broker_engine = BrokerEngine()
         self.journal_service = JournalService()
 
@@ -73,6 +77,8 @@ class MonitorService:
         await self._load_settings()
         await self.market_service.start(symbols)
         await self.screener_service.start(symbols)
+        await self.capital_service.start()
+        await self.setup_factor_engine.load_states()
         self._task = asyncio.create_task(self._run(), name="monitor-loop")
         logger.info("MonitorService started for %d symbols", len(symbols))
 
@@ -86,6 +92,7 @@ class MonitorService:
             self._task = None
         await self.market_service.stop()
         await self.screener_service.stop()
+        await self.capital_service.stop()
 
     async def restart(self) -> None:
         await self.start()
@@ -169,6 +176,7 @@ class MonitorService:
         await self.gate_engine.refresh_rules()
         await self.sizer_engine.refresh()
         await self.grade_engine.refresh()
+        await self.capital_service.refresh()
 
         setups = await self._load_active_setups()
         conditions = await self._load_active_conditions()
@@ -327,24 +335,54 @@ class MonitorService:
             await event_bus.publish({"type": "new_entry", "entry": journal_to_dict(entry)})
             return journal_to_dict(entry)
 
-        # Steps 6 & 7: sizing and grading. The grade comes from the
-        # signal-points model over default+additional results (mandatory
-        # conditions are excluded from grading) and feeds the sizer's
-        # grade multiplier.
+        # Step 6: grading first (the sizer consumes the grade multiplier).
+        # The grade comes from the signal-points model over default +
+        # additional results; mandatory conditions are excluded.
         grading = self.grade_engine.evaluate_detailed(default_results, additional_results)
         grade, grade_score = grading["grade"], grading["score"]
+
+        # Step 7: sizing — per account, with the setup factor and the
+        # at-the-moment capital cap. All inputs are cached (zero I/O).
+        setup_factor_state = self.setup_factor_engine.get_state(setup.id)
+        setup_factor = float(setup_factor_state["final_factor"])
         regime_key = str(screener_snapshot.get("regime") or "")
-        sizing = self.sizer_engine.calculate(
-            entry_price, sl_price if sl_price is not None else entry_price, grade, regime_key
-        )
+        sl_for_risk = sl_price if sl_price is not None else entry_price
+        if self.capital_service.accounts:
+            sizing = self.sizer_engine.calculate_multi(
+                entry_price,
+                sl_for_risk,
+                grade,
+                regime_key,
+                setup_factor,
+                self.capital_service.accounts,
+                self.capital_service.available,
+            )
+            account_breakdown = sizing["accounts"]
+        else:  # no accounts configured -> legacy single-account sizing
+            sizing = self.sizer_engine.calculate(entry_price, sl_for_risk, grade, regime_key)
+            sizing["final_shares"] = int(sizing["final_shares"] * setup_factor)
+            account_breakdown = None
+
         card_data["entry_shares"] = sizing["final_shares"]
         card_data["entry_factors"] = {
             **sizing["factors"],
             "grade_score": grade_score,
             "grade_raw_points": grading["raw_points"],
             "grade_breakdown": grading["breakdown"],
+            "setup_factor": setup_factor,
+            "setup_factor_state": setup_factor_state,
         }
+        if account_breakdown is not None:
+            card_data["entry_factors"]["accounts"] = account_breakdown
         card_data["entry_grade"] = grade
+
+        # A setup factor of 0 blocks the trade: the card is still written
+        # (full audit trail) but no alert is dispatched.
+        if setup_factor <= 0.0:
+            card_data["status"] = "blocked_by_setup_factor"
+            entry = await self.journal_service.create_entry_card(card_data)
+            await event_bus.publish({"type": "new_entry", "entry": journal_to_dict(entry)})
+            return journal_to_dict(entry)
 
         # Step 8: write the immutable Entry Card.
         card_data["status"] = "pending"

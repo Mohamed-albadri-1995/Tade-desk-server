@@ -54,15 +54,29 @@ class BrokerEngine:
             result = await session.execute(select(BrokerModel).where(BrokerModel.is_active == True))  # noqa: E712
             return list(result.scalars().all())
 
+    @staticmethod
+    def _account_shares_for_broker(journal_entry: JournalModel, broker_id: int):
+        """If the entry has per-account sizing and an account is linked to
+        this broker, use that account's share count for the alert."""
+        accounts = (journal_entry.entry_factors or {}).get("accounts") or {}
+        for account in accounts.values():
+            if account.get("broker_id") == broker_id:
+                return account.get("final_shares")
+        return None
+
     async def dispatch(self, journal_entry: JournalModel) -> List[dict]:
         alert = format_alert(journal_entry)
         results = []
         for broker in await self._active_brokers():
+            broker_alert = dict(alert)
+            account_shares = self._account_shares_for_broker(journal_entry, broker.id)
+            if account_shares is not None:
+                broker_alert["qty"] = account_shares
             try:
                 if broker.type == "alpaca":
-                    await self._dispatch_alpaca(broker, alert)
+                    await self._dispatch_alpaca(broker, broker_alert)
                 elif broker.type == "signalstack":
-                    await self._dispatch_signalstack(broker, alert)
+                    await self._dispatch_signalstack(broker, broker_alert)
                 else:
                     raise ValueError(f"unknown broker type: {broker.type}")
                 results.append({"broker": broker.name, "ok": True})

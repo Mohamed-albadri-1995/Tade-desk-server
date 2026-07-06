@@ -1,6 +1,6 @@
 # Plan: Journal Analytics + Setup Factor Engine
 
-Status: **PLAN — not yet implemented.**
+Status: **IMPLEMENTED** (phases A–E; see README for the API surface).
 
 Two deliverables, in dependency order:
 
@@ -84,7 +84,11 @@ endpoint, one `dim` parameter; returns per-bucket account metrics
 * `dim=setup` — the per-setup table (feeds the eye for Phase C)
 * `dim=grade` — does A+ actually outperform B? Validates the grading model
 * `dim=regime` — from the gate screener snapshot captured at entry
-* `dim=side`, `dim=stock`, `dim=hour` (entry time bucket), `dim=weekday`
+* `dim=side`, `dim=stock`, `dim=weekday`
+* **entry-time analysis**: `dim=hour` (entry hour bucket) and
+  `dim=session` (open 9:35–10:30 / morning / midday / power hour) from
+  `entry_signal_time`, plus hold-duration buckets — a dedicated Time view
+  in the UI, like the old tool's Time tab
 * `dim=condition` — per default/additional condition name: metrics for
   trades where it was aligned vs not aligned. This is the transparent,
   tabular replacement for the old "win weights"/correlation idea, and it
@@ -100,19 +104,32 @@ used. Nothing hidden.
 ## Phase C — Journal Analytics UI (browser)
 
 Extend the existing single-page UI. The current **Journal** tab keeps the
-card list + exit form; a new **Analytics** tab hosts four sub-views
-(mirroring the old tool's layout, restyled to ours):
+card list + exit form (it is the old tool's "Trades" tab); a new
+**Analytics** tab hosts the sub-views — all the useful tabs from the old
+tool carried over (only Correlation is dropped, replaced by Breakdowns):
 
 1. **Overview** — stat tiles (net PnL, win rate, expectancy $/R, PF, max
    DD, SQN, payoff, streaks) + the equity curve with drawdown shading.
    Each tile shows the formula/inputs in a tooltip (transparency).
 2. **Calendar** — month grid heatmap (green/red by daily PnL, count
    badge), month navigation, click-through to that day's trades.
-3. **Breakdowns** — dimension picker (Setup / Grade / Regime / Side /
-   Stock / Hour / Weekday / Condition) rendering the B4 table: bucket,
-   trades, win %, expectancy, PF, total PnL, avg R, capture %, max DD,
-   sparkline. Sortable columns, same filters as the API.
-4. **Setup Factor** — see Phase D; lives here so the factor's inputs and
+3. **Time** — entry-time analysis: metrics by entry hour, by session
+   period, by weekday, plus hold-duration distribution (winners vs
+   losers). (old tool: Time tab)
+4. **Risk** — drawdown curve and max-DD detail, R-multiple distribution
+   histogram, streaks, Kelly/SQN/recovery, risk-per-trade adherence
+   (planned risk vs realized loss). (old tool: Risk tab)
+5. **Stats** — the full metrics catalog in one transparent table: every
+   metric with its value, formula and inputs. (old tool: Stats tab)
+6. **Magnitude** — PnL/%-move magnitude buckets (small/medium/large
+   winners and losers), MAE/MFE scatter, capture-% distribution — shows
+   whether profits come from many small or few big trades. (old tool:
+   Magnitude tab)
+7. **Breakdowns** — dimension picker (Setup / Grade / Regime / Side /
+   Stock / Hour / Session / Weekday / Condition) rendering the B4 table:
+   bucket, trades, win %, expectancy, PF, total PnL, avg R, capture %,
+   max DD, sparkline. Sortable columns, same filters as the API.
+8. **Setup Factor** — see Phase D; lives here so the factor's inputs and
    the resulting multiplier are inspected in the same place.
 
 Charts: plain inline SVG like the rest of our UI (the old tool's
@@ -146,8 +163,11 @@ with user-editable thresholds/points, e.g. (defaults, all editable):
 `score = Σ signal_points`, normalized 0–100 exactly like the grade score.
 
 **D3. Score → factor via a user-editable mapping table** (like the grade
-multiplier table): e.g. ≥80 → 1.5 · ≥60 → 1.25 · ≥40 → 1.0 · ≥20 → 0.75 ·
-else 0.5, clamped to configurable bounds (default 0.5–1.5).
+multiplier table): e.g. ≥80 → 1.5 · ≥60 → 1.25 · ≥40 → 1.0 · ≥20 → 0.5 ·
+else **0.0**. Bounds default **0.0–1.5**: a setup with proven bad
+performance reaches factor 0 → zero shares → the entry card is still
+written (status `blocked_by_setup_factor`) so the record stays complete,
+but no alert is dispatched.
 
 **D4. Confidence shrinkage (critical).** With few closed trades the factor
 must not swing sizing. Final factor is pulled toward neutral 1.0:
@@ -178,6 +198,38 @@ row per setup showing every input → points → score → factor → shrinkage 
 final, so the multiplier is never a black box.
 
 ---
+
+## Phase E — Accounts & capital guard (sizer fixes)
+
+Answers three gaps in the current sizer: account size is one manual
+number, there is no multi-account support, and nothing stops a position
+from exceeding available capital *at the moment* of the signal.
+
+**E1. AccountModel** — multiple accounts: `name`, `account_size`
+(manual base), optional `risk_per_trade` override (falls back to global
+settings), optional linked broker, `is_active`. A default account is
+seeded from the existing settings value.
+
+**E2. CapitalService (the "at the moment" part)** — per account, keeps an
+in-memory, continuously-updated view: `capital_base` (live buying power
+synced from Alpaca on an interval when a broker is linked; otherwise the
+manual account_size) minus `open_allocation` (Σ entry_price × shares of
+this account's open cards) = `available_capital`. Zero I/O at signal
+time — the pipeline reads the cached value.
+
+**E3. Hard cap in sizing** — per account:
+`final_shares = min(risk_based_shares, floor(available_capital / entry_price))`.
+When the cap binds, the entry card records it
+(`capital_capped: true`, with both numbers) — transparent.
+
+**E4. Multi-account cards/alerts** — sizing runs once per active
+account; the entry card stores a per-account breakdown in
+`entry_factors.accounts`, `entry_shares` holds the primary account's
+shares, and each broker alert uses its linked account's share count.
+
+**E5. Pipeline order fix** — grading runs as step 6 and sizing as step 7
+(the v11 spec listed sizing before grading, but sizing consumes the
+grade multiplier; grade-then-size is now the explicit order).
 
 ## How this feeds the future setups-enhancement engine
 

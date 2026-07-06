@@ -34,6 +34,13 @@ def journal_to_dict(entry: JournalModel) -> dict:
         "exit_price": entry.exit_price,
         "exit_pnl": entry.exit_pnl,
         "exit_reason": entry.exit_reason,
+        "r_multiple": entry.r_multiple,
+        "planned_rr": entry.planned_rr,
+        "mae_pct": entry.mae_pct,
+        "mfe_pct": entry.mfe_pct,
+        "capture_pct": entry.capture_pct,
+        "hold_minutes": entry.hold_minutes,
+        "exit_verdict": entry.exit_verdict,
     }
 
 
@@ -47,8 +54,13 @@ class JournalService:
             await session.refresh(entry)
         return entry
 
-    async def update_exit_card(self, journal_id: int, exit_data: dict) -> Optional[JournalModel]:
-        """Fill the exit snapshot. Entry fields are never modified."""
+    async def update_exit_card(
+        self, journal_id: int, exit_data: dict, bars: Optional[list] = None
+    ) -> Optional[JournalModel]:
+        """Fill the exit snapshot and compute exit enrichment.
+        Entry fields are never modified."""
+        from app.services.exit_enrichment import compute_exit_enrichment
+
         allowed = {"exit_time", "exit_price", "exit_pnl", "exit_reason", "status"}
         async with async_session_factory() as session:
             entry = (
@@ -63,6 +75,19 @@ class JournalService:
                 k in exit_data for k in ("exit_price", "exit_pnl", "exit_reason")
             ):
                 entry.exit_time = datetime.utcnow()
+            if entry.exit_price is not None:
+                if entry.exit_pnl is None and entry.entry_price is not None and entry.entry_shares:
+                    direction = 1.0 if entry.signal_side == "long" else -1.0
+                    entry.exit_pnl = round(
+                        (float(entry.exit_price) - float(entry.entry_price))
+                        * direction
+                        * float(entry.entry_shares),
+                        2,
+                    )
+                if entry.status not in ("rejected",):
+                    entry.status = exit_data.get("status") or "closed"
+                for key, value in compute_exit_enrichment(entry, bars).items():
+                    setattr(entry, key, value)
             await session.commit()
             await session.refresh(entry)
         return entry

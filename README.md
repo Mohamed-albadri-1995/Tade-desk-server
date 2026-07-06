@@ -68,6 +68,31 @@ hypothetical condition results.
 Setups must define `SetupIndicator`, conditions `ConditionCheck` — see
 `examples/setup_ema_cross.py` and `examples/condition_rel_volume.py`.
 
+### Analytics & setup factor
+
+Closing a trade (Journal tab form, `PUT /api/journal/{id}/exit`, or CSV
+import via `/api/journal/import-exits`) enriches the card once with
+R-multiple, planned RR, MAE/MFE, capture % and an exit verdict. The
+**Analytics** tab (all math server-side under `/api/analytics/*`) shows
+Overview (stat tiles + equity/drawdown curve), Calendar, Time (entry
+hour/session/weekday/hold), Risk (R histogram, stop overruns), Stats
+(every metric with its formula), Magnitude (MAE/MFE scatter, capture
+distribution) and Breakdowns (by setup/grade/regime/side/stock/hour/
+session/weekday/condition).
+
+The **SetupFactorEngine** (`/api/setup-factor`) turns each setup's real
+performance (expectancy R, profit factor, win rate, drawdown R, recent
+form) into a sizing factor via the same DB-backed signal-points pattern
+as grading, with confidence shrinkage toward 1.0 for small samples; the
+mapping reaches **0.0**, which blocks alerts (card status
+`blocked_by_setup_factor`). Sizing is per **account**
+(`/api/accounts`, `/api/capital`): each active account has its own
+capital base (live Alpaca buying power when a broker is linked, else
+manual) and every position is hard-capped to available capital at the
+moment of the signal — `final = min(risk-based, available/entry)`.
+Pipeline order: grade (step 6) then size (step 7);
+`shares = base × grade × regime × setup_factor`.
+
 ### Watchlist import
 
 Upload `.csv` or `.json` on the Watchlist tab (extracts the `ticker` field

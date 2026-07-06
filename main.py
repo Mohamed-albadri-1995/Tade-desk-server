@@ -14,8 +14,26 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app.database import async_session_factory, init_db
-from app.models import GradeMultiplierModel, GradeScoringModelModel, UserSettingsModel
-from app.routers import brokers, conditions, journal, monitor as monitor_router, settings as settings_router, setups, watchlist
+from app.models import (
+    AccountModel,
+    GradeMultiplierModel,
+    GradeScoringModelModel,
+    SetupFactorModelModel,
+    UserSettingsModel,
+)
+from app.routers import (
+    accounts,
+    analytics,
+    brokers,
+    conditions,
+    journal,
+    monitor as monitor_router,
+    settings as settings_router,
+    setup_factor,
+    setups,
+    watchlist,
+)
+from app.services.setup_factor import DEFAULT_FACTOR_MAP, DEFAULT_SIGNALS
 from app.services.monitor import MARKET_TZ, monitor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -47,14 +65,34 @@ async def seed_defaults() -> None:
         ).scalar_one_or_none()
         if grading_row is None:
             session.add(GradeScoringModelModel(id=1))
+        factor_row = (
+            await session.execute(
+                select(SetupFactorModelModel).where(SetupFactorModelModel.id == 1)
+            )
+        ).scalar_one_or_none()
+        if factor_row is None:
+            session.add(
+                SetupFactorModelModel(
+                    id=1, signals=dict(DEFAULT_SIGNALS), factor_map=dict(DEFAULT_FACTOR_MAP)
+                )
+            )
+        has_accounts = (await session.execute(select(AccountModel))).scalars().first()
+        if has_accounts is None:
+            size = settings_row.account_size if settings_row else 100000.0
+            session.add(
+                AccountModel(name="Main", account_size=size, is_primary=True, is_active=True)
+            )
         await session.commit()
     await monitor.grade_engine.refresh()
+    await monitor.setup_factor_engine.refresh_model()
+    await monitor.setup_factor_engine.recompute_all()
 
 
 async def session_start_job() -> None:
     """Daily at session start: re-arm signals and (re)start the feeds."""
     logger.info("session start — re-arming signals and restarting feeds")
     monitor.reset_signals()
+    await monitor.setup_factor_engine.recompute_all()
     await monitor.start()
 
 
@@ -94,6 +132,9 @@ app.include_router(journal.router)
 app.include_router(brokers.router)
 app.include_router(settings_router.router)
 app.include_router(monitor_router.router)
+app.include_router(analytics.router)
+app.include_router(accounts.router)
+app.include_router(setup_factor.router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

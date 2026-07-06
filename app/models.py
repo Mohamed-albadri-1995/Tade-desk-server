@@ -72,6 +72,14 @@ class JournalModel(Base):
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     exit_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     exit_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Exit enrichment — computed once when the exit is recorded (immutable).
+    r_multiple: Mapped[float | None] = mapped_column(Float, nullable=True)
+    planned_rr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mae_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mfe_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    capture_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hold_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_verdict: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class BrokerModel(Base):
@@ -128,6 +136,62 @@ class GateRuleModel(Base):
     condition: Mapped[dict] = mapped_column(JSON, default=dict)  # e.g. {"secBias":"BULLISH","secHot":true}
     side_allowed: Mapped[str] = mapped_column(String(10), default="both")  # 'long'|'short'|'both'
     priority: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AccountModel(Base):
+    """A trading account the sizer computes shares for. ``account_size`` is
+    the manual capital base; when a broker of type 'alpaca' is linked, the
+    CapitalService replaces it with live buying power on an interval."""
+
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    account_size: Mapped[float] = mapped_column(Float, default=100000.0)
+    risk_per_trade: Mapped[float | None] = mapped_column(Float, nullable=True)  # None -> global
+    broker_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class SetupFactorModelModel(Base):
+    """User-editable setup-factor model (singleton id=1) — signal points
+    over a setup's real performance, mapped to a sizing factor that can
+    reach 0.0 (block) with confidence shrinkage toward 1.0 for small n."""
+
+    __tablename__ = "setup_factor_model"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Signal thresholds/points: {signal: {thresholds/points...}} — kept as
+    # JSON so every knob is user-editable without schema changes.
+    signals: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Score -> factor mapping, checked best-first: {"80": 1.5, "60": 1.25, ...}
+    factor_map: Mapped[dict] = mapped_column(JSON, default=dict)
+    factor_min: Mapped[float] = mapped_column(Float, default=0.0)
+    factor_max: Mapped[float] = mapped_column(Float, default=1.5)
+    min_trades: Mapped[int] = mapped_column(Integer, default=20)  # full confidence at n>=this
+    hard_floor_trades: Mapped[int] = mapped_column(Integer, default=5)  # below -> factor 1.0
+    recent_window: Mapped[int] = mapped_column(Integer, default=10)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class SetupFactorStateModel(Base):
+    """Computed setup-factor state per setup — full audit trail of how the
+    factor was derived. Recomputed on exit updates and at session start;
+    read (never computed) at signal time."""
+
+    __tablename__ = "setup_factor_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    setup_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    inputs: Mapped[dict] = mapped_column(JSON, default=dict)  # n, expectancy_r, pf, win_rate, ...
+    signal_points: Mapped[dict] = mapped_column(JSON, default=dict)  # per-signal points
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0..100
+    mapped_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0..1 shrinkage weight
+    final_factor: Mapped[float] = mapped_column(Float, default=1.0)
+    insufficient_data: Mapped[bool] = mapped_column(Boolean, default=True)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class UserSettingsModel(Base):
