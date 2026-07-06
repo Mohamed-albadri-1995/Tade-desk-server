@@ -167,3 +167,29 @@ def hma(source, length: int):
     b = wma(source, length)
     diff = 2.0 * a - b
     return wma(diff, sq)
+
+
+@primitive(
+    name='pine_5day',
+    group='ma',
+    description=('5-day RTH SMA — matches the Pine construct '
+                 '`request.security(sym, "1", ta.sma(close, 1950), ...)`. '
+                 '1950 min = 6.5h × 5 RTH days. Auto-detects bar spacing '
+                 'from the DataFrame index (5m → length=390, 15m → 130, '
+                 'etc.), uses close as source.'),
+    params=(),
+    inputs=('bars',),
+)
+def pine_5day(bars: Bars):
+    df = bars.df
+    if len(df) < 3:
+        return np.full(len(df), np.nan)
+    # Median inter-bar delta in minutes — robust to overnight gaps.
+    deltas = pd.Series(df.index).diff().dt.total_seconds().dropna() / 60.0
+    bar_min = float(deltas.median())
+    if bar_min <= 0:
+        return np.full(len(df), np.nan)
+    length = max(1, int(round(1950.0 / bar_min)))
+    close = df['close'].to_numpy(dtype=float)
+    s = pd.Series(close)
+    return s.rolling(length, min_periods=length).mean().to_numpy()

@@ -100,3 +100,30 @@ def bb(source, length: int, mult: float):
         'upper':  middle + mult * dev,
         'lower':  middle - mult * dev,
     }
+
+
+@primitive(
+    name='bb_ema',
+    group='volatility',
+    description=('Bollinger Bands with an EMA middle line — matches the L3 '
+                 'script\'s `l3_bb_ema = ta.ema(close, length)` + '
+                 '`ta.stdev(close, length)` bands. Returns {middle, upper, '
+                 'lower}.'),
+    params=(
+        Param('length', 'int',   default=21, min=2),
+        Param('mult',   'float', default=2.0, min=0.0),
+    ),
+    inputs=('source',),
+)
+def bb_ema(source, length: int, mult: float):
+    from qp.primitives.ma import ema as _ema
+    src = np.asarray(source, dtype=float)
+    length = int(length)
+    mult = float(mult)
+    middle = _ema(src, length)
+    dev    = pd.Series(src).rolling(length, min_periods=length).std(ddof=0).to_numpy()
+    return {
+        'middle': middle,
+        'upper':  middle + mult * dev,
+        'lower':  middle - mult * dev,
+    }
