@@ -99,16 +99,72 @@ POST /api/approve         save an approval entry ({key, approved_by, notes})
 
 ```python
 import qp
-from qp.registry import REGISTRY
 
-sma_fn = REGISTRY['ma.sma'].fn
+sma_fn = qp.REGISTRY['ma.sma'].fn
 values = sma_fn(close_array, length=9)   # numpy array, NaN warmup
+
+# Bars primitives take a validated OHLCV container
+vwap = qp.REGISTRY['vwap.session'].fn(qp.Bars.from_frame(df))
 ```
 
-**From the trading tool (planned):** a Node → Python bridge exposes
-`market_data.sma('SPY', '5m', 9)` and internally calls `REGISTRY['ma.sma'].fn`
-on cached bars. The trading tool never re-implements the math — it always
-routes through here.
+## Trading tool integration (v11 Bridge Pattern)
+
+Per the v11 spec §8 and the integration analysis §A, the trading tool
+exposes qp to its sandboxed setup + condition scripts through a
+`market_data` object. The sandbox never imports qp directly — it only sees
+the methods the bridge attaches:
+
+```python
+# trading_tool/market_data.py — for reference; belongs in the trading tool
+import qp
+
+class MarketData:
+    def __init__(self, bar_cache):
+        self._cache = bar_cache
+        # v11 §8: only approved primitives are exposed to scripts.
+        for key, meta in qp.approved_primitives().items():
+            method_name = meta.name          # e.g. 'sma', 'session'
+            fn = meta.fn
+            inputs = meta.inputs             # ('source',) or ('bars',)
+            def _bind(fn=fn, inputs=inputs):
+                if inputs == ('source',):
+                    def call(stock, source='close', **params):
+                        arr = self._cache[stock][source].values
+                        return fn(arr, **params)
+                    return call
+                if inputs == ('bars',):
+                    def call(stock, **params):
+                        df = self._cache[stock]
+                        return fn(qp.Bars.from_frame(df), **params)
+                    return call
+                raise ValueError(f'unknown inputs {inputs!r}')
+            setattr(self, method_name, _bind())
+```
+
+Then a sandboxed setup script (v11 §8 `SetupIndicator` interface) writes:
+
+```python
+class SetupIndicator:
+    def check_signal(self, stock, timestamp, market_data):
+        sma_fast = market_data.sma(stock, length=9)
+        sma_slow = market_data.sma(stock, length=21)
+        if sma_fast[-1] > sma_slow[-1] and sma_fast[-2] <= sma_slow[-2]:
+            return 'long'
+        return None
+```
+
+**What qp guarantees the trading tool:**
+
+- `qp.REGISTRY[key].fn` — the callable, always identical to what the
+  compare tool plotted when you approved it.
+- `qp.REGISTRY[key].params` — tuple of `Param` records so the trading tool
+  can validate script inputs before firing.
+- `qp.REGISTRY[key].inputs` — `('source',)` or `('bars',)` so the bridge
+  knows what to feed the callable.
+- `qp.approved_primitives()` — filtered view; v11 §8 rule that no
+  unapproved indicator reaches a live script.
+- `qp.Bars.from_frame(df)` — the validated OHLCV container primitives
+  with `inputs=('bars',)` expect.
 
 ## Design notes
 

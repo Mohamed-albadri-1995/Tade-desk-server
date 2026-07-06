@@ -118,6 +118,13 @@ def is_approved(key: str) -> bool:
     return key in _APPROVALS
 
 
+def approved_primitives() -> dict[str, PrimitiveMeta]:
+    """Return only the approved slice of REGISTRY. Used by the trading tool
+    to build sandbox `market_data` methods — v11 §8 rule: no unapproved
+    indicator reaches a live setup script."""
+    return {k: m for k, m in REGISTRY.items() if k in _APPROVALS}
+
+
 def refresh_approvals() -> None:
     """Re-read approvals.json — the compare tool calls this after it
     writes a new approval so subsequent /primitives calls see it."""

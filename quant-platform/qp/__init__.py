@@ -12,9 +12,20 @@ unapproved primitive get a red "🚧" badge in the UI so you always
 know what's verified vs. draft.
 """
 
-from qp.registry import primitive, REGISTRY, get_approval, is_approved
+from qp.registry import (
+    primitive, REGISTRY, Param, PrimitiveMeta,
+    get_approval, is_approved, approved_primitives,
+)
 
 # Import every primitives module so the decorators register.
 from qp import primitives as _primitives  # noqa: F401
 
-__all__ = ['primitive', 'REGISTRY', 'get_approval', 'is_approved']
+# Re-export Bars at the top level so downstream can `from qp import Bars`
+# instead of reaching into qp.primitives.bars.
+from qp.primitives.bars import Bars
+
+__all__ = [
+    'primitive', 'REGISTRY', 'Param', 'PrimitiveMeta',
+    'get_approval', 'is_approved', 'approved_primitives',
+    'Bars',
+]
