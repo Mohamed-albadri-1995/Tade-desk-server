@@ -49,9 +49,13 @@ _ET = 'America/New_York'
 # itself can reach.
 _STATIC_DIR = Path(__file__).resolve().parent / '.static'
 _CHART_JS   = _STATIC_DIR / 'lightweight-charts.js'
+# Pinned to a specific version — an unpinned URL serves whatever is
+# latest, and v5 renamed the series API out from under us once already.
+# (The page JS feature-detects both v4 and v5, so an already-cached v5
+# file keeps working too.)
 _CHART_MIRRORS = [
-    'https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js',
-    'https://cdn.jsdelivr.net/npm/lightweight-charts/dist/lightweight-charts.standalone.production.js',
+    'https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js',
+    'https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js',
     'https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.min.js',
 ]
 
@@ -312,6 +316,19 @@ function waitForChartLib(timeoutMs) {
   });
 }
 
+// lightweight-charts changed its series API in v5:
+//   v4: chart.addCandlestickSeries(opts) / chart.addLineSeries(opts)
+//   v5: chart.addSeries(LightweightCharts.CandlestickSeries, opts)
+// Feature-detect so whichever version the server cached works.
+function addCandles(opts) {
+  if (typeof CHART.addCandlestickSeries === 'function') return CHART.addCandlestickSeries(opts);
+  return CHART.addSeries(LightweightCharts.CandlestickSeries, opts);
+}
+function addLine(opts) {
+  if (typeof CHART.addLineSeries === 'function') return CHART.addLineSeries(opts);
+  return CHART.addSeries(LightweightCharts.LineSeries, opts);
+}
+
 function initChart() {
   const el = document.getElementById('chart');
   CHART = LightweightCharts.createChart(el, {
@@ -321,7 +338,7 @@ function initChart() {
     rightPriceScale: { borderColor: '#1e2632' },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
-  PRICE = CHART.addCandlestickSeries({ upColor:'#22c55e', downColor:'#ef5350', wickUpColor:'#22c55e', wickDownColor:'#ef5350', borderVisible:false });
+  PRICE = addCandles({ upColor:'#22c55e', downColor:'#ef5350', wickUpColor:'#22c55e', wickDownColor:'#ef5350', borderVisible:false });
   new ResizeObserver(() => CHART.applyOptions({ width: el.clientWidth, height: el.clientHeight })).observe(el);
 }
 
@@ -478,7 +495,7 @@ async function reload() {
   for (const l of LINES) { try { CHART.removeSeries(l); } catch(_){} }
   LINES = [];
   for (const s of (j.series || [])) {
-    const line = CHART.addLineSeries({ color: s.color, lineWidth: 2, priceLineVisible: false, title: s.name });
+    const line = addLine({ color: s.color, lineWidth: 2, priceLineVisible: false, title: s.name });
     line.setData(s.values);
     LINES.push(line);
   }
