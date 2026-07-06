@@ -53,6 +53,12 @@ class PrimitiveMeta:
 
 REGISTRY: dict[str, PrimitiveMeta] = {}
 
+# Short-name → key. Short names must be globally unique (not just unique
+# within a group) because the trading tool exposes each approved primitive
+# as `market_data.<name>()` — a collision there would silently shadow one
+# primitive with another.
+_NAME_TO_KEY: dict[str, str] = {}
+
 
 def primitive(
     *,
@@ -80,6 +86,14 @@ def primitive(
                 f'duplicate primitive key {key!r} — already registered at '
                 f'{REGISTRY[key].file}:{REGISTRY[key].lineno}'
             )
+        if name in _NAME_TO_KEY:
+            other = REGISTRY[_NAME_TO_KEY[name]]
+            raise RuntimeError(
+                f'primitive short name {name!r} already used by '
+                f'{other.key} ({other.file}:{other.lineno}) — short names '
+                f'must be globally unique because the trading tool exposes '
+                f'them as market_data.{name}()'
+            )
         try:
             src_file = inspect.getsourcefile(fn) or ''
             _, lineno = inspect.getsourcelines(fn)
@@ -90,6 +104,7 @@ def primitive(
             params=tuple(params), inputs=tuple(inputs), fn=fn,
             module=fn.__module__, file=src_file, lineno=lineno,
         )
+        _NAME_TO_KEY[name] = key
         fn._qp_key = key  # convenience for inspection
         return fn
     return _decorate

@@ -1,70 +1,58 @@
 """
 Floor pivots (classic day-trader levels).
 
-- `floor`: returns {P, R1, R2, R3, S1, S2, S3}, computed from yesterday's
-  RTH high/low/close. Constant across today's RTH bars, NaN before enough
-  history exists.
+- `floor`: returns {P, R1, R2, R3, S1, S2, S3} from yesterday's H/L/C.
+  Constant across today's bars; NaN until a prior session exists.
 
-Formulas (Pine's standard):
+`session` picks which bars define yesterday's range:
+  'rth' (default) — 09:30-16:00 ET only. Matches the pivots you see on a
+        TradingView equities chart, whose daily bars exclude extended
+        hours.
+  'eth' — every bar of the ET calendar date (premarket + RTH + AH).
+        This is the pasted Pine's "Full Day Daily Pivots (ETH)" intent
+        (written for 24h futures sessions). Needs extended-hours bars in
+        the feed.
+
+Formulas (standard floor pivots):
     P  = (H + L + C) / 3
-    R1 = 2P - L
-    S1 = 2P - H
-    R2 = P + (H - L)
-    S2 = P - (H - L)
-    R3 = H + 2*(P - L)
-    S3 = L - 2*(H - P)
+    R1 = 2P - L        S1 = 2P - H
+    R2 = P + (H - L)   S2 = P - (H - L)
+    R3 = H + 2*(P - L) S3 = L - 2*(H - P)
 """
 
 from __future__ import annotations
 
-import numpy as np
-
-from qp.registry import primitive
+from qp.registry import primitive, Param
 from qp.primitives.bars import Bars
-from qp.primitives.levels import _daily_agg, _in_rth
+from qp.primitives.levels import _daily_agg
+from qp.primitives._session import rth_pred
 
 
 @primitive(
     name='floor',
     group='pivots',
     description=('Floor pivots {P, R1, R2, R3, S1, S2, S3} from yesterday\'s '
-                 'RTH H/L/C. Constant across today\'s bars.'),
-    params=(),
+                 'H/L/C. session=\'rth\' (default, matches TV equities daily '
+                 'bars) or \'eth\' (full extended day — the Pine script\'s '
+                 'ETH pivots).'),
+    params=(Param('session', 'str', default='rth',
+                  description="'rth' or 'eth'"),),
     inputs=('bars',),
 )
-def floor(bars: Bars):
+def floor(bars: Bars, session: str = 'rth'):
     df = bars.df
-    high  = _daily_agg(df, _in_rth, 'high',  ago=1)
-    low   = _daily_agg(df, _in_rth, 'low',   ago=1)
-    # Yesterday's close — grab the last RTH close from yesterday.
-    # Reuse the daily aggregator by treating close as an "open" trick: we
-    # need the LAST value, not the first. Doing it directly here:
-    et = df.index.tz_convert('America/New_York')
-    close_arr = df['close'].to_numpy(dtype=float)
-    dates = et.date
-    per_day: dict = {}
-    order: list = []
-    for i in range(len(df)):
-        if not _in_rth(et[i]):
-            continue
-        d = dates[i]
-        if d not in per_day:
-            per_day[d] = close_arr[i]
-            order.append(d)
-        else:
-            per_day[d] = close_arr[i]  # keep overwriting → ends at last RTH close
-    day_pos = {d: k for k, d in enumerate(order)}
-    close_prev = np.full(len(df), np.nan)
-    for i in range(len(df)):
-        d = dates[i]
-        if d not in day_pos:
-            continue
-        pos = day_pos[d] - 1
-        if pos < 0:
-            continue
-        close_prev[i] = per_day[order[pos]]
+    if session == 'eth':
+        pred = lambda ts: True  # noqa: E731 — every bar of the ET date
+    elif session == 'rth':
+        pred = rth_pred(df)
+    else:
+        raise ValueError(f"session must be 'rth' or 'eth', got {session!r}")
 
-    P  = (high + low + close_prev) / 3.0
+    high  = _daily_agg(df, pred, 'high',  ago=1)
+    low   = _daily_agg(df, pred, 'low',   ago=1)
+    close = _daily_agg(df, pred, 'close', ago=1)
+
+    P  = (high + low + close) / 3.0
     R1 = 2.0 * P - low
     S1 = 2.0 * P - high
     R2 = P + (high - low)

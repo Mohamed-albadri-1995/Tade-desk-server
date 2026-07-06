@@ -155,14 +155,18 @@ def vwma(bars: Bars, length: int, source: str = 'close'):
     name='hma',
     group='ma',
     description=('Hull MA. Matches TradingView `ta.hma(source, length)` — '
-                 'wma(2*wma(src, len/2) - wma(src, len), sqrt(len)).'),
+                 'wma(2*wma(src, round(len/2)) - wma(src, len), '
+                 'round(sqrt(len))). Rounds half away from zero like Pine '
+                 'math.round (matters for odd lengths, e.g. 15 → half=8).'),
     params=(Param('length', 'int', default=20, min=2),),
     inputs=('source',),
 )
 def hma(source, length: int):
     length = int(length)
-    half = max(1, length // 2)
-    sq   = max(1, int(math.floor(math.sqrt(length))))
+    # Pine math.round = round half away from zero; Python round() is
+    # banker's rounding, so do it by hand.
+    half = max(1, int(length / 2.0 + 0.5))
+    sq   = max(1, int(math.sqrt(length) + 0.5))
     a = wma(source, half)
     b = wma(source, length)
     diff = 2.0 * a - b
@@ -173,23 +177,35 @@ def hma(source, length: int):
     name='pine_5day',
     group='ma',
     description=('5-day RTH SMA — matches the Pine construct '
-                 '`request.security(sym, "1", ta.sma(close, 1950), ...)`. '
-                 '1950 min = 6.5h × 5 RTH days. Auto-detects bar spacing '
-                 'from the DataFrame index (5m → length=390, 15m → 130, '
-                 'etc.), uses close as source.'),
+                 '`request.security(sym, "1", ta.sma(close, 1950), ...)`: '
+                 '1950 min = 6.5h x 5 RTH days. Computed over RTH bars '
+                 'only (premarket/AH excluded), so 5m → 390 RTH bars, '
+                 '1m → 1950, daily → 5. Value held flat across non-RTH '
+                 'bars. Exact vs Pine on 1m; on coarser TFs it samples '
+                 'TF closes instead of every 1m close (tiny smoothing '
+                 'difference — verify on 1m).'),
     params=(),
     inputs=('bars',),
 )
 def pine_5day(bars: Bars):
+    from qp.primitives._session import rth_positions
     df = bars.df
-    if len(df) < 3:
-        return np.full(len(df), np.nan)
-    # Median inter-bar delta in minutes — robust to overnight gaps.
+    n = len(df)
+    if n < 3:
+        return np.full(n, np.nan)
     deltas = pd.Series(df.index).diff().dt.total_seconds().dropna() / 60.0
     bar_min = float(deltas.median())
     if bar_min <= 0:
-        return np.full(len(df), np.nan)
-    length = max(1, int(round(1950.0 / bar_min)))
-    close = df['close'].to_numpy(dtype=float)
-    s = pd.Series(close)
-    return s.rolling(length, min_periods=length).mean().to_numpy()
+        return np.full(n, np.nan)
+    # One RTH day is 390 minutes; a daily bar counts as one full RTH day.
+    length = max(1, int(round(1950.0 / min(bar_min, 390.0))))
+    pos = rth_positions(df)
+    out = np.full(n, np.nan)
+    if len(pos) == 0:
+        return out
+    close = df['close'].to_numpy(dtype=float)[pos]
+    vals = pd.Series(close).rolling(length, min_periods=length).mean().to_numpy()
+    out[pos] = vals
+    # Hold the last RTH value across non-RTH bars (Pine's security() call
+    # keeps returning the last computed 1m value on chart bars).
+    return pd.Series(out).ffill().to_numpy()

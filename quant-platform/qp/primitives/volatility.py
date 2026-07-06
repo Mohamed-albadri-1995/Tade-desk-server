@@ -2,8 +2,9 @@
 Volatility primitives — all Pine `ta.<name>` bar-for-bar parity.
 
 - true_range: max(high-low, |high-prev_close|, |low-prev_close|).
-              Matches `ta.tr(true)`. First bar is NaN.
+              Matches `ta.tr(handle_na=true)` — first bar = high-low.
 - atr:        Wilder ATR = rma(true_range, length). `ta.atr(length)`.
+              First value at bar (length-1), same as Pine.
 - stdev:      population std (ddof=0) of `source` over `length` bars.
               Matches `ta.stdev(source, length)`.
 - bb:         Bollinger Bands. Returns a dict {middle, upper, lower} so
@@ -25,8 +26,9 @@ from qp.primitives.ma import rma as _rma
     name='true_range',
     group='volatility',
     description=('True range, `max(H-L, |H-prev_close|, |L-prev_close|)`. '
-                 'Matches TradingView `ta.tr(handle_na=true)`. First bar '
-                 'is NaN (no prior close).'),
+                 'Matches TradingView `ta.tr(handle_na=true)`: the first '
+                 'bar (no prior close) falls back to high-low. This is '
+                 'the variant `ta.atr` builds on.'),
     params=(),
     inputs=('bars',),
 )
@@ -41,8 +43,9 @@ def true_range(bars: Bars):
         np.abs(high - prev_close),
         np.abs(low - prev_close),
     ])
-    # First bar has no prev close → NaN
-    tr[0] = np.nan
+    # handle_na=true: no prev close on bar 0 → the bar's own range.
+    if len(tr):
+        tr[0] = high[0] - low[0]
     return tr
 
 
@@ -55,9 +58,9 @@ def true_range(bars: Bars):
     inputs=('bars',),
 )
 def atr(bars: Bars, length: int):
-    # ta.atr(len) is literally rma(tr(true), len). rma handles the leading
-    # NaN (bar 0 has no prev_close) by skipping until it has `length` valid
-    # values, matching Pine's warmup.
+    # ta.atr(len) is literally rma(tr(handle_na=true), len). TR is valid
+    # from bar 0 (H-L fallback), so rma seeds at bar (length-1) — Pine's
+    # exact warmup.
     return _rma(true_range(bars), int(length))
 
 

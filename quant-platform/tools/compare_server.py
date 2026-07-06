@@ -137,7 +137,14 @@ def compute_data(symbol: str, tf: str, days: int, primitive_key: str,
     if len(bars) == 0:
         return {'bars': [], 'series': [], 'first': None, 'last': None}
 
-    ts = (bars.index.view('int64') // 1_000_000_000).tolist()
+    # Display-only shift: lightweight-charts renders epoch seconds as UTC,
+    # so feed it the ET wall-clock re-labelled as UTC. Both panels then
+    # show the same clock (the TV widget is set to America/New_York).
+    # Timedelta division instead of asi8/view: index int64s are unit-
+    # dependent (pandas 3.0 defaults to microseconds, not nanoseconds).
+    naive_et = bars.index.tz_convert(_ET).tz_localize(None)
+    ts = ((naive_et - pd.Timestamp('1970-01-01'))
+          // pd.Timedelta(seconds=1)).tolist()
     bar_list = [
         {'time': int(t), 'open': float(o), 'high': float(h),
          'low': float(l), 'close': float(c), 'volume': float(v)}
@@ -282,6 +289,29 @@ PAGE = r"""<!doctype html>
 <script>
 let CHART = null, PRICE = null, LINES = [], PRIMS = [];
 
+// Chart-library failures must NEVER take down the rest of the page — the
+// primitive dropdown, params, and approval flow all work without a chart.
+// (This was the "empty dropdown" bug: initChart threw when the CDN was
+// blocked and everything after it silently never ran.)
+function chartBanner(msg) {
+  const el = document.getElementById('chart');
+  el.innerHTML = '<div style="padding:24px;color:#f5a623;font-size:13px;line-height:1.6">' +
+    '⚠️ ' + msg + '<br><span style="color:#64748b">The primitive list, parameters and ' +
+    'Approve button still work. To fix the chart: restart the server and check qp.log ' +
+    'for the "chart library cached" line, then hard-refresh (Ctrl+Shift+R).</span></div>';
+}
+
+function waitForChartLib(timeoutMs) {
+  return new Promise(resolve => {
+    const t0 = Date.now();
+    (function poll() {
+      if (window.LightweightCharts) return resolve(true);
+      if (Date.now() - t0 > timeoutMs) return resolve(false);
+      setTimeout(poll, 100);
+    })();
+  });
+}
+
 function initChart() {
   const el = document.getElementById('chart');
   CHART = LightweightCharts.createChart(el, {
@@ -389,11 +419,19 @@ function onPrimChange() {
     const lab = document.createElement('label'); lab.textContent = par.name; grid.appendChild(lab);
     const inp = document.createElement('input');
     inp.dataset.name = par.name; inp.dataset.kind = par.kind;
-    inp.value = savedParams[par.name] ?? par.default ?? '';
-    if (par.min != null) inp.min = par.min;
-    if (par.max != null) inp.max = par.max;
-    inp.type = (par.kind === 'int' || par.kind === 'float') ? 'number' : 'text';
-    if (par.kind === 'float') inp.step = 'any';
+    if (par.kind === 'bool') {
+      inp.type = 'checkbox';
+      const saved = savedParams[par.name];
+      inp.checked = saved !== undefined ? saved === true || saved === 'true'
+                                        : par.default === true;
+      inp.style.width = 'auto'; inp.style.justifySelf = 'start';
+    } else {
+      inp.value = savedParams[par.name] ?? par.default ?? '';
+      if (par.min != null) inp.min = par.min;
+      if (par.max != null) inp.max = par.max;
+      inp.type = (par.kind === 'int' || par.kind === 'float') ? 'number' : 'text';
+      if (par.kind === 'float') inp.step = 'any';
+    }
     grid.appendChild(inp);
   }
   const meta = p.approval;
@@ -410,7 +448,7 @@ function collectParams() {
     let v = el.value;
     if (el.dataset.kind === 'int')   v = parseInt(v, 10);
     if (el.dataset.kind === 'float') v = parseFloat(v);
-    if (el.dataset.kind === 'bool')  v = (v === 'true');
+    if (el.dataset.kind === 'bool')  v = el.type === 'checkbox' ? el.checked : (v === 'true');
     out[el.dataset.name] = v;
   }
   return out;
@@ -418,7 +456,7 @@ function collectParams() {
 
 async function reload() {
   const p = currentPrim();
-  if (!p) return;
+  if (!p || !PRICE) return;   // no chart → nothing to draw into
   const symbol = document.getElementById('symbol').value.trim().toUpperCase() || 'SPY';
   const tf = document.getElementById('tf').value;
   const days = document.getElementById('days').value;
@@ -472,10 +510,23 @@ function restoreState() {
   const s   = localStorage.getItem('qp_source'); if (s)   document.getElementById('source').value = s;
 }
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   restoreState();
-  initChart();
-  loadPrimitives().then(() => { loadTV(); reload(); });
+  // The dropdown + approval flow must come up no matter what happens to
+  // the chart library. Order: primitives first, chart second.
+  try {
+    await loadPrimitives();
+  } catch (e) {
+    document.getElementById('status').textContent = 'failed to load primitives: ' + e;
+  }
+  loadTV();
+  const haveLib = await waitForChartLib(8000);
+  if (haveLib) {
+    try { initChart(); } catch (e) { chartBanner('Chart init failed: ' + e.message); }
+  } else {
+    chartBanner('Chart library did not load — /static/lightweight-charts.js missing and no CDN reachable from this browser.');
+  }
+  if (PRICE) reload();
 });
 document.getElementById('symbol').addEventListener('change', () => { loadTV(); reload(); });
 document.getElementById('tf').addEventListener('change',      () => { loadTV(); reload(); });
