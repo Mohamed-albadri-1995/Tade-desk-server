@@ -20,16 +20,16 @@ def _pivot(source, left: int, right: int, side: str):
     right = int(right)
     n = len(src)
     out = np.full(n, np.nan)
-    # A pivot at index i is confirmed on bar i+right. We can therefore
-    # write out[i+right] = src[i] when src[i] is the extreme of
-    # src[i-left : i+right+1] (unique).
+    # Pine semantics: `v >= left values AND v > right values` (high side).
+    # Left ties count as a pivot; right side must be strictly less.
     for i in range(left, n - right):
-        window = src[i - left: i + right + 1]
         v = src[i]
+        left_win  = src[i - left: i]
+        right_win = src[i + 1: i + right + 1]
         if side == 'high':
-            is_pivot = v == window.max() and int((window == v).sum()) == 1
+            is_pivot = (v >= left_win.max()) and (v > right_win.max())
         else:
-            is_pivot = v == window.min() and int((window == v).sum()) == 1
+            is_pivot = (v <= left_win.min()) and (v < right_win.min())
         if is_pivot:
             out[i + right] = v
     return out

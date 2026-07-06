@@ -109,11 +109,14 @@ def n_day(bars: Bars, n_days: int):
     anchor = np.zeros(n, dtype=bool)
     day_count = 0
     last_date = None
+    N = int(n_days)
     for i in range(n):
         if dates[i] != last_date:
             day_count += 1
             last_date = dates[i]
-            if day_count % int(n_days) == 1:  # start a new N-day block
+            # Match Pine literally: `isNewDay AND dCount % N == 0`. First
+            # anchor is at day N (day 2 for N=2). Days 1..N-1 are NaN.
+            if day_count % N == 0:
                 anchor[i] = True
     return _running_vwap(price, vol, anchor)
 
@@ -277,19 +280,23 @@ def week_ll(bars: Bars):
 def _confirmed_pivots(values: np.ndarray, lookback: int, side: str) -> np.ndarray:
     """Return the bar index of the anchor (pivot) for each output bar. -1
     until the first pivot is confirmed. Confirmation happens `lookback`
-    bars *after* the pivot bar itself, matching `ta.pivothigh(v, N, N)`."""
+    bars *after* the pivot bar itself. Matches Pine `ta.pivothigh(v, N, N)`
+    semantics: `v >= left values AND v > right values` (ties on the left
+    still count as a pivot; the right side must be strictly less)."""
     n = len(values)
     anchor_idx = np.full(n, -1, dtype=np.int64)
     current = -1
+    L = int(lookback)
     for i in range(n):
-        if i >= 2 * lookback:
-            centre = i - lookback
-            window = values[centre - lookback: centre + lookback + 1]
+        if i >= 2 * L:
+            centre = i - L
             v = values[centre]
+            left_win  = values[centre - L: centre]
+            right_win = values[centre + 1: centre + L + 1]
             if side == 'high':
-                is_pivot = v == window.max() and (window == v).sum() == 1
+                is_pivot = (v >= left_win.max()) and (v > right_win.max())
             else:
-                is_pivot = v == window.min() and (window == v).sum() == 1
+                is_pivot = (v <= left_win.min()) and (v < right_win.min())
             if is_pivot:
                 current = centre
         anchor_idx[i] = current
