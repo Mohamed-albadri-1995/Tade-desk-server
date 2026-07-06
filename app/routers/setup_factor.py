@@ -18,6 +18,7 @@ router = APIRouter(prefix="/api/setup-factor", tags=["setup-factor"])
 class SetupFactorModelUpdate(BaseModel):
     signals: Optional[dict] = None
     factor_map: Optional[dict] = None
+    split_by_side: Optional[bool] = None
     factor_min: Optional[float] = None
     factor_max: Optional[float] = None
     min_trades: Optional[int] = None
@@ -27,18 +28,29 @@ class SetupFactorModelUpdate(BaseModel):
 
 @router.get("")
 async def list_states(session: AsyncSession = Depends(get_session)):
-    """Every setup with its full factor derivation: inputs -> signal
-    points -> score -> mapped factor -> confidence -> final factor."""
+    """Every setup with its full factor derivation per side: inputs ->
+    signal points -> score -> mapped factor -> confidence -> final."""
     setups = (await session.execute(select(SetupModel))).scalars().all()
-    return [
-        {
-            "setup_id": s.id,
-            "setup_name": s.name,
-            "is_active": s.is_active,
-            **monitor.setup_factor_engine.get_state(s.id),
-        }
-        for s in setups
-    ]
+    split = monitor.setup_factor_engine.model.get("split_by_side")
+    out = []
+    for s in setups:
+        sides = ["pooled", "long", "short"] if split else ["pooled"]
+        for side in sides:
+            state = monitor.setup_factor_engine._states.get((s.id, side))
+            if state is None:
+                if side != "pooled":
+                    continue
+                state = monitor.setup_factor_engine.get_state(s.id)
+            out.append(
+                {
+                    "setup_id": s.id,
+                    "setup_name": s.name,
+                    "is_active": s.is_active,
+                    "side": side,
+                    **{k: v for k, v in state.items() if k != "side"},
+                }
+            )
+    return out
 
 
 @router.get("/model")
@@ -51,6 +63,7 @@ async def get_model(session: AsyncSession = Depends(get_session)):
     return {
         "signals": row.signals,
         "factor_map": row.factor_map,
+        "split_by_side": row.split_by_side,
         "factor_min": row.factor_min,
         "factor_max": row.factor_max,
         "min_trades": row.min_trades,

@@ -57,6 +57,10 @@ class MarketDataService:
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
 
+    @property
+    def symbols(self) -> List[str]:
+        return list(self._symbols)
+
     # ----------------------------------------------------------------- loop
 
     async def _run(self) -> None:

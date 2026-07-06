@@ -51,11 +51,26 @@ async def update_settings(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "settings not initialised")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    for field in ("session_start_time", "session_end_time"):
+        if field in data:
+            parts = str(data[field]).split(":")
+            if len(parts) != 2 or not all(p.isdigit() for p in parts):
+                raise HTTPException(422, f"{field} must be HH:MM")
+    if "watchlist_source" in data and data["watchlist_source"] not in ("screener", "manual"):
+        raise HTTPException(422, "watchlist_source must be 'screener' or 'manual'")
+    watchlist_changed = "watchlist_source" in data and data["watchlist_source"] != row.watchlist_source
+    for key, value in data.items():
         setattr(row, key, value)
     await session.commit()
     await session.refresh(row)
     await monitor._load_settings()
+    if "session_start_time" in data:
+        from main import schedule_session_start  # lazy: avoids circular import
+
+        schedule_session_start()
+    if watchlist_changed:
+        await monitor.restart()
     return row
 
 

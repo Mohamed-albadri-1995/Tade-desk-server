@@ -176,6 +176,8 @@ class UserSettingsUpdate(BaseModel):
     account_size: Optional[float] = None
     risk_per_trade: Optional[float] = None
     session_start_time: Optional[str] = None
+    session_end_time: Optional[str] = None
+    watchlist_source: Optional[str] = None  # 'screener' | 'manual'
     screener_refresh_interval: Optional[int] = None
     market_refresh_interval: Optional[int] = None
     ohlcv_lookback_bars: Optional[int] = None
@@ -188,6 +190,8 @@ class UserSettingsOut(BaseModel):
     account_size: float
     risk_per_trade: float
     session_start_time: str
+    session_end_time: str
+    watchlist_source: str
     screener_refresh_interval: int
     market_refresh_interval: int
     ohlcv_lookback_bars: int

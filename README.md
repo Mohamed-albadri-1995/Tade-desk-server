@@ -93,7 +93,20 @@ moment of the signal — `final = min(risk-based, available/entry)`.
 Pipeline order: grade (step 6) then size (step 7);
 `shares = base × grade × regime × setup_factor`.
 
-### Watchlist import
+### Watchlist & session
 
-Upload `.csv` or `.json` on the Watchlist tab (extracts the `ticker` field
-per record); the data feeds restart automatically with the new symbols.
+By default (`watchlist_source: screener`) the watchlist is pulled
+automatically from the screener registry and the market feed re-syncs
+whenever the registry changes; switch to `manual` in Settings to use
+`.csv`/`.json` uploads on the Watchlist tab instead. The screener itself
+is embedded in the UI's **Screener** tab (from `SCREENER_URL`), so both
+tools live on one page.
+
+New entries are evaluated only inside the **entry window** (ET), default
+**09:35–10:00** — the session starts and stops automatically, and both
+times are editable in Settings. Open positions are monitored around the
+clock regardless of the window.
+
+The setup factor is computed **per side** (long/short) with pooled
+fallback while a side has too few trades (toggle `split_by_side` in the
+factor model).

@@ -69,6 +69,8 @@ class MonitorService:
         self.journal_service = JournalService()
 
         self.session_start_time = "09:35"
+        self.session_end_time = "10:00"  # last new entry; positions monitored regardless
+        self.watchlist_source = "screener"  # 'screener' (auto) | 'manual' (uploads)
         self.market_refresh_interval = 5
 
         self._task: Optional[asyncio.Task] = None
@@ -79,8 +81,10 @@ class MonitorService:
 
     async def start(self) -> None:
         await self.stop()
-        symbols = await self._load_watchlist()
         await self._load_settings()
+        # 'screener' mode: symbols come from the screener registry and are
+        # synced automatically each tick; 'manual' mode uses uploads.
+        symbols = [] if self.watchlist_source == "screener" else await self._load_watchlist()
         await self.market_service.start(symbols)
         await self.screener_service.start(symbols)
         await self.capital_service.start()
@@ -120,6 +124,9 @@ class MonitorService:
             "symbols_cached": sorted(self.market_cache.keys()),
             "screener_cached": sorted(self.screener_cache.keys()),
             "session_start_time": self.session_start_time,
+            "session_end_time": self.session_end_time,
+            "session_open": self._session_open(),
+            "watchlist_source": self.watchlist_source,
         }
 
     # -------------------------------------------------------------- loaders
@@ -140,6 +147,8 @@ class MonitorService:
             ).scalar_one_or_none()
         if row:
             self.session_start_time = row.session_start_time
+            self.session_end_time = row.session_end_time
+            self.watchlist_source = row.watchlist_source
             self.market_refresh_interval = row.market_refresh_interval
             self.market_service.refresh_interval = row.market_refresh_interval
             self.market_service.lookback_bars = row.ohlcv_lookback_bars
@@ -157,13 +166,21 @@ class MonitorService:
             )
             return list(result.scalars().all())
 
-    def _session_open(self) -> bool:
+    @staticmethod
+    def _parse_hhmm(value: str, fallback: tuple) -> tuple:
         try:
-            hour, minute = (int(x) for x in self.session_start_time.split(":"))
-        except ValueError:
-            hour, minute = 9, 35
+            hour, minute = (int(x) for x in value.split(":"))
+            return (hour, minute)
+        except (ValueError, AttributeError):
+            return fallback
+
+    def _session_open(self) -> bool:
+        """New entries are evaluated only inside [start, end] ET —
+        the session starts and stops automatically."""
+        start = self._parse_hhmm(self.session_start_time, (9, 35))
+        end = self._parse_hhmm(self.session_end_time, (10, 0))
         now = datetime.now(MARKET_TZ)
-        return (now.hour, now.minute) >= (hour, minute)
+        return start <= (now.hour, now.minute) <= end
 
     # ------------------------------------------------------------ main loop
 
@@ -179,6 +196,7 @@ class MonitorService:
         # Open positions are watched whenever data flows, even outside the
         # session window — an overnight position still needs its stop.
         await self._monitor_positions()
+        await self._sync_screener_watchlist()
         if not self._session_open():
             return
         # Refresh DB-backed caches so signal-time lookups are pure memory reads.
@@ -265,6 +283,18 @@ class MonitorService:
 
         self._armed[armed_key] = signal_side
         await self.run_signal_pipeline(stock, setup, conditions, evaluation)
+
+    async def _sync_screener_watchlist(self) -> None:
+        """In 'screener' mode the watchlist is whatever the screener
+        registry currently holds; restart the market feed when it changes."""
+        if self.watchlist_source != "screener":
+            return
+        screener_symbols = sorted(self.screener_cache.keys())
+        if not screener_symbols:
+            return
+        if set(screener_symbols) != set(self.market_service.symbols):
+            logger.info("screener watchlist changed -> %d symbols", len(screener_symbols))
+            await self.market_service.start(screener_symbols)
 
     # ------------------------------------------------ position monitoring
 
@@ -425,7 +455,7 @@ class MonitorService:
 
         # Step 7: sizing — per account, with the setup factor and the
         # at-the-moment capital cap. All inputs are cached (zero I/O).
-        setup_factor_state = self.setup_factor_engine.get_state(setup.id)
+        setup_factor_state = self.setup_factor_engine.get_state(setup.id, signal_side)
         setup_factor = float(setup_factor_state["final_factor"])
         regime_key = str(screener_snapshot.get("regime") or "")
         sl_for_risk = sl_price if sl_price is not None else entry_price

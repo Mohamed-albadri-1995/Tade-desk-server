@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -167,6 +167,9 @@ class SetupFactorModelModel(Base):
     signals: Mapped[dict] = mapped_column(JSON, default=dict)
     # Score -> factor mapping, checked best-first: {"80": 1.5, "60": 1.25, ...}
     factor_map: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Compute separate long/short factors (falls back to pooled while a
+    # side has too few trades).
+    split_by_side: Mapped[bool] = mapped_column(Boolean, default=True)
     factor_min: Mapped[float] = mapped_column(Float, default=0.0)
     factor_max: Mapped[float] = mapped_column(Float, default=1.5)
     min_trades: Mapped[int] = mapped_column(Integer, default=20)  # full confidence at n>=this
@@ -181,9 +184,11 @@ class SetupFactorStateModel(Base):
     read (never computed) at signal time."""
 
     __tablename__ = "setup_factor_state"
+    __table_args__ = (UniqueConstraint("setup_id", "side", name="uq_setup_factor_side"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    setup_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    setup_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    side: Mapped[str] = mapped_column(String(10), default="pooled")  # pooled|long|short
     inputs: Mapped[dict] = mapped_column(JSON, default=dict)  # n, expectancy_r, pf, win_rate, ...
     signal_points: Mapped[dict] = mapped_column(JSON, default=dict)  # per-signal points
     score: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0..100
@@ -201,6 +206,8 @@ class UserSettingsModel(Base):
     account_size: Mapped[float] = mapped_column(Float, default=100000.0)
     risk_per_trade: Mapped[float] = mapped_column(Float, default=0.01)  # fraction of account
     session_start_time: Mapped[str] = mapped_column(String(5), default="09:35")
+    session_end_time: Mapped[str] = mapped_column(String(5), default="10:00")  # last entry
+    watchlist_source: Mapped[str] = mapped_column(String(10), default="screener")  # screener|manual
     screener_refresh_interval: Mapped[int] = mapped_column(Integer, default=15)
     market_refresh_interval: Mapped[int] = mapped_column(Integer, default=5)
     ohlcv_lookback_bars: Mapped[int] = mapped_column(Integer, default=5000)

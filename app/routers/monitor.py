@@ -25,6 +25,13 @@ async def monitor_stop():
     return monitor.status()
 
 
+@router.get("/api/config")
+async def app_config():
+    from app.config import settings
+
+    return {"screener_url": settings.screener_url}
+
+
 @router.get("/api/primitives")
 async def list_primitives():
     import qp

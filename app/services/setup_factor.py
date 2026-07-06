@@ -71,13 +71,14 @@ def _max_drawdown_r(trades: List[JournalModel]) -> Optional[float]:
 class SetupFactorEngine:
     def __init__(self):
         self.model: dict = self._default_model()
-        self._states: Dict[int, dict] = {}  # setup_id -> state dict (cache)
+        self._states: Dict[tuple, dict] = {}  # (setup_id, side) -> state; side: pooled|long|short
 
     @staticmethod
     def _default_model() -> dict:
         return {
             "signals": dict(DEFAULT_SIGNALS),
             "factor_map": dict(DEFAULT_FACTOR_MAP),
+            "split_by_side": True,
             "factor_min": 0.0,
             "factor_max": 1.5,
             "min_trades": 20,
@@ -98,6 +99,7 @@ class SetupFactorEngine:
             self.model = {
                 "signals": row.signals or dict(DEFAULT_SIGNALS),
                 "factor_map": row.factor_map or dict(DEFAULT_FACTOR_MAP),
+                "split_by_side": bool(row.split_by_side),
                 "factor_min": row.factor_min,
                 "factor_max": row.factor_max,
                 "min_trades": row.min_trades,
@@ -109,7 +111,8 @@ class SetupFactorEngine:
         async with async_session_factory() as session:
             rows = (await session.execute(select(SetupFactorStateModel))).scalars().all()
         self._states = {
-            r.setup_id: {
+            (r.setup_id, r.side or "pooled"): {
+                "side": r.side or "pooled",
                 "final_factor": r.final_factor,
                 "insufficient_data": r.insufficient_data,
                 "score": r.score,
@@ -231,7 +234,7 @@ class SetupFactorEngine:
 
     # ----------------------------------------------------------- recompute
 
-    async def recompute_all(self) -> Dict[int, dict]:
+    async def recompute_all(self) -> Dict[tuple, dict]:
         await self.refresh_model()
         async with async_session_factory() as session:
             trades = (
@@ -244,33 +247,51 @@ class SetupFactorEngine:
                 by_setup.setdefault(t.setup_id, []).append(t)
 
             for setup_id, setup_trades in by_setup.items():
-                state = self.compute_state(setup_trades)
-                self._states[setup_id] = state
-                row = (
-                    await session.execute(
-                        select(SetupFactorStateModel).where(
-                            SetupFactorStateModel.setup_id == setup_id
+                variants = {"pooled": setup_trades}
+                if self.model.get("split_by_side"):
+                    variants["long"] = [t for t in setup_trades if t.signal_side == "long"]
+                    variants["short"] = [t for t in setup_trades if t.signal_side == "short"]
+                for side, side_trades in variants.items():
+                    state = self.compute_state(side_trades)
+                    state["side"] = side
+                    self._states[(setup_id, side)] = state
+                    row = (
+                        await session.execute(
+                            select(SetupFactorStateModel).where(
+                                SetupFactorStateModel.setup_id == setup_id,
+                                SetupFactorStateModel.side == side,
+                            )
                         )
-                    )
-                ).scalar_one_or_none()
-                if row is None:
-                    row = SetupFactorStateModel(setup_id=setup_id)
-                    session.add(row)
-                row.inputs = state["inputs"]
-                row.signal_points = state["signal_points"]
-                row.score = state["score"]
-                row.mapped_factor = state["mapped_factor"]
-                row.confidence = state["confidence"]
-                row.final_factor = state["final_factor"]
-                row.insufficient_data = state["insufficient_data"]
+                    ).scalar_one_or_none()
+                    if row is None:
+                        row = SetupFactorStateModel(setup_id=setup_id, side=side)
+                        session.add(row)
+                    row.inputs = state["inputs"]
+                    row.signal_points = state["signal_points"]
+                    row.score = state["score"]
+                    row.mapped_factor = state["mapped_factor"]
+                    row.confidence = state["confidence"]
+                    row.final_factor = state["final_factor"]
+                    row.insufficient_data = state["insufficient_data"]
             await session.commit()
         return self._states
 
     # --------------------------------------------------------- signal time
 
-    def get_state(self, setup_id: int) -> dict:
-        """Cached state read — zero I/O; neutral 1.0 for unseen setups."""
-        return self._states.get(setup_id, dict(NEUTRAL_STATE))
+    def get_state(self, setup_id: int, side: Optional[str] = None) -> dict:
+        """Cached state read — zero I/O; neutral 1.0 for unseen setups.
 
-    def get_factor(self, setup_id: int) -> float:
-        return float(self.get_state(setup_id)["final_factor"])
+        With side splitting on, the side-specific state is used once that
+        side has enough trades; otherwise it falls back to the pooled
+        state. ``side_used`` records which one applied (transparency)."""
+        if side and self.model.get("split_by_side"):
+            side_state = self._states.get((setup_id, side))
+            if side_state and not side_state["insufficient_data"]:
+                return {**side_state, "side_used": side}
+        pooled = self._states.get((setup_id, "pooled"))
+        if pooled:
+            return {**pooled, "side_used": "pooled"}
+        return {**dict(NEUTRAL_STATE), "side": "pooled", "side_used": "pooled"}
+
+    def get_factor(self, setup_id: int, side: Optional[str] = None) -> float:
+        return float(self.get_state(setup_id, side)["final_factor"])
