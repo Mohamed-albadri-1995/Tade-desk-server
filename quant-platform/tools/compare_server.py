@@ -114,27 +114,41 @@ def compute_data(symbol: str, tf: str, days: int, primitive_key: str,
         if primitive_key not in REGISTRY:
             raise ValueError(f'unknown primitive {primitive_key!r}')
         m = REGISTRY[primitive_key]
-        # Resolve inputs. Every primitive takes ONE of:
-        #   inputs=('bars',) → pass a Bars dataclass (validated OHLCV)
-        #   inputs=('source',) → pass the resolved source array
         kwargs = dict(params or {})
         if list(m.inputs) == ['bars']:
-            arr = m.fn(Bars.from_frame(bars), **kwargs)
+            result = m.fn(Bars.from_frame(bars), **kwargs)
         elif list(m.inputs) == ['source']:
             src = _source_series(bars, source)
-            arr = m.fn(src, **kwargs)
+            result = m.fn(src, **kwargs)
         else:
             raise ValueError(f'unsupported inputs {m.inputs!r} on {primitive_key}')
-        arr = np.asarray(arr, dtype=float)
-        vals = []
-        for t, v in zip(ts, arr):
-            if v == v:  # NaN skip
-                vals.append({'time': int(t), 'value': float(v)})
-        series_out.append({
-            'name':  f'{m.name}({",".join(f"{k}={v}" for k,v in kwargs.items())})',
-            'color': '#22c55e' if get_approval(primitive_key) else '#f5a623',
-            'values': vals,
-        })
+
+        # Single array → one series. Dict → one per key (BB, MACD, etc.)
+        if isinstance(result, dict):
+            lines = [(sub_name, np.asarray(arr, dtype=float))
+                     for sub_name, arr in result.items()]
+        else:
+            lines = [(None, np.asarray(result, dtype=float))]
+
+        approved = get_approval(primitive_key) is not None
+        # Multi-line palettes never use "approved-green" as a per-line
+        # signal — the badge already tells you approval status. For a
+        # single-line primitive, keep the green/orange convention.
+        palette = ['#f5a623', '#3b82f6', '#a855f7', '#ec4899', '#14b8a6']
+        for idx, (sub_name, arr) in enumerate(lines):
+            vals = [{'time': int(t), 'value': float(v)}
+                    for t, v in zip(ts, arr) if v == v]
+            if len(lines) == 1:
+                color = '#22c55e' if approved else '#f5a623'
+            else:
+                color = palette[idx % len(palette)]
+            label = m.name if sub_name is None else f'{m.name}.{sub_name}'
+            args = ','.join(f'{k}={v}' for k, v in kwargs.items())
+            series_out.append({
+                'name':  f'{label}({args})' if args else label,
+                'color': color,
+                'values': vals,
+            })
 
     return {
         'bars':   bar_list,
@@ -211,7 +225,7 @@ PAGE = r"""<!doctype html>
   </div>
 </div>
 <script>
-let CHART = null, PRICE = null, LINE = null, PRIMS = [];
+let CHART = null, PRICE = null, LINES = [], PRIMS = [];
 
 function initChart() {
   const el = document.getElementById('chart');
@@ -230,10 +244,20 @@ function initChart() {
 // the TV widget reloads with the matching study attached, so eyeball parity
 // is one page-load instead of clicking through TV's Indicators menu.
 const TV_STUDIES = {
-  'ma.sma':       'MASimple@tv-basicstudies',
-  'ma.ema':       'MAExp@tv-basicstudies',
-  'ma.wma':       'MAWeighted@tv-basicstudies',
-  'vwap.session': 'VWAP@tv-basicstudies',
+  'ma.sma':            'MASimple@tv-basicstudies',
+  'ma.ema':            'MAExp@tv-basicstudies',
+  'ma.wma':            'MAWeighted@tv-basicstudies',
+  'ma.vwma':           'MAVolumeWeighted@tv-basicstudies',
+  'ma.hma':            'HullMA@tv-basicstudies',
+  'ma.rma':            null,   // Wilder RMA — no direct TV overlay
+  'vwap.session':      'VWAP@tv-basicstudies',
+  'volatility.atr':    'ATR@tv-basicstudies',
+  'volatility.stdev':  'StandardDeviation@tv-basicstudies',
+  'volatility.bb':     'BB@tv-basicstudies',
+  'volatility.true_range': null,  // TR — no direct TV overlay
+  'osc.rsi':           'RSI@tv-basicstudies',
+  'extremes.highest':  null,   // add "Donchian Channels" manually if you want it
+  'extremes.lowest':   null,
 };
 
 function loadTV() {
@@ -358,11 +382,12 @@ async function reload() {
   const j = await r.json();
   document.getElementById('status').textContent = `${j.first} → ${j.last} · ${(j.bars || []).length} bars`;
   PRICE.setData(j.bars);
-  if (LINE) { try { CHART.removeSeries(LINE); } catch(_){} LINE = null; }
-  if ((j.series || []).length) {
-    const s = j.series[0];
-    LINE = CHART.addLineSeries({ color: s.color, lineWidth: 2, priceLineVisible: false });
-    LINE.setData(s.values);
+  for (const l of LINES) { try { CHART.removeSeries(l); } catch(_){} }
+  LINES = [];
+  for (const s of (j.series || [])) {
+    const line = CHART.addLineSeries({ color: s.color, lineWidth: 2, priceLineVisible: false, title: s.name });
+    line.setData(s.values);
+    LINES.push(line);
   }
 }
 
