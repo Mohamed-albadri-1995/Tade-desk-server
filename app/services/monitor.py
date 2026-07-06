@@ -168,6 +168,7 @@ class MonitorService:
         # Refresh DB-backed caches so signal-time lookups are pure memory reads.
         await self.gate_engine.refresh_rules()
         await self.sizer_engine.refresh()
+        await self.grade_engine.refresh()
 
         setups = await self._load_active_setups()
         conditions = await self._load_active_conditions()
@@ -326,17 +327,23 @@ class MonitorService:
             await event_bus.publish({"type": "new_entry", "entry": journal_to_dict(entry)})
             return journal_to_dict(entry)
 
-        # Steps 6 & 7: sizing and grading. GradeEngine is the placeholder
-        # ('B', 1.0); its grade feeds the sizer's grade multiplier.
-        grade, grade_score = self.grade_engine.evaluate(
-            evaluation["mandatory_results"] or {}, default_results, additional_results
-        )
+        # Steps 6 & 7: sizing and grading. The grade comes from the
+        # signal-points model over default+additional results (mandatory
+        # conditions are excluded from grading) and feeds the sizer's
+        # grade multiplier.
+        grading = self.grade_engine.evaluate_detailed(default_results, additional_results)
+        grade, grade_score = grading["grade"], grading["score"]
         regime_key = str(screener_snapshot.get("regime") or "")
         sizing = self.sizer_engine.calculate(
             entry_price, sl_price if sl_price is not None else entry_price, grade, regime_key
         )
         card_data["entry_shares"] = sizing["final_shares"]
-        card_data["entry_factors"] = {**sizing["factors"], "grade_score": grade_score}
+        card_data["entry_factors"] = {
+            **sizing["factors"],
+            "grade_score": grade_score,
+            "grade_raw_points": grading["raw_points"],
+            "grade_breakdown": grading["breakdown"],
+        }
         card_data["entry_grade"] = grade
 
         # Step 8: write the immutable Entry Card.

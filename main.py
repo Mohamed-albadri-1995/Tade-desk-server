@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app.database import async_session_factory, init_db
-from app.models import GradeMultiplierModel, UserSettingsModel
+from app.models import GradeMultiplierModel, GradeScoringModelModel, UserSettingsModel
 from app.routers import brokers, conditions, journal, monitor as monitor_router, settings as settings_router, setups, watchlist
 from app.services.monitor import MARKET_TZ, monitor
 
@@ -40,7 +40,15 @@ async def seed_defaults() -> None:
         for grade, multiplier in DEFAULT_GRADE_MULTIPLIERS.items():
             if grade not in existing:
                 session.add(GradeMultiplierModel(grade=grade, multiplier=multiplier))
+        grading_row = (
+            await session.execute(
+                select(GradeScoringModelModel).where(GradeScoringModelModel.id == 1)
+            )
+        ).scalar_one_or_none()
+        if grading_row is None:
+            session.add(GradeScoringModelModel(id=1))
         await session.commit()
+    await monitor.grade_engine.refresh()
 
 
 async def session_start_job() -> None:

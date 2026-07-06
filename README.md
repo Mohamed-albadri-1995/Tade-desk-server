@@ -43,9 +43,25 @@ pytest
 
 Setup fires → record `signal_time` → evaluate default/additional conditions →
 resolve entry/SL/TP from cache → **gate check** (rejected cards are journaled
-and stop) → sizing → grading (placeholder `('B', 1.0)`) → immutable entry
-card → broker dispatch (Alpaca SDK/REST, SignalStack webhook) → status
-`alerted`. All inputs are cached in memory: no network calls at signal time.
+and stop) → sizing → grading → immutable entry card → broker dispatch
+(Alpaca SDK/REST, SignalStack webhook) → status `alerted`. All inputs are
+cached in memory: no network calls at signal time.
+
+### Grading model
+
+`GradeEngine` follows the screener's Side E scoring principles: the model
+is loaded from the database (user-editable on the Gate & Sizing tab or via
+`GET/PUT /api/grading/model`), every default/additional condition is a
+signal contributing weighted points (asymmetric aligned/misaligned weights,
+plus per-condition overrides), `score = Σ signal_points` normalized to
+0–100, and fixed thresholds classify the score into A+/A/B/C/D.
+**Mandatory conditions are never graded** — they are prerequisites for the
+signal, not quality signals. The per-condition points breakdown is stored
+in `entry_factors.grade_breakdown` on every entry card, so future analysis
+(e.g. a setup-enhancement engine that flags harmful or irrelevant
+conditions) has per-trade data to learn from.
+`POST /api/grading/preview` dry-runs the current model against
+hypothetical condition results.
 
 ### Script interfaces (spec §8)
 

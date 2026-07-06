@@ -101,6 +101,25 @@ class RegimeMultiplierModel(Base):
     multiplier: Mapped[float] = mapped_column(Float, default=1.0)
 
 
+class GradeScoringModelModel(Base):
+    """User-editable grading model (singleton row, id=1) — same principle
+    as the screener's Side E scoring model: loaded from the database,
+    signal points per condition, thresholds for classification."""
+
+    __tablename__ = "grade_scoring_model"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # singleton (id=1)
+    default_weight: Mapped[float] = mapped_column(Float, default=2.0)
+    additional_weight: Mapped[float] = mapped_column(Float, default=1.0)
+    misaligned_default_penalty: Mapped[float] = mapped_column(Float, default=-2.0)
+    misaligned_additional_penalty: Mapped[float] = mapped_column(Float, default=-1.0)
+    condition_weights: Mapped[dict] = mapped_column(JSON, default=dict)  # {name: weight}
+    grade_thresholds: Mapped[dict] = mapped_column(
+        JSON, default=lambda: {"A+": 85.0, "A": 70.0, "B": 50.0, "C": 30.0}
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class GateRuleModel(Base):
     __tablename__ = "gate_rules"
 

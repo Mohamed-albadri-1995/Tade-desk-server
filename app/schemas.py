@@ -118,6 +118,34 @@ class RegimeMultiplierIn(BaseModel):
     multiplier: float
 
 
+# ------------------------------------------------------------ grading model
+class GradeScoringModelUpdate(BaseModel):
+    default_weight: Optional[float] = None
+    additional_weight: Optional[float] = None
+    misaligned_default_penalty: Optional[float] = None
+    misaligned_additional_penalty: Optional[float] = None
+    condition_weights: Optional[dict] = None
+    grade_thresholds: Optional[dict] = None
+
+
+class GradeScoringModelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    default_weight: float
+    additional_weight: float
+    misaligned_default_penalty: float
+    misaligned_additional_penalty: float
+    condition_weights: dict
+    grade_thresholds: dict
+    updated_at: datetime
+
+
+class GradePreviewIn(BaseModel):
+    default_results: dict = Field(default_factory=dict)
+    additional_results: dict = Field(default_factory=dict)
+
+
 # --------------------------------------------------------------- gate rules
 class GateRuleCreate(BaseModel):
     rule_name: str

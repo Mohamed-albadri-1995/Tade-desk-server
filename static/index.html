@@ -158,6 +158,22 @@
       <table><thead><tr><th>Grade</th><th>Multiplier</th><th></th></tr></thead><tbody id="grade-body"></tbody></table>
     </div>
     <div class="panel">
+      <h3>Grading model <span class="muted">(signal points over default/additional conditions — mandatory conditions are never graded)</span></h3>
+      <div class="row">
+        <div><label>Default condition weight (aligned)</label><input id="gm-dw" type="number" step="any"></div>
+        <div><label>Default condition penalty (misaligned)</label><input id="gm-dp" type="number" step="any"></div>
+      </div>
+      <div class="row">
+        <div><label>Additional condition weight (aligned)</label><input id="gm-aw" type="number" step="any"></div>
+        <div><label>Additional condition penalty (misaligned)</label><input id="gm-ap" type="number" step="any"></div>
+      </div>
+      <label>Per-condition weight overrides (JSON, e.g. {"trend_ok": 3})</label>
+      <input id="gm-cw" value="{}">
+      <label>Grade thresholds — minimum score 0–100 (JSON, keys A+/A/B/C; below lowest = D)</label>
+      <input id="gm-th" value='{"A+":85,"A":70,"B":50,"C":30}'>
+      <button class="btn" id="gm-save">Save grading model</button>
+    </div>
+    <div class="panel">
       <h3>Regime multipliers</h3>
       <table><thead><tr><th>Regime key</th><th>Multiplier</th><th></th></tr></thead><tbody id="regime-body"></tbody></table>
       <div class="row">
@@ -495,6 +511,26 @@ $("#gate-add").onclick = async () => {
     flash("Gate rule added"); loadGate();
   } catch (err) { flash("Error: " + (err.detail || err.message || JSON.stringify(err))); }
 };
+async function loadGradingModel() {
+  const m = await api.get("/api/grading/model");
+  $("#gm-dw").value = m.default_weight; $("#gm-dp").value = m.misaligned_default_penalty;
+  $("#gm-aw").value = m.additional_weight; $("#gm-ap").value = m.misaligned_additional_penalty;
+  $("#gm-cw").value = JSON.stringify(m.condition_weights || {});
+  $("#gm-th").value = JSON.stringify(m.grade_thresholds || {});
+}
+$("#gm-save").onclick = async () => {
+  try {
+    await api.send("PUT", "/api/grading/model", {
+      default_weight: Number($("#gm-dw").value),
+      misaligned_default_penalty: Number($("#gm-dp").value),
+      additional_weight: Number($("#gm-aw").value),
+      misaligned_additional_penalty: Number($("#gm-ap").value),
+      condition_weights: JSON.parse($("#gm-cw").value || "{}"),
+      grade_thresholds: JSON.parse($("#gm-th").value || "{}"),
+    });
+    flash("Grading model saved");
+  } catch (err) { flash("Error: " + (err.detail || err.message || JSON.stringify(err))); }
+};
 $("#regime-add").onclick = async () => {
   await api.send("PUT", "/api/multipliers/regime",
     { regime_key: $("#regime-key").value, multiplier: Number($("#regime-mult").value) });
@@ -545,7 +581,7 @@ $("#settings-form").onsubmit = async (e) => {
 
 /* --------------------------------------------------------- initial */
 loadSetups(); loadConditions(); loadJournal(); loadWatchlist(); loadMonitor();
-loadGate(); loadBrokers(); loadSettings();
+loadGate(); loadGradingModel(); loadBrokers(); loadSettings();
 </script>
 </body>
 </html>
