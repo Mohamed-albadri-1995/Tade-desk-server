@@ -40,21 +40,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import qp  # noqa: E402  — populates REGISTRY via primitive decorators
 from qp.registry import REGISTRY, get_approval, save_approval
 from qp.primitives.bars import Bars
-from tools.data import alpaca, polygon
+from tools.data import alpaca, polygon, hybrid
 
 # Data feeds the compare tool can pull bars from. Each module exposes the
 # same load(symbol, tf, start, end) → tz-aware UTC OHLCV DataFrame.
-_LOADERS = {'alpaca': alpaca, 'polygon': polygon}
+_LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid}
 
 
 def _feed_status() -> dict:
     """Which feeds have credentials configured, and the preferred default.
-    Polygon is preferred when available — deeper history + premarket."""
+    Polygon is preferred when available — deeper history + premarket.
+    'hybrid' (Polygon history + Alpaca live gap-fill) needs both."""
+    has_alpaca  = bool(os.environ.get('APCA_API_KEY_ID') and os.environ.get('APCA_API_SECRET_KEY'))
+    has_polygon = bool(os.environ.get('POLYGON_API_KEY'))
     have = {
-        'alpaca':  bool(os.environ.get('APCA_API_KEY_ID') and os.environ.get('APCA_API_SECRET_KEY')),
-        'polygon': bool(os.environ.get('POLYGON_API_KEY')),
+        'alpaca':  has_alpaca,
+        'polygon': has_polygon,
+        'hybrid':  has_alpaca and has_polygon,
     }
-    default = 'polygon' if have['polygon'] else 'alpaca'
+    default = 'polygon' if has_polygon else 'alpaca'
     return {'feeds': have, 'default_feed': default}
 
 _ET = 'America/New_York'
@@ -286,7 +290,7 @@ PAGE = r"""<!doctype html>
     <option>1m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option>
   </select></label>
   <label>Days <input id="days" type="number" value="5" min="1" max="730" style="width:66px"></label>
-  <label>Feed <select id="feed"><option>alpaca</option><option>polygon</option></select></label>
+  <label>Feed <select id="feed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
   <label>Primitive <select id="prim" style="min-width:220px"></select></label>
   <label>Source <select id="source">
     <option>close</option><option>open</option><option>high</option><option>low</option>

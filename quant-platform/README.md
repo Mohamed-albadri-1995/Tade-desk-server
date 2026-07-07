@@ -86,6 +86,16 @@ The **Feed** dropdown in the header picks where bars come from:
   raise **Days** (up to 730) to verify the long-lookback primitives.
   Note the free tier is end-of-day delayed, so today's newest bars may
   be missing — verify on a prior day.
+- **hybrid** — Polygon for history + premarket, Alpaca appended to fill
+  the gap from Polygon's last bar to now (Polygon free is EOD-delayed,
+  Alpaca is live). Deep history *and* today's session in one series.
+  ⚠️ **Volume seam:** Alpaca IEX volume is a fraction of Polygon's
+  consolidated volume, so at the seam the volume column drops. Harmless
+  for price primitives (MAs, RSI, ATR, levels, pivots, structure); it
+  **distorts the VWAP family** (`vwap.*`, `ma.vwma`) in the Alpaca
+  portion, which won't match TradingView. Verify VWAPs on **polygon**
+  on a completed prior day; use **hybrid** for price primitives and to
+  see today with full history. Needs both keys.
 
 A feed shows "(no key)" in the dropdown when its credentials aren't set.
 Bars are cached per feed under `~/.qp-cache/` (Polygon files are
