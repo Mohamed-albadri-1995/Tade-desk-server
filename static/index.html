@@ -595,7 +595,13 @@ async function loadMonitor() {
 }
 async function loadConfig() {
   const cfg = await api.get("/api/config");
-  $("#screener-link").href = cfg.screener_url;
+  // SCREENER_URL is the server-to-server address (often 127.0.0.1). For the
+  // browser link, keep the port but use the host the user is browsing from.
+  try {
+    const u = new URL(cfg.screener_url);
+    if (["127.0.0.1", "localhost"].includes(u.hostname)) u.hostname = location.hostname;
+    $("#screener-link").href = u.toString();
+  } catch { $("#screener-link").href = cfg.screener_url; }
 }
 async function loadScreenerRegistry() {
   const [rows, market] = await Promise.all([
