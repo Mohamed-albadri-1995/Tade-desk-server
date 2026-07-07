@@ -90,6 +90,7 @@ def stdev(source, length: int):
         Param('mult',   'float', default=2.0, min=0.0),
     ),
     inputs=('source',),
+    outputs=('middle', 'upper', 'lower'),
 )
 def bb(source, length: int, mult: float):
     src = np.asarray(source, dtype=float)
@@ -117,6 +118,7 @@ def bb(source, length: int, mult: float):
         Param('mult',   'float', default=2.0, min=0.0),
     ),
     inputs=('source',),
+    outputs=('middle', 'upper', 'lower'),
 )
 def bb_ema(source, length: int, mult: float):
     from qp.primitives.ma import ema as _ema

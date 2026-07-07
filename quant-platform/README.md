@@ -1,179 +1,197 @@
-# qp — verified primitives library
+# qp — verified primitives library + compare tool
 
-**One rule:** no math outside `qp/primitives/`. Every function in there is
-`@primitive`-decorated. Every downstream caller (compare tool, trading
-tool's `market_data`, backtests, user scripts) reaches the same function
-through the same registry. What you verify in the compare tool is what
-runs in production.
-
-## Layout
+**The one rule:** no market math exists anywhere except `qp/primitives/`.
+Every function there is `@primitive`-decorated into one registry. Every
+consumer — the compare tool, the trading tool's `market_data`, backtests,
+user scripts — reaches the *same* function through the *same* registry.
+What you verified against TradingView is what runs in production. Always.
 
 ```
-qp/
-  __init__.py          exports primitive, REGISTRY, get_approval, is_approved
-  registry.py          the decorator + REGISTRY + approvals reader/writer
-  primitives/
-    __init__.py        auto-imports every primitives module
-    bars.py            Bars dataclass — the one OHLCV container
-    ma.py              seed: ma.sma
-    # add more here: ema.py, vwap.py, atr.py, ...
-approvals/
-  approvals.json       git-tracked map of approved primitives
-tools/
-  compare_server.py    the compare UI — chart vs TradingView vs primitive
-  data/
-    alpaca.py          bar loader (IEX feed, parquet-cached)
+┌─────────────────┐     ┌──────────────────────┐
+│  compare tool    │     │  trading tool         │
+│  (verify+approve)│     │  (market_data bridge) │
+└───────┬─────────┘     └──────────┬───────────┘
+        │      both call           │
+        ▼                          ▼
+   qp.REGISTRY['ma.sma'].fn(...)   ← ONE implementation
+        ▲
+   approvals/approvals.json        ← the gate: what's ✅ verified
 ```
+
+## Repo layout
+
+```
+quant-platform/
+├── qp/
+│   ├── __init__.py        exports: REGISTRY, Bars, Param, PrimitiveMeta,
+│   │                      approved_primitives, is_approved, get_approval
+│   ├── registry.py        @primitive decorator + registry + approvals I/O
+│   └── primitives/
+│       ├── _session.py    shared RTH/premarket/daily-frame helpers (not a primitive)
+│       ├── bars.py        Bars — validated OHLCV container
+│       ├── ma.py          sma, ema, wma, rma, vwma, hma, pine_5day
+│       ├── vwap.py        session, n_day, weekly, monthly, anchored,
+│       │                  today_hh/ll, week_hh/ll, swing_hh/ll, gap,
+│       │                  last_hour_hh/ll, stdev_bands
+│       ├── volatility.py  true_range, atr, stdev, bb, bb_ema
+│       ├── oscillators.py rsi
+│       ├── extremes.py    highest, lowest
+│       ├── levels.py      prev-day/PM/overnight/weekly/monthly/monday/yearly
+│       ├── dynamic_sr.py  dynamic support/resistance engine
+│       ├── structure.py   pivot_high, pivot_low
+│       ├── pivots.py      floor pivots {P,R1..R3,S1..S3}
+│       └── candle.py      body, upper_wick, lower_wick, bar_range
+├── approvals/approvals.json   git-tracked verification records
+├── tools/
+│   ├── compare_server.py      the verification web UI
+│   ├── gen_catalog.py         regenerates docs/CATALOG.md from the registry
+│   └── data/alpaca.py         bar loader (IEX feed, parquet cache)
+├── docs/
+│   └── CATALOG.md             full primitive catalog (auto-generated)
+├── INTEGRATION.md             ← for the trading-tool builder: exact API contract
+├── README.md                  this file
+└── requirements.txt           pandas, numpy, pyarrow
+```
+
+## Running the compare tool (EC2 runbook)
+
+```sh
+cd ~/Tade-desk-server/quant-platform
+git pull origin claude/read-j5hgnf                  # update code
+
+# kill any previous server on 8765
+kill $(ss -ltnp | grep 8765 | awk -F'pid=' '{print $2}' | awk -F',' '{print $1}') 2>/dev/null
+
+export APCA_API_KEY_ID="PK..."                      # Alpaca paper keys
+export APCA_API_SECRET_KEY="..."
+
+nohup python3 tools/compare_server.py --host 0.0.0.0 --port 8765 > qp.log 2>&1 &
+sleep 3 && curl -s http://127.0.0.1:8765/api/health
+# → {"ok": true, "primitives": 60}
+```
+
+Open `http://<public-ip>:8765` in a browser. Requires port 8765 open in
+the EC2 security group.
+
+### HTTP endpoints
+
+```
+GET  /                            the page
+GET  /api/health                  {"ok": true, "primitives": N}
+GET  /api/primitives              registry + approval status + outputs shape
+GET  /api/data?symbol=&tf=&days=&key=&params=&source=
+POST /api/approve                 {key, approved_by, notes}
+GET  /static/lightweight-charts.js   self-hosted chart library
+```
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Page loads but looks stale | Hard refresh: **Ctrl+Shift+R** |
+| Orange banner in left panel | Chart library issue — the banner says exactly what; dropdown + Approve still work |
+| `/api/data` returns 500 "APCA_API_KEY_ID…" | Export the Alpaca keys, restart the server (exports only apply to processes started after them) |
+| Empty response / connection refused | Server died — rerun the `nohup` line; check `tail qp.log` |
+| Boot log says "chart lib will use CDN fallback" | Server couldn't download the chart lib; browser will try CDNs directly |
+
+## The verification workflow
+
+1. Pick a primitive in the dropdown (🚧 = draft, ✅ = approved).
+2. Set symbol / TF / days / source / params → **Compute**.
+3. Compare the left chart against TradingView on the right (matching TV
+   study auto-attaches where one exists). Check shape + hover 2-3 bars
+   for numeric agreement.
+4. Match → **Approve as verified** (writes `approvals/approvals.json`).
+   Mismatch → don't approve; report the primitive, the settings, and
+   what differs.
+5. End of session, back up approvals:
+   ```sh
+   cd ~/Tade-desk-server && git add quant-platform/approvals/approvals.json \
+     && git commit -m "approvals batch" && git push origin claude/read-j5hgnf
+   ```
+
+An approval records who, when, the git SHA of the code approved, and
+notes. Re-approving overwrites (e.g. after a bug fix — re-verify, then
+re-approve so the record points at the fixed code).
 
 ## Adding a primitive
 
-1. Pick a group (`ma`, `vwap`, `volatility`, `session`, …). Groups become
-   the picker's optgroups in the compare tool.
-2. Open the group's file under `qp/primitives/` (create it if new). New
-   files are auto-discovered — no wiring in `__init__.py`.
-3. Write the function and decorate it. Example:
+1. Pick a group file under `qp/primitives/` (or create a new `.py` —
+   auto-discovered, no wiring).
+2. Write the function + decorator:
 
    ```python
    from qp.registry import primitive, Param
 
    @primitive(
-       name='ema',
+       name='my_thing',                # globally unique short name
        group='ma',
-       description='Exponential MA. Matches TradingView ta.ema(source, length).',
+       description='What it computes. Which Pine call it matches.',
        params=(Param('length', 'int', default=9, min=1),),
-       inputs=('source',),
+       inputs=('source',),             # or ('bars',)
+       # outputs=('a', 'b') if it returns a dict of arrays
    )
-   def ema(source, length: int):
-       import pandas as pd
-       return pd.Series(source).ewm(span=length, adjust=False).mean().to_numpy()
+   def my_thing(source, length: int):
+       ...  # return np.ndarray aligned to input, NaN for warm-up
    ```
 
-4. `inputs` is either `('source',)` (any of `close/open/high/low/hl2/hlc3/ohlc4`)
-   or `('bars',)` (a full OHLCV DataFrame with tz-aware index).
-5. Save. Refresh the compare UI. The primitive shows up with a 🚧 badge.
+3. Restart the compare server → the primitive appears with 🚧.
+4. Verify → approve → `python3 tools/gen_catalog.py` → commit.
 
-## Verifying + approving
+Contract rules the decorator enforces: unique `group.name` key AND
+globally unique short `name` (the trading tool flattens names into
+`market_data.<name>()`).
 
-1. Start the compare tool:
-
-   ```sh
-   pip install -r requirements.txt
-   export APCA_API_KEY_ID=... APCA_API_SECRET_KEY=...   # paper key is fine
-   python3 tools/compare_server.py --host 127.0.0.1 --port 8765
-   ```
-
-2. Open `http://127.0.0.1:8765`. Left panel = lightweight-charts driven by
-   your primitive. Right panel = TradingView widget for the same symbol/TF.
-3. Pick symbol, timeframe, days, primitive, source, tweak params, hit
-   **Compute**. Eyeball match against TradingView's built-in overlay of the
-   same indicator (add it in the TV widget on the right).
-4. When it matches bar-for-bar, click **Approve as verified**. This writes
-   an entry to `approvals/approvals.json`:
-
-   ```json
-   {
-     "ma.sma": {
-       "approved_by":  "mo",
-       "approved_at":  "2026-07-05T15:30:00+00:00",
-       "git_sha":      "abcdef1",
-       "notes":        "matches TV ta.sma(close,9) on SPY 5m 2026-07-02"
-     }
-   }
-   ```
-
-5. Commit the JSON change. An approval is a promise to future callers.
-
-## HTTP endpoints (compare server)
-
-```
-GET  /                    the page
-GET  /api/health          {"ok": true, "primitives": N}
-GET  /api/primitives      registry + approval status
-GET  /api/data?symbol=... bars + overlay values for the selected primitive
-POST /api/approve         save an approval entry ({key, approved_by, notes})
-```
-
-## Consuming primitives
-
-**From Python:**
+## Consuming the library
 
 ```python
 import qp
 
-sma_fn = qp.REGISTRY['ma.sma'].fn
-values = sma_fn(close_array, length=9)   # numpy array, NaN warmup
+# direct call
+values = qp.REGISTRY['ma.sma'].fn(close_array, length=9)
 
-# Bars primitives take a validated OHLCV container
+# bars-input primitives take the validated container
 vwap = qp.REGISTRY['vwap.session'].fn(qp.Bars.from_frame(df))
+
+# ONLY the verified slice — what the trading tool must use
+for key, meta in qp.approved_primitives().items():
+    print(key, meta.params, meta.outputs)
 ```
 
-## Trading tool integration (v11 Bridge Pattern)
+**Building the trading tool / an adapter?** Read **`INTEGRATION.md`** —
+it contains the exact, code-tested contract: building `Bars` from plain
+bar dicts, the parameter/return conventions, warm-up policy, import-path
+guidance, dependencies, and a runnable end-to-end example.
 
-Per the v11 spec §8 and the integration analysis §A, the trading tool
-exposes qp to its sandboxed setup + condition scripts through a
-`market_data` object. The sandbox never imports qp directly — it only sees
-the methods the bridge attaches:
+## Documented deviations from the source Pine scripts
 
-```python
-# trading_tool/market_data.py — for reference; belongs in the trading tool
-import qp
+Each deviation exists for a stated reason; everything else matches
+bar-for-bar:
 
-class MarketData:
-    def __init__(self, bar_cache):
-        self._cache = bar_cache
-        # v11 §8: only approved primitives are exposed to scripts.
-        for key, meta in qp.approved_primitives().items():
-            method_name = meta.name          # e.g. 'sma', 'session'
-            fn = meta.fn
-            inputs = meta.inputs             # ('source',) or ('bars',)
-            def _bind(fn=fn, inputs=inputs):
-                if inputs == ('source',):
-                    def call(stock, source='close', **params):
-                        arr = self._cache[stock][source].values
-                        return fn(arr, **params)
-                    return call
-                if inputs == ('bars',):
-                    def call(stock, **params):
-                        df = self._cache[stock]
-                        return fn(qp.Bars.from_frame(df), **params)
-                    return call
-                raise ValueError(f'unknown inputs {inputs!r}')
-            setattr(self, method_name, _bind())
-```
+1. **VWAPs default to `rth_only=True`** — matches a standard TV equities
+   chart (whose data excludes extended hours). Set `rth_only=False` for
+   extended-hours accumulation.
+2. **`vwap.n_day` block phase** — Pine counts days from its loaded chart
+   history, which is arbitrary; qp counts from the fetched window. Phase
+   may differ by a day vs TV; the math within blocks is identical.
+3. **`last_hour_*` bounded to < 16:00 ET** — the raw Pine (`hour >=
+   start`) leaks into after-hours on extended charts; qp implements the
+   intent (the last trading hour).
+4. **`pivots.floor` defaults to `session='rth'`** — TV daily bars for
+   stocks exclude extended hours, so this matches what TV draws;
+   `'eth'` gives the Pine's literal full-day behaviour (futures).
+5. **Before a VWAP's first anchor qp shows NaN** — Pine shows an
+   accumulate-from-history-start line there, which depends on how many
+   bars happen to be loaded. qp deliberately shows nothing.
+6. **Weekly/monthly/yearly levels are RTH-only** — matches TV's
+   weekly/monthly equity bars; `weekly_open` is Monday 09:30, not the
+   04:00 premarket print.
+7. **Daily charts:** session filters treat each daily bar as the RTH
+   aggregate, so levels/pivots/session-VWAPs work on 1d frames.
 
-Then a sandboxed setup script (v11 §8 `SetupIndicator` interface) writes:
+## Docs index
 
-```python
-class SetupIndicator:
-    def check_signal(self, stock, timestamp, market_data):
-        sma_fast = market_data.sma(stock, length=9)
-        sma_slow = market_data.sma(stock, length=21)
-        if sma_fast[-1] > sma_slow[-1] and sma_fast[-2] <= sma_slow[-2]:
-            return 'long'
-        return None
-```
-
-**What qp guarantees the trading tool:**
-
-- `qp.REGISTRY[key].fn` — the callable, always identical to what the
-  compare tool plotted when you approved it.
-- `qp.REGISTRY[key].params` — tuple of `Param` records so the trading tool
-  can validate script inputs before firing.
-- `qp.REGISTRY[key].inputs` — `('source',)` or `('bars',)` so the bridge
-  knows what to feed the callable.
-- `qp.approved_primitives()` — filtered view; v11 §8 rule that no
-  unapproved indicator reaches a live script.
-- `qp.Bars.from_frame(df)` — the validated OHLCV container primitives
-  with `inputs=('bars',)` expect.
-
-## Design notes
-
-- **No side effects at import.** `qp/__init__.py` imports the primitives
-  module for the decorator side effect. That's it — no I/O, no network.
-- **Bars are tz-aware, monotonic, OHLCV.** `Bars.from_frame` enforces it.
-- **The compare tool is the ONLY doorway to approvals.** Editing
-  `approvals.json` by hand works but skips the eyeball step — please don't.
-- **Alpaca IEX bars.** Free tier, deterministic, parquet-cached under
-  `~/.qp-cache/`. If you need better fills for backtest, swap in a
-  different loader under `tools/data/` — the compare tool's URL doesn't
-  change.
+- `docs/CATALOG.md` — every primitive: description, inputs, outputs,
+  params, approval status. Auto-generated; regenerate with
+  `python3 tools/gen_catalog.py`.
+- `INTEGRATION.md` — the trading-tool integration contract.

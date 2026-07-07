@@ -38,6 +38,7 @@ from qp.primitives._session import rth_pred
     params=(Param('session', 'str', default='rth',
                   description="'rth' or 'eth'"),),
     inputs=('bars',),
+    outputs=('P', 'R1', 'R2', 'R3', 'S1', 'S2', 'S3'),
 )
 def floor(bars: Bars, session: str = 'rth'):
     df = bars.df

@@ -110,6 +110,7 @@ def list_primitives() -> list[dict]:
                 for p in m.params
             ],
             'inputs':      list(m.inputs),
+            'outputs':     list(m.outputs),
             'file':        m.file,
             'lineno':      m.lineno,
             'approved':    appr is not None,

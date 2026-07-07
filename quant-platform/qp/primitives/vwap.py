@@ -560,6 +560,7 @@ def last_hour_ll(bars: Bars, last_hour_start: int, rth_only: bool = True):
                  'close.'),
     params=(Param('mult', 'float', default=1.0, min=0.0),),
     inputs=('bars',),
+    outputs=('middle', 'upper', 'lower'),
 )
 def stdev_bands(bars: Bars, mult: float):
     df = bars.df

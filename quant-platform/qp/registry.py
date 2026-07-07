@@ -49,6 +49,10 @@ class PrimitiveMeta:
     module: str
     file: str
     lineno: int
+    # Return shape, machine-readable for the trading tool's bridge:
+    #   ('value',)                       → fn returns one np.ndarray
+    #   ('middle','upper','lower'), ...  → fn returns dict[str, np.ndarray]
+    outputs: tuple = ('value',)
 
 
 REGISTRY: dict[str, PrimitiveMeta] = {}
@@ -67,6 +71,7 @@ def primitive(
     description: str = '',
     params: tuple = (),
     inputs: tuple = ('bars',),
+    outputs: tuple = ('value',),
 ) -> Callable:
     """Register a function as a qp primitive.
 
@@ -103,6 +108,7 @@ def primitive(
             key=key, name=name, group=group, description=description,
             params=tuple(params), inputs=tuple(inputs), fn=fn,
             module=fn.__module__, file=src_file, lineno=lineno,
+            outputs=tuple(outputs),
         )
         _NAME_TO_KEY[name] = key
         fn._qp_key = key  # convenience for inspection

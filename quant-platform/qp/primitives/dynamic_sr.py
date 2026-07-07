@@ -73,6 +73,8 @@ def _confirmed_pivot_values(values: np.ndarray, prd: int, side: str) -> np.ndarr
               description='"hl" (high/low) or "body" (close/open)'),
     ),
     inputs=('bars',),
+    # keys are sr1..sr{max_levels}; this tuple reflects the default (6)
+    outputs=('sr1', 'sr2', 'sr3', 'sr4', 'sr5', 'sr6'),
 )
 def dynamic_sr(bars: Bars, pivot_period: int, max_pivots: int,
                channel_width_pct: float, max_levels: int,
