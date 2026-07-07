@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+from typing import Optional
+
 from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,9 +21,9 @@ class SetupModel(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     script_content: Mapped[str] = mapped_column(Text, nullable=False)
     mandatory_conditions: Mapped[list] = mapped_column(JSON, default=list)  # list of strings
-    sl_tp: Mapped[list | None] = mapped_column(JSON, nullable=True)  # (sl, tp) tuple
+    sl_tp: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # (sl, tp) tuple
     entry_method: Mapped[str] = mapped_column(String(50), default="market")
-    entry_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    entry_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -60,26 +62,26 @@ class JournalModel(Base):
     entry_mandatory_results: Mapped[dict] = mapped_column(JSON, default=dict)
     entry_default_results: Mapped[dict] = mapped_column(JSON, default=dict)
     entry_additional_results: Mapped[dict] = mapped_column(JSON, default=dict)
-    entry_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    entry_sl_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    entry_tp_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    entry_shares: Mapped[float | None] = mapped_column(Float, nullable=True)
+    entry_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_sl_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_tp_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_shares: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     entry_factors: Mapped[dict] = mapped_column(JSON, default=dict)
-    entry_grade: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    entry_grade: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
     entry_gate_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
-    entry_gate_screener_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    exit_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    exit_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
-    exit_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    entry_gate_screener_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    exit_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    exit_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     # Exit enrichment — computed once when the exit is recorded (immutable).
-    r_multiple: Mapped[float | None] = mapped_column(Float, nullable=True)
-    planned_rr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    mae_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    mfe_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    capture_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    hold_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
-    exit_verdict: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    r_multiple: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    planned_rr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    mae_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    mfe_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    capture_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    hold_minutes: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    exit_verdict: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
 
 class BrokerModel(Base):
@@ -148,8 +150,8 @@ class AccountModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     account_size: Mapped[float] = mapped_column(Float, default=100000.0)
-    risk_per_trade: Mapped[float | None] = mapped_column(Float, nullable=True)  # None -> global
-    broker_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    risk_per_trade: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # None -> global
+    broker_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -191,9 +193,9 @@ class SetupFactorStateModel(Base):
     side: Mapped[str] = mapped_column(String(10), default="pooled")  # pooled|long|short
     inputs: Mapped[dict] = mapped_column(JSON, default=dict)  # n, expectancy_r, pf, win_rate, ...
     signal_points: Mapped[dict] = mapped_column(JSON, default=dict)  # per-signal points
-    score: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0..100
-    mapped_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
-    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0..1 shrinkage weight
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0..100
+    mapped_factor: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0..1 shrinkage weight
     final_factor: Mapped[float] = mapped_column(Float, default=1.0)
     insufficient_data: Mapped[bool] = mapped_column(Boolean, default=True)
     computed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

@@ -5,6 +5,7 @@ extracts the ``ticker`` field from each record and stores the symbols.
 import csv
 import io
 import json
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import select
@@ -18,7 +19,7 @@ from app.services.monitor import monitor
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
 
 
-def _extract_ticker(record) -> str | None:
+def _extract_ticker(record) -> Optional[str]:
     if isinstance(record, str):
         return record.strip().upper() or None
     if isinstance(record, dict):
@@ -68,7 +69,7 @@ def parse_watchlist_file(filename: str, content: bytes) -> list[str]:
     return unique
 
 
-@router.get("", response_model=WatchlistOut | None)
+@router.get("", response_model=Optional[WatchlistOut])
 async def get_watchlist(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
         select(WatchlistModel).order_by(WatchlistModel.uploaded_at.desc())
