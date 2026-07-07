@@ -30,6 +30,7 @@ from app.models import (
     UserSettingsModel,
     WatchlistModel,
 )
+from app import qp_loader
 from app.services.broker_engine import BrokerEngine
 from app.services.capital import OPEN_STATUSES, CapitalService
 from app.services.condition_engine import ConditionEngine
@@ -134,6 +135,7 @@ class MonitorService:
             "session_end_time": self.session_end_time,
             "session_open": self._session_open(),
             "watchlist_source": self.watchlist_source,
+            "qp_source": "verified" if qp_loader.VERIFIED else "placeholder-unverified",
         }
 
     # -------------------------------------------------------------- loaders
@@ -210,6 +212,15 @@ class MonitorService:
         await self.sizer_engine.refresh()
         await self.grade_engine.refresh()
         await self.capital_service.refresh()
+        if qp_loader.VERIFIED:
+            # Approvals only ever grow; picking up newly approved primitives
+            # after the user pulls in the quant-platform checkout.
+            try:
+                import qp
+
+                qp.registry.refresh_approvals()
+            except Exception:
+                pass
 
         setups = await self._load_active_setups()
         conditions = await self._load_active_conditions()

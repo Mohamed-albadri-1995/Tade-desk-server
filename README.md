@@ -28,7 +28,7 @@ pytest
 
 | Piece | Where | Role |
 | :--- | :--- | :--- |
-| `qp/` | primitives library | **All** indicator math (`qp.REGISTRY[key].fn`); nothing is re-implemented in the tool |
+| `qp/` | placeholder primitives | Fallback indicator math only — see "Verified qp library" below |
 | `app/services/sandbox.py` | sandbox | Raw scripts run via `exec()` with whitelisted imports (`typing`, `datetime`, `math`, `collections`) and removed built-ins |
 | `app/services/market_proxy.py` | injected `market_data` | `get_ohlcv`, `get_current_price`, plus dynamic methods for every registered primitive (e.g. `market_data.sma(stock, length=9)`) |
 | `app/services/market_data.py` | MarketDataService | OHLCV bars from Alpaca → Polygon → Yahoo fallback, cached every 5 s |
@@ -62,6 +62,27 @@ in `entry_factors.grade_breakdown` on every entry card, so future analysis
 conditions) has per-trade data to learn from.
 `POST /api/grading/preview` dry-runs the current model against
 hypothetical condition results.
+
+### Verified qp library (quant-platform)
+
+When `QP_PATH` in `.env` points at the quant-platform directory (branch
+`claude/read-j5hgnf`, same repo), the tool loads the **TradingView-
+verified qp library** instead of the placeholder: sandboxed scripts can
+call **approved primitives only** (`qp.approved_primitives()`), with
+the calling convention from `quant-platform/INTEGRATION.md` — Bars
+built once per cache generation, `source='close'` default for
+source-input primitives, latest-non-NaN scalar results (dicts of
+scalars for multi-output primitives). Approvals are re-read every
+monitor tick, so newly verified primitives appear without a restart.
+`GET /api/primitives` and `GET /api/monitor/status` (`qp_source`) show
+which mode is active. Integration test (run standalone):
+
+```bash
+QP_PATH=/path/to/quant-platform QP_VERIFIED_TEST=1 pytest tests/test_qp_verified.py
+```
+
+Once the branches merge, delete the placeholder `qp/` directory — the
+verified library is the single source of truth.
 
 ### Script interfaces (spec §8)
 
