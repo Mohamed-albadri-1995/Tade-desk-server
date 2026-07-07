@@ -32,6 +32,38 @@ async def app_config():
     return {"screener_url": settings.screener_url}
 
 
+@router.get("/api/screener/registry")
+async def screener_registry():
+    """The screener registry as this tool sees it (from the cache the
+    ScreenerDataService maintains) — rendered natively in the Screener
+    tab, since the screener app refuses iframe embedding."""
+    rows = []
+    for ctx in monitor.screener_cache.values():
+        raw_stock = (ctx.raw or {}).get("stock") if isinstance(ctx.raw, dict) else {}
+        if not isinstance(raw_stock, dict):
+            raw_stock = {}
+        rows.append(
+            {
+                "ticker": ctx.stock,
+                "score": ctx.score,
+                "price": raw_stock.get("price"),
+                "change": raw_stock.get("change"),
+                "rvol": ctx.rvol,
+                "gapPct": ctx.gapPct,
+                "sector": ctx.sector,
+                "regime": ctx.regime,
+                "secBias": ctx.secBias,
+                "secHot": ctx.secHot,
+                "secScore": ctx.secScore,
+                "themes": ctx.themes,
+                "catalyst": ctx.catalyst,
+                "updated_at": ctx.updated_at,
+            }
+        )
+    rows.sort(key=lambda r: -(r["score"] or 0))
+    return rows
+
+
 @router.get("/api/primitives")
 async def list_primitives():
     import qp

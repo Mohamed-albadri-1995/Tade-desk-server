@@ -199,8 +199,6 @@ class MonitorService:
         # session window — an overnight position still needs its stop.
         await self._monitor_positions()
         await self._sync_screener_watchlist()
-        if not self._session_open():
-            return
         # Refresh DB-backed caches so signal-time lookups are pure memory reads.
         await self.gate_engine.refresh_rules()
         await self.sizer_engine.refresh()
@@ -286,6 +284,11 @@ class MonitorService:
                 self._armed[armed_key] = None
                 for condition in conditions:
                     await self._publish_status(stock, setup.id, condition.name, "unknown")
+            return
+
+        # The Watch tab stays live all day, but new entries fire only
+        # inside the [start, end] session window.
+        if not self._session_open():
             return
 
         if self._armed.get(armed_key) == signal_side:
