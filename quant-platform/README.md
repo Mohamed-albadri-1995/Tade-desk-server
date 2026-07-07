@@ -64,14 +64,32 @@ kill $(ss -ltnp | grep 8765 | awk -F'pid=' '{print $2}' | awk -F',' '{print $1}'
 
 export APCA_API_KEY_ID="PK..."                      # Alpaca paper keys
 export APCA_API_SECRET_KEY="..."
+export POLYGON_API_KEY="..."                        # optional — deeper history + premarket
 
 nohup python3 tools/compare_server.py --host 0.0.0.0 --port 8765 > qp.log 2>&1 &
 sleep 3 && curl -s http://127.0.0.1:8765/api/health
-# → {"ok": true, "primitives": 60}
+# → {"ok": true, "primitives": 60, "feeds": {...}, "default_feed": "polygon"}
 ```
 
 Open `http://<public-ip>:8765` in a browser. Requires port 8765 open in
 the EC2 security group.
+
+### Data feeds
+
+The **Feed** dropdown in the header picks where bars come from:
+
+- **alpaca** (IEX, free) — RTH only, ~last 5-7 days of intraday history.
+  Fine for MAs/RSI/ATR/BB/session-VWAP, but can't reach premarket,
+  overnight, multi-day, monthly, or `dynamic_sr` (needs ~300 bars).
+- **polygon** — full extended-hours (premarket/afterhours) bars, years
+  of history. Set `POLYGON_API_KEY` and it becomes the default feed;
+  raise **Days** (up to 730) to verify the long-lookback primitives.
+  Note the free tier is end-of-day delayed, so today's newest bars may
+  be missing — verify on a prior day.
+
+A feed shows "(no key)" in the dropdown when its credentials aren't set.
+Bars are cached per feed under `~/.qp-cache/` (Polygon files are
+`poly_`-prefixed, so the two never mix).
 
 ### HTTP endpoints
 

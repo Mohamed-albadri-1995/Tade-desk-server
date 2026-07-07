@@ -40,7 +40,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import qp  # noqa: E402  — populates REGISTRY via primitive decorators
 from qp.registry import REGISTRY, get_approval, save_approval
 from qp.primitives.bars import Bars
-from tools.data import alpaca
+from tools.data import alpaca, polygon
+
+# Data feeds the compare tool can pull bars from. Each module exposes the
+# same load(symbol, tf, start, end) → tz-aware UTC OHLCV DataFrame.
+_LOADERS = {'alpaca': alpaca, 'polygon': polygon}
+
+
+def _feed_status() -> dict:
+    """Which feeds have credentials configured, and the preferred default.
+    Polygon is preferred when available — deeper history + premarket."""
+    have = {
+        'alpaca':  bool(os.environ.get('APCA_API_KEY_ID') and os.environ.get('APCA_API_SECRET_KEY')),
+        'polygon': bool(os.environ.get('POLYGON_API_KEY')),
+    }
+    default = 'polygon' if have['polygon'] else 'alpaca'
+    return {'feeds': have, 'default_feed': default}
 
 _ET = 'America/New_York'
 
@@ -137,12 +152,18 @@ def _source_series(bars: pd.DataFrame, name: str) -> np.ndarray:
 
 
 def compute_data(symbol: str, tf: str, days: int, primitive_key: str,
-                 params: dict, source: str = 'close') -> dict:
+                 params: dict, source: str = 'close', feed: str = 'alpaca') -> dict:
     """Fetch bars + call the primitive + return everything the UI needs."""
+    loader = _LOADERS.get(feed)
+    if loader is None:
+        raise ValueError(f'unknown feed {feed!r} (have: {sorted(_LOADERS)})')
     end = pd.Timestamp.now(tz='UTC').floor('5min')
-    days = min(int(days), 7) if tf == '1m' else int(days)
+    # Alpaca IEX caps 1m history at ~7 days; Polygon goes back years.
+    if tf == '1m' and feed == 'alpaca':
+        days = min(int(days), 7)
+    days = int(days)
     start = end - pd.Timedelta(days=days)
-    bars = alpaca.load(symbol, tf, start, end)
+    bars = loader.load(symbol, tf, start, end)
     if len(bars) == 0:
         return {'bars': [], 'series': [], 'first': None, 'last': None}
 
@@ -264,7 +285,8 @@ PAGE = r"""<!doctype html>
   <label>TF <select id="tf">
     <option>1m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option>
   </select></label>
-  <label>Days <input id="days" type="number" value="5" min="1" max="60" style="width:60px"></label>
+  <label>Days <input id="days" type="number" value="5" min="1" max="730" style="width:66px"></label>
+  <label>Feed <select id="feed"><option>alpaca</option><option>polygon</option></select></label>
   <label>Primitive <select id="prim" style="min-width:220px"></select></label>
   <label>Source <select id="source">
     <option>close</option><option>open</option><option>high</option><option>low</option>
@@ -484,15 +506,17 @@ async function reload() {
   const tf = document.getElementById('tf').value;
   const days = document.getElementById('days').value;
   const source = document.getElementById('source').value;
+  const feed = document.getElementById('feed').value;
   const params = collectParams();
   // Persist so a hard-refresh lands you back where you were.
   localStorage.setItem('qp_symbol', symbol);
   localStorage.setItem('qp_tf', tf);
   localStorage.setItem('qp_days', days);
   localStorage.setItem('qp_source', source);
+  localStorage.setItem('qp_feed', feed);
   localStorage.setItem('qp_params_' + p.key, JSON.stringify(params));
-  document.getElementById('status').textContent = 'loading…';
-  const qs = new URLSearchParams({ symbol, tf, days, source, key: p.key, params: JSON.stringify(params) });
+  document.getElementById('status').textContent = 'loading… (' + feed + ')';
+  const qs = new URLSearchParams({ symbol, tf, days, source, feed, key: p.key, params: JSON.stringify(params) });
   const r = await fetch('/api/data?' + qs);
   if (!r.ok) { document.getElementById('status').textContent = 'error: ' + (await r.text()).slice(0, 200); return; }
   const j = await r.json();
@@ -531,10 +555,27 @@ function restoreState() {
   const tf  = localStorage.getItem('qp_tf');     if (tf)  document.getElementById('tf').value = tf;
   const d   = localStorage.getItem('qp_days');   if (d)   document.getElementById('days').value = d;
   const s   = localStorage.getItem('qp_source'); if (s)   document.getElementById('source').value = s;
+  const f   = localStorage.getItem('qp_feed');   if (f)   document.getElementById('feed').value = f;
+}
+
+async function initFeeds() {
+  // Label feeds by whether the server has their keys; default to the
+  // server's preferred feed (polygon when configured) unless the user
+  // already picked one.
+  try {
+    const h = await (await fetch('/api/health')).json();
+    const sel = document.getElementById('feed');
+    for (const opt of sel.options) {
+      const ok = h.feeds && h.feeds[opt.value];
+      opt.textContent = opt.value + (ok ? '' : ' (no key)');
+    }
+    if (!localStorage.getItem('qp_feed') && h.default_feed) sel.value = h.default_feed;
+  } catch (_) {}
 }
 
 window.addEventListener('load', async () => {
   restoreState();
+  await initFeeds();
   // The dropdown + approval flow must come up no matter what happens to
   // the chart library. Order: primitives first, chart second.
   try {
@@ -579,7 +620,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, body, 'application/javascript; charset=utf-8'); return
             self._send(404, b'not cached', 'text/plain'); return
         if u.path == '/api/health':
-            self._send(200, json.dumps({'ok': True, 'primitives': len(REGISTRY)}).encode('utf-8')); return
+            self._send(200, json.dumps({'ok': True, 'primitives': len(REGISTRY),
+                                        **_feed_status()}).encode('utf-8')); return
         if u.path == '/api/primitives':
             self._send(200, json.dumps(list_primitives()).encode('utf-8')); return
         if u.path == '/api/data':
@@ -593,6 +635,7 @@ class Handler(BaseHTTPRequestHandler):
                     primitive_key=q.get('key', ''),
                     params=params,
                     source=q.get('source', 'close'),
+                    feed=q.get('feed', 'alpaca'),
                 )
                 self._send(200, json.dumps(out).encode('utf-8'))
             except Exception as e:
