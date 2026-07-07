@@ -24,6 +24,9 @@ class SetupModel(Base):
     sl_tp: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # (sl, tp) tuple
     entry_method: Mapped[str] = mapped_column(String(50), default="market")
     entry_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Close any still-open position of this setup once the entry window
+    # ends (time-stop at session end).
+    close_at_session_end: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

@@ -367,7 +367,11 @@ class MonitorService:
         """Auto-close open positions whose SL or TP was touched by the
         latest cached bar (step 10 of the pipeline: fill the exit
         snapshot). Fill assumption is the level itself; if a bar touches
-        both SL and TP, the stop wins (conservative)."""
+        both SL and TP, the stop wins (conservative).
+
+        After the entry window ends, positions belonging to setups with
+        ``close_at_session_end`` are time-stopped at the current cached
+        price (exit_reason 'session_end')."""
         async with async_session_factory() as session:
             open_entries = (
                 await session.execute(
@@ -377,6 +381,18 @@ class MonitorService:
                     )
                 )
             ).scalars().all()
+
+        session_end_flags = {}
+        if open_entries and not self._session_open():
+            async with async_session_factory() as session:
+                setups = (
+                    await session.execute(
+                        select(SetupModel).where(
+                            SetupModel.id.in_({e.setup_id for e in open_entries})
+                        )
+                    )
+                ).scalars().all()
+                session_end_flags = {s.id: s.close_at_session_end for s in setups}
 
         closed_setups = []
         for entry in open_entries:
@@ -398,6 +414,13 @@ class MonitorService:
                     exit_price, reason = sl, "stop_loss"
                 elif tp is not None and low <= tp:
                     exit_price, reason = tp, "take_profit"
+
+            # Time-stop: entry window is over and the setup says close.
+            if reason is None and not self._session_open():
+                # Deleted setups fall back to the default (close).
+                if session_end_flags.get(entry.setup_id, True) and cache.get("price"):
+                    exit_price, reason = float(cache["price"]), "session_end"
+
             if reason is None:
                 continue
 

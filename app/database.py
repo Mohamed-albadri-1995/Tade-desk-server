@@ -38,6 +38,9 @@ _MIGRATION_COLUMNS = {
     "setup_factor_model": [
         ("split_by_side", "BOOLEAN DEFAULT 1"),
     ],
+    "setups": [
+        ("close_at_session_end", "BOOLEAN DEFAULT 1"),
+    ],
 }
 
 # Tables whose contents are recomputable and whose schema changed in a way

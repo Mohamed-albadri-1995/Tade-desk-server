@@ -14,6 +14,7 @@ class SetupCreate(BaseModel):
     sl_tp: Optional[Tuple[Optional[float], Optional[float]]] = None
     entry_method: str = "market"
     entry_price: Optional[float] = None
+    close_at_session_end: bool = True
     is_active: bool = True
 
 
@@ -24,6 +25,7 @@ class SetupUpdate(BaseModel):
     sl_tp: Optional[Tuple[Optional[float], Optional[float]]] = None
     entry_method: Optional[str] = None
     entry_price: Optional[float] = None
+    close_at_session_end: Optional[bool] = None
     is_active: Optional[bool] = None
 
 
@@ -37,6 +39,7 @@ class SetupOut(BaseModel):
     sl_tp: Optional[list] = None
     entry_method: str
     entry_price: Optional[float] = None
+    close_at_session_end: bool
     is_active: bool
     created_at: datetime
     updated_at: datetime

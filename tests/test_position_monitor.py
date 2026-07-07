@@ -23,7 +23,12 @@ def bar(high, low, close):
 @pytest_asyncio.fixture()
 async def service():
     await init_db()
-    return MonitorService()
+    svc = MonitorService()
+    # Keep the entry window open for the SL/TP tests so the session-end
+    # time-stop doesn't interfere; the time-stop tests close it explicitly.
+    svc.session_start_time = "00:00"
+    svc.session_end_time = "23:59"
+    return svc
 
 
 async def open_entry(stock="POSM", side="long", sl=98.0, tp=106.0, shares=10):
@@ -93,4 +98,51 @@ async def test_untouched_position_stays_open(service):
     await service._monitor_positions()
     entry = await fetch(journal_id)
     assert entry.status == "alerted"
+    assert entry.exit_pnl is None
+
+
+async def _make_setup(setup_id, close_at_session_end):
+    from app.models import SetupModel
+
+    async with async_session_factory() as session:
+        session.add(
+            SetupModel(
+                id=setup_id, name=f"s{setup_id}", script_content="x=1",
+                close_at_session_end=close_at_session_end,
+            )
+        )
+        await session.commit()
+
+
+async def test_session_end_time_stop_closes_position(service):
+    await _make_setup(201, close_at_session_end=True)
+    journal_id = await open_entry(stock="POS6")
+    async with async_session_factory() as session:
+        entry = await session.get(JournalModel, journal_id)
+        entry.setup_id = 201
+        await session.commit()
+    service.session_start_time = "00:00"
+    service.session_end_time = "00:01"  # window long over
+    service.market_cache["POS6"] = {"bars": [bar(103.0, 99.0, 102.0)], "price": 102.0}
+    await service._monitor_positions()
+    entry = await fetch(journal_id)
+    assert entry.status == "closed"
+    assert entry.exit_reason == "session_end"
+    assert entry.exit_price == 102.0  # current cached price
+    assert entry.exit_pnl == 20.0
+
+
+async def test_session_end_hold_when_setup_says_no(service):
+    await _make_setup(202, close_at_session_end=False)
+    journal_id = await open_entry(stock="POS7")
+    async with async_session_factory() as session:
+        entry = await session.get(JournalModel, journal_id)
+        entry.setup_id = 202
+        await session.commit()
+    service.session_start_time = "00:00"
+    service.session_end_time = "00:01"
+    service.market_cache["POS7"] = {"bars": [bar(103.0, 99.0, 102.0)], "price": 102.0}
+    await service._monitor_positions()
+    entry = await fetch(journal_id)
+    assert entry.status == "alerted"  # held: SL/TP still governs
     assert entry.exit_pnl is None
