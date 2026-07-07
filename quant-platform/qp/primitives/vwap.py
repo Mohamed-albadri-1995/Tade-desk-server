@@ -120,11 +120,17 @@ def session(bars: Bars):
 @primitive(
     name='n_day',
     group='vwap',
-    description=('VWAP that anchors every N trading days, counted from the '
-                 'start of the fetched window (non-rolling blocks — matches '
-                 'Pine `ta.vwap(hlc3, isNewDay and dCount%N==0)`; day 1 is '
-                 'NaN, first anchor at day N). Phase vs TV may differ by a '
-                 'day because Pine counts from ITS chart-history start.'),
+    description=('Rolling N-session VWAP. At any bar it is the volume-weighted '
+                 'average price from the open of the session (N-1) sessions '
+                 'ago through the current bar — so a 2-day VWAP always spans '
+                 'yesterday + today. Only the first session of the fetched '
+                 'window degenerates to the session VWAP (nothing earlier '
+                 'exists). DEVIATES from the Pine `ta.vwap(hlc3, isNewDay and '
+                 'dCount%N==0)` block-reset on purpose: that version resets '
+                 'every N days with arbitrary phase and collapses to the plain '
+                 'session VWAP on every reset day, which is useless on a live '
+                 'watch. This rolling form is what "N-day VWAP" means to a '
+                 'trader.'),
     params=(
         Param('n_days',   'int',  default=2, min=1),
         Param('rth_only', 'bool', default=True),
@@ -136,18 +142,36 @@ def n_day(bars: Bars, n_days: int, rth_only: bool = True):
     et = df.index.tz_convert(_ET)
     price, vol = _hlc3_vol(df)
     m = len(df)
-    dates = et.date
-    anchor = np.zeros(m, dtype=bool)
-    day_count = 0
-    last_date = None
     N = int(n_days)
+    if m == 0:
+        return _scatter(np.full(0, np.nan), pos, len(bars.df))
+
+    # Session index per bar + first-bar position of each session.
+    dates = et.date
+    session_idx = np.empty(m, dtype=np.int64)
+    session_start: list[int] = []
+    si = -1
+    last = None
     for i in range(m):
-        if dates[i] != last_date:
-            day_count += 1
-            last_date = dates[i]
-            if day_count % N == 0:
-                anchor[i] = True
-    return _scatter(_running_vwap(price, vol, anchor), pos, len(bars.df))
+        if dates[i] != last:
+            si += 1
+            session_start.append(i)
+            last = dates[i]
+        session_idx[i] = si
+
+    # Prefix sums so each bar's rolling window is O(1).
+    pv = price * vol
+    cpv = np.concatenate(([0.0], np.cumsum(pv)))
+    cv  = np.concatenate(([0.0], np.cumsum(vol)))
+
+    out = np.full(m, np.nan)
+    for i in range(m):
+        anchor_session = max(0, session_idx[i] - (N - 1))
+        a = session_start[anchor_session]
+        den = cv[i + 1] - cv[a]
+        if den > 0:
+            out[i] = (cpv[i + 1] - cpv[a]) / den
+    return _scatter(out, pos, len(bars.df))
 
 
 def _calendar_anchored(bars: Bars, period: str, rth_only: bool) -> np.ndarray:

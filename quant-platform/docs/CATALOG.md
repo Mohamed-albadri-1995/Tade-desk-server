@@ -2,7 +2,7 @@
 
 Generated from the registry by `tools/gen_catalog.py` — do not edit by hand.
 
-**60 primitives · 25 approved** (as of 2026-07-07 11:11 UTC).
+**60 primitives · 25 approved** (as of 2026-07-07 14:49 UTC).
 Approval status changes as verification progresses; the source of truth
 is `approvals/approvals.json`, queried at runtime via `qp.approved_primitives()`.
 
@@ -435,7 +435,7 @@ Monthly VWAP — resets on the first (RTH) bar of each ET calendar month. Matche
 
 ### 🚧 `vwap.n_day`
 
-VWAP that anchors every N trading days, counted from the start of the fetched window (non-rolling blocks — matches Pine `ta.vwap(hlc3, isNewDay and dCount%N==0)`; day 1 is NaN, first anchor at day N). Phase vs TV may differ by a day because Pine counts from ITS chart-history start.
+Rolling N-session VWAP. At any bar it is the volume-weighted average price from the open of the session (N-1) sessions ago through the current bar — so a 2-day VWAP always spans yesterday + today. Only the first session of the fetched window degenerates to the session VWAP (nothing earlier exists). DEVIATES from the Pine `ta.vwap(hlc3, isNewDay and dCount%N==0)` block-reset on purpose: that version resets every N days with arbitrary phase and collapses to the plain session VWAP on every reset day, which is useless on a live watch. This rolling form is what "N-day VWAP" means to a trader.
 
 - input: `bars`
 - output: single series

@@ -117,6 +117,33 @@ or "strictly the current bar, None if NaN" (session-gated values) is
 right; for the latter use
 `None if np.isnan(arr[-1]) else float(arr[-1])`.
 
+**Scalar vs array — the decision your bridge MUST make.** Every
+primitive returns the **full history array**. But the two script styles
+you'll receive use the result differently:
+
+```python
+# Style A — "latest value" scripts (scalar-expecting):
+rsi = market_data.rsi(stock, length=14)
+return rsi > 55                       # ← expects rsi to be ONE number
+
+# Style B — cross-bar scripts (array-expecting, the v11 analysis example):
+sma_fast = market_data.sma(stock, 9)
+if sma_fast[-1] > sma_slow[-1] and sma_fast[-2] <= sma_slow[-2]:
+```
+
+If your bridge returns the raw array, Style A **crashes** —
+`np.ndarray > 55` is an array, and `if array:` raises
+`ValueError: truth value of an array ... is ambiguous`. If it returns a
+scalar, Style B can't index `[-1]`/`[-2]`.
+
+**Recommended bridge: return the latest scalar by default, expose the
+array via a `.series` namespace.** This makes Style A scripts (the
+common case for a live watch — "is RSI above 55 right now?") work as
+written, and Style B scripts use `market_data.series.sma(stock, 9)[-1]`.
+Both are shown in the reference bridge in §3. Pick a convention and
+document it for whoever writes setup scripts — do not leave it implicit,
+it's the #1 thing that will silently break scripts.
+
 **Lookback requirements.** Feed enough history for the primitive to
 warm up: at least `length` bars for rolling indicators; **≥ 300 bars**
 for `levels.dynamic_sr`; ~5 RTH days of 1-minute bars (≈1950) for
@@ -163,27 +190,55 @@ Notes:
 - Full records (who/when/sha/notes): `qp.get_approval('ma.sma')` →
   dict or `None`; `qp.is_approved('ma.sma')` → bool.
 
-Reference bridge pattern (adapt freely — the contract is the registry,
-not this snippet):
+Reference bridge (adapt freely — the contract is the registry, not this
+snippet). Returns **latest scalars** on the main object and the **full
+arrays** under `market_data.series`, resolving the scalar-vs-array issue
+from §2. Multi-output primitives (bb, floor, dynamic_sr…) return a dict
+of latest scalars (or a dict of arrays under `.series`).
 
 ```python
-class MarketData:
-    def __init__(self, get_bars):          # get_bars(stock) -> qp.Bars
+import numpy as np
+
+def _latest(x):
+    if isinstance(x, dict):
+        return {k: _latest(v) for k, v in x.items()}
+    a = np.asarray(x, dtype=float)
+    idx = np.where(~np.isnan(a))[0]
+    return float(a[idx[-1]]) if len(idx) else None
+
+class _Series:
+    """market_data.series.<name>(...) → full np.ndarray (or dict of them)."""
+    def __init__(self, get_bars):
         self._get_bars = get_bars
         for key, meta in qp.approved_primitives().items():
             setattr(self, meta.name, self._bind(meta))
-
     def _bind(self, meta):
         if meta.inputs == ('bars',):
-            def call(stock, **params):
-                return meta.fn(self._get_bars(stock), **params)
-        else:  # ('source',)
-            def call(stock, source='close', **params):
-                bars = self._get_bars(stock)
-                arr = getattr(bars, source)      # close/open/high/low/volume
-                return meta.fn(arr, **params)
-        return call
+            return lambda stock, **p: meta.fn(self._get_bars(stock), **p)
+        return lambda stock, source='close', **p: \
+            meta.fn(getattr(self._get_bars(stock), source), **p)
+
+class MarketData:
+    def __init__(self, get_bars):          # get_bars(stock) -> qp.Bars
+        self._get_bars = get_bars
+        self.series = _Series(get_bars)    # array access for cross-bar logic
+        for key, meta in qp.approved_primitives().items():
+            setattr(self, meta.name, self._bind(meta))
+    def _bind(self, meta):
+        if meta.inputs == ('bars',):
+            return lambda stock, **p: _latest(meta.fn(self._get_bars(stock), **p))
+        return lambda stock, source='close', **p: \
+            _latest(meta.fn(getattr(self._get_bars(stock), source), **p))
+
+    # plus the tool's own non-qp methods per v11 §8:
+    def get_current_price(self, stock): ...   # float
+    def get_ohlcv(self, stock, lookback): ... # list[dict]
 ```
+
+With this, the received example scripts run unchanged:
+`market_data.rsi(stock, length=14) > 55` → `float > 55` → `bool` ✓;
+`market_data.ema(stock, length=9) > market_data.ema(stock, length=20)`
+→ `bool` ✓; `market_data.day_open(stock)` → `float` ✓.
 
 ## 4. Import path & the `qp` name collision
 
