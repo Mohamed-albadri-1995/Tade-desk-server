@@ -46,5 +46,107 @@
     "approved_by": "badri",
     "git_sha": "b158e77",
     "notes": ""
+  },
+  "ma.ema": {
+    "approved_at": "2026-07-07T08:07:13+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "ma.hma": {
+    "approved_at": "2026-07-07T08:07:54+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "ma.rma": {
+    "approved_at": "2026-07-07T08:16:28+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "ma.sma": {
+    "approved_at": "2026-07-07T08:16:18+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "ma.vwma": {
+    "approved_at": "2026-07-07T08:48:02+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "ma.wma": {
+    "approved_at": "2026-07-07T08:52:42+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "osc.rsi": {
+    "approved_at": "2026-07-07T08:17:53+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "structure.pivot_high": {
+    "approved_at": "2026-07-07T08:50:55+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "volatility.bb": {
+    "approved_at": "2026-07-07T08:19:18+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "volatility.bb_ema": {
+    "approved_at": "2026-07-07T08:18:20+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "vwap.session": {
+    "approved_at": "2026-07-07T08:24:46+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "vwap.swing_hh": {
+    "approved_at": "2026-07-07T08:37:52+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "vwap.swing_ll": {
+    "approved_at": "2026-07-07T08:38:48+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "vwap.today_hh": {
+    "approved_at": "2026-07-07T08:40:33+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "vwap.today_ll": {
+    "approved_at": "2026-07-07T08:41:36+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "vwap.week_hh": {
+    "approved_at": "2026-07-07T08:42:37+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "vwap.week_ll": {
+    "approved_at": "2026-07-07T08:44:06+00:00",
+    "approved_by": "badri",
+    "git_sha": "f8be7ae",
+    "notes": ""
   }
 }
