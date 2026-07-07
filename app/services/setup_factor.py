@@ -234,14 +234,15 @@ class SetupFactorEngine:
 
     # ----------------------------------------------------------- recompute
 
-    async def recompute_all(self) -> Dict[tuple, dict]:
+    async def recompute_all(self, setup_id: Optional[int] = None) -> Dict[tuple, dict]:
+        """Recompute factor states — all setups, or just one when a single
+        close only invalidates that setup's stats."""
         await self.refresh_model()
         async with async_session_factory() as session:
-            trades = (
-                (await session.execute(select(JournalModel).where(JournalModel.exit_pnl != None)))  # noqa: E711
-                .scalars()
-                .all()
-            )
+            query = select(JournalModel).where(JournalModel.exit_pnl != None)  # noqa: E711
+            if setup_id is not None:
+                query = query.where(JournalModel.setup_id == setup_id)
+            trades = (await session.execute(query)).scalars().all()
             by_setup: Dict[int, List[JournalModel]] = {}
             for t in trades:
                 by_setup.setdefault(t.setup_id, []).append(t)

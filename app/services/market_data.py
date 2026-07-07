@@ -64,9 +64,12 @@ class MarketDataService:
     # ----------------------------------------------------------------- loop
 
     async def _run(self) -> None:
-        while True:
-            started = asyncio.get_event_loop().time()
-            for symbol in self._symbols:
+        # Bounded fan-out: sequential fetching cannot keep a large
+        # screener-fed watchlist fresh at a 5s interval.
+        semaphore = asyncio.Semaphore(8)
+
+        async def fetch_one(symbol: str) -> None:
+            async with semaphore:
                 try:
                     bars = await self._fetch_bars(symbol)
                     if bars:
@@ -77,6 +80,10 @@ class MarketDataService:
                         }
                 except Exception as exc:
                     logger.warning("market data fetch failed for %s: %s", symbol, exc)
+
+        while True:
+            started = asyncio.get_event_loop().time()
+            await asyncio.gather(*(fetch_one(s) for s in self._symbols))
             elapsed = asyncio.get_event_loop().time() - started
             await asyncio.sleep(max(0.5, self.refresh_interval - elapsed))
 
@@ -158,18 +165,21 @@ class MarketDataService:
         data = result[0]
         timestamps = data.get("timestamp") or []
         quote = ((data.get("indicators") or {}).get("quote") or [{}])[0]
+        opens = quote.get("open") or []
+        highs = quote.get("high") or []
+        lows = quote.get("low") or []
+        closes = quote.get("close") or []
+        volumes = quote.get("volume") or []
+
+        def at(arr, i):
+            return arr[i] if i < len(arr) else None
+
         bars = []
         for i, ts in enumerate(timestamps):
-            o, h, l, c = (
-                (quote.get("open") or [])[i : i + 1] or [None],
-                (quote.get("high") or [])[i : i + 1] or [None],
-                (quote.get("low") or [])[i : i + 1] or [None],
-                (quote.get("close") or [])[i : i + 1] or [None],
-            )
-            o, h, l, c = o[0], h[0], l[0], c[0]
+            o, h, l, c = at(opens, i), at(highs, i), at(lows, i), at(closes, i)
             if None in (o, h, l, c):
                 continue
-            v = ((quote.get("volume") or [])[i : i + 1] or [0])[0] or 0
+            v = at(volumes, i) or 0
             bars.append(
                 {
                     "timestamp": datetime.utcfromtimestamp(ts).isoformat() + "Z",

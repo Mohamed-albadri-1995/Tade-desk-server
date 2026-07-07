@@ -97,10 +97,7 @@ async def session_start_job() -> None:
 
 
 def schedule_session_start() -> None:
-    try:
-        hour, minute = (int(x) for x in monitor.session_start_time.split(":"))
-    except ValueError:
-        hour, minute = 9, 35
+    hour, minute = monitor._parse_hhmm(monitor.session_start_time, (9, 35))
     scheduler.add_job(
         session_start_job,
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute),

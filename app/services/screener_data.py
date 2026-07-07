@@ -1,9 +1,13 @@
 """ScreenerDataService (spec 3.2).
 
-Asynchronous loop fetching from ``SCREENER_URL/api/registry``, parsing
-each record into a ``TickerContext`` dataclass and updating
-``screener_cache[stock]`` every ``screener_refresh_interval`` seconds
-(default 15).
+Asynchronous loop fetching the screener registry, parsing each r0 record
+into a ``TickerContext`` dataclass and updating ``screener_cache[stock]``
+every ``screener_refresh_interval`` seconds (default 15).
+
+The screener tool (Market Tab spec §9) serves ``/api/registry/today``
+(today's r0 rows) and ``/api/registry/all``; the v11 trading-tool spec
+referenced ``/api/registry``. We try them in that order and stick with
+the first path that answers.
 """
 
 import asyncio
@@ -41,34 +45,47 @@ class TickerContext:
 
 
 def _parse_record(record: dict) -> Optional[TickerContext]:
-    stock = record.get("ticker") or record.get("stock") or record.get("symbol")
-    if not stock:
+    """Parse one screener r0 row: ticker at top level, indicator fields in
+    the ``stock`` dict, market context in ``context``, score in ``_score``
+    (Market Tab spec §1). Falls back to flat keys for older payloads."""
+    ticker = record.get("ticker") or record.get("symbol")
+    if not ticker and not isinstance(record.get("stock"), dict):
+        ticker = record.get("stock")
+    if not ticker:
         return None
-    context = record.get("context") or {}
+    context = record.get("context") if isinstance(record.get("context"), dict) else {}
     stock_fields = record.get("stock") if isinstance(record.get("stock"), dict) else {}
 
     def pick(*keys):
-        for source in (record, context, stock_fields or {}):
+        for source in (record, context, stock_fields):
             for key in keys:
                 if isinstance(source, dict) and source.get(key) is not None:
                     return source.get(key)
         return None
 
+    catalyst = pick("catalyst", "catalystLabel")
+    if isinstance(catalyst, dict):  # r0 catalyst is an object with a label
+        catalyst = catalyst.get("label") or catalyst.get("type")
+
     return TickerContext(
-        stock=str(stock).upper(),
+        stock=str(ticker).upper(),
         regime=pick("regime"),
         secBias=pick("secBias", "sectorBias"),
         secHot=pick("secHot", "sectorHot"),
         secScore=pick("secScore", "sectorScore"),
-        sector=pick("sector"),
+        sector=pick("sector", "broadResolved"),
         themes=pick("themes") or [],
-        score=pick("score", "totalScore"),
+        score=record.get("_score") if record.get("_score") is not None else pick("score", "score_at_entry", "totalScore"),
         rvol=pick("rvol"),
         gapPct=pick("gapPct", "gap_pct"),
-        catalyst=pick("catalyst", "catalystLabel"),
+        catalyst=catalyst,
         updated_at=datetime.utcnow().isoformat() + "Z",
         raw=record,
     )
+
+
+# Tried in order; the first path that answers is kept for the session.
+REGISTRY_PATHS = ("/api/registry/today", "/api/registry", "/api/registry/all")
 
 
 class ScreenerDataService:
@@ -78,6 +95,7 @@ class ScreenerDataService:
         self._task: Optional[asyncio.Task] = None
         self._symbols: List[str] = []
         self._client: Optional[httpx.AsyncClient] = None
+        self._registry_path: Optional[str] = None  # discovered working path
 
     async def start(self, symbols: List[str]) -> None:
         await self.stop()
@@ -110,13 +128,32 @@ class ScreenerDataService:
                 logger.warning("screener fetch failed: %s", exc)
             await asyncio.sleep(self.refresh_interval)
 
+    async def _fetch_registry(self):
+        base = settings.screener_url.rstrip("/")
+        paths = (self._registry_path,) if self._registry_path else REGISTRY_PATHS
+        last_error = None
+        for path in paths:
+            try:
+                resp = await self._client.get(f"{base}{path}")
+                resp.raise_for_status()
+                if self._registry_path != path:
+                    logger.info("screener registry found at %s%s", base, path)
+                    self._registry_path = path
+                return resp.json()
+            except Exception as exc:
+                last_error = exc
+        self._registry_path = None  # rediscover next cycle
+        raise last_error if last_error else RuntimeError("no registry path configured")
+
     async def _refresh(self) -> None:
-        url = f"{settings.screener_url.rstrip('/')}/api/registry"
-        resp = await self._client.get(url)
-        resp.raise_for_status()
-        payload = resp.json()
+        payload = await self._fetch_registry()
         records = payload if isinstance(payload, list) else (
-            payload.get("registry") or payload.get("rows") or payload.get("data") or []
+            payload.get("registry")
+            or payload.get("rows")
+            or payload.get("r0")
+            or payload.get("items")
+            or payload.get("data")
+            or []
         )
         watch = set(self._symbols)
         for record in records:

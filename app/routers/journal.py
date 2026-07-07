@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_session
+from app.database import async_session_factory, get_session
 from app.models import JournalModel
 from app.schemas import ExitCardUpdate
 from app.services.event_bus import event_bus
@@ -25,8 +25,9 @@ def _bars_for(stock: str):
     return entry.get("bars") if entry else None
 
 
-async def _after_close() -> None:
-    await monitor.setup_factor_engine.recompute_all()
+async def _after_close(setup_ids) -> None:
+    for setup_id in set(setup_ids):
+        await monitor.setup_factor_engine.recompute_all(setup_id=setup_id)
     await monitor.capital_service.refresh()
 
 
@@ -45,18 +46,17 @@ async def get_journal_entry(journal_id: int, session: AsyncSession = Depends(get
 
 
 @router.put("/{journal_id}/exit")
-async def update_exit(journal_id: int, payload: ExitCardUpdate):
-    entry = await monitor.journal_service.update_exit_card(
-        journal_id, payload.model_dump(exclude_unset=True), bars=None
-    )
-    if entry is None:
+async def update_exit(
+    journal_id: int, payload: ExitCardUpdate, session: AsyncSession = Depends(get_session)
+):
+    existing = await session.get(JournalModel, journal_id)
+    if existing is None:
         raise HTTPException(404, "journal entry not found")
+    entry = await monitor.journal_service.update_exit_card(
+        journal_id, payload.model_dump(exclude_unset=True), bars=_bars_for(existing.stock)
+    )
     if entry.exit_price is not None:
-        # Re-run with bars for MAE/MFE/capture if we have them cached.
-        bars = _bars_for(entry.stock)
-        if bars:
-            entry = await monitor.journal_service.update_exit_card(journal_id, {}, bars=bars)
-        await _after_close()
+        await _after_close([entry.setup_id])
     data = journal_to_dict(entry)
     await event_bus.publish({"type": "new_entry", "entry": data})
     return data
@@ -72,7 +72,7 @@ async def import_exits(file: UploadFile):
     if not reader.fieldnames or not required.issubset({f.strip() for f in reader.fieldnames}):
         raise HTTPException(422, "CSV must have journal_id and exit_price columns")
     results = {"updated": 0, "errors": []}
-    closed_any = False
+    closed_setups = []
     for i, row in enumerate(reader, start=2):
         try:
             journal_id = int(row["journal_id"])
@@ -81,17 +81,18 @@ async def import_exits(file: UploadFile):
                 exit_data["exit_time"] = datetime.fromisoformat(row["exit_time"].replace("Z", ""))
             if row.get("exit_reason"):
                 exit_data["exit_reason"] = row["exit_reason"]
-            entry = await monitor.journal_service.update_exit_card(journal_id, exit_data, bars=None)
-            if entry is None:
+            async with async_session_factory() as session:
+                existing = await session.get(JournalModel, journal_id)
+            if existing is None:
                 results["errors"].append(f"line {i}: journal {journal_id} not found")
                 continue
-            bars = _bars_for(entry.stock)
-            if bars:
-                await monitor.journal_service.update_exit_card(journal_id, {}, bars=bars)
+            entry = await monitor.journal_service.update_exit_card(
+                journal_id, exit_data, bars=_bars_for(existing.stock)
+            )
             results["updated"] += 1
-            closed_any = True
+            closed_setups.append(entry.setup_id)
         except Exception as exc:
             results["errors"].append(f"line {i}: {exc}")
-    if closed_any:
-        await _after_close()
+    if closed_setups:
+        await _after_close(closed_setups)
     return results

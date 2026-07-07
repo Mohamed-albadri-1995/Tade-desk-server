@@ -31,7 +31,7 @@ from app.models import (
     WatchlistModel,
 )
 from app.services.broker_engine import BrokerEngine
-from app.services.capital import CapitalService
+from app.services.capital import OPEN_STATUSES, CapitalService
 from app.services.condition_engine import ConditionEngine
 from app.services.event_bus import event_bus
 from app.services.gate_engine import GateEngine
@@ -76,6 +76,7 @@ class MonitorService:
         self._task: Optional[asyncio.Task] = None
         self._armed: Dict[tuple, Optional[str]] = {}  # (stock, setup_id) -> fired side
         self._statuses: Dict[tuple, str] = {}  # (stock, setup_id, condition) -> status
+        self._published: Dict[tuple, object] = {}  # last mandatory/raw values sent (WS dedupe)
 
     # ------------------------------------------------------------ lifecycle
 
@@ -111,6 +112,7 @@ class MonitorService:
         """Re-arm all signals (called daily at session start)."""
         self._armed.clear()
         self._statuses.clear()
+        self._published.clear()
 
     @property
     def running(self) -> bool:
@@ -207,14 +209,16 @@ class MonitorService:
 
         setups = await self._load_active_setups()
         conditions = await self._load_active_conditions()
-        symbols = [s for s in self.market_cache.keys()]
+        # The condition->setup association doesn't depend on the stock, so
+        # build the map once per tick, not once per (stock, setup).
+        conditions_by_setup = {
+            setup.id: [c for c in conditions if setup.id in (c.associated_setups or [])]
+            for setup in setups
+        }
 
-        for stock in symbols:
+        for stock in list(self.market_cache):
             for setup in setups:
-                setup_conditions = [
-                    c for c in conditions if setup.id in (c.associated_setups or [])
-                ]
-                await self._evaluate_pair(stock, setup, setup_conditions)
+                await self._evaluate_pair(stock, setup, conditions_by_setup[setup.id])
 
     async def _publish_status(self, stock: str, setup_id: int, condition: str, status: str) -> None:
         key = (stock, setup_id, condition)
@@ -239,22 +243,28 @@ class MonitorService:
         if evaluation.get("error"):
             return
 
-        # Live mandatory ✅/❌ updates.
+        # Live mandatory ✅/❌ updates — published only when the value changed
+        # so a large watchlist doesn't flood the WebSocket every tick.
         for name, passed in (evaluation["mandatory_results"] or {}).items():
-            await event_bus.publish(
-                {
-                    "type": "mandatory_update",
-                    "stock": stock,
-                    "setup_id": setup.id,
-                    "condition": name,
-                    "passed": bool(passed),
-                }
-            )
+            key = ("mandatory", stock, setup.id, name)
+            if self._published.get(key) != bool(passed):
+                self._published[key] = bool(passed)
+                await event_bus.publish(
+                    {
+                        "type": "mandatory_update",
+                        "stock": stock,
+                        "setup_id": setup.id,
+                        "condition": name,
+                        "passed": bool(passed),
+                    }
+                )
 
         # Raw values + unknown status for default/additional conditions.
         for condition in conditions:
             values = self.condition_engine.get_raw_display(condition, stock, now)
-            if values:
+            key = ("raw", stock, setup.id, condition.name)
+            if values and self._published.get(key) != values:
+                self._published[key] = values
                 await event_bus.publish(
                     {
                         "type": "raw_display",
@@ -307,13 +317,13 @@ class MonitorService:
             open_entries = (
                 await session.execute(
                     select(JournalModel).where(
-                        JournalModel.status.in_(("pending", "alerted")),
+                        JournalModel.status.in_(OPEN_STATUSES),
                         JournalModel.exit_pnl == None,  # noqa: E711
                     )
                 )
             ).scalars().all()
 
-        closed_any = False
+        closed_setups = []
         for entry in open_entries:
             cache = self.market_cache.get(entry.stock)
             if not cache or not cache.get("bars"):
@@ -341,7 +351,7 @@ class MonitorService:
                 {"exit_price": float(exit_price), "exit_reason": reason},
                 bars=cache["bars"],
             )
-            closed_any = True
+            closed_setups.append(closed.setup_id)
             data = journal_to_dict(closed)
             await event_bus.publish({"type": "new_entry", "entry": data})
             await event_bus.publish(
@@ -365,8 +375,9 @@ class MonitorService:
                 closed.stock, closed.id, reason, float(exit_price),
             )
 
-        if closed_any:
-            await self.setup_factor_engine.recompute_all()
+        if closed_setups:
+            for setup_id in set(closed_setups):
+                await self.setup_factor_engine.recompute_all(setup_id=setup_id)
             await self.capital_service.refresh()
 
     # ------------------------------------------------- signal pipeline (§4)
@@ -459,21 +470,28 @@ class MonitorService:
         setup_factor = float(setup_factor_state["final_factor"])
         regime_key = str(screener_snapshot.get("regime") or "")
         sl_for_risk = sl_price if sl_price is not None else entry_price
-        if self.capital_service.accounts:
-            sizing = self.sizer_engine.calculate_multi(
-                entry_price,
-                sl_for_risk,
-                grade,
-                regime_key,
-                setup_factor,
-                self.capital_service.accounts,
-                self.capital_service.available,
-            )
-            account_breakdown = sizing["accounts"]
-        else:  # no accounts configured -> legacy single-account sizing
-            sizing = self.sizer_engine.calculate(entry_price, sl_for_risk, grade, regime_key)
-            sizing["final_shares"] = int(sizing["final_shares"] * setup_factor)
-            account_breakdown = None
+        # One sizing path for every card shape: with no accounts configured
+        # a synthetic account built from the global settings stands in, so
+        # entry_factors.accounts is always present and identical in form.
+        accounts = self.capital_service.accounts or [
+            {
+                "id": 0,
+                "name": "default",
+                "account_size": self.sizer_engine.account_size,
+                "risk_per_trade": None,
+                "broker_id": None,
+                "is_primary": True,
+            }
+        ]
+        sizing = self.sizer_engine.calculate_multi(
+            entry_price,
+            sl_for_risk,
+            grade,
+            regime_key,
+            setup_factor,
+            accounts,
+            self.capital_service.available,
+        )
 
         card_data["entry_shares"] = sizing["final_shares"]
         card_data["entry_factors"] = {
@@ -483,9 +501,8 @@ class MonitorService:
             "grade_breakdown": grading["breakdown"],
             "setup_factor": setup_factor,
             "setup_factor_state": setup_factor_state,
+            "accounts": sizing["accounts"],
         }
-        if account_breakdown is not None:
-            card_data["entry_factors"]["accounts"] = account_breakdown
         card_data["entry_grade"] = grade
 
         # A setup factor of 0 blocks the trade: the card is still written
