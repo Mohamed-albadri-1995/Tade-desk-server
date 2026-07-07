@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class SetupCreate(BaseModel):
     name: str
     script_content: str
+    # Derived from the script on save (get_mandatory_conditions /
+    # get_entry_params) — any values sent here are overridden.
     mandatory_conditions: List[str] = Field(default_factory=list)
     sl_tp: Optional[Tuple[Optional[float], Optional[float]]] = None
     entry_method: str = "market"
@@ -47,7 +49,7 @@ class SetupOut(BaseModel):
 
 # --------------------------------------------------------------- conditions
 class ConditionCreate(BaseModel):
-    name: str
+    name: str = ""  # derived from the script's get_name() on save
     type: str = "default"  # 'default' | 'additional'
     script_content: str
     associated_setups: List[int] = Field(default_factory=list)

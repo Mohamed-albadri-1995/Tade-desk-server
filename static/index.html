@@ -150,14 +150,9 @@
         <div><label>Name</label><input id="setup-name" required></div>
         <div><label>Active</label><select id="setup-active"><option value="true">yes</option><option value="false">no</option></select></div>
       </div>
-      <div class="row">
-        <div><label>Entry method</label><select id="setup-entry-method"><option>market</option><option>limit</option></select></div>
-        <div><label>Entry price (blank = market)</label><input id="setup-entry-price" type="number" step="any"></div>
-      </div>
       <label>Close open positions at session end (time-stop at the entry-window end)</label>
       <select id="setup-close-end"><option value="true">yes — close at window end</option><option value="false">no — hold until SL/TP</option></select>
-      <label>Mandatory condition names (comma separated)</label><input id="setup-mandatory">
-      <label>Script (must define class SetupIndicator)</label>
+      <label>Script (must define class SetupIndicator — mandatory conditions and entry method/price are read from the script itself)</label>
       <textarea class="code" id="setup-script" spellcheck="false"></textarea>
       <button class="btn" type="submit">Save setup</button>
       <button class="btn secondary" type="button" id="setup-clear">Clear</button>
@@ -170,8 +165,8 @@
       <h3>New / Edit Condition <span class="muted" id="cond-editing"></span></h3>
       <input type="hidden" id="cond-id">
       <div class="row">
-        <div><label>Name</label><input id="cond-name" required></div>
         <div><label>Type</label><select id="cond-type"><option>default</option><option>additional</option></select></div>
+        <div><label>Name <span class="muted">(automatic — read from the script's get_name())</span></label><input id="cond-name" disabled placeholder="from script"></div>
       </div>
       <div class="row">
         <div><label>Associated setup IDs (comma separated)</label><input id="cond-setups"></div>
@@ -504,7 +499,8 @@ async function loadSetups() {
   const rows = await api.get("/api/setups");
   setupNames = Object.fromEntries(rows.map(s => [s.id, s.name]));
   $("#setups-body").innerHTML = rows.map(s => `<tr>
-    <td>${s.id}</td><td>${s.name}</td><td>${s.entry_method}${s.entry_price ? " @ " + s.entry_price : ""}${s.close_at_session_end ? ' <span class="muted">· closes at window end</span>' : ""}</td>
+    <td>${s.id}</td><td>${s.name}<div class="muted" style="font-size:11px">mandatory: ${(s.mandatory_conditions || []).join(", ") || "—"}</div></td>
+    <td>${s.entry_method}${s.entry_price ? " @ " + s.entry_price : ""}${s.close_at_session_end ? ' <span class="muted">· closes at window end</span>' : ""}</td>
     <td>${s.is_active ? "✅" : "—"}</td>
     <td><button class="btn secondary" data-edit="${s.id}">edit</button>
         <button class="btn danger" data-del="${s.id}">delete</button></td></tr>`).join("");
@@ -512,10 +508,7 @@ async function loadSetups() {
     const s = rows.find(x => x.id == b.dataset.edit);
     $("#setup-id").value = s.id; $("#setup-name").value = s.name;
     $("#setup-active").value = String(s.is_active);
-    $("#setup-entry-method").value = s.entry_method;
-    $("#setup-entry-price").value = s.entry_price ?? "";
     $("#setup-close-end").value = String(s.close_at_session_end);
-    $("#setup-mandatory").value = (s.mandatory_conditions || []).join(", ");
     $("#setup-script").value = s.script_content;
     $("#setup-editing").textContent = `(editing #${s.id})`;
   });
@@ -530,9 +523,6 @@ $("#setup-form").onsubmit = async (e) => {
   const body = {
     name: $("#setup-name").value,
     script_content: $("#setup-script").value,
-    mandatory_conditions: $("#setup-mandatory").value.split(",").map(s => s.trim()).filter(Boolean),
-    entry_method: $("#setup-entry-method").value,
-    entry_price: $("#setup-entry-price").value ? Number($("#setup-entry-price").value) : null,
     close_at_session_end: $("#setup-close-end").value === "true",
     is_active: $("#setup-active").value === "true",
   };
@@ -569,7 +559,7 @@ $("#cond-form").onsubmit = async (e) => {
   e.preventDefault();
   const id = $("#cond-id").value;
   const body = {
-    name: $("#cond-name").value, type: $("#cond-type").value,
+    type: $("#cond-type").value,
     script_content: $("#cond-script").value,
     associated_setups: $("#cond-setups").value.split(",").map(s => parseInt(s.trim())).filter(Number.isInteger),
     is_active: $("#cond-active").value === "true",
