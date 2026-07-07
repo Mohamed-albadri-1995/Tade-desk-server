@@ -301,26 +301,63 @@ class MonitorService:
         self._armed[armed_key] = signal_side
         await self.run_signal_pipeline(stock, setup, conditions, evaluation)
 
+    async def _open_position_stocks(self) -> set:
+        """Stocks with open positions stay watched even if removed from the
+        shortlist — their SL/TP monitoring must not go blind."""
+        try:
+            async with async_session_factory() as session:
+                rows = (
+                    await session.execute(
+                        select(JournalModel.stock)
+                        .where(
+                            JournalModel.status.in_(OPEN_STATUSES),
+                            JournalModel.exit_pnl == None,  # noqa: E711
+                        )
+                        .distinct()
+                    )
+                ).scalars().all()
+            return {str(s).upper() for s in rows}
+        except Exception:  # pre-init DB during early startup
+            return set()
+
+    def _purge_watch_state(self, keep: set) -> None:
+        """Drop cached bars and Watch-tab state for stocks no longer watched."""
+        for stock in [s for s in self.market_cache if s not in keep]:
+            del self.market_cache[stock]
+        for key in [k for k in self._armed if k[0] not in keep]:
+            del self._armed[key]
+        for key in [k for k in self._statuses if k[0] not in keep]:
+            del self._statuses[key]
+        for key in [k for k in self._published if k[1] not in keep]:
+            del self._published[key]
+
     async def _sync_screener_watchlist(self) -> None:
         """Keep the market feed in step with the screener: in 'shortlist'
-        mode the watchlist mirrors the screener's shortlist (star/unstar in
-        the screener adds/removes it here within one refresh); in
-        'registry'/'screener' mode it mirrors the whole registry."""
+        mode the watchlist mirrors the screener's shortlist — star/unstar
+        in the screener adds/removes it here within one refresh, no manual
+        action needed. Removed stocks are purged from the cache and the
+        Watch tab (unless they still have an open position)."""
         if self.watchlist_source == "manual":
             return
         if self.watchlist_source == "shortlist":
-            symbols = sorted(set(self.screener_service.shortlist))
-            if not symbols and self.market_service.symbols:
-                logger.info("screener shortlist is empty -> stopping market feed")
-                await self.market_service.stop()
-                return
+            base = set(self.screener_service.shortlist)
         else:  # 'registry' / legacy 'screener'
-            symbols = sorted(self.screener_cache.keys())
+            base = set(self.screener_cache.keys())
+        symbols = sorted(base | await self._open_position_stocks())
+
+        current = set(self.market_service.symbols)
         if not symbols:
+            if current or self.market_cache:
+                logger.info("watchlist is empty -> stopping market feed")
+                await self.market_service.stop()
+                self._purge_watch_state(set())
+                await event_bus.publish({"type": "watchlist_update", "symbols": []})
             return
-        if set(symbols) != set(self.market_service.symbols):
+        if set(symbols) != current:
             logger.info("screener watchlist changed -> %d symbols: %s", len(symbols), symbols)
             await self.market_service.start(symbols)
+            self._purge_watch_state(set(symbols))
+            await event_bus.publish({"type": "watchlist_update", "symbols": symbols})
 
     # ------------------------------------------------ position monitoring
 

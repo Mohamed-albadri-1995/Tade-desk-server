@@ -102,8 +102,9 @@
   </section>
 
   <section id="tab-watch" class="tab active">
+    <div class="panel" id="watch-symbols" class="muted">Watching: —</div>
     <div class="cards" id="watch-cards"></div>
-    <p class="muted" id="watch-empty">Waiting for live data… cards appear per (stock, setup) once the monitor evaluates.</p>
+    <p class="muted" id="watch-empty">Waiting for live data… cards appear per (stock, setup) once the monitor evaluates. You need at least one active setup (Setups tab) and symbols on the watchlist.</p>
   </section>
 
   <section id="tab-journal" class="tab">
@@ -476,6 +477,15 @@ function connectWS() {
         flash(`🚨 Alert sent: ${msg.alert.stock} ${msg.alert.side} × ${msg.alert.shares} @ ${fmt(msg.alert.entry_price)}`);
         break;
       }
+      case "watchlist_update": {
+        const keep = new Set(msg.symbols);
+        for (const key of [...watch.keys()]) {
+          if (!keep.has(watch.get(key).stock)) watch.delete(key);
+        }
+        $("#watch-symbols").textContent = "Watching: " + (msg.symbols.length ? msg.symbols.join(", ") : "— (shortlist is empty)");
+        renderWatch(); loadMonitor();
+        break;
+      }
       case "position_closed": {
         const p = msg.position;
         flash(`${p.reason === "take_profit" ? "🎯" : "🛑"} Closed ${p.stock} #${p.journal_id} (${p.reason}) @ ${fmt(p.exit_price)} · PnL ${fmt(p.exit_pnl)}${p.r_multiple != null ? ` (${p.r_multiple}R)` : ""}`);
@@ -576,6 +586,7 @@ async function loadWatchlist() {
 }
 async function loadMonitor() {
   const st = await api.get("/api/monitor/status");
+  $("#watch-symbols").textContent = "Watching: " + (st.symbols_cached.length ? st.symbols_cached.join(", ") : "— (no symbols yet)");
   $("#monitor-status").textContent =
     `monitor: ${st.monitor_running ? "running" : "stopped"} · market feed: ${st.market_data_running ? "on" : "off"}` +
     ` · screener: ${st.screener_running ? "on" : "off"} · cached: ${st.symbols_cached.length} symbols` +

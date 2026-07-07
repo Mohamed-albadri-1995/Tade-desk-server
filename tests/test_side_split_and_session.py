@@ -80,10 +80,15 @@ import pytest
 pytestmark_async = pytest.mark.asyncio
 
 
+async def _no_open_positions():
+    return set()
+
+
 @pytest.mark.asyncio
 async def test_shortlist_watchlist_sync():
     service = MonitorService()
     service.watchlist_source = "shortlist"
+    service._open_position_stocks = _no_open_positions
     service.screener_service.shortlist = ["NVDA", "SDOT"]
 
     started_with, stopped = [], []
@@ -119,6 +124,7 @@ async def test_screener_watchlist_sync():
 
     service = MonitorService()
     service.watchlist_source = "registry"
+    service._open_position_stocks = _no_open_positions
     service.screener_cache["NVDA"] = TickerContext(stock="NVDA")
     service.screener_cache["AMD"] = TickerContext(stock="AMD")
 
