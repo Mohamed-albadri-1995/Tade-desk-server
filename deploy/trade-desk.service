@@ -1,0 +1,17 @@
+[Unit]
+Description=Trade Desk trading tool (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/tade-desk-server
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+# Give the app time to stop its feeds cleanly on shutdown.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
