@@ -70,7 +70,10 @@ class MonitorService:
 
         self.session_start_time = "09:35"
         self.session_end_time = "10:00"  # last new entry; positions monitored regardless
-        self.watchlist_source = "screener"  # 'screener' (auto) | 'manual' (uploads)
+        # 'shortlist' -> the screener's curated shortlist (default)
+        # 'registry'/'screener' -> every stock in the screener registry
+        # 'manual' -> csv/json uploads
+        self.watchlist_source = "shortlist"
         self.market_refresh_interval = 5
 
         self._task: Optional[asyncio.Task] = None
@@ -83,9 +86,9 @@ class MonitorService:
     async def start(self) -> None:
         await self.stop()
         await self._load_settings()
-        # 'screener' mode: symbols come from the screener registry and are
-        # synced automatically each tick; 'manual' mode uses uploads.
-        symbols = [] if self.watchlist_source == "screener" else await self._load_watchlist()
+        # Screener-driven modes get their symbols from the sync in _tick;
+        # only 'manual' mode seeds from uploaded watchlists.
+        symbols = await self._load_watchlist() if self.watchlist_source == "manual" else []
         await self.market_service.start(symbols)
         await self.screener_service.start(symbols)
         await self.capital_service.start()
@@ -151,6 +154,7 @@ class MonitorService:
             self.session_start_time = row.session_start_time
             self.session_end_time = row.session_end_time
             self.watchlist_source = row.watchlist_source
+            self.screener_service.include_shortlist = row.watchlist_source == "shortlist"
             self.market_refresh_interval = row.market_refresh_interval
             self.market_service.refresh_interval = row.market_refresh_interval
             self.market_service.lookback_bars = row.ohlcv_lookback_bars
@@ -298,16 +302,25 @@ class MonitorService:
         await self.run_signal_pipeline(stock, setup, conditions, evaluation)
 
     async def _sync_screener_watchlist(self) -> None:
-        """In 'screener' mode the watchlist is whatever the screener
-        registry currently holds; restart the market feed when it changes."""
-        if self.watchlist_source != "screener":
+        """Keep the market feed in step with the screener: in 'shortlist'
+        mode the watchlist mirrors the screener's shortlist (star/unstar in
+        the screener adds/removes it here within one refresh); in
+        'registry'/'screener' mode it mirrors the whole registry."""
+        if self.watchlist_source == "manual":
             return
-        screener_symbols = sorted(self.screener_cache.keys())
-        if not screener_symbols:
+        if self.watchlist_source == "shortlist":
+            symbols = sorted(set(self.screener_service.shortlist))
+            if not symbols and self.market_service.symbols:
+                logger.info("screener shortlist is empty -> stopping market feed")
+                await self.market_service.stop()
+                return
+        else:  # 'registry' / legacy 'screener'
+            symbols = sorted(self.screener_cache.keys())
+        if not symbols:
             return
-        if set(screener_symbols) != set(self.market_service.symbols):
-            logger.info("screener watchlist changed -> %d symbols", len(screener_symbols))
-            await self.market_service.start(screener_symbols)
+        if set(symbols) != set(self.market_service.symbols):
+            logger.info("screener watchlist changed -> %d symbols: %s", len(symbols), symbols)
+            await self.market_service.start(symbols)
 
     # ------------------------------------------------ position monitoring
 

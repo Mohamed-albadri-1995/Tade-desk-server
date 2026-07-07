@@ -96,7 +96,7 @@
       <a id="screener-link" href="#" target="_blank" class="btn secondary" style="margin-top:0;text-decoration:none">Open full screener ↗</a>
     </div>
     <div style="overflow-x:auto">
-    <table><thead><tr><th>Ticker</th><th>Score</th><th>Price</th><th>Chg%</th><th>RVOL</th><th>Gap%</th><th>Sector</th><th>Bias</th><th>Regime</th><th>Themes</th><th>Catalyst</th></tr></thead>
+    <table><thead><tr><th>★</th><th>Ticker</th><th>Score</th><th>Price</th><th>Chg%</th><th>RVOL</th><th>Gap%</th><th>Sector</th><th>Sec bias</th><th>My bias</th><th>Regime</th><th>Themes</th><th>Catalyst</th></tr></thead>
       <tbody id="screener-body"></tbody></table>
     </div>
   </section>
@@ -267,7 +267,7 @@
         <div><label>Session end (ET, HH:MM) — last new entry; stops automatically</label><input id="set-session-end"></div>
       </div>
       <div class="row">
-        <div><label>Watchlist source</label><select id="set-wl-source"><option value="screener">screener (automatic)</option><option value="manual">manual uploads</option></select></div>
+        <div><label>Watchlist source</label><select id="set-wl-source"><option value="shortlist">screener shortlist (your ★ picks)</option><option value="registry">whole screener registry</option><option value="manual">manual uploads</option></select></div>
         <div><label>OHLCV lookback bars</label><input id="set-lookback" type="number"></div>
       </div>
       <div class="row">
@@ -591,6 +591,7 @@ async function loadScreenerRegistry() {
     ? `${rows.length} stocks from the screener registry · auto-refreshes`
     : "No registry data yet — check that the screener is running and SCREENER_URL is correct in .env";
   $("#screener-body").innerHTML = rows.map(r => `<tr>
+    <td>${r.inShortlist ? "★" : ""}</td>
     <td style="font-weight:700">${r.ticker}</td>
     <td>${r.score ?? "—"}</td>
     <td>${r.price != null ? "$" + Number(r.price).toFixed(2) : "—"}</td>
@@ -599,6 +600,7 @@ async function loadScreenerRegistry() {
     <td>${r.gapPct != null ? Number(r.gapPct).toFixed(1) + "%" : "—"}</td>
     <td>${r.sector ?? "—"}</td>
     <td>${r.secBias ?? "—"}${r.secHot ? " 🔥" : ""}${r.secScore != null ? ` <span class="muted">(${r.secScore})</span>` : ""}</td>
+    <td>${r.bias && r.bias !== "auto" ? `<span class="side ${r.bias}">${r.bias}</span>` : (r.bias ?? "—")}</td>
     <td>${r.regime ?? "—"}</td>
     <td class="muted">${(r.themes || []).join(", ") || "—"}</td>
     <td>${r.catalyst ? "⚡ " + r.catalyst : "—"}</td></tr>`).join("");

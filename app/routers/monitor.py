@@ -45,6 +45,8 @@ async def screener_registry():
         rows.append(
             {
                 "ticker": ctx.stock,
+                "inShortlist": ctx.inShortlist,
+                "bias": ctx.bias,
                 "score": ctx.score,
                 "price": raw_stock.get("price"),
                 "change": raw_stock.get("change"),

@@ -81,11 +81,44 @@ pytestmark_async = pytest.mark.asyncio
 
 
 @pytest.mark.asyncio
+async def test_shortlist_watchlist_sync():
+    service = MonitorService()
+    service.watchlist_source = "shortlist"
+    service.screener_service.shortlist = ["NVDA", "SDOT"]
+
+    started_with, stopped = [], []
+
+    async def fake_start(symbols):
+        started_with.append(sorted(symbols))
+        service.market_service._symbols = sorted(symbols)
+
+    async def fake_stop():
+        stopped.append(True)
+        service.market_service._symbols = []
+
+    service.market_service.start = fake_start
+    service.market_service.stop = fake_stop
+
+    await service._sync_screener_watchlist()
+    assert started_with == [["NVDA", "SDOT"]]
+
+    # Star another ticker in the screener -> picked up on the next sync.
+    service.screener_service.shortlist = ["NVDA", "SDOT", "TSLA"]
+    await service._sync_screener_watchlist()
+    assert started_with[-1] == ["NVDA", "SDOT", "TSLA"]
+
+    # Clearing the shortlist stops the market feed.
+    service.screener_service.shortlist = []
+    await service._sync_screener_watchlist()
+    assert stopped == [True]
+
+
+@pytest.mark.asyncio
 async def test_screener_watchlist_sync():
     from app.services.screener_data import TickerContext
 
     service = MonitorService()
-    service.watchlist_source = "screener"
+    service.watchlist_source = "registry"
     service.screener_cache["NVDA"] = TickerContext(stock="NVDA")
     service.screener_cache["AMD"] = TickerContext(stock="AMD")
 

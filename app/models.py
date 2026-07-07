@@ -209,7 +209,7 @@ class UserSettingsModel(Base):
     risk_per_trade: Mapped[float] = mapped_column(Float, default=0.01)  # fraction of account
     session_start_time: Mapped[str] = mapped_column(String(5), default="09:35")
     session_end_time: Mapped[str] = mapped_column(String(5), default="10:00")  # last entry
-    watchlist_source: Mapped[str] = mapped_column(String(10), default="screener")  # screener|manual
+    watchlist_source: Mapped[str] = mapped_column(String(10), default="shortlist")  # shortlist|registry|manual
     screener_refresh_interval: Mapped[int] = mapped_column(Integer, default=15)
     market_refresh_interval: Mapped[int] = mapped_column(Integer, default=5)
     ohlcv_lookback_bars: Mapped[int] = mapped_column(Integer, default=5000)

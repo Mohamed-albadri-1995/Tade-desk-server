@@ -36,6 +36,8 @@ class TickerContext:
     rvol: Optional[float] = None
     gapPct: Optional[float] = None
     catalyst: Optional[str] = None
+    bias: Optional[str] = None  # user's manual override in the screener (auto|long|short)
+    inShortlist: Optional[bool] = None
     updated_at: Optional[str] = None
     raw: dict = field(default_factory=dict)  # full registry record for the gate snapshot
 
@@ -79,6 +81,8 @@ def _parse_record(record: dict) -> Optional[TickerContext]:
         rvol=pick("rvol"),
         gapPct=pick("gapPct", "gap_pct"),
         catalyst=catalyst,
+        bias=record.get("bias"),
+        inShortlist=record.get("inShortlist"),
         updated_at=datetime.utcnow().isoformat() + "Z",
         raw=record,
     )
@@ -96,6 +100,8 @@ class ScreenerDataService:
         self._symbols: List[str] = []
         self._client: Optional[httpx.AsyncClient] = None
         self._registry_path: Optional[str] = None  # discovered working path
+        self.include_shortlist = False  # set when the watchlist source is 'shortlist'
+        self.shortlist: List[str] = []  # tickers from /api/shortlist/today
 
     async def start(self, symbols: List[str]) -> None:
         await self.stop()
@@ -165,3 +171,23 @@ class ScreenerDataService:
             if watch and ctx.stock not in watch:
                 continue
             self.screener_cache[ctx.stock] = ctx
+
+        if self.include_shortlist:
+            await self._refresh_shortlist()
+
+    async def _refresh_shortlist(self) -> None:
+        """Today's shortlist — the user's curated watchlist in the screener
+        (/api/shortlist/today -> {date, items: [{ticker, ...}]})."""
+        try:
+            base = settings.screener_url.rstrip("/")
+            resp = await self._client.get(f"{base}/api/shortlist/today")
+            resp.raise_for_status()
+            payload = resp.json() or {}
+            items = payload.get("items") or []
+            self.shortlist = [
+                str(item["ticker"]).upper()
+                for item in items
+                if isinstance(item, dict) and item.get("ticker")
+            ]
+        except Exception as exc:
+            logger.warning("shortlist fetch failed (keeping previous): %s", exc)

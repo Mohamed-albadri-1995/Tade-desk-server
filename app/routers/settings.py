@@ -57,8 +57,10 @@ async def update_settings(
             parts = str(data[field]).split(":")
             if len(parts) != 2 or not all(p.isdigit() for p in parts):
                 raise HTTPException(422, f"{field} must be HH:MM")
-    if "watchlist_source" in data and data["watchlist_source"] not in ("screener", "manual"):
-        raise HTTPException(422, "watchlist_source must be 'screener' or 'manual'")
+    if "watchlist_source" in data and data["watchlist_source"] not in (
+        "shortlist", "registry", "screener", "manual",
+    ):
+        raise HTTPException(422, "watchlist_source must be 'shortlist', 'registry' or 'manual'")
     watchlist_changed = "watchlist_source" in data and data["watchlist_source"] != row.watchlist_source
     for key, value in data.items():
         setattr(row, key, value)

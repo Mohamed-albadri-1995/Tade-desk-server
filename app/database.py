@@ -33,7 +33,7 @@ _MIGRATION_COLUMNS = {
     ],
     "user_settings": [
         ("session_end_time", "VARCHAR(5) DEFAULT '10:00'"),
-        ("watchlist_source", "VARCHAR(10) DEFAULT 'screener'"),
+        ("watchlist_source", "VARCHAR(10) DEFAULT 'shortlist'"),
     ],
     "setup_factor_model": [
         ("split_by_side", "BOOLEAN DEFAULT 1"),
@@ -66,6 +66,12 @@ def _migrate(conn) -> None:
         for name, ddl_type in columns:
             if name not in existing:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))
+    # One-time value migration: 'screener' watchlist mode became the
+    # shortlist-driven default (registry-wide mode is now 'registry').
+    if "user_settings" in inspector.get_table_names():
+        conn.execute(
+            text("UPDATE user_settings SET watchlist_source='shortlist' WHERE watchlist_source='screener'")
+        )
 
 
 async def init_db() -> None:
