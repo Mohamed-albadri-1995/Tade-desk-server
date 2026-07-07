@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import qp  # noqa: E402  — populates REGISTRY via primitive decorators
 from qp.registry import REGISTRY, get_approval, save_approval
 from qp.primitives.bars import Bars
+from qp.primitives._session import in_rth as _in_rth, in_premarket as _in_premarket
 from tools.data import alpaca, polygon, hybrid
 
 # Data feeds the compare tool can pull bars from. Each module exposes the
@@ -155,85 +156,122 @@ def _source_series(bars: pd.DataFrame, name: str) -> np.ndarray:
     raise ValueError(f'unknown source {name!r}')
 
 
-def compute_data(symbol: str, tf: str, days: int, primitive_key: str,
-                 params: dict, source: str = 'close', feed: str = 'alpaca') -> dict:
-    """Fetch bars + call the primitive + return everything the UI needs."""
+def _session_class(ts) -> str:
+    """'rth' (09:30-16:00 ET), 'pre' (04:00-09:30), or 'post' (else)."""
+    if _in_rth(ts):
+        return 'rth'
+    if _in_premarket(ts):
+        return 'pre'
+    return 'post'   # 16:00-20:00 afterhours + overnight
+
+
+# Dim tints for extended-hours candles in all-day view. Regular-session
+# bars keep the series default (bright green/red).
+_SESS_TINT = {
+    'pre':  {'up': '#2f6f8f', 'down': '#274b63'},   # muted blue
+    'post': {'up': '#7a5aa0', 'down': '#4a3a63'},   # muted purple
+}
+
+
+def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict) -> list:
+    """Compute one overlay spec {key, source, params, color} → list of
+    plot series (one, or several for dict-output primitives)."""
+    key = ov.get('key')
+    if not key or key not in REGISTRY:
+        raise ValueError(f'unknown primitive {key!r}')
+    m = REGISTRY[key]
+    kwargs = dict(ov.get('params') or {})
+    source = ov.get('source', 'close')
+    if list(m.inputs) == ['bars']:
+        result = m.fn(Bars.from_frame(bars), **kwargs)
+    elif list(m.inputs) == ['source']:
+        result = m.fn(_source_series(bars, source), **kwargs)
+    else:
+        raise ValueError(f'unsupported inputs {m.inputs!r} on {key}')
+
+    if isinstance(result, dict):
+        lines = [(sub, np.asarray(a, dtype=float)) for sub, a in result.items()]
+    else:
+        lines = [(None, np.asarray(result, dtype=float))]
+
+    color = ov.get('color') or '#22c55e'
+    args = ','.join(f'{k}={v}' for k, v in kwargs.items())
+    out = []
+    for idx, (sub, arr) in enumerate(lines):
+        vals = [{'time': int(t), 'value': float(v)}
+                for t, v in zip(ts, arr) if v == v]
+        label = m.name if sub is None else f'{m.name}.{sub}'
+        out.append({
+            'overlayId': ov.get('id'),
+            'name':  f'{label}({args})' if args else label,
+            'color': color,
+            'style': 0 if idx == 0 else 2,   # first solid, rest dotted
+            'values': vals,
+        })
+    return out
+
+
+def compute_data(symbol: str, tf: str, days: int, overlays: list,
+                 feed: str = 'alpaca', view: str = 'all') -> dict:
+    """Fetch bars once, compute every overlay, return everything the UI
+    needs. `view`: 'all' (show pre/rth/post, tint extended hours) or
+    'regular' (RTH bars only — computed and displayed)."""
     loader = _LOADERS.get(feed)
     if loader is None:
         raise ValueError(f'unknown feed {feed!r} (have: {sorted(_LOADERS)})')
     end = pd.Timestamp.now(tz='UTC').floor('5min')
-    # Alpaca IEX caps 1m history at ~7 days; Polygon goes back years.
     if tf == '1m' and feed == 'alpaca':
-        days = min(int(days), 7)
+        days = min(int(days), 7)   # Alpaca IEX 1m history cap
     days = int(days)
     start = end - pd.Timedelta(days=days)
     bars = loader.load(symbol, tf, start, end)
-    if len(bars) == 0:
-        return {'bars': [], 'series': [], 'first': None, 'last': None}
 
-    # Display-only shift: lightweight-charts renders epoch seconds as UTC,
-    # so feed it the ET wall-clock re-labelled as UTC. Both panels then
-    # show the same clock (the TV widget is set to America/New_York).
-    # Timedelta division instead of asi8/view: index int64s are unit-
-    # dependent (pandas 3.0 defaults to microseconds, not nanoseconds).
-    naive_et = bars.index.tz_convert(_ET).tz_localize(None)
-    ts = ((naive_et - pd.Timestamp('1970-01-01'))
-          // pd.Timedelta(seconds=1)).tolist()
-    bar_list = [
-        {'time': int(t), 'open': float(o), 'high': float(h),
-         'low': float(l), 'close': float(c), 'volume': float(v)}
-        for t, o, h, l, c, v in zip(ts, bars['open'], bars['high'], bars['low'],
-                                    bars['close'], bars['volume'])
-    ]
+    et_full = bars.index.tz_convert(_ET)
+    if view == 'regular':
+        mask = np.fromiter((_in_rth(t) for t in et_full), bool, len(bars))
+        bars = bars[mask]
+    if len(bars) == 0:
+        return {'bars': [], 'series': [], 'day_starts': [], 'first': None, 'last': None}
+
+    et = bars.index.tz_convert(_ET)
+    # ET wall-clock re-labelled as UTC epoch seconds (so both panels share
+    # the ET clock). Timedelta division is pandas-resolution-independent.
+    naive_et = et.tz_localize(None)
+    ts = ((naive_et - pd.Timestamp('1970-01-01')) // pd.Timedelta(seconds=1)).tolist()
+
+    o = bars['open'].to_numpy(float);  h = bars['high'].to_numpy(float)
+    lo = bars['low'].to_numpy(float);  c = bars['close'].to_numpy(float)
+    v = bars['volume'].to_numpy(float)
+
+    bar_list = []
+    day_starts = []
+    prev_date = None
+    for i in range(len(bars)):
+        d = et[i].date()
+        if d != prev_date:
+            day_starts.append(int(ts[i]))
+            prev_date = d
+        bar = {'time': int(ts[i]), 'open': float(o[i]), 'high': float(h[i]),
+               'low': float(lo[i]), 'close': float(c[i]), 'volume': float(v[i])}
+        if view == 'all':
+            cls = _session_class(et[i])
+            if cls != 'rth':
+                tint = _SESS_TINT[cls]['up' if c[i] >= o[i] else 'down']
+                bar['color'] = tint
+                bar['borderColor'] = tint
+                bar['wickColor'] = tint
+        bar_list.append(bar)
 
     series_out = []
-    if primitive_key:
-        if primitive_key not in REGISTRY:
-            raise ValueError(f'unknown primitive {primitive_key!r}')
-        m = REGISTRY[primitive_key]
-        kwargs = dict(params or {})
-        if list(m.inputs) == ['bars']:
-            result = m.fn(Bars.from_frame(bars), **kwargs)
-        elif list(m.inputs) == ['source']:
-            src = _source_series(bars, source)
-            result = m.fn(src, **kwargs)
-        else:
-            raise ValueError(f'unsupported inputs {m.inputs!r} on {primitive_key}')
-
-        # Single array → one series. Dict → one per key (BB, MACD, etc.)
-        if isinstance(result, dict):
-            lines = [(sub_name, np.asarray(arr, dtype=float))
-                     for sub_name, arr in result.items()]
-        else:
-            lines = [(None, np.asarray(result, dtype=float))]
-
-        approved = get_approval(primitive_key) is not None
-        # Multi-line palettes never use "approved-green" as a per-line
-        # signal — the badge already tells you approval status. For a
-        # single-line primitive, keep the green/orange convention.
-        palette = ['#f5a623', '#3b82f6', '#a855f7', '#ec4899', '#14b8a6']
-        for idx, (sub_name, arr) in enumerate(lines):
-            vals = [{'time': int(t), 'value': float(v)}
-                    for t, v in zip(ts, arr) if v == v]
-            if len(lines) == 1:
-                color = '#22c55e' if approved else '#f5a623'
-            else:
-                color = palette[idx % len(palette)]
-            label = m.name if sub_name is None else f'{m.name}.{sub_name}'
-            args = ','.join(f'{k}={v}' for k, v in kwargs.items())
-            series_out.append({
-                'name':  f'{label}({args})' if args else label,
-                'color': color,
-                'values': vals,
-            })
+    for ov in (overlays or []):
+        series_out.extend(_one_overlay(bars, ts, ov))
 
     return {
         'bars':   bar_list,
         'series': series_out,
-        # Show ET times in the status line — that's what TradingView shows
-        # on the right panel, so eyeball parity gets the same clock.
-        'first':  bars.index[0].tz_convert(_ET).strftime('%Y-%m-%d %H:%M ET'),
-        'last':   bars.index[-1].tz_convert(_ET).strftime('%Y-%m-%d %H:%M ET'),
+        'day_starts': day_starts,
+        'first':  et[0].strftime('%Y-%m-%d %H:%M ET'),
+        'last':   et[-1].strftime('%Y-%m-%d %H:%M ET'),
     }
 
 
@@ -282,6 +320,16 @@ PAGE = r"""<!doctype html>
   #approveNotes { width:100%; box-sizing:border-box; min-height:60px; background:#1c2431; border:1px solid var(--border); color:var(--text); padding:6px 8px; border-radius:5px; font-size:12px; font-family:inherit; resize:vertical; }
   #approveBtn { width:100%; margin-top:8px; }
   #approveBtn.done { background:var(--draft); }
+  #overlayList { display:flex; flex-direction:column; gap:4px; max-height:150px; overflow:auto; }
+  .ovrow { display:flex; align-items:center; gap:7px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; cursor:pointer; background:#141a24; }
+  .ovrow.sel { border-color:var(--accent); background:#182130; }
+  .ovrow .dot { width:10px; height:10px; border-radius:50%; flex:0 0 auto; }
+  .ovrow .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ovrow .bd { font-size:9px; padding:1px 5px; border-radius:3px; }
+  .ovrow .x { color:var(--text3); cursor:pointer; padding:0 2px; }
+  .ovrow .x:hover { color:var(--red); }
+  #addPrim, #addSource { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:4px 6px; border-radius:4px; font-size:12px; }
+  #panel button { cursor:pointer; padding:5px 10px; border-radius:5px; font-size:12px; }
 </style></head>
 <body>
 <header>
@@ -291,11 +339,9 @@ PAGE = r"""<!doctype html>
   </select></label>
   <label>Days <input id="days" type="number" value="5" min="1" max="730" style="width:66px"></label>
   <label>Feed <select id="feed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
-  <label>Primitive <select id="prim" style="min-width:220px"></select></label>
-  <label>Source <select id="source">
-    <option>close</option><option>open</option><option>high</option><option>low</option>
-    <option>hl2</option><option>hlc3</option><option>ohlc4</option>
-    <option>volume</option><option>body_high</option><option>body_low</option>
+  <label>Session <select id="view">
+    <option value="all">All-day (pre/post tinted)</option>
+    <option value="regular">Regular session only</option>
   </select></label>
   <button onclick="reload()">Compute</button>
   <span id="status" style="color:var(--text3)"></span>
@@ -306,13 +352,24 @@ PAGE = r"""<!doctype html>
 </main>
 <div id="panel">
   <div>
-    <h3>Primitive <span id="primStatus" class="badge draft" style="margin-left:6px">draft</span></h3>
-    <div id="primName" style="font-weight:600">—</div>
-    <div id="primDesc" style="color:var(--text2);margin-top:4px">Pick a primitive above.</div>
-    <div id="primFile" class="meta">—</div>
+    <h3>Overlays</h3>
+    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+      <select id="addPrim" style="flex:1;min-width:150px"></select>
+      <select id="addSource" style="width:92px">
+        <option>close</option><option>open</option><option>high</option><option>low</option>
+        <option>hl2</option><option>hlc3</option><option>ohlc4</option>
+        <option>volume</option><option>body_high</option><option>body_low</option>
+      </select>
+      <button onclick="addOverlay()" style="background:#1c2431;color:var(--text);border:1px solid var(--border)">+ Add</button>
+    </div>
+    <div id="overlayList"></div>
   </div>
   <div>
-    <h3>Parameters</h3>
+    <h3>Selected <span id="primStatus" class="badge draft" style="margin-left:6px">—</span></h3>
+    <div id="primName" style="font-weight:600">—</div>
+    <div id="primDesc" style="color:var(--text2);margin-top:4px;max-height:64px;overflow:auto">Add an overlay, then click it to edit.</div>
+    <div id="primFile" class="meta">—</div>
+    <h3 style="margin-top:10px">Parameters</h3>
     <div id="paramsGrid"></div>
   </div>
   <div>
@@ -324,6 +381,11 @@ PAGE = r"""<!doctype html>
 </div>
 <script>
 let CHART = null, PRICE = null, LINES = [], PRIMS = [];
+let OVERLAYS = [];          // [{id, key, source, params, color}]
+let SELECTED = null;        // overlay id driving the params + approval panels
+let _nextId = 1;
+const PALETTE = ['#22c55e','#3b82f6','#f5a623','#a855f7','#ec4899',
+                 '#14b8a6','#eab308','#ef4444','#06b6d4','#84cc16'];
 
 // Chart-library failures must NEVER take down the rest of the page — the
 // primitive dropdown, params, and approval flow all work without a chart.
@@ -398,8 +460,8 @@ function loadTV() {
   const symbol = document.getElementById('symbol').value.trim().toUpperCase() || 'SPY';
   const tf = document.getElementById('tf').value;
   const tvInterval = ({ '1m':'1', '5m':'5', '15m':'15', '30m':'30', '1h':'60', '1d':'D' })[tf];
-  const primKey = document.getElementById('prim').value;
-  const study = TV_STUDIES[primKey];
+  const o = currentOverlay();
+  const study = o ? TV_STUDIES[o.key] : null;
   document.getElementById('tv').innerHTML = '';
   new TradingView.widget({
     autosize: true,
@@ -417,14 +479,13 @@ function loadTV() {
 async function loadPrimitives() {
   const r = await fetch('/api/primitives');
   PRIMS = await r.json();
-  const sel = document.getElementById('prim');
-  const savedKey = sel.value || localStorage.getItem('qp_prim') || '';
+  const sel = document.getElementById('addPrim');
+  const keep = sel.value;
   sel.innerHTML = '';
   const groups = {};
   for (const p of PRIMS) (groups[p.group] ||= []).push(p);
   for (const g of Object.keys(groups).sort()) {
-    const og = document.createElement('optgroup');
-    og.label = g;
+    const og = document.createElement('optgroup'); og.label = g;
     for (const p of groups[g]) {
       const opt = document.createElement('option');
       opt.value = p.key;
@@ -433,67 +494,68 @@ async function loadPrimitives() {
     }
     sel.appendChild(og);
   }
-  if (savedKey && PRIMS.some(p => p.key === savedKey)) sel.value = savedKey;
-  sel.onchange = () => { onPrimChange(); loadTV(); reload(); };
-  onPrimChange();
+  if (keep && PRIMS.some(p => p.key === keep)) sel.value = keep;
 }
 
-function currentPrim() {
-  const k = document.getElementById('prim').value;
-  return PRIMS.find(p => p.key === k);
+function primMeta(key) { return PRIMS.find(p => p.key === key); }
+function currentOverlay() { return OVERLAYS.find(o => o.id === SELECTED); }
+
+function persistOverlays() {
+  localStorage.setItem('qp_overlays', JSON.stringify(OVERLAYS));
+  localStorage.setItem('qp_selected', SELECTED || '');
 }
 
-function onPrimChange() {
-  const p = currentPrim();
-  if (!p) return;
-  localStorage.setItem('qp_prim', p.key);
-  document.getElementById('primName').textContent = p.name + ' (' + p.key + ')';
-  document.getElementById('primDesc').textContent = p.description || '—';
-  document.getElementById('primFile').textContent = (p.file || '') + (p.lineno ? ':' + p.lineno : '');
-  const badge = document.getElementById('primStatus');
-  badge.textContent = p.approved ? 'approved' : 'draft';
-  badge.className = 'badge ' + (p.approved ? 'approved' : 'draft');
-  const grid = document.getElementById('paramsGrid');
-  grid.innerHTML = '';
-  // Per-primitive param cache — remember what you typed last time you looked
-  // at this primitive.
-  const savedParams = JSON.parse(localStorage.getItem('qp_params_' + p.key) || '{}');
-  if (p.params.length === 0) {
-    const note = document.createElement('div');
-    note.style.color = 'var(--text3)'; note.style.gridColumn = '1 / -1';
-    note.textContent = '(no parameters)';
-    grid.appendChild(note);
+function addOverlay() {
+  const key = document.getElementById('addPrim').value;
+  const source = document.getElementById('addSource').value;
+  const m = primMeta(key); if (!m) return;
+  const params = {};
+  for (const par of m.params) params[par.name] = par.default;
+  const color = PALETTE[OVERLAYS.length % PALETTE.length];
+  const id = 'o' + (_nextId++);
+  OVERLAYS.push({ id, key, source, params, color });
+  persistOverlays(); renderOverlays(); selectOverlay(id); reload();
+}
+
+function removeOverlay(id) {
+  OVERLAYS = OVERLAYS.filter(o => o.id !== id);
+  if (SELECTED === id) SELECTED = OVERLAYS.length ? OVERLAYS[OVERLAYS.length - 1].id : null;
+  persistOverlays(); renderOverlays(); renderSelected(); reload();
+}
+
+function selectOverlay(id) { SELECTED = id; persistOverlays(); renderOverlays(); renderSelected(); loadTV(); }
+
+function renderOverlays() {
+  const box = document.getElementById('overlayList');
+  box.innerHTML = '';
+  if (!OVERLAYS.length) {
+    box.innerHTML = '<div style="color:var(--text3)">No overlays — add one above (e.g. ma → sma).</div>';
+    return;
   }
-  for (const par of p.params) {
-    const lab = document.createElement('label'); lab.textContent = par.name; grid.appendChild(lab);
-    const inp = document.createElement('input');
-    inp.dataset.name = par.name; inp.dataset.kind = par.kind;
-    if (par.kind === 'bool') {
-      inp.type = 'checkbox';
-      const saved = savedParams[par.name];
-      inp.checked = saved !== undefined ? saved === true || saved === 'true'
-                                        : par.default === true;
-      inp.style.width = 'auto'; inp.style.justifySelf = 'start';
-    } else {
-      inp.value = savedParams[par.name] ?? par.default ?? '';
-      if (par.min != null) inp.min = par.min;
-      if (par.max != null) inp.max = par.max;
-      inp.type = (par.kind === 'int' || par.kind === 'float') ? 'number' : 'text';
-      if (par.kind === 'float') inp.step = 'any';
-    }
-    grid.appendChild(inp);
+  for (const o of OVERLAYS) {
+    const m = primMeta(o.key);
+    const args = Object.entries(o.params).map(([k, v]) => k + '=' + v).join(',');
+    const appr = m && m.approved;
+    const row = document.createElement('div');
+    row.className = 'ovrow' + (o.id === SELECTED ? ' sel' : '');
+    row.innerHTML =
+      `<span class="dot" style="background:${o.color}"></span>` +
+      `<span class="nm">${m ? m.name : o.key}${args ? '(' + args + ')' : ''} ` +
+        `<span style="color:var(--text3)">${o.source}</span></span>` +
+      `<span class="bd" style="background:${appr ? 'rgba(34,197,94,.15)' : 'rgba(245,166,35,.15)'};` +
+        `color:${appr ? 'var(--accent)' : 'var(--draft)'}">${appr ? '✓' : '🚧'}</span>` +
+      `<span class="x" title="remove">✕</span>`;
+    row.onclick = (e) => {
+      if (e.target.classList.contains('x')) removeOverlay(o.id);
+      else selectOverlay(o.id);
+    };
+    box.appendChild(row);
   }
-  const meta = p.approval;
-  document.getElementById('approveMeta').textContent = meta
-    ? `approved ${meta.approved_at} by ${meta.approved_by} · ${meta.git_sha}`
-    : '—';
-  document.getElementById('approveBtn').textContent = p.approved ? 'Re-approve (overwrite)' : 'Approve as verified';
 }
 
-function collectParams() {
-  const inputs = document.querySelectorAll('#paramsGrid input');
+function readParams() {
   const out = {};
-  for (const el of inputs) {
+  for (const el of document.querySelectorAll('#paramsGrid input')) {
     let v = el.value;
     if (el.dataset.kind === 'int')   v = parseInt(v, 10);
     if (el.dataset.kind === 'float') v = parseFloat(v);
@@ -503,52 +565,104 @@ function collectParams() {
   return out;
 }
 
+function renderSelected() {
+  const o = currentOverlay();
+  const nameEl = document.getElementById('primName'), descEl = document.getElementById('primDesc'),
+        fileEl = document.getElementById('primFile'), badge = document.getElementById('primStatus'),
+        grid = document.getElementById('paramsGrid'), metaEl = document.getElementById('approveMeta'),
+        btn = document.getElementById('approveBtn');
+  grid.innerHTML = '';
+  if (!o) {
+    nameEl.textContent = '—'; descEl.textContent = 'Add an overlay, then click it to edit its parameters.';
+    fileEl.textContent = '—'; badge.textContent = '—'; badge.className = 'badge draft';
+    metaEl.textContent = '—'; btn.textContent = 'Approve as verified';
+    return;
+  }
+  const m = primMeta(o.key);
+  nameEl.textContent = m.name + ' (' + m.key + ')';
+  descEl.textContent = m.description || '—';
+  fileEl.textContent = (m.file || '') + (m.lineno ? ':' + m.lineno : '');
+  badge.textContent = m.approved ? 'approved' : 'draft';
+  badge.className = 'badge ' + (m.approved ? 'approved' : 'draft');
+  if (m.params.length === 0) {
+    grid.innerHTML = '<div style="color:var(--text3);grid-column:1/-1">(no parameters)</div>';
+  }
+  for (const par of m.params) {
+    const lab = document.createElement('label'); lab.textContent = par.name; grid.appendChild(lab);
+    const inp = document.createElement('input');
+    inp.dataset.name = par.name; inp.dataset.kind = par.kind;
+    if (par.kind === 'bool') {
+      inp.type = 'checkbox'; inp.checked = (o.params[par.name] === true);
+      inp.style.width = 'auto'; inp.style.justifySelf = 'start';
+    } else {
+      inp.value = o.params[par.name] ?? par.default ?? '';
+      if (par.min != null) inp.min = par.min;
+      if (par.max != null) inp.max = par.max;
+      inp.type = (par.kind === 'int' || par.kind === 'float') ? 'number' : 'text';
+      if (par.kind === 'float') inp.step = 'any';
+    }
+    inp.onchange = () => { o.params = readParams(); persistOverlays(); renderOverlays(); reload(); };
+    grid.appendChild(inp);
+  }
+  const ap = m.approval;
+  metaEl.textContent = ap ? `approved ${ap.approved_at} by ${ap.approved_by} · ${ap.git_sha}` : '—';
+  btn.textContent = m.approved ? 'Re-approve (overwrite)' : 'Approve as verified';
+}
+
 async function reload() {
-  const p = currentPrim();
-  if (!p || !PRICE) return;   // no chart → nothing to draw into
+  if (!PRICE) return;   // no chart → nothing to draw into
   const symbol = document.getElementById('symbol').value.trim().toUpperCase() || 'SPY';
   const tf = document.getElementById('tf').value;
   const days = document.getElementById('days').value;
-  const source = document.getElementById('source').value;
   const feed = document.getElementById('feed').value;
-  const params = collectParams();
-  // Persist so a hard-refresh lands you back where you were.
+  const view = document.getElementById('view').value;
   localStorage.setItem('qp_symbol', symbol);
   localStorage.setItem('qp_tf', tf);
   localStorage.setItem('qp_days', days);
-  localStorage.setItem('qp_source', source);
   localStorage.setItem('qp_feed', feed);
-  localStorage.setItem('qp_params_' + p.key, JSON.stringify(params));
-  document.getElementById('status').textContent = 'loading… (' + feed + ')';
-  const qs = new URLSearchParams({ symbol, tf, days, source, feed, key: p.key, params: JSON.stringify(params) });
+  localStorage.setItem('qp_view', view);
+  document.getElementById('status').textContent = 'loading… (' + feed + ', ' + view + ')';
+  const qs = new URLSearchParams({ symbol, tf, days, feed, view, overlays: JSON.stringify(OVERLAYS) });
   const r = await fetch('/api/data?' + qs);
   if (!r.ok) { document.getElementById('status').textContent = 'error: ' + (await r.text()).slice(0, 200); return; }
   const j = await r.json();
-  document.getElementById('status').textContent = `${j.first} → ${j.last} · ${(j.bars || []).length} bars`;
-  PRICE.setData(j.bars);
+  document.getElementById('status').textContent =
+    `${j.first} → ${j.last} · ${(j.bars || []).length} bars · ${OVERLAYS.length} overlay(s)`;
+  PRICE.setData(j.bars);   // per-bar tints for pre/post ride along in all-day view
+  // Day separators: a small marker + date label at each day's first bar
+  // (skip on the 1d timeframe where every bar is a day).
+  if (tf !== '1d' && j.day_starts && j.day_starts.length) {
+    PRICE.setMarkers(j.day_starts.map(t => {
+      const d = new Date(t * 1000);
+      return { time: t, position: 'belowBar', color: '#64748b', shape: 'square',
+               size: 1, text: (d.getUTCMonth() + 1) + '/' + d.getUTCDate() };
+    }));
+  } else {
+    PRICE.setMarkers([]);
+  }
   for (const l of LINES) { try { CHART.removeSeries(l); } catch(_){} }
   LINES = [];
   for (const s of (j.series || [])) {
-    const line = addLine({ color: s.color, lineWidth: 2, priceLineVisible: false, title: s.name });
+    const line = addLine({ color: s.color, lineWidth: 2, priceLineVisible: false,
+                           title: s.name, lineStyle: s.style || 0 });
     line.setData(s.values);
     LINES.push(line);
   }
 }
 
 async function approve() {
-  const p = currentPrim(); if (!p) return;
+  const o = currentOverlay(); if (!o) { alert('Select an overlay to approve.'); return; }
   const notes = document.getElementById('approveNotes').value.trim();
   const who = prompt('Approving as (your name / initials):', localStorage.getItem('qp_approver') || '') || '';
   if (!who) return;
   localStorage.setItem('qp_approver', who);
   const r = await fetch('/api/approve', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ key: p.key, approved_by: who, notes }),
+    body: JSON.stringify({ key: o.key, approved_by: who, notes }),
   });
   if (!r.ok) { alert('approve failed: ' + await r.text()); return; }
   await loadPrimitives();
-  document.getElementById('prim').value = p.key;
-  onPrimChange();
+  renderOverlays(); renderSelected();
   const btn = document.getElementById('approveBtn');
   btn.classList.add('done'); btn.textContent = 'saved ✓';
   setTimeout(() => btn.classList.remove('done'), 1500);
@@ -558,8 +672,19 @@ function restoreState() {
   const sym = localStorage.getItem('qp_symbol'); if (sym) document.getElementById('symbol').value = sym;
   const tf  = localStorage.getItem('qp_tf');     if (tf)  document.getElementById('tf').value = tf;
   const d   = localStorage.getItem('qp_days');   if (d)   document.getElementById('days').value = d;
-  const s   = localStorage.getItem('qp_source'); if (s)   document.getElementById('source').value = s;
   const f   = localStorage.getItem('qp_feed');   if (f)   document.getElementById('feed').value = f;
+  const vw  = localStorage.getItem('qp_view');   if (vw)  document.getElementById('view').value = vw;
+}
+
+function restoreOverlays() {
+  try {
+    const a = JSON.parse(localStorage.getItem('qp_overlays') || '[]');
+    if (Array.isArray(a) && a.length) {
+      OVERLAYS = a;
+      _nextId = Math.max(...a.map(o => parseInt((o.id || 'o0').slice(1)) || 0)) + 1;
+      SELECTED = localStorage.getItem('qp_selected') || a[0].id;
+    }
+  } catch (_) {}
 }
 
 async function initFeeds() {
@@ -580,13 +705,23 @@ async function initFeeds() {
 window.addEventListener('load', async () => {
   restoreState();
   await initFeeds();
-  // The dropdown + approval flow must come up no matter what happens to
-  // the chart library. Order: primitives first, chart second.
+  // The overlay list + approval flow must come up no matter what happens
+  // to the chart library. Order: primitives first, chart second.
   try {
     await loadPrimitives();
   } catch (e) {
     document.getElementById('status').textContent = 'failed to load primitives: ' + e;
   }
+  restoreOverlays();
+  if (!OVERLAYS.length && PRIMS.some(p => p.key === 'ma.sma')) {
+    // Seed a sensible default so the page isn't blank on first visit.
+    const m = primMeta('ma.sma'); const params = {};
+    for (const par of m.params) params[par.name] = par.default;
+    OVERLAYS = [{ id: 'o' + (_nextId++), key: 'ma.sma', source: 'close', params, color: PALETTE[0] }];
+    SELECTED = OVERLAYS[0].id;
+    persistOverlays();
+  }
+  renderOverlays(); renderSelected();
   loadTV();
   const haveLib = await waitForChartLib(8000);
   if (haveLib) {
@@ -598,6 +733,9 @@ window.addEventListener('load', async () => {
 });
 document.getElementById('symbol').addEventListener('change', () => { loadTV(); reload(); });
 document.getElementById('tf').addEventListener('change',      () => { loadTV(); reload(); });
+document.getElementById('feed').addEventListener('change',    () => reload());
+document.getElementById('view').addEventListener('change',    () => reload());
+document.getElementById('days').addEventListener('change',    () => reload());
 </script>
 <!-- TradingView widget loader (external — required by their embed API) -->
 <script src="https://s3.tradingview.com/tv.js"></script>
@@ -631,15 +769,23 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/api/data':
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             try:
-                params = json.loads(q.get('params') or '{}')
+                # New multi-overlay contract: overlays=[{id,key,source,params,color}].
+                # Back-compat: a single key=/params=/source= still works.
+                if q.get('overlays'):
+                    overlays = json.loads(q['overlays'])
+                elif q.get('key'):
+                    overlays = [{'id': 'a', 'key': q['key'],
+                                 'source': q.get('source', 'close'),
+                                 'params': json.loads(q.get('params') or '{}')}]
+                else:
+                    overlays = []
                 out = compute_data(
                     symbol=q.get('symbol', 'SPY'),
                     tf=q.get('tf', '5m'),
                     days=int(q.get('days', 5)),
-                    primitive_key=q.get('key', ''),
-                    params=params,
-                    source=q.get('source', 'close'),
+                    overlays=overlays,
                     feed=q.get('feed', 'alpaca'),
+                    view=q.get('view', 'all'),
                 )
                 self._send(200, json.dumps(out).encode('utf-8'))
             except Exception as e:
