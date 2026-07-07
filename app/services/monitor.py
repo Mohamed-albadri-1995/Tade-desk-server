@@ -60,7 +60,9 @@ class MonitorService:
 
         self.setup_engine = SetupEngine(self.market_data)
         self.condition_engine = ConditionEngine(self.market_data)
-        self.gate_engine = GateEngine(self.screener_cache)
+        self.gate_engine = GateEngine(
+            self.screener_cache, market_provider=lambda: self.screener_service.market_snapshot
+        )
         self.sizer_engine = SizerEngine()
         self.grade_engine = GradeEngine()
         self.setup_factor_engine = SetupFactorEngine()

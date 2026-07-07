@@ -80,6 +80,24 @@ def test_gate_missing_screener_data():
     assert snapshot["missing"] is True
 
 
+def test_gate_prefers_live_market_snapshot():
+    """The row's regime is a scan-time copy; the live /api/market/snapshot
+    regime must override it for rules and sizing, keeping row_regime."""
+    market = {"capturedAt": "2026-07-07T10:00:00Z", "regime": "BULL_TREND_FRESH"}
+    cache = {"AAPL": ctx(regime="STALE_SCAN_COPY")}
+    gate = GateEngine(cache, market_provider=lambda: market)
+    gate._rules = [
+        {"id": 1, "rule_name": "fresh-regime-rule", "condition": {"regime": "BULL_TREND_FRESH"},
+         "side_allowed": "long", "priority": 5},
+    ]
+    allowed, snapshot = gate.is_allowed("AAPL", "long")
+    assert allowed is True
+    assert snapshot["gate_rule"] == "fresh-regime-rule"  # matched on the live regime
+    assert snapshot["regime"] == "BULL_TREND_FRESH"  # sizing sees the fresh one
+    assert snapshot["row_regime"] == "STALE_SCAN_COPY"  # audit trail keeps the row copy
+    assert snapshot["market"]["capturedAt"] == "2026-07-07T10:00:00Z"
+
+
 def test_parse_record_variants():
     record = {"ticker": "nvda", "context": {"regime": "BULL_TREND", "secBias": "BULLISH", "secHot": True}}
     parsed = _parse_record(record)

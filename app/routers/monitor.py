@@ -32,6 +32,13 @@ async def app_config():
     return {"screener_url": settings.screener_url}
 
 
+@router.get("/api/screener/market")
+async def screener_market():
+    """Live market context from the screener's Market engine
+    (/api/market/snapshot), refreshed every screener cycle."""
+    return monitor.screener_service.market_snapshot or {}
+
+
 @router.get("/api/screener/registry")
 async def screener_registry():
     """The screener registry as this tool sees it (from the cache the

@@ -90,6 +90,7 @@
 </header>
 <main>
   <section id="tab-screener" class="tab">
+    <div class="panel" id="market-banner" style="display:none"></div>
     <div class="panel" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <span id="screener-meta" class="muted">Loading registry…</span>
       <button class="btn secondary" id="screener-refresh" style="margin-top:0">Refresh</button>
@@ -597,7 +598,20 @@ async function loadConfig() {
   $("#screener-link").href = cfg.screener_url;
 }
 async function loadScreenerRegistry() {
-  const rows = await api.get("/api/screener/registry");
+  const [rows, market] = await Promise.all([
+    api.get("/api/screener/registry"),
+    api.get("/api/screener/market").catch(() => ({})),
+  ]);
+  if (market && market.regime) {
+    const age = market.capturedAt ? Math.round((Date.now() - new Date(market.capturedAt)) / 60000) : null;
+    $("#market-banner").style.display = "block";
+    $("#market-banner").innerHTML =
+      `<b>Market:</b> ${market.regimeLabel || market.regime}` +
+      ` · <span class="muted">short</span> ${market.shortTerm ?? "—"}` +
+      ` · <span class="muted">mid</span> ${market.midTerm ?? "—"}` +
+      ` · <span class="muted">long</span> ${market.longTerm ?? "—"}` +
+      (age != null ? ` · <span class="muted">as of ${age} min ago${age > 30 ? " ⚠️ stale" : ""}</span>` : "");
+  }
   $("#screener-meta").textContent = rows.length
     ? `${rows.length} stocks from the screener registry · auto-refreshes`
     : "No registry data yet — check that the screener is running and SCREENER_URL is correct in .env";

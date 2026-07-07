@@ -21,8 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 class GateEngine:
-    def __init__(self, screener_cache: Dict[str, TickerContext]):
+    def __init__(self, screener_cache: Dict[str, TickerContext], market_provider=None):
         self.screener_cache = screener_cache
+        # Returns the screener's live /api/market/snapshot (or None). Its
+        # regime is fresher than the per-row copy made at scan time, so it
+        # overrides the row's regime for rule matching and sizing; the
+        # row's own value is kept as row_regime for the audit trail.
+        self._market_provider = market_provider
         self._rules: List[dict] = []
 
     async def refresh_rules(self) -> None:
@@ -58,6 +63,13 @@ class GateEngine:
     def is_allowed(self, stock: str, side: str) -> Tuple[bool, dict]:
         context = self.screener_cache.get(stock.upper())
         snapshot = context.snapshot() if context else {"stock": stock.upper(), "missing": True}
+
+        market = self._market_provider() if self._market_provider else None
+        if market:
+            snapshot["market"] = market
+            snapshot["row_regime"] = snapshot.get("regime")
+            if market.get("regime"):
+                snapshot["regime"] = market["regime"]
 
         for rule in self._rules:  # already sorted by priority (highest first)
             if self._matches(rule["condition"], snapshot):

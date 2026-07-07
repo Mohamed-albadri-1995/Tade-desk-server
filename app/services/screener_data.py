@@ -102,6 +102,11 @@ class ScreenerDataService:
         self._registry_path: Optional[str] = None  # discovered working path
         self.include_shortlist = False  # set when the watchlist source is 'shortlist'
         self.shortlist: List[str] = []  # tickers from /api/shortlist/today
+        # Live market context straight from the screener's Market engine
+        # (/api/market/snapshot). r0 rows only copy this at scan time, so
+        # polling it directly means any freshness fix in the screener
+        # reaches the trading tool immediately.
+        self.market_snapshot: Optional[dict] = None
 
     async def start(self, symbols: List[str]) -> None:
         await self.stop()
@@ -174,6 +179,35 @@ class ScreenerDataService:
 
         if self.include_shortlist:
             await self._refresh_shortlist()
+        await self._refresh_market_snapshot()
+
+    @staticmethod
+    def _result_of(value):
+        """Screener market fields are objects like {result: 'BULLISH', ...}
+        or {slug, label} for the regime; reduce to the classification."""
+        if isinstance(value, dict):
+            return value.get("result") or value.get("slug") or value.get("label")
+        return value
+
+    async def _refresh_market_snapshot(self) -> None:
+        try:
+            base = settings.screener_url.rstrip("/")
+            resp = await self._client.get(f"{base}/api/market/snapshot")
+            resp.raise_for_status()
+            raw = resp.json() or {}
+            regime = raw.get("regime") or {}
+            self.market_snapshot = {
+                "capturedAt": raw.get("capturedAt"),
+                "regime": self._result_of(regime),
+                "regimeLabel": regime.get("label") if isinstance(regime, dict) else None,
+                "shortTerm": self._result_of(raw.get("shortTerm")),
+                "midTerm": self._result_of(raw.get("midTerm")),
+                "longTerm": self._result_of(raw.get("longTerm")),
+                "indices": raw.get("indices"),
+                "sectors": raw.get("sectors"),
+            }
+        except Exception as exc:
+            logger.warning("market snapshot fetch failed (keeping previous): %s", exc)
 
     async def _refresh_shortlist(self) -> None:
         """Today's shortlist — the user's curated watchlist in the screener
