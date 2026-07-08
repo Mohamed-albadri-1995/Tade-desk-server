@@ -329,7 +329,20 @@ def compute_data(symbol: str, tf: str, days: int, overlays: list,
     ctx = {'symbol': symbol, 'tf': tf, 'loader': loader, 'start': start, 'end': end}
     series_out = []
     for ov in (overlays or []):
-        series_out.extend(_one_overlay(bars, ts, ov, ctx))
+        # One failing overlay must not kill the whole request — otherwise a
+        # single primitive that needs more history than the feed has (e.g.
+        # dynamic_sr, pine_5day on shallow Alpaca data) would blank ALL the
+        # overlays. Compute each independently; report failures per-overlay.
+        try:
+            series_out.extend(_one_overlay(bars, ts, ov, ctx))
+        except Exception as e:
+            m = REGISTRY.get(ov.get('key'))
+            series_out.append({
+                'overlayId': ov.get('id'),
+                'name':  (m.name if m else str(ov.get('key'))),
+                'color': ov.get('color') or '#ef4444',
+                'style': 0, 'values': [], 'error': str(e),
+            })
 
     return {
         'bars':   bar_list,
@@ -811,6 +824,7 @@ async function reload() {
   //   'sma(...): draw error …'  → chart-library API problem
   const drawn = [];
   for (const s of (j.series || [])) {
+    if (s.error) { drawn.push(`${s.name}: ERROR ${s.error}`); continue; }
     const pts = (s.values || []).length;
     try {
       const line = addLine({ color: s.color, lineWidth: 2, priceLineVisible: false,
