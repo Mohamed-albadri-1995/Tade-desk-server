@@ -30,7 +30,7 @@ quant-platform/
 │       ├── _session.py    shared RTH/premarket/daily-frame helpers (not a primitive)
 │       ├── bars.py        Bars — validated OHLCV container
 │       ├── ma.py          sma, ema, wma, rma, vwma, hma, pine_5day
-│       ├── vwap.py        session, n_day, weekly, monthly, anchored,
+│       ├── vwap.py        session, nday_block, nday_rolling, weekly, monthly, anchored,
 │       │                  today_hh/ll, week_hh/ll, swing_hh/ll, gap,
 │       │                  last_hour_hh/ll, stdev_bands
 │       ├── volatility.py  true_range, atr, stdev, bb, bb_ema
@@ -199,9 +199,12 @@ bar-for-bar:
 1. **VWAPs default to `rth_only=True`** — matches a standard TV equities
    chart (whose data excludes extended hours). Set `rth_only=False` for
    extended-hours accumulation.
-2. **`vwap.n_day` block phase** — Pine counts days from its loaded chart
-   history, which is arbitrary; qp counts from the fetched window. Phase
-   may differ by a day vs TV; the math within blocks is identical.
+2. **Two N-session VWAPs** — `vwap.nday_block` is the Pine
+   `ta.vwap(hlc3, isNewDay and dCount%N==0)` block-reset study (use
+   `anchor_offset` 0..N-1 to line the arbitrary block phase up with TV);
+   `vwap.nday_rolling` is a trailing VWAP always anchored at the open of
+   the session (N-1) ago through now ("yesterday's open until now" for
+   N=2), which never resets to a single day.
 3. **`last_hour_*` bounded to < 16:00 ET** — the raw Pine (`hour >=
    start`) leaks into after-hours on extended charts; qp implements the
    intent (the last trading hour).

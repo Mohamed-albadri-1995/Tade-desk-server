@@ -2,7 +2,7 @@
 
 Generated from the registry by `tools/gen_catalog.py` — do not edit by hand.
 
-**60 primitives · 25 approved** (as of 2026-07-08 11:37 UTC).
+**61 primitives · 25 approved** (as of 2026-07-08 11:45 UTC).
 Approval status changes as verification progresses; the source of truth
 is `approvals/approvals.json`, queried at runtime via `qp.approved_primitives()`.
 
@@ -433,14 +433,22 @@ Monthly VWAP — resets on the first (RTH) bar of each ET calendar month. Matche
 - output: single series
 - params: `rth_only`: bool = True
 
-### 🚧 `vwap.n_day`
+### 🚧 `vwap.nday_block`
 
-N-session BLOCK VWAP — exact Pine `ta.vwap(hlc3, isNewDay and dCount % N == 0)`. The VWAP accumulates across N sessions then RESETS: on a block-start (reset) session it equals the plain session VWAP, and by the Nth session it spans all N. (Earlier qp used a rolling N-session window, which does NOT match a TradingView chart running this Pine.)
-PHASE: Pine's dCount counts sessions from wherever its chart history happens to start, so WHICH sessions are block-starts is arbitrary. `anchor_offset` (0..N-1) shifts the phase — if the reset days don't line up with your TradingView, bump it (for N=2 just try 0 then 1) until the reset days match, then keep Days fixed. The math inside each block is identical.
+N-session BLOCK VWAP — exact Pine `ta.vwap(hlc3, isNewDay and dCount % N == 0)`. Accumulates across N sessions then RESETS: on a block-start session it equals the plain session VWAP, and by the Nth session it spans all N. Use this to reproduce the TradingView study that uses that Pine. For a VWAP that is ALWAYS anchored at yesterday's open (never resets to one day) use `nday_rolling` instead.
+PHASE: Pine's dCount counts sessions from wherever the chart history starts, so which sessions are block-starts is arbitrary. `anchor_offset` (0..N-1) shifts the phase — if the reset days don't line up with your TradingView, try 0 then 1 (for N=2) until they match, then keep Days fixed.
 
 - input: `bars`
 - output: single series
 - params: `n_days`: int = 2 (min 1) · `rth_only`: bool = True · `anchor_offset`: int = 0 (min 0)
+
+### 🚧 `vwap.nday_rolling`
+
+N-session ROLLING (trailing) VWAP — always anchored at the OPEN of the session (N-1) ago through the current bar. For N=2 that is "anchored from yesterday's open until now": every bar's value is the volume-weighted average price over the last N sessions (yesterday + today). The anchor slides forward each day; it NEVER resets to a single day. This is NOT the Pine `dCount%N` study — for that use `nday_block`. Only the first (N-1) sessions of the fetched window degenerate to a shorter span (nothing earlier exists). To eyeball on TradingView, drop an Anchored VWAP at yesterday's 09:30.
+
+- input: `bars`
+- output: single series
+- params: `n_days`: int = 2 (min 1) · `rth_only`: bool = True
 
 ### ✅ `vwap.session`
 

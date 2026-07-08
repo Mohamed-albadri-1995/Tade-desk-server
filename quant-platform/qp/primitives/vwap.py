@@ -10,12 +10,14 @@ data excludes extended hours. Set rth_only=False to accumulate every bar
 in the frame (TV chart with extended hours enabled). On daily+ frames
 every bar counts as RTH.
 
-Pine-parity note on `n_day`: it is the exact Pine block VWAP
-`ta.vwap(hlc3, isNewDay and dCount%N==0)` — accumulate N sessions, reset,
-repeat. Pine's dCount counts sessions from wherever the loaded chart
-history starts, so which sessions are block-starts is arbitrary; qp
-exposes an `anchor_offset` (0..N-1) to shift the phase so the reset days
-line up with your TradingView. The math inside each block is identical.
+Two N-session VWAPs, kept deliberately separate to avoid confusion when
+building setups:
+  - `nday_block`   resets every N sessions (the Pine `ta.vwap(hlc3,
+                   isNewDay and dCount%N==0)` study; `anchor_offset` shifts
+                   the arbitrary block phase to match TradingView).
+  - `nday_rolling` is always anchored at the open of the session (N-1) ago
+                   through now — "yesterday's open until the current moment"
+                   for N=2 — and never resets to a single day.
 """
 
 from __future__ import annotations
@@ -118,21 +120,36 @@ def session(bars: Bars):
     return out
 
 
+# =========================================================================
+# Two DISTINCT N-session VWAPs — keep them straight when building setups:
+#
+#   nday_block   — BLOCK VWAP. Resets every N sessions (fixed 2-day chunks).
+#                  Matches the Pine `ta.vwap(hlc3, isNewDay and dCount%N==0)`
+#                  script. On a reset day it equals the plain session VWAP.
+#                  Use this to reproduce that exact TradingView study.
+#
+#   nday_rolling — ROLLING/TRAILING VWAP. Always anchored at the OPEN of the
+#                  session (N-1) ago (for N=2: yesterday's open) through the
+#                  current bar. Slides forward every day; always spans the
+#                  last N sessions, never resets to a single day. This is
+#                  "2-day VWAP anchored from yesterday's open until now".
+# =========================================================================
+
 @primitive(
-    name='n_day',
+    name='nday_block',
     group='vwap',
     description=('N-session BLOCK VWAP — exact Pine `ta.vwap(hlc3, isNewDay '
-                 'and dCount % N == 0)`. The VWAP accumulates across N sessions '
-                 'then RESETS: on a block-start (reset) session it equals the '
-                 'plain session VWAP, and by the Nth session it spans all N. '
-                 '(Earlier qp used a rolling N-session window, which does NOT '
-                 'match a TradingView chart running this Pine.)\n'
-                 'PHASE: Pine\'s dCount counts sessions from wherever its chart '
-                 'history happens to start, so WHICH sessions are block-starts '
-                 'is arbitrary. `anchor_offset` (0..N-1) shifts the phase — if '
-                 'the reset days don\'t line up with your TradingView, bump it '
-                 '(for N=2 just try 0 then 1) until the reset days match, then '
-                 'keep Days fixed. The math inside each block is identical.'),
+                 'and dCount % N == 0)`. Accumulates across N sessions then '
+                 'RESETS: on a block-start session it equals the plain session '
+                 'VWAP, and by the Nth session it spans all N. Use this to '
+                 'reproduce the TradingView study that uses that Pine. For a '
+                 'VWAP that is ALWAYS anchored at yesterday\'s open (never '
+                 'resets to one day) use `nday_rolling` instead.\n'
+                 'PHASE: Pine\'s dCount counts sessions from wherever the chart '
+                 'history starts, so which sessions are block-starts is '
+                 'arbitrary. `anchor_offset` (0..N-1) shifts the phase — if the '
+                 'reset days don\'t line up with your TradingView, try 0 then 1 '
+                 '(for N=2) until they match, then keep Days fixed.'),
     params=(
         Param('n_days',        'int',  default=2, min=1),
         Param('rth_only',      'bool', default=True),
@@ -141,7 +158,7 @@ def session(bars: Bars):
     ),
     inputs=('bars',),
 )
-def n_day(bars: Bars, n_days: int, rth_only: bool = True, anchor_offset: int = 0):
+def nday_block(bars: Bars, n_days: int, rth_only: bool = True, anchor_offset: int = 0):
     df, pos = _sub_frame(bars, rth_only)
     et = df.index.tz_convert(_ET)
     price, vol = _hlc3_vol(df)
@@ -171,6 +188,62 @@ def n_day(bars: Bars, n_days: int, rth_only: bool = True, anchor_offset: int = 0
         cum_v  += vol[i]
         if cum_v > 0:
             out[i] = cum_pv / cum_v
+    return _scatter(out, pos, len(bars.df))
+
+
+@primitive(
+    name='nday_rolling',
+    group='vwap',
+    description=('N-session ROLLING (trailing) VWAP — always anchored at the '
+                 'OPEN of the session (N-1) ago through the current bar. For '
+                 'N=2 that is "anchored from yesterday\'s open until now": every '
+                 'bar\'s value is the volume-weighted average price over the '
+                 'last N sessions (yesterday + today). The anchor slides forward '
+                 'each day; it NEVER resets to a single day. This is NOT the '
+                 'Pine `dCount%N` study — for that use `nday_block`. Only the '
+                 'first (N-1) sessions of the fetched window degenerate to a '
+                 'shorter span (nothing earlier exists). To eyeball on '
+                 'TradingView, drop an Anchored VWAP at yesterday\'s 09:30.'),
+    params=(
+        Param('n_days',   'int',  default=2, min=1),
+        Param('rth_only', 'bool', default=True),
+    ),
+    inputs=('bars',),
+)
+def nday_rolling(bars: Bars, n_days: int, rth_only: bool = True):
+    df, pos = _sub_frame(bars, rth_only)
+    et = df.index.tz_convert(_ET)
+    price, vol = _hlc3_vol(df)
+    m = len(df)
+    N = int(n_days)
+    if m == 0:
+        return _scatter(np.full(0, np.nan), pos, len(bars.df))
+
+    # Session index per bar + first-bar position of each session.
+    dates = et.date
+    session_idx = np.empty(m, dtype=np.int64)
+    session_start: list[int] = []
+    si = -1
+    last = None
+    for i in range(m):
+        if dates[i] != last:
+            si += 1
+            session_start.append(i)
+            last = dates[i]
+        session_idx[i] = si
+
+    # Prefix sums so each bar's trailing window is O(1).
+    pv = price * vol
+    cpv = np.concatenate(([0.0], np.cumsum(pv)))
+    cv  = np.concatenate(([0.0], np.cumsum(vol)))
+
+    out = np.full(m, np.nan)
+    for i in range(m):
+        anchor_session = max(0, session_idx[i] - (N - 1))   # open of (N-1) ago
+        a = session_start[anchor_session]
+        den = cv[i + 1] - cv[a]
+        if den > 0:
+            out[i] = (cpv[i + 1] - cpv[a]) / den
     return _scatter(out, pos, len(bars.df))
 
 
