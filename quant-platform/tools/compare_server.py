@@ -467,7 +467,9 @@ function initChart() {
                      : _ET_HM.format(new Date(t * 1000)),
     },
     localization: { timeFormatter: (t) => _ET_FULL.format(new Date(t * 1000)) + ' ET' },
-    rightPriceScale: { borderColor: '#1e2632' },
+    // Tight top/bottom margins so the candles fill the pane like the
+    // TradingView panel — easier side-by-side comparison.
+    rightPriceScale: { borderColor: '#1e2632', scaleMargins: { top: 0.08, bottom: 0.08 } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
   // Session background bands: a full-height histogram on its own hidden
