@@ -827,8 +827,11 @@ async function reload() {
     if (s.error) { drawn.push(`${s.name}: ERROR ${s.error}`); continue; }
     const pts = (s.values || []).length;
     try {
-      const line = addLine({ color: s.color, lineWidth: 2, priceLineVisible: false,
-                             title: s.name, lineStyle: s.style || 0 });
+      // lineWidth 3 (was 2) — a 2px line is nearly invisible against the
+      // candles on a high-DPI phone; 3px reads clearly like the TV study.
+      const line = addLine({ color: s.color, lineWidth: 3, priceLineVisible: false,
+                             title: s.name, lineStyle: s.style || 0,
+                             crosshairMarkerVisible: true, lastValueVisible: true });
       line.setData(s.values || []);
       LINES.push(line);
       drawn.push(`${s.name}: ${pts} pts`);
