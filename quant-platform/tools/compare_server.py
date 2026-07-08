@@ -562,23 +562,36 @@ const TV_STUDIES = {
 };
 
 function loadTV() {
-  const symbol = document.getElementById('symbol').value.trim().toUpperCase() || 'SPY';
-  const tf = document.getElementById('tf').value;
-  const tvInterval = ({ '1m':'1', '5m':'5', '15m':'15', '30m':'30', '1h':'60', '1d':'D' })[tf];
-  const o = currentOverlay();
-  const study = o ? TV_STUDIES[o.key] : null;
-  document.getElementById('tv').innerHTML = '';
-  new TradingView.widget({
-    autosize: true,
-    // Bare symbol — TV widget resolves to the primary exchange. Hardcoding
-    // 'NASDAQ:' broke NYSE/AMEX tickers like SPY.
-    symbol: symbol,
-    interval: tvInterval, timezone: 'America/New_York',
-    theme: 'dark', style: '1', locale: 'en',
-    hide_top_toolbar: true, hide_side_toolbar: false,
-    studies: study ? [study] : [],
-    container_id: 'tv',
-  });
+  // CRITICAL: this must never throw. It is called right before reload() in
+  // several chains (addOverlay → selectOverlay → loadTV → reload, and the
+  // symbol/tf change handlers). The TradingView embed widget throws
+  // intermittently — the global isn't ready yet, or the constructor fails
+  // when the widget is torn down and recreated on every overlay add
+  // (common on mobile). If that exception escaped, reload() never ran and
+  // the overlay line was never drawn. Swallow it: the left (qp) chart and
+  // overlays do not depend on the TV widget at all.
+  try {
+    if (typeof TradingView === 'undefined' || !TradingView.widget) return;
+    const symbol = document.getElementById('symbol').value.trim().toUpperCase() || 'SPY';
+    const tf = document.getElementById('tf').value;
+    const tvInterval = ({ '1m':'1', '5m':'5', '15m':'15', '30m':'30', '1h':'60', '1d':'D' })[tf];
+    const o = currentOverlay();
+    const study = o ? TV_STUDIES[o.key] : null;
+    document.getElementById('tv').innerHTML = '';
+    new TradingView.widget({
+      autosize: true,
+      // Bare symbol — TV widget resolves to the primary exchange. Hardcoding
+      // 'NASDAQ:' broke NYSE/AMEX tickers like SPY.
+      symbol: symbol,
+      interval: tvInterval, timezone: 'America/New_York',
+      theme: 'dark', style: '1', locale: 'en',
+      hide_top_toolbar: true, hide_side_toolbar: false,
+      studies: study ? [study] : [],
+      container_id: 'tv',
+    });
+  } catch (e) {
+    console.warn('loadTV failed (TV widget only — overlays unaffected):', e.message);
+  }
 }
 
 async function loadPrimitives() {
