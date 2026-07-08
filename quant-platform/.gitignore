@@ -3,4 +3,5 @@ __pycache__/
 .qp-cache/
 tools/.static/
 qp.log
+.env
 

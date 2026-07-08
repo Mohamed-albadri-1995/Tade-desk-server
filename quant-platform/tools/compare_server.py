@@ -48,6 +48,37 @@ from tools.data import alpaca, polygon, hybrid
 _LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid}
 
 
+def _load_dotenv() -> None:
+    """Populate os.environ from a `.env` file at the project root, for any
+    keys not already set in the environment.
+
+    Why: `export`ed keys only live in the shell session that set them. When
+    the SSH/console session reconnects and the server is relaunched, those
+    exports are gone and every feed comes up 'no key'. A `.env` file on the
+    box fixes that permanently — the server reads it on every start. The
+    file is gitignored, so keys never enter the repo. An already-exported
+    env var always wins over the file."""
+    env_path = Path(__file__).resolve().parents[1] / '.env'
+    if not env_path.exists():
+        return
+    try:
+        for raw in env_path.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, val = line.split('=', 1)
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+    except Exception as e:  # never let a bad .env stop the server
+        print(f'[qp] warning: could not read .env ({env_path}): {e}',
+              file=sys.stderr)
+
+
+_load_dotenv()
+
+
 def _feed_status() -> dict:
     """Which feeds have credentials configured, and the preferred default.
     Polygon is preferred when available — deeper history + premarket.
@@ -476,7 +507,11 @@ const _ET_FULL = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York',
 function initChart() {
   const el = document.getElementById('chart');
   CHART = LightweightCharts.createChart(el, {
-    layout: { background: { color: '#0e1116' }, textColor: '#94a3b8' },
+    // attributionLogo:false hides the small "TradingView" watermark the
+    // lightweight-charts library stamps on our left chart (the library is
+    // made by TradingView). Our left chart is qp data, not a TV widget —
+    // hiding the logo stops it looking like two TradingViews.
+    layout: { background: { color: '#0e1116' }, textColor: '#94a3b8', attributionLogo: false },
     grid:   { vertLines: { color: '#1e2632' }, horzLines: { color: '#1e2632' } },
     timeScale: {
       timeVisible: true, secondsVisible: false, borderColor: '#1e2632',
