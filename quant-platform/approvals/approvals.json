@@ -1,8 +1,26 @@
 {
+  "levels.afterhours_high": {
+    "approved_at": "2026-07-08T18:37:22+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.afterhours_low": {
+    "approved_at": "2026-07-08T18:37:29+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
   "levels.day_open": {
     "approved_at": "2026-07-06T13:51:30+00:00",
     "approved_by": "badri",
     "git_sha": "b158e77",
+    "notes": ""
+  },
+  "levels.dynamic_sr": {
+    "approved_at": "2026-07-08T18:35:27+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
     "notes": ""
   },
   "levels.monday_high": {
@@ -17,6 +35,48 @@
     "git_sha": "b158e77",
     "notes": ""
   },
+  "levels.monthly_high": {
+    "approved_at": "2026-07-08T18:37:55+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.monthly_low": {
+    "approved_at": "2026-07-08T18:37:40+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.monthly_open": {
+    "approved_at": "2026-07-08T18:37:06+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.overnight_high": {
+    "approved_at": "2026-07-08T18:37:01+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.overnight_low": {
+    "approved_at": "2026-07-08T18:38:18+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.pm_high": {
+    "approved_at": "2026-07-08T18:38:46+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.pm_low": {
+    "approved_at": "2026-07-08T18:38:40+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
   "levels.prev_day_high": {
     "approved_at": "2026-07-08T11:38:02+00:00",
     "approved_by": "badri",
@@ -27,6 +87,30 @@
     "approved_at": "2026-07-08T11:38:53+00:00",
     "approved_by": "badri",
     "git_sha": "095b347",
+    "notes": ""
+  },
+  "levels.prev_day_open": {
+    "approved_at": "2026-07-08T18:39:38+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.prev_month_open": {
+    "approved_at": "2026-07-08T18:39:33+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.prev_week_open": {
+    "approved_at": "2026-07-08T18:39:27+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.prev_year_open": {
+    "approved_at": "2026-07-08T18:40:06+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
     "notes": ""
   },
   "levels.today_high": {
@@ -57,6 +141,12 @@
     "approved_at": "2026-07-06T13:55:31+00:00",
     "approved_by": "badri",
     "git_sha": "b158e77",
+    "notes": ""
+  },
+  "levels.yearly_open": {
+    "approved_at": "2026-07-08T18:40:00+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
     "notes": ""
   },
   "ma.ema": {
@@ -123,6 +213,18 @@
     "approved_at": "2026-07-07T08:18:20+00:00",
     "approved_by": "badri",
     "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "volatility.stdev": {
+    "approved_at": "2026-07-08T18:40:40+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
+    "notes": ""
+  },
+  "vwap.anchored": {
+    "approved_at": "2026-07-08T18:35:41+00:00",
+    "approved_by": "badri",
+    "git_sha": "e828815",
     "notes": ""
   },
   "vwap.nday_block": {
