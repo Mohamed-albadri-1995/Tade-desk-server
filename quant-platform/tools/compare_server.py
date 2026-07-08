@@ -165,14 +165,6 @@ def _session_class(ts) -> str:
     return 'post'   # 16:00-20:00 afterhours + overnight
 
 
-# Dim tints for extended-hours candles in all-day view. Regular-session
-# bars keep the series default (bright green/red).
-_SESS_TINT = {
-    'pre':  {'up': '#2f6f8f', 'down': '#274b63'},   # muted blue
-    'post': {'up': '#7a5aa0', 'down': '#4a3a63'},   # muted purple
-}
-
-
 def _call_primitive(m, frame: pd.DataFrame, source: str, kwargs: dict):
     if list(m.inputs) == ['bars']:
         return m.fn(Bars.from_frame(frame), **kwargs)
@@ -280,12 +272,9 @@ def compute_data(symbol: str, tf: str, days: int, overlays: list,
         bar = {'time': int(ts[i]), 'open': float(o[i]), 'high': float(h[i]),
                'low': float(lo[i]), 'close': float(c[i]), 'volume': float(v[i])}
         if view == 'all':
-            cls = _session_class(et[i])
-            if cls != 'rth':
-                tint = _SESS_TINT[cls]['up' if c[i] >= o[i] else 'down']
-                bar['color'] = tint
-                bar['borderColor'] = tint
-                bar['wickColor'] = tint
+            # Candles stay normal green/red; the frontend paints a session
+            # BACKGROUND band from this per-bar class (pre / rth / post).
+            bar['sess'] = _session_class(et[i])
         bar_list.append(bar)
 
     ctx = {'symbol': symbol, 'tf': tf, 'loader': loader, 'start': start, 'end': end}
@@ -367,9 +356,13 @@ PAGE = r"""<!doctype html>
   <label>Days <input id="days" type="number" value="5" min="1" max="730" style="width:66px"></label>
   <label>Feed <select id="feed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
   <label>Session <select id="view">
-    <option value="all">All-day (pre/post tinted)</option>
+    <option value="all">All-day</option>
     <option value="regular">Regular session only</option>
   </select></label>
+  <span id="sessLegend" style="font-size:10px;color:var(--text3);display:flex;gap:8px;align-items:center">
+    <span><span style="display:inline-block;width:9px;height:9px;background:rgba(59,130,246,.5);border-radius:2px;vertical-align:middle"></span> pre</span>
+    <span><span style="display:inline-block;width:9px;height:9px;background:rgba(168,85,247,.5);border-radius:2px;vertical-align:middle"></span> after/overnight</span>
+  </span>
   <button onclick="reload()">Compute</button>
   <span id="status" style="color:var(--text3)"></span>
 </header>
@@ -407,7 +400,7 @@ PAGE = r"""<!doctype html>
   </div>
 </div>
 <script>
-let CHART = null, PRICE = null, LINES = [], PRIMS = [];
+let CHART = null, PRICE = null, BG = null, LINES = [], PRIMS = [];
 let OVERLAYS = [];          // [{id, key, source, params, color}]
 let SELECTED = null;        // overlay id driving the params + approval panels
 let _nextId = 1;
@@ -449,6 +442,10 @@ function addLine(opts) {
   if (typeof CHART.addLineSeries === 'function') return CHART.addLineSeries(opts);
   return CHART.addSeries(LightweightCharts.LineSeries, opts);
 }
+function addHistogram(opts) {
+  if (typeof CHART.addHistogramSeries === 'function') return CHART.addHistogramSeries(opts);
+  return CHART.addSeries(LightweightCharts.HistogramSeries, opts);
+}
 
 // Format epoch-seconds in America/New_York, regardless of the viewer's
 // own timezone — so the axis + crosshair read the same as TradingView
@@ -473,6 +470,13 @@ function initChart() {
     rightPriceScale: { borderColor: '#1e2632' },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
+  // Session background bands: a full-height histogram on its own hidden
+  // scale, drawn BEFORE the candles so it sits behind them. Each bar is
+  // painted with a faint colour by session (premarket / afterhours), or
+  // transparent during the regular session.
+  BG = addHistogram({ priceScaleId: 'sessbg', priceLineVisible: false,
+                      lastValueVisible: false, base: 0 });
+  CHART.priceScale('sessbg').applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
   PRICE = addCandles({ upColor:'#22c55e', downColor:'#ef5350', wickUpColor:'#22c55e', wickDownColor:'#ef5350', borderVisible:false });
   new ResizeObserver(() => CHART.applyOptions({ width: el.clientWidth, height: el.clientHeight })).observe(el);
 }
@@ -683,7 +687,18 @@ async function reload() {
   const j = await r.json();
   document.getElementById('status').textContent =
     `${j.first} → ${j.last} · ${(j.bars || []).length} bars · ${OVERLAYS.length} overlay(s)`;
-  PRICE.setData(j.bars);   // per-bar tints for pre/post ride along in all-day view
+  PRICE.setData(j.bars);
+  // Session background bands (all-day view only). Full-height bar, coloured
+  // faint blue in premarket and faint purple in afterhours/overnight;
+  // transparent during the regular session so RTH shows the plain dark bg.
+  if (BG) {
+    BG.setData((j.bars || []).map(b => ({
+      time: b.time, value: 1,
+      color: b.sess === 'pre'  ? 'rgba(59,130,246,0.13)'
+           : b.sess === 'post' ? 'rgba(168,85,247,0.15)'
+           : 'rgba(0,0,0,0)',
+    })));
+  }
   // Day separators: a small marker + date label at each day's first bar
   // (skip on the 1d timeframe where every bar is a day).
   if (tf !== '1d' && j.day_starts && j.day_starts.length) {
