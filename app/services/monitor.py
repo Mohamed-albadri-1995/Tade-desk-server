@@ -226,8 +226,15 @@ class MonitorService:
         conditions = await self._load_active_conditions()
         # The condition->setup association doesn't depend on the stock, so
         # build the map once per tick, not once per (stock, setup).
+        # A 'default' condition is a checkpoint for EVERY setup (no IDs
+        # needed); an 'additional' condition applies only to the setups
+        # whose id is in its associated_setups list.
         conditions_by_setup = {
-            setup.id: [c for c in conditions if setup.id in (c.associated_setups or [])]
+            setup.id: [
+                c
+                for c in conditions
+                if c.type == "default" or setup.id in (c.associated_setups or [])
+            ]
             for setup in setups
         }
 

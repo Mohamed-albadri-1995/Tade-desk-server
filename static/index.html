@@ -165,11 +165,11 @@
       <h3>New / Edit Condition <span class="muted" id="cond-editing"></span></h3>
       <input type="hidden" id="cond-id">
       <div class="row">
-        <div><label>Type</label><select id="cond-type"><option>default</option><option>additional</option></select></div>
+        <div><label>Type</label><select id="cond-type"><option value="default">default — checkpoint for ALL setups</option><option value="additional">additional — only chosen setups</option></select></div>
         <div><label>Name <span class="muted">(automatic — read from the script's get_name())</span></label><input id="cond-name" disabled placeholder="from script"></div>
       </div>
       <div class="row">
-        <div><label>Associated setup IDs (comma separated)</label><input id="cond-setups"></div>
+        <div id="cond-setups-wrap"><label>Associated setup IDs (comma separated) <span class="muted">— additional only</span></label><input id="cond-setups"></div>
         <div><label>Active</label><select id="cond-active"><option value="true">yes</option><option value="false">no</option></select></div>
       </div>
       <label>Script (must define class ConditionCheck)</label>
@@ -541,7 +541,7 @@ async function loadConditions() {
   const rows = await api.get("/api/conditions");
   $("#conds-body").innerHTML = rows.map(c => `<tr>
     <td>${c.id}</td><td>${c.name}</td><td>${c.type}</td>
-    <td>${(c.associated_setups || []).join(", ")}</td><td>${c.is_active ? "✅" : "—"}</td>
+    <td>${c.type === "default" ? "<span class='muted'>all setups</span>" : ((c.associated_setups || []).join(", ") || "—")}</td><td>${c.is_active ? "✅" : "—"}</td>
     <td><button class="btn secondary" data-edit="${c.id}">edit</button>
         <button class="btn danger" data-del="${c.id}">delete</button></td></tr>`).join("");
   $("#conds-body").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => {
@@ -550,18 +550,29 @@ async function loadConditions() {
     $("#cond-setups").value = (c.associated_setups || []).join(", ");
     $("#cond-active").value = String(c.is_active); $("#cond-script").value = c.script_content;
     $("#cond-editing").textContent = `(editing #${c.id})`;
+    syncCondType();
   });
   $("#conds-body").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     await api.send("DELETE", "/api/conditions/" + b.dataset.del); loadConditions();
   });
 }
+// 'default' conditions apply to every setup, so hide the setup-IDs field.
+function syncCondType() {
+  $("#cond-setups-wrap").style.display = $("#cond-type").value === "additional" ? "" : "none";
+}
+$("#cond-type").addEventListener("change", syncCondType);
+syncCondType();
+
 $("#cond-form").onsubmit = async (e) => {
   e.preventDefault();
   const id = $("#cond-id").value;
+  const isAdditional = $("#cond-type").value === "additional";
   const body = {
     type: $("#cond-type").value,
     script_content: $("#cond-script").value,
-    associated_setups: $("#cond-setups").value.split(",").map(s => parseInt(s.trim())).filter(Number.isInteger),
+    associated_setups: isAdditional
+      ? $("#cond-setups").value.split(",").map(s => parseInt(s.trim())).filter(Number.isInteger)
+      : [],
     is_active: $("#cond-active").value === "true",
   };
   try {
