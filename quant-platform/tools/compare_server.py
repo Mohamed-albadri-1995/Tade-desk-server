@@ -449,6 +449,7 @@ PAGE = r"""<!doctype html>
   <span id="status" style="color:var(--text3)"></span>
   <span id="addBar">
     <select id="addPrim"></select>
+    <input id="addLen" type="number" min="1" placeholder="len" title="Length/period for this overlay (applies to primitives that have a length). Leave blank for the default." style="width:62px">
     <select id="addSource">
       <option>close</option><option>open</option><option>high</option><option>low</option>
       <option>hl2</option><option>hlc3</option><option>ohlc4</option>
@@ -662,11 +663,34 @@ function syncSourceEnabled() {
   sel.disabled = !!barsInput;
   sel.title = barsInput ? 'This primitive uses the full OHLCV bar (price + volume); source is ignored.' : '';
   sel.style.opacity = barsInput ? '0.4' : '1';
+  // Length box: enable only when the primitive has a length param; show its
+  // default as the placeholder so you can see/override it before adding.
+  const lenEl = document.getElementById('addLen');
+  const lp = lengthParamOf(m);
+  if (lp) {
+    const def = m.params.find(p => p.name === lp);
+    lenEl.disabled = false; lenEl.style.opacity = '1';
+    lenEl.placeholder = def && def.default != null ? String(def.default) : 'len';
+    lenEl.title = 'Length for ' + lp + ' (default ' + (def ? def.default : '?') + '). Blank = default.';
+  } else {
+    lenEl.disabled = true; lenEl.style.opacity = '0.4';
+    lenEl.placeholder = '—'; lenEl.value = '';
+    lenEl.title = 'This primitive has no length parameter.';
+  }
 }
 
 function persistOverlays() {
   localStorage.setItem('qp_overlays', JSON.stringify(OVERLAYS));
   localStorage.setItem('qp_selected', SELECTED || '');
+}
+
+// Name of the primitive's primary length/period param, if it has one.
+function lengthParamOf(m) {
+  if (!m || !m.params) return null;
+  const names = m.params.map(p => p.name);
+  for (const cand of ['length', 'period', 'len', 'pivot_period'])
+    if (names.includes(cand)) return cand;
+  return null;
 }
 
 function addOverlay() {
@@ -675,6 +699,12 @@ function addOverlay() {
   const m = primMeta(key); if (!m) return;
   const params = {};
   for (const par of m.params) params[par.name] = par.default;
+  // Apply the header length box to this overlay's length param (if it has
+  // one and the box is filled). Lets you set the period up top instead of
+  // digging into the params panel below the charts.
+  const lp = lengthParamOf(m);
+  const lenVal = parseInt(document.getElementById('addLen').value, 10);
+  if (lp && Number.isFinite(lenVal) && lenVal > 0) params[lp] = lenVal;
   const color = PALETTE[OVERLAYS.length % PALETTE.length];
   const id = 'o' + (_nextId++);
   OVERLAYS.push({ id, key, source, params, color });
@@ -824,8 +854,14 @@ async function reload() {
   //   'sma(...): draw error …'  → chart-library API problem
   const drawn = [];
   for (const s of (j.series || [])) {
-    if (s.error) { drawn.push(`${s.name}: ERROR ${s.error}`); continue; }
+    if (s.error) { drawn.push(`${s.name}: ⚠ ERROR ${s.error}`); continue; }
     const pts = (s.values || []).length;
+    if (pts === 0) {
+      // No points to plot — almost always the length exceeds the number of
+      // bars loaded. Say so instead of drawing an invisible empty line.
+      drawn.push(`${s.name}: ⚠ 0 pts — length may exceed the ${(j.bars||[]).length} bars loaded; raise Days or lower length`);
+      continue;
+    }
     try {
       // lineWidth 3 (was 2) — a 2px line is nearly invisible against the
       // candles on a high-DPI phone; 3px reads clearly like the TV study.
