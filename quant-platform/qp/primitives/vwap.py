@@ -10,11 +10,12 @@ data excludes extended hours. Set rth_only=False to accumulate every bar
 in the frame (TV chart with extended hours enabled). On daily+ frames
 every bar counts as RTH.
 
-Pine-parity note on `n_day`: Pine's `ta.vwap(hlc3, isNewDay and
-dCount%N==0)` counts days from the start of the loaded chart history, so
-its block phase is arbitrary — it changes with how many bars TV loaded.
-qp counts from the start of the fetched window, so expect a possible
-1-day phase offset vs TV. The math inside each block is identical.
+Pine-parity note on `n_day`: it is the exact Pine block VWAP
+`ta.vwap(hlc3, isNewDay and dCount%N==0)` — accumulate N sessions, reset,
+repeat. Pine's dCount counts sessions from wherever the loaded chart
+history starts, so which sessions are block-starts is arbitrary; qp
+exposes an `anchor_offset` (0..N-1) to shift the phase so the reset days
+line up with your TradingView. The math inside each block is identical.
 """
 
 from __future__ import annotations
@@ -120,57 +121,56 @@ def session(bars: Bars):
 @primitive(
     name='n_day',
     group='vwap',
-    description=('Rolling N-session VWAP. At any bar it is the volume-weighted '
-                 'average price from the open of the session (N-1) sessions '
-                 'ago through the current bar — so a 2-day VWAP always spans '
-                 'yesterday + today. Only the first session of the fetched '
-                 'window degenerates to the session VWAP (nothing earlier '
-                 'exists). DEVIATES from the Pine `ta.vwap(hlc3, isNewDay and '
-                 'dCount%N==0)` block-reset on purpose: that version resets '
-                 'every N days with arbitrary phase and collapses to the plain '
-                 'session VWAP on every reset day, which is useless on a live '
-                 'watch. This rolling form is what "N-day VWAP" means to a '
-                 'trader.'),
+    description=('N-session BLOCK VWAP — exact Pine `ta.vwap(hlc3, isNewDay '
+                 'and dCount % N == 0)`. The VWAP accumulates across N sessions '
+                 'then RESETS: on a block-start (reset) session it equals the '
+                 'plain session VWAP, and by the Nth session it spans all N. '
+                 '(Earlier qp used a rolling N-session window, which does NOT '
+                 'match a TradingView chart running this Pine.)\n'
+                 'PHASE: Pine\'s dCount counts sessions from wherever its chart '
+                 'history happens to start, so WHICH sessions are block-starts '
+                 'is arbitrary. `anchor_offset` (0..N-1) shifts the phase — if '
+                 'the reset days don\'t line up with your TradingView, bump it '
+                 '(for N=2 just try 0 then 1) until the reset days match, then '
+                 'keep Days fixed. The math inside each block is identical.'),
     params=(
-        Param('n_days',   'int',  default=2, min=1),
-        Param('rth_only', 'bool', default=True),
+        Param('n_days',        'int',  default=2, min=1),
+        Param('rth_only',      'bool', default=True),
+        Param('anchor_offset', 'int',  default=0, min=0,
+              description='Shift block phase to align resets with TV (0..N-1).'),
     ),
     inputs=('bars',),
 )
-def n_day(bars: Bars, n_days: int, rth_only: bool = True):
+def n_day(bars: Bars, n_days: int, rth_only: bool = True, anchor_offset: int = 0):
     df, pos = _sub_frame(bars, rth_only)
     et = df.index.tz_convert(_ET)
     price, vol = _hlc3_vol(df)
     m = len(df)
-    N = int(n_days)
-    if m == 0:
-        return _scatter(np.full(0, np.nan), pos, len(bars.df))
-
-    # Session index per bar + first-bar position of each session.
-    dates = et.date
-    session_idx = np.empty(m, dtype=np.int64)
-    session_start: list[int] = []
-    si = -1
-    last = None
-    for i in range(m):
-        if dates[i] != last:
-            si += 1
-            session_start.append(i)
-            last = dates[i]
-        session_idx[i] = si
-
-    # Prefix sums so each bar's rolling window is O(1).
-    pv = price * vol
-    cpv = np.concatenate(([0.0], np.cumsum(pv)))
-    cv  = np.concatenate(([0.0], np.cumsum(vol)))
-
+    N = max(1, int(n_days))
+    off = int(anchor_offset)
     out = np.full(m, np.nan)
+    if m == 0:
+        return _scatter(out, pos, len(bars.df))
+
+    # Walk bars; a new session that lands on a block boundary resets the
+    # accumulation (Pine: isNewDay and dCount % N == 0). `sess` is the 0-based
+    # session ordinal within the frame; dCount is that ordinal.
+    dates = et.date
+    cum_pv = 0.0
+    cum_v  = 0.0
+    sess = -1
+    last_date = None
     for i in range(m):
-        anchor_session = max(0, session_idx[i] - (N - 1))
-        a = session_start[anchor_session]
-        den = cv[i + 1] - cv[a]
-        if den > 0:
-            out[i] = (cpv[i + 1] - cpv[a]) / den
+        if dates[i] != last_date:
+            sess += 1
+            last_date = dates[i]
+            if (sess + off) % N == 0:      # block-start session → reset
+                cum_pv = 0.0
+                cum_v  = 0.0
+        cum_pv += price[i] * vol[i]
+        cum_v  += vol[i]
+        if cum_v > 0:
+            out[i] = cum_pv / cum_v
     return _scatter(out, pos, len(bars.df))
 
 

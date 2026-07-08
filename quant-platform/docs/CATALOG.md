@@ -2,7 +2,7 @@
 
 Generated from the registry by `tools/gen_catalog.py` — do not edit by hand.
 
-**60 primitives · 25 approved** (as of 2026-07-08 04:53 UTC).
+**60 primitives · 25 approved** (as of 2026-07-08 11:37 UTC).
 Approval status changes as verification progresses; the source of truth
 is `approvals/approvals.json`, queried at runtime via `qp.approved_primitives()`.
 
@@ -435,11 +435,12 @@ Monthly VWAP — resets on the first (RTH) bar of each ET calendar month. Matche
 
 ### 🚧 `vwap.n_day`
 
-Rolling N-session VWAP. At any bar it is the volume-weighted average price from the open of the session (N-1) sessions ago through the current bar — so a 2-day VWAP always spans yesterday + today. Only the first session of the fetched window degenerates to the session VWAP (nothing earlier exists). DEVIATES from the Pine `ta.vwap(hlc3, isNewDay and dCount%N==0)` block-reset on purpose: that version resets every N days with arbitrary phase and collapses to the plain session VWAP on every reset day, which is useless on a live watch. This rolling form is what "N-day VWAP" means to a trader.
+N-session BLOCK VWAP — exact Pine `ta.vwap(hlc3, isNewDay and dCount % N == 0)`. The VWAP accumulates across N sessions then RESETS: on a block-start (reset) session it equals the plain session VWAP, and by the Nth session it spans all N. (Earlier qp used a rolling N-session window, which does NOT match a TradingView chart running this Pine.)
+PHASE: Pine's dCount counts sessions from wherever its chart history happens to start, so WHICH sessions are block-starts is arbitrary. `anchor_offset` (0..N-1) shifts the phase — if the reset days don't line up with your TradingView, bump it (for N=2 just try 0 then 1) until the reset days match, then keep Days fixed. The math inside each block is identical.
 
 - input: `bars`
 - output: single series
-- params: `n_days`: int = 2 (min 1) · `rth_only`: bool = True
+- params: `n_days`: int = 2 (min 1) · `rth_only`: bool = True · `anchor_offset`: int = 0 (min 0)
 
 ### ✅ `vwap.session`
 
