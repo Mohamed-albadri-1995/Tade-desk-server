@@ -404,8 +404,11 @@ let CHART = null, PRICE = null, BG = null, LINES = [], PRIMS = [];
 let OVERLAYS = [];          // [{id, key, source, params, color}]
 let SELECTED = null;        // overlay id driving the params + approval panels
 let _nextId = 1;
-const PALETTE = ['#22c55e','#3b82f6','#f5a623','#a855f7','#ec4899',
-                 '#14b8a6','#eab308','#ef4444','#06b6d4','#84cc16'];
+// Overlay line colors. Blue first (like a TradingView MA). Deliberately
+// excludes the candle green (#22c55e) and candle red (#ef5350) so an
+// overlay line never camouflages itself against the candles.
+const PALETTE = ['#3b82f6','#f5a623','#a855f7','#ec4899','#06b6d4',
+                 '#eab308','#14b8a6','#f97316','#e879f9','#84cc16'];
 
 // Chart-library failures must NEVER take down the rest of the page — the
 // primitive dropdown, params, and approval flow all work without a chart.
@@ -752,8 +755,14 @@ function restoreOverlays() {
     const a = JSON.parse(localStorage.getItem('qp_overlays') || '[]');
     if (Array.isArray(a) && a.length) {
       OVERLAYS = a;
+      // Recolor overlays whose saved color collides with the candle colors.
+      // Older sessions seeded the line as #22c55e — the up-candle green — so
+      // it vanished against green candles. Remap those to a palette color.
+      const CANDLE = new Set(['#22c55e', '#ef5350', '#ef4444']);
+      OVERLAYS.forEach((o, i) => { if (!o.color || CANDLE.has(o.color)) o.color = PALETTE[i % PALETTE.length]; });
       _nextId = Math.max(...a.map(o => parseInt((o.id || 'o0').slice(1)) || 0)) + 1;
       SELECTED = localStorage.getItem('qp_selected') || a[0].id;
+      persistOverlays();
     }
   } catch (_) {}
 }
