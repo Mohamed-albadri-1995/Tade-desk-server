@@ -328,10 +328,14 @@ PAGE = r"""<!doctype html>
      failed to download it), fall back to public CDNs. -->
 <script>
 (function(){
+  // Pin the CDN fallbacks to 4.2.3 — the same version the server caches to
+  // /static/. Unpinned URLs resolve to the latest (v5.x), whose series API
+  // differs (addLineSeries removed), which would break overlays if the
+  // local copy ever failed and the browser fell back to a CDN.
   const srcs = [
     '/static/lightweight-charts.js',
-    'https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js',
-    'https://cdn.jsdelivr.net/npm/lightweight-charts/dist/lightweight-charts.standalone.production.js',
+    'https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js',
+    'https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js',
   ];
   function tryLoad(i){
     if (i >= srcs.length) return;
@@ -767,12 +771,27 @@ async function reload() {
   }
   for (const l of LINES) { try { CHART.removeSeries(l); } catch(_){} }
   LINES = [];
+  // Draw each overlay line, and report point counts in the status bar so a
+  // silent failure (empty series, or an addLine API mismatch) is visible:
+  //   'sma(length=9): 148 pts'  → drawing fine
+  //   'sma(length=9): 0 pts'    → computed empty on this feed (raise Days,
+  //                               check params, or switch feed)
+  //   'sma(...): draw error …'  → chart-library API problem
+  const drawn = [];
   for (const s of (j.series || [])) {
-    const line = addLine({ color: s.color, lineWidth: 2, priceLineVisible: false,
-                           title: s.name, lineStyle: s.style || 0 });
-    line.setData(s.values);
-    LINES.push(line);
+    const pts = (s.values || []).length;
+    try {
+      const line = addLine({ color: s.color, lineWidth: 2, priceLineVisible: false,
+                             title: s.name, lineStyle: s.style || 0 });
+      line.setData(s.values || []);
+      LINES.push(line);
+      drawn.push(`${s.name}: ${pts} pts`);
+    } catch (e) {
+      drawn.push(`${s.name}: draw error ${e.message}`);
+    }
   }
+  console.log('qp overlays:', drawn, j.series);
+  if (drawn.length) document.getElementById('status').textContent += ' · ' + drawn.join(' · ');
 }
 
 async function approve() {
