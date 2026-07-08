@@ -883,10 +883,15 @@ async function reload() {
       drawn.push(`${s.name}: draw error ${e.message}`);
     }
   }
-  // Confine the oscillator band to the bottom ~30% of the chart so it reads
-  // like a separate pane and never squashes the candles.
+  // Split the chart into two clean panes when an oscillator is present:
+  // candles get the TOP ~65% (bottom margin pushes them up), the oscillator
+  // gets the BOTTOM ~28% on its own scale — no overlap, like a TV sub-pane.
+  // When there is no oscillator, restore the candles to (almost) full height.
   if (usedOsc) {
-    try { CHART.priceScale('osc').applyOptions({ scaleMargins: { top: 0.72, bottom: 0 }, visible: true, borderColor: '#1e2632' }); } catch(_){}
+    try { CHART.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.34 } }); } catch(_){}
+    try { CHART.priceScale('osc').applyOptions({ scaleMargins: { top: 0.72, bottom: 0.02 }, visible: true, borderColor: '#1e2632' }); } catch(_){}
+  } else {
+    try { CHART.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.08 } }); } catch(_){}
   }
   console.log('qp overlays:', drawn, j.series);
   if (drawn.length) document.getElementById('status').textContent += ' · ' + drawn.join(' · ');
