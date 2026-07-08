@@ -346,6 +346,22 @@ PAGE = r"""<!doctype html>
   .ovrow .x:hover { color:var(--red); }
   #addPrim, #addSource { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:4px 6px; border-radius:4px; font-size:12px; }
   #panel button { cursor:pointer; padding:5px 10px; border-radius:5px; font-size:12px; }
+  /* Add-overlay picker lives in the header so the primitive list is always
+     visible at the top — on a phone the lower panel scrolls off under the
+     charts. */
+  #addBar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-left:auto; }
+  #addBar select, #addBar button { font-size:12px; border-radius:5px; }
+  #addBar #addPrim { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:5px 8px; min-width:150px; }
+  #addBar #addBtn { background:var(--accent); color:#000; border:none; padding:6px 12px; font-weight:600; cursor:pointer; }
+  /* Narrow screens (phones): stack the lower panel into one column and don't
+     let the charts eat the whole viewport, so the panel is reachable. */
+  @media (max-width: 820px) {
+    main { grid-template-columns: 1fr; height:auto; }
+    main > div { height:44vh; }
+    #panel { grid-template-columns: 1fr; }
+    #addBar { margin-left:0; width:100%; }
+    #addBar #addPrim { flex:1; }
+  }
 </style></head>
 <body>
 <header>
@@ -365,6 +381,15 @@ PAGE = r"""<!doctype html>
   </span>
   <button onclick="reload()">Compute</button>
   <span id="status" style="color:var(--text3)"></span>
+  <span id="addBar">
+    <select id="addPrim"></select>
+    <select id="addSource">
+      <option>close</option><option>open</option><option>high</option><option>low</option>
+      <option>hl2</option><option>hlc3</option><option>ohlc4</option>
+      <option>volume</option><option>body_high</option><option>body_low</option>
+    </select>
+    <button id="addBtn" onclick="addOverlay()">+ Add overlay</button>
+  </span>
 </header>
 <main>
   <div><div id="chart"></div></div>
@@ -372,16 +397,7 @@ PAGE = r"""<!doctype html>
 </main>
 <div id="panel">
   <div>
-    <h3>Overlays</h3>
-    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-      <select id="addPrim" style="flex:1;min-width:150px"></select>
-      <select id="addSource" style="width:92px">
-        <option>close</option><option>open</option><option>high</option><option>low</option>
-        <option>hl2</option><option>hlc3</option><option>ohlc4</option>
-        <option>volume</option><option>body_high</option><option>body_low</option>
-      </select>
-      <button onclick="addOverlay()" style="background:#1c2431;color:var(--text);border:1px solid var(--border)">+ Add</button>
-    </div>
+    <h3>Overlays <span style="font-weight:400;color:var(--text3);text-transform:none;letter-spacing:0">— add from the picker in the top bar</span></h3>
     <div id="overlayList"></div>
   </div>
   <div>
