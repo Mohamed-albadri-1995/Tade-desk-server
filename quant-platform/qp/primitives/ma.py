@@ -176,36 +176,30 @@ def hma(source, length: int):
 @primitive(
     name='pine_5day',
     group='ma',
-    description=('5-day RTH SMA — matches the Pine construct '
-                 '`request.security(sym, "1", ta.sma(close, 1950), ...)`: '
-                 '1950 min = 6.5h x 5 RTH days. Computed over RTH bars '
-                 'only (premarket/AH excluded), so 5m → 390 RTH bars, '
-                 '1m → 1950, daily → 5. Value held flat across non-RTH '
-                 'bars. Exact vs Pine on 1m; on coarser TFs it samples '
-                 'TF closes instead of every 1m close (tiny smoothing '
-                 'difference — verify on 1m).'),
-    params=(),
+    description=('5-day MA: SMA of close over the last `length` 1-minute '
+                 'RTH bars (default 1950 = 6.5h x 5 RTH days). Matches Pine '
+                 '`request.security(sym,"1",ta.sma(close,1950))`. Always '
+                 'computed on 1-minute data (compute_tf=\'1m\') regardless '
+                 'of the chart timeframe, and held flat across non-RTH '
+                 'bars — so the line is identical whether you view a 1m, '
+                 '5m or 15m chart.'),
+    params=(Param('length', 'int', default=1950, min=1,
+                  description='Number of 1-minute RTH bars (1950 = 5 days).'),),
     inputs=('bars',),
+    compute_tf='1m',
 )
-def pine_5day(bars: Bars):
+def pine_5day(bars: Bars, length: int = 1950):
     from qp.primitives._session import rth_positions
     df = bars.df
     n = len(df)
-    if n < 3:
-        return np.full(n, np.nan)
-    deltas = pd.Series(df.index).diff().dt.total_seconds().dropna() / 60.0
-    bar_min = float(deltas.median())
-    if bar_min <= 0:
-        return np.full(n, np.nan)
-    # One RTH day is 390 minutes; a daily bar counts as one full RTH day.
-    length = max(1, int(round(1950.0 / min(bar_min, 390.0))))
-    pos = rth_positions(df)
+    length = int(length)
     out = np.full(n, np.nan)
+    pos = rth_positions(df)          # RTH bars only (Pine "1" is RTH data)
     if len(pos) == 0:
         return out
     close = df['close'].to_numpy(dtype=float)[pos]
     vals = pd.Series(close).rolling(length, min_periods=length).mean().to_numpy()
     out[pos] = vals
-    # Hold the last RTH value across non-RTH bars (Pine's security() call
-    # keeps returning the last computed 1m value on chart bars).
+    # Hold the last RTH value across non-RTH bars (request.security keeps
+    # returning the last computed value between updates).
     return pd.Series(out).ffill().to_numpy()

@@ -2,7 +2,7 @@
 
 Generated from the registry by `tools/gen_catalog.py` — do not edit by hand.
 
-**60 primitives · 25 approved** (as of 2026-07-07 14:49 UTC).
+**60 primitives · 25 approved** (as of 2026-07-08 04:53 UTC).
 Approval status changes as verification progresses; the source of truth
 is `approvals/approvals.json`, queried at runtime via `qp.approved_primitives()`.
 
@@ -273,11 +273,11 @@ Hull MA. Matches TradingView `ta.hma(source, length)` — wma(2*wma(src, round(l
 
 ### 🚧 `ma.pine_5day`
 
-5-day RTH SMA — matches the Pine construct `request.security(sym, "1", ta.sma(close, 1950), ...)`: 1950 min = 6.5h x 5 RTH days. Computed over RTH bars only (premarket/AH excluded), so 5m → 390 RTH bars, 1m → 1950, daily → 5. Value held flat across non-RTH bars. Exact vs Pine on 1m; on coarser TFs it samples TF closes instead of every 1m close (tiny smoothing difference — verify on 1m).
+5-day MA: SMA of close over the last `length` 1-minute RTH bars (default 1950 = 6.5h x 5 RTH days). Matches Pine `request.security(sym,"1",ta.sma(close,1950))`. Always computed on 1-minute data (compute_tf='1m') regardless of the chart timeframe, and held flat across non-RTH bars — so the line is identical whether you view a 1m, 5m or 15m chart.
 
 - input: `bars`
 - output: single series
-- params: none
+- params: `length`: int = 1950 (min 1)
 
 ### ✅ `ma.rma`
 

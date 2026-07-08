@@ -173,7 +173,22 @@ _SESS_TINT = {
 }
 
 
-def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict) -> list:
+def _call_primitive(m, frame: pd.DataFrame, source: str, kwargs: dict):
+    if list(m.inputs) == ['bars']:
+        return m.fn(Bars.from_frame(frame), **kwargs)
+    elif list(m.inputs) == ['source']:
+        return m.fn(_source_series(frame, source), **kwargs)
+    raise ValueError(f'unsupported inputs {m.inputs!r} on {m.key}')
+
+
+def _reindex_asof(arr, src_index, dst_index):
+    """Map a value array indexed by src bars onto dst bars: each dst bar
+    gets the last src value at-or-before it (forward-fill)."""
+    return pd.Series(np.asarray(arr, dtype=float), index=src_index) \
+             .reindex(dst_index, method='ffill').to_numpy()
+
+
+def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
     """Compute one overlay spec {key, source, params, color} → list of
     plot series (one, or several for dict-output primitives)."""
     key = ov.get('key')
@@ -182,12 +197,19 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict) -> list:
     m = REGISTRY[key]
     kwargs = dict(ov.get('params') or {})
     source = ov.get('source', 'close')
-    if list(m.inputs) == ['bars']:
-        result = m.fn(Bars.from_frame(bars), **kwargs)
-    elif list(m.inputs) == ['source']:
-        result = m.fn(_source_series(bars, source), **kwargs)
+
+    # Fixed-timeframe primitives (pine_5day → '1m') are computed on their
+    # own timeframe regardless of the chart's, then mapped onto the display
+    # bars — so the line is identical on a 1m / 5m / 15m chart.
+    if m.compute_tf and m.compute_tf != ctx['tf']:
+        cbars = ctx['loader'].load(ctx['symbol'], m.compute_tf, ctx['start'], ctx['end'])
+        result = _call_primitive(m, cbars, source, kwargs)
+        if isinstance(result, dict):
+            result = {k: _reindex_asof(a, cbars.index, bars.index) for k, a in result.items()}
+        else:
+            result = _reindex_asof(result, cbars.index, bars.index)
     else:
-        raise ValueError(f'unsupported inputs {m.inputs!r} on {key}')
+        result = _call_primitive(m, bars, source, kwargs)
 
     if isinstance(result, dict):
         lines = [(sub, np.asarray(a, dtype=float)) for sub, a in result.items()]
@@ -234,10 +256,13 @@ def compute_data(symbol: str, tf: str, days: int, overlays: list,
         return {'bars': [], 'series': [], 'day_starts': [], 'first': None, 'last': None}
 
     et = bars.index.tz_convert(_ET)
-    # ET wall-clock re-labelled as UTC epoch seconds (so both panels share
-    # the ET clock). Timedelta division is pandas-resolution-independent.
-    naive_et = et.tz_localize(None)
-    ts = ((naive_et - pd.Timestamp('1970-01-01')) // pd.Timedelta(seconds=1)).tolist()
+    # TRUE UTC epoch seconds. The browser chart is told to format these in
+    # ET via Intl (America/New_York) so the axis reads the same as
+    # TradingView regardless of the viewer's own timezone. (The old
+    # "relabel ET as UTC" trick broke for viewers outside UTC — e.g. a
+    # UTC+3 browser shifted every bar +3h.)
+    ts = ((bars.index - pd.Timestamp('1970-01-01', tz='UTC'))
+          // pd.Timedelta(seconds=1)).tolist()
 
     o = bars['open'].to_numpy(float);  h = bars['high'].to_numpy(float)
     lo = bars['low'].to_numpy(float);  c = bars['close'].to_numpy(float)
@@ -249,7 +274,8 @@ def compute_data(symbol: str, tf: str, days: int, overlays: list,
     for i in range(len(bars)):
         d = et[i].date()
         if d != prev_date:
-            day_starts.append(int(ts[i]))
+            day_starts.append({'time': int(ts[i]),
+                               'label': f'{et[i].month}/{et[i].day}'})
             prev_date = d
         bar = {'time': int(ts[i]), 'open': float(o[i]), 'high': float(h[i]),
                'low': float(lo[i]), 'close': float(c[i]), 'volume': float(v[i])}
@@ -262,9 +288,10 @@ def compute_data(symbol: str, tf: str, days: int, overlays: list,
                 bar['wickColor'] = tint
         bar_list.append(bar)
 
+    ctx = {'symbol': symbol, 'tf': tf, 'loader': loader, 'start': start, 'end': end}
     series_out = []
     for ov in (overlays or []):
-        series_out.extend(_one_overlay(bars, ts, ov))
+        series_out.extend(_one_overlay(bars, ts, ov, ctx))
 
     return {
         'bars':   bar_list,
@@ -423,12 +450,26 @@ function addLine(opts) {
   return CHART.addSeries(LightweightCharts.LineSeries, opts);
 }
 
+// Format epoch-seconds in America/New_York, regardless of the viewer's
+// own timezone — so the axis + crosshair read the same as TradingView
+// even from a UTC+3 (Saudi Arabia) browser.
+const _ET_HM   = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', hour12:false });
+const _ET_MD   = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', month:'short', day:'numeric' });
+const _ET_FULL = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false });
+
 function initChart() {
   const el = document.getElementById('chart');
   CHART = LightweightCharts.createChart(el, {
     layout: { background: { color: '#0e1116' }, textColor: '#94a3b8' },
     grid:   { vertLines: { color: '#1e2632' }, horzLines: { color: '#1e2632' } },
-    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#1e2632' },
+    timeScale: {
+      timeVisible: true, secondsVisible: false, borderColor: '#1e2632',
+      // tickMarkType: 0=Year 1=Month 2=DayOfMonth 3=Time 4=TimeWithSeconds
+      tickMarkFormatter: (t, tickType) =>
+        tickType < 3 ? _ET_MD.format(new Date(t * 1000))
+                     : _ET_HM.format(new Date(t * 1000)),
+    },
+    localization: { timeFormatter: (t) => _ET_FULL.format(new Date(t * 1000)) + ' ET' },
     rightPriceScale: { borderColor: '#1e2632' },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
@@ -495,10 +536,24 @@ async function loadPrimitives() {
     sel.appendChild(og);
   }
   if (keep && PRIMS.some(p => p.key === keep)) sel.value = keep;
+  sel.onchange = syncSourceEnabled;
+  syncSourceEnabled();
 }
 
 function primMeta(key) { return PRIMS.find(p => p.key === key); }
 function currentOverlay() { return OVERLAYS.find(o => o.id === SELECTED); }
+
+// A 'bars'-input primitive (VWAPs, ATR, levels…) ignores the source
+// dropdown — it reads the whole OHLCV bar (price AND volume) itself.
+// Grey the source picker out for those so it's clear it doesn't apply.
+function syncSourceEnabled() {
+  const m = primMeta(document.getElementById('addPrim').value);
+  const sel = document.getElementById('addSource');
+  const barsInput = m && m.inputs && m.inputs.length === 1 && m.inputs[0] === 'bars';
+  sel.disabled = !!barsInput;
+  sel.title = barsInput ? 'This primitive uses the full OHLCV bar (price + volume); source is ignored.' : '';
+  sel.style.opacity = barsInput ? '0.4' : '1';
+}
 
 function persistOverlays() {
   localStorage.setItem('qp_overlays', JSON.stringify(OVERLAYS));
@@ -632,11 +687,10 @@ async function reload() {
   // Day separators: a small marker + date label at each day's first bar
   // (skip on the 1d timeframe where every bar is a day).
   if (tf !== '1d' && j.day_starts && j.day_starts.length) {
-    PRICE.setMarkers(j.day_starts.map(t => {
-      const d = new Date(t * 1000);
-      return { time: t, position: 'belowBar', color: '#64748b', shape: 'square',
-               size: 1, text: (d.getUTCMonth() + 1) + '/' + d.getUTCDate() };
-    }));
+    PRICE.setMarkers(j.day_starts.map(d => (
+      { time: d.time, position: 'belowBar', color: '#64748b', shape: 'square',
+        size: 1, text: d.label }   // label is the ET date, computed server-side
+    )));
   } else {
     PRICE.setMarkers([]);
   }

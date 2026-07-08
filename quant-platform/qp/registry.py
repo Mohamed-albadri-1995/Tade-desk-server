@@ -53,6 +53,11 @@ class PrimitiveMeta:
     #   ('value',)                       → fn returns one np.ndarray
     #   ('middle','upper','lower'), ...  → fn returns dict[str, np.ndarray]
     outputs: tuple = ('value',)
+    # If set (e.g. '1m'), this primitive is defined on a FIXED timeframe
+    # regardless of the chart's timeframe — the caller must feed it bars of
+    # `compute_tf` and map the result onto the display bars. pine_5day uses
+    # '1m' (Pine's request.security(sym,"1",...)). None = use the given bars.
+    compute_tf: 'Optional[str]' = None
 
 
 REGISTRY: dict[str, PrimitiveMeta] = {}
@@ -72,6 +77,7 @@ def primitive(
     params: tuple = (),
     inputs: tuple = ('bars',),
     outputs: tuple = ('value',),
+    compute_tf: 'Optional[str]' = None,
 ) -> Callable:
     """Register a function as a qp primitive.
 
@@ -108,7 +114,7 @@ def primitive(
             key=key, name=name, group=group, description=description,
             params=tuple(params), inputs=tuple(inputs), fn=fn,
             module=fn.__module__, file=src_file, lineno=lineno,
-            outputs=tuple(outputs),
+            outputs=tuple(outputs), compute_tf=compute_tf,
         )
         _NAME_TO_KEY[name] = key
         fn._qp_key = key  # convenience for inspection
