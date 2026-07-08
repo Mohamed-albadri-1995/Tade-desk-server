@@ -227,6 +227,24 @@
     "git_sha": "e828815",
     "notes": ""
   },
+  "vwap.last_hour_hh": {
+    "approved_at": "2026-07-08T18:51:20+00:00",
+    "approved_by": "badri",
+    "git_sha": "42cc7bb",
+    "notes": ""
+  },
+  "vwap.last_hour_ll": {
+    "approved_at": "2026-07-08T18:51:13+00:00",
+    "approved_by": "badri",
+    "git_sha": "42cc7bb",
+    "notes": ""
+  },
+  "vwap.monthly": {
+    "approved_at": "2026-07-08T18:53:10+00:00",
+    "approved_by": "badri",
+    "git_sha": "42cc7bb",
+    "notes": ""
+  },
   "vwap.nday_block": {
     "approved_at": "2026-07-08T11:59:37+00:00",
     "approved_by": "badri",
@@ -243,6 +261,12 @@
     "approved_at": "2026-07-07T08:24:46+00:00",
     "approved_by": "badri",
     "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "vwap.stdev_bands": {
+    "approved_at": "2026-07-08T18:51:51+00:00",
+    "approved_by": "badri",
+    "git_sha": "42cc7bb",
     "notes": ""
   },
   "vwap.swing_hh": {
@@ -279,6 +303,12 @@
     "approved_at": "2026-07-07T08:44:06+00:00",
     "approved_by": "badri",
     "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "vwap.weekly": {
+    "approved_at": "2026-07-08T18:53:03+00:00",
+    "approved_by": "badri",
+    "git_sha": "42cc7bb",
     "notes": ""
   }
 }
