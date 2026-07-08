@@ -93,6 +93,24 @@ def _feed_status() -> dict:
     default = 'polygon' if has_polygon else 'alpaca'
     return {'feeds': have, 'default_feed': default}
 
+
+def _build_id() -> str:
+    """Short git SHA of the running code, resolved once at startup. Exposed
+    in /api/health and the page header so you can confirm at a glance that a
+    restart actually picked up the latest commit (vs. an old server process
+    still holding the port)."""
+    try:
+        sha = subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            stderr=subprocess.DEVNULL, timeout=5).decode().strip()
+        return sha or 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+_BUILD = _build_id()
+
 _ET = 'America/New_York'
 
 # Local cache of the chart library so the browser doesn't need to reach any
@@ -425,6 +443,7 @@ PAGE = r"""<!doctype html>
     </select>
     <button id="addBtn" onclick="addOverlay()">+ Add overlay</button>
   </span>
+  <span id="build" style="font-size:10px;color:var(--text3);margin-left:8px">build …</span>
 </header>
 <main>
   <div><div id="chart"></div></div>
@@ -862,6 +881,9 @@ async function initFeeds() {
       opt.textContent = opt.value + (ok ? '' : ' (no key)');
     }
     if (!localStorage.getItem('qp_feed') && h.default_feed) sel.value = h.default_feed;
+    // Show the running build (git SHA) so a stale server process is obvious.
+    const b = document.getElementById('build');
+    if (b) b.textContent = 'build ' + (h.build || '?');
   } catch (_) {}
 }
 
@@ -925,7 +947,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, body, 'application/javascript; charset=utf-8'); return
             self._send(404, b'not cached', 'text/plain'); return
         if u.path == '/api/health':
-            self._send(200, json.dumps({'ok': True, 'primitives': len(REGISTRY),
+            self._send(200, json.dumps({'ok': True, 'build': _BUILD,
+                                        'primitives': len(REGISTRY),
                                         **_feed_status()}).encode('utf-8')); return
         if u.path == '/api/primitives':
             self._send(200, json.dumps(list_primitives()).encode('utf-8')); return
@@ -990,6 +1013,7 @@ def main():
     chart_ok = _ensure_chart_js()
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f'qp compare UI on http://{args.host}:{args.port} — '
+          f'build {_BUILD} — '
           f'{len(REGISTRY)} primitives loaded — '
           f'chart lib {"cached locally" if chart_ok else "will use CDN fallback"}')
     try:
