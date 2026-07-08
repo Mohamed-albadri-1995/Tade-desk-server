@@ -129,12 +129,36 @@ _CHART_MIRRORS = [
 ]
 
 
+def _chart_js_version() -> str:
+    """Version string of the cached chart library, or '' if not cached."""
+    try:
+        head = _CHART_JS.read_bytes()[:600].decode('latin-1')
+        import re as _re
+        m = _re.search(r'Lightweight Charts[^\n]*?v(\d+\.\d+\.\d+)', head)
+        return m.group(1) if m else 'unknown'
+    except Exception:
+        return ''
+
+
 def _ensure_chart_js() -> bool:
     """Download the chart library once, cache under tools/.static/. Return
     True on success. If every mirror fails we fall back to a CDN reference
     in the HTML (which will only work if the browser can reach one)."""
+    # Re-download if the cached file isn't the pinned v4 line. tools/.static
+    # is gitignored, so an old cache (e.g. a v5 downloaded before the version
+    # was pinned) would otherwise persist forever across git pulls — and v5's
+    # series API differs enough that overlay lines silently fail to draw while
+    # candles still work. Force a fresh v4.x copy.
     if _CHART_JS.exists() and _CHART_JS.stat().st_size > 10_000:
-        return True
+        ver = _chart_js_version()
+        if ver.startswith('4.'):
+            return True
+        print(f'[qp] cached chart lib is v{ver or "?"} (want 4.x) — re-downloading',
+              file=sys.stderr)
+        try:
+            _CHART_JS.unlink()
+        except Exception:
+            pass
     _STATIC_DIR.mkdir(parents=True, exist_ok=True)
     for url in _CHART_MIRRORS:
         try:
@@ -1019,6 +1043,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b'not cached', 'text/plain'); return
         if u.path == '/api/health':
             self._send(200, json.dumps({'ok': True, 'build': _BUILD,
+                                        'chart_lib': _chart_js_version() or 'CDN',
                                         'primitives': len(REGISTRY),
                                         **_feed_status()}).encode('utf-8')); return
         if u.path == '/api/primitives':
