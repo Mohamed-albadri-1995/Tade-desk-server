@@ -197,10 +197,22 @@
     "git_sha": "f8be7ae",
     "notes": ""
   },
+  "pivots.floor": {
+    "approved_at": "2026-07-08T18:57:33+00:00",
+    "approved_by": "badri",
+    "git_sha": "8dfdfc3",
+    "notes": ""
+  },
   "structure.pivot_high": {
     "approved_at": "2026-07-07T08:50:55+00:00",
     "approved_by": "badri",
     "git_sha": "f8be7ae",
+    "notes": ""
+  },
+  "volatility.atr": {
+    "approved_at": "2026-07-08T18:58:35+00:00",
+    "approved_by": "badri",
+    "git_sha": "8dfdfc3",
     "notes": ""
   },
   "volatility.bb": {
