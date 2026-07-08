@@ -2,7 +2,7 @@
 
 Generated from the registry by `tools/gen_catalog.py` — do not edit by hand.
 
-**62 primitives · 25 approved** (as of 2026-07-08 14:48 UTC).
+**64 primitives · 30 approved** (as of 2026-07-08 14:56 UTC).
 Approval status changes as verification progresses; the source of truth
 is `approvals/approvals.json`, queried at runtime via `qp.approved_primitives()`.
 
@@ -69,6 +69,22 @@ Lowest value of `source` over the last `length` bars (inclusive of current bar).
 
 ## levels
 
+### 🚧 `levels.afterhours_high`
+
+After-hours high = the full non-RTH range leading into the open: 16:00 (NY close) → 09:30 next day ET (overnight + premarket). Running through that window, then frozen across the RTH day. This is the old "overnight_high", renamed. Needs extended-hours bars (polygon / hybrid), All-day view.
+
+- input: `bars`
+- output: single series
+- params: none
+
+### 🚧 `levels.afterhours_low`
+
+After-hours low = 16:00 → 09:30 next day ET (overnight + premarket).
+
+- input: `bars`
+- output: single series
+- params: none
+
 ### ✅ `levels.day_open`
 
 Today's RTH open (09:30 ET bar). NaN before today's open exists.
@@ -127,7 +143,7 @@ This ET month's RTH open.
 
 ### 🚧 `levels.overnight_high`
 
-Overnight high (18:00 prev day - 09:30 today ET). Running during ON; frozen through the trading day.
+Overnight high = NY close → premarket start: 16:00 → 04:00 ET, premarket EXCLUDED. Running through the overnight, frozen across the RTH day. For the range that also includes premarket use afterhours_high; for premarket only use pm_high. Needs extended-hours bars (polygon / hybrid), All-day view.
 
 - input: `bars`
 - output: single series
@@ -135,7 +151,7 @@ Overnight high (18:00 prev day - 09:30 today ET). Running during ON; frozen thro
 
 ### 🚧 `levels.overnight_low`
 
-Overnight low (18:00 prev day - 09:30 today ET).
+Overnight low = 16:00 → 04:00 ET (NY close → premarket start, premarket excluded).
 
 - input: `bars`
 - output: single series
@@ -157,7 +173,7 @@ Premarket low (04:00-09:30 ET), frozen after 09:30.
 - output: single series
 - params: none
 
-### 🚧 `levels.prev_day_high`
+### ✅ `levels.prev_day_high`
 
 Yesterday's RTH high, held constant across today.
 
@@ -165,7 +181,7 @@ Yesterday's RTH high, held constant across today.
 - output: single series
 - params: none
 
-### 🚧 `levels.prev_day_low`
+### ✅ `levels.prev_day_low`
 
 Yesterday's RTH low.
 
@@ -271,7 +287,7 @@ Hull MA. Matches TradingView `ta.hma(source, length)` — wma(2*wma(src, round(l
 - output: single series
 - params: `length`: int = 20 (min 2)
 
-### 🚧 `ma.pine_5day`
+### ✅ `ma.pine_5day`
 
 5-day MA: SMA of close over the last `length` 1-minute RTH bars (default 1950 = 6.5h x 5 RTH days). Matches Pine `request.security(sym,"1",ta.sma(close,1950))`. Always computed on 1-minute data (compute_tf='1m') regardless of the chart timeframe, and held flat across non-RTH bars — so the line is identical whether you view a 1m, 5m or 15m chart.
 
@@ -441,7 +457,7 @@ Monthly VWAP — resets on the first (RTH) bar of each ET calendar month. Matche
 - output: single series
 - params: `rth_only`: bool = True
 
-### 🚧 `vwap.nday_block`
+### ✅ `vwap.nday_block`
 
 N-session BLOCK VWAP — exact Pine `ta.vwap(hlc3, isNewDay and dCount % N == 0)`. Accumulates across N sessions then RESETS: on a block-start session it equals the plain session VWAP, and by the Nth session it spans all N. Use this to reproduce the TradingView study that uses that Pine. For a VWAP that is ALWAYS anchored at yesterday's open (never resets to one day) use `nday_rolling` instead.
 PHASE: Pine's dCount counts sessions from wherever the chart history starts, so which sessions are block-starts is arbitrary. `anchor_offset` (0..N-1) shifts the phase — if the reset days don't line up with your TradingView, try 0 then 1 (for N=2) until they match, then keep Days fixed.
@@ -450,7 +466,7 @@ PHASE: Pine's dCount counts sessions from wherever the chart history starts, so 
 - output: single series
 - params: `n_days`: int = 2 (min 1) · `rth_only`: bool = True · `anchor_offset`: int = 0 (min 0)
 
-### 🚧 `vwap.nday_rolling`
+### ✅ `vwap.nday_rolling`
 
 N-session ROLLING (trailing) VWAP — always anchored at the OPEN of the session (N-1) ago through the current bar. For N=2 that is "anchored from yesterday's open until now": every bar's value is the volume-weighted average price over the last N sessions (yesterday + today). The anchor slides forward each day; it NEVER resets to a single day. This is NOT the Pine `dCount%N` study — for that use `nday_block`. Only the first (N-1) sessions of the fetched window degenerate to a shorter span (nothing earlier exists). To eyeball on TradingView, drop an Anchored VWAP at yesterday's 09:30.
 

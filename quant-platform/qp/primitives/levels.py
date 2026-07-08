@@ -196,31 +196,37 @@ def pm_low(bars: Bars):
     return _pm_level(bars, 'low')
 
 
-def _overnight_extreme(df: pd.DataFrame, which: str):
-    """Overnight = 18:00 prev calendar day → 09:30 today ET. Running during
-    the ON window, frozen from 09:30 until 18:00 starts the next one."""
+def _leading_extreme(df: pd.DataFrame, which: str, in_win):
+    """Extreme of a non-RTH window that LEADS INTO the RTH day. `in_win(t)`
+    marks bars inside the window. An evening bar (hour >= 12) belongs to the
+    NEXT calendar day's window; a morning bar belongs to today's. The extreme
+    runs live inside the window, then is frozen (held) through that RTH day.
+
+    Used for:
+      - afterhours (16:00 -> 09:30): overnight + premarket, close-to-open.
+      - overnight  (16:00 -> 04:00): the overnight part only (excl. premarket).
+    (Premarket 04:00 -> 09:30 lives in pm_high / pm_low.)"""
     et = df.index.tz_convert(_ET)
-    high  = df['high'].to_numpy(dtype=float)
-    low   = df['low'].to_numpy(dtype=float)
+    high = df['high'].to_numpy(dtype=float)
+    low  = df['low'].to_numpy(dtype=float)
     n = len(df)
-    on_date = []
-    in_on = []
+    in_w, wdate = [], []
     for i in range(n):
         t = et[i]
-        pred = (t.hour >= 18) or (t.hour < 9) or (t.hour == 9 and t.minute < 30)
-        in_on.append(pred)
-        if t.hour >= 18:
-            on_date.append((t + pd.Timedelta(days=1)).date())
+        w = bool(in_win(t))
+        in_w.append(w)
+        if w:
+            wdate.append((t + pd.Timedelta(days=1)).date() if t.hour >= 12 else t.date())
         else:
-            on_date.append(t.date())
+            wdate.append(None)
 
     running = np.full(n, np.nan)
     cur_date = None
     cur_val  = np.nan
     for i in range(n):
-        if not in_on[i]:
+        if not in_w[i]:
             continue
-        d = on_date[i]
+        d = wdate[i]
         v = high[i] if which == 'high' else low[i]
         if d != cur_date:
             cur_val = v
@@ -232,8 +238,8 @@ def _overnight_extreme(df: pd.DataFrame, which: str):
     out = np.full(n, np.nan)
     holds: dict = {}
     for i in range(n):
-        if in_on[i]:
-            holds[on_date[i]] = running[i]
+        if in_w[i]:
+            holds[wdate[i]] = running[i]
             out[i] = running[i]
         else:
             d = et[i].date()
@@ -242,19 +248,52 @@ def _overnight_extreme(df: pd.DataFrame, which: str):
     return out
 
 
+# afterhours = overnight + premarket = 16:00 (NY close) → 09:30 (next open).
+def _in_afterhours(t):
+    return (t.hour >= 16) or (t.hour < 9) or (t.hour == 9 and t.minute < 30)
+
+
+# overnight = NY close → premarket start = 16:00 → 04:00 (premarket excluded).
+def _in_overnight(t):
+    return (t.hour >= 16) or (t.hour < 4)
+
+
+@primitive(name='afterhours_high', group='levels',
+           description=('After-hours high = the full non-RTH range leading into '
+                        'the open: 16:00 (NY close) → 09:30 next day ET '
+                        '(overnight + premarket). Running through that window, '
+                        'then frozen across the RTH day. This is the old '
+                        '"overnight_high", renamed. Needs extended-hours bars '
+                        '(polygon / hybrid), All-day view.'),
+           params=(), inputs=('bars',))
+def afterhours_high(bars: Bars):
+    return _leading_extreme(bars.df, 'high', _in_afterhours)
+
+
+@primitive(name='afterhours_low', group='levels',
+           description='After-hours low = 16:00 → 09:30 next day ET (overnight + premarket).',
+           params=(), inputs=('bars',))
+def afterhours_low(bars: Bars):
+    return _leading_extreme(bars.df, 'low', _in_afterhours)
+
+
 @primitive(name='overnight_high', group='levels',
-           description=('Overnight high (18:00 prev day - 09:30 today ET). '
-                        'Running during ON; frozen through the trading day.'),
+           description=('Overnight high = NY close → premarket start: 16:00 → '
+                        '04:00 ET, premarket EXCLUDED. Running through the '
+                        'overnight, frozen across the RTH day. For the range '
+                        'that also includes premarket use afterhours_high; for '
+                        'premarket only use pm_high. Needs extended-hours bars '
+                        '(polygon / hybrid), All-day view.'),
            params=(), inputs=('bars',))
 def overnight_high(bars: Bars):
-    return _overnight_extreme(bars.df, 'high')
+    return _leading_extreme(bars.df, 'high', _in_overnight)
 
 
 @primitive(name='overnight_low', group='levels',
-           description='Overnight low (18:00 prev day - 09:30 today ET).',
+           description='Overnight low = 16:00 → 04:00 ET (NY close → premarket start, premarket excluded).',
            params=(), inputs=('bars',))
 def overnight_low(bars: Bars):
-    return _overnight_extreme(bars.df, 'low')
+    return _leading_extreme(bars.df, 'low', _in_overnight)
 
 
 # ────────────────────────────────────────────────────────────
