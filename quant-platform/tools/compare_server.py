@@ -846,34 +846,47 @@ async function reload() {
   }
   for (const l of LINES) { try { CHART.removeSeries(l); } catch(_){} }
   LINES = [];
-  // Draw each overlay line, and report point counts in the status bar so a
-  // silent failure (empty series, or an addLine API mismatch) is visible:
-  //   'sma(length=9): 148 pts'  → drawing fine
-  //   'sma(length=9): 0 pts'    → computed empty on this feed (raise Days,
-  //                               check params, or switch feed)
-  //   'sma(...): draw error …'  → chart-library API problem
+  // Price range of the visible candles — used to decide whether an overlay
+  // sits ON the price (MAs, VWAP, bands, levels) or is an OSCILLATOR whose
+  // values live in a different range (RSI 0-100, ATR/true_range tiny). The
+  // latter get their own band at the bottom of the chart, like a TV sub-pane
+  // — otherwise an RSI line at ~50 is drawn far below candles at ~747 and is
+  // invisible.
+  let pLo = Infinity, pHi = -Infinity;
+  for (const b of (j.bars || [])) { if (b.low < pLo) pLo = b.low; if (b.high > pHi) pHi = b.high; }
+  const pSpan = (pHi - pLo) || 1;
+  let usedOsc = false;
   const drawn = [];
   for (const s of (j.series || [])) {
     if (s.error) { drawn.push(`${s.name}: ⚠ ERROR ${s.error}`); continue; }
     const pts = (s.values || []).length;
     if (pts === 0) {
-      // No points to plot — almost always the length exceeds the number of
-      // bars loaded. Say so instead of drawing an invisible empty line.
       drawn.push(`${s.name}: ⚠ 0 pts — length may exceed the ${(j.bars||[]).length} bars loaded; raise Days or lower length`);
       continue;
     }
+    // Does this series overlap the price range? If its whole value range is
+    // clearly outside the candles, treat it as an oscillator (bottom band).
+    let sLo = Infinity, sHi = -Infinity;
+    for (const v of s.values) { if (v.value < sLo) sLo = v.value; if (v.value > sHi) sHi = v.value; }
+    const overlapsPrice = (sHi >= pLo - 0.5 * pSpan) && (sLo <= pHi + 0.5 * pSpan);
+    const scaleId = overlapsPrice ? 'right' : 'osc';
+    if (scaleId === 'osc') usedOsc = true;
     try {
-      // lineWidth 3 (was 2) — a 2px line is nearly invisible against the
-      // candles on a high-DPI phone; 3px reads clearly like the TV study.
       const line = addLine({ color: s.color, lineWidth: 3, priceLineVisible: false,
                              title: s.name, lineStyle: s.style || 0,
-                             crosshairMarkerVisible: true, lastValueVisible: true });
+                             crosshairMarkerVisible: true, lastValueVisible: true,
+                             priceScaleId: scaleId });
       line.setData(s.values || []);
       LINES.push(line);
-      drawn.push(`${s.name}: ${pts} pts`);
+      drawn.push(`${s.name}: ${pts} pts${scaleId === 'osc' ? ' (bottom pane)' : ''}`);
     } catch (e) {
       drawn.push(`${s.name}: draw error ${e.message}`);
     }
+  }
+  // Confine the oscillator band to the bottom ~30% of the chart so it reads
+  // like a separate pane and never squashes the candles.
+  if (usedOsc) {
+    try { CHART.priceScale('osc').applyOptions({ scaleMargins: { top: 0.72, bottom: 0 }, visible: true, borderColor: '#1e2632' }); } catch(_){}
   }
   console.log('qp overlays:', drawn, j.series);
   if (drawn.length) document.getElementById('status').textContent += ' · ' + drawn.join(' · ');
