@@ -65,6 +65,26 @@ def atr(bars: Bars, length: int):
 
 
 @primitive(
+    name='atr_daily',
+    group='volatility',
+    description=('Daily ATR — the Wilder ATR computed on 1-DAY bars, always, '
+                 'regardless of the chart timeframe (compute_tf=\'1d\'), then '
+                 'held flat across each day. Matches Pine '
+                 '`request.security(syminfo.tickerid, "D", ta.atr(length))`. '
+                 'Lets you read the DAILY ATR while looking at an intraday '
+                 'chart. Needs enough daily history for the warm-up — raise '
+                 'Days to >= ~3x length (e.g. Days 30-45 for length 14).'),
+    params=(Param('length', 'int', default=14, min=1),),
+    inputs=('bars',),
+    compute_tf='1d',
+)
+def atr_daily(bars: Bars, length: int = 14):
+    # Same math as ta.atr, but the caller feeds DAILY bars (compute_tf='1d')
+    # and maps the result back onto the display bars.
+    return _rma(true_range(bars), int(length))
+
+
+@primitive(
     name='stdev',
     group='volatility',
     description=('Population standard deviation (ddof=0) of `source` over '

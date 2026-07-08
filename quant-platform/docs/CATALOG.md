@@ -2,7 +2,7 @@
 
 Generated from the registry by `tools/gen_catalog.py` — do not edit by hand.
 
-**61 primitives · 25 approved** (as of 2026-07-08 11:45 UTC).
+**62 primitives · 25 approved** (as of 2026-07-08 14:48 UTC).
 Approval status changes as verification progresses; the source of truth
 is `approvals/approvals.json`, queried at runtime via `qp.approved_primitives()`.
 
@@ -83,7 +83,7 @@ Dynamic S/R levels — port of "Support Resistance Dynamic v2". Clusters the las
 
 - input: `bars`
 - output: dict with keys `sr1, sr2, sr3, sr4, sr5, sr6`
-- params: `pivot_period`: int = 10 (min 4, max 30) · `max_pivots`: int = 20 (min 5, max 100) · `channel_width_pct`: float = 10.0 (min 1) · `max_levels`: int = 6 (min 1, max 10) · `min_strength`: int = 1 (min 1, max 10) · `source`: str = 'hl'
+- params: `pivot_period`: int = 10 (min 4, max 30) · `max_pivots`: int = 20 (min 5, max 100) · `channel_width_pct`: float = 10.0 (min 1) · `max_levels`: int = 6 (min 1, max 10) · `min_strength`: int = 3 (min 1, max 10) · `source`: str = 'hl'
 
 ### ✅ `levels.monday_high`
 
@@ -354,6 +354,14 @@ Pivot low — matches Pine `ta.pivotlow(source, left, right)`.
 ### 🚧 `volatility.atr`
 
 Average True Range (Wilder). Matches TradingView `ta.atr(length)` — rma(true_range, length).
+
+- input: `bars`
+- output: single series
+- params: `length`: int = 14 (min 1)
+
+### 🚧 `volatility.atr_daily`
+
+Daily ATR — the Wilder ATR computed on 1-DAY bars, always, regardless of the chart timeframe (compute_tf='1d'), then held flat across each day. Matches Pine `request.security(syminfo.tickerid, "D", ta.atr(length))`. Lets you read the DAILY ATR while looking at an intraday chart. Needs enough daily history for the warm-up — raise Days to >= ~3x length (e.g. Days 30-45 for length 14).
 
 - input: `bars`
 - output: single series

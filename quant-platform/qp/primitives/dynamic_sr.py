@@ -68,7 +68,7 @@ def _confirmed_pivot_values(values: np.ndarray, prd: int, side: str) -> np.ndarr
         Param('max_pivots',        'int',   default=20, min=5,  max=100),
         Param('channel_width_pct', 'float', default=10.0, min=1.0),
         Param('max_levels',        'int',   default=6,  min=1,  max=10),
-        Param('min_strength',      'int',   default=1,  min=1,  max=10),
+        Param('min_strength',      'int',   default=3,  min=1,  max=10),
         Param('source',            'str',   default='hl',
               description='"hl" (high/low) or "body" (close/open)'),
     ),

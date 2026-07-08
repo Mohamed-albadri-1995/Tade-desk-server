@@ -283,6 +283,10 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
 
     color = ov.get('color') or '#22c55e'
     args = ','.join(f'{k}={v}' for k, v in kwargs.items())
+    # Horizontal-level primitives (S/R, floor pivots, prev-day/open levels)
+    # are piecewise-constant — they must render as STEP lines, not diagonal
+    # connectors, or they look like a chaotic web. MAs/VWAPs stay smooth.
+    step = m.group in ('levels', 'pivots', 'dynamic_sr')
     out = []
     for idx, (sub, arr) in enumerate(lines):
         vals = [{'time': int(t), 'value': float(v)}
@@ -293,6 +297,7 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
             'name':  f'{label}({args})' if args else label,
             'color': color,
             'style': 0 if idx == 0 else 2,   # first solid, rest dotted
+            'step':  step,
             'values': vals,
         })
     return out
@@ -314,7 +319,10 @@ def compute_data(symbol: str, tf: str, days: int, overlays: list,
     bars = loader.load(symbol, tf, start, end)
 
     et_full = bars.index.tz_convert(_ET)
-    if view == 'regular':
+    # Daily (and coarser) bars are timestamped at the session date, not inside
+    # 09:30-16:00, so the RTH filter would drop every one of them → 0 bars.
+    # Each daily bar already IS the RTH session, so skip the filter for 1d.
+    if view == 'regular' and tf != '1d':
         mask = np.fromiter((_in_rth(t) for t in et_full), bool, len(bars))
         bars = bars[mask]
     if len(bars) == 0:
@@ -896,8 +904,11 @@ async function reload() {
     const scaleId = overlapsPrice ? 'right' : 'osc';
     if (scaleId === 'osc') usedOsc = true;
     try {
-      const line = addLine({ color: s.color, lineWidth: 3, priceLineVisible: false,
-                             title: s.name, lineStyle: s.style || 0,
+      // Level primitives (S/R, pivots, opens) render as horizontal STEP
+      // lines (LineType.WithSteps = 1); everything else stays smooth.
+      const lineType = s.step ? 1 : 0;
+      const line = addLine({ color: s.color, lineWidth: s.step ? 2 : 3, priceLineVisible: false,
+                             title: s.name, lineStyle: s.style || 0, lineType: lineType,
                              crosshairMarkerVisible: true, lastValueVisible: true,
                              priceScaleId: scaleId });
       line.setData(s.values || []);
