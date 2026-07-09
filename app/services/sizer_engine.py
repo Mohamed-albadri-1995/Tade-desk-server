@@ -42,21 +42,19 @@ class SizerEngine:
         self,
         entry_price: float,
         sl_price: float,
-        grade: str,
-        regime_key: str,
-        setup_factor: float,
+        final_multiplier: float,
         accounts: list,
         available_fn,
     ) -> dict:
-        """Per-account sizing with the setup factor and the at-the-moment
-        capital cap:  final = min(risk_based, floor(available / entry)).
+        """Per-account sizing with the learned final multiplier
+        (grade_multiplier × setup_factor, computed by the pipeline) and
+        the at-the-moment capital cap:
+        final = min(risk_based × multiplier, floor(available / entry)).
 
         ``accounts`` are cached account dicts; ``available_fn(account_id)``
         returns cached available capital (zero I/O). Returns a per-account
         breakdown plus the primary account's shares for the card headline.
         """
-        grade_multiplier = self._grade_multipliers.get(grade, 1.0)
-        regime_multiplier = self._regime_multipliers.get(regime_key or "", 1.0)
         risk_per_share = abs(entry_price - sl_price)
 
         per_account = {}
@@ -72,15 +70,7 @@ class SizerEngine:
             if risk_per_share <= 0:
                 risk_shares = 0
             else:
-                risk_shares = int(
-                    math.floor(
-                        risk_amount
-                        / risk_per_share
-                        * grade_multiplier
-                        * regime_multiplier
-                        * setup_factor
-                    )
-                )
+                risk_shares = int(math.floor(risk_amount / risk_per_share * final_multiplier))
             available = available_fn(account["id"])
             cap_shares = (
                 int(math.floor(available / entry_price))
@@ -107,11 +97,7 @@ class SizerEngine:
             "accounts": per_account,
             "factors": {
                 "risk_per_share": risk_per_share,
-                "grade": grade,
-                "grade_multiplier": grade_multiplier,
-                "regime_key": regime_key,
-                "regime_multiplier": regime_multiplier,
-                "setup_factor": setup_factor,
+                "final_multiplier": final_multiplier,
             },
         }
 

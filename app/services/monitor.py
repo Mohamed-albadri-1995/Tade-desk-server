@@ -25,6 +25,7 @@ from sqlalchemy import select
 from app.database import async_session_factory
 from app.models import (
     ConditionModel,
+    JournalConditionAlignmentModel,
     JournalModel,
     SetupModel,
     UserSettingsModel,
@@ -36,8 +37,8 @@ from app.services.capital import OPEN_STATUSES, CapitalService
 from app.services.condition_engine import ConditionEngine
 from app.services.event_bus import event_bus
 from app.services.gate_engine import GateEngine
-from app.services.grade_engine import GradeEngine
 from app.services.journal_service import JournalService, journal_to_dict
+from app.services.learning import LearningEngine
 from app.services.market_data import MarketDataService
 from app.services.market_proxy import MarketDataProxy
 from app.services.screener_data import ScreenerDataService
@@ -65,7 +66,7 @@ class MonitorService:
             self.screener_cache, market_provider=lambda: self.screener_service.market_snapshot
         )
         self.sizer_engine = SizerEngine()
-        self.grade_engine = GradeEngine()
+        self.learning_engine = LearningEngine()
         self.setup_factor_engine = SetupFactorEngine()
         self.capital_service = CapitalService()
         self.broker_engine = BrokerEngine()
@@ -95,6 +96,8 @@ class MonitorService:
         await self.market_service.start(symbols)
         await self.screener_service.start(symbols)
         await self.capital_service.start()
+        await self.learning_engine.load()
+        self.setup_factor_engine.min_trades = self.learning_engine.min_trades
         await self.setup_factor_engine.load_states()
         self._task = asyncio.create_task(self._run(), name="monitor-loop")
         logger.info("MonitorService started for %d symbols", len(symbols))
@@ -210,7 +213,6 @@ class MonitorService:
         # Refresh DB-backed caches so signal-time lookups are pure memory reads.
         await self.gate_engine.refresh_rules()
         await self.sizer_engine.refresh()
-        await self.grade_engine.refresh()
         await self.capital_service.refresh()
         if qp_loader.VERIFIED:
             # Approvals only ever grow; picking up newly approved primitives
@@ -476,6 +478,30 @@ class MonitorService:
                 await self.setup_factor_engine.recompute_all(setup_id=setup_id)
             await self.capital_service.refresh()
 
+    async def _store_alignments(
+        self, entry, default_results, additional_results, conditions, regime
+    ) -> None:
+        """Persist the exact per-condition alignment state of this card in
+        queryable form — the learning engine's training data."""
+        type_by_name = {c.name: c.type for c in conditions}
+        try:
+            async with async_session_factory() as session:
+                for name, aligned in {**default_results, **additional_results}.items():
+                    session.add(
+                        JournalConditionAlignmentModel(
+                            journal_id=entry.id,
+                            setup_id=entry.setup_id,
+                            side=entry.signal_side,
+                            condition_name=name,
+                            condition_type=type_by_name.get(name, "default"),
+                            regime=str(regime) if regime else None,
+                            aligned=bool(aligned),
+                        )
+                    )
+                await session.commit()
+        except Exception:
+            logger.exception("failed to store condition alignments for card %s", entry.id)
+
     # ------------------------------------------------- signal pipeline (§4)
 
     async def run_signal_pipeline(
@@ -551,20 +577,28 @@ class MonitorService:
         if not allowed:
             card_data["status"] = "rejected"
             entry = await self.journal_service.create_entry_card(card_data)
+            await self._store_alignments(
+                entry, default_results, additional_results, conditions,
+                screener_snapshot.get("regime"),
+            )
             await event_bus.publish({"type": "new_entry", "entry": journal_to_dict(entry)})
             return journal_to_dict(entry)
 
-        # Step 6: grading first (the sizer consumes the grade multiplier).
-        # The grade comes from the signal-points model over default +
-        # additional results; mandatory conditions are excluded.
-        grading = self.grade_engine.evaluate_detailed(default_results, additional_results)
-        grade, grade_score = grading["grade"], grading["score"]
+        # Step 6: contextual grade from the learned (setup, side) model:
+        # condition alignments + current regime -> predicted R -> grade
+        # bucket -> data-driven multiplier. Fallback (no model yet):
+        # grade B, multiplier 1.0. Pure cached arithmetic — zero I/O.
+        live_regime = screener_snapshot.get("regime")
+        grading = self.learning_engine.predict(
+            setup.id, signal_side, {**default_results, **additional_results}, live_regime
+        )
+        grade, grade_multiplier = grading["grade"], float(grading["multiplier"])
 
-        # Step 7: sizing — per account, with the setup factor and the
-        # at-the-moment capital cap. All inputs are cached (zero I/O).
+        # Step 7: the health cap (aggregate WR/PF/drawdown per setup+side)
+        # and the final multiplier = grade_multiplier × setup_factor.
         setup_factor_state = self.setup_factor_engine.get_state(setup.id, signal_side)
         setup_factor = float(setup_factor_state["final_factor"])
-        regime_key = str(screener_snapshot.get("regime") or "")
+        final_multiplier = grade_multiplier * setup_factor
         sl_for_risk = sl_price if sl_price is not None else entry_price
         # One sizing path for every card shape: with no accounts configured
         # a synthetic account built from the global settings stands in, so
@@ -582,9 +616,7 @@ class MonitorService:
         sizing = self.sizer_engine.calculate_multi(
             entry_price,
             sl_for_risk,
-            grade,
-            regime_key,
-            setup_factor,
+            final_multiplier,
             accounts,
             self.capital_service.available,
         )
@@ -592,26 +624,32 @@ class MonitorService:
         card_data["entry_shares"] = sizing["final_shares"]
         card_data["entry_factors"] = {
             **sizing["factors"],
-            "grade_score": grade_score,
-            "grade_raw_points": grading["raw_points"],
-            "grade_breakdown": grading["breakdown"],
+            "grade": grade,
+            "grade_multiplier": grade_multiplier,
+            "predicted_r": grading.get("predicted_r"),
+            "grade_drivers": grading.get("drivers"),
+            "grade_model": grading.get("model"),
             "setup_factor": setup_factor,
             "setup_factor_state": setup_factor_state,
+            "final_multiplier": final_multiplier,
+            "regime": live_regime,
             "accounts": sizing["accounts"],
         }
         card_data["entry_grade"] = grade
 
-        # A setup factor of 0 blocks the trade: the card is still written
-        # (full audit trail) but no alert is dispatched.
-        if setup_factor <= 0.0:
+        # A zero final multiplier (health collapsed to 0) blocks the trade:
+        # the card is still written (full audit trail), no alert sent.
+        if final_multiplier <= 0.0:
             card_data["status"] = "blocked_by_setup_factor"
             entry = await self.journal_service.create_entry_card(card_data)
+            await self._store_alignments(entry, default_results, additional_results, conditions, live_regime)
             await event_bus.publish({"type": "new_entry", "entry": journal_to_dict(entry)})
             return journal_to_dict(entry)
 
         # Step 8: write the immutable Entry Card.
         card_data["status"] = "pending"
         entry = await self.journal_service.create_entry_card(card_data)
+        await self._store_alignments(entry, default_results, additional_results, conditions, live_regime)
         await event_bus.publish({"type": "new_entry", "entry": journal_to_dict(entry)})
 
         # Step 9: dispatch broker alerts and mark as alerted.

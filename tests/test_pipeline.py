@@ -96,15 +96,16 @@ async def test_full_pipeline_creates_alerted_entry(monitor_service, bars):
     assert entry["entry_price"] == pytest.approx(bars[-1]["close"])
     assert entry["entry_sl_price"] == pytest.approx(bars[-1]["close"] - 2.0)
     assert entry["entry_tp_price"] == pytest.approx(bars[-1]["close"] + 4.0)
-    # Both gradable conditions aligned -> signal-points model gives 100 -> A+.
-    assert entry["entry_grade"] == "A+"
-    assert entry["entry_factors"]["grade_score"] == 100.0
-    assert set(entry["entry_factors"]["grade_breakdown"]) == {"default_cond", "additional_cond"}
+    # No trained model for this setup -> learned-grade fallback: B × 1.0.
+    assert entry["entry_grade"] == "B"
+    assert entry["entry_factors"]["grade_multiplier"] == 1.0
+    assert entry["entry_factors"]["setup_factor"] == 1.0  # < min_trades -> neutral
+    assert entry["entry_factors"]["final_multiplier"] == 1.0
     assert entry["entry_mandatory_results"] == {"always_on": True}
     assert entry["entry_default_results"] == {"default_cond": True}
     assert entry["entry_additional_results"] == {"additional_cond": True}
     assert entry["entry_gate_allowed"] is True
-    # 1000 risk / 2.0 per share; A+ has no multiplier configured in this test -> 1.0
+    # 1000 risk / 2.0 per share × final multiplier 1.0
     assert entry["entry_shares"] == 500
     assert entry["entry_gate_screener_snapshot"]["regime"] == "BULL"
 

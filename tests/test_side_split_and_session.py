@@ -4,55 +4,37 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.services.monitor import MonitorService
-from app.services.setup_factor import NEUTRAL_STATE, SetupFactorEngine
+from app.services.setup_factor import SetupFactorEngine
 
 from tests.test_setup_factor import make_trades
 
 
 def test_side_states_computed_separately():
     engine = SetupFactorEngine()
-    trades = make_trades([1.5] * 10) + [
-        t for t in make_trades([-1.5] * 10)
-    ]
-    for t in trades[10:]:
+    engine.min_trades = 10
+    trades = make_trades([2.0, 2.0, -1.0] * 4) + [t for t in make_trades([-1.5] * 12)]
+    for t in trades[12:]:
         t.signal_side = "short"
-    # emulate recompute grouping
-    pooled = engine.compute_state(trades)
     longs = engine.compute_state([t for t in trades if t.signal_side == "long"])
     shorts = engine.compute_state([t for t in trades if t.signal_side == "short"])
     engine._states = {
-        (1, "pooled"): {**pooled, "side": "pooled"},
+        (1, "pooled"): {**engine.compute_state(trades), "side": "pooled"},
         (1, "long"): {**longs, "side": "long"},
         (1, "short"): {**shorts, "side": "short"},
     }
-    # long side profitable, short side toxic — factors must differ
-    assert engine.get_state(1, "long")["final_factor"] > 1.0
-    assert engine.get_state(1, "short")["final_factor"] < 1.0
+    # long side healthy, short side toxic — health caps must differ
+    assert engine.get_state(1, "long")["final_factor"] > engine.get_state(1, "short")["final_factor"]
     assert engine.get_state(1, "long")["side_used"] == "long"
 
 
-def test_side_fallback_to_pooled_when_thin():
+def test_thin_side_is_neutral_per_plan():
+    """Below min_trades the side factor is exactly neutral 1.0."""
     engine = SetupFactorEngine()
-    pooled = engine.compute_state(make_trades([1.0] * 20))
-    thin_short = engine.compute_state(make_trades([1.0] * 2))  # below hard floor
-    engine._states = {
-        (1, "pooled"): {**pooled, "side": "pooled"},
-        (1, "short"): {**thin_short, "side": "short"},
-    }
+    thin = engine.compute_state(make_trades([-1.0] * 5))  # 5 < 30
+    engine._states = {(1, "short"): {**thin, "side": "short"}}
     state = engine.get_state(1, "short")
-    assert state["side_used"] == "pooled"  # too few short trades -> pooled
-    assert state["final_factor"] == pooled["final_factor"]
-
-
-def test_split_off_uses_pooled():
-    engine = SetupFactorEngine()
-    engine.model["split_by_side"] = False
-    pooled = engine.compute_state(make_trades([1.0] * 20))
-    engine._states = {
-        (1, "pooled"): {**pooled, "side": "pooled"},
-        (1, "long"): {**dict(NEUTRAL_STATE), "side": "long", "final_factor": 99.0},
-    }
-    assert engine.get_state(1, "long")["side_used"] == "pooled"
+    assert state["final_factor"] == 1.0
+    assert state["insufficient_data"] is True
 
 
 def test_session_window_open_and_closed():

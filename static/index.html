@@ -195,7 +195,11 @@
 
   <section id="tab-gate" class="tab">
     <div class="panel">
-      <h3>Gate rules</h3>
+      <h3>Regime gate <span class="muted">(the market regime decides which sides may trade — sizing itself is learned automatically from your trades)</span></h3>
+      <table><thead><tr><th>Regime</th><th>Long allowed</th><th>Short allowed</th></tr></thead><tbody id="regime-gate-body"></tbody></table>
+    </div>
+    <div class="panel">
+      <h3>Advanced gate rules <span class="muted">(JSON matching on screener fields — optional)</span></h3>
       <table><thead><tr><th>Priority</th><th>Name</th><th>Condition (JSON)</th><th>Side allowed</th><th></th></tr></thead><tbody id="gate-body"></tbody></table>
       <div class="row">
         <div><label>Rule name</label><input id="gate-name"></div>
@@ -206,35 +210,6 @@
         <div><label>Side allowed</label><select id="gate-side"><option>both</option><option>long</option><option>short</option></select></div>
       </div>
       <button class="btn" id="gate-add">Add rule</button>
-    </div>
-    <div class="panel">
-      <h3>Grade multipliers</h3>
-      <table><thead><tr><th>Grade</th><th>Multiplier</th><th></th></tr></thead><tbody id="grade-body"></tbody></table>
-    </div>
-    <div class="panel">
-      <h3>Grading model <span class="muted">(signal points over default/additional conditions — mandatory conditions are never graded)</span></h3>
-      <div class="row">
-        <div><label>Default condition weight (aligned)</label><input id="gm-dw" type="number" step="any"></div>
-        <div><label>Default condition penalty (misaligned)</label><input id="gm-dp" type="number" step="any"></div>
-      </div>
-      <div class="row">
-        <div><label>Additional condition weight (aligned)</label><input id="gm-aw" type="number" step="any"></div>
-        <div><label>Additional condition penalty (misaligned)</label><input id="gm-ap" type="number" step="any"></div>
-      </div>
-      <label>Per-condition weight overrides (JSON, e.g. {"trend_ok": 3})</label>
-      <input id="gm-cw" value="{}">
-      <label>Grade thresholds — minimum score 0–100 (JSON, keys A+/A/B/C; below lowest = D)</label>
-      <input id="gm-th" value='{"A+":85,"A":70,"B":50,"C":30}'>
-      <button class="btn" id="gm-save">Save grading model</button>
-    </div>
-    <div class="panel">
-      <h3>Regime multipliers</h3>
-      <table><thead><tr><th>Regime key</th><th>Multiplier</th><th></th></tr></thead><tbody id="regime-body"></tbody></table>
-      <div class="row">
-        <div><label>Regime key</label><input id="regime-key"></div>
-        <div><label>Multiplier</label><input id="regime-mult" type="number" step="any" value="1.0"></div>
-      </div>
-      <button class="btn" id="regime-add">Add / update</button>
     </div>
   </section>
 
@@ -275,6 +250,14 @@
       </div>
       <button class="btn" type="submit">Save settings</button>
     </form>
+    <div class="panel">
+      <h3>Self-learning engine</h3>
+      <p class="muted" style="font-size:12px" id="learning-status-line">—</p>
+      <div class="row">
+        <div><label>Minimum closed trades per (setup, side) before a model is trained</label><input id="learn-min" type="number" min="5"></div>
+        <div style="display:flex;align-items:end"><button class="btn" id="learn-run" style="margin-top:0">Run learning now</button></div>
+      </div>
+    </div>
     <div class="panel">
       <h3>Accounts &amp; capital</h3>
       <p class="muted" style="font-size:12px;margin:4px 0 8px">Sizing runs per active account. Available capital = capital base (live buying power when an Alpaca broker is linked, else the manual size) − capital allocated to open trades. Positions are hard-capped to available capital at signal time.</p>
@@ -659,6 +642,21 @@ $("#mon-stop").onclick = async () => { await api.send("POST", "/api/monitor/stop
 
 /* ---------------------------------------------------- gate & sizing */
 async function loadGate() {
+  const gates = await api.get("/api/gate-regimes");
+  const toggle = (r, side, on) =>
+    `<button class="btn ${on ? "" : "danger"}" data-regime="${r}" data-side="${side}" data-next="${!on}"
+       style="margin-top:0;padding:4px 12px">${on ? "✅ allowed" : "⛔ blocked"}</button>`;
+  $("#regime-gate-body").innerHTML = gates.map(g => `<tr>
+    <td style="font-weight:600">${g.regime_key}</td>
+    <td>${toggle(g.regime_key, "long", g.allow_long)}</td>
+    <td>${toggle(g.regime_key, "short", g.allow_short)}</td></tr>`).join("");
+  $("#regime-gate-body").querySelectorAll("[data-regime]").forEach(b => b.onclick = async () => {
+    const body = { regime_key: b.dataset.regime };
+    body[b.dataset.side === "long" ? "allow_long" : "allow_short"] = b.dataset.next === "true";
+    await api.send("PUT", "/api/gate-regimes", body);
+    loadGate();
+  });
+
   const rules = await api.get("/api/gate-rules");
   $("#gate-body").innerHTML = rules.map(r => `<tr>
     <td>${r.priority}</td><td>${r.rule_name}</td><td><code>${JSON.stringify(r.condition)}</code></td>
@@ -666,21 +664,6 @@ async function loadGate() {
     <td><button class="btn danger" data-del="${r.id}">delete</button></td></tr>`).join("");
   $("#gate-body").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     await api.send("DELETE", "/api/gate-rules/" + b.dataset.del); loadGate();
-  });
-  const grades = await api.get("/api/multipliers/grade");
-  $("#grade-body").innerHTML = grades.map(g => `<tr><td>${g.grade}</td>
-    <td><input type="number" step="any" value="${g.multiplier}" data-grade="${g.grade}" style="width:110px"></td>
-    <td><button class="btn secondary" data-save="${g.grade}">save</button></td></tr>`).join("");
-  $("#grade-body").querySelectorAll("[data-save]").forEach(b => b.onclick = async () => {
-    const input = $(`#grade-body input[data-grade="${CSS.escape(b.dataset.save)}"]`);
-    await api.send("PUT", "/api/multipliers/grade", { grade: b.dataset.save, multiplier: Number(input.value) });
-    flash("Grade multiplier saved");
-  });
-  const regimes = await api.get("/api/multipliers/regime");
-  $("#regime-body").innerHTML = regimes.map(r => `<tr><td>${r.regime_key}</td><td>${r.multiplier}</td>
-    <td><button class="btn danger" data-del="${r.id}">delete</button></td></tr>`).join("");
-  $("#regime-body").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
-    await api.send("DELETE", "/api/multipliers/regime/" + b.dataset.del); loadGate();
   });
 }
 $("#gate-add").onclick = async () => {
@@ -691,31 +674,6 @@ $("#gate-add").onclick = async () => {
     });
     flash("Gate rule added"); loadGate();
   } catch (err) { flash("Error: " + (err.detail || err.message || JSON.stringify(err))); }
-};
-async function loadGradingModel() {
-  const m = await api.get("/api/grading/model");
-  $("#gm-dw").value = m.default_weight; $("#gm-dp").value = m.misaligned_default_penalty;
-  $("#gm-aw").value = m.additional_weight; $("#gm-ap").value = m.misaligned_additional_penalty;
-  $("#gm-cw").value = JSON.stringify(m.condition_weights || {});
-  $("#gm-th").value = JSON.stringify(m.grade_thresholds || {});
-}
-$("#gm-save").onclick = async () => {
-  try {
-    await api.send("PUT", "/api/grading/model", {
-      default_weight: Number($("#gm-dw").value),
-      misaligned_default_penalty: Number($("#gm-dp").value),
-      additional_weight: Number($("#gm-aw").value),
-      misaligned_additional_penalty: Number($("#gm-ap").value),
-      condition_weights: JSON.parse($("#gm-cw").value || "{}"),
-      grade_thresholds: JSON.parse($("#gm-th").value || "{}"),
-    });
-    flash("Grading model saved");
-  } catch (err) { flash("Error: " + (err.detail || err.message || JSON.stringify(err))); }
-};
-$("#regime-add").onclick = async () => {
-  await api.send("PUT", "/api/multipliers/regime",
-    { regime_key: $("#regime-key").value, multiplier: Number($("#regime-mult").value) });
-  flash("Regime multiplier saved"); loadGate();
 };
 
 /* ----------------------------------------------------------- brokers */
@@ -926,43 +884,44 @@ const anRenderers = {
     el.querySelectorAll(".an-dim").forEach(b => b.onclick = () => { el.dataset.dim = b.dataset.dim; anRenderers.breakdown(el); });
   },
   async factor(el) {
-    const [states, model] = await Promise.all([api.get("/api/setup-factor"), api.get("/api/setup-factor/model")]);
+    const [states, model, learning] = await Promise.all([
+      api.get("/api/setup-factor"),
+      api.get("/api/setup-factor/model"),
+      api.get("/api/learning/status"),
+    ]);
     const rows = states.map(s => {
-      const inp = s.inputs || {}, pts = s.signal_points || {};
+      const inp = s.inputs || {}, comp = s.components || {};
       return `<tr><td>${s.side === "pooled" ? `<b>${s.setup_name}</b>` : ""}</td>
         <td><span class="side ${s.side === "long" ? "long" : s.side === "short" ? "short" : ""}">${s.side}</span></td>
         <td>${inp.n ?? 0}</td>
-        <td>${inp.expectancy_r != null ? inp.expectancy_r + "R" : "—"}</td>
-        <td>${inp.pf_infinite ? "∞" : inp.profit_factor ?? "—"}</td>
         <td>${inp.win_rate != null ? inp.win_rate + "%" : "—"}</td>
+        <td>${inp.profit_factor ?? "—"}</td>
         <td>${inp.max_drawdown_r != null ? inp.max_drawdown_r + "R" : "—"}</td>
-        <td class="muted">${Object.entries(pts).map(([k, v]) => `${k}:${v > 0 ? "+" : ""}${v}`).join(" ") || "—"}</td>
-        <td>${s.score ?? "—"}</td><td>${s.mapped_factor ?? "—"}</td><td>${s.confidence ?? "—"}</td>
-        <td style="font-weight:700;color:${s.final_factor === 0 ? "var(--red)" : s.final_factor > 1 ? "var(--green)" : ""}">${s.final_factor}${s.insufficient_data ? ' <span class="muted">(insufficient data)</span>' : ""}</td></tr>`;
+        <td class="muted">${Object.entries(comp).map(([k, v]) => `${k}:${v}`).join(" ") || "—"}</td>
+        <td>${s.score ?? "—"}</td>
+        <td style="font-weight:700;color:${s.final_factor === 0 ? "var(--red)" : ""}">${s.final_factor}${s.insufficient_data ? ' <span class="muted">(n < ' + model.min_trades + ' → neutral 1.0)</span>' : ""}</td></tr>`;
     }).join("");
-    el.innerHTML = `<p class="muted" style="font-size:12px">Factor path: performance inputs → signal points → score (0–100) → mapped factor → × confidence (n/${model.min_trades}, floor ${model.hard_floor_trades} trades) → final. Factor 0 blocks alerts. Side split ${model.split_by_side ? "ON — a signal uses its side's row once that side has ≥" + model.hard_floor_trades + " trades, else the pooled row" : "OFF — pooled only"}. Sizing = base × grade × regime × <b>setup factor</b>.</p>
-      <table><thead><tr><th>Setup</th><th>Side</th><th>n</th><th>Exp R</th><th>PF</th><th>Win%</th><th>DD (R)</th><th>Signal points</th><th>Score</th><th>Mapped</th><th>Conf.</th><th>Final factor</th></tr></thead><tbody>${rows || '<tr><td colspan="12" class="muted">no setups</td></tr>'}</tbody></table>
-      <div class="panel" style="margin-top:12px"><h3>Model</h3>
-      <label>Signals (JSON)</label><textarea class="code" id="sf-signals" style="min-height:120px">${JSON.stringify(model.signals, null, 2)}</textarea>
-      <div class="row"><div><label>Factor map (score→factor JSON)</label><input id="sf-map" value='${JSON.stringify(model.factor_map)}'></div>
-      <div><label>Bounds min,max</label><input id="sf-bounds" value="${model.factor_min},${model.factor_max}"></div></div>
-      <div class="row"><div><label>Min trades (full confidence)</label><input id="sf-min" type="number" value="${model.min_trades}"></div>
-      <div><label>Hard floor trades / recent window</label><input id="sf-floor" value="${model.hard_floor_trades},${model.recent_window}"></div></div>
-      <label>Split by side (separate long/short factors)</label><select id="sf-split"><option value="true" ${model.split_by_side ? "selected" : ""}>on</option><option value="false" ${model.split_by_side ? "" : "selected"}>off</option></select>
-      <button class="btn" id="sf-save" style="margin-right:8px">Save model</button>
-      <button class="btn secondary" id="sf-recompute">Recompute now</button></div>`;
-    $("#sf-save").onclick = async () => {
-      try {
-        const [fmin, fmax] = $("#sf-bounds").value.split(",").map(Number);
-        const [floor, recent] = $("#sf-floor").value.split(",").map(Number);
-        await api.send("PUT", "/api/setup-factor/model", {
-          signals: JSON.parse($("#sf-signals").value), factor_map: JSON.parse($("#sf-map").value),
-          factor_min: fmin, factor_max: fmax, min_trades: Number($("#sf-min").value),
-          hard_floor_trades: floor, recent_window: recent,
-          split_by_side: $("#sf-split").value === "true",
-        });
-        flash("Setup factor model saved"); anRenderers.factor(el);
-      } catch (err) { flash("Error: " + (err.detail || err.message || JSON.stringify(err))); }
+    const modelRows = (learning.models || []).map(m => `<tr>
+      <td>${m.setup_name}</td><td><span class="side ${m.side}">${m.side}</span></td>
+      <td>${m.sample_count}</td><td class="muted">${m.trained_at ? new Date(m.trained_at).toLocaleString() : "—"}</td>
+      <td class="muted">${(m.top_features || []).slice(0, 3).map(f => `${f.feature} (${f.weight > 0 ? "+" : ""}${f.weight})`).join(" · ") || "—"}</td>
+      <td class="muted">${(m.buckets || []).map(b => `${b.grade}×${b.multiplier}`).join(" ")}</td></tr>`).join("");
+    el.innerHTML = `
+      <h3 style="margin:8px 0">Setup factor (health cap)</h3>
+      <p class="muted" style="font-size:12px">${model.formula}. Neutral 1.0 below ${model.min_trades} closed trades. Final size multiplier = learned grade multiplier × this factor.</p>
+      <table><thead><tr><th>Setup</th><th>Side</th><th>n</th><th>Win%</th><th>PF</th><th>Max DD</th><th>Components</th><th>Health</th><th>Factor</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="9" class="muted">no setups</td></tr>'}</tbody></table>
+      <h3 style="margin:14px 0 6px">Learned grade models</h3>
+      <p class="muted" style="font-size:12px">One model per (setup, side), trained nightly at 20:00 ET from your closed trades: condition alignments + regime → predicted R → grade bucket → data-driven multiplier (clamped 0.5–1.5). Fallback until ≥ ${learning.min_trades} trades: grade B × 1.0. Last run: ${learning.last_run_at ? new Date(learning.last_run_at).toLocaleString() : "never"}.</p>
+      <table><thead><tr><th>Setup</th><th>Side</th><th>Samples</th><th>Trained</th><th>Top features</th><th>Grade multipliers</th></tr></thead>
+      <tbody>${modelRows || '<tr><td colspan="6" class="muted">no trained models yet — need ≥ ' + learning.min_trades + ' closed trades per (setup, side)</td></tr>'}</tbody></table>
+      <button class="btn" id="sf-learn" style="margin-top:10px">Run learning now</button>
+      <button class="btn secondary" id="sf-recompute">Recompute health</button>`;
+    $("#sf-learn").onclick = async () => {
+      flash("Learning run started…");
+      const r = await api.send("POST", "/api/learning/run");
+      flash(`Learning done: ${r.trained.length} trained, ${r.skipped.length} skipped`);
+      anRenderers.factor(el);
     };
     $("#sf-recompute").onclick = async () => { await api.send("POST", "/api/setup-factor/recompute"); flash("Recomputed"); anRenderers.factor(el); };
   },
@@ -985,6 +944,23 @@ document.querySelector('[data-tab="analytics"]').addEventListener("click", () =>
   sel.innerHTML = '<option value="">all</option>' + Object.entries(setupNames).map(([id, n]) => `<option value="${id}">${n}</option>`).join("");
   renderAnalytics();
 });
+
+/* ---------------------------------------------------------- learning */
+async function loadLearning() {
+  const st = await api.get("/api/learning/status");
+  $("#learn-min").value = st.min_trades;
+  $("#learning-status-line").textContent =
+    `Runs automatically every night at 20:00 ET. Last run: ${st.last_run_at ? new Date(st.last_run_at).toLocaleString() : "never"} · trained models: ${st.models.length}`;
+}
+$("#learn-run").onclick = async () => {
+  flash("Learning run started…");
+  try {
+    await api.send("PUT", "/api/learning/config", { min_trades: Number($("#learn-min").value) });
+    const r = await api.send("POST", "/api/learning/run");
+    flash(`Learning done: ${r.trained.length} trained, ${r.skipped.length} skipped (not enough trades)`);
+    loadLearning();
+  } catch (err) { flash("Error: " + (err.detail || JSON.stringify(err))); }
+};
 
 /* ---------------------------------------------------------- accounts */
 async function loadAccounts() {
@@ -1018,7 +994,7 @@ $("#acc-add").onclick = async () => {
 
 /* --------------------------------------------------------- initial */
 loadSetups(); loadConditions(); loadJournal(); loadWatchlist(); loadMonitor();
-loadGate(); loadGradingModel(); loadBrokers(); loadSettings(); loadAccounts(); loadConfig();
+loadGate(); loadBrokers(); loadSettings(); loadAccounts(); loadConfig(); loadLearning();
 </script>
 </body>
 </html>

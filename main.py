@@ -16,9 +16,8 @@ from sqlalchemy import select
 from app.database import async_session_factory, init_db
 from app.models import (
     AccountModel,
-    GradeMultiplierModel,
-    GradeScoringModelModel,
-    SetupFactorModelModel,
+    LearningConfigModel,
+    RegimeGateModel,
     UserSettingsModel,
 )
 from app.routers import (
@@ -27,19 +26,25 @@ from app.routers import (
     brokers,
     conditions,
     journal,
+    learning as learning_router,
     monitor as monitor_router,
     settings as settings_router,
     setup_factor,
     setups,
     watchlist,
 )
-from app.services.setup_factor import DEFAULT_FACTOR_MAP, DEFAULT_SIGNALS
+from app.services.learning import backfill_alignments
 from app.services.monitor import MARKET_TZ, monitor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("trade-desk")
 
-DEFAULT_GRADE_MULTIPLIERS = {"A+": 1.5, "A": 1.25, "B": 1.0, "C": 0.75, "D": 0.5}
+# The screener's 15 regime slugs (src/sideD/regime.js REGIME_CATALOG).
+REGIME_KEYS = [
+    "STRONG_UP", "EXTENDED_UP", "UP", "WEAK_UP", "PULLBACK_BULL",
+    "CHOP_BULL", "CORRECTION", "RECOVERY", "BASING", "TOPPING",
+    "CHOP_BEAR", "BEAR_RALLY", "DOWN", "STRONG_DOWN", "CAPITULATION",
+]
 
 scheduler = AsyncIOScheduler(timezone=MARKET_TZ)
 
@@ -51,31 +56,18 @@ async def seed_defaults() -> None:
         ).scalar_one_or_none()
         if settings_row is None:
             session.add(UserSettingsModel(id=1))
-        existing = {
-            g.grade
-            for g in (await session.execute(select(GradeMultiplierModel))).scalars().all()
+        learning_row = (
+            await session.execute(select(LearningConfigModel).where(LearningConfigModel.id == 1))
+        ).scalar_one_or_none()
+        if learning_row is None:
+            session.add(LearningConfigModel(id=1))
+        existing_regimes = {
+            g.regime_key
+            for g in (await session.execute(select(RegimeGateModel))).scalars().all()
         }
-        for grade, multiplier in DEFAULT_GRADE_MULTIPLIERS.items():
-            if grade not in existing:
-                session.add(GradeMultiplierModel(grade=grade, multiplier=multiplier))
-        grading_row = (
-            await session.execute(
-                select(GradeScoringModelModel).where(GradeScoringModelModel.id == 1)
-            )
-        ).scalar_one_or_none()
-        if grading_row is None:
-            session.add(GradeScoringModelModel(id=1))
-        factor_row = (
-            await session.execute(
-                select(SetupFactorModelModel).where(SetupFactorModelModel.id == 1)
-            )
-        ).scalar_one_or_none()
-        if factor_row is None:
-            session.add(
-                SetupFactorModelModel(
-                    id=1, signals=dict(DEFAULT_SIGNALS), factor_map=dict(DEFAULT_FACTOR_MAP)
-                )
-            )
+        for key in REGIME_KEYS:
+            if key not in existing_regimes:
+                session.add(RegimeGateModel(regime_key=key, allow_long=True, allow_short=True))
         has_accounts = (await session.execute(select(AccountModel))).scalars().first()
         if has_accounts is None:
             size = settings_row.account_size if settings_row else 100000.0
@@ -83,9 +75,20 @@ async def seed_defaults() -> None:
                 AccountModel(name="Main", account_size=size, is_primary=True, is_active=True)
             )
         await session.commit()
-    await monitor.grade_engine.refresh()
-    await monitor.setup_factor_engine.refresh_model()
+    await backfill_alignments()
     await monitor.setup_factor_engine.recompute_all()
+
+
+async def learning_job() -> None:
+    """Nightly (20:00 ET): retrain all (setup, side) models from the journal."""
+    logger.info("nightly learning run starting")
+    try:
+        result = await monitor.learning_engine.run_learning()
+        monitor.setup_factor_engine.min_trades = monitor.learning_engine.min_trades
+        await monitor.setup_factor_engine.recompute_all()
+        logger.info("nightly learning done: %s trained", len(result["trained"]))
+    except Exception:
+        logger.exception("nightly learning run failed")
 
 
 async def session_start_job() -> None:
@@ -102,6 +105,12 @@ def schedule_session_start() -> None:
         session_start_job,
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute),
         id="session-start",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        learning_job,
+        CronTrigger(day_of_week="mon-fri", hour=20, minute=0),  # 20:00 ET, after close
+        id="nightly-learning",
         replace_existing=True,
     )
 
@@ -132,6 +141,7 @@ app.include_router(monitor_router.router)
 app.include_router(analytics.router)
 app.include_router(accounts.router)
 app.include_router(setup_factor.router)
+app.include_router(learning_router.router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

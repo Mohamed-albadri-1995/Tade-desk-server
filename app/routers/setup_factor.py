@@ -1,41 +1,31 @@
-"""Setup factor API (plan Phase D) — states with full breakdown, and the
-user-editable model."""
+"""Setup factor (health cap) API — per (setup, side) states with the full
+derivation: WR/PF/drawdown → normalised components → health score →
+factor."""
 
-from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models import SetupFactorModelModel, SetupModel
+from app.models import SetupModel
 from app.services.monitor import monitor
+from app.services.setup_factor import (
+    DD_TERRIBLE_R,
+    PF_GREAT,
+    SCORE_TO_FACTOR,
+    WEIGHTS,
+    WR_GREAT,
+)
 
 router = APIRouter(prefix="/api/setup-factor", tags=["setup-factor"])
 
 
-class SetupFactorModelUpdate(BaseModel):
-    signals: Optional[dict] = None
-    factor_map: Optional[dict] = None
-    split_by_side: Optional[bool] = None
-    factor_min: Optional[float] = None
-    factor_max: Optional[float] = None
-    min_trades: Optional[int] = None
-    hard_floor_trades: Optional[int] = None
-    recent_window: Optional[int] = None
-
-
 @router.get("")
 async def list_states(session: AsyncSession = Depends(get_session)):
-    """Every setup with its full factor derivation per side: inputs ->
-    signal points -> score -> mapped factor -> confidence -> final."""
     setups = (await session.execute(select(SetupModel))).scalars().all()
-    split = monitor.setup_factor_engine.model.get("split_by_side")
     out = []
     for s in setups:
-        sides = ["pooled", "long", "short"] if split else ["pooled"]
-        for side in sides:
+        for side in ("pooled", "long", "short"):
             state = monitor.setup_factor_engine._states.get((s.id, side))
             if state is None:
                 if side != "pooled":
@@ -54,39 +44,17 @@ async def list_states(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/model")
-async def get_model(session: AsyncSession = Depends(get_session)):
-    row = (
-        await session.execute(select(SetupFactorModelModel).where(SetupFactorModelModel.id == 1))
-    ).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(404, "setup factor model not initialised")
+async def get_model():
+    """The health formula (fixed constants) and the live min_trades knob."""
     return {
-        "signals": row.signals,
-        "factor_map": row.factor_map,
-        "split_by_side": row.split_by_side,
-        "factor_min": row.factor_min,
-        "factor_max": row.factor_max,
-        "min_trades": row.min_trades,
-        "hard_floor_trades": row.hard_floor_trades,
-        "recent_window": row.recent_window,
-        "updated_at": row.updated_at,
+        "formula": "health = 0.30·min(1, WR/0.60) + 0.40·min(1, PF/2.0) + 0.30·(1 − min(1, maxDD_R/10)); factor = clamp(health × 1.2, 0, 1)",
+        "wr_great": WR_GREAT,
+        "pf_great": PF_GREAT,
+        "dd_terrible_r": DD_TERRIBLE_R,
+        "weights": WEIGHTS,
+        "score_to_factor": SCORE_TO_FACTOR,
+        "min_trades": monitor.setup_factor_engine.min_trades,
     }
-
-
-@router.put("/model")
-async def update_model(
-    payload: SetupFactorModelUpdate, session: AsyncSession = Depends(get_session)
-):
-    row = (
-        await session.execute(select(SetupFactorModelModel).where(SetupFactorModelModel.id == 1))
-    ).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(404, "setup factor model not initialised")
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(row, key, value)
-    await session.commit()
-    await monitor.setup_factor_engine.recompute_all()
-    return await get_model(session)
 
 
 @router.post("/recompute")

@@ -8,7 +8,6 @@ from app.database import get_session
 from app.models import (
     GateRuleModel,
     GradeMultiplierModel,
-    GradeScoringModelModel,
     RegimeMultiplierModel,
     UserSettingsModel,
 )
@@ -17,9 +16,6 @@ from app.schemas import (
     GateRuleOut,
     GateRuleUpdate,
     GradeMultiplierIn,
-    GradePreviewIn,
-    GradeScoringModelOut,
-    GradeScoringModelUpdate,
     RegimeMultiplierIn,
     UserSettingsOut,
     UserSettingsUpdate,
@@ -142,53 +138,6 @@ async def delete_regime_multiplier(
     await session.delete(row)
     await session.commit()
     await monitor.sizer_engine.refresh()
-
-
-# ----------------------------------------------------------- grading model
-@router.get("/grading/model", response_model=GradeScoringModelOut)
-async def get_grading_model(session: AsyncSession = Depends(get_session)):
-    row = (
-        await session.execute(
-            select(GradeScoringModelModel).where(GradeScoringModelModel.id == 1)
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(404, "grading model not initialised")
-    return row
-
-
-@router.put("/grading/model", response_model=GradeScoringModelOut)
-async def update_grading_model(
-    payload: GradeScoringModelUpdate, session: AsyncSession = Depends(get_session)
-):
-    row = (
-        await session.execute(
-            select(GradeScoringModelModel).where(GradeScoringModelModel.id == 1)
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(404, "grading model not initialised")
-    data = payload.model_dump(exclude_unset=True)
-    if "grade_thresholds" in data:
-        invalid = set(data["grade_thresholds"]) - {"A+", "A", "B", "C"}
-        if invalid:
-            raise HTTPException(422, f"grade_thresholds keys must be A+/A/B/C, got {sorted(invalid)}")
-    for key, value in data.items():
-        setattr(row, key, value)
-    await session.commit()
-    await session.refresh(row)
-    await monitor.grade_engine.refresh()
-    return row
-
-
-@router.post("/grading/preview")
-async def preview_grade(payload: GradePreviewIn):
-    """Dry-run the current grading model against hypothetical condition
-    results (mandatory conditions are never part of grading)."""
-    await monitor.grade_engine.refresh()
-    return monitor.grade_engine.evaluate_detailed(
-        payload.default_results, payload.additional_results
-    )
 
 
 # --------------------------------------------------------------- gate rules

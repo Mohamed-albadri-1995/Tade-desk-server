@@ -1,11 +1,9 @@
-"""GateEngine (spec 3.5).
+"""GateEngine (spec 3.5, simplified per the Rebuild plan).
 
-Reads ``screener_cache[stock]`` and applies user-editable DB rules
-sorted by priority. Returns ``(allowed, screener_snapshot)``.
-
-Rules are cached in memory and refreshed by the monitor loop so that
-``is_allowed`` performs zero I/O at signal time (zero-latency
-guarantee).
+Primary gate: one allow/block toggle per market regime and side
+(gate_regime_settings). The advanced JSON rules remain as a secondary
+layer for users who need them. Both are cached in memory and refreshed
+by the monitor loop, so ``is_allowed`` performs zero I/O at signal time.
 """
 
 import logging
@@ -14,7 +12,7 @@ from typing import Dict, List, Tuple
 from sqlalchemy import select
 
 from app.database import async_session_factory
-from app.models import GateRuleModel
+from app.models import GateRuleModel, RegimeGateModel
 from app.services.screener_data import TickerContext
 
 logger = logging.getLogger(__name__)
@@ -29,9 +27,15 @@ class GateEngine:
         # row's own value is kept as row_regime for the audit trail.
         self._market_provider = market_provider
         self._rules: List[dict] = []
+        self._regime_gates: Dict[str, dict] = {}  # regime_key -> {allow_long, allow_short}
 
     async def refresh_rules(self) -> None:
         async with async_session_factory() as session:
+            gates = (await session.execute(select(RegimeGateModel))).scalars().all()
+            self._regime_gates = {
+                g.regime_key: {"allow_long": g.allow_long, "allow_short": g.allow_short}
+                for g in gates
+            }
             result = await session.execute(
                 select(GateRuleModel).order_by(GateRuleModel.priority.desc(), GateRuleModel.id)
             )
@@ -70,6 +74,16 @@ class GateEngine:
             snapshot["row_regime"] = snapshot.get("regime")
             if market.get("regime"):
                 snapshot["regime"] = market["regime"]
+
+        # Primary gate: the per-regime long/short toggle. Unknown regimes
+        # (not yet in the table) default to allowed.
+        regime = snapshot.get("regime")
+        gate = self._regime_gates.get(str(regime)) if regime else None
+        if gate is not None:
+            allowed_for_side = gate["allow_long"] if side == "long" else gate["allow_short"]
+            if not allowed_for_side:
+                snapshot["gate_rule"] = f"regime:{regime} blocks {side}"
+                return False, snapshot
 
         for rule in self._rules:  # already sorted by priority (highest first)
             if self._matches(rule["condition"], snapshot):

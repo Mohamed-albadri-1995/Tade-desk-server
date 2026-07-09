@@ -204,6 +204,93 @@ class SetupFactorStateModel(Base):
     computed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class JournalConditionAlignmentModel(Base):
+    """One row per condition per entry card — the exact state of every
+    condition at signal time, in queryable form for the learning engine."""
+
+    __tablename__ = "journal_condition_alignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    journal_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    setup_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    side: Mapped[str] = mapped_column(String(10), nullable=False)
+    condition_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    condition_type: Mapped[str] = mapped_column(String(20), default="default")
+    regime: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    aligned: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class LearnedModelModel(Base):
+    """One trained model per (setup_id, side): the Ridge intercept plus
+    metadata. Per-feature weights live in LearnedGradeWeightModel; the
+    composition intercept + Σ weight_i × standardized(x_i) reproduces the
+    scaler→PCA→Ridge prediction exactly (all linear), so live inference
+    is pure arithmetic with zero sklearn and zero I/O."""
+
+    __tablename__ = "learned_models"
+    __table_args__ = (UniqueConstraint("setup_id", "side", name="uq_learned_model"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    setup_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    side: Mapped[str] = mapped_column(String(10), nullable=False)
+    intercept: Mapped[float] = mapped_column(Float, default=0.0)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0)
+    overall_avg_r: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    trained_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LearnedGradeWeightModel(Base):
+    """Effective linear weight per feature, with the scaler's mean/scale
+    so the live vector can be standardized identically at signal time."""
+
+    __tablename__ = "learned_grade_weights"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    setup_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    side: Mapped[str] = mapped_column(String(10), nullable=False)
+    feature_key: Mapped[str] = mapped_column(String(300), nullable=False)  # cond:<name> | regime:<slug>
+    weight: Mapped[float] = mapped_column(Float, default=0.0)
+    mean: Mapped[float] = mapped_column(Float, default=0.0)
+    scale: Mapped[float] = mapped_column(Float, default=1.0)
+
+
+class LearnedGradeBucketModel(Base):
+    """Grade thresholds (quantiles of predicted R) and the data-driven
+    multiplier (bucket avg realised R / overall avg R, clamped)."""
+
+    __tablename__ = "learned_grade_buckets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    setup_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    side: Mapped[str] = mapped_column(String(10), nullable=False)
+    grade: Mapped[str] = mapped_column(String(5), nullable=False)  # A+, A, B, C
+    lower_bound: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # None = -inf
+    upper_bound: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # None = +inf
+    multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RegimeGateModel(Base):
+    """Simplified gate — one row per market regime with long/short toggles."""
+
+    __tablename__ = "gate_regime_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    regime_key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    allow_long: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_short: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class LearningConfigModel(Base):
+    """Singleton (id=1): learning engine knobs + last-run bookkeeping."""
+
+    __tablename__ = "learning_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    min_trades: Mapped[int] = mapped_column(Integer, default=30)
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class UserSettingsModel(Base):
     __tablename__ = "user_settings"
 
