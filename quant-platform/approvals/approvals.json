@@ -23,6 +23,18 @@
     "git_sha": "9df096a",
     "notes": ""
   },
+  "extremes.highest": {
+    "approved_at": "2026-07-10T16:39:17+00:00",
+    "approved_by": "badri",
+    "git_sha": "5d9dfaa",
+    "notes": ""
+  },
+  "extremes.lowest": {
+    "approved_at": "2026-07-10T16:36:17+00:00",
+    "approved_by": "badri",
+    "git_sha": "5d9dfaa",
+    "notes": ""
+  },
   "levels.afterhours_high": {
     "approved_at": "2026-07-08T18:37:22+00:00",
     "approved_by": "badri",
@@ -99,6 +111,30 @@
     "approved_at": "2026-07-08T18:38:40+00:00",
     "approved_by": "badri",
     "git_sha": "e828815",
+    "notes": ""
+  },
+  "levels.postmarket_high": {
+    "approved_at": "2026-07-10T10:25:58+00:00",
+    "approved_by": "badri",
+    "git_sha": "5d9dfaa",
+    "notes": ""
+  },
+  "levels.postmarket_low": {
+    "approved_at": "2026-07-10T10:25:52+00:00",
+    "approved_by": "badri",
+    "git_sha": "5d9dfaa",
+    "notes": ""
+  },
+  "levels.postpre_high": {
+    "approved_at": "2026-07-10T10:26:51+00:00",
+    "approved_by": "badri",
+    "git_sha": "5d9dfaa",
+    "notes": ""
+  },
+  "levels.postpre_low": {
+    "approved_at": "2026-07-10T10:26:43+00:00",
+    "approved_by": "badri",
+    "git_sha": "5d9dfaa",
     "notes": ""
   },
   "levels.prev_day_high": {
@@ -233,10 +269,22 @@
     "git_sha": "f8be7ae",
     "notes": ""
   },
+  "structure.pivot_low": {
+    "approved_at": "2026-07-10T17:23:10+00:00",
+    "approved_by": "badri",
+    "git_sha": "5d9dfaa",
+    "notes": ""
+  },
   "volatility.atr": {
     "approved_at": "2026-07-08T18:58:35+00:00",
     "approved_by": "badri",
     "git_sha": "8dfdfc3",
+    "notes": ""
+  },
+  "volatility.atr_daily": {
+    "approved_at": "2026-07-10T10:23:08+00:00",
+    "approved_by": "badri",
+    "git_sha": "5d9dfaa",
     "notes": ""
   },
   "volatility.bb": {
@@ -267,6 +315,12 @@
     "approved_at": "2026-07-08T18:35:41+00:00",
     "approved_by": "badri",
     "git_sha": "e828815",
+    "notes": ""
+  },
+  "vwap.gap": {
+    "approved_at": "2026-07-10T10:21:17+00:00",
+    "approved_by": "badri",
+    "git_sha": "5d9dfaa",
     "notes": ""
   },
   "vwap.last_hour_hh": {
