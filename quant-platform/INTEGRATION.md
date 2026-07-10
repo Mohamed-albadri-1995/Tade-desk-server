@@ -385,6 +385,141 @@ bars=100  sma9=98.6578  atr14=0.2018
 
 ---
 
+## 8. MIGRATION — install qp into the trading tool & replace any old copy
+
+**Status at handoff (2026-07): verification stage COMPLETE.** The library
+has 64 primitives; the user verified them against TradingView in the
+compare tool, and `approvals/approvals.json` is the authoritative gate.
+This section is the instruction sheet for the trading-tool builder.
+
+### 8.1 Where the library lives — import, never copy
+
+The verified library is in **this same repository**:
+
+```
+<repo root>/quant-platform/qp/                      ← the package
+<repo root>/quant-platform/approvals/approvals.json ← the gate
+```
+
+- **Import qp from `quant-platform/` via `sys.path` (see §4). Do NOT
+  copy `.py` files into `src/`** — a copy freezes the math and silently
+  diverges from what the user verified. One source of truth, one path.
+- Pin the integration by recording the repo git SHA; update = `git pull`
+  + restart the sidecar, never cherry-pick files.
+
+### 8.2 Replace ANY older indicator math — checklist
+
+The one rule: **no market math exists outside `qp/primitives/`.** Before
+wiring, sweep the trading tool and route everything through qp:
+
+1. `grep -rn "def sma\|def ema\|def vwap\|def rsi\|def atr" src/` — any
+   Python indicator function outside quant-platform gets deleted and
+   replaced with a qp call.
+2. Any earlier embedded/partial copy of qp (an old `qp/` folder, a
+   `primitives.py`, an "indicator engine") — delete it; all imports
+   point at `quant-platform/qp` only.
+3. Stock-card indicator fields (`vwap, sma5, ema9, ema13, ema20, ema50,
+   atr, pmHigh, pmLow, …` in `src/scoring/scorer.py` NUMERIC_COLS and
+   the sides that populate them): wherever setup/condition logic depends
+   on these matching TradingView, compute them **from bars via qp**
+   rather than trusting provider snapshot fields. (Derived arithmetic
+   like `adrPct = atr/price*100` in `sideB/calculations.js` may stay —
+   it consumes qp outputs; it isn't indicator math.)
+
+### 8.3 Wiring for THIS trading tool (Node + Flask sidecar)
+
+The tool already runs a Python sidecar that Node calls over HTTP
+(`src/scoring/server.py`, port 3001, `npm run start:scorer`). qp plugs
+into that same server — add these endpoints (adjust the `parents[]`
+depth per §4):
+
+```python
+# at the top of src/scoring/server.py
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'quant-platform'))
+import numpy as np
+import pandas as pd
+import qp
+
+@app.route('/qp/registry', methods=['GET'])
+def qp_registry():
+    # approved slice ONLY — the sandbox never sees unverified math (§3)
+    out = {}
+    for key, m in qp.approved_primitives().items():
+        out[key] = {'name': m.name, 'group': m.group,
+                    'inputs': list(m.inputs), 'outputs': list(m.outputs),
+                    'params': [{'name': p.name, 'kind': p.kind,
+                                'default': p.default} for p in m.params]}
+    return jsonify({'ok': True, 'primitives': out})
+
+@app.route('/qp/compute', methods=['POST'])
+def qp_compute():
+    """Body: {bars: [{t, o, h, l, c, v}...]   (t = epoch seconds UTC),
+              indicators: [{key, params?, mode?}]}
+       mode: 'last' (default) → latest scalar; 'series' → full array."""
+    body = request.get_json(force=True)
+    rows = body['bars']
+    idx = pd.to_datetime([r['t'] for r in rows], unit='s', utc=True)
+    df = pd.DataFrame({'open':  [r['o'] for r in rows],
+                       'high':  [r['h'] for r in rows],
+                       'low':   [r['l'] for r in rows],
+                       'close': [r['c'] for r in rows],
+                       'volume':[r['v'] for r in rows]}, index=idx)
+    bars = qp.Bars.from_frame(df)
+    close = df['close'].to_numpy(dtype=float)
+    approved = qp.approved_primitives()
+    results = {}
+    for spec in body['indicators']:
+        key = spec['key']
+        if key not in approved:                    # the gate, enforced
+            results[key] = {'error': f'{key} is not an approved primitive'}
+            continue
+        m = approved[key]
+        kwargs = spec.get('params') or {}
+        arr = (m.fn(bars, **kwargs) if list(m.inputs) == ['bars']
+               else m.fn(close, **kwargs))         # pick source per §2
+        def _out(a):
+            a = np.asarray(a, dtype=float)
+            if spec.get('mode') == 'series':
+                return [None if x != x else float(x) for x in a]
+            valid = a[~np.isnan(a)]
+            return float(valid[-1]) if len(valid) else None
+        results[key] = ({k: _out(v) for k, v in arr.items()}
+                        if isinstance(arr, dict) else _out(arr))
+    return jsonify({'ok': True, 'values': results})
+```
+
+Node side: `POST http://127.0.0.1:3001/qp/compute` with the symbol's
+bars and the indicator list of the setup being evaluated; read
+`values['vwap.session']` etc. Expose them to user scripts as
+`market_data.<short_name>()` per §3.
+
+**Fixed-timeframe primitives** (`compute_tf` set — `volatility.atr_daily`
+needs 1d bars, `ma.pine_5day` needs 1m bars): feed them bars OF THAT
+timeframe (with warm-up history: ~3× the length), then hold the last
+value onto your display bars. The compare server's `_one_overlay()`
+shows the reference implementation of this mapping.
+
+### 8.4 Acceptance checks for the migration
+
+1. `GET /qp/registry` returns only ✅ approved keys (matches
+   `approvals/approvals.json`).
+2. Feed the same bars to `/qp/compute` for `ma.sma(length=9)` and to the
+   compare tool — identical values.
+3. The 8.2 grep sweep comes back clean (no indicator math outside qp).
+4. Requesting an unapproved key returns an error, not a number.
+
+### 8.5 Update flow after handoff
+
+The compare tool stays alive for future work: new primitive → verify →
+approve → `git pull` in the trading tool → restart sidecar. If a
+verified primitive's math is ever edited, its approval is stale — the
+user re-verifies and re-approves; the trading tool picks it up on the
+next pull. Nothing else to coordinate.
+
+---
+
 *Questions or mismatches: report the primitive key, the exact params,
 and observed-vs-expected values in the qp session. The library's
 verification loop (compare tool → fix → re-approve) handles the rest.*
