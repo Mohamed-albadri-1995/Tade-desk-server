@@ -35,18 +35,6 @@
     "git_sha": "5d9dfaa",
     "notes": ""
   },
-  "levels.afterhours_high": {
-    "approved_at": "2026-07-08T18:37:22+00:00",
-    "approved_by": "badri",
-    "git_sha": "e828815",
-    "notes": ""
-  },
-  "levels.afterhours_low": {
-    "approved_at": "2026-07-08T18:37:29+00:00",
-    "approved_by": "badri",
-    "git_sha": "e828815",
-    "notes": ""
-  },
   "levels.day_open": {
     "approved_at": "2026-07-06T13:51:30+00:00",
     "approved_by": "badri",
@@ -85,18 +73,6 @@
   },
   "levels.monthly_open": {
     "approved_at": "2026-07-08T18:37:06+00:00",
-    "approved_by": "badri",
-    "git_sha": "e828815",
-    "notes": ""
-  },
-  "levels.overnight_high": {
-    "approved_at": "2026-07-08T18:37:01+00:00",
-    "approved_by": "badri",
-    "git_sha": "e828815",
-    "notes": ""
-  },
-  "levels.overnight_low": {
-    "approved_at": "2026-07-08T18:38:18+00:00",
     "approved_by": "badri",
     "git_sha": "e828815",
     "notes": ""
