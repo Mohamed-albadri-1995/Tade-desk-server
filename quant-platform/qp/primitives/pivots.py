@@ -32,15 +32,16 @@ from qp.primitives._session import rth_pred
     name='floor',
     group='pivots',
     description=('Floor pivots {P, R1, R2, R3, S1, S2, S3} from yesterday\'s '
-                 'H/L/C. session=\'rth\' (default, matches TV equities daily '
-                 'bars) or \'eth\' (full extended day — the Pine script\'s '
-                 'ETH pivots).'),
-    params=(Param('session', 'str', default='rth',
-                  description="'rth' or 'eth'"),),
+                 'H/L/C. session=\'eth\' (default) uses the full 24h day — '
+                 'matches the user\'s Pine "Full Day Daily Pivots (ETH)" which '
+                 'requests the 24h Globex daily bar. session=\'rth\' uses the '
+                 '09:30-16:00 daily bar (a standard TV equities daily).'),
+    params=(Param('session', 'str', default='eth',
+                  description="'eth' (full 24h day, matches the Pine) or 'rth'"),),
     inputs=('bars',),
     outputs=('P', 'R1', 'R2', 'R3', 'S1', 'S2', 'S3'),
 )
-def floor(bars: Bars, session: str = 'rth'):
+def floor(bars: Bars, session: str = 'eth'):
     df = bars.df
     if session == 'eth':
         pred = lambda ts: True  # noqa: E731 — every bar of the ET date

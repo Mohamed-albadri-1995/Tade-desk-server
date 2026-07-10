@@ -2,7 +2,7 @@
 
 Generated from the registry by `tools/gen_catalog.py` — do not edit by hand.
 
-**64 primitives · 30 approved** (as of 2026-07-08 14:56 UTC).
+**64 primitives · 30 approved** (as of 2026-07-10 09:38 UTC).
 Approval status changes as verification progresses; the source of truth
 is `approvals/approvals.json`, queried at runtime via `qp.approved_primitives()`.
 
@@ -69,22 +69,6 @@ Lowest value of `source` over the last `length` bars (inclusive of current bar).
 
 ## levels
 
-### 🚧 `levels.afterhours_high`
-
-After-hours high = the full non-RTH range leading into the open: 16:00 (NY close) → 09:30 next day ET (overnight + premarket). Running through that window, then frozen across the RTH day. This is the old "overnight_high", renamed. Needs extended-hours bars (polygon / hybrid), All-day view.
-
-- input: `bars`
-- output: single series
-- params: none
-
-### 🚧 `levels.afterhours_low`
-
-After-hours low = 16:00 → 09:30 next day ET (overnight + premarket).
-
-- input: `bars`
-- output: single series
-- params: none
-
 ### ✅ `levels.day_open`
 
 Today's RTH open (09:30 ET bar). NaN before today's open exists.
@@ -141,22 +125,6 @@ This ET month's RTH open.
 - output: single series
 - params: none
 
-### 🚧 `levels.overnight_high`
-
-Overnight high = NY close → premarket start: 16:00 → 04:00 ET, premarket EXCLUDED. Running through the overnight, frozen across the RTH day. For the range that also includes premarket use afterhours_high; for premarket only use pm_high. Needs extended-hours bars (polygon / hybrid), All-day view.
-
-- input: `bars`
-- output: single series
-- params: none
-
-### 🚧 `levels.overnight_low`
-
-Overnight low = 16:00 → 04:00 ET (NY close → premarket start, premarket excluded).
-
-- input: `bars`
-- output: single series
-- params: none
-
 ### 🚧 `levels.pm_high`
 
 Premarket high (04:00-09:30 ET). Running during PM; frozen through the rest of the day. Needs extended-hours bars in the feed (Alpaca IEX includes them).
@@ -168,6 +136,38 @@ Premarket high (04:00-09:30 ET). Running during PM; frozen through the rest of t
 ### 🚧 `levels.pm_low`
 
 Premarket low (04:00-09:30 ET), frozen after 09:30.
+
+- input: `bars`
+- output: single series
+- params: none
+
+### 🚧 `levels.postmarket_high`
+
+Post-market high — window 16:00 → 04:00 next day ET (NY close → premarket start). This is the "overnight" session in the 24h model NY/post/pre; premarket is EXCLUDED. Running through the window, then frozen across the next RTH day. Needs extended-hours bars (polygon / hybrid), All-day view.
+
+- input: `bars`
+- output: single series
+- params: none
+
+### 🚧 `levels.postmarket_low`
+
+Post-market low — window 16:00 → 04:00 next day ET (NY close → premarket start, premarket excluded).
+
+- input: `bars`
+- output: single series
+- params: none
+
+### 🚧 `levels.postpre_high`
+
+Post+Pre high — window 16:00 → 09:30 next day ET: the full extended range from the NY close to the next open (post-market 16:00-04:00 + premarket 04:00-09:30). Running through the window, frozen across the RTH day. This is the old "overnight_high" renamed. The user's Pine used 18:00-09:30 (CME Globex); here it anchors to the 16:00 NY equity close. Needs extended-hours bars (polygon / hybrid), All-day view.
+
+- input: `bars`
+- output: single series
+- params: none
+
+### 🚧 `levels.postpre_low`
+
+Post+Pre low — window 16:00 → 09:30 next day ET (post-market + premarket, the full close→open range).
 
 - input: `bars`
 - output: single series
@@ -341,11 +341,11 @@ Wilder RSI. Matches TradingView `ta.rsi(source, length)` — rma-smoothed gains/
 
 ### 🚧 `pivots.floor`
 
-Floor pivots {P, R1, R2, R3, S1, S2, S3} from yesterday's H/L/C. session='rth' (default, matches TV equities daily bars) or 'eth' (full extended day — the Pine script's ETH pivots).
+Floor pivots {P, R1, R2, R3, S1, S2, S3} from yesterday's H/L/C. session='eth' (default) uses the full 24h day — matches the user's Pine "Full Day Daily Pivots (ETH)" which requests the 24h Globex daily bar. session='rth' uses the 09:30-16:00 daily bar (a standard TV equities daily).
 
 - input: `bars`
 - output: dict with keys `P, R1, R2, R3, S1, S2, S3`
-- params: `session`: str = 'rth'
+- params: `session`: str = 'eth'
 
 ## structure
 

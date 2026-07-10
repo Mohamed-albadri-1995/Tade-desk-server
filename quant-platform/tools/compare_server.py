@@ -253,6 +253,89 @@ def _reindex_asof(arr, src_index, dst_index):
              .reindex(dst_index, method='ffill').to_numpy()
 
 
+# Warm-up history (extra calendar days) fetched for fixed-timeframe
+# primitives, so e.g. atr_daily(14) has ~140 daily bars and pine_5day has
+# its 1950 one-minute bars BEFORE the first visible bar — the line then
+# covers the whole visible range at any Days setting.
+_COMPUTE_TF_WARMUP_DAYS = {'1m': 15, '5m': 30, '15m': 45, '30m': 60,
+                           '1h': 90, '1d': 200}
+
+# Cap on how many recent pivot events get verification markers — keeps the
+# chart readable when a long range has dozens of pivots.
+_MAX_MARKED_EVENTS = 14
+
+
+def _series_markers(m, kwargs, arr, ts, bars: pd.DataFrame) -> list:
+    """Verification markers that make the primitive's REFERENCE POINTS
+    visible on the chart, so an eyeball check has all the pieces:
+
+    - structure.pivot_high / pivot_low: for each confirmed pivot, mark the
+      WINDOW START (□, `left` bars before the pivot bar), the PIVOT bar
+      itself (PH/PL arrow), and the CONFIRM bar (✓, `right` bars after —
+      where the step line changes). Window = pivot ± left/right.
+    - vwap.* : ⚓ at each anchor bar (where accumulation starts). For
+      vwap.gap this shows exactly which gap bar the AVWAP re-anchored on —
+      change atr_mult and watch the ⚓ move.
+    - extremes.highest / lowest: bracket the LATEST trailing window
+      (⟨len…⟩) so the current reference range is visible; the window slides
+      forward one bar per bar.
+    """
+    n = len(arr)
+    marks: list[dict] = []
+
+    def _valid(i):  # not NaN
+        return arr[i] == arr[i]
+
+    key = m.key
+    if key in ('structure.pivot_high', 'structure.pivot_low'):
+        up = key.endswith('high')
+        left  = int(kwargs.get('left', 10))
+        right = int(kwargs.get('right', 10))
+        events = [i for i in range(n)
+                  if _valid(i) and (i == 0 or not _valid(i - 1) or arr[i] != arr[i - 1])]
+        for i in events[-_MAX_MARKED_EVENTS:]:
+            piv = i - right          # bar where the extreme actually printed
+            win = piv - left         # left edge of the pivot window
+            pos = 'aboveBar' if up else 'belowBar'
+            if 0 <= win < n:
+                marks.append({'time': int(ts[win]), 'position': pos,
+                              'shape': 'square', 'text': '⟨'})
+            if 0 <= piv < n:
+                marks.append({'time': int(ts[piv]), 'position': pos,
+                              'shape': 'arrowDown' if up else 'arrowUp',
+                              'text': 'PH' if up else 'PL'})
+            marks.append({'time': int(ts[i]), 'position': pos,
+                          'shape': 'circle', 'text': '✓'})
+    elif key.startswith('vwap.'):
+        # Anchor = accumulation start: NaN→value transition, or (gap vwap)
+        # a bar whose value equals its own HLC3 — the tell of a re-anchor.
+        hlc3 = ((bars['high'] + bars['low'] + bars['close']) / 3.0).to_numpy(dtype=float)
+        anchors = []
+        for i in range(n):
+            if not _valid(i):
+                continue
+            fresh = (i == 0) or (not _valid(i - 1))
+            reanchor = (key == 'vwap.gap' and abs(arr[i] - hlc3[i]) <=
+                        1e-9 * max(1.0, abs(hlc3[i])))
+            if fresh or reanchor:
+                anchors.append(i)
+        for i in anchors[-_MAX_MARKED_EVENTS:]:
+            marks.append({'time': int(ts[i]), 'position': 'belowBar',
+                          'shape': 'arrowUp', 'text': '⚓'})
+    elif key in ('extremes.highest', 'extremes.lowest'):
+        L = int(kwargs.get('length', 0) or 0)
+        last_valid = max((i for i in range(n) if _valid(i)), default=-1)
+        if L > 0 and last_valid >= L - 1:
+            s = last_valid - (L - 1)
+            pos = 'aboveBar' if key.endswith('highest') else 'belowBar'
+            marks.append({'time': int(ts[s]), 'position': pos,
+                          'shape': 'square', 'text': f'⟨{L}'})
+            marks.append({'time': int(ts[last_valid]), 'position': pos,
+                          'shape': 'square', 'text': '⟩'})
+    marks.sort(key=lambda x: x['time'])
+    return marks
+
+
 def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
     """Compute one overlay spec {key, source, params, color} → list of
     plot series (one, or several for dict-output primitives)."""
@@ -263,11 +346,15 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
     kwargs = dict(ov.get('params') or {})
     source = ov.get('source', 'close')
 
-    # Fixed-timeframe primitives (pine_5day → '1m') are computed on their
-    # own timeframe regardless of the chart's, then mapped onto the display
-    # bars — so the line is identical on a 1m / 5m / 15m chart.
+    # Fixed-timeframe primitives (atr_daily → '1d', pine_5day → '1m') are
+    # computed on their own timeframe regardless of the chart's, then mapped
+    # onto the display bars — HTF analysis: the value is identical on a 1m,
+    # 5m or 1d chart. The fetch start is pushed back by a warm-up allowance
+    # so the indicator has its full lookback before the first visible bar.
     if m.compute_tf and m.compute_tf != ctx['tf']:
-        cbars = ctx['loader'].load(ctx['symbol'], m.compute_tf, ctx['start'], ctx['end'])
+        warm = _COMPUTE_TF_WARMUP_DAYS.get(m.compute_tf, 30)
+        cstart = ctx['start'] - pd.Timedelta(days=warm)
+        cbars = ctx['loader'].load(ctx['symbol'], m.compute_tf, cstart, ctx['end'])
         result = _call_primitive(m, cbars, source, kwargs)
         if isinstance(result, dict):
             result = {k: _reindex_asof(a, cbars.index, bars.index) for k, a in result.items()}
@@ -283,23 +370,30 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
 
     color = ov.get('color') or '#22c55e'
     args = ','.join(f'{k}={v}' for k, v in kwargs.items())
-    # Horizontal-level primitives (S/R, floor pivots, prev-day/open levels)
-    # are piecewise-constant — they must render as STEP lines, not diagonal
-    # connectors, or they look like a chaotic web. MAs/VWAPs stay smooth.
-    step = m.group in ('levels', 'pivots', 'dynamic_sr')
+    # Piecewise-constant primitives (S/R, floor pivots, day levels, pivot
+    # H/L) must render as STEP lines, not diagonal connectors, or they look
+    # like a chaotic web. MAs/VWAPs stay smooth.
+    step = m.group in ('levels', 'pivots', 'dynamic_sr', 'structure')
     out = []
     for idx, (sub, arr) in enumerate(lines):
         vals = [{'time': int(t), 'value': float(v)}
                 for t, v in zip(ts, arr) if v == v]
         label = m.name if sub is None else f'{m.name}.{sub}'
-        out.append({
+        series = {
             'overlayId': ov.get('id'),
             'name':  f'{label}({args})' if args else label,
             'color': color,
             'style': 0 if idx == 0 else 2,   # first solid, rest dotted
             'step':  step,
             'values': vals,
-        })
+        }
+        if idx == 0:   # markers belong to the primary line only
+            mk = _series_markers(m, kwargs, arr, ts, bars)
+            if mk:
+                for x in mk:
+                    x['color'] = color
+                series['markers'] = mk
+        out.append(series)
     return out
 
 
@@ -912,8 +1006,14 @@ async function reload() {
                              crosshairMarkerVisible: true, lastValueVisible: true,
                              priceScaleId: scaleId });
       line.setData(s.values || []);
+      // Verification markers from the server: pivot window ⟨ / PH / ✓,
+      // VWAP ⚓ anchors, extremes ⟨len…⟩ window brackets.
+      if (s.markers && s.markers.length && typeof line.setMarkers === 'function') {
+        try { line.setMarkers(s.markers); } catch (_) {}
+      }
       LINES.push(line);
-      drawn.push(`${s.name}: ${pts} pts${scaleId === 'osc' ? ' (bottom pane)' : ''}`);
+      const extra = (s.markers && s.markers.length ? ` · ${s.markers.length} marks` : '');
+      drawn.push(`${s.name}: ${pts} pts${scaleId === 'osc' ? ' (bottom pane)' : ''}${extra}`);
     } catch (e) {
       drawn.push(`${s.name}: draw error ${e.message}`);
     }

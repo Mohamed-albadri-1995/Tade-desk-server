@@ -248,52 +248,72 @@ def _leading_extreme(df: pd.DataFrame, which: str, in_win):
     return out
 
 
-# afterhours = overnight + premarket = 16:00 (NY close) → 09:30 (next open).
-def _in_afterhours(t):
-    return (t.hour >= 16) or (t.hour < 9) or (t.hour == 9 and t.minute < 30)
+# ── Extended-hours levels, named by session with explicit ET windows ──
+# The user's 24h session model (all three tile the clock):
+#   NY session  = 09:30 - 16:00 ET                       → today_*/day_open
+#   post-market = 16:00 - 04:00 next day ET              → postmarket_high/low
+#                 (NY close → premarket start; what the
+#                 user previously called "overnight".
+#                 NOTE: equity convention often means
+#                 16:00-20:00 by "after-hours" — HERE it
+#                 is the full 16:00-04:00 block.)
+#   premarket   = 04:00 - 09:30 ET                       → pm_high / pm_low
+# Combined:
+#   post+pre    = 16:00 - 09:30 next day ET              → postpre_high/low
+#                 (the whole close→open extended range;
+#                 the user's Pine used 18:00-09:30 CME
+#                 Globex — here anchored to the 16:00 NY
+#                 equity close.)
+# Each level is the running high/low over its window leading INTO an RTH day,
+# then frozen across that day. Needs extended-hours bars (polygon / hybrid),
+# All-day view.
 
-
-# overnight = NY close → premarket start = 16:00 → 04:00 (premarket excluded).
-def _in_overnight(t):
+def _in_postmarket(t):   # 16:00 → 04:00 next day ET (close → premarket start)
     return (t.hour >= 16) or (t.hour < 4)
 
 
-@primitive(name='afterhours_high', group='levels',
-           description=('After-hours high = the full non-RTH range leading into '
-                        'the open: 16:00 (NY close) → 09:30 next day ET '
-                        '(overnight + premarket). Running through that window, '
-                        'then frozen across the RTH day. This is the old '
-                        '"overnight_high", renamed. Needs extended-hours bars '
+def _in_postpre(t):      # 16:00 → 09:30 next day ET (post-market + premarket)
+    return (t.hour >= 16) or (t.hour < 9) or (t.hour == 9 and t.minute < 30)
+
+
+@primitive(name='postmarket_high', group='levels',
+           description=('Post-market high — window 16:00 → 04:00 next day ET '
+                        '(NY close → premarket start). This is the "overnight" '
+                        'session in the 24h model NY/post/pre; premarket is '
+                        'EXCLUDED. Running through the window, then frozen '
+                        'across the next RTH day. Needs extended-hours bars '
                         '(polygon / hybrid), All-day view.'),
            params=(), inputs=('bars',))
-def afterhours_high(bars: Bars):
-    return _leading_extreme(bars.df, 'high', _in_afterhours)
+def postmarket_high(bars: Bars):
+    return _leading_extreme(bars.df, 'high', _in_postmarket)
 
 
-@primitive(name='afterhours_low', group='levels',
-           description='After-hours low = 16:00 → 09:30 next day ET (overnight + premarket).',
+@primitive(name='postmarket_low', group='levels',
+           description='Post-market low — window 16:00 → 04:00 next day ET (NY close → premarket start, premarket excluded).',
            params=(), inputs=('bars',))
-def afterhours_low(bars: Bars):
-    return _leading_extreme(bars.df, 'low', _in_afterhours)
+def postmarket_low(bars: Bars):
+    return _leading_extreme(bars.df, 'low', _in_postmarket)
 
 
-@primitive(name='overnight_high', group='levels',
-           description=('Overnight high = NY close → premarket start: 16:00 → '
-                        '04:00 ET, premarket EXCLUDED. Running through the '
-                        'overnight, frozen across the RTH day. For the range '
-                        'that also includes premarket use afterhours_high; for '
-                        'premarket only use pm_high. Needs extended-hours bars '
-                        '(polygon / hybrid), All-day view.'),
+@primitive(name='postpre_high', group='levels',
+           description=('Post+Pre high — window 16:00 → 09:30 next day ET: the '
+                        'full extended range from the NY close to the next '
+                        'open (post-market 16:00-04:00 + premarket 04:00-'
+                        '09:30). Running through the window, frozen across the '
+                        'RTH day. This is the old "overnight_high" renamed. '
+                        'The user\'s Pine used 18:00-09:30 (CME Globex); here '
+                        'it anchors to the 16:00 NY equity close. Needs '
+                        'extended-hours bars (polygon / hybrid), All-day view.'),
            params=(), inputs=('bars',))
-def overnight_high(bars: Bars):
-    return _leading_extreme(bars.df, 'high', _in_overnight)
+def postpre_high(bars: Bars):
+    return _leading_extreme(bars.df, 'high', _in_postpre)
 
 
-@primitive(name='overnight_low', group='levels',
-           description='Overnight low = 16:00 → 04:00 ET (NY close → premarket start, premarket excluded).',
+@primitive(name='postpre_low', group='levels',
+           description='Post+Pre low — window 16:00 → 09:30 next day ET (post-market + premarket, the full close→open range).',
            params=(), inputs=('bars',))
-def overnight_low(bars: Bars):
-    return _leading_extreme(bars.df, 'low', _in_overnight)
+def postpre_low(bars: Bars):
+    return _leading_extreme(bars.df, 'low', _in_postpre)
 
 
 # ────────────────────────────────────────────────────────────
