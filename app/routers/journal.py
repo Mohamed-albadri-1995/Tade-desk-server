@@ -56,6 +56,9 @@ async def update_exit(
         journal_id, payload.model_dump(exclude_unset=True), bars=_bars_for(existing.stock)
     )
     if entry.exit_price is not None:
+        # Manual close in the UI must also close the position at the brokers.
+        if existing.status in ("pending", "alerted"):
+            await monitor.broker_engine.dispatch_close(entry, "manual")
         await _after_close([entry.setup_id])
     data = journal_to_dict(entry)
     await event_bus.publish({"type": "new_entry", "entry": data})

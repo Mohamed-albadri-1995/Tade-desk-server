@@ -157,6 +157,24 @@ class CapitalService:
 
     # ---------------------------------------------------------- signal time
 
+    def reserve(self, per_account: dict, entry_price: float) -> None:
+        """Immediately charge a new position against available capital, in
+        memory. Without this, two signals firing in the same 5s tick would
+        both see the same free capital and could over-allocate together;
+        the next DB refresh reconciles to the same numbers."""
+        for account_id_str, breakdown in (per_account or {}).items():
+            shares = float(breakdown.get("final_shares") or 0)
+            if shares <= 0:
+                continue
+            try:
+                state = self.state.get(int(account_id_str))
+            except (TypeError, ValueError):
+                state = None
+            if state is not None:
+                state["open_allocation"] = round(
+                    state.get("open_allocation", 0.0) + shares * float(entry_price), 2
+                )
+
     def available(self, account_id: int) -> Optional[float]:
         state = self.state.get(account_id)
         if not state:

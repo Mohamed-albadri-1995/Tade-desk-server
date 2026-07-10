@@ -450,6 +450,13 @@ class MonitorService:
                 bars=cache["bars"],
             )
             closed_setups.append(closed.setup_id)
+            # Send the closing order to the brokers. For SL/TP the Alpaca
+            # bracket legs usually filled already (then this is a no-op);
+            # for session_end this IS the exit order.
+            try:
+                await self.broker_engine.dispatch_close(closed, reason)
+            except Exception:
+                logger.exception("broker close dispatch failed for %s", closed.id)
             data = journal_to_dict(closed)
             await event_bus.publish({"type": "new_entry", "entry": data})
             await event_bus.publish(
@@ -646,9 +653,11 @@ class MonitorService:
             await event_bus.publish({"type": "new_entry", "entry": journal_to_dict(entry)})
             return journal_to_dict(entry)
 
-        # Step 8: write the immutable Entry Card.
+        # Step 8: write the immutable Entry Card and immediately reserve the
+        # capital so another signal in the same tick can't reuse it.
         card_data["status"] = "pending"
         entry = await self.journal_service.create_entry_card(card_data)
+        self.capital_service.reserve(sizing["accounts"], entry_price)
         await self._store_alignments(entry, default_results, additional_results, conditions, live_regime)
         await event_bus.publish({"type": "new_entry", "entry": journal_to_dict(entry)})
 
