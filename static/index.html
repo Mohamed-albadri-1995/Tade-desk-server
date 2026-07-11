@@ -214,11 +214,16 @@
   </section>
 
   <section id="tab-brokers" class="tab">
+    <div class="panel"><p class="muted" style="font-size:12px;margin:0">Sizing produces one <b>standard order</b> against the standard account (your primary account). Each broker below scales it by its <b>size vs standard</b> (0.25 = quarter, 2 = double; floored, never rounded up) and translates it. <b>Exit mode</b> — <i>bracket</i>: SL/TP ride with the entry at the broker (protected even if this server dies); <i>at exit</i>: the tool sends the exit order when its own monitor triggers. The <b>paper</b> broker places no real order — the journal is its fill, and it's the clean track the learning engine trains on.</p></div>
     <form id="broker-form">
       <h3>Add broker</h3>
       <div class="row">
-        <div><label>Type</label><select id="broker-type"><option>alpaca</option><option>signalstack</option></select></div>
+        <div><label>Type</label><select id="broker-type"><option value="paper">paper</option><option value="alpaca">alpaca</option><option value="signalstack">signalstack</option></select></div>
         <div><label>Name</label><input id="broker-name" required></div>
+      </div>
+      <div class="row">
+        <div><label>Size vs standard account (e.g. 0.25, 1, 2)</label><input id="broker-scale" type="number" step="any" value="1"></div>
+        <div><label>Exit mode</label><select id="broker-exit"><option value="bracket">bracket — SL/TP with entry</option><option value="at_exit">at exit — tool sends exit</option></select></div>
       </div>
       <div class="row">
         <div><label>API key / webhook URL</label><input id="broker-key"></div>
@@ -226,7 +231,7 @@
       </div>
       <button class="btn" type="submit">Save broker</button>
     </form>
-    <table><thead><tr><th>ID</th><th>Type</th><th>Name</th><th>Active</th><th>Credentials</th><th></th></tr></thead><tbody id="brokers-body"></tbody></table>
+    <table><thead><tr><th>ID</th><th>Type</th><th>Name</th><th>Size ×</th><th>Exit</th><th>Active</th><th>Credentials</th><th></th></tr></thead><tbody id="brokers-body"></tbody></table>
   </section>
 
   <section id="tab-settings" class="tab">
@@ -680,8 +685,10 @@ $("#gate-add").onclick = async () => {
 async function loadBrokers() {
   const rows = await api.get("/api/brokers");
   $("#brokers-body").innerHTML = rows.map(b => `<tr>
-    <td>${b.id}</td><td>${b.type}</td><td>${b.name}</td><td>${b.is_active ? "✅" : "—"}</td>
-    <td>${b.has_api_key ? "🔑" : "—"} ${b.has_secret ? "🔒" : ""}</td>
+    <td>${b.id}</td><td>${b.type}</td><td>${b.name}</td>
+    <td>${b.scale}×</td><td>${b.exit_mode === "bracket" ? "bracket" : "at exit"}</td>
+    <td>${b.is_active ? "✅" : "—"}</td>
+    <td>${b.type === "paper" ? "—" : (b.has_api_key ? "🔑" : "—") + " " + (b.has_secret ? "🔒" : "")}</td>
     <td><button class="btn danger" data-del="${b.id}">delete</button></td></tr>`).join("");
   $("#brokers-body").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     await api.send("DELETE", "/api/brokers/" + b.dataset.del); loadBrokers();
@@ -692,6 +699,7 @@ $("#broker-form").onsubmit = async (e) => {
   try {
     await api.send("POST", "/api/brokers", {
       type: $("#broker-type").value, name: $("#broker-name").value,
+      scale: Number($("#broker-scale").value), exit_mode: $("#broker-exit").value,
       api_key: $("#broker-key").value, secret: $("#broker-secret").value,
     });
     flash("Broker saved"); $("#broker-form").reset(); loadBrokers();

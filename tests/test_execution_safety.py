@@ -26,33 +26,13 @@ async def test_dispatch_close_skips_zero_shares(monkeypatch):
     engine = BrokerEngine()
 
     class FakeBroker:
-        id, name, type = 7, "paper", "alpaca"
+        id, name, type, scale, exit_mode = 7, "paper", "paper", 1.0, "bracket"
 
     async def fake_brokers():
         return [FakeBroker()]
 
     engine._active_brokers = fake_brokers
     results = await engine.dispatch_close(make_entry(shares=0), "session_end")
-    assert results == [{"broker": "paper", "ok": True, "skipped": "zero shares"}]
-
-
-async def test_dispatch_skips_zero_qty_accounts(monkeypatch):
-    from app.services.broker_engine import BrokerEngine
-
-    engine = BrokerEngine()
-
-    class FakeBroker:
-        id, name, type = 7, "paper", "alpaca"
-
-    async def fake_brokers():
-        return [FakeBroker()]
-
-    engine._active_brokers = fake_brokers
-    # Per-account breakdown says this broker's account sized to 0.
-    entry = make_entry(shares=100, factors={
-        "accounts": {"1": {"broker_id": 7, "final_shares": 0, "name": "Main"}}
-    })
-    results = await engine.dispatch(entry)
     assert results == [{"broker": "paper", "ok": True, "skipped": "zero shares"}]
 
 

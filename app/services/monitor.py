@@ -644,6 +644,19 @@ class MonitorService:
         }
         card_data["entry_grade"] = grade
 
+        # The canonical STANDARD ORDER (sized for the standard account).
+        # Every broker scales/translates this one object at dispatch time.
+        card_data["entry_factors"]["standard_order"] = {
+            "symbol": stock,
+            "side": "buy" if signal_side == "long" else "sell",
+            "qty": int(sizing["final_shares"]),
+            "order_type": entry_method if entry_method == "limit" else "market",
+            "limit_price": entry_price if entry_method == "limit" else None,
+            "stop_loss": sl_price,
+            "take_profit": tp_price,
+            "time_in_force": "day",
+        }
+
         # A zero final multiplier (health collapsed to 0) blocks the trade:
         # the card is still written (full audit trail), no alert sent.
         if final_multiplier <= 0.0:

@@ -91,10 +91,18 @@ class BrokerModel(Base):
     __tablename__ = "brokers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    type: Mapped[str] = mapped_column(String(20), nullable=False)  # 'alpaca' | 'signalstack'
+    type: Mapped[str] = mapped_column(String(20), nullable=False)  # 'alpaca'|'signalstack'|'paper'
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     api_key: Mapped[str] = mapped_column(Text, default="")  # encrypted
     secret: Mapped[str] = mapped_column(Text, default="")  # encrypted
+    # This broker's account size relative to the STANDARD account the
+    # pipeline sizes against (primary account, default $100k):
+    # 0.25 = quarter size, 2.0 = double. Applied to entry AND exit qty.
+    scale: Mapped[float] = mapped_column(Float, default=1.0)
+    # 'bracket': SL/TP legs ride with the entry (broker-side protection).
+    # 'at_exit': plain entry; the tool sends the exit order when its own
+    # monitor triggers (SL/TP touch, session end, manual close).
+    exit_mode: Mapped[str] = mapped_column(String(10), default="bracket")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

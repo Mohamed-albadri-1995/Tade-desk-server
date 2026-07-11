@@ -88,10 +88,12 @@ class WatchlistOut(BaseModel):
 
 # ------------------------------------------------------------------ brokers
 class BrokerCreate(BaseModel):
-    type: str  # 'alpaca' | 'signalstack'
+    type: str  # 'alpaca' | 'signalstack' | 'paper'
     name: str
     api_key: str = ""
     secret: str = ""
+    scale: float = 1.0  # account size relative to the standard account
+    exit_mode: str = "bracket"  # 'bracket' | 'at_exit'
     is_active: bool = True
 
 
@@ -100,6 +102,8 @@ class BrokerUpdate(BaseModel):
     name: Optional[str] = None
     api_key: Optional[str] = None
     secret: Optional[str] = None
+    scale: Optional[float] = None
+    exit_mode: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -107,6 +111,8 @@ class BrokerOut(BaseModel):
     id: int
     type: str
     name: str
+    scale: float
+    exit_mode: str
     is_active: bool
     has_api_key: bool
     has_secret: bool

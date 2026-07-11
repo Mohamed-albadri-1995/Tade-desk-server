@@ -41,6 +41,10 @@ _MIGRATION_COLUMNS = {
     "setups": [
         ("close_at_session_end", "BOOLEAN DEFAULT 1"),
     ],
+    "brokers": [
+        ("scale", "FLOAT DEFAULT 1.0"),
+        ("exit_mode", "VARCHAR(10) DEFAULT 'bracket'"),
+    ],
 }
 
 # Tables whose contents are recomputable and whose schema changed in a way

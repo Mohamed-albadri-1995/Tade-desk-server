@@ -16,6 +16,7 @@ from sqlalchemy import select
 from app.database import async_session_factory, init_db
 from app.models import (
     AccountModel,
+    BrokerModel,
     LearningConfigModel,
     RegimeGateModel,
     UserSettingsModel,
@@ -73,6 +74,15 @@ async def seed_defaults() -> None:
             size = settings_row.account_size if settings_row else 100000.0
             session.add(
                 AccountModel(name="Main", account_size=size, is_primary=True, is_active=True)
+            )
+        has_brokers = (await session.execute(select(BrokerModel))).scalars().first()
+        if has_brokers is None:
+            # The always-on baseline: a paper broker at the standard size.
+            # The journal is its fill record — this is the clean track the
+            # learning engine trains on.
+            session.add(
+                BrokerModel(type="paper", name="Paper (standard ×1)", scale=1.0,
+                            exit_mode="at_exit", is_active=True)
             )
         await session.commit()
     await backfill_alignments()
