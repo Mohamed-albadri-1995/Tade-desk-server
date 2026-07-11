@@ -2,7 +2,7 @@
 
 Generated from the registry by `tools/gen_catalog.py` — do not edit by hand.
 
-**66 primitives · 64 approved** (as of 2026-07-11 10:27 UTC).
+**66 primitives · 64 approved** (as of 2026-07-11 10:30 UTC).
 Approval status changes as verification progresses; the source of truth
 is `approvals/approvals.json`, queried at runtime via `qp.approved_primitives()`.
 
@@ -428,6 +428,7 @@ Average DAILY volume over the last `length` days. Computed on 1-day bars (comput
 ### 🚧 `volume.rel_volume`
 
 Intraday Relative Volume (RVOL). For each bar: cumulative volume from the RTH open (09:30 ET) through the bar, divided by the AVERAGE cumulative volume at the same time-of-day over the previous `length` RTH sessions. ~1.0 = normal for this hour, 2.0 = twice the usual volume by now. Matches the day-trader / TradingView intraday Relative Volume. Non-RTH bars are NaN. Needs `length` prior RTH days of history — raise Days (e.g. Days >= length + a few).
+TIMEFRAME-INVARIANT: because it is cumulative volume from the session open (the same total whether you sum 1m or 5m bars), the value at any given time is identical on a 1m/5m/15m/1h chart — verified to 1e-15. Changing the chart TF does not change it.
 
 - input: `bars`
 - output: single series

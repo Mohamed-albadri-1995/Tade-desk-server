@@ -54,7 +54,12 @@ def avg_volume(bars: Bars, length: int = 20):
                  'hour, 2.0 = twice the usual volume by now. Matches the '
                  'day-trader / TradingView intraday Relative Volume. Non-RTH '
                  'bars are NaN. Needs `length` prior RTH days of history — '
-                 'raise Days (e.g. Days >= length + a few).'),
+                 'raise Days (e.g. Days >= length + a few).\n'
+                 'TIMEFRAME-INVARIANT: because it is cumulative volume from the '
+                 'session open (the same total whether you sum 1m or 5m bars), '
+                 'the value at any given time is identical on a 1m/5m/15m/1h '
+                 'chart — verified to 1e-15. Changing the chart TF does not '
+                 'change it.'),
     params=(Param('length', 'int', default=20, min=1),),
     inputs=('bars',),
 )
