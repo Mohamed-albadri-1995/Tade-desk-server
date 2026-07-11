@@ -41,6 +41,22 @@ python3 -m chart.server --host 0.0.0.0 --port 8766
 
 Open `http://<host>:8766`. Requires port 8766 open in the EC2 security group.
 
+### Run it permanently (systemd)
+
+So the chart auto-starts on boot and auto-restarts if it crashes (instead of a
+`nohup` that dies on reboot), install it as a service — one time:
+
+```sh
+cd ~/Tade-desk-server/quant-platform
+bash chart/deploy/install-service.sh            # default port 8765
+# PORT=8766 bash chart/deploy/install-service.sh # to pick a port
+```
+
+After that: `sudo systemctl restart qp-chart` (e.g. after a `git pull`),
+`systemctl status qp-chart`, logs at `~/chart.log` or `journalctl -u qp-chart`.
+The unit sets `MemoryHigh` so on a small host the chart is throttled to swap
+before it can starve the screener.
+
 ### Live data note
 
 Polygon's free tier is end-of-day delayed, so **Live** only *moves* on the
