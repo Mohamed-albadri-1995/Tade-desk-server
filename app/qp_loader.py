@@ -31,19 +31,28 @@ def _purge_qp_modules() -> None:
 
 
 def _candidates():
+    """Source of the verified qp library.
+
+    If QP_PATH is set it is AUTHORITATIVE (reference mode) — the only
+    source tried, so a change in that shared checkout reflects here and a
+    broken library fails loudly instead of silently falling back to a
+    stale copy. If QP_PATH is unset, use the vendored copy in the repo
+    (pinned mode), then the sibling screener checkout as a last resort.
+    """
     env = os.getenv("QP_PATH", "").strip()
     if env:
-        yield Path(env).expanduser()
+        return [Path(env).expanduser()], "reference"
     repo_root = Path(__file__).resolve().parents[1]
-    yield repo_root / "quant-platform"
-    yield Path.home() / "Tade-desk-server" / "quant-platform"
+    return [repo_root / "quant-platform",
+            Path.home() / "Tade-desk-server" / "quant-platform"], "vendored"
 
 
 def load() -> bool:
     global VERIFIED, QP_DIR
     if VERIFIED:
         return True
-    for candidate in _candidates():
+    candidates, mode = _candidates()
+    for candidate in candidates:
         if not (candidate / "qp" / "registry.py").exists():
             continue
         sys.path.insert(0, str(candidate))
@@ -56,8 +65,8 @@ def load() -> bool:
             VERIFIED = True
             QP_DIR = candidate
             logger.info(
-                "VERIFIED qp library loaded from %s — %d approved primitives",
-                candidate, len(qp.approved_primitives()),
+                "VERIFIED qp library loaded from %s (%s mode) — %d approved primitives",
+                candidate, mode, len(qp.approved_primitives()),
             )
             return True
         except Exception as exc:
@@ -65,9 +74,16 @@ def load() -> bool:
             if str(candidate) in sys.path:
                 sys.path.remove(str(candidate))
             _purge_qp_modules()
-    # The placeholder is gone — there is no verified-vs-unverified choice
-    # any more. If the library can't load, fail hard: unverified indicator
-    # math must never run a live trade (INTEGRATION.md §8.2).
+    # Fail hard: unverified/absent indicator math must never run a live
+    # trade (INTEGRATION.md §8.2). In reference mode this also means a
+    # broken QP_PATH library stops the tool rather than trading on a
+    # stale copy.
+    if mode == "reference":
+        raise RuntimeError(
+            f"QP_PATH is set but the verified qp library there failed to load "
+            f"({os.getenv('QP_PATH')}). Fix the library or unset QP_PATH to use "
+            "the vendored copy. Refusing to trade on unverified math."
+        )
     raise RuntimeError(
         "verified qp library not found — expected quant-platform/ in the repo "
         "or QP_PATH set in .env. Run: git checkout origin/claude/read-j5hgnf -- "
