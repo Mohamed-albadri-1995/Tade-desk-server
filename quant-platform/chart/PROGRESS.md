@@ -38,3 +38,16 @@ it doesn't count.
   save/reload roundtrips the shape; no JS errors.
 - Result: any derived quantity (body%, wick%, move-in-ATR, distance-to-level,
   ratios) is now COMPOSED, per the "basic primitives + flexible logic" rule.
+
+### It.2 — calculation & logic bug audit  [DONE]
+- Kitchen-sink integration test (nested AND/OR, expr, offset, for_bars,
+  ATLEAST, THEN, bounce, slope, SL/TP by ATR/%) → runs clean; exits split
+  {exit,SL,TP} correctly.
+- BUG FOUND + FIXED: a strategy with entry signals but no exit/SL/TP produced
+  ZERO chart markers (markers came only from *closed* trades) — you'd think
+  nothing fired. Now: mark every entry-condition edge + each taken trade's exit
+  by reason. Frontend shows "N entry signals · M trades".
+- HARDENING: _merge_defaults now drops params not in a primitive's signature,
+  so a stale/extra key from an old saved strategy can't crash the call.
+- Verified: entry-only strategy shows 17 markers = 17 signals; bogus param no
+  longer crashes.

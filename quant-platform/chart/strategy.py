@@ -62,15 +62,18 @@ _SEQ_WINDOW = 10          # max bars between consecutive steps of a THEN sequenc
 
 
 def _merge_defaults(key: str, params: dict) -> dict:
-    """Fill in the primitive's default params for anything the operand didn't
-    set — the builder only exposes the length-like param, so others (e.g. BB's
-    `mult`) must fall back to their registry defaults or the call crashes."""
-    out = dict(params or {})
+    """Return the primitive's params with registry defaults filled in AND any
+    unknown keys dropped — the builder only exposes the length-like param, so
+    others (e.g. BB's `mult`) must fall back to defaults, and a stale/extra key
+    from an old saved strategy must not crash the primitive call."""
+    src = dict(params or {})
     m = cs.REGISTRY.get(key)
-    if m:
-        for p in m.params:
-            out.setdefault(p.name, p.default)
-    return out
+    if not m:
+        return src
+    names = {p.name for p in m.params}
+    out = {p.name: src.get(p.name, p.default) for p in m.params}
+    # keep only known params (drops anything not in the signature)
+    return {k: v for k, v in out.items() if k in names}
 
 
 def _shift(arr: np.ndarray, offset: int) -> np.ndarray:
@@ -498,11 +501,13 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
 
     entry_word = 'Long' if side == 'long' else 'Short'
     markers = []
-    # Mark the ACTUAL taken trades (entry + its exit + reason), so the picture
-    # reflects the SL/TP simulation, not every raw signal.
-    for t in trades:
-        markers.append({'time': int(ts[t['ei']]), 'position': 'belowBar',
+    # Every bar the ENTRY condition fires (so you always see signals, even if a
+    # strategy has no exit/stop and nothing "closes")...
+    for i in np.nonzero(entry_ev)[0]:
+        markers.append({'time': int(ts[i]), 'position': 'belowBar',
                         'shape': 'arrowUp', 'color': '#22c55e', 'text': entry_word})
+    # ...plus the exit of each taken trade, coloured by reason (SL/TP/exit-rule).
+    for t in trades:
         col = {'SL': '#ef5350', 'TP': '#22c55e', 'exit': '#94a3b8'}.get(t['reason'], '#ef5350')
         markers.append({'time': int(ts[t['xi']]), 'position': 'aboveBar',
                         'shape': 'arrowDown', 'color': col, 'text': t['reason']})

@@ -588,7 +588,7 @@ async function evalStrategy(){
     ex.textContent=j.exit_now?'TRUE now':'idle'; ex.className='en '+(j.exit_now?'t':'f');
     const s=j.stats;
     const by=s&&s.exits_by?' ['+Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' ')+']':'';
-    document.getElementById('stratStat').innerHTML=`${(s?s.trades:0)} trades · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%${by} <span class="muted">(preview — full backtest is Phase 4)</span>`:' · no trades');
+    document.getElementById('stratStat').innerHTML=`${(j.entries||[]).length} entry signals · ${(s?s.trades:0)} trades · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%${by} <span class="muted">(preview — full backtest is Phase 4)</span>`:(j.exit_now===undefined?'':' · add an exit or SL/TP to close trades'));
   }catch(e){ document.getElementById('stratStat').textContent='error: '+e.message; }
 }
 function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open); document.getElementById('stratBtn').classList.toggle('on',open); if(open&&CHART){ setTimeout(()=>{const el=document.getElementById('chart'); CHART.applyOptions({height:el.clientHeight});},50); } }
