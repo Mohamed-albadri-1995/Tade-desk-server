@@ -51,3 +51,16 @@ it doesn't count.
   so a stale/extra key from an old saved strategy can't crash the call.
 - Verified: entry-only strategy shows 17 markers = 17 signals; bogus param no
   longer crashes.
+
+### It.3 — chart-view audit + live crosshair legend  [DONE]
+- Added a TradingView-style **crosshair legend** (top-left): hover any bar →
+  symbol + O/H/L/C coloured up/down + Volume + the value of every drawn
+  indicator AND strategy line at that bar. Falls back to the last bar when not
+  hovering. Directly serves "see the number".
+- Overlay-load errors moved from the legend to the status line (⚠) so the
+  legend stays clean for values.
+- Verified in headless: legend renders "SPY O H L C V ema(9) …" from real
+  series data; no JS errors.
+- Remaining audit areas (next iterations): timeframe/session adaptability pass;
+  strategy expressiveness vs known public strategies; drawing polish (marker
+  density, price-line labels); then final sweep.

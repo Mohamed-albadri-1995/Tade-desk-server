@@ -193,6 +193,7 @@ function initChart(){
   CHART.priceScale('vol').applyOptions({scaleMargins:{top:0.86,bottom:0},visible:false});
   PRICE=addCandles({upColor:'#22c55e',downColor:'#ef5350',wickUpColor:'#22c55e',wickDownColor:'#ef5350',borderVisible:false});
   new ResizeObserver(()=>CHART.applyOptions({width:el.clientWidth,height:el.clientHeight})).observe(el);
+  CHART.subscribeCrosshairMove(updateLegend);
 }
 
 async function loadPrimitives(){
@@ -283,14 +284,27 @@ function drawSnapshot(j){
     const line=addLine({color:s.color,lineWidth:s.step?2:3,priceLineVisible:false,title:s.name,lineStyle:s.style||0,lineType:lt,lastValueVisible:true,priceScaleId:scaleId});
     line.setData(vals);
     if(s.markers&&s.markers.length&&typeof line.setMarkers==='function'){ try{line.setMarkers(s.markers);}catch(_){} }
-    line._ov={name:s.name}; LINES.push(line);
-    leg.push(`<span style="color:${s.color}"><span class="pill" style="background:${s.color}"></span>${s.name}</span>`);
+    line._ov={name:s.name,color:s.color}; line._last=vals.length?vals[vals.length-1].value:null; LINES.push(line);
   }
   if(usedOsc){
     try{CHART.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.34}});}catch(_){}
     try{CHART.priceScale('osc').applyOptions({scaleMargins:{top:0.72,bottom:0.02},visible:true,borderColor:'#1e2632'});}catch(_){}
   } else { try{CHART.priceScale('right').applyOptions({scaleMargins:{top:0.08,bottom:0.08}});}catch(_){} }
-  document.getElementById('legend').innerHTML=leg.join('  ');
+  document.getElementById('status').dataset.ovErr = leg.length ? leg.join(' · ') : '';
+  updateLegend();
+}
+function _fmtN(v){ if(v==null||v!==v)return '—'; const a=Math.abs(v); return a>=1000?Math.round(v).toLocaleString():(a>=1?v.toFixed(2):v.toFixed(4)); }
+function updateLegend(param){
+  const leg=document.getElementById('legend'); if(!leg||!PRICE)return;
+  const has=param&&param.time&&param.seriesData;
+  let o,h,l,c,vol;
+  if(has){ const pd=param.seriesData.get(PRICE); if(pd){o=pd.open;h=pd.high;l=pd.low;c=pd.close;} const vd=param.seriesData.get(VOL); if(vd)vol=vd.value; }
+  else if(PRICEBARS.length){ const bb=PRICEBARS[PRICEBARS.length-1]; o=bb.open;h=bb.high;l=bb.low;c=bb.close;vol=bb.volume; }
+  const sym=(document.getElementById('symbol').value||'').toUpperCase();
+  let html='';
+  if(c!=null){ const up=c>=o; html+=`<b>${sym}</b> <span style="color:${up?'var(--accent)':'var(--red)'}">O ${_fmtN(o)}  H ${_fmtN(h)}  L ${_fmtN(l)}  C ${_fmtN(c)}</span>`; if(vol!=null)html+=`  <span class="muted">V ${_fmtN(vol)}</span>`; }
+  for(const ln of [...LINES,...STRATLINES]){ if(!ln._ov)continue; let v=ln._last; if(has){ const d=param.seriesData.get(ln); v=d?d.value:undefined; } if(v!=null&&v===v) html+=`  <span style="color:${ln._ov.color||'#94a3b8'}"><span class="pill" style="background:${ln._ov.color||'#94a3b8'}"></span>${ln._ov.name} ${_fmtN(v)}</span>`; }
+  leg.innerHTML=html;
 }
 
 async function loadChart(){
@@ -309,7 +323,8 @@ async function loadChart(){
     if(!j.ok){ document.getElementById('status').textContent='error: '+(j.error||'').slice(0,120); return; }
     drawSnapshot(j);
     const tag=asof?` · as of ${asof}`:'';
-    document.getElementById('status').textContent=`${symbol} · ${j.first} → ${j.last} · ${(j.bars||[]).length} bars · ${OVERLAYS.length} overlay(s)${tag}`;
+    const ovErr=document.getElementById('status').dataset.ovErr;
+    document.getElementById('status').innerHTML=`${symbol} · ${j.first} → ${j.last} · ${(j.bars||[]).length} bars · ${OVERLAYS.length} overlay(s)${tag}`+(ovErr?` · <span style="color:var(--draft)">⚠ ${ovErr}</span>`:'');
     renderRegister();           // keep the register highlight on the loaded symbol
     if(LIVE&&!asof) startLive();       // re-subscribe with the new params (live only)
   }catch(e){ document.getElementById('status').textContent='error: '+e.message; }
@@ -558,9 +573,11 @@ function drawStratSeries(series){
     let sLo=Infinity,sHi=-Infinity; for(const v of vals){ if(v.value<sLo)sLo=v.value; if(v.value>sHi)sHi=v.value; }
     const onPrice=(sHi>=pLo-0.5*span)&&(sLo<=pHi+0.5*span); if(!onPrice)usedOsc=true;
     const ln=addLine({color:s.color,lineWidth:2,priceLineVisible:false,title:s.name,lineStyle:0,lineType:s.step?1:0,lastValueVisible:true,priceScaleId:onPrice?'right':'osc'});
-    ln.setData(vals); if(s.markers&&s.markers.length&&typeof ln.setMarkers==='function'){try{ln.setMarkers(s.markers);}catch(_){}} STRATLINES.push(ln);
+    ln.setData(vals); if(s.markers&&s.markers.length&&typeof ln.setMarkers==='function'){try{ln.setMarkers(s.markers);}catch(_){}}
+    ln._ov={name:s.name,color:s.color}; ln._last=vals.length?vals[vals.length-1].value:null; STRATLINES.push(ln);
   }
   if(usedOsc){ try{CHART.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.34}});}catch(_){} try{CHART.priceScale('osc').applyOptions({scaleMargins:{top:0.72,bottom:0.02},visible:true,borderColor:'#1e2632'});}catch(_){} }
+  updateLegend();
 }
 function readStratHeader(){ STRAT.name=document.getElementById('stratName').value; STRAT.side=document.getElementById('stratSide').value;
   const rd=(t,v)=>{ const vv=parseFloat(document.getElementById(v).value); return {type:document.getElementById(t).value, value:Number.isFinite(vv)?vv:null}; };
