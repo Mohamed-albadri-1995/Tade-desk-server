@@ -34,42 +34,71 @@ def feed_ok(feed: str) -> bool:
     return False
 
 
-def required_days(overlays: list, tf: str, base_days: int) -> int:
-    """Bump `base_days` up so the heaviest indicator has enough history.
+# A multi-session VWAP / level needs its history in CALENDAR days, not bars:
+# a 1-month VWAP wants ~a month of history whether the chart is 1m or 1h. So
+# these groups get a flat calendar-day floor, timeframe-independent. 40 days
+# covers 1-month VWAP/levels, 1-week VWAP, 5-day MA, prior-week/prior-month —
+# the things the user said must never be silently wrong. (Yearly / prior-year
+# anchors would need ~365d; those are intentionally NOT force-covered — a stray
+# yearly level is acceptable, a wrong 1-month VWAP is not.)
+_HISTORY_GROUPS = {'vwap', 'levels', 'pivots', 'structure', 'dynamic_sr'}
+_HISTORY_FLOOR_DAYS = 40
 
-    Looks at each overlay's length/period param (or a known floor for
-    history-hungry bars-primitives), converts the bar-lookback into calendar
-    days for the chart timeframe, and returns max(base_days, needed)."""
+# Ceiling per timeframe so a heavy combo can't fetch a pathological window and
+# OOM a small box. Comfortably above the 40-day floor for the ones that matter.
+_MAX_DAYS = {'1m': 60, '5m': 120, '15m': 250, '30m': 400, '1h': 500, '1d': 800}
+
+
+def _bars_to_days(bars: int, tf: str, buffer: int = 2) -> int:
+    """A bar-count lookback (e.g. a 200-bar EMA) → calendar days for `tf`,
+    +40% for weekends/holidays."""
+    tf_min = _TF_MIN.get(tf, 5)
+    return math.ceil(bars * tf_min / _RTH_MIN * 1.4) + buffer
+
+
+def required_days(overlays: list, tf: str, base_days: int) -> int:
+    """Bump `base_days` up so the heaviest indicator has enough warm-up.
+
+    Works in calendar days so it's timeframe-invariant: multi-session
+    VWAPs / levels get a flat 40-day floor; N-session windows (N-day VWAP)
+    scale by their session count; pure bar-count lookbacks (EMA length,
+    pivot left/right) convert bars→days. Capped per timeframe to protect the
+    host from an unbounded fetch."""
     try:
         from qp.registry import REGISTRY
     except Exception:
         return int(base_days)
-    tf_min = _TF_MIN.get(tf, 5)
-    need_bars = 0
+    need_days = 0
     for ov in overlays or []:
-        key = ov.get('key')
-        m = REGISTRY.get(key)
+        m = REGISTRY.get(ov.get('key'))
         if not m:
             continue
         params = ov.get('params') or {}
-        # explicit length-like params
-        for pname in ('length', 'period', 'len', 'pivot_period', 'atr_length'):
+        # 1) explicit SESSION-count window (N-day VWAP, N-session lookbacks).
+        #    These count trading days → ~1.7x calendar + a week of buffer.
+        for pname in ('n_days', 'sessions', 'days', 'lookback_days'):
             if pname in params:
                 try:
-                    need_bars = max(need_bars, int(params[pname]))
+                    need_days = max(need_days, math.ceil(int(params[pname]) * 1.7) + 7)
                 except (TypeError, ValueError):
                     pass
-        # history-hungry engines with an implicit floor
-        floor = {'dynamic_sr': 320, 'gap': 60}.get(m.name, 0)
-        # multi-session vwap / levels want several days regardless of length
-        if m.group in ('vwap', 'levels') and m.name not in ('session',):
-            floor = max(floor, 3 * _RTH_MIN)
-        need_bars = max(need_bars, floor)
-    if need_bars <= 0:
+        # 2) multi-session VWAP / levels / structure / pivots: flat calendar floor.
+        if m.group in _HISTORY_GROUPS:
+            need_days = max(need_days, _HISTORY_FLOOR_DAYS)
+        # 3) dynamic_sr's ~300-bar range window can exceed the floor on coarse TFs.
+        if m.name == 'dynamic_sr':
+            need_days = max(need_days, _bars_to_days(320, tf))
+        # 4) pure bar-count lookbacks (EMA/SMA length, pivot left/right, swing).
+        for pname in ('length', 'period', 'len', 'pivot_period', 'atr_length',
+                      'left', 'right', 'lookback'):
+            if pname in params:
+                try:
+                    need_days = max(need_days, _bars_to_days(int(params[pname]), tf))
+                except (TypeError, ValueError):
+                    pass
+    if need_days <= 0:
         return int(base_days)
-    # bars -> RTH days (+40% buffer for weekends/holidays), min 1
-    need_days = math.ceil(need_bars * tf_min / _RTH_MIN * 1.4) + 1
-    return max(int(base_days), need_days)
+    return min(max(int(base_days), need_days), _MAX_DAYS.get(tf, 400))
 
 
 def load_bars(symbol: str, tf: str, days: int, feed: str,
