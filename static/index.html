@@ -262,6 +262,8 @@
         <div><label>Minimum closed trades per (setup, side) before a model is trained</label><input id="learn-min" type="number" min="5"></div>
         <div style="display:flex;align-items:end"><button class="btn" id="learn-run" style="margin-top:0">Run learning now</button></div>
       </div>
+      <div id="learning-models" style="margin-top:12px"></div>
+      <div id="learning-skipped" class="muted" style="font-size:12px;margin-top:6px"></div>
     </div>
     <div class="panel">
       <h3>Accounts &amp; capital</h3>
@@ -353,6 +355,27 @@ function breakdownTable(title, results) {
     entries.map(([k, v]) => `<tr><td>${k}</td><td>${v === true ? "✅" : v === false ? "❌" : v}</td></tr>`).join("") +
     `</tbody></table>`;
 }
+// Plain-English "why this size" — the exact factor chain stored on the card.
+function sizingExplain(f) {
+  if (!f || Object.keys(f).length === 0) return "";
+  const gm = f.grade_multiplier, sf = f.setup_factor, fm = f.final_multiplier;
+  const drivers = (f.grade_drivers || []).slice(0, 5).map(d =>
+    `<div style="font-size:11px;color:${d.contribution >= 0 ? "var(--green)" : "var(--red)"}">• ${d.feature}${d.value ? "" : " (off)"} → ${d.contribution >= 0 ? "+" : ""}${d.contribution}R</div>`
+  ).join("");
+  const sfin = f.setup_factor_state ? (f.setup_factor_state.inputs || {}) : {};
+  const modelNote = f.grade_model
+    ? `learned model, ${f.grade_model.sample_count} trades`
+    : "no trained model yet → grade B ×1.0 (fallback)";
+  return `<h4>Why this size (transparent)</h4>
+    <table><tbody>
+      <tr><td>Learned grade</td><td><b>${f.grade ?? "—"}</b> · predicted R <b>${f.predicted_r ?? "—"}</b> <span class="muted">(${modelNote})</span></td></tr>
+      <tr><td>Grade multiplier</td><td>×${gm ?? "—"}</td></tr>
+      <tr><td>Setup health factor</td><td>×${sf ?? "—"} <span class="muted">${sfin.n != null ? `(win ${sfin.win_rate ?? "—"}% · PF ${sfin.profit_factor ?? "—"} · maxDD ${sfin.max_drawdown_r ?? "—"}R · n=${sfin.n})` : "(neutral until enough trades)"}</span></td></tr>
+      <tr><td><b>Final multiplier</b></td><td><b>×${fm ?? "—"}</b> = grade × health</td></tr>
+      <tr><td>Risk / share</td><td>${f.risk_per_share != null ? "$" + Number(f.risk_per_share).toFixed(4) : "—"}</td></tr>
+    </tbody></table>
+    ${drivers ? `<div style="margin-top:4px"><span class="muted" style="font-size:11px">Grade drivers for THIS trade:</span>${drivers}</div>` : ""}`;
+}
 function renderJournal() {
   const body = $("#journal-body");
   body.innerHTML = "";
@@ -387,7 +410,8 @@ function renderJournal() {
       ${breakdownTable("Mandatory", e.entry_mandatory_results)}
       ${breakdownTable("Default conditions", e.entry_default_results)}
       ${breakdownTable("Additional conditions", e.entry_additional_results)}
-      <h4>Sizing factors</h4><pre class="muted">${JSON.stringify(e.entry_factors || {}, null, 2)}</pre>
+      ${sizingExplain(e.entry_factors || {})}
+      <h4>Full sizing factors (raw)</h4><pre class="muted">${JSON.stringify(e.entry_factors || {}, null, 2)}</pre>
       <h4>Gate screener snapshot</h4><pre class="muted">${JSON.stringify(e.entry_gate_screener_snapshot || {}, null, 2)}</pre>
       ${enrichment}${closeForm}
       </div></td>`;
@@ -954,18 +978,59 @@ document.querySelector('[data-tab="analytics"]').addEventListener("click", () =>
 });
 
 /* ---------------------------------------------------------- learning */
+// Turn a raw feature key + weight into a plain-English driver line.
+function driverText(feature, weight) {
+  const dir = weight >= 0 ? "raises" : "lowers";
+  const sign = weight >= 0 ? "+" : "";
+  let label;
+  if (feature.startsWith("cond:")) label = `Condition "${feature.slice(5)}" aligned`;
+  else if (feature.startsWith("regime:")) label = `Regime ${feature.slice(7)}`;
+  else label = feature;
+  return `${label} → ${dir} expected R (${sign}${weight})`;
+}
+function rangeText(lo, hi) {
+  const l = lo == null ? "−∞" : (lo >= 0 ? "+" : "") + lo.toFixed(2);
+  const h = hi == null ? "+∞" : (hi >= 0 ? "+" : "") + hi.toFixed(2);
+  return `${l}R … ${h}R`;
+}
 async function loadLearning() {
   const st = await api.get("/api/learning/status");
   $("#learn-min").value = st.min_trades;
-  $("#learning-status-line").textContent =
-    `Runs automatically every night at 20:00 ET. Last run: ${st.last_run_at ? new Date(st.last_run_at).toLocaleString() : "never"} · trained models: ${st.models.length}`;
+  $("#learning-status-line").innerHTML =
+    `Runs automatically every night at 20:00 ET. Last run: <b>${st.last_run_at ? new Date(st.last_run_at).toLocaleString() : "never"}</b> · trained models: <b>${st.models.length}</b>.
+     Each model learns, per (setup, side), how your conditions + the market regime predict the trade's R-multiple, then turns that into a grade and a size multiplier. Below is exactly what it learned — nothing hidden.`;
+
+  if (!st.models.length) {
+    $("#learning-models").innerHTML = `<p class="muted" style="font-size:12px">No models yet. Each (setup, side) needs at least ${st.min_trades} closed trades. As trades accumulate they train automatically.</p>`;
+    return;
+  }
+  $("#learning-models").innerHTML = st.models.map(m => {
+    const drivers = (m.top_features || []).map(f =>
+      `<div style="font-size:11px;color:${f.weight >= 0 ? "var(--green)" : "var(--red)"}">• ${driverText(f.feature, f.weight)}</div>`
+    ).join("") || '<div class="muted" style="font-size:11px">no feature weights</div>';
+    const buckets = (m.buckets || []).map(b =>
+      `<tr><td style="font-weight:600">${b.grade}</td><td>${rangeText(b.lower, b.upper)}</td>
+        <td style="font-weight:700;color:${b.multiplier > 1 ? "var(--green)" : b.multiplier < 1 ? "var(--red)" : ""}">×${b.multiplier}</td>
+        <td class="muted">${b.n} trades</td></tr>`).join("");
+    return `<div class="panel" style="background:var(--panel2);margin-bottom:10px">
+      <div style="font-weight:700">${m.setup_name} · <span class="side ${m.side}">${m.side}</span>
+        <span class="muted" style="font-weight:400;font-size:11px">— trained on ${m.sample_count} closed trades, ${m.trained_at ? new Date(m.trained_at).toLocaleString() : "—"}</span></div>
+      <div style="margin:6px 0"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em">What it learned (top drivers of expected R)</span>${drivers}</div>
+      <div><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em">Grade → size multiplier</span>
+        <table style="margin-top:4px"><thead><tr><th>Grade</th><th>Predicted R range</th><th>Size ×</th><th>from</th></tr></thead><tbody>${buckets}</tbody></table></div>
+    </div>`;
+  }).join("");
 }
 $("#learn-run").onclick = async () => {
   flash("Learning run started…");
   try {
     await api.send("PUT", "/api/learning/config", { min_trades: Number($("#learn-min").value) });
     const r = await api.send("POST", "/api/learning/run");
-    flash(`Learning done: ${r.trained.length} trained, ${r.skipped.length} skipped (not enough trades)`);
+    const skipTxt = r.skipped.length
+      ? " · skipped: " + r.skipped.map(s => `setup ${s.setup_id}/${s.side} (${s.n} trades${s.reason ? ", " + s.reason : ""})`).join(", ")
+      : "";
+    $("#learning-skipped").textContent = r.skipped.length ? "Not enough data to train:" + skipTxt : "";
+    flash(`Learning done: ${r.trained.length} trained, ${r.skipped.length} skipped`);
     loadLearning();
   } catch (err) { flash("Error: " + (err.detail || JSON.stringify(err))); }
 };
