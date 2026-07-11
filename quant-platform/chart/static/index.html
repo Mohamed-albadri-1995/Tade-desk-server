@@ -466,12 +466,17 @@ function operandEl(op, onStruct, allowConst){
     const r=document.createElement('span'); r.textContent=')'; r.style.color='var(--text3)'; box.appendChild(r); canOffset=true;
   } else if(op.kind==='primitive'){
     const ps=primSelect(op.key); ps.onchange=()=>{op.key=ps.value; op.params={}; delete op.sub; onStruct();}; box.appendChild(ps);
-    const m=primMeta(op.key), lp=lenParam(m);
-    if(lp){ const li=document.createElement('input'); li.type='number'; li.className='len'; const d=m.params.find(p=>p.name===lp); li.placeholder=d&&d.default!=null?String(d.default):'len'; if(op.params[lp]!=null)li.value=op.params[lp]; li.onchange=()=>{const v=parseInt(li.value,10); if(Number.isFinite(v))op.params[lp]=v; else delete op.params[lp];}; box.appendChild(li);}
+    const m=primMeta(op.key); op.params=op.params||{};
+    // ALL params of the primitive (length, mult, window start/end, strength…)
+    for(const p of (m&&m.params||[])){
+      if(p.kind==='bool'){ const cb=document.createElement('input'); cb.type='checkbox'; cb.title=p.name; cb.checked=op.params[p.name]!=null?!!op.params[p.name]:!!p.default; cb.onchange=()=>op.params[p.name]=cb.checked; box.appendChild(document.createTextNode(p.name.slice(0,4))); box.appendChild(cb); }
+      else if(p.kind==='int'||p.kind==='float'){ const li=document.createElement('input'); li.type='number'; li.className='len'; li.title=p.name; li.placeholder=p.name+(p.default!=null?(' '+p.default):''); if(p.kind==='float')li.step='any'; if(op.params[p.name]!=null)li.value=op.params[p.name]; li.onchange=()=>{const v=(p.kind==='float')?parseFloat(li.value):parseInt(li.value,10); if(Number.isFinite(v))op.params[p.name]=v; else delete op.params[p.name];}; box.appendChild(li); }
+      else { const ti=document.createElement('input'); ti.className='len'; ti.style.width='58px'; ti.title=p.name; ti.placeholder=p.name; if(op.params[p.name]!=null)ti.value=op.params[p.name]; ti.onchange=()=>{ if(ti.value)op.params[p.name]=ti.value; else delete op.params[p.name]; }; box.appendChild(ti); }
+    }
     // multi-output primitives (floor R1/S1…, dynamic_sr sr1…, BB upper/lower) → pick the line
     if(m&&m.outputs&&m.outputs.length>1){ if(!op.sub)op.sub=m.outputs[0]; const os=document.createElement('select'); os.title='which output line'; for(const o of m.outputs){const opt=document.createElement('option');opt.value=o;opt.textContent=o;os.appendChild(opt);} os.value=op.sub; os.onchange=()=>op.sub=os.value; box.appendChild(os); }
     else if(op.sub){ delete op.sub; }
-    const src=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;src.appendChild(o);} src.value=op.source||'close'; src.onchange=()=>op.source=src.value; box.appendChild(src); canOffset=true;
+    const src=document.createElement('select'); src.title='input source'; for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;src.appendChild(o);} src.value=op.source||'close'; src.onchange=()=>op.source=src.value; box.appendChild(src); canOffset=true;
   } else if(op.kind==='price'){
     const fs=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'close'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs); canOffset=true;
   } else if(op.kind==='time'){

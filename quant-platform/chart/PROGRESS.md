@@ -80,3 +80,13 @@ it doesn't count.
   so window start/end (and bb mult, dynamic_sr strength) can't be set inline —
   they fall back to defaults. Fix in It.5: expose ALL params of a primitive
   operand.
+
+### It.5 — operand editor exposes ALL primitive params  [DONE]
+- The rule operand editor now renders an input for every param of the chosen
+  primitive (int/float → number, bool → checkbox, str → text), not just the
+  length-like one. So window start/end (power hour 1500–1600), BB mult,
+  dynamic_sr min_strength/pivot_period, vwap anchor_offset, etc. are all
+  settable inline. Verified in headless: window_high shows start/end, bb shows
+  length+mult, power-hour values captured; no JS errors.
+- This makes every primitive fully configurable inside a condition — the last
+  piece for "as complex as needed" using only basic primitives.
