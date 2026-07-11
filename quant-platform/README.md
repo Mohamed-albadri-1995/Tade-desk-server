@@ -40,7 +40,8 @@ quant-platform/
 │       ├── dynamic_sr.py  dynamic support/resistance engine
 │       ├── structure.py   pivot_high, pivot_low
 │       ├── pivots.py      floor pivots {P,R1..R3,S1..S3}
-│       └── candle.py      body, upper_wick, lower_wick, bar_range
+│       ├── candle.py      body, upper_wick, lower_wick, bar_range
+│       └── volume.py       avg_volume, rel_volume (RVOL)
 ├── approvals/approvals.json   git-tracked verification records
 ├── tools/
 │   ├── compare_server.py      the verification web UI

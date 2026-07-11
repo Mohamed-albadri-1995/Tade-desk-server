@@ -2,7 +2,7 @@
 
 Generated from the registry by `tools/gen_catalog.py` — do not edit by hand.
 
-**64 primitives · 30 approved** (as of 2026-07-10 09:38 UTC).
+**66 primitives · 64 approved** (as of 2026-07-11 10:27 UTC).
 Approval status changes as verification progresses; the source of truth
 is `approvals/approvals.json`, queried at runtime via `qp.approved_primitives()`.
 
@@ -17,7 +17,7 @@ Conventions:
 
 ## candle
 
-### 🚧 `candle.bar_range`
+### ✅ `candle.bar_range`
 
 Full bar range, high - low.
 
@@ -25,7 +25,7 @@ Full bar range, high - low.
 - output: single series
 - params: none
 
-### 🚧 `candle.body`
+### ✅ `candle.body`
 
 Absolute candle body, |close - open|.
 
@@ -33,7 +33,7 @@ Absolute candle body, |close - open|.
 - output: single series
 - params: none
 
-### 🚧 `candle.lower_wick`
+### ✅ `candle.lower_wick`
 
 Lower wick, min(close, open) - low.
 
@@ -41,7 +41,7 @@ Lower wick, min(close, open) - low.
 - output: single series
 - params: none
 
-### 🚧 `candle.upper_wick`
+### ✅ `candle.upper_wick`
 
 Upper wick, high - max(close, open).
 
@@ -51,7 +51,7 @@ Upper wick, high - max(close, open).
 
 ## extremes
 
-### 🚧 `extremes.highest`
+### ✅ `extremes.highest`
 
 Highest value of `source` over the last `length` bars (inclusive of current bar). Matches Pine `ta.highest`.
 
@@ -59,7 +59,7 @@ Highest value of `source` over the last `length` bars (inclusive of current bar)
 - output: single series
 - params: `length`: int = 20 (min 1)
 
-### 🚧 `extremes.lowest`
+### ✅ `extremes.lowest`
 
 Lowest value of `source` over the last `length` bars (inclusive of current bar). Matches Pine `ta.lowest`.
 
@@ -77,7 +77,7 @@ Today's RTH open (09:30 ET bar). NaN before today's open exists.
 - output: single series
 - params: none
 
-### 🚧 `levels.dynamic_sr`
+### ✅ `levels.dynamic_sr`
 
 Dynamic S/R levels — port of "Support Resistance Dynamic v2". Clusters the last `max_pivots` confirmed pivots into channels no wider than (300-bar range * channel_width_pct /100), ranks by pivot count, keeps the top `max_levels`. Returns {sr1..srN}, strongest first. `source`: "hl" uses high/low pivots, "body" uses max/min(open,close). Needs ~300 bars of history before the first level.
 
@@ -101,7 +101,7 @@ This ISO week's Monday RTH low.
 - output: single series
 - params: none
 
-### 🚧 `levels.monthly_high`
+### ✅ `levels.monthly_high`
 
 This ET month's running RTH high.
 
@@ -109,7 +109,7 @@ This ET month's running RTH high.
 - output: single series
 - params: none
 
-### 🚧 `levels.monthly_low`
+### ✅ `levels.monthly_low`
 
 This ET month's running RTH low.
 
@@ -117,7 +117,7 @@ This ET month's running RTH low.
 - output: single series
 - params: none
 
-### 🚧 `levels.monthly_open`
+### ✅ `levels.monthly_open`
 
 This ET month's RTH open.
 
@@ -125,7 +125,7 @@ This ET month's RTH open.
 - output: single series
 - params: none
 
-### 🚧 `levels.pm_high`
+### ✅ `levels.pm_high`
 
 Premarket high (04:00-09:30 ET). Running during PM; frozen through the rest of the day. Needs extended-hours bars in the feed (Alpaca IEX includes them).
 
@@ -133,7 +133,7 @@ Premarket high (04:00-09:30 ET). Running during PM; frozen through the rest of t
 - output: single series
 - params: none
 
-### 🚧 `levels.pm_low`
+### ✅ `levels.pm_low`
 
 Premarket low (04:00-09:30 ET), frozen after 09:30.
 
@@ -141,7 +141,7 @@ Premarket low (04:00-09:30 ET), frozen after 09:30.
 - output: single series
 - params: none
 
-### 🚧 `levels.postmarket_high`
+### ✅ `levels.postmarket_high`
 
 Post-market high — window 16:00 → 04:00 next day ET (NY close → premarket start). This is the "overnight" session in the 24h model NY/post/pre; premarket is EXCLUDED. Running through the window, then frozen across the next RTH day. Needs extended-hours bars (polygon / hybrid), All-day view.
 
@@ -149,7 +149,7 @@ Post-market high — window 16:00 → 04:00 next day ET (NY close → premarket 
 - output: single series
 - params: none
 
-### 🚧 `levels.postmarket_low`
+### ✅ `levels.postmarket_low`
 
 Post-market low — window 16:00 → 04:00 next day ET (NY close → premarket start, premarket excluded).
 
@@ -157,7 +157,7 @@ Post-market low — window 16:00 → 04:00 next day ET (NY close → premarket s
 - output: single series
 - params: none
 
-### 🚧 `levels.postpre_high`
+### ✅ `levels.postpre_high`
 
 Post+Pre high — window 16:00 → 09:30 next day ET: the full extended range from the NY close to the next open (post-market 16:00-04:00 + premarket 04:00-09:30). Running through the window, frozen across the RTH day. This is the old "overnight_high" renamed. The user's Pine used 18:00-09:30 (CME Globex); here it anchors to the 16:00 NY equity close. Needs extended-hours bars (polygon / hybrid), All-day view.
 
@@ -165,7 +165,7 @@ Post+Pre high — window 16:00 → 09:30 next day ET: the full extended range fr
 - output: single series
 - params: none
 
-### 🚧 `levels.postpre_low`
+### ✅ `levels.postpre_low`
 
 Post+Pre low — window 16:00 → 09:30 next day ET (post-market + premarket, the full close→open range).
 
@@ -189,7 +189,7 @@ Yesterday's RTH low.
 - output: single series
 - params: none
 
-### 🚧 `levels.prev_day_open`
+### ✅ `levels.prev_day_open`
 
 Yesterday's RTH open.
 
@@ -197,7 +197,7 @@ Yesterday's RTH open.
 - output: single series
 - params: none
 
-### 🚧 `levels.prev_month_open`
+### ✅ `levels.prev_month_open`
 
 Previous month's RTH open (PMO). Fetch window must reach into last month.
 
@@ -205,7 +205,7 @@ Previous month's RTH open (PMO). Fetch window must reach into last month.
 - output: single series
 - params: none
 
-### 🚧 `levels.prev_week_open`
+### ✅ `levels.prev_week_open`
 
 Previous ISO week's RTH open (PWO). Fetch window must reach into last week.
 
@@ -213,7 +213,7 @@ Previous ISO week's RTH open (PWO). Fetch window must reach into last week.
 - output: single series
 - params: none
 
-### 🚧 `levels.prev_year_open`
+### ✅ `levels.prev_year_open`
 
 Previous year's RTH open (PYO). Fetch window must reach into last year.
 
@@ -261,7 +261,7 @@ This ISO week's RTH open (Monday 09:30 ET bar).
 - output: single series
 - params: none
 
-### 🚧 `levels.yearly_open`
+### ✅ `levels.yearly_open`
 
 This year's RTH open (first RTH bar of the year — the S/R script's YO line). The fetch window must include January for a real value.
 
@@ -339,7 +339,7 @@ Wilder RSI. Matches TradingView `ta.rsi(source, length)` — rma-smoothed gains/
 
 ## pivots
 
-### 🚧 `pivots.floor`
+### ✅ `pivots.floor`
 
 Floor pivots {P, R1, R2, R3, S1, S2, S3} from yesterday's H/L/C. session='eth' (default) uses the full 24h day — matches the user's Pine "Full Day Daily Pivots (ETH)" which requests the 24h Globex daily bar. session='rth' uses the 09:30-16:00 daily bar (a standard TV equities daily).
 
@@ -357,7 +357,7 @@ Pivot high — matches Pine `ta.pivothigh(source, left, right)`. Returns the piv
 - output: single series
 - params: `left`: int = 10 (min 1) · `right`: int = 10 (min 1)
 
-### 🚧 `structure.pivot_low`
+### ✅ `structure.pivot_low`
 
 Pivot low — matches Pine `ta.pivotlow(source, left, right)`.
 
@@ -367,7 +367,7 @@ Pivot low — matches Pine `ta.pivotlow(source, left, right)`.
 
 ## volatility
 
-### 🚧 `volatility.atr`
+### ✅ `volatility.atr`
 
 Average True Range (Wilder). Matches TradingView `ta.atr(length)` — rma(true_range, length).
 
@@ -375,7 +375,7 @@ Average True Range (Wilder). Matches TradingView `ta.atr(length)` — rma(true_r
 - output: single series
 - params: `length`: int = 14 (min 1)
 
-### 🚧 `volatility.atr_daily`
+### ✅ `volatility.atr_daily`
 
 Daily ATR — the Wilder ATR computed on 1-DAY bars, always, regardless of the chart timeframe (compute_tf='1d'), then held flat across each day. Matches Pine `request.security(syminfo.tickerid, "D", ta.atr(length))`. Lets you read the DAILY ATR while looking at an intraday chart. Needs enough daily history for the warm-up — raise Days to >= ~3x length (e.g. Days 30-45 for length 14).
 
@@ -399,7 +399,7 @@ Bollinger Bands with an EMA middle line — matches the L3 script's `l3_bb_ema =
 - output: dict with keys `middle, upper, lower`
 - params: `length`: int = 21 (min 2) · `mult`: float = 2.0 (min 0)
 
-### 🚧 `volatility.stdev`
+### ✅ `volatility.stdev`
 
 Population standard deviation (ddof=0) of `source` over `length` bars. Matches TradingView `ta.stdev(source, length)`.
 
@@ -407,7 +407,7 @@ Population standard deviation (ddof=0) of `source` over `length` bars. Matches T
 - output: single series
 - params: `length`: int = 20 (min 2)
 
-### 🚧 `volatility.true_range`
+### ✅ `volatility.true_range`
 
 True range, `max(H-L, |H-prev_close|, |L-prev_close|)`. Matches TradingView `ta.tr(handle_na=true)`: the first bar (no prior close) falls back to high-low. This is the variant `ta.atr` builds on.
 
@@ -415,9 +415,27 @@ True range, `max(H-L, |H-prev_close|, |L-prev_close|)`. Matches TradingView `ta.
 - output: single series
 - params: none
 
+## volume
+
+### 🚧 `volume.avg_volume`
+
+Average DAILY volume over the last `length` days. Computed on 1-day bars (compute_tf='1d') so it is the same value on any chart timeframe — matches `ta.sma(volume, length)` on a daily chart. Held flat across intraday bars. Raise Days so the warm-up (>= length daily bars) is available.
+
+- input: `bars`
+- output: single series
+- params: `length`: int = 20 (min 1)
+
+### 🚧 `volume.rel_volume`
+
+Intraday Relative Volume (RVOL). For each bar: cumulative volume from the RTH open (09:30 ET) through the bar, divided by the AVERAGE cumulative volume at the same time-of-day over the previous `length` RTH sessions. ~1.0 = normal for this hour, 2.0 = twice the usual volume by now. Matches the day-trader / TradingView intraday Relative Volume. Non-RTH bars are NaN. Needs `length` prior RTH days of history — raise Days (e.g. Days >= length + a few).
+
+- input: `bars`
+- output: single series
+- params: `length`: int = 20 (min 1)
+
 ## vwap
 
-### 🚧 `vwap.anchored`
+### ✅ `vwap.anchored`
 
 AVWAP from a user-chosen datetime — the cluster script's Earnings/News VWAP A/B. Anchors at the first bar whose timestamp >= `anchor` (Pine: `time >= i_earnDate and time[1] < i_earnDate`). `anchor` is an ET datetime string, e.g. "2026-07-01 09:30". Empty anchor → all NaN.
 
@@ -425,7 +443,7 @@ AVWAP from a user-chosen datetime — the cluster script's Earnings/News VWAP A/
 - output: single series
 - params: `anchor`: str = '' · `rth_only`: bool = True
 
-### 🚧 `vwap.gap`
+### ✅ `vwap.gap`
 
 AVWAP anchored at the most recent gap bar: `|open - prev_close| >= atr(atr_length) * atr_mult`. With rth_only (default) prev_close is the previous RTH bar, so the 09:30 bar carries the full overnight gap — matching Pine on an RTH chart.
 
@@ -433,7 +451,7 @@ AVWAP anchored at the most recent gap bar: `|open - prev_close| >= atr(atr_lengt
 - output: single series
 - params: `atr_length`: int = 14 (min 1) · `atr_mult`: float = 1.5 (min 0) · `rth_only`: bool = True
 
-### 🚧 `vwap.last_hour_hh`
+### ✅ `vwap.last_hour_hh`
 
 AVWAP seeded each new ET day with yesterday's last-hour (15:00-16:00 ET by default) highest-high bar, then accumulating today's bars.
 
@@ -441,7 +459,7 @@ AVWAP seeded each new ET day with yesterday's last-hour (15:00-16:00 ET by defau
 - output: single series
 - params: `last_hour_start`: int = 15 (min 10, max 15) · `rth_only`: bool = True
 
-### 🚧 `vwap.last_hour_ll`
+### ✅ `vwap.last_hour_ll`
 
 AVWAP seeded from yesterday's last-hour lowest-low bar.
 
@@ -449,7 +467,7 @@ AVWAP seeded from yesterday's last-hour lowest-low bar.
 - output: single series
 - params: `last_hour_start`: int = 15 (min 10, max 15) · `rth_only`: bool = True
 
-### 🚧 `vwap.monthly`
+### ✅ `vwap.monthly`
 
 Monthly VWAP — resets on the first (RTH) bar of each ET calendar month. Matches Pine `ta.vwap(hlc3, isNewMonth)` on an RTH chart.
 
@@ -482,7 +500,7 @@ Session VWAP for US equities. Resets at 09:30 ET, computes only during RTH (09:3
 - output: single series
 - params: none
 
-### 🚧 `vwap.stdev_bands`
+### ✅ `vwap.stdev_bands`
 
 Session VWAP with ± mult * (running stdev of price around the VWAP). Returns {middle, upper, lower}. This is the BBZ script's `bz_vwap_stdev` ("SDV") — NOT the same as `volatility.stdev`, which is a rolling-window stdev of close.
 
@@ -538,7 +556,7 @@ AVWAP from this ISO-week's lowest bar. Re-anchors on new LL.
 - output: single series
 - params: `rth_only`: bool = True
 
-### 🚧 `vwap.weekly`
+### ✅ `vwap.weekly`
 
 Weekly VWAP — resets on the first (RTH) bar of each ISO week. Matches Pine `ta.vwap(hlc3, isNewWeek)` on an RTH chart.
 
