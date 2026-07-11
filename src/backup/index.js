@@ -44,13 +44,17 @@ function githubRequest(method, path, token, body) {
   });
 }
 
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function getFileSha(token, filePath) {
   const res = await githubRequest('GET', `/repos/${BACKUP_REPO}/contents/${filePath}?ref=${BACKUP_BRANCH}`, token);
   if (res.status === 200 && res.body.sha) return res.body.sha;
   return null;
 }
 
-async function pushFile(token, filePath, content, message) {
+async function pushFile(token, filePath, content, message, attempt = 0) {
+  // Always re-read the current SHA right before the PUT so we commit against
+  // the file as it stands now.
   const sha = await getFileSha(token, filePath);
   const body = {
     message,
@@ -59,6 +63,12 @@ async function pushFile(token, filePath, content, message) {
     ...(sha ? { sha } : {}),
   };
   const res = await githubRequest('PUT', `/repos/${BACKUP_REPO}/contents/${filePath}`, token, body);
+  // 409 (ref moved) / 422 (stale sha): another commit landed on the branch
+  // between our GET and PUT. Back off, re-fetch the fresh SHA, and retry.
+  if ((res.status === 409 || res.status === 422) && attempt < 4) {
+    await delay(400 * (attempt + 1));
+    return pushFile(token, filePath, content, message, attempt + 1);
+  }
   if (res.status !== 200 && res.status !== 201) {
     throw new Error(`GitHub push failed (${res.status}): ${JSON.stringify(res.body)}`);
   }
@@ -153,10 +163,10 @@ async function pushBackup() {
   const ts = new Date().toISOString();
   const msg = `Backup ${date} — auto export at ${ts}`;
 
-  await Promise.all([
-    pushFile(token, `backups/${date}.json`, payload, msg),
-    pushFile(token, 'backups/latest.json', payload, msg),
-  ]);
+  // Push sequentially, NOT in parallel: both files commit to the same branch,
+  // and two concurrent Contents-API commits race on the branch HEAD → 409.
+  await pushFile(token, `backups/${date}.json`, payload, msg);
+  await pushFile(token, 'backups/latest.json', payload, msg);
 
   // Record last backup time in settings
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('lastBackupAt', ts);
