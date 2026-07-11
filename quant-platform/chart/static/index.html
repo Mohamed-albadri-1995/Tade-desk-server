@@ -69,7 +69,8 @@
   .rrow .rx:hover { color:var(--red); }
   .opd { display:inline-flex; gap:3px; align-items:center; }
   .opd .len { width:48px; } .opd .cst { width:64px; }
-  .addrule { margin-top:7px; background:#1c2431; color:var(--text2); border:1px dashed var(--border); padding:4px 10px; border-radius:5px; font-size:11px; cursor:pointer; }
+  .addrule { margin-top:7px; background:#1c2431; color:var(--text2); border:1px dashed var(--border); padding:4px 10px; border-radius:5px; font-size:11px; cursor:pointer; margin-right:5px; }
+  .subgroup { border:1px solid #26324a; border-radius:6px; padding:5px 7px; margin:5px 0; background:rgba(59,130,246,0.05); }
   .logicsel { font-size:10px !important; padding:1px 4px !important; }
   #stratStat { font-size:11px; color:var(--text2); }
   #banner { position:absolute; top:8px; left:8px; right:8px; background:rgba(245,166,35,.14); color:var(--draft); padding:8px 10px; border-radius:6px; font-size:12px; display:none; z-index:5; }
@@ -112,6 +113,8 @@
         <input id="stratName" placeholder="strategy name" size="16">
         <label style="color:var(--text2)">Side
           <select id="stratSide"><option value="long">Long</option><option value="short">Short</option></select></label>
+        <label style="color:var(--text2)" title="Stop loss">SL <select id="slType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option></select><input id="slVal" type="number" step="any" style="width:52px"></label>
+        <label style="color:var(--text2)" title="Take profit">TP <select id="tpType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option></select><input id="tpVal" type="number" step="any" style="width:52px"></label>
         <select id="stratLoad" title="load a saved strategy"><option value="">— saved —</option></select>
         <button id="stratSave" style="background:var(--accent);color:#000">Save</button>
         <button id="stratNew" style="background:#1c2431;color:var(--text);border:1px solid var(--border)">New</button>
@@ -125,12 +128,14 @@
         <div class="rulecol" id="colEntry">
           <h4>Entry — when <select id="entryLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="ATLEAST">AT LEAST k</option><option value="THEN">IN SEQUENCE</option></select><input id="entryK" class="logicsel" type="number" style="width:44px;display:none" title="minimum conditions that must match" placeholder="k"><input id="entryWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="entryNow">—</span></h4>
           <div id="entryRules"></div>
-          <button class="addrule" data-g="entry">+ condition</button>
+          <button class="addrule" data-g="entry" data-t="rule">+ condition</button>
+          <button class="addrule" data-g="entry" data-t="group">+ group ( )</button>
         </div>
         <div class="rulecol" id="colExit">
           <h4>Exit — when <select id="exitLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="ATLEAST">AT LEAST k</option><option value="THEN">IN SEQUENCE</option></select><input id="exitK" class="logicsel" type="number" style="width:44px;display:none" title="minimum conditions that must match" placeholder="k"><input id="exitWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="exitNow">—</span></h4>
           <div id="exitRules"></div>
-          <button class="addrule" data-g="exit">+ condition</button>
+          <button class="addrule" data-g="exit" data-t="rule">+ condition</button>
+          <button class="addrule" data-g="exit" data-t="group">+ group ( )</button>
         </div>
       </div>
     </div>
@@ -152,8 +157,8 @@
   </div>
 </main>
 <script>
-let CHART=null, PRICE=null, BG=null, LINES=[], PRIMS=[], WS=null, LIVE=false;
-let OVERLAYS=[], SELECTED=null, _nid=1, PRICEBARS=[];
+let CHART=null, PRICE=null, BG=null, VOL=null, LINES=[], PRIMS=[], WS=null, LIVE=false;
+let OVERLAYS=[], SELECTED=null, _nid=1, PRICEBARS=[], STRATLINES=[];
 let FEEDS={}, REG_ROWS=[];
 const feedHas=n=>!!FEEDS[n];
 let DAYMARKERS=[], SIGMARKERS=[];   // price-series markers: day labels + strategy signals
@@ -184,6 +189,8 @@ function initChart(){
   });
   BG=addHist({priceScaleId:'sessbg',priceLineVisible:false,lastValueVisible:false,base:0});
   CHART.priceScale('sessbg').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
+  VOL=addHist({priceScaleId:'vol',priceLineVisible:false,lastValueVisible:false});
+  CHART.priceScale('vol').applyOptions({scaleMargins:{top:0.86,bottom:0},visible:false});
   PRICE=addCandles({upColor:'#22c55e',downColor:'#ef5350',wickUpColor:'#22c55e',wickDownColor:'#ef5350',borderVisible:false});
   new ResizeObserver(()=>CHART.applyOptions({width:el.clientWidth,height:el.clientHeight})).observe(el);
 }
@@ -251,10 +258,14 @@ function renderSelected(){
 }
 
 // ── draw a full snapshot: candles + session bands + overlays (panes/steps/markers) ──
+function clearStratLines(){ for(const l of STRATLINES){ try{CHART.removeSeries(l);}catch(_){} } STRATLINES=[]; }
 function drawSnapshot(j){
   PRICEBARS=j.bars||[]; PRICE.setData(PRICEBARS);
+  clearStratLines(); SIGMARKERS=[];      // strategy lines/signals are ephemeral — redrawn on Evaluate
   if(BG){ BG.setData((j.bars||[]).map(b=>({time:b.time,value:1,
     color:b.sess==='pre'?'rgba(59,130,246,0.12)':b.sess==='post'?'rgba(168,85,247,0.14)':'rgba(0,0,0,0)'}))); }
+  if(VOL){ VOL.setData((j.bars||[]).map(b=>({time:b.time,value:b.volume,
+    color:b.close>=b.open?'rgba(34,197,94,0.32)':'rgba(239,83,80,0.32)'}))); }
   const tf=document.getElementById('tf').value;
   if(tf!=='1d'&&j.day_starts&&j.day_starts.length){
     DAYMARKERS=j.day_starts.map(d=>({time:d.time,position:'belowBar',color:'#64748b',shape:'square',size:1,text:d.label}));
@@ -411,7 +422,9 @@ const UNARY=new Set(['rising','falling']);
 const BOUNCE=new Set(['bounce_up','bounce_down']);
 const PFIELDS=['close','open','high','low','hl2','hlc3','ohlc4','volume'];
 let STRAT=blankStrat(), SAVED=[];
-function blankStrat(){ return {id:null,name:'',side:'long',entry:{logic:'AND',window:10,rules:[]},exit:{logic:'AND',window:10,rules:[]}}; }
+function blankStrat(){ return {id:null,name:'',side:'long',risk:{sl:{type:'',value:null},tp:{type:'',value:null}},entry:{logic:'AND',window:10,k:1,rules:[]},exit:{logic:'AND',window:10,k:1,rules:[]}}; }
+function blankGroup(){ return {logic:'OR',window:10,k:1,rules:[]}; }
+function isGroup(n){ return n && Array.isArray(n.rules); }
 function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; if(kind==='time')return {kind:'time',field:'minutes'}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
 function seedTemplate(){ // a readable EMA-cross default so the builder isn't blank
   const ema=()=>({kind:'primitive',key:'ma.ema',source:'close',params:{length:9}});
@@ -429,9 +442,12 @@ function operandEl(op, onStruct, allowConst){
   box.appendChild(kindSel);
   let canOffset=false;
   if(op.kind==='primitive'){
-    const ps=primSelect(op.key); ps.onchange=()=>{op.key=ps.value; op.params={}; onStruct();}; box.appendChild(ps);
+    const ps=primSelect(op.key); ps.onchange=()=>{op.key=ps.value; op.params={}; delete op.sub; onStruct();}; box.appendChild(ps);
     const m=primMeta(op.key), lp=lenParam(m);
     if(lp){ const li=document.createElement('input'); li.type='number'; li.className='len'; const d=m.params.find(p=>p.name===lp); li.placeholder=d&&d.default!=null?String(d.default):'len'; if(op.params[lp]!=null)li.value=op.params[lp]; li.onchange=()=>{const v=parseInt(li.value,10); if(Number.isFinite(v))op.params[lp]=v; else delete op.params[lp];}; box.appendChild(li);}
+    // multi-output primitives (floor R1/S1…, dynamic_sr sr1…, BB upper/lower) → pick the line
+    if(m&&m.outputs&&m.outputs.length>1){ if(!op.sub)op.sub=m.outputs[0]; const os=document.createElement('select'); os.title='which output line'; for(const o of m.outputs){const opt=document.createElement('option');opt.value=o;opt.textContent=o;os.appendChild(opt);} os.value=op.sub; os.onchange=()=>op.sub=os.value; box.appendChild(os); }
+    else if(op.sub){ delete op.sub; }
     const src=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;src.appendChild(o);} src.value=op.source||'close'; src.onchange=()=>op.source=src.value; box.appendChild(src); canOffset=true;
   } else if(op.kind==='price'){
     const fs=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'close'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs); canOffset=true;
@@ -481,28 +497,71 @@ async function testRule(rule){
     document.getElementById('stratStat').innerHTML=`🔍 condition true on <b>${j.true}</b>/${j.bars} bars (${j.pct}%) · now: ${j.now?'<span class="up">TRUE</span>':'<span class="muted">idle</span>'}`;
   }catch(e){ document.getElementById('stratStat').textContent='test error: '+e.message; }
 }
+function logicControl(grp){
+  const wrap=document.createElement('span'); wrap.className='opd';
+  const sel=document.createElement('select'); sel.className='logicsel';
+  for(const [v,l] of [['AND','ALL match'],['OR','ANY match'],['ATLEAST','AT LEAST k'],['THEN','IN SEQUENCE']]){const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);}
+  sel.value=grp.logic||'OR';
+  const kIn=document.createElement('input'); kIn.type='number'; kIn.className='len'; kIn.style.width='38px'; kIn.placeholder='k'; kIn.value=grp.k!=null?grp.k:1;
+  const wIn=document.createElement('input'); wIn.type='number'; wIn.className='len'; wIn.style.width='50px'; wIn.placeholder='within N'; wIn.value=grp.window!=null?grp.window:10;
+  const upd=()=>{ kIn.style.display=sel.value==='ATLEAST'?'':'none'; wIn.style.display=sel.value==='THEN'?'':'none'; };
+  sel.onchange=()=>{ grp.logic=sel.value; upd(); }; kIn.onchange=()=>{ const v=parseInt(kIn.value,10); grp.k=Number.isFinite(v)?v:1; }; wIn.onchange=()=>{ const v=parseInt(wIn.value,10); grp.window=Number.isFinite(v)?v:10; };
+  upd(); wrap.appendChild(sel); wrap.appendChild(kIn); wrap.appendChild(wIn); return wrap;
+}
+function renderGroupChildren(grp, container){
+  container.innerHTML='';
+  if(!grp.rules.length){ const d=document.createElement('div'); d.className='muted'; d.style.fontSize='11px'; d.textContent='no conditions — + condition / + group'; container.appendChild(d); return; }
+  for(const child of grp.rules){ container.appendChild(isGroup(child)?groupBox(child,grp):ruleRowEl(grp,child)); }
+}
+function groupBox(grp, parent){
+  const box=document.createElement('div'); box.className='subgroup';
+  const head=document.createElement('div'); head.className='rrow'; head.style.cssText='border-bottom:none;padding:0 0 4px';
+  const lbl=document.createElement('span'); lbl.style.cssText='color:var(--blue);font-size:12px;font-weight:700'; lbl.textContent='('; head.appendChild(lbl);
+  head.appendChild(logicControl(grp));
+  const rm=document.createElement('span'); rm.className='rx'; rm.textContent='✕ group'; rm.title='remove group'; rm.style.marginLeft='auto'; rm.onclick=()=>{ parent.rules=parent.rules.filter(r=>r!==grp); renderStrat(); }; head.appendChild(rm);
+  box.appendChild(head);
+  const body=document.createElement('div'); renderGroupChildren(grp, body); box.appendChild(body);
+  const foot=document.createElement('div');
+  const ac=document.createElement('button'); ac.className='addrule'; ac.textContent='+ condition'; ac.onclick=()=>{ grp.rules.push(blankRule()); renderStrat(); };
+  const ag=document.createElement('button'); ag.className='addrule'; ag.textContent='+ group'; ag.onclick=()=>{ grp.rules.push(blankGroup()); renderStrat(); };
+  const cl=document.createElement('span'); cl.style.cssText='color:var(--blue);font-size:12px;font-weight:700;margin-left:5px'; cl.textContent=')';
+  foot.appendChild(ac); foot.appendChild(ag); foot.appendChild(cl); box.appendChild(foot);
+  return box;
+}
 function renderStrat(){
   document.getElementById('stratName').value=STRAT.name||'';
   document.getElementById('stratSide').value=STRAT.side||'long';
+  const risk=STRAT.risk||{};
+  document.getElementById('slType').value=(risk.sl&&risk.sl.type)||''; document.getElementById('slVal').value=(risk.sl&&risk.sl.value!=null)?risk.sl.value:'';
+  document.getElementById('tpType').value=(risk.tp&&risk.tp.type)||''; document.getElementById('tpVal').value=(risk.tp&&risk.tp.value!=null)?risk.tp.value:'';
   for(const g of ['entry','exit']){
     const grp=STRAT[g]; document.getElementById(g+'Logic').value=grp.logic||'AND';
-    const win=document.getElementById(g+'Window'); const isThen=(grp.logic==='THEN');
-    win.style.display=isThen?'':'none'; win.value=grp.window!=null?grp.window:10;
-    const kIn=document.getElementById(g+'K'); const isK=(grp.logic==='ATLEAST');
-    kIn.style.display=isK?'':'none'; kIn.value=grp.k!=null?grp.k:1;
-    const box=document.getElementById(g+'Rules'); box.innerHTML='';
-    if(!grp.rules.length) box.innerHTML='<div class="muted" style="font-size:11px">no conditions — click + condition</div>';
-    for(const rule of grp.rules) box.appendChild(ruleRowEl(grp,rule));
+    const win=document.getElementById(g+'Window'); win.style.display=(grp.logic==='THEN')?'':'none'; win.value=grp.window!=null?grp.window:10;
+    const kIn=document.getElementById(g+'K'); kIn.style.display=(grp.logic==='ATLEAST')?'':'none'; kIn.value=grp.k!=null?grp.k:1;
+    renderGroupChildren(grp, document.getElementById(g+'Rules'));
   }
 }
+function drawStratSeries(series){
+  clearStratLines();
+  let pLo=Infinity,pHi=-Infinity; for(const b of PRICEBARS){ if(b.low<pLo)pLo=b.low; if(b.high>pHi)pHi=b.high; } const span=(pHi-pLo)||1; let usedOsc=false;
+  for(const s of (series||[])){ const vals=s.values||[]; if(!vals.length)continue;
+    let sLo=Infinity,sHi=-Infinity; for(const v of vals){ if(v.value<sLo)sLo=v.value; if(v.value>sHi)sHi=v.value; }
+    const onPrice=(sHi>=pLo-0.5*span)&&(sLo<=pHi+0.5*span); if(!onPrice)usedOsc=true;
+    const ln=addLine({color:s.color,lineWidth:2,priceLineVisible:false,title:s.name,lineStyle:0,lineType:s.step?1:0,lastValueVisible:true,priceScaleId:onPrice?'right':'osc'});
+    ln.setData(vals); if(s.markers&&s.markers.length&&typeof ln.setMarkers==='function'){try{ln.setMarkers(s.markers);}catch(_){}} STRATLINES.push(ln);
+  }
+  if(usedOsc){ try{CHART.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.34}});}catch(_){} try{CHART.priceScale('osc').applyOptions({scaleMargins:{top:0.72,bottom:0.02},visible:true,borderColor:'#1e2632'});}catch(_){} }
+}
 function readStratHeader(){ STRAT.name=document.getElementById('stratName').value; STRAT.side=document.getElementById('stratSide').value;
+  const rd=(t,v)=>{ const vv=parseFloat(document.getElementById(v).value); return {type:document.getElementById(t).value, value:Number.isFinite(vv)?vv:null}; };
+  STRAT.risk={sl:rd('slType','slVal'), tp:rd('tpType','tpVal')};
   for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; const k=parseInt(document.getElementById(g+'K').value,10); STRAT[g].k=Number.isFinite(k)?k:1; } }
 async function loadStrategies(){
   try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
   const sel=document.getElementById('stratLoad'); sel.innerHTML='<option value="">— saved —</option>';
   for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);} if(STRAT.id)sel.value=STRAT.id;
 }
-function loadStrategyById(id){ const s=SAVED.find(x=>String(x.id)===String(id)); if(!s)return; STRAT=JSON.parse(JSON.stringify(s)); STRAT.entry=STRAT.entry||{logic:'AND',rules:[]}; STRAT.exit=STRAT.exit||{logic:'AND',rules:[]}; renderStrat(); }
+function loadStrategyById(id){ const s=SAVED.find(x=>String(x.id)===String(id)); if(!s)return; STRAT=JSON.parse(JSON.stringify(s)); STRAT.entry=STRAT.entry||{logic:'AND',rules:[]}; STRAT.exit=STRAT.exit||{logic:'AND',rules:[]}; STRAT.risk=STRAT.risk||{sl:{type:'',value:null},tp:{type:'',value:null}}; SIGMARKERS=[]; clearStratLines(); refreshMarkers(); renderStrat(); }
 async function saveStrategy(){ readStratHeader(); if(!STRAT.name)STRAT.name='Untitled'; const j=await (await fetch('/api/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(STRAT)})).json(); if(j.ok){ STRAT.id=j.strategy.id; await loadStrategies(); document.getElementById('stratStat').textContent='saved ✓'; } else document.getElementById('stratStat').textContent='save error'; }
 async function delStrategy(){ if(STRAT.id){ await fetch('/api/strategies/'+STRAT.id,{method:'DELETE'}); } STRAT=blankStrat(); seedTemplate(); await loadStrategies(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; }
 async function evalStrategy(){
@@ -513,11 +572,13 @@ async function evalStrategy(){
     const j=await (await fetch('/api/strategy/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(!j.ok){ document.getElementById('stratStat').textContent='error: '+(j.error||'').slice(0,90); return; }
     SIGMARKERS=j.markers||[]; refreshMarkers();
+    drawStratSeries(j.series);        // draw the exact indicators the rules use
     const en=document.getElementById('entryNow'), ex=document.getElementById('exitNow');
     en.textContent=j.entry_now?'TRUE now':'idle'; en.className='en '+(j.entry_now?'t':'f');
     ex.textContent=j.exit_now?'TRUE now':'idle'; ex.className='en '+(j.exit_now?'t':'f');
     const s=j.stats;
-    document.getElementById('stratStat').innerHTML=`${j.entries.length} entries · ${j.exits.length} exits · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% <span class="muted">(preview — full backtest is Phase 4)</span>`:'');
+    const by=s&&s.exits_by?' ['+Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' ')+']':'';
+    document.getElementById('stratStat').innerHTML=`${(s?s.trades:0)} trades · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%${by} <span class="muted">(preview — full backtest is Phase 4)</span>`:' · no trades');
   }catch(e){ document.getElementById('stratStat').textContent='error: '+e.message; }
 }
 function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open); document.getElementById('stratBtn').classList.toggle('on',open); if(open&&CHART){ setTimeout(()=>{const el=document.getElementById('chart'); CHART.applyOptions({height:el.clientHeight});},50); } }
@@ -545,7 +606,8 @@ window.addEventListener('load',async()=>{
   document.getElementById('stratDel').onclick=delStrategy;
   document.getElementById('stratNew').onclick=()=>{ STRAT=blankStrat(); seedTemplate(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; };
   document.getElementById('stratLoad').addEventListener('change',e=>loadStrategyById(e.target.value));
-  document.querySelectorAll('.addrule').forEach(b=>b.onclick=()=>{ STRAT[b.dataset.g].rules.push(blankRule()); renderStrat(); });
+  document.getElementById('stratClear').onclick=()=>{ SIGMARKERS=[]; refreshMarkers(); clearStratLines(); document.getElementById('stratStat').textContent=''; };
+  document.querySelectorAll('#colEntry>.addrule, #colExit>.addrule').forEach(b=>b.onclick=()=>{ STRAT[b.dataset.g].rules.push(b.dataset.t==='group'?blankGroup():blankRule()); renderStrat(); });
   for(const g of ['entry','exit']){
     document.getElementById(g+'Logic').addEventListener('change',e=>{ STRAT[g].logic=e.target.value; renderStrat(); });
     document.getElementById(g+'Window').addEventListener('change',e=>{ const w=parseInt(e.target.value,10); STRAT[g].window=Number.isFinite(w)?w:10; });

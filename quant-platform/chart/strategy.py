@@ -38,9 +38,14 @@ stat. Full P/L simulation is Phase 4.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 import tools.compare_server as cs
+
+_IND_PALETTE = ['#3b82f6', '#f5a623', '#a855f7', '#ec4899', '#06b6d4',
+                '#eab308', '#14b8a6', '#f97316', '#e879f9', '#84cc16']
 
 _OPS = ('gt', 'lt', 'ge', 'le', 'eq', 'neq',
         'cross_above', 'cross_below', 'rising', 'falling',
@@ -54,6 +59,18 @@ _SLOPE_LOOKBACK = 8       # bars in the regression window
 _SLOPE_MIN_STRENGTH = 1.5 # min |net move ÷ window volatility| to count as a trend
 _BOUNCE_TOL_PCT = 0.15    # how close (in %) the wick must come to the level to "touch"
 _SEQ_WINDOW = 10          # max bars between consecutive steps of a THEN sequence
+
+
+def _merge_defaults(key: str, params: dict) -> dict:
+    """Fill in the primitive's default params for anything the operand didn't
+    set — the builder only exposes the length-like param, so others (e.g. BB's
+    `mult`) must fall back to their registry defaults or the call crashes."""
+    out = dict(params or {})
+    m = cs.REGISTRY.get(key)
+    if m:
+        for p in m.params:
+            out.setdefault(p.name, p.default)
+    return out
 
 
 def _shift(arr: np.ndarray, offset: int) -> np.ndarray:
@@ -93,7 +110,7 @@ def _operand_array(operand: dict, bars, ctx) -> np.ndarray:
         key = operand.get('key')
         _, _, lines = cs.overlay_arrays(
             bars, {'key': key, 'source': operand.get('source', 'close'),
-                   'params': operand.get('params') or {}}, ctx)
+                   'params': _merge_defaults(key, operand.get('params'))}, ctx)
         sub = operand.get('sub')
         if sub:                                   # dict-output primitive line
             base = next((arr for s, arr in lines if s == sub), None)
@@ -290,7 +307,7 @@ def _edges(mask: np.ndarray) -> np.ndarray:
     return mask & ~prev
 
 
-# ── collect referenced primitives so the fetch window has enough warm-up ────
+# ── collect referenced primitives (for warm-up sizing AND for plotting) ─────
 def referenced_overlays(strategy: dict) -> list:
     out = []
 
@@ -310,21 +327,107 @@ def referenced_overlays(strategy: dict) -> list:
     return out
 
 
-def _pair_trades(ts, close, entry_ev, exit_ev, side):
-    """Naive preview pairing: enter on an entry edge while flat, exit on the
-    next exit edge. Return list of (entry_i, exit_i, ret). Directional. This is
-    a quick sanity stat only — the real day-by-day sim is Phase 4."""
+def _unique_indicators(strategy: dict) -> list:
+    """Distinct primitive operands (key + source + params) referenced anywhere
+    in the strategy, so the chart can DRAW the exact indicators the rules use."""
+    seen, out = set(), []
+
+    def add(o):
+        if isinstance(o, dict) and o.get('kind', 'primitive') == 'primitive' and o.get('key'):
+            spec = {'key': o['key'], 'source': o.get('source', 'close'),
+                    'params': o.get('params') or {}}
+            k = json.dumps(spec, sort_keys=True)
+            if k not in seen:
+                seen.add(k); out.append(spec)
+
+    def walk(g):
+        for r in (g or {}).get('rules') or []:
+            if 'rules' in r or 'logic' in r:
+                walk(r)
+            else:
+                add(r.get('left')); add(r.get('right'))
+    walk(strategy.get('entry')); walk(strategy.get('exit'))
+    return out
+
+
+def _indicator_series(strategy: dict, bars, ts, ctx) -> list:
+    series = []
+    for i, spec in enumerate(_unique_indicators(strategy)):
+        try:
+            series.extend(cs._one_overlay(
+                bars, ts, {**spec, 'params': _merge_defaults(spec['key'], spec['params']),
+                           'id': f'strat{i}',
+                           'color': _IND_PALETTE[i % len(_IND_PALETTE)]}, ctx))
+        except Exception:  # noqa: BLE001 — a missing-history indicator just won't draw
+            pass
+    return series
+
+
+def _risk_dist(spec: dict, entry: float, atr: float):
+    """Absolute price distance for a stop/target spec {type,value}. type:
+    pct (% of entry), atr (× ATR at entry), points (absolute). None = unset."""
+    if not spec:
+        return None
+    try:
+        v = float(spec.get('value'))
+    except (TypeError, ValueError):
+        return None
+    t = spec.get('type', 'pct')
+    if t == 'pct':
+        return entry * v / 100.0
+    if t == 'atr':
+        return (atr if atr == atr else 0.0) * v      # NaN-safe
+    if t == 'points':
+        return v
+    return None
+
+
+def _pair_trades(bars, ts, entry_ev, exit_ev, side, risk, ctx):
+    """Preview pairing with STOP-LOSS and TAKE-PROFIT. Enter on an entry edge
+    while flat; then exit at whichever comes first, intrabar: SL hit, TP hit, or
+    an exit-condition edge. SL is checked before TP (conservative when both fall
+    in one bar). Returns trades with entry/exit price + reason. The full
+    day-by-day sim is Phase 4; this makes the preview honest about stops."""
+    close = bars['close'].to_numpy(float)
+    high = bars['high'].to_numpy(float)
+    low = bars['low'].to_numpy(float)
+    n = len(close)
+    risk = risk or {}
+    atr = np.full(n, np.nan)
+    if (risk.get('sl') or {}).get('type') == 'atr' or (risk.get('tp') or {}).get('type') == 'atr':
+        try:
+            _, _, lines = cs.overlay_arrays(
+                bars, {'key': 'volatility.atr', 'source': 'close', 'params': {'length': 14}}, ctx)
+            atr = lines[0][1]
+        except Exception:
+            pass
     trades = []
-    in_pos = False
-    ei = 0
-    for i in range(len(ts)):
-        if not in_pos and entry_ev[i]:
-            in_pos = True; ei = i
-        elif in_pos and exit_ev[i]:
-            r = (close[i] - close[ei]) / close[ei]
+    in_pos = False; ei = 0; sl = tp = None
+    for j in range(n):
+        if not in_pos:
+            if entry_ev[j]:
+                in_pos = True; ei = j
+                ep = close[j]
+                sd = _risk_dist(risk.get('sl'), ep, atr[j])
+                td = _risk_dist(risk.get('tp'), ep, atr[j])
+                if side == 'long':
+                    sl = ep - sd if sd else None; tp = ep + td if td else None
+                else:
+                    sl = ep + sd if sd else None; tp = ep - td if td else None
+            continue
+        px = reason = None
+        if sl is not None and ((side == 'long' and low[j] <= sl) or (side == 'short' and high[j] >= sl)):
+            px, reason = sl, 'SL'
+        elif tp is not None and ((side == 'long' and high[j] >= tp) or (side == 'short' and low[j] <= tp)):
+            px, reason = tp, 'TP'
+        elif exit_ev[j]:
+            px, reason = close[j], 'exit'
+        if px is not None:
+            r = (px - close[ei]) / close[ei]
             if side == 'short':
                 r = -r
-            trades.append((ei, i, float(r)))
+            trades.append({'ei': ei, 'xi': j, 'ret': float(r), 'reason': reason,
+                           'entry': float(close[ei]), 'exit': float(px)})
             in_pos = False
     return trades
 
@@ -369,30 +472,37 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
                 'markers': [], 'stats': None, 'first': None, 'last': None}
 
     side = strategy.get('side', 'long')
-    entry_ev = _edges(_eval_group(strategy.get('entry'), bars, ctx))
-    exit_ev = _edges(_eval_group(strategy.get('exit'), bars, ctx))
-    close = bars['close'].to_numpy(float)
+    entry_mask = _eval_group(strategy.get('entry'), bars, ctx)
+    exit_mask = _eval_group(strategy.get('exit'), bars, ctx)
+    entry_ev = _edges(entry_mask)
+    exit_ev = _edges(exit_mask)
+
+    trades = _pair_trades(bars, ts, entry_ev, exit_ev, side, strategy.get('risk'), ctx)
 
     entry_word = 'Long' if side == 'long' else 'Short'
     markers = []
-    for i in np.nonzero(entry_ev)[0]:
-        markers.append({'time': int(ts[i]), 'position': 'belowBar',
+    # Mark the ACTUAL taken trades (entry + its exit + reason), so the picture
+    # reflects the SL/TP simulation, not every raw signal.
+    for t in trades:
+        markers.append({'time': int(ts[t['ei']]), 'position': 'belowBar',
                         'shape': 'arrowUp', 'color': '#22c55e', 'text': entry_word})
-    for i in np.nonzero(exit_ev)[0]:
-        markers.append({'time': int(ts[i]), 'position': 'aboveBar',
-                        'shape': 'arrowDown', 'color': '#ef5350', 'text': 'Exit'})
+        col = {'SL': '#ef5350', 'TP': '#22c55e', 'exit': '#94a3b8'}.get(t['reason'], '#ef5350')
+        markers.append({'time': int(ts[t['xi']]), 'position': 'aboveBar',
+                        'shape': 'arrowDown', 'color': col, 'text': t['reason']})
     markers.sort(key=lambda x: x['time'])
 
-    trades = _pair_trades(ts, close, entry_ev, exit_ev, side)
     stats = None
     if trades:
-        rets = np.array([t[2] for t in trades], float)
+        rets = np.array([t['ret'] for t in trades], float)
         wins = int((rets > 0).sum())
+        by = {}
+        for t in trades:
+            by[t['reason']] = by.get(t['reason'], 0) + 1
         stats = {'trades': len(trades), 'wins': wins,
                  'win_rate': round(100.0 * wins / len(trades), 1),
                  'avg_return_pct': round(100.0 * float(rets.mean()), 3),
                  'total_return_pct': round(100.0 * float(rets.sum()), 3),
-                 'preview': True}
+                 'exits_by': by, 'preview': True}
 
     et = bars.index.tz_convert(cs._ET)
     return {
@@ -400,8 +510,9 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         'entries': [{'time': int(ts[i])} for i in np.nonzero(entry_ev)[0]],
         'exits':   [{'time': int(ts[i])} for i in np.nonzero(exit_ev)[0]],
         'markers': markers,
-        'entry_now': bool(_eval_group(strategy.get('entry'), bars, ctx)[-1]),
-        'exit_now':  bool(_eval_group(strategy.get('exit'), bars, ctx)[-1]),
+        'series':  _indicator_series(strategy, bars, ts, ctx),
+        'entry_now': bool(entry_mask[-1]),
+        'exit_now':  bool(exit_mask[-1]),
         'stats': stats,
         'first': et[0].strftime('%Y-%m-%d %H:%M ET'),
         'last':  et[-1].strftime('%Y-%m-%d %H:%M ET'),

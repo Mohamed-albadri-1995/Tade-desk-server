@@ -123,6 +123,18 @@ in that order, within the window.
 - **🔍 Test a condition** — every row has a test button: it marks *every* bar
   the single condition holds and reports how often (e.g. "slope of 13-MA is
   rising 22% of bars, TRUE now"), so you validate a piece before composing.
+- **Nested groups** — `+ group ( )` adds a bracketed sub-group with its own
+  ALL/ANY/≥k/SEQUENCE, so you can build `A and B and (C or D or E) and (F or G)`.
+- **Level lines as operands** — multi-output primitives expose a line picker:
+  floor pivots → `P/R1/R2/R3/S1/S2/S3`, `dynamic_sr` → `sr1…sr6`, Bollinger /
+  σ-bands → `upper/middle/lower`. So "price breaks R1" is
+  `Price close` **crosses ▲** `Indicator floor · R1`.
+- **Stop-loss / take-profit** — set SL and TP in the header (%, ATR×, or points).
+  Evaluate then simulates the exit at whichever hits first (SL / TP / exit rule)
+  and the stat breaks trades down by exit reason.
+- **Strategy indicators plot** — Evaluate draws every indicator the rules
+  reference on the chart, and a **volume** histogram sits under the candles, so
+  you can see exactly what the signals are reading.
 
 **Evaluate** runs the rules over the current chart window and draws **entry
 (green ▲) / exit (red ▼) signal markers** on the candles, shows whether each
