@@ -24,10 +24,6 @@ from qp.registry import primitive
 from qp.primitives.bars import Bars
 
 
-def _range(df):
-    return df['high'].to_numpy(dtype=float) - df['low'].to_numpy(dtype=float)
-
-
 @primitive(name='body', group='candle',
            description='Absolute candle body, |close - open|.',
            params=(), inputs=('bars',))
@@ -64,46 +60,3 @@ def bar_range(bars: Bars):
     df = bars.df
     return (df['high'].to_numpy(dtype=float) -
             df['low'].to_numpy(dtype=float))
-
-
-# ── ratios: plottable "candle quality" numbers (judge them on their own) ────
-@primitive(name='body_pct', group='candle',
-           description='Body as % of range: |close-open| / (high-low) × 100. '
-                       'NaN on zero-range bars. "Candle Quality → Min Body %".',
-           params=(), inputs=('bars',))
-def body_pct(bars: Bars):
-    df = bars.df
-    o = df['open'].to_numpy(dtype=float); c = df['close'].to_numpy(dtype=float)
-    rng = _range(df)
-    with np.errstate(invalid='ignore', divide='ignore'):
-        out = np.abs(c - o) / rng * 100.0
-    out[rng <= 0] = np.nan
-    return out
-
-
-@primitive(name='upper_wick_pct', group='candle',
-           description='Upper wick as % of range: (high-max(o,c)) / (high-low) '
-                       '× 100. NaN on zero-range bars. "Max Upper Wick %".',
-           params=(), inputs=('bars',))
-def upper_wick_pct(bars: Bars):
-    df = bars.df
-    o = df['open'].to_numpy(dtype=float); c = df['close'].to_numpy(dtype=float)
-    rng = _range(df)
-    with np.errstate(invalid='ignore', divide='ignore'):
-        out = (df['high'].to_numpy(dtype=float) - np.maximum(o, c)) / rng * 100.0
-    out[rng <= 0] = np.nan
-    return out
-
-
-@primitive(name='lower_wick_pct', group='candle',
-           description='Lower wick as % of range: (min(o,c)-low) / (high-low) '
-                       '× 100. NaN on zero-range bars. "c1_lwick_pct" in L3.',
-           params=(), inputs=('bars',))
-def lower_wick_pct(bars: Bars):
-    df = bars.df
-    o = df['open'].to_numpy(dtype=float); c = df['close'].to_numpy(dtype=float)
-    rng = _range(df)
-    with np.errstate(invalid='ignore', divide='ignore'):
-        out = (np.minimum(o, c) - df['low'].to_numpy(dtype=float)) / rng * 100.0
-    out[rng <= 0] = np.nan
-    return out

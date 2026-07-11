@@ -106,6 +106,22 @@ def _operand_array(operand: dict, bars, ctx) -> np.ndarray:
         if field not in _PRICE_FIELDS:
             raise ValueError(f'unknown price field {field!r}')
         base = cs._source_series(bars, field)
+    elif kind == 'expr':
+        # Arithmetic combining — the general tool. a <op> b, recursive, so any
+        # derived quantity is composed, not hard-coded as a primitive:
+        #   body% = candle.body ÷ candle.bar_range × 100
+        #   move in ATR = (close − day_open) ÷ atr_daily
+        #   distance to R1 = close − floor·R1
+        a = _operand_array(operand.get('a'), bars, ctx)
+        b = _operand_array(operand.get('b'), bars, ctx)
+        eop = operand.get('op', 'sub')
+        with np.errstate(invalid='ignore', divide='ignore'):
+            if eop == 'add':   base = a + b
+            elif eop == 'sub': base = a - b
+            elif eop == 'mul': base = a * b
+            elif eop == 'div': base = np.where(b != 0, a / b, np.nan)
+            else:
+                raise ValueError(f'unknown expr op {eop!r}')
     elif kind == 'primitive':
         key = operand.get('key')
         _, _, lines = cs.overlay_arrays(
@@ -279,7 +295,11 @@ def referenced_overlays(strategy: dict) -> list:
     out = []
 
     def walk_operand(o):
-        if isinstance(o, dict) and o.get('kind', 'primitive') == 'primitive' and o.get('key'):
+        if not isinstance(o, dict):
+            return
+        if o.get('kind') == 'expr':
+            walk_operand(o.get('a')); walk_operand(o.get('b')); return
+        if o.get('kind', 'primitive') == 'primitive' and o.get('key'):
             out.append({'key': o['key'], 'params': o.get('params') or {}})
 
     def walk_group(g):
@@ -300,7 +320,11 @@ def _unique_indicators(strategy: dict) -> list:
     seen, out = set(), []
 
     def add(o):
-        if isinstance(o, dict) and o.get('kind', 'primitive') == 'primitive' and o.get('key'):
+        if not isinstance(o, dict):
+            return
+        if o.get('kind') == 'expr':
+            add(o.get('a')); add(o.get('b')); return
+        if o.get('kind', 'primitive') == 'primitive' and o.get('key'):
             spec = {'key': o['key'], 'source': o.get('source', 'close'),
                     'params': o.get('params') or {}}
             k = json.dumps(spec, sort_keys=True)
@@ -422,18 +446,33 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
     # Draw the exact indicators this condition reads (so you SEE the values, not
     # just the fire dots) + the current value of the left operand.
     series = _indicator_series(strat_like, bars, ts, ctx)
-    left_now = None
+    left_now = right_now = None
     if not is_group and isinstance(node.get('left'), dict):
         try:
             la = _operand_array(node['left'], bars, ctx)
             if la[-1] == la[-1]:
                 left_now = round(float(la[-1]), 4)
+            # a composed (expr) left value isn't a registry primitive, so draw
+            # it explicitly — otherwise you couldn't SEE the computed number.
+            if node['left'].get('kind') == 'expr':
+                vals = [{'time': int(t), 'value': float(v)} for t, v in zip(ts, la) if v == v]
+                if vals:
+                    series = list(series) + [{'name': 'expr', 'color': '#eab308',
+                                              'style': 0, 'step': False, 'values': vals}]
+        except Exception:
+            pass
+    if not is_group and isinstance(node.get('right'), dict) and node.get('op') not in _UNARY:
+        try:
+            ra = _operand_array(node['right'], bars, ctx)
+            if ra[-1] == ra[-1]:
+                right_now = round(float(ra[-1]), 4)
         except Exception:
             pass
     et = bars.index.tz_convert(cs._ET)
     return {'ok': True, 'bars': n, 'true': int(mask.sum()),
             'pct': round(100.0 * mask.sum() / n, 1), 'now': bool(mask[-1]),
-            'markers': markers, 'series': series, 'left_now': left_now,
+            'markers': markers, 'series': series,
+            'left_now': left_now, 'right_now': right_now,
             'first': et[0].strftime('%Y-%m-%d %H:%M ET'),
             'last': et[-1].strftime('%Y-%m-%d %H:%M ET')}
 

@@ -425,7 +425,8 @@ let STRAT=blankStrat(), SAVED=[];
 function blankStrat(){ return {id:null,name:'',side:'long',risk:{sl:{type:'',value:null},tp:{type:'',value:null}},entry:{logic:'AND',window:10,k:1,rules:[]},exit:{logic:'AND',window:10,k:1,rules:[]}}; }
 function blankGroup(){ return {logic:'OR',window:10,k:1,rules:[]}; }
 function isGroup(n){ return n && Array.isArray(n.rules); }
-function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; if(kind==='time')return {kind:'time',field:'minutes'}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
+function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; if(kind==='time')return {kind:'time',field:'minutes'}; if(kind==='expr')return {kind:'expr',op:'sub',a:blankOperand('price'),b:blankOperand('const')}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
+const EXPR_OPS=[['add','+'],['sub','−'],['mul','×'],['div','÷']];
 function seedTemplate(){ // a readable EMA-cross default so the builder isn't blank
   const ema=()=>({kind:'primitive',key:'ma.ema',source:'close',params:{length:9}});
   STRAT.entry.rules=[{left:{kind:'price',field:'close'},op:'cross_above',right:ema()}];
@@ -436,12 +437,19 @@ function primSelect(val){ const sel=document.createElement('select'); const grou
 function operandEl(op, onStruct, allowConst){
   const box=document.createElement('span'); box.className='opd';
   const kindSel=document.createElement('select');
-  const kinds=[['primitive','Indicator'],['price','Price'],['time','Time']]; if(allowConst)kinds.push(['const','Value']);
+  const kinds=[['primitive','Indicator'],['price','Price'],['time','Time'],['expr','Expr ()']]; if(allowConst)kinds.push(['const','Value']);
   for(const [v,l] of kinds){ const o=document.createElement('option'); o.value=v; o.textContent=l; kindSel.appendChild(o);} kindSel.value=op.kind;
   kindSel.onchange=()=>{ const repl=blankOperand(kindSel.value); for(const k of Object.keys(op))delete op[k]; Object.assign(op,repl); onStruct(); };
   box.appendChild(kindSel);
   let canOffset=false;
-  if(op.kind==='primitive'){
+  if(op.kind==='expr'){
+    if(!op.a)op.a=blankOperand('price'); if(!op.b)op.b=blankOperand('const'); if(!op.op)op.op='sub';
+    const l=document.createElement('span'); l.textContent='('; l.style.color='var(--text3)'; box.appendChild(l);
+    box.appendChild(operandEl(op.a, onStruct, true));
+    const os=document.createElement('select'); for(const [v,s] of EXPR_OPS){const o=document.createElement('option');o.value=v;o.textContent=s;os.appendChild(o);} os.value=op.op; os.onchange=()=>op.op=os.value; box.appendChild(os);
+    box.appendChild(operandEl(op.b, onStruct, true));
+    const r=document.createElement('span'); r.textContent=')'; r.style.color='var(--text3)'; box.appendChild(r); canOffset=true;
+  } else if(op.kind==='primitive'){
     const ps=primSelect(op.key); ps.onchange=()=>{op.key=ps.value; op.params={}; delete op.sub; onStruct();}; box.appendChild(ps);
     const m=primMeta(op.key), lp=lenParam(m);
     if(lp){ const li=document.createElement('input'); li.type='number'; li.className='len'; const d=m.params.find(p=>p.name===lp); li.placeholder=d&&d.default!=null?String(d.default):'len'; if(op.params[lp]!=null)li.value=op.params[lp]; li.onchange=()=>{const v=parseInt(li.value,10); if(Number.isFinite(v))op.params[lp]=v; else delete op.params[lp];}; box.appendChild(li);}
@@ -495,8 +503,8 @@ async function testRule(rule){
     if(!j.ok){ document.getElementById('stratStat').textContent='test error: '+(j.error||'').slice(0,90); return; }
     SIGMARKERS=j.markers||[]; refreshMarkers();
     drawStratSeries(j.series);        // draw the actual indicator lines this condition reads
-    const val=(j.left_now!=null)?` · value now <b>${j.left_now}</b>`:'';
-    document.getElementById('stratStat').innerHTML=`🔍 true on <b>${j.true}</b>/${j.bars} bars (${j.pct}%)${val} · now: ${j.now?'<span class="up">TRUE</span>':'<span class="muted">idle</span>'}`;
+    const val=(j.left_now!=null)?` · now <b>${j.left_now}</b>${j.right_now!=null?' vs '+j.right_now:''}`:'';
+    document.getElementById('stratStat').innerHTML=`🔍 true on <b>${j.true}</b>/${j.bars} bars (${j.pct}%)${val} · ${j.now?'<span class="up">TRUE now</span>':'<span class="muted">idle</span>'}`;
   }catch(e){ document.getElementById('stratStat').textContent='test error: '+e.message; }
 }
 function logicControl(grp){
