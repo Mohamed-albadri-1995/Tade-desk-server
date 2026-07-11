@@ -116,6 +116,19 @@ it doesn't count.
   all correct; save/list/delete endpoints; full complex strategy renders +
   round-trips save/reload with no JS errors.
 
+### It.9 — second review pass  [DONE]
+- required_days re-reviewed: window_high start/end (930/945) correctly NOT
+  misread as bar/session counts; per-TF caps hold. Clean.
+- Live WebSocket path reviewed: PRICE.update / line.update / setMarkers all
+  wrapped in try/catch (a stale/out-of-order tick degrades silently, never
+  crashes). refreshMarkers builds a fresh sorted copy — no mutation.
+- FIXED (UX/correctness): the operand editor always drew the input-`source`
+  dropdown, even for bars-input primitives (VWAPs, pivots, candle*, window_*)
+  that ignore it — a dead control (and vwma showed two source fields). Now
+  gated on `inputs` containing 'source'. Verified: ema shows source, vwap/floor
+  don't; no JS errors.
+- Nothing else material. Engine, store, refactor, live, and UI all reviewed.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop

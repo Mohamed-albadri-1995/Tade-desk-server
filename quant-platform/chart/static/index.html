@@ -476,7 +476,10 @@ function operandEl(op, onStruct, allowConst){
     // multi-output primitives (floor R1/S1…, dynamic_sr sr1…, BB upper/lower) → pick the line
     if(m&&m.outputs&&m.outputs.length>1){ if(!op.sub)op.sub=m.outputs[0]; const os=document.createElement('select'); os.title='which output line'; for(const o of m.outputs){const opt=document.createElement('option');opt.value=o;opt.textContent=o;os.appendChild(opt);} os.value=op.sub; os.onchange=()=>op.sub=os.value; box.appendChild(os); }
     else if(op.sub){ delete op.sub; }
-    const src=document.createElement('select'); src.title='input source'; for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;src.appendChild(o);} src.value=op.source||'close'; src.onchange=()=>op.source=src.value; box.appendChild(src); canOffset=true;
+    // input source only matters for source-input primitives (MAs, RSI…); bars-
+    // input ones (VWAPs, pivots, candle*) ignore it — don't show a dead control.
+    if(m&&m.inputs&&m.inputs.indexOf('source')>=0){ const src=document.createElement('select'); src.title='input source'; for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;src.appendChild(o);} src.value=op.source||'close'; src.onchange=()=>op.source=src.value; box.appendChild(src); }
+    canOffset=true;
   } else if(op.kind==='price'){
     const fs=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'close'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs); canOffset=true;
   } else if(op.kind==='time'){
