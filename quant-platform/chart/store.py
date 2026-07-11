@@ -71,11 +71,11 @@ def save_strategy(obj: dict) -> dict:
     with _lock:
         db = _db()
         if sid:
-            db.execute('UPDATE strategies SET name=?, data=?, updated_at=? WHERE id=?',
-                       (name, data, now, sid))
+            cur = db.execute('UPDATE strategies SET name=?, data=?, updated_at=? WHERE id=?',
+                             (name, data, now, sid))
             db.commit()
-            if db.total_changes == 0:
-                sid = None  # id didn't exist → fall through to insert
+            if cur.rowcount == 0:      # this statement matched no row (stale id)
+                sid = None             # → fall through to insert a fresh row
         if not sid:
             cur = db.execute(
                 'INSERT INTO strategies (name, data, created_at, updated_at) VALUES (?,?,?,?)',

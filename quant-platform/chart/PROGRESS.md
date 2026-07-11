@@ -101,6 +101,21 @@ it doesn't count.
   window_high/low (4 entries, 2 trades); composed move-in-ATR expr (52 entries,
   indicator drawn). All clean, server boots, 69 primitives.
 
+### It.8 — full review & debug pass  [DONE]
+- Re-read the refactored compute_data/prepare_bars/overlay_arrays: clean, no
+  dangling refs, compare-tool path intact.
+- Ran a 12-case edge battery on the engine. Two real bugs found + fixed:
+  1. `_shift` (bar offset) — offset ≥ series length produced a WRONG-LENGTH
+     array (`arr[:-off]` overshoots) → broadcast crash on any big offset / short
+     window. Now returns an all-NaN array of the correct length.
+  2. `store.save_strategy` — used `db.total_changes` (cumulative since connect,
+     never 0 after the first write) to detect a stale-id update → a save with a
+     non-existent id silently returned None instead of inserting. Now uses the
+     UPDATE statement's `cursor.rowcount`.
+- Verified: offsets 1/119/120/1000 all length-safe; store insert/update/stale-id
+  all correct; save/list/delete endpoints; full complex strategy renders +
+  round-trips save/reload with no JS errors.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop

@@ -78,10 +78,14 @@ def _merge_defaults(key: str, params: dict) -> dict:
 
 def _shift(arr: np.ndarray, offset: int) -> np.ndarray:
     """Value `offset` bars ago (Pine's series[offset]); NaN for the first
-    `offset` bars. offset<=0 → unchanged."""
+    `offset` bars. offset<=0 → unchanged. If offset ≥ length, the whole series
+    is 'before the start' → all-NaN (same length), never a wrong-length array."""
     off = int(offset or 0)
     if off <= 0:
         return arr
+    n = len(arr)
+    if off >= n:
+        return np.full(n, np.nan)
     return np.concatenate((np.full(off, np.nan), arr[:-off]))
 
 
