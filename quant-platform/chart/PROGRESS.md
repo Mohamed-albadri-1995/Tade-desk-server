@@ -90,3 +90,27 @@ it doesn't count.
   length+mult, power-hour values captured; no JS errors.
 - This makes every primitive fully configurable inside a condition — the last
   piece for "as complex as needed" using only basic primitives.
+
+### It.6 — drawing polish (marker declutter, side-aware)  [DONE]
+- Entry markers are now clean arrows (no repeated "Long"/"Short" text) so a
+  dense chart stays readable; the exit marker carries the reason label
+  (SL/TP/exit). Markers are side-aware: short entries point down, exits up.
+
+### It.7 — final regression sweep  [DONE]
+- Full sweep: short strategy (down-arrow entries, exits {TP:2,exit:1}); ORB via
+  window_high/low (4 entries, 2 trades); composed move-in-ATR expr (52 entries,
+  indicator drawn). All clean, server boots, 69 primitives.
+
+## Status: approaching exit door
+Combining logic is fully general (nested groups · Expr arithmetic · offset ·
+sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
+solid (plot any primitive · 🔍 with live values · crosshair OHLC). Expressiveness
+verified against 6 canonical strategies incl. ORB. No material bug remains in
+the swept areas.
+Open items that need the USER, not more building:
+  1. Full Script 1 ("VWAP Cluster Bounce") — upload was truncated; need the
+     entry logic to reproduce it 1:1.
+  2. New draft primitives (trend.slope, levels.window_high/low) await your
+     TradingView verification before approval.
+As Opus 4.8: further changes from here are cosmetic/subjective or need your
+input — so this is a natural stop unless you point me at something specific.

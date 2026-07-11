@@ -499,18 +499,21 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
 
     trades = _pair_trades(bars, ts, entry_ev, exit_ev, side, strategy.get('risk'), ctx)
 
-    entry_word = 'Long' if side == 'long' else 'Short'
+    up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
+    up_pos = 'belowBar' if side == 'long' else 'aboveBar'
     markers = []
-    # Every bar the ENTRY condition fires (so you always see signals, even if a
-    # strategy has no exit/stop and nothing "closes")...
+    # Every bar the ENTRY condition fires (clean arrow, no repeated text label —
+    # keeps a dense chart readable). Shown even if nothing "closes".
     for i in np.nonzero(entry_ev)[0]:
-        markers.append({'time': int(ts[i]), 'position': 'belowBar',
-                        'shape': 'arrowUp', 'color': '#22c55e', 'text': entry_word})
-    # ...plus the exit of each taken trade, coloured by reason (SL/TP/exit-rule).
+        markers.append({'time': int(ts[i]), 'position': up_pos,
+                        'shape': up_shape, 'color': '#22c55e', 'text': ''})
+    # ...plus the exit of each taken trade — THIS carries the reason label.
     for t in trades:
         col = {'SL': '#ef5350', 'TP': '#22c55e', 'exit': '#94a3b8'}.get(t['reason'], '#ef5350')
-        markers.append({'time': int(ts[t['xi']]), 'position': 'aboveBar',
-                        'shape': 'arrowDown', 'color': col, 'text': t['reason']})
+        markers.append({'time': int(ts[t['xi']]),
+                        'position': 'aboveBar' if side == 'long' else 'belowBar',
+                        'shape': 'arrowDown' if side == 'long' else 'arrowUp',
+                        'color': col, 'text': t['reason']})
     markers.sort(key=lambda x: x['time'])
 
     stats = None
