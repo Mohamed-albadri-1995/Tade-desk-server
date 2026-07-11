@@ -108,6 +108,25 @@ long trigger.
 13-EMA* fires only when price was above the MA, pulled back to it, and bounced —
 in that order, within the window.
 
+### Judge every piece on its own, then compose
+
+The rule is: never trust a piece you haven't *seen*. Two ways to inspect:
+
+1. **Plot the number.** Every computation is a primitive you can add from the
+   top-bar picker and watch, including the ones that used to be hidden inside
+   operators: **`trend.slope`** (the exact number `rising`/`falling` threshold —
+   near 0 in chop, large ± in a trend), **`candle.body_pct` / `upper_wick_pct` /
+   `lower_wick_pct`**, `volume.rel_volume`, `volatility.atr`, etc. Add `slope`,
+   look at it, and you can *see* "big number = steep, small = flat" before you
+   ever pick a threshold.
+2. **🔍 test the condition.** The test button now **draws the actual indicator
+   lines the condition reads** and reports the **left operand's current value**,
+   alongside the fire dots. So `close bounces ▲ off ema(13)` draws the 13-EMA +
+   dots on the real bounces — you confirm with your eyes that a "bounce" is a
+   bounce. `slope > 1.5` draws the slope line + dots where it's above 1.5.
+
+Only once a piece looks right do you wire it into a strategy.
+
 ### Advanced composition (for complex, Pine-level strategies)
 
 - **Bar offset** — every operand has a `[n]` box = *n bars ago*. `close > high[1]`

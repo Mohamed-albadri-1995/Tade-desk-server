@@ -494,7 +494,9 @@ async function testRule(rule){
     const j=await (await fetch('/api/strategy/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(!j.ok){ document.getElementById('stratStat').textContent='test error: '+(j.error||'').slice(0,90); return; }
     SIGMARKERS=j.markers||[]; refreshMarkers();
-    document.getElementById('stratStat').innerHTML=`🔍 condition true on <b>${j.true}</b>/${j.bars} bars (${j.pct}%) · now: ${j.now?'<span class="up">TRUE</span>':'<span class="muted">idle</span>'}`;
+    drawStratSeries(j.series);        // draw the actual indicator lines this condition reads
+    const val=(j.left_now!=null)?` · value now <b>${j.left_now}</b>`:'';
+    document.getElementById('stratStat').innerHTML=`🔍 true on <b>${j.true}</b>/${j.bars} bars (${j.pct}%)${val} · now: ${j.now?'<span class="up">TRUE</span>':'<span class="muted">idle</span>'}`;
   }catch(e){ document.getElementById('stratStat').textContent='test error: '+e.message; }
 }
 function logicControl(grp){

@@ -145,46 +145,13 @@ def _apply_op(op: str, L: np.ndarray, R: np.ndarray) -> np.ndarray:
     return out
 
 
-def _slope_strength(L: np.ndarray, lookback: int) -> np.ndarray:
-    """The 'clear slope method'. Fit a least-squares line to a trailing
-    `lookback`-bar window; the net modelled move across the window is
-    `slope × (lookback-1)`. Divide that by the window's own standard deviation
-    to get a scale-free STRENGTH in 'volatility units':
-
-        strength = (net directional move) ÷ (bar-to-bar scatter of the window)
-
-    In a choppy tape the net move is tiny next to the scatter → strength ≈ 0 →
-    neither rising nor falling. In a genuine trend the move dominates the
-    scatter → large |strength|. Works on price or any indicator, any symbol,
-    any timeframe, because it's normalized by the series' own noise."""
-    n = len(L)
-    out = np.full(n, np.nan)
-    w = max(2, int(lookback))
-    if n < w:
-        return out
-    from numpy.lib.stride_tricks import sliding_window_view
-    win = sliding_window_view(L, w)                 # (n-w+1, w), aligned to window END
-    x = np.arange(w, dtype=float)
-    xm = x.mean()
-    sxx = ((x - xm) ** 2).sum()
-    with np.errstate(invalid='ignore', divide='ignore'):
-        ym = win.mean(axis=1, keepdims=True)
-        slope = ((x - xm) * (win - ym)).sum(axis=1) / sxx     # value per bar
-        move = slope * (w - 1)                                # net move over window
-        sd = win.std(axis=1)                                  # window volatility
-        strength = np.zeros(len(slope))
-        nz = sd > 1e-12
-        strength[nz] = move[nz] / sd[nz]
-        ramp = (~nz) & (np.abs(move) > 1e-9)                  # smooth ramp, ~no scatter
-        strength[ramp] = np.sign(move[ramp]) * 1e9
-        out[w - 1:] = strength
-    return out
-
-
 def _slope_flag(L: np.ndarray, op: str, p: dict) -> np.ndarray:
+    # Same math as the plottable `trend.slope` primitive — one source of truth,
+    # so what you SEE when you plot slope is exactly what rising/falling tests.
+    from qp.primitives.trend import slope_strength
     lookback = int(p.get('lookback', _SLOPE_LOOKBACK))
     thr = float(p.get('min_strength', _SLOPE_MIN_STRENGTH))
-    s = _slope_strength(L, lookback)
+    s = slope_strength(L, lookback)
     with np.errstate(invalid='ignore'):
         out = (s >= thr) if op == 'rising' else (s <= -thr)
     out = np.asarray(out, dtype=bool)
@@ -447,15 +414,26 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
     n = len(bars)
     if n == 0:
         return {'ok': True, 'bars': 0, 'true': 0, 'markers': [], 'now': False}
-    mask = (_eval_group(node, bars, ctx) if ('rules' in node or 'logic' in node)
-            else _eval_rule(node, bars, ctx))
+    is_group = ('rules' in node or 'logic' in node)
+    mask = _eval_group(node, bars, ctx) if is_group else _eval_rule(node, bars, ctx)
     idx = np.nonzero(mask)[0]
     markers = [{'time': int(ts[i]), 'position': 'aboveBar', 'shape': 'circle',
                 'color': '#3b82f6', 'text': ''} for i in idx]
+    # Draw the exact indicators this condition reads (so you SEE the values, not
+    # just the fire dots) + the current value of the left operand.
+    series = _indicator_series(strat_like, bars, ts, ctx)
+    left_now = None
+    if not is_group and isinstance(node.get('left'), dict):
+        try:
+            la = _operand_array(node['left'], bars, ctx)
+            if la[-1] == la[-1]:
+                left_now = round(float(la[-1]), 4)
+        except Exception:
+            pass
     et = bars.index.tz_convert(cs._ET)
     return {'ok': True, 'bars': n, 'true': int(mask.sum()),
             'pct': round(100.0 * mask.sum() / n, 1), 'now': bool(mask[-1]),
-            'markers': markers,
+            'markers': markers, 'series': series, 'left_now': left_now,
             'first': et[0].strftime('%Y-%m-%d %H:%M ET'),
             'last': et[-1].strftime('%Y-%m-%d %H:%M ET')}
 
