@@ -1,12 +1,15 @@
-# qp charting platform — Phase 1 (real-time chart)
+# qp charting platform — Phases 1–2
 
 A broker-style live candlestick chart backed entirely by the verified `qp`
 library. Every indicator you draw is the *same* verified primitive the
 compare tool approved and the trading tool runs — one source of truth.
 
-This is **Phase 1** of the platform plan (Core Infrastructure & Real-Time
-Charting). Later phases add the primitive builder, visual strategy builder,
-screener navigation, and the backtest engine.
+**Phase 1** (Core Infrastructure & Real-Time Charting) is the live chart.
+**Phase 2** (Screener Integration & Navigation) wires the chart to the Node
+screener's frozen **R1** and **Shortlist** registers so you can browse every
+stock the scanner flagged on any past date and replay its chart exactly as it
+stood that day. Later phases add the primitive/strategy builders and the
+backtest engine (which reuses the same register bridge, day by day).
 
 ## What Phase 1 gives you
 
@@ -44,24 +47,44 @@ Polygon's free tier is end-of-day delayed, so **Live** only *moves* on the
 **alpaca** or **hybrid** feed (the UI warns you when Live is on + Polygon).
 Use polygon for deep history / prior-day analysis, alpaca/hybrid for live.
 
+## Screener navigation (Phase 2)
+
+The side panel's **Screener register** browser lists the stocks on the
+scanner's R1 (or Shortlist) register for a chosen date, each as a card with
+score / regime / sector / gap% / rvol. Click a card → the chart loads that
+ticker **as of that register date** (via `asof`), so you review the setup as
+it actually looked that morning. The header **As-of** field does the same by
+hand (blank = live/now); setting it disables Live (a past day isn't live).
+
+The chart reads the registers over the screener's own HTTP API — point it at
+the screener with `SCREENER_URL` (default `http://localhost:3000`, i.e. the
+same box). If the screener is down the browser just shows a note; the chart
+still works.
+
 ## Endpoints
 
 ```
-GET  /                 the chart page
-GET  /api/health       {ok, build, primitives, feeds, default_feed}
-GET  /api/primitives   registry + approval status (the indicator picker)
-GET  /api/chart        candles + indicator series (JSON snapshot)
-WS   /ws/live          pushes {type:'tick', bar, tips} on an interval
+GET  /                        the chart page
+GET  /api/health              {ok, build, primitives, feeds, default_feed}
+GET  /api/primitives          registry + approval status (the indicator picker)
+GET  /api/chart               candles + indicator series (JSON snapshot)
+                              ?asof=YYYY-MM-DD replays a historical date
+WS   /ws/live                 pushes {type:'tick', bar, tips} on an interval
+GET  /api/screener/health     is the screener reachable
+GET  /api/screener/dates      ?register=R1|Shortlist → available dates
+GET  /api/screener/register   ?register=&date= → ticker cards (score, regime, …)
 ```
 
 ## Architecture
 
 - `chart/server.py` — FastAPI app. Reuses `tools.compare_server.compute_data`
   (the proven candles + overlay + pane + marker engine) for snapshots and
-  adds the live WebSocket.
+  adds the live WebSocket + the screener-register endpoints.
 - `chart/data_manager.py` — wraps the `tools/data` loaders (alpaca / polygon
   / hybrid), computes required warm-up history per indicator, serves the live
   tail.
+- `chart/screener.py` — reads the Node screener's frozen R1 / Shortlist
+  registers (stdlib HTTP, `SCREENER_URL`) and maps each row to a compact card.
 - `chart/static/index.html` — the frontend (lightweight-charts, pinned v4.2.3
   vendored under `chart/static/`).
 

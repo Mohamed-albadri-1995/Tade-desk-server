@@ -32,6 +32,7 @@ _ORIG_ARGV = list(sys.argv)
 sys.argv = sys.argv[:1]
 import tools.compare_server as cs            # noqa: E402  compute_data, list_primitives, _feed_status, _BUILD
 from chart import data_manager as dm         # noqa: E402
+from chart import screener as sc             # noqa: E402  Phase 2 register bridge
 sys.argv = _ORIG_ARGV                        # restore the real command-line args
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # noqa: E402
@@ -60,24 +61,44 @@ def primitives():
     return cs.list_primitives()
 
 
+# ── Phase 2: screener register navigation ──────────────────────────────────
+@app.get('/api/screener/health')
+def screener_health():
+    return {'registers': sc.REGISTERS, **sc.health()}
+
+
+@app.get('/api/screener/dates')
+def screener_dates(register: str = 'R1'):
+    return {'register': register, 'dates': sc.available_dates(register)}
+
+
+@app.get('/api/screener/register')
+def screener_register(register: str = 'R1', date: str = ''):
+    """Compact ticker cards for a register on a date (default latest)."""
+    return JSONResponse(sc.register_rows(register, date or None))
+
+
 def _snapshot(symbol: str, tf: str, days: int, feed: str, view: str,
-              overlays: list) -> dict:
+              overlays: list, asof: str | None = None) -> dict:
     """Candles + indicator series for the requested window. Auto-extends the
-    fetch window so every indicator has enough warm-up history."""
+    fetch window so every indicator has enough warm-up history. `asof`
+    (YYYY-MM-DD) replays the stock as of a historical register date."""
     days = dm.required_days(overlays, tf, days)
     return cs.compute_data(symbol=symbol.upper(), tf=tf, days=days,
-                           overlays=overlays, feed=feed, view=view)
+                           overlays=overlays, feed=feed, view=view,
+                           asof=asof or None)
 
 
 @app.get('/api/chart')
 def chart(symbol: str = 'SPY', tf: str = '5m', days: int = 5,
-          feed: str = 'polygon', view: str = 'all', overlays: str = '[]'):
+          feed: str = 'polygon', view: str = 'all', overlays: str = '[]',
+          asof: str = ''):
     try:
         ovs = json.loads(overlays) if overlays else []
     except json.JSONDecodeError:
         ovs = []
     try:
-        data = _snapshot(symbol, tf, days, feed, view, ovs)
+        data = _snapshot(symbol, tf, days, feed, view, ovs, asof)
         data['ok'] = True
         return JSONResponse(data)
     except Exception as e:
@@ -102,6 +123,7 @@ async def ws_live(ws: WebSocket):
     feed = cfg.get('feed', 'polygon')
     view = cfg.get('view', 'all')
     overlays = cfg.get('overlays', [])
+    asof = cfg.get('asof') or None
     interval = max(5, int(cfg.get('interval', 20)))
 
     loop = asyncio.get_event_loop()
@@ -110,7 +132,7 @@ async def ws_live(ws: WebSocket):
         while True:
             try:
                 data = await loop.run_in_executor(
-                    None, _snapshot, symbol, tf, days, feed, view, overlays)
+                    None, _snapshot, symbol, tf, days, feed, view, overlays, asof)
                 bars = data.get('bars') or []
                 if bars:
                     tail = bars[-1]

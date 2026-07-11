@@ -398,14 +398,25 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
 
 
 def compute_data(symbol: str, tf: str, days: int, overlays: list,
-                 feed: str = 'alpaca', view: str = 'all') -> dict:
+                 feed: str = 'alpaca', view: str = 'all',
+                 asof: str | None = None) -> dict:
     """Fetch bars once, compute every overlay, return everything the UI
     needs. `view`: 'all' (show pre/rth/post, tint extended hours) or
-    'regular' (RTH bars only — computed and displayed)."""
+    'regular' (RTH bars only — computed and displayed).
+
+    `asof` (YYYY-MM-DD) anchors the window to the END of that ET trading
+    day instead of "now" — this is what lets the charting platform replay a
+    stock exactly as it stood on the register date the screener captured it
+    (Phase 2 navigation). Omitted / None → live (ends now)."""
     loader = _LOADERS.get(feed)
     if loader is None:
         raise ValueError(f'unknown feed {feed!r} (have: {sorted(_LOADERS)})')
-    end = pd.Timestamp.now(tz='UTC').floor('5min')
+    if asof:
+        # End of the selected ET day (next ET midnight) → includes that day's
+        # full RTH + extended session, then converted to a true UTC instant.
+        end = (pd.Timestamp(asof, tz=_ET) + pd.Timedelta(days=1)).tz_convert('UTC')
+    else:
+        end = pd.Timestamp.now(tz='UTC').floor('5min')
     if tf == '1m' and feed == 'alpaca':
         days = min(int(days), 7)   # Alpaca IEX 1m history cap
     days = int(days)

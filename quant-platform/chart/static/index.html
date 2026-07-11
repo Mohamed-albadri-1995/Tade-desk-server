@@ -37,6 +37,20 @@
   #paramsGrid label { color:var(--text2); }
   #paramsGrid input { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:4px 8px; border-radius:4px; font-size:12px; width:100%; }
   #status { color:var(--text3); font-size:11px; }
+  #asof.set { border-color:var(--draft); color:var(--draft); }
+  /* ── screener register browser ── */
+  #regBar { display:flex; gap:6px; margin-bottom:7px; }
+  #regBar select { flex:1; min-width:0; }
+  #regList { display:flex; flex-direction:column; gap:4px; max-height:38vh; overflow:auto; }
+  .card { padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:#141a24; cursor:pointer; }
+  .card:hover { border-color:var(--accent); background:#182130; }
+  .card.on { border-color:var(--draft); background:#1c2330; }
+  .card .top { display:flex; align-items:center; gap:6px; }
+  .card .tk { font-weight:700; color:var(--text); }
+  .card .sc { margin-left:auto; font-weight:700; font-size:11px; padding:1px 6px; border-radius:10px; }
+  .card .meta { color:var(--text3); font-size:10.5px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card .chip { color:var(--text2); }
+  .up { color:var(--accent); } .dn { color:var(--red); }
   #banner { position:absolute; top:8px; left:8px; right:8px; background:rgba(245,166,35,.14); color:var(--draft); padding:8px 10px; border-radius:6px; font-size:12px; display:none; z-index:5; }
   .legend { position:absolute; top:6px; left:10px; font-size:11px; color:var(--text2); z-index:4; pointer-events:none; text-shadow:0 1px 2px #000; }
   .pill { display:inline-block; width:8px; height:8px; border-radius:2px; vertical-align:middle; margin-right:3px; }
@@ -51,6 +65,7 @@
   <label>Days <input id="days" type="number" value="5" min="1" max="730" style="width:60px"></label>
   <label>Feed <select id="feed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
   <label>Session <select id="view"><option value="all">All-day</option><option value="regular">Regular</option></select></label>
+  <label title="Replay the chart as of a past date (blank = live/now). Set automatically when you click a screener register stock.">As-of <input id="asof" type="date" style="width:130px"></label>
   <button id="compute">Compute</button>
   <button id="liveBtn">▶ Live</button>
   <span style="width:1px;height:20px;background:var(--border)"></span>
@@ -71,6 +86,12 @@
     <div id="chart"></div>
   </div>
   <div id="side">
+    <h3>Screener register</h3>
+    <div id="regBar">
+      <select id="regReg"><option value="R1">R1 (all)</option><option value="Shortlist">Shortlist</option></select>
+      <select id="regDate"></select>
+    </div>
+    <div id="regList"><div class="muted">Loading register…</div></div>
     <h3>Overlays</h3>
     <div id="overlayList"><div class="muted">Pick an indicator in the top bar → + Add.</div></div>
     <h3>Selected</h3>
@@ -83,6 +104,8 @@
 <script>
 let CHART=null, PRICE=null, BG=null, LINES=[], PRIMS=[], WS=null, LIVE=false;
 let OVERLAYS=[], SELECTED=null, _nid=1, PRICEBARS=[];
+let FEEDS={}, REG_ROWS=[];
+const feedHas=n=>!!FEEDS[n];
 const PALETTE=['#3b82f6','#f5a623','#a855f7','#ec4899','#06b6d4','#eab308','#14b8a6','#f97316','#e879f9','#84cc16'];
 
 // ── chart-library helpers (v4/v5 feature-detect) ──
@@ -211,15 +234,20 @@ async function loadChart(){
   const symbol=document.getElementById('symbol').value.trim().toUpperCase()||'SPY';
   const tf=document.getElementById('tf').value, days=document.getElementById('days').value;
   const feed=document.getElementById('feed').value, view=document.getElementById('view').value;
+  const asof=document.getElementById('asof').value||'';
+  syncAsofUI();
   ['symbol','tf','days','feed','view'].forEach(k=>localStorage.setItem('qpc_'+k,document.getElementById(k).value));
   document.getElementById('status').textContent='loading…';
   const qs=new URLSearchParams({symbol,tf,days,feed,view,overlays:JSON.stringify(OVERLAYS)});
+  if(asof)qs.set('asof',asof);
   try{
     const j=await (await fetch('/api/chart?'+qs)).json();
     if(!j.ok){ document.getElementById('status').textContent='error: '+(j.error||'').slice(0,120); return; }
     drawSnapshot(j);
-    document.getElementById('status').textContent=`${j.first} → ${j.last} · ${(j.bars||[]).length} bars · ${OVERLAYS.length} overlay(s)`;
-    if(LIVE) startLive();       // re-subscribe with the new params
+    const tag=asof?` · as of ${asof}`:'';
+    document.getElementById('status').textContent=`${symbol} · ${j.first} → ${j.last} · ${(j.bars||[]).length} bars · ${OVERLAYS.length} overlay(s)${tag}`;
+    renderRegister();           // keep the register highlight on the loaded symbol
+    if(LIVE&&!asof) startLive();       // re-subscribe with the new params (live only)
   }catch(e){ document.getElementById('status').textContent='error: '+e.message; }
 }
 
@@ -247,6 +275,8 @@ function startLive(){
   WS.onclose=()=>{ if(LIVE){ /* auto-reconnect after a beat */ setTimeout(()=>{ if(LIVE)startLive(); },3000); } };
 }
 function toggleLive(){
+  // Live means "now" — clear any As-of replay first.
+  if(!LIVE&&document.getElementById('asof').value){ document.getElementById('asof').value=''; syncAsofUI(); loadChart(); }
   LIVE=!LIVE; const b=document.getElementById('liveBtn');
   b.classList.toggle('on',LIVE); b.textContent=LIVE?'⏸ Live':'▶ Live';
   if(LIVE){ const f=document.getElementById('feed').value; if(f==='polygon')banner('Polygon free tier is end-of-day delayed — switch Feed to alpaca or hybrid for live bar movement.'); startLive(); }
@@ -256,10 +286,70 @@ function toggleLive(){
 async function initHealth(){
   try{ const h=await (await fetch('/api/health')).json();
     document.getElementById('build').textContent='build '+(h.build||'?');
+    FEEDS=h.feeds||{};
     const sel=document.getElementById('feed');
     for(const o of sel.options){ const ok=h.feeds&&h.feeds[o.value]; o.textContent=o.value+(ok?'':' (no key)'); }
     if(!localStorage.getItem('qpc_feed')&&h.default_feed)sel.value=h.default_feed;
   }catch(_){}
+}
+
+// ── Phase 2: screener register navigation ──
+function syncAsofUI(){
+  const asof=document.getElementById('asof').value;
+  document.getElementById('asof').classList.toggle('set',!!asof);
+  const lb=document.getElementById('liveBtn');
+  lb.disabled=!!asof; lb.style.opacity=asof?.5:1;
+  lb.title=asof?'Live is off while As-of is set (a past date). Clear As-of to go live.':'';
+}
+async function loadRegDates(){
+  const reg=document.getElementById('regReg').value, sel=document.getElementById('regDate');
+  try{
+    const j=await (await fetch('/api/screener/dates?register='+encodeURIComponent(reg))).json();
+    const dates=j.dates||[]; sel.innerHTML='';
+    if(!dates.length){ sel.innerHTML='<option value="">latest</option>'; }
+    else for(const d of dates){ const o=document.createElement('option'); o.value=d; o.textContent=d; sel.appendChild(o); }
+  }catch(_){ sel.innerHTML='<option value="">latest</option>'; }
+  loadRegister();
+}
+async function loadRegister(){
+  const reg=document.getElementById('regReg').value, date=document.getElementById('regDate').value;
+  const box=document.getElementById('regList'); box.innerHTML='<div class="muted">Loading…</div>';
+  try{
+    const qs=new URLSearchParams({register:reg}); if(date)qs.set('date',date);
+    const j=await (await fetch('/api/screener/register?'+qs)).json();
+    if(!j.ok){ REG_ROWS=[]; box.innerHTML='<div class="muted">Screener not reachable on :3000 — start it to browse R1 / Shortlist.<br><span style="color:var(--text3)">'+((j.error||'')+'').slice(0,90)+'</span></div>'; return; }
+    REG_ROWS=j.rows||[]; renderRegister();
+  }catch(e){ REG_ROWS=[]; box.innerHTML='<div class="muted">error: '+e.message+'</div>'; }
+}
+function scoreColor(s){ if(typeof s!=='number')return{bg:'#1c2431',fg:'#94a3b8'};
+  if(s>=70)return{bg:'rgba(34,197,94,.18)',fg:'#22c55e'};
+  if(s>=45)return{bg:'rgba(245,166,35,.18)',fg:'#f5a623'};
+  return{bg:'rgba(239,83,80,.16)',fg:'#ef5350'}; }
+function fmtPct(v){ return (typeof v==='number')?(v>=0?'+':'')+v.toFixed(1)+'%':'—'; }
+function renderRegister(){
+  const box=document.getElementById('regList');
+  if(!REG_ROWS.length){ box.innerHTML='<div class="muted">No stocks on this register/date.</div>'; return; }
+  const curSym=(document.getElementById('symbol').value||'').trim().toUpperCase();
+  box.innerHTML='';
+  for(const c of REG_ROWS){
+    const sc=scoreColor(c.score);
+    const el=document.createElement('div'); el.className='card'+(c.ticker===curSym?' on':'');
+    const chg=(typeof c.change==='number')?`<span class="${c.change>=0?'up':'dn'}" style="font-size:11px">${fmtPct(c.change)}</span>`:'';
+    const meta=[c.regime,c.sector,c.secBias&&('sec '+c.secBias)].filter(Boolean).join(' · ');
+    const meta2=[c.gapPct!=null?'gap '+fmtPct(c.gapPct):null, c.rvol!=null?'rvol '+Number(c.rvol).toFixed(1):null, c.method?('★'+c.method):null].filter(Boolean).join(' · ');
+    el.innerHTML=`<div class="top"><span class="tk">${c.ticker}</span>${chg}<span class="sc" style="background:${sc.bg};color:${sc.fg}">${typeof c.score==='number'?Math.round(c.score):'—'}</span></div>`
+      +`<div class="meta">${meta||'—'}</div>`+(meta2?`<div class="meta">${meta2}</div>`:'');
+    el.onclick=()=>pickStock(c);
+    box.appendChild(el);
+  }
+}
+function pickStock(c){
+  document.getElementById('symbol').value=c.ticker;
+  const date=document.getElementById('regDate').value||c.date||'';
+  document.getElementById('asof').value=date;
+  if(date&&feedHas('polygon'))document.getElementById('feed').value='polygon';  // deep history for a past day
+  if(LIVE)toggleLive();                 // a past register day isn't live
+  syncAsofUI(); renderRegister(); loadChart();
 }
 function restore(){
   ['symbol','tf','days','feed','view'].forEach(k=>{ const v=localStorage.getItem('qpc_'+k); if(v)document.getElementById(k).value=v; });
@@ -272,11 +362,16 @@ window.addEventListener('load',async()=>{
   if(typeof LightweightCharts==='undefined'){ banner('Chart library did not load (/static/lightweight-charts.js).'); return; }
   try{ initChart(); }catch(e){ banner('Chart init failed: '+e.message); return; }
   loadChart();
+  loadRegDates();
   document.getElementById('compute').onclick=loadChart;
   document.getElementById('addBtn').onclick=addOverlay;
   document.getElementById('liveBtn').onclick=toggleLive;
+  document.getElementById('regReg').addEventListener('change',loadRegDates);
+  document.getElementById('regDate').addEventListener('change',loadRegister);
+  document.getElementById('asof').addEventListener('change',()=>{ syncAsofUI(); loadChart(); });
   for(const id of ['symbol','tf','days','feed','view'])
     document.getElementById(id).addEventListener('change',()=>{ if(LIVE&&id!=='days')startLive(); loadChart(); });
+  syncAsofUI();
 });
 </script>
 </body>
