@@ -51,6 +51,27 @@
   .card .meta { color:var(--text3); font-size:10.5px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .card .chip { color:var(--text2); }
   .up { color:var(--accent); } .dn { color:var(--red); }
+  #stratBtn { background:#1c2431; color:var(--text); border:1px solid var(--border); }
+  #stratBtn.on { background:var(--blue); color:#fff; border-color:var(--blue); }
+  /* ── strategy builder drawer ── */
+  #drawer { position:absolute; left:0; right:0; bottom:0; height:42vh; background:var(--panel); border-top:1px solid var(--border); z-index:6; display:none; flex-direction:column; }
+  #drawer.open { display:flex; }
+  #drawer .dhead { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; font-size:12px; }
+  #drawer .dhead input, #drawer .dhead select { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:5px 7px; border-radius:5px; font-size:12px; }
+  #drawer .dbody { flex:1; display:flex; gap:12px; padding:10px 12px; overflow:auto; min-height:0; }
+  .rulecol { flex:1; min-width:0; border:1px solid var(--border); border-radius:7px; padding:8px; background:#141a24; }
+  .rulecol h4 { margin:0 0 7px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text2); display:flex; align-items:center; gap:8px; }
+  .rulecol h4 .en { margin-left:auto; font-weight:600; font-size:10px; padding:1px 6px; border-radius:8px; }
+  .en.t { background:rgba(34,197,94,.18); color:var(--accent); } .en.f { background:#1c2431; color:var(--text3); }
+  .rrow { display:flex; gap:4px; align-items:center; flex-wrap:wrap; padding:5px 0; border-bottom:1px dashed #1e2632; }
+  .rrow select, .rrow input { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:3px 5px; border-radius:4px; font-size:11px; }
+  .rrow .rx { color:var(--text3); cursor:pointer; padding:0 3px; margin-left:auto; }
+  .rrow .rx:hover { color:var(--red); }
+  .opd { display:inline-flex; gap:3px; align-items:center; }
+  .opd .len { width:48px; } .opd .cst { width:64px; }
+  .addrule { margin-top:7px; background:#1c2431; color:var(--text2); border:1px dashed var(--border); padding:4px 10px; border-radius:5px; font-size:11px; cursor:pointer; }
+  .logicsel { font-size:10px !important; padding:1px 4px !important; }
+  #stratStat { font-size:11px; color:var(--text2); }
   #banner { position:absolute; top:8px; left:8px; right:8px; background:rgba(245,166,35,.14); color:var(--draft); padding:8px 10px; border-radius:6px; font-size:12px; display:none; z-index:5; }
   .legend { position:absolute; top:6px; left:10px; font-size:11px; color:var(--text2); z-index:4; pointer-events:none; text-shadow:0 1px 2px #000; }
   .pill { display:inline-block; width:8px; height:8px; border-radius:2px; vertical-align:middle; margin-right:3px; }
@@ -68,6 +89,7 @@
   <label title="Replay the chart as of a past date (blank = live/now). Set automatically when you click a screener register stock.">As-of <input id="asof" type="date" style="width:130px"></label>
   <button id="compute">Compute</button>
   <button id="liveBtn">▶ Live</button>
+  <button id="stratBtn">⚡ Strategy</button>
   <span style="width:1px;height:20px;background:var(--border)"></span>
   <label>Add <select id="addPrim"></select></label>
   <input id="addLen" type="number" placeholder="len" title="length/period">
@@ -84,6 +106,34 @@
     <div id="banner"></div>
     <div class="legend" id="legend"></div>
     <div id="chart"></div>
+    <div id="drawer">
+      <div class="dhead">
+        <strong style="color:var(--blue)">⚡ Strategy</strong>
+        <input id="stratName" placeholder="strategy name" size="16">
+        <label style="color:var(--text2)">Side
+          <select id="stratSide"><option value="long">Long</option><option value="short">Short</option></select></label>
+        <select id="stratLoad" title="load a saved strategy"><option value="">— saved —</option></select>
+        <button id="stratSave" style="background:var(--accent);color:#000">Save</button>
+        <button id="stratNew" style="background:#1c2431;color:var(--text);border:1px solid var(--border)">New</button>
+        <button id="stratDel" style="background:#1c2431;color:var(--red);border:1px solid var(--border)">Delete</button>
+        <button id="stratEval" style="background:var(--blue);color:#fff">▶ Evaluate</button>
+        <button id="stratClear" style="background:#1c2431;color:var(--text2);border:1px solid var(--border)">Clear signals</button>
+        <span id="stratStat"></span>
+        <span id="drawerClose" style="margin-left:auto;cursor:pointer;color:var(--text3);font-size:16px">✕</span>
+      </div>
+      <div class="dbody">
+        <div class="rulecol" id="colEntry">
+          <h4>Entry — when <select id="entryLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option></select><span class="en f" id="entryNow">—</span></h4>
+          <div id="entryRules"></div>
+          <button class="addrule" data-g="entry">+ condition</button>
+        </div>
+        <div class="rulecol" id="colExit">
+          <h4>Exit — when <select id="exitLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option></select><span class="en f" id="exitNow">—</span></h4>
+          <div id="exitRules"></div>
+          <button class="addrule" data-g="exit">+ condition</button>
+        </div>
+      </div>
+    </div>
   </div>
   <div id="side">
     <h3>Screener register</h3>
@@ -106,6 +156,8 @@ let CHART=null, PRICE=null, BG=null, LINES=[], PRIMS=[], WS=null, LIVE=false;
 let OVERLAYS=[], SELECTED=null, _nid=1, PRICEBARS=[];
 let FEEDS={}, REG_ROWS=[];
 const feedHas=n=>!!FEEDS[n];
+let DAYMARKERS=[], SIGMARKERS=[];   // price-series markers: day labels + strategy signals
+function refreshMarkers(){ if(PRICE){ try{ PRICE.setMarkers([...DAYMARKERS,...SIGMARKERS].sort((a,b)=>a.time-b.time)); }catch(_){} } }
 const PALETTE=['#3b82f6','#f5a623','#a855f7','#ec4899','#06b6d4','#eab308','#14b8a6','#f97316','#e879f9','#84cc16'];
 
 // ── chart-library helpers (v4/v5 feature-detect) ──
@@ -205,8 +257,9 @@ function drawSnapshot(j){
     color:b.sess==='pre'?'rgba(59,130,246,0.12)':b.sess==='post'?'rgba(168,85,247,0.14)':'rgba(0,0,0,0)'}))); }
   const tf=document.getElementById('tf').value;
   if(tf!=='1d'&&j.day_starts&&j.day_starts.length){
-    PRICE.setMarkers(j.day_starts.map(d=>({time:d.time,position:'belowBar',color:'#64748b',shape:'square',size:1,text:d.label})));
-  } else PRICE.setMarkers([]);
+    DAYMARKERS=j.day_starts.map(d=>({time:d.time,position:'belowBar',color:'#64748b',shape:'square',size:1,text:d.label}));
+  } else DAYMARKERS=[];
+  refreshMarkers();
   for(const l of LINES){ try{CHART.removeSeries(l);}catch(_){} } LINES=[];
   let pLo=Infinity,pHi=-Infinity; for(const b of (j.bars||[])){ if(b.low<pLo)pLo=b.low; if(b.high>pHi)pHi=b.high; }
   const span=(pHi-pLo)||1; let usedOsc=false; const leg=[];
@@ -351,6 +404,80 @@ function pickStock(c){
   if(LIVE)toggleLive();                 // a past register day isn't live
   syncAsofUI(); renderRegister(); loadChart();
 }
+
+// ── Phase 3: strategy builder ──
+const OPS=[['gt','>'],['lt','<'],['ge','≥'],['le','≤'],['cross_above','crosses ▲'],['cross_below','crosses ▼'],['eq','='],['neq','≠'],['rising','rising'],['falling','falling']];
+const UNARY=new Set(['rising','falling']);
+const PFIELDS=['close','open','high','low','hl2','hlc3','ohlc4','volume'];
+let STRAT=blankStrat(), SAVED=[];
+function blankStrat(){ return {id:null,name:'',side:'long',entry:{logic:'AND',rules:[]},exit:{logic:'AND',rules:[]}}; }
+function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
+function seedTemplate(){ // a readable EMA-cross default so the builder isn't blank
+  const ema=()=>({kind:'primitive',key:'ma.ema',source:'close',params:{length:9}});
+  STRAT.entry.rules=[{left:{kind:'price',field:'close'},op:'cross_above',right:ema()}];
+  STRAT.exit.rules=[{left:{kind:'price',field:'close'},op:'cross_below',right:ema()}];
+}
+function blankRule(){ return {left:blankOperand('price'),op:'gt',right:blankOperand('primitive')}; }
+function primSelect(val){ const sel=document.createElement('select'); const groups={}; for(const p of PRIMS)(groups[p.group]||=[]).push(p); for(const g of Object.keys(groups).sort()){ const og=document.createElement('optgroup'); og.label=g; for(const p of groups[g]){ const o=document.createElement('option'); o.value=p.key; o.textContent=p.name; og.appendChild(o);} sel.appendChild(og);} if(val)sel.value=val; return sel; }
+function operandEl(op, onStruct, allowConst){
+  const box=document.createElement('span'); box.className='opd';
+  const kindSel=document.createElement('select');
+  const kinds=[['primitive','Indicator'],['price','Price']]; if(allowConst)kinds.push(['const','Value']);
+  for(const [v,l] of kinds){ const o=document.createElement('option'); o.value=v; o.textContent=l; kindSel.appendChild(o);} kindSel.value=op.kind;
+  kindSel.onchange=()=>{ const repl=blankOperand(kindSel.value); for(const k of Object.keys(op))delete op[k]; Object.assign(op,repl); onStruct(); };
+  box.appendChild(kindSel);
+  if(op.kind==='primitive'){
+    const ps=primSelect(op.key); ps.onchange=()=>{op.key=ps.value; op.params={}; onStruct();}; box.appendChild(ps);
+    const m=primMeta(op.key), lp=lenParam(m);
+    if(lp){ const li=document.createElement('input'); li.type='number'; li.className='len'; const d=m.params.find(p=>p.name===lp); li.placeholder=d&&d.default!=null?String(d.default):'len'; if(op.params[lp]!=null)li.value=op.params[lp]; li.onchange=()=>{const v=parseInt(li.value,10); if(Number.isFinite(v))op.params[lp]=v; else delete op.params[lp];}; box.appendChild(li);}
+    const src=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;src.appendChild(o);} src.value=op.source||'close'; src.onchange=()=>op.source=src.value; box.appendChild(src);
+  } else if(op.kind==='price'){
+    const fs=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'close'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs);
+  } else { const ci=document.createElement('input'); ci.type='number'; ci.step='any'; ci.className='cst'; ci.value=op.value??0; ci.onchange=()=>op.value=parseFloat(ci.value); box.appendChild(ci); }
+  return box;
+}
+function ruleRowEl(group, rule){
+  const row=document.createElement('div'); row.className='rrow';
+  row.appendChild(operandEl(rule.left, renderStrat, false));
+  const opSel=document.createElement('select'); for(const [v,l] of OPS){const o=document.createElement('option');o.value=v;o.textContent=l;opSel.appendChild(o);} opSel.value=rule.op; opSel.onchange=()=>{rule.op=opSel.value; renderStrat();}; row.appendChild(opSel);
+  if(!UNARY.has(rule.op)) row.appendChild(operandEl(rule.right, renderStrat, true));
+  const x=document.createElement('span'); x.className='rx'; x.textContent='✕'; x.title='remove'; x.onclick=()=>{group.rules=group.rules.filter(r=>r!==rule); renderStrat();}; row.appendChild(x);
+  return row;
+}
+function renderStrat(){
+  document.getElementById('stratName').value=STRAT.name||'';
+  document.getElementById('stratSide').value=STRAT.side||'long';
+  document.getElementById('entryLogic').value=STRAT.entry.logic||'AND';
+  document.getElementById('exitLogic').value=STRAT.exit.logic||'AND';
+  for(const g of ['entry','exit']){ const box=document.getElementById(g+'Rules'); box.innerHTML='';
+    if(!STRAT[g].rules.length) box.innerHTML='<div class="muted" style="font-size:11px">no conditions — click + condition</div>';
+    for(const rule of STRAT[g].rules) box.appendChild(ruleRowEl(STRAT[g],rule)); }
+}
+function readStratHeader(){ STRAT.name=document.getElementById('stratName').value; STRAT.side=document.getElementById('stratSide').value; STRAT.entry.logic=document.getElementById('entryLogic').value; STRAT.exit.logic=document.getElementById('exitLogic').value; }
+async function loadStrategies(){
+  try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
+  const sel=document.getElementById('stratLoad'); sel.innerHTML='<option value="">— saved —</option>';
+  for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);} if(STRAT.id)sel.value=STRAT.id;
+}
+function loadStrategyById(id){ const s=SAVED.find(x=>String(x.id)===String(id)); if(!s)return; STRAT=JSON.parse(JSON.stringify(s)); STRAT.entry=STRAT.entry||{logic:'AND',rules:[]}; STRAT.exit=STRAT.exit||{logic:'AND',rules:[]}; renderStrat(); }
+async function saveStrategy(){ readStratHeader(); if(!STRAT.name)STRAT.name='Untitled'; const j=await (await fetch('/api/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(STRAT)})).json(); if(j.ok){ STRAT.id=j.strategy.id; await loadStrategies(); document.getElementById('stratStat').textContent='saved ✓'; } else document.getElementById('stratStat').textContent='save error'; }
+async function delStrategy(){ if(STRAT.id){ await fetch('/api/strategies/'+STRAT.id,{method:'DELETE'}); } STRAT=blankStrat(); seedTemplate(); await loadStrategies(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; }
+async function evalStrategy(){
+  readStratHeader();
+  const body={ strategy:STRAT, symbol:document.getElementById('symbol').value.trim().toUpperCase()||'SPY', tf:document.getElementById('tf').value, days:Number(document.getElementById('days').value), feed:document.getElementById('feed').value, view:document.getElementById('view').value, asof:document.getElementById('asof').value||'' };
+  document.getElementById('stratStat').textContent='evaluating…';
+  try{
+    const j=await (await fetch('/api/strategy/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!j.ok){ document.getElementById('stratStat').textContent='error: '+(j.error||'').slice(0,90); return; }
+    SIGMARKERS=j.markers||[]; refreshMarkers();
+    const en=document.getElementById('entryNow'), ex=document.getElementById('exitNow');
+    en.textContent=j.entry_now?'TRUE now':'idle'; en.className='en '+(j.entry_now?'t':'f');
+    ex.textContent=j.exit_now?'TRUE now':'idle'; ex.className='en '+(j.exit_now?'t':'f');
+    const s=j.stats;
+    document.getElementById('stratStat').innerHTML=`${j.entries.length} entries · ${j.exits.length} exits · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% <span class="muted">(preview — full backtest is Phase 4)</span>`:'');
+  }catch(e){ document.getElementById('stratStat').textContent='error: '+e.message; }
+}
+function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open); document.getElementById('stratBtn').classList.toggle('on',open); if(open&&CHART){ setTimeout(()=>{const el=document.getElementById('chart'); CHART.applyOptions({height:el.clientHeight});},50); } }
 function restore(){
   ['symbol','tf','days','feed','view'].forEach(k=>{ const v=localStorage.getItem('qpc_'+k); if(v)document.getElementById(k).value=v; });
   try{ const a=JSON.parse(localStorage.getItem('qpc_ov')||'[]'); if(Array.isArray(a)&&a.length){ OVERLAYS=a; _nid=Math.max(...a.map(o=>parseInt((o.id||'o0').slice(1))||0))+1; SELECTED=localStorage.getItem('qpc_sel')||a[0].id; } }catch(_){}
@@ -363,9 +490,19 @@ window.addEventListener('load',async()=>{
   try{ initChart(); }catch(e){ banner('Chart init failed: '+e.message); return; }
   loadChart();
   loadRegDates();
+  // strategy builder
+  seedTemplate(); renderStrat(); loadStrategies();
   document.getElementById('compute').onclick=loadChart;
   document.getElementById('addBtn').onclick=addOverlay;
   document.getElementById('liveBtn').onclick=toggleLive;
+  document.getElementById('stratBtn').onclick=toggleDrawer;
+  document.getElementById('drawerClose').onclick=toggleDrawer;
+  document.getElementById('stratEval').onclick=evalStrategy;
+  document.getElementById('stratSave').onclick=saveStrategy;
+  document.getElementById('stratDel').onclick=delStrategy;
+  document.getElementById('stratNew').onclick=()=>{ STRAT=blankStrat(); seedTemplate(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; };
+  document.getElementById('stratLoad').addEventListener('change',e=>loadStrategyById(e.target.value));
+  document.querySelectorAll('.addrule').forEach(b=>b.onclick=()=>{ STRAT[b.dataset.g].rules.push(blankRule()); renderStrat(); });
   document.getElementById('regReg').addEventListener('change',loadRegDates);
   document.getElementById('regDate').addEventListener('change',loadRegister);
   document.getElementById('asof').addEventListener('change',()=>{ syncAsofUI(); loadChart(); });

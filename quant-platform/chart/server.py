@@ -33,9 +33,11 @@ sys.argv = sys.argv[:1]
 import tools.compare_server as cs            # noqa: E402  compute_data, list_primitives, _feed_status, _BUILD
 from chart import data_manager as dm         # noqa: E402
 from chart import screener as sc             # noqa: E402  Phase 2 register bridge
+from chart import strategy as strat          # noqa: E402  Phase 3 strategy engine
+from chart import store                      # noqa: E402  Phase 3 strategy storage
 sys.argv = _ORIG_ARGV                        # restore the real command-line args
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
@@ -76,6 +78,45 @@ def screener_dates(register: str = 'R1'):
 def screener_register(register: str = 'R1', date: str = ''):
     """Compact ticker cards for a register on a date (default latest)."""
     return JSONResponse(sc.register_rows(register, date or None))
+
+
+# ── Phase 3: strategy builder + signal evaluation ──────────────────────────
+@app.get('/api/strategies')
+def strategies_list():
+    return {'ok': True, 'strategies': store.list_strategies()}
+
+
+@app.post('/api/strategies')
+def strategies_save(payload: dict = Body(...)):
+    try:
+        return {'ok': True, 'strategy': store.save_strategy(payload)}
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
+
+
+@app.delete('/api/strategies/{sid}')
+def strategies_delete(sid: int):
+    return {'ok': store.delete_strategy(sid)}
+
+
+@app.post('/api/strategy/evaluate')
+def strategy_evaluate(payload: dict = Body(...)):
+    """Evaluate a strategy over a chart window → signal markers + preview
+    stats. Body: {strategy, symbol, tf, days, feed, view, asof}."""
+    try:
+        s = payload.get('strategy') or {}
+        out = strat.evaluate(
+            s,
+            symbol=str(payload.get('symbol', 'SPY')).upper(),
+            tf=payload.get('tf', '5m'),
+            days=int(payload.get('days', 5)),
+            feed=payload.get('feed', 'polygon'),
+            view=payload.get('view', 'all'),
+            asof=payload.get('asof') or None,
+        )
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
 
 
 def _snapshot(symbol: str, tf: str, days: int, feed: str, view: str,

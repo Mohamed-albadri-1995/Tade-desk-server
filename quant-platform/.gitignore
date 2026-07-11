@@ -4,4 +4,5 @@ __pycache__/
 tools/.static/
 qp.log
 .env
+chart/platform.db
 

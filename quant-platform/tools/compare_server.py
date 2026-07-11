@@ -336,9 +336,15 @@ def _series_markers(m, kwargs, arr, ts, bars: pd.DataFrame) -> list:
     return marks
 
 
-def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
-    """Compute one overlay spec {key, source, params, color} → list of
-    plot series (one, or several for dict-output primitives)."""
+def overlay_arrays(bars: pd.DataFrame, ov: dict, ctx: dict):
+    """Compute one overlay/operand spec {key, source, params} → (m, kwargs,
+    lines) where lines is [(sub, np.ndarray)] aligned to `bars`. This is the
+    raw-array core shared by the chart's overlay drawing and the strategy
+    engine's rule evaluation — both get the identical primitive math.
+
+    Fixed-timeframe primitives (atr_daily → '1d', pine_5day → '1m') are
+    computed on their own timeframe and reindexed onto the display bars (HTF
+    analysis: identical value on a 1m/5m/1d chart), with a warm-up allowance."""
     key = ov.get('key')
     if not key or key not in REGISTRY:
         raise ValueError(f'unknown primitive {key!r}')
@@ -346,11 +352,6 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
     kwargs = dict(ov.get('params') or {})
     source = ov.get('source', 'close')
 
-    # Fixed-timeframe primitives (atr_daily → '1d', pine_5day → '1m') are
-    # computed on their own timeframe regardless of the chart's, then mapped
-    # onto the display bars — HTF analysis: the value is identical on a 1m,
-    # 5m or 1d chart. The fetch start is pushed back by a warm-up allowance
-    # so the indicator has its full lookback before the first visible bar.
     if m.compute_tf and m.compute_tf != ctx['tf']:
         warm = _COMPUTE_TF_WARMUP_DAYS.get(m.compute_tf, 30)
         cstart = ctx['start'] - pd.Timedelta(days=warm)
@@ -367,6 +368,13 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
         lines = [(sub, np.asarray(a, dtype=float)) for sub, a in result.items()]
     else:
         lines = [(None, np.asarray(result, dtype=float))]
+    return m, kwargs, lines
+
+
+def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
+    """Compute one overlay spec {key, source, params, color} → list of
+    plot series (one, or several for dict-output primitives)."""
+    m, kwargs, lines = overlay_arrays(bars, ov, ctx)
 
     color = ov.get('color') or '#22c55e'
     args = ','.join(f'{k}={v}' for k, v in kwargs.items())
@@ -397,17 +405,16 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
     return out
 
 
-def compute_data(symbol: str, tf: str, days: int, overlays: list,
-                 feed: str = 'alpaca', view: str = 'all',
-                 asof: str | None = None) -> dict:
-    """Fetch bars once, compute every overlay, return everything the UI
-    needs. `view`: 'all' (show pre/rth/post, tint extended hours) or
-    'regular' (RTH bars only — computed and displayed).
+def prepare_bars(symbol: str, tf: str, days: int, feed: str = 'alpaca',
+                 view: str = 'all', asof: str | None = None):
+    """Fetch + session-filter bars and return (bars, ts, ctx) — the shared
+    front half of compute_data, factored out so the strategy engine evaluates
+    rules on the EXACT same bars the chart draws.
 
-    `asof` (YYYY-MM-DD) anchors the window to the END of that ET trading
-    day instead of "now" — this is what lets the charting platform replay a
-    stock exactly as it stood on the register date the screener captured it
-    (Phase 2 navigation). Omitted / None → live (ends now)."""
+    `asof` (YYYY-MM-DD) anchors the window to the END of that ET trading day
+    instead of 'now' (Phase 2 historical replay). `ts` is true UTC epoch
+    seconds; `ctx` carries what overlay/rule computation needs (loader, tf,
+    fetch window). On an empty window, ts is [] and ctx is still returned."""
     loader = _LOADERS.get(feed)
     if loader is None:
         raise ValueError(f'unknown feed {feed!r} (have: {sorted(_LOADERS)})')
@@ -423,25 +430,39 @@ def compute_data(symbol: str, tf: str, days: int, overlays: list,
     start = end - pd.Timedelta(days=days)
     bars = loader.load(symbol, tf, start, end)
 
-    et_full = bars.index.tz_convert(_ET)
     # Daily (and coarser) bars are timestamped at the session date, not inside
     # 09:30-16:00, so the RTH filter would drop every one of them → 0 bars.
     # Each daily bar already IS the RTH session, so skip the filter for 1d.
-    if view == 'regular' and tf != '1d':
+    if view == 'regular' and tf != '1d' and len(bars):
+        et_full = bars.index.tz_convert(_ET)
         mask = np.fromiter((_in_rth(t) for t in et_full), bool, len(bars))
         bars = bars[mask]
+    ctx = {'symbol': symbol, 'tf': tf, 'loader': loader, 'start': start, 'end': end}
+    if len(bars) == 0:
+        return bars, [], ctx
+    # TRUE UTC epoch seconds — the browser formats these in ET via Intl so the
+    # axis reads the same as TradingView regardless of the viewer's own tz.
+    ts = ((bars.index - pd.Timestamp('1970-01-01', tz='UTC'))
+          // pd.Timedelta(seconds=1)).tolist()
+    return bars, ts, ctx
+
+
+def compute_data(symbol: str, tf: str, days: int, overlays: list,
+                 feed: str = 'alpaca', view: str = 'all',
+                 asof: str | None = None) -> dict:
+    """Fetch bars once, compute every overlay, return everything the UI
+    needs. `view`: 'all' (show pre/rth/post, tint extended hours) or
+    'regular' (RTH bars only — computed and displayed).
+
+    `asof` (YYYY-MM-DD) anchors the window to the END of that ET trading
+    day instead of "now" — this is what lets the charting platform replay a
+    stock exactly as it stood on the register date the screener captured it
+    (Phase 2 navigation). Omitted / None → live (ends now)."""
+    bars, ts, ctx = prepare_bars(symbol, tf, days, feed, view, asof)
     if len(bars) == 0:
         return {'bars': [], 'series': [], 'day_starts': [], 'first': None, 'last': None}
 
     et = bars.index.tz_convert(_ET)
-    # TRUE UTC epoch seconds. The browser chart is told to format these in
-    # ET via Intl (America/New_York) so the axis reads the same as
-    # TradingView regardless of the viewer's own timezone. (The old
-    # "relabel ET as UTC" trick broke for viewers outside UTC — e.g. a
-    # UTC+3 browser shifted every bar +3h.)
-    ts = ((bars.index - pd.Timestamp('1970-01-01', tz='UTC'))
-          // pd.Timedelta(seconds=1)).tolist()
-
     o = bars['open'].to_numpy(float);  h = bars['high'].to_numpy(float)
     lo = bars['low'].to_numpy(float);  c = bars['close'].to_numpy(float)
     v = bars['volume'].to_numpy(float)
@@ -463,7 +484,6 @@ def compute_data(symbol: str, tf: str, days: int, overlays: list,
             bar['sess'] = _session_class(et[i])
         bar_list.append(bar)
 
-    ctx = {'symbol': symbol, 'tf': tf, 'loader': loader, 'start': start, 'end': end}
     series_out = []
     for ov in (overlays or []):
         # One failing overlay must not kill the whole request — otherwise a

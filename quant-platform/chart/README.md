@@ -77,6 +77,28 @@ the screener with `SCREENER_URL` (default `http://localhost:3000`, i.e. the
 same box). If the screener is down the browser just shows a note; the chart
 still works.
 
+## Strategy builder (Phase 3)
+
+The **⚡ Strategy** button opens a builder drawer. A strategy is **entry** and
+**exit** rule groups; each rule compares two operands with an operator:
+
+- **operands**: an *Indicator* (any qp primitive + length + source), a *Price*
+  field (close/open/high/low/hl2/hlc3/ohlc4/volume), or a constant *Value*.
+- **operators**: `> < ≥ ≤ = ≠`, `crosses ▲` / `crosses ▼`, `rising` /
+  `falling`.
+- each group is **ALL match** (AND) or **ANY match** (OR).
+
+**Evaluate** runs the rules over the current chart window and draws **entry
+(green ▲) / exit (red ▼) signal markers** on the candles, shows whether each
+side is TRUE right now, and a quick win-rate/return **preview** (the real
+day-by-day P/L sim is Phase 4). Strategies are saved to a small SQLite store
+and reloaded from the dropdown.
+
+The rules are evaluated with the **exact same qp primitive math the chart
+draws** (shared `compare_server.overlay_arrays`), so a signal is never computed
+from different numbers than what you see — and the same declarative strategy is
+what Phase 4 backtests over the screener's historical register days.
+
 ## Endpoints
 
 ```
@@ -89,6 +111,11 @@ WS   /ws/live                 pushes {type:'tick', bar, tips} on an interval
 GET  /api/screener/health     is the screener reachable
 GET  /api/screener/dates      ?register=R1|Shortlist → available dates
 GET  /api/screener/register   ?register=&date= → ticker cards (score, regime, …)
+GET  /api/strategies          list saved strategies
+POST /api/strategies          create / update a strategy (JSON body)
+DEL  /api/strategies/{id}     delete
+POST /api/strategy/evaluate   {strategy, symbol, tf, days, feed, view, asof}
+                              → entry/exit signals + markers + preview stats
 ```
 
 ## Architecture
