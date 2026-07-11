@@ -65,12 +65,14 @@ def load() -> bool:
             if str(candidate) in sys.path:
                 sys.path.remove(str(candidate))
             _purge_qp_modules()
-    logger.warning(
-        "verified qp library not found — falling back to the built-in "
-        "PLACEHOLDER primitives (not TradingView-verified). Set QP_PATH "
-        "in .env to the quant-platform directory."
+    # The placeholder is gone — there is no verified-vs-unverified choice
+    # any more. If the library can't load, fail hard: unverified indicator
+    # math must never run a live trade (INTEGRATION.md §8.2).
+    raise RuntimeError(
+        "verified qp library not found — expected quant-platform/ in the repo "
+        "or QP_PATH set in .env. Run: git checkout origin/claude/read-j5hgnf -- "
+        "quant-platform && pip install -r quant-platform/requirements.txt"
     )
-    return False
 
 
 load()

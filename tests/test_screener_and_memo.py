@@ -59,19 +59,22 @@ def test_registry_today_is_tried_first():
 
 
 def test_primitive_memoization(bars):
+    # Count calls into the verified sma primitive (approved short name 'sma',
+    # registry key 'ma.sma').
     calls = {"n": 0}
     import qp
 
-    original = qp.REGISTRY["sma"].fn
+    meta = next((m for m in qp.approved_primitives().values() if m.name == "sma"), None)
+    assert meta is not None, "sma must be approved in the verified library"
+    original = meta.fn
 
-    def counting(bars_, **params):
+    def counting(arr, **params):
         calls["n"] += 1
-        return original(bars_, **params)
+        return original(arr, **params)
 
+    meta.__dict__["fn"] = counting
     cache = {"AAPL": {"bars": bars, "price": bars[-1]["close"], "timestamp": datetime(2026, 7, 6, 12, 0)}}
     proxy = MarketDataProxy(cache)
-    object.__setattr__(qp.REGISTRY["sma"], "__dict__", dict(qp.REGISTRY["sma"].__dict__))  # frozen dataclass workaround not needed; patch registry directly
-    qp.REGISTRY["sma"].__dict__["fn"] = counting
     try:
         first = proxy.sma("AAPL", length=9)
         second = proxy.sma("AAPL", length=9)
@@ -86,13 +89,15 @@ def test_primitive_memoization(bars):
         proxy.sma("AAPL", length=9)
         assert calls["n"] == 3
     finally:
-        qp.REGISTRY["sma"].__dict__["fn"] = original
+        meta.__dict__["fn"] = original
 
 
 def test_memo_returns_copies_for_containers(bars):
+    # 'bb' (Bollinger Bands) is an approved multi-output primitive -> dict.
     cache = {"AAPL": {"bars": bars, "price": 1.0, "timestamp": datetime(2026, 7, 6)}}
     proxy = MarketDataProxy(cache)
-    first = proxy.bollinger("AAPL", length=20)
-    first["upper"] = -999.0  # a script mutating its result...
-    second = proxy.bollinger("AAPL", length=20)
-    assert second["upper"] != -999.0  # ...must not poison the memo
+    first = proxy.bb("AAPL", length=20)
+    assert isinstance(first, dict)
+    first[next(iter(first))] = -999.0  # a script mutating its result...
+    second = proxy.bb("AAPL", length=20)
+    assert second[next(iter(second))] != -999.0  # ...must not poison the memo

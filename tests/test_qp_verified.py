@@ -15,10 +15,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    not os.getenv("QP_VERIFIED_TEST"),
-    reason="verified-qp integration test (set QP_VERIFIED_TEST=1 and QP_PATH)",
-)
+# The verified library is now mandatory (loaded at import in app.qp_loader),
+# so these run in the normal suite.
 
 
 def make_doc_rows():

@@ -138,7 +138,8 @@ class MonitorService:
             "session_end_time": self.session_end_time,
             "session_open": self._session_open(),
             "watchlist_source": self.watchlist_source,
-            "qp_source": "verified" if qp_loader.VERIFIED else "placeholder-unverified",
+            "qp_source": "verified",
+            "qp_approved_count": len(__import__("qp").approved_primitives()),
         }
 
     # -------------------------------------------------------------- loaders
@@ -214,15 +215,14 @@ class MonitorService:
         await self.gate_engine.refresh_rules()
         await self.sizer_engine.refresh()
         await self.capital_service.refresh()
-        if qp_loader.VERIFIED:
-            # Approvals only ever grow; picking up newly approved primitives
-            # after the user pulls in the quant-platform checkout.
-            try:
-                import qp
+        # Approvals only ever grow; pick up newly approved primitives after
+        # the user re-syncs the quant-platform checkout, without a restart.
+        try:
+            import qp
 
-                qp.registry.refresh_approvals()
-            except Exception:
-                pass
+            qp.registry.refresh_approvals()
+        except Exception:
+            pass
 
         setups = await self._load_active_setups()
         conditions = await self._load_active_conditions()

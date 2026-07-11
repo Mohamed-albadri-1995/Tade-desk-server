@@ -75,31 +75,25 @@ async def screener_registry():
 
 @router.get("/api/primitives")
 async def list_primitives():
-    from app import qp_loader
+    """The APPROVED verified primitives available to setup scripts, by
+    the short name you call as market_data.<name>()."""
     import qp
 
-    if qp_loader.VERIFIED:
-        return [
-            {
-                "key": meta.key,
-                "name": meta.name,
-                "group": meta.group,
-                "description": meta.description,
-                "inputs": list(meta.inputs),
-                "outputs": list(meta.outputs),
-                "params": [
-                    {"name": p.name, "kind": p.kind, "default": p.default,
-                     "min": p.min, "max": p.max, "description": p.description}
-                    for p in meta.params
-                ],
-                "source": "verified",
-            }
-            for meta in qp.approved_primitives().values()
-        ]
     return [
-        {"key": p.key, "description": p.description, "params": p.params,
-         "source": "placeholder-unverified"}
-        for p in qp.REGISTRY.values()
+        {
+            "key": meta.key,
+            "name": meta.name,
+            "group": meta.group,
+            "description": meta.description,
+            "inputs": list(meta.inputs),
+            "outputs": list(meta.outputs),
+            "params": [
+                {"name": p.name, "kind": p.kind, "default": p.default,
+                 "min": p.min, "max": p.max, "description": p.description}
+                for p in meta.params
+            ],
+        }
+        for meta in qp.approved_primitives().values()
     ]
 
 

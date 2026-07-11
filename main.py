@@ -40,6 +40,16 @@ from app.services.monitor import MARKET_TZ, monitor
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("trade-desk")
 
+# qp_loader runs at import (before basicConfig), so restate the confirmation
+# here with the app's formatter — this is the boot-log line to look for.
+_qp = __import__("qp")
+from app import qp_loader  # noqa: E402
+
+logger.info(
+    "VERIFIED qp library loaded from %s — %d approved primitives",
+    qp_loader.QP_DIR, len(_qp.approved_primitives()),
+)
+
 # The screener's 15 regime slugs (src/sideD/regime.js REGIME_CATALOG).
 REGIME_KEYS = [
     "STRONG_UP", "EXTENDED_UP", "UP", "WEAK_UP", "PULLBACK_BULL",
