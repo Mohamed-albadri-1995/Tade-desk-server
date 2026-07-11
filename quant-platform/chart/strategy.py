@@ -8,12 +8,15 @@ also the exact series the Phase 4 backtest will replay day-by-day.
 
 Schema (JSON)
 -------------
-operand:
+operand:                                    (any operand may add "offset": n = n bars ago)
   {"kind":"primitive","key":"ma.ema","source":"close","params":{"length":9},"sub":null}
   {"kind":"price","field":"close|open|high|low|hl2|hlc3|ohlc4|volume"}
+  {"kind":"time","field":"minutes|hhmm|hour|minute"}   # ET bar time-of-day
   {"kind":"const","value": <number>}
 rule:
-  {"left": operand, "op": OP, "right": operand, "op_params": {...}}
+  {"left": operand, "op": OP, "right": operand, "op_params": {...},
+   "for_bars": N,       # true only if it held on ALL of the last N bars
+   "within_bars": N}    # true if it held on ANY of the last N bars
   OP ∈ gt lt ge le eq neq cross_above cross_below rising falling bounce_up bounce_down
     rising/falling  — regression slope of `left` over op_params.lookback bars,
                       measured as net move ÷ window volatility, is ≥ / ≤
@@ -53,6 +56,15 @@ _BOUNCE_TOL_PCT = 0.15    # how close (in %) the wick must come to the level to 
 _SEQ_WINDOW = 10          # max bars between consecutive steps of a THEN sequence
 
 
+def _shift(arr: np.ndarray, offset: int) -> np.ndarray:
+    """Value `offset` bars ago (Pine's series[offset]); NaN for the first
+    `offset` bars. offset<=0 → unchanged."""
+    off = int(offset or 0)
+    if off <= 0:
+        return arr
+    return np.concatenate((np.full(off, np.nan), arr[:-off]))
+
+
 # ── operand → aligned float array ──────────────────────────────────────────
 def _operand_array(operand: dict, bars, ctx) -> np.ndarray:
     if not isinstance(operand, dict):
@@ -61,27 +73,37 @@ def _operand_array(operand: dict, bars, ctx) -> np.ndarray:
     n = len(bars)
     if kind == 'const':
         try:
-            return np.full(n, float(operand.get('value')), dtype=float)
+            base = np.full(n, float(operand.get('value')), dtype=float)
         except (TypeError, ValueError):
             raise ValueError(f'bad const value {operand.get("value")!r}')
-    if kind == 'price':
+    elif kind == 'time':
+        # Bar time-of-day in ET, for session windows. field: minutes (since
+        # midnight, default), hhmm (930, 1300…), hour, minute.
+        et = bars.index.tz_convert(cs._ET)
+        hh = np.asarray(et.hour, dtype=float); mm = np.asarray(et.minute, dtype=float)
+        field = operand.get('field', 'minutes')
+        base = ({'hour': hh, 'minute': mm, 'hhmm': hh * 100 + mm}
+                .get(field, hh * 60 + mm))
+    elif kind == 'price':
         field = operand.get('field', 'close')
         if field not in _PRICE_FIELDS:
             raise ValueError(f'unknown price field {field!r}')
-        return cs._source_series(bars, field)
-    if kind == 'primitive':
+        base = cs._source_series(bars, field)
+    elif kind == 'primitive':
         key = operand.get('key')
         _, _, lines = cs.overlay_arrays(
             bars, {'key': key, 'source': operand.get('source', 'close'),
                    'params': operand.get('params') or {}}, ctx)
         sub = operand.get('sub')
         if sub:                                   # dict-output primitive line
-            for s, arr in lines:
-                if s == sub:
-                    return arr
-            raise ValueError(f'{key} has no output {sub!r}')
-        return lines[0][1]
-    raise ValueError(f'unknown operand kind {kind!r}')
+            base = next((arr for s, arr in lines if s == sub), None)
+            if base is None:
+                raise ValueError(f'{key} has no output {sub!r}')
+        else:
+            base = lines[0][1]
+    else:
+        raise ValueError(f'unknown operand kind {kind!r}')
+    return _shift(np.asarray(base, dtype=float), operand.get('offset', 0))
 
 
 # ── comparison / cross operators → boolean array ───────────────────────────
@@ -205,6 +227,20 @@ def _sequence(parts: list, window: int) -> np.ndarray:
     return fire
 
 
+def _rolling(mask: np.ndarray, n: int, mode: str) -> np.ndarray:
+    """`for_bars`: true only if the condition held on ALL of the last n bars
+    (sustained). `within_bars`: true if it held on ANY of the last n bars."""
+    if n <= 1:
+        return mask
+    from numpy.lib.stride_tricks import sliding_window_view
+    out = np.zeros(len(mask), dtype=bool)
+    if len(mask) < n:
+        return out
+    sums = sliding_window_view(mask.astype(int), n).sum(axis=1)
+    out[n - 1:] = (sums == n) if mode == 'all' else (sums > 0)
+    return out
+
+
 def _eval_rule(rule: dict, bars, ctx) -> np.ndarray:
     op = rule.get('op', 'gt')
     if op not in _OPS:
@@ -212,11 +248,18 @@ def _eval_rule(rule: dict, bars, ctx) -> np.ndarray:
     p = rule.get('op_params') or {}
     L = _operand_array(rule.get('left'), bars, ctx)
     if op in _UNARY:
-        return _slope_flag(L, op, p)
-    R = _operand_array(rule.get('right'), bars, ctx)
-    if op in _BOUNCE:
-        return _bounce_flag(op, bars, R, p)
-    return _apply_op(op, L, R)
+        out = _slope_flag(L, op, p)
+    else:
+        R = _operand_array(rule.get('right'), bars, ctx)
+        out = _bounce_flag(op, bars, R, p) if op in _BOUNCE else _apply_op(op, L, R)
+    # sustained modifiers: held for the last N bars / true within the last N.
+    fb = int(rule.get('for_bars', 0) or 0)
+    wb = int(rule.get('within_bars', 0) or 0)
+    if fb > 1:
+        out = _rolling(out, fb, 'all')
+    elif wb > 1:
+        out = _rolling(out, wb, 'any')
+    return out
 
 
 def _eval_group(group: dict, bars, ctx) -> np.ndarray:
@@ -234,7 +277,10 @@ def _eval_group(group: dict, bars, ctx) -> np.ndarray:
     if logic == 'THEN':
         return _sequence(parts, int((group or {}).get('window', _SEQ_WINDOW)))
     stacked = np.vstack(parts)
-    return stacked.all(axis=0) if logic == 'AND' else stacked.any(axis=0)
+    if logic == 'ATLEAST':                        # K-of-N scoring
+        k = int((group or {}).get('k', 1))
+        return stacked.sum(axis=0) >= k
+    return stacked.any(axis=0) if logic == 'OR' else stacked.all(axis=0)
 
 
 def _edges(mask: np.ndarray) -> np.ndarray:
@@ -281,6 +327,34 @@ def _pair_trades(ts, close, entry_ev, exit_ev, side):
             trades.append((ei, i, float(r)))
             in_pos = False
     return trades
+
+
+def test_condition(node: dict, symbol: str, tf: str, days: int,
+                   feed: str = 'polygon', view: str = 'all',
+                   asof: str | None = None) -> dict:
+    """Evaluate a SINGLE rule (or group) and mark EVERY bar where it holds —
+    for validating a condition ('slope of 13-MA', 'bounce off 5-DMA', 'break of
+    resistance') before wiring it into a strategy. Returns a dot marker on each
+    true bar, the count, the % of bars true, and whether it's true right now."""
+    from chart import data_manager as dm
+    strat_like = {'entry': node if ('rules' in node or 'logic' in node)
+                  else {'logic': 'AND', 'rules': [node]}}
+    days = dm.required_days(referenced_overlays(strat_like), tf, days)
+    bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
+    n = len(bars)
+    if n == 0:
+        return {'ok': True, 'bars': 0, 'true': 0, 'markers': [], 'now': False}
+    mask = (_eval_group(node, bars, ctx) if ('rules' in node or 'logic' in node)
+            else _eval_rule(node, bars, ctx))
+    idx = np.nonzero(mask)[0]
+    markers = [{'time': int(ts[i]), 'position': 'aboveBar', 'shape': 'circle',
+                'color': '#3b82f6', 'text': ''} for i in idx]
+    et = bars.index.tz_convert(cs._ET)
+    return {'ok': True, 'bars': n, 'true': int(mask.sum()),
+            'pct': round(100.0 * mask.sum() / n, 1), 'now': bool(mask[-1]),
+            'markers': markers,
+            'first': et[0].strftime('%Y-%m-%d %H:%M ET'),
+            'last': et[-1].strftime('%Y-%m-%d %H:%M ET')}
 
 
 def evaluate(strategy: dict, symbol: str, tf: str, days: int,

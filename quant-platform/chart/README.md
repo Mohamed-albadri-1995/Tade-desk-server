@@ -108,6 +108,22 @@ long trigger.
 13-EMA* fires only when price was above the MA, pulled back to it, and bounced —
 in that order, within the window.
 
+### Advanced composition (for complex, Pine-level strategies)
+
+- **Bar offset** — every operand has a `[n]` box = *n bars ago*. `close > high[1]`
+  (break of the previous bar's high) is `Price close` **>** `Price high [1]`.
+- **Time of day** — a `Time` operand returns the ET bar time (minutes since
+  midnight, or `hhmm`), so a session window 9:30–13:00 is two conditions:
+  `Time minutes ≥ 570` **and** `≤ 780`.
+- **Held for N bars** — each condition has a `held for / within N` selector:
+  *held for 3* = true only if it held on all of the last 3 bars (sustained);
+  *within 5* = true if it held on any of the last 5.
+- **AT LEAST k** — a group mode: fires when at least **k** of its conditions
+  match (the "min core / min extra" scoring in the Pine scripts).
+- **🔍 Test a condition** — every row has a test button: it marks *every* bar
+  the single condition holds and reports how often (e.g. "slope of 13-MA is
+  rising 22% of bars, TRUE now"), so you validate a piece before composing.
+
 **Evaluate** runs the rules over the current chart window and draws **entry
 (green ▲) / exit (red ▼) signal markers** on the candles, shows whether each
 side is TRUE right now, and a quick win-rate/return **preview** (the real

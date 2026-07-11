@@ -99,6 +99,23 @@ def strategies_delete(sid: int):
     return {'ok': store.delete_strategy(sid)}
 
 
+@app.post('/api/strategy/test')
+def strategy_test(payload: dict = Body(...)):
+    """Evaluate a single condition (rule or group) and mark every bar it holds
+    — for validating a condition before composing. Body: {node, symbol, tf,
+    days, feed, view, asof}."""
+    try:
+        out = strat.test_condition(
+            payload.get('node') or {},
+            symbol=str(payload.get('symbol', 'SPY')).upper(),
+            tf=payload.get('tf', '5m'), days=int(payload.get('days', 5)),
+            feed=payload.get('feed', 'polygon'), view=payload.get('view', 'all'),
+            asof=payload.get('asof') or None)
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
+
+
 @app.post('/api/strategy/evaluate')
 def strategy_evaluate(payload: dict = Body(...)):
     """Evaluate a strategy over a chart window → signal markers + preview

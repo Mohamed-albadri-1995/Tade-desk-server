@@ -123,12 +123,12 @@
       </div>
       <div class="dbody">
         <div class="rulecol" id="colEntry">
-          <h4>Entry — when <select id="entryLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="THEN">IN SEQUENCE</option></select><input id="entryWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="entryNow">—</span></h4>
+          <h4>Entry — when <select id="entryLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="ATLEAST">AT LEAST k</option><option value="THEN">IN SEQUENCE</option></select><input id="entryK" class="logicsel" type="number" style="width:44px;display:none" title="minimum conditions that must match" placeholder="k"><input id="entryWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="entryNow">—</span></h4>
           <div id="entryRules"></div>
           <button class="addrule" data-g="entry">+ condition</button>
         </div>
         <div class="rulecol" id="colExit">
-          <h4>Exit — when <select id="exitLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="THEN">IN SEQUENCE</option></select><input id="exitWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="exitNow">—</span></h4>
+          <h4>Exit — when <select id="exitLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="ATLEAST">AT LEAST k</option><option value="THEN">IN SEQUENCE</option></select><input id="exitK" class="logicsel" type="number" style="width:44px;display:none" title="minimum conditions that must match" placeholder="k"><input id="exitWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="exitNow">—</span></h4>
           <div id="exitRules"></div>
           <button class="addrule" data-g="exit">+ condition</button>
         </div>
@@ -412,7 +412,7 @@ const BOUNCE=new Set(['bounce_up','bounce_down']);
 const PFIELDS=['close','open','high','low','hl2','hlc3','ohlc4','volume'];
 let STRAT=blankStrat(), SAVED=[];
 function blankStrat(){ return {id:null,name:'',side:'long',entry:{logic:'AND',window:10,rules:[]},exit:{logic:'AND',window:10,rules:[]}}; }
-function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
+function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; if(kind==='time')return {kind:'time',field:'minutes'}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
 function seedTemplate(){ // a readable EMA-cross default so the builder isn't blank
   const ema=()=>({kind:'primitive',key:'ma.ema',source:'close',params:{length:9}});
   STRAT.entry.rules=[{left:{kind:'price',field:'close'},op:'cross_above',right:ema()}];
@@ -423,22 +423,35 @@ function primSelect(val){ const sel=document.createElement('select'); const grou
 function operandEl(op, onStruct, allowConst){
   const box=document.createElement('span'); box.className='opd';
   const kindSel=document.createElement('select');
-  const kinds=[['primitive','Indicator'],['price','Price']]; if(allowConst)kinds.push(['const','Value']);
+  const kinds=[['primitive','Indicator'],['price','Price'],['time','Time']]; if(allowConst)kinds.push(['const','Value']);
   for(const [v,l] of kinds){ const o=document.createElement('option'); o.value=v; o.textContent=l; kindSel.appendChild(o);} kindSel.value=op.kind;
   kindSel.onchange=()=>{ const repl=blankOperand(kindSel.value); for(const k of Object.keys(op))delete op[k]; Object.assign(op,repl); onStruct(); };
   box.appendChild(kindSel);
+  let canOffset=false;
   if(op.kind==='primitive'){
     const ps=primSelect(op.key); ps.onchange=()=>{op.key=ps.value; op.params={}; onStruct();}; box.appendChild(ps);
     const m=primMeta(op.key), lp=lenParam(m);
     if(lp){ const li=document.createElement('input'); li.type='number'; li.className='len'; const d=m.params.find(p=>p.name===lp); li.placeholder=d&&d.default!=null?String(d.default):'len'; if(op.params[lp]!=null)li.value=op.params[lp]; li.onchange=()=>{const v=parseInt(li.value,10); if(Number.isFinite(v))op.params[lp]=v; else delete op.params[lp];}; box.appendChild(li);}
-    const src=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;src.appendChild(o);} src.value=op.source||'close'; src.onchange=()=>op.source=src.value; box.appendChild(src);
+    const src=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;src.appendChild(o);} src.value=op.source||'close'; src.onchange=()=>op.source=src.value; box.appendChild(src); canOffset=true;
   } else if(op.kind==='price'){
-    const fs=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'close'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs);
+    const fs=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'close'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs); canOffset=true;
+  } else if(op.kind==='time'){
+    const fs=document.createElement('select'); for(const f of ['minutes','hhmm','hour','minute']){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'minutes'; fs.title='ET time-of-day (minutes since midnight, hhmm=930, …)'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs);
   } else { const ci=document.createElement('input'); ci.type='number'; ci.step='any'; ci.className='cst'; ci.value=op.value??0; ci.onchange=()=>op.value=parseFloat(ci.value); box.appendChild(ci); }
+  if(canOffset){ const off=document.createElement('input'); off.type='number'; off.className='len'; off.style.width='40px'; off.title='bars ago (e.g. 1 = previous bar)'; off.placeholder='[0]'; if(op.offset)off.value=op.offset; off.onchange=()=>{const v=parseInt(off.value,10); if(Number.isFinite(v)&&v>0)op.offset=v; else delete op.offset;}; box.appendChild(off); }
   return box;
 }
 function labeled(txt,el){ const s=document.createElement('span'); s.className='opd'; const l=document.createElement('span'); l.style.cssText='color:var(--text3);font-size:10px'; l.textContent=txt; s.appendChild(l); s.appendChild(el); return s; }
 function opParamInput(rule,key,def){ rule.op_params=rule.op_params||{}; const i=document.createElement('input'); i.type='number'; i.step='any'; i.className='len'; i.placeholder=String(def); if(rule.op_params[key]!=null)i.value=rule.op_params[key]; i.onchange=()=>{const v=parseFloat(i.value); if(Number.isFinite(v))rule.op_params[key]=v; else delete rule.op_params[key];}; return i; }
+function holdControl(rule){
+  const wrap=document.createElement('span'); wrap.className='opd';
+  const sel=document.createElement('select'); sel.className='logicsel'; sel.title='sustained: require the condition to hold';
+  for(const [v,l] of [['','hold —'],['for','held for'],['within','within']]){const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);}
+  const cur=rule.for_bars?'for':(rule.within_bars?'within':''); sel.value=cur;
+  const nIn=document.createElement('input'); nIn.type='number'; nIn.className='len'; nIn.style.width='40px'; nIn.placeholder='N bars'; nIn.value=rule.for_bars||rule.within_bars||''; nIn.style.display=cur?'':'none';
+  const apply=()=>{ delete rule.for_bars; delete rule.within_bars; const m=sel.value; nIn.style.display=m?'':'none'; const v=parseInt(nIn.value,10); if(m&&Number.isFinite(v)&&v>1){ if(m==='for')rule.for_bars=v; else rule.within_bars=v; } };
+  sel.onchange=apply; nIn.onchange=apply; wrap.appendChild(sel); wrap.appendChild(nIn); return wrap;
+}
 function ruleRowEl(group, rule){
   const row=document.createElement('div'); row.className='rrow';
   row.appendChild(operandEl(rule.left, renderStrat, false));
@@ -452,8 +465,21 @@ function ruleRowEl(group, rule){
   } else {
     row.appendChild(operandEl(rule.right, renderStrat, true));
   }
+  row.appendChild(holdControl(rule));
+  const t=document.createElement('span'); t.className='rx'; t.textContent='🔍'; t.title='test this condition — mark every bar it holds'; t.style.marginLeft='auto'; t.onclick=()=>testRule(rule); row.appendChild(t);
   const x=document.createElement('span'); x.className='rx'; x.textContent='✕'; x.title='remove'; x.onclick=()=>{group.rules=group.rules.filter(r=>r!==rule); renderStrat();}; row.appendChild(x);
   return row;
+}
+async function testRule(rule){
+  readStratHeader();
+  const body={ node:rule, symbol:document.getElementById('symbol').value.trim().toUpperCase()||'SPY', tf:document.getElementById('tf').value, days:Number(document.getElementById('days').value), feed:document.getElementById('feed').value, view:document.getElementById('view').value, asof:document.getElementById('asof').value||'' };
+  document.getElementById('stratStat').textContent='testing…';
+  try{
+    const j=await (await fetch('/api/strategy/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!j.ok){ document.getElementById('stratStat').textContent='test error: '+(j.error||'').slice(0,90); return; }
+    SIGMARKERS=j.markers||[]; refreshMarkers();
+    document.getElementById('stratStat').innerHTML=`🔍 condition true on <b>${j.true}</b>/${j.bars} bars (${j.pct}%) · now: ${j.now?'<span class="up">TRUE</span>':'<span class="muted">idle</span>'}`;
+  }catch(e){ document.getElementById('stratStat').textContent='test error: '+e.message; }
 }
 function renderStrat(){
   document.getElementById('stratName').value=STRAT.name||'';
@@ -462,13 +488,15 @@ function renderStrat(){
     const grp=STRAT[g]; document.getElementById(g+'Logic').value=grp.logic||'AND';
     const win=document.getElementById(g+'Window'); const isThen=(grp.logic==='THEN');
     win.style.display=isThen?'':'none'; win.value=grp.window!=null?grp.window:10;
+    const kIn=document.getElementById(g+'K'); const isK=(grp.logic==='ATLEAST');
+    kIn.style.display=isK?'':'none'; kIn.value=grp.k!=null?grp.k:1;
     const box=document.getElementById(g+'Rules'); box.innerHTML='';
     if(!grp.rules.length) box.innerHTML='<div class="muted" style="font-size:11px">no conditions — click + condition</div>';
     for(const rule of grp.rules) box.appendChild(ruleRowEl(grp,rule));
   }
 }
 function readStratHeader(){ STRAT.name=document.getElementById('stratName').value; STRAT.side=document.getElementById('stratSide').value;
-  for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; } }
+  for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; const k=parseInt(document.getElementById(g+'K').value,10); STRAT[g].k=Number.isFinite(k)?k:1; } }
 async function loadStrategies(){
   try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
   const sel=document.getElementById('stratLoad'); sel.innerHTML='<option value="">— saved —</option>';
@@ -521,6 +549,7 @@ window.addEventListener('load',async()=>{
   for(const g of ['entry','exit']){
     document.getElementById(g+'Logic').addEventListener('change',e=>{ STRAT[g].logic=e.target.value; renderStrat(); });
     document.getElementById(g+'Window').addEventListener('change',e=>{ const w=parseInt(e.target.value,10); STRAT[g].window=Number.isFinite(w)?w:10; });
+    document.getElementById(g+'K').addEventListener('change',e=>{ const k=parseInt(e.target.value,10); STRAT[g].k=Number.isFinite(k)?k:1; });
   }
   document.getElementById('regReg').addEventListener('change',loadRegDates);
   document.getElementById('regDate').addEventListener('change',loadRegister);
