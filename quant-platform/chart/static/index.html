@@ -123,12 +123,12 @@
       </div>
       <div class="dbody">
         <div class="rulecol" id="colEntry">
-          <h4>Entry — when <select id="entryLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option></select><span class="en f" id="entryNow">—</span></h4>
+          <h4>Entry — when <select id="entryLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="THEN">IN SEQUENCE</option></select><input id="entryWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="entryNow">—</span></h4>
           <div id="entryRules"></div>
           <button class="addrule" data-g="entry">+ condition</button>
         </div>
         <div class="rulecol" id="colExit">
-          <h4>Exit — when <select id="exitLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option></select><span class="en f" id="exitNow">—</span></h4>
+          <h4>Exit — when <select id="exitLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="THEN">IN SEQUENCE</option></select><input id="exitWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="exitNow">—</span></h4>
           <div id="exitRules"></div>
           <button class="addrule" data-g="exit">+ condition</button>
         </div>
@@ -406,11 +406,12 @@ function pickStock(c){
 }
 
 // ── Phase 3: strategy builder ──
-const OPS=[['gt','>'],['lt','<'],['ge','≥'],['le','≤'],['cross_above','crosses ▲'],['cross_below','crosses ▼'],['eq','='],['neq','≠'],['rising','rising'],['falling','falling']];
+const OPS=[['gt','>'],['lt','<'],['ge','≥'],['le','≤'],['cross_above','crosses ▲'],['cross_below','crosses ▼'],['bounce_up','bounces ▲ off'],['bounce_down','bounces ▼ off'],['rising','rising'],['falling','falling'],['eq','='],['neq','≠']];
 const UNARY=new Set(['rising','falling']);
+const BOUNCE=new Set(['bounce_up','bounce_down']);
 const PFIELDS=['close','open','high','low','hl2','hlc3','ohlc4','volume'];
 let STRAT=blankStrat(), SAVED=[];
-function blankStrat(){ return {id:null,name:'',side:'long',entry:{logic:'AND',rules:[]},exit:{logic:'AND',rules:[]}}; }
+function blankStrat(){ return {id:null,name:'',side:'long',entry:{logic:'AND',window:10,rules:[]},exit:{logic:'AND',window:10,rules:[]}}; }
 function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
 function seedTemplate(){ // a readable EMA-cross default so the builder isn't blank
   const ema=()=>({kind:'primitive',key:'ma.ema',source:'close',params:{length:9}});
@@ -436,24 +437,38 @@ function operandEl(op, onStruct, allowConst){
   } else { const ci=document.createElement('input'); ci.type='number'; ci.step='any'; ci.className='cst'; ci.value=op.value??0; ci.onchange=()=>op.value=parseFloat(ci.value); box.appendChild(ci); }
   return box;
 }
+function labeled(txt,el){ const s=document.createElement('span'); s.className='opd'; const l=document.createElement('span'); l.style.cssText='color:var(--text3);font-size:10px'; l.textContent=txt; s.appendChild(l); s.appendChild(el); return s; }
+function opParamInput(rule,key,def){ rule.op_params=rule.op_params||{}; const i=document.createElement('input'); i.type='number'; i.step='any'; i.className='len'; i.placeholder=String(def); if(rule.op_params[key]!=null)i.value=rule.op_params[key]; i.onchange=()=>{const v=parseFloat(i.value); if(Number.isFinite(v))rule.op_params[key]=v; else delete rule.op_params[key];}; return i; }
 function ruleRowEl(group, rule){
   const row=document.createElement('div'); row.className='rrow';
   row.appendChild(operandEl(rule.left, renderStrat, false));
   const opSel=document.createElement('select'); for(const [v,l] of OPS){const o=document.createElement('option');o.value=v;o.textContent=l;opSel.appendChild(o);} opSel.value=rule.op; opSel.onchange=()=>{rule.op=opSel.value; renderStrat();}; row.appendChild(opSel);
-  if(!UNARY.has(rule.op)) row.appendChild(operandEl(rule.right, renderStrat, true));
+  if(UNARY.has(rule.op)){
+    row.appendChild(labeled('over', opParamInput(rule,'lookback',8)));
+    row.appendChild(labeled('bars · str≥', opParamInput(rule,'min_strength',1.5)));
+  } else if(BOUNCE.has(rule.op)){
+    row.appendChild(operandEl(rule.right, renderStrat, true));
+    row.appendChild(labeled('tol%', opParamInput(rule,'tol_pct',0.15)));
+  } else {
+    row.appendChild(operandEl(rule.right, renderStrat, true));
+  }
   const x=document.createElement('span'); x.className='rx'; x.textContent='✕'; x.title='remove'; x.onclick=()=>{group.rules=group.rules.filter(r=>r!==rule); renderStrat();}; row.appendChild(x);
   return row;
 }
 function renderStrat(){
   document.getElementById('stratName').value=STRAT.name||'';
   document.getElementById('stratSide').value=STRAT.side||'long';
-  document.getElementById('entryLogic').value=STRAT.entry.logic||'AND';
-  document.getElementById('exitLogic').value=STRAT.exit.logic||'AND';
-  for(const g of ['entry','exit']){ const box=document.getElementById(g+'Rules'); box.innerHTML='';
-    if(!STRAT[g].rules.length) box.innerHTML='<div class="muted" style="font-size:11px">no conditions — click + condition</div>';
-    for(const rule of STRAT[g].rules) box.appendChild(ruleRowEl(STRAT[g],rule)); }
+  for(const g of ['entry','exit']){
+    const grp=STRAT[g]; document.getElementById(g+'Logic').value=grp.logic||'AND';
+    const win=document.getElementById(g+'Window'); const isThen=(grp.logic==='THEN');
+    win.style.display=isThen?'':'none'; win.value=grp.window!=null?grp.window:10;
+    const box=document.getElementById(g+'Rules'); box.innerHTML='';
+    if(!grp.rules.length) box.innerHTML='<div class="muted" style="font-size:11px">no conditions — click + condition</div>';
+    for(const rule of grp.rules) box.appendChild(ruleRowEl(grp,rule));
+  }
 }
-function readStratHeader(){ STRAT.name=document.getElementById('stratName').value; STRAT.side=document.getElementById('stratSide').value; STRAT.entry.logic=document.getElementById('entryLogic').value; STRAT.exit.logic=document.getElementById('exitLogic').value; }
+function readStratHeader(){ STRAT.name=document.getElementById('stratName').value; STRAT.side=document.getElementById('stratSide').value;
+  for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; } }
 async function loadStrategies(){
   try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
   const sel=document.getElementById('stratLoad'); sel.innerHTML='<option value="">— saved —</option>';
@@ -503,6 +518,10 @@ window.addEventListener('load',async()=>{
   document.getElementById('stratNew').onclick=()=>{ STRAT=blankStrat(); seedTemplate(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; };
   document.getElementById('stratLoad').addEventListener('change',e=>loadStrategyById(e.target.value));
   document.querySelectorAll('.addrule').forEach(b=>b.onclick=()=>{ STRAT[b.dataset.g].rules.push(blankRule()); renderStrat(); });
+  for(const g of ['entry','exit']){
+    document.getElementById(g+'Logic').addEventListener('change',e=>{ STRAT[g].logic=e.target.value; renderStrat(); });
+    document.getElementById(g+'Window').addEventListener('change',e=>{ const w=parseInt(e.target.value,10); STRAT[g].window=Number.isFinite(w)?w:10; });
+  }
   document.getElementById('regReg').addEventListener('change',loadRegDates);
   document.getElementById('regDate').addEventListener('change',loadRegister);
   document.getElementById('asof').addEventListener('change',()=>{ syncAsofUI(); loadChart(); });

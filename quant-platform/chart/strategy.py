@@ -13,10 +13,19 @@ operand:
   {"kind":"price","field":"close|open|high|low|hl2|hlc3|ohlc4|volume"}
   {"kind":"const","value": <number>}
 rule:
-  {"left": operand, "op": OP, "right": operand}     # right ignored for rising/falling
-  OP ∈ gt lt ge le eq neq cross_above cross_below rising falling
+  {"left": operand, "op": OP, "right": operand, "op_params": {...}}
+  OP ∈ gt lt ge le eq neq cross_above cross_below rising falling bounce_up bounce_down
+    rising/falling  — regression slope of `left` over op_params.lookback bars,
+                      measured as net move ÷ window volatility, is ≥ / ≤
+                      op_params.min_strength. A flat/choppy series is NEITHER
+                      (strength ~0). right ignored.
+    bounce_up/down  — the price bar bounces off `right` (an MA/level): a wick comes
+                      within op_params.tol_pct of it and the bar closes back on the
+                      right side (support held / resistance held).
 group:
-  {"logic":"AND"|"OR", "rules":[rule|group, ...]}
+  {"logic":"AND"|"OR"|"THEN", "window": N, "rules":[rule|group, ...]}
+    AND all match · OR any match · THEN steps happen IN ORDER, each within
+    `window` bars of the previous (sequence logic).
 strategy:
   {"name","description","side":"long"|"short","entry": group, "exit": group}
 
@@ -31,9 +40,17 @@ import numpy as np
 import tools.compare_server as cs
 
 _OPS = ('gt', 'lt', 'ge', 'le', 'eq', 'neq',
-        'cross_above', 'cross_below', 'rising', 'falling')
-_UNARY = ('rising', 'falling')
+        'cross_above', 'cross_below', 'rising', 'falling',
+        'bounce_up', 'bounce_down')
+_UNARY = ('rising', 'falling')          # right operand ignored
+_BOUNCE = ('bounce_up', 'bounce_down')  # left = price bar, right = reference level
 _PRICE_FIELDS = ('close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'volume')
+
+# Defaults for the configurable operators (overridable per rule via op_params).
+_SLOPE_LOOKBACK = 8       # bars in the regression window
+_SLOPE_MIN_STRENGTH = 1.5 # min |net move ÷ window volatility| to count as a trend
+_BOUNCE_TOL_PCT = 0.15    # how close (in %) the wick must come to the level to "touch"
+_SEQ_WINDOW = 10          # max bars between consecutive steps of a THEN sequence
 
 
 # ── operand → aligned float array ──────────────────────────────────────────
@@ -67,10 +84,8 @@ def _operand_array(operand: dict, bars, ctx) -> np.ndarray:
     raise ValueError(f'unknown operand kind {kind!r}')
 
 
-# ── operator → boolean array ───────────────────────────────────────────────
+# ── comparison / cross operators → boolean array ───────────────────────────
 def _apply_op(op: str, L: np.ndarray, R: np.ndarray) -> np.ndarray:
-    if op not in _OPS:
-        raise ValueError(f'unknown operator {op!r}')
     prevL = np.concatenate(([np.nan], L[:-1]))
     prevR = np.concatenate(([np.nan], R[:-1]))
     with np.errstate(invalid='ignore'):
@@ -84,24 +99,123 @@ def _apply_op(op: str, L: np.ndarray, R: np.ndarray) -> np.ndarray:
             out = (~np.isnan(prevL) & ~np.isnan(prevR)) & (prevL <= prevR) & (L > R)
         elif op == 'cross_below':
             out = (~np.isnan(prevL) & ~np.isnan(prevR)) & (prevL >= prevR) & (L < R)
-        elif op == 'rising':
-            out = (~np.isnan(prevL)) & (L > prevL)
-        elif op == 'falling':
-            out = (~np.isnan(prevL)) & (L < prevL)
+        else:
+            raise ValueError(f'unknown operator {op!r}')
     out = np.asarray(out, dtype=bool)
-    # NaN comparisons must be False (numpy already yields False, but eq/neq via
-    # isclose treat NaN oddly — mask any bar with a NaN operand).
-    invalid = np.isnan(L) | np.isnan(R)
-    if op in _UNARY:
-        invalid = np.isnan(L) | np.isnan(prevL)
-    out[invalid] = False
+    out[np.isnan(L) | np.isnan(R)] = False   # any NaN operand → False
     return out
+
+
+def _slope_strength(L: np.ndarray, lookback: int) -> np.ndarray:
+    """The 'clear slope method'. Fit a least-squares line to a trailing
+    `lookback`-bar window; the net modelled move across the window is
+    `slope × (lookback-1)`. Divide that by the window's own standard deviation
+    to get a scale-free STRENGTH in 'volatility units':
+
+        strength = (net directional move) ÷ (bar-to-bar scatter of the window)
+
+    In a choppy tape the net move is tiny next to the scatter → strength ≈ 0 →
+    neither rising nor falling. In a genuine trend the move dominates the
+    scatter → large |strength|. Works on price or any indicator, any symbol,
+    any timeframe, because it's normalized by the series' own noise."""
+    n = len(L)
+    out = np.full(n, np.nan)
+    w = max(2, int(lookback))
+    if n < w:
+        return out
+    from numpy.lib.stride_tricks import sliding_window_view
+    win = sliding_window_view(L, w)                 # (n-w+1, w), aligned to window END
+    x = np.arange(w, dtype=float)
+    xm = x.mean()
+    sxx = ((x - xm) ** 2).sum()
+    with np.errstate(invalid='ignore', divide='ignore'):
+        ym = win.mean(axis=1, keepdims=True)
+        slope = ((x - xm) * (win - ym)).sum(axis=1) / sxx     # value per bar
+        move = slope * (w - 1)                                # net move over window
+        sd = win.std(axis=1)                                  # window volatility
+        strength = np.zeros(len(slope))
+        nz = sd > 1e-12
+        strength[nz] = move[nz] / sd[nz]
+        ramp = (~nz) & (np.abs(move) > 1e-9)                  # smooth ramp, ~no scatter
+        strength[ramp] = np.sign(move[ramp]) * 1e9
+        out[w - 1:] = strength
+    return out
+
+
+def _slope_flag(L: np.ndarray, op: str, p: dict) -> np.ndarray:
+    lookback = int(p.get('lookback', _SLOPE_LOOKBACK))
+    thr = float(p.get('min_strength', _SLOPE_MIN_STRENGTH))
+    s = _slope_strength(L, lookback)
+    with np.errstate(invalid='ignore'):
+        out = (s >= thr) if op == 'rising' else (s <= -thr)
+    out = np.asarray(out, dtype=bool)
+    out[np.isnan(s)] = False
+    return out
+
+
+def _bounce_flag(op: str, bars, R: np.ndarray, p: dict) -> np.ndarray:
+    """Price bounces off a reference level R (an MA / level, the right operand).
+    A real bounce isn't just 'near the level' — it must (1) come FROM the right
+    side (so it's a pullback to support/resistance, not a breakout through it),
+    (2) TOUCH within `tol_pct` of R with its wick, and (3) TURN back, closing on
+    the original side with momentum. bounce_up = support held; bounce_down =
+    resistance held. Guarding on 'from above/below' is what stops it from firing
+    every bar when price is hugging the level."""
+    tol = float(p.get('tol_pct', _BOUNCE_TOL_PCT)) / 100.0
+    low = bars['low'].to_numpy(float);   high = bars['high'].to_numpy(float)
+    close = bars['close'].to_numpy(float)
+    prev_close = np.concatenate(([np.nan], close[:-1]))
+    prev_R = np.concatenate(([np.nan], R[:-1]))
+    with np.errstate(invalid='ignore'):
+        if op == 'bounce_up':
+            from_above = prev_close >= prev_R           # was on/above support
+            touched = low <= R * (1 + tol)              # wick dipped to it
+            held = close > R                            # closed back above
+            turning = close > prev_close                # bounced up
+            out = from_above & touched & held & turning
+        else:
+            from_below = prev_close <= prev_R           # was on/below resistance
+            touched = high >= R * (1 - tol)             # wick poked up to it
+            held = close < R                            # closed back below
+            turning = close < prev_close                # rejected down
+            out = from_below & touched & held & turning
+    out = np.asarray(out, dtype=bool)
+    out[np.isnan(R) | np.isnan(prev_R) | np.isnan(prev_close)] = False
+    return out
+
+
+def _sequence(parts: list, window: int) -> np.ndarray:
+    """THEN logic: the steps must occur IN ORDER, each within `window` bars of
+    the previous one. Fires on the bar the final step completes. e.g.
+    'close > ma13' THEN 'close bounce_up ma13' = was above, dipped, bounced."""
+    n = len(parts[0]); k = len(parts)
+    fire = np.zeros(n, dtype=bool)
+    if k == 1:
+        return parts[0].copy()
+    last = [-10 ** 9] * k        # most recent in-sequence completion bar per step
+    for i in range(n):
+        prev = last.copy()       # state BEFORE this bar → enforces t_{j-1} < t_j
+        if parts[0][i]:
+            last[0] = i
+        for j in range(1, k):
+            if parts[j][i] and prev[j - 1] >= 0 and 0 < (i - prev[j - 1]) <= window:
+                last[j] = i
+        if last[k - 1] == i and parts[k - 1][i]:
+            fire[i] = True
+    return fire
 
 
 def _eval_rule(rule: dict, bars, ctx) -> np.ndarray:
     op = rule.get('op', 'gt')
+    if op not in _OPS:
+        raise ValueError(f'unknown operator {op!r}')
+    p = rule.get('op_params') or {}
     L = _operand_array(rule.get('left'), bars, ctx)
-    R = L if op in _UNARY else _operand_array(rule.get('right'), bars, ctx)
+    if op in _UNARY:
+        return _slope_flag(L, op, p)
+    R = _operand_array(rule.get('right'), bars, ctx)
+    if op in _BOUNCE:
+        return _bounce_flag(op, bars, R, p)
     return _apply_op(op, L, R)
 
 
@@ -117,6 +231,8 @@ def _eval_group(group: dict, bars, ctx) -> np.ndarray:
             parts.append(_eval_group(r, bars, ctx))
         else:
             parts.append(_eval_rule(r, bars, ctx))
+    if logic == 'THEN':
+        return _sequence(parts, int((group or {}).get('window', _SEQ_WINDOW)))
     stacked = np.vstack(parts)
     return stacked.all(axis=0) if logic == 'AND' else stacked.any(axis=0)
 

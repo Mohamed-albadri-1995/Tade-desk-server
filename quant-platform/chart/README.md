@@ -84,9 +84,29 @@ The **⚡ Strategy** button opens a builder drawer. A strategy is **entry** and
 
 - **operands**: an *Indicator* (any qp primitive + length + source), a *Price*
   field (close/open/high/low/hl2/hlc3/ohlc4/volume), or a constant *Value*.
-- **operators**: `> < ≥ ≤ = ≠`, `crosses ▲` / `crosses ▼`, `rising` /
-  `falling`.
-- each group is **ALL match** (AND) or **ANY match** (OR).
+- **operators**: `> < ≥ ≤ = ≠`, `crosses ▲/▼`, `bounces ▲/▼ off`, and
+  `rising` / `falling`.
+- each group is **ALL match** (AND), **ANY match** (OR), or **IN SEQUENCE**
+  (THEN — the conditions must happen *in order*, each within N bars of the
+  previous).
+
+**rising / falling — the slope method.** Not a bar-to-bar comparison (that
+just flips on noise). It fits a least-squares line over `lookback` bars and
+measures the net move as a multiple of the window's *own* volatility
+(`net move ÷ scatter`). A choppy tape has a tiny net move next to its scatter →
+**neither** rising nor falling; only a genuine drift (strength ≥ `min_strength`,
+default 1.5 over 8 bars) counts. Scale-free, so it behaves the same on any
+symbol or timeframe.
+
+**bounces ▲/▼ off `<level>`.** A real bounce, not "near the level": price must
+come *from* the right side, its wick must *touch* within `tol%` of the level,
+and it must *turn back* and close on the original side (support held /
+resistance rejected). `bounce_up` off a 13-EMA = the classic pullback-to-MA
+long trigger.
+
+**Sequence (THEN).** e.g. *close > 13-EMA* **THEN** *close bounces ▲ off
+13-EMA* fires only when price was above the MA, pulled back to it, and bounced —
+in that order, within the window.
 
 **Evaluate** runs the rules over the current chart window and draws **entry
 (green ▲) / exit (red ▼) signal markers** on the candles, shows whether each
