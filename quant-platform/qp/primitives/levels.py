@@ -23,11 +23,39 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from qp.registry import primitive
+from qp.registry import primitive, Param
 from qp.primitives.bars import Bars
 from qp.primitives._session import (
     ET as _ET, in_rth as _in_rth, in_premarket as _in_premarket, rth_pred,
 )
+
+
+def _window_extreme(df, which: str, start_hhmm: int, end_hhmm: int):
+    """High/low of an INTRADAY time window [start, end) in ET (hhmm, e.g. 930,
+    945). Runs live inside the window each day, then is FROZEN (held flat) for
+    the rest of that calendar day — an opening-range / power-hour style level.
+    NaN before the window has any bars. `end` exclusive; end<=start → empty."""
+    et = df.index.tz_convert(_ET)
+    high = df['high'].to_numpy(dtype=float)
+    low = df['low'].to_numpy(dtype=float)
+    n = len(df)
+    s = (int(start_hhmm) // 100) * 60 + int(start_hhmm) % 100
+    e = (int(end_hhmm) // 100) * 60 + int(end_hhmm) % 100
+    out = np.full(n, np.nan)
+    cur_date = None
+    hold = np.nan
+    for i in range(n):
+        t = et[i]
+        d = t.date()
+        if d != cur_date:
+            cur_date = d
+            hold = np.nan
+        mins = t.hour * 60 + t.minute
+        if s <= mins < e:
+            v = high[i] if which == 'high' else low[i]
+            hold = v if hold != hold else (max(hold, v) if which == 'high' else min(hold, v))
+        out[i] = hold
+    return out
 
 
 # ────────────────────────────────────────────────────────────
@@ -155,6 +183,29 @@ def today_high(bars: Bars):
            params=(), inputs=('bars',))
 def today_low(bars: Bars):
     return _running_session_extreme(bars.df, rth_pred(bars.df), 'low')
+
+
+@primitive(name='window_high', group='levels',
+           description='High of an intraday ET time window [start, end) in hhmm '
+                       '(default 930–945 = the OPENING RANGE), frozen for the '
+                       'rest of the day. Set 1500–1600 for power-hour high, etc. '
+                       'Break of it = ORB long trigger.',
+           params=(Param('start', 'int', default=930, min=0, max=2359),
+                   Param('end', 'int', default=945, min=0, max=2359)),
+           inputs=('bars',))
+def window_high(bars: Bars, start: int, end: int):
+    return _window_extreme(bars.df, 'high', start, end)
+
+
+@primitive(name='window_low', group='levels',
+           description='Low of an intraday ET time window [start, end) in hhmm '
+                       '(default 930–945 = the OPENING RANGE), frozen for the '
+                       'rest of the day. Break of it = ORB short trigger.',
+           params=(Param('start', 'int', default=930, min=0, max=2359),
+                   Param('end', 'int', default=945, min=0, max=2359)),
+           inputs=('bars',))
+def window_low(bars: Bars, start: int, end: int):
+    return _window_extreme(bars.df, 'low', start, end)
 
 
 # ────────────────────────────────────────────────────────────

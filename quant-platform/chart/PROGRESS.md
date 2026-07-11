@@ -64,3 +64,19 @@ it doesn't count.
 - Remaining audit areas (next iterations): timeframe/session adaptability pass;
   strategy expressiveness vs known public strategies; drawing polish (marker
   density, price-line labels); then final sweep.
+
+### It.4 — expressiveness stress test + opening-range primitive  [DONE]
+- Encoded 6 known strategies as JSON and ran them: EMA-cross, VWAP-reclaim,
+  RSI-reversion, inside-bar breakout, 3-red+rising-vol all express + evaluate
+  cleanly. ORB was the gap — no "opening-range high", and today_high (running)
+  can't work for it.
+- Added basic irreducible primitives `levels.window_high` / `window_low`:
+  high/low of an intraday ET window [start,end) in hhmm, default 930–945 (the
+  opening range), FROZEN for the rest of the day; set 1500–1600 for power hour,
+  etc. Not derivable from existing primitives → legit basic addition. 69 total.
+- Verified: OR-high == max of the first-3-bars' highs and holds flat after; per
+  ET-day reset in code.
+- FOUND (next): the strategy operand editor only exposes ONE length-like param,
+  so window start/end (and bb mult, dynamic_sr strength) can't be set inline —
+  they fall back to defaults. Fix in It.5: expose ALL params of a primitive
+  operand.
