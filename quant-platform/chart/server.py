@@ -26,9 +26,13 @@ from pathlib import Path
 # qp + the shared compute engine
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
-sys.argv = sys.argv[:1]                      # keep compare_server's argparse quiet
+# compare_server imports qp at load; keep argv clean during that import, then
+# RESTORE it so our own --host/--port parser in main() still sees the flags.
+_ORIG_ARGV = list(sys.argv)
+sys.argv = sys.argv[:1]
 import tools.compare_server as cs            # noqa: E402  compute_data, list_primitives, _feed_status, _BUILD
 from chart import data_manager as dm         # noqa: E402
+sys.argv = _ORIG_ARGV                        # restore the real command-line args
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse  # noqa: E402
