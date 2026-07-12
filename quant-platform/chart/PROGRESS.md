@@ -184,6 +184,29 @@ space on chart." Fixed both, looking at the layout code + behaviour together:
   drag; drawer height 328 → 448 on an upward drag; ✕ and backdrop both close;
   no JS errors.
 
+### It.13 — mobile: operand controls were rendering OFF-SCREEN  [DONE]
+Bug from the phone ("I select floor, nothing changed — check all similars, it's
+a general problem"). Reproduced headlessly: selecting a multi-output primitive
+(floor → P/R1/R2/… picker, plus its `session` param box) DID add the controls,
+but they rendered at x≈296–343 while the Entry column on a 360px phone was only
+x≈21–165 — i.e. the added controls overflowed the ~160px column and sat
+off-screen to the side (inColumn:false). Root cause = two things stacking:
+  1. the strategy drawer split into TWO ~160px columns (Entry | Exit) on a
+     phone, halving the width;
+  2. `.opd` (an operand's control cluster) was `inline-flex; nowrap`, so when
+     its controls exceeded the column width they spilled sideways instead of
+     wrapping.
+Fix (CSS only, no logic change):
+  - `@media(max-width:820px){ #drawer .dbody{ flex-direction:column } }` — on a
+    phone the Entry/Exit groups stack, so every rule row gets the FULL width.
+  - `.opd{ flex-wrap:wrap; max-width:100% }` — operand controls now wrap to the
+    next line instead of overflowing off the edge (helps every viewport).
+Verified headless at 360 + 412px: the R1/R2/S… picker is now inColumn:true &
+inViewport:true; screenshot shows `Indicator floor · session · R2` all visible.
+This affected EVERY multi-output primitive (dynamic_sr sr1…, bollinger
+upper/lower, all pivots) and any primitive with extra params on a phone — the
+"general problem" the user suspected.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
