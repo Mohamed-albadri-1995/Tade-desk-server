@@ -165,6 +165,25 @@ Looked at the phone screenshot + the layout code together. Three real issues:
 - Verified in headless (390px viewport): panel hidden, chart width 390, header
   40px, toggle works; a level at 700 leaves the scale hugging the ~100 candles.
 
+### It.12 — mobile panels: closeable + drag-resizable  [DONE]
+Phone feedback: "I am able to open panels but it's difficult to close them; I
+am also not able to move them up and down / left and right to change their
+space on chart." Fixed both, looking at the layout code + behaviour together:
+- CLOSE: the side panel now has an explicit ✕ button (#sideClose) and, on
+  mobile, a tap-anywhere-outside backdrop (#sideBackdrop, shown only while the
+  drawer is open via body.side-open). The ☰ toggle now open/closes symmetrically
+  and keeps body.side-open in sync. So on a phone you dismiss the panel with the
+  ✕ or by tapping the dimmed chart — no more trapped drawer.
+- RESIZE: two drag grips (mouse + touch), each via one `_resizable` helper:
+  * #sideGrip — the side panel's left edge → drag to set its WIDTH
+    (180px … 92vw). Clears the mobile max-width cap so it can actually widen.
+  * #drawerGrip — the strategy drawer's top handle bar → drag to set its
+    HEIGHT (110px … 85vh). The chart re-applies its size after every drag so it
+    always fills the remaining space.
+- Verified in headless (390px viewport): side width 300 → 359 on a leftward
+  drag; drawer height 328 → 448 on an upward drag; ✕ and backdrop both close;
+  no JS errors.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop

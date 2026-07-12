@@ -21,10 +21,21 @@
   #addPrim { min-width:150px; }
   #addLen { width:60px; }
   #sideBtn { background:#1c2431; color:var(--text2); border:1px solid var(--border); }
-  main { flex:1 1 auto; display:flex; min-height:0; }
+  main { flex:1 1 auto; display:flex; min-height:0; position:relative; }
+  /* dismiss + resize affordances for the panels */
+  #sideBackdrop { display:none; position:absolute; inset:0; background:rgba(0,0,0,0.45); z-index:8; }
+  #sideGrip { position:absolute; left:0; top:0; bottom:0; width:10px; cursor:col-resize; z-index:2; touch-action:none; }
+  #sideGrip:hover { background:rgba(59,130,246,0.25); }
+  #sideTop { display:flex; align-items:center; justify-content:space-between; margin:0 0 6px; }
+  #sideTop b { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:.08em; }
+  #sideClose { cursor:pointer; color:var(--text); font-size:22px; line-height:1; padding:2px 10px; border:1px solid var(--border); border-radius:6px; background:#1c2431; }
+  #drawerGrip { position:absolute; top:0; left:0; right:0; height:14px; cursor:row-resize; z-index:7; touch-action:none; }
+  #drawerGrip::before { content:''; position:absolute; left:50%; top:4px; transform:translateX(-50%); width:44px; height:4px; border-radius:3px; background:var(--text3); opacity:.55; }
+  #drawerGrip:hover::before { background:var(--blue); opacity:1; }
+  @media (max-width:820px){ body.side-open #sideBackdrop { display:block; } }
   #chartWrap { flex:1 1 auto; position:relative; min-width:0; }
   #chart { width:100%; height:100%; }
-  #side { flex:0 0 260px; border-left:1px solid var(--border); padding:10px 12px; overflow:auto; font-size:12px; background:var(--panel); }
+  #side { flex:0 0 260px; border-left:1px solid var(--border); padding:10px 12px; overflow:auto; font-size:12px; background:var(--panel); position:relative; }
   #side.hide { display:none; }
   /* ── mobile: header scrolls in one row, side becomes an overlay drawer so the
         chart is ALWAYS full-width underneath ── */
@@ -122,6 +133,7 @@
     <div class="legend" id="legend"></div>
     <div id="chart"></div>
     <div id="drawer">
+      <div id="drawerGrip" title="drag to resize"></div>
       <div class="dhead">
         <strong style="color:var(--blue)">⚡ Strategy</strong>
         <input id="stratName" placeholder="strategy name" size="16">
@@ -154,7 +166,10 @@
       </div>
     </div>
   </div>
+  <div id="sideBackdrop"></div>
   <div id="side">
+    <div id="sideGrip" title="drag to resize"></div>
+    <div id="sideTop"><b>Panel</b><span id="sideClose" title="close panel">✕</span></div>
     <h3>Screener register</h3>
     <div id="regBar">
       <select id="regReg"><option value="R1">R1 (all)</option><option value="Shortlist">Shortlist</option></select>
@@ -676,8 +691,26 @@ window.addEventListener('load',async()=>{
   const applyScale=()=>{ const m=parseInt(document.getElementById('scaleMode').value,10)||0; localStorage.setItem('qpc_scale',m); try{CHART.priceScale('right').applyOptions({mode:m});}catch(_){} };
   document.getElementById('scaleMode').addEventListener('change',applyScale); applyScale();
   document.getElementById('fitBtn').onclick=()=>{ try{CHART.timeScale().fitContent();}catch(_){} };
-  document.getElementById('sideBtn').onclick=()=>{ document.getElementById('side').classList.toggle('hide'); if(CHART){ const el=document.getElementById('chart'); setTimeout(()=>CHART.applyOptions({width:el.clientWidth,height:el.clientHeight}),60); } };
+  const _resizeChart=()=>{ if(CHART){ const el=document.getElementById('chart'); CHART.applyOptions({width:el.clientWidth,height:el.clientHeight}); } };
+  const closeSide=()=>{ document.getElementById('side').classList.add('hide'); document.body.classList.remove('side-open'); setTimeout(_resizeChart,60); };
+  const openSide=()=>{ document.getElementById('side').classList.remove('hide'); document.body.classList.add('side-open'); setTimeout(_resizeChart,60); };
+  document.getElementById('sideBtn').onclick=()=>{ document.getElementById('side').classList.contains('hide')?openSide():closeSide(); };
+  document.getElementById('sideClose').onclick=closeSide;
+  document.getElementById('sideBackdrop').onclick=closeSide;
   if(window.innerWidth<820) document.getElementById('side').classList.add('hide');   // phones: chart full-width, panel on demand
+  // drag-to-resize panels (touch + mouse): side panel width, strategy drawer height
+  function _resizable(gripId, getStart, apply){
+    const g=document.getElementById(gripId); if(!g)return;
+    let on=false,sx=0,sy=0,st=0;
+    const down=e=>{ on=true; const p=e.touches?e.touches[0]:e; sx=p.clientX; sy=p.clientY; st=getStart(); document.body.style.userSelect='none'; if(e.cancelable)e.preventDefault(); };
+    const move=e=>{ if(!on)return; const p=e.touches?e.touches[0]:e; apply(st,p.clientX-sx,p.clientY-sy); if(e.cancelable)e.preventDefault(); };
+    const up=()=>{ if(on){ on=false; document.body.style.userSelect=''; _resizeChart(); } };
+    g.addEventListener('mousedown',down); g.addEventListener('touchstart',down,{passive:false});
+    window.addEventListener('mousemove',move); window.addEventListener('touchmove',move,{passive:false});
+    window.addEventListener('mouseup',up); window.addEventListener('touchend',up);
+  }
+  _resizable('sideGrip', ()=>document.getElementById('side').getBoundingClientRect().width, (st,dx)=>{ const w=Math.max(180,Math.min(window.innerWidth*0.92, st-dx)); const s=document.getElementById('side'); s.style.flexBasis=w+'px'; s.style.width=w+'px'; s.style.maxWidth='none'; _resizeChart(); });
+  _resizable('drawerGrip', ()=>document.getElementById('drawer').getBoundingClientRect().height, (st,dx,dy)=>{ const h=Math.max(110,Math.min(window.innerHeight*0.85, st-dy)); document.getElementById('drawer').style.height=h+'px'; _resizeChart(); });
   document.getElementById('stratBtn').onclick=toggleDrawer;
   document.getElementById('drawerClose').onclick=toggleDrawer;
   document.getElementById('stratEval').onclick=evalStrategy;
