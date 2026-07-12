@@ -496,6 +496,20 @@ function blankGroup(){ return {logic:'OR',window:10,k:1,rules:[]}; }
 function isGroup(n){ return n && Array.isArray(n.rules); }
 function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; if(kind==='time')return {kind:'time',field:'minutes'}; if(kind==='expr')return {kind:'expr',op:'sub',a:blankOperand('price'),b:blankOperand('const')}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
 const EXPR_OPS=[['add','+'],['sub','−'],['mul','×'],['div','÷']];
+// Primitives whose NUMBER of output lines is driven by a param (not fixed).
+// dynamic_sr returns sr1..sr{max_levels}, so the line picker must track that
+// param — otherwise you'd pick a line the primitive never emits (→ error) or
+// miss lines beyond the static default.
+const OUT_COUNT_PARAM={'levels.dynamic_sr':'max_levels'};
+function effectiveOutputs(op, m){
+  if(!m||!m.outputs)return [];
+  if(op.key==='levels.dynamic_sr'){
+    let ml=parseInt(op.params&&op.params.max_levels,10); if(!Number.isFinite(ml))ml=6;
+    ml=Math.max(1,Math.min(10,ml));
+    return Array.from({length:ml},(_,i)=>'sr'+(i+1));
+  }
+  return m.outputs;
+}
 function seedTemplate(){ // a readable EMA-cross default so the builder isn't blank
   const ema=()=>({kind:'primitive',key:'ma.ema',source:'close',params:{length:9}});
   STRAT.entry.rules=[{left:{kind:'price',field:'close'},op:'cross_above',right:ema()}];
@@ -524,11 +538,12 @@ function operandEl(op, onStruct, allowConst){
     // ALL params of the primitive (length, mult, window start/end, strength…)
     for(const p of (m&&m.params||[])){
       if(p.kind==='bool'){ const cb=document.createElement('input'); cb.type='checkbox'; cb.title=p.name; cb.checked=op.params[p.name]!=null?!!op.params[p.name]:!!p.default; cb.onchange=()=>op.params[p.name]=cb.checked; box.appendChild(document.createTextNode(p.name.slice(0,4))); box.appendChild(cb); }
-      else if(p.kind==='int'||p.kind==='float'){ const li=document.createElement('input'); li.type='number'; li.className='len'; li.title=p.name; li.placeholder=p.name+(p.default!=null?(' '+p.default):''); if(p.kind==='float')li.step='any'; if(op.params[p.name]!=null)li.value=op.params[p.name]; li.onchange=()=>{const v=(p.kind==='float')?parseFloat(li.value):parseInt(li.value,10); if(Number.isFinite(v))op.params[p.name]=v; else delete op.params[p.name];}; box.appendChild(li); }
+      else if(p.kind==='int'||p.kind==='float'){ const li=document.createElement('input'); li.type='number'; li.className='len'; li.title=p.name; li.placeholder=p.name+(p.default!=null?(' '+p.default):''); if(p.kind==='float')li.step='any'; if(op.params[p.name]!=null)li.value=op.params[p.name]; const govern=(OUT_COUNT_PARAM[op.key]===p.name); li.onchange=()=>{const v=(p.kind==='float')?parseFloat(li.value):parseInt(li.value,10); if(Number.isFinite(v))op.params[p.name]=v; else delete op.params[p.name]; if(govern)onStruct();}; box.appendChild(li); }
       else { const ti=document.createElement('input'); ti.className='len'; ti.style.width='58px'; ti.title=p.name; ti.placeholder=p.name; if(op.params[p.name]!=null)ti.value=op.params[p.name]; ti.onchange=()=>{ if(ti.value)op.params[p.name]=ti.value; else delete op.params[p.name]; }; box.appendChild(ti); }
     }
-    // multi-output primitives (floor R1/S1…, dynamic_sr sr1…, BB upper/lower) → pick the line
-    if(m&&m.outputs&&m.outputs.length>1){ if(!op.sub)op.sub=m.outputs[0]; const os=document.createElement('select'); os.title='which output line'; for(const o of m.outputs){const opt=document.createElement('option');opt.value=o;opt.textContent=o;os.appendChild(opt);} os.value=op.sub; os.onchange=()=>op.sub=os.value; box.appendChild(os); }
+    // multi-output primitives (floor P/R1/S1…, dynamic_sr sr1…, BB middle/upper/lower) → pick the line
+    const outs=effectiveOutputs(op, m);
+    if(outs.length>1){ if(!op.sub||outs.indexOf(op.sub)<0)op.sub=outs[0]; const os=document.createElement('select'); os.title='which output line'; for(const o of outs){const opt=document.createElement('option');opt.value=o;opt.textContent=o;os.appendChild(opt);} os.value=op.sub; os.onchange=()=>op.sub=os.value; box.appendChild(os); }
     else if(op.sub){ delete op.sub; }
     // input source only matters for source-input primitives (MAs, RSI…); bars-
     // input ones (VWAPs, pivots, candle*) ignore it — don't show a dead control.

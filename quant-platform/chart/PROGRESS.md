@@ -207,6 +207,26 @@ This affected EVERY multi-output primitive (dynamic_sr sr1…, bollinger
 upper/lower, all pivots) and any primitive with extra params on a phone — the
 "general problem" the user suspected.
 
+### It.14 — audit multi-output pickers; dynamic_sr tracks max_levels  [DONE]
+User: "check all primitives — e.g. bb upper/lower/middle; dynamic_sr depends on
+number of SR levels." Audited all 5 multi-output primitives against what they
+actually return:
+- pivots.floor → P/R1/R2/R3/S1/S2/S3 (fixed 7) — picker correct.
+- volatility.bb, volatility.bb_ema, vwap.stdev_bands → middle/upper/lower
+  (fixed 3). The `mult`/σ param MOVES upper & lower, it doesn't change the
+  count, so 3 lines is right — picker correct.
+- levels.dynamic_sr → BUG: it returns sr1..sr{max_levels} (dict built from the
+  `max_levels` param, 1..10), but the picker used the STATIC registry outputs
+  (sr1..sr6). So with max_levels=3 you could pick sr5/sr6 → server error
+  "dynamic_sr has no output 'sr5'"; with max_levels=8 the picker capped at sr6
+  so sr7/sr8 were unreachable.
+Fix (frontend only — qp math/registry untouched): `effectiveOutputs(op,m)`
+derives sr1..sr{max_levels} for dynamic_sr from the operand's current param;
+the picker uses it, re-renders when max_levels changes (that param now triggers
+onStruct), and resets a stale `sub` that falls out of range.
+Verified headless: floor=7, bb/stdev=3, dynamic_sr default=6, max_levels=3→3
+lines, max_levels=8→8 lines; no JS errors.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
