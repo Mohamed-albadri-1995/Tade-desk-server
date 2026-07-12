@@ -147,6 +147,24 @@ it doesn't count.
   lightweight-charts has no built-in drawing layer; that's a large custom build
   and low priority for a strategy-first platform. Noted, not built.
 
+### It.11 — mobile layout + stop levels compressing candles  [DONE]
+Looked at the phone screenshot + the layout code together. Three real issues:
+- Header used flex-wrap → ~7 stacked rows on a phone (~550px tall), eating the
+  chart's height. Fixed: on ≤820px the header is a single horizontally-scrollable
+  row (~40px).
+- #side was a fixed 260px column → on a ~390px phone the chart got ~140px wide.
+  Fixed: on mobile #side is an absolute overlay DRAWER (chart always full-width
+  underneath) with a ☰ Panel toggle; hidden by default on phones. Toggle also
+  works on desktop to reclaim the 260px.
+- BUG: overlay/level lines were on the price scale and DROVE autoscale, so a far
+  level (R3, monthly, prev-year-open) stretched the scale and compressed the
+  candles ("more levels → more pressed chart"). Fixed: price-scale overlays get
+  autoscaleInfoProvider:()=>null — the CANDLES alone drive the price scale;
+  overlays draw where they are (far ones simply sit off-screen; drag the price
+  axis or Fit to see them).
+- Verified in headless (390px viewport): panel hidden, chart width 390, header
+  40px, toggle works; a level at 700 leaves the scale hugging the ~100 candles.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
