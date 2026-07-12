@@ -129,6 +129,24 @@ it doesn't count.
   don't; no JS errors.
 - Nothing else material. Engine, store, refactor, live, and UI all reviewed.
 
+### It.10 — TradingView-parity chart proficiency  [DONE]
+- Audited our chart vs TradingView's core charting. Added the high-value gaps
+  that lightweight-charts supports:
+  * Chart TYPES: Candles / Bars / Line / Area / **Heikin Ashi** (HA computed
+    client-side from OHLC). Switchable live; persisted.
+  * Price-scale MODE: Linear / **Log** / **Percentage**. Persisted.
+  * **Fit view** button (timeScale.fitContent).
+  * Symbol **watermark** behind the chart.
+  * Live updates + crosshair legend handle line/area (value) vs OHLC series.
+- Already had: crosshair OHLC+indicator legend, volume pane, oscillator subpane,
+  session shading, ET axis, real-time streaming, multi-indicator overlays,
+  historical replay (asof), zoom/pan (built-in).
+- Verified in headless: all 5 types switch with no errors; Log mode applies;
+  Fit works; watermark = symbol.
+- Honest remaining gap vs TV: freehand DRAWING TOOLS (trendlines/fib/rect) —
+  lightweight-charts has no built-in drawing layer; that's a large custom build
+  and low priority for a strategy-first platform. Noted, not built.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop

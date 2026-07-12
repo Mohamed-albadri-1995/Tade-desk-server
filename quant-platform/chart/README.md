@@ -13,7 +13,9 @@ backtest engine (which reuses the same register bridge, day by day).
 
 ## What Phase 1 gives you
 
-- Full-width candlestick chart (lightweight-charts), no TradingView panel.
+- Full-width chart (lightweight-charts), no TradingView panel. Chart types:
+  Candles / Bars / Line / Area / Heikin Ashi. Price scale Linear / Log / %.
+  Fit-view, symbol watermark, live crosshair OHLC + indicator-value legend.
 - Timeframes 1m/5m/15m/30m/1h/1d; session toggle Regular / All-day.
 - Add any of the 60+ qp indicators from the picker — length + source +
   colour; price overlays draw on the candles, oscillators (RSI, RVOL, ATR)
