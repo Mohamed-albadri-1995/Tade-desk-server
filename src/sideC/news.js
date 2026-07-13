@@ -79,9 +79,10 @@ const CATALYST_PATTERNS = [
     guard: SCHEDULED_EARNINGS },
   { id: 'fda_designation', tier: 2, label: 'FDA Designation', sentiment: 'bull', color: '#86efac',
     pattern: /\b(breakthrough therapy|fast[- ]track|orphan drug|rmat) designation|granted (fda )?(fast[- ]track|orphan|breakthrough)/i },
-  { id: 'analyst_up', tier: 2, label: 'Upgrade', sentiment: 'bull', color: '#86efac', family: 'analyst',
-    pattern: /\b(upgrad(es?|ed) (to|shares|stock)|double[- ]upgrade|initiat(es?|ed) (coverage )?(with |at )?(a )?(buy|outperform|overweight|strong buy)|(rais(es|ed)|hikes?|boosts?|lifts?) (its )?(price target|pt\b)|price target (raised|increased|hiked|boosted))/i },
-  { id: 'analyst_down', tier: 2, label: 'Downgrade', sentiment: 'bear', color: '#f87171', family: 'analyst',
+  { id: 'analyst_up', tier: 2, label: 'Upgrade', sentiment: 'bull', color: '#86efac',
+    pattern: /\b(upgrad(es?|ed) (\w+ ){0,2}(to|shares|stock|rating)|analyst upgrade|double[- ]upgrade|initiat(es?|ed) (coverage )?(with |at )?(a )?(buy|outperform|overweight|strong buy)|(rais(es|ed)|hikes?|boosts?|lifts?) (its )?(price target|pt\b)|price target (raised|increased|hiked|boosted))/i,
+    guard: /\b(system|software|network|infrastructure|product|app|platform|facility) upgrade/i },
+  { id: 'analyst_down', tier: 2, label: 'Downgrade', sentiment: 'bear', color: '#f87171',
     pattern: /\b(downgrad(es?|ed)|double[- ]downgrade|initiat(es?|ed) (coverage )?(with |at )?(a )?(sell|underperform|underweight)|(cut(s)?|lower(s|ed)?|slash(es|ed)?) (its )?(price target|pt\b)|price target (cut|lowered|slashed|reduced))/i },
   { id: 'contract', tier: 2, label: 'Contract Win', sentiment: 'bull', color: '#67e8f9',
     pattern: /\b((wins?|awarded|secures?|lands?|receives?|books?) (a |an |its )?(\$?[\d.,]+ ?(million|billion|m\b|b\b) )?(contract|order|purchase order|award|task order)|contract (award|win)|government contract|idiq contract|defense contract)/i },
@@ -105,7 +106,8 @@ const CATALYST_PATTERNS = [
     guard: /\b(regain(s|ed)?|back in|cures?[sd]?) compliance\b/i },
   { id: 'legal', tier: 2, label: 'Legal Risk', sentiment: 'bear', color: '#f472b6',
     pattern: /\b(lawsuit|class action|sec (charg|investigat|probe|subpoena)|doj (investigat|probe|charg)|criminal (charges|probe)|fraud (charges?|allegations?)|under investigation)/i,
-    guard: LAWFIRM_SPAM },
+    // spam + resolved-in-their-favor headlines are not new legal risk
+    guard: new RegExp(LAWFIRM_SPAM.source + String.raw`|\bwins? (the )?(lawsuit|case|patent)|court rul(es|ing) in (its |their )?favor|settl(es|ed|ement)|dismiss(es|ed|al)`, 'i') },
   { id: 'dividend_cut', tier: 2, label: 'Dividend Cut', sentiment: 'bear', color: '#f87171', family: 'dividend',
     pattern: /\b((cuts?|slash(es|ed)?|suspends?|eliminat(es|ed)|reduc(es|ed)) (its )?(quarterly |annual )?dividend|dividend (cut|suspension))/i },
 
@@ -114,9 +116,9 @@ const CATALYST_PATTERNS = [
     pattern: /\b((rais(es|ed)|boost(s|ed)?|hik(es|ed)|increas(es|ed)|initiat(es|ed)|declares? (a )?special) (its )?(quarterly |annual |cash )?dividend|dividend (increase|hike|initiation))/i },
   { id: 'squeeze', tier: 3, label: 'Short Squeeze', sentiment: 'bull', color: '#fb923c',
     pattern: /\b(short squeeze|heavily shorted|short interest (surge|spike|jump|soar))/i },
-  { id: 'insider_buy', tier: 3, label: 'Insider Buy', sentiment: 'bull', color: '#fbbf24', family: 'insider',
+  { id: 'insider_buy', tier: 3, label: 'Insider Buy', sentiment: 'bull', color: '#fbbf24',
     pattern: /\b(insider (buy|purchas)|(ceo|cfo|coo|director|officer|chairman|president) (buys?|bought|purchas(es|ed)))/i },
-  { id: 'insider_sell', tier: 3, label: 'Insider Sell', sentiment: 'bear', color: '#f87171', family: 'insider',
+  { id: 'insider_sell', tier: 3, label: 'Insider Sell', sentiment: 'bear', color: '#f87171',
     pattern: /\b(insider (sell|sale|dump)|(ceo|cfo|coo|director|officer|chairman|president) (sells?|sold|dumps?|unloads?))/i },
   { id: 'shelf', tier: 3, label: 'Shelf Filing', sentiment: 'bear', color: '#fda4af', family: 'dilution',
     pattern: /\b(shelf (registration|offering|filing)|files? (a )?(mixed |universal )?shelf|form s-3|\bs-3\b)/i },
@@ -144,6 +146,30 @@ function suppressWeakSiblings(hits) {
     const fam = h.def.family;
     return !fam || byFamily.get(fam) === h;
   });
+}
+
+// Generalized one-event-one-catalyst rule (not just earnings): when every
+// headline behind category B also triggered category A, and both point the
+// same direction, B is a re-description of A's event — "FDA grants approval
+// on positive Phase 3 data" must not surface as FDA Approval AND Trial Win.
+// Opposite directions are never merged: "beats estimates but cuts guidance"
+// is genuinely two facts and both must survive.
+function suppressSameEvidence(hits, order) {
+  const drop = new Set();
+  for (const a of hits) {
+    for (const b of hits) {
+      if (a === b || drop.has(b)) continue;
+      if (a.def.sentiment !== b.def.sentiment) continue;
+      let subset = true;
+      for (const i of b.idx) if (!a.idx.has(i)) { subset = false; break; }
+      if (!subset) continue;
+      if (a.score > b.score ||
+          (a.score === b.score && order.get(a.def.id) < order.get(b.def.id))) {
+        drop.add(b);
+      }
+    }
+  }
+  return hits.filter(h => !drop.has(h));
 }
 
 function normalizeHeadline(text) {
@@ -185,17 +211,18 @@ function recencyAdj(ageHours) {
  */
 function classifyCatalysts(headlines, now = Date.now()) {
   const items = toItems(headlines, now);
-  const byCat = new Map(); // id -> { def, count, freshestAge, evidence }
+  const byCat = new Map(); // id -> { def, count, freshestAge, evidence, idx }
 
-  for (const item of items) {
+  items.forEach((item, i) => {
     for (const def of CATALYST_PATTERNS) {
       if (def.guard && def.guard.test(item.text)) continue;
       if (!def.pattern.test(item.text)) continue;
       const cur = byCat.get(def.id);
       if (!cur) {
-        byCat.set(def.id, { def, count: 1, freshestAge: item.ageHours, evidence: item.text });
+        byCat.set(def.id, { def, count: 1, freshestAge: item.ageHours, evidence: item.text, idx: new Set([i]) });
       } else {
         cur.count += 1;
+        cur.idx.add(i);
         // keep the freshest headline as the evidence
         if (item.ageHours != null && (cur.freshestAge == null || item.ageHours < cur.freshestAge)) {
           cur.freshestAge = item.ageHours;
@@ -203,17 +230,18 @@ function classifyCatalysts(headlines, now = Date.now()) {
         }
       }
     }
-  }
+  });
 
   let hits = [];
   for (const agg of byCat.values()) {
     const corro = Math.min(agg.count - 1, 3) * 8; // corroboration, capped
     const score = TIER_BASE[agg.def.tier] + corro + recencyAdj(agg.freshestAge);
-    hits.push({ def: agg.def, score, count: agg.count, ageHours: agg.freshestAge, evidence: agg.evidence });
+    hits.push({ def: agg.def, score, count: agg.count, ageHours: agg.freshestAge, evidence: agg.evidence, idx: agg.idx });
   }
 
-  hits = suppressWeakSiblings(hits);
   const order = new Map(CATALYST_PATTERNS.map((d, i) => [d.id, i]));
+  hits = suppressWeakSiblings(hits);
+  hits = suppressSameEvidence(hits, order);
   hits.sort((a, b) => (b.score - a.score) || (order.get(a.def.id) - order.get(b.def.id)));
   return hits;
 }
@@ -224,6 +252,7 @@ function toPublic(hit) {
     label: def.label,
     sentiment: def.sentiment,
     color: def.color,
+    source: 'news',
     tier: def.tier,
     tierName: TIER_NAME[def.tier],
     score: Math.round(hit.score),

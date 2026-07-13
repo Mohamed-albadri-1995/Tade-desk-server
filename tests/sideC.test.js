@@ -1,4 +1,6 @@
 const { classifyCatalyst, classifyCatalysts } = require('../src/sideC/news');
+const { detectTechnicalCatalysts, combineCatalyst } = require('../src/sideC/technical');
+const { resolveAutoBias } = require('../src/sideC/bias');
 
 describe('Side C — Catalyst Classification', () => {
   test('FDA approval headline → FDA Approval', () => {
@@ -213,5 +215,134 @@ describe('Side C — importance ranking & secondary catalysts', () => {
       { headline: 'ACME tops expectations for the quarter', ts: now - 7200000 },
     ], now);
     expect(r.confidence).toBe('high');
+  });
+});
+
+describe('Side C — one event, one catalyst (all categories, not just earnings)', () => {
+  test('FDA approval + trial data in one headline → single catalyst', () => {
+    const r = classifyCatalyst(['FDA grants approval to ACME after positive topline results']);
+    expect(r.label).toBe('FDA Approval');
+    expect(r.others.map(o => o.label)).not.toContain('Trial Win');
+  });
+
+  test('opposite directions from one headline both survive', () => {
+    const r = classifyCatalyst(['ACME earnings beat estimates but company cuts full-year guidance']);
+    expect(r.label).toBe('Earnings Beat');
+    expect(r.others.map(o => o.label)).toContain('Guidance Cut');
+  });
+
+  test('separate events on separate headlines both survive', () => {
+    const r = classifyCatalyst([
+      'ACME wins $30 million defense contract',
+      'ACME announces $200 million buyback program',
+    ]);
+    const labels = [r.label, ...r.others.map(o => o.label)];
+    expect(labels).toContain('Contract Win');
+    expect(labels).toContain('Buyback');
+  });
+
+  test('upgrade and downgrade from different analysts both survive', () => {
+    const r = classifyCatalyst([
+      'BigBank upgrades ACME to buy',
+      'OtherBank downgrades ACME on valuation',
+    ]);
+    const labels = [r.label, ...r.others.map(o => o.label)];
+    expect(labels).toContain('Upgrade');
+    expect(labels).toContain('Downgrade');
+  });
+
+  test('a won lawsuit is not Legal Risk', () => {
+    const r = classifyCatalyst(['ACME wins lawsuit against rival']);
+    expect(r.label).toBe('Legal Win');
+    expect(r.sentiment).toBe('bull');
+  });
+});
+
+describe('Side C — technical catalysts', () => {
+  const quiet = { gapPct: 0.5, rvol: 1.1, change: 0.4, price: 50, monthHigh: 60, monthLow: 40, adrPct: 3, shortFloat: 4 };
+  const gapper = { gapPct: 8, rvol: 6, change: 9, price: 50, monthHigh: 60, monthLow: 40, adrPct: 3, shortFloat: 4 };
+
+  test('quiet tape → no technical catalyst', () => {
+    expect(detectTechnicalCatalysts(quiet)).toHaveLength(0);
+  });
+
+  test('missing data → no technical catalyst, no crash', () => {
+    expect(detectTechnicalCatalysts(null)).toHaveLength(0);
+    expect(detectTechnicalCatalysts({})).toHaveLength(0);
+  });
+
+  test('big gap on volume → Gap Up, and the move family yields only one', () => {
+    const t = detectTechnicalCatalysts(gapper);
+    const moveLabels = t.map(x => x.label).filter(l => ['Gap Up', 'Big Move Up', 'Volume Surge'].includes(l));
+    expect(moveLabels).toEqual(['Gap Up']);
+    expect(t[0].source).toBe('technical');
+  });
+
+  test('breakout above monthly high detected', () => {
+    const t = detectTechnicalCatalysts({ ...quiet, price: 61, rvol: 3, change: 6 });
+    expect(t.map(x => x.label)).toContain('Monthly Breakout');
+  });
+
+  test('no news → technical becomes primary with capped confidence', () => {
+    const c = combineCatalyst(null, gapper);
+    expect(c.label).toBe('Gap Up');
+    expect(c.source).toBe('technical');
+    expect(c.confidence).toBe('medium');
+  });
+
+  test('news always outranks technicals; aligned technical goes to others', () => {
+    const news = classifyCatalyst(['ACME receives FDA approval for device']);
+    const c = combineCatalyst(news, gapper);
+    expect(c.label).toBe('FDA Approval');
+    expect(c.others.map(o => o.label)).toContain('Gap Up');
+  });
+
+  test('technical contradicting the news primary is dropped — no fighting', () => {
+    const news = classifyCatalyst(['ACME announces public offering of common stock']); // bear
+    const c = combineCatalyst(news, gapper); // gap UP (bull)
+    expect(c.label).toBe('Dilution');
+    expect((c.others || []).map(o => o.label)).not.toContain('Gap Up');
+  });
+
+  test('neutral news primary accepts a directional technical', () => {
+    const news = classifyCatalyst(['ACME reports second-quarter results']); // neutral
+    const c = combineCatalyst(news, gapper);
+    expect(c.label).toBe('Earnings');
+    expect(c.others.map(o => o.label)).toContain('Gap Up');
+  });
+});
+
+describe('Side C — auto bias from catalyst type', () => {
+  const bullCtx = { shortTerm: 'BULLISH', secBias: 'BULLISH', longTerm: 'BULLISH' };
+  const bearCtx = { shortTerm: 'BEARISH', secBias: 'BEARISH', longTerm: 'BEARISH' };
+
+  test('manual bias always wins', () => {
+    const r = resolveAutoBias({ bias: 'short', catalyst: { sentiment: 'bull', tier: 1 }, context: bullCtx });
+    expect(r).toMatchObject({ bias: 'short', source: 'manual' });
+  });
+
+  test('tier-1 catalyst overrides even a fully opposed tape', () => {
+    const r = resolveAutoBias({ bias: 'auto', catalyst: { label: 'FDA Rejection', sentiment: 'bear', tier: 1, stale: false }, context: bullCtx });
+    expect(r).toMatchObject({ bias: 'short', source: 'catalyst' });
+  });
+
+  test('tier-2 catalyst follows unless trend AND sector both oppose', () => {
+    const cat = { label: 'Contract Win', sentiment: 'bull', tier: 2, stale: false };
+    expect(resolveAutoBias({ bias: 'auto', catalyst: cat, context: { shortTerm: 'BEARISH', secBias: 'NEUTRAL' } }))
+      .toMatchObject({ bias: 'long', source: 'catalyst' });
+    expect(resolveAutoBias({ bias: 'auto', catalyst: cat, context: bearCtx }))
+      .toMatchObject({ bias: 'short', source: 'context' });
+  });
+
+  test('tier-3, neutral, or stale catalysts fall back to context', () => {
+    expect(resolveAutoBias({ bias: 'auto', catalyst: { sentiment: 'bull', tier: 3, stale: false }, context: bearCtx }).source).toBe('context');
+    expect(resolveAutoBias({ bias: 'auto', catalyst: { sentiment: 'neutral', tier: 2, stale: false }, context: bearCtx }).source).toBe('context');
+    expect(resolveAutoBias({ bias: 'auto', catalyst: { sentiment: 'bear', tier: 1, stale: true }, context: bullCtx }))
+      .toMatchObject({ bias: 'long', source: 'context' });
+  });
+
+  test('no catalyst → context logic unchanged (default long)', () => {
+    expect(resolveAutoBias({ bias: 'auto', context: {} }).bias).toBe('long');
+    expect(resolveAutoBias({ bias: 'auto', context: bearCtx }).bias).toBe('short');
   });
 });

@@ -66,6 +66,10 @@ function updateNews(ticker, news, catalyst) {
   if (row) {
     row.news = news;
     row.catalyst = catalyst;
+    // Catalyst is the strongest auto-bias input, so resolve it here where
+    // both catalyst and context are known; UI and scorer read row.autoBias.
+    const { resolveAutoBias } = require('../sideC/bias');
+    row.autoBias = resolveAutoBias(row);
     row.lastUpdated = Date.now();
   }
 }
