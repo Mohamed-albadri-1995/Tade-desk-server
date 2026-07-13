@@ -57,7 +57,7 @@ def _pairs(spec: dict) -> list[tuple[str, str]]:
         syms = [s.strip().upper() for s in (uni.get('symbols') or []) if s and s.strip()]
         if not syms:
             raise ValueError('universe.symbols is empty')
-        return [(d, s) for d in _dates(spec) for s in syms]
+        return [(d, s, {}) for d in _dates(spec) for s in syms]
     if kind == 'register':
         from chart import screener as sc
         reg = uni.get('register', 'R1')
@@ -69,14 +69,16 @@ def _pairs(spec: dict) -> list[tuple[str, str]]:
                              f'screener reachable and does it have frozen days in range?')
         pairs = []
         for d in sorted(dates):
-            rows = sc.register_rows(reg, d)
+            rows = sc.register_rows(reg, d, full=True)
             if not rows.get('ok'):
                 raise ValueError(f'screener register fetch failed for {d}: '
                                  f'{rows.get("error", "unreachable")}')
             for r in rows.get('rows') or []:
                 t = (r.get('ticker') or '').strip().upper()
                 if t:
-                    pairs.append((d, t))
+                    # the FULL frozen R1/Shortlist card rides along with every
+                    # trade so results can be filtered by ANY register column
+                    pairs.append((d, t, r))
         if not pairs:
             raise ValueError(f'{reg} register has no tickers in range')
         return pairs
@@ -99,7 +101,7 @@ def _summary(closed: list, opens: list, n_pairs: int, errors: list,
              all_dates: list | None = None, cost_bps: float = 0.0) -> dict:
     out = {'pairs': n_pairs, 'trades': len(closed), 'open_trades': len(opens),
            'errors': len(errors), 'error_samples': errors[:10],
-           'cost_bps_per_side': cost_bps}
+           'cost_bps_per_side': cost_bps, 'dates': list(all_dates or [])}
     if closed:
         rets = [t['ret'] for t in closed]
         wins = sum(1 for r in rets if r > 0)
@@ -165,7 +167,7 @@ def run(spec: dict, progress_cb=None) -> dict:
     pairs = _pairs(spec)
 
     closed, opens, errors = [], [], []
-    for i, (day, sym) in enumerate(pairs):
+    for i, (day, sym, rctx) in enumerate(pairs):
         try:
             r = strat.evaluate(strategy, sym, tf, base_days, feed=feed,
                                view=view, asof=day, fill=fill)
@@ -176,20 +178,20 @@ def run(spec: dict, progress_cb=None) -> dict:
                                        'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
                                        'entry': t['entry'], 'exit': t['exit'],
                                        'ret': t['ret'] - 2.0 * cost,   # round trip
-                                       'reason': t['reason']})
+                                       'reason': t['reason'], 'ctx': rctx})
                 ot = r.get('open_trade')
                 if ot and _et_date(ot['time']) == day:
                     opens.append({'date': day, 'symbol': sym, 'side': side,
                                   'entry_ts': ot['time'], 'exit_ts': None,
                                   'entry': ot['entry'], 'exit': None,
                                   'ret': ot['ret_pct'] / 100.0 - cost,  # one side so far
-                                  'reason': 'open'})
+                                  'reason': 'open', 'ctx': rctx})
         except Exception as e:  # noqa: BLE001 — one bad day/symbol must not kill the run
             errors.append(f'{day} {sym}: {e}')
         if progress_cb:
             progress_cb((i + 1) / len(pairs))
 
-    all_dates = sorted({d for d, _ in pairs})
+    all_dates = sorted({d for d, _, _ in pairs})
     return {'summary': _summary(closed, opens, len(pairs), errors,
                                 all_dates=all_dates, cost_bps=float(spec.get('cost_bps', 0.0) or 0.0)),
             'trades': closed + opens}

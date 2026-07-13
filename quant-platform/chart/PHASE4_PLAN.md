@@ -3,7 +3,14 @@
 **Read this first if you are resuming this work (any model, any session).**
 Update the checkboxes + "STATE" line after EVERY step. One commit per step.
 
-## STATE: ALL 8 STEPS DONE — Phase 4 backtest engine complete, pending user review on real data.
+## STATE: ALL 8 STEPS + Chan pass + FILTERS/EXPORT DONE — pending user review on real data.
+Post-step additions: (9) Chan metrics (cost_bps, daily Sharpe, DD duration);
+(10) every trade carries its frozen R1/Shortlist card (ctx) → generic client-
+side filters (any R1 column, entry/exit hhmm ET, dur_min, dow, price, reason;
+ops = ≠ > < in has; metrics recomputed on the filtered subset with the same
+math) + CSV export (filtered, ctx flattened) + /api/backtest/{id}/report
+(phone-first HTML: KPI grid with metric definitions + bias disclosure) +
+/api/backtest/{id}/csv (full).
 
 ## Context (30-second version)
 - The platform: verified `qp` primitives → chart server (`chart/server.py`, box

@@ -26,13 +26,15 @@ bid = store.create_backtest('t1', {'a': 1})
 store.update_backtest(bid, progress=0.5)
 store.add_bt_trades(bid, [{'date': '2024-01-03', 'symbol': 'AAA', 'side': 'long',
                            'entry_ts': 1000, 'exit_ts': 2000, 'entry': 10.0,
-                           'exit': 10.5, 'ret': 0.05, 'reason': 'exit'}])
+                           'exit': 10.5, 'ret': 0.05, 'reason': 'exit',
+                           'ctx': {'score': 66, 'regime': 'STRONG_UP'}}])
 store.update_backtest(bid, status='done', progress=1.0, summary={'trades': 1})
 g = store.get_backtest(bid)
 chkv('status/progress', (g['status'], g['progress']), ('done', 1.0))
 chkv('spec json back', g['spec'], {'a': 1})
 chkv('summary back', g['summary'], {'trades': 1})
 chkv('trade row back', (g['trades'][0]['symbol'], g['trades'][0]['ret']), ('AAA', 0.05))
+chkv('ctx json roundtrip', g['trades'][0]['ctx'], {'score': 66, 'regime': 'STRONG_UP'})
 chkv('list has it', any(b['id'] == bid for b in store.list_backtests()), True)
 chkv('delete', (store.delete_backtest(bid), store.get_backtest(bid)), (True, None))
 
@@ -88,8 +90,9 @@ print("== 4. register universe (monkeypatched screener) ==")
 import chart.screener as sc
 _ad, _rr = sc.available_dates, sc.register_rows
 sc.available_dates = lambda reg='R1': ['2024-01-09', '2024-01-10', '2024-01-15']
-sc.register_rows = lambda reg, d=None: {'ok': True, 'rows':
-    [{'ticker': 'AAA'}] if d == '2024-01-09' else [{'ticker': 'AAA'}, {'ticker': 'BBB'}]}
+sc.register_rows = lambda reg, d=None, full=False: {'ok': True, 'rows':
+    [{'ticker': 'AAA', 'score': 71, 'regime': 'STRONG_UP', 'hot': True}] if d == '2024-01-09'
+    else [{'ticker': 'AAA', 'score': 55, 'regime': 'CHOP'}, {'ticker': 'BBB', 'score': 80, 'regime': 'STRONG_UP'}]}
 spec_reg = dict(spec)
 spec_reg['universe'] = {'kind': 'register', 'register': 'R1'}
 out2 = bt.run(spec_reg)
@@ -98,6 +101,10 @@ chkv('per-day membership -> 3 pairs', out2['summary']['pairs'], 3)
 chkv('3 closed trades', out2['summary']['trades'], 3)
 chkv('day-10 has both tickers', sorted(t['symbol'] for t in out2['trades']
                                        if t['date'] == '2024-01-10'), ['AAA', 'BBB'])
+ctxs = {(t['date'], t['symbol']): t.get('ctx') or {} for t in out2['trades']}
+chkv('R1 card rides with each trade', ctxs[('2024-01-09', 'AAA')].get('score'), 71)
+chkv('per-day ctx differs', ctxs[('2024-01-10', 'AAA')].get('regime'), 'CHOP')
+chkv('symbols universe ctx empty', all(not (t.get('ctx') or {}) for t in out['trades']), True)
 sc.available_dates, sc.register_rows = _ad, _rr
 
 print("== 5. spec validation errors are clear ==")

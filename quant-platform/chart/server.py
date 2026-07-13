@@ -150,6 +150,97 @@ def backtests_list():
     return {'ok': True, 'backtests': store.list_backtests()}
 
 
+@app.get('/api/backtest/{bid}/csv')
+def backtest_csv(bid: int):
+    """Full results as CSV — trade fields + every register (R1/Shortlist)
+    column flattened as ctx_<field>, so any spreadsheet can slice it."""
+    from fastapi.responses import PlainTextResponse
+    import csv
+    import io
+    g = store.get_backtest(bid)
+    if not g:
+        return JSONResponse({'ok': False, 'error': 'not found'}, status_code=200)
+    trades = g.get('trades') or []
+    ctx_keys = sorted({k for t in trades for k in (t.get('ctx') or {})})
+    base = ['date', 'symbol', 'side', 'entry_ts', 'exit_ts', 'entry', 'exit',
+            'ret_pct', 'reason']
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(base + [f'ctx_{k}' for k in ctx_keys])
+    for t in trades:
+        c = t.get('ctx') or {}
+        w.writerow([t['date'], t['symbol'], t['side'], t['entry_ts'], t['exit_ts'],
+                    t['entry'], t['exit'],
+                    round(t['ret'] * 100, 4) if t.get('ret') is not None else '',
+                    t['reason']] + [c.get(k, '') for k in ctx_keys])
+    return PlainTextResponse(buf.getvalue(), media_type='text/csv', headers={
+        'Content-Disposition': f'attachment; filename="backtest_{bid}.csv"'})
+
+
+@app.get('/api/backtest/{bid}/report')
+def backtest_report(bid: int):
+    """Self-contained phone-readable HTML report: clear metric definitions,
+    bias disclosure (fill model, costs, universe), and the trade list."""
+    from fastapi.responses import HTMLResponse
+    g = store.get_backtest(bid)
+    if not g:
+        return HTMLResponse('<h3>backtest not found</h3>')
+    s = g.get('summary') or {}
+    spec = g.get('spec') or {}
+    uni = spec.get('universe') or {}
+    uni_txt = (', '.join(uni.get('symbols') or []) if uni.get('kind') == 'symbols'
+               else f"register {uni.get('register', 'R1')} (frozen per day — survivorship-bias-free)")
+    warn = []
+    if not spec.get('cost_bps'):
+        warn.append('costs = 0 bps (frictionless — real results will be worse)')
+    if spec.get('fill', 'close') == 'close':
+        warn.append("fill = close (optimistic; use 'next open' for live-honest fills)")
+    rows = ''.join(
+        f"<tr><td>{t['date']}</td><td><b>{t['symbol']}</b></td><td>{t['side']}</td>"
+        f"<td>{t['entry']:.2f}→{('%.2f' % t['exit']) if t.get('exit') is not None else 'open'}</td>"
+        f"<td class='{'up' if (t.get('ret') or 0) > 0 else 'dn'}'>"
+        f"{(t['ret'] * 100):+.2f}%</td><td>{t['reason']}</td></tr>"
+        for t in (g.get('trades') or []))
+    m = (lambda k, d='—': s.get(k) if s.get(k) is not None else d)
+    html = f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backtest #{bid} — {g.get('name', '')}</title><style>
+body{{background:#0e1116;color:#e2e8f0;font-family:-apple-system,'Segoe UI',sans-serif;margin:0;padding:14px}}
+h2{{margin:0 0 4px}} .muted{{color:#64748b;font-size:12px}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:12px 0}}
+.kpi{{background:#151a24;border:1px solid #1e2632;border-radius:8px;padding:10px}}
+.kpi b{{font-size:19px;display:block}} .kpi span{{color:#94a3b8;font-size:11px}}
+table{{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}}
+td,th{{padding:6px 6px;border-bottom:1px solid #1e2632;text-align:left;white-space:nowrap}}
+.up{{color:#22c55e}} .dn{{color:#ef5350}} .warn{{color:#f5a623;font-size:12px;margin:8px 0}}
+.defs{{color:#64748b;font-size:11px;line-height:1.6;margin-top:14px}}
+.wrap{{overflow-x:auto}}</style></head><body>
+<h2>Backtest #{bid} — {g.get('name', '')}</h2>
+<div class="muted">{spec.get('start')} → {spec.get('end')} · {spec.get('tf')} · {uni_txt} ·
+fill: {spec.get('fill', 'close')} · cost: {spec.get('cost_bps', 0)} bps/side · status: {g.get('status')}</div>
+{('<div class="warn">⚠ ' + ' · '.join(warn) + '</div>') if warn else ''}
+<div class="grid">
+<div class="kpi"><b>{m('trades')}</b><span>closed trades ({m('open_trades', 0)} open)</span></div>
+<div class="kpi"><b>{m('win_rate')}%</b><span>win rate (closed trades with return &gt; 0)</span></div>
+<div class="kpi"><b>{m('total_return_pct')}%</b><span>total return (sum of per-trade %, unit size)</span></div>
+<div class="kpi"><b>{m('avg_return_pct')}%</b><span>average per trade</span></div>
+<div class="kpi"><b>{m('sharpe')}</b><span>Sharpe (daily returns ×√252, flat days included)</span></div>
+<div class="kpi"><b>{m('max_drawdown_pct')}%</b><span>max drawdown depth</span></div>
+<div class="kpi"><b>{m('max_dd_days')}</b><span>max drawdown duration (days below prior peak)</span></div>
+<div class="kpi"><b>{m('pairs')}</b><span>day·symbol pairs evaluated ({m('errors', 0)} errors)</span></div>
+</div>
+<div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th><th>why</th></tr>
+{rows}</table></div>
+<div class="defs"><b>How to read this honestly:</b><br>
+· Every trade uses the exact strategy JSON + verified qp math the chart draws — no re-implementation.<br>
+· Only trades ENTERED on each evaluated day count (no warm-up leakage, no look-ahead).<br>
+· Register universes are frozen as-of each morning → no survivorship bias. Symbol lists carry whatever bias you typed.<br>
+· 'open' rows were still holding at the day window's end — excluded from win rate.<br>
+· Returns are per-unit-position %; position sizing/compounding belongs to the trading tool.</div>
+</body></html>"""
+    return HTMLResponse(html)
+
+
 @app.delete('/api/backtest/{bid}')
 def backtest_delete(bid: int):
     g = store.get_backtest(bid, with_trades=False)

@@ -88,11 +88,15 @@ def _card(row: dict) -> dict:
     }
 
 
-def register_rows(register: str = 'R1', date: str | None = None) -> dict:
+def register_rows(register: str = 'R1', date: str | None = None,
+                  full: bool = False) -> dict:
     """Compact cards for a register on a date (default: latest).
 
     Returns {ok, register, date, rows[]}. Rows are sorted by score desc so the
-    strongest candidates surface first. `date` None → the screener's latest."""
+    strongest candidates surface first. `date` None → the screener's latest.
+    `full=True` additionally carries EVERY scalar field of the raw register
+    row (normalized card names win on collision) — the backtester stores this
+    per trade so results can be filtered by ANY R1 column."""
     reg = register if register in REGISTERS else 'R1'
     try:
         raw = _get(f'/{reg}/{date}') if date else _get(f'/{reg}/latest')
@@ -103,7 +107,14 @@ def register_rows(register: str = 'R1', date: str | None = None) -> dict:
     except Exception as e:  # noqa: BLE001
         return {'ok': False, 'register': reg, 'date': date, 'rows': [], 'error': str(e)}
 
-    rows = [_card(r) for r in (raw or []) if r.get('ticker')]
+    def _one(r: dict) -> dict:
+        c = _card(r)
+        if full:
+            extra = {k: v for k, v in r.items()
+                     if isinstance(v, (int, float, str, bool)) and k not in c}
+            c = {**extra, **c}
+        return c
+    rows = [_one(r) for r in (raw or []) if r.get('ticker')]
     # Shortlist can repeat a ticker across method rows; keep the first (newest).
     seen, uniq = set(), []
     for c in rows:

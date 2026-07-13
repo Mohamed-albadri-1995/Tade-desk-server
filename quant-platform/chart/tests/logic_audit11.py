@@ -69,5 +69,29 @@ d = body(d) if not isinstance(d, dict) else d
 chkv('delete done run', d.get('ok'), True)
 chkv('gone', store.get_backtest(bid), None)
 
+print("== exports: CSV flattening + report ==")
+bid_e = store.create_backtest('exp', {'universe': {'kind': 'symbols', 'symbols': ['Z']},
+                                      'start': '2024-01-09', 'end': '2024-01-09',
+                                      'fill': 'close', 'cost_bps': 0})
+store.add_bt_trades(bid_e, [
+    {'date': '2024-01-09', 'symbol': 'ZZZ', 'side': 'long', 'entry_ts': 1704808800,
+     'exit_ts': 1704812400, 'entry': 10.0, 'exit': 10.2, 'ret': 0.02, 'reason': 'exit',
+     'ctx': {'score': 71, 'regime': 'STRONG_UP', 'hot': True}}])
+store.update_backtest(bid_e, status='done', progress=1.0,
+                      summary={'trades': 1, 'dates': ['2024-01-09']})
+csv_txt = bytes(srv.backtest_csv(bid_e).body).decode()
+head = csv_txt.splitlines()[0].split(',')
+row = csv_txt.splitlines()[1].split(',')
+chkv('csv has ctx columns', ('ctx_regime' in head, 'ctx_score' in head, 'ctx_hot' in head),
+     (True, True, True))
+chkv('csv ret in pct', row[head.index('ret_pct')], '2.0')
+chkv('csv ctx value', row[head.index('ctx_regime')], 'STRONG_UP')
+rep = bytes(srv.backtest_report(bid_e).body).decode()
+chkv('report is html with metric definitions',
+     ('Sharpe' in rep, 'survivorship' in rep, 'ZZZ' in rep), (True, True, True))
+chkv('report warns on frictionless+close fill',
+     ('frictionless' in rep, 'optimistic' in rep), (True, True))
+store.delete_backtest(bid_e)
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)

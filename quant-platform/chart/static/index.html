@@ -196,6 +196,20 @@
       </div>
       <div id="btStat" class="muted" style="margin-top:5px">— uses the chart's TF, feed and session —</div>
       <div id="btSummary" style="margin-top:4px"></div>
+      <div id="btFilters" style="display:none;margin-top:6px;border-top:1px dashed var(--border);padding-top:6px">
+        <div id="btFRows"></div>
+        <div style="display:flex;gap:4px;margin-top:4px">
+          <select id="btFField" style="flex:2;min-width:0"></select>
+          <select id="btFOp" style="flex:1;min-width:0"><option>=</option><option>≠</option><option>&gt;</option><option>&lt;</option><option>in</option><option>has</option></select>
+          <input id="btFVal" placeholder="value(s)" style="flex:2;min-width:0">
+          <button id="btFAdd" style="background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px">+</button>
+        </div>
+        <div class="muted" style="font-size:10px;margin-top:3px">in = comma list (regime in STRONG_UP,UP) · has = contains · times are ET hhmm (935) · dur_min · dow = Mon…Fri</div>
+        <div style="display:flex;gap:4px;margin-top:5px">
+          <button id="btCsv" style="flex:1;background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px">CSV (filtered)</button>
+          <button id="btReport" style="flex:1;background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px">Report</button>
+        </div>
+      </div>
       <div id="btTrades" style="max-height:30vh;overflow:auto;margin-top:4px"></div>
     </div>
     <h3>Overlays</h3>
@@ -722,8 +736,101 @@ async function loadStrategies(){
 }
 
 // ── Phase 4: backtest panel ──
-let BT_POLL=null;
+let BT_POLL=null, BT_LAST=null, BT_FILTERS=[];
+const _ET_DOW=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short'});
+function btDerive(t){ // per-trade derived fields for filtering (all ET)
+  const e=new Date(t.entry_ts*1000);
+  const [eh,em]=_ET_HM.format(e).split(':').map(Number);
+  const o={...(t.ctx||{}), symbol:t.symbol, side:t.side, reason:t.reason, date:t.date,
+    ret_pct:t.ret!=null?t.ret*100:null, entry_price:t.entry,
+    entry_hhmm:eh*100+em, dow:_ET_DOW.format(e)};
+  if(t.exit_ts){ const x=new Date(t.exit_ts*1000); const [xh,xm]=_ET_HM.format(x).split(':').map(Number);
+    o.exit_hhmm=xh*100+xm; o.dur_min=Math.round((t.exit_ts-t.entry_ts)/60); }
+  return o;
+}
+function btMatch(t,f){ // one filter {field,op,val} against one trade
+  const v=btDerive(t)[f.field];
+  if(v==null)return false;
+  const num=parseFloat(f.val), isN=Number.isFinite(num)&&Number.isFinite(parseFloat(v));
+  const sv=String(v).toLowerCase(), fv=String(f.val).toLowerCase();
+  switch(f.op){
+    case '=': return isN?parseFloat(v)===num:sv===fv;
+    case '≠': return isN?parseFloat(v)!==num:sv!==fv;
+    case '>': return isN&&parseFloat(v)>num;
+    case '<': return isN&&parseFloat(v)<num;
+    case 'in': return fv.split(',').map(x=>x.trim()).filter(Boolean).includes(sv);
+    case 'has': return sv.includes(fv);
+  } return false;
+}
+function btApplyFilters(trades){ return (trades||[]).filter(t=>BT_FILTERS.every(f=>btMatch(t,f))); }
+function btMetrics(trades,dates){ // client-side mirror of the server summary math
+  const closed=trades.filter(t=>t.reason!=='open'), opens=trades.filter(t=>t.reason==='open');
+  const s={trades:closed.length, open_trades:opens.length, pairs:(dates||[]).length};
+  if(!closed.length)return s;
+  const rets=closed.map(t=>t.ret); const wins=rets.filter(r=>r>0).length;
+  s.wins=wins; s.win_rate=Math.round(1000*wins/closed.length)/10;
+  s.avg_return_pct=Math.round(100000*rets.reduce((a,b)=>a+b,0)/rets.length)/1000;
+  s.total_return_pct=Math.round(100000*rets.reduce((a,b)=>a+b,0))/1000;
+  s.exits_by={}; for(const t of closed)s.exits_by[t.reason]=(s.exits_by[t.reason]||0)+1;
+  const seq=[...closed].sort((a,b)=>a.exit_ts-b.exit_ts);
+  let cum=0,peak=0,dd=0; s.equity_curve=[];
+  for(const t of seq){ cum+=t.ret; peak=Math.max(peak,cum); dd=Math.max(dd,peak-cum);
+    s.equity_curve.push({time:t.exit_ts,value:Math.round(100000*cum)/1000}); }
+  s.max_drawdown_pct=Math.round(100000*dd)/1000;
+  if(dates&&dates.length){
+    const daily={}; for(const d of dates)daily[d]=0;
+    for(const t of closed)daily[t.date]=(daily[t.date]||0)+t.ret;
+    const vals=Object.keys(daily).sort().map(d=>daily[d]); const n=vals.length;
+    const mean=vals.reduce((a,b)=>a+b,0)/n;
+    const sd=n>1?Math.sqrt(vals.reduce((a,v)=>a+(v-mean)*(v-mean),0)/(n-1)):0;
+    s.sharpe=sd>1e-12?Math.round(100*mean/sd*Math.sqrt(252))/100:null;
+    let c=0,p=0,run=0,worst=0;
+    for(const v of vals){ c+=v; if(c>=p-1e-12){p=c;run=0;} else {run++; worst=Math.max(worst,run);} }
+    s.max_dd_days=worst;
+  }
+  return s;
+}
+function btFieldOptions(trades){
+  const keys=new Set(['symbol','side','reason','date','ret_pct','entry_price','entry_hhmm','exit_hhmm','dur_min','dow']);
+  for(const t of trades||[])for(const k of Object.keys(t.ctx||{}))keys.add(k);
+  const sel=document.getElementById('btFField'); sel.innerHTML='';
+  for(const k of [...keys].sort()){const o=document.createElement('option');o.value=k;o.textContent=k;sel.appendChild(o);}
+}
+function btRenderFilters(){
+  const box=document.getElementById('btFRows'); box.innerHTML='';
+  BT_FILTERS.forEach((f,i)=>{ const d=document.createElement('div'); d.className='muted'; d.style.cssText='display:flex;gap:4px;align-items:center;font-size:11px';
+    d.innerHTML=`<span style="color:var(--text)">${f.field} ${f.op} ${f.val}</span>`;
+    const x=document.createElement('span'); x.className='rx'; x.textContent='✕'; x.style.marginLeft='auto';
+    x.onclick=()=>{BT_FILTERS.splice(i,1); btRefresh();}; d.appendChild(x); box.appendChild(d); });
+}
+function btRefresh(){ if(!BT_LAST)return;
+  const ft=btApplyFilters(BT_LAST.trades||[]);
+  const s=btMetrics(ft, (BT_LAST.summary&&BT_LAST.summary.dates)||[]);
+  s.cost_bps_per_side=BT_LAST.summary&&BT_LAST.summary.cost_bps_per_side;
+  s.errors=0;
+  btRenderFilters();
+  btRenderCore({summary:s, trades:ft}, BT_FILTERS.length?` · filtered ${ft.length}/${(BT_LAST.trades||[]).length}`:'');
+}
+function btCsvExport(){ if(!BT_LAST)return;
+  const ft=btApplyFilters(BT_LAST.trades||[]);
+  const keys=new Set(); for(const t of ft)for(const k of Object.keys(t.ctx||{}))keys.add(k);
+  const ck=[...keys].sort();
+  const head=['date','symbol','side','entry_ts','exit_ts','entry','exit','ret_pct','reason',...ck.map(k=>'ctx_'+k)];
+  const esc=v=>{v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const lines=[head.join(',')];
+  for(const t of ft){ lines.push([t.date,t.symbol,t.side,t.entry_ts,t.exit_ts??'',t.entry,t.exit??'',
+    t.ret!=null?(t.ret*100).toFixed(4):'',t.reason,...ck.map(k=>(t.ctx||{})[k]??'')].map(esc).join(',')); }
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='backtest_'+(BT_LAST.id||'x')+(BT_FILTERS.length?'_filtered':'')+'.csv'; a.click();
+}
 function btRender(g){
+  BT_LAST=g; BT_FILTERS=[];
+  document.getElementById('btFilters').style.display='';
+  btFieldOptions(g.trades); btRenderFilters();
+  btRenderCore(g,'');
+}
+function btRenderCore(g,extra){
   const sum=document.getElementById('btSummary'), tbl=document.getElementById('btTrades');
   const s=g.summary;
   if(!s){ sum.innerHTML=''; tbl.innerHTML=''; return; }
@@ -731,6 +838,7 @@ function btRender(g){
   sum.innerHTML = s.trades
     ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span style="color:var(--draft)">⚠ ${s.errors} errors</span>`:'')
     : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
+  if(extra)sum.innerHTML+=`<span class="muted">${extra}</span>`;
   // equity curve → oscillator pane (values are %, far from price range)
   if(s.equity_curve&&s.equity_curve.length){ drawStratSeries([{name:'equity %',color:'#22c55e',step:false,style:0,values:s.equity_curve}]); }
   const rows=(g.trades||[]);
@@ -859,6 +967,9 @@ window.addEventListener('load',async()=>{
     document.getElementById(g+'K').addEventListener('change',e=>{ const k=parseInt(e.target.value,10); STRAT[g].k=Number.isFinite(k)?k:1; });
   }
   document.getElementById('btRun').onclick=btRun;
+  document.getElementById('btFAdd').onclick=()=>{ const f={field:document.getElementById('btFField').value, op:document.getElementById('btFOp').value, val:document.getElementById('btFVal').value.trim()}; if(f.field&&f.val!=='')BT_FILTERS.push(f); document.getElementById('btFVal').value=''; btRefresh(); };
+  document.getElementById('btCsv').onclick=btCsvExport;
+  document.getElementById('btReport').onclick=()=>{ if(BT_LAST&&BT_LAST.id)window.open('/api/backtest/'+BT_LAST.id+'/report','_blank'); };
   document.getElementById('btUni').addEventListener('change',e=>{ document.getElementById('btSyms').style.display=e.target.value==='symbols'?'':'none'; });
   document.getElementById('regReg').addEventListener('change',loadRegDates);
   document.getElementById('regDate').addEventListener('change',loadRegister);

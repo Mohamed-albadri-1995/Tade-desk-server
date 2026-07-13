@@ -58,9 +58,14 @@ def _db() -> sqlite3.Connection:
                 entry    REAL NOT NULL,
                 exit     REAL,
                 ret      REAL,                      -- fractional return (signed)
-                reason   TEXT                       -- SL | TP | exit | open
+                reason   TEXT,                      -- SL | TP | exit | open
+                ctx      TEXT                       -- frozen register card JSON
             )
         """)
+        try:  # migration for DBs created before the ctx column existed
+            _conn.execute('ALTER TABLE backtest_trades ADD COLUMN ctx TEXT')
+        except sqlite3.OperationalError:
+            pass
         _conn.execute("""CREATE INDEX IF NOT EXISTS idx_bt_trades
                          ON backtest_trades (bt_id, date)""")
         _conn.commit()
@@ -164,11 +169,12 @@ def add_bt_trades(bt_id: int, trades: list) -> None:
              float(t['entry']),
              (float(t['exit']) if t.get('exit') is not None else None),
              (float(t['ret']) if t.get('ret') is not None else None),
-             t.get('reason')) for t in trades]
+             t.get('reason'),
+             (json.dumps(t['ctx']) if t.get('ctx') else None)) for t in trades]
     with _lock:
         _db().executemany(
             'INSERT INTO backtest_trades (bt_id, date, symbol, side, entry_ts, exit_ts, '
-            'entry, exit, ret, reason) VALUES (?,?,?,?,?,?,?,?,?,?)', rows)
+            'entry, exit, ret, reason, ctx) VALUES (?,?,?,?,?,?,?,?,?,?,?)', rows)
         _db().commit()
 
 
@@ -184,7 +190,11 @@ def get_backtest(bt_id: int, with_trades: bool = True) -> dict | None:
     out['spec'] = json.loads(out['spec'])
     out['summary'] = json.loads(out['summary']) if out.get('summary') else None
     if with_trades:
-        out['trades'] = [dict(r) for r in tr]
+        out['trades'] = []
+        for r in tr:
+            d = dict(r)
+            d['ctx'] = json.loads(d['ctx']) if d.get('ctx') else {}
+            out['trades'].append(d)
     return out
 
 
