@@ -313,9 +313,18 @@ def _snapshot(symbol: str, tf: str, days: int, feed: str, view: str,
     fetch window so every indicator has enough warm-up history. `asof`
     (YYYY-MM-DD) replays the stock as of a historical register date."""
     days = dm.required_days(overlays, tf, days)
-    return cs.compute_data(symbol=symbol.upper(), tf=tf, days=days,
-                           overlays=overlays, feed=feed, view=view,
-                           asof=asof or None)
+    out = cs.compute_data(symbol=symbol.upper(), tf=tf, days=days,
+                          overlays=overlays, feed=feed, view=view,
+                          asof=asof or None)
+    # NEVER silently under-warm an indicator: Alpaca's 1m feed is capped to a
+    # 7-day window inside prepare_bars, so anything needing more history
+    # (month VWAP, weekly levels, 5-day MA) is computed on a truncated window.
+    if tf == '1m' and feed == 'alpaca' and days > 7:
+        out['warn'] = (f'alpaca 1m is capped to a 7-day window but these '
+                       f'overlays need ~{days} days of warm-up — multi-day '
+                       f'VWAPs/levels are UNRELIABLE here. Use the polygon '
+                       f'feed (or a coarser TF) for them.')
+    return out
 
 
 @app.get('/api/chart')

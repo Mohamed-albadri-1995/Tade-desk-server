@@ -429,6 +429,7 @@ async function loadChart(){
     const j=await (await fetch('/api/chart?'+qs)).json();
     if(!j.ok){ document.getElementById('status').textContent='error: '+(j.error||'').slice(0,120); return; }
     drawSnapshot(j);
+    banner(j.warn||'');
     const tag=asof?` · as of ${asof}`:'';
     const ovErr=document.getElementById('status').dataset.ovErr;
     document.getElementById('status').innerHTML=`${symbol} · ${j.first} → ${j.last} · ${(j.bars||[]).length} bars · ${OVERLAYS.length} overlay(s)${tag}`+(ovErr?` · <span style="color:var(--draft)">⚠ ${ovErr}</span>`:'');
