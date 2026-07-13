@@ -143,8 +143,8 @@
         <input id="stratName" placeholder="strategy name" size="16">
         <label style="color:var(--text2)">Side
           <select id="stratSide"><option value="long">Long</option><option value="short">Short</option></select></label>
-        <label style="color:var(--text2)" title="Stop loss">SL <select id="slType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option></select><input id="slVal" type="number" step="any" style="width:52px"></label>
-        <label style="color:var(--text2)" title="Take profit">TP <select id="tpType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option></select><input id="tpVal" type="number" step="any" style="width:52px"></label>
+        <label style="color:var(--text2)" title="Stop loss — long: below entry / short: above entry. @line: trail an indicator (value = % beyond it)">SL <select id="slType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option><option value="prim">@ line</option></select><input id="slVal" type="number" step="any" style="width:52px" placeholder="1.5"></label><span id="slAnchor"></span>
+        <label style="color:var(--text2)" title="Take profit — long: above entry / short: below entry. @line: an indicator level (value = % before it)">TP <select id="tpType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option><option value="prim">@ line</option></select><input id="tpVal" type="number" step="any" style="width:52px" placeholder="1.5"></label><span id="tpAnchor"></span>
         <select id="stratLoad" title="load a saved strategy"><option value="">— saved —</option></select>
         <button id="stratSave" style="background:var(--accent);color:#000">Save</button>
         <button id="stratNew" style="background:#1c2431;color:var(--text);border:1px solid var(--border)">New</button>
@@ -486,9 +486,10 @@ function pickStock(c){
 }
 
 // ── Phase 3: strategy builder ──
-const OPS=[['gt','>'],['lt','<'],['ge','≥'],['le','≤'],['cross_above','crosses ▲'],['cross_below','crosses ▼'],['bounce_up','bounces ▲ off'],['bounce_down','bounces ▼ off'],['rising','rising'],['falling','falling'],['eq','='],['neq','≠']];
+const OPS=[['gt','>'],['lt','<'],['ge','≥'],['le','≤'],['gt_pct','above by ≥%'],['lt_pct','below by ≥%'],['cross_above','crosses ▲'],['cross_below','crosses ▼'],['bounce_up','bounces ▲ off'],['bounce_down','bounces ▼ off'],['rising','rising'],['falling','falling'],['eq','='],['neq','≠']];
 const UNARY=new Set(['rising','falling']);
 const BOUNCE=new Set(['bounce_up','bounce_down']);
+const PCT=new Set(['gt_pct','lt_pct']);
 const PFIELDS=['close','open','high','low','hl2','hlc3','ohlc4','volume'];
 let STRAT=blankStrat(), SAVED=[];
 function blankStrat(){ return {id:null,name:'',side:'long',risk:{sl:{type:'',value:null},tp:{type:'',value:null}},entry:{logic:'AND',window:10,k:1,rules:[]},exit:{logic:'AND',window:10,k:1,rules:[]}}; }
@@ -570,14 +571,19 @@ function holdControl(rule){
 }
 function ruleRowEl(group, rule){
   const row=document.createElement('div'); row.className='rrow';
-  row.appendChild(operandEl(rule.left, renderStrat, false));
+  const leftEl=operandEl(rule.left, renderStrat, false);
+  if(BOUNCE.has(rule.op)){ leftEl.style.opacity='.4'; leftEl.title='ignored — a bounce reads the PRICE BAR itself (wick touch + close back); only the level on the right matters'; }
+  row.appendChild(leftEl);
   const opSel=document.createElement('select'); for(const [v,l] of OPS){const o=document.createElement('option');o.value=v;o.textContent=l;opSel.appendChild(o);} opSel.value=rule.op; opSel.onchange=()=>{rule.op=opSel.value; renderStrat();}; row.appendChild(opSel);
   if(UNARY.has(rule.op)){
-    row.appendChild(labeled('over', opParamInput(rule,'lookback',8)));
-    row.appendChild(labeled('bars · str≥', opParamInput(rule,'min_strength',1.5)));
+    row.appendChild(labeled('over', opParamInput(rule,'lookback',12)));
+    row.appendChild(labeled('bars · str≥', opParamInput(rule,'min_strength',2)));
   } else if(BOUNCE.has(rule.op)){
     row.appendChild(operandEl(rule.right, renderStrat, true));
     row.appendChild(labeled('tol%', opParamInput(rule,'tol_pct',0.15)));
+  } else if(PCT.has(rule.op)){
+    row.appendChild(operandEl(rule.right, renderStrat, true));
+    row.appendChild(labeled('%', opParamInput(rule,'pct',1)));
   } else {
     row.appendChild(operandEl(rule.right, renderStrat, true));
   }
@@ -592,7 +598,7 @@ async function testRule(rule){
   document.getElementById('stratStat').textContent='testing…';
   try{
     const j=await (await fetch('/api/strategy/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-    if(!j.ok){ document.getElementById('stratStat').textContent='test error: '+(j.error||'').slice(0,90); return; }
+    if(!j.ok){ document.getElementById('stratStat').textContent='test error: '+(j.error||'').slice(0,160); return; }
     SIGMARKERS=j.markers||[]; refreshMarkers();
     drawStratSeries(j.series);        // draw the actual indicator lines this condition reads
     const val=(j.left_now!=null)?` · now <b>${j.left_now}</b>${j.right_now!=null?' vs '+j.right_now:''}`:'';
@@ -636,6 +642,14 @@ function renderStrat(){
   const risk=STRAT.risk||{};
   document.getElementById('slType').value=(risk.sl&&risk.sl.type)||''; document.getElementById('slVal').value=(risk.sl&&risk.sl.value!=null)?risk.sl.value:'';
   document.getElementById('tpType').value=(risk.tp&&risk.tp.type)||''; document.getElementById('tpVal').value=(risk.tp&&risk.tp.value!=null)?risk.tp.value:'';
+  // anchored SL/TP (@ line): show an operand editor for the line it trails;
+  // the value box becomes "% beyond the line" (long shifts down, short up).
+  for(const [rk,box,vid] of [['sl','slAnchor','slVal'],['tp','tpAnchor','tpVal']]){
+    const host=document.getElementById(box); host.innerHTML='';
+    const spec=risk[rk]; const isPrim=spec&&spec.type==='prim';
+    document.getElementById(vid).placeholder=isPrim?'% beyond':'1.5';
+    if(isPrim){ spec.anchor=spec.anchor||{kind:'primitive',key:'ma.ema',source:'close',params:{length:9}}; host.appendChild(operandEl(spec.anchor, renderStrat, false)); }
+  }
   for(const g of ['entry','exit']){
     const grp=STRAT[g]; document.getElementById(g+'Logic').value=grp.logic||'AND';
     const win=document.getElementById(g+'Window'); win.style.display=(grp.logic==='THEN')?'':'none'; win.value=grp.window!=null?grp.window:10;
@@ -657,8 +671,11 @@ function drawStratSeries(series){
   updateLegend();
 }
 function readStratHeader(){ STRAT.name=document.getElementById('stratName').value; STRAT.side=document.getElementById('stratSide').value;
-  const rd=(t,v)=>{ const vv=parseFloat(document.getElementById(v).value); return {type:document.getElementById(t).value, value:Number.isFinite(vv)?vv:null}; };
-  STRAT.risk={sl:rd('slType','slVal'), tp:rd('tpType','tpVal')};
+  const rd=(t,v,old)=>{ const vv=parseFloat(document.getElementById(v).value); const out={type:document.getElementById(t).value, value:Number.isFinite(vv)?vv:null};
+    if(out.type==='prim') out.anchor=(old&&old.anchor)||{kind:'primitive',key:'ma.ema',source:'close',params:{length:9}};   // keep the edited anchor
+    return out; };
+  const oldR=STRAT.risk||{};
+  STRAT.risk={sl:rd('slType','slVal',oldR.sl), tp:rd('tpType','tpVal',oldR.tp)};
   for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; const k=parseInt(document.getElementById(g+'K').value,10); STRAT[g].k=Number.isFinite(k)?k:1; } }
 async function loadStrategies(){
   try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
@@ -674,7 +691,7 @@ async function evalStrategy(){
   document.getElementById('stratStat').textContent='evaluating…';
   try{
     const j=await (await fetch('/api/strategy/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-    if(!j.ok){ document.getElementById('stratStat').textContent='error: '+(j.error||'').slice(0,90); return; }
+    if(!j.ok){ document.getElementById('stratStat').textContent='error: '+(j.error||'').slice(0,160); return; }
     SIGMARKERS=j.markers||[]; refreshMarkers();
     drawStratSeries(j.series);        // draw the exact indicators the rules use
     const en=document.getElementById('entryNow'), ex=document.getElementById('exitNow');
@@ -737,6 +754,7 @@ window.addEventListener('load',async()=>{
   document.getElementById('stratDel').onclick=delStrategy;
   document.getElementById('stratNew').onclick=()=>{ STRAT=blankStrat(); seedTemplate(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; };
   document.getElementById('stratLoad').addEventListener('change',e=>loadStrategyById(e.target.value));
+  for(const id of ['slType','tpType']) document.getElementById(id).addEventListener('change',()=>{ readStratHeader(); renderStrat(); });
   document.getElementById('stratClear').onclick=()=>{ SIGMARKERS=[]; refreshMarkers(); clearStratLines(); document.getElementById('stratStat').textContent=''; };
   document.querySelectorAll('#colEntry>.addrule, #colExit>.addrule').forEach(b=>b.onclick=()=>{ STRAT[b.dataset.g].rules.push(b.dataset.t==='group'?blankGroup():blankRule()); renderStrat(); });
   for(const g of ['entry','exit']){

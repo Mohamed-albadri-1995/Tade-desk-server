@@ -47,7 +47,7 @@ import tools.compare_server as cs
 _IND_PALETTE = ['#3b82f6', '#f5a623', '#a855f7', '#ec4899', '#06b6d4',
                 '#eab308', '#14b8a6', '#f97316', '#e879f9', '#84cc16']
 
-_OPS = ('gt', 'lt', 'ge', 'le', 'eq', 'neq',
+_OPS = ('gt', 'lt', 'ge', 'le', 'eq', 'neq', 'gt_pct', 'lt_pct',
         'cross_above', 'cross_below', 'rising', 'falling',
         'bounce_up', 'bounce_down')
 _UNARY = ('rising', 'falling')          # right operand ignored
@@ -55,8 +55,10 @@ _BOUNCE = ('bounce_up', 'bounce_down')  # left = price bar, right = reference le
 _PRICE_FIELDS = ('close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'volume')
 
 # Defaults for the configurable operators (overridable per rule via op_params).
-_SLOPE_LOOKBACK = 8       # bars in the regression window
-_SLOPE_MIN_STRENGTH = 1.5 # min |net move ÷ window volatility| to count as a trend
+_SLOPE_LOOKBACK = 12      # bars in the regression window
+_SLOPE_MIN_STRENGTH = 2.0 # min |net move ÷ residual noise| to count as a trend
+                          # (pure noise reads |strength|≈0.9, so 2.0 ≈ "clearly a trend":
+                          # chop false-fires ~3-4%, real trends score 5-50+)
 _BOUNCE_TOL_PCT = 0.15    # how close (in %) the wick must come to the level to "touch"
 _SEQ_WINDOW = 10          # max bars between consecutive steps of a THEN sequence
 
@@ -147,7 +149,8 @@ def _operand_array(operand: dict, bars, ctx) -> np.ndarray:
 
 
 # ── comparison / cross operators → boolean array ───────────────────────────
-def _apply_op(op: str, L: np.ndarray, R: np.ndarray) -> np.ndarray:
+def _apply_op(op: str, L: np.ndarray, R: np.ndarray, p: dict | None = None) -> np.ndarray:
+    p = p or {}
     prevL = np.concatenate(([np.nan], L[:-1]))
     prevR = np.concatenate(([np.nan], R[:-1]))
     with np.errstate(invalid='ignore'):
@@ -157,6 +160,12 @@ def _apply_op(op: str, L: np.ndarray, R: np.ndarray) -> np.ndarray:
         elif op == 'le': out = L <= R
         elif op == 'eq': out = np.isclose(L, R)
         elif op == 'neq': out = ~np.isclose(L, R)
+        elif op == 'gt_pct':
+            # above by AT LEAST pct% of the reference: L ≥ R × (1 + pct/100).
+            # 'gt' answers "is it above?"; this answers "is it MEANINGFULLY above?"
+            out = L >= R * (1.0 + float(p.get('pct', 0.0)) / 100.0)
+        elif op == 'lt_pct':
+            out = L <= R * (1.0 - float(p.get('pct', 0.0)) / 100.0)
         elif op == 'cross_above':
             out = (~np.isnan(prevL) & ~np.isnan(prevR)) & (prevL <= prevR) & (L > R)
         elif op == 'cross_below':
@@ -254,16 +263,28 @@ def _eval_rule(rule: dict, bars, ctx) -> np.ndarray:
         raise ValueError(f'unknown operator {op!r}')
     p = rule.get('op_params') or {}
     L = _operand_array(rule.get('left'), bars, ctx)
+    R = None
     if op in _UNARY:
         out = _slope_flag(L, op, p)
     else:
         R = _operand_array(rule.get('right'), bars, ctx)
-        out = _bounce_flag(op, bars, R, p) if op in _BOUNCE else _apply_op(op, L, R)
+        out = _bounce_flag(op, bars, R, p) if op in _BOUNCE else _apply_op(op, L, R, p)
     # sustained modifiers: held for the last N bars / true within the last N.
     fb = int(rule.get('for_bars', 0) or 0)
     wb = int(rule.get('within_bars', 0) or 0)
     if fb > 1:
-        out = _rolling(out, fb, 'all')
+        if op in ('cross_above', 'cross_below') and R is not None:
+            # A cross is a ONE-bar event — "held for N" of the event itself can
+            # never be true. What "cross + hold N" MEANS is: it crossed, and the
+            # crossed STATE (above / below) then held on every bar since. Fires
+            # once, N-1 bars after the cross, only if the state survived.
+            state = _apply_op('gt' if op == 'cross_above' else 'lt', L, R)
+            held = _rolling(state, fb, 'all')
+            shifted = np.concatenate((np.zeros(fb - 1, dtype=bool), out[:-(fb - 1)])) \
+                if fb - 1 < len(out) else np.zeros(len(out), dtype=bool)
+            out = held & shifted
+        else:
+            out = _rolling(out, fb, 'all')
     elif wb > 1:
         out = _rolling(out, wb, 'any')
     return out
@@ -318,6 +339,9 @@ def referenced_overlays(strategy: dict) -> list:
                 walk_operand(r.get('right'))
     walk_group(strategy.get('entry'))
     walk_group(strategy.get('exit'))
+    for spec in (strategy.get('risk') or {}).values():        # anchored SL/TP lines
+        if isinstance(spec, dict):
+            walk_operand(spec.get('anchor'))
     return out
 
 
@@ -345,6 +369,9 @@ def _unique_indicators(strategy: dict) -> list:
             else:
                 add(r.get('left')); add(r.get('right'))
     walk(strategy.get('entry')); walk(strategy.get('exit'))
+    for spec in (strategy.get('risk') or {}).values():        # draw anchored SL/TP lines too
+        if isinstance(spec, dict):
+            add(spec.get('anchor'))
     return out
 
 
@@ -380,12 +407,36 @@ def _risk_dist(spec: dict, entry: float, atr: float):
     return None
 
 
+def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
+    """Per-bar level array for a primitive-ANCHORED stop/target:
+    {type:'prim', anchor:<any operand>, value:<pct beyond>}. The level TRAILS
+    the anchor line bar by bar (below the 9-EMA moves with the 9-EMA).
+    `value` (%) shifts the level in the PROTECTIVE direction for the position:
+    long → below the line (SL under support / TP short of resistance),
+    short → above the line. NaN bars (warm-up) simply don't trigger."""
+    if not spec or spec.get('type') != 'prim':
+        return None
+    try:
+        arr = _operand_array(spec.get('anchor'), bars, ctx)
+    except Exception:
+        return None
+    try:
+        pct = float(spec.get('value') or 0.0)
+    except (TypeError, ValueError):
+        pct = 0.0
+    shift = (1.0 - pct / 100.0) if side == 'long' else (1.0 + pct / 100.0)
+    return np.asarray(arr, dtype=float) * shift
+
+
 def _pair_trades(bars, ts, entry_ev, exit_ev, side, risk, ctx):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Enter on an entry edge
-    while flat; then exit at whichever comes first, intrabar: SL hit, TP hit, or
-    an exit-condition edge. SL is checked before TP (conservative when both fall
-    in one bar). Returns trades with entry/exit price + reason. The full
-    day-by-day sim is Phase 4; this makes the preview honest about stops."""
+    while flat; then exit at whichever comes first, intrabar. PROTOCOL (fixed
+    priority, so the three exit paths never conflict): 1) SL — protection is
+    checked first, and wins if SL and TP fall in the same bar (conservative);
+    2) TP; 3) the exit-rule edge (at that bar's close). SL/TP are either a
+    fixed distance from entry (pct / ATR× / points) or ANCHORED to an indicator
+    line (type 'prim') that trails bar by bar. Full day-by-day sim is Phase 4;
+    this makes the preview honest about stops."""
     close = bars['close'].to_numpy(float)
     high = bars['high'].to_numpy(float)
     low = bars['low'].to_numpy(float)
@@ -399,6 +450,8 @@ def _pair_trades(bars, ts, entry_ev, exit_ev, side, risk, ctx):
             atr = lines[0][1]
         except Exception:
             pass
+    sl_arr = _anchor_levels(risk.get('sl'), side, bars, ctx)   # trailing line, or None
+    tp_arr = _anchor_levels(risk.get('tp'), side, bars, ctx)
     trades = []
     in_pos = False; ei = 0; sl = tp = None
     for j in range(n):
@@ -406,6 +459,8 @@ def _pair_trades(bars, ts, entry_ev, exit_ev, side, risk, ctx):
             if entry_ev[j]:
                 in_pos = True; ei = j
                 ep = close[j]
+                # fixed-distance stops: long → SL BELOW entry / TP above;
+                # short → SL ABOVE entry / TP below. (Anchored ones use the array.)
                 sd = _risk_dist(risk.get('sl'), ep, atr[j])
                 td = _risk_dist(risk.get('tp'), ep, atr[j])
                 if side == 'long':
@@ -413,11 +468,19 @@ def _pair_trades(bars, ts, entry_ev, exit_ev, side, risk, ctx):
                 else:
                     sl = ep + sd if sd else None; tp = ep - td if td else None
             continue
+        # effective level this bar: anchored (trailing, may be NaN in warm-up)
+        # beats the fixed scalar; NaN disables the check for that bar.
+        slv = sl_arr[j] if sl_arr is not None else sl
+        tpv = tp_arr[j] if tp_arr is not None else tp
+        if slv is not None and slv != slv:
+            slv = None
+        if tpv is not None and tpv != tpv:
+            tpv = None
         px = reason = None
-        if sl is not None and ((side == 'long' and low[j] <= sl) or (side == 'short' and high[j] >= sl)):
-            px, reason = sl, 'SL'
-        elif tp is not None and ((side == 'long' and high[j] >= tp) or (side == 'short' and low[j] <= tp)):
-            px, reason = tp, 'TP'
+        if slv is not None and ((side == 'long' and low[j] <= slv) or (side == 'short' and high[j] >= slv)):
+            px, reason = slv, 'SL'
+        elif tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
+            px, reason = tpv, 'TP'
         elif exit_ev[j]:
             px, reason = close[j], 'exit'
         if px is not None:

@@ -227,6 +227,43 @@ onStruct), and resets a stale `sub` that falls out of range.
 Verified headless: floor=7, bb/stdev=3, dynamic_sr default=6, max_levels=3→3
 lines, max_levels=8→8 lines; no JS errors.
 
+### It.15 — logic proof, user bug batch, %-ops, anchored SL/TP, slope v2  [DONE]
+Deep logic audit FIRST (82 hand-computed cases, engine must match exactly):
+every operator, AND/OR/ATLEAST/THEN + nesting, offset/_shift, expr (÷0, nested),
+time operand, for/within, bounce, edges, SL/TP pairing incl. same-bar SL-beats-TP,
+sub-line selection, _merge_defaults → ALL PASS. Then the reported issues:
+- FIXED (semantics): `cross_above/below + held for N` could NEVER fire — a
+  cross is a 1-bar event, so "the cross held 3 bars" is impossible. Now it
+  means what you meant: crossed, AND the crossed STATE (above/below) held on
+  every bar since → fires once, N-1 bars after the cross. Verified incl.
+  broke/re-cross cases and via evaluate() over a stub feed (32 fires vs 95
+  plain crosses).
+- VERIFIED NOT A BUG: offset/_shift + `close-open > atr_daily/N` — full e2e
+  through evaluate() with a stub loader (1m+1d): 752 entries/4321 bars; the 🔍
+  tester reports left/right live values. The likely on-phone culprit: the expr
+  middle op DEFAULTS to − (minus); atr_daily−30000 ≈ −29995 makes `>` always
+  true (one edge at bar 0) and `<` never true — matching the report exactly.
+  Error text in the status line lengthened 90→160 chars.
+- VERIFIED NOT A BUG: editing a saved strategy (load → change → Save keeps the
+  same id, updates in place; survives page reload). Full UI roundtrip test.
+- NEW operators: `above by ≥%` / `below by ≥%` (gt_pct/lt_pct): L ≥ R×(1+pct/100)
+  — "meaningfully above", not just above.
+- NEW: SL/TP "@ line" — anchor the stop/target to ANY operand (9-EMA, session
+  VWAP, S2, window_low=premarket low, even an expr), optional % beyond; the
+  level TRAILS the line bar by bar. Long → shifted below the line, short →
+  above (protective side), automatic. Priority protocol unchanged & explicit:
+  SL first (wins same-bar ties), then TP, then exit-rule. NaN warm-up bars
+  can't trigger. Anchors count toward warm-up AND get drawn on Evaluate.
+- Slope v2 (draft primitive, not part of the agreed 66): strength is now net
+  modelled move ÷ RESIDUAL noise around the fitted line (ddof=2), capped ±99,
+  default length 12, threshold 2.0. v1 saturated ~3.3 in any clean trend (steep
+  == shallow) and false-fired ~17-19% in chop; v2: chop <10% fires at 2.0,
+  steep ≫ shallow (median 47 vs 3), pure noise reads ~0.9.
+- UI: bounce rows dim the left operand (a bounce reads the price BAR; only the
+  right-side level matters) with an explanatory tooltip.
+All 82+28 audit cases green; headless UI verification green (pct box, anchor
+editor, save/reload/edit roundtrip, no JS errors).
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
