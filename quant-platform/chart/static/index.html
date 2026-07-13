@@ -861,8 +861,16 @@ function btRenderCore(g,extra){
   if(!s){ sum.innerHTML=''; tbl.innerHTML=''; return; }
   const by=s.exits_by?Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' '):'';
   sum.innerHTML = s.trades
-    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span style="color:var(--draft)">⚠ ${s.errors} errors</span>`:'')
+    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span id="btErrTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="tap to see which day·symbol pairs failed and why">⚠ ${s.errors} errors</span>`:'')
     : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
+  const samp=(BT_LAST&&BT_LAST.summary&&BT_LAST.summary.error_samples)||s.error_samples||[];
+  const tgl=document.getElementById('btErrTgl');
+  if(tgl&&samp.length){ tgl.onclick=()=>{ let d=document.getElementById('btErrList');
+    if(d){ d.remove(); return; }
+    d=document.createElement('div'); d.id='btErrList'; d.className='muted';
+    d.style.cssText='font-size:10px;margin-top:3px;white-space:normal;color:var(--draft)';
+    d.innerHTML='skipped pairs (no trades from these):<br>'+samp.map(x=>'· '+String(x).slice(0,120)).join('<br>')+(s.errors>samp.length?`<br>… +${s.errors-samp.length} more (see /api/backtest/{id})`:'');
+    sum.appendChild(d); }; }
   if(s.ttp){ sum.innerHTML+=`<br><span style="color:var(--draft)">TTP @ ${s.ttp.shares} sh: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counted $${s.ttp.counted_pnl_usd} · ${s.ttp.wins_below_min} wins < $${s.ttp.min_profit_ps}/sh wasted</span>`; }
   if(extra)sum.innerHTML+=`<span class="muted">${extra}</span>`;
   // equity curve → oscillator pane (values are %, far from price range)

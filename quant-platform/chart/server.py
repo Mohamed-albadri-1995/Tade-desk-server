@@ -235,6 +235,9 @@ td,th{{padding:6px 6px;border-bottom:1px solid #1e2632;text-align:left;white-spa
 fill: {spec.get('fill', 'close')} · cost: {spec.get('cost_bps', 0)} bps/side ·
 rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_close') else 'none')} · status: {g.get('status')}</div>
 {('<div class="warn">⚠ ' + ' · '.join(warn) + '</div>') if warn else ''}
+{('<div class="warn">⚠ ' + str(s.get('errors')) + ' day·symbol pairs skipped (no data / feed error):<br>'
+  + '<br>'.join('· ' + str(x)[:120] for x in (s.get('error_samples') or [])[:5]) + '</div>')
+ if s.get('errors') else ''}
 <div class="grid">
 <div class="kpi"><b>{m('trades')}</b><span>closed trades ({m('open_trades', 0)} open)</span></div>
 <div class="kpi"><b>{m('win_rate')}%</b><span>win rate (closed trades with return &gt; 0)</span></div>
