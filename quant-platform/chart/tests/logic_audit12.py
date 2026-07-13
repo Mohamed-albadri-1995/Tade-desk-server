@@ -125,5 +125,23 @@ out = bt.run({'strategy': strat_day, 'tf': '1m', 'days': 1, 'feed': 'stub12',
 chkv('backtest eod exit recorded', out['summary']['exits_by'], {'eod': 1})
 chkv('ttp block present in summary', 'ttp' in out['summary'], True)
 
+print("== 7. corners: next_open x eod interplay ==")
+# exit signal fires ON the eod bar (next_open): the eod close must take it —
+# nothing may fill on the next day's open.
+b7 = bars_at(['15:47', '15:48', '15:49', '15:50'], [100, 100, 100, 100],
+             o=[100, 100, 100, 99])
+eok7, eod7 = S._session_masks(b7, RULES)
+tr7, _, _, op7 = S._pair_trades(b7, list(range(4)), np.array([True, False, False, False]),
+                                np.array([False, False, True, False]), 'long', {}, None,
+                                fill='next_open', entry_ok=eok7, eod_close=eod7)
+chkv('eod supersedes a same-bar exit signal', [(t['xi'], t['reason']) for t in tr7],
+     [(2, 'eod')])
+chkv('nothing open after eod', op7, None)
+# entry signal one bar BEFORE eod with next_open: fill bar IS the eod bar -> blocked
+tr8, _, _, op8 = S._pair_trades(b7, list(range(4)), np.array([False, True, False, False]),
+                                np.zeros(4, bool), 'long', {}, None,
+                                fill='next_open', entry_ok=eok7, eod_close=eod7)
+chkv('fill landing on the liquidation bar is blocked', (len(tr8), op8), (0, None))
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)

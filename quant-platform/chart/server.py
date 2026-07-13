@@ -110,28 +110,33 @@ def strategies_delete(sid: int):
 
 
 # ── Phase 4: backtests ──────────────────────────────────────────────────────
+import threading as _threading
 _BT_RUNNING: dict = {'id': None}
+_BT_START_LOCK = _threading.Lock()     # closes the double-POST race window
 
 
 @app.post('/api/backtest')
 def backtest_start(payload: dict = Body(...)):
-    """Start a backtest in a background thread. One at a time (small box).
-    Body = spec: {name, strategy|strategy_id, universe, start, end, tf, feed,
-    view, fill, days}. Returns {ok, id} immediately; poll GET /api/backtest/{id}."""
+    """Start a backtest in a background thread. One at a time (small box) —
+    the check-and-create is under a lock so two simultaneous POSTs can't both
+    pass the 'already running' check. Body = spec: {name, strategy|strategy_id,
+    universe, start, end, tf, feed, view, fill, days}. Returns {ok, id}
+    immediately; poll GET /api/backtest/{id}."""
     import threading
     from chart import backtest as bt
     try:
-        cur = _BT_RUNNING.get('id')
-        if cur is not None:
-            g = store.get_backtest(cur, with_trades=False)
-            if g and g['status'] == 'running':
-                return JSONResponse({'ok': False,
-                                     'error': f'backtest #{cur} is still running'},
-                                    status_code=200)
-        bt._pairs(payload)                     # validate spec BEFORE creating a row
-        bt._resolve_strategy(payload)
-        bid = store.create_backtest(payload.get('name') or 'Backtest', payload)
-        _BT_RUNNING['id'] = bid
+        with _BT_START_LOCK:
+            cur = _BT_RUNNING.get('id')
+            if cur is not None:
+                g = store.get_backtest(cur, with_trades=False)
+                if g and g['status'] == 'running':
+                    return JSONResponse({'ok': False,
+                                         'error': f'backtest #{cur} is still running'},
+                                        status_code=200)
+            bt._pairs(payload)                 # validate spec BEFORE creating a row
+            bt._resolve_strategy(payload)
+            bid = store.create_backtest(payload.get('name') or 'Backtest', payload)
+            _BT_RUNNING['id'] = bid
         t = threading.Thread(target=bt.run_and_store, args=(bid, payload), daemon=True)
         t.start()
         return {'ok': True, 'id': bid}
