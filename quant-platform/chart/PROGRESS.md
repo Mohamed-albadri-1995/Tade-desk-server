@@ -348,6 +348,25 @@ DELIBERATELY KEPT (with reasons):
 Suite now 120 hand-computed cases across 6 audit parts + stub-feed e2e — all
 green. Server routes verified exception-wrapped end to end.
 
+### It.19 — Trade operand: position-aware exits  [DONE]
+User: "SL and TP conditions are very simple — I can't make 'exit if price is
+2 ATR below MA or 1%' or 'break below 20MA OR exhaustion candle while moved
+>2 daily ATR OR above R3'." Gap analysis:
+- Example 2 and '2 ATR below MA' were ALREADY expressible (nested OR/AND +
+  Expr; the SL anchor accepts an Expr like sma20 − atr14×2 → real intrabar
+  trailing stop). Verified both with hand-computed cases.
+- The REAL structural gap was 'or 1%': exit conditions couldn't see THE TRADE.
+Added operand kind 'trade' (exit rules only): entry price / bars in trade /
+P&L% (side-signed). Trade-aware exit groups are re-evaluated PER TRADE inside
+the pairing loop, so each trade measures from its OWN entry — verified with a
+re-entry case where trade 2's −1% baseline differs from trade 1's. Unlocks:
+condition-based stops (P&L% ≤ −1), profit locks, TIME stops (bars ≥ N), and
+any mix of those with indicator legs in one OR group. Guards: Trade in an
+ENTRY rule raises a clear error; 🔍 tester explains it needs a live position.
+exit_now for trade-aware exits is computed against the open position if one
+exists. Suite: +11 cases (both user examples verbatim) → 131 total, all green;
+UI roundtrip verified.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop

@@ -13,6 +13,9 @@ operand:                                    (any operand may add "offset": n = n
   {"kind":"price","field":"close|open|high|low|hl2|hlc3|ohlc4|volume"}
   {"kind":"time","field":"minutes|hhmm|hour|minute"}   # ET bar time-of-day
   {"kind":"const","value": <number>}
+  {"kind":"trade","field":"entry|bars|pnl_pct"}  # THE OPEN POSITION (exit rules
+                        # only): entry price / bars held / unrealized P&L% —
+                        # evaluated per trade, each trade sees its own entry
 rule:
   {"left": operand, "op": OP, "right": operand, "op_params": {...},
    "for_bars": N,       # true only if it held on ALL of the last N bars
@@ -97,11 +100,32 @@ def _shift(arr: np.ndarray, offset: int) -> np.ndarray:
 
 
 # ── operand → aligned float array ──────────────────────────────────────────
-def _operand_array(operand: dict, bars, ctx) -> np.ndarray:
+def _operand_array(operand: dict, bars, ctx, trade: dict | None = None) -> np.ndarray:
     if not isinstance(operand, dict):
         raise ValueError('operand must be an object')
     kind = operand.get('kind', 'primitive')
     n = len(bars)
+    if kind == 'trade':
+        # THE POSITION ITSELF as an operand — exit rules only. Evaluated per
+        # trade inside the pairing loop, so each trade sees its OWN entry.
+        #   entry   → the trade's entry price (flat line)
+        #   bars    → bars held so far (0 on the entry bar) — time stops
+        #   pnl_pct → unrealized P&L % since entry, signed by side
+        if not trade:
+            raise ValueError('Trade fields (entry/bars/P&L) only exist inside '
+                             'a position — use them in EXIT rules, not entry')
+        field = operand.get('field', 'pnl_pct')
+        close = bars['close'].to_numpy(float)
+        if field == 'entry':
+            base = np.full(n, float(trade['entry']))
+        elif field == 'bars':
+            base = np.arange(n, dtype=float) - float(trade['ei'])
+        elif field == 'pnl_pct':
+            sgn = -1.0 if trade.get('side') == 'short' else 1.0
+            base = sgn * (close - float(trade['entry'])) / float(trade['entry']) * 100.0
+        else:
+            raise ValueError(f'unknown trade field {field!r}')
+        return _shift(base, operand.get('offset', 0))
     if kind == 'const':
         try:
             base = np.full(n, float(operand.get('value')), dtype=float)
@@ -126,8 +150,8 @@ def _operand_array(operand: dict, bars, ctx) -> np.ndarray:
         #   body% = candle.body ÷ candle.bar_range × 100
         #   move in ATR = (close − day_open) ÷ atr_daily
         #   distance to R1 = close − floor·R1
-        a = _operand_array(operand.get('a'), bars, ctx)
-        b = _operand_array(operand.get('b'), bars, ctx)
+        a = _operand_array(operand.get('a'), bars, ctx, trade)
+        b = _operand_array(operand.get('b'), bars, ctx, trade)
         eop = operand.get('op', 'sub')
         with np.errstate(invalid='ignore', divide='ignore'):
             if eop == 'add':   base = a + b
@@ -275,17 +299,17 @@ def _rolling(mask: np.ndarray, n: int, mode: str) -> np.ndarray:
     return out
 
 
-def _eval_rule(rule: dict, bars, ctx) -> np.ndarray:
+def _eval_rule(rule: dict, bars, ctx, trade: dict | None = None) -> np.ndarray:
     op = rule.get('op', 'gt')
     if op not in _OPS:
         raise ValueError(f'unknown operator {op!r}')
     p = rule.get('op_params') or {}
-    L = _operand_array(rule.get('left'), bars, ctx)
+    L = _operand_array(rule.get('left'), bars, ctx, trade)
     R = None
     if op in _UNARY:
         out = _slope_flag(L, op, p)
     else:
-        R = _operand_array(rule.get('right'), bars, ctx)
+        R = _operand_array(rule.get('right'), bars, ctx, trade)
         out = _bounce_flag(op, bars, R, p) if op in _BOUNCE else _apply_op(op, L, R, p)
     # sustained modifiers: held for the last N bars / true within the last N.
     fb = int(rule.get('for_bars', 0) or 0)
@@ -318,7 +342,7 @@ def _eval_rule(rule: dict, bars, ctx) -> np.ndarray:
     return out
 
 
-def _eval_group(group: dict, bars, ctx) -> np.ndarray:
+def _eval_group(group: dict, bars, ctx, trade: dict | None = None) -> np.ndarray:
     n = len(bars)
     rules = (group or {}).get('rules') or []
     if not rules:
@@ -327,9 +351,9 @@ def _eval_group(group: dict, bars, ctx) -> np.ndarray:
     parts = []
     for r in rules:
         if 'rules' in r or 'logic' in r:          # nested group
-            parts.append(_eval_group(r, bars, ctx))
+            parts.append(_eval_group(r, bars, ctx, trade))
         else:
-            parts.append(_eval_rule(r, bars, ctx))
+            parts.append(_eval_rule(r, bars, ctx, trade))
     if logic == 'THEN':
         return _sequence(parts, int((group or {}).get('window', _SEQ_WINDOW)))
     stacked = np.vstack(parts)
@@ -338,6 +362,19 @@ def _eval_group(group: dict, bars, ctx) -> np.ndarray:
         k = max(1, int((group or {}).get('k', 1) or 1))
         return stacked.sum(axis=0) >= k
     return stacked.any(axis=0) if logic == 'OR' else stacked.all(axis=0)
+
+
+def _uses_trade(node) -> bool:
+    """Does this rule/group tree reference the Trade operand anywhere? If so,
+    the exit condition depends on the POSITION (entry price, bars held, P&L)
+    and must be re-evaluated per trade instead of once globally."""
+    if not isinstance(node, dict):
+        return False
+    if node.get('kind') == 'trade':
+        return True
+    if 'rules' in node or 'logic' in node:
+        return any(_uses_trade(r) for r in node.get('rules') or [])
+    return any(_uses_trade(node.get(k)) for k in ('left', 'right', 'a', 'b'))
 
 
 def _edges(mask: np.ndarray) -> np.ndarray:
@@ -457,7 +494,8 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
     return np.asarray(arr, dtype=float) * shift
 
 
-def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
+def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
+                 exit_group: dict | None = None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -508,6 +546,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
     trades = []
     open_trade = None
     in_pos = False; ei = 0; sl = tp = None
+    em = exit_mask                       # per-trade exit mask when trade-aware
     for j in range(n):
         if not in_pos:
             if entry_mask[j]:
@@ -525,6 +564,11 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
                 if sl_required and (e_sl is None or e_sl != e_sl):
                     continue                       # stop unpriceable → no trade
                 in_pos = True; ei = j
+                if exit_group is not None:
+                    # exit rules reference the Trade operand → evaluate the
+                    # exit condition FOR THIS TRADE (its own entry price/bar)
+                    em = _eval_group(exit_group, bars, ctx,
+                                     trade={'entry': ep, 'ei': ei, 'side': side})
                 if e_sl is not None and e_sl == e_sl:
                     sl_view[j] = e_sl
                 if e_tp is not None and e_tp == e_tp:
@@ -547,7 +591,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
             px, reason = slv, 'SL'
         elif tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
             px, reason = tpv, 'TP'
-        elif exit_mask[j]:
+        elif em is not None and em[j]:
             px, reason = close[j], 'exit'
         if px is not None:
             r = (px - close[ei]) / close[ei]
@@ -566,6 +610,22 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
     return trades, sl_view, tp_view, open_trade
 
 
+def _exit_now(exit_mask, trade_aware, exit_group, open_trade, side, bars, ctx) -> bool:
+    """'Is the exit condition true right now?' — for a trade-aware exit that
+    only means anything relative to the OPEN position, if there is one."""
+    if not trade_aware:
+        return bool(exit_mask[-1])
+    if not open_trade:
+        return False
+    try:
+        em = _eval_group(exit_group, bars, ctx,
+                         trade={'entry': open_trade['entry'],
+                                'ei': open_trade['ei'], 'side': side})
+        return bool(em[-1])
+    except Exception:
+        return False
+
+
 def test_condition(node: dict, symbol: str, tf: str, days: int,
                    feed: str = 'polygon', view: str = 'all',
                    asof: str | None = None) -> dict:
@@ -574,6 +634,11 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
     resistance') before wiring it into a strategy. Returns a dot marker on each
     true bar, the count, the % of bars true, and whether it's true right now."""
     from chart import data_manager as dm
+    if _uses_trade(node):
+        return {'ok': False,
+                'error': 'Trade fields (entry price / bars in trade / P&L%) '
+                         'need a live position — put this rule in EXIT and '
+                         'use Evaluate to see it per trade'}
     strat_like = {'entry': node if ('rules' in node or 'logic' in node)
                   else {'logic': 'AND', 'rules': [node]}}
     days = dm.required_days(referenced_overlays(strat_like), tf, days)
@@ -635,15 +700,22 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
                 'first': None, 'last': None}
 
     side = strategy.get('side', 'long')
+    exit_group = strategy.get('exit')
+    # Trade-operand exits (P&L %, bars held, entry price) depend on WHICH
+    # position is open, so no single global exit mask exists — the pairing
+    # loop evaluates the exit group per trade instead.
+    trade_aware = _uses_trade(exit_group or {})
     entry_mask = _eval_group(strategy.get('entry'), bars, ctx)
-    exit_mask = _eval_group(strategy.get('exit'), bars, ctx)
+    exit_mask = (np.zeros(n, dtype=bool) if trade_aware
+                 else _eval_group(exit_group, bars, ctx))
     entry_ev = _edges(entry_mask)
     exit_ev = _edges(exit_mask)
 
     # STATUS pairing: enter while flat on any true entry bar; exit on any true
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
     trades, sl_view, tp_view, open_trade = _pair_trades(
-        bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx)
+        bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx,
+        exit_group=exit_group if trade_aware else None)
 
     up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
     up_pos = 'belowBar' if side == 'long' else 'aboveBar'
@@ -703,7 +775,8 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         'markers': markers,
         'series':  series,
         'entry_now': bool(entry_mask[-1]),
-        'exit_now':  bool(exit_mask[-1]),
+        'exit_now':  _exit_now(exit_mask, trade_aware, exit_group, open_trade,
+                               side, bars, ctx),
         'stats': stats,
         'open_trade': ({'time': int(ts[open_trade['ei']]),
                         'entry': open_trade['entry'],
