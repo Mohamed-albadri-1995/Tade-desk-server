@@ -65,7 +65,10 @@ def save_strategy(obj: dict) -> dict:
     name = (obj.get('name') or 'Untitled strategy').strip()[:120]
     sid = obj.get('id')
     payload = dict(obj)
-    payload.pop('id', None)
+    # strip store metadata so a load→edit→save cycle doesn't embed stale
+    # copies of it inside the strategy document itself
+    for meta in ('id', 'updated_at', 'created_at'):
+        payload.pop(meta, None)
     data = json.dumps(payload)
     now = time.time()
     with _lock:

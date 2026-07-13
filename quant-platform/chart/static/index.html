@@ -497,7 +497,7 @@ let STRAT=blankStrat(), SAVED=[];
 function blankStrat(){ return {id:null,name:'',side:'long',risk:{sl:{type:'',value:null},tp:{type:'',value:null}},entry:{logic:'AND',window:10,k:1,rules:[]},exit:{logic:'AND',window:10,k:1,rules:[]}}; }
 function blankGroup(){ return {logic:'OR',window:10,k:1,rules:[]}; }
 function isGroup(n){ return n && Array.isArray(n.rules); }
-function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; if(kind==='time')return {kind:'time',field:'minutes'}; if(kind==='expr')return {kind:'expr',op:'sub',a:blankOperand('price'),b:blankOperand('const')}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
+function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; if(kind==='time')return {kind:'time',field:'minutes'}; if(kind==='trade')return {kind:'trade',field:'pnl_pct'}; if(kind==='expr')return {kind:'expr',op:'sub',a:blankOperand('price'),b:blankOperand('const')}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
 const EXPR_OPS=[['add','+'],['sub','−'],['mul','×'],['div','÷']];
 // Primitives whose NUMBER of output lines is driven by a param (not fixed).
 // dynamic_sr returns sr1..sr{max_levels}, so the line picker must track that
@@ -523,7 +523,7 @@ function primSelect(val){ const sel=document.createElement('select'); const grou
 function operandEl(op, onStruct, allowConst){
   const box=document.createElement('span'); box.className='opd';
   const kindSel=document.createElement('select');
-  const kinds=[['primitive','Indicator'],['price','Price'],['time','Time'],['expr','Expr ()']]; if(allowConst)kinds.push(['const','Value']);
+  const kinds=[['primitive','Indicator'],['price','Price'],['time','Time'],['trade','Trade'],['expr','Expr ()']]; if(allowConst)kinds.push(['const','Value']);
   for(const [v,l] of kinds){ const o=document.createElement('option'); o.value=v; o.textContent=l; kindSel.appendChild(o);} kindSel.value=op.kind;
   kindSel.onchange=()=>{ const repl=blankOperand(kindSel.value); for(const k of Object.keys(op))delete op[k]; Object.assign(op,repl); onStruct(); };
   box.appendChild(kindSel);
@@ -556,6 +556,8 @@ function operandEl(op, onStruct, allowConst){
     const fs=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'close'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs); canOffset=true;
   } else if(op.kind==='time'){
     const fs=document.createElement('select'); for(const f of ['minutes','hhmm','hour','minute']){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'minutes'; fs.title='ET time-of-day (minutes since midnight, hhmm=930, …)'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs);
+  } else if(op.kind==='trade'){
+    const fs=document.createElement('select'); for(const [v,l] of [['pnl_pct','P&L %'],['bars','bars in trade'],['entry','entry price']]){const o=document.createElement('option');o.value=v;o.textContent=l;fs.appendChild(o);} fs.value=op.field||'pnl_pct'; fs.title='the OPEN position — exit rules only; each trade sees its own entry'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs);
   } else { const ci=document.createElement('input'); ci.type='number'; ci.step='any'; ci.className='cst'; ci.value=op.value??0; ci.onchange=()=>op.value=parseFloat(ci.value); box.appendChild(ci); }
   if(canOffset){ const off=document.createElement('input'); off.type='number'; off.className='len'; off.style.width='40px'; off.title='bars ago (e.g. 1 = previous bar)'; off.placeholder='[0]'; if(op.offset)off.value=op.offset; off.onchange=()=>{const v=parseInt(off.value,10); if(Number.isFinite(v)&&v>0)op.offset=v; else delete op.offset;}; box.appendChild(off); }
   return box;
@@ -706,7 +708,8 @@ async function evalStrategy(){
     ex.textContent=j.exit_now?'TRUE now':'idle'; ex.className='en '+(j.exit_now?'t':'f');
     const s=j.stats;
     const by=s&&s.exits_by?' ['+Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' ')+']':'';
-    document.getElementById('stratStat').innerHTML=`${(j.entries||[]).length} entry signals · ${(s?s.trades:0)} trades · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%${by} <span class="muted">(preview — full backtest is Phase 4)</span>`:(j.exit_now===undefined?'':' · add an exit or SL/TP to close trades'));
+    const op=j.open_trade?` · <span style="color:var(--blue)">1 OPEN (${j.open_trade.ret_pct>=0?'+':''}${j.open_trade.ret_pct}%)</span>`:'';
+    document.getElementById('stratStat').innerHTML=`${(j.entries||[]).length} entry signals · ${(s?s.trades:0)} trades${op} · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%${by} <span class="muted">(preview — full backtest is Phase 4)</span>`:(j.open_trade||j.exit_now===undefined?'':' · add an exit or SL/TP to close trades'));
   }catch(e){ document.getElementById('stratStat').textContent='error: '+e.message; }
 }
 function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open); document.getElementById('stratBtn').classList.toggle('on',open); if(open&&CHART){ setTimeout(()=>{const el=document.getElementById('chart'); CHART.applyOptions({height:el.clientHeight});},50); } }

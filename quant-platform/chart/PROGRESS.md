@@ -314,6 +314,59 @@ All audits green: 54 + 28 + 12 cases + stub-feed e2e.
 Verified: 3 level-view cases + full 101-case regression + headless screenshot
 (volume band, dashed SL/TP segments with axis labels, no JS errors).
 
+### It.18 — Fable 5 ownership pass (full re-read, review, harden)  [DONE]
+Read every line of strategy.py / server.py / store.py / data_manager.py /
+the builder JS with fresh eyes, measuring each decision against the end
+journey (backtest → broker orders). qp library untouched (approved/frozen).
+BUGS FIXED (platform layer):
+1. gt_pct/lt_pct broke on NEGATIVE references (slope, expr diffs): R×(1+p/100)
+   moves the margin the wrong way when R<0 → now L ≥ R + |R|·pct/100.
+2. ATLEAST with k≤0/blank made the group TRUE ON EVERY BAR (sum ≥ 0) → k
+   clamped to ≥1.
+3. UNPROTECTED ENTRIES: an SL configured but unpriceable at the entry bar
+   (ATR warm-up NaN, anchored line not formed) entered with NO stop, silently.
+   Now the entry is SKIPPED until the stop is priceable — live you'd never
+   send an entry without knowing the stop, so the preview must not simulate
+   one. (Blank SL value = SL off = explicit user choice, still enters.)
+4. store embedded stale id/updated_at copies inside the strategy document on
+   every load→edit→save cycle → meta keys stripped before persisting.
+5. Empty-window responses missed keys the frontend touches (series/entry_now).
+DESIGN CHANGED:
+- OPEN POSITIONS are now first-class: a trade still holding at the window end
+  is returned as open_trade (entry, time, unrealized %) and the UI shows
+  "· 1 OPEN (+x%)" instead of the position silently not existing.
+DELIBERATELY KEPT (with reasons):
+- Fills at the signal bar's close (entry AND exit-rule exits). The standard
+  optimistic-by-one-spread preview assumption; Phase 4 backtest will offer
+  next-bar-open fills as a config, not a hidden change here.
+- Live WS loop recomputes the full snapshot per tick — heavy but bounded
+  (interval ≥5s, capped fetch window); an incremental tail computation is a
+  Phase 4 optimization, not a correctness issue.
+- 'N entry signals' counts fresh edges while trades count status entries, so
+  trades can exceed signals after stop-out re-entries — intentional, the OPEN/
+  trades readout makes it legible.
+Suite now 120 hand-computed cases across 6 audit parts + stub-feed e2e — all
+green. Server routes verified exception-wrapped end to end.
+
+### It.19 — Trade operand: position-aware exits  [DONE]
+User: "SL and TP conditions are very simple — I can't make 'exit if price is
+2 ATR below MA or 1%' or 'break below 20MA OR exhaustion candle while moved
+>2 daily ATR OR above R3'." Gap analysis:
+- Example 2 and '2 ATR below MA' were ALREADY expressible (nested OR/AND +
+  Expr; the SL anchor accepts an Expr like sma20 − atr14×2 → real intrabar
+  trailing stop). Verified both with hand-computed cases.
+- The REAL structural gap was 'or 1%': exit conditions couldn't see THE TRADE.
+Added operand kind 'trade' (exit rules only): entry price / bars in trade /
+P&L% (side-signed). Trade-aware exit groups are re-evaluated PER TRADE inside
+the pairing loop, so each trade measures from its OWN entry — verified with a
+re-entry case where trade 2's −1% baseline differs from trade 1's. Unlocks:
+condition-based stops (P&L% ≤ −1), profit locks, TIME stops (bars ≥ N), and
+any mix of those with indicator legs in one OR group. Guards: Trade in an
+ENTRY rule raises a clear error; 🔍 tester explains it needs a live position.
+exit_now for trade-aware exits is computed against the open position if one
+exists. Suite: +11 cases (both user examples verbatim) → 131 total, all green;
+UI roundtrip verified.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
