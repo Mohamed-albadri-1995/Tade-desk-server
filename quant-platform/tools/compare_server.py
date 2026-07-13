@@ -336,7 +336,10 @@ def _series_markers(m, kwargs, arr, ts, bars: pd.DataFrame) -> list:
     return marks
 
 
-def overlay_arrays(bars: pd.DataFrame, ov: dict, ctx: dict):
+_TF_MINUTES = {'1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '1d': 390}
+
+
+def overlay_arrays(bars: pd.DataFrame, ov: dict, ctx: dict, causal: bool = False):
     """Compute one overlay/operand spec {key, source, params} → (m, kwargs,
     lines) where lines is [(sub, np.ndarray)] aligned to `bars`. This is the
     raw-array core shared by the chart's overlay drawing and the strategy
@@ -344,7 +347,19 @@ def overlay_arrays(bars: pd.DataFrame, ov: dict, ctx: dict):
 
     Fixed-timeframe primitives (atr_daily → '1d', pine_5day → '1m') are
     computed on their own timeframe and reindexed onto the display bars (HTF
-    analysis: identical value on a 1m/5m/1d chart), with a warm-up allowance."""
+    analysis: identical value on a 1m/5m/1d chart), with a warm-up allowance.
+
+    `causal=True` (the STRATEGY/BACKTEST mode): when the compute timeframe is
+    COARSER than the display timeframe, the reindex uses the last **completed**
+    higher-TF bar — i.e. intraday bars during day D get day D-1's daily value.
+    Daily bars are timestamped at the day's START, so the default at-or-before
+    fill hands day D's full-day ATR/volume to D's own 09:31 bar. That matches
+    what TradingView draws on historical intraday charts (their security()
+    history repaints the same way — it is HOW these primitives passed TV
+    verification), so the CHART keeps the default; but a signal engine using
+    it would know the day's final range at the open — look-ahead. Finer
+    compute TFs (pine_5day's 1m) complete within the display bar and stay
+    unshifted: at the display bar's close every source bar is history."""
     key = ov.get('key')
     if not key or key not in REGISTRY:
         raise ValueError(f'unknown primitive {key!r}')
@@ -357,10 +372,19 @@ def overlay_arrays(bars: pd.DataFrame, ov: dict, ctx: dict):
         cstart = ctx['start'] - pd.Timedelta(days=warm)
         cbars = ctx['loader'].load(ctx['symbol'], m.compute_tf, cstart, ctx['end'])
         result = _call_primitive(m, cbars, source, kwargs)
+        coarser = (_TF_MINUTES.get(m.compute_tf, 390)
+                   > _TF_MINUTES.get(ctx['tf'], 390))
+        shift = 1 if (causal and coarser) else 0
+
+        def _map(a):
+            a = np.asarray(a, dtype=float)
+            if shift:                      # last COMPLETED higher-TF bar only
+                a = np.concatenate(([np.nan] * shift, a[:-shift]))
+            return _reindex_asof(a, cbars.index, bars.index)
         if isinstance(result, dict):
-            result = {k: _reindex_asof(a, cbars.index, bars.index) for k, a in result.items()}
+            result = {k: _map(a) for k, a in result.items()}
         else:
-            result = _reindex_asof(result, cbars.index, bars.index)
+            result = _map(result)
     else:
         result = _call_primitive(m, bars, source, kwargs)
 
@@ -371,10 +395,11 @@ def overlay_arrays(bars: pd.DataFrame, ov: dict, ctx: dict):
     return m, kwargs, lines
 
 
-def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict) -> list:
+def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict,
+                 causal: bool = False) -> list:
     """Compute one overlay spec {key, source, params, color} → list of
     plot series (one, or several for dict-output primitives)."""
-    m, kwargs, lines = overlay_arrays(bars, ov, ctx)
+    m, kwargs, lines = overlay_arrays(bars, ov, ctx, causal=causal)
 
     color = ov.get('color') or '#22c55e'
     args = ','.join(f'{k}={v}' for k, v in kwargs.items())

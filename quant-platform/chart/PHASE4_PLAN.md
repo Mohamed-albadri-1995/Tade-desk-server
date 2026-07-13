@@ -121,7 +121,10 @@ that chart as-of its day.
 The book's backtesting prescriptions vs this engine (PDF upload failed; audit
 done from the book's well-known content — costs, biases, Sharpe/DD, ch. 3):
 - **Look-ahead bias**: PREVENTED by construction — causal primitives, positive-
-  only offsets, next_open fill option, day-slice on asof windows (tests part 8/9/10).
+  only offsets, next_open fill option, day-slice on asof windows (tests part
+  8/9/10). PLUS (loop it.2): higher-TF reindex is CAUSAL in the strategy layer
+  — intraday bars only see the last COMPLETED daily bar for atr_daily /
+  avg_volume (part 13); the chart keeps TV-parity display.
 - **Survivorship bias**: the register universes are FROZEN as-of each day (R1 at
   9:36 ET) — exactly the bias-free universe design the book asks for. Manual
   symbol lists carry whatever bias the user types in (documented, not solvable).

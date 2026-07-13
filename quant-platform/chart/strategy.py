@@ -162,9 +162,12 @@ def _operand_array(operand: dict, bars, ctx, trade: dict | None = None) -> np.nd
                 raise ValueError(f'unknown expr op {eop!r}')
     elif kind == 'primitive':
         key = operand.get('key')
+        # causal=True: a coarser-timeframe primitive (atr_daily, avg_volume)
+        # only shows the last COMPLETED higher-TF bar — no same-day look-ahead
         _, _, lines = cs.overlay_arrays(
             bars, {'key': key, 'source': operand.get('source', 'close'),
-                   'params': _merge_defaults(key, operand.get('params'))}, ctx)
+                   'params': _merge_defaults(key, operand.get('params'))}, ctx,
+            causal=True)
         sub = operand.get('sub')
         if sub:                                   # dict-output primitive line
             base = next((arr for s, arr in lines if s == sub), None)
@@ -448,7 +451,8 @@ def _indicator_series(strategy: dict, bars, ts, ctx) -> list:
             series.extend(cs._one_overlay(
                 bars, ts, {**spec, 'params': _merge_defaults(spec['key'], spec['params']),
                            'id': f'strat{i}',
-                           'color': _IND_PALETTE[i % len(_IND_PALETTE)]}, ctx))
+                           'color': _IND_PALETTE[i % len(_IND_PALETTE)]}, ctx,
+                causal=True))
         except Exception:  # noqa: BLE001 — a missing-history indicator just won't draw
             pass
     return series
@@ -542,7 +546,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     if (risk.get('sl') or {}).get('type') == 'atr' or (risk.get('tp') or {}).get('type') == 'atr':
         try:
             _, _, lines = cs.overlay_arrays(
-                bars, {'key': 'volatility.atr', 'source': 'close', 'params': {'length': 14}}, ctx)
+                bars, {'key': 'volatility.atr', 'source': 'close', 'params': {'length': 14}}, ctx,
+                causal=True)
             atr = lines[0][1]
         except Exception:
             pass

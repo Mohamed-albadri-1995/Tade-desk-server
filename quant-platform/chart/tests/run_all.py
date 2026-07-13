@@ -24,6 +24,7 @@ PARTS = [
     ('logic_audit10.py',    'backtest: store, runner, day-slice, register universe'),
     ('logic_audit11.py',    'backtest API lifecycle: start/poll/done, guards'),
     ('logic_audit12.py',    'Trade The Pool rules: session, fees, min-profit, one-position'),
+    ('logic_audit13.py',    'Phase-1 foundation: higher-TF look-ahead (causal reindex)'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

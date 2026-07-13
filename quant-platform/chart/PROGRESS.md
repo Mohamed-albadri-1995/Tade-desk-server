@@ -406,6 +406,24 @@ pinned the user's ONE-POSITION invariant with explicit tests (repeated
 signals ignored while holding; re-arm only after SL/TP/exit/eod). +17 cases
 (part 12) — suite ALL GREEN.
 
+### It.23 — loop it.2: PHASE-1 FOUNDATION BUG — higher-TF look-ahead  [DONE]
+User widened the review loop to start from Phase 1 ("if phase 1 is wrong, 2
+and 3 are wrong"). Fresh read of the data layer found exactly that class of
+bug: daily bars are stamped at the day's START, so the at-or-before reindex
+handed day D's COMPLETED daily value (full-day ATR range / volume) to D's own
+09:31 bar. On the CHART this matches TradingView (their security() history
+repaints identically — it is how atr_daily/avg_volume passed TV verification)
+— but the strategy/backtest layer was reading tomorrow's newspaper: 'moved >
+2 daily ATR' at 10:00 knew the day's final range. FIX: overlay_arrays gains
+causal=True (strategy engine, SL-ATR, anchored levels, strategy-drawn lines);
+when compute_tf is COARSER than the display tf the reindex shifts one src bar
+→ intraday bars during D see D-1's completed value only. Finer compute TFs
+(pine_5day 1m) stay unshifted (complete within the display bar at close
+semantics). Chart overlay picker keeps TV-parity mode (approved look).
+Hand-computed proof (part 13): D3 TR=5 vs D2 TR=1 → chart mode 5.0 at 09:30,
+causal 1.0; avg_volume same law; engine + expr read causal; daily-on-daily
+identical both modes. Suite ALL GREEN.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
