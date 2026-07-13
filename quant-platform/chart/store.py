@@ -33,6 +33,36 @@ def _db() -> sqlite3.Connection:
                 updated_at REAL NOT NULL
             )
         """)
+        _conn.execute("""
+            CREATE TABLE IF NOT EXISTS backtests (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                spec       TEXT NOT NULL,           -- run spec JSON
+                status     TEXT NOT NULL,           -- running | done | error
+                progress   REAL NOT NULL DEFAULT 0, -- 0..1
+                summary    TEXT,                    -- stats JSON when done
+                error      TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+        """)
+        _conn.execute("""
+            CREATE TABLE IF NOT EXISTS backtest_trades (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                bt_id    INTEGER NOT NULL,
+                date     TEXT NOT NULL,             -- ET session date YYYY-MM-DD
+                symbol   TEXT NOT NULL,
+                side     TEXT NOT NULL,
+                entry_ts INTEGER NOT NULL,          -- epoch s (UTC)
+                exit_ts  INTEGER,                   -- NULL = still open at day end
+                entry    REAL NOT NULL,
+                exit     REAL,
+                ret      REAL,                      -- fractional return (signed)
+                reason   TEXT                       -- SL | TP | exit | open
+            )
+        """)
+        _conn.execute("""CREATE INDEX IF NOT EXISTS idx_bt_trades
+                         ON backtest_trades (bt_id, date)""")
         _conn.commit()
     return _conn
 
@@ -92,5 +122,89 @@ def delete_strategy(sid: int) -> bool:
     with _lock:
         db = _db()
         cur = db.execute('DELETE FROM strategies WHERE id = ?', (sid,))
+        db.commit()
+    return cur.rowcount > 0
+
+
+# ── Phase 4: backtest runs ──────────────────────────────────────────────────
+def create_backtest(name: str, spec: dict) -> int:
+    now = time.time()
+    with _lock:
+        cur = _db().execute(
+            'INSERT INTO backtests (name, spec, status, progress, created_at, updated_at) '
+            'VALUES (?,?,?,?,?,?)',
+            ((name or 'Backtest').strip()[:120], json.dumps(spec), 'running', 0.0, now, now))
+        _db().commit()
+        return cur.lastrowid
+
+
+def update_backtest(bt_id: int, status: str | None = None, progress: float | None = None,
+                    summary: dict | None = None, error: str | None = None) -> None:
+    sets, vals = ['updated_at=?'], [time.time()]
+    if status is not None:
+        sets.append('status=?'); vals.append(status)
+    if progress is not None:
+        sets.append('progress=?'); vals.append(float(progress))
+    if summary is not None:
+        sets.append('summary=?'); vals.append(json.dumps(summary))
+    if error is not None:
+        sets.append('error=?'); vals.append(str(error)[:500])
+    vals.append(bt_id)
+    with _lock:
+        _db().execute(f'UPDATE backtests SET {", ".join(sets)} WHERE id=?', vals)
+        _db().commit()
+
+
+def add_bt_trades(bt_id: int, trades: list) -> None:
+    """trades: [{date, symbol, side, entry_ts, exit_ts, entry, exit, ret, reason}]"""
+    if not trades:
+        return
+    rows = [(bt_id, t['date'], t['symbol'], t['side'], int(t['entry_ts']),
+             (int(t['exit_ts']) if t.get('exit_ts') is not None else None),
+             float(t['entry']),
+             (float(t['exit']) if t.get('exit') is not None else None),
+             (float(t['ret']) if t.get('ret') is not None else None),
+             t.get('reason')) for t in trades]
+    with _lock:
+        _db().executemany(
+            'INSERT INTO backtest_trades (bt_id, date, symbol, side, entry_ts, exit_ts, '
+            'entry, exit, ret, reason) VALUES (?,?,?,?,?,?,?,?,?,?)', rows)
+        _db().commit()
+
+
+def get_backtest(bt_id: int, with_trades: bool = True) -> dict | None:
+    with _lock:
+        row = _db().execute('SELECT * FROM backtests WHERE id=?', (bt_id,)).fetchone()
+        tr = (_db().execute('SELECT * FROM backtest_trades WHERE bt_id=? '
+                            'ORDER BY entry_ts', (bt_id,)).fetchall()
+              if (row and with_trades) else [])
+    if not row:
+        return None
+    out = dict(row)
+    out['spec'] = json.loads(out['spec'])
+    out['summary'] = json.loads(out['summary']) if out.get('summary') else None
+    if with_trades:
+        out['trades'] = [dict(r) for r in tr]
+    return out
+
+
+def list_backtests() -> list:
+    with _lock:
+        rows = _db().execute(
+            'SELECT id, name, status, progress, summary, created_at, updated_at '
+            'FROM backtests ORDER BY id DESC LIMIT 100').fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d['summary'] = json.loads(d['summary']) if d.get('summary') else None
+        out.append(d)
+    return out
+
+
+def delete_backtest(bt_id: int) -> bool:
+    with _lock:
+        db = _db()
+        cur = db.execute('DELETE FROM backtests WHERE id=?', (bt_id,))
+        db.execute('DELETE FROM backtest_trades WHERE bt_id=?', (bt_id,))
         db.commit()
     return cur.rowcount > 0

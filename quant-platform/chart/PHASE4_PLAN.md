@@ -3,7 +3,7 @@
 **Read this first if you are resuming this work (any model, any session).**
 Update the checkboxes + "STATE" line after EVERY step. One commit per step.
 
-## STATE: Steps 1-2 done. Next: Step 3 (store tables).
+## STATE: Steps 1-5 done. Next: Step 6 (API endpoints).
 
 ## Context (30-second version)
 - The platform: verified `qp` primitives → chart server (`chart/server.py`, box
@@ -57,14 +57,14 @@ that chart as-of its day.
       (`strategy` dict stays pure — fill is a call arg, default 'close').
       Hand-computed tests: logic_audit9.py (entry px, SL distance re-anchored,
       last-bar signal ⇒ no trade, next_open vs close divergence).
-- [ ] **3. Store: backtest tables** — `chart/store.py`: `backtests`
+- [x] **3. Store: backtest tables** — `chart/store.py`: `backtests`
       (id, name, spec TEXT, status running|done|error, progress REAL,
       summary TEXT, error TEXT, created_at, updated_at) and `backtest_trades`
       (id, bt_id, date, symbol, side, entry_ts, exit_ts, entry, exit, ret,
       reason). CRUD: create_backtest, update_backtest, add_bt_trades,
       get_backtest(+trades), list_backtests, delete_backtest. Tests: store
       roundtrip in tests (tmp db, same pattern as logic_audit6 part 5).
-- [ ] **4. Runner core** — `chart/backtest.py::run(spec, progress_cb=None)`:
+- [x] **4. Runner core** — `chart/backtest.py::run(spec, progress_cb=None)`:
       spec = {name, strategy (inline dict) OR strategy_id, universe:
       {kind:'symbols', symbols:[...]} , start, end (YYYY-MM-DD, ET dates),
       tf, feed, view, fill}. For each trading day D in [start,end] (skip
@@ -76,7 +76,7 @@ that chart as-of its day.
       Tests: stub loader (reuse e2e_expr.py pattern) with a deterministic
       strategy ⇒ hand-count trades across 2 symbols × 3 days; day-slice test
       (a signal on warm-up day D-1 must NOT create a day-D trade).
-- [ ] **5. Register universe** — universe {kind:'register',
+- [x] **5. Register universe** — universe {kind:'register',
       register:'R1'|'Shortlist'}: dates from `screener.available_dates()`
       ∩ [start,end]; per-date tickers from `screener.register_rows(reg, D)`.
       Graceful: screener down ⇒ error status with clear message. Test with a

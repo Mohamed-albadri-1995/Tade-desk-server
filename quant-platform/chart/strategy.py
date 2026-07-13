@@ -812,6 +812,11 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     et = bars.index.tz_convert(cs._ET)
     return {
         'ok': True, 'bars': n, 'side': side,
+        # the actual simulated trades — the backtester (Phase 4) consumes
+        # EXACTLY this, so preview and backtest can never disagree.
+        'trades': [{'entry_ts': int(ts[t['ei']]), 'exit_ts': int(ts[t['xi']]),
+                    'entry': t['entry'], 'exit': t['exit'], 'ret': t['ret'],
+                    'reason': t['reason']} for t in trades],
         'entries': [{'time': int(ts[i])} for i in np.nonzero(entry_ev)[0]],
         'exits':   [{'time': int(ts[i])} for i in np.nonzero(exit_ev)[0]],
         'markers': markers,
