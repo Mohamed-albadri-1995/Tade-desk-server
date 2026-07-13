@@ -346,3 +346,31 @@ describe('Side C — auto bias from catalyst type', () => {
     expect(resolveAutoBias({ bias: 'auto', context: bearCtx }).bias).toBe('short');
   });
 });
+
+describe('Side C — live-deploy findings (2026-07-13)', () => {
+  test('coverage initiation with company name in between still classifies', () => {
+    expect(classifyCatalyst(['Zacks Initiates Coverage of SUNation With Underperform Recommendation']).label).toBe('Downgrade');
+    expect(classifyCatalyst(['BigBank initiates coverage of ACME Corp with a Buy rating']).label).toBe('Upgrade');
+  });
+
+  test('stale news catalyst yields primary to a fresh technical, stays visible', () => {
+    const now = Date.now();
+    // Reverse split announced weeks ago; stock gapping up huge today
+    const news = classifyCatalyst(
+      [{ headline: 'ACME announces 1-for-100 reverse stock split', ts: now - 25 * 86400000 }], now);
+    expect(news.stale).toBe(true);
+    const c = combineCatalyst(news, { gapPct: 38, rvol: 1800, change: 85, price: 2.2, monthHigh: 3.2, monthLow: 1.0, adrPct: 15 });
+    expect(c.label).toBe('Gap Up');
+    expect(c.source).toBe('technical');
+    expect(c.others.map(o => o.label)).toContain('Reverse Split');
+  });
+
+  test('fresh news catalyst still outranks the technical', () => {
+    const now = Date.now();
+    const news = classifyCatalyst(
+      [{ headline: 'ACME announces 1-for-100 reverse stock split', ts: now - 2 * 3600000 }], now);
+    const c = combineCatalyst(news, { gapPct: -12, rvol: 8, change: -14, price: 2.2, monthHigh: 12, monthLow: 2.5, adrPct: 15 });
+    expect(c.label).toBe('Reverse Split');
+    expect(c.others.map(o => o.label)).toContain('Gap Down');
+  });
+});

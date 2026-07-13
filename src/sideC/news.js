@@ -80,10 +80,10 @@ const CATALYST_PATTERNS = [
   { id: 'fda_designation', tier: 2, label: 'FDA Designation', sentiment: 'bull', color: '#86efac',
     pattern: /\b(breakthrough therapy|fast[- ]track|orphan drug|rmat) designation|granted (fda )?(fast[- ]track|orphan|breakthrough)/i },
   { id: 'analyst_up', tier: 2, label: 'Upgrade', sentiment: 'bull', color: '#86efac',
-    pattern: /\b(upgrad(es?|ed) (\w+ ){0,2}(to|shares|stock|rating)|analyst upgrade|double[- ]upgrade|initiat(es?|ed) (coverage )?(with |at )?(a )?(buy|outperform|overweight|strong buy)|(rais(es|ed)|hikes?|boosts?|lifts?) (its )?(price target|pt\b)|price target (raised|increased|hiked|boosted))/i,
+    pattern: /\b(upgrad(es?|ed) (\w+ ){0,2}(to|shares|stock|rating)|analyst upgrade|double[- ]upgrade|initiat(es?|ed) coverage.{0,40}\b(buy|outperform|overweight|strong buy)|initiat(es?|ed) (with |at )(a )?(buy|outperform|overweight|strong buy)|(rais(es|ed)|hikes?|boosts?|lifts?) (its )?(price target|pt\b)|price target (raised|increased|hiked|boosted))/i,
     guard: /\b(system|software|network|infrastructure|product|app|platform|facility) upgrade/i },
   { id: 'analyst_down', tier: 2, label: 'Downgrade', sentiment: 'bear', color: '#f87171',
-    pattern: /\b(downgrad(es?|ed)|double[- ]downgrade|initiat(es?|ed) (coverage )?(with |at )?(a )?(sell|underperform|underweight)|(cut(s)?|lower(s|ed)?|slash(es|ed)?) (its )?(price target|pt\b)|price target (cut|lowered|slashed|reduced))/i },
+    pattern: /\b(downgrad(es?|ed)|double[- ]downgrade|initiat(es?|ed) coverage.{0,40}\b(sell|underperform|underweight)|initiat(es?|ed) (with |at )(a )?(sell|underperform|underweight)|(cut(s)?|lower(s|ed)?|slash(es|ed)?) (its )?(price target|pt\b)|price target (cut|lowered|slashed|reduced))/i },
   { id: 'contract', tier: 2, label: 'Contract Win', sentiment: 'bull', color: '#67e8f9',
     pattern: /\b((wins?|awarded|secures?|lands?|receives?|books?) (a |an |its )?(\$?[\d.,]+ ?(million|billion|m\b|b\b) )?(contract|order|purchase order|award|task order)|contract (award|win)|government contract|idiq contract|defense contract)/i },
   { id: 'partnership', tier: 2, label: 'Partnership', sentiment: 'bull', color: '#67e8f9',
@@ -314,12 +314,18 @@ async function fetchYahoo(ticker) {
       { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } }
     );
     const news = resp.data?.news || [];
-    return news.slice(0, 10).map(n => ({
-      headline: n.title,
-      url: n.link,
-      datetime: n.providerPublishTime,
-      source: 'yahoo',
-    }));
+    // Yahoo search returns market-wide roundups and other companies' stories
+    // too ("Most Active Stocks", ...). Only keep items Yahoo itself tagged
+    // with this ticker — untagged roundups must not create catalysts.
+    return news
+      .filter(n => Array.isArray(n.relatedTickers) && n.relatedTickers.includes(ticker))
+      .slice(0, 10)
+      .map(n => ({
+        headline: n.title,
+        url: n.link,
+        datetime: n.providerPublishTime,
+        source: 'yahoo',
+      }));
   } catch {
     return [];
   }

@@ -99,15 +99,23 @@ function combineCatalyst(newsCatalyst, stock) {
   const tech = detectTechnicalCatalysts(stock);
   if (!tech.length) return newsCatalyst || null;
 
-  if (!newsCatalyst) {
+  // A stale news story (>4 days, e.g. a weeks-old reverse split) already
+  // played out — it must not mask what the tape is doing TODAY. The fresh
+  // technical leads and the old story stays visible as a secondary.
+  if (!newsCatalyst || (newsCatalyst.stale && tech[0].tier <= 2)) {
     const [primary, ...rest] = tech;
+    const others = [...rest];
+    if (newsCatalyst) {
+      const { others: newsOthers = [], ...newsCompact } = newsCatalyst;
+      others.push(newsCompact, ...newsOthers);
+    }
     return {
       ...primary,
-      confidence: primary.tier <= 2 ? 'medium' : 'low', // tape without a story is never 'high'
+      confidence: primary.tier <= 2 ? 'medium' : 'low', // tape without a fresh story is never 'high'
       corroboration: 1,
       ageHours: 0,
       stale: false,
-      others: rest,
+      others,
     };
   }
 
