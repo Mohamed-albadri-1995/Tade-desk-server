@@ -140,6 +140,7 @@ def strategy_evaluate(payload: dict = Body(...)):
             feed=payload.get('feed', 'polygon'),
             view=payload.get('view', 'all'),
             asof=payload.get('asof') or None,
+            fill=payload.get('fill', 'close'),
         )
         return JSONResponse(out)
     except Exception as e:

@@ -20,6 +20,7 @@ PARTS = [
     ('logic_audit6.py',     'pct negative refs, k clamp, unprotected-entry skip, open trade'),
     ('logic_audit7.py',     'Trade operand (P&L / bars / entry), expr-anchored SL'),
     ('logic_audit8.py',     'SL/TP/exit can never fire before entry'),
+    ('logic_audit9.py',     "fill model: 'close' preview vs 'next_open' honest live"),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

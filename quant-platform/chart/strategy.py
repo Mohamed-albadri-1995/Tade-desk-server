@@ -495,7 +495,7 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
 
 
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
-                 exit_group: dict | None = None):
+                 exit_group: dict | None = None, fill: str = 'close'):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -503,11 +503,26 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     true — even if it was already true before the entry (a flip-edge would
     miss that). PROTOCOL (fixed priority, so the three exit paths never
     conflict): 1) SL — protection is checked first, and wins if SL and TP fall
-    in the same bar (conservative); 2) TP; 3) the exit-rule status (at that
-    bar's close). SL/TP are either a fixed distance from entry (pct / ATR× /
-    points) or ANCHORED to an indicator line (type 'prim') that trails bar by
-    bar. Full day-by-day sim is Phase 4; this makes the preview honest."""
+    in the same bar (conservative); 2) TP; 3) the exit-rule status. SL/TP are
+    either a fixed distance from entry (pct / ATR× / points) or ANCHORED to an
+    indicator line (type 'prim') that trails bar by bar.
+
+    FILL MODEL (`fill`):
+      'close'     — entries and exit-rule exits fill at the SIGNAL bar's close
+                    (the chart-preview assumption; optimistic by ~one spread).
+      'next_open' — the honest live assumption: a signal evaluated at bar j's
+                    close turns into a market order filled at bar j+1's OPEN.
+                    Consequences, all implemented: a signal on the last bar
+                    produces NO trade; the position exists from bar j+1, so
+                    SL/TP are live for the REST of that bar (a gap through the
+                    stop right after entry stops out same-bar); an exit-rule
+                    signal at bar x fills at open[x+1] and that market exit
+                    precedes intrabar SL/TP on the fill bar (the open prints
+                    first); fixed SL/TP distances anchor to the OPEN fill
+                    price, ATR taken at the signal bar (last completed bar).
+    SL/TP themselves always fill intrabar AT the level in both models."""
     close = bars['close'].to_numpy(float)
+    opn = bars['open'].to_numpy(float)
     high = bars['high'].to_numpy(float)
     low = bars['low'].to_numpy(float)
     n = len(close)
@@ -543,36 +558,58 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     # (a fixed stop plots flat, an anchored one visibly trails its line).
     sl_view = np.full(n, np.nan)
     tp_view = np.full(n, np.nan)
+    next_open = (fill == 'next_open')
     trades = []
     open_trade = None
-    in_pos = False; ei = 0; sl = tp = None
+    in_pos = False; ei = 0; sl = tp = None; ep_cur = None
+    pending_exit = False                 # next_open: exit signal seen, fills next bar
     em = exit_mask                       # per-trade exit mask when trade-aware
     for j in range(n):
         if not in_pos:
             if entry_mask[j]:
-                ep = close[j]
+                if next_open and j + 1 >= n:
+                    continue             # signal on the last bar — no bar to fill on
+                ep = opn[j + 1] if next_open else close[j]
+                ej = j + 1 if next_open else j
                 # fixed-distance stops: long → SL BELOW entry / TP above;
-                # short → SL ABOVE entry / TP below. (Anchored ones use the array.)
+                # short → SL ABOVE entry / TP below. ATR at the SIGNAL bar —
+                # the last COMPLETED bar at fill time in both models.
                 sd = _risk_dist(risk.get('sl'), ep, atr[j])
                 td = _risk_dist(risk.get('tp'), ep, atr[j])
                 if side == 'long':
                     sl = ep - sd if sd else None; tp = ep + td if td else None
                 else:
                     sl = ep + sd if sd else None; tp = ep - td if td else None
+                # priceability check uses the SIGNAL bar's anchored value (the
+                # last completed one) — the trailing array takes over per bar.
                 e_sl = sl_arr[j] if sl_arr is not None else sl
                 e_tp = tp_arr[j] if tp_arr is not None else tp
                 if sl_required and (e_sl is None or e_sl != e_sl):
                     continue                       # stop unpriceable → no trade
-                in_pos = True; ei = j
+                in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
                 if exit_group is not None:
                     # exit rules reference the Trade operand → evaluate the
                     # exit condition FOR THIS TRADE (its own entry price/bar)
                     em = _eval_group(exit_group, bars, ctx,
                                      trade={'entry': ep, 'ei': ei, 'side': side})
-                if e_sl is not None and e_sl == e_sl:
-                    sl_view[j] = e_sl
-                if e_tp is not None and e_tp == e_tp:
-                    tp_view[j] = e_tp
+                if not next_open:        # close fill: entry bar is exempt; arm views
+                    if e_sl is not None and e_sl == e_sl:
+                        sl_view[j] = e_sl
+                    if e_tp is not None and e_tp == e_tp:
+                        tp_view[j] = e_tp
+                    continue
+            continue
+        # ── in a position ──
+        # next_open: a market exit ordered at the previous close fills at THIS
+        # bar's open — chronologically BEFORE any intrabar SL/TP this bar.
+        if pending_exit:
+            px, reason = opn[j], 'exit'
+            r = (px - ep_cur) / ep_cur
+            if side == 'short':
+                r = -r
+            trades.append({'ei': ei, 'xi': j, 'ret': float(r), 'reason': reason,
+                           'entry': float(ep_cur), 'exit': float(px)})
+            in_pos = False; pending_exit = False
             continue
         # effective level this bar: anchored (trailing, may be NaN in warm-up)
         # beats the fixed scalar; NaN disables the check for that bar.
@@ -592,20 +629,25 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         elif tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
             px, reason = tpv, 'TP'
         elif em is not None and em[j]:
-            px, reason = close[j], 'exit'
+            if next_open:
+                if j + 1 < n:
+                    pending_exit = True  # market out at the next bar's open
+                # else: no bar left to fill on — stays open to the window end
+            else:
+                px, reason = close[j], 'exit'
         if px is not None:
-            r = (px - close[ei]) / close[ei]
+            r = (px - ep_cur) / ep_cur
             if side == 'short':
                 r = -r
             trades.append({'ei': ei, 'xi': j, 'ret': float(r), 'reason': reason,
-                           'entry': float(close[ei]), 'exit': float(px)})
+                           'entry': float(ep_cur), 'exit': float(px)})
             in_pos = False
     if in_pos:
         # still holding at the window's end — report it instead of hiding it
-        r = (close[-1] - close[ei]) / close[ei]
+        r = (close[-1] - ep_cur) / ep_cur
         if side == 'short':
             r = -r
-        open_trade = {'ei': ei, 'entry': float(close[ei]),
+        open_trade = {'ei': ei, 'entry': float(ep_cur),
                       'last': float(close[-1]), 'ret': float(r)}
     return trades, sl_view, tp_view, open_trade
 
@@ -688,7 +730,7 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
 
 def evaluate(strategy: dict, symbol: str, tf: str, days: int,
              feed: str = 'polygon', view: str = 'all',
-             asof: str | None = None) -> dict:
+             asof: str | None = None, fill: str = 'close') -> dict:
     from chart import data_manager as dm
     days = dm.required_days(referenced_overlays(strategy), tf, days)
     bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
@@ -715,7 +757,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
     trades, sl_view, tp_view, open_trade = _pair_trades(
         bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx,
-        exit_group=exit_group if trade_aware else None)
+        exit_group=exit_group if trade_aware else None, fill=fill)
 
     up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
     up_pos = 'belowBar' if side == 'long' else 'aboveBar'

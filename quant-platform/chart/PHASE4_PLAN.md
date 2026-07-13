@@ -3,7 +3,7 @@
 **Read this first if you are resuming this work (any model, any session).**
 Update the checkboxes + "STATE" line after EVERY step. One commit per step.
 
-## STATE: Step 1 done (this doc). Next: Step 2.
+## STATE: Steps 1-2 done. Next: Step 3 (store tables).
 
 ## Context (30-second version)
 - The platform: verified `qp` primitives → chart server (`chart/server.py`, box
@@ -49,7 +49,7 @@ that chart as-of its day.
 
 ## Steps (one commit each; check off + update STATE when done)
 - [x] **1. This plan doc** — commit `chart/PHASE4_PLAN.md`.
-- [ ] **2. Fill model in the engine** — `_pair_trades(..., fill='close'|'next_open')`:
+- [x] **2. Fill model in the engine** — `_pair_trades(..., fill='close'|'next_open')`:
       entry price = next bar's open (entry signal on bar j ⇒ position starts
       at j+1's open; SL/TP checks then start at j+1 too, using that entry
       price for fixed distances); exit-rule fills at next open likewise; SL/TP
