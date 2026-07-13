@@ -97,8 +97,44 @@ def _resolve_strategy(spec: dict) -> dict:
     raise ValueError('spec needs strategy (inline) or a valid strategy_id')
 
 
+def _ttp_block(closed: list, opens: list, spec: dict) -> dict | None:
+    """Prop-firm accounting (Trade The Pool defaults, all overridable):
+    per-share commission with a per-order minimum, dollar P&L for a fixed
+    share size, and the MIN-PROFIT rule — winners under `min_profit_ps`
+    $/share do NOT count toward the profit target; losses always count.
+    pnl_ps is the raw entry→exit price difference (their rule is on average
+    prices, before commissions)."""
+    fps = float(spec.get('fee_per_share', 0) or 0)
+    fmin = float(spec.get('fee_min', 0) or 0)
+    mps = spec.get('min_profit_ps')
+    if not (fps or fmin or mps is not None):
+        return None
+    shares = max(1.0, float(spec.get('shares', 100) or 100))
+    mps = float(0.10 if mps is None else mps)
+    fee = (lambda: max(fps * shares, fmin)) if (fps or fmin) else (lambda: 0.0)
+    fees = net = counted = 0.0
+    below = 0
+    for t in closed:
+        sgn = 1.0 if t['side'] == 'long' else -1.0
+        pps = sgn * (t['exit'] - t['entry'])
+        f = fee() * 2                      # entry order + exit order
+        n_usd = shares * pps - f
+        fees += f; net += n_usd
+        if 0 < pps < mps:
+            below += 1                     # win too small → target credit is 0
+        else:
+            counted += n_usd
+    fees += fee() * len(opens)             # open positions paid the entry side
+    return {'shares': shares, 'fee_per_share': fps, 'fee_min_per_order': fmin,
+            'min_profit_ps': mps, 'fees_usd': round(fees, 2),
+            'net_pnl_usd': round(net, 2),
+            'counted_pnl_usd': round(counted, 2),
+            'wins_below_min': below}
+
+
 def _summary(closed: list, opens: list, n_pairs: int, errors: list,
-             all_dates: list | None = None, cost_bps: float = 0.0) -> dict:
+             all_dates: list | None = None, cost_bps: float = 0.0,
+             spec: dict | None = None) -> dict:
     out = {'pairs': n_pairs, 'trades': len(closed), 'open_trades': len(opens),
            'errors': len(errors), 'error_samples': errors[:10],
            'cost_bps_per_side': cost_bps, 'dates': list(all_dates or [])}
@@ -147,6 +183,9 @@ def _summary(closed: list, opens: list, n_pairs: int, errors: list,
                 else:
                     run += 1; worst = max(worst, run)
             out['max_dd_days'] = worst
+    ttp = _ttp_block(closed, opens, spec or {})
+    if ttp:
+        out['ttp'] = ttp
     return out
 
 
@@ -170,7 +209,8 @@ def run(spec: dict, progress_cb=None) -> dict:
     for i, (day, sym, rctx) in enumerate(pairs):
         try:
             r = strat.evaluate(strategy, sym, tf, base_days, feed=feed,
-                               view=view, asof=day, fill=fill)
+                               view=view, asof=day, fill=fill,
+                               rules=spec.get('rules'))
             if r.get('ok') and r.get('bars'):
                 for t in r.get('trades') or []:
                     if _et_date(t['entry_ts']) == day:      # day-slice honesty
@@ -193,7 +233,9 @@ def run(spec: dict, progress_cb=None) -> dict:
 
     all_dates = sorted({d for d, _, _ in pairs})
     return {'summary': _summary(closed, opens, len(pairs), errors,
-                                all_dates=all_dates, cost_bps=float(spec.get('cost_bps', 0.0) or 0.0)),
+                                all_dates=all_dates,
+                                cost_bps=float(spec.get('cost_bps', 0.0) or 0.0),
+                                spec=spec),
             'trades': closed + opens}
 
 

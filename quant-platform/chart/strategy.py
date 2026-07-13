@@ -495,7 +495,8 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
 
 
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
-                 exit_group: dict | None = None, fill: str = 'close'):
+                 exit_group: dict | None = None, fill: str = 'close',
+                 entry_ok=None, eod_close=None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -520,7 +521,17 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     precedes intrabar SL/TP on the fill bar (the open prints
                     first); fixed SL/TP distances anchor to the OPEN fill
                     price, ATR taken at the signal bar (last completed bar).
-    SL/TP themselves always fill intrabar AT the level in both models."""
+    SL/TP themselves always fill intrabar AT the level in both models.
+
+    SESSION RULES (prop-firm style, e.g. Trade The Pool):
+      entry_ok  — boolean mask of bars where OPENING a position is allowed
+                  (RTH only). The FILL bar must be allowed: with next_open a
+                  signal whose fill would land outside the window is dropped.
+      eod_close — boolean mask marking each day's forced-liquidation bar; any
+                  position still open there exits AT THAT BAR'S CLOSE, reason
+                  'eod', after intrabar SL/TP had their chance. A pending
+                  next-open exit can never leak across the day boundary
+                  because the eod bar flattens first."""
     close = bars['close'].to_numpy(float)
     opn = bars['open'].to_numpy(float)
     high = bars['high'].to_numpy(float)
@@ -571,6 +582,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     continue             # signal on the last bar — no bar to fill on
                 ep = opn[j + 1] if next_open else close[j]
                 ej = j + 1 if next_open else j
+                if entry_ok is not None and not entry_ok[ej]:
+                    continue             # fill moment outside the allowed session
+                if eod_close is not None and eod_close[ej]:
+                    continue             # never open into the liquidation bar
                 # fixed-distance stops: long → SL BELOW entry / TP above;
                 # short → SL ABOVE entry / TP below. ATR at the SIGNAL bar —
                 # the last COMPLETED bar at fill time in both models.
@@ -635,6 +650,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 # else: no bar left to fill on — stays open to the window end
             else:
                 px, reason = close[j], 'exit'
+        # forced end-of-day flat: nothing survives the liquidation bar
+        if px is None and eod_close is not None and eod_close[j]:
+            px, reason = close[j], 'eod'
+            pending_exit = False
         if px is not None:
             r = (px - ep_cur) / ep_cur
             if side == 'short':
@@ -728,9 +747,37 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
             'last': et[-1].strftime('%Y-%m-%d %H:%M ET')}
 
 
+def _session_masks(bars, rules: dict | None):
+    """Prop-firm session rules → (entry_ok, eod_close) masks, or (None, None).
+    rules = {'rth_entries': bool, 'eod_close': bool,
+             'entry_start': 930, 'entry_cutoff': 1550}
+    entry_cutoff 1550 mirrors Trade The Pool: liquidation begins 10 minutes
+    before the 16:00 close, so nothing may open at/after 15:50 and anything
+    still held exits on each day's last bar before the cutoff."""
+    if not rules or not (rules.get('rth_entries') or rules.get('eod_close')):
+        return None, None
+    et = bars.index.tz_convert(cs._ET)
+    hhmm = np.asarray(et.hour, dtype=int) * 100 + np.asarray(et.minute, dtype=int)
+    start = int(rules.get('entry_start', 930))
+    cutoff = int(rules.get('entry_cutoff', 1550))
+    entry_ok = ((hhmm >= start) & (hhmm < cutoff)) if rules.get('rth_entries') else None
+    eod = None
+    if rules.get('eod_close'):
+        eod = np.zeros(len(bars), dtype=bool)
+        days_key = et.strftime('%Y-%m-%d')
+        last_for_day = {}
+        for i in range(len(bars)):
+            if hhmm[i] < cutoff:
+                last_for_day[days_key[i]] = i
+        for i in last_for_day.values():
+            eod[i] = True
+    return entry_ok, eod
+
+
 def evaluate(strategy: dict, symbol: str, tf: str, days: int,
              feed: str = 'polygon', view: str = 'all',
-             asof: str | None = None, fill: str = 'close') -> dict:
+             asof: str | None = None, fill: str = 'close',
+             rules: dict | None = None) -> dict:
     from chart import data_manager as dm
     days = dm.required_days(referenced_overlays(strategy), tf, days)
     bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
@@ -755,9 +802,11 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
 
     # STATUS pairing: enter while flat on any true entry bar; exit on any true
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
+    entry_ok, eod_close = _session_masks(bars, rules)
     trades, sl_view, tp_view, open_trade = _pair_trades(
         bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx,
-        exit_group=exit_group if trade_aware else None, fill=fill)
+        exit_group=exit_group if trade_aware else None, fill=fill,
+        entry_ok=entry_ok, eod_close=eod_close)
 
     up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
     up_pos = 'belowBar' if side == 'long' else 'aboveBar'
@@ -777,7 +826,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
                             'shape': up_shape, 'color': '#22c55e', 'text': ''})
     # ...plus the exit of each taken trade — THIS carries the reason label.
     for t in trades:
-        col = {'SL': '#ef5350', 'TP': '#22c55e', 'exit': '#94a3b8'}.get(t['reason'], '#ef5350')
+        col = {'SL': '#ef5350', 'TP': '#22c55e', 'exit': '#94a3b8', 'eod': '#f5a623'}.get(t['reason'], '#ef5350')
         markers.append({'time': int(ts[t['xi']]),
                         'position': 'aboveBar' if side == 'long' else 'belowBar',
                         'shape': 'arrowDown' if side == 'long' else 'arrowUp',

@@ -163,18 +163,33 @@ def backtest_csv(bid: int):
     trades = g.get('trades') or []
     ctx_keys = sorted({k for t in trades for k in (t.get('ctx') or {})})
     base = ['date', 'symbol', 'side', 'entry_ts', 'exit_ts', 'entry', 'exit',
-            'ret_pct', 'reason']
+            'ret_pct', 'pnl_ps', 'reason']
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(base + [f'ctx_{k}' for k in ctx_keys])
     for t in trades:
         c = t.get('ctx') or {}
+        sgn = 1.0 if t['side'] == 'long' else -1.0
+        pps = (round(sgn * (t['exit'] - t['entry']), 4)
+               if t.get('exit') is not None else '')
         w.writerow([t['date'], t['symbol'], t['side'], t['entry_ts'], t['exit_ts'],
                     t['entry'], t['exit'],
                     round(t['ret'] * 100, 4) if t.get('ret') is not None else '',
-                    t['reason']] + [c.get(k, '') for k in ctx_keys])
+                    pps, t['reason']] + [c.get(k, '') for k in ctx_keys])
     return PlainTextResponse(buf.getvalue(), media_type='text/csv', headers={
         'Content-Disposition': f'attachment; filename="backtest_{bid}.csv"'})
+
+
+def _ttp_html(s: dict) -> str:
+    t = (s or {}).get('ttp')
+    if not t:
+        return ''
+    return f"""<div class="grid">
+<div class="kpi"><b>${t['net_pnl_usd']}</b><span>net P&amp;L @ {t['shares']:.0f} shares (after ${t['fees_usd']} fees)</span></div>
+<div class="kpi"><b>${t['counted_pnl_usd']}</b><span>COUNTED P&amp;L — wins &lt; ${t['min_profit_ps']}/share credit 0 (losses always count)</span></div>
+<div class="kpi"><b>{t['wins_below_min']}</b><span>wins below the ${t['min_profit_ps']}/share minimum (wasted wins)</span></div>
+<div class="kpi"><b>${t['fee_per_share']}/sh, min ${t['fee_min_per_order']}</b><span>commission per order side</span></div>
+</div>"""
 
 
 @app.get('/api/backtest/{bid}/report')
@@ -217,7 +232,8 @@ td,th{{padding:6px 6px;border-bottom:1px solid #1e2632;text-align:left;white-spa
 .wrap{{overflow-x:auto}}</style></head><body>
 <h2>Backtest #{bid} — {g.get('name', '')}</h2>
 <div class="muted">{spec.get('start')} → {spec.get('end')} · {spec.get('tf')} · {uni_txt} ·
-fill: {spec.get('fill', 'close')} · cost: {spec.get('cost_bps', 0)} bps/side · status: {g.get('status')}</div>
+fill: {spec.get('fill', 'close')} · cost: {spec.get('cost_bps', 0)} bps/side ·
+rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_close') else 'none')} · status: {g.get('status')}</div>
 {('<div class="warn">⚠ ' + ' · '.join(warn) + '</div>') if warn else ''}
 <div class="grid">
 <div class="kpi"><b>{m('trades')}</b><span>closed trades ({m('open_trades', 0)} open)</span></div>
@@ -229,6 +245,7 @@ fill: {spec.get('fill', 'close')} · cost: {spec.get('cost_bps', 0)} bps/side ·
 <div class="kpi"><b>{m('max_dd_days')}</b><span>max drawdown duration (days below prior peak)</span></div>
 <div class="kpi"><b>{m('pairs')}</b><span>day·symbol pairs evaluated ({m('errors', 0)} errors)</span></div>
 </div>
+{_ttp_html(s)}
 <div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th><th>why</th></tr>
 {rows}</table></div>
 <div class="defs"><b>How to read this honestly:</b><br>

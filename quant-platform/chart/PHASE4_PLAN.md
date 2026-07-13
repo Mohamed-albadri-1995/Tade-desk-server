@@ -10,7 +10,19 @@ side filters (any R1 column, entry/exit hhmm ET, dur_min, dow, price, reason;
 ops = ≠ > < in has; metrics recomputed on the filtered subset with the same
 math) + CSV export (filtered, ctx flattened) + /api/backtest/{id}/report
 (phone-first HTML: KPI grid with metric definitions + bias disclosure) +
-/api/backtest/{id}/csv (full).
+/api/backtest/{id}/csv (full);
+(11) TRADE THE POOL preset (verified from tradethepool.com + reviews, Jul 2026):
+commission $0.005/share min $0.75/order (both sides; open trades one side);
+min-profit rule — wins < $0.10/share credit $0 toward the target ("wasted
+wins" counted), losses always count; session rules — RTH-only entries and
+forced liquidation on each day's last bar before 15:50 ET (their auto-
+liquidation starts 10 min before close), enforced in the ENGINE via
+entry_ok/eod_close masks (works with all-day charts: indicators see pre/post
+data, orders don't). All defaults editable in the panel (preset dropdown
+fills them). New exit reason 'eod'. spec: shares, fee_per_share, fee_min,
+min_profit_ps, rules{rth_entries,eod_close,entry_start,entry_cutoff}.
+ONE-POSITION invariant pinned by test: while a position is open, new entry
+signals are ignored until SL/TP/exit/eod closes it (part 12).
 
 ## Context (30-second version)
 - The platform: verified `qp` primitives → chart server (`chart/server.py`, box

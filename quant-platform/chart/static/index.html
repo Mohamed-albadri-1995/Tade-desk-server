@@ -190,6 +190,16 @@
       <input id="btSyms" placeholder="symbols: SPY,QQQ" style="width:100%;margin-top:4px">
       <input id="btCost" type="number" step="any" placeholder="cost bps/side (e.g. 5)" title="transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies)." style="width:100%;margin-top:4px">
       <div style="display:flex;gap:4px;margin-top:4px">
+        <select id="btPreset" style="flex:1" title="prop-firm preset — fills the fields below; everything stays editable"><option value="">preset: custom</option><option value="ttp">Trade The Pool</option></select>
+        <input id="btShares" type="number" placeholder="shares 100" title="fixed share size for $ P&L and per-share fees" style="flex:1;min-width:0">
+      </div>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <input id="btFee" type="number" step="any" placeholder="$/share" title="commission per share per order (TTP: 0.005)" style="flex:1;min-width:0">
+        <input id="btFeeMin" type="number" step="any" placeholder="min $/order" title="minimum commission per filled order (TTP: 0.75)" style="flex:1;min-width:0">
+        <input id="btMinPs" type="number" step="any" placeholder="min $/sh" title="minimum profit per share for a win to COUNT toward the target (TTP: 0.10) — losses always count" style="flex:1;min-width:0">
+      </div>
+      <label style="display:flex;gap:5px;align-items:center;margin-top:4px;color:var(--text2)"><input type="checkbox" id="btRules"> RTH-only entries + forced 15:50 EOD close (chart keeps all-day data for indicators)</label>
+      <div style="display:flex;gap:4px;margin-top:4px">
         <input id="btStart" type="date" style="flex:1;min-width:0" title="start date">
         <input id="btEnd" type="date" style="flex:1;min-width:0" title="end date">
         <button id="btRun" style="background:var(--blue);color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer">Run</button>
@@ -743,6 +753,7 @@ function btDerive(t){ // per-trade derived fields for filtering (all ET)
   const [eh,em]=_ET_HM.format(e).split(':').map(Number);
   const o={...(t.ctx||{}), symbol:t.symbol, side:t.side, reason:t.reason, date:t.date,
     ret_pct:t.ret!=null?t.ret*100:null, entry_price:t.entry,
+    pnl_ps:t.exit!=null?(t.side==='short'?-1:1)*(t.exit-t.entry):null,
     entry_hhmm:eh*100+em, dow:_ET_DOW.format(e)};
   if(t.exit_ts){ const x=new Date(t.exit_ts*1000); const [xh,xm]=_ET_HM.format(x).split(':').map(Number);
     o.exit_hhmm=xh*100+xm; o.dur_min=Math.round((t.exit_ts-t.entry_ts)/60); }
@@ -838,6 +849,7 @@ function btRenderCore(g,extra){
   sum.innerHTML = s.trades
     ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span style="color:var(--draft)">⚠ ${s.errors} errors</span>`:'')
     : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
+  if(s.ttp){ sum.innerHTML+=`<br><span style="color:var(--draft)">TTP @ ${s.ttp.shares} sh: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counted $${s.ttp.counted_pnl_usd} · ${s.ttp.wins_below_min} wins < $${s.ttp.min_profit_ps}/sh wasted</span>`; }
   if(extra)sum.innerHTML+=`<span class="muted">${extra}</span>`;
   // equity curve → oscillator pane (values are %, far from price range)
   if(s.equity_curve&&s.equity_curve.length){ drawStratSeries([{name:'equity %',color:'#22c55e',step:false,style:0,values:s.equity_curve}]); }
@@ -875,7 +887,12 @@ async function btRun(){
       : {kind:'register', register:uni},
     start:document.getElementById('btStart').value, end:document.getElementById('btEnd').value,
     tf:document.getElementById('tf').value, feed:document.getElementById('feed').value,
-    view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0 };
+    view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0,
+    shares:parseFloat(document.getElementById('btShares').value)||100,
+    fee_per_share:parseFloat(document.getElementById('btFee').value)||0,
+    fee_min:parseFloat(document.getElementById('btFeeMin').value)||0,
+    min_profit_ps:(document.getElementById('btMinPs').value!==''?parseFloat(document.getElementById('btMinPs').value):null),
+    rules:document.getElementById('btRules').checked?{rth_entries:true,eod_close:true}:null };
   document.getElementById('btStat').textContent='starting…';
   document.getElementById('btSummary').innerHTML=''; document.getElementById('btTrades').innerHTML='';
   try{
@@ -969,6 +986,7 @@ window.addEventListener('load',async()=>{
   document.getElementById('btRun').onclick=btRun;
   document.getElementById('btFAdd').onclick=()=>{ const f={field:document.getElementById('btFField').value, op:document.getElementById('btFOp').value, val:document.getElementById('btFVal').value.trim()}; if(f.field&&f.val!=='')BT_FILTERS.push(f); document.getElementById('btFVal').value=''; btRefresh(); };
   document.getElementById('btCsv').onclick=btCsvExport;
+  document.getElementById('btPreset').addEventListener('change',e=>{ if(e.target.value==='ttp'){ document.getElementById('btFee').value='0.005'; document.getElementById('btFeeMin').value='0.75'; document.getElementById('btMinPs').value='0.10'; document.getElementById('btShares').value=document.getElementById('btShares').value||'100'; document.getElementById('btRules').checked=true; document.getElementById('btFill').value='next_open'; } });
   document.getElementById('btReport').onclick=()=>{ if(BT_LAST&&BT_LAST.id)window.open('/api/backtest/'+BT_LAST.id+'/report','_blank'); };
   document.getElementById('btUni').addEventListener('change',e=>{ document.getElementById('btSyms').style.display=e.target.value==='symbols'?'':'none'; });
   document.getElementById('regReg').addEventListener('change',loadRegDates);

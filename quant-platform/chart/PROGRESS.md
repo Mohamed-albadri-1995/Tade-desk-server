@@ -391,6 +391,21 @@ fill selector, progress poll, summary + equity curve in the osc pane, trade
 list where a click replays that chart as-of that day). +50 new hand-computed
 cases across parts 9-11; suite total 215; ALL GREEN; headless UI smoke clean.
 
+### It.22 — Trade The Pool preset: fees, min-profit, session rules  [DONE]
+Researched TTP terms (site + reviews): $0.005/sh min $0.75/order; wins under
+$0.10/share don't count toward the target (losses always do); auto-liquidation
+starts 15:50 ET. Implemented: engine session masks (entry_ok = RTH only,
+eod_close = forced flat on the last bar before 15:50, reason 'eod'; next_open
+fills landing outside the window are dropped; pending exits can't leak across
+days) — works with ALL-DAY charts so pre/post data still feeds indicators.
+Backtester: shares + per-share fee with per-order minimum (round trip 2x,
+open 1x), TTP block in summary (net $, COUNTED $ under the min-profit rule,
+wasted-win count, fees $) + report KPI cards + UI preset (fills 0.005/0.75/
+0.10/RTH+EOD/next_open; all editable). CSV gains pnl_ps ($/share). Also
+pinned the user's ONE-POSITION invariant with explicit tests (repeated
+signals ignored while holding; re-arm only after SL/TP/exit/eod). +17 cases
+(part 12) — suite ALL GREEN.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
