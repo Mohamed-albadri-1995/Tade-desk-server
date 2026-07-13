@@ -109,6 +109,55 @@ def strategies_delete(sid: int):
     return {'ok': store.delete_strategy(sid)}
 
 
+# ── Phase 4: backtests ──────────────────────────────────────────────────────
+_BT_RUNNING: dict = {'id': None}
+
+
+@app.post('/api/backtest')
+def backtest_start(payload: dict = Body(...)):
+    """Start a backtest in a background thread. One at a time (small box).
+    Body = spec: {name, strategy|strategy_id, universe, start, end, tf, feed,
+    view, fill, days}. Returns {ok, id} immediately; poll GET /api/backtest/{id}."""
+    import threading
+    from chart import backtest as bt
+    try:
+        cur = _BT_RUNNING.get('id')
+        if cur is not None:
+            g = store.get_backtest(cur, with_trades=False)
+            if g and g['status'] == 'running':
+                return JSONResponse({'ok': False,
+                                     'error': f'backtest #{cur} is still running'},
+                                    status_code=200)
+        bt._pairs(payload)                     # validate spec BEFORE creating a row
+        bt._resolve_strategy(payload)
+        bid = store.create_backtest(payload.get('name') or 'Backtest', payload)
+        _BT_RUNNING['id'] = bid
+        t = threading.Thread(target=bt.run_and_store, args=(bid, payload), daemon=True)
+        t.start()
+        return {'ok': True, 'id': bid}
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
+
+
+@app.get('/api/backtest/{bid}')
+def backtest_get(bid: int, trades: int = 1):
+    g = store.get_backtest(bid, with_trades=bool(trades))
+    return JSONResponse({'ok': bool(g), 'backtest': g})
+
+
+@app.get('/api/backtests')
+def backtests_list():
+    return {'ok': True, 'backtests': store.list_backtests()}
+
+
+@app.delete('/api/backtest/{bid}')
+def backtest_delete(bid: int):
+    g = store.get_backtest(bid, with_trades=False)
+    if g and g['status'] == 'running':
+        return JSONResponse({'ok': False, 'error': 'still running'}, status_code=200)
+    return {'ok': store.delete_backtest(bid)}
+
+
 @app.post('/api/strategy/test')
 def strategy_test(payload: dict = Body(...)):
     """Evaluate a single condition (rule or group) and mark every bar it holds

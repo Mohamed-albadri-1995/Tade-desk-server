@@ -3,7 +3,7 @@
 **Read this first if you are resuming this work (any model, any session).**
 Update the checkboxes + "STATE" line after EVERY step. One commit per step.
 
-## STATE: Steps 1-5 done. Next: Step 6 (API endpoints).
+## STATE: ALL 8 STEPS DONE — Phase 4 backtest engine complete, pending user review on real data.
 
 ## Context (30-second version)
 - The platform: verified `qp` primitives → chart server (`chart/server.py`, box
@@ -81,12 +81,12 @@ that chart as-of its day.
       ∩ [start,end]; per-date tickers from `screener.register_rows(reg, D)`.
       Graceful: screener down ⇒ error status with clear message. Test with a
       monkeypatched screener module.
-- [ ] **6. API** — `chart/server.py`: POST /api/backtest (validates spec,
+- [x] **6. API** — `chart/server.py`: POST /api/backtest (validates spec,
       rejects if one already running, spawns daemon thread, returns id),
       GET /api/backtest/{id} (status+progress+summary+trades),
       GET /api/backtests, DELETE /api/backtest/{id}. Progress = fraction of
       (day,symbol) pairs done, written to store every few pairs.
-- [ ] **7. UI** — new "🧪 Backtest" section (side panel, under the register
+- [x] **7. UI** — new "🧪 Backtest" section (side panel, under the register
       browser): saved-strategy picker, universe toggle (Symbols text input /
       Register+range), start+end dates, tf, fill selector, Run button,
       progress bar (poll GET every 2s while running), then: summary line
@@ -94,7 +94,7 @@ that chart as-of its day.
       pane (reuse drawStratSeries with a step:false series), trades table
       (date, sym, side, entry→exit, ret%, reason) — clicking a row sets
       symbol+asof and loads that chart so the trade is inspectable.
-- [ ] **8. Final pass** — full `run_all.py` + new tests green; headless UI
+- [x] **8. Final pass** — full `run_all.py` + new tests green; headless UI
       smoke (run a stub backtest end-to-end through the API); PROGRESS.md
       iteration entry; README section; deploy command for the user.
 

@@ -180,6 +180,23 @@
       <select id="regDate"></select>
     </div>
     <div id="regList"><div class="muted">Loading register…</div></div>
+    <h3>🧪 Backtest</h3>
+    <div id="btBox" style="font-size:11px">
+      <select id="btStrat" style="width:100%"><option value="">— saved strategy —</option></select>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <select id="btUni" style="flex:1"><option value="symbols">Symbols</option><option value="R1">Register R1</option><option value="Shortlist">Shortlist</option></select>
+        <select id="btFill" style="flex:1" title="fill model: close = signal bar close (preview) · next open = honest live fills"><option value="close">fill: close</option><option value="next_open">fill: next open</option></select>
+      </div>
+      <input id="btSyms" placeholder="symbols: SPY,QQQ" style="width:100%;margin-top:4px">
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <input id="btStart" type="date" style="flex:1;min-width:0" title="start date">
+        <input id="btEnd" type="date" style="flex:1;min-width:0" title="end date">
+        <button id="btRun" style="background:var(--blue);color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer">Run</button>
+      </div>
+      <div id="btStat" class="muted" style="margin-top:5px">— uses the chart's TF, feed and session —</div>
+      <div id="btSummary" style="margin-top:4px"></div>
+      <div id="btTrades" style="max-height:30vh;overflow:auto;margin-top:4px"></div>
+    </div>
     <h3>Overlays</h3>
     <div id="overlayList"><div class="muted">Pick an indicator in the top bar → + Add.</div></div>
     <h3>Selected</h3>
@@ -700,6 +717,64 @@ async function loadStrategies(){
   try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
   const sel=document.getElementById('stratLoad'); sel.innerHTML='<option value="">— saved —</option>';
   for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);} if(STRAT.id)sel.value=STRAT.id;
+  const bsel=document.getElementById('btStrat'); if(bsel){ const keep=bsel.value; bsel.innerHTML='<option value="">— saved strategy —</option>'; for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; bsel.appendChild(o);} if(keep)bsel.value=keep; }
+}
+
+// ── Phase 4: backtest panel ──
+let BT_POLL=null;
+function btRender(g){
+  const sum=document.getElementById('btSummary'), tbl=document.getElementById('btTrades');
+  const s=g.summary;
+  if(!s){ sum.innerHTML=''; tbl.innerHTML=''; return; }
+  const by=s.exits_by?Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' '):'';
+  sum.innerHTML = s.trades
+    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}% · maxDD ${s.max_drawdown_pct}% · [${by}]`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span style="color:var(--draft)">⚠ ${s.errors} errors</span>`:'')
+    : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
+  // equity curve → oscillator pane (values are %, far from price range)
+  if(s.equity_curve&&s.equity_curve.length){ drawStratSeries([{name:'equity %',color:'#22c55e',step:false,style:0,values:s.equity_curve}]); }
+  const rows=(g.trades||[]);
+  tbl.innerHTML='';
+  for(const t of rows){
+    const d=document.createElement('div'); d.className='card'; d.style.padding='4px 6px';
+    const cls=(t.ret||0)>0?'up':'dn';
+    d.innerHTML=`<span class="tk">${t.symbol}</span> <span class="muted">${t.date}</span> <span class="${cls}" style="float:right">${t.ret!=null?((t.ret*100).toFixed(2)+'%'):'—'} ${t.reason}</span>`;
+    d.title=`${t.side} ${t.entry} → ${t.exit??'(open)'}`;
+    d.onclick=()=>{ document.getElementById('symbol').value=t.symbol; document.getElementById('asof').value=t.date; if(LIVE)toggleLive(); syncAsofUI(); loadChart(); };
+    tbl.appendChild(d);
+  }
+}
+async function btPoll(id){
+  try{
+    const j=await (await fetch('/api/backtest/'+id)).json();
+    if(!j.ok||!j.backtest){ document.getElementById('btStat').textContent='backtest not found'; clearInterval(BT_POLL); return; }
+    const g=j.backtest;
+    if(g.status==='running'){ document.getElementById('btStat').textContent=`running… ${(100*(g.progress||0)).toFixed(0)}%`; return; }
+    clearInterval(BT_POLL); BT_POLL=null;
+    if(g.status==='error'){ document.getElementById('btStat').textContent='error: '+(g.error||'').slice(0,160); return; }
+    document.getElementById('btStat').textContent=`done ✓ (#${g.id})`;
+    btRender(g);
+  }catch(e){ document.getElementById('btStat').textContent='poll error: '+e.message; }
+}
+async function btRun(){
+  const sid=document.getElementById('btStrat').value;
+  if(!sid){ document.getElementById('btStat').textContent='pick a saved strategy first (build + Save in ⚡ Strategy)'; return; }
+  const uni=document.getElementById('btUni').value;
+  const spec={ name:'bt '+new Date().toISOString().slice(0,16),
+    strategy_id:parseInt(sid,10),
+    universe: uni==='symbols'
+      ? {kind:'symbols', symbols:(document.getElementById('btSyms').value||'').split(',').map(s=>s.trim()).filter(Boolean)}
+      : {kind:'register', register:uni},
+    start:document.getElementById('btStart').value, end:document.getElementById('btEnd').value,
+    tf:document.getElementById('tf').value, feed:document.getElementById('feed').value,
+    view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3 };
+  document.getElementById('btStat').textContent='starting…';
+  document.getElementById('btSummary').innerHTML=''; document.getElementById('btTrades').innerHTML='';
+  try{
+    const j=await (await fetch('/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(spec)})).json();
+    if(!j.ok){ document.getElementById('btStat').textContent='error: '+(j.error||'').slice(0,160); return; }
+    if(BT_POLL)clearInterval(BT_POLL);
+    BT_POLL=setInterval(()=>btPoll(j.id),2000); btPoll(j.id);
+  }catch(e){ document.getElementById('btStat').textContent='error: '+e.message; }
 }
 function loadStrategyById(id){ const s=SAVED.find(x=>String(x.id)===String(id)); if(!s)return; STRAT=JSON.parse(JSON.stringify(s)); STRAT.entry=STRAT.entry||{logic:'AND',rules:[]}; STRAT.exit=STRAT.exit||{logic:'AND',rules:[]}; STRAT.risk=STRAT.risk||{sl:{type:'',value:null},tp:{type:'',value:null}}; SIGMARKERS=[]; clearStratLines(); refreshMarkers(); renderStrat(); }
 async function saveStrategy(){ readStratHeader(); if(!STRAT.name)STRAT.name='Untitled'; const j=await (await fetch('/api/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(STRAT)})).json(); if(j.ok){ STRAT.id=j.strategy.id; await loadStrategies(); document.getElementById('stratStat').textContent='saved ✓'; } else document.getElementById('stratStat').textContent='save error'; }
@@ -782,6 +857,8 @@ window.addEventListener('load',async()=>{
     document.getElementById(g+'Window').addEventListener('change',e=>{ const w=parseInt(e.target.value,10); STRAT[g].window=Number.isFinite(w)?w:10; });
     document.getElementById(g+'K').addEventListener('change',e=>{ const k=parseInt(e.target.value,10); STRAT[g].k=Number.isFinite(k)?k:1; });
   }
+  document.getElementById('btRun').onclick=btRun;
+  document.getElementById('btUni').addEventListener('change',e=>{ document.getElementById('btSyms').style.display=e.target.value==='symbols'?'':'none'; });
   document.getElementById('regReg').addEventListener('change',loadRegDates);
   document.getElementById('regDate').addEventListener('change',loadRegister);
   document.getElementById('asof').addEventListener('change',()=>{ syncAsofUI(); loadChart(); });

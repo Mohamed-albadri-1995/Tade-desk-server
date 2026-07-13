@@ -21,6 +21,8 @@ PARTS = [
     ('logic_audit7.py',     'Trade operand (P&L / bars / entry), expr-anchored SL'),
     ('logic_audit8.py',     'SL/TP/exit can never fire before entry'),
     ('logic_audit9.py',     "fill model: 'close' preview vs 'next_open' honest live"),
+    ('logic_audit10.py',    'backtest: store, runner, day-slice, register universe'),
+    ('logic_audit11.py',    'backtest API lifecycle: start/poll/done, guards'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

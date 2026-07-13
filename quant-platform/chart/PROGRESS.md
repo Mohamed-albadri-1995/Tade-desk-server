@@ -378,6 +378,19 @@ redraw does NOT touch a manual zoom (your zoom survives Compute/params). The
 Verified headless: manual@700 → switch → autoScale true and $1 candles fill
 the view; same-symbol redraw keeps manual; Fit restores. Screenshot proof.
 
+### It.21 — Phase 4: backtest engine (steps 1-8, see PHASE4_PLAN.md)  [DONE]
+Fill model ('close' preview vs 'next_open' honest live fills, 14 cases);
+evaluate() exposes its trades so the backtester consumes the preview's exact
+output; backtests + backtest_trades store; chart/backtest.py runner with
+DAY-SLICE honesty (only day-D entries count for D), per-day register
+membership (R1/Shortlist), open-vs-closed separation, summary with win rate /
+total % / max drawdown / equity curve; API (POST /api/backtest + poll/list/
+delete, one-at-a-time guard, spec validated before creating a row); 🧪
+Backtest UI panel (saved strategy, symbols or register universe, date range,
+fill selector, progress poll, summary + equity curve in the osc pane, trade
+list where a click replays that chart as-of that day). +50 new hand-computed
+cases across parts 9-11; suite total 215; ALL GREEN; headless UI smoke clean.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
