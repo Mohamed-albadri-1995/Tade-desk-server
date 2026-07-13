@@ -589,6 +589,10 @@ function ruleRowEl(group, rule){
     row.appendChild(operandEl(rule.right, renderStrat, true));
   }
   row.appendChild(holdControl(rule));
+  const so=document.createElement('input'); so.type='number'; so.className='len'; so.style.width='42px'; so.placeholder='ago 0';
+  so.title='SIGNAL shift: this condition was true N bars AGO — moves the whole signal right on the chart (works for bounce too). Operand [n] boxes shift a value; this shifts the rule’s result.';
+  if(rule.offset)so.value=rule.offset; so.onchange=()=>{const v=parseInt(so.value,10); if(Number.isFinite(v)&&v>0)rule.offset=v; else delete rule.offset;};
+  row.appendChild(labeled('ago', so));
   const t=document.createElement('span'); t.className='rx'; t.textContent='🔍'; t.title='test this condition — mark every bar it holds'; t.style.marginLeft='auto'; t.onclick=()=>testRule(rule); row.appendChild(t);
   const x=document.createElement('span'); x.className='rx'; x.textContent='✕'; x.title='remove'; x.onclick=()=>{group.rules=group.rules.filter(r=>r!==rule); renderStrat();}; row.appendChild(x);
   return row;

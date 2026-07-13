@@ -16,7 +16,10 @@ operand:                                    (any operand may add "offset": n = n
 rule:
   {"left": operand, "op": OP, "right": operand, "op_params": {...},
    "for_bars": N,       # true only if it held on ALL of the last N bars
-   "within_bars": N}    # true if it held on ANY of the last N bars
+   "within_bars": N,    # true if it held on ANY of the last N bars
+   "offset": N}         # SIGNAL shift: the condition was true N bars AGO
+                        # (applied after for/within; operand offsets shift
+                        # values, this shifts the rule's own result)
   OP ∈ gt lt ge le eq neq cross_above cross_below rising falling bounce_up bounce_down
     rising/falling  — regression slope of `left` over op_params.lookback bars,
                       measured as net move ÷ window volatility, is ≥ / ≤
@@ -300,6 +303,16 @@ def _eval_rule(rule: dict, bars, ctx) -> np.ndarray:
             out = _rolling(out, fb, 'all')
     elif wb > 1:
         out = _rolling(out, wb, 'any')
+    # rule-level SIGNAL offset: "this condition was true N bars AGO" — shifts
+    # the whole signal to the RIGHT on the chart. (Operand [n] shifts a VALUE;
+    # this shifts the RESULT — the only way to displace e.g. a bounce, whose
+    # operands are the price bar itself.) Left/future shift would be look-ahead
+    # into bars that haven't happened — not expressible, by design.
+    roff = int(rule.get('offset', 0) or 0)
+    if roff > 0:
+        n = len(out)
+        out = (np.concatenate((np.zeros(roff, dtype=bool), out[:-roff]))
+               if roff < n else np.zeros(n, dtype=bool))
     return out
 
 
