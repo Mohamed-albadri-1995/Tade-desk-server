@@ -816,23 +816,26 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
     up_pos = 'belowBar' if side == 'long' else 'aboveBar'
     markers = []
-    # Every bar the ENTRY condition first fires (clean arrow, no repeated text —
-    # keeps a dense chart readable). Shown even if nothing "closes".
-    edge_times = set()
+    # TRADES vs SIGNALS must LOOK different, or the chart lies:
+    #  - solid arrow  = a position actually OPENED here (one per trade — the
+    #    engine holds at most one position, tests part 12)
+    #  - faint dot    = the entry condition fired but NO trade opened (already
+    #    in a position / session rules / unpriceable stop). Informational.
+    entered = {t['ei'] for t in trades}
+    if open_trade:
+        entered.add(open_trade['ei'])
     for i in np.nonzero(entry_ev)[0]:
-        edge_times.add(int(ts[i]))
-        markers.append({'time': int(ts[i]), 'position': up_pos,
+        if i in entered:
+            continue                      # real entry drawn below
+        markers.append({'time': int(ts[i]), 'position': up_pos, 'size': 1,
+                        'shape': 'circle', 'color': '#475569', 'text': ''})
+    for ei in sorted(entered):
+        markers.append({'time': int(ts[ei]), 'position': up_pos, 'size': 2,
                         'shape': up_shape, 'color': '#22c55e', 'text': ''})
-    # ...plus RE-entries: a trade taken while the signal was still on (e.g.
-    # right after a stop-out) isn't a fresh edge, but it IS an entry.
-    for t in trades:
-        if int(ts[t['ei']]) not in edge_times:
-            markers.append({'time': int(ts[t['ei']]), 'position': up_pos,
-                            'shape': up_shape, 'color': '#22c55e', 'text': ''})
-    # ...plus the exit of each taken trade — THIS carries the reason label.
+    # each trade's exit carries its reason; exactly one exit per trade.
     for t in trades:
         col = {'SL': '#ef5350', 'TP': '#22c55e', 'exit': '#94a3b8', 'eod': '#f5a623'}.get(t['reason'], '#ef5350')
-        markers.append({'time': int(ts[t['xi']]),
+        markers.append({'time': int(ts[t['xi']]), 'size': 2,
                         'position': 'aboveBar' if side == 'long' else 'belowBar',
                         'shape': 'arrowDown' if side == 'long' else 'arrowUp',
                         'color': col, 'text': t['reason']})
