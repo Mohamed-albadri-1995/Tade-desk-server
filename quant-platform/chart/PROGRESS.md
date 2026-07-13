@@ -431,12 +431,18 @@ final patch + one clean full pass. Check off as completed:
       bar into asof=D replays (dailies are stamped midnight ET = the window
       end). prepare_bars + compute_tf fetch now cut strictly < end on
       replays; LIVE keeps the boundary (developing) bar. Tests part 14.
-- [ ] P2  data_manager (required_days edges) + live WS server paths
-- [ ] P3  Screener bridge (Phase 2): card mapping, date handling
-- [ ] P4  Engine corners: session-rules × fill × trade-aware interplay
-- [ ] P5  Store + API endpoints sweep
-- [ ] P6  Frontend JS sweep (builder + backtest panel + filters)
-- [ ] P7  FINAL: full suite + headless smoke + close the loop
+- [x] P2  data_manager + live WS: FOUND — alpaca-1m 7-day cap silently
+      truncated multi-day warm-up (month VWAP!) → loud banner warning now
+- [x] P3  Screener bridge: clean (4th pass — dates, latest fallback, R1
+      _score vs Shortlist score mapping, error surfacing)
+- [x] P4  Engine corners: eod supersedes same-bar next_open exit signal;
+      fill landing ON the liquidation bar blocked (part 12 → 20 cases)
+- [x] P5  Store+API: backtest-start double-POST race closed with a lock
+- [x] P6  Frontend: smoke green at 390px + 900px (banner, error-samples
+      toggle, builder, backtest panel), no JS errors
+- [x] P7  FINAL: full suite ALL GREEN (250+ cases, 15 parts) — LOOP CLOSED.
+      Next real work needs USER input: run backtests on real data and report
+      anything that looks wrong; then the trading-tool bridge (Phase 5).
 
 ### It.24 — loop patch P1: asof replay boundary  [DONE]
 Alpaca/Polygon treat `end` as inclusive; daily bars are stamped at midnight
