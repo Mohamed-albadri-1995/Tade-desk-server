@@ -1937,6 +1937,28 @@ function renderCards() {
   grid.innerHTML = rows.map(buildCard).join('');
 }
 
+// Catalyst badge: icon encodes importance (⚡ major / ● notable / · minor),
+// stale week-old catalysts render dimmed, secondaries listed in the tooltip.
+function catalystTitle(c) {
+  const parts = [`${c.source === 'technical' ? 'technical · ' : ''}${c.tierName || ''} ${c.sentiment || ''}`.trim()];
+  if (c.detail) parts.push(c.detail);
+  if (c.corroboration > 1) parts.push(`${c.corroboration} headlines`);
+  if (c.ageHours != null) parts.push(c.ageHours < 48 ? `${c.ageHours}h old` : `${Math.round(c.ageHours/24)}d old`);
+  if (c.confidence) parts.push(`${c.confidence} confidence`);
+  if (c.headline) parts.push(`"${c.headline}"`);
+  if (c.others && c.others.length) parts.push('also: ' + c.others.map(o => o.label).join(', '));
+  return parts.join(' · ').replace(/"/g, '&quot;');
+}
+function catalystBadgeHTML(c) {
+  // Old-format catalysts (pre-v2 rows restored from checkpoint) have no tier
+  // — render them the way the old UI did (⚡) rather than as minor.
+  const tier = c.tier || 1;
+  const icon = c.source === 'technical' ? '📈' : tier === 1 ? '⚡' : tier === 2 ? '●' : '·';
+  const dim = c.stale ? 'opacity:0.55;' : '';
+  const extra = c.others && c.others.length ? ` <span style="opacity:0.7">+${c.others.length}</span>` : '';
+  return `<span class="badge badge-catalyst" title="${catalystTitle(c)}" style="${dim}background:${c.color}20;color:${c.color};border:1px solid ${c.color}40">${icon} ${c.label}${extra}</span>`;
+}
+
 function buildCard(row) {
   const s = row.stock || {};
   const ctx = row.context || {};
@@ -1956,9 +1978,7 @@ function buildCard(row) {
     `<span class="badge ${badgeMap[k]||'badge-trend'}">${badgeLabels[k]||k}</span>`
   ).join('');
   const hotBadge = ctx.secHot ? '<span class="badge badge-hot">🔥 HOT</span>' : '';
-  const catalystBadge = catalyst
-    ? `<span class="badge badge-catalyst" style="background:${catalyst.color}20;color:${catalyst.color};border:1px solid ${catalyst.color}40">⚡ ${catalyst.label}</span>`
-    : '';
+  const catalystBadge = catalyst ? catalystBadgeHTML(catalyst) : '';
 
   // Regime display
   const regimeInfo = getRegimeDisplay(ctx.regime);
@@ -2037,8 +2057,12 @@ function buildCard(row) {
     if (lt === 'BEARISH') return 'short';
     return 'long';
   }
-  const autoBiasResult = bias === 'auto' ? computeAutoBias(ctx) : null;
-  const autoLabel = autoBiasResult ? ` <span class="bias-auto-label">(${autoBiasResult})</span>` : '';
+  // Prefer the server-resolved auto bias (catalyst-aware); fall back to the
+  // local context-only derivation when the row hasn't been through Side C yet.
+  const autoBiasResult = bias === 'auto' ? (row.autoBias?.bias || computeAutoBias(ctx)) : null;
+  const autoBiasSrc = bias === 'auto' && row.autoBias?.source === 'catalyst' ? ' ⚡' : '';
+  const autoBiasTitle = row.autoBias?.reason ? ` title="auto: ${esc(row.autoBias.reason)}"` : '';
+  const autoLabel = autoBiasResult ? ` <span class="bias-auto-label"${autoBiasTitle}>(${autoBiasResult}${autoBiasSrc})</span>` : '';
   const biasHTML = `<button class="bias-btn bias-${bias}" onclick="cycleBias('${row.ticker}',this)">${biasLabels[bias]}${autoLabel}</button>`;
 
   return `
@@ -2146,7 +2170,7 @@ function buildCard(row) {
 
     <!-- NEWS -->
     <div class="card-section">
-      <div class="section-title">News ${catalyst ? '· ⚡ ' + catalyst.label : ''}</div>
+      <div class="section-title">News ${catalyst ? '· ' + (catalyst.tier === 1 ? '⚡ ' : '') + catalyst.label + (catalyst.others && catalyst.others.length ? ' <span style="opacity:0.6;font-weight:400">+ ' + catalyst.others.map(o => o.label).join(', ') + '</span>' : '') : ''}</div>
       <div id="news-${row.ticker}">${newsHTML}</div>
     </div>
 

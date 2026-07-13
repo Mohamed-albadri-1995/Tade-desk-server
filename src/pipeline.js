@@ -3,6 +3,7 @@ const { runAllScanners } = require('./sideA/tvScanner');
 const { mergeScannersIntoR0 } = require('./sideA/merge');
 const { applyDerivedFields } = require('./sideB/calculations');
 const { fetchNewsForTicker } = require('./sideC/news');
+const { combineCatalyst } = require('./sideC/technical');
 const { buildMarketSnapshot, enrichR0WithContext } = require('./sideD/engine');
 const db = require('./db');
 const r0 = require('./r0/registry');
@@ -99,10 +100,16 @@ async function runFullScan() {
     // Side E: Live scoring via Python Flask service (non-fatal — null scores if service down)
     let withScores = withContext;
     await stageWrapSoft(report, 'sideE', async () => {
-      // Preserve user-set bias from previous r0 state before scoring
+      // Preserve user-set bias and the last known catalyst from previous r0
+      // state before scoring — news (Side C) runs after scoring, so without
+      // this the catalyst feature and catalyst-driven auto-bias would always
+      // be empty at score time.
       const toScore = withContext.map(row => {
         const prev = r0.getRow(row.ticker);
-        return prev?.bias && prev.bias !== 'auto' ? { ...row, bias: prev.bias } : row;
+        const carried = { ...row };
+        if (prev?.bias && prev.bias !== 'auto') carried.bias = prev.bias;
+        if (prev?.catalyst) carried.catalyst = prev.catalyst;
+        return carried;
       });
       withScores = await scoreAllRows(toScore);
       const scored = withScores.filter(r => r._score !== null).length;
@@ -133,7 +140,7 @@ async function runFullScan() {
       const liveRows = r0.getAll().filter(r => r.liveNow);
       const results = await Promise.allSettled(
         liveRows.map(row => fetchNewsForTicker(row.ticker).then(({ news, catalyst }) => {
-          r0.updateNews(row.ticker, news, catalyst);
+          r0.updateNews(row.ticker, news, combineCatalyst(catalyst, row.stock));
         }))
       );
       const failed = results.filter(r => r.status === 'rejected').length;

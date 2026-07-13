@@ -66,6 +66,12 @@ function updateNews(ticker, news, catalyst) {
   if (row) {
     row.news = news;
     row.catalyst = catalyst;
+    // Catalyst is the strongest auto-bias input, so resolve it here where
+    // both catalyst and context are known. Stored as the pure-auto answer
+    // (manual bias forced aside) so the AUTO button label stays correct even
+    // if the trader toggles manual bias on and off between news refreshes.
+    const { resolveAutoBias } = require('../sideC/bias');
+    row.autoBias = resolveAutoBias({ ...row, bias: 'auto' });
     row.lastUpdated = Date.now();
   }
 }
