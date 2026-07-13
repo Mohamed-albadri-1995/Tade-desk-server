@@ -95,9 +95,11 @@ def _resolve_strategy(spec: dict) -> dict:
     raise ValueError('spec needs strategy (inline) or a valid strategy_id')
 
 
-def _summary(closed: list, opens: list, n_pairs: int, errors: list) -> dict:
+def _summary(closed: list, opens: list, n_pairs: int, errors: list,
+             all_dates: list | None = None, cost_bps: float = 0.0) -> dict:
     out = {'pairs': n_pairs, 'trades': len(closed), 'open_trades': len(opens),
-           'errors': len(errors), 'error_samples': errors[:10]}
+           'errors': len(errors), 'error_samples': errors[:10],
+           'cost_bps_per_side': cost_bps}
     if closed:
         rets = [t['ret'] for t in closed]
         wins = sum(1 for r in rets if r > 0)
@@ -121,6 +123,28 @@ def _summary(closed: list, opens: list, n_pairs: int, errors: list) -> dict:
             'exits_by': by,
             'equity_curve': curve,
         })
+        # Chan-style DAILY metrics: build the daily return series over ALL
+        # evaluated days (flat days = 0 — leaving them out inflates Sharpe),
+        # then annualized Sharpe (√252) and max-drawdown DURATION in days.
+        if all_dates:
+            daily = {d: 0.0 for d in all_dates}
+            for t in closed:
+                daily[t['date']] = daily.get(t['date'], 0.0) + t['ret']
+            vals = [daily[d] for d in sorted(daily)]
+            n = len(vals)
+            mean = sum(vals) / n
+            var = sum((v - mean) ** 2 for v in vals) / (n - 1) if n > 1 else 0.0
+            sd = var ** 0.5
+            out['sharpe'] = round(mean / sd * (252 ** 0.5), 2) if sd > 1e-12 else None
+            cum = peak = 0.0
+            run = worst = 0
+            for v in vals:
+                cum += v
+                if cum >= peak - 1e-12:
+                    peak = cum; run = 0
+                else:
+                    run += 1; worst = max(worst, run)
+            out['max_dd_days'] = worst
     return out
 
 
@@ -134,6 +158,10 @@ def run(spec: dict, progress_cb=None) -> dict:
     view = spec.get('view', 'all')
     fill = spec.get('fill', 'close')
     base_days = int(spec.get('days', 3))       # evaluate() auto-extends warm-up
+    # transaction costs (Chan ch.3: costs flip marginal strategies negative —
+    # a backtest without them lies). Fractional cost per SIDE in basis points
+    # (spread + slippage + commission); a round trip pays it twice.
+    cost = float(spec.get('cost_bps', 0.0) or 0.0) / 10000.0
     pairs = _pairs(spec)
 
     closed, opens, errors = [], [], []
@@ -147,19 +175,23 @@ def run(spec: dict, progress_cb=None) -> dict:
                         closed.append({'date': day, 'symbol': sym, 'side': side,
                                        'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
                                        'entry': t['entry'], 'exit': t['exit'],
-                                       'ret': t['ret'], 'reason': t['reason']})
+                                       'ret': t['ret'] - 2.0 * cost,   # round trip
+                                       'reason': t['reason']})
                 ot = r.get('open_trade')
                 if ot and _et_date(ot['time']) == day:
                     opens.append({'date': day, 'symbol': sym, 'side': side,
                                   'entry_ts': ot['time'], 'exit_ts': None,
                                   'entry': ot['entry'], 'exit': None,
-                                  'ret': ot['ret_pct'] / 100.0, 'reason': 'open'})
+                                  'ret': ot['ret_pct'] / 100.0 - cost,  # one side so far
+                                  'reason': 'open'})
         except Exception as e:  # noqa: BLE001 — one bad day/symbol must not kill the run
             errors.append(f'{day} {sym}: {e}')
         if progress_cb:
             progress_cb((i + 1) / len(pairs))
 
-    return {'summary': _summary(closed, opens, len(pairs), errors),
+    all_dates = sorted({d for d, _ in pairs})
+    return {'summary': _summary(closed, opens, len(pairs), errors,
+                                all_dates=all_dates, cost_bps=float(spec.get('cost_bps', 0.0) or 0.0)),
             'trades': closed + opens}
 
 

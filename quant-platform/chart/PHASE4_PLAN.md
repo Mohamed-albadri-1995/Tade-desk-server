@@ -98,6 +98,28 @@ that chart as-of its day.
       smoke (run a stub backtest end-to-end through the API); PROGRESS.md
       iteration entry; README section; deploy command for the user.
 
+## Chan alignment (Quantitative Trading, E. Chan — user-provided reference)
+The book's backtesting prescriptions vs this engine (PDF upload failed; audit
+done from the book's well-known content — costs, biases, Sharpe/DD, ch. 3):
+- **Look-ahead bias**: PREVENTED by construction — causal primitives, positive-
+  only offsets, next_open fill option, day-slice on asof windows (tests part 8/9/10).
+- **Survivorship bias**: the register universes are FROZEN as-of each day (R1 at
+  9:36 ET) — exactly the bias-free universe design the book asks for. Manual
+  symbol lists carry whatever bias the user types in (documented, not solvable).
+- **Transaction costs**: `spec.cost_bps` per side (spread+slippage+commission);
+  every round trip pays 2×, open positions 1×. Default 0 but the UI labels
+  0 as "frictionless (lies)".
+- **Metrics**: daily-return Sharpe (√252, flat days INCLUDED — dropping them
+  inflates it), max drawdown depth AND duration (days), equity curve.
+- **Data-snooping / overfitting**: no optimizer is built on purpose. Guidance:
+  tune on one date range, confirm on a later untouched range; distrust
+  parameter sets that only work at one setting. Paper trade before live
+  (the trading tool's paper mode is the walk-forward stage).
+- **Not adopted**: Kelly sizing (position sizing belongs to the trading tool's
+  sizer/grading cascade, not the chart backtester); split/dividend adjustment
+  (intraday horizon; feeds are unadjusted — flag if a multi-month daily-TF
+  backtest is ever needed).
+
 ## Verification protocol (every step)
 1. `cd quant-platform && python3 chart/tests/run_all.py` → ALL GREEN.
 2. New behavior gets hand-computed cases in `chart/tests/` (same style).

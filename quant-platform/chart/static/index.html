@@ -188,6 +188,7 @@
         <select id="btFill" style="flex:1" title="fill model: close = signal bar close (preview) · next open = honest live fills"><option value="close">fill: close</option><option value="next_open">fill: next open</option></select>
       </div>
       <input id="btSyms" placeholder="symbols: SPY,QQQ" style="width:100%;margin-top:4px">
+      <input id="btCost" type="number" step="any" placeholder="cost bps/side (e.g. 5)" title="transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies)." style="width:100%;margin-top:4px">
       <div style="display:flex;gap:4px;margin-top:4px">
         <input id="btStart" type="date" style="flex:1;min-width:0" title="start date">
         <input id="btEnd" type="date" style="flex:1;min-width:0" title="end date">
@@ -728,7 +729,7 @@ function btRender(g){
   if(!s){ sum.innerHTML=''; tbl.innerHTML=''; return; }
   const by=s.exits_by?Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' '):'';
   sum.innerHTML = s.trades
-    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}% · maxDD ${s.max_drawdown_pct}% · [${by}]`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span style="color:var(--draft)">⚠ ${s.errors} errors</span>`:'')
+    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span style="color:var(--draft)">⚠ ${s.errors} errors</span>`:'')
     : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
   // equity curve → oscillator pane (values are %, far from price range)
   if(s.equity_curve&&s.equity_curve.length){ drawStratSeries([{name:'equity %',color:'#22c55e',step:false,style:0,values:s.equity_curve}]); }
@@ -766,7 +767,7 @@ async function btRun(){
       : {kind:'register', register:uni},
     start:document.getElementById('btStart').value, end:document.getElementById('btEnd').value,
     tf:document.getElementById('tf').value, feed:document.getElementById('feed').value,
-    view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3 };
+    view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0 };
   document.getElementById('btStat').textContent='starting…';
   document.getElementById('btSummary').innerHTML=''; document.getElementById('btTrades').innerHTML='';
   try{

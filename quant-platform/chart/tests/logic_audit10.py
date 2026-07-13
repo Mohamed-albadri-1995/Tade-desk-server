@@ -37,12 +37,13 @@ chkv('list has it', any(b['id'] == bid for b in store.list_backtests()), True)
 chkv('delete', (store.delete_backtest(bid), store.get_backtest(bid)), (True, None))
 
 print("== 2. runner over a stub feed: deterministic 1 trade/day/symbol ==")
-rng = np.random.default_rng(11)
 class StubLoader:
     def load(self, symbol, tf, start, end):
+        # deterministic PER (symbol, window) so repeat runs see identical bars
+        r = np.random.default_rng(abs(hash((symbol, str(start), str(end)))) % (2**31))
         idx = pd.date_range(start, end, freq='1min', tz='UTC')[:6000]
         n = len(idx)
-        base = (100 if symbol == 'AAA' else 50) + np.cumsum(rng.normal(0, 0.02, n))
+        base = (100 if symbol == 'AAA' else 50) + np.cumsum(r.normal(0, 0.02, n))
         o = base; c = base + 0.01
         return pd.DataFrame({'open': o, 'high': np.maximum(o, c) + 0.02,
                              'low': np.minimum(o, c) - 0.02, 'close': c,
@@ -124,6 +125,30 @@ bt.run_and_store(bid3, {'strategy': strategy})
 g3 = store.get_backtest(bid3, with_trades=False)
 chkv('error status recorded', g3['status'], 'error')
 chktrue('error message present', bool(g3['error']))
+
+print("== 7. Chan metrics: costs, Sharpe, drawdown duration (hand-computed) ==")
+# _summary directly with controlled trades. 4 days; day rets: +1%, -2%, +0.5%, +2%
+dates4 = ['2024-01-08', '2024-01-09', '2024-01-10', '2024-01-11']
+mk = lambda d, r, i: {'date': d, 'symbol': 'X', 'side': 'long', 'entry_ts': i*100,
+                      'exit_ts': i*100+50, 'entry': 100, 'exit': 100*(1+r),
+                      'ret': r, 'reason': 'exit'}
+tr4 = [mk('2024-01-08', 0.01, 1), mk('2024-01-09', -0.02, 2),
+       mk('2024-01-10', 0.005, 3), mk('2024-01-11', 0.02, 4)]
+s7 = bt._summary(tr4, [], 4, [], all_dates=dates4, cost_bps=0.0)
+# daily: [.01,-.02,.005,.02]; mean=.00375; sample sd: dev=[.00625,-.02375,.00125,.01625]
+# ss=3.9075e-5+5.640625e-4+1.5625e-6+2.640625e-4 = 8.6875e-4; var=ss/3=2.8958e-4; sd=.017017
+# sharpe = .00375/.017017*sqrt(252) = 0.22037*15.8745 = 3.4983 -> 3.5
+chkv('sharpe hand-computed', s7['sharpe'], 3.5)
+# cum: .01,-.01,-.005,.015 ; peak .01 -> below at day2,3 (run 2), recovered day4
+chkv('maxDD duration = 2 days', s7['max_dd_days'], 2)
+chkv('maxDD depth = 2%', s7['max_drawdown_pct'], 2.0)
+# cost applied in run(): re-run part-2 spec with 10 bps/side -> each trade -0.2%
+out_c = bt.run({**spec, 'cost_bps': 10})
+gross = {(t['date'], t['symbol']): t['ret'] for t in out['trades']}
+net = {(t['date'], t['symbol']): t['ret'] for t in out_c['trades']}
+diff_ok = all(abs((gross[k] - net[k]) - 0.002) < 1e-12 for k in gross)
+chkv('every round trip pays 2 x 10bps', diff_ok, True)
+chkv('cost recorded in summary', out_c['summary']['cost_bps_per_side'], 10.0)
 
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)
