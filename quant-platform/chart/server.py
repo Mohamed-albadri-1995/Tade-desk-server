@@ -94,6 +94,16 @@ def strategies_save(payload: dict = Body(...)):
         return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
 
 
+@app.get('/api/strategies/{sid}')
+def strategies_get(sid: int):
+    """Single strategy by id — the exact stored JSON. This is the bridge the
+    backtester and the trading tool pull from, so all three run the SAME
+    document through the SAME evaluator (no conversion step to introduce
+    errors)."""
+    s = store.get_strategy(sid)
+    return {'ok': bool(s), 'strategy': s}
+
+
 @app.delete('/api/strategies/{sid}')
 def strategies_delete(sid: int):
     return {'ok': store.delete_strategy(sid)}

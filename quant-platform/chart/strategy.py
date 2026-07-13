@@ -60,6 +60,8 @@ _SLOPE_MIN_STRENGTH = 2.0 # min |net move ÷ residual noise| to count as a trend
                           # (pure noise reads |strength|≈0.9, so 2.0 ≈ "clearly a trend":
                           # chop false-fires ~3-4%, real trends score 5-50+)
 _BOUNCE_TOL_PCT = 0.15    # how close (in %) the wick must come to the level to "touch"
+_BOUNCE_CLOSE_POS = 0.6   # bounce bar must close in the top 60% of its own range
+                          # (bottom 60% for bounce_down) — touch-and-GO, not a doji
 _SEQ_WINDOW = 10          # max bars between consecutive steps of a THEN sequence
 
 
@@ -200,22 +202,33 @@ def _bounce_flag(op: str, bars, R: np.ndarray, p: dict) -> np.ndarray:
     resistance held. Guarding on 'from above/below' is what stops it from firing
     every bar when price is hugging the level."""
     tol = float(p.get('tol_pct', _BOUNCE_TOL_PCT)) / 100.0
+    # how decisively the bar must close AWAY from the level: the close must sit
+    # in the top `close_pos` fraction of the bar's range for bounce_up (bottom
+    # for bounce_down). Kills the doji/long-wick case — a bar that merely
+    # TOUCHED and closed mid-range is not a bounce.
+    cpos = float(p.get('close_pos', _BOUNCE_CLOSE_POS))
     low = bars['low'].to_numpy(float);   high = bars['high'].to_numpy(float)
     close = bars['close'].to_numpy(float)
+    opn = bars['open'].to_numpy(float)
     prev_close = np.concatenate(([np.nan], close[:-1]))
     prev_R = np.concatenate(([np.nan], R[:-1]))
-    with np.errstate(invalid='ignore'):
+    rng = high - low
+    with np.errstate(invalid='ignore', divide='ignore'):
+        pos = np.where(rng > 0, (close - low) / rng, 0.5)   # 1 = closed at the high
         if op == 'bounce_up':
-            from_above = prev_close >= prev_R           # was on/above support
+            from_above = (prev_close >= prev_R) & (opn >= R)  # was above AND the bar
+            #      STARTED above — a bar that opened below support and closed above
+            #      it CROSSED the level, it didn't bounce off it.
             touched = low <= R * (1 + tol)              # wick dipped to it
             held = close > R                            # closed back above
-            turning = close > prev_close                # bounced up
+            turning = (close > prev_close) & (pos >= cpos)  # closed strong, near
+            #      the top of its own range — touch-and-GO, not touch-and-hover
             out = from_above & touched & held & turning
         else:
-            from_below = prev_close <= prev_R           # was on/below resistance
+            from_below = (prev_close <= prev_R) & (opn <= R)
             touched = high >= R * (1 - tol)             # wick poked up to it
             held = close < R                            # closed back below
-            turning = close < prev_close                # rejected down
+            turning = (close < prev_close) & (pos <= 1.0 - cpos)
             out = from_below & touched & held & turning
     out = np.asarray(out, dtype=bool)
     out[np.isnan(R) | np.isnan(prev_R) | np.isnan(prev_close)] = False
@@ -428,15 +441,18 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
     return np.asarray(arr, dtype=float) * shift
 
 
-def _pair_trades(bars, ts, entry_ev, exit_ev, side, risk, ctx):
-    """Preview pairing with STOP-LOSS and TAKE-PROFIT. Enter on an entry edge
-    while flat; then exit at whichever comes first, intrabar. PROTOCOL (fixed
-    priority, so the three exit paths never conflict): 1) SL — protection is
-    checked first, and wins if SL and TP fall in the same bar (conservative);
-    2) TP; 3) the exit-rule edge (at that bar's close). SL/TP are either a
-    fixed distance from entry (pct / ATR× / points) or ANCHORED to an indicator
-    line (type 'prim') that trails bar by bar. Full day-by-day sim is Phase 4;
-    this makes the preview honest about stops."""
+def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
+    """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
+    checks, not one-shot signals: while FLAT, enter on any bar the entry
+    condition IS true (so after a stop-out it can re-enter while the setup
+    still holds); while IN a position, exit on any bar the exit condition IS
+    true — even if it was already true before the entry (a flip-edge would
+    miss that). PROTOCOL (fixed priority, so the three exit paths never
+    conflict): 1) SL — protection is checked first, and wins if SL and TP fall
+    in the same bar (conservative); 2) TP; 3) the exit-rule status (at that
+    bar's close). SL/TP are either a fixed distance from entry (pct / ATR× /
+    points) or ANCHORED to an indicator line (type 'prim') that trails bar by
+    bar. Full day-by-day sim is Phase 4; this makes the preview honest."""
     close = bars['close'].to_numpy(float)
     high = bars['high'].to_numpy(float)
     low = bars['low'].to_numpy(float)
@@ -456,7 +472,7 @@ def _pair_trades(bars, ts, entry_ev, exit_ev, side, risk, ctx):
     in_pos = False; ei = 0; sl = tp = None
     for j in range(n):
         if not in_pos:
-            if entry_ev[j]:
+            if entry_mask[j]:
                 in_pos = True; ei = j
                 ep = close[j]
                 # fixed-distance stops: long → SL BELOW entry / TP above;
@@ -481,7 +497,7 @@ def _pair_trades(bars, ts, entry_ev, exit_ev, side, risk, ctx):
             px, reason = slv, 'SL'
         elif tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
             px, reason = tpv, 'TP'
-        elif exit_ev[j]:
+        elif exit_mask[j]:
             px, reason = close[j], 'exit'
         if px is not None:
             r = (px - close[ei]) / close[ei]
@@ -564,16 +580,26 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     entry_ev = _edges(entry_mask)
     exit_ev = _edges(exit_mask)
 
-    trades = _pair_trades(bars, ts, entry_ev, exit_ev, side, strategy.get('risk'), ctx)
+    # STATUS pairing: enter while flat on any true entry bar; exit on any true
+    # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
+    trades = _pair_trades(bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx)
 
     up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
     up_pos = 'belowBar' if side == 'long' else 'aboveBar'
     markers = []
-    # Every bar the ENTRY condition fires (clean arrow, no repeated text label —
+    # Every bar the ENTRY condition first fires (clean arrow, no repeated text —
     # keeps a dense chart readable). Shown even if nothing "closes".
+    edge_times = set()
     for i in np.nonzero(entry_ev)[0]:
+        edge_times.add(int(ts[i]))
         markers.append({'time': int(ts[i]), 'position': up_pos,
                         'shape': up_shape, 'color': '#22c55e', 'text': ''})
+    # ...plus RE-entries: a trade taken while the signal was still on (e.g.
+    # right after a stop-out) isn't a fresh edge, but it IS an entry.
+    for t in trades:
+        if int(ts[t['ei']]) not in edge_times:
+            markers.append({'time': int(ts[t['ei']]), 'position': up_pos,
+                            'shape': up_shape, 'color': '#22c55e', 'text': ''})
     # ...plus the exit of each taken trade — THIS carries the reason label.
     for t in trades:
         col = {'SL': '#ef5350', 'TP': '#22c55e', 'exit': '#94a3b8'}.get(t['reason'], '#ef5350')

@@ -581,6 +581,7 @@ function ruleRowEl(group, rule){
   } else if(BOUNCE.has(rule.op)){
     row.appendChild(operandEl(rule.right, renderStrat, true));
     row.appendChild(labeled('tol%', opParamInput(rule,'tol_pct',0.15)));
+    const cp=opParamInput(rule,'close_pos',0.6); cp.title='how decisively it must close away from the level: 0.6 = close in the top 60% of the bar’s range (bottom for bounce ▼) — rejects doji touches'; row.appendChild(labeled('pos≥', cp));
   } else if(PCT.has(rule.op)){
     row.appendChild(operandEl(rule.right, renderStrat, true));
     row.appendChild(labeled('%', opParamInput(rule,'pct',1)));

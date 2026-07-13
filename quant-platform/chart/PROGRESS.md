@@ -264,6 +264,35 @@ sub-line selection, _merge_defaults → ALL PASS. Then the reported issues:
 All 82+28 audit cases green; headless UI verification green (pct box, anchor
 editor, save/reload/edit roundtrip, no JS errors).
 
+### It.16 — status-check pairing, bounce v3, volume via composition  [DONE]
+User feedback round 2:
+- STATUS, not signal-fire: conditions are state checks. _pair_trades now enters
+  while FLAT on any bar the entry condition IS true (so it re-enters after a
+  stop-out while the setup still holds) and exits on any bar the exit condition
+  IS true — the old edge-based exit MISSED an exit condition that was already
+  true before entry (no flip → no exit, position stuck). Verified: always-true
+  exit closes next bar; re-entry after SL; one-shot signal = one trade.
+  Re-entry bars that aren't fresh edges now also get entry arrows.
+- BOUNCE v3, closing the two holes the user called out:
+  1. slice-through: a bar that OPENS on the wrong side of the level and closes
+     across it is a CROSS, not a bounce → the bar's open must be on the
+     original side too (prev_close guard kept).
+  2. doji touch: close>prev_close alone let a long-wick hover count → the bar
+     must close in the top `close_pos` (default 60%) of its OWN range for
+     bounce_up (bottom 60% for bounce_down) — touch-and-GO. Exposed as `pos≥`
+     in the rule row. Verified with explicit attack cases both directions.
+  For extra confirmation compose: bounce THEN `high > high[1]` (the user's
+  "exceeded previous high and held" idea) — no new primitive needed.
+- VOLUME: no volume primitives were missing — volume conditions are COMPOSED
+  per the basic-pieces rule: `Price volume > sma(source=volume, 20)` (relative
+  volume), `volume > volume[1]` (rising volume) via offset, `volume.avg_volume`
+  / `volume.rel_volume` for daily-baseline versions. Verified both compositions.
+- NO-CONVERSION bridge: GET /api/strategies/{id} returns the exact stored JSON.
+  Chart preview, Phase-4 backtest, and the trading tool all run the SAME JSON
+  through the SAME evaluate() — there is no translation step to introduce
+  errors. (The trading tool imports chart/strategy.py or calls the HTTP API.)
+All audits green: 54 + 28 + 12 cases + stub-feed e2e.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
