@@ -774,6 +774,19 @@ function btMatch(t,f){ // one filter {field,op,val} against one trade
   } return false;
 }
 function btApplyFilters(trades){ return (trades||[]).filter(t=>BT_FILTERS.every(f=>btMatch(t,f))); }
+function btTtp(closed,opens,base){ // mirror of backtest._ttp_block for filtered subsets
+  if(!base)return null;
+  const shares=base.shares||100, fps=base.fee_per_share||0, fmin=base.fee_min_per_order||0, mps=base.min_profit_ps!=null?base.min_profit_ps:0.10;
+  const fee=(fps||fmin)?Math.max(fps*shares,fmin):0;
+  let fees=0,net=0,counted=0,below=0;
+  for(const t of closed){ const sgn=t.side==='short'?-1:1; const pps=sgn*(t.exit-t.entry);
+    const f=fee*2, n=shares*pps-f; fees+=f; net+=n;
+    if(pps>0&&pps<mps)below++; else counted+=n; }
+  fees+=fee*opens.length;
+  const r2=x=>Math.round(100*x)/100;
+  return {shares,fee_per_share:fps,fee_min_per_order:fmin,min_profit_ps:mps,
+          fees_usd:r2(fees),net_pnl_usd:r2(net),counted_pnl_usd:r2(counted),wins_below_min:below};
+}
 function btMetrics(trades,dates){ // client-side mirror of the server summary math
   const closed=trades.filter(t=>t.reason!=='open'), opens=trades.filter(t=>t.reason==='open');
   const s={trades:closed.length, open_trades:opens.length, pairs:(dates||[]).length};
@@ -818,6 +831,7 @@ function btRefresh(){ if(!BT_LAST)return;
   const ft=btApplyFilters(BT_LAST.trades||[]);
   const s=btMetrics(ft, (BT_LAST.summary&&BT_LAST.summary.dates)||[]);
   s.cost_bps_per_side=BT_LAST.summary&&BT_LAST.summary.cost_bps_per_side;
+  if(BT_LAST.summary&&BT_LAST.summary.ttp){ s.ttp=btTtp(ft.filter(t=>t.reason!=='open'&&t.exit!=null), ft.filter(t=>t.reason==='open'), BT_LAST.summary.ttp); }
   s.errors=0;
   btRenderFilters();
   btRenderCore({summary:s, trades:ft}, BT_FILTERS.length?` · filtered ${ft.length}/${(BT_LAST.trades||[]).length}`:'');
