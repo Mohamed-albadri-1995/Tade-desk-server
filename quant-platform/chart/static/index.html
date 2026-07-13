@@ -191,7 +191,7 @@
 </main>
 <script>
 let CHART=null, PRICE=null, BG=null, VOL=null, LINES=[], PRIMS=[], WS=null, LIVE=false;
-let OVERLAYS=[], SELECTED=null, _nid=1, PRICEBARS=[], STRATLINES=[];
+let OVERLAYS=[], SELECTED=null, _nid=1, PRICEBARS=[], STRATLINES=[], LASTSYMTF='';
 let FEEDS={}, REG_ROWS=[], CHARTTYPE='candles';
 const feedHas=n=>!!FEEDS[n];
 // ── chart-type (candles/bar/line/area/Heikin Ashi) ──
@@ -313,6 +313,16 @@ function clearStratLines(){ for(const l of STRATLINES){ try{CHART.removeSeries(l
 function drawSnapshot(j){
   PRICEBARS=j.bars||[]; PRICE.setData(priceData());
   try{ CHART.applyOptions({watermark:{text:(document.getElementById('symbol').value||'').toUpperCase()}}); }catch(_){}
+  // NEW SYMBOL / TF → the old zoom is meaningless (a $700 range on a $1 stock).
+  // Dragging the price axis puts the scale in MANUAL mode permanently, so we
+  // must explicitly restore auto-scale + fit when the instrument changes.
+  const symtf=(document.getElementById('symbol').value||'').toUpperCase()+'|'+document.getElementById('tf').value;
+  if(symtf!==LASTSYMTF){
+    LASTSYMTF=symtf;
+    try{CHART.priceScale('right').applyOptions({autoScale:true});}catch(_){}
+    try{CHART.priceScale('osc').applyOptions({autoScale:true});}catch(_){}
+    try{CHART.timeScale().fitContent();}catch(_){}
+  }
   clearStratLines(); SIGMARKERS=[];      // strategy lines/signals are ephemeral — redrawn on Evaluate
   if(BG){ BG.setData((j.bars||[]).map(b=>({time:b.time,value:1,
     color:b.sess==='pre'?'rgba(59,130,246,0.12)':b.sess==='post'?'rgba(168,85,247,0.14)':'rgba(0,0,0,0)'}))); }
@@ -736,7 +746,7 @@ window.addEventListener('load',async()=>{
   document.getElementById('scaleMode').value=localStorage.getItem('qpc_scale')||'0';
   const applyScale=()=>{ const m=parseInt(document.getElementById('scaleMode').value,10)||0; localStorage.setItem('qpc_scale',m); try{CHART.priceScale('right').applyOptions({mode:m});}catch(_){} };
   document.getElementById('scaleMode').addEventListener('change',applyScale); applyScale();
-  document.getElementById('fitBtn').onclick=()=>{ try{CHART.timeScale().fitContent();}catch(_){} };
+  document.getElementById('fitBtn').onclick=()=>{ try{CHART.priceScale('right').applyOptions({autoScale:true});}catch(_){} try{CHART.priceScale('osc').applyOptions({autoScale:true});}catch(_){} try{CHART.timeScale().fitContent();}catch(_){} };
   const _resizeChart=()=>{ if(CHART){ const el=document.getElementById('chart'); CHART.applyOptions({width:el.clientWidth,height:el.clientHeight}); } };
   const closeSide=()=>{ document.getElementById('side').classList.add('hide'); document.body.classList.remove('side-open'); setTimeout(_resizeChart,60); };
   const openSide=()=>{ document.getElementById('side').classList.remove('hide'); document.body.classList.add('side-open'); setTimeout(_resizeChart,60); };
