@@ -166,11 +166,13 @@ def _apply_op(op: str, L: np.ndarray, R: np.ndarray, p: dict | None = None) -> n
         elif op == 'eq': out = np.isclose(L, R)
         elif op == 'neq': out = ~np.isclose(L, R)
         elif op == 'gt_pct':
-            # above by AT LEAST pct% of the reference: L ≥ R × (1 + pct/100).
-            # 'gt' answers "is it above?"; this answers "is it MEANINGFULLY above?"
-            out = L >= R * (1.0 + float(p.get('pct', 0.0)) / 100.0)
+            # above by AT LEAST pct% of the reference's MAGNITUDE:
+            # L ≥ R + |R|·pct/100. 'gt' answers "is it above?"; this answers
+            # "is it MEANINGFULLY above?". |R| (not R) keeps the margin on the
+            # correct side when the reference is NEGATIVE (slope, expr diffs).
+            out = L >= R + np.abs(R) * float(p.get('pct', 0.0)) / 100.0
         elif op == 'lt_pct':
-            out = L <= R * (1.0 - float(p.get('pct', 0.0)) / 100.0)
+            out = L <= R - np.abs(R) * float(p.get('pct', 0.0)) / 100.0
         elif op == 'cross_above':
             out = (~np.isnan(prevL) & ~np.isnan(prevR)) & (prevL <= prevR) & (L > R)
         elif op == 'cross_below':
@@ -332,7 +334,8 @@ def _eval_group(group: dict, bars, ctx) -> np.ndarray:
         return _sequence(parts, int((group or {}).get('window', _SEQ_WINDOW)))
     stacked = np.vstack(parts)
     if logic == 'ATLEAST':                        # K-of-N scoring
-        k = int((group or {}).get('k', 1))
+        # clamp: k ≤ 0 would make the group TRUE ON EVERY BAR (sum ≥ 0)
+        k = max(1, int((group or {}).get('k', 1) or 1))
         return stacked.sum(axis=0) >= k
     return stacked.any(axis=0) if logic == 'OR' else stacked.all(axis=0)
 
@@ -481,17 +484,33 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
             pass
     sl_arr = _anchor_levels(risk.get('sl'), side, bars, ctx)   # trailing line, or None
     tp_arr = _anchor_levels(risk.get('tp'), side, bars, ctx)
+    # Is a stop CONFIGURED? (fixed types need a finite value; 'prim' is
+    # configured by its anchor alone — the % is optional). If yes, an entry
+    # whose stop can't be PRICED on that bar (ATR warm-up NaN, anchored line
+    # not formed yet) is SKIPPED — live you would never send an entry without
+    # knowing the stop, so the preview must not simulate one.
+    def _configured(spec):
+        spec = spec or {}
+        if spec.get('type') == 'prim':
+            return True
+        if not spec.get('type'):
+            return False
+        try:
+            return float(spec.get('value')) == float(spec.get('value'))
+        except (TypeError, ValueError):
+            return False
+    sl_required = _configured(risk.get('sl'))
     # the ARMED level on every in-position bar (NaN while flat) — returned so
     # the chart can DRAW the stop/target exactly as the simulation used them
     # (a fixed stop plots flat, an anchored one visibly trails its line).
     sl_view = np.full(n, np.nan)
     tp_view = np.full(n, np.nan)
     trades = []
+    open_trade = None
     in_pos = False; ei = 0; sl = tp = None
     for j in range(n):
         if not in_pos:
             if entry_mask[j]:
-                in_pos = True; ei = j
                 ep = close[j]
                 # fixed-distance stops: long → SL BELOW entry / TP above;
                 # short → SL ABOVE entry / TP below. (Anchored ones use the array.)
@@ -503,9 +522,12 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
                     sl = ep + sd if sd else None; tp = ep - td if td else None
                 e_sl = sl_arr[j] if sl_arr is not None else sl
                 e_tp = tp_arr[j] if tp_arr is not None else tp
-                if e_sl is not None:
+                if sl_required and (e_sl is None or e_sl != e_sl):
+                    continue                       # stop unpriceable → no trade
+                in_pos = True; ei = j
+                if e_sl is not None and e_sl == e_sl:
                     sl_view[j] = e_sl
-                if e_tp is not None:
+                if e_tp is not None and e_tp == e_tp:
                     tp_view[j] = e_tp
             continue
         # effective level this bar: anchored (trailing, may be NaN in warm-up)
@@ -534,7 +556,14 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
             trades.append({'ei': ei, 'xi': j, 'ret': float(r), 'reason': reason,
                            'entry': float(close[ei]), 'exit': float(px)})
             in_pos = False
-    return trades, sl_view, tp_view
+    if in_pos:
+        # still holding at the window's end — report it instead of hiding it
+        r = (close[-1] - close[ei]) / close[ei]
+        if side == 'short':
+            r = -r
+        open_trade = {'ei': ei, 'entry': float(close[ei]),
+                      'last': float(close[-1]), 'ret': float(r)}
+    return trades, sl_view, tp_view, open_trade
 
 
 def test_condition(node: dict, symbol: str, tf: str, days: int,
@@ -551,7 +580,8 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
     bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
     n = len(bars)
     if n == 0:
-        return {'ok': True, 'bars': 0, 'true': 0, 'markers': [], 'now': False}
+        return {'ok': True, 'bars': 0, 'true': 0, 'pct': 0.0, 'markers': [],
+                'series': [], 'now': False, 'left_now': None, 'right_now': None}
     is_group = ('rules' in node or 'logic' in node)
     mask = _eval_group(node, bars, ctx) if is_group else _eval_rule(node, bars, ctx)
     idx = np.nonzero(mask)[0]
@@ -599,8 +629,10 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
     n = len(bars)
     if n == 0:
-        return {'ok': True, 'bars': 0, 'entries': [], 'exits': [],
-                'markers': [], 'stats': None, 'first': None, 'last': None}
+        return {'ok': True, 'bars': 0, 'entries': [], 'exits': [], 'series': [],
+                'markers': [], 'stats': None, 'open_trade': None,
+                'entry_now': False, 'exit_now': False,
+                'first': None, 'last': None}
 
     side = strategy.get('side', 'long')
     entry_mask = _eval_group(strategy.get('entry'), bars, ctx)
@@ -610,7 +642,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
 
     # STATUS pairing: enter while flat on any true entry bar; exit on any true
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
-    trades, sl_view, tp_view = _pair_trades(
+    trades, sl_view, tp_view, open_trade = _pair_trades(
         bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx)
 
     up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
@@ -673,6 +705,10 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         'entry_now': bool(entry_mask[-1]),
         'exit_now':  bool(exit_mask[-1]),
         'stats': stats,
+        'open_trade': ({'time': int(ts[open_trade['ei']]),
+                        'entry': open_trade['entry'],
+                        'ret_pct': round(100.0 * open_trade['ret'], 3)}
+                       if open_trade else None),
         'first': et[0].strftime('%Y-%m-%d %H:%M ET'),
         'last':  et[-1].strftime('%Y-%m-%d %H:%M ET'),
     }

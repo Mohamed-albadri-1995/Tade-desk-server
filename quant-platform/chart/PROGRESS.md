@@ -314,6 +314,40 @@ All audits green: 54 + 28 + 12 cases + stub-feed e2e.
 Verified: 3 level-view cases + full 101-case regression + headless screenshot
 (volume band, dashed SL/TP segments with axis labels, no JS errors).
 
+### It.18 — Fable 5 ownership pass (full re-read, review, harden)  [DONE]
+Read every line of strategy.py / server.py / store.py / data_manager.py /
+the builder JS with fresh eyes, measuring each decision against the end
+journey (backtest → broker orders). qp library untouched (approved/frozen).
+BUGS FIXED (platform layer):
+1. gt_pct/lt_pct broke on NEGATIVE references (slope, expr diffs): R×(1+p/100)
+   moves the margin the wrong way when R<0 → now L ≥ R + |R|·pct/100.
+2. ATLEAST with k≤0/blank made the group TRUE ON EVERY BAR (sum ≥ 0) → k
+   clamped to ≥1.
+3. UNPROTECTED ENTRIES: an SL configured but unpriceable at the entry bar
+   (ATR warm-up NaN, anchored line not formed) entered with NO stop, silently.
+   Now the entry is SKIPPED until the stop is priceable — live you'd never
+   send an entry without knowing the stop, so the preview must not simulate
+   one. (Blank SL value = SL off = explicit user choice, still enters.)
+4. store embedded stale id/updated_at copies inside the strategy document on
+   every load→edit→save cycle → meta keys stripped before persisting.
+5. Empty-window responses missed keys the frontend touches (series/entry_now).
+DESIGN CHANGED:
+- OPEN POSITIONS are now first-class: a trade still holding at the window end
+  is returned as open_trade (entry, time, unrealized %) and the UI shows
+  "· 1 OPEN (+x%)" instead of the position silently not existing.
+DELIBERATELY KEPT (with reasons):
+- Fills at the signal bar's close (entry AND exit-rule exits). The standard
+  optimistic-by-one-spread preview assumption; Phase 4 backtest will offer
+  next-bar-open fills as a config, not a hidden change here.
+- Live WS loop recomputes the full snapshot per tick — heavy but bounded
+  (interval ≥5s, capped fetch window); an incremental tail computation is a
+  Phase 4 optimization, not a correctness issue.
+- 'N entry signals' counts fresh edges while trades count status entries, so
+  trades can exceed signals after stop-out re-entries — intentional, the OPEN/
+  trades readout makes it legible.
+Suite now 120 hand-computed cases across 6 audit parts + stub-feed e2e — all
+green. Server routes verified exception-wrapped end to end.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
