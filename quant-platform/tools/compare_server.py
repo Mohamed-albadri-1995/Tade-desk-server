@@ -371,6 +371,8 @@ def overlay_arrays(bars: pd.DataFrame, ov: dict, ctx: dict, causal: bool = False
         warm = _COMPUTE_TF_WARMUP_DAYS.get(m.compute_tf, 30)
         cstart = ctx['start'] - pd.Timedelta(days=warm)
         cbars = ctx['loader'].load(ctx['symbol'], m.compute_tf, cstart, ctx['end'])
+        if ctx.get('asof') and len(cbars):
+            cbars = cbars[cbars.index < ctx['end']]   # same replay-boundary law
         result = _call_primitive(m, cbars, source, kwargs)
         coarser = (_TF_MINUTES.get(m.compute_tf, 390)
                    > _TF_MINUTES.get(ctx['tf'], 390))
@@ -462,7 +464,16 @@ def prepare_bars(symbol: str, tf: str, days: int, feed: str = 'alpaca',
         et_full = bars.index.tz_convert(_ET)
         mask = np.fromiter((_in_rth(t) for t in et_full), bool, len(bars))
         bars = bars[mask]
-    ctx = {'symbol': symbol, 'tf': tf, 'loader': loader, 'start': start, 'end': end}
+    # HISTORICAL HONESTY: vendor bar APIs (Alpaca, Polygon) treat `end` as
+    # INCLUSIVE, and daily bars are stamped at midnight ET — so an asof=D
+    # window (end = D+1 00:00 ET) can come back carrying D+1's daily bar, a
+    # bar from the FUTURE of the replay. Never trust vendor inclusivity:
+    # on a replay, cut strictly before `end`. Live keeps the boundary bar
+    # (the developing candle is the point of live mode).
+    if asof and len(bars):
+        bars = bars[bars.index < end]
+    ctx = {'symbol': symbol, 'tf': tf, 'loader': loader, 'start': start,
+           'end': end, 'asof': bool(asof)}
     if len(bars) == 0:
         return bars, [], ctx
     # TRUE UTC epoch seconds — the browser formats these in ET via Intl so the

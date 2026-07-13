@@ -424,6 +424,29 @@ Hand-computed proof (part 13): D3 TR=5 vs D2 TR=1 → chart mode 5.0 at 09:30,
 causal 1.0; avg_volume same law; engine + expr read causal; daily-on-daily
 identical both modes. Suite ALL GREEN.
 
+## FULL-TOOL REVIEW LOOP (finite patch list — no infinite loop)
+Each patch: review → debug → fix → commit → report. Loop STOPS after the
+final patch + one clean full pass. Check off as completed:
+- [x] P1  Data-layer boundaries: vendor end-INCLUSIVITY leaked D+1's daily
+      bar into asof=D replays (dailies are stamped midnight ET = the window
+      end). prepare_bars + compute_tf fetch now cut strictly < end on
+      replays; LIVE keeps the boundary (developing) bar. Tests part 14.
+- [ ] P2  data_manager (required_days edges) + live WS server paths
+- [ ] P3  Screener bridge (Phase 2): card mapping, date handling
+- [ ] P4  Engine corners: session-rules × fill × trade-aware interplay
+- [ ] P5  Store + API endpoints sweep
+- [ ] P6  Frontend JS sweep (builder + backtest panel + filters)
+- [ ] P7  FINAL: full suite + headless smoke + close the loop
+
+### It.24 — loop patch P1: asof replay boundary  [DONE]
+Alpaca/Polygon treat `end` as inclusive; daily bars are stamped at midnight
+ET; asof=D sets end = D+1 00:00 ET → historical replays could include D+1's
+daily bar (the future) in daily displays AND in the compute_tf daily fetch.
+Fix: on replays (ctx.asof), slice strictly before `end` in prepare_bars and
+in overlay_arrays' HTF fetch; live keeps the boundary bar (the developing
+candle is the point of live). Proven with a deliberately end-inclusive stub
+loader stamping dailies at ET midnight (part 14, 7 cases). Suite ALL GREEN.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
