@@ -481,6 +481,11 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
             pass
     sl_arr = _anchor_levels(risk.get('sl'), side, bars, ctx)   # trailing line, or None
     tp_arr = _anchor_levels(risk.get('tp'), side, bars, ctx)
+    # the ARMED level on every in-position bar (NaN while flat) — returned so
+    # the chart can DRAW the stop/target exactly as the simulation used them
+    # (a fixed stop plots flat, an anchored one visibly trails its line).
+    sl_view = np.full(n, np.nan)
+    tp_view = np.full(n, np.nan)
     trades = []
     in_pos = False; ei = 0; sl = tp = None
     for j in range(n):
@@ -496,6 +501,12 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
                     sl = ep - sd if sd else None; tp = ep + td if td else None
                 else:
                     sl = ep + sd if sd else None; tp = ep - td if td else None
+                e_sl = sl_arr[j] if sl_arr is not None else sl
+                e_tp = tp_arr[j] if tp_arr is not None else tp
+                if e_sl is not None:
+                    sl_view[j] = e_sl
+                if e_tp is not None:
+                    tp_view[j] = e_tp
             continue
         # effective level this bar: anchored (trailing, may be NaN in warm-up)
         # beats the fixed scalar; NaN disables the check for that bar.
@@ -505,6 +516,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
             slv = None
         if tpv is not None and tpv != tpv:
             tpv = None
+        if slv is not None:
+            sl_view[j] = slv
+        if tpv is not None:
+            tp_view[j] = tpv
         px = reason = None
         if slv is not None and ((side == 'long' and low[j] <= slv) or (side == 'short' and high[j] >= slv)):
             px, reason = slv, 'SL'
@@ -519,7 +534,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx):
             trades.append({'ei': ei, 'xi': j, 'ret': float(r), 'reason': reason,
                            'entry': float(close[ei]), 'exit': float(px)})
             in_pos = False
-    return trades
+    return trades, sl_view, tp_view
 
 
 def test_condition(node: dict, symbol: str, tf: str, days: int,
@@ -595,7 +610,8 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
 
     # STATUS pairing: enter while flat on any true entry bar; exit on any true
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
-    trades = _pair_trades(bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx)
+    trades, sl_view, tp_view = _pair_trades(
+        bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx)
 
     up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
     up_pos = 'belowBar' if side == 'long' else 'aboveBar'
@@ -635,13 +651,25 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
                  'total_return_pct': round(100.0 * float(rets.sum()), 3),
                  'exits_by': by, 'preview': True}
 
+    # the ARMED stop/target levels, drawn exactly as the simulation used them:
+    # dashed red SL / dashed green TP segments spanning each trade's life —
+    # fixed levels plot flat from the entry, anchored ones visibly trail.
+    series = _indicator_series(strategy, bars, ts, ctx)
+    for nm, arr, col in (('SL level', sl_view, '#ef5350'),
+                         ('TP level', tp_view, '#22c55e')):
+        vals = [{'time': int(t), 'value': float(v)}
+                for t, v in zip(ts, arr) if v == v]
+        if vals:
+            series = list(series) + [{'name': nm, 'color': col, 'style': 2,
+                                      'step': True, 'values': vals}]
+
     et = bars.index.tz_convert(cs._ET)
     return {
         'ok': True, 'bars': n, 'side': side,
         'entries': [{'time': int(ts[i])} for i in np.nonzero(entry_ev)[0]],
         'exits':   [{'time': int(ts[i])} for i in np.nonzero(exit_ev)[0]],
         'markers': markers,
-        'series':  _indicator_series(strategy, bars, ts, ctx),
+        'series':  series,
         'entry_now': bool(entry_mask[-1]),
         'exit_now':  bool(exit_mask[-1]),
         'stats': stats,

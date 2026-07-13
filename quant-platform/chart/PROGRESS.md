@@ -293,6 +293,27 @@ User feedback round 2:
   errors. (The trading tool imports chart/strategy.py or calls the HTTP API.)
 All audits green: 54 + 28 + 12 cases + stub-feed e2e.
 
+### It.17 — volume always visible, SL/TP drawn as armed, order mapping  [DONE]
+- VOLUME: the histogram existed but at 0.32 alpha squeezed into the bottom 14%
+  under the candles it was invisible on a phone. Now a standard chart part:
+  own band (bottom 20%), 0.55 alpha, and the LIVE tick updates it too (it
+  didn't before).
+- SL/TP LEVELS DRAWN: _pair_trades now records the ARMED level on every
+  in-position bar (NaN while flat) and evaluate() returns them as dashed step
+  series — red 'SL level', green 'TP level'. A fixed stop plots flat from the
+  entry; an anchored one (@ line, e.g. 3% below the 9-MA) visibly TRAILS bar
+  by bar. What you see is literally what the simulation used. Frontend now
+  honors per-series line style (dashed).
+- ORDER MAPPING (no-conflict protocol, documented for the trading tool):
+  SL/TP are PRICE LEVELS -> broker bracket legs (stop + limit, OCO). Exit
+  rules are CONDITIONS -> bot-side close (cancel remaining legs, then market
+  out). Anchored SL/TP -> amend the resting stop/limit each bar. Priority is
+  the same everywhere: SL first, then TP, then exit rule. SL/TP must NOT be
+  modeled as condition groups: conditions evaluate on bar close, levels fill
+  INTRABAR and live at the broker even if the bot dies.
+Verified: 3 level-view cases + full 101-case regression + headless screenshot
+(volume band, dashed SL/TP segments with axis labels, no JS errors).
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop

@@ -237,8 +237,9 @@ function initChart(){
   });
   BG=addHist({priceScaleId:'sessbg',priceLineVisible:false,lastValueVisible:false,base:0});
   CHART.priceScale('sessbg').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
+  // volume histogram — a STANDARD part of the chart (own band, bottom 20%)
   VOL=addHist({priceScaleId:'vol',priceLineVisible:false,lastValueVisible:false});
-  CHART.priceScale('vol').applyOptions({scaleMargins:{top:0.86,bottom:0},visible:false});
+  CHART.priceScale('vol').applyOptions({scaleMargins:{top:0.80,bottom:0},visible:false});
   CHARTTYPE=localStorage.getItem('qpc_ctype')||'candles';
   makePriceSeries();
   new ResizeObserver(()=>CHART.applyOptions({width:el.clientWidth,height:el.clientHeight})).observe(el);
@@ -316,7 +317,7 @@ function drawSnapshot(j){
   if(BG){ BG.setData((j.bars||[]).map(b=>({time:b.time,value:1,
     color:b.sess==='pre'?'rgba(59,130,246,0.12)':b.sess==='post'?'rgba(168,85,247,0.14)':'rgba(0,0,0,0)'}))); }
   if(VOL){ VOL.setData((j.bars||[]).map(b=>({time:b.time,value:b.volume,
-    color:b.close>=b.open?'rgba(34,197,94,0.32)':'rgba(239,83,80,0.32)'}))); }
+    color:b.close>=b.open?'rgba(34,197,94,0.55)':'rgba(239,83,80,0.55)'}))); }
   const tf=document.getElementById('tf').value;
   if(tf!=='1d'&&j.day_starts&&j.day_starts.length){
     DAYMARKERS=j.day_starts.map(d=>({time:d.time,position:'belowBar',color:'#64748b',shape:'square',size:1,text:d.label}));
@@ -400,6 +401,7 @@ function startLive(){
     if(m.type==='error'){ document.getElementById('status').textContent='live: '+(m.error||'').slice(0,100); return; }
     if(m.type!=='tick'||!m.bar)return;
     try{ if(CHARTTYPE==='line'||CHARTTYPE==='area')PRICE.update({time:m.bar.time,value:m.bar.close}); else if(CHARTTYPE!=='heikin')PRICE.update(m.bar); }catch(_){}
+    try{ if(VOL&&m.bar.volume!=null)VOL.update({time:m.bar.time,value:m.bar.volume,color:m.bar.close>=m.bar.open?'rgba(34,197,94,0.55)':'rgba(239,83,80,0.55)'}); }catch(_){}
     // move each overlay line's last tip
     for(const t of (m.tips||[])){ const ln=LINES.find(l=>l._ov&&l._ov.name===t.name); if(ln){ try{ln.update({time:t.time,value:t.value});}catch(_){} } }
     const now=new Date(); document.getElementById('status').textContent=`live · last bar ${_ET_HM.format(new Date(m.bar.time*1000))} ET · updated ${now.toLocaleTimeString()}`;
@@ -668,7 +670,7 @@ function drawStratSeries(series){
   for(const s of (series||[])){ const vals=s.values||[]; if(!vals.length)continue;
     let sLo=Infinity,sHi=-Infinity; for(const v of vals){ if(v.value<sLo)sLo=v.value; if(v.value>sHi)sHi=v.value; }
     const onPrice=(sHi>=pLo-0.5*span)&&(sLo<=pHi+0.5*span); if(!onPrice)usedOsc=true;
-    const ln=addLine({color:s.color,lineWidth:2,priceLineVisible:false,title:s.name,lineStyle:0,lineType:s.step?1:0,lastValueVisible:true,priceScaleId:onPrice?'right':'osc',...(onPrice?{autoscaleInfoProvider:()=>null}:{})});
+    const ln=addLine({color:s.color,lineWidth:2,priceLineVisible:false,title:s.name,lineStyle:s.style||0,lineType:s.step?1:0,lastValueVisible:true,priceScaleId:onPrice?'right':'osc',...(onPrice?{autoscaleInfoProvider:()=>null}:{})});
     ln.setData(vals); if(s.markers&&s.markers.length&&typeof ln.setMarkers==='function'){try{ln.setMarkers(s.markers);}catch(_){}}
     ln._ov={name:s.name,color:s.color}; ln._last=vals.length?vals[vals.length-1].value:null; STRATLINES.push(ln);
   }
