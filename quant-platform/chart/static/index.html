@@ -187,6 +187,10 @@
         <select id="btUni" style="flex:1"><option value="symbols">Symbols</option><option value="R1">Register R1</option><option value="Shortlist">Shortlist</option></select>
         <select id="btFill" style="flex:1" title="fill model: close = signal bar close (preview) · next open = honest live fills"><option value="close">fill: close</option><option value="next_open">fill: next open</option></select>
       </div>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <select id="btTf" style="flex:1" title="bar timeframe the backtest evaluates on — use the TF you built the strategy on"><option>1m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select>
+        <select id="btFeed" style="flex:1" title="data feed for the backtest. polygon covers the whole market; alpaca (IEX) has NO data for many small caps — those pairs would be skipped"><option>alpaca</option><option>polygon</option><option>hybrid</option></select>
+      </div>
       <input id="btSyms" placeholder="symbols: SPY,QQQ" style="width:100%;margin-top:4px">
       <input id="btCost" type="number" step="any" placeholder="cost bps/side (e.g. 5)" title="transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies)." style="width:100%;margin-top:4px">
       <div style="display:flex;gap:4px;margin-top:4px">
@@ -204,7 +208,7 @@
         <input id="btEnd" type="date" style="flex:1;min-width:0" title="end date">
         <button id="btRun" style="background:var(--blue);color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer">Run</button>
       </div>
-      <div id="btStat" class="muted" style="margin-top:5px">— uses the chart's TF, feed and session —</div>
+      <div id="btStat" class="muted" style="margin-top:5px">— runs on the TF + feed selected above —</div>
       <div id="btSummary" style="margin-top:4px"></div>
       <div id="btFilters" style="display:none;margin-top:6px;border-top:1px dashed var(--border);padding-top:6px">
         <div id="btFRows"></div>
@@ -475,9 +479,18 @@ async function initHealth(){
   try{ const h=await (await fetch('/api/health')).json();
     document.getElementById('build').textContent='build '+(h.build||'?');
     FEEDS=h.feeds||{};
+    for(const id of ['feed','btFeed']){
+      const sel=document.getElementById(id);
+      for(const o of sel.options){ const ok=h.feeds&&h.feeds[o.value]; o.textContent=o.value+(ok?'':' (no key)'); }
+    }
     const sel=document.getElementById('feed');
-    for(const o of sel.options){ const ok=h.feeds&&h.feeds[o.value]; o.textContent=o.value+(ok?'':' (no key)'); }
     if(!localStorage.getItem('qpc_feed')&&h.default_feed)sel.value=h.default_feed;
+    // a persisted selection whose key is GONE would silently return no data —
+    // fall back to the feed the server says is actually configured
+    if(h.default_feed&&FEEDS[sel.value]===false)sel.value=h.default_feed;
+    // backtests default to the server's preferred feed (full-market coverage),
+    // NOT the chart's current pick — thin feeds silently shrink the universe
+    if(h.default_feed)document.getElementById('btFeed').value=h.default_feed;
   }catch(_){}
 }
 
@@ -861,19 +874,29 @@ function btRenderCore(g,extra){
   const s=g.summary;
   if(!s){ sum.innerHTML=''; tbl.innerHTML=''; return; }
   const by=s.exits_by?Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' '):'';
-  sum.innerHTML = s.trades
-    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span id="btErrTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="tap to see which day·symbol pairs failed and why">⚠ ${s.errors} errors</span>`:'')
+  let html = s.trades
+    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+` · ${s.pairs} pairs`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span id="btErrTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="tap to see which day·symbol pairs failed and why">⚠ ${s.errors} errors</span>`:'')
     : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
-  const samp=(BT_LAST&&BT_LAST.summary&&BT_LAST.summary.error_samples)||s.error_samples||[];
-  const tgl=document.getElementById('btErrTgl');
-  if(tgl&&samp.length){ tgl.onclick=()=>{ let d=document.getElementById('btErrList');
-    if(d){ d.remove(); return; }
-    d=document.createElement('div'); d.id='btErrList'; d.className='muted';
-    d.style.cssText='font-size:10px;margin-top:3px;white-space:normal;color:var(--draft)';
-    d.innerHTML='skipped pairs (no trades from these):<br>'+samp.map(x=>'· '+String(x).slice(0,120)).join('<br>')+(s.errors>samp.length?`<br>… +${s.errors-samp.length} more (see /api/backtest/{id})`:'');
-    sum.appendChild(d); }; }
-  if(s.ttp){ sum.innerHTML+=`<br><span style="color:var(--draft)">TTP @ ${s.ttp.shares} sh: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counted $${s.ttp.counted_pnl_usd} · ${s.ttp.wins_below_min} wins < $${s.ttp.min_profit_ps}/sh wasted</span>`; }
-  if(extra)sum.innerHTML+=`<span class="muted">${extra}</span>`;
+  if(s.ttp){ html+=`<br><span style="color:var(--draft)">TTP @ ${s.ttp.shares} sh: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counted $${s.ttp.counted_pnl_usd} · ${s.ttp.wins_below_min} wins < $${s.ttp.min_profit_ps}/sh wasted</span>`; }
+  const cov=s.coverage;
+  if(cov){
+    let c=`coverage: <b>${cov.evaluated}/${cov.pairs}</b> pairs had data (${cov.tf}·${cov.feed})`;
+    if(cov.no_data)c+=` · <span id="btNdTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="the feed returned ZERO bars for these — they were never evaluated. Small caps often have no alpaca (IEX) data; use polygon.">${cov.no_data} no-data</span>`;
+    c+=` · signals on ${cov.signal_pairs} pairs (${cov.signals_on_day})·traded ${cov.traded_pairs}`;
+    if(cov.bars_median!=null)c+=` · ~${cov.bars_median} bars/pair`;
+    html+=`<br><span class="muted" style="font-size:10px">${c}</span>`;
+  }
+  if(extra)html+=`<span class="muted">${extra}</span>`;
+  sum.innerHTML=html;   // ONE write — appending after wiring would destroy the tap handlers
+  const wireTgl=(id,label,items,total)=>{ const t=document.getElementById(id); if(!t||!items.length)return;
+    t.onclick=()=>{ let d=document.getElementById(id+'List');
+      if(d){ d.remove(); return; }
+      d=document.createElement('div'); d.id=id+'List'; d.className='muted';
+      d.style.cssText='font-size:10px;margin-top:3px;white-space:normal;color:var(--draft)';
+      d.innerHTML=label+'<br>'+items.map(x=>'· '+String(x).slice(0,120)).join('<br>')+((total||0)>items.length?`<br>… +${total-items.length} more (see /api/backtest/{id})`:'');
+      sum.appendChild(d); }; };
+  wireTgl('btErrTgl','failed pairs (evaluation errors):',(BT_LAST&&BT_LAST.summary&&BT_LAST.summary.error_samples)||s.error_samples||[],s.errors);
+  if(cov)wireTgl('btNdTgl','pairs with NO bars from the feed (not evaluated — try polygon):',cov.no_data_samples||[],cov.no_data);
   // equity curve → oscillator pane (values are %, far from price range)
   if(s.equity_curve&&s.equity_curve.length){ drawStratSeries([{name:'equity %',color:'#22c55e',step:false,style:0,values:s.equity_curve}]); }
   const rows=(g.trades||[]);
@@ -909,7 +932,7 @@ async function btRun(){
       ? {kind:'symbols', symbols:(document.getElementById('btSyms').value||'').split(',').map(s=>s.trim()).filter(Boolean)}
       : {kind:'register', register:uni},
     start:document.getElementById('btStart').value, end:document.getElementById('btEnd').value,
-    tf:document.getElementById('tf').value, feed:document.getElementById('feed').value,
+    tf:document.getElementById('btTf').value, feed:document.getElementById('btFeed').value,
     view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0,
     shares:parseFloat(document.getElementById('btShares').value)||100,
     fee_per_share:parseFloat(document.getElementById('btFee').value)||0,
@@ -1007,6 +1030,9 @@ window.addEventListener('load',async()=>{
     document.getElementById(g+'K').addEventListener('change',e=>{ const k=parseInt(e.target.value,10); STRAT[g].k=Number.isFinite(k)?k:1; });
   }
   document.getElementById('btRun').onclick=btRun;
+  // start the backtest TF on whatever the chart is on (the TF the strategy
+  // was built against) — but it's its own visible control from here on
+  document.getElementById('btTf').value=document.getElementById('tf').value;
   document.getElementById('btFAdd').onclick=()=>{ const f={field:document.getElementById('btFField').value, op:document.getElementById('btFOp').value, val:document.getElementById('btFVal').value.trim()}; if(f.field&&f.val!=='')BT_FILTERS.push(f); document.getElementById('btFVal').value=''; btRefresh(); };
   document.getElementById('btCsv').onclick=btCsvExport;
   document.getElementById('btPreset').addEventListener('change',e=>{ if(e.target.value==='ttp'){ document.getElementById('btFee').value='0.005'; document.getElementById('btFeeMin').value='0.75'; document.getElementById('btMinPs').value='0.10'; document.getElementById('btShares').value=document.getElementById('btShares').value||'100'; document.getElementById('btRules').checked=true; document.getElementById('btFill').value='next_open'; } });
