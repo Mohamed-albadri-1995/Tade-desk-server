@@ -485,3 +485,22 @@ and got 1 trade — rightly called it impossible. Root causes, all fixed:
 UI shows: pairs count always + coverage line with tappable no-data list;
 report shows coverage KPIs + a PARTIALLY-EVALUATED warning. Suite ALL GREEN
 (16 parts). Headless smoke at 390/900px: toggles alive, no JS errors.
+
+### It.26 — phantom signal ladders (stacked arrows at one bar)  [DONE]
+User's SPY preview showed columns of identical entry/exit arrows at single
+x-positions. Cause: required_days() EXTENDS the evaluate fetch for indicator
+warm-up (pine_5day len 1950 on 1m: 5 requested days -> ~13, alpaca-capped 7),
+so eval returned markers/series/trades on warm-up bars the chart never
+displays — lightweight-charts snaps unknown marker times onto the nearest
+bar it has, stacking them into ladders. Not real trades (one-position
+invariant holds); a pure display lie. Fixed at three layers:
+1. evaluate(): every output (markers, entries/exits, trades, series incl.
+   SL/TP views, bar count, stats, first/last) sliced to the REQUESTED window;
+   warm-up keeps feeding indicator values + position state carried in. A
+   pre-window open position is still reported, just not drawn.
+2. test_condition(): same slice — the fire-rate % now describes the bars the
+   user is looking at, not invisible warm-up bars.
+3. refreshMarkers(): drops any marker outside PRICEBARS' time range (belt &
+   braces against any future bar-set mismatch).
+Audit part 16 (17 cases) forces a 2->13-day extension and pins all of it.
+Suite ALL GREEN (17 parts).

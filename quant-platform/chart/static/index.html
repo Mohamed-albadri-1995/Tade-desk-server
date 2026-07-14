@@ -253,7 +253,12 @@ function makePriceSeries(){
 }
 function setChartType(t){ CHARTTYPE=t; localStorage.setItem('qpc_ctype',t); makePriceSeries(); PRICE.setData(priceData()); refreshMarkers(); }
 let DAYMARKERS=[], SIGMARKERS=[];   // price-series markers: day labels + strategy signals
-function refreshMarkers(){ if(PRICE){ try{ PRICE.setMarkers([...DAYMARKERS,...SIGMARKERS].sort((a,b)=>a.time-b.time)); }catch(_){} } }
+function refreshMarkers(){ if(PRICE){ try{
+  let ms=[...DAYMARKERS,...SIGMARKERS];
+  // a marker whose time the price series doesn't cover gets snapped onto the
+  // nearest bar by the library — several of those stack into a phantom ladder
+  if(PRICEBARS.length){ const t0=PRICEBARS[0].time, t1=PRICEBARS[PRICEBARS.length-1].time; ms=ms.filter(m=>m.time>=t0&&m.time<=t1); }
+  PRICE.setMarkers(ms.sort((a,b)=>a.time-b.time)); }catch(_){} } }
 const PALETTE=['#3b82f6','#f5a623','#a855f7','#ec4899','#06b6d4','#eab308','#14b8a6','#f97316','#e879f9','#84cc16'];
 
 // ── chart-library helpers (v4/v5 feature-detect) ──

@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pandas as pd
 
 import tools.compare_server as cs
 
@@ -707,6 +708,7 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
                          'use Evaluate to see it per trade'}
     strat_like = {'entry': node if ('rules' in node or 'logic' in node)
                   else {'logic': 'AND', 'rules': [node]}}
+    days_req = int(days)
     days = dm.required_days(referenced_overlays(strat_like), tf, days)
     bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
     n = len(bars)
@@ -715,6 +717,14 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
                 'series': [], 'now': False, 'left_now': None, 'right_now': None}
     is_group = ('rules' in node or 'logic' in node)
     mask = _eval_group(node, bars, ctx) if is_group else _eval_rule(node, bars, ctx)
+    # only the requested window: warm-up bars aren't displayed, so dots there
+    # would snap onto the chart's boundary bars, and the fire-rate % must
+    # describe the bars the user is actually looking at (see evaluate()).
+    vis = np.asarray(bars.index >= (ctx['end'] - pd.Timedelta(days=days_req)))
+    if not vis.any():
+        vis = np.ones(n, dtype=bool)
+    mask = mask & vis
+    n = int(vis.sum())
     idx = np.nonzero(mask)[0]
     markers = [{'time': int(ts[i]), 'position': 'aboveBar', 'shape': 'circle',
                 'color': '#3b82f6', 'text': ''} for i in idx]
@@ -743,7 +753,12 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
                 right_now = round(float(ra[-1]), 4)
         except Exception:
             pass
-    et = bars.index.tz_convert(cs._ET)
+    wsec = int((ctx['end'] - pd.Timedelta(days=days_req)
+                - pd.Timestamp('1970-01-01', tz='UTC')) // pd.Timedelta(seconds=1))
+    series = [dict(s, values=[v for v in (s.get('values') or [])
+                              if v['time'] >= wsec]) for s in series]
+    series = [s for s in series if s['values']]
+    et = bars.index[vis].tz_convert(cs._ET)
     return {'ok': True, 'bars': n, 'true': int(mask.sum()),
             'pct': round(100.0 * mask.sum() / n, 1), 'now': bool(mask[-1]),
             'markers': markers, 'series': series,
@@ -784,6 +799,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
              asof: str | None = None, fill: str = 'close',
              rules: dict | None = None) -> dict:
     from chart import data_manager as dm
+    days_req = int(days)                   # what the CALLER asked to see
     days = dm.required_days(referenced_overlays(strategy), tf, days)
     bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
     n = len(bars)
@@ -813,6 +829,23 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         exit_group=exit_group if trade_aware else None, fill=fill,
         entry_ok=entry_ok, eod_close=eod_close)
 
+    # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what
+    # the caller asked for (indicator warm-up). The chart only displays the
+    # requested window — signals/trades/series on warm-up bars would be
+    # handed to the chart library with times it has no bars for, and it snaps
+    # them onto the nearest bar it DOES have: a phantom ladder of stacked
+    # arrows at one spot. Slice every output to the requested window. The
+    # warm-up bars keep doing their real job (indicator values + the position
+    # state carried into the window).
+    wstart = ctx['end'] - pd.Timedelta(days=days_req)
+    vis = np.asarray(bars.index >= wstart)
+    if not vis.any():                       # degenerate; window ends at data end
+        vis = np.ones(n, dtype=bool)
+    entry_ev = entry_ev & vis
+    exit_ev = exit_ev & vis
+    trades = [t for t in trades if vis[t['ei']]]
+    pre_window_open = open_trade is not None and not vis[open_trade['ei']]
+
     up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
     up_pos = 'belowBar' if side == 'long' else 'aboveBar'
     markers = []
@@ -822,7 +855,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     #  - faint dot    = the entry condition fired but NO trade opened (already
     #    in a position / session rules / unpriceable stop). Informational.
     entered = {t['ei'] for t in trades}
-    if open_trade:
+    if open_trade and not pre_window_open:  # a pre-window entry has no bar to draw on
         entered.add(open_trade['ei'])
     for i in np.nonzero(entry_ev)[0]:
         if i in entered:
@@ -865,10 +898,16 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         if vals:
             series = list(series) + [{'name': nm, 'color': col, 'style': 2,
                                       'step': True, 'values': vals}]
+    # series points on warm-up bars would also land on bars the chart lacks
+    wsec = int((wstart - pd.Timestamp('1970-01-01', tz='UTC'))
+               // pd.Timedelta(seconds=1))
+    series = [dict(s, values=[v for v in (s.get('values') or [])
+                              if v['time'] >= wsec]) for s in series]
+    series = [s for s in series if s['values']]
 
-    et = bars.index.tz_convert(cs._ET)
+    et = bars.index[vis].tz_convert(cs._ET)
     return {
-        'ok': True, 'bars': n, 'side': side,
+        'ok': True, 'bars': int(vis.sum()), 'side': side,
         # the actual simulated trades — the backtester (Phase 4) consumes
         # EXACTLY this, so preview and backtest can never disagree.
         'trades': [{'entry_ts': int(ts[t['ei']]), 'exit_ts': int(ts[t['xi']]),
