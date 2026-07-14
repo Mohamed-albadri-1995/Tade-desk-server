@@ -146,6 +146,48 @@ chktrue('chop mostly NEITHER (>=88%)', neither>=0.88, f'(got {neither:.1%})')
 ramp=np.arange(50,dtype=float)
 chktrue('perfect ramp capped at 99', np.nanmax(slope_strength(ramp,12))==99.0)
 
+print("== E2. rising/falling v3: direction · net-% magnitude · consistency ==")
+# 1) magnitude gate (min_pct): +0.05/bar from 100 -> net over 12 bars = 0.6
+#    (~0.59% of the start). Any-direction passes; >=1% does not; >=0.5% does.
+slow=bars_from(close=list(100+0.05*np.arange(30)))
+chkv('shallow rise: direction-only fires',
+     bool(S._eval_rule(rule(P(),'rising'), slow, None)[-1]), True)
+chkv('shallow rise: net>=1% rejects it',
+     bool(S._eval_rule(rule(P(),'rising',op_params={'min_pct':1.0}), slow, None)[-1]), False)
+chkv('shallow rise: net>=0.5% passes',
+     bool(S._eval_rule(rule(P(),'rising',op_params={'min_pct':0.5}), slow, None)[-1]), True)
+# 2) consistency knob: 8 up / 4 down diffs per 12-bar window (net clearly up,
+#    frac = 8/12 = 0.667): default 0.75 rejects, 0.6 accepts, 0 = direction only.
+pat=[+.2,+.2,-.1,+.2,+.2,-.1,+.2,+.2,-.1,+.2,+.2,-.1]
+jag=bars_from(close=list(100+np.cumsum([0.0]+pat+pat)))
+chkv('jagged net-up rejected at default 0.75 (8/12 moves up)',
+     bool(S._eval_rule(rule(P(),'rising'), jag, None)[-1]), False)
+chkv('same shape accepted at consistency 0.6',
+     bool(S._eval_rule(rule(P(),'rising',op_params={'consistency':0.6}), jag, None)[-1]), True)
+chkv('consistency 0 = pure direction',
+     bool(S._eval_rule(rule(P(),'rising',op_params={'consistency':0}), jag, None)[-1]), True)
+# 3) step lines (pm_low, day levels): flat most bars, occasional up-steps —
+#    flat bars must NOT count against consistency.
+stp=[0,0,0,1,0,0,0,0,1,0,0,0]
+step=bars_from(close=list(100+np.cumsum([0.0]+stp+stp)))
+chkv('step line with 2 up-steps in the window IS rising',
+     bool(S._eval_rule(rule(P(),'rising'), step, None)[-1]), True)
+chkv('step line is not falling',
+     bool(S._eval_rule(rule(P(),'falling'), step, None)[-1]), False)
+flatb=bars_from(close=[100.0]*30)
+chkv('a flat line is NEITHER rising nor falling',
+     (bool(S._eval_rule(rule(P(),'rising'), flatb, None)[-1]),
+      bool(S._eval_rule(rule(P(),'falling'), flatb, None)[-1])), (False, False))
+# 4) falling mirror with magnitude
+drop=bars_from(close=list(100-0.05*np.arange(30)))
+chkv('falling mirror: direction fires, >=1% rejects',
+     (bool(S._eval_rule(rule(P(),'falling'), drop, None)[-1]),
+      bool(S._eval_rule(rule(P(),'falling',op_params={'min_pct':1.0}), drop, None)[-1])),
+     (True, False))
+# 5) v2 leftover min_strength in saved strategies is IGNORED (not an error)
+chkv('old min_strength param ignored',
+     bool(S._eval_rule(rule(P(),'rising',op_params={'min_strength':20}), slow, None)[-1]), True)
+
 print("\n================  RESULT (part 2)  ================")
 print(f"PASS={PASS}  FAIL={FAIL}")
 if FAILS: print("FAILURES:", FAILS)

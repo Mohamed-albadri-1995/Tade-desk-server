@@ -539,3 +539,25 @@ shows a winner. Investigated, not assumed:
    the stat line always names it; Clear signals resets to pure preview.
 Suite ALL GREEN (17 parts, part 15 now 23 cases). Headless: tap injects
 fill/rules/symbol/asof/tf into the evaluate request, label renders.
+
+### It.29 — rising/falling v3: price terms, not a unitless statistic  [DONE]
+User (with 3 TV scripts): "the rising and falling check is very stupid and
+not related to rise or fall at all." Correct: v2 scored net move / residual
+noise — on smooth lines (VWAPs, long MAs) the noise term ~0 made the score
+explode, so any str>= threshold was arbitrary and the number had no unit a
+trader could reason about (they were typing str>=10, str>=20 blind).
+v3, built from their scripts' two honest idioms ('5D MA Rising' = ma>ma[N];
+L3 VWAP slope score = net up-checkpoints):
+  rising over N bars =
+    1. DIRECTION  line > its value N bars ago
+    2. MAGNITUDE  optional min_pct: net move >= min_pct% of the start
+    3. CONSISTENCY >= consistency (default 0.75) of the window's NONZERO
+       bar-to-bar changes point that way (flat bars don't count against it —
+       step lines like pm_low that move rarely but one-way still qualify)
+Flat = neither. v2's min_strength is ignored if present in saved strategies
+(engine no longer reads it); qp's plottable trend.slope untouched (frozen).
+UI: 'str>=' replaced by 'net>=%' + 'cons>=' with explanatory titles.
+Part 2 sec E2: 12 hand-computed cases (magnitude gate, consistency knob,
+step lines, flat-neither, falling mirror, min_strength ignored). Old part-1
+monotone/chop and part-2 seeded-noise engine tests pass unchanged under v3.
+Suite ALL GREEN (17 parts).

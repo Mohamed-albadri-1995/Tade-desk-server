@@ -652,7 +652,8 @@ function ruleRowEl(group, rule){
   const opSel=document.createElement('select'); for(const [v,l] of OPS){const o=document.createElement('option');o.value=v;o.textContent=l;opSel.appendChild(o);} opSel.value=rule.op; opSel.onchange=()=>{rule.op=opSel.value; renderStrat();}; row.appendChild(opSel);
   if(UNARY.has(rule.op)){
     row.appendChild(labeled('over', opParamInput(rule,'lookback',12)));
-    row.appendChild(labeled('bars · str≥', opParamInput(rule,'min_strength',2)));
+    const mp=opParamInput(rule,'min_pct',0); mp.title='minimum NET move over the lookback, as % of the start value: 0 = any move in the direction counts; 0.2 = must have risen/fallen at least 0.2% over the window'; row.appendChild(labeled('bars · net≥%', mp));
+    const cn=opParamInput(rule,'consistency',0.75); cn.title='how one-way the move must be: fraction of the window’s bar-to-bar changes pointing in the direction. 0.75 = 9 of 12 moves up (for rising). Flat bars don’t count against it. 0 = direction only; 1 = strictly one-way.'; row.appendChild(labeled('cons≥', cn));
   } else if(BOUNCE.has(rule.op)){
     row.appendChild(operandEl(rule.right, renderStrat, true));
     row.appendChild(labeled('tol%', opParamInput(rule,'tol_pct',0.15)));

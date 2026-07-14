@@ -13,7 +13,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 PARTS = [
     ('logic_audit.py',      'operators, groups, THEN, bounce, slope, SL/TP pairing'),
-    ('logic_audit2.py',     'pct ops, cross+hold, anchored SL/TP, slope v2'),
+    ('logic_audit2.py',     'pct ops, cross+hold, anchored SL/TP, slope v3'),
     ('logic_audit3.py',     'bounce v3 attack cases, status pairing, volume composition'),
     ('logic_audit4.py',     "rule-level signal offset ('ago')"),
     ('level_view_audit.py', 'SL/TP level views (what gets drawn)'),

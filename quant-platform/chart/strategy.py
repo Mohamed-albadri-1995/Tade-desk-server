@@ -24,10 +24,13 @@ rule:
                         # (applied after for/within; operand offsets shift
                         # values, this shifts the rule's own result)
   OP ∈ gt lt ge le eq neq cross_above cross_below rising falling bounce_up bounce_down
-    rising/falling  — regression slope of `left` over op_params.lookback bars,
-                      measured as net move ÷ window volatility, is ≥ / ≤
-                      op_params.min_strength. A flat/choppy series is NEITHER
-                      (strength ~0). right ignored.
+    rising/falling  — `left` over op_params.lookback bars, in PRICE terms:
+                      (1) ends above/below where it started; (2) optionally by
+                      at least op_params.min_pct % of the start; (3) at least
+                      op_params.consistency (default 0.75) of the window's
+                      bar-to-bar CHANGES point that way (flat bars don't count
+                      against it). A flat/choppy series is NEITHER. right
+                      ignored.
     bounce_up/down  — the price bar bounces off `right` (an MA/level): a wick comes
                       within op_params.tol_pct of it and the bar closes back on the
                       right side (support held / resistance held).
@@ -62,8 +65,8 @@ _BOUNCE = ('bounce_up', 'bounce_down')  # left = price bar, right = reference le
 _PRICE_FIELDS = ('close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'volume')
 
 # Defaults for the configurable operators (overridable per rule via op_params).
-_SLOPE_LOOKBACK = 12      # bars in the regression window
-_SLOPE_MIN_STRENGTH = 2.0 # min |net move ÷ residual noise| to count as a trend
+_SLOPE_LOOKBACK = 12       # bars the line is measured over
+_SLOPE_CONSISTENCY = 0.75  # fraction of the window's moves that must agree
                           # (pure noise reads |strength|≈0.9, so 2.0 ≈ "clearly a trend":
                           # chop false-fires ~3-4%, real trends score 5-50+)
 _BOUNCE_TOL_PCT = 0.15    # how close (in %) the wick must come to the level to "touch"
@@ -213,17 +216,48 @@ def _apply_op(op: str, L: np.ndarray, R: np.ndarray, p: dict | None = None) -> n
 
 
 def _slope_flag(L: np.ndarray, op: str, p: dict) -> np.ndarray:
-    # Same math as the plottable `trend.slope` primitive — one source of truth,
-    # so what you SEE when you plot slope is exactly what rising/falling tests.
-    from qp.primitives.trend import slope_strength
-    lookback = int(p.get('lookback', _SLOPE_LOOKBACK))
-    thr = float(p.get('min_strength', _SLOPE_MIN_STRENGTH))
-    s = slope_strength(L, lookback)
-    with np.errstate(invalid='ignore'):
-        out = (s >= thr) if op == 'rising' else (s <= -thr)
-    out = np.asarray(out, dtype=bool)
-    out[np.isnan(s)] = False
-    return out
+    """rising/falling v3 — measured in PRICE terms a trader can verify by eye,
+    replacing the old noise-normalized regression score whose 'strength' had
+    no unit (on smooth lines like VWAPs the noise term ~0 made the score
+    explode, so any threshold was arbitrary). Three checks over `lookback`:
+      1. DIRECTION — the line ends above (rising) / below (falling) where it
+         started N bars ago (TV idiom: '5D MA Rising' = ma > ma[N]).
+      2. MAGNITUDE — optional min_pct: the net move is at least min_pct% of
+         the start value ('rising by ≥0.2% over 12 bars').
+      3. CONSISTENCY — at least `consistency` (default 0.75) of the window's
+         NONZERO bar-to-bar changes point the same way (the L3 slope-score
+         idea). Flat bars don't count against it, so step lines (pm_low,
+         day levels) that move rarely but always one way still qualify.
+    A flat line is neither rising nor falling. min_strength (v2) is ignored."""
+    n = len(L)
+    N = max(1, int(p.get('lookback', _SLOPE_LOOKBACK) or _SLOPE_LOOKBACK))
+    min_pct = float(p.get('min_pct', 0.0) or 0.0)
+    cons = min(max(float(p.get('consistency', _SLOPE_CONSISTENCY)), 0.0), 1.0)
+    ref = np.full(n, np.nan)
+    if n > N:
+        ref[N:] = L[:-N]
+    with np.errstate(invalid='ignore', divide='ignore'):
+        net = L - ref
+        d = np.diff(L, prepend=np.nan)
+        up = (d > 0).astype(np.float64)     # NaN diffs count as neither
+        dn = (d < 0).astype(np.float64)
+        cu, cd = np.cumsum(up), np.cumsum(dn)
+        cup, cdn = cu.copy(), cd.copy()     # rolling sums of the last N diffs
+        if n > N:
+            cup[N:] = cu[N:] - cu[:-N]
+            cdn[N:] = cd[N:] - cd[:-N]
+        nz = cup + cdn
+        good = cup if op == 'rising' else cdn
+        signed = net if op == 'rising' else -net
+        ok = signed > 0
+        if min_pct > 0:
+            ok = ok & (signed >= np.abs(ref) * min_pct / 100.0)
+        if cons > 0:
+            frac = good / np.where(nz > 0, nz, 1.0)
+            ok = ok & (nz > 0) & (frac >= cons)
+    ok = np.asarray(ok, dtype=bool)
+    ok[np.isnan(L) | np.isnan(ref)] = False
+    return ok
 
 
 def _bounce_flag(op: str, bars, R: np.ndarray, p: dict) -> np.ndarray:
