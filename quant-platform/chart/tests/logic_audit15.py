@@ -105,5 +105,59 @@ try:
 finally:
     sc.available_dates, sc.register_rows = _orig_ad, _orig_rr
 
+print("== 4. parity: a backtest row IS evaluate()'s trade — and fill flips it ==")
+# Hand-built day: signal bar 14:00 closes 50.00; the NEXT bar opens 51.00
+# (spike). Exit signal 14:10 (close 50.50); next open 50.40.
+#   close fill (preview):    50.00 -> 50.50  = +1.000%   WINNER
+#   next_open fill (honest): 51.00 -> 50.40  = -1.176%   LOSER
+# Same strategy, same day, same data — the fill model alone flips the sign.
+# And the backtest row must equal the direct evaluate() call bit-for-bit.
+import chart.strategy as S
+
+
+class ParityLoader:
+    def load(self, symbol, tf, start, end):
+        idx = pd.date_range(start, end, freq='1min', tz='UTC')[:25000]
+        et = idx.tz_convert('America/New_York')
+        hhmm = np.asarray(et.hour) * 100 + np.asarray(et.minute)
+        o = np.full(len(idx), 50.0)
+        c = np.full(len(idx), 50.0)
+        o[hhmm == 1401] = 51.00; c[hhmm == 1401] = 50.90
+        o[hhmm == 1410] = 50.55; c[hhmm == 1410] = 50.50
+        o[hhmm == 1411] = 50.40; c[hhmm == 1411] = 50.45
+        return pd.DataFrame({'open': o, 'high': np.maximum(o, c) + 0.02,
+                             'low': np.minimum(o, c) - 0.02, 'close': c,
+                             'volume': np.full(len(idx), 1000.0)}, index=idx)
+
+
+cs._LOADERS['stub15p'] = ParityLoader()
+strat_p = {'name': 'p', 'side': 'long',
+           'entry': {'logic': 'AND', 'rules': [{'left': T(), 'op': 'eq', 'right': C(1400)}]},
+           'exit': {'logic': 'AND', 'rules': [{'left': T(), 'op': 'eq', 'right': C(1410)}]}}
+rn = S.evaluate(strat_p, 'PAR', '1m', 1, feed='stub15p', view='all',
+                asof='2024-01-09', fill='next_open', rules=RULES)
+tn = rn['trades']
+chkv('next_open: entry at NEXT bar open, exit at NEXT bar open',
+     (tn[0]['entry'], tn[0]['exit']) if tn else None, (51.0, 50.4))
+chkv('next_open ret is the honest LOSS',
+     round(tn[0]['ret'], 6) if tn else None, round((50.4 - 51.0) / 51.0, 6))
+rc = S.evaluate(strat_p, 'PAR', '1m', 1, feed='stub15p', view='all',
+                asof='2024-01-09', fill='close')
+tc = rc['trades']
+chkv('close fill (preview): same signals, WINNER',
+     (tc[0]['entry'], tc[0]['exit'], round(tc[0]['ret'], 6)) if tc else None,
+     (50.0, 50.5, 0.01))
+out4 = bt.run({'strategy': strat_p, 'tf': '1m', 'days': 1, 'feed': 'stub15p',
+               'view': 'all', 'fill': 'next_open',
+               'start': '2024-01-09', 'end': '2024-01-09',
+               'universe': {'kind': 'symbols', 'symbols': ['PAR']},
+               'rules': RULES})
+row = out4['trades'][0] if out4['trades'] else None
+chkv('backtest row == evaluate() trade bit-for-bit',
+     (row['entry_ts'], row['entry'], row['exit'], round(row['ret'], 10),
+      row['reason']) if row else None,
+     (tn[0]['entry_ts'], tn[0]['entry'], tn[0]['exit'],
+      round(tn[0]['ret'], 10), tn[0]['reason']) if tn else 'no-eval-trade')
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)

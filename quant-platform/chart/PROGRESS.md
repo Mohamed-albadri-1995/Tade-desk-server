@@ -519,3 +519,23 @@ open-side on the touch bar, wick tol, doji/close_pos on the confirm bar.
 Part 3 +8 cases (two-bar shape, breakdown kill, window boundary, down
 mirror); all old attack cases pass unchanged = within=1 equivalence.
 Suite ALL GREEN (17 parts). Headless: 'win' input renders, stores op_params.
+
+### It.28 — "loser in backtest, winner alone" investigated: replay mode  [DONE]
+User: ZCMD 2026-07-07 shows -2.50% in backtest #22 but evaluating it alone
+shows a winner. Investigated, not assumed:
+1. Engine consistency PROVEN, not asserted: part 15 sec 4 pins bit-for-bit
+   equality between a backtest row and evaluate() under the same settings
+   (entry_ts, prices, ret, reason). No nondeterminism.
+2. The real cause: the Evaluate preview runs close-fill with NO session
+   rules; the backtest ran next-open fill + TTP rules. Hand-built case in
+   the suite: identical signals are +1.000% at close fill and -1.176% at
+   next-open (signal close 50.00, next open 51.00 spike). On 1m runners the
+   fill model alone flips signs — that is the honesty it exists for.
+3. Tool so the user can SEE it: tapping a backtest trade row now REPLAYS
+   that run — loads the symbol as-of the trade date, switches tf/feed to the
+   run's, loads the run's strategy, evaluates with the run's fill+rules, and
+   labels the stat line 'backtest #N replay: next-open fill · session rules
+   ON'. /api/strategy/evaluate accepts rules; EVALMODE tracks the mode and
+   the stat line always names it; Clear signals resets to pure preview.
+Suite ALL GREEN (17 parts, part 15 now 23 cases). Headless: tap injects
+fill/rules/symbol/asof/tf into the evaluate request, label renders.

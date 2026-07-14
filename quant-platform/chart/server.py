@@ -303,7 +303,10 @@ def strategy_test(payload: dict = Body(...)):
 @app.post('/api/strategy/evaluate')
 def strategy_evaluate(payload: dict = Body(...)):
     """Evaluate a strategy over a chart window → signal markers + preview
-    stats. Body: {strategy, symbol, tf, days, feed, view, asof}."""
+    stats. Body: {strategy, symbol, tf, days, feed, view, asof, fill, rules}.
+    fill + rules let the UI REPLAY a backtest's exact settings on the chart —
+    without them a preview (close fill, no session rules) can legitimately
+    show a different trade than the backtest took."""
     try:
         s = payload.get('strategy') or {}
         out = strat.evaluate(
@@ -315,6 +318,7 @@ def strategy_evaluate(payload: dict = Body(...)):
             view=payload.get('view', 'all'),
             asof=payload.get('asof') or None,
             fill=payload.get('fill', 'close'),
+            rules=payload.get('rules') or None,
         )
         return JSONResponse(out)
     except Exception as e:

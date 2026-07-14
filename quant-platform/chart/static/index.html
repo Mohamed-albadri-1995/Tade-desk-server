@@ -912,7 +912,14 @@ function btRenderCore(g,extra){
     const cls=(t.ret||0)>0?'up':'dn';
     d.innerHTML=`<span class="tk">${t.symbol}</span> <span class="muted">${t.date}</span> <span class="${cls}" style="float:right">${t.ret!=null?((t.ret*100).toFixed(2)+'%'):'—'} ${t.reason}</span>`;
     d.title=`${t.side} ${t.entry} → ${t.exit??'(open)'}`;
-    d.onclick=()=>{ document.getElementById('symbol').value=t.symbol; document.getElementById('asof').value=t.date; if(LIVE)toggleLive(); syncAsofUI(); loadChart(); };
+    d.onclick=async()=>{ // REPLAY the backtest's exact settings on this trade's chart:
+      const spec=(g&&g.spec)||{};
+      document.getElementById('symbol').value=t.symbol; document.getElementById('asof').value=t.date;
+      if(spec.tf)document.getElementById('tf').value=spec.tf;
+      if(spec.feed)document.getElementById('feed').value=spec.feed;
+      if(spec.strategy_id)loadStrategyById(spec.strategy_id);
+      EVALMODE={fill:spec.fill||'close', rules:spec.rules||null, label:'backtest #'+(g.id||'')+' replay'};
+      if(LIVE)toggleLive(); syncAsofUI(); await loadChart(); evalStrategy(); };
     tbl.appendChild(d);
   }
 }
@@ -957,9 +964,14 @@ async function btRun(){
 function loadStrategyById(id){ const s=SAVED.find(x=>String(x.id)===String(id)); if(!s)return; STRAT=JSON.parse(JSON.stringify(s)); STRAT.entry=STRAT.entry||{logic:'AND',rules:[]}; STRAT.exit=STRAT.exit||{logic:'AND',rules:[]}; STRAT.risk=STRAT.risk||{sl:{type:'',value:null},tp:{type:'',value:null}}; SIGMARKERS=[]; clearStratLines(); refreshMarkers(); renderStrat(); }
 async function saveStrategy(){ readStratHeader(); if(!STRAT.name)STRAT.name='Untitled'; const j=await (await fetch('/api/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(STRAT)})).json(); if(j.ok){ STRAT.id=j.strategy.id; await loadStrategies(); document.getElementById('stratStat').textContent='saved ✓'; } else document.getElementById('stratStat').textContent='save error'; }
 async function delStrategy(){ if(STRAT.id){ await fetch('/api/strategies/'+STRAT.id,{method:'DELETE'}); } STRAT=blankStrat(); seedTemplate(); await loadStrategies(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; }
+// how Evaluate simulates fills/session rules. Default = pure preview (close
+// fill, no rules). Tapping a backtest trade row switches this to THAT run's
+// settings so the chart shows the exact trade the backtest took — a preview
+// under different settings showing a different result is not a bug.
+let EVALMODE={fill:'close', rules:null, label:''};
 async function evalStrategy(){
   readStratHeader();
-  const body={ strategy:STRAT, symbol:document.getElementById('symbol').value.trim().toUpperCase()||'SPY', tf:document.getElementById('tf').value, days:Number(document.getElementById('days').value), feed:document.getElementById('feed').value, view:document.getElementById('view').value, asof:document.getElementById('asof').value||'' };
+  const body={ strategy:STRAT, symbol:document.getElementById('symbol').value.trim().toUpperCase()||'SPY', tf:document.getElementById('tf').value, days:Number(document.getElementById('days').value), feed:document.getElementById('feed').value, view:document.getElementById('view').value, asof:document.getElementById('asof').value||'', fill:EVALMODE.fill, rules:EVALMODE.rules };
   document.getElementById('stratStat').textContent='evaluating…';
   try{
     const j=await (await fetch('/api/strategy/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
@@ -972,7 +984,10 @@ async function evalStrategy(){
     const s=j.stats;
     const by=s&&s.exits_by?' ['+Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' ')+']':'';
     const op=j.open_trade?` · <span style="color:var(--blue)">1 OPEN (${j.open_trade.ret_pct>=0?'+':''}${j.open_trade.ret_pct}%)</span>`:'';
-    document.getElementById('stratStat').innerHTML=`${(j.entries||[]).length} entry signals · ${(s?s.trades:0)} trades${op} · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%${by} <span class="muted">(preview — full backtest is Phase 4)</span>`:(j.open_trade||j.exit_now===undefined?'':' · add an exit or SL/TP to close trades'));
+    const mode=(EVALMODE.fill!=='close'||EVALMODE.rules)
+      ? `(${EVALMODE.label||'replay'}: ${EVALMODE.fill==='next_open'?'next-open':'close'} fill · ${EVALMODE.rules?'session rules ON':'no rules'})`
+      : '(preview: close fill · no session rules — tap a backtest trade to replay its settings)';
+    document.getElementById('stratStat').innerHTML=`${(j.entries||[]).length} entry signals · ${(s?s.trades:0)} trades${op} · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%${by}`:(j.open_trade||j.exit_now===undefined?'':' · add an exit or SL/TP to close trades'))+` <span class="muted">${mode}</span>`;
   }catch(e){ document.getElementById('stratStat').textContent='error: '+e.message; }
 }
 function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open); document.getElementById('stratBtn').classList.toggle('on',open); if(open&&CHART){ setTimeout(()=>{const el=document.getElementById('chart'); CHART.applyOptions({height:el.clientHeight});},50); } }
@@ -1028,7 +1043,7 @@ window.addEventListener('load',async()=>{
   document.getElementById('stratNew').onclick=()=>{ STRAT=blankStrat(); seedTemplate(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; };
   document.getElementById('stratLoad').addEventListener('change',e=>loadStrategyById(e.target.value));
   for(const id of ['slType','tpType']) document.getElementById(id).addEventListener('change',()=>{ readStratHeader(); renderStrat(); });
-  document.getElementById('stratClear').onclick=()=>{ SIGMARKERS=[]; refreshMarkers(); clearStratLines(); document.getElementById('stratStat').textContent=''; };
+  document.getElementById('stratClear').onclick=()=>{ SIGMARKERS=[]; refreshMarkers(); clearStratLines(); EVALMODE={fill:'close',rules:null,label:''}; document.getElementById('stratStat').textContent=''; };
   document.querySelectorAll('#colEntry>.addrule, #colExit>.addrule').forEach(b=>b.onclick=()=>{ STRAT[b.dataset.g].rules.push(b.dataset.t==='group'?blankGroup():blankRule()); renderStrat(); });
   for(const g of ['entry','exit']){
     document.getElementById(g+'Logic').addEventListener('change',e=>{ STRAT[g].logic=e.target.value; renderStrat(); });
