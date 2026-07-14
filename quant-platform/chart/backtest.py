@@ -134,10 +134,12 @@ def _ttp_block(closed: list, opens: list, spec: dict) -> dict | None:
 
 def _summary(closed: list, opens: list, n_pairs: int, errors: list,
              all_dates: list | None = None, cost_bps: float = 0.0,
-             spec: dict | None = None) -> dict:
+             spec: dict | None = None, coverage: dict | None = None) -> dict:
     out = {'pairs': n_pairs, 'trades': len(closed), 'open_trades': len(opens),
            'errors': len(errors), 'error_samples': errors[:10],
            'cost_bps_per_side': cost_bps, 'dates': list(all_dates or [])}
+    if coverage is not None:
+        out['coverage'] = coverage
     if closed:
         rets = [t['ret'] for t in closed]
         wins = sum(1 for r in rets if r > 0)
@@ -194,11 +196,13 @@ def run(spec: dict, progress_cb=None) -> dict:
     store-shaped (see store.add_bt_trades). Raises ValueError on a bad spec."""
     strategy = _resolve_strategy(spec)
     side = strategy.get('side', 'long')
-    tf = spec.get('tf', '5m')
-    feed = spec.get('feed', 'polygon')
-    view = spec.get('view', 'all')
-    fill = spec.get('fill', 'close')
-    base_days = int(spec.get('days', 3))       # evaluate() auto-extends warm-up
+    # `or` (not dict defaults): the UI can send '' for an untouched select, and
+    # an empty feed/tf must NOT reach the loaders as a mystery value.
+    tf = spec.get('tf') or '5m'
+    feed = spec.get('feed') or 'polygon'
+    view = spec.get('view') or 'all'
+    fill = spec.get('fill') or 'close'
+    base_days = int(spec.get('days', 3) or 3)  # evaluate() auto-extends warm-up
     # transaction costs (Chan ch.3: costs flip marginal strategies negative —
     # a backtest without them lies). Fractional cost per SIDE in basis points
     # (spread + slippage + commission); a round trip pays it twice.
@@ -206,14 +210,32 @@ def run(spec: dict, progress_cb=None) -> dict:
     pairs = _pairs(spec)
 
     closed, opens, errors = [], [], []
+    # COVERAGE accounting — "1 trade" is uninterpretable unless the run also
+    # says how much of the universe was ACTUALLY evaluated. A pair whose feed
+    # returns zero bars is not an error and produces no trade; before this
+    # block it vanished silently, which can make a thin feed (alpaca IEX on
+    # small caps) look like a strategy that never fires.
+    cov = {'pairs': len(pairs), 'evaluated': 0, 'no_data': 0,
+           'no_data_samples': [], 'signals_on_day': 0, 'signal_pairs': 0,
+           'traded_pairs': 0, 'tf': tf, 'feed': feed, 'fill': fill}
+    bar_counts = []
     for i, (day, sym, rctx) in enumerate(pairs):
         try:
             r = strat.evaluate(strategy, sym, tf, base_days, feed=feed,
                                view=view, asof=day, fill=fill,
                                rules=spec.get('rules'))
             if r.get('ok') and r.get('bars'):
+                cov['evaluated'] += 1
+                bar_counts.append(int(r['bars']))
+                sigs = sum(1 for e in (r.get('entries') or [])
+                           if _et_date(e['time']) == day)
+                if sigs:
+                    cov['signal_pairs'] += 1
+                    cov['signals_on_day'] += sigs
+                took = False
                 for t in r.get('trades') or []:
                     if _et_date(t['entry_ts']) == day:      # day-slice honesty
+                        took = True
                         closed.append({'date': day, 'symbol': sym, 'side': side,
                                        'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
                                        'entry': t['entry'], 'exit': t['exit'],
@@ -221,21 +243,35 @@ def run(spec: dict, progress_cb=None) -> dict:
                                        'reason': t['reason'], 'ctx': rctx})
                 ot = r.get('open_trade')
                 if ot and _et_date(ot['time']) == day:
+                    took = True
                     opens.append({'date': day, 'symbol': sym, 'side': side,
                                   'entry_ts': ot['time'], 'exit_ts': None,
                                   'entry': ot['entry'], 'exit': None,
                                   'ret': ot['ret_pct'] / 100.0 - cost,  # one side so far
                                   'reason': 'open', 'ctx': rctx})
+                if took:
+                    cov['traded_pairs'] += 1
+            else:
+                cov['no_data'] += 1
+                if len(cov['no_data_samples']) < 12:
+                    cov['no_data_samples'].append(f'{day} {sym}')
         except Exception as e:  # noqa: BLE001 — one bad day/symbol must not kill the run
             errors.append(f'{day} {sym}: {e}')
         if progress_cb:
             progress_cb((i + 1) / len(pairs))
 
-    all_dates = sorted({d for d, _, _ in pairs})
+    if bar_counts:
+        bar_counts.sort()
+        cov['bars_median'] = int(bar_counts[len(bar_counts) // 2])
+    per_day: dict = {}
+    for d, _, _ in pairs:
+        per_day[d] = per_day.get(d, 0) + 1
+    cov['pairs_per_day'] = per_day
+    all_dates = sorted(per_day)
     return {'summary': _summary(closed, opens, len(pairs), errors,
                                 all_dates=all_dates,
                                 cost_bps=float(spec.get('cost_bps', 0.0) or 0.0),
-                                spec=spec),
+                                spec=spec, coverage=cov),
             'trades': closed + opens}
 
 
