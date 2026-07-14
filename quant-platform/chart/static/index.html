@@ -657,6 +657,7 @@ function ruleRowEl(group, rule){
     row.appendChild(operandEl(rule.right, renderStrat, true));
     row.appendChild(labeled('tol%', opParamInput(rule,'tol_pct',0.15)));
     const cp=opParamInput(rule,'close_pos',0.6); cp.title='how decisively it must close away from the level: 0.6 = close in the top 60% of the bar’s range (bottom for bounce ▼) — rejects doji touches'; row.appendChild(labeled('pos≥', cp));
+    const wi=opParamInput(rule,'within',1); wi.title='touch → confirmation window: 1 = same candle must touch AND turn; 3 = a weak candle may tap the level and a strong one confirm up to 2 bars later (no close through the level in between). Most real bounces need 2-3.'; row.appendChild(labeled('win', wi));
   } else if(PCT.has(rule.op)){
     row.appendChild(operandEl(rule.right, renderStrat, true));
     row.appendChild(labeled('%', opParamInput(rule,'pct',1)));

@@ -233,13 +233,21 @@ def _bounce_flag(op: str, bars, R: np.ndarray, p: dict) -> np.ndarray:
     (2) TOUCH within `tol_pct` of R with its wick, and (3) TURN back, closing on
     the original side with momentum. bounce_up = support held; bounce_down =
     resistance held. Guarding on 'from above/below' is what stops it from firing
-    every bar when price is hugging the level."""
+    every bar when price is hugging the level.
+
+    The touch and the turn do NOT have to be the same candle: a weak hammer
+    that taps the MA followed by a strong confirmation bar is the most common
+    real bounce shape. `within` (default 1 = same bar) lets the confirmation
+    come up to N bars after the touch, as long as no bar in between CLOSES
+    decisively through the level (beyond tol — a brief spring is allowed, a
+    breakdown is not). Fires on the confirmation bar."""
     tol = float(p.get('tol_pct', _BOUNCE_TOL_PCT)) / 100.0
-    # how decisively the bar must close AWAY from the level: the close must sit
-    # in the top `close_pos` fraction of the bar's range for bounce_up (bottom
-    # for bounce_down). Kills the doji/long-wick case — a bar that merely
-    # TOUCHED and closed mid-range is not a bounce.
+    # how decisively the confirmation bar must close AWAY from the level: the
+    # close must sit in the top `close_pos` fraction of its own range for
+    # bounce_up (bottom for bounce_down). Kills the doji/long-wick case — a
+    # bar that merely TOUCHED and closed mid-range is not a bounce.
     cpos = float(p.get('close_pos', _BOUNCE_CLOSE_POS))
+    w = max(1, min(20, int(p.get('within', 1) or 1)))
     low = bars['low'].to_numpy(float);   high = bars['high'].to_numpy(float)
     close = bars['close'].to_numpy(float)
     opn = bars['open'].to_numpy(float)
@@ -249,21 +257,32 @@ def _bounce_flag(op: str, bars, R: np.ndarray, p: dict) -> np.ndarray:
     with np.errstate(invalid='ignore', divide='ignore'):
         pos = np.where(rng > 0, (close - low) / rng, 0.5)   # 1 = closed at the high
         if op == 'bounce_up':
-            from_above = (prev_close >= prev_R) & (opn >= R)  # was above AND the bar
-            #      STARTED above — a bar that opened below support and closed above
-            #      it CROSSED the level, it didn't bounce off it.
-            touched = low <= R * (1 + tol)              # wick dipped to it
-            held = close > R                            # closed back above
-            turning = (close > prev_close) & (pos >= cpos)  # closed strong, near
-            #      the top of its own range — touch-and-GO, not touch-and-hover
-            out = from_above & touched & held & turning
+            # the TOUCH bar: was above AND started above — a bar that opened
+            # below support and closed above it CROSSED the level, no bounce —
+            # and its wick dipped to within tol of the level.
+            touch = (prev_close >= prev_R) & (opn >= R) & (low <= R * (1 + tol))
+            # bars from the touch to the confirmation must not CLOSE through
+            # the level beyond tol (spring wicks fine, breakdowns kill it)
+            held = close >= R * (1 - tol)
+            # the CONFIRMATION bar: back above the level, up vs previous close,
+            # closed strong near the top of its own range — touch-and-GO
+            confirm = (close > R) & (close > prev_close) & (pos >= cpos)
         else:
-            from_below = (prev_close <= prev_R) & (opn <= R)
-            touched = high >= R * (1 - tol)             # wick poked up to it
-            held = close < R                            # closed back below
-            turning = (close < prev_close) & (pos <= 1.0 - cpos)
-            out = from_below & touched & held & turning
-    out = np.asarray(out, dtype=bool)
+            touch = (prev_close <= prev_R) & (opn <= R) & (high >= R * (1 - tol))
+            held = close <= R * (1 + tol)
+            confirm = (close < R) & (close < prev_close) & (pos <= 1.0 - cpos)
+    touch = np.asarray(touch, dtype=bool)
+    held = np.asarray(held, dtype=bool)
+    confirm = np.asarray(confirm, dtype=bool)
+
+    def _sh(a: np.ndarray, k: int) -> np.ndarray:
+        return a if k == 0 else np.concatenate((np.zeros(k, dtype=bool), a[:-k]))
+
+    out = confirm & touch                    # same-bar touch-and-go (within=1)
+    hold_run = np.ones(len(close), dtype=bool)
+    for off in range(1, w):                  # touch `off` bars back, closes held since
+        hold_run &= _sh(held, off)
+        out |= confirm & _sh(touch, off) & hold_run
     out[np.isnan(R) | np.isnan(prev_R) | np.isnan(prev_close)] = False
     return out
 

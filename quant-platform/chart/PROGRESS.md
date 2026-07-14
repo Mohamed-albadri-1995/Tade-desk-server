@@ -504,3 +504,18 @@ invariant holds); a pure display lie. Fixed at three layers:
    braces against any future bar-set mismatch).
 Audit part 16 (17 cases) forces a 2->13-day extension and pins all of it.
 Suite ALL GREEN (17 parts).
+
+### It.27 — bounce v4: touch and confirmation may be different candles  [DONE]
+User (SRXH 07/09, riding ema16): "our rule of bounce excludes very valid
+bounce." True — v3 demanded ONE candle to touch the level, close back above
+it, close above prev close AND close in the top 40% of its range. The most
+common real bounce (weak hammer taps the MA, NEXT candle confirms) failed.
+v4 adds `within` (op_param, default 1 = exact old behavior, UI 'win'):
+the confirmation may come up to N-1 bars after the touch, provided no bar
+in between CLOSES through the level beyond tol (spring wicks fine,
+breakdowns kill it; a reclaim after a breakdown close is a CROSS, not a
+bounce). Fires on the confirmation bar. All v3 guards intact: from-side +
+open-side on the touch bar, wick tol, doji/close_pos on the confirm bar.
+Part 3 +8 cases (two-bar shape, breakdown kill, window boundary, down
+mirror); all old attack cases pass unchanged = within=1 equivalence.
+Suite ALL GREEN (17 parts). Headless: 'win' input renders, stores op_params.
