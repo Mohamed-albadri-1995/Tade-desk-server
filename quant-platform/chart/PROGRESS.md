@@ -466,3 +466,22 @@ Open items that need the USER, not more building:
      TradingView verification before approval.
 As Opus 4.8: further changes from here are cosmetic/subjective or need your
 input — so this is a natural stop unless you point me at something specific.
+
+### It.25 — first real-data run (#16) diagnosed: coverage honesty  [DONE]
+User ran "Vwap bounce" on register R1 (07/08→07/14, TTP rules, next_open)
+and got 1 trade — rightly called it impossible. Root causes, all fixed:
+1. SILENT no-data skips: a pair whose feed returns zero bars was neither an
+   error nor counted anywhere. Alpaca (IEX) carries no bars for many small-cap
+   gappers, so most of R1 could vanish without a trace. run() now counts
+   evaluated / no-data (named samples) / signal / traded pairs, per-day pair
+   counts, median bars → summary.coverage (part 15, 19 cases).
+2. Backtest silently inherited the CHART's tf + feed selects (feed defaults
+   to alpaca on first load, persisted before the server hint applies). The
+   panel now has its own visible TF + feed selects; backtest feed defaults to
+   the server's default_feed (polygon when keyed); '' normalizes server-side.
+3. btRender wired the ⚠ errors tap handler BEFORE `innerHTML +=` appended the
+   TTP line — re-parsing destroyed the listener, so the errors toggle was
+   dead whenever a TTP block was shown. One innerHTML write, then wire.
+UI shows: pairs count always + coverage line with tappable no-data list;
+report shows coverage KPIs + a PARTIALLY-EVALUATED warning. Suite ALL GREEN
+(16 parts). Headless smoke at 390/900px: toggles alive, no JS errors.

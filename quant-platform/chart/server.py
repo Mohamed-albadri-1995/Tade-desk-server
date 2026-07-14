@@ -215,6 +215,12 @@ def backtest_report(bid: int):
         warn.append('costs = 0 bps (frictionless — real results will be worse)')
     if spec.get('fill', 'close') == 'close':
         warn.append("fill = close (optimistic; use 'next open' for live-honest fills)")
+    cov = s.get('coverage') or {}
+    if cov.get('no_data'):
+        warn.append(f"{cov['no_data']} of {cov.get('pairs')} day·symbol pairs returned "
+                    f"NO bars on feed '{cov.get('feed')}' — the universe was only "
+                    f"PARTIALLY evaluated (alpaca/IEX carries no data for many small "
+                    f"caps; rerun on polygon)")
     rows = ''.join(
         f"<tr><td>{t['date']}</td><td><b>{t['symbol']}</b></td><td>{t['side']}</td>"
         f"<td>{t['entry']:.2f}→{('%.2f' % t['exit']) if t.get('exit') is not None else 'open'}</td>"
@@ -236,7 +242,8 @@ td,th{{padding:6px 6px;border-bottom:1px solid #1e2632;text-align:left;white-spa
 .defs{{color:#64748b;font-size:11px;line-height:1.6;margin-top:14px}}
 .wrap{{overflow-x:auto}}</style></head><body>
 <h2>Backtest #{bid} — {g.get('name', '')}</h2>
-<div class="muted">{spec.get('start')} → {spec.get('end')} · {spec.get('tf')} · {uni_txt} ·
+<div class="muted">{spec.get('start')} → {spec.get('end')} · {cov.get('tf') or spec.get('tf')} ·
+feed: {cov.get('feed') or spec.get('feed') or '?'} · {uni_txt} ·
 fill: {spec.get('fill', 'close')} · cost: {spec.get('cost_bps', 0)} bps/side ·
 rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_close') else 'none')} · status: {g.get('status')}</div>
 {('<div class="warn">⚠ ' + ' · '.join(warn) + '</div>') if warn else ''}
@@ -251,7 +258,9 @@ rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_c
 <div class="kpi"><b>{m('sharpe')}</b><span>Sharpe (daily returns ×√252, flat days included)</span></div>
 <div class="kpi"><b>{m('max_drawdown_pct')}%</b><span>max drawdown depth</span></div>
 <div class="kpi"><b>{m('max_dd_days')}</b><span>max drawdown duration (days below prior peak)</span></div>
-<div class="kpi"><b>{m('pairs')}</b><span>day·symbol pairs evaluated ({m('errors', 0)} errors)</span></div>
+<div class="kpi"><b>{m('pairs')}</b><span>day·symbol pairs in the universe ({m('errors', 0)} errors)</span></div>
+{(f'''<div class="kpi"><b>{cov.get('evaluated')}/{cov.get('pairs')}</b><span>pairs with data ({cov.get('no_data', 0)} returned no bars)</span></div>
+<div class="kpi"><b>{cov.get('signals_on_day', 0)}</b><span>entry signals on {cov.get('signal_pairs', 0)} pairs → {cov.get('traded_pairs', 0)} traded</span></div>''') if cov else ''}
 </div>
 {_ttp_html(s)}
 <div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th><th>why</th></tr>
