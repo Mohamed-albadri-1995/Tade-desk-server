@@ -171,7 +171,24 @@ def backtest_csv(bid: int):
     if not g:
         return JSONResponse({'ok': False, 'error': 'not found'}, status_code=200)
     trades = g.get('trades') or []
-    sname = (g.get('summary') or {}).get('strategy_name') or g.get('name') or ''
+    # strategy name, most-reliable first: the summary (new runs), else RESOLVE
+    # from the run's spec (inline strategy or strategy_id → stored name) so
+    # even runs recorded before summaries carried it still self-identify.
+    def _sname(g):
+        s = (g.get('summary') or {}).get('strategy_name')
+        if s:
+            return s
+        spec = g.get('spec') or {}
+        inl = spec.get('strategy')
+        if isinstance(inl, dict) and inl.get('name'):
+            return inl['name']
+        sid = spec.get('strategy_id')
+        if sid:
+            st = store.get_strategy(int(sid))
+            if st and st.get('name'):
+                return st['name']
+        return g.get('name') or ''
+    sname = _sname(g)
     ctx_keys = sorted({k for t in trades for k in (t.get('ctx') or {})})
     # 'strategy' as the FIRST column so every row self-identifies which setup
     # produced it (a CSV with no strategy name is un-attributable).
