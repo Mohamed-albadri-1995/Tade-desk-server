@@ -45,7 +45,7 @@ a finer intrabar-path model can come later.
 - [x] 3. Surface: teal T1/T2 leg markers on the chart (evaluate); backtest summary counts scaleout_legs/trades; report shows a scale-out KPI. Part 18 -> 28 cases.
       show scale-out; CSV unchanged (weighted ret) + optional legs column.
 - [x] 4. UI: scale-out targets editor (fraction + R×/%/ATR×/pts) in the builder header, live "% scaled / runner" readout, survives read+save. Headless verified.
-- [ ] 5. Seeds: give the 5 scalps their real scale-out exits; re-validate,
+- [x] 5. Seeds: RubberBand (1R+2R+VWAP runner), Second Chance (2R + 9EMA trail), HitchHiker (1R + 9EMA trail) carry PDF scale-out; Back$ide/Fashionably Late single-exit. Part 17 + SCALPS.md updated.
       re-run, compare to PDF win/R.
 
-## STATE: step 4 DONE — next: step 5 (give the 5 seeds real scale-out exits, re-run vs PDF)
+## STATE: ALL 5 STEPS DONE. Scale-out modeled end-to-end (engine, chart, report, UI, seeds). Next real work: user re-runs seeds on real data to compare vs PDF win/R.

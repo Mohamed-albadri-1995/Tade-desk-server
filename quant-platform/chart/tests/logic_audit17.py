@@ -99,7 +99,10 @@ rubber = {'name': 'RubberBand', 'side': 'long',
         rule(P('high'), 'gt', PRIM('extremes.highest', params={'length': 2}, source='high', off=1)),  # clears prior-2 highs
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_above', PRIM('vwap.session'))]),  # final 1/3 into VWAP
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('levels.today_low', off=1), 'value': 0.05}}}  # ~.02 below LoD (prior-bar LoD so it CAN break)
+    # PDF exit: 1/3 at 1R, 1/3 at 2R, final 1/3 (the runner) into VWAP (exit rule)
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('levels.today_low', off=1), 'value': 0.05},
+             'targets': [{'fraction': 1/3, 'r_multiple': 1.0},
+                         {'fraction': 1/3, 'r_multiple': 2.0}]}}  # runner = 1/3
 r = run(rubber, 'RUBBER')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("double-bar-break green fires on the snapback bar (bar 8)",
@@ -108,6 +111,8 @@ ok("does NOT fire before the down-extension exists (bars 0-2 quiet)",
    all(t > bar_ts(3) for t in entry_bars(r)), f"entries={entry_bars(r)}")
 ok("stop is anchored to today_low (priced, trailing)",
    any(s['name'] == 'SL level' for s in r.get('series') or []))
+ok("RubberBand carries its PDF scale-out legs (1R + 2R)",
+   len(rubber['risk'].get('targets') or []) == 2)
 
 # STOP-RATCHET guard: a long stop must never move DOWN, so a stop anchored to
 # a running low (which only falls) FREEZES at its entry level and a real
@@ -175,7 +180,10 @@ second = {'name': 'SecondChance', 'side': 'long',
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # trail 9EMA
     # PDF: ".02 below the low of the TURN candle" — the recent retest low, not
     # the whole day's low. extremes.lowest(3) tracks the turn-candle area.
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 3}, source='low', off=1), 'value': 0.05}}}
+    # PDF exit: sell 1/2 at the target (~2R proxy for the pullback high), trail
+    # the other 1/2 under the 9-EMA (the runner exit rule above).
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 3}, source='low', off=1), 'value': 0.05},
+             'targets': [{'fraction': 0.5, 'r_multiple': 2.0}]}}
 r = run(second, 'SECOND')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("break->retest->attack THEN-sequence fires (>=1 entry)", len(entry_bars(r)) >= 1,
@@ -231,8 +239,10 @@ hitch = {'name': 'HitchHiker', 'side': 'long',
         rule(P('close'), 'gt', upper_third),                                          # upper 1/3 of day range
         rule(P('volume'), 'gt', EXPR('mul', C(1.3), P('volume', off=1))),             # +30% volume on break
     ]),
-    'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # wave exit proxy
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 6}, source='low', off=1), 'value': 0.05}}}
+    'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # wave-2 = trail 9EMA
+    # PDF exit: 1/2 into wave 1 (~1R), 1/2 into wave 2 (the 9-EMA trail runner).
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 6}, source='low', off=1), 'value': 0.05},
+             'targets': [{'fraction': 0.5, 'r_multiple': 1.0}]}}
 r = run(hitch, 'HITCH')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("consolidation-break + upper-third + volume fires (>=1 entry)", len(entry_bars(r)) >= 1,

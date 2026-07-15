@@ -182,7 +182,21 @@ trading tool; on the chart it is approximated with a VWAP-anchored Expr.
    the cross (the engine already extends the fetch for warm-up and slices the
    display to your window).
 
-## The one modeling boundary → Phase 5
+## Scale-out exits (now modeled — the seeds carry them)
+
+The engine models partial exits: `risk.targets` = ordered legs
+`{fraction, r_multiple}` (or a fixed `tp`), the runner rides to SL/exit/eod,
+and the return is size-weighted. The seeds ship their PDF exits:
+- **RubberBand** — ⅓ at 1R, ⅓ at 2R, final ⅓ (runner) into VWAP.
+- **Second Chance** — ½ at ~2R, trail the other ½ under the 9-EMA.
+- **HitchHiker** — ½ at 1R (wave 1), trail ½ under the 9-EMA (wave 2).
+- **Back$ide / Fashionably Late** — single exit (the PDF has no scale-out).
+
+The chart draws a teal T1/T2 (…%) tick at each partial; the report shows how
+many partials banked. Only LIVE execution of the legs (bracket orders) is
+left for the trading tool.
+
+## The remaining boundary → Phase 5 (live execution)
 
 The engine is **one position, one exit**, on purpose (preview = backtest =
 live, no drift). Every "scale out in thirds / halves / waves" and every

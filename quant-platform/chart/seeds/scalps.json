@@ -94,7 +94,17 @@
      "offset": 1
     },
     "value": 0.05
-   }
+   },
+   "targets": [
+    {
+     "fraction": 0.3333333333333333,
+     "r_multiple": 1.0
+    },
+    {
+     "fraction": 0.3333333333333333,
+     "r_multiple": 2.0
+    }
+   ]
   }
  },
  {
@@ -183,7 +193,13 @@
      "offset": 1
     },
     "value": 0.05
-   }
+   },
+   "targets": [
+    {
+     "fraction": 0.5,
+     "r_multiple": 2.0
+    }
+   ]
   }
  },
  {
@@ -432,7 +448,13 @@
      "offset": 1
     },
     "value": 0.05
-   }
+   },
+   "targets": [
+    {
+     "fraction": 0.5,
+     "r_multiple": 1.0
+    }
+   ]
   }
  },
  {
