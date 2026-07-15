@@ -269,10 +269,12 @@ def run(spec: dict, progress_cb=None) -> dict:
                         cov['scaleout_legs'] = cov.get('scaleout_legs', 0) + nlegs
                         if nlegs:
                             cov['scaleout_trades'] = cov.get('scaleout_trades', 0) + 1
+                        # slippage cost per SIDE: entry + every exit fill (each
+                        # partial + the runner). Single exit → 2 sides as before.
                         closed.append({'date': day, 'symbol': sym, 'side': side,
                                        'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
                                        'entry': t['entry'], 'exit': t['exit'],
-                                       'ret': t['ret'] - 2.0 * cost,   # round trip
+                                       'ret': t['ret'] - (2.0 + nlegs) * cost,
                                        'reason': t['reason'], 'ctx': rctx,
                                        'legs': t.get('legs') or []})  # for per-fill TTP
                 ot = r.get('open_trade')
@@ -285,7 +287,8 @@ def run(spec: dict, progress_cb=None) -> dict:
                     opens.append({'date': day, 'symbol': sym, 'side': side,
                                   'entry_ts': ot['time'], 'exit_ts': None,
                                   'entry': ot['entry'], 'exit': None,
-                                  'ret': ot['ret_pct'] / 100.0 - cost,  # one side so far
+                                  # entry side + each banked partial (runner open)
+                                  'ret': ot['ret_pct'] / 100.0 - (1.0 + nlegs) * cost,
                                   'reason': 'open', 'ctx': rctx,
                                   'legs': ot.get('legs') or []})  # banked partials
                 if took:

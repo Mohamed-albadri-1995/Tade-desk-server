@@ -554,7 +554,8 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
 
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  exit_group: dict | None = None, fill: str = 'close',
-                 entry_ok=None, eod_close=None, max_per_day=None):
+                 entry_ok=None, eod_close=None, max_per_day=None,
+                 cooldown_bars=None, min_hold_bars=None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -634,12 +635,19 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     in_pos = False; ei = 0; sl = tp = None; ep_cur = None
     sl_eff = None                        # RATCHET: a stop never loosens (see below)
     pending_exit = False                 # next_open: exit signal seen, fills next bar
-    # "2 strikes and out" — cap ENTRIES per ET session day (PDF: RubberBand 2,
-    # Back$ide/HitchHiker 1). None = unlimited. Counts attempts, so re-entering
-    # a falling knife after each stop-out is bounded.
+    # ── entry DISCIPLINE (all optional, per ET session day) ──
+    #  max_per_day    "2 strikes and out": cap attempts/day (PDF 1-2). None=∞.
+    #  cooldown_bars  after an exit, block new entries for N bars (stops
+    #                 re-taking the same chop 2-3 minutes later).
+    #  min_hold_bars  the exit RULE can't fire in the first N bars after entry
+    #                 (SL/TP/eod still protect) — kills 0-min whipsaw exits.
+    cooldown = int(cooldown_bars) if cooldown_bars else 0
+    min_hold = int(min_hold_bars) if min_hold_bars else 0
     et_day = (bars.index.tz_convert(cs._ET).strftime('%Y-%m-%d')
-              if max_per_day else None)
+              if (max_per_day or cooldown) else None)
     day_count: dict = {}
+    last_exit_bar = None                  # index of the most recent exit (this day)
+    cur_day = None
     em = exit_mask                       # per-trade exit mask when trade-aware
     # SCALE-OUT legs (optional): each takes a FRACTION off at a target. The
     # trigger is EITHER an R-multiple of the initial risk (needs an SL), OR a
@@ -667,6 +675,9 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     remaining = 1.0; realized = 0.0; legs = []
     tgt_fr = []; tgt_fixed = []; tgt_arrs = []; tgt_done = []
     for j in range(n):
+        # new ET day → reset the per-day cooldown clock
+        if et_day is not None and et_day[j] != cur_day:
+            cur_day = et_day[j]; last_exit_bar = None
         if not in_pos:
             if entry_mask[j]:
                 if next_open and j + 1 >= n:
@@ -679,6 +690,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     continue             # never open into the liquidation bar
                 if max_per_day and day_count.get(et_day[ej], 0) >= max_per_day:
                     continue             # daily attempt cap reached (2 strikes out)
+                if cooldown and last_exit_bar is not None and (j - last_exit_bar) < cooldown:
+                    continue             # still cooling down after the last exit
                 # fixed-distance stops: long → SL BELOW entry / TP above;
                 # short → SL ABOVE entry / TP below. ATR at the SIGNAL bar —
                 # the last COMPLETED bar at fill time in both models.
@@ -738,6 +751,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         # any partials already banked. legs=[] and remaining=1 ⇒ identical to the
         # old single-exit math.
         def _close(xi, px, reason):
+            nonlocal last_exit_bar
             r = (px - ep_cur) / ep_cur
             if side == 'short':
                 r = -r
@@ -747,6 +761,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             trades.append({'ei': ei, 'xi': xi, 'ret': float(total), 'reason': reason,
                            'entry': float(ep_cur), 'exit': float(px),
                            'legs': list(legs)})
+            last_exit_bar = xi           # start the cooldown clock
         if pending_exit:
             _close(j, opn[j], 'exit')
             in_pos = False; pending_exit = False
@@ -807,10 +822,12 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 trades.append({'ei': ei, 'xi': last['xi'], 'ret': float(realized),
                                'reason': last['reason'], 'entry': float(ep_cur),
                                'exit': last['price'], 'legs': list(legs)})
+                last_exit_bar = last['xi']
                 in_pos = False; continue
         if not tgt_fr and tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
             _close(j, tpv, 'TP'); in_pos = False; continue
-        if em is not None and em[j]:
+        # exit RULE — deferred during the min-hold window (SL/TP/eod still fire)
+        if em is not None and em[j] and (j - ei) >= min_hold:
             if next_open:
                 if j + 1 < n:
                     pending_exit = True  # market out at the next bar's open
@@ -979,12 +996,18 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     # STATUS pairing: enter while flat on any true entry bar; exit on any true
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
     entry_ok, eod_close = _session_masks(bars, rules)
-    mpd = (rules or {}).get('max_entries_per_day')
+    # discipline knobs: the strategy carries its own (saved with it), the panel
+    # `rules` can OVERRIDE the attempts cap for a one-off run.
+    _risk = strategy.get('risk') or {}
+    mpd = (rules or {}).get('max_entries_per_day') or _risk.get('max_entries_per_day')
     mpd = int(mpd) if mpd else None
+    cooldown = _risk.get('cooldown_bars')
+    min_hold = _risk.get('min_hold_bars')
     trades, sl_view, tp_view, open_trade = _pair_trades(
         bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx,
         exit_group=exit_group if trade_aware else None, fill=fill,
-        entry_ok=entry_ok, eod_close=eod_close, max_per_day=mpd)
+        entry_ok=entry_ok, eod_close=eod_close, max_per_day=mpd,
+        cooldown_bars=cooldown, min_hold_bars=min_hold)
 
     # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what
     # the caller asked for (indicator warm-up). The chart only displays the
