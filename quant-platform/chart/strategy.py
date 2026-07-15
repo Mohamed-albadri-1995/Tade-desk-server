@@ -805,12 +805,25 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             sl_view[j] = slv
         if tpv is not None:
             tp_view[j] = tpv
-        # PRIORITY (conservative): 1) SL on the remainder — a bar touching both
-        # stop and target is assumed to hit the stop first; 2) scale-out target
-        # legs; 3) single TP (only when no legs); 4) exit rule; 5) eod.
-        if slv is not None and ((side == 'long' and low[j] <= slv) or (side == 'short' and high[j] >= slv)):
-            _close(j, slv, 'SL'); in_pos = False; continue
-        if tgt_fr:                             # scale-out: bank each reached leg
+        # PRIORITY — faithful to how a resting BRACKET order actually fills
+        # (this is the order that trades the funded account, so the backtest
+        # must match it or "same JSON live" diverges on the P&L):
+        #  1) scale-out target legs are resting LIMIT orders, each on its own
+        #     share lot. A bar whose range trades THROUGH a leg fills it — that
+        #     lot is booked regardless of what else the bar does. So bank every
+        #     reached leg FIRST, then the stop applies only to what's LEFT.
+        #     (A real exchange bracket fills a partial-limit AND the stop on the
+        #     same bar; the old "stop takes everything, discard the partial"
+        #     understated every scale-out that pulled back into its stop.)
+        #  2) EXCEPTION — a bar that GAPS through the stop at the open: the stop
+        #     is the first print of the bar, the whole remaining lot is gone
+        #     before price could trade up to any target, so no partial banks.
+        #  3) stop on the remaining lot.  4) a SINGLE TP (no legs) is the whole
+        #     position, mutually exclusive with the stop on one bar → assume the
+        #     stop (conservative).  5) exit rule.  6) eod.
+        gap_stop = slv is not None and ((side == 'long' and opn[j] <= slv)
+                                        or (side == 'short' and opn[j] >= slv))
+        if tgt_fr and not gap_stop:            # scale-out: bank each reached leg
             for k in range(len(tgt_fr)):
                 if tgt_done[k]:
                     continue
@@ -836,6 +849,9 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                                'exit': last['price'], 'legs': list(legs)})
                 last_exit_bar = last['xi']
                 in_pos = False; continue
+        # stop on the REMAINING lot (partials, if any, already banked above)
+        if slv is not None and ((side == 'long' and low[j] <= slv) or (side == 'short' and high[j] >= slv)):
+            _close(j, slv, 'SL'); in_pos = False; continue
         if not tgt_fr and tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
             _close(j, tpv, 'TP'); in_pos = False; continue
         # exit RULE — deferred during the min-hold window (SL/TP/eod still fire)

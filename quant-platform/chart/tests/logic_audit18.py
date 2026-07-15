@@ -181,5 +181,42 @@ out = bt.run({'strategy': strat, 'tf': '1m', 'days': 1, 'feed': 'so', 'view': 'a
 covv = out['summary'].get('coverage') or {}
 chk('backtest summary counts scale-out legs', (covv.get('scaleout_legs') or 0) >= 1, True)
 
+print("== 11. STRADDLE bar — the bracket bug: target AND stop hit same bar ==")
+# entry @100, 1% stop (=99), one 1/3 leg at 1R (=101). A later bar's range
+# trades THROUGH both: high 101.5 (limit @101 fills), low 98.5 (stop @99 hits).
+# A live bracket rests the 1/3 limit and the stop on separate lots → BOTH fill:
+# bank 1/3 @ +1%, stop 2/3 @ -1% = -1/3%. (Old engine stopped 100% and threw
+# the partial away, understating every scale-out that pulled back to its stop.)
+bstr = bars([100, 100, 100, 100, 100],
+            h=[100.1, 100.1, 101.5, 100.1, 100.1],
+            l=[99.9, 99.9, 98.5, 99.9, 99.9])
+rstr = {'sl': {'type': 'pct', 'value': 1}, 'targets': [{'fraction': 1/3, 'r_multiple': 1.0}]}
+trs, _, _, _ = S._pair_trades(bstr, list(range(5)), entry_at(5, 1), np.zeros(5, bool),
+                              'long', rstr, None)
+chk('straddle: one closed trade', len(trs), 1)
+chk('straddle: banked the 1/3 partial (a T1 leg exists)',
+    len(trs[0]['legs']) if trs else 0, 1)
+chk('straddle: weighted ret = 1/3(+1%) + 2/3(-1%) = -1/3%',
+    trs[0]['ret'] if trs else None, (1/3)*0.01 + (2/3)*(-0.01))
+# a GENUINE gap: the bar OPENS below the stop → the stop is the first print,
+# the whole lot is gone before price could reach the target → no partial.
+bgap = bars([100, 100, 100, 100, 100],
+            o=[100, 100, 98.7, 100, 100],
+            h=[100.1, 100.1, 101.5, 100.1, 100.1],
+            l=[99.9, 99.9, 98.5, 99.9, 99.9])
+trg, _, _, _ = S._pair_trades(bgap, list(range(5)), entry_at(5, 1), np.zeros(5, bool),
+                              'long', rstr, None)
+chk('gap-through-stop: NO partial banked', len(trg[0]['legs']) if trg else None, 0)
+chk('gap-through-stop: full stop -1%', trg[0]['ret'] if trg else None, -0.01)
+# SHORT mirror of the straddle: entry @100, stop @101, 1/3 leg at 1R (=99).
+bsh = bars([100, 100, 100, 100, 100],
+           h=[100.1, 100.1, 101.5, 100.1, 100.1],
+           l=[99.9, 99.9, 98.5, 99.9, 99.9])
+trsh, _, _, _ = S._pair_trades(bsh, list(range(5)), entry_at(5, 1), np.zeros(5, bool),
+                               'short', rstr, None)
+chk('short straddle: banked the 1/3 partial', len(trsh[0]['legs']) if trsh else 0, 1)
+chk('short straddle: weighted ret = 1/3(+1%) + 2/3(-1%) = -1/3%',
+    trsh[0]['ret'] if trsh else None, (1/3)*0.01 + (2/3)*(-0.01))
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)
