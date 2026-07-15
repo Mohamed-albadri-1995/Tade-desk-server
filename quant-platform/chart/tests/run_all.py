@@ -28,6 +28,7 @@ PARTS = [
     ('logic_audit14.py',    'Phase-1 foundation: asof replay boundary (no D+1 leak)'),
     ('logic_audit15.py',    'backtest coverage: no-data pairs counted, spec normalization'),
     ('logic_audit16.py',    'preview window honesty: warm-up outputs sliced (no ladders)'),
+    ('logic_audit17.py',    'the 5 pro scalps (trades_.pdf) build + fire through evaluate()'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

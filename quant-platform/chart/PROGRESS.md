@@ -561,3 +561,27 @@ Part 2 sec E2: 12 hand-computed cases (magnitude gate, consistency knob,
 step lines, flat-neither, falling mirror, min_strength ignored). Old part-1
 monotone/chop and part-2 seeded-noise engine tests pass unchanged under v3.
 Suite ALL GREEN (17 parts).
+
+### It.30 — validate the 5 pro scalps build in the tool (pre-Phase-5)  [DONE]
+User gave a 10-page PDF of 5 professional scalps (RubberBand, Second Chance,
+Back$ide, HitchHiker, Fashionably Late) and asked: before Phase 5, prove the
+tool can actually MAKE these — understand → convert to logic → build each →
+if primitives short, add+test → loop. Result:
+- ALL 5 entries + core exits build with EXISTING primitives. No new
+  primitive needed (today_low/high, extremes.highest/lowest, rel_volume,
+  pivot_high/low, vwap.session, ema, atr_daily, pivots.floor, window_high/low
+  all already in the 69-primitive registry).
+- Each built as real strategy JSON and fired through the FULL evaluate()
+  path against hand-crafted trigger bars — new audit part 17 (13 checks),
+  suite ALL GREEN (18 parts).
+- Two real lessons surfaced (documented in chart/SCALPS.md): (a) cross_above
+  + rising must use consistency 0 at the cross bar (the MA has just turned,
+  not yet a consistent run); (b) EMA/VWAP need warm-up before the cross —
+  fine live (fires ~10:00am) but a preview window must include pre-cross bars.
+- The ONE modeling boundary: scale-outs (thirds/halves/waves) and
+  entry-frozen measured-move targets are BRACKET-ORDER behavior, not signal
+  generation. Engine stays one-position/one-exit (preview=backtest=live);
+  the partials become take-profit legs on the trading-tool side in Phase 5.
+chart/SCALPS.md = plain-English → builder-rows conversion for all 5 + the
+coverage table + the Phase-5 boundary. This is the go/no-go the user wanted
+before the bridge.
