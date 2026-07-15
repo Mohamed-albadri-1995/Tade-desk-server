@@ -52,7 +52,9 @@ print("== 3. EACH trade sees its OWN entry (re-entry correctness) ==")
 # trade2 re-enters @4 (98.5) -> its -1% is 97.5, hit @6 (97.3)
 b3=bars_from(close=[100,100,99.5,98.5,98.5,98.0,97.3])
 ent=np.array([False,True,True,True,True,True,True])
-tr3,_,_,_=S._pair_trades(b3, list(range(7)), ent, None, 'long', {}, None, exit_group=xg)
+# status mode → re-enter while the setup holds, so we can verify each trade
+# computes its Trade-operand P&L off its OWN entry baseline
+tr3,_,_,_=S._pair_trades(b3, list(range(7)), ent, None, 'long', {}, None, exit_group=xg, entry_mode='status')
 chkv('two trades, own baselines', [(t['ei'],t['xi']) for t in tr3], [(1,3),(4,6)])
 
 print("== 4. YOUR EXAMPLE 1: exit if price 2*ATR below MA  OR  down 1% ==")

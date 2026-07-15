@@ -83,5 +83,22 @@ r1 = S.evaluate(strat, 'X', '1m', 1, feed='disc', view='all', asof='2024-01-09',
 chk('panel rule overrides strategy cap → 1',
     len(r1['trades']) + (1 if r1['open_trade'] else 0), 1)
 
+print("== 6. edge model: one entry per true-RUN; a new run re-arms ==")
+# persistent run, SL never hits → ONE entry (edge), rides open.
+b6 = bars([100, 100, 100, 100, 100], h=[100.1]*5, l=[99.9]*5)
+run6 = np.array([False, True, True, True, True])
+tr, _, _, op = S._pair_trades(b6, list(range(5)), run6, np.zeros(5, bool),
+                              'long', {'sl': {'type': 'pct', 'value': 50}}, None)
+chk('persistent run → ONE entry (edge)', len(tr) + (1 if op else 0), 1)
+# two SEPARATE runs (mask resets to false between): run A stops out, run B is a
+# fresh false→true edge → a second, distinct setup.
+b6b = bars([100, 100, 99, 99, 98, 98],
+           l=[99.9, 98.9, 98.9, 97.9, 97.9, 96.9])
+run_ab = np.array([False, True, True, False, True, True])   # run A(1-2), B(4-5)
+trab, _, _, opab = S._pair_trades(b6b, list(range(6)), run_ab, np.zeros(6, bool),
+                                  'long', {'sl': {'type': 'pct', 'value': 1}}, None)
+chk('two runs → two setups', [t['ei'] for t in trab] + ([opab['ei']] if opab else []),
+    [1, 4])
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)

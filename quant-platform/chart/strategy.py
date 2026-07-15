@@ -555,7 +555,7 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  exit_group: dict | None = None, fill: str = 'close',
                  entry_ok=None, eod_close=None, max_per_day=None,
-                 cooldown_bars=None, min_hold_bars=None):
+                 cooldown_bars=None, min_hold_bars=None, entry_mode='edge'):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -648,6 +648,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     day_count: dict = {}
     last_exit_bar = None                  # index of the most recent exit (this day)
     cur_day = None
+    entered_run = False                   # edge mode: entered the current true-run?
     em = exit_mask                       # per-trade exit mask when trade-aware
     # SCALE-OUT legs (optional): each takes a FRACTION off at a target. The
     # trigger is EITHER an R-multiple of the initial risk (needs an SL), OR a
@@ -678,8 +679,18 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         # new ET day → reset the per-day cooldown clock
         if et_day is not None and et_day[j] != cur_day:
             cur_day = et_day[j]; last_exit_bar = None
+        # ENTRY trigger model. 'edge' (default): one entry per contiguous
+        # true-RUN of the setup group — a fresh false→true edge starts a new
+        # run (reset even while in a position); within a run we enter ONCE, at
+        # the first ENTERABLE bar (so a warm-up/blocked edge bar doesn't lose
+        # the setup), and never re-enter that same run. So a condition that
+        # stays true for many bars is ONE setup; a spiky mask (cross/break/
+        # sequence) is a new run each time. 'status' = the old any-true-bar mode.
+        if entry_mode == 'edge' and entry_mask[j] and not (j > 0 and entry_mask[j - 1]):
+            entered_run = False           # a new true-run began
         if not in_pos:
-            if entry_mask[j]:
+            fire = (entry_mask[j] and not entered_run) if entry_mode == 'edge' else entry_mask[j]
+            if fire:
                 if next_open and j + 1 >= n:
                     continue             # signal on the last bar — no bar to fill on
                 ep = opn[j + 1] if next_open else close[j]
@@ -708,6 +719,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 if sl_required and (e_sl is None or e_sl != e_sl):
                     continue                       # stop unpriceable → no trade
                 in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
+                entered_run = True        # this true-run has now been taken
                 sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
                 if max_per_day:
                     day_count[et_day[ej]] = day_count.get(et_day[ej], 0) + 1
@@ -1007,7 +1019,8 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx,
         exit_group=exit_group if trade_aware else None, fill=fill,
         entry_ok=entry_ok, eod_close=eod_close, max_per_day=mpd,
-        cooldown_bars=cooldown, min_hold_bars=min_hold)
+        cooldown_bars=cooldown, min_hold_bars=min_hold,
+        entry_mode=(_risk.get('entry_mode') or 'edge'))
 
     # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what
     # the caller asked for (indicator warm-up). The chart only displays the

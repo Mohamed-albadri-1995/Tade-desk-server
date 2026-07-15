@@ -141,13 +141,23 @@ b2=bars_from(close=[100,100,100,100,100,100],
              l=[99.8,99.8,98.5,99.8,98.5,99.8])   # SL 1% (=99) hit at idx2 and idx4
 entry_status=np.array([False,True,True,True,True,True])   # setup stays valid
 risk={'sl':{'type':'pct','value':1}}
+# EDGE default: a persistent true-run is ONE setup → one entry (no nonsense
+# re-entry after the stop-out while the same condition still holds).
 tr2,_SL,_TP,_OP=S._pair_trades(b2, list(range(6)), entry_status, np.zeros(6,bool), 'long', risk, None)
-chkv('re-enters while status holds', [(t['ei'],t['xi'],t['reason']) for t in tr2],
+chkv('edge default: persistent run enters ONCE', [(t['ei'],t['xi'],t['reason']) for t in tr2],
+     [(1,2,'SL')])
+# STATUS mode (opt-in) restores the old any-true-bar re-entry
+tr2s,_,_,_=S._pair_trades(b2, list(range(6)), entry_status, np.zeros(6,bool), 'long', risk, None, entry_mode='status')
+chkv('status mode: re-enters while it holds', [(t['ei'],t['xi'],t['reason']) for t in tr2s],
      [(1,2,'SL'),(3,4,'SL')])
-# but a one-bar signal (edge-like mask) does NOT re-enter
+# a spiky mask (each true bar preceded by false) = a NEW run each time → re-enters
+entry_spiky=np.array([False,True,False,True,False,True])
+tr3,_SL,_TP,_OP=S._pair_trades(b2, list(range(6)), entry_spiky, np.zeros(6,bool), 'long', risk, None)
+chkv('spiky mask: each edge is a new setup', len(tr3)>=2, True)
+# one-bar signal → single trade
 entry_once=np.array([False,True,False,False,False,False])
-tr3,_SL,_TP,_OP=S._pair_trades(b2, list(range(6)), entry_once, np.zeros(6,bool), 'long', risk, None)
-chkv('one-shot signal: single trade', len(tr3), 1)
+tr4,_,_,_=S._pair_trades(b2, list(range(6)), entry_once, np.zeros(6,bool), 'long', risk, None)
+chkv('one-shot signal: single trade', len(tr4), 1)
 
 print("== C. volume composition (no new primitives needed) ==")
 # volume > sma(volume, 3): rel volume spike via existing pieces
