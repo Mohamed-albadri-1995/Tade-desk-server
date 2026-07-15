@@ -131,6 +131,30 @@ def delete_strategy(sid: int) -> bool:
     return cur.rowcount > 0
 
 
+def seed_strategies() -> int:
+    """Insert bundled seed strategies (chart/seeds/*.json) that aren't already
+    in the DB, matched by name. Idempotent: run on every startup — a name that
+    exists (even if the user edited it) is left alone, so it never clobbers
+    the user's own changes. Returns how many were newly inserted."""
+    seeds_dir = Path(__file__).resolve().parent / 'seeds'
+    if not seeds_dir.is_dir():
+        return 0
+    existing = {s['name'] for s in list_strategies()}
+    added = 0
+    for f in sorted(seeds_dir.glob('*.json')):
+        try:
+            docs = json.loads(f.read_text())
+        except Exception:
+            continue
+        for obj in (docs if isinstance(docs, list) else [docs]):
+            name = (obj.get('name') or '').strip()
+            if name and name not in existing:
+                save_strategy({k: v for k, v in obj.items() if k != 'id'})
+                existing.add(name)
+                added += 1
+    return added
+
+
 # ── Phase 4: backtest runs ──────────────────────────────────────────────────
 def create_backtest(name: str, spec: dict) -> int:
     now = time.time()

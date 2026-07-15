@@ -46,6 +46,11 @@ _STATIC = Path(__file__).resolve().parent / 'static'
 app = FastAPI(title='qp charting platform')
 app.mount('/static', StaticFiles(directory=str(_STATIC)), name='static')
 
+try:                       # bundled seed strategies (the 5 pro scalps) — the
+    store.seed_strategies()  # first boot after deploy adds any that are missing
+except Exception:          # never let a seed problem stop the server
+    pass
+
 
 @app.get('/', response_class=HTMLResponse)
 def index():
