@@ -99,7 +99,7 @@ rubber = {'name': 'RubberBand', 'side': 'long',
         rule(P('high'), 'gt', PRIM('extremes.highest', params={'length': 2}, source='high', off=1)),  # clears prior-2 highs
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_above', PRIM('vwap.session'))]),  # final 1/3 into VWAP
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('levels.today_low'), 'value': 0.05}}}  # ~.02 below LoD
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('levels.today_low', off=1), 'value': 0.05}}}  # ~.02 below LoD (prior-bar LoD so it CAN break)
 r = run(rubber, 'RUBBER')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("double-bar-break green fires on the snapback bar (bar 8)",
@@ -108,6 +108,28 @@ ok("does NOT fire before the down-extension exists (bars 0-2 quiet)",
    all(t > bar_ts(3) for t in entry_bars(r)), f"entries={entry_bars(r)}")
 ok("stop is anchored to today_low (priced, trailing)",
    any(s['name'] == 'SL level' for s in r.get('series') or []))
+
+# ANTI-INERT-STOP guard: a long SL anchored to the LIVE running low can never
+# fire (price is never below its own running minimum). The seed uses [1] (the
+# prior-bar low) so a real breakdown DOES stop out. Prove it fires.
+print("--- stop-fires guard (today_low[1] vs live today_low) ---")
+gidx = _day_index(6, start='10:00')
+gd = pd.DataFrame({'open':[50,50,49,48,47,46], 'high':[50.1,50.1,49.1,48.1,47.1,46.1],
+                   'low':[49.9,49.9,48.9,47.9,46.9,45.9], 'close':[50,50,49,48,47,46],
+                   'volume':[1e5]*6}, index=gidx)
+SCEN['STOPTEST'] = gd
+gstrat = {'name':'g','side':'long',
+          'entry': G('AND', [rule(T(), 'eq', C(1001))]),      # enter 2nd bar
+          'exit': G('AND', []),
+          'risk': {'sl': {'type':'prim','anchor':PRIM('levels.today_low', off=1),'value':0.05}}}
+rg = run(gstrat, 'STOPTEST')
+ok("today_low[1] stop actually FIRES on a breakdown (not inert)",
+   any(t['reason'] == 'SL' for t in rg.get('trades') or []),
+   f"trades={[(t['reason']) for t in rg.get('trades') or []]} open={rg.get('open_trade')}")
+gstrat_bad = dict(gstrat, risk={'sl': {'type':'prim','anchor':PRIM('levels.today_low'),'value':0.05}})
+rb = run(gstrat_bad, 'STOPTEST')
+ok("live today_low stop is INERT (documents the trap)",
+   not any(t['reason'] == 'SL' for t in rb.get('trades') or []))
 
 print("=" * 64)
 print("SCALP 2 — Second Chance (breakout retest, LONG)")
@@ -133,7 +155,7 @@ second = {'name': 'SecondChance', 'side': 'long',
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # trail 9EMA
     # PDF: ".02 below the low of the TURN candle" — the recent retest low, not
     # the whole day's low. extremes.lowest(3) tracks the turn-candle area.
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 3}, source='low'), 'value': 0.05}}}
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 3}, source='low', off=1), 'value': 0.05}}}
 r = run(second, 'SECOND')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("break->retest->attack THEN-sequence fires (>=1 entry)", len(entry_bars(r)) >= 1,
@@ -162,7 +184,7 @@ backside = {'name': 'Backside', 'side': 'long',
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_above', PRIM('vwap.session'))]),        # exit entire at VWAP
     # PDF: ".02 below the most recent higher low" — a recent swing low, not day low.
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 5}, source='low'), 'value': 0.05}}}
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 5}, source='low', off=1), 'value': 0.05}}}
 r = run(backside, 'BACK')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("HL + above-rising-9EMA + midpoint + range-break fires (>=1 entry)", len(entry_bars(r)) >= 1,
@@ -190,7 +212,7 @@ hitch = {'name': 'HitchHiker', 'side': 'long',
         rule(P('volume'), 'gt', EXPR('mul', C(1.3), P('volume', off=1))),             # +30% volume on break
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # wave exit proxy
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 6}, source='low'), 'value': 0.05}}}
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 6}, source='low', off=1), 'value': 0.05}}}
 r = run(hitch, 'HITCH')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("consolidation-break + upper-third + volume fires (>=1 entry)", len(entry_bars(r)) >= 1,
@@ -220,10 +242,10 @@ late = {'name': 'FashionablyLate', 'side': 'long',
     # measured-move stop: 1/3 of the way from VWAP down to LoD (anchored expr)
     'exit': G('AND', [rule(P('close'), 'cross_above',
         EXPR('add', PRIM('vwap.session'),
-             EXPR('mul', C(1.0), EXPR('sub', PRIM('vwap.session'), PRIM('levels.today_low')))))]),  # ~1 measured move above
+             EXPR('mul', C(1.0), EXPR('sub', PRIM('vwap.session'), PRIM('levels.today_low', off=1)))))]),  # ~1 measured move above
     'risk': {'sl': {'type': 'prim',
         'anchor': EXPR('sub', PRIM('vwap.session'),
-                       EXPR('mul', C(2.0/3.0), EXPR('sub', PRIM('vwap.session'), PRIM('levels.today_low')))),
+                       EXPR('mul', C(2.0/3.0), EXPR('sub', PRIM('vwap.session'), PRIM('levels.today_low', off=1)))),
         'value': 0.0}}}
 r = run(late, 'FLATE')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))

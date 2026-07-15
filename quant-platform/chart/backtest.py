@@ -268,11 +268,14 @@ def run(spec: dict, progress_cb=None) -> dict:
         per_day[d] = per_day.get(d, 0) + 1
     cov['pairs_per_day'] = per_day
     all_dates = sorted(per_day)
-    return {'summary': _summary(closed, opens, len(pairs), errors,
-                                all_dates=all_dates,
-                                cost_bps=float(spec.get('cost_bps', 0.0) or 0.0),
-                                spec=spec, coverage=cov),
-            'trades': closed + opens}
+    summary = _summary(closed, opens, len(pairs), errors,
+                       all_dates=all_dates,
+                       cost_bps=float(spec.get('cost_bps', 0.0) or 0.0),
+                       spec=spec, coverage=cov)
+    # which strategy produced this run — so every export self-identifies
+    summary['strategy_name'] = strategy.get('name') or 'Untitled'
+    summary['strategy_side'] = side
+    return {'summary': summary, 'trades': closed + opens}
 
 
 def run_and_store(bt_id: int, spec: dict) -> None:

@@ -90,7 +90,8 @@
     "anchor": {
      "kind": "primitive",
      "key": "levels.today_low",
-     "source": "close"
+     "source": "close",
+     "offset": 1
     },
     "value": 0.05
    }
@@ -178,7 +179,8 @@
      "source": "low",
      "params": {
       "length": 3
-     }
+     },
+     "offset": 1
     },
     "value": 0.05
    }
@@ -308,7 +310,8 @@
      "source": "low",
      "params": {
       "length": 5
-     }
+     },
+     "offset": 1
     },
     "value": 0.05
    }
@@ -425,7 +428,8 @@
      "source": "low",
      "params": {
       "length": 6
-     }
+     },
+     "offset": 1
     },
     "value": 0.05
    }
@@ -519,7 +523,8 @@
         "b": {
          "kind": "primitive",
          "key": "levels.today_low",
-         "source": "close"
+         "source": "close",
+         "offset": 1
         }
        }
       }
@@ -556,7 +561,8 @@
        "b": {
         "kind": "primitive",
         "key": "levels.today_low",
-        "source": "close"
+        "source": "close",
+        "offset": 1
        }
       }
      }

@@ -171,9 +171,12 @@ def backtest_csv(bid: int):
     if not g:
         return JSONResponse({'ok': False, 'error': 'not found'}, status_code=200)
     trades = g.get('trades') or []
+    sname = (g.get('summary') or {}).get('strategy_name') or g.get('name') or ''
     ctx_keys = sorted({k for t in trades for k in (t.get('ctx') or {})})
-    base = ['date', 'symbol', 'side', 'entry_ts', 'exit_ts', 'entry', 'exit',
-            'ret_pct', 'pnl_ps', 'reason']
+    # 'strategy' as the FIRST column so every row self-identifies which setup
+    # produced it (a CSV with no strategy name is un-attributable).
+    base = ['strategy', 'date', 'symbol', 'side', 'entry_ts', 'exit_ts', 'entry',
+            'exit', 'ret_pct', 'pnl_ps', 'reason']
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(base + [f'ctx_{k}' for k in ctx_keys])
@@ -182,12 +185,15 @@ def backtest_csv(bid: int):
         sgn = 1.0 if t['side'] == 'long' else -1.0
         pps = (round(sgn * (t['exit'] - t['entry']), 4)
                if t.get('exit') is not None else '')
-        w.writerow([t['date'], t['symbol'], t['side'], t['entry_ts'], t['exit_ts'],
+        w.writerow([sname, t['date'], t['symbol'], t['side'], t['entry_ts'], t['exit_ts'],
                     t['entry'], t['exit'],
                     round(t['ret'] * 100, 4) if t.get('ret') is not None else '',
                     pps, t['reason']] + [c.get(k, '') for k in ctx_keys])
+    # filename carries the strategy slug too, so downloads don't collide
+    slug = ''.join(ch if ch.isalnum() else '_' for ch in sname)[:40].strip('_')
+    fname = f'backtest_{bid}_{slug}.csv' if slug else f'backtest_{bid}.csv'
     return PlainTextResponse(buf.getvalue(), media_type='text/csv', headers={
-        'Content-Disposition': f'attachment; filename="backtest_{bid}.csv"'})
+        'Content-Disposition': f'attachment; filename="{fname}"'})
 
 
 def _ttp_html(s: dict) -> str:
@@ -246,8 +252,9 @@ td,th{{padding:6px 6px;border-bottom:1px solid #1e2632;text-align:left;white-spa
 .up{{color:#22c55e}} .dn{{color:#ef5350}} .warn{{color:#f5a623;font-size:12px;margin:8px 0}}
 .defs{{color:#64748b;font-size:11px;line-height:1.6;margin-top:14px}}
 .wrap{{overflow-x:auto}}</style></head><body>
-<h2>Backtest #{bid} — {g.get('name', '')}</h2>
-<div class="muted">{spec.get('start')} → {spec.get('end')} · {cov.get('tf') or spec.get('tf')} ·
+<h2>Backtest #{bid} — {s.get('strategy_name') or g.get('name', '')}</h2>
+<div class="muted">strategy: <b>{s.get('strategy_name') or '—'}</b> ({s.get('strategy_side') or spec.get('side') or 'long'}) ·
+{spec.get('start')} → {spec.get('end')} · {cov.get('tf') or spec.get('tf')} ·
 feed: {cov.get('feed') or spec.get('feed') or '?'} · {uni_txt} ·
 fill: {spec.get('fill', 'close')} · cost: {spec.get('cost_bps', 0)} bps/side ·
 rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_close') else 'none')} · status: {g.get('status')}</div>
