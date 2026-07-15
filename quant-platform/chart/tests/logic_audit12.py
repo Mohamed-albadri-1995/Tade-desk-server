@@ -111,8 +111,40 @@ chkv('1 wasted win below $0.10/sh', ttp['wins_below_min'], 1)
 ttp2 = bt._ttp_block([mk(0.15, 1)], [], {**spec, 'shares': 500})
 chkv('per-share fee beats the minimum at 500sh', ttp2['fees_usd'], 5.0)
 # open position pays one side only
-ttp3 = bt._ttp_block([], [{'entry': 20.0, 'side': 'long'}], spec)
+ttp3 = bt._ttp_block([], [{'entry': 20.0, 'side': 'long', 'legs': []}], spec)
 chkv('open trade pays entry side only', ttp3['fees_usd'], 0.75)
+
+print("== 5b. TTP treats a SCALE-OUT as ONE trade (blended average) ==")
+# entry 20; T1 banks 1/2 at +0.30/sh, runner 1/2 exits at +0.04/sh.
+# The $0.10 rule tests the AVERAGE: (0.5*0.30 + 0.5*0.04) = +0.17/sh → CLEARS
+# the min, so the WHOLE trade counts (even though the runner slice alone was
+# below). Commissions are still per order: 1 entry + 2 exits = 3 × $0.75.
+sc = {'date': '2024-01-09', 'symbol': 'X', 'side': 'long', 'entry': 20.0,
+      'exit': 20.04, 'ret': 0.0085, 'reason': 'exit',
+      'legs': [{'fraction': 0.5, 'price': 20.30}]}
+t = bt._ttp_block([sc], [], spec)
+chkv('3 orders of fees (1 entry + 2 exits)', t['fees_usd'], 2.25)
+chkv('net = 100*0.17 gross - 2.25 fees', t['net_pnl_usd'], round(17 - 2.25, 2))
+chkv('counted = net (blended 0.17/sh clears the min)', t['counted_pnl_usd'],
+     round(17 - 2.25, 2))
+chkv('NOT a wasted win — the trade average cleared $0.10', t['wins_below_min'], 0)
+# a scale-out whose BLENDED average is below $0.10 IS wasted as one trade:
+# T1 1/2 @ +0.06, runner 1/2 @ +0.02 → avg 0.04 < 0.10 → wasted, counted 0.
+sc2 = {'side': 'long', 'entry': 20.0, 'exit': 20.02, 'ret': 0.002, 'reason': 'exit',
+       'legs': [{'fraction': 0.5, 'price': 20.06}]}
+t2 = bt._ttp_block([sc2], [], spec)
+chkv('blended-below-min scale-out is ONE wasted win', t2['wins_below_min'], 1)
+chkv('wasted → counted 0', t2['counted_pnl_usd'], 0.0)
+# more legs ⇒ more orders. 300sh: entry order = 0.005*300 = $1.50 (beats min);
+# each 100-share exit = $0.75 min. So 1.50 + 3×0.75 = $3.75 (vs $2.25 for a
+# single exit) — scale-out genuinely costs more commission.
+sc3 = {'side': 'long', 'entry': 20.0, 'exit': 20.5, 'ret': 0.02, 'reason': 'exit',
+       'legs': [{'fraction': 1/3, 'price': 20.2}, {'fraction': 1/3, 'price': 20.4}]}
+t3 = bt._ttp_block([sc3], [], {**spec, 'shares': 300})
+chkv('3-exit trade: entry(full) + 3 exits = 1.50 + 3×0.75', t3['fees_usd'], 3.75)
+single = bt._ttp_block([{'side': 'long', 'entry': 20.0, 'exit': 20.5,
+                         'ret': 0.025, 'reason': 'exit', 'legs': []}], [], {**spec, 'shares': 300})
+chkv('same size single-exit pays less (entry + 1 exit)', single['fees_usd'], 3.0)
 
 print("== 6. rules flow through evaluate + backtest spec ==")
 import tools.compare_server as cs

@@ -199,9 +199,11 @@ def backtest_csv(bid: int):
     w.writerow(base + [f'ctx_{k}' for k in ctx_keys])
     for t in trades:
         c = t.get('ctx') or {}
-        sgn = 1.0 if t['side'] == 'long' else -1.0
-        pps = (round(sgn * (t['exit'] - t['entry']), 4)
-               if t.get('exit') is not None else '')
+        # per-share P&L of the WHOLE position (scale-out weighted, not just the
+        # runner leg): ret is the size-weighted fractional return, so
+        # ret×entry is the true blended $/share.
+        pps = (round((t.get('ret') or 0.0) * t['entry'], 4)
+               if t.get('ret') is not None else '')
         w.writerow([sname, t['date'], t['symbol'], t['side'], t['entry_ts'], t['exit_ts'],
                     t['entry'], t['exit'],
                     round(t['ret'] * 100, 4) if t.get('ret') is not None else '',

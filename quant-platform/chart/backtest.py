@@ -97,13 +97,36 @@ def _resolve_strategy(spec: dict) -> dict:
     raise ValueError('spec needs strategy (inline) or a valid strategy_id')
 
 
+def _fills(t: dict, closed: bool):
+    """A trade's CLOSING orders as (fraction, pps) — one per scale-out leg
+    plus the runner. Each partial is a separate broker order, so Trade The
+    Pool's per-order min-profit rule and per-order commission apply to each.
+    For an OPEN position only the banked partials are realized (no runner)."""
+    sgn = 1.0 if t['side'] == 'long' else -1.0
+    entry = t['entry']
+    fills = []
+    used = 0.0
+    for g in (t.get('legs') or []):
+        fr = float(g['fraction']); used += fr
+        fills.append((fr, sgn * (float(g['price']) - entry)))
+    if closed and t.get('exit') is not None:
+        runner = max(0.0, 1.0 - used)
+        if runner > 1e-9:
+            fills.append((runner, sgn * (t['exit'] - entry)))
+    return fills
+
+
 def _ttp_block(closed: list, opens: list, spec: dict) -> dict | None:
     """Prop-firm accounting (Trade The Pool defaults, all overridable):
     per-share commission with a per-order minimum, dollar P&L for a fixed
     share size, and the MIN-PROFIT rule — winners under `min_profit_ps`
     $/share do NOT count toward the profit target; losses always count.
-    pnl_ps is the raw entry→exit price difference (their rule is on average
-    prices, before commissions)."""
+
+    A scale-out is ONE trade, one position: the min-profit rule is tested on
+    the trade's AVERAGE per-share P&L across all fills (not per leg), and it
+    counts as a single win/loss after the whole position closes. Commissions
+    are still per ORDER — a 3-exit scale-out pays 1 entry + 3 exit orders —
+    because each fill is a real order at the broker."""
     fps = float(spec.get('fee_per_share', 0) or 0)
     fmin = float(spec.get('fee_min', 0) or 0)
     mps = spec.get('min_profit_ps')
@@ -111,20 +134,26 @@ def _ttp_block(closed: list, opens: list, spec: dict) -> dict | None:
         return None
     shares = max(1.0, float(spec.get('shares', 100) or 100))
     mps = float(0.10 if mps is None else mps)
-    fee = (lambda: max(fps * shares, fmin)) if (fps or fmin) else (lambda: 0.0)
+    # commission for an order of `sz` shares (per-share, floored at the minimum)
+    order_fee = (lambda sz: max(fps * sz, fmin)) if (fps or fmin) else (lambda sz: 0.0)
     fees = net = counted = 0.0
     below = 0
-    for t in closed:
-        sgn = 1.0 if t['side'] == 'long' else -1.0
-        pps = sgn * (t['exit'] - t['entry'])
-        f = fee() * 2                      # entry order + exit order
-        n_usd = shares * pps - f
-        fees += f; net += n_usd
-        if 0 < pps < mps:
-            below += 1                     # win too small → target credit is 0
+    for t, is_closed in [(t, True) for t in closed] + [(t, False) for t in opens]:
+        fills = _fills(t, is_closed)
+        f_trade = order_fee(shares)        # entry order (whole size)
+        realized = sum(fr for fr, _ in fills)     # 1.0 for a closed trade
+        gross = 0.0
+        for fr, pps in fills:
+            gross += shares * fr * pps
+            f_trade += order_fee(shares * fr)     # each partial/runner = one order
+        # AVERAGE per-share P&L of the whole position → the min-profit test
+        avg_pps = (gross / (shares * realized)) if realized > 1e-9 else 0.0
+        net_trade = gross - f_trade
+        fees += f_trade; net += net_trade
+        if 0 < avg_pps < mps:              # the TRADE's blended win is too small
+            below += 1                     # wasted win → 0 credit toward target
         else:
-            counted += n_usd
-    fees += fee() * len(opens)             # open positions paid the entry side
+            counted += net_trade
     return {'shares': shares, 'fee_per_share': fps, 'fee_min_per_order': fmin,
             'min_profit_ps': mps, 'fees_usd': round(fees, 2),
             'net_pnl_usd': round(net, 2),
@@ -244,7 +273,8 @@ def run(spec: dict, progress_cb=None) -> dict:
                                        'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
                                        'entry': t['entry'], 'exit': t['exit'],
                                        'ret': t['ret'] - 2.0 * cost,   # round trip
-                                       'reason': t['reason'], 'ctx': rctx})
+                                       'reason': t['reason'], 'ctx': rctx,
+                                       'legs': t.get('legs') or []})  # for per-fill TTP
                 ot = r.get('open_trade')
                 if ot and _et_date(ot['time']) == day:
                     took = True
@@ -256,7 +286,8 @@ def run(spec: dict, progress_cb=None) -> dict:
                                   'entry_ts': ot['time'], 'exit_ts': None,
                                   'entry': ot['entry'], 'exit': None,
                                   'ret': ot['ret_pct'] / 100.0 - cost,  # one side so far
-                                  'reason': 'open', 'ctx': rctx})
+                                  'reason': 'open', 'ctx': rctx,
+                                  'legs': ot.get('legs') or []})  # banked partials
                 if took:
                     cov['traded_pairs'] += 1
             else:
