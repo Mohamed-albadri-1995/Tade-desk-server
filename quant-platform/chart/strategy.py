@@ -1022,7 +1022,16 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     for ei in sorted(entered):
         markers.append({'time': int(ts[ei]), 'position': up_pos, 'size': 2,
                         'shape': up_shape, 'color': '#22c55e', 'text': ''})
-    # each trade's exit carries its reason; exactly one exit per trade.
+    # scale-out partials: a small teal tick at each banked leg (T1/T2…), so the
+    # chart shows WHERE fractions came off before the runner's final exit.
+    for t in list(trades) + ([open_trade] if open_trade else []):
+        for g in (t.get('legs') or []):
+            pct = int(round(g['fraction'] * 100))
+            markers.append({'time': int(ts[g['xi']]), 'size': 1,
+                            'position': 'aboveBar' if side == 'long' else 'belowBar',
+                            'shape': 'circle', 'color': '#14b8a6',
+                            'text': f"{g['reason']} {pct}%"})
+    # each trade's exit carries its reason; exactly one FINAL exit per trade.
     for t in trades:
         col = {'SL': '#ef5350', 'TP': '#22c55e', 'trail': '#16a34a', 'exit': '#94a3b8', 'eod': '#f5a623'}.get(t['reason'], '#ef5350')
         markers.append({'time': int(ts[t['xi']]), 'size': 2,

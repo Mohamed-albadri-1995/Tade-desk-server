@@ -290,6 +290,7 @@ rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_c
 <div class="kpi"><b>{m('pairs')}</b><span>day·symbol pairs in the universe ({m('errors', 0)} errors)</span></div>
 {(f'''<div class="kpi"><b>{cov.get('evaluated')}/{cov.get('pairs')}</b><span>pairs with data ({cov.get('no_data', 0)} returned no bars)</span></div>
 <div class="kpi"><b>{cov.get('signals_on_day', 0)}</b><span>entry signals on {cov.get('signal_pairs', 0)} pairs → {cov.get('traded_pairs', 0)} traded</span></div>''') if cov else ''}
+{(f'''<div class="kpi"><b>{cov.get('scaleout_legs')}</b><span>scale-out partials banked across {cov.get('scaleout_trades', 0)} trades (returns are size-weighted)</span></div>''') if cov and cov.get('scaleout_legs') else ''}
 </div>
 {_ttp_html(s)}
 <div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th><th>why</th></tr>

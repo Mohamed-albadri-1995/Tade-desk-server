@@ -167,5 +167,19 @@ chk('a position opened', bool(tr9), True)
 chk('trade carries legs list (surfaced by evaluate)', bool(tr9) and ('legs' in tr9[0]), True)
 chk('the prim-anchored leg actually banked', bool(tr9) and len(tr9[0]['legs']) == 1, True)
 
+print("== 10. STEP 3 — legs surface as chart markers + backtest counts them ==")
+# reuse the case-9 recover-to-VWAP strat; a banked leg must show a teal T-marker.
+mk = r.get('markers') or []
+tmarks = [m for m in mk if str(m.get('text', '')).startswith('T')]
+chk('a scale-out leg marker (T1 …%) is drawn', len(tmarks) >= 1, True)
+chk('leg marker is the teal partial colour', tmarks[0]['color'] if tmarks else None, '#14b8a6')
+# run a tiny backtest and confirm the summary counts the partials
+import chart.backtest as bt
+out = bt.run({'strategy': strat, 'tf': '1m', 'days': 1, 'feed': 'so', 'view': 'all',
+              'fill': 'close', 'start': '2024-01-09', 'end': '2024-01-09',
+              'universe': {'kind': 'symbols', 'symbols': ['X']}})
+covv = out['summary'].get('coverage') or {}
+chk('backtest summary counts scale-out legs', (covv.get('scaleout_legs') or 0) >= 1, True)
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)

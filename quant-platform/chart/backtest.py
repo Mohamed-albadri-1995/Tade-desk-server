@@ -236,6 +236,10 @@ def run(spec: dict, progress_cb=None) -> dict:
                 for t in r.get('trades') or []:
                     if _et_date(t['entry_ts']) == day:      # day-slice honesty
                         took = True
+                        nlegs = len(t.get('legs') or [])
+                        cov['scaleout_legs'] = cov.get('scaleout_legs', 0) + nlegs
+                        if nlegs:
+                            cov['scaleout_trades'] = cov.get('scaleout_trades', 0) + 1
                         closed.append({'date': day, 'symbol': sym, 'side': side,
                                        'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
                                        'entry': t['entry'], 'exit': t['exit'],
@@ -244,6 +248,10 @@ def run(spec: dict, progress_cb=None) -> dict:
                 ot = r.get('open_trade')
                 if ot and _et_date(ot['time']) == day:
                     took = True
+                    nlegs = len(ot.get('legs') or [])
+                    cov['scaleout_legs'] = cov.get('scaleout_legs', 0) + nlegs
+                    if nlegs:
+                        cov['scaleout_trades'] = cov.get('scaleout_trades', 0) + 1
                     opens.append({'date': day, 'symbol': sym, 'side': side,
                                   'entry_ts': ot['time'], 'exit_ts': None,
                                   'entry': ot['entry'], 'exit': None,
