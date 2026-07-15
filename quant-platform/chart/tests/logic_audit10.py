@@ -183,5 +183,50 @@ diff_ok = all(abs((gross[k] - net[k]) - 0.002) < 1e-12 for k in gross)
 chkv('every round trip pays 2 x 10bps', diff_ok, True)
 chkv('cost recorded in summary', out_c['summary']['cost_bps_per_side'], 10.0)
 
+print("== 8. discipline caps entries END-TO-END through backtest.run() ==")
+# A sawtooth day: green/red/green/red... A `close>open` long enters on every
+# green bar (each a fresh false->true EDGE — the red bar between breaks the run),
+# the next red bar exits it. Uncapped that is ~1 trade per green bar; the
+# strategy's risk.max_entries_per_day must clamp it — proving discipline flows
+# strategy.risk -> evaluate() -> _pair_trades inside the real runner.
+class SawLoader:
+    def load(self, symbol, tf, start, end):
+        idx = pd.date_range(start, end, freq='1min', tz='UTC')[:6000]
+        n = len(idx)
+        et = idx.tz_convert(cs._ET)
+        o = np.full(n, 100.0); c = np.full(n, 100.0)
+        for i in range(n):
+            # only inside RTH so the pattern is clean; green on even minutes
+            if 570 <= et[i].hour * 60 + et[i].minute <= 780:
+                if i % 2 == 0: o[i] = 99.95; c[i] = 100.05   # green (enter)
+                else:          o[i] = 100.05; c[i] = 99.95   # red   (exit)
+        return pd.DataFrame({'open': o, 'high': np.maximum(o, c) + 0.02,
+                             'low': np.minimum(o, c) - 0.02, 'close': c,
+                             'volume': 1000.0}, index=idx)
+cs._LOADERS['saw'] = SawLoader()
+Pc = lambda f: {'kind': 'price', 'field': f}
+saw_strat = {'name': 'saw', 'side': 'long',
+             'entry': {'logic': 'AND', 'rules': [{'left': Pc('close'), 'op': 'gt', 'right': Pc('open')}]},
+             'exit':  {'logic': 'AND', 'rules': [{'left': Pc('close'), 'op': 'lt', 'right': Pc('open')}]},
+             'risk':  {}}
+saw_spec = {'strategy': saw_strat, 'tf': '1m', 'days': 1, 'feed': 'saw', 'view': 'all',
+            'fill': 'close', 'start': '2024-01-09', 'end': '2024-01-10',
+            'universe': {'kind': 'symbols', 'symbols': ['AAA']}}
+def per_day_closed(out):
+    d = {}
+    for t in out['trades']:
+        if t['reason'] != 'open':
+            d[t['date']] = d.get(t['date'], 0) + 1
+    return d
+u = per_day_closed(bt.run(saw_spec))
+chktrue(f'uncapped sawtooth over-enters ({max(u.values())}/day)', max(u.values()) > 3)
+for cap in (1, 2):
+    d = per_day_closed(bt.run({**saw_spec, 'strategy': {**saw_strat, 'risk': {'max_entries_per_day': cap}}}))
+    chkv(f'risk.max_entries_per_day={cap}: every day capped to {cap}', set(d.values()), {cap})
+# the backtest-panel override still trumps the strategy's own cap
+d1 = per_day_closed(bt.run({**saw_spec, 'strategy': {**saw_strat, 'risk': {'max_entries_per_day': 5}},
+                            'rules': {'max_entries_per_day': 1}}))
+chkv('panel rule overrides strategy cap end-to-end', set(d1.values()), {1})
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)
