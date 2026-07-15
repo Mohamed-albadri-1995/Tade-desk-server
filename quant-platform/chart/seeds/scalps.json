@@ -104,7 +104,10 @@
      "fraction": 0.3333333333333333,
      "r_multiple": 2.0
     }
-   ]
+   ],
+   "max_entries_per_day": 2,
+   "cooldown_bars": 10,
+   "min_hold_bars": 3
   }
  },
  {
@@ -199,7 +202,10 @@
      "fraction": 0.5,
      "r_multiple": 2.0
     }
-   ]
+   ],
+   "max_entries_per_day": 2,
+   "cooldown_bars": 10,
+   "min_hold_bars": 3
   }
  },
  {
@@ -330,7 +336,10 @@
      "offset": 1
     },
     "value": 0.05
-   }
+   },
+   "max_entries_per_day": 1,
+   "cooldown_bars": 10,
+   "min_hold_bars": 3
   }
  },
  {
@@ -454,7 +463,10 @@
      "fraction": 0.5,
      "r_multiple": 1.0
     }
-   ]
+   ],
+   "max_entries_per_day": 1,
+   "cooldown_bars": 10,
+   "min_hold_bars": 3
   }
  },
  {
@@ -590,7 +602,10 @@
      }
     },
     "value": 0.0
-   }
+   },
+   "max_entries_per_day": 1,
+   "cooldown_bars": 10,
+   "min_hold_bars": 3
   }
  }
 ]
