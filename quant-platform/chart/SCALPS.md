@@ -36,12 +36,15 @@ Long side is shown throughout; every scalp inverts for shorts (swap
 **Builder (ENTRY, ALL match)**
 | left | op | right |
 |---|---|---|
+| Expr `day_open − today_low` | `>` | Expr `3 × atr_daily` |
 | Price `close` | `>` | Price `open` |
 | Price `high` | `>` | `extremes.highest` len 2, source high, **[1] ago** |
 
-Odds filters you can add (all real primitives): `rel_volume > 5`; extension
-`(day_open − close) > 3 × atr_daily` via an Expr on the left; time-of-day
-`hhmm` between 1000–1330.
+The first row is the **defining premise** and ships in the seed: the day
+must be extended DOWN by >3 ATR (open to low-of-day) — without it the
+double-bar break fires in any uptrend, the opposite of a snapback fade.
+Further odds filters you can add: `rel_volume > 5`; time-of-day `hhmm`
+between 1000–1330.
 
 **Stop:** SL = anchored to `today_low`, small % beyond (the $0.02 becomes a
 tiny %; the exact 2-cent offset is a bracket detail).

@@ -7,6 +7,39 @@
    "rules": [
     {
      "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "primitive",
+       "key": "levels.day_open",
+       "source": "close"
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "levels.today_low",
+       "source": "close"
+      }
+     },
+     "op": "gt",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 3
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "volatility.atr_daily",
+       "source": "close",
+       "params": {
+        "length": 14
+       }
+      }
+     }
+    },
+    {
+     "left": {
       "kind": "price",
       "field": "close"
      },

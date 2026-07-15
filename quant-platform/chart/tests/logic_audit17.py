@@ -85,6 +85,12 @@ vol= [1e5, 1e5, 1e5, 1e5, 1.5e5, 2e5, 2.5e5, 3e5, 5e5, 2e5, 1e5]           # acc
 SCEN['RUBBER'] = frame(cl, op, hi, lo, vol)
 rubber = {'name': 'RubberBand', 'side': 'long',
     'entry': G('AND', [
+        # DEFINING premise: the day is extended DOWN > 3 ATR (open to LoD) —
+        # without this the double-bar break fires in any UPtrend, the opposite
+        # of a snapback fade. Measured open→LoD so a partial snapback bar
+        # doesn't disqualify the setup.
+        rule(EXPR('sub', PRIM('levels.day_open'), PRIM('levels.today_low')),
+             'gt', EXPR('mul', C(3), PRIM('volatility.atr_daily', params={'length': 14}))),
         rule(P('close'), 'gt', P('open')),                                   # green candle
         rule(P('high'), 'gt', PRIM('extremes.highest', params={'length': 2}, source='high', off=1)),  # clears prior-2 highs
     ]),
@@ -94,6 +100,8 @@ r = run(rubber, 'RUBBER')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("double-bar-break green fires on the snapback bar (bar 8)",
    bar_ts(9) in entry_bars(r), f"entries={entry_bars(r)}")
+ok("does NOT fire before the down-extension exists (bars 0-2 quiet)",
+   all(t > bar_ts(3) for t in entry_bars(r)), f"entries={entry_bars(r)}")
 ok("stop is anchored to today_low (priced, trailing)",
    any(s['name'] == 'SL level' for s in r.get('series') or []))
 
