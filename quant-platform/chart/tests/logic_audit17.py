@@ -133,6 +133,24 @@ ok("LIVE today_low stop ALSO fires now (ratchet freezes it, no longer inert)",
    any(t['reason'] == 'SL' for t in rl.get('trades') or []),
    f"trades={[(t['reason']) for t in rl.get('trades') or []]} open={rl.get('open_trade')}")
 
+# a stop anchored to a RISING line ratchets up above entry; when hit in profit
+# it is a 'trail' take, NOT a stop-loss — the reason must say so. Enter at bar 4
+# (ema3 warmed); the line climbs above entry, then a gentle pullback hits it.
+tidx = _day_index(9, start='10:00')
+tc = [50, 50, 51, 52, 53, 54, 53.5, 53, 52.5]      # warm, rise past entry, ease back
+td = pd.DataFrame({'open':tc,'high':[x+0.15 for x in tc],'low':[x-0.15 for x in tc],
+                   'close':tc,'volume':[1e5]*9}, index=tidx)
+SCEN['TRAIL'] = td
+tstrat = {'name':'t','side':'long',
+          'entry': G('AND', [rule(T(), 'eq', C(1004))]),   # enter bar 4 (close 53)
+          'exit': G('AND', []),
+          'risk': {'sl': {'type':'prim','anchor':PRIM('ma.ema',params={'length':3}),'value':0}}}
+rt = run(tstrat, 'TRAIL')
+tr_t = rt.get('trades') or []
+ok("profitable trailing-stop exit is labeled 'trail', not 'SL'",
+   bool(tr_t) and tr_t[0]['reason'] == 'trail' and tr_t[0]['ret'] > 0,
+   f"trades={[(t['reason'], round(t['ret'],3)) for t in tr_t]} open={rt.get('open_trade')}")
+
 print("=" * 64)
 print("SCALP 2 — Second Chance (breakout retest, LONG)")
 print("=" * 64)

@@ -744,6 +744,11 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             r = (px - ep_cur) / ep_cur
             if side == 'short':
                 r = -r
+            # a stop that RATCHETED above entry and got hit is a trailing-stop
+            # take in PROFIT, not a loss — relabel so the reason breakdown and
+            # win/loss reading are honest ('SL' should mean a real stop-out).
+            if reason == 'SL' and r > 0:
+                reason = 'trail'
             trades.append({'ei': ei, 'xi': j, 'ret': float(r), 'reason': reason,
                            'entry': float(ep_cur), 'exit': float(px)})
             in_pos = False
@@ -949,7 +954,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
                         'shape': up_shape, 'color': '#22c55e', 'text': ''})
     # each trade's exit carries its reason; exactly one exit per trade.
     for t in trades:
-        col = {'SL': '#ef5350', 'TP': '#22c55e', 'exit': '#94a3b8', 'eod': '#f5a623'}.get(t['reason'], '#ef5350')
+        col = {'SL': '#ef5350', 'TP': '#22c55e', 'trail': '#16a34a', 'exit': '#94a3b8', 'eod': '#f5a623'}.get(t['reason'], '#ef5350')
         markers.append({'time': int(ts[t['xi']]), 'size': 2,
                         'position': 'aboveBar' if side == 'long' else 'belowBar',
                         'shape': 'arrowDown' if side == 'long' else 'arrowUp',
