@@ -105,5 +105,67 @@ chk('short leg1 @98 banked', (op['legs'][0]['reason'], round(op['legs'][0]['pric
 chk('short weighted open = 1/3*.02 + 2/3*.06', round(op['ret'], 6) if op else None,
     round((1/3)*0.02 + (2/3)*0.06, 6))
 
+print("== 6b. over-banking guard: fractions summing >1 clamp to 100% ==")
+# legs 0.7 + 0.7 = 1.4 → the 2nd is clamped to the remaining 0.3.
+b = bars([100, 100, 102, 104],
+         h=[100, 100.2, 102.5, 104.5], l=[99.9, 99.8, 101.5, 103.5])
+risk = {'sl': {'type': 'pct', 'value': 2},
+        'targets': [{'fraction': 0.7, 'r_multiple': 1.0},
+                    {'fraction': 0.7, 'r_multiple': 2.0}]}
+tr, _, _, op = S._pair_trades(b, list(range(4)), entry_at(4, 1), np.zeros(4, bool),
+                              'long', risk, None)
+chk('2nd leg clamped to 0.3 (total = 1.0)',
+    round(sum(g['fraction'] for g in tr[0]['legs']), 6) if tr else None, 1.0)
+chk('weighted = 0.7*.02 + 0.3*.04', round(tr[0]['ret'], 6) if tr else None,
+    round(0.7 * 0.02 + 0.3 * 0.04, 6))
+
+print("== 7. STEP 2 — fixed pct-distance leg (no R needed) ==")
+# take 1/2 at +3% from entry (=103), runner rides to close 106. No SL at all.
+b = bars([100, 100, 103, 106], h=[100, 100.2, 103.2, 106.0], l=[99.9, 99.8, 102.5, 105.5])
+risk = {'targets': [{'fraction': 0.5, 'tp': {'type': 'pct', 'value': 3}}]}
+tr, _, _, op = S._pair_trades(b, list(range(4)), entry_at(4, 1), np.zeros(4, bool),
+                              'long', risk, None)
+chk('pct leg banked @103', (op['legs'][0]['reason'], round(op['legs'][0]['price'], 2)) if op else None,
+    ('T1', 103.0))
+chk('weighted open = 0.5*.03 + 0.5*.06', round(op['ret'], 6) if op else None,
+    round(0.5 * 0.03 + 0.5 * 0.06, 6))
+
+print("== 8. STEP 2 — points-distance leg ==")
+b = bars([100, 100, 100.5, 101], h=[100, 100.1, 100.6, 101.1], l=[99.9, 99.9, 100.2, 100.7])
+risk = {'targets': [{'fraction': 0.5, 'tp': {'type': 'points', 'value': 0.5}}]}
+tr, _, _, op = S._pair_trades(b, list(range(4)), entry_at(4, 1), np.zeros(4, bool),
+                              'long', risk, None)
+chk('points leg banked @100.5', round(op['legs'][0]['price'], 2) if (op and op['legs']) else None, 100.5)
+
+print("== 9. STEP 2 — prim-anchored leg trails per bar ==")
+# take 1/2 when price reaches the session VWAP (a rising line). Needs a feed;
+# use the module's overlay path via a tiny stub.
+import tools.compare_server as cs
+class Stub:
+    # a proper ET-RTH day so vwap.session computes: price dips then recovers,
+    # so a long entered near the dip can take 1/2 when price rises back to VWAP.
+    def load(self, sym, tf, start, end):
+        n = 30
+        idx = pd.DatetimeIndex([pd.Timestamp('2024-01-09 09:30', tz='America/New_York')
+                                + pd.Timedelta(minutes=i) for i in range(n)]).tz_convert('UTC')
+        base = np.array([103, 102, 101, 100, 99, 99, 100, 101, 102, 103] + [104] * 20, float)
+        return pd.DataFrame({'open': base, 'high': base + 0.1, 'low': base - 0.1,
+                             'close': base, 'volume': 1000.0}, index=idx)
+cs._LOADERS['so'] = Stub()
+strat = {'name': 's', 'side': 'long',
+         # always-true entry → opens on the first eligible bar (one-position gated)
+         'entry': {'logic': 'AND', 'rules': [{'left': {'kind': 'price', 'field': 'close'},
+                                              'op': 'gt', 'right': {'kind': 'const', 'value': 0}}]},
+         'exit': {'logic': 'AND', 'rules': []},
+         'risk': {'sl': {'type': 'pct', 'value': 5},
+                  'targets': [{'fraction': 0.5, 'tp': {'type': 'prim',
+                               'anchor': {'kind': 'primitive', 'key': 'vwap.session'}, 'value': 0}}]}}
+r = S.evaluate(strat, 'X', '1m', 1, feed='so', view='all', asof='2024-01-09', fill='close')
+tr9 = (r.get('trades') or []) + ([r['open_trade']] if r.get('open_trade') else [])
+chk('prim-anchored leg evaluates without error', r.get('ok'), True)
+chk('a position opened', bool(tr9), True)
+chk('trade carries legs list (surfaced by evaluate)', bool(tr9) and ('legs' in tr9[0]), True)
+chk('the prim-anchored leg actually banked', bool(tr9) and len(tr9[0]['legs']) == 1, True)
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)

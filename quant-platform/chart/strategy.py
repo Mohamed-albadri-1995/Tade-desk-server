@@ -641,19 +641,31 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
               if max_per_day else None)
     day_count: dict = {}
     em = exit_mask                       # per-trade exit mask when trade-aware
-    # SCALE-OUT legs (optional): each takes a FRACTION off at an R-multiple of
-    # the initial risk (entry→stop). The runner (1 − Σfraction) rides to
-    # SL/exit/eod. Requires an SL to define 1R. See SCALEOUT_PLAN.md.
+    # SCALE-OUT legs (optional): each takes a FRACTION off at a target. The
+    # trigger is EITHER an R-multiple of the initial risk (needs an SL), OR a
+    # `tp` spec like the single TP — fixed distance (pct/atr/points) or a
+    # prim-anchored line (trails per bar). The runner (1 − Σfraction) rides to
+    # SL/exit/eod. See SCALEOUT_PLAN.md.
     targets = []
     for t in ((risk or {}).get('targets') or []):
-        try:
-            fr = float(t.get('fraction')); rm = float(t.get('r_multiple'))
-        except (TypeError, ValueError, AttributeError):
+        if not isinstance(t, dict):
             continue
-        if fr > 0 and rm > 0:
-            targets.append((fr, rm))
+        try:
+            fr = float(t.get('fraction'))
+        except (TypeError, ValueError):
+            continue
+        if fr <= 0:
+            continue
+        rm = t.get('r_multiple')
+        tp = t.get('tp') if isinstance(t.get('tp'), dict) else None
+        # a prim-anchored leg target trails per bar → precompute its array once
+        arr = _anchor_levels(tp, side, bars, ctx) if (tp and tp.get('type') == 'prim') else None
+        targets.append({'fraction': fr,
+                        'r_multiple': (float(rm) if rm not in (None, '', 0) else None),
+                        'tp': tp, 'arr': arr})
     # per-trade scale-out state (reset at each entry)
-    remaining = 1.0; realized = 0.0; legs = []; tgt_lv = []; tgt_fr = []; tgt_done = []
+    remaining = 1.0; realized = 0.0; legs = []
+    tgt_fr = []; tgt_fixed = []; tgt_arrs = []; tgt_done = []
     for j in range(n):
         if not in_pos:
             if entry_mask[j]:
@@ -686,18 +698,27 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
                 if max_per_day:
                     day_count[et_day[ej]] = day_count.get(et_day[ej], 0) + 1
-                # arm scale-out legs for THIS trade: level = entry ± R×risk,
-                # risk = |entry − initial stop|. No priceable stop ⇒ no legs.
+                # arm scale-out legs for THIS trade. Each leg resolves to a
+                # FIXED level (R-multiple or fixed distance) or a per-bar ARRAY
+                # (prim-anchored). R-multiple legs need a priceable stop.
                 remaining = 1.0; realized = 0.0; legs = []
-                tgt_lv = []; tgt_fr = []; tgt_done = []
-                if targets and e_sl is not None and e_sl == e_sl:
-                    rdist = (ep - e_sl) if side == 'long' else (e_sl - ep)
-                    if rdist > 0:
-                        for fr, rm in targets:
-                            tgt_lv.append(ep + rm * rdist if side == 'long'
-                                          else ep - rm * rdist)
-                            tgt_fr.append(fr)
-                        tgt_done = [False] * len(tgt_lv)
+                tgt_fr = []; tgt_fixed = []; tgt_arrs = []; tgt_done = []
+                rdist = ((ep - e_sl) if side == 'long' else (e_sl - ep)) \
+                    if (e_sl is not None and e_sl == e_sl) else None
+                for t in targets:
+                    lvl = None; arr = t['arr']
+                    if arr is None:
+                        if t['r_multiple'] is not None:
+                            if rdist and rdist > 0:
+                                lvl = (ep + t['r_multiple'] * rdist) if side == 'long' \
+                                    else (ep - t['r_multiple'] * rdist)
+                        elif t['tp'] is not None:
+                            d = _risk_dist(t['tp'], ep, atr[j])
+                            if d:
+                                lvl = (ep + d) if side == 'long' else (ep - d)
+                    if lvl is not None or arr is not None:
+                        tgt_fr.append(t['fraction']); tgt_fixed.append(lvl)
+                        tgt_arrs.append(arr); tgt_done.append(False)
                 if exit_group is not None:
                     # exit rules reference the Trade operand → evaluate the
                     # exit condition FOR THIS TRADE (its own entry price/bar)
@@ -762,19 +783,24 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         # legs; 3) single TP (only when no legs); 4) exit rule; 5) eod.
         if slv is not None and ((side == 'long' and low[j] <= slv) or (side == 'short' and high[j] >= slv)):
             _close(j, slv, 'SL'); in_pos = False; continue
-        if tgt_lv:                             # scale-out: bank each reached leg
-            for k in range(len(tgt_lv)):
+        if tgt_fr:                             # scale-out: bank each reached leg
+            for k in range(len(tgt_fr)):
                 if tgt_done[k]:
                     continue
-                lv = tgt_lv[k]
+                lv = tgt_fixed[k] if tgt_fixed[k] is not None else tgt_arrs[k][j]
+                if lv is None or lv != lv:     # unformed/NaN this bar → not yet
+                    continue
                 if (side == 'long' and high[j] >= lv) or (side == 'short' and low[j] <= lv):
                     lr = (lv - ep_cur) / ep_cur
                     if side == 'short':
                         lr = -lr
-                    realized += tgt_fr[k] * lr
-                    remaining -= tgt_fr[k]
+                    # never bank more than what's left (fractions summing >1 are
+                    # user error — clamp so a trade can't exceed 100% of size)
+                    fr_take = tgt_fr[k] if tgt_fr[k] <= remaining else remaining
+                    realized += fr_take * lr
+                    remaining -= fr_take
                     tgt_done[k] = True
-                    legs.append({'xi': j, 'price': float(lv), 'fraction': float(tgt_fr[k]),
+                    legs.append({'xi': j, 'price': float(lv), 'fraction': float(fr_take),
                                  'ret': float(lr), 'reason': f'T{k + 1}'})
             if remaining <= 1e-9:              # fully scaled out at the last leg
                 last = legs[-1]
@@ -782,7 +808,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                                'reason': last['reason'], 'entry': float(ep_cur),
                                'exit': last['price'], 'legs': list(legs)})
                 in_pos = False; continue
-        if not tgt_lv and tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
+        if not tgt_fr and tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
             _close(j, tpv, 'TP'); in_pos = False; continue
         if em is not None and em[j]:
             if next_open:
@@ -1043,7 +1069,12 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         # EXACTLY this, so preview and backtest can never disagree.
         'trades': [{'entry_ts': int(ts[t['ei']]), 'exit_ts': int(ts[t['xi']]),
                     'entry': t['entry'], 'exit': t['exit'], 'ret': t['ret'],
-                    'reason': t['reason']} for t in trades],
+                    'reason': t['reason'],
+                    # scale-out partials, timestamped for the chart (Step 3)
+                    'legs': [{'exit_ts': int(ts[g['xi']]), 'price': g['price'],
+                              'fraction': g['fraction'], 'ret': g['ret'],
+                              'reason': g['reason']} for g in t.get('legs') or []]}
+                   for t in trades],
         'entries': [{'time': int(ts[i])} for i in np.nonzero(entry_ev)[0]],
         'exits':   [{'time': int(ts[i])} for i in np.nonzero(exit_ev)[0]],
         'markers': markers,
@@ -1054,7 +1085,10 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         'stats': stats,
         'open_trade': ({'time': int(ts[open_trade['ei']]),
                         'entry': open_trade['entry'],
-                        'ret_pct': round(100.0 * open_trade['ret'], 3)}
+                        'ret_pct': round(100.0 * open_trade['ret'], 3),
+                        'legs': [{'exit_ts': int(ts[g['xi']]), 'price': g['price'],
+                                  'fraction': g['fraction'], 'ret': g['ret'],
+                                  'reason': g['reason']} for g in open_trade.get('legs') or []]}
                        if open_trade else None),
         'first': et[0].strftime('%Y-%m-%d %H:%M ET'),
         'last':  et[-1].strftime('%Y-%m-%d %H:%M ET'),

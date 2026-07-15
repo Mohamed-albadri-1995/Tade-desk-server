@@ -41,11 +41,11 @@ a finer intrabar-path model can come later.
 - [x] 1. Engine: R-multiple scale-out legs in _pair_trades + weighted return +
       leg records. Part 18 (16 hand-computed cases). No UI yet. Backward compat
       proven: no `targets` ⇒ byte-identical single-exit path (suite green).
-- [ ] 2. Engine: per-leg non-R triggers (pct / ATR / prim-anchored / price).
+- [x] 2. Engine: per-leg non-R triggers — fixed pct/atr/points + prim-anchored (trails). Over-banking clamp. Part 18 -> 25 cases.
 - [ ] 3. Surface: evaluate() markers per leg (T1/T2 tags), report + summary
       show scale-out; CSV unchanged (weighted ret) + optional legs column.
 - [ ] 4. UI: targets editor in the strategy builder (fraction + trigger rows).
 - [ ] 5. Seeds: give the 5 scalps their real scale-out exits; re-validate,
       re-run, compare to PDF win/R.
 
-## STATE: step 1 DONE — next: step 2 (per-leg non-R triggers)
+## STATE: step 2 DONE — next: step 3 (surface legs on chart + report)
