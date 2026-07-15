@@ -81,16 +81,20 @@ cl = [50.0, 49.4, 48.8, 48.2, 47.6, 47.0, 46.6, 46.4, 47.2, 47.0, 46.8]
 op = [50.2, 49.8, 49.2, 48.6, 48.0, 47.4, 47.0, 46.7, 46.5, 47.3, 47.1]  # bar8 green: c47.2>o46.5
 hi = [50.3, 49.9, 49.3, 48.7, 48.1, 47.5, 47.1, 46.8, 47.4, 47.4, 47.2]  # bar8 high 47.4 > max(h7=46.8,h6=47.1)
 lo = [49.3, 49.0, 48.4, 47.8, 47.2, 46.6, 46.3, 46.2, 46.4, 46.7, 46.5]
-vol= [1e5, 1e5, 1e5, 1e5, 1.5e5, 2e5, 2.5e5, 3e5, 5e5, 2e5, 1e5]           # accel into bar8
+vol= [1e5, 1e5, 1e5, 2e5, 3e5, 5e5, 7e5, 9e5, 1.3e6, 4e5, 1e5]             # accel into bar8, snapback RVOL>5
 SCEN['RUBBER'] = frame(cl, op, hi, lo, vol)
 rubber = {'name': 'RubberBand', 'side': 'long',
     'entry': G('AND', [
         # DEFINING premise: the day is extended DOWN > 3 ATR (open to LoD) —
         # without this the double-bar break fires in any UPtrend, the opposite
         # of a snapback fade. Measured open→LoD so a partial snapback bar
-        # doesn't disqualify the setup.
+        # doesn't disqualify the setup. (PDF: "Price down > 3 ATRs from open".)
         rule(EXPR('sub', PRIM('levels.day_open'), PRIM('levels.today_low')),
              'gt', EXPR('mul', C(3), PRIM('volatility.atr_daily', params={'length': 14}))),
+        # NOTE: the PDF's "RVOL > 5" is the SCREENER's daily relative volume (a
+        # stock-SELECTION filter) — already handled by the R1 universe and the
+        # `rvol` backtest column, NOT an intraday bar condition. So it is not an
+        # entry rule here.
         rule(P('close'), 'gt', P('open')),                                   # green candle
         rule(P('high'), 'gt', PRIM('extremes.highest', params={'length': 2}, source='high', off=1)),  # clears prior-2 highs
     ]),
@@ -127,7 +131,9 @@ second = {'name': 'SecondChance', 'side': 'long',
         rule(P('close'), 'gt', P('close', off=1)),   # (3) attack: closes above prior candle
     ], window=8),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # trail 9EMA
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('levels.today_low'), 'value': 0.05}}}
+    # PDF: ".02 below the low of the TURN candle" — the recent retest low, not
+    # the whole day's low. extremes.lowest(3) tracks the turn-candle area.
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 3}, source='low'), 'value': 0.05}}}
 r = run(second, 'SECOND')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("break->retest->attack THEN-sequence fires (>=1 entry)", len(entry_bars(r)) >= 1,
@@ -141,18 +147,25 @@ base = [50,49.5,49,48.5,48,47.6,47.8,48.1,48.0,48.4,48.7,48.6,49.0,49.4,49.3,49.
 cl = [float(x) for x in base]
 hi = [c + 0.15 for c in cl]; lo = [c - 0.15 for c in cl]; opn = [c - 0.05 for c in cl]
 SCEN['BACK'] = frame(cl, opn, hi, lo)
+midpoint = EXPR('div', EXPR('add', PRIM('levels.today_low'), PRIM('vwap.session')), C(2))
 backside = {'name': 'Backside', 'side': 'long',
     'entry': G('AND', [
         rule(P('close'), 'gt', PRIM('ma.ema', params={'length': 9})),               # above 9EMA
         rule(PRIM('ma.ema', params={'length': 9}), 'rising', None,
              op_params={'lookback': 5, 'consistency': 0.6}),                         # rising 9EMA
-        rule(P('close'), 'cross_above', PRIM('extremes.highest', params={'length': 5}, source='high', off=1)),  # range break
+        # PDF: "distinct higher high AND distinct higher low" — the range break
+        # is the higher high; a rising rolling 3-bar low is the higher low.
+        rule(PRIM('extremes.lowest', params={'length': 3}, source='low'), 'rising', None,
+             op_params={'lookback': 4, 'consistency': 0.6}),                         # higher lows
+        rule(P('close'), 'gt', midpoint),                                            # PDF: range above halfway LoD→VWAP
+        rule(P('close'), 'cross_above', PRIM('extremes.highest', params={'length': 5}, source='high', off=1)),  # higher high / range break
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_above', PRIM('vwap.session'))]),        # exit entire at VWAP
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('levels.today_low'), 'value': 0.05}}}
+    # PDF: ".02 below the most recent higher low" — a recent swing low, not day low.
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 5}, source='low'), 'value': 0.05}}}
 r = run(backside, 'BACK')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
-ok("above-rising-9EMA + range-break fires (>=1 entry)", len(entry_bars(r)) >= 1,
+ok("HL + above-rising-9EMA + midpoint + range-break fires (>=1 entry)", len(entry_bars(r)) >= 1,
    f"entries={entry_bars(r)}")
 ok("single-target VWAP exit closes the trade",
    any(t['reason'] == 'exit' for t in r.get('trades') or []) or len(entry_bars(r)) >= 1)
@@ -200,6 +213,9 @@ late = {'name': 'FashionablyLate', 'side': 'long',
         # a strict run would only pass a bar or two LATER, missing the cross.
         rule(PRIM('ma.ema', params={'length': 9}), 'rising', None,
              op_params={'lookback': 4, 'consistency': 0.0}),                                # 9EMA upsloping
+        # PDF: VWAP is "flat to downsloping" at the cross — express as VWAP now
+        # <= VWAP 5 bars ago (a rising VWAP would disqualify the setup).
+        rule(PRIM('vwap.session'), 'le', PRIM('vwap.session', off=5)),                       # flat-to-down VWAP
     ]),
     # measured-move stop: 1/3 of the way from VWAP down to LoD (anchored expr)
     'exit': G('AND', [rule(P('close'), 'cross_above',

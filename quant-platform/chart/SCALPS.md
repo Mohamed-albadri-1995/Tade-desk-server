@@ -43,8 +43,12 @@ Long side is shown throughout; every scalp inverts for shorts (swap
 The first row is the **defining premise** and ships in the seed: the day
 must be extended DOWN by >3 ATR (open to low-of-day) — without it the
 double-bar break fires in any uptrend, the opposite of a snapback fade.
-Further odds filters you can add: `rel_volume > 5`; time-of-day `hhmm`
-between 1000–1330.
+
+The PDF's **"RVOL > 5"** is the SCREENER's daily relative volume — a
+stock-**selection** filter, not an intraday bar condition. It is already
+handled by trading only the R1 universe (these ARE the high-RVOL in-play
+names) and is filterable in the backtest by the `rvol` column, so it is not
+an entry rule. Time-of-day `hhmm` 1000–1330 is an optional filter you can add.
 
 **Stop:** SL = anchored to `today_low`, small % beyond (the $0.02 becomes a
 tiny %; the exact 2-cent offset is a bracket detail).
@@ -70,7 +74,8 @@ legs.**
 | 2 retest | Price `low` | `≤` | the same level |
 | 3 attack | Price `close` | `>` | Price `close` **[1] ago** |
 
-**Stop:** anchored to `today_low` (or the retest low).
+**Stop:** the PDF says ".02 below the low of the **turn candle**" → anchored to
+`extremes.lowest` len 3, source low (the recent retest low), not the day low.
 **Exit in the engine:** `close crosses ▼ ema(9)` (the trail). → **The "sell
 half at the pullback high" leg is a trading-tool bracket.**
 
@@ -87,18 +92,17 @@ The level is your choice of any real level primitive — that is exactly the
 - Stop: ~$0.02 below the most recent higher low. One attempt.
 - Exit: **entire** position at VWAP.
 
-**Builder (ENTRY, ALL match)**
+**Builder (ENTRY, ALL match)** — all 5 conditions ship in the seed
 | left | op | right |
 |---|---|---|
 | Price `close` | `>` | `ema` len 9 |
-| `ema` len 9 | `rising` | (net≥%, cons≥) |
-| Price `close` | `crosses ▲` | `extremes.highest` len 5, source high, **[1] ago** |
+| `ema` len 9 | `rising` | (upsloping 9EMA) |
+| `extremes.lowest` len 3, source low | `rising` | **the "higher low"** |
+| Price `close` | `>` | Expr `(today_low + vwap.session)/2` (range above the midpoint) |
+| Price `close` | `crosses ▲` | `extremes.highest` len 5, source high, **[1] ago** (the "higher high"/range break) |
 
-Location filter (optional, straight from the PDF — "range above halfway
-between LoD and VWAP"): Expr left `(today_low + vwap.session)/2` … actually
-build it as `close > today_low + 0.5×(vwap − today_low)` using a nested Expr.
-
-**Stop:** anchored to `today_low` (or `structure.pivot_low`).
+**Stop:** PDF says ".02 below the **most recent higher low**" → anchored to
+`extremes.lowest` len 5, source low (a recent swing low), not the day low.
 **Exit in the engine:** `close crosses ▲ vwap.session` — **fully expressible,
 single target. This scalp maps 1:1.**
 
@@ -139,11 +143,12 @@ mechanical stand-in for the visual pattern.
 - Stop: a **measured move** — 1/3 of the VWAP-to-LoD distance.
 - Exit: 1 measured move above the cross.
 
-**Builder (ENTRY, ALL match)**
+**Builder (ENTRY, ALL match)** — all 3 conditions ship in the seed
 | left | op | right |
 |---|---|---|
 | `ema` len 9 | `crosses ▲` | `vwap.session` |
 | `ema` len 9 | `rising` | **cons≥ 0** (see lesson below) |
+| `vwap.session` | `≤` | `vwap.session` **[5] ago** (VWAP flat-to-down, per the PDF) |
 
 **Stop:** SL anchored to an Expr `vwap − (2/3)×(vwap − today_low)` (1/3 of the
 way down from VWAP to the LoD). **Target:** the measured move (cross + (cross
