@@ -632,6 +632,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     trades = []
     open_trade = None
     in_pos = False; ei = 0; sl = tp = None; ep_cur = None
+    sl_eff = None                        # RATCHET: a stop never loosens (see below)
     pending_exit = False                 # next_open: exit signal seen, fills next bar
     em = exit_mask                       # per-trade exit mask when trade-aware
     for j in range(n):
@@ -661,6 +662,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 if sl_required and (e_sl is None or e_sl != e_sl):
                     continue                       # stop unpriceable → no trade
                 in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
+                sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
                 if exit_group is not None:
                     # exit rules reference the Trade operand → evaluate the
                     # exit condition FOR THIS TRADE (its own entry price/bar)
@@ -693,6 +695,21 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             slv = None
         if tpv is not None and tpv != tpv:
             tpv = None
+        # RATCHET — a protective stop NEVER loosens. A long stop can trail UP
+        # with a rising anchor (9-EMA) but must never move DOWN; a short stop
+        # never moves up. Without this, a stop anchored to a running extreme
+        # (low-of-day, rolling low) chases price down every bar and can never
+        # be breached — the position bleeds to EOD unprotected. Ratcheting
+        # freezes such a stop at its entry level (exactly ".02 below the LoD
+        # at entry") while still letting genuine trailing stops tighten.
+        if slv is not None:
+            if sl_eff is None:
+                sl_eff = slv
+            else:
+                sl_eff = max(sl_eff, slv) if side == 'long' else min(sl_eff, slv)
+            slv = sl_eff
+        else:
+            slv = sl_eff                 # anchor NaN this bar → hold the last level
         if slv is not None:
             sl_view[j] = slv
         if tpv is not None:

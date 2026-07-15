@@ -109,10 +109,11 @@ ok("does NOT fire before the down-extension exists (bars 0-2 quiet)",
 ok("stop is anchored to today_low (priced, trailing)",
    any(s['name'] == 'SL level' for s in r.get('series') or []))
 
-# ANTI-INERT-STOP guard: a long SL anchored to the LIVE running low can never
-# fire (price is never below its own running minimum). The seed uses [1] (the
-# prior-bar low) so a real breakdown DOES stop out. Prove it fires.
-print("--- stop-fires guard (today_low[1] vs live today_low) ---")
+# STOP-RATCHET guard: a long stop must never move DOWN, so a stop anchored to
+# a running low (which only falls) FREEZES at its entry level and a real
+# breakdown DOES stop out — for BOTH the live anchor and the [1] variant.
+# (Before the ratchet, the live anchor chased price down and never fired.)
+print("--- stop-ratchet guard (freezes, never chases down) ---")
 gidx = _day_index(6, start='10:00')
 gd = pd.DataFrame({'open':[50,50,49,48,47,46], 'high':[50.1,50.1,49.1,48.1,47.1,46.1],
                    'low':[49.9,49.9,48.9,47.9,46.9,45.9], 'close':[50,50,49,48,47,46],
@@ -123,13 +124,14 @@ gstrat = {'name':'g','side':'long',
           'exit': G('AND', []),
           'risk': {'sl': {'type':'prim','anchor':PRIM('levels.today_low', off=1),'value':0.05}}}
 rg = run(gstrat, 'STOPTEST')
-ok("today_low[1] stop actually FIRES on a breakdown (not inert)",
+ok("today_low[1] stop FIRES on a breakdown",
    any(t['reason'] == 'SL' for t in rg.get('trades') or []),
    f"trades={[(t['reason']) for t in rg.get('trades') or []]} open={rg.get('open_trade')}")
-gstrat_bad = dict(gstrat, risk={'sl': {'type':'prim','anchor':PRIM('levels.today_low'),'value':0.05}})
-rb = run(gstrat_bad, 'STOPTEST')
-ok("live today_low stop is INERT (documents the trap)",
-   not any(t['reason'] == 'SL' for t in rb.get('trades') or []))
+gstrat_live = dict(gstrat, risk={'sl': {'type':'prim','anchor':PRIM('levels.today_low'),'value':0.05}})
+rl = run(gstrat_live, 'STOPTEST')
+ok("LIVE today_low stop ALSO fires now (ratchet freezes it, no longer inert)",
+   any(t['reason'] == 'SL' for t in rl.get('trades') or []),
+   f"trades={[(t['reason']) for t in rl.get('trades') or []]} open={rl.get('open_trade')}")
 
 print("=" * 64)
 print("SCALP 2 — Second Chance (breakout retest, LONG)")
