@@ -160,6 +160,12 @@
         <button id="tgtAdd" style="background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 7px;cursor:pointer">＋ target</button>
         <span id="tgtSum" class="muted" style="font-size:10px"></span>
       </div>
+      <div id="discRow" style="padding:4px 8px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:11px">
+        <span style="color:var(--text2)" title="Discipline: keeps a setup from re-firing into chop. Attempts caps entries per session day; cooldown blocks re-entry for N bars after any exit; min-hold stops the EXIT RULE (not SL/TP) firing in the first N bars.">Discipline</span>
+        <label style="display:inline-flex;gap:3px;align-items:center">attempts/day<input id="discMaxDay" type="number" min="1" step="1" class="len" style="width:46px" placeholder="∞" title="max ENTRY attempts per session day (blank = unlimited)"></label>
+        <label style="display:inline-flex;gap:3px;align-items:center">cooldown<input id="discCooldown" type="number" min="0" step="1" class="len" style="width:46px" placeholder="0" title="bars to block re-entry after any exit (blank/0 = none)"></label>
+        <label style="display:inline-flex;gap:3px;align-items:center">min-hold<input id="discMinHold" type="number" min="0" step="1" class="len" style="width:46px" placeholder="0" title="bars before the EXIT RULE may fire (SL/TP still protect). blank/0 = none"></label>
+      </div>
       <div class="dbody">
         <div class="rulecol" id="colEntry">
           <h4>Entry — when <select id="entryLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="ATLEAST">AT LEAST k</option><option value="THEN">IN SEQUENCE</option></select><input id="entryK" class="logicsel" type="number" style="width:44px;display:none" title="minimum conditions that must match" placeholder="k"><input id="entryWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="entryNow">—</span></h4>
@@ -209,7 +215,7 @@
         <input id="btMinPs" type="number" step="any" placeholder="min $/sh" title="minimum profit per share for a win to COUNT toward the target (TTP: 0.10) — losses always count" style="flex:1;min-width:0">
       </div>
       <label style="display:flex;gap:5px;align-items:center;margin-top:4px;color:var(--text2)"><input type="checkbox" id="btRules"> RTH-only entries + forced 15:50 EOD close (chart keeps all-day data for indicators)</label>
-      <input id="btMaxDay" type="number" min="1" step="1" placeholder="max entries/day (blank = unlimited; PDF: 2 strikes, or 1 for one-and-done)" title="cap ENTRY attempts per session day. After N stop-outs the setup won't re-fire that day — stops re-entering a falling knife. Blank = unlimited." style="width:100%;margin-top:4px">
+      <input id="btMaxDay" type="number" min="1" step="1" placeholder="max entries/day OVERRIDE (blank = use the strategy's own cap)" title="Override the strategy's own attempts/day cap for THIS backtest only. Blank = use whatever the strategy defines (its Discipline field). Set a number to force a different cap without editing the strategy." style="width:100%;margin-top:4px">
       <div style="display:flex;gap:4px;margin-top:4px">
         <input id="btStart" type="date" style="flex:1;min-width:0" title="start date">
         <input id="btEnd" type="date" style="flex:1;min-width:0" title="end date">
@@ -745,6 +751,9 @@ function renderStrat(){
     const kIn=document.getElementById(g+'K'); kIn.style.display=(grp.logic==='ATLEAST')?'':'none'; kIn.value=grp.k!=null?grp.k:1;
     renderGroupChildren(grp, document.getElementById(g+'Rules'));
   }
+  document.getElementById('discMaxDay').value=risk.max_entries_per_day!=null?risk.max_entries_per_day:'';
+  document.getElementById('discCooldown').value=risk.cooldown_bars!=null?risk.cooldown_bars:'';
+  document.getElementById('discMinHold').value=risk.min_hold_bars!=null?risk.min_hold_bars:'';
   renderTargets();
 }
 // ── scale-out targets editor ──
@@ -789,8 +798,13 @@ function readStratHeader(){ STRAT.name=document.getElementById('stratName').valu
     if(out.type==='prim') out.anchor=(old&&old.anchor)||{kind:'primitive',key:'ma.ema',source:'close',params:{length:9}};   // keep the edited anchor
     return out; };
   const oldR=STRAT.risk||{};
-  STRAT.risk={sl:rd('slType','slVal',oldR.sl), tp:rd('tpType','tpVal',oldR.tp)};
-  if(oldR.targets&&oldR.targets.length) STRAT.risk.targets=oldR.targets;   // scale-out legs edited in place
+  const risk={...oldR};                                   // keep entry_mode + any other keys
+  risk.sl=rd('slType','slVal',oldR.sl); risk.tp=rd('tpType','tpVal',oldR.tp);
+  if(oldR.targets&&oldR.targets.length) risk.targets=oldR.targets; else delete risk.targets;  // scale-out legs edited in place
+  const iv=id=>{ const v=parseInt(document.getElementById(id).value,10); return Number.isFinite(v)?v:null; };
+  for(const [id,key] of [['discMaxDay','max_entries_per_day'],['discCooldown','cooldown_bars'],['discMinHold','min_hold_bars']]){
+    const v=iv(id); if(v!=null) risk[key]=v; else delete risk[key]; }
+  STRAT.risk=risk;
   for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; const k=parseInt(document.getElementById(g+'K').value,10); STRAT[g].k=Number.isFinite(k)?k:1; } }
 async function loadStrategies(){
   try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
