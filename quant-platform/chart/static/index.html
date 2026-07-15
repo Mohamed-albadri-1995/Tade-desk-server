@@ -154,6 +154,12 @@
         <span id="stratStat"></span>
         <span id="drawerClose" style="margin-left:auto;cursor:pointer;color:var(--text3);font-size:16px">✕</span>
       </div>
+      <div id="tgtRow" style="padding:4px 8px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px">
+        <span style="color:var(--text2)" title="Scale-out: take a FRACTION of the position off at each target; the runner (rest) rides to your SL / exit rule. R× uses the entry→stop distance as 1R (needs an SL).">Scale-out</span>
+        <span id="tgtList" style="display:flex;flex-wrap:wrap;gap:6px"></span>
+        <button id="tgtAdd" style="background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 7px;cursor:pointer">＋ target</button>
+        <span id="tgtSum" class="muted" style="font-size:10px"></span>
+      </div>
       <div class="dbody">
         <div class="rulecol" id="colEntry">
           <h4>Entry — when <select id="entryLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="ATLEAST">AT LEAST k</option><option value="THEN">IN SEQUENCE</option></select><input id="entryK" class="logicsel" type="number" style="width:44px;display:none" title="minimum conditions that must match" placeholder="k"><input id="entryWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="entryNow">—</span></h4>
@@ -739,6 +745,31 @@ function renderStrat(){
     const kIn=document.getElementById(g+'K'); kIn.style.display=(grp.logic==='ATLEAST')?'':'none'; kIn.value=grp.k!=null?grp.k:1;
     renderGroupChildren(grp, document.getElementById(g+'Rules'));
   }
+  renderTargets();
+}
+// ── scale-out targets editor ──
+function renderTargets(){
+  const host=document.getElementById('tgtList'); if(!host)return; host.innerHTML='';
+  const risk=STRAT.risk||(STRAT.risk={}); const tgts=risk.targets||(risk.targets=[]);
+  const TYPES=[['r','R×'],['pct','%'],['atr','ATR×'],['points','pts']];
+  tgts.forEach((t,i)=>{
+    const row=document.createElement('span'); row.style.cssText='display:inline-flex;gap:3px;align-items:center;background:#151a24;border:1px solid var(--border);border-radius:5px;padding:2px 4px';
+    const fr=document.createElement('input'); fr.type='number'; fr.step='any'; fr.className='len'; fr.style.width='42px'; fr.placeholder='frac'; fr.title='fraction of the position to take off (0.33 = a third)'; fr.value=t.fraction!=null?t.fraction:'';
+    fr.onchange=()=>{ const v=parseFloat(fr.value); t.fraction=Number.isFinite(v)?v:null; renderTargets(); };
+    const cur=t.r_multiple!=null?'r':((t.tp&&t.tp.type)||'r');
+    const ty=document.createElement('select'); for(const [v,l] of TYPES){const o=document.createElement('option');o.value=v;o.textContent=l;ty.appendChild(o);} ty.value=cur;
+    const val=document.createElement('input'); val.type='number'; val.step='any'; val.className='len'; val.style.width='44px'; val.title='R× uses entry→stop as 1R; %/ATR×/pts are distance from entry';
+    val.value=(cur==='r'?t.r_multiple:(t.tp&&t.tp.value))??'';
+    const writeVal=()=>{ const v=parseFloat(val.value); const tp=ty.value;
+      if(tp==='r'){ t.r_multiple=Number.isFinite(v)?v:null; delete t.tp; }
+      else { delete t.r_multiple; t.tp={type:tp, value:Number.isFinite(v)?v:null}; } };
+    ty.onchange=()=>{ writeVal(); renderTargets(); }; val.onchange=writeVal;
+    const del=document.createElement('span'); del.textContent='✕'; del.style.cssText='cursor:pointer;color:var(--text3)'; del.onclick=()=>{ tgts.splice(i,1); renderTargets(); };
+    row.append(fr,ty,val,del); host.appendChild(row);
+  });
+  const sum=tgts.reduce((a,t)=>a+(parseFloat(t.fraction)||0),0);
+  const runner=Math.max(0,1-sum);
+  document.getElementById('tgtSum').textContent = tgts.length? `= ${(sum*100).toFixed(0)}% scaled, ${(runner*100).toFixed(0)}% runner`+(sum>1?' ⚠ >100%':'') : '';
 }
 function drawStratSeries(series){
   clearStratLines();
@@ -759,6 +790,7 @@ function readStratHeader(){ STRAT.name=document.getElementById('stratName').valu
     return out; };
   const oldR=STRAT.risk||{};
   STRAT.risk={sl:rd('slType','slVal',oldR.sl), tp:rd('tpType','tpVal',oldR.tp)};
+  if(oldR.targets&&oldR.targets.length) STRAT.risk.targets=oldR.targets;   // scale-out legs edited in place
   for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; const k=parseInt(document.getElementById(g+'K').value,10); STRAT[g].k=Number.isFinite(k)?k:1; } }
 async function loadStrategies(){
   try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
@@ -1043,6 +1075,7 @@ window.addEventListener('load',async()=>{
   document.getElementById('stratBtn').onclick=toggleDrawer;
   document.getElementById('drawerClose').onclick=toggleDrawer;
   document.getElementById('stratEval').onclick=evalStrategy;
+  document.getElementById('tgtAdd').onclick=()=>{ STRAT.risk=STRAT.risk||{}; (STRAT.risk.targets=STRAT.risk.targets||[]).push({fraction:0.5,r_multiple:1}); renderTargets(); };
   document.getElementById('stratSave').onclick=saveStrategy;
   document.getElementById('stratDel').onclick=delStrategy;
   document.getElementById('stratNew').onclick=()=>{ STRAT=blankStrat(); seedTemplate(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; };
