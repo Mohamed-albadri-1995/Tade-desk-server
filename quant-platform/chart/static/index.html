@@ -203,6 +203,7 @@
         <input id="btMinPs" type="number" step="any" placeholder="min $/sh" title="minimum profit per share for a win to COUNT toward the target (TTP: 0.10) — losses always count" style="flex:1;min-width:0">
       </div>
       <label style="display:flex;gap:5px;align-items:center;margin-top:4px;color:var(--text2)"><input type="checkbox" id="btRules"> RTH-only entries + forced 15:50 EOD close (chart keeps all-day data for indicators)</label>
+      <input id="btMaxDay" type="number" min="1" step="1" placeholder="max entries/day (blank = unlimited; PDF: 2 strikes, or 1 for one-and-done)" title="cap ENTRY attempts per session day. After N stop-outs the setup won't re-fire that day — stops re-entering a falling knife. Blank = unlimited." style="width:100%;margin-top:4px">
       <div style="display:flex;gap:4px;margin-top:4px">
         <input id="btStart" type="date" style="flex:1;min-width:0" title="start date">
         <input id="btEnd" type="date" style="flex:1;min-width:0" title="end date">
@@ -952,7 +953,10 @@ async function btRun(){
     fee_per_share:parseFloat(document.getElementById('btFee').value)||0,
     fee_min:parseFloat(document.getElementById('btFeeMin').value)||0,
     min_profit_ps:(document.getElementById('btMinPs').value!==''?parseFloat(document.getElementById('btMinPs').value):null),
-    rules:document.getElementById('btRules').checked?{rth_entries:true,eod_close:true}:null };
+    rules:(function(){ const md=parseInt(document.getElementById('btMaxDay').value,10);
+      const on=document.getElementById('btRules').checked; const cap=Number.isFinite(md)&&md>0;
+      if(!on&&!cap)return null;
+      const r={}; if(on){r.rth_entries=true;r.eod_close=true;} if(cap)r.max_entries_per_day=md; return r; })() };
   document.getElementById('btStat').textContent='starting…';
   document.getElementById('btSummary').innerHTML=''; document.getElementById('btTrades').innerHTML='';
   try{

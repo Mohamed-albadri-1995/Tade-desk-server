@@ -73,6 +73,25 @@ chkv('signal at bar3 ignored while holding; trade1 = SL @4',
      [(t['ei'], t['xi'], t['reason']) for t in tr4], [(1, 4, 'SL')])
 chkv('next signal after the exit opens trade 2', op4['ei'] if op4 else None, 5)
 
+print("== 4b. MAX ENTRIES PER DAY (2 strikes and out) ==")
+# a falling knife: enters, stops out, re-enters, stops out, would enter a 3rd
+# time — with max_per_day=2 the 3rd (and 4th) attempts are BLOCKED.
+bk = bars_at(['10:00','10:01','10:02','10:03','10:04','10:05','10:06','10:07'],
+             [100, 100, 98, 98, 96, 96, 94, 94],
+             l=[99.9, 98.5, 97.9, 96.5, 95.9, 94.5, 93.9, 93.5])
+entk = np.array([False, True, False, True, False, True, False, True])
+riskk = {'sl': {'type': 'pct', 'value': 1}}
+trU, _, _, opU = S._pair_trades(bk, list(range(8)), entk, np.zeros(8, bool),
+                                'long', riskk, None)
+chkv('uncapped: re-enters the knife 4 times',
+     len(trU) + (1 if opU else 0), 4)
+trC, _, _, opC = S._pair_trades(bk, list(range(8)), entk, np.zeros(8, bool),
+                                'long', riskk, None, max_per_day=2)
+chkv('capped at 2: only 2 attempts that day',
+     len(trC) + (1 if opC else 0), 2)
+chkv('both capped trades are the FIRST two entries',
+     [t['ei'] for t in trC], [1, 3])
+
 print("== 5. TTP fees + counted-profit (hand-computed) ==")
 mk = lambda pps, i: {'date': '2024-01-09', 'symbol': 'X', 'side': 'long',
                      'entry_ts': i * 100, 'exit_ts': i * 100 + 50, 'entry': 20.0,

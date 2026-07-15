@@ -554,7 +554,7 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
 
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  exit_group: dict | None = None, fill: str = 'close',
-                 entry_ok=None, eod_close=None):
+                 entry_ok=None, eod_close=None, max_per_day=None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -634,6 +634,12 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     in_pos = False; ei = 0; sl = tp = None; ep_cur = None
     sl_eff = None                        # RATCHET: a stop never loosens (see below)
     pending_exit = False                 # next_open: exit signal seen, fills next bar
+    # "2 strikes and out" — cap ENTRIES per ET session day (PDF: RubberBand 2,
+    # Back$ide/HitchHiker 1). None = unlimited. Counts attempts, so re-entering
+    # a falling knife after each stop-out is bounded.
+    et_day = (bars.index.tz_convert(cs._ET).strftime('%Y-%m-%d')
+              if max_per_day else None)
+    day_count: dict = {}
     em = exit_mask                       # per-trade exit mask when trade-aware
     for j in range(n):
         if not in_pos:
@@ -646,6 +652,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     continue             # fill moment outside the allowed session
                 if eod_close is not None and eod_close[ej]:
                     continue             # never open into the liquidation bar
+                if max_per_day and day_count.get(et_day[ej], 0) >= max_per_day:
+                    continue             # daily attempt cap reached (2 strikes out)
                 # fixed-distance stops: long → SL BELOW entry / TP above;
                 # short → SL ABOVE entry / TP below. ATR at the SIGNAL bar —
                 # the last COMPLETED bar at fill time in both models.
@@ -663,6 +671,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     continue                       # stop unpriceable → no trade
                 in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
                 sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
+                if max_per_day:
+                    day_count[et_day[ej]] = day_count.get(et_day[ej], 0) + 1
                 if exit_group is not None:
                     # exit rules reference the Trade operand → evaluate the
                     # exit condition FOR THIS TRADE (its own entry price/bar)
@@ -894,10 +904,12 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     # STATUS pairing: enter while flat on any true entry bar; exit on any true
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
     entry_ok, eod_close = _session_masks(bars, rules)
+    mpd = (rules or {}).get('max_entries_per_day')
+    mpd = int(mpd) if mpd else None
     trades, sl_view, tp_view, open_trade = _pair_trades(
         bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx,
         exit_group=exit_group if trade_aware else None, fill=fill,
-        entry_ok=entry_ok, eod_close=eod_close)
+        entry_ok=entry_ok, eod_close=eod_close, max_per_day=mpd)
 
     # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what
     # the caller asked for (indicator warm-up). The chart only displays the
