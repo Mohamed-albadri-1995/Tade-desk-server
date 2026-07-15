@@ -38,6 +38,32 @@ chkv('ctx json roundtrip', g['trades'][0]['ctx'], {'score': 66, 'regime': 'STRON
 chkv('list has it', any(b['id'] == bid for b in store.list_backtests()), True)
 chkv('delete', (store.delete_backtest(bid), store.get_backtest(bid)), (True, None))
 
+print("== 1b. seed strategies REFRESH stale copies (not skip) ==")
+sid = store.save_strategy({'name': 'Seed X', 'side': 'long',
+                           'entry': {'logic': 'AND', 'rules': []},
+                           'risk': {'sl': {'type': 'pct', 'value': 1}, 'targets': []}})['id']
+# monkeypatch the bundle to a NEW definition for the same name
+import chart.store as _st
+_orig_glob = _st.Path.glob
+class _Seeds:
+    def is_dir(self): return True
+    def glob(self, pat): return [self]
+    def read_text(self): return json.dumps([{'name': 'Seed X', 'side': 'long',
+        'entry': {'logic': 'AND', 'rules': []},
+        'risk': {'sl': {'type': 'pct', 'value': 1},
+                 'targets': [{'fraction': 0.5, 'r_multiple': 2.0}]}}])
+import json
+_save_dir = _st.Path
+_st.Path = lambda *a, **k: type('P', (), {'resolve': lambda s: type('Q', (), {'parent': type('R', (), {'__truediv__': lambda s2, o: _Seeds()})()})()})()
+try:
+    n = store.seed_strategies()
+    got = [s for s in store.list_strategies() if s['name'] == 'Seed X'][0]
+    chkv('stale seed was refreshed (targets restored), id kept',
+         (got['risk']['targets'][0]['r_multiple'], got['id']), (2.0, sid))
+    chkv('refresh is idempotent', store.seed_strategies(), 0)
+finally:
+    _st.Path = _save_dir
+
 print("== 2. runner over a stub feed: deterministic 1 trade/day/symbol ==")
 class StubLoader:
     def load(self, symbol, tf, start, end):
