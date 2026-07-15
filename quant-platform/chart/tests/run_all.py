@@ -29,6 +29,7 @@ PARTS = [
     ('logic_audit15.py',    'backtest coverage: no-data pairs counted, spec normalization'),
     ('logic_audit16.py',    'preview window honesty: warm-up outputs sliced (no ladders)'),
     ('logic_audit17.py',    'the 5 pro scalps (trades_.pdf) build + fire through evaluate()'),
+    ('logic_audit18.py',    'scale-out step 1: R-multiple legs, weighted return'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

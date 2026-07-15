@@ -641,6 +641,19 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
               if max_per_day else None)
     day_count: dict = {}
     em = exit_mask                       # per-trade exit mask when trade-aware
+    # SCALE-OUT legs (optional): each takes a FRACTION off at an R-multiple of
+    # the initial risk (entry→stop). The runner (1 − Σfraction) rides to
+    # SL/exit/eod. Requires an SL to define 1R. See SCALEOUT_PLAN.md.
+    targets = []
+    for t in ((risk or {}).get('targets') or []):
+        try:
+            fr = float(t.get('fraction')); rm = float(t.get('r_multiple'))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if fr > 0 and rm > 0:
+            targets.append((fr, rm))
+    # per-trade scale-out state (reset at each entry)
+    remaining = 1.0; realized = 0.0; legs = []; tgt_lv = []; tgt_fr = []; tgt_done = []
     for j in range(n):
         if not in_pos:
             if entry_mask[j]:
@@ -673,6 +686,18 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
                 if max_per_day:
                     day_count[et_day[ej]] = day_count.get(et_day[ej], 0) + 1
+                # arm scale-out legs for THIS trade: level = entry ± R×risk,
+                # risk = |entry − initial stop|. No priceable stop ⇒ no legs.
+                remaining = 1.0; realized = 0.0; legs = []
+                tgt_lv = []; tgt_fr = []; tgt_done = []
+                if targets and e_sl is not None and e_sl == e_sl:
+                    rdist = (ep - e_sl) if side == 'long' else (e_sl - ep)
+                    if rdist > 0:
+                        for fr, rm in targets:
+                            tgt_lv.append(ep + rm * rdist if side == 'long'
+                                          else ep - rm * rdist)
+                            tgt_fr.append(fr)
+                        tgt_done = [False] * len(tgt_lv)
                 if exit_group is not None:
                     # exit rules reference the Trade operand → evaluate the
                     # exit condition FOR THIS TRADE (its own entry price/bar)
@@ -688,13 +713,21 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         # ── in a position ──
         # next_open: a market exit ordered at the previous close fills at THIS
         # bar's open — chronologically BEFORE any intrabar SL/TP this bar.
-        if pending_exit:
-            px, reason = opn[j], 'exit'
+        # close the REMAINING fraction at (px, reason); weighted return folds in
+        # any partials already banked. legs=[] and remaining=1 ⇒ identical to the
+        # old single-exit math.
+        def _close(xi, px, reason):
             r = (px - ep_cur) / ep_cur
             if side == 'short':
                 r = -r
-            trades.append({'ei': ei, 'xi': j, 'ret': float(r), 'reason': reason,
-                           'entry': float(ep_cur), 'exit': float(px)})
+            if reason == 'SL' and r > 0:     # ratcheted stop hit in profit = trail
+                reason = 'trail'
+            total = realized + remaining * r
+            trades.append({'ei': ei, 'xi': xi, 'ret': float(total), 'reason': reason,
+                           'entry': float(ep_cur), 'exit': float(px),
+                           'legs': list(legs)})
+        if pending_exit:
+            _close(j, opn[j], 'exit')
             in_pos = False; pending_exit = False
             continue
         # effective level this bar: anchored (trailing, may be NaN in warm-up)
@@ -724,41 +757,52 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             sl_view[j] = slv
         if tpv is not None:
             tp_view[j] = tpv
-        px = reason = None
+        # PRIORITY (conservative): 1) SL on the remainder — a bar touching both
+        # stop and target is assumed to hit the stop first; 2) scale-out target
+        # legs; 3) single TP (only when no legs); 4) exit rule; 5) eod.
         if slv is not None and ((side == 'long' and low[j] <= slv) or (side == 'short' and high[j] >= slv)):
-            px, reason = slv, 'SL'
-        elif tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
-            px, reason = tpv, 'TP'
-        elif em is not None and em[j]:
+            _close(j, slv, 'SL'); in_pos = False; continue
+        if tgt_lv:                             # scale-out: bank each reached leg
+            for k in range(len(tgt_lv)):
+                if tgt_done[k]:
+                    continue
+                lv = tgt_lv[k]
+                if (side == 'long' and high[j] >= lv) or (side == 'short' and low[j] <= lv):
+                    lr = (lv - ep_cur) / ep_cur
+                    if side == 'short':
+                        lr = -lr
+                    realized += tgt_fr[k] * lr
+                    remaining -= tgt_fr[k]
+                    tgt_done[k] = True
+                    legs.append({'xi': j, 'price': float(lv), 'fraction': float(tgt_fr[k]),
+                                 'ret': float(lr), 'reason': f'T{k + 1}'})
+            if remaining <= 1e-9:              # fully scaled out at the last leg
+                last = legs[-1]
+                trades.append({'ei': ei, 'xi': last['xi'], 'ret': float(realized),
+                               'reason': last['reason'], 'entry': float(ep_cur),
+                               'exit': last['price'], 'legs': list(legs)})
+                in_pos = False; continue
+        if not tgt_lv and tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
+            _close(j, tpv, 'TP'); in_pos = False; continue
+        if em is not None and em[j]:
             if next_open:
                 if j + 1 < n:
                     pending_exit = True  # market out at the next bar's open
                 # else: no bar left to fill on — stays open to the window end
             else:
-                px, reason = close[j], 'exit'
+                _close(j, close[j], 'exit'); in_pos = False; continue
         # forced end-of-day flat: nothing survives the liquidation bar
-        if px is None and eod_close is not None and eod_close[j]:
-            px, reason = close[j], 'eod'
-            pending_exit = False
-        if px is not None:
-            r = (px - ep_cur) / ep_cur
-            if side == 'short':
-                r = -r
-            # a stop that RATCHETED above entry and got hit is a trailing-stop
-            # take in PROFIT, not a loss — relabel so the reason breakdown and
-            # win/loss reading are honest ('SL' should mean a real stop-out).
-            if reason == 'SL' and r > 0:
-                reason = 'trail'
-            trades.append({'ei': ei, 'xi': j, 'ret': float(r), 'reason': reason,
-                           'entry': float(ep_cur), 'exit': float(px)})
-            in_pos = False
+        if eod_close is not None and eod_close[j]:
+            _close(j, close[j], 'eod'); in_pos = False; pending_exit = False; continue
     if in_pos:
         # still holding at the window's end — report it instead of hiding it
         r = (close[-1] - ep_cur) / ep_cur
         if side == 'short':
             r = -r
+        # fold any banked partials into the still-open position's mark-to-market
         open_trade = {'ei': ei, 'entry': float(ep_cur),
-                      'last': float(close[-1]), 'ret': float(r)}
+                      'last': float(close[-1]), 'ret': float(realized + remaining * r),
+                      'legs': list(legs)}
     return trades, sl_view, tp_view, open_trade
 
 
