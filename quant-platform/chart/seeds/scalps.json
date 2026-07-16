@@ -132,6 +132,138 @@
   }
  },
  {
+  "name": "RubberBand Scalp (Short)",
+  "side": "short",
+  "entry": {
+   "logic": "AND",
+   "rules": [
+    {
+     "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "primitive",
+       "key": "levels.today_high",
+       "source": "close"
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "levels.day_open",
+       "source": "close"
+      }
+     },
+     "op": "gt",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 3
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "volatility.atr_daily",
+       "source": "close",
+       "params": {
+        "length": 14
+       }
+      }
+     }
+    },
+    {
+     "left": {
+      "kind": "price",
+      "field": "high"
+     },
+     "op": "ge",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "primitive",
+       "key": "levels.today_high",
+       "source": "close"
+      },
+      "b": {
+       "kind": "const",
+       "value": 0.97
+      }
+     }
+    },
+    {
+     "left": {
+      "kind": "price",
+      "field": "close"
+     },
+     "op": "lt",
+     "right": {
+      "kind": "price",
+      "field": "open"
+     }
+    },
+    {
+     "left": {
+      "kind": "price",
+      "field": "low"
+     },
+     "op": "lt",
+     "right": {
+      "kind": "primitive",
+      "key": "extremes.lowest",
+      "source": "low",
+      "params": {
+       "length": 2
+      },
+      "offset": 1
+     }
+    }
+   ]
+  },
+  "exit": {
+   "logic": "AND",
+   "rules": [
+    {
+     "left": {
+      "kind": "price",
+      "field": "close"
+     },
+     "op": "cross_below",
+     "right": {
+      "kind": "primitive",
+      "key": "vwap.session",
+      "source": "close"
+     }
+    }
+   ]
+  },
+  "risk": {
+   "sl": {
+    "type": "prim",
+    "anchor": {
+     "kind": "primitive",
+     "key": "levels.today_high",
+     "source": "close",
+     "offset": 1
+    },
+    "value": 0.05
+   },
+   "targets": [
+    {
+     "fraction": 0.3333333333333333,
+     "r_multiple": 1.0
+    },
+    {
+     "fraction": 0.3333333333333333,
+     "r_multiple": 2.0
+    }
+   ],
+   "max_entries_per_day": 2,
+   "cooldown_bars": 10,
+   "window_start": 1000,
+   "window_end": 1330
+  }
+ },
+ {
   "name": "Second Chance Scalp",
   "side": "long",
   "entry": {

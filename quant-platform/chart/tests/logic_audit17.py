@@ -122,6 +122,33 @@ ok("stop is anchored to today_low (priced, trailing)",
 ok("RubberBand carries its PDF scale-out legs (1R + 2R)",
    len(rubber['risk'].get('targets') or []) == 2)
 
+# RubberBand SHORT — the exact same scalp INVERTED (PDF: "all rules the same, just
+# inverted for short scalps"). This is the version that fits the R1 register (an
+# extended-UP momentum universe): fade the blow-off top. Up-extension >3 ATR from
+# the open, then a RED snapback candle AT the high-of-day breaks the prior 2 lows
+# (double-bar break DOWN); cover the runner into VWAP; stop .02 ABOVE the HoD.
+cls = [50.0, 50.7, 51.4, 52.1, 52.8, 53.5, 53.9, 54.1, 52.9, 53.0, 53.1]
+ops = [49.8, 50.3, 51.0, 51.7, 52.4, 53.1, 53.6, 53.9, 54.0, 52.8, 53.0]   # bar8 RED: c52.9<o54.0
+his = [50.1, 50.8, 51.5, 52.2, 52.9, 53.6, 54.0, 54.2, 54.1, 53.1, 53.2]   # HoD 54.2 @bar7; bar8 high 54.1 (near HoD)
+los = [49.7, 50.2, 50.9, 51.6, 52.3, 53.0, 53.4, 53.7, 52.6, 52.7, 52.9]   # bar8 low 52.6 < min(lo6,lo7)=53.4
+vols= [1e5, 1e5, 1e5, 2e5, 3e5, 5e5, 7e5, 9e5, 1.3e6, 4e5, 1e5]            # accel into the blow-off
+SCEN['RUBBERUP'] = frame(cls, ops, his, los, vols)
+import json as _j0
+rubber_s = [s for s in _j0.loads((pathlib.Path(__file__).resolve().parents[1] / 'seeds' / 'scalps.json').read_text())
+            if s['name'] == 'RubberBand Scalp (Short)'][0]
+rubber_s = dict(rubber_s); rubber_s['risk'] = {k: v for k, v in rubber_s['risk'].items()
+                                               if k not in ('window_start', 'window_end')}
+rs = run(rubber_s, 'RUBBERUP')
+ok("SHORT: JSON valid / evaluates", rs.get('ok') and rs.get('bars'), rs.get('error',''))
+ok("SHORT: red double-bar-break fires on the snapback bar (bar 8)",
+   bar_ts(9) in entry_bars(rs), f"entries={entry_bars(rs)}")
+ok("SHORT: does NOT fire before the up-extension exists (bars 0-2 quiet)",
+   all(t > bar_ts(3) for t in entry_bars(rs)), f"entries={entry_bars(rs)}")
+ok("SHORT: stop is anchored ABOVE (today_high), priced",
+   any(s['name'] == 'SL level' for s in rs.get('series') or []))
+ok("SHORT: carries the PDF scale-out legs (1R + 2R, measured DOWN)",
+   len(rubber_s['risk'].get('targets') or []) == 2)
+
 # PROXIMITY guard (backtest #76 JEM): a day that IS >3 ATR down, with a green
 # double-bar break, but the break fires FAR ABOVE the low-of-day (a continuation
 # bounce, not a snapback) → the low-near-LoD rule must REJECT it. Same premise
@@ -377,10 +404,10 @@ for _s in (rubber, second, backside, hitch, late):
 # a stored seed without a cap re-enters chop all day (the reported bug).
 import json as _json
 _seeds = _json.loads((pathlib.Path(__file__).resolve().parents[1] / 'seeds' / 'scalps.json').read_text())
-_seed_caps = {'RubberBand Scalp': 2, 'Second Chance Scalp': 2, 'Back$ide Scalp': 1,
-              'HitchHiker Scalp': 1, 'Fashionably Late Scalp': 1}
-_seed_win = {'RubberBand Scalp': (1000, 1330), 'Second Chance Scalp': (959, 1550),
-             'Back$ide Scalp': (1000, 1330),
+_seed_caps = {'RubberBand Scalp': 2, 'RubberBand Scalp (Short)': 2, 'Second Chance Scalp': 2,
+              'Back$ide Scalp': 1, 'HitchHiker Scalp': 1, 'Fashionably Late Scalp': 1}
+_seed_win = {'RubberBand Scalp': (1000, 1330), 'RubberBand Scalp (Short)': (1000, 1330),
+             'Second Chance Scalp': (959, 1550), 'Back$ide Scalp': (1000, 1330),
              'HitchHiker Scalp': (945, 1100), 'Fashionably Late Scalp': (1000, 1330)}
 for _sd in _seeds:
     _r = _sd.get('risk') or {}
