@@ -41,6 +41,26 @@
     {
      "left": {
       "kind": "price",
+      "field": "low"
+     },
+     "op": "le",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "primitive",
+       "key": "levels.today_low",
+       "source": "close"
+      },
+      "b": {
+       "kind": "const",
+       "value": 1.03
+      }
+     }
+    },
+    {
+     "left": {
+      "kind": "price",
       "field": "close"
      },
      "op": "gt",

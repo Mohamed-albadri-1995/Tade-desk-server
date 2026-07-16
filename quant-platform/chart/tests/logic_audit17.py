@@ -91,6 +91,12 @@ rubber = {'name': 'RubberBand', 'side': 'long',
         # doesn't disqualify the setup. (PDF: "Price down > 3 ATRs from open".)
         rule(EXPR('sub', PRIM('levels.day_open'), PRIM('levels.today_low')),
              'gt', EXPR('mul', C(3), PRIM('volatility.atr_daily', params={'length': 14}))),
+        # PROXIMITY: the snapback bar's LOW must be within 3% of the low-of-day.
+        # The PDF's snapback candle "almost always marks the low of the day", so a
+        # valid entry sits AT the bottom → the LoD-anchored stop is tight. Without
+        # this the double-bar break also fires on continuation bounces far above
+        # the LoD, where the stop is 50%+ away (backtest #76 JEM: 10.38 vs 4.98).
+        rule(P('low'), 'le', EXPR('mul', PRIM('levels.today_low'), C(1.03))),
         # NOTE: the PDF's "RVOL > 5" is the SCREENER's daily relative volume (a
         # stock-SELECTION filter) — already handled by the R1 universe and the
         # `rvol` backtest column, NOT an intraday bar condition. So it is not an
@@ -103,7 +109,7 @@ rubber = {'name': 'RubberBand', 'side': 'long',
     'risk': {'sl': {'type': 'prim', 'anchor': PRIM('levels.today_low', off=1), 'value': 0.05},
              'targets': [{'fraction': 1/3, 'r_multiple': 1.0},
                          {'fraction': 1/3, 'r_multiple': 2.0}],   # runner = 1/3
-             # PDF discipline: up to 2 attempts/day, 10m cooldown, 3m min-hold
+             # PDF discipline: up to 2 attempts/day, 10m cooldown
              'max_entries_per_day': 2, 'cooldown_bars': 10}}
 r = run(rubber, 'RUBBER')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
@@ -115,6 +121,21 @@ ok("stop is anchored to today_low (priced, trailing)",
    any(s['name'] == 'SL level' for s in r.get('series') or []))
 ok("RubberBand carries its PDF scale-out legs (1R + 2R)",
    len(rubber['risk'].get('targets') or []) == 2)
+
+# PROXIMITY guard (backtest #76 JEM): a day that IS >3 ATR down, with a green
+# double-bar break, but the break fires FAR ABOVE the low-of-day (a continuation
+# bounce, not a snapback) → the low-near-LoD rule must REJECT it. Same premise
+# day as RUBBER, but a late green bar that breaks 2 highs while sitting well
+# above the LoD.
+clj = [50.0, 49.4, 48.8, 48.2, 47.6, 47.0, 46.6, 46.4, 48.5, 49.2, 49.0]  # bar8-9 bounce far above 46.2 LoD
+opj = [50.2, 49.8, 49.2, 48.6, 48.0, 47.4, 47.0, 46.7, 47.8, 48.6, 49.1]
+hij = [50.3, 49.9, 49.3, 48.7, 48.1, 47.5, 47.1, 46.8, 48.7, 49.4, 49.2]  # bar8 high 48.7 clears prior-2 highs
+loj = [49.3, 49.0, 48.4, 47.8, 47.2, 46.6, 46.3, 46.2, 48.0, 48.5, 48.4]  # bar8 low 48.0 = ~3.9% over 46.2 LoD
+volj= [1e5, 1e5, 1e5, 2e5, 3e5, 5e5, 7e5, 9e5, 1.3e6, 4e5, 1e5]
+SCEN['RUBBERFAR'] = frame(clj, opj, hij, loj, volj)
+rf = run(rubber, 'RUBBERFAR')
+ok("far-above-LoD break is REJECTED (low 48.0 > 46.2*1.03) — no JEM -52%",
+   len(entry_bars(rf)) == 0, f"entries={entry_bars(rf)}")
 
 # STOP-RATCHET guard: a long stop must never move DOWN, so a stop anchored to
 # a running low (which only falls) FREEZES at its entry level and a real
