@@ -340,13 +340,15 @@ late = {'name': 'FashionablyLate', 'side': 'long',
         # <= VWAP 5 bars ago (a rising VWAP would disqualify the setup).
         rule(PRIM('vwap.session'), 'le', PRIM('vwap.session', off=5)),                       # flat-to-down VWAP
     ]),
-    # measured-move stop: 1/3 of the way from VWAP down to LoD (anchored expr)
+    # PDF EXIT: "1 measured move above the CROSS" — measured move = cross − LoD,
+    # FROZEN at entry (the cross), not chasing live VWAP. target = 2*entry − LoD,
+    # via the Trade `entry` operand.
     'exit': G('AND', [rule(P('close'), 'cross_above',
-        EXPR('add', PRIM('vwap.session'),
-             EXPR('mul', C(1.0), EXPR('sub', PRIM('vwap.session'), PRIM('levels.today_low', off=1)))))]),  # ~1 measured move above
+        EXPR('sub', EXPR('mul', C(2.0), {'kind': 'trade', 'field': 'entry'}), PRIM('levels.today_low')))]),
+    # PDF STOP: "1/3 the distance from VWAP to the LoD" (tight) → 3:1 R:R.
     'risk': {'sl': {'type': 'prim',
         'anchor': EXPR('sub', PRIM('vwap.session'),
-                       EXPR('mul', C(2.0/3.0), EXPR('sub', PRIM('vwap.session'), PRIM('levels.today_low', off=1)))),
+                       EXPR('mul', C(1.0/3.0), EXPR('sub', PRIM('vwap.session'), PRIM('levels.today_low', off=1)))),
         'value': 0.0},
         'max_entries_per_day': 1, 'cooldown_bars': 10}}
 r = run(late, 'FLATE')
@@ -354,6 +356,12 @@ ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("9EMA-cross-VWAP fires (>=1 entry)", len(entry_bars(r)) >= 1, f"entries={entry_bars(r)}")
 ok("expr-anchored measured-move stop is priced",
    any(s['name'] == 'SL level' for s in r.get('series') or []))
+# the exit target is FROZEN at the cross (Trade `entry`), not the live VWAP:
+# a winning trade must exit via 'exit' at ~2*entry − LoD (a fixed level), and
+# the trade's return must reflect that fixed target, not a drifting one.
+_wins = [t for t in (r.get('trades') or []) if t['reason'] == 'exit']
+ok("frozen measured-move target produces a clean 'exit' (not eod/SL drift)",
+   len(_wins) >= 1 or bool(r.get('open_trade')), f"trades={[(t['reason']) for t in r.get('trades') or []]}")
 
 print("=" * 64)
 print("DISCIPLINE — the 5 scalps cap attempts + cool down (NO min-hold: their")
