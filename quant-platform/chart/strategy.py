@@ -939,6 +939,23 @@ def _exit_now(exit_mask, trade_aware, exit_group, open_trade, side, bars, ctx) -
         return False
 
 
+def _draw_operand(nd: dict, arr, ts, tag: str) -> list:
+    """Explicit chart series for a left/right operand whose value isn't a plain
+    registry line — an `expr` (computed) or a `hold` (forward-filled) operand.
+    A HELD operand draws as a STEP line (holds flat until the next real value),
+    so the held level is visible and verifiable by eye in 'Test a condition'."""
+    if not isinstance(nd, dict) or not (nd.get('kind') == 'expr' or nd.get('hold')):
+        return []
+    vals = [{'time': int(t), 'value': float(v)} for t, v in zip(ts, arr) if v == v]
+    if not vals:
+        return []
+    held = bool(nd.get('hold'))
+    name = (f"{nd.get('key','value')} (held)" if held
+            else ('expr' if tag == 'L' else 'expr(R)'))
+    return [{'name': name, 'color': '#14b8a6' if held else '#eab308',
+             'style': 0, 'step': held, 'values': vals}]
+
+
 def test_condition(node: dict, symbol: str, tf: str, days: int,
                    feed: str = 'polygon', view: str = 'all',
                    asof: str | None = None) -> dict:
@@ -976,20 +993,18 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
                 'color': '#3b82f6', 'text': ''} for i in idx]
     # Draw the exact indicators this condition reads (so you SEE the values, not
     # just the fire dots) + the current value of the left operand.
-    series = _indicator_series(strat_like, bars, ts, ctx)
+    series = list(_indicator_series(strat_like, bars, ts, ctx))
     left_now = right_now = None
     if not is_group and isinstance(node.get('left'), dict):
         try:
             la = _operand_array(node['left'], bars, ctx)
             if la[-1] == la[-1]:
                 left_now = round(float(la[-1]), 4)
-            # a composed (expr) left value isn't a registry primitive, so draw
-            # it explicitly — otherwise you couldn't SEE the computed number.
-            if node['left'].get('kind') == 'expr':
-                vals = [{'time': int(t), 'value': float(v)} for t, v in zip(ts, la) if v == v]
-                if vals:
-                    series = list(series) + [{'name': 'expr', 'color': '#eab308',
-                                              'style': 0, 'step': False, 'values': vals}]
+            # a composed (expr) or HELD operand isn't a plain registry line, so
+            # draw it explicitly — otherwise you couldn't SEE the value. A HELD
+            # operand draws as a STEP line (it holds flat until the next real
+            # value): that IS the persistent level, so 'hold' is verifiable by eye.
+            series += _draw_operand(node['left'], la, ts, 'L')
         except Exception:
             pass
     if not is_group and isinstance(node.get('right'), dict) and node.get('op') not in _UNARY:
@@ -997,6 +1012,7 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
             ra = _operand_array(node['right'], bars, ctx)
             if ra[-1] == ra[-1]:
                 right_now = round(float(ra[-1]), 4)
+            series += _draw_operand(node['right'], ra, ts, 'R')
         except Exception:
             pass
     wsec = int((ctx['end'] - pd.Timedelta(days=days_req)

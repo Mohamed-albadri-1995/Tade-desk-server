@@ -645,6 +645,17 @@ function operandEl(op, onStruct, allowConst){
     const fs=document.createElement('select'); for(const [v,l] of [['pnl_pct','P&L %'],['bars','bars in trade'],['entry','entry price']]){const o=document.createElement('option');o.value=v;o.textContent=l;fs.appendChild(o);} fs.value=op.field||'pnl_pct'; fs.title='the OPEN position — exit rules only; each trade sees its own entry'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs);
   } else { const ci=document.createElement('input'); ci.type='number'; ci.step='any'; ci.className='cst'; ci.value=op.value??0; ci.onchange=()=>op.value=parseFloat(ci.value); box.appendChild(ci); }
   if(canOffset){ const off=document.createElement('input'); off.type='number'; off.className='len'; off.style.width='40px'; off.title='bars ago (e.g. 1 = previous bar)'; off.placeholder='[0]'; if(op.offset)off.value=op.offset; off.onchange=()=>{const v=parseInt(off.value,10); if(Number.isFinite(v)&&v>0)op.offset=v; else delete op.offset;}; box.appendChild(off); }
+  // HOLD (forward-fill): carry this operand's last real value forward. Turns a
+  // sparse primitive (pivot_high/low — NaN except on a confirmation bar) into a
+  // PERSISTENT level line. Only meaningful for primitives/expr (price is never
+  // NaN); shown there so you can build "break/retest a level".
+  if(op.kind==='primitive'||op.kind==='expr'){
+    const hl=document.createElement('span'); hl.textContent='⇢hold'; hl.style.cssText='color:var(--text3);font-size:10px;cursor:help';
+    hl.title='HOLD: carry the last real value forward (fixnan). A sparse pivot_high becomes a horizontal resistance line held until the next swing high. Needed to break/retest a fixed level.';
+    const hb=document.createElement('input'); hb.type='checkbox'; hb.style.margin='0 0 0 2px'; hb.title=hl.title; hb.checked=!!op.hold;
+    hb.onchange=()=>{ if(hb.checked)op.hold=true; else delete op.hold; onStruct(); };
+    box.appendChild(hl); box.appendChild(hb);
+  }
   return box;
 }
 function labeled(txt,el){ const s=document.createElement('span'); s.className='opd'; const l=document.createElement('span'); l.style.cssText='color:var(--text3);font-size:10px'; l.textContent=txt; s.appendChild(l); s.appendChild(el); return s; }
