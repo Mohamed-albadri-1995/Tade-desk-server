@@ -665,10 +665,15 @@
     },
     {
      "left": {
-      "kind": "price",
-      "field": "close"
+      "kind": "primitive",
+      "key": "extremes.lowest",
+      "source": "low",
+      "params": {
+       "length": 6
+      },
+      "offset": 1
      },
-     "op": "gt",
+     "op": "ge",
      "right": {
       "kind": "expr",
       "op": "add",
@@ -698,6 +703,43 @@
          "source": "close"
         }
        }
+      }
+     }
+    },
+    {
+     "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "primitive",
+       "key": "extremes.highest",
+       "source": "high",
+       "params": {
+        "length": 6
+       },
+       "offset": 1
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "extremes.lowest",
+       "source": "low",
+       "params": {
+        "length": 6
+       },
+       "offset": 1
+      }
+     },
+     "op": "le",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 0.05
+      },
+      "b": {
+       "kind": "price",
+       "field": "close"
       }
      }
     },

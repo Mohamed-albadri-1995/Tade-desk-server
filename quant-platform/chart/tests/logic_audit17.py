@@ -326,10 +326,18 @@ vol= [2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5]   # break bar 12 vo
 SCEN['HITCH'] = frame(cl, opn, hi, lo, vol)
 rng = EXPR('sub', PRIM('levels.today_high'), PRIM('levels.today_low'))
 upper_third = EXPR('add', PRIM('levels.today_low'), EXPR('mul', C(2.0/3.0), rng))
+HI6 = PRIM('extremes.highest', params={'length': 6}, source='high', off=1)
+LO6 = PRIM('extremes.lowest', params={'length': 6}, source='low', off=1)
 hitch = {'name': 'HitchHiker', 'side': 'long',
     'entry': G('AND', [
-        rule(P('close'), 'cross_above', PRIM('extremes.highest', params={'length': 6}, source='high', off=1)),  # break consolidation
-        rule(P('close'), 'gt', upper_third),                                          # upper 1/3 of day range
+        rule(P('close'), 'cross_above', HI6),                                         # break the consolidation
+        # PDF: the consolidation LOW (not just the break bar) sits in the upper 1/3
+        # of the day range — a real post-drive pause near the highs, not mid-range
+        # chop. This is what rejects the SVRE noise + the JEM false break (backtest
+        # #97: both consolidated BELOW the upper third of a wide day range).
+        rule(LO6, 'ge', upper_third),
+        # PDF: a TIGHT consolidation, not a wide sloppy swing. Prior-6-bar range <=5%.
+        rule(EXPR('sub', HI6, LO6), 'le', EXPR('mul', C(0.05), P('close'))),
         rule(P('volume'), 'gt', EXPR('mul', C(1.3), P('volume', off=1))),             # +30% volume on break
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # wave-2 = trail 9EMA
@@ -339,8 +347,19 @@ hitch = {'name': 'HitchHiker', 'side': 'long',
              'max_entries_per_day': 1, 'cooldown_bars': 10}}
 r = run(hitch, 'HITCH')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
-ok("consolidation-break + upper-third + volume fires (>=1 entry)", len(entry_bars(r)) >= 1,
+ok("tight-consolidation-in-upper-third + break + volume fires (>=1 entry)", len(entry_bars(r)) >= 1,
    f"entries={entry_bars(r)}")
+# CONTROL: a MID-RANGE choppy pause (consolidation low well below the upper third)
+# must be REJECTED — this is the SVRE/JEM failure the low-in-upper-third rule kills.
+clc = [47.0,48.5,47.2,48.4,47.3, 47.8,47.6,47.9,47.7,47.85,47.75,47.8, 48.1]  # wide day (46.8..49), pause ~47.7 = mid-range
+hic = [47.6,49.0,47.8,48.9,47.9, 47.95,47.9,48.05,47.9,48.0,47.95,48.0, 48.3]
+loc = [46.8,47.9,46.9,47.9,47.0, 47.6,47.5,47.7,47.55,47.7,47.6,47.65, 47.9]
+opc = [46.9,47.1,48.4,47.3,48.3, 47.7,47.85,47.7,47.9,47.75,47.85,47.78, 47.95]
+volc= [2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5]
+SCEN['HITCHCHOP'] = frame(clc, opc, hic, loc, volc)
+rc = run(hitch, 'HITCHCHOP')
+ok("mid-range chop is REJECTED (consolidation low below the upper third)",
+   len(entry_bars(rc)) == 0, f"entries={entry_bars(rc)}")
 
 print("=" * 64)
 print("SCALP 5 — Fashionably Late (9EMA crosses VWAP, LONG)")
