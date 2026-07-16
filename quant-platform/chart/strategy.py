@@ -1201,6 +1201,26 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
                               if v['time'] >= wsec]) for s in series]
     series = [s for s in series if s['values']]
 
+    # DIAGNOSTIC — "drop %": how far the name was EXTENDED DOWN at entry, as
+    # (session VWAP − low-of-day) ÷ entry × 100. It separates a real extension
+    # setup (big drop → the stock actually fell away from VWAP and recovered)
+    # from flat chop (tiny drop → nothing happened). Ride it on each trade so a
+    # backtest can show it. Computed once, NaN-safe; None if unavailable.
+    _vwap_arr = _low_arr = None
+    if trades or open_trade:
+        try:
+            _vwap_arr = cs.overlay_arrays(bars, {'key': 'vwap.session', 'source': 'close'}, ctx, causal=True)[2][0][1]
+            _low_arr = cs.overlay_arrays(bars, {'key': 'levels.today_low', 'source': 'close'}, ctx, causal=True)[2][0][1]
+        except Exception:
+            _vwap_arr = _low_arr = None
+    def _drop_at(ei, ep):
+        if _vwap_arr is None or _low_arr is None or not ep:
+            return None
+        try:
+            v = float((_vwap_arr[ei] - _low_arr[ei]) / ep * 100.0)
+            return round(v, 2) if v == v else None
+        except Exception:
+            return None
     et = bars.index[vis].tz_convert(cs._ET)
     return {
         'ok': True, 'bars': int(vis.sum()), 'side': side,
@@ -1208,7 +1228,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         # EXACTLY this, so preview and backtest can never disagree.
         'trades': [{'entry_ts': int(ts[t['ei']]), 'exit_ts': int(ts[t['xi']]),
                     'entry': t['entry'], 'exit': t['exit'], 'ret': t['ret'],
-                    'reason': t['reason'],
+                    'reason': t['reason'], 'drop_pct': _drop_at(t['ei'], t['entry']),
                     # scale-out partials, timestamped for the chart (Step 3)
                     'legs': [{'exit_ts': int(ts[g['xi']]), 'price': g['price'],
                               'fraction': g['fraction'], 'ret': g['ret'],
@@ -1225,6 +1245,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         'open_trade': ({'time': int(ts[open_trade['ei']]),
                         'entry': open_trade['entry'],
                         'ret_pct': round(100.0 * open_trade['ret'], 3),
+                        'drop_pct': _drop_at(open_trade['ei'], open_trade['entry']),
                         'legs': [{'exit_ts': int(ts[g['xi']]), 'price': g['price'],
                                   'fraction': g['fraction'], 'ret': g['ret'],
                                   'reason': g['reason']} for g in open_trade.get('legs') or []]}

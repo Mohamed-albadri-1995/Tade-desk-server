@@ -281,7 +281,9 @@ def run(spec: dict, progress_cb=None) -> dict:
                                        'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
                                        'entry': t['entry'], 'exit': t['exit'],
                                        'ret': t['ret'] - (2.0 + nlegs) * cost,
-                                       'reason': t['reason'], 'ctx': rctx,
+                                       'reason': t['reason'],
+                                       # diagnostic rides in ctx (no schema change)
+                                       'ctx': {**(rctx or {}), 'drop_pct': t.get('drop_pct')},
                                        'legs': t.get('legs') or []})  # for per-fill TTP
                 ot = r.get('open_trade')
                 if ot and _et_date(ot['time']) == day:
@@ -295,7 +297,8 @@ def run(spec: dict, progress_cb=None) -> dict:
                                   'entry': ot['entry'], 'exit': None,
                                   # entry side + each banked partial (runner open)
                                   'ret': ot['ret_pct'] / 100.0 - (1.0 + nlegs) * cost,
-                                  'reason': 'open', 'ctx': rctx,
+                                  'reason': 'open',
+                                  'ctx': {**(rctx or {}), 'drop_pct': ot.get('drop_pct')},
                                   'legs': ot.get('legs') or []})  # banked partials
                 if took:
                     cov['traded_pairs'] += 1

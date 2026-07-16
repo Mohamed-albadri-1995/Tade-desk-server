@@ -251,11 +251,13 @@ def backtest_report(bid: int):
                     f"NO bars on feed '{cov.get('feed')}' — the universe was only "
                     f"PARTIALLY evaluated (alpaca/IEX carries no data for many small "
                     f"caps; rerun on polygon)")
+    _drop = lambda t: (f"{(t.get('ctx') or {}).get('drop_pct'):.2f}%"
+                       if (t.get('ctx') or {}).get('drop_pct') is not None else '—')
     rows = ''.join(
         f"<tr><td>{t['date']}</td><td><b>{t['symbol']}</b></td><td>{t['side']}</td>"
         f"<td>{t['entry']:.2f}→{('%.2f' % t['exit']) if t.get('exit') is not None else 'open'}</td>"
         f"<td class='{'up' if (t.get('ret') or 0) > 0 else 'dn'}'>"
-        f"{(t['ret'] * 100):+.2f}%</td><td>{t['reason']}</td></tr>"
+        f"{(t['ret'] * 100):+.2f}%</td><td>{_drop(t)}</td><td>{t['reason']}</td></tr>"
         for t in (g.get('trades') or []))
     m = (lambda k, d='—': s.get(k) if s.get(k) is not None else d)
     html = f"""<!doctype html><html><head><meta charset="utf-8">
@@ -295,7 +297,7 @@ rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_c
 {(f'''<div class="kpi"><b>{cov.get('scaleout_legs')}</b><span>scale-out partials banked across {cov.get('scaleout_trades', 0)} trades (returns are size-weighted)</span></div>''') if cov and cov.get('scaleout_legs') else ''}
 </div>
 {_ttp_html(s)}
-<div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th><th>why</th></tr>
+<div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th><th>drop%</th><th>why</th></tr>
 {rows}</table></div>
 <div class="defs"><b>How to read this honestly:</b><br>
 · Every trade uses the exact strategy JSON + verified qp math the chart draws — no re-implementation.<br>
