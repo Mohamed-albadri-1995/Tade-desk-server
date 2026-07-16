@@ -133,6 +133,18 @@ Only once a piece looks right do you wire it into a strategy.
 
 - **Bar offset** — every operand has a `[n]` box = *n bars ago*. `close > high[1]`
   (break of the previous bar's high) is `Price close` **>** `Price high [1]`.
+- **Hold (forward-fill)** — an operand modifier `"hold": true` that carries a
+  primitive's last real value forward until it changes (Pine's `fixnan`). Turns
+  a *sparse* primitive — one that's NaN except on a few bars, like
+  `structure.pivot_high`/`pivot_low` (which only print on a confirmation bar) —
+  into a **persistent, fixed level**: a *held* `pivot_high` is the horizontal
+  resistance line at the last swing high. Without it, "retest a level" can't be
+  written, because the level is blank on the retest bar. It's an **engine-side
+  operand transform** (`chart/strategy.py::_hold`, applied before `offset`) — the
+  frozen qp primitive library is **not** touched; `hold` works *on top of* any
+  primitive. Past-only, so no look-ahead. Used by the Second Chance seed:
+  `close cross_above pivot_high(hold)` (break) → `low ≤ pivot_high(hold)`
+  (retest of the same fixed level) → `close > close[1]` (attack).
 - **Time of day** — a `Time` operand returns the ET bar time (minutes since
   midnight, or `hhmm`), so a session window 9:30–13:00 is two conditions:
   `Time minutes ≥ 570` **and** `≤ 780`.

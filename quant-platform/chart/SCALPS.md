@@ -67,12 +67,20 @@ legs.**
 - Stop: ~$0.02 below the low of the turn candle.
 - Exit: half at the pullback high, trail the rest under the **9 EMA**.
 
-**Builder (ENTRY, IN SEQUENCE / THEN, window ≈ 8 bars)**
+**Builder (ENTRY, IN SEQUENCE / THEN, window ≈ 6 bars)**
 | step | left | op | right |
 |---|---|---|---|
-| 1 break | Price `close` | `crosses ▲` | the level (e.g. `prev_day_high`, `pm_high`, or `window_high` of the opening range) |
-| 2 retest | Price `low` | `≤` | the same level |
+| 1 break | Price `close` | `crosses ▲` | `structure.pivot_high` **(hold)** — the range top, held as a fixed level |
+| 2 retest | Price `low` | `≤` | the **same** held `pivot_high` |
 | 3 attack | Price `close` | `>` | Price `close` **[1] ago** |
+
+The resistance is not a single arbitrary level but the **top of the range the
+stock broke** — a real swing high (`structure.pivot_high`), **held** forward
+(`"hold": true`) so it stays fixed through the retest. A rolling `highest(N)`
+can't be used: after the break it jumps to the breakout high and smears the
+retest. (The old seed used the first-4-min opening-range high — usually a tiny,
+meaningless level; that produced the junk breaks in backtest #75.) `pm_high` /
+`prev_day_high` are alternative fixed levels if you want a specific one.
 
 **Stop:** the PDF says ".02 below the low of the **turn candle**" → anchored to
 `extremes.lowest` len 3, source low (the recent retest low), not the day low.

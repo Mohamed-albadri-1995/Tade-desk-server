@@ -55,6 +55,30 @@ b3=bars_from(close=[11,9,9,11,9,9])
 chk('above[2] AND below[now]', S._eval_group({'logic':'AND','rules':[A,Br]}, b3, None),
     [False,False,True,False,False,True])
 
+print("== hold: forward-fill a sparse primitive into a persistent level ==")
+# a sparse operand (a primitive that's NaN except a few bars) — simulate with a
+# pivot_high. Craft one clean swing high; 'hold' must carry it forward flat.
+import tools.compare_server as cs
+def chkv(name, got, exp):
+    global PASS, FAIL
+    if got == exp: PASS += 1
+    else: FAIL += 1; FAILS.append(name); print(f"  FAIL {name}: got={got!r} exp={exp!r}")
+bh = bars_from(close=[10,10.1,10.2,10.3,10.2,10.1,10,10,10,10,10,10,10],
+               h    =[10.1,10.2,10.3,10.5,10.3,10.2,10.1,10.1,10.1,10.1,10.1,10.1,10.1])  # peak high 10.5 @ idx3
+ctx3 = {'symbol':'X','tf':'1m','start':bh.index[0],'end':bh.index[-1]}
+raw = S._operand_array({'kind':'primitive','key':'structure.pivot_high','source':'high',
+                        'params':{'left':2,'right':2}}, bh, ctx3)
+held = S._operand_array({'kind':'primitive','key':'structure.pivot_high','source':'high',
+                         'params':{'left':2,'right':2},'hold':True}, bh, ctx3)
+# raw prints 10.5 only on the confirmation bar (idx 5 = peak idx3 + right 2), NaN else
+chkv('raw pivot is sparse (one real value)', int((~np.isnan(raw)).sum()), 1)
+chkv('raw value is the swing high', round(float(raw[np.nanargmax(np.where(np.isnan(raw),-1,raw))]),2), 10.5)
+# held: NaN until confirmation, then 10.5 carried forward on every later bar
+first = int(np.argmax(~np.isnan(held)))
+chkv('held is NaN before the pivot confirms', bool(np.isnan(held[first-1])) if first>0 else True, True)
+chkv('held carries 10.5 forward to the last bar', round(float(held[-1]),2), 10.5)
+chkv('held has no gaps after it starts', int(np.isnan(held[first:]).sum()), 0)
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 if FAILS: print("FAILURES:", FAILS)
 sys.exit(1 if FAIL else 0)

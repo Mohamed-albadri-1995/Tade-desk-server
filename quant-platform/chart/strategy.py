@@ -8,7 +8,11 @@ also the exact series the Phase 4 backtest will replay day-by-day.
 
 Schema (JSON)
 -------------
-operand:                                    (any operand may add "offset": n = n bars ago)
+operand:              (any operand may add "offset": n = n bars ago,
+                       and "hold": true = forward-fill its last real value —
+                       carries a SPARSE primitive like structure.pivot_high
+                       forward into a persistent, fixed level. hold applies
+                       BEFORE offset. See _hold(); no look-ahead.)
   {"kind":"primitive","key":"ma.ema","source":"close","params":{"length":9},"sub":null}
   {"kind":"price","field":"close|open|high|low|hl2|hlc3|ohlc4|volume"}
   {"kind":"time","field":"minutes|hhmm|hour|minute"}   # ET bar time-of-day
@@ -103,6 +107,26 @@ def _shift(arr: np.ndarray, offset: int) -> np.ndarray:
     return np.concatenate((np.full(off, np.nan), arr[:-off]))
 
 
+def _hold(arr: np.ndarray) -> np.ndarray:
+    """Forward-fill: carry each last real (non-NaN) value forward until the next
+    one appears (Pine's `fixnan`). Turns a SPARSE primitive — one that only
+    prints on some bars, like structure.pivot_high/low (NaN except on a
+    confirmation bar), or a session level — into a PERSISTENT step line you can
+    use as a real, fixed level: 'the last swing high, held' IS the horizontal
+    resistance a trader draws. Past-only (a value can only be carried FORWARD
+    from a bar already seen), so it never introduces look-ahead. Bars before the
+    first real value stay NaN."""
+    arr = np.asarray(arr, dtype=float)
+    mask = ~np.isnan(arr)
+    if not mask.any():
+        return arr
+    idx = np.where(mask, np.arange(arr.size), 0)
+    np.maximum.accumulate(idx, out=idx)         # index of the last real value
+    out = arr[idx]
+    out[:int(np.argmax(mask))] = np.nan          # nothing to hold before the first
+    return out
+
+
 # ── operand → aligned float array ──────────────────────────────────────────
 def _operand_array(operand: dict, bars, ctx, trade: dict | None = None) -> np.ndarray:
     if not isinstance(operand, dict):
@@ -181,7 +205,10 @@ def _operand_array(operand: dict, bars, ctx, trade: dict | None = None) -> np.nd
             base = lines[0][1]
     else:
         raise ValueError(f'unknown operand kind {kind!r}')
-    return _shift(np.asarray(base, dtype=float), operand.get('offset', 0))
+    base = np.asarray(base, dtype=float)
+    if operand.get('hold'):                       # forward-fill, THEN shift
+        base = _hold(base)                        # (a sparse pivot → a held level)
+    return _shift(base, operand.get('offset', 0))
 
 
 # ── comparison / cross operators → boolean array ───────────────────────────

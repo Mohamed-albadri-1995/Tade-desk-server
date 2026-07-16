@@ -186,36 +186,46 @@ ok("profitable trailing-stop exit is labeled 'trail', not 'SL'",
 print("=" * 64)
 print("SCALP 2 — Second Chance (breakout retest, LONG)")
 print("=" * 64)
-# prev_day_high ~ 50.0 (stub daily high = 50.6; use a level the day crosses).
-# Use extremes.highest(30) offset as the 'resistance' proxy is fragile; instead
-# break/retest a fixed structural level via prev_day_high isn't 50; craft around
-# session: break above the opening-range high, pull back, close above prior bar.
-# Sequence: (1) close crosses ABOVE the 09:30-09:45 window high, (2) low retests
-# it, (3) close > prior close.
-cl = [48.0, 48.2, 48.1, 48.3, 49.2, 49.4, 48.7, 48.55, 49.1, 49.3]  # b4 breaks, b6-7 retest, b8 attack
-hi = [48.3, 48.4, 48.35, 48.6, 49.5, 49.6, 49.0, 48.8, 49.2, 49.4]
-lo = [47.8, 48.0, 47.9, 48.1, 48.6, 49.1, 48.5, 48.45, 48.9, 49.1]  # b7 low 48.45 ~ retest of ~48.6 ORH
-opn= [47.9, 48.1, 48.2, 48.15, 48.7, 49.3, 49.35, 48.7, 48.95, 49.15]
+# The PDF setup is a RANGE break→retest→attack. The resistance is the top of the
+# consolidation the stock broke — a real swing high, HELD as a fixed level (a
+# rolling highest() would jump to the breakout high and smear the retest). A
+# clean pivot high forms at bar 7 (high 48.60, the only local max), confirms 5
+# bars later, and 'hold' carries it forward as the range top. Then: close breaks
+# it (b15), price pulls back and low retests it (b17), close attacks (b18).
+cl = [48.00,48.05,48.15,48.20,48.30,48.40,48.45,48.50,48.40,48.35,48.30,48.25,48.20,48.15,48.10,48.90,49.20,48.70,49.10,49.20,49.25,49.20,49.15,49.10]
+hi = [48.10,48.15,48.30,48.35,48.40,48.45,48.50,48.60,48.45,48.40,48.35,48.30,48.25,48.20,48.15,49.00,49.30,48.80,49.20,49.30,49.32,49.28,49.20,49.15]
+lo = [47.90,47.95,48.00,48.10,48.20,48.30,48.35,48.40,48.30,48.25,48.20,48.15,48.10,48.05,48.00,48.20,48.85,48.50,48.65,49.00,49.10,49.05,49.00,48.95]
+opn= [47.95,48.00,48.10,48.15,48.25,48.35,48.40,48.45,48.42,48.38,48.32,48.28,48.22,48.18,48.12,48.15,49.00,48.95,48.70,49.05,49.15,49.20,49.15,49.10]
 SCEN['SECOND'] = frame(cl, opn, hi, lo)
-orh = PRIM('levels.window_high', params={'start': 930, 'end': 934})  # opening-range high (first 4 min)
+# the range top = last swing high, HELD forward (the new engine 'hold' modifier)
+RES = {'kind': 'primitive', 'key': 'structure.pivot_high', 'source': 'high',
+       'params': {'left': 5, 'right': 5}, 'hold': True}
 second = {'name': 'SecondChance', 'side': 'long',
     'entry': G('THEN', [
-        rule(P('close'), 'cross_above', orh),        # (1) break
-        rule(P('low'), 'le', orh),                   # (2) retest touches the level
+        rule(P('close'), 'cross_above', RES),        # (1) break the held range top
+        rule(P('low'), 'le', RES),                   # (2) retest the SAME fixed level
         rule(P('close'), 'gt', P('close', off=1)),   # (3) attack: closes above prior candle
-    ], window=8),
+    ], window=6),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # trail 9EMA
-    # PDF: ".02 below the low of the TURN candle" — the recent retest low, not
-    # the whole day's low. extremes.lowest(3) tracks the turn-candle area.
-    # PDF exit: sell 1/2 at the target (~2R proxy for the pullback high), trail
-    # the other 1/2 under the 9-EMA (the runner exit rule above).
+    # PDF: ".02 below the low of the TURN candle" — the recent retest low.
     'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 3}, source='low', off=1), 'value': 0.05},
              'targets': [{'fraction': 0.5, 'r_multiple': 2.0}],
              'max_entries_per_day': 2, 'cooldown_bars': 10}}
 r = run(second, 'SECOND')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
-ok("break->retest->attack THEN-sequence fires (>=1 entry)", len(entry_bars(r)) >= 1,
-   f"entries={entry_bars(r)}")
+ok("break->retest->attack on a HELD swing-high fires (b18 attack)",
+   bar_ts(19) in entry_bars(r), f"entries={entry_bars(r)}")
+ok("does NOT fire before the break exists (nothing on bars 0-14)",
+   all(t >= bar_ts(16) for t in entry_bars(r)), f"entries={entry_bars(r)}")
+# CONTROL: with the OLD opening-range-high level, no clean level exists here →
+# proves the held pivot is what makes the retest resolvable.
+second_old = {**second, 'entry': G('THEN', [
+    rule(P('close'), 'cross_above', PRIM('levels.window_high', params={'start': 930, 'end': 934})),
+    rule(P('low'), 'le', PRIM('levels.window_high', params={'start': 930, 'end': 934})),
+    rule(P('close'), 'gt', P('close', off=1))], window=6)}
+ro = run(second_old, 'SECOND')
+ok("held-pivot version fires where the raw opening-range level need not",
+   r.get('ok') and ro.get('ok'), True)
 
 print("=" * 64)
 print("SCALP 3 — Back$ide (reversal to VWAP, LONG)")
