@@ -58,6 +58,22 @@ def run2(**kw):
 chk('no min-hold: exit rule fires at bar2', run2(), [(1, 2, 'exit')])
 chk('min_hold 3: exit rule deferred to bar4 (ei+3)', run2(min_hold_bars=3),
     [(1, 4, 'exit')])
+# HAZARD (why the seeds do NOT set min-hold): a STATUS exit re-fires every bar
+# so deferral just delays it. But a CROSS exit is true on ONE bar — if that bar
+# is inside the hold window, the signal is SUPPRESSED and never returns, so the
+# runner exit is LOST. Only put min-hold on status-style exits.
+bc = bars([100, 100, 101.2, 101.5, 101.6, 101.7], h=[100.1, 100.1, 101.3, 101.6, 101.7, 101.8],
+          l=[99.9, 99.9, 101.1, 101.4, 101.5, 101.6])
+ec = np.array([False, True, False, False, False, False])
+xc = {'logic': 'AND', 'rules': [{'left': {'kind': 'price', 'field': 'close'},
+      'op': 'cross_above', 'right': {'kind': 'const', 'value': 101}}]}   # cross at bar2
+def runc(**kw):
+    tr, _, _, op = S._pair_trades(bc, list(range(6)), ec, None, 'long',
+                                  {'sl': {'type': 'pct', 'value': 50}}, None, exit_group=xc, **kw)
+    return [(t['xi'], t['reason']) for t in tr], bool(op)
+chk('cross exit (no min-hold) fires at the cross bar', runc()[0], [(2, 'exit')])
+chk('cross exit INSIDE min-hold window is lost → rides open', runc(min_hold_bars=3),
+    ([], True))
 
 print("== 5. discipline threads through evaluate() from strategy.risk ==")
 import tools.compare_server as cs

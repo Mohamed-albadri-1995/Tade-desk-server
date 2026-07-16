@@ -104,7 +104,7 @@ rubber = {'name': 'RubberBand', 'side': 'long',
              'targets': [{'fraction': 1/3, 'r_multiple': 1.0},
                          {'fraction': 1/3, 'r_multiple': 2.0}],   # runner = 1/3
              # PDF discipline: up to 2 attempts/day, 10m cooldown, 3m min-hold
-             'max_entries_per_day': 2, 'cooldown_bars': 10, 'min_hold_bars': 3}}
+             'max_entries_per_day': 2, 'cooldown_bars': 10}}
 r = run(rubber, 'RUBBER')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("double-bar-break green fires on the snapback bar (bar 8)",
@@ -186,7 +186,7 @@ second = {'name': 'SecondChance', 'side': 'long',
     # the other 1/2 under the 9-EMA (the runner exit rule above).
     'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 3}, source='low', off=1), 'value': 0.05},
              'targets': [{'fraction': 0.5, 'r_multiple': 2.0}],
-             'max_entries_per_day': 2, 'cooldown_bars': 10, 'min_hold_bars': 3}}
+             'max_entries_per_day': 2, 'cooldown_bars': 10}}
 r = run(second, 'SECOND')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("break->retest->attack THEN-sequence fires (>=1 entry)", len(entry_bars(r)) >= 1,
@@ -216,7 +216,7 @@ backside = {'name': 'Backside', 'side': 'long',
     'exit': G('AND', [rule(P('close'), 'cross_above', PRIM('vwap.session'))]),        # exit entire at VWAP
     # PDF: ".02 below the most recent higher low" — a recent swing low, not day low.
     'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 5}, source='low', off=1), 'value': 0.05},
-             'max_entries_per_day': 1, 'cooldown_bars': 10, 'min_hold_bars': 3}}
+             'max_entries_per_day': 1, 'cooldown_bars': 10}}
 r = run(backside, 'BACK')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("HL + above-rising-9EMA + midpoint + range-break fires (>=1 entry)", len(entry_bars(r)) >= 1,
@@ -247,7 +247,7 @@ hitch = {'name': 'HitchHiker', 'side': 'long',
     # PDF exit: 1/2 into wave 1 (~1R), 1/2 into wave 2 (the 9-EMA trail runner).
     'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 6}, source='low', off=1), 'value': 0.05},
              'targets': [{'fraction': 0.5, 'r_multiple': 1.0}],
-             'max_entries_per_day': 1, 'cooldown_bars': 10, 'min_hold_bars': 3}}
+             'max_entries_per_day': 1, 'cooldown_bars': 10}}
 r = run(hitch, 'HITCH')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("consolidation-break + upper-third + volume fires (>=1 entry)", len(entry_bars(r)) >= 1,
@@ -282,7 +282,7 @@ late = {'name': 'FashionablyLate', 'side': 'long',
         'anchor': EXPR('sub', PRIM('vwap.session'),
                        EXPR('mul', C(2.0/3.0), EXPR('sub', PRIM('vwap.session'), PRIM('levels.today_low', off=1)))),
         'value': 0.0},
-        'max_entries_per_day': 1, 'cooldown_bars': 10, 'min_hold_bars': 3}}
+        'max_entries_per_day': 1, 'cooldown_bars': 10}}
 r = run(late, 'FLATE')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
 ok("9EMA-cross-VWAP fires (>=1 entry)", len(entry_bars(r)) >= 1, f"entries={entry_bars(r)}")
@@ -290,7 +290,8 @@ ok("expr-anchored measured-move stop is priced",
    any(s['name'] == 'SL level' for s in r.get('series') or []))
 
 print("=" * 64)
-print("DISCIPLINE — the 5 scalps carry their PDF attempt caps / cooldown / hold")
+print("DISCIPLINE — the 5 scalps cap attempts + cool down (NO min-hold: their")
+print("exits are CROSS events, and min-hold would eat the runner exit)")
 print("=" * 64)
 # every scalp must cap attempts (nonsense re-entry was the bug); PDF caps 2/2/1/1/1
 _caps = {'RubberBand': 2, 'SecondChance': 2, 'Backside': 1, 'HitchHiker': 1, 'FashionablyLate': 1}
@@ -298,8 +299,8 @@ for _s in (rubber, second, backside, hitch, late):
     _r = _s['risk']
     ok(f"{_s['name']}: attempts cap = {_caps[_s['name']]}",
        _r.get('max_entries_per_day') == _caps[_s['name']], f"got={_r.get('max_entries_per_day')}")
-    ok(f"{_s['name']}: cooldown + min-hold set",
-       _r.get('cooldown_bars') == 10 and _r.get('min_hold_bars') == 3,
+    ok(f"{_s['name']}: cooldown set, min-hold ABSENT (cross exit)",
+       _r.get('cooldown_bars') == 10 and _r.get('min_hold_bars') is None,
        f"cd={_r.get('cooldown_bars')} mh={_r.get('min_hold_bars')}")
 # the SHIPPED seeds (seeds/scalps.json) must carry the SAME discipline as here —
 # a stored seed without a cap re-enters chop all day (the reported bug).
@@ -309,9 +310,9 @@ _seed_caps = {'RubberBand Scalp': 2, 'Second Chance Scalp': 2, 'Back$ide Scalp':
               'HitchHiker Scalp': 1, 'Fashionably Late Scalp': 1}
 for _sd in _seeds:
     _r = _sd.get('risk') or {}
-    ok(f"seed '{_sd['name']}' carries its cap",
+    ok(f"seed '{_sd['name']}' caps + cools, no min-hold",
        _r.get('max_entries_per_day') == _seed_caps.get(_sd['name'])
-       and _r.get('cooldown_bars') == 10 and _r.get('min_hold_bars') == 3,
+       and _r.get('cooldown_bars') == 10 and _r.get('min_hold_bars') is None,
        f"cap={_r.get('max_entries_per_day')} cd={_r.get('cooldown_bars')} mh={_r.get('min_hold_bars')}")
 
 print("\n" + "=" * 64)
