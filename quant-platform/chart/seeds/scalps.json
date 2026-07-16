@@ -367,6 +367,64 @@
       },
       {
        "left": {
+        "kind": "expr",
+        "op": "sub",
+        "a": {
+         "kind": "primitive",
+         "key": "vwap.session",
+         "source": "close"
+        },
+        "b": {
+         "kind": "primitive",
+         "key": "levels.today_low",
+         "source": "close"
+        }
+       },
+       "op": "ge",
+       "right": {
+        "kind": "expr",
+        "op": "mul",
+        "a": {
+         "kind": "const",
+         "value": 0.03
+        },
+        "b": {
+         "kind": "price",
+         "field": "close"
+        }
+       }
+      },
+      {
+       "left": {
+        "kind": "expr",
+        "op": "sub",
+        "a": {
+         "kind": "primitive",
+         "key": "vwap.session",
+         "source": "close"
+        },
+        "b": {
+         "kind": "primitive",
+         "key": "levels.today_low",
+         "source": "close"
+        }
+       },
+       "op": "le",
+       "right": {
+        "kind": "expr",
+        "op": "mul",
+        "a": {
+         "kind": "const",
+         "value": 0.12
+        },
+        "b": {
+         "kind": "price",
+         "field": "close"
+        }
+       }
+      },
+      {
+       "left": {
         "kind": "price",
         "field": "close"
        },

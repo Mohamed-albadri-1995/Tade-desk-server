@@ -259,8 +259,13 @@ backside = {'name': 'Backside', 'side': 'long',
                   rule(P('close'), 'gt', EMA9, for_bars=3),
                   rule(PRIM('extremes.lowest', params={'length': 3}, source='low'), 'rising', None,
                        op_params={'lookback': 4, 'consistency': 0.6})]),
-        # 3. RANGE BREAK, still below VWAP and above the LoD->VWAP midpoint
+        # 3. RANGE BREAK, still below VWAP and above the LoD->VWAP midpoint, with a
+        #    real-but-not-broken extension: 3% <= (VWAP-LoD)/price < 12%. The floor
+        #    is anti-chop (need room to VWAP); the cap skips the day-1 broken/halted
+        #    names the PDF says to avoid (data: backtest #93 drop%-band sweep).
         G('AND', [rule(P('close'), 'lt', VWAP9),
+                  rule(EXPR('sub', VWAP9, PRIM('levels.today_low')), 'ge', EXPR('mul', C(0.03), P('close'))),
+                  rule(EXPR('sub', VWAP9, PRIM('levels.today_low')), 'le', EXPR('mul', C(0.12), P('close'))),
                   rule(P('close'), 'gt', midpoint),
                   rule(P('close'), 'cross_above', PRIM('extremes.highest', params={'length': 5}, source='high', off=1))]),
     ], window=30),
