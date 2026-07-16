@@ -259,6 +259,32 @@ ok("HL + above-rising-9EMA + midpoint + range-break fires (>=1 entry)", len(entr
 ok("single-target VWAP exit closes the trade",
    any(t['reason'] == 'exit' for t in r.get('trades') or []) or len(entry_bars(r)) >= 1)
 
+# --- Back$ide SEQUENCE variation (behavior + THEN, keeps the original above) ---
+# The PDF's backside is a SEQUENCE, not a one-bar pattern: (1) reclaim the 9EMA
+# off the low, (2) BEHAVIOR — hold above a RISING 9EMA for a sustained run
+# (consistent buying, a range building above the MA), (3) SIGNAL — the range
+# (held pivot_high) breaks. Fires ONCE, at the break.
+EMA9 = PRIM('ma.ema', params={'length': 9})
+bcl = [50,49.5,49,48.5,48,47.6,47.35,47.3,47.6,48.1,48.5,48.8,49.0,49.1,48.9,48.75,48.8,48.7,48.85,48.8,49.0,49.4,49.7,50.0]
+SCEN['BSEQ'] = frame([float(x) for x in bcl], [x-0.03 for x in bcl], [x+0.12 for x in bcl], [x-0.12 for x in bcl])
+bseq = {'name': 'BacksideSeq', 'side': 'long',
+    'entry': G('THEN', [
+        rule(P('close'), 'cross_above', EMA9),                                # 1. reclaim the 9EMA (turn off the low)
+        G('AND', [rule(P('close'), 'gt', EMA9, for_bars=5),                   # 2. BEHAVIOR: held above a RISING 9EMA
+                  rule(EMA9, 'rising', None, op_params={'lookback': 5, 'consistency': 0.6})]),
+        rule(P('close'), 'cross_above',                                       # 3. SIGNAL: the range breaks
+             {'kind': 'primitive', 'key': 'structure.pivot_high', 'source': 'high',
+              'params': {'left': 3, 'right': 3}, 'hold': True}),
+    ], window=20),
+    'exit': G('AND', [rule(P('close'), 'cross_above', PRIM('vwap.session'))]),
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 5}, source='low', off=1), 'value': 0.05},
+             'max_entries_per_day': 1, 'cooldown_bars': 10}}
+rq = run(bseq, 'BSEQ')
+ok("Back$ide SEQUENCE: reclaim->hold-above-rising-9EMA->range-break fires ONCE",
+   len(entry_bars(rq)) == 1, f"entries={entry_bars(rq)}")
+ok("Back$ide SEQUENCE fires at the break (bar 21), not on the reclaim/hold",
+   bar_ts(22) in entry_bars(rq), f"entries={entry_bars(rq)}")
+
 print("=" * 64)
 print("SCALP 4 — HitchHiker (consolidation breakout, LONG)")
 print("=" * 64)
@@ -342,6 +368,7 @@ for _s in (rubber, second, backside, hitch, late):
 import json as _json
 _seeds = _json.loads((pathlib.Path(__file__).resolve().parents[1] / 'seeds' / 'scalps.json').read_text())
 _seed_caps = {'RubberBand Scalp': 2, 'Second Chance Scalp': 2, 'Back$ide Scalp': 1,
+              'Back$ide Scalp (Sequence)': 1,
               'HitchHiker Scalp': 1, 'Fashionably Late Scalp': 1}
 for _sd in _seeds:
     _r = _sd.get('risk') or {}
