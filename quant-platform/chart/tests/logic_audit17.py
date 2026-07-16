@@ -77,10 +77,10 @@ print("=" * 64)
 # down-extension, then a green candle whose HIGH clears the prior 2 bars' highs.
 # bars 0-7 grind DOWN from 50 to ~46 (extended >3 ATR? atr_daily~ (0.6..); we
 # just prove the double-bar-break + green fires). bar 8 = SNAPBACK green.
-cl = [50.0, 49.4, 48.8, 48.2, 47.6, 47.0, 46.6, 46.4, 47.2, 47.0, 46.8]
-op = [50.2, 49.8, 49.2, 48.6, 48.0, 47.4, 47.0, 46.7, 46.5, 47.3, 47.1]  # bar8 green: c47.2>o46.5
-hi = [50.3, 49.9, 49.3, 48.7, 48.1, 47.5, 47.1, 46.8, 47.4, 47.4, 47.2]  # bar8 high 47.4 > max(h7=46.8,h6=47.1)
-lo = [49.3, 49.0, 48.4, 47.8, 47.2, 46.6, 46.3, 46.2, 46.4, 46.7, 46.5]
+cl = [50.0, 49.4, 48.8, 48.2, 47.6, 47.0, 46.6, 46.4, 47.6, 47.0, 46.8]  # bar8 = BIG green snapback
+op = [50.2, 49.8, 49.2, 48.6, 48.0, 47.4, 47.0, 46.7, 46.3, 47.3, 47.1]  # bar8 green: c47.6>o46.3
+hi = [50.3, 49.9, 49.3, 48.7, 48.1, 47.5, 47.1, 46.8, 47.7, 47.4, 47.2]  # bar8 high 47.7 > max(h7=46.8,h6=47.1)
+lo = [49.3, 49.0, 48.4, 47.8, 47.2, 46.6, 46.3, 46.2, 46.2, 46.7, 46.5]  # bar8 range 1.5 = big standout candle
 vol= [1e5, 1e5, 1e5, 2e5, 3e5, 5e5, 7e5, 9e5, 1.3e6, 4e5, 1e5]             # accel into bar8, snapback RVOL>5
 SCEN['RUBBER'] = frame(cl, op, hi, lo, vol)
 rubber = {'name': 'RubberBand', 'side': 'long',
@@ -103,6 +103,13 @@ rubber = {'name': 'RubberBand', 'side': 'long',
         # entry rule here.
         rule(P('close'), 'gt', P('open')),                                   # green candle
         rule(P('high'), 'gt', PRIM('extremes.highest', params={'length': 2}, source='high', off=1)),  # clears prior-2 highs
+        # BIG snapback candle (user): the snapback is a large, decisive bar — a
+        # "clear announcement the move is finished", not a small poke over 2 highs.
+        # PDF: "range of 1-min candles increase on the last leg" / "one of the 5
+        # highest volume bars". Require its range >= 1.5x the prior-5-bar average.
+        rule(EXPR('sub', P('high'), P('low')), 'ge',
+             EXPR('mul', C(1.5), EXPR('sub', PRIM('ma.sma', source='high', params={'length': 5}, off=1),
+                                              PRIM('ma.sma', source='low', params={'length': 5}, off=1)))),
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_above', PRIM('vwap.session'))]),  # final 1/3 into VWAP
     # PDF exit: 1/3 at 1R, 1/3 at 2R, final 1/3 (the runner) into VWAP (exit rule)
@@ -163,6 +170,19 @@ SCEN['RUBBERFAR'] = frame(clj, opj, hij, loj, volj)
 rf = run(rubber, 'RUBBERFAR')
 ok("far-above-LoD break is REJECTED (low 48.0 > 46.2*1.03) — no JEM -52%",
    len(entry_bars(rf)) == 0, f"entries={entry_bars(rf)}")
+
+# BIG-CANDLE guard (user): same extended-down premise + a green double-bar break AT
+# the LoD, but the snapback bar is SMALL (range 0.3 vs prior avg ~0.82) — a weak poke,
+# not a decisive announcement. The big-candle rule must REJECT it.
+cls = [50.0, 49.4, 48.8, 48.2, 47.6, 47.0, 46.6, 46.4, 47.15, 47.0, 46.8]  # bar8 tiny green
+ops = [50.2, 49.8, 49.2, 48.6, 48.0, 47.4, 47.0, 46.7, 46.95, 47.3, 47.1]
+his = [50.3, 49.9, 49.3, 48.7, 48.1, 47.5, 47.1, 46.8, 47.2,  47.4, 47.2]  # bar8 high 47.2 clears 47.1, range only 0.3
+los = [49.3, 49.0, 48.4, 47.8, 47.2, 46.6, 46.3, 46.2, 46.9,  46.7, 46.5]
+vols= [1e5, 1e5, 1e5, 2e5, 3e5, 5e5, 7e5, 9e5, 1.3e6, 4e5, 1e5]
+SCEN['RUBBERSMALL'] = frame(cls, ops, his, los, vols)
+rsm = run(rubber, 'RUBBERSMALL')
+ok("small snapback candle is REJECTED (range 0.3 < 1.5x prior avg) — not decisive",
+   len(entry_bars(rsm)) == 0, f"entries={entry_bars(rsm)}")
 
 # STOP-RATCHET guard: a long stop must never move DOWN, so a stop anchored to
 # a running low (which only falls) FREEZES at its entry level and a real

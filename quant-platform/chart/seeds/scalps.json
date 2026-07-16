@@ -84,6 +84,51 @@
       },
       "offset": 1
      }
+    },
+    {
+     "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "price",
+       "field": "high"
+      },
+      "b": {
+       "kind": "price",
+       "field": "low"
+      }
+     },
+     "op": "ge",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 1.5
+      },
+      "b": {
+       "kind": "expr",
+       "op": "sub",
+       "a": {
+        "kind": "primitive",
+        "key": "ma.sma",
+        "source": "high",
+        "params": {
+         "length": 5
+        },
+        "offset": 1
+       },
+       "b": {
+        "kind": "primitive",
+        "key": "ma.sma",
+        "source": "low",
+        "params": {
+         "length": 5
+        },
+        "offset": 1
+       }
+      }
+     }
     }
    ]
   },
@@ -215,6 +260,51 @@
        "length": 2
       },
       "offset": 1
+     }
+    },
+    {
+     "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "price",
+       "field": "high"
+      },
+      "b": {
+       "kind": "price",
+       "field": "low"
+      }
+     },
+     "op": "ge",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 1.5
+      },
+      "b": {
+       "kind": "expr",
+       "op": "sub",
+       "a": {
+        "kind": "primitive",
+        "key": "ma.sma",
+        "source": "high",
+        "params": {
+         "length": 5
+        },
+        "offset": 1
+       },
+       "b": {
+        "kind": "primitive",
+        "key": "ma.sma",
+        "source": "low",
+        "params": {
+         "length": 5
+        },
+        "offset": 1
+       }
+      }
      }
     }
    ]
