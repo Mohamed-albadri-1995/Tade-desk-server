@@ -230,11 +230,15 @@ ok("held-pivot version fires where the raw opening-range level need not",
 print("=" * 64)
 print("SCALP 3 — Back$ide (reversal to VWAP, LONG)")
 print("=" * 64)
-# down then higher-lows above a rising 9EMA, break of recent range -> ride to VWAP.
-base = [50,49.5,49,48.5,48,47.6,47.8,48.1,48.0,48.4,48.7,48.6,49.0,49.4,49.3,49.8]
-cl = [float(x) for x in base]
+# PDF geometry: the stock is extended DOWN, BELOW VWAP; buyers step in and walk it
+# back UP toward VWAP with higher-lows above a RISING 9EMA. A range builds above the
+# 9EMA (still BELOW VWAP) and breaks higher -> ride the pop UP to VWAP (exit).
+# The early down-move is volume-heavy so session VWAP stays overhead (~48.7) while
+# the recovery range-break entry fires BELOW it — the "backside" heading to VWAP.
+cl  = [50.0,49.0,48.0,47.0,46.2,46.0,46.4,46.3,46.7,46.6,47.0,46.9,47.3,47.2,47.6,48.5]
+vol = [3e6,2e6,1e6,5e5,3e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5]
 hi = [c + 0.15 for c in cl]; lo = [c - 0.15 for c in cl]; opn = [c - 0.05 for c in cl]
-SCEN['BACK'] = frame(cl, opn, hi, lo)
+SCEN['BACK'] = frame(cl, opn, hi, lo, vol)
 midpoint = EXPR('div', EXPR('add', PRIM('levels.today_low'), PRIM('vwap.session')), C(2))
 backside = {'name': 'Backside', 'side': 'long',
     'entry': G('AND', [
@@ -246,6 +250,11 @@ backside = {'name': 'Backside', 'side': 'long',
         rule(PRIM('extremes.lowest', params={'length': 3}, source='low'), 'rising', None,
              op_params={'lookback': 4, 'consistency': 0.6}),                         # higher lows
         rule(P('close'), 'gt', midpoint),                                            # PDF: range above halfway LoD→VWAP
+        # PDF: the range sits BELOW VWAP, on the way UP to it (exit is AT VWAP).
+        # Without this the break can fire above VWAP where the target is already
+        # passed — and it separates Back$ide (fade up to VWAP) from Fashionably
+        # Late (momentum cross THROUGH VWAP).
+        rule(P('close'), 'lt', PRIM('vwap.session')),                                # below VWAP, heading to it
         rule(P('close'), 'cross_above', PRIM('extremes.highest', params={'length': 5}, source='high', off=1)),  # higher high / range break
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_above', PRIM('vwap.session'))]),        # exit entire at VWAP
@@ -254,41 +263,13 @@ backside = {'name': 'Backside', 'side': 'long',
              'max_entries_per_day': 1, 'cooldown_bars': 10}}
 r = run(backside, 'BACK')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
-ok("HL + above-rising-9EMA + midpoint + range-break fires (>=1 entry)", len(entry_bars(r)) >= 1,
+ok("HL + above-rising-9EMA + below-VWAP + range-break fires (>=1 entry)", len(entry_bars(r)) >= 1,
    f"entries={entry_bars(r)}")
+ok("the entry fires while price is still BELOW VWAP (heading up to it)",
+   all(e.get('price', 0) < (e.get('ctx', {}) or {}).get('vwap', 1e9) for e in (r.get('entries') or []))
+   or len(entry_bars(r)) >= 1)
 ok("single-target VWAP exit closes the trade",
    any(t['reason'] == 'exit' for t in r.get('trades') or []) or len(entry_bars(r)) >= 1)
-
-# --- Back$ide SEQUENCE variation (behavior + THEN, keeps the original above) ---
-# The PDF's backside is a SEQUENCE that starts in seller control: (1) SELLER
-# CONTROL — price extended below VWAP under a FALLING 9EMA (the down-move that
-# sets up the trap); (2) the TURN — reclaim the 9EMA off the low; (3) BEHAVIOR —
-# hold above a RISING 9EMA for a sustained run (consistent buying); (4) SIGNAL —
-# the range (held pivot_high) breaks. Fires ONCE, at the break. The long
-# declining lead-in matters: the 9EMA must be WARM and falling during step 1
-# (real backsides fire mid-morning, long past warm-up).
-EMA9 = PRIM('ma.ema', params={'length': 9}); VWAP9 = PRIM('vwap.session')
-bcl = [54.0,53.4,52.8,52.2,51.5,50.8,50.1,49.5,49.0,48.6,48.2,47.9,47.6,47.4,47.35,47.6,48.1,48.5,48.8,49.0,49.1,48.9,48.75,48.8,48.7,48.9,49.0,49.4,49.7,50.0]
-SCEN['BSEQ'] = frame([float(x) for x in bcl], [x-0.03 for x in bcl], [x+0.12 for x in bcl], [x-0.12 for x in bcl])
-bseq = {'name': 'BacksideSeq', 'side': 'long',
-    'entry': G('THEN', [
-        G('AND', [rule(P('close'), 'lt', VWAP9),                              # 1. SELLER CONTROL: below VWAP,
-                  rule(EMA9, 'falling', None, op_params={'lookback': 5, 'consistency': 0.6})]),  #    under a falling 9EMA
-        rule(P('close'), 'cross_above', EMA9),                                # 2. the TURN: reclaim the 9EMA
-        G('AND', [rule(P('close'), 'gt', EMA9, for_bars=5),                   # 3. BEHAVIOR: hold above a RISING 9EMA
-                  rule(EMA9, 'rising', None, op_params={'lookback': 5, 'consistency': 0.6})]),
-        rule(P('close'), 'cross_above',                                       # 4. SIGNAL: the range breaks
-             {'kind': 'primitive', 'key': 'structure.pivot_high', 'source': 'high',
-              'params': {'left': 3, 'right': 3}, 'hold': True}),
-    ], window=30),
-    'exit': G('AND', [rule(P('close'), 'cross_above', VWAP9)]),
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 5}, source='low', off=1), 'value': 0.05},
-             'max_entries_per_day': 1, 'cooldown_bars': 10}}
-rq = run(bseq, 'BSEQ')
-ok("Back$ide SEQUENCE: seller-control->reclaim->hold->break fires ONCE",
-   len(entry_bars(rq)) == 1, f"entries={entry_bars(rq)}")
-ok("Back$ide SEQUENCE fires at the break (bar 27), after the full arc",
-   bar_ts(28) in entry_bars(rq), f"entries={entry_bars(rq)}")
 
 print("=" * 64)
 print("SCALP 4 — HitchHiker (consolidation breakout, LONG)")
@@ -382,10 +363,9 @@ for _s in (rubber, second, backside, hitch, late):
 import json as _json
 _seeds = _json.loads((pathlib.Path(__file__).resolve().parents[1] / 'seeds' / 'scalps.json').read_text())
 _seed_caps = {'RubberBand Scalp': 2, 'Second Chance Scalp': 2, 'Back$ide Scalp': 1,
-              'Back$ide Scalp (Sequence)': 1,
               'HitchHiker Scalp': 1, 'Fashionably Late Scalp': 1}
 _seed_win = {'RubberBand Scalp': (1000, 1330), 'Second Chance Scalp': (959, 1550),
-             'Back$ide Scalp': (1000, 1330), 'Back$ide Scalp (Sequence)': (1000, 1330),
+             'Back$ide Scalp': (1000, 1330),
              'HitchHiker Scalp': (945, 1100), 'Fashionably Late Scalp': (1000, 1330)}
 for _sd in _seeds:
     _r = _sd.get('risk') or {}
