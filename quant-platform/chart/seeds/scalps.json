@@ -366,8 +366,40 @@
   "side": "long",
   "entry": {
    "logic": "THEN",
-   "window": 20,
+   "window": 30,
    "rules": [
+    {
+     "logic": "AND",
+     "rules": [
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
+       },
+       "op": "lt",
+       "right": {
+        "kind": "primitive",
+        "key": "vwap.session",
+        "source": "close"
+       }
+      },
+      {
+       "left": {
+        "kind": "primitive",
+        "key": "ma.ema",
+        "source": "close",
+        "params": {
+         "length": 9
+        }
+       },
+       "op": "falling",
+       "op_params": {
+        "lookback": 5,
+        "consistency": 0.6
+       }
+      }
+     ]
+    },
     {
      "left": {
       "kind": "price",
