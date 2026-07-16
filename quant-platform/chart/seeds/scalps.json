@@ -236,109 +236,181 @@
   "name": "Back$ide Scalp",
   "side": "long",
   "entry": {
-   "logic": "AND",
+   "logic": "THEN",
+   "window": 30,
    "rules": [
     {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "gt",
-     "right": {
-      "kind": "primitive",
-      "key": "ma.ema",
-      "source": "close",
-      "params": {
-       "length": 9
-      }
-     }
-    },
-    {
-     "left": {
-      "kind": "primitive",
-      "key": "ma.ema",
-      "source": "close",
-      "params": {
-       "length": 9
-      }
-     },
-     "op": "rising",
-     "op_params": {
-      "lookback": 5,
-      "consistency": 0.6
-     }
-    },
-    {
-     "left": {
-      "kind": "primitive",
-      "key": "extremes.lowest",
-      "source": "low",
-      "params": {
-       "length": 3
-      }
-     },
-     "op": "rising",
-     "op_params": {
-      "lookback": 4,
-      "consistency": 0.6
-     }
-    },
-    {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "gt",
-     "right": {
-      "kind": "expr",
-      "op": "div",
-      "a": {
-       "kind": "expr",
-       "op": "add",
-       "a": {
-        "kind": "primitive",
-        "key": "levels.today_low",
-        "source": "close"
+     "logic": "AND",
+     "rules": [
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
        },
-       "b": {
+       "op": "lt",
+       "right": {
         "kind": "primitive",
         "key": "vwap.session",
         "source": "close"
        }
       },
-      "b": {
-       "kind": "const",
-       "value": 2
-      }
-     }
-    },
-    {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "lt",
-     "right": {
-      "kind": "primitive",
-      "key": "vwap.session",
-      "source": "close"
-     }
-    },
-    {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "cross_above",
-     "right": {
-      "kind": "primitive",
-      "key": "extremes.highest",
-      "source": "high",
-      "params": {
-       "length": 5
+      {
+       "left": {
+        "kind": "primitive",
+        "key": "ma.ema",
+        "source": "close",
+        "params": {
+         "length": 9
+        }
+       },
+       "op": "falling",
+       "op_params": {
+        "lookback": 5,
+        "consistency": 0.6
+       }
       },
-      "offset": 1
-     }
+      {
+       "left": {
+        "kind": "expr",
+        "op": "sub",
+        "a": {
+         "kind": "primitive",
+         "key": "vwap.session",
+         "source": "close"
+        },
+        "b": {
+         "kind": "price",
+         "field": "low"
+        }
+       },
+       "op": "ge",
+       "right": {
+        "kind": "expr",
+        "op": "mul",
+        "a": {
+         "kind": "const",
+         "value": 0.015
+        },
+        "b": {
+         "kind": "price",
+         "field": "close"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "logic": "AND",
+     "rules": [
+      {
+       "left": {
+        "kind": "primitive",
+        "key": "ma.ema",
+        "source": "close",
+        "params": {
+         "length": 9
+        }
+       },
+       "op": "rising",
+       "op_params": {
+        "lookback": 5,
+        "consistency": 0.6
+       }
+      },
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
+       },
+       "op": "gt",
+       "right": {
+        "kind": "primitive",
+        "key": "ma.ema",
+        "source": "close",
+        "params": {
+         "length": 9
+        }
+       },
+       "for_bars": 3
+      },
+      {
+       "left": {
+        "kind": "primitive",
+        "key": "extremes.lowest",
+        "source": "low",
+        "params": {
+         "length": 3
+        }
+       },
+       "op": "rising",
+       "op_params": {
+        "lookback": 4,
+        "consistency": 0.6
+       }
+      }
+     ]
+    },
+    {
+     "logic": "AND",
+     "rules": [
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
+       },
+       "op": "lt",
+       "right": {
+        "kind": "primitive",
+        "key": "vwap.session",
+        "source": "close"
+       }
+      },
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
+       },
+       "op": "gt",
+       "right": {
+        "kind": "expr",
+        "op": "div",
+        "a": {
+         "kind": "expr",
+         "op": "add",
+         "a": {
+          "kind": "primitive",
+          "key": "levels.today_low",
+          "source": "close"
+         },
+         "b": {
+          "kind": "primitive",
+          "key": "vwap.session",
+          "source": "close"
+         }
+        },
+        "b": {
+         "kind": "const",
+         "value": 2
+        }
+       }
+      },
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
+       },
+       "op": "cross_above",
+       "right": {
+        "kind": "primitive",
+        "key": "extremes.highest",
+        "source": "high",
+        "params": {
+         "length": 5
+        },
+        "offset": 1
+       }
+      }
+     ]
     }
    ]
   },

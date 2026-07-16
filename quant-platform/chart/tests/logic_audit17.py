@@ -228,48 +228,58 @@ ok("held-pivot version fires where the raw opening-range level need not",
    r.get('ok') and ro.get('ok'), True)
 
 print("=" * 64)
-print("SCALP 3 — Back$ide (reversal to VWAP, LONG)")
+print("SCALP 3 — Back$ide (reversal to VWAP, LONG) — the PDF SEQUENCE")
 print("=" * 64)
-# PDF geometry: the stock is extended DOWN, BELOW VWAP; buyers step in and walk it
-# back UP toward VWAP with higher-lows above a RISING 9EMA. A range builds above the
-# 9EMA (still BELOW VWAP) and breaks higher -> ride the pop UP to VWAP (exit).
+# The Back$ide is a SEQUENCE, and the real sequence matters (the PDF's, not ours):
+#   1. SELLER CONTROL — the stock is extended DOWN, BELOW a falling VWAP, under a
+#      FALLING 9EMA. Shorts get excited it will keep going.
+#   2. BACKSIDE ESTABLISHED — it stops going lower; the 9EMA slope flips from DOWN
+#      to UP; price HOLDS above the rising 9EMA with a distinct higher-low.
+#   3. RANGE BREAK — a consolidation above the 9EMA breaks higher, STILL below VWAP
+#      -> enter; shorts stop out; fast pop UP to VWAP (exit).
 # The early down-move is volume-heavy so session VWAP stays overhead (~48.7) while
-# the recovery range-break entry fires BELOW it — the "backside" heading to VWAP.
-cl  = [50.0,49.0,48.0,47.0,46.2,46.0,46.4,46.3,46.7,46.6,47.0,46.9,47.3,47.2,47.6,48.5]
-vol = [3e6,2e6,1e6,5e5,3e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5,1e5]
+# the range-break entry fires BELOW it. Arc: fall (0-5) -> first HL bounce (6-9) ->
+# hold above a rising 9EMA (10-15) -> range break still below VWAP (16) -> pop
+# through VWAP = exit (17-18).
+cl  = [50.0,49.0,48.0,47.0,46.2,46.0, 46.4,46.3,46.7,46.5, 47.0,46.9,47.2,47.1,47.4,47.3, 47.9, 48.6,49.2]
+vol = [3e6,2e6,1e6,5e5,3e5,1e5] + [1e5]*13
 hi = [c + 0.15 for c in cl]; lo = [c - 0.15 for c in cl]; opn = [c - 0.05 for c in cl]
 SCEN['BACK'] = frame(cl, opn, hi, lo, vol)
-midpoint = EXPR('div', EXPR('add', PRIM('levels.today_low'), PRIM('vwap.session')), C(2))
+EMA9 = PRIM('ma.ema', params={'length': 9}); VWAP9 = PRIM('vwap.session')
+midpoint = EXPR('div', EXPR('add', PRIM('levels.today_low'), VWAP9), C(2))
+ext = EXPR('sub', VWAP9, P('low'))                       # how far below VWAP the low sits
 backside = {'name': 'Backside', 'side': 'long',
-    'entry': G('AND', [
-        rule(P('close'), 'gt', PRIM('ma.ema', params={'length': 9})),               # above 9EMA
-        rule(PRIM('ma.ema', params={'length': 9}), 'rising', None,
-             op_params={'lookback': 5, 'consistency': 0.6}),                         # rising 9EMA
-        # PDF: "distinct higher high AND distinct higher low" — the range break
-        # is the higher high; a rising rolling 3-bar low is the higher low.
-        rule(PRIM('extremes.lowest', params={'length': 3}, source='low'), 'rising', None,
-             op_params={'lookback': 4, 'consistency': 0.6}),                         # higher lows
-        rule(P('close'), 'gt', midpoint),                                            # PDF: range above halfway LoD→VWAP
-        # PDF: the range sits BELOW VWAP, on the way UP to it (exit is AT VWAP).
-        # Without this the break can fire above VWAP where the target is already
-        # passed — and it separates Back$ide (fade up to VWAP) from Fashionably
-        # Late (momentum cross THROUGH VWAP).
-        rule(P('close'), 'lt', PRIM('vwap.session')),                                # below VWAP, heading to it
-        rule(P('close'), 'cross_above', PRIM('extremes.highest', params={'length': 5}, source='high', off=1)),  # higher high / range break
-    ]),
-    'exit': G('AND', [rule(P('close'), 'cross_above', PRIM('vwap.session'))]),        # exit entire at VWAP
+    'entry': G('THEN', [
+        # 1. SELLER CONTROL: extended >=1.5% below a falling VWAP, falling 9EMA
+        G('AND', [rule(P('close'), 'lt', VWAP9),
+                  rule(EMA9, 'falling', None, op_params={'lookback': 5, 'consistency': 0.6}),
+                  rule(ext, 'ge', EXPR('mul', C(0.015), P('close')))]),
+        # 2. BACKSIDE: 9EMA rising, price holds above it, distinct higher-low
+        G('AND', [rule(EMA9, 'rising', None, op_params={'lookback': 5, 'consistency': 0.6}),
+                  rule(P('close'), 'gt', EMA9, for_bars=3),
+                  rule(PRIM('extremes.lowest', params={'length': 3}, source='low'), 'rising', None,
+                       op_params={'lookback': 4, 'consistency': 0.6})]),
+        # 3. RANGE BREAK, still below VWAP and above the LoD->VWAP midpoint
+        G('AND', [rule(P('close'), 'lt', VWAP9),
+                  rule(P('close'), 'gt', midpoint),
+                  rule(P('close'), 'cross_above', PRIM('extremes.highest', params={'length': 5}, source='high', off=1))]),
+    ], window=30),
+    'exit': G('AND', [rule(P('close'), 'cross_above', VWAP9)]),        # exit entire at VWAP
     # PDF: ".02 below the most recent higher low" — a recent swing low, not day low.
     'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 5}, source='low', off=1), 'value': 0.05},
              'max_entries_per_day': 1, 'cooldown_bars': 10}}
 r = run(backside, 'BACK')
+_tr = r.get('trades') or []
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
-ok("HL + above-rising-9EMA + below-VWAP + range-break fires (>=1 entry)", len(entry_bars(r)) >= 1,
-   f"entries={entry_bars(r)}")
+ok("SEQUENCE fires ONCE (seller-control -> backside -> range break)",
+   len(entry_bars(r)) == 1, f"entries={entry_bars(r)}")
+ok("fires at the range break (bar 16), after the full down->turn arc",
+   bar_ts(17) in entry_bars(r), f"entries={entry_bars(r)}")
 ok("the entry fires while price is still BELOW VWAP (heading up to it)",
-   all(e.get('price', 0) < (e.get('ctx', {}) or {}).get('vwap', 1e9) for e in (r.get('entries') or []))
-   or len(entry_bars(r)) >= 1)
-ok("single-target VWAP exit closes the trade",
-   any(t['reason'] == 'exit' for t in r.get('trades') or []) or len(entry_bars(r)) >= 1)
+   bool(_tr) and _tr[0]['entry'] < _tr[0]['exit'], f"trade={_tr[:1]}")
+ok("single-target VWAP exit closes the trade at a profit (pop to VWAP)",
+   bool(_tr) and _tr[0]['reason'] == 'exit' and _tr[0]['ret'] > 0,
+   f"trades={[(t['reason'], round(t['ret'],3)) for t in _tr]}")
 
 print("=" * 64)
 print("SCALP 4 — HitchHiker (consolidation breakout, LONG)")
