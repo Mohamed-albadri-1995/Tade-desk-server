@@ -583,7 +583,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  exit_group: dict | None = None, fill: str = 'close',
                  entry_ok=None, eod_close=None, max_per_day=None,
                  cooldown_bars=None, min_hold_bars=None, entry_mode='edge',
-                 max_stop_pct=None):
+                 max_stop_pct=None, win_start=None, win_end=None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -676,6 +676,15 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     min_hold = int(min_hold_bars) if min_hold_bars else 0
     et_day = (bars.index.tz_convert(cs._ET).strftime('%Y-%m-%d')
               if (max_per_day or cooldown) else None)
+    # SESSION WINDOW (per-strategy, ET hhmm): the PDF setups are time-of-day
+    # plays (RubberBand/Back$ide/Fashionably Late 10:00–13:30, HitchHiker the
+    # opening drive, …). An entry may only OPEN inside [win_start, win_end];
+    # SL/TP/exit still manage a position that runs past it, and eod still
+    # flattens. None = no window (all session).
+    et_hhmm = None
+    if win_start is not None or win_end is not None:
+        _et = bars.index.tz_convert(cs._ET)
+        et_hhmm = np.asarray(_et.hour) * 100 + np.asarray(_et.minute)
     day_count: dict = {}
     last_exit_bar = None                  # index of the most recent exit (this day)
     cur_day = None
@@ -730,6 +739,11 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     continue             # fill moment outside the allowed session
                 if eod_close is not None and eod_close[ej]:
                     continue             # never open into the liquidation bar
+                if et_hhmm is not None:  # per-strategy time-of-day window (ET)
+                    hm = int(et_hhmm[ej])
+                    if (win_start is not None and hm < win_start) or \
+                       (win_end is not None and hm > win_end):
+                        continue         # outside the setup's session window
                 if max_per_day and day_count.get(et_day[ej], 0) >= max_per_day:
                     continue             # daily attempt cap reached (2 strikes out)
                 if cooldown and last_exit_bar is not None and (j - last_exit_bar) < cooldown:
@@ -1099,7 +1113,8 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         entry_ok=entry_ok, eod_close=eod_close, max_per_day=mpd,
         cooldown_bars=cooldown, min_hold_bars=min_hold,
         entry_mode=(_risk.get('entry_mode') or 'edge'),
-        max_stop_pct=_risk.get('max_stop_pct'))
+        max_stop_pct=_risk.get('max_stop_pct'),
+        win_start=_risk.get('window_start'), win_end=_risk.get('window_end'))
 
     # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what
     # the caller asked for (indicator warm-up). The chart only displays the

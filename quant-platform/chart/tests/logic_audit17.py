@@ -375,12 +375,18 @@ _seeds = _json.loads((pathlib.Path(__file__).resolve().parents[1] / 'seeds' / 's
 _seed_caps = {'RubberBand Scalp': 2, 'Second Chance Scalp': 2, 'Back$ide Scalp': 1,
               'Back$ide Scalp (Sequence)': 1,
               'HitchHiker Scalp': 1, 'Fashionably Late Scalp': 1}
+_seed_win = {'RubberBand Scalp': (1000, 1330), 'Second Chance Scalp': (959, 1550),
+             'Back$ide Scalp': (1000, 1330), 'Back$ide Scalp (Sequence)': (1000, 1330),
+             'HitchHiker Scalp': (945, 1100), 'Fashionably Late Scalp': (1000, 1330)}
 for _sd in _seeds:
     _r = _sd.get('risk') or {}
     ok(f"seed '{_sd['name']}' caps + cools, no min-hold",
        _r.get('max_entries_per_day') == _seed_caps.get(_sd['name'])
        and _r.get('cooldown_bars') == 10 and _r.get('min_hold_bars') is None,
        f"cap={_r.get('max_entries_per_day')} cd={_r.get('cooldown_bars')} mh={_r.get('min_hold_bars')}")
+    ok(f"seed '{_sd['name']}' carries its PDF time window",
+       (_r.get('window_start'), _r.get('window_end')) == _seed_win.get(_sd['name']),
+       f"win=({_r.get('window_start')},{_r.get('window_end')}) exp={_seed_win.get(_sd['name'])}")
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")

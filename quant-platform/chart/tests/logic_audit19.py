@@ -134,5 +134,28 @@ tr7b, _, _, op7b = S._pair_trades(b7b, list(range(4)), np.array([False, True, Fa
                                   np.zeros(4, bool), 'long', r7b, None, max_stop_pct=10)
 chk('a 2% stop passes a 10% cap', len(tr7b) + (1 if op7b else 0), 1)
 
+print("== 8. session window: entries only OPEN inside [win_start, win_end] ET ==")
+# 60 one-min bars from 09:35 ET; entry every bar. Status mode so it would enter
+# on the first allowed bar. Window 10:00–10:30 → first entry at 10:00, and a
+# window 14:00–15:00 (after all bars) → no entry at all.
+w_idx = pd.DatetimeIndex([pd.Timestamp('2024-01-09 09:35', tz='America/New_York')
+                          + pd.Timedelta(minutes=i) for i in range(60)]).tz_convert('UTC')
+wc = np.full(60, 100.0)
+wb = pd.DataFrame({'open': wc, 'high': wc + 0.1, 'low': wc - 0.1, 'close': wc,
+                   'volume': np.full(60, 1e5)}, index=w_idx)
+w_hhmm = (w_idx.tz_convert('America/New_York').hour * 100
+          + w_idx.tz_convert('America/New_York').minute)
+def win_entries(**kw):
+    tr, _, _, op = S._pair_trades(wb, list(range(60)), np.ones(60, bool), np.zeros(60, bool),
+                                  'long', {'sl': {'type': 'pct', 'value': 50}}, None,
+                                  entry_mode='status', **kw)
+    eis = [t['ei'] for t in tr] + ([op['ei']] if op else [])
+    return [int(w_hhmm[e]) for e in eis]
+chk('no window: enters on the first bar (09:35)', win_entries()[:1], [935])
+chk('window 1000-1030: first entry is 10:00, none before', min(win_entries(win_start=1000, win_end=1030)), 1000)
+chk('window 1000-1030: nothing after 10:30', max(win_entries(win_start=1000, win_end=1030)) <= 1030, True)
+chk('window 1400-1500 (after all bars): NO entry', win_entries(win_start=1400, win_end=1500), [])
+chk('open-ended win_start only: 10:30+ allowed, blocks before', min(win_entries(win_start=1030)), 1030)
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)
