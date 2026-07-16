@@ -131,6 +131,17 @@ ctxs = {(t['date'], t['symbol']): t.get('ctx') or {} for t in out2['trades']}
 chkv('R1 card rides with each trade', ctxs[('2024-01-09', 'AAA')].get('score'), 71)
 chkv('per-day ctx differs', ctxs[('2024-01-10', 'AAA')].get('regime'), 'CHOP')
 chkv('symbols universe ctx empty', all(not (t.get('ctx') or {}) for t in out['trades']), True)
+# DEDUP: a day's register listing the same symbol twice must yield ONE pair —
+# else the second pair is a second evaluate() and slips the per-day cap.
+sc.register_rows = lambda reg, d=None, full=False: {'ok': True, 'rows':
+    [{'ticker': 'AAA', 'score': 71}, {'ticker': 'aaa', 'score': 40},
+     {'ticker': 'BBB', 'score': 80}]}   # AAA duplicated (mixed case)
+dup_pairs = bt._pairs({'universe': {'kind': 'register', 'register': 'R1'},
+                       'start': '2024-01-09', 'end': '2024-01-09'})
+chkv('duplicate register rows collapse to one pair per symbol',
+     sorted(s for _, s, _ in dup_pairs), ['AAA', 'BBB'])
+chkv('dedup keeps the FIRST card (score 71, not 40)',
+     [c.get('score') for _, s, c in dup_pairs if s == 'AAA'], [71])
 sc.available_dates, sc.register_rows = _ad, _rr
 
 print("== 5. spec validation errors are clear ==")

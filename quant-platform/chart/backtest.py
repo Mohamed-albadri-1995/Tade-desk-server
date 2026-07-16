@@ -73,11 +73,17 @@ def _pairs(spec: dict) -> list[tuple[str, str]]:
             if not rows.get('ok'):
                 raise ValueError(f'screener register fetch failed for {d}: '
                                  f'{rows.get("error", "unreachable")}')
+            seen = set()             # ONE position per symbol per day
             for r in rows.get('rows') or []:
                 t = (r.get('ticker') or '').strip().upper()
-                if t:
+                if t and t not in seen:
+                    seen.add(t)
                     # the FULL frozen R1/Shortlist card rides along with every
-                    # trade so results can be filtered by ANY register column
+                    # trade so results can be filtered by ANY register column.
+                    # Dedup: a symbol listed twice in a day's register would be
+                    # a SECOND evaluate() pair and slip the per-day attempt cap
+                    # (which is enforced per pair) — so the same name could
+                    # double-trade. The engine holds one position per symbol.
                     pairs.append((d, t, r))
         if not pairs:
             raise ValueError(f'{reg} register has no tickers in range')
