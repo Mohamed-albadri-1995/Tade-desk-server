@@ -339,6 +339,11 @@ late = {'name': 'FashionablyLate', 'side': 'long',
         # PDF: VWAP is "flat to downsloping" at the cross — express as VWAP now
         # <= VWAP 5 bars ago (a rising VWAP would disqualify the setup).
         rule(PRIM('vwap.session'), 'le', PRIM('vwap.session', off=5)),                       # flat-to-down VWAP
+        # ANTI-CHOP (data-driven, backtest #88): the stock must have extended
+        # DOWN >= 1% from VWAP to the LoD — a real setup, not flat chop. The two
+        # junk losers were <0.3%; every winner was >3%.
+        rule(EXPR('sub', PRIM('vwap.session'), PRIM('levels.today_low')), 'ge',
+             EXPR('mul', C(0.01), P('close'))),
     ]),
     # EXIT: 1 measured move above the LIVE VWAP (VWAP-anchored). NOTE: a tighter,
     # frozen 2*entry−LoD target + a ⅓ stop is the textbook 3:1, but on the real

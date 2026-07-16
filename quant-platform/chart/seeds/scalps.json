@@ -691,6 +691,35 @@
       "source": "close",
       "offset": 5
      }
+    },
+    {
+     "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "primitive",
+       "key": "vwap.session",
+       "source": "close"
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "levels.today_low",
+       "source": "close"
+      }
+     },
+     "op": "ge",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 0.01
+      },
+      "b": {
+       "kind": "price",
+       "field": "close"
+      }
+     }
     }
    ]
   },
