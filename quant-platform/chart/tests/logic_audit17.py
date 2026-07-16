@@ -360,24 +360,10 @@ hitch = {'name': 'HitchHiker', 'side': 'long',
         rule(LO6, 'ge', upper_third),
         # PDF: a TIGHT consolidation, not a wide sloppy swing. Prior-6-bar range <=5%.
         rule(EXPR('sub', HI6, LO6), 'le', EXPR('mul', C(0.05), P('close'))),
-        # ANTI-CHOP (backtest #98 KUST): even a locally-tight, high-sitting window
-        # can be CHOP — bars whipping with big wicks. The PDF's tell is "large wicks
-        # in both directions". mean(bar range) = sma(high,6)-sma(low,6); require it
-        # <=1.5% of price = small orderly bars, not wicks (KUST~2.5%, STEP~0.1%).
-        rule(EXPR('sub', PRIM('ma.sma', source='high', params={'length': 6}, off=1),
-                         PRIM('ma.sma', source='low', params={'length': 6}, off=1)),
-             'le', EXPR('mul', C(0.015), P('close'))),
-        # PDF geometry (user's read of the HitchHiker page): price RIDES ABOVE the
-        # 9 EMA through the consolidation, and the 9 EMA is FLAT / very small up-slope
-        # (a rest, not a steep drive, not rolling over). Plus a GREEN breakout candle.
-        rule(PRIM('ma.sma', source='low', params={'length': 6}, off=1), 'ge',
-             PRIM('ma.ema', params={'length': 9}, off=1)),                             # rides above the 9 EMA
-        rule(PRIM('ma.ema', params={'length': 9}, off=1), 'ge',
-             PRIM('ma.ema', params={'length': 9}, off=6)),                             # 9 EMA flat-to-up
-        rule(EXPR('sub', PRIM('ma.ema', params={'length': 9}, off=1),
-                         PRIM('ma.ema', params={'length': 9}, off=6)),
-             'le', EXPR('mul', C(0.03), P('close'))),                                  # 9 EMA flat / small up-slope
-        rule(P('close'), 'gt', P('open')),                                            # green breakout candle
+        # NOTE: a "9-EMA flat/small-up-slope" gate was tried (backtest #102) and
+        # REVERTED — chop has a FLAT 9-EMA while clean drives have a RISING one, so
+        # the gate rejected the good drives (STEP/SOBR) and kept the chop (KUST/QTTB),
+        # the opposite of the goal. #98's width+location gates are the best config.
         rule(P('volume'), 'gt', EXPR('mul', C(1.3), P('volume', off=1))),             # +30% volume on break
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # wave-2 = trail 9EMA
@@ -400,18 +386,6 @@ SCEN['HITCHCHOP'] = frame(clc, opc, hic, loc, volc)
 rc = run(hitch, 'HITCHCHOP')
 ok("mid-range chop is REJECTED (consolidation low below the upper third)",
    len(entry_bars(rc)) == 0, f"entries={entry_bars(rc)}")
-# CONTROL 2: a consolidation that IS tight (net), high-sitting, in the upper third,
-# but made of WICKY bars (each bar whips ~1.7% of price) — the KUST case. Passes
-# every width/location gate, but the avg-bar-range (chop) gate must REJECT it.
-clw = _W([47.0,47.6,48.2,48.8,49.2, 49.10,49.15,49.05,49.12,49.08,49.14,49.10, 49.6], 46.5)
-hiw = _W([47.2,47.8,48.4,49.0,49.35, 49.55,49.6,49.5,49.58,49.52,49.6,49.55, 49.8], 46.6)   # big UPPER wicks
-low = _W([46.8,47.4,48.0,48.6,49.05, 48.7,48.75,48.65,48.72,48.68,48.74,48.7, 49.3], 46.4)  # big LOWER wicks
-opw = _W([46.9,47.5,48.1,48.7,49.1,  49.12,49.08,49.16,49.06,49.14,49.05,49.13, 49.4], 46.5)
-volw= _W([2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5], 1e5)
-SCEN['HITCHWICK'] = frame(clw, opw, hiw, low, volw)
-rw = run(hitch, 'HITCHWICK')
-ok("wicky consolidation is REJECTED (avg bar range ~1.7% > 1.5% = chop)",
-   len(entry_bars(rw)) == 0, f"entries={entry_bars(rw)}")
 
 print("=" * 64)
 print("SCALP 5 — Fashionably Late (9EMA crosses VWAP, LONG)")
