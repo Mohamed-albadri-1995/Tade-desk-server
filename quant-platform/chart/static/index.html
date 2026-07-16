@@ -165,6 +165,7 @@
         <label style="display:inline-flex;gap:3px;align-items:center">attempts/day<input id="discMaxDay" type="number" min="1" step="1" class="len" style="width:46px" placeholder="∞" title="max ENTRY attempts per session day (blank = unlimited)"></label>
         <label style="display:inline-flex;gap:3px;align-items:center">cooldown<input id="discCooldown" type="number" min="0" step="1" class="len" style="width:46px" placeholder="0" title="bars to block re-entry after any exit (blank/0 = none)"></label>
         <label style="display:inline-flex;gap:3px;align-items:center">min-hold<input id="discMinHold" type="number" min="0" step="1" class="len" style="width:46px" placeholder="0" title="bars before the EXIT RULE may fire (SL/TP still protect). blank/0 = none"></label>
+        <label style="display:inline-flex;gap:3px;align-items:center">max&nbsp;stop&nbsp;%<input id="discMaxStop" type="number" min="0" step="0.5" class="len" style="width:52px" placeholder="∞" title="refuse an entry whose stop sits further than this % from the entry — no scalp risks 50% because the anchor (e.g. low-of-day) is far away. blank = no cap"></label>
       </div>
       <div class="dbody">
         <div class="rulecol" id="colEntry">
@@ -754,6 +755,7 @@ function renderStrat(){
   document.getElementById('discMaxDay').value=risk.max_entries_per_day!=null?risk.max_entries_per_day:'';
   document.getElementById('discCooldown').value=risk.cooldown_bars!=null?risk.cooldown_bars:'';
   document.getElementById('discMinHold').value=risk.min_hold_bars!=null?risk.min_hold_bars:'';
+  document.getElementById('discMaxStop').value=risk.max_stop_pct!=null?risk.max_stop_pct:'';
   renderTargets();
 }
 // ── scale-out targets editor ──
@@ -804,6 +806,8 @@ function readStratHeader(){ STRAT.name=document.getElementById('stratName').valu
   const iv=id=>{ const v=parseInt(document.getElementById(id).value,10); return Number.isFinite(v)?v:null; };
   for(const [id,key] of [['discMaxDay','max_entries_per_day'],['discCooldown','cooldown_bars'],['discMinHold','min_hold_bars']]){
     const v=iv(id); if(v!=null) risk[key]=v; else delete risk[key]; }
+  const ms=parseFloat(document.getElementById('discMaxStop').value);
+  if(Number.isFinite(ms)) risk.max_stop_pct=ms; else delete risk.max_stop_pct;
   STRAT.risk=risk;
   for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; const k=parseInt(document.getElementById(g+'K').value,10); STRAT[g].k=Number.isFinite(k)?k:1; } }
 async function loadStrategies(){

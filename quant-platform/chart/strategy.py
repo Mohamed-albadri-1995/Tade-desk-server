@@ -555,7 +555,8 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  exit_group: dict | None = None, fill: str = 'close',
                  entry_ok=None, eod_close=None, max_per_day=None,
-                 cooldown_bars=None, min_hold_bars=None, entry_mode='edge'):
+                 cooldown_bars=None, min_hold_bars=None, entry_mode='edge',
+                 max_stop_pct=None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -721,6 +722,16 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 e_tp = tp_arr[j] if tp_arr is not None else tp
                 if sl_required and (e_sl is None or e_sl != e_sl):
                     continue                       # stop unpriceable → no trade
+                # MAX RISK CAP: refuse an entry whose stop is absurdly far. A
+                # scalp's stop is meant to be tight (RubberBand: ".02 below the
+                # low of the day", because the snapback candle marks the LoD).
+                # When the entry fires far ABOVE the LoD (a continuation bounce,
+                # not a snapback), the LoD-anchored stop can be 50%+ away — a
+                # trade no one would take. Skip it, exactly like an unpriceable
+                # stop. (see JEM 2026-07-01: entry 10.38, stop at the 4.98 LoD.)
+                if max_stop_pct and e_sl is not None and e_sl == e_sl and ep:
+                    if abs(ep - e_sl) / ep * 100.0 > float(max_stop_pct):
+                        continue
                 in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
                 entered_run = True        # this true-run has now been taken
                 sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
@@ -1044,7 +1055,8 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         exit_group=exit_group if trade_aware else None, fill=fill,
         entry_ok=entry_ok, eod_close=eod_close, max_per_day=mpd,
         cooldown_bars=cooldown, min_hold_bars=min_hold,
-        entry_mode=(_risk.get('entry_mode') or 'edge'))
+        entry_mode=(_risk.get('entry_mode') or 'edge'),
+        max_stop_pct=_risk.get('max_stop_pct'))
 
     # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what
     # the caller asked for (indicator warm-up). The chart only displays the

@@ -116,5 +116,23 @@ trab, _, _, opab = S._pair_trades(b6b, list(range(6)), run_ab, np.zeros(6, bool)
 chk('two runs → two setups', [t['ei'] for t in trab] + ([opab['ei']] if opab else []),
     [1, 4])
 
+print("== 7. max_stop_pct: refuse an entry whose stop is absurdly far ==")
+# entry @100, stop anchored to a level 48 (a 52% stop, like JEM 10.38→4.98 LoD).
+b7 = bars([100, 100, 100, 100], h=[100.1, 101, 101, 101], l=[99.9]*4)
+r7 = {'sl': {'type': 'prim', 'anchor': {'kind': 'const', 'value': 48}, 'value': 0}}
+def run7(**kw):
+    tr, _, _, op = S._pair_trades(b7, list(range(4)), np.array([False, True, False, False]),
+                                  np.zeros(4, bool), 'long', r7, None, **kw)
+    return len(tr) + (1 if op else 0)
+chk('no cap: the 52% stop trade is taken', run7(), 1)
+chk('max_stop_pct=10: 52% stop → NO trade', run7(max_stop_pct=10), 0)
+chk('max_stop_pct=60: 52% stop still allowed (under the cap)', run7(max_stop_pct=60), 1)
+# a NORMAL tight stop (2%) is never blocked by a generous cap
+b7b = bars([100, 100, 100, 100], h=[100.1, 101, 101, 101], l=[99.9]*4)
+r7b = {'sl': {'type': 'pct', 'value': 2}}
+tr7b, _, _, op7b = S._pair_trades(b7b, list(range(4)), np.array([False, True, False, False]),
+                                  np.zeros(4, bool), 'long', r7b, None, max_stop_pct=10)
+chk('a 2% stop passes a 10% cap', len(tr7b) + (1 if op7b else 0), 1)
+
 print(f"\nPASS={PASS} FAIL={FAIL}")
 sys.exit(1 if FAIL else 0)
