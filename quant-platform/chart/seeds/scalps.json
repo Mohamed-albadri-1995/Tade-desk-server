@@ -782,6 +782,96 @@
     },
     {
      "left": {
+      "kind": "primitive",
+      "key": "ma.sma",
+      "source": "low",
+      "params": {
+       "length": 6
+      },
+      "offset": 1
+     },
+     "op": "ge",
+     "right": {
+      "kind": "primitive",
+      "key": "ma.ema",
+      "source": "close",
+      "params": {
+       "length": 9
+      },
+      "offset": 1
+     }
+    },
+    {
+     "left": {
+      "kind": "primitive",
+      "key": "ma.ema",
+      "source": "close",
+      "params": {
+       "length": 9
+      },
+      "offset": 1
+     },
+     "op": "ge",
+     "right": {
+      "kind": "primitive",
+      "key": "ma.ema",
+      "source": "close",
+      "params": {
+       "length": 9
+      },
+      "offset": 6
+     }
+    },
+    {
+     "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "primitive",
+       "key": "ma.ema",
+       "source": "close",
+       "params": {
+        "length": 9
+       },
+       "offset": 1
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "ma.ema",
+       "source": "close",
+       "params": {
+        "length": 9
+       },
+       "offset": 6
+      }
+     },
+     "op": "le",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 0.03
+      },
+      "b": {
+       "kind": "price",
+       "field": "close"
+      }
+     }
+    },
+    {
+     "left": {
+      "kind": "price",
+      "field": "close"
+     },
+     "op": "gt",
+     "right": {
+      "kind": "price",
+      "field": "open"
+     }
+    },
+    {
+     "left": {
       "kind": "price",
       "field": "volume"
      },

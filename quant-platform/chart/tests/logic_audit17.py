@@ -316,13 +316,15 @@ ok("single-target VWAP exit closes the trade at a profit (pop to VWAP)",
 print("=" * 64)
 print("SCALP 4 — HitchHiker (consolidation breakout, LONG)")
 print("=" * 64)
-# drive up 0-4, tight consolidation 5-11 in the UPPER third of the day range,
-# then break the consolidation high on 30%+ volume.
-cl = [47.0,47.6,48.2,48.8,49.2, 49.15,49.25,49.1,49.2,49.15,49.25,49.2, 49.7]
-hi = [47.2,47.8,48.4,49.0,49.35, 49.3,49.35,49.28,49.33,49.3,49.36,49.33, 49.9]
-lo = [46.8,47.4,48.0,48.6,49.05, 49.05,49.1,49.0,49.08,49.05,49.12,49.08, 49.3]
-opn= [46.9,47.5,48.1,48.7,49.1,  49.2,49.15,49.22,49.12,49.2,49.18,49.24, 49.35]
-vol= [2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5]   # break bar 12 vol 2e5 = 2x prior 1e5
+# 8 warm-up bars (so the 9-EMA is warm — real setups fire mid-morning), then a
+# drive up, a tight consolidation in the UPPER third riding ABOVE a flat 9-EMA,
+# then a GREEN break of the consolidation high on 30%+ volume.
+_W = lambda seq, v: [v] * 8 + seq   # prepend 8 flat warm-up bars at value v
+cl = _W([47.0,47.6,48.2,48.8,49.2, 49.15,49.25,49.1,49.2,49.15,49.25,49.2, 49.7], 46.5)
+hi = _W([47.2,47.8,48.4,49.0,49.35, 49.3,49.35,49.28,49.33,49.3,49.36,49.33, 49.9], 46.6)
+lo = _W([46.8,47.4,48.0,48.6,49.05, 49.05,49.1,49.0,49.08,49.05,49.12,49.08, 49.3], 46.4)
+opn= _W([46.9,47.5,48.1,48.7,49.1,  49.2,49.15,49.22,49.12,49.2,49.18,49.24, 49.35], 46.5)
+vol= _W([2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5], 1e5)   # break bar vol 2x prior
 SCEN['HITCH'] = frame(cl, opn, hi, lo, vol)
 rng = EXPR('sub', PRIM('levels.today_high'), PRIM('levels.today_low'))
 upper_third = EXPR('add', PRIM('levels.today_low'), EXPR('mul', C(2.0/3.0), rng))
@@ -345,6 +347,17 @@ hitch = {'name': 'HitchHiker', 'side': 'long',
         rule(EXPR('sub', PRIM('ma.sma', source='high', params={'length': 6}, off=1),
                          PRIM('ma.sma', source='low', params={'length': 6}, off=1)),
              'le', EXPR('mul', C(0.015), P('close'))),
+        # PDF geometry (user's read of the HitchHiker page): price RIDES ABOVE the
+        # 9 EMA through the consolidation, and the 9 EMA is FLAT / very small up-slope
+        # (a rest, not a steep drive, not rolling over). Plus a GREEN breakout candle.
+        rule(PRIM('ma.sma', source='low', params={'length': 6}, off=1), 'ge',
+             PRIM('ma.ema', params={'length': 9}, off=1)),                             # rides above the 9 EMA
+        rule(PRIM('ma.ema', params={'length': 9}, off=1), 'ge',
+             PRIM('ma.ema', params={'length': 9}, off=6)),                             # 9 EMA flat-to-up
+        rule(EXPR('sub', PRIM('ma.ema', params={'length': 9}, off=1),
+                         PRIM('ma.ema', params={'length': 9}, off=6)),
+             'le', EXPR('mul', C(0.03), P('close'))),                                  # 9 EMA flat / small up-slope
+        rule(P('close'), 'gt', P('open')),                                            # green breakout candle
         rule(P('volume'), 'gt', EXPR('mul', C(1.3), P('volume', off=1))),             # +30% volume on break
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # wave-2 = trail 9EMA
@@ -358,11 +371,11 @@ ok("tight-consolidation-in-upper-third + break + volume fires (>=1 entry)", len(
    f"entries={entry_bars(r)}")
 # CONTROL: a MID-RANGE choppy pause (consolidation low well below the upper third)
 # must be REJECTED — this is the SVRE/JEM failure the low-in-upper-third rule kills.
-clc = [47.0,48.5,47.2,48.4,47.3, 47.8,47.6,47.9,47.7,47.85,47.75,47.8, 48.1]  # wide day (46.8..49), pause ~47.7 = mid-range
-hic = [47.6,49.0,47.8,48.9,47.9, 47.95,47.9,48.05,47.9,48.0,47.95,48.0, 48.3]
-loc = [46.8,47.9,46.9,47.9,47.0, 47.6,47.5,47.7,47.55,47.7,47.6,47.65, 47.9]
-opc = [46.9,47.1,48.4,47.3,48.3, 47.7,47.85,47.7,47.9,47.75,47.85,47.78, 47.95]
-volc= [2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5]
+clc = _W([47.0,48.5,47.2,48.4,47.3, 47.8,47.6,47.9,47.7,47.85,47.75,47.8, 48.1], 46.5)  # pause ~47.7 = mid-range
+hic = _W([47.6,49.0,47.8,48.9,47.9, 47.95,47.9,48.05,47.9,48.0,47.95,48.0, 48.3], 46.6)
+loc = _W([46.8,47.9,46.9,47.9,47.0, 47.6,47.5,47.7,47.55,47.7,47.6,47.65, 47.9], 46.4)
+opc = _W([46.9,47.1,48.4,47.3,48.3, 47.7,47.85,47.7,47.9,47.75,47.85,47.78, 47.95], 46.5)
+volc= _W([2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5], 1e5)
 SCEN['HITCHCHOP'] = frame(clc, opc, hic, loc, volc)
 rc = run(hitch, 'HITCHCHOP')
 ok("mid-range chop is REJECTED (consolidation low below the upper third)",
@@ -370,11 +383,11 @@ ok("mid-range chop is REJECTED (consolidation low below the upper third)",
 # CONTROL 2: a consolidation that IS tight (net), high-sitting, in the upper third,
 # but made of WICKY bars (each bar whips ~1.7% of price) — the KUST case. Passes
 # every width/location gate, but the avg-bar-range (chop) gate must REJECT it.
-clw = [47.0,47.6,48.2,48.8,49.2, 49.10,49.15,49.05,49.12,49.08,49.14,49.10, 49.6]
-hiw = [47.2,47.8,48.4,49.0,49.35, 49.55,49.6,49.5,49.58,49.52,49.6,49.55, 49.8]   # big UPPER wicks
-low = [46.8,47.4,48.0,48.6,49.05, 48.7,48.75,48.65,48.72,48.68,48.74,48.7, 49.3]  # big LOWER wicks (~0.85 range each)
-opw = [46.9,47.5,48.1,48.7,49.1,  49.12,49.08,49.16,49.06,49.14,49.05,49.13, 49.4]
-volw= [2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5]
+clw = _W([47.0,47.6,48.2,48.8,49.2, 49.10,49.15,49.05,49.12,49.08,49.14,49.10, 49.6], 46.5)
+hiw = _W([47.2,47.8,48.4,49.0,49.35, 49.55,49.6,49.5,49.58,49.52,49.6,49.55, 49.8], 46.6)   # big UPPER wicks
+low = _W([46.8,47.4,48.0,48.6,49.05, 48.7,48.75,48.65,48.72,48.68,48.74,48.7, 49.3], 46.4)  # big LOWER wicks
+opw = _W([46.9,47.5,48.1,48.7,49.1,  49.12,49.08,49.16,49.06,49.14,49.05,49.13, 49.4], 46.5)
+volw= _W([2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5], 1e5)
 SCEN['HITCHWICK'] = frame(clw, opw, hiw, low, volw)
 rw = run(hitch, 'HITCHWICK')
 ok("wicky consolidation is REJECTED (avg bar range ~1.7% > 1.5% = chop)",
