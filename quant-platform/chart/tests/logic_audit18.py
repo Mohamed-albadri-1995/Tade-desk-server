@@ -207,7 +207,9 @@ bgap = bars([100, 100, 100, 100, 100],
 trg, _, _, _ = S._pair_trades(bgap, list(range(5)), entry_at(5, 1), np.zeros(5, bool),
                               'long', rstr, None)
 chk('gap-through-stop: NO partial banked', len(trg[0]['legs']) if trg else None, 0)
-chk('gap-through-stop: full stop -1%', trg[0]['ret'] if trg else None, -0.01)
+# fills at the GAP OPEN (98.7), not the stop level (99) — real gap slippage
+chk('gap-through-stop: full stop at the open = -1.3%',
+    trg[0]['ret'] if trg else None, (98.7 - 100) / 100)
 # SHORT mirror of the straddle: entry @100, stop @101, 1/3 leg at 1R (=99).
 bsh = bars([100, 100, 100, 100, 100],
            h=[100.1, 100.1, 101.5, 100.1, 100.1],

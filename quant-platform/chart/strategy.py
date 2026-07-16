@@ -580,7 +580,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     precedes intrabar SL/TP on the fill bar (the open prints
                     first); fixed SL/TP distances anchor to the OPEN fill
                     price, ATR taken at the signal bar (last completed bar).
-    SL/TP themselves always fill intrabar AT the level in both models.
+    TP fills intrabar AT the level. A STOP fills at the level on a within-bar
+    touch, but at the OPEN when the bar GAPS through it (opens already beyond
+    the level) — a market order can't fill at a price the tape skipped, so the
+    gap slippage is charged (what the funded account really pays).
 
     SESSION RULES (prop-firm style, e.g. Trade The Pool):
       entry_ok  — boolean mask of bars where OPENING a position is allowed
@@ -849,9 +852,14 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                                'exit': last['price'], 'legs': list(legs)})
                 last_exit_bar = last['xi']
                 in_pos = False; continue
-        # stop on the REMAINING lot (partials, if any, already banked above)
+        # stop on the REMAINING lot (partials, if any, already banked above).
+        # A stop is a MARKET order once touched: if the bar GAPS through it (opens
+        # already beyond the level), you fill at the open, not the level — that
+        # slippage is a real cost the funded account eats, so the backtest must
+        # too. A within-bar touch (open on the safe side) fills at the level.
         if slv is not None and ((side == 'long' and low[j] <= slv) or (side == 'short' and high[j] >= slv)):
-            _close(j, slv, 'SL'); in_pos = False; continue
+            sl_fill = (min(slv, opn[j]) if side == 'long' else max(slv, opn[j]))
+            _close(j, sl_fill, 'SL'); in_pos = False; continue
         if not tgt_fr and tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
             _close(j, tpv, 'TP'); in_pos = False; continue
         # exit RULE — deferred during the min-hold window (SL/TP/eod still fire)

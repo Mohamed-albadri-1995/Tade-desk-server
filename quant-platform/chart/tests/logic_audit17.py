@@ -143,10 +143,14 @@ ok("LIVE today_low stop ALSO fires now (ratchet freezes it, no longer inert)",
 # a stop anchored to a RISING line ratchets up above entry; when hit in profit
 # it is a 'trail' take, NOT a stop-loss — the reason must say so. Enter at bar 4
 # (ema3 warmed); the line climbs above entry, then a gentle pullback hits it.
+# The exit bar (7) must OPEN ABOVE the ratcheted stop and wick DOWN to it — a
+# real intrabar touch that fills at the level, not a gap that fills at the open.
 tidx = _day_index(9, start='10:00')
-tc = [50, 50, 51, 52, 53, 54, 53.5, 53, 52.5]      # warm, rise past entry, ease back
-td = pd.DataFrame({'open':tc,'high':[x+0.15 for x in tc],'low':[x-0.15 for x in tc],
-                   'close':tc,'volume':[1e5]*9}, index=tidx)
+tc = [50, 50, 51, 52, 53, 54, 53.5, 53, 52.5]      # closes: warm, rise, ease back
+to = [50, 50, 51, 52, 53, 54, 53.5, 53.4, 52.5]    # bar7 opens 53.4 (above the trail)
+th = [max(o, c) + 0.15 for o, c in zip(to, tc)]
+tl = [min(o, c) - 0.15 for o, c in zip(to, tc)]
+td = pd.DataFrame({'open':to,'high':th,'low':tl,'close':tc,'volume':[1e5]*9}, index=tidx)
 SCEN['TRAIL'] = td
 tstrat = {'name':'t','side':'long',
           'entry': G('AND', [rule(T(), 'eq', C(1004))]),   # enter bar 4 (close 53)
