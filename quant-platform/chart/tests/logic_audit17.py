@@ -353,6 +353,11 @@ LO6 = PRIM('extremes.lowest', params={'length': 6}, source='low', off=1)
 hitch = {'name': 'HitchHiker', 'side': 'long',
     'entry': G('AND', [
         rule(P('close'), 'cross_above', HI6),                                         # break the consolidation
+        # PDF loser-factor "multiple attempts before the consolidation": the break
+        # must close above the PRIOR running high of day = a FRESH break to a new HoD
+        # (buyers stepping in at the highs, no pullback), not breaking a lower local
+        # high AFTER the stock already topped (the "end of move" case: QTTB).
+        rule(P('close'), 'gt', PRIM('levels.today_high', off=1)),
         # PDF: the consolidation LOW (not just the break bar) sits in the upper 1/3
         # of the day range — a real post-drive pause near the highs, not mid-range
         # chop. This is what rejects the SVRE noise + the JEM false break (backtest

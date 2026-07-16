@@ -755,6 +755,19 @@
     },
     {
      "left": {
+      "kind": "price",
+      "field": "close"
+     },
+     "op": "gt",
+     "right": {
+      "kind": "primitive",
+      "key": "levels.today_high",
+      "source": "close",
+      "offset": 1
+     }
+    },
+    {
+     "left": {
       "kind": "primitive",
       "key": "extremes.lowest",
       "source": "low",
