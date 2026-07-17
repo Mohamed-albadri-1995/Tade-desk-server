@@ -340,10 +340,10 @@ print("=" * 64)
 # drive up, a tight consolidation in the UPPER third riding ABOVE a flat 9-EMA,
 # then a GREEN break of the consolidation high on 30%+ volume.
 _W = lambda seq, v: [v] * 8 + seq   # prepend 8 flat warm-up bars at value v
-cl = _W([47.0,47.6,48.2,48.8,49.2, 49.15,49.25,49.1,49.2,49.15,49.25,49.2, 49.7], 46.5)
-hi = _W([47.2,47.8,48.4,49.0,49.35, 49.3,49.35,49.28,49.33,49.3,49.36,49.33, 49.9], 46.6)
-lo = _W([46.8,47.4,48.0,48.6,49.05, 49.05,49.1,49.0,49.08,49.05,49.12,49.08, 49.3], 46.4)
-opn= _W([46.9,47.5,48.1,48.7,49.1,  49.2,49.15,49.22,49.12,49.2,49.18,49.24, 49.35], 46.5)
+cl = _W([47.0,47.6,48.2,48.8,49.2, 49.15,49.25,49.1,49.2,49.15,49.25,49.2, 49.85], 46.5)  # break = strong bull candle
+hi = _W([47.2,47.8,48.4,49.0,49.35, 49.3,49.35,49.28,49.33,49.3,49.36,49.33, 49.90], 46.6)
+lo = _W([46.8,47.4,48.0,48.6,49.05, 49.05,49.1,49.0,49.08,49.05,49.12,49.08, 49.32], 46.4)
+opn= _W([46.9,47.5,48.1,48.7,49.1,  49.2,49.15,49.22,49.12,49.2,49.18,49.24, 49.36], 46.5)
 vol= _W([2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5], 1e5)   # break bar vol 2x prior
 SCEN['HITCH'] = frame(cl, opn, hi, lo, vol)
 rng = EXPR('sub', PRIM('levels.today_high'), PRIM('levels.today_low'))
@@ -397,16 +397,20 @@ ok("mid-range chop is REJECTED (consolidation low below the upper third)",
 #   L2 HOLD      — the drive stops; a TIGHT 6-bar range holds in the upper 1/3 (no pullback)
 #   L3 BREAK     — the HitchHiker candle breaks the consolidation high on +30% volume
 # Fires ONCE, at the break, only after the full arc — the same crafted HITCH day.
-hh6 = PRIM('extremes.highest', params={'length': 6}, source='high')
-ll6 = PRIM('extremes.lowest', params={'length': 6}, source='low')
+hh8 = PRIM('extremes.highest', params={'length': 8}, source='high')
+ll8 = PRIM('extremes.lowest', params={'length': 8}, source='low')
+HI8 = PRIM('extremes.highest', params={'length': 8}, source='high', off=1)
+_body = EXPR('sub', P('close'), P('open')); _barr = EXPR('sub', P('high'), P('low'))
 hseq = {'name': 'HitchHikerSeq', 'side': 'long',
     'entry': G('THEN', [
-        rule(P('close'), 'rising', None, op_params={'lookback': 5, 'consistency': 0.7}),   # L1 drive
-        G('AND', [rule(EXPR('sub', hh6, ll6), 'le', EXPR('mul', C(0.04), P('close'))),      # L2 tight
-                  rule(ll6, 'ge', upper_third)]),                                            #    upper 1/3, held
-        G('AND', [rule(P('close'), 'cross_above', HI6),                                     # L3 break
-                  rule(P('volume'), 'gt', EXPR('mul', C(1.3), P('volume', off=1)))]),
-    ], window=15),
+        rule(P('close'), 'rising', None, op_params={'lookback': 5, 'consistency': 0.7}),   # L1 GOOD DRIVE
+        G('AND', [rule(EXPR('sub', hh8, ll8), 'le', EXPR('mul', C(0.05), P('close'))),      # L2 LONG (8-bar) tight pause
+                  rule(ll8, 'ge', upper_third)]),                                            #    low in upper 1/3
+        G('AND', [rule(P('close'), 'cross_above', HI8),                                     # L3 break the level
+                  rule(P('close'), 'gt', P('open')),                                        #    green
+                  rule(_body, 'ge', EXPR('mul', C(0.6), _barr)),                            #    clear bullish body
+                  rule(P('volume'), 'gt', P('volume', off=1))]),                            #    volume > previous
+    ], window=20),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),
     'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 6}, source='low', off=1), 'value': 0.05},
              'targets': [{'fraction': 0.5, 'r_multiple': 1.0}],
