@@ -353,11 +353,6 @@ LO6 = PRIM('extremes.lowest', params={'length': 6}, source='low', off=1)
 hitch = {'name': 'HitchHiker', 'side': 'long',
     'entry': G('AND', [
         rule(P('close'), 'cross_above', HI6),                                         # break the consolidation
-        # PDF loser-factor "multiple attempts before the consolidation": the break
-        # must close above the PRIOR running high of day = a FRESH break to a new HoD
-        # (buyers stepping in at the highs, no pullback), not breaking a lower local
-        # high AFTER the stock already topped (the "end of move" case: QTTB).
-        rule(P('close'), 'gt', PRIM('levels.today_high', off=1)),
         # PDF: the consolidation LOW (not just the break bar) sits in the upper 1/3
         # of the day range — a real post-drive pause near the highs, not mid-range
         # chop. This is what rejects the SVRE noise + the JEM false break (backtest
@@ -391,6 +386,32 @@ SCEN['HITCHCHOP'] = frame(clc, opc, hic, loc, volc)
 rc = run(hitch, 'HITCHCHOP')
 ok("mid-range chop is REJECTED (consolidation low below the upper third)",
    len(entry_bars(rc)) == 0, f"entries={entry_bars(rc)}")
+
+# --- HitchHiker as the PDF SEQUENCE (drive -> hold/consolidation -> break) ---
+# Instead of a single AND snapshot, detect each PDF layer and chain them in order:
+#   L1 DRIVE     — close rising (>=70% of last 5 moves up), a distinct drive off open
+#   L2 HOLD      — the drive stops; a TIGHT 6-bar range holds in the upper 1/3 (no pullback)
+#   L3 BREAK     — the HitchHiker candle breaks the consolidation high on +30% volume
+# Fires ONCE, at the break, only after the full arc — the same crafted HITCH day.
+hh6 = PRIM('extremes.highest', params={'length': 6}, source='high')
+ll6 = PRIM('extremes.lowest', params={'length': 6}, source='low')
+hseq = {'name': 'HitchHikerSeq', 'side': 'long',
+    'entry': G('THEN', [
+        rule(P('close'), 'rising', None, op_params={'lookback': 5, 'consistency': 0.7}),   # L1 drive
+        G('AND', [rule(EXPR('sub', hh6, ll6), 'le', EXPR('mul', C(0.04), P('close'))),      # L2 tight
+                  rule(ll6, 'ge', upper_third)]),                                            #    upper 1/3, held
+        G('AND', [rule(P('close'), 'cross_above', HI6),                                     # L3 break
+                  rule(P('volume'), 'gt', EXPR('mul', C(1.3), P('volume', off=1)))]),
+    ], window=15),
+    'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 6}, source='low', off=1), 'value': 0.05},
+             'targets': [{'fraction': 0.5, 'r_multiple': 1.0}],
+             'max_entries_per_day': 1, 'cooldown_bars': 10}}
+rq = run(hseq, 'HITCH')
+ok("SEQUENCE fires ONCE on the drive->hold->break arc", len(entry_bars(rq)) == 1,
+   f"entries={entry_bars(rq)}")
+ok("SEQUENCE does NOT fire on mid-range chop (no clean drive->hold->break)",
+   len(entry_bars(run(hseq, 'HITCHCHOP'))) == 0)
 
 print("=" * 64)
 print("SCALP 5 — Fashionably Late (9EMA crosses VWAP, LONG)")
@@ -455,10 +476,12 @@ for _s in (rubber, second, backside, hitch, late):
 import json as _json
 _seeds = _json.loads((pathlib.Path(__file__).resolve().parents[1] / 'seeds' / 'scalps.json').read_text())
 _seed_caps = {'RubberBand Scalp': 2, 'RubberBand Scalp (Short)': 2, 'Second Chance Scalp': 2,
-              'Back$ide Scalp': 1, 'HitchHiker Scalp': 1, 'Fashionably Late Scalp': 1}
+              'Back$ide Scalp': 1, 'HitchHiker Scalp': 1, 'HitchHiker Scalp (Sequence)': 1,
+              'Fashionably Late Scalp': 1}
 _seed_win = {'RubberBand Scalp': (1000, 1330), 'RubberBand Scalp (Short)': (1000, 1330),
              'Second Chance Scalp': (959, 1550), 'Back$ide Scalp': (1000, 1330),
-             'HitchHiker Scalp': (945, 1100), 'Fashionably Late Scalp': (1000, 1330)}
+             'HitchHiker Scalp': (945, 1100), 'HitchHiker Scalp (Sequence)': (945, 1100),
+             'Fashionably Late Scalp': (1000, 1330)}
 for _sd in _seeds:
     _r = _sd.get('risk') or {}
     ok(f"seed '{_sd['name']}' caps + cools, no min-hold",

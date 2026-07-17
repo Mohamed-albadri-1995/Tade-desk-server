@@ -755,19 +755,6 @@
     },
     {
      "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "gt",
-     "right": {
-      "kind": "primitive",
-      "key": "levels.today_high",
-      "source": "close",
-      "offset": 1
-     }
-    },
-    {
-     "left": {
       "kind": "primitive",
       "key": "extremes.lowest",
       "source": "low",
@@ -867,6 +854,195 @@
      }
     }
    ]
+  },
+  "exit": {
+   "logic": "AND",
+   "rules": [
+    {
+     "left": {
+      "kind": "price",
+      "field": "close"
+     },
+     "op": "cross_below",
+     "right": {
+      "kind": "primitive",
+      "key": "ma.ema",
+      "source": "close",
+      "params": {
+       "length": 9
+      }
+     }
+    }
+   ]
+  },
+  "risk": {
+   "sl": {
+    "type": "prim",
+    "anchor": {
+     "kind": "primitive",
+     "key": "extremes.lowest",
+     "source": "low",
+     "params": {
+      "length": 6
+     },
+     "offset": 1
+    },
+    "value": 0.05
+   },
+   "targets": [
+    {
+     "fraction": 0.5,
+     "r_multiple": 1.0
+    }
+   ],
+   "max_entries_per_day": 1,
+   "cooldown_bars": 10,
+   "window_start": 945,
+   "window_end": 1100
+  }
+ },
+ {
+  "name": "HitchHiker Scalp (Sequence)",
+  "side": "long",
+  "entry": {
+   "logic": "THEN",
+   "rules": [
+    {
+     "left": {
+      "kind": "price",
+      "field": "close"
+     },
+     "op": "rising",
+     "op_params": {
+      "lookback": 5,
+      "consistency": 0.7
+     }
+    },
+    {
+     "logic": "AND",
+     "rules": [
+      {
+       "left": {
+        "kind": "expr",
+        "op": "sub",
+        "a": {
+         "kind": "primitive",
+         "key": "extremes.highest",
+         "source": "high",
+         "params": {
+          "length": 6
+         }
+        },
+        "b": {
+         "kind": "primitive",
+         "key": "extremes.lowest",
+         "source": "low",
+         "params": {
+          "length": 6
+         }
+        }
+       },
+       "op": "le",
+       "right": {
+        "kind": "expr",
+        "op": "mul",
+        "a": {
+         "kind": "const",
+         "value": 0.04
+        },
+        "b": {
+         "kind": "price",
+         "field": "close"
+        }
+       }
+      },
+      {
+       "left": {
+        "kind": "primitive",
+        "key": "extremes.lowest",
+        "source": "low",
+        "params": {
+         "length": 6
+        }
+       },
+       "op": "ge",
+       "right": {
+        "kind": "expr",
+        "op": "add",
+        "a": {
+         "kind": "primitive",
+         "key": "levels.today_low",
+         "source": "close"
+        },
+        "b": {
+         "kind": "expr",
+         "op": "mul",
+         "a": {
+          "kind": "const",
+          "value": 0.6666666666666666
+         },
+         "b": {
+          "kind": "expr",
+          "op": "sub",
+          "a": {
+           "kind": "primitive",
+           "key": "levels.today_high",
+           "source": "close"
+          },
+          "b": {
+           "kind": "primitive",
+           "key": "levels.today_low",
+           "source": "close"
+          }
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "logic": "AND",
+     "rules": [
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
+       },
+       "op": "cross_above",
+       "right": {
+        "kind": "primitive",
+        "key": "extremes.highest",
+        "source": "high",
+        "params": {
+         "length": 6
+        },
+        "offset": 1
+       }
+      },
+      {
+       "left": {
+        "kind": "price",
+        "field": "volume"
+       },
+       "op": "gt",
+       "right": {
+        "kind": "expr",
+        "op": "mul",
+        "a": {
+         "kind": "const",
+         "value": 1.3
+        },
+        "b": {
+         "kind": "price",
+         "field": "volume",
+         "offset": 1
+        }
+       }
+      }
+     ]
+    }
+   ],
+   "window": 15
   },
   "exit": {
    "logic": "AND",
