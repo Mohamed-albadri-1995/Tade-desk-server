@@ -365,12 +365,10 @@ hitch = {'name': 'HitchHiker', 'side': 'long',
         # the gate rejected the good drives (STEP/SOBR) and kept the chop (KUST/QTTB),
         # the opposite of the goal. #98's width+location gates are the best config.
         rule(P('volume'), 'gt', EXPR('mul', C(1.3), P('volume', off=1))),             # +30% volume on break
-        # FRESH HoD (user's read of SUNE): the day-high was printed within the last
-        # ~12 bars and price holds right at it — no DECLINE away from the high. A
-        # stock that spiked to its high then declined for 15+ bars (QTTB) has its
-        # recent-12-bar high well below the stale day-high, so it's rejected.
-        rule(PRIM('extremes.highest', params={'length': 12}, source='high', off=1), 'ge',
-             EXPR('mul', PRIM('levels.today_high', off=1), C(0.995))),
+        # NOTE: a "fresh HoD" gate (highest(12) ~= today_high) was tried (backtest
+        # #108) and REVERTED — it DROPPED the one real setup (SUNE consolidated below
+        # an EARLIER high) and KEPT the junk (QTTB broke near a fresh high). The exact
+        # opposite of intended. No entry-time feature isolates the real HitchHiker.
     ]),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # wave-2 = trail 9EMA
     # PDF exit: 1/2 into wave 1 (~1R), 1/2 into wave 2 (the 9-EMA trail runner).
