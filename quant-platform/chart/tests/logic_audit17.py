@@ -336,44 +336,47 @@ ok("single-target VWAP exit closes the trade at a profit (pop to VWAP)",
 print("=" * 64)
 print("SCALP 4 — HitchHiker (consolidation breakout, LONG)")
 print("=" * 64)
-# 8 warm-up bars (so the 9-EMA is warm — real setups fire mid-morning), then a
-# drive up, a tight consolidation in the UPPER third riding ABOVE a flat 9-EMA,
-# then a GREEN break of the consolidation high on 30%+ volume.
+# 8 warm-up bars, a DRIVE to a peak, a 6-bar consolidation holding BELOW the peak
+# (price stopped making higher highs), then a GREEN break above the peak on volume.
 _W = lambda seq, v: [v] * 8 + seq   # prepend 8 flat warm-up bars at value v
-cl = _W([47.0,47.6,48.2,48.8,49.2, 49.15,49.25,49.1,49.2,49.15,49.25,49.2, 49.85], 46.5)  # break = strong bull candle
-hi = _W([47.2,47.8,48.4,49.0,49.35, 49.3,49.35,49.28,49.33,49.3,49.36,49.33, 49.90], 46.6)
-lo = _W([46.8,47.4,48.0,48.6,49.05, 49.05,49.1,49.0,49.08,49.05,49.12,49.08, 49.32], 46.4)
-opn= _W([46.9,47.5,48.1,48.7,49.1,  49.2,49.15,49.22,49.12,49.2,49.18,49.24, 49.36], 46.5)
-vol= _W([2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5], 1e5)   # break bar vol 2x prior
+cl = _W([47.5,48.3,49.2,50.0, 49.70,49.65,49.72,49.68,49.70,49.66, 50.20], 46.5)  # drive->peak 50.0, flat, break
+hi = _W([47.6,48.4,49.3,50.1, 49.75,49.70,49.77,49.73,49.75,49.71, 50.30], 46.6)  # peak HIGH 50.1 (behind the box)
+lo = _W([47.4,48.2,49.1,49.9, 49.65,49.60,49.67,49.63,49.65,49.61, 49.90], 46.4)
+opn= _W([47.4,47.6,48.4,49.3, 49.72,49.68,49.66,49.71,49.66,49.69, 49.70], 46.5)  # break bar green (o49.70->c50.20)
+vol= _W([2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5, 2e5], 1e5)                     # break bar vol 2x prior
 SCEN['HITCH'] = frame(cl, opn, hi, lo, vol)
 rng = EXPR('sub', PRIM('levels.today_high'), PRIM('levels.today_low'))
 upper_third = EXPR('add', PRIM('levels.today_low'), EXPR('mul', C(2.0/3.0), rng))
-hh8 = PRIM('extremes.highest', params={'length': 8}, source='high')
-ll8 = PRIM('extremes.lowest', params={'length': 8}, source='low')
+HI3 = PRIM('extremes.highest', params={'length': 3}, source='high')
+HI8v = PRIM('extremes.highest', params={'length': 8}, source='high')
 HI8 = PRIM('extremes.highest', params={'length': 8}, source='high', off=1)
+hh5 = PRIM('extremes.highest', params={'length': 5}, source='high')
+ll5 = PRIM('extremes.lowest', params={'length': 5}, source='low')
 LO12 = PRIM('extremes.lowest', params={'length': 12}, source='low')
-# Fresh HitchHiker (from-scratch rebuild): the PDF's arc as an ordered THEN —
-#   1) REAL DRIVE  — rising AND price >=4% above the recent low (a genuine move,
-#      not a gentle drift with a 2-bar flat that can masquerade as a setup)
-#   2) SHELF       — a tight 8-bar hold whose LOW sits in the upper 1/3 (holds up)
-#   3) BREAK       — clears the shelf high, GREEN candle, volume > the previous bar
+# Fresh HitchHiker (from-scratch): the PDF's arc as an ordered THEN, with the PROVEN
+# consolidation detector (the user's spec) as L2 —
+#   1) REAL DRIVE  — rising AND price >=4% above the recent low (not a gentle drift)
+#   2) CONSOLIDATION — price STOPPED making higher highs (recent-3 high < 8-bar high,
+#      the peak is behind it), a tight 5-bar box, low in the upper 1/3
+#   3) BREAK       — clears the box high (the peak), GREEN candle, volume > previous
 hitch = {'name': 'HitchHiker', 'side': 'long',
     'entry': G('THEN', [
         G('AND', [rule(P('close'), 'rising', None, op_params={'lookback': 5, 'consistency': 0.7}),
                   rule(P('close'), 'ge', EXPR('mul', LO12, C(1.04)))]),
-        G('AND', [rule(EXPR('sub', hh8, ll8), 'le', EXPR('mul', C(0.04), P('close'))),
-                  rule(ll8, 'ge', upper_third)]),
+        G('AND', [rule(HI3, 'lt', EXPR('mul', HI8v, C(0.998))),                        # STOPPED making HH
+                  rule(EXPR('sub', hh5, ll5), 'le', EXPR('mul', C(0.03), P('close'))),  # tight box
+                  rule(ll5, 'ge', upper_third)]),                                       # low in upper 1/3
         G('AND', [rule(P('close'), 'cross_above', HI8),
                   rule(P('close'), 'gt', P('open')),
                   rule(P('volume'), 'gt', P('volume', off=1))]),
     ], window=20),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # wave-2 = trail 9EMA
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 8}, source='low', off=1), 'value': 0.05},
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 5}, source='low', off=1), 'value': 0.05},
              'targets': [{'fraction': 0.5, 'r_multiple': 1.0}],
              'max_entries_per_day': 1, 'cooldown_bars': 10}}
 r = run(hitch, 'HITCH')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
-ok("drive -> shelf -> break fires ONCE on the crafted arc", len(entry_bars(r)) == 1,
+ok("drive -> STOPPED-making-HH box -> break fires ONCE on the crafted arc", len(entry_bars(r)) == 1,
    f"entries={entry_bars(r)}")
 # CONTROL: a MID-RANGE choppy pause (consolidation low well below the upper third)
 # must be REJECTED — no clean drive->shelf->break.

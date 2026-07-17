@@ -781,8 +781,17 @@
      "rules": [
       {
        "left": {
+        "kind": "primitive",
+        "key": "extremes.highest",
+        "source": "high",
+        "params": {
+         "length": 3
+        }
+       },
+       "op": "lt",
+       "right": {
         "kind": "expr",
-        "op": "sub",
+        "op": "mul",
         "a": {
          "kind": "primitive",
          "key": "extremes.highest",
@@ -792,11 +801,29 @@
          }
         },
         "b": {
+         "kind": "const",
+         "value": 0.998
+        }
+       }
+      },
+      {
+       "left": {
+        "kind": "expr",
+        "op": "sub",
+        "a": {
+         "kind": "primitive",
+         "key": "extremes.highest",
+         "source": "high",
+         "params": {
+          "length": 5
+         }
+        },
+        "b": {
          "kind": "primitive",
          "key": "extremes.lowest",
          "source": "low",
          "params": {
-          "length": 8
+          "length": 5
          }
         }
        },
@@ -806,7 +833,7 @@
         "op": "mul",
         "a": {
          "kind": "const",
-         "value": 0.04
+         "value": 0.03
         },
         "b": {
          "kind": "price",
@@ -820,7 +847,7 @@
         "key": "extremes.lowest",
         "source": "low",
         "params": {
-         "length": 8
+         "length": 5
         }
        },
        "op": "ge",
@@ -933,7 +960,7 @@
      "key": "extremes.lowest",
      "source": "low",
      "params": {
-      "length": 8
+      "length": 5
      },
      "offset": 1
     },
