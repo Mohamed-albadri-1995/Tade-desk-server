@@ -119,6 +119,37 @@ ok("unfetchable reference symbol fails SAFE: ok run, 0 entries (gate blocks)",
    rm.get('ok') and len(rm.get('entries') or []) == 0,
    f"err={rm.get('error')} entries={rm.get('entries')}")
 
+print("=" * 64)
+print("PART D — review fixes: symbol'd RISK anchors + honest chart lines")
+print("=" * 64)
+# a stop ANCHORED to a reference symbol's line must be discovered (preloaded)
+# and priced — before the fix it raised inside _anchor_levels, was swallowed,
+# and the trade ran with NO stop at all.
+anchored = {'name': 'a', 'side': 'long',
+            'entry': {'logic': 'AND', 'rules': [
+                {'left': {'kind': 'price', 'field': 'close'}, 'op': 'gt',
+                 'right': {'kind': 'const', 'value': 0}}]},
+            'exit': {'logic': 'AND', 'rules': []},
+            'risk': {'sl': {'type': 'prim', 'value': 0.5,
+                            'anchor': {'kind': 'primitive', 'key': 'ma.ema',
+                                       'params': {'length': 3}, 'symbol': 'MKTUP'}}}}
+ok("referenced_symbols() walks risk anchors",
+   S.referenced_symbols(anchored) == ['MKTUP'], S.referenced_symbols(anchored))
+ra = run(anchored)
+ok("symbol-anchored SL is PRICED (an 'SL level' series exists — not silently dropped)",
+   ra.get('ok') and any(s.get('name') == 'SL level' for s in ra.get('series') or []),
+   f"err={ra.get('error')} series={[s.get('name') for s in ra.get('series') or []]}")
+# cross-symbol primitives must NOT be drawn from the traded symbol's bars —
+# the line would silently show the wrong symbol's data.
+gate_prim = {'name': 'g', 'side': 'long',
+             'entry': {'logic': 'AND', 'rules': [
+                 {'left': {'kind': 'primitive', 'key': 'ma.ema',
+                           'params': {'length': 3}, 'symbol': 'MKTUP'},
+                  'op': 'gt', 'right': {'kind': 'const', 'value': 0}}]},
+             'exit': {'logic': 'AND', 'rules': []}, 'risk': {}}
+ok("_unique_indicators SKIPS cross-symbol operands (no wrong-symbol lines)",
+   S._unique_indicators(gate_prim) == [], S._unique_indicators(gate_prim))
+
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)

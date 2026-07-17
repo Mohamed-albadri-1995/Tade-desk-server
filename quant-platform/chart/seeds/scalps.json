@@ -666,16 +666,38 @@
      ]
     },
     {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "gt",
-     "right": {
-      "kind": "price",
-      "field": "close",
-      "offset": 1
-     }
+     "logic": "AND",
+     "rules": [
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
+       },
+       "op": "gt",
+       "right": {
+        "kind": "price",
+        "field": "close",
+        "offset": 1
+       }
+      },
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
+       },
+       "op": "ge",
+       "right": {
+        "kind": "primitive",
+        "key": "structure.pivot_high",
+        "source": "high",
+        "params": {
+         "left": 5,
+         "right": 5
+        },
+        "hold": true
+       }
+      }
+     ]
     }
    ],
    "window": 6

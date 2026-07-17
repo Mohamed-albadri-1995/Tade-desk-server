@@ -160,6 +160,9 @@ def _operand_array(operand: dict, bars, ctx, trade: dict | None = None) -> np.nd
         if len(rbars) == 0:                     # feed failed → NaN → rule False
             return np.full(len(bars), np.nan)   # (fail-safe: gate blocks entry)
         sub_op = {k: v for k, v in operand.items() if k != 'symbol'}
+        if sub_op.get('kind') == 'trade':
+            raise ValueError('trade fields (entry/bars/P&L) live on the traded '
+                             'symbol — they cannot carry a "symbol" reference')
         rarr = _operand_array(sub_op, rbars, ctx, trade)
         return _causal_align(rarr, rbars.index, bars.index)
     kind = operand.get('kind', 'primitive')
@@ -548,6 +551,16 @@ def referenced_symbols(strategy: dict) -> list:
                 walk_operand(r.get('right'))
     walk_group(strategy.get('entry'))
     walk_group(strategy.get('exit'))
+    # risk anchors too: a symbol'd SL/TP anchor whose reference bars were never
+    # preloaded would raise inside _anchor_levels, get swallowed, and leave the
+    # trade UNPROTECTED — so they must be discovered here like any rule operand.
+    risk = strategy.get('risk') or {}
+    for spec in risk.values():
+        if isinstance(spec, dict):
+            walk_operand(spec.get('anchor'))
+    for t in (risk.get('targets') or []):
+        if isinstance(t, dict) and isinstance(t.get('tp'), dict):
+            walk_operand(t['tp'].get('anchor'))
     return sorted(out)
 
 
@@ -597,6 +610,9 @@ def _unique_indicators(strategy: dict) -> list:
     def add(o):
         if not isinstance(o, dict):
             return
+        if o.get('symbol'):
+            return    # cross-symbol operand: drawing it from the TRADED bars
+                      # would plot the wrong symbol's data — skip the line
         if o.get('kind') == 'expr':
             add(o.get('a')); add(o.get('b')); return
         if o.get('kind', 'primitive') == 'primitive' and o.get('key'):
