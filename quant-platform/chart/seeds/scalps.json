@@ -852,6 +852,32 @@
        "offset": 1
       }
      }
+    },
+    {
+     "left": {
+      "kind": "primitive",
+      "key": "extremes.highest",
+      "source": "high",
+      "params": {
+       "length": 12
+      },
+      "offset": 1
+     },
+     "op": "ge",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "primitive",
+       "key": "levels.today_high",
+       "source": "close",
+       "offset": 1
+      },
+      "b": {
+       "kind": "const",
+       "value": 0.995
+      }
+     }
     }
    ]
   },
