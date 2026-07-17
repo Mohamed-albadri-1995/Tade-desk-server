@@ -137,9 +137,13 @@ ok("RubberBand carries its PDF scale-out legs (1R + 2R)",
 cls = [50.0, 50.7, 51.4, 52.1, 52.8, 53.5, 53.9, 54.1, 52.9, 53.0, 53.1]
 ops = [49.8, 50.3, 51.0, 51.7, 52.4, 53.1, 53.6, 53.9, 54.0, 52.8, 53.0]   # bar8 RED: c52.9<o54.0
 his = [50.1, 50.8, 51.5, 52.2, 52.9, 53.6, 54.0, 54.2, 54.1, 53.1, 53.2]   # HoD 54.2 @bar7; bar8 high 54.1 (near HoD)
-los = [49.7, 50.2, 50.9, 51.6, 52.3, 53.0, 53.4, 53.7, 52.6, 52.7, 52.9]   # bar8 low 52.6 < min(lo6,lo7)=53.4
-vols= [1e5, 1e5, 1e5, 2e5, 3e5, 5e5, 7e5, 9e5, 1.3e6, 4e5, 1e5]            # accel into the blow-off
+los = [49.7, 50.2, 50.9, 51.6, 52.3, 52.8, 53.2, 53.5, 52.6, 52.7, 52.9]   # last-leg ranges WIDEN (accel); bar8 low 52.6 < min(lo6,lo7)
+vols= [1e5, 1e5, 1e5, 2e5, 3e5, 5e5, 7e5, 9e5, 1.3e6, 4e5, 1e5]            # vol accel into the blow-off; bar8 = day max
 SCEN['RUBBERUP'] = frame(cls, ops, his, los, vols)
+# the SHORT seed carries the SCALPS_SPEC market gate (SPY ema20 not cleanly
+# rising) — give the stub feed a FLAT SPY so the gate passes (le holds).
+SCEN['SPY'] = frame([400.0] * 60, [400.0] * 60, [400.1] * 60, [399.9] * 60,
+                    [1e6] * 60, start='08:40')
 import json as _j0
 rubber_s = [s for s in _j0.loads((pathlib.Path(__file__).resolve().parents[1] / 'seeds' / 'scalps.json').read_text())
             if s['name'] == 'RubberBand Scalp (Short)'][0]

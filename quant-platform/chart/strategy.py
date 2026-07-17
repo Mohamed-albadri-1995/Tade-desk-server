@@ -127,10 +127,41 @@ def _hold(arr: np.ndarray) -> np.ndarray:
     return out
 
 
+def _causal_align(values: np.ndarray, src_index, dst_index) -> np.ndarray:
+    """Reference-symbol series → the traded symbol's timeline. Each destination
+    bar sees the value at the LAST source bar at-or-before its own time
+    (merge-asof; the same no-look-ahead rule as the higher-TF causal reindex).
+    Destination bars before the first source bar are NaN."""
+    if len(src_index) == 0:
+        return np.full(len(dst_index), np.nan)
+    src = src_index.asi8
+    dst = dst_index.asi8
+    idx = np.searchsorted(src, dst, side='right') - 1
+    vals = np.asarray(values, dtype=float)
+    return np.where(idx >= 0, vals[np.clip(idx, 0, None)], np.nan)
+
+
 # ── operand → aligned float array ──────────────────────────────────────────
 def _operand_array(operand: dict, bars, ctx, trade: dict | None = None) -> np.ndarray:
     if not isinstance(operand, dict):
         raise ValueError('operand must be an object')
+    # CROSS-SYMBOL (market) operand: "symbol": "SPY" computes this operand on
+    # the reference symbol's bars (preloaded by evaluate()/test_condition from
+    # the same feed) and causally aligns it onto the traded symbol's timeline.
+    # offset/hold apply on the REFERENCE timeline (SPY[1] = SPY's prior bar).
+    # This powers every "market trending with/against" factor in SCALPS_SPEC.
+    ref_sym = operand.get('symbol')
+    if ref_sym:
+        rbars = (ctx.get('_ref_bars') or {}).get(str(ref_sym).upper())
+        if rbars is None:
+            raise ValueError(f'reference bars for {ref_sym!r} not loaded — '
+                             'cross-symbol operands run through evaluate()/'
+                             'test_condition, which preload them')
+        if len(rbars) == 0:                     # feed failed → NaN → rule False
+            return np.full(len(bars), np.nan)   # (fail-safe: gate blocks entry)
+        sub_op = {k: v for k, v in operand.items() if k != 'symbol'}
+        rarr = _operand_array(sub_op, rbars, ctx, trade)
+        return _causal_align(rarr, rbars.index, bars.index)
     kind = operand.get('kind', 'primitive')
     n = len(bars)
     if kind == 'trade':
@@ -493,6 +524,69 @@ def referenced_overlays(strategy: dict) -> list:
         if isinstance(spec, dict):
             walk_operand(spec.get('anchor'))
     return out
+
+
+def referenced_symbols(strategy: dict) -> list:
+    """Distinct cross-symbol references ("symbol" on any operand, e.g. the
+    SPY market gate) used anywhere in the strategy's rules."""
+    out: set = set()
+
+    def walk_operand(o):
+        if not isinstance(o, dict):
+            return
+        if o.get('symbol'):
+            out.add(str(o['symbol']).upper())
+        if o.get('kind') == 'expr':
+            walk_operand(o.get('a')); walk_operand(o.get('b'))
+
+    def walk_group(g):
+        for r in (g or {}).get('rules') or []:
+            if 'rules' in r or 'logic' in r:
+                walk_group(r)
+            else:
+                walk_operand(r.get('left'))
+                walk_operand(r.get('right'))
+    walk_group(strategy.get('entry'))
+    walk_group(strategy.get('exit'))
+    return sorted(out)
+
+
+_REF_CACHE: dict = {}     # (feed, sym, tf, days, view, asof) → bars; ASOF-ONLY
+
+
+def _preload_ref_bars(strategy_like: dict, symbol: str, bars, ctx,
+                      tf: str, days: int, feed: str, view: str,
+                      asof: str | None) -> None:
+    """Fetch each cross-symbol reference's bars over the SAME window/feed and
+    stash them in ctx for _operand_array. A failed fetch stores an EMPTY frame
+    → the operand evaluates NaN → its rule is False (the gate fails safe by
+    blocking entries rather than crashing or silently passing).
+
+    Historical runs (asof set) cache per (feed,sym,tf,days,view,asof): a
+    register backtest evaluates every pair of a day with the same asof, so the
+    market symbol (SPY) is fetched ONCE per day, not once per pair — without
+    this, a rate-limited feed (Polygon 429) would blank the gate randomly.
+    Live runs (asof None) are never cached (bars must track 'now')."""
+    ref_syms = referenced_symbols(strategy_like)
+    if not ref_syms:
+        return
+    refs = ctx.setdefault('_ref_bars', {})
+    refs[str(symbol).upper()] = bars          # self-reference is harmless
+    for rs in ref_syms:
+        if rs in refs:
+            continue
+        key = (feed, rs, tf, int(days), view, asof) if asof else None
+        rb = _REF_CACHE.get(key) if key else None
+        if rb is None:
+            try:
+                rb, _, _ = cs.prepare_bars(rs, tf, days, feed, view, asof)
+                if key and len(rb):           # cache successes only
+                    if len(_REF_CACHE) > 512:
+                        _REF_CACHE.clear()
+                    _REF_CACHE[key] = rb
+            except Exception:
+                rb = bars.iloc[0:0]
+        refs[rs] = rb
 
 
 def _unique_indicators(strategy: dict) -> list:
@@ -992,6 +1086,7 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
     if n == 0:
         return {'ok': True, 'bars': 0, 'true': 0, 'pct': 0.0, 'markers': [],
                 'series': [], 'now': False, 'left_now': None, 'right_now': None}
+    _preload_ref_bars(strat_like, symbol, bars, ctx, tf, days, feed, view, asof)
     is_group = ('rules' in node or 'logic' in node)
     mask = _eval_group(node, bars, ctx) if is_group else _eval_rule(node, bars, ctx)
     # only the requested window: warm-up bars aren't displayed, so dots there
@@ -1087,6 +1182,9 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
 
     side = strategy.get('side', 'long')
     exit_group = strategy.get('exit')
+    # Cross-symbol (market gate) operands need their reference bars loaded
+    # before any rule evaluates. Same window, same feed, causally aligned.
+    _preload_ref_bars(strategy, symbol, bars, ctx, tf, days, feed, view, asof)
     # Trade-operand exits (P&L %, bars held, entry price) depend on WHICH
     # position is open, so no single global exit mask exists — the pairing
     # loop evaluates the exit group per trade instead.

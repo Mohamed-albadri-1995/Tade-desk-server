@@ -129,6 +129,117 @@
        }
       }
      }
+    },
+    {
+     "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "primitive",
+       "key": "ma.sma",
+       "source": "high",
+       "params": {
+        "length": 3
+       },
+       "offset": 1
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "ma.sma",
+       "source": "low",
+       "params": {
+        "length": 3
+       },
+       "offset": 1
+      }
+     },
+     "op": "gt",
+     "right": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "primitive",
+       "key": "ma.sma",
+       "source": "high",
+       "params": {
+        "length": 5
+       },
+       "offset": 4
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "ma.sma",
+       "source": "low",
+       "params": {
+        "length": 5
+       },
+       "offset": 4
+      }
+     }
+    },
+    {
+     "left": {
+      "kind": "primitive",
+      "key": "ma.sma",
+      "source": "volume",
+      "params": {
+       "length": 3
+      },
+      "offset": 1
+     },
+     "op": "gt",
+     "right": {
+      "kind": "primitive",
+      "key": "ma.sma",
+      "source": "volume",
+      "params": {
+       "length": 5
+      },
+      "offset": 4
+     }
+    },
+    {
+     "left": {
+      "kind": "price",
+      "field": "volume"
+     },
+     "op": "ge",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 0.6
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "levels.today_vol_max",
+       "source": "close",
+       "offset": 1
+      }
+     }
+    },
+    {
+     "left": {
+      "kind": "primitive",
+      "key": "ma.ema",
+      "source": "close",
+      "params": {
+       "length": 20
+      },
+      "symbol": "SPY"
+     },
+     "op": "ge",
+     "right": {
+      "kind": "primitive",
+      "key": "ma.ema",
+      "source": "close",
+      "params": {
+       "length": 20
+      },
+      "offset": 15,
+      "symbol": "SPY"
+     }
     }
    ]
   },
@@ -306,6 +417,117 @@
        }
       }
      }
+    },
+    {
+     "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "primitive",
+       "key": "ma.sma",
+       "source": "high",
+       "params": {
+        "length": 3
+       },
+       "offset": 1
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "ma.sma",
+       "source": "low",
+       "params": {
+        "length": 3
+       },
+       "offset": 1
+      }
+     },
+     "op": "gt",
+     "right": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "primitive",
+       "key": "ma.sma",
+       "source": "high",
+       "params": {
+        "length": 5
+       },
+       "offset": 4
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "ma.sma",
+       "source": "low",
+       "params": {
+        "length": 5
+       },
+       "offset": 4
+      }
+     }
+    },
+    {
+     "left": {
+      "kind": "primitive",
+      "key": "ma.sma",
+      "source": "volume",
+      "params": {
+       "length": 3
+      },
+      "offset": 1
+     },
+     "op": "gt",
+     "right": {
+      "kind": "primitive",
+      "key": "ma.sma",
+      "source": "volume",
+      "params": {
+       "length": 5
+      },
+      "offset": 4
+     }
+    },
+    {
+     "left": {
+      "kind": "price",
+      "field": "volume"
+     },
+     "op": "ge",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 0.6
+      },
+      "b": {
+       "kind": "primitive",
+       "key": "levels.today_vol_max",
+       "source": "close",
+       "offset": 1
+      }
+     }
+    },
+    {
+     "left": {
+      "kind": "primitive",
+      "key": "ma.ema",
+      "source": "close",
+      "params": {
+       "length": 20
+      },
+      "symbol": "SPY"
+     },
+     "op": "le",
+     "right": {
+      "kind": "primitive",
+      "key": "ma.ema",
+      "source": "close",
+      "params": {
+       "length": 20
+      },
+      "offset": 15,
+      "symbol": "SPY"
+     }
     }
    ]
   },
@@ -360,38 +582,88 @@
    "logic": "THEN",
    "rules": [
     {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "cross_above",
-     "right": {
-      "kind": "primitive",
-      "key": "structure.pivot_high",
-      "source": "high",
-      "params": {
-       "left": 5,
-       "right": 5
+     "logic": "AND",
+     "rules": [
+      {
+       "left": {
+        "kind": "price",
+        "field": "close"
+       },
+       "op": "cross_above",
+       "right": {
+        "kind": "primitive",
+        "key": "structure.pivot_high",
+        "source": "high",
+        "params": {
+         "left": 5,
+         "right": 5
+        },
+        "hold": true
+       }
       },
-      "hold": true
-     }
+      {
+       "left": {
+        "kind": "price",
+        "field": "volume"
+       },
+       "op": "gt",
+       "right": {
+        "kind": "expr",
+        "op": "mul",
+        "a": {
+         "kind": "const",
+         "value": 1.3
+        },
+        "b": {
+         "kind": "primitive",
+         "key": "ma.sma",
+         "source": "volume",
+         "params": {
+          "length": 5
+         },
+         "offset": 1
+        }
+       }
+      }
+     ]
     },
     {
-     "left": {
-      "kind": "price",
-      "field": "low"
-     },
-     "op": "le",
-     "right": {
-      "kind": "primitive",
-      "key": "structure.pivot_high",
-      "source": "high",
-      "params": {
-       "left": 5,
-       "right": 5
+     "logic": "AND",
+     "rules": [
+      {
+       "left": {
+        "kind": "price",
+        "field": "low"
+       },
+       "op": "le",
+       "right": {
+        "kind": "primitive",
+        "key": "structure.pivot_high",
+        "source": "high",
+        "params": {
+         "left": 5,
+         "right": 5
+        },
+        "hold": true
+       }
       },
-      "hold": true
-     }
+      {
+       "left": {
+        "kind": "price",
+        "field": "volume"
+       },
+       "op": "lt",
+       "right": {
+        "kind": "primitive",
+        "key": "ma.sma",
+        "source": "volume",
+        "params": {
+         "length": 5
+        },
+        "offset": 1
+       }
+      }
+     ]
     },
     {
      "left": {
@@ -445,7 +717,19 @@
    "targets": [
     {
      "fraction": 0.5,
-     "r_multiple": 2.0
+     "tp": {
+      "type": "prim",
+      "anchor": {
+       "kind": "primitive",
+       "key": "extremes.highest",
+       "source": "high",
+       "params": {
+        "length": 8
+       },
+       "offset": 1
+      },
+      "value": 0.0
+     }
     }
    ],
    "max_entries_per_day": 2,

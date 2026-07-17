@@ -185,6 +185,31 @@ def today_low(bars: Bars):
     return _running_session_extreme(bars.df, rth_pred(bars.df), 'low')
 
 
+@primitive(name='today_vol_max', group='levels',
+           description='Today\'s running RTH maximum single-bar volume so far '
+                       '(the volume analogue of today_high). Powers "one of '
+                       'the day\'s biggest volume bars" checks.',
+           params=(), inputs=('bars',))
+def today_vol_max(bars: Bars):
+    df = bars.df
+    pred = rth_pred(df)
+    et = df.index.tz_convert(_ET)
+    vol = df['volume'].to_numpy(dtype=float)
+    n = len(df)
+    out = np.full(n, np.nan)
+    cur_day = None
+    cur_max = np.nan
+    for i in range(n):
+        t = et[i]
+        if t.date() != cur_day:
+            cur_day = t.date()
+            cur_max = np.nan
+        if pred(t):
+            cur_max = vol[i] if np.isnan(cur_max) else max(cur_max, vol[i])
+        out[i] = cur_max
+    return out
+
+
 @primitive(name='window_high', group='levels',
            description='High of an intraday ET time window [start, end) in hhmm '
                        '(default 930–945 = the OPENING RANGE), frozen for the '
