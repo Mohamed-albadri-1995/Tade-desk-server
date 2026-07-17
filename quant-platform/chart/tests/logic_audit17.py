@@ -348,39 +348,35 @@ vol= _W([2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5], 1e5)   # break 
 SCEN['HITCH'] = frame(cl, opn, hi, lo, vol)
 rng = EXPR('sub', PRIM('levels.today_high'), PRIM('levels.today_low'))
 upper_third = EXPR('add', PRIM('levels.today_low'), EXPR('mul', C(2.0/3.0), rng))
-HI6 = PRIM('extremes.highest', params={'length': 6}, source='high', off=1)
-LO6 = PRIM('extremes.lowest', params={'length': 6}, source='low', off=1)
+hh8 = PRIM('extremes.highest', params={'length': 8}, source='high')
+ll8 = PRIM('extremes.lowest', params={'length': 8}, source='low')
+HI8 = PRIM('extremes.highest', params={'length': 8}, source='high', off=1)
+LO12 = PRIM('extremes.lowest', params={'length': 12}, source='low')
+# Fresh HitchHiker (from-scratch rebuild): the PDF's arc as an ordered THEN —
+#   1) REAL DRIVE  — rising AND price >=4% above the recent low (a genuine move,
+#      not a gentle drift with a 2-bar flat that can masquerade as a setup)
+#   2) SHELF       — a tight 8-bar hold whose LOW sits in the upper 1/3 (holds up)
+#   3) BREAK       — clears the shelf high, GREEN candle, volume > the previous bar
 hitch = {'name': 'HitchHiker', 'side': 'long',
-    'entry': G('AND', [
-        rule(P('close'), 'cross_above', HI6),                                         # break the consolidation
-        # PDF: the consolidation LOW (not just the break bar) sits in the upper 1/3
-        # of the day range — a real post-drive pause near the highs, not mid-range
-        # chop. This is what rejects the SVRE noise + the JEM false break (backtest
-        # #97: both consolidated BELOW the upper third of a wide day range).
-        rule(LO6, 'ge', upper_third),
-        # PDF: a TIGHT consolidation, not a wide sloppy swing. Prior-6-bar range <=5%.
-        rule(EXPR('sub', HI6, LO6), 'le', EXPR('mul', C(0.05), P('close'))),
-        # NOTE: a "9-EMA flat/small-up-slope" gate was tried (backtest #102) and
-        # REVERTED — chop has a FLAT 9-EMA while clean drives have a RISING one, so
-        # the gate rejected the good drives (STEP/SOBR) and kept the chop (KUST/QTTB),
-        # the opposite of the goal. #98's width+location gates are the best config.
-        rule(P('volume'), 'gt', EXPR('mul', C(1.3), P('volume', off=1))),             # +30% volume on break
-        # NOTE: a "fresh HoD" gate (highest(12) ~= today_high) was tried (backtest
-        # #108) and REVERTED — it DROPPED the one real setup (SUNE consolidated below
-        # an EARLIER high) and KEPT the junk (QTTB broke near a fresh high). The exact
-        # opposite of intended. No entry-time feature isolates the real HitchHiker.
-    ]),
+    'entry': G('THEN', [
+        G('AND', [rule(P('close'), 'rising', None, op_params={'lookback': 5, 'consistency': 0.7}),
+                  rule(P('close'), 'ge', EXPR('mul', LO12, C(1.04)))]),
+        G('AND', [rule(EXPR('sub', hh8, ll8), 'le', EXPR('mul', C(0.04), P('close'))),
+                  rule(ll8, 'ge', upper_third)]),
+        G('AND', [rule(P('close'), 'cross_above', HI8),
+                  rule(P('close'), 'gt', P('open')),
+                  rule(P('volume'), 'gt', P('volume', off=1))]),
+    ], window=20),
     'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),  # wave-2 = trail 9EMA
-    # PDF exit: 1/2 into wave 1 (~1R), 1/2 into wave 2 (the 9-EMA trail runner).
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 6}, source='low', off=1), 'value': 0.05},
+    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 8}, source='low', off=1), 'value': 0.05},
              'targets': [{'fraction': 0.5, 'r_multiple': 1.0}],
              'max_entries_per_day': 1, 'cooldown_bars': 10}}
 r = run(hitch, 'HITCH')
 ok("JSON valid / evaluates", r.get('ok') and r.get('bars'), r.get('error',''))
-ok("tight-consolidation-in-upper-third + break + volume fires (>=1 entry)", len(entry_bars(r)) >= 1,
+ok("drive -> shelf -> break fires ONCE on the crafted arc", len(entry_bars(r)) == 1,
    f"entries={entry_bars(r)}")
 # CONTROL: a MID-RANGE choppy pause (consolidation low well below the upper third)
-# must be REJECTED — this is the SVRE/JEM failure the low-in-upper-third rule kills.
+# must be REJECTED — no clean drive->shelf->break.
 clc = _W([47.0,48.5,47.2,48.4,47.3, 47.8,47.6,47.9,47.7,47.85,47.75,47.8, 48.1], 46.5)  # pause ~47.7 = mid-range
 hic = _W([47.6,49.0,47.8,48.9,47.9, 47.95,47.9,48.05,47.9,48.0,47.95,48.0, 48.3], 46.6)
 loc = _W([46.8,47.9,46.9,47.9,47.0, 47.6,47.5,47.7,47.55,47.7,47.6,47.65, 47.9], 46.4)
@@ -388,38 +384,8 @@ opc = _W([46.9,47.1,48.4,47.3,48.3, 47.7,47.85,47.7,47.9,47.75,47.85,47.78, 47.9
 volc= _W([2e5,2e5,2e5,2e5,2e5, 1e5,1e5,1e5,1e5,1e5,1e5,1e5, 2e5], 1e5)
 SCEN['HITCHCHOP'] = frame(clc, opc, hic, loc, volc)
 rc = run(hitch, 'HITCHCHOP')
-ok("mid-range chop is REJECTED (consolidation low below the upper third)",
+ok("mid-range chop is REJECTED (no clean drive->shelf->break)",
    len(entry_bars(rc)) == 0, f"entries={entry_bars(rc)}")
-
-# --- HitchHiker as the PDF SEQUENCE (drive -> hold/consolidation -> break) ---
-# Instead of a single AND snapshot, detect each PDF layer and chain them in order:
-#   L1 DRIVE     — close rising (>=70% of last 5 moves up), a distinct drive off open
-#   L2 HOLD      — the drive stops; a TIGHT 6-bar range holds in the upper 1/3 (no pullback)
-#   L3 BREAK     — the HitchHiker candle breaks the consolidation high on +30% volume
-# Fires ONCE, at the break, only after the full arc — the same crafted HITCH day.
-hh8 = PRIM('extremes.highest', params={'length': 8}, source='high')
-ll8 = PRIM('extremes.lowest', params={'length': 8}, source='low')
-HI8 = PRIM('extremes.highest', params={'length': 8}, source='high', off=1)
-_body = EXPR('sub', P('close'), P('open')); _barr = EXPR('sub', P('high'), P('low'))
-hseq = {'name': 'HitchHikerSeq', 'side': 'long',
-    'entry': G('THEN', [
-        rule(P('close'), 'rising', None, op_params={'lookback': 5, 'consistency': 0.7}),   # L1 GOOD DRIVE
-        G('AND', [rule(EXPR('sub', hh8, ll8), 'le', EXPR('mul', C(0.05), P('close'))),      # L2 LONG (8-bar) tight pause
-                  rule(ll8, 'ge', upper_third)]),                                            #    low in upper 1/3
-        G('AND', [rule(P('close'), 'cross_above', HI8),                                     # L3 break the level
-                  rule(P('close'), 'gt', P('open')),                                        #    green
-                  rule(_body, 'ge', EXPR('mul', C(0.6), _barr)),                            #    clear bullish body
-                  rule(P('volume'), 'gt', P('volume', off=1))]),                            #    volume > previous
-    ], window=20),
-    'exit': G('AND', [rule(P('close'), 'cross_below', PRIM('ma.ema', params={'length': 9}))]),
-    'risk': {'sl': {'type': 'prim', 'anchor': PRIM('extremes.lowest', params={'length': 6}, source='low', off=1), 'value': 0.05},
-             'targets': [{'fraction': 0.5, 'r_multiple': 1.0}],
-             'max_entries_per_day': 1, 'cooldown_bars': 10}}
-rq = run(hseq, 'HITCH')
-ok("SEQUENCE fires ONCE on the drive->hold->break arc", len(entry_bars(rq)) == 1,
-   f"entries={entry_bars(rq)}")
-ok("SEQUENCE does NOT fire on mid-range chop (no clean drive->hold->break)",
-   len(entry_bars(run(hseq, 'HITCHCHOP'))) == 0)
 
 print("=" * 64)
 print("SCALP 5 — Fashionably Late (9EMA crosses VWAP, LONG)")
@@ -484,12 +450,10 @@ for _s in (rubber, second, backside, hitch, late):
 import json as _json
 _seeds = _json.loads((pathlib.Path(__file__).resolve().parents[1] / 'seeds' / 'scalps.json').read_text())
 _seed_caps = {'RubberBand Scalp': 2, 'RubberBand Scalp (Short)': 2, 'Second Chance Scalp': 2,
-              'Back$ide Scalp': 1, 'HitchHiker Scalp': 1, 'HitchHiker Scalp (Sequence)': 1,
-              'Fashionably Late Scalp': 1}
+              'Back$ide Scalp': 1, 'HitchHiker Scalp': 1, 'Fashionably Late Scalp': 1}
 _seed_win = {'RubberBand Scalp': (1000, 1330), 'RubberBand Scalp (Short)': (1000, 1330),
              'Second Chance Scalp': (959, 1550), 'Back$ide Scalp': (1000, 1330),
-             'HitchHiker Scalp': (945, 1100), 'HitchHiker Scalp (Sequence)': (945, 1100),
-             'Fashionably Late Scalp': (1000, 1330)}
+             'HitchHiker Scalp': (945, 1100), 'Fashionably Late Scalp': (1000, 1330)}
 for _sd in _seeds:
     _r = _sd.get('risk') or {}
     ok(f"seed '{_sd['name']}' caps + cools, no min-hold",
