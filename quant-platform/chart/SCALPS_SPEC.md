@@ -63,7 +63,7 @@ it *can't* extend further and a distinct snapback announces the seller is done.
 | green double-bar break | RULE `close>open` + `high > highest(2,high)[1]` |
 | BIG snapback candle | RULE `(high−low) ≥ 1.5×(sma(high,5)[1]−sma(low,5)[1])` |
 | range accel on last leg | RULE (same avg-bar-range identity, recent vs earlier window) |
-| top-of-day volume bar | QP `levels.today_vol_max` → RULE `volume ≥ 0.6×today_vol_max[1]` |
+| top-of-day volume bar | QUALITY (demoted from RULE — the PDF lists it under increase factors, not entry; funnel evidence VEEE 07/14: on gap-up days the 9:30 bar dominates today_vol_max, so a 0.6×max proxy was near-unsatisfiable and far stricter than the PDF's "one of the 5 highest" rank wording) |
 | RVOL > 5 | SCREENER (R1 `rvol` column; filterable in backtest) |
 | stop .02 under LoD | RISK sl anchor `today_low[1]`, ratcheted |
 | thirds 1R/2R/VWAP | RISK targets ⅓@1R ⅓@2R + EXIT rule `close cross_above vwap` |
@@ -287,7 +287,7 @@ masquerade as book numbers.
 | consolidation 5–20 min | 5-bar box / window 20 | PDF literal |
 | extension from open | 3 ATR | PDF number (increase factor, promoted via the avoid clause) |
 | snapback candle ≥1.5× recent range | 1.5× | USER-observed characteristic (not in PDF) |
-| top-of-day volume | ≥0.6× today_vol_max[1] | mechanization of "one of the 5 highest volume bars" — judgment |
+| top-of-day volume | (demoted to quality) | was ≥0.6× today_vol_max[1] — funnel on VEEE 07/14 showed the proxy near-unsatisfiable on gap-up days (open bar dominates the day max) and stricter than the PDF's rank wording; the PDF's entry rules never contained it, so it left the entry per the audit rule |
 | drive magnitude | ≥4 % over lowest(12) | mechanization of "distinct drive" — judgment |
 | market gate | ema20(SPY) slope over 15 m | mechanization of "cleanly trending" — judgment |
 | stopped-making-HH | highest(3) < 0.998×highest(8) | USER-designed detector, proven in isolation |

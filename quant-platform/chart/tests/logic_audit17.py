@@ -121,7 +121,8 @@ cl3 = g_cl + a_cl + [46.40, 46.60, 48.30, 48.90, 48.70, 48.60, 48.50, 48.40, 48.
 op3 = [50.25] + [c + 0.03 for c in cl3[:-1]]; op3[17] = 47.60
 hi3 = [max(o, c) + 0.12 for o, c in zip(op3, cl3)]
 lo3 = [min(o, c) - 0.10 for o, c in zip(op3, cl3)]
-hi3[17] = 49.00; lo3[17] = 47.50                      # big green DBB but ~4% over LoD
+hi3[17] = 49.20; lo3[17] = 48.00                      # big green DBB but ~4% over LoD
+op3[17] = 48.10; cl3[17] = 48.90                      # (low 48.00 >> LoD 46.15×1.03)
 SCEN['RUBBERFAR'] = frame(cl3, op3, hi3, lo3, vol)
 ok("break far above the LoD is REJECTED (no snapback at the lows)",
    len(entry_bars(run(rb, 'RUBBERFAR'))) == 0,

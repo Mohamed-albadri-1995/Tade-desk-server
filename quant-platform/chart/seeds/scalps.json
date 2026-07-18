@@ -212,27 +212,6 @@
       },
       {
        "left": {
-        "kind": "price",
-        "field": "volume"
-       },
-       "op": "ge",
-       "right": {
-        "kind": "expr",
-        "op": "mul",
-        "a": {
-         "kind": "const",
-         "value": 0.6
-        },
-        "b": {
-         "kind": "primitive",
-         "key": "levels.today_vol_max",
-         "source": "close",
-         "offset": 1
-        }
-       }
-      },
-      {
-       "left": {
         "kind": "expr",
         "op": "sub",
         "a": {
@@ -556,27 +535,6 @@
           },
           "offset": 1
          }
-        }
-       }
-      },
-      {
-       "left": {
-        "kind": "price",
-        "field": "volume"
-       },
-       "op": "ge",
-       "right": {
-        "kind": "expr",
-        "op": "mul",
-        "a": {
-         "kind": "const",
-         "value": 0.6
-        },
-        "b": {
-         "kind": "primitive",
-         "key": "levels.today_vol_max",
-         "source": "close",
-         "offset": 1
         }
        }
       },
