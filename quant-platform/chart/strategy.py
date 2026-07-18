@@ -686,7 +686,18 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
     except (TypeError, ValueError):
         pct = 0.0
     shift = (1.0 - pct / 100.0) if side == 'long' else (1.0 + pct / 100.0)
-    return np.asarray(arr, dtype=float) * shift
+    out = np.asarray(arr, dtype=float) * shift
+    # `abs`: a fixed DOLLAR offset in the protective direction — the PDF's
+    # literal ".02 below the low" is two CENTS, not a percent; on a $4 stock
+    # 0.05% is $0.002, ten times tighter than the book and wick-stops trades
+    # the book survives. pct and abs stack (usually one or the other).
+    try:
+        absv = float(spec.get('abs') or 0.0)
+    except (TypeError, ValueError):
+        absv = 0.0
+    if absv:
+        out = out - absv if side == 'long' else out + absv
+    return out
 
 
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,

@@ -150,6 +150,27 @@ gate_prim = {'name': 'g', 'side': 'long',
 ok("_unique_indicators SKIPS cross-symbol operands (no wrong-symbol lines)",
    S._unique_indicators(gate_prim) == [], S._unique_indicators(gate_prim))
 
+print("=" * 64)
+print("PART E — anchored stops support the PDF's literal $.02 offset")
+print("=" * 64)
+abs_bars = frame([50, 50.5, 51, 50.8, 51.2])
+lvl = S._anchor_levels({'type': 'prim', 'value': 0.0, 'abs': 0.02,
+                        'anchor': {'kind': 'primitive', 'key': 'levels.today_low',
+                                   'source': 'close'}}, 'long', abs_bars, {})
+low_run = np.minimum.accumulate(abs_bars['low'].to_numpy())
+ok("LONG: level == running LoD − $0.02 exactly",
+   lvl is not None and np.allclose(lvl[~np.isnan(lvl)],
+                                   (low_run - 0.02)[~np.isnan(lvl)]),
+   f"lvl={lvl}")
+lvs = S._anchor_levels({'type': 'prim', 'value': 0.0, 'abs': 0.02,
+                        'anchor': {'kind': 'primitive', 'key': 'levels.today_high',
+                                   'source': 'close'}}, 'short', abs_bars, {})
+hi_run = np.maximum.accumulate(abs_bars['high'].to_numpy())
+ok("SHORT: level == running HoD + $0.02 exactly",
+   lvs is not None and np.allclose(lvs[~np.isnan(lvs)],
+                                   (hi_run + 0.02)[~np.isnan(lvs)]),
+   f"lvl={lvs}")
+
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)

@@ -203,18 +203,18 @@ print("=" * 64)
 # while still below VWAP → the ENTIRE position exits intrabar AT VWAP.
 b_warm = [50.00] * 10                                 # open chop: warms the 9-EMA (real
 b_fall = [49.90, 49.00, 48.00, 47.00, 46.40, 46.10]   # Back$ides fire mid-morning)
-b_up   = [46.40, 46.30, 46.80, 46.70, 47.10, 47.00, 47.40, 47.48]
-b_box  = [47.25, 47.35, 47.22, 47.34, 47.26, 47.35]
-b_brk  = [47.62, 48.20, 48.90, 49.20, 49.10]
+b_up   = [46.40, 46.30, 46.85, 46.75, 47.20, 47.10, 47.55, 47.65]
+b_box  = [47.50, 47.60, 47.47, 47.59, 47.51, 47.60]
+b_brk  = [47.85, 48.30, 48.70, 48.90, 48.80]
 bc = b_warm + b_fall + b_up + b_box + b_brk
 bo = [50.05] + [c + 0.02 for c in bc[:-1]]
 bh = [max(o, c) + 0.10 for o, c in zip(bo, bc)]
 bl = [min(o, c) - 0.10 for o, c in zip(bo, bc)]
-bh[23] = 47.60                                        # the distinct peak (bar 23)
-for i in range(24, 30):                               # the box: tight, above ema9
-    bh[i] = max(bo[i], bc[i]) + 0.05
+bh[23] = 47.85                                        # the distinct peak (bar 23)
+for i in range(24, 30):                               # the box: tight, above ema9,
+    bh[i] = max(bo[i], bc[i]) + 0.05                  # its FLOOR above the midpoint
     bl[i] = min(bo[i], bc[i]) - 0.05
-bv = [5e5] * 10 + [3e6, 2e6, 1e6, 5e5, 3e5, 2e5] + [1e5] * 8 + [8e4] * 6 + [3e5] * 5
+bv = [1e5] * 10 + [1.5e6, 1e6, 6e5, 4e5, 3e5, 2e5] + [1e5] * 8 + [8e4] * 6 + [3e5] * 5
 SCEN['BACK'] = frame(bc, bo, bh, bl, bv)
 bs = seed('Back$ide Scalp')
 r3 = run(bs, 'BACK')

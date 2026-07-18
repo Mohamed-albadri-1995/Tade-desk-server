@@ -317,7 +317,8 @@
      "source": "close",
      "offset": 1
     },
-    "value": 0.05
+    "value": 0.0,
+    "abs": 0.02
    },
    "targets": [
     {
@@ -327,6 +328,18 @@
     {
      "fraction": 0.3333333333333333,
      "r_multiple": 2.0
+    },
+    {
+     "fraction": 0.3333333333333333,
+     "tp": {
+      "type": "prim",
+      "anchor": {
+       "kind": "primitive",
+       "key": "vwap.session",
+       "source": "close"
+      },
+      "value": 0.0
+     }
     }
    ],
    "max_entries_per_day": 2,
@@ -653,7 +666,8 @@
      "source": "close",
      "offset": 1
     },
-    "value": 0.05
+    "value": 0.0,
+    "abs": 0.02
    },
    "targets": [
     {
@@ -663,6 +677,18 @@
     {
      "fraction": 0.3333333333333333,
      "r_multiple": 2.0
+    },
+    {
+     "fraction": 0.3333333333333333,
+     "tp": {
+      "type": "prim",
+      "anchor": {
+       "kind": "primitive",
+       "key": "vwap.session",
+       "source": "close"
+      },
+      "value": 0.0
+     }
     }
    ],
    "max_entries_per_day": 2,
@@ -830,7 +856,8 @@
      },
      "offset": 1
     },
-    "value": 0.05
+    "value": 0.0,
+    "abs": 0.02
    },
    "targets": [
     {
@@ -1099,10 +1126,15 @@
       },
       {
        "left": {
-        "kind": "price",
-        "field": "close"
+        "kind": "primitive",
+        "key": "extremes.lowest",
+        "source": "low",
+        "params": {
+         "length": 5
+        },
+        "offset": 1
        },
-       "op": "gt",
+       "op": "ge",
        "right": {
         "kind": "expr",
         "op": "div",
@@ -1234,7 +1266,8 @@
      },
      "offset": 1
     },
-    "value": 0.05
+    "value": 0.0,
+    "abs": 0.02
    },
    "targets": [
     {
@@ -1424,20 +1457,9 @@
         "key": "extremes.highest",
         "source": "high",
         "params": {
-         "length": 8
+         "length": 5
         },
         "offset": 1
-       }
-      },
-      {
-       "left": {
-        "kind": "price",
-        "field": "close"
-       },
-       "op": "gt",
-       "right": {
-        "kind": "price",
-        "field": "open"
        }
       },
       {
@@ -1497,7 +1519,8 @@
      },
      "offset": 1
     },
-    "value": 0.05
+    "value": 0.0,
+    "abs": 0.02
    },
    "targets": [
     {
