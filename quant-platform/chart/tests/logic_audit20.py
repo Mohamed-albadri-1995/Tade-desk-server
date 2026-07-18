@@ -171,6 +171,21 @@ ok("SHORT: level == running HoD + $0.02 exactly",
                                    (hi_run + 0.02)[~np.isnan(lvs)]),
    f"lvl={lvs}")
 
+print("=" * 64)
+print("PART F — the explain funnel names the blocking rule")
+print("=" * 64)
+exp_up = S.explain_entry(strat('MKTUP'), 'XX', '1m', 1, feed='xsym',
+                         view='all', asof='2024-01-09')
+exp_dn = S.explain_entry(strat('MKTDN'), 'XX', '1m', 1, feed='xsym',
+                         view='all', asof='2024-01-09')
+ok("rising market: funnel reports fires > 0",
+   exp_up.get('ok') and exp_up.get('sequence_fires', 0) > 0, exp_up)
+dn_rules = [r for s in (exp_dn.get('steps') or []) for r in (s.get('rules') or [])]
+gate = next((r for r in dn_rules if '@MKTDN' in r.get('rule', '')), None)
+ok("falling market: the GATE rule shows 0 true bars (named blocker)",
+   exp_dn.get('sequence_fires') == 0 and gate is not None and gate.get('true_bars') == 0,
+   f"gate={gate} fires={exp_dn.get('sequence_fires')}")
+
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)

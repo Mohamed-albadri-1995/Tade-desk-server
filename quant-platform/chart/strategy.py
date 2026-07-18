@@ -1165,6 +1165,86 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
             'last': et[-1].strftime('%Y-%m-%d %H:%M ET')}
 
 
+def _rule_label(r: dict) -> str:
+    """Compact human label for a rule — for the explain funnel."""
+    def o(x):
+        if not isinstance(x, dict):
+            return str(x)
+        k = x.get('kind', 'primitive')
+        if k == 'price':
+            s = x.get('field', '?')
+        elif k == 'const':
+            s = str(x.get('value'))
+        elif k == 'time':
+            s = f"time.{x.get('field', 'hhmm')}"
+        elif k == 'expr':
+            s = f"({o(x.get('a'))} {x.get('op', '?')} {o(x.get('b'))})"
+        else:
+            p = ','.join(str(v) for v in (x.get('params') or {}).values())
+            s = f"{(x.get('key') or '?').split('.')[-1]}({p})"
+        if x.get('offset'):
+            s += f"[{x['offset']}]"
+        if x.get('symbol'):
+            s += f"@{x['symbol']}"
+        return s
+    lab = f"{o(r.get('left'))} {r.get('op', '?')}"
+    if r.get('right') is not None:
+        lab += f" {o(r.get('right'))}"
+    return lab
+
+
+def explain_entry(strategy: dict, symbol: str, tf: str, days: int,
+                  feed: str = 'polygon', view: str = 'all',
+                  asof: str | None = None) -> dict:
+    """The SIGNAL FUNNEL: evaluate every step of the entry group — and every
+    rule inside each step — INDEPENDENTLY, and report how many visible bars
+    each was true on. When a strategy fires 0 trades, this names the exact
+    blocking rule instead of leaving it to guesswork. Diagnostic only: reads
+    the same bars/ctx as evaluate(), changes nothing."""
+    from chart import data_manager as dm
+    days_req = int(days)
+    days = dm.required_days(referenced_overlays(strategy), tf, days)
+    bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
+    n = len(bars)
+    if n == 0:
+        return {'ok': True, 'bars': 0, 'steps': [], 'sequence_fires': 0}
+    _preload_ref_bars(strategy, symbol, bars, ctx, tf, days, feed, view, asof)
+    vis = np.asarray(bars.index >= (ctx['end'] - pd.Timedelta(days=days_req)))
+    if not vis.any():
+        vis = np.ones(n, dtype=bool)
+    entry = strategy.get('entry') or {}
+    steps_out = []
+    for i, step in enumerate(entry.get('rules') or []):
+        is_grp = 'rules' in step or 'logic' in step
+        try:
+            m = _eval_group(step, bars, ctx) if is_grp else _eval_rule(step, bars, ctx)
+        except Exception as e:                      # a broken rule IS the finding
+            steps_out.append({'step': i + 1, 'error': str(e)}); continue
+        rules_out = []
+        for r in (step.get('rules') or []) if is_grp else [step]:
+            try:
+                if 'rules' in r or 'logic' in r:
+                    rm = _eval_group(r, bars, ctx); lab = f"[{r.get('logic', 'group')}]"
+                else:
+                    rm = _eval_rule(r, bars, ctx); lab = _rule_label(r)
+                rules_out.append({'rule': lab, 'true_bars': int((rm & vis).sum())})
+            except Exception as e:
+                rules_out.append({'rule': _rule_label(r), 'error': str(e)})
+        steps_out.append({'step': i + 1, 'true_bars': int((m & vis).sum()),
+                          'rules': rules_out})
+    try:
+        full = _eval_group(entry, bars, ctx)
+        fires = int((full & vis).sum())
+    except Exception as e:
+        return {'ok': False, 'error': str(e), 'steps': steps_out}
+    return {'ok': True, 'bars': int(vis.sum()), 'logic': entry.get('logic', 'AND'),
+            'window': entry.get('window'), 'sequence_fires': fires,
+            'steps': steps_out,
+            'note': 'true_bars counts each step/rule INDEPENDENTLY (state, not '
+                    'sequence-gated); sequence_fires is the full ordered entry. '
+                    'A step with 0 true_bars — or its 0-bar rule — is the blocker.'}
+
+
 def _session_masks(bars, rules: dict | None):
     """Prop-firm session rules → (entry_ok, eod_close) masks, or (None, None).
     rules = {'rth_entries': bool, 'eod_close': bool,

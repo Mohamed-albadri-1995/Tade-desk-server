@@ -317,6 +317,25 @@ def backtest_delete(bid: int):
     return {'ok': store.delete_backtest(bid)}
 
 
+@app.get('/api/strategy/explain')
+def strategy_explain_route(name: str, symbol: str, day: str,
+                           tf: str = '1m', feed: str = 'polygon'):
+    """SIGNAL FUNNEL (GET, browser-friendly): why didn't a strategy fire?
+    Evaluates every entry step — and every rule inside it — independently on
+    one symbol+day, reporting true-bar counts. The 0-count rule is the blocker.
+    /api/strategy/explain?name=RubberBand%20Scalp%20(Short)&symbol=VEEE&day=2026-07-14
+    """
+    match = [s for s in store.list_strategies() if s.get('name') == name]
+    if not match:
+        return {'ok': False, 'error': f'no strategy named {name!r}',
+                'have': [s.get('name') for s in store.list_strategies()]}
+    try:
+        return strat.explain_entry(match[0], str(symbol).upper(), tf, 1,
+                                   feed=feed, view='all', asof=day)
+    except Exception as e:                        # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
 @app.post('/api/strategy/test')
 def strategy_test(payload: dict = Body(...)):
     """Evaluate a single condition (rule or group) and mark every bar it holds
