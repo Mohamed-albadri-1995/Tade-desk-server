@@ -1214,13 +1214,14 @@ def explain_entry(strategy: dict, symbol: str, tf: str, days: int,
         vis = np.ones(n, dtype=bool)
     entry = strategy.get('entry') or {}
     steps_out = []
-    for i, step in enumerate(entry.get('rules') or []):
+    for si, step in enumerate(entry.get('rules') or []):
         is_grp = 'rules' in step or 'logic' in step
         try:
             m = _eval_group(step, bars, ctx) if is_grp else _eval_rule(step, bars, ctx)
         except Exception as e:                      # a broken rule IS the finding
-            steps_out.append({'step': i + 1, 'error': str(e)}); continue
+            steps_out.append({'step': si + 1, 'error': str(e)}); continue
         rules_out = []
+        masks = []
         for r in (step.get('rules') or []) if is_grp else [step]:
             try:
                 if 'rules' in r or 'logic' in r:
@@ -1228,9 +1229,25 @@ def explain_entry(strategy: dict, symbol: str, tf: str, days: int,
                 else:
                     rm = _eval_rule(r, bars, ctx); lab = _rule_label(r)
                 rules_out.append({'rule': lab, 'true_bars': int((rm & vis).sum())})
+                masks.append(np.asarray(rm, dtype=bool))
             except Exception as e:
                 rules_out.append({'rule': _rule_label(r), 'error': str(e)})
-        steps_out.append({'step': i + 1, 'true_bars': int((m & vis).sum()),
+                masks.append(None)
+        step_true = int((m & vis).sum())
+        # LEAVE-ONE-OUT: when an AND step never fires JOINTLY even though every
+        # rule fires individually, the counts can't say which rules exclude
+        # each other. For each rule, count the bars where all the OTHERS agree:
+        # a rule with without_this > 0 is a BINDING constraint (drop it and the
+        # step would fire); without_this == 0 means it isn't the one in the way.
+        if (is_grp and step.get('logic', 'AND') == 'AND' and step_true == 0
+                and len(masks) > 1 and all(x is not None for x in masks)):
+            for k in range(len(masks)):
+                others = vis.copy()
+                for j, mk in enumerate(masks):
+                    if j != k:
+                        others &= mk
+                rules_out[k]['without_this'] = int(others.sum())
+        steps_out.append({'step': si + 1, 'true_bars': step_true,
                           'rules': rules_out})
     try:
         full = _eval_group(entry, bars, ctx)

@@ -186,6 +186,20 @@ ok("falling market: the GATE rule shows 0 true bars (named blocker)",
    exp_dn.get('sequence_fires') == 0 and gate is not None and gate.get('true_bars') == 0,
    f"gate={gate} fires={exp_dn.get('sequence_fires')}")
 
+conflict = {'name': 'c', 'side': 'long',
+            'entry': {'logic': 'THEN', 'rules': [
+                {'logic': 'AND', 'rules': [
+                    {'left': {'kind': 'price', 'field': 'close'}, 'op': 'gt',
+                     'right': {'kind': 'const', 'value': 0}},
+                    {'left': {'kind': 'price', 'field': 'close'}, 'op': 'lt',
+                     'right': {'kind': 'const', 'value': 0}}]}]},
+            'exit': {'logic': 'AND', 'rules': []}, 'risk': {}}
+exp_c = S.explain_entry(conflict, 'XX', '1m', 1, feed='xsym', view='all', asof='2024-01-09')
+c_rules = exp_c['steps'][0]['rules']
+ok("leave-one-out NAMES the binding rule (close<0: without_this>0; close>0: 0)",
+   c_rules[1].get('without_this', 0) > 0 and c_rules[0].get('without_this', -1) == 0,
+   c_rules)
+
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)
