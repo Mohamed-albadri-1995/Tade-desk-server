@@ -267,3 +267,42 @@ noise-stopped the winners (64 %→30 %). Win-rate fidelity beats R:R cosmetics.
 3. Everything else in this spec is expressible with the existing verified
    primitives (levels, extremes, ma, vwap, structure.pivot + hold, candle
    anatomy via price fields, THEN sequences, for_bars, targets, discipline).
+
+---
+
+## Provenance of every number (anti-overfit guardrail)
+
+The crafted test arcs are SMOKE tests only: they prove a sequence CAN fire and
+an avoid-case CAN reject. They are never evidence a threshold is right, and no
+live threshold may be changed to make an arc pass. Thresholds change only from
+(a) the PDF's literal text, or (b) REAL-market evidence — and any data-derived
+number is listed here with the window it came from, so fitted numbers can never
+masquerade as book numbers.
+
+| number | value | provenance |
+|---|---|---|
+| stop offset | $0.02 | PDF literal (".02 below") |
+| scale-outs 1R / 2R / thirds | exact | PDF literal |
+| break volume | +30 % vs prior bar | PDF literal (HitchHiker) |
+| consolidation 5–20 min | 5-bar box / window 20 | PDF literal |
+| extension from open | 3 ATR | PDF number (increase factor, promoted via the avoid clause) |
+| snapback candle ≥1.5× recent range | 1.5× | USER-observed characteristic (not in PDF) |
+| top-of-day volume | ≥0.6× today_vol_max[1] | mechanization of "one of the 5 highest volume bars" — judgment |
+| drive magnitude | ≥4 % over lowest(12) | mechanization of "distinct drive" — judgment |
+| market gate | ema20(SPY) slope over 15 m | mechanization of "cleanly trending" — judgment |
+| stopped-making-HH | highest(3) < 0.998×highest(8) | USER-designed detector, proven in isolation |
+| box tightness | ≤3 % of price | judgment |
+| Back$ide extension band | 3–12 % | DATA-FITTED on backtests #93/#94 (07/01–07/16 R1) — needs forward OOS confirmation |
+| FL anti-chop | VWAP−LoD ≥1 % | DATA-FITTED on backtest #88 (same window) — validated in #89, needs forward OOS |
+| EMA-hug tolerance | box low ≥ 0.995×ema9 | ⚠ CALIBRATED ON A SYNTHETIC ARC — the geometric argument (EMA lags into a box from below) is real, the NUMBER is not evidence. Re-measure on a real confirmed Back$ide chart before trusting. |
+| cooldown | 10 bars | engine hygiene (PDF silent) |
+
+### Validation protocol (the fix for "tuning until it dies")
+1. Seeds are FROZEN as the PDF derivation. Arc tests are smoke only.
+2. Real validation: eyeball detections on real charts (user confirms geometry),
+   then backtest the frozen seed.
+3. At most ONE tuning pass per strategy per data window — and the register
+   accrues forward daily, so NEXT week's data is free out-of-sample: tune on
+   window A, confirm on window B, never iterate on the same window.
+4. A change motivated by a failing test arc is allowed ONLY when the arc is
+   shown to be wrong against the PDF's picture — never to make the arc green.
