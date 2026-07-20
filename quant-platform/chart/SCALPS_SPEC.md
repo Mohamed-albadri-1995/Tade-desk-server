@@ -58,7 +58,7 @@ it *can't* extend further and a distinct snapback announces the seller is done.
 ### Mechanization map
 | piece | where |
 |---|---|
-| down >3 ATR from open | RULE `(day_open − today_low) > 3×atr_daily(14)` |
+| down >3 ATR from open | QUALITY (demoted from RULE — PDF lists it under increase factors; funnel evidence LHSW 07/07: after a +277% overnight gap the 14-day ATR is denominated in the OLD price regime, so "3 ATRs" was true on ZERO bars of a 7.74→4.8 fade day while dropping it fires the 2 real snapbacks. The avoid clause "not extended from VWAP" stays covered by step 1's beyond-VWAP grind) |
 | snapback AT the LoD | RULE `low ≤ today_low×1.03` |
 | green double-bar break | RULE `close>open` + `high > highest(2,high)[1]` |
 | BIG snapback candle | RULE `(high−low) ≥ 1.5×(sma(high,5)[1]−sma(low,5)[1])` |
@@ -285,7 +285,7 @@ masquerade as book numbers.
 | scale-outs 1R / 2R / thirds | exact | PDF literal |
 | break volume | +30 % vs prior bar | PDF literal (HitchHiker) |
 | consolidation 5–20 min | 5-bar box / window 20 | PDF literal |
-| extension from open | 3 ATR | PDF number (increase factor, promoted via the avoid clause) |
+| extension from open | (demoted to quality) | was `>3×atr_daily` — funnel on LHSW 07/07: after a +277% gap the daily ATR reflects the OLD price regime, so the rule was true on 0 bars of a real 7.74→4.8 fade day (leave-one-out: dropping it fires the 2 real snapbacks). PDF lists it under increase factors; the avoid ("not extended from VWAP") remains via step 1 |
 | snapback candle ≥1.5× recent range | 1.5× | USER-observed characteristic (not in PDF) |
 | top-of-day volume | (demoted to quality) | was ≥0.6× today_vol_max[1] — funnel on VEEE 07/14 showed the proxy near-unsatisfiable on gap-up days (open bar dominates the day max) and stricter than the PDF's rank wording; the PDF's entry rules never contained it, so it left the entry per the audit rule |
 | drive magnitude | ≥4 % over lowest(12) | mechanization of "distinct drive" — judgment |
