@@ -353,8 +353,8 @@ print("=" * 64)
 _caps = {'RubberBand Scalp': 2, 'RubberBand Scalp (Short)': 2, 'Second Chance Scalp': 2,
          'Back$ide Scalp': 1, 'HitchHiker Scalp': 1, 'Fashionably Late Scalp': 1}
 _wins = {'RubberBand Scalp': (1000, 1330), 'RubberBand Scalp (Short)': (1000, 1330),
-         'Second Chance Scalp': (959, 1550), 'Back$ide Scalp': (1000, 1330),
-         'HitchHiker Scalp': (945, 1030), 'Fashionably Late Scalp': (1000, 1330)}
+         'Second Chance Scalp': (959, 1600), 'Back$ide Scalp': (1000, 1330),
+         'HitchHiker Scalp': (930, 1030), 'Fashionably Late Scalp': (1000, 1330)}
 for name, sd in SEEDS.items():
     _r = sd.get('risk') or {}
     ok(f"seed '{name}' caps + cools, no min-hold",

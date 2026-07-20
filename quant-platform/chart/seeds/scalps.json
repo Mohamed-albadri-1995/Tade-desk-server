@@ -807,7 +807,7 @@
    "max_entries_per_day": 2,
    "cooldown_bars": 10,
    "window_start": 959,
-   "window_end": 1550
+   "window_end": 1600
   }
  },
  {
@@ -1457,7 +1457,7 @@
    ],
    "max_entries_per_day": 1,
    "cooldown_bars": 10,
-   "window_start": 945,
+   "window_start": 930,
    "window_end": 1030
   }
  },
