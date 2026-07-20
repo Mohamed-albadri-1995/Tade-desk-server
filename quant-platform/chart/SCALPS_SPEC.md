@@ -118,7 +118,7 @@ It is a sniper's trade: wait, let the level prove itself.
 ### Mechanization map
 | piece | where |
 |---|---|
-| significant level | RULE held pivot `structure.pivot_high(5,5)` `hold:true` **+ capped-range rule** `highest(15,high)[1] ≤ heldPivot` on the break step — the book's setup is a RANGE break ("stocks that put in ranges"); the level counts only if nothing (not even a wick) traded above it in the last 15 bars. Kills stale chewed-through pivots and bumps with overhead prints — the churn class the SVRE chart exposed (402 raw signals in #127/#128) |
+| significant level | RULE held pivot: `structure.pivot_high(5,5)` with `hold:true`. ⚠ UNDER-MECHANIZED (churn: 402 raw signals, SVRE chart) and the one attempted fix FAILED validation — see "SC capped-range rule (REVERTED)" in provenance. A better mechanization must measure the CURRENT range top, not the absolute recent high; design it on forward OOS data |
 | break = CLOSE above | RULE `close cross_above heldPivot` |
 | retest touches level | RULE `low ≤ heldPivot` (THEN step 2) |
 | attack closes above prior | RULE `close > close[1]` (THEN step 3) |
@@ -150,13 +150,20 @@ payoff 1.12:1 — leg-math audit found ZERO phantom fills and the total landed
 on the #127 reconstruction (−15.1 %), so the EXECUTION LAYER IS VERIFIED
 CLEAN (stops avg −2.4 %, exit bucket net +17.6 %). The remaining deficit vs
 the sheet (50–55 % / 1.9:1) is the ENTRY: 402 raw signals, attacks at
-insignificant levels feeding the stops. The queued entry-side pass is now
-APPLIED — the capped-range significance rule on the break step (see the map).
-This closes the tuning budget for the 07/01–07/20 window: whatever the next
-run shows, further changes wait for forward OOS as the register accrues.
-Side observation (report filter only, NOT a seed change — same pattern as
-RubberBand Long): #128 rvol≥5 → 43 % win / −6.3 %, rvol<5 → 21 % win /
-−10.4 %; the book's "In Play RVOL>5" screener factor keeps showing up.
+insignificant levels feeding the stops.
+Backtest #129 tested the capped-range entry rule and FAILED it (see the
+provenance row) — the rule was reverted; the seed is back to the #128 state.
+FINAL STATE FOR THIS WINDOW: **NOT VALIDATED, PARKED.** Execution layer
+verified honest (#128: zero phantom fills, reconstruction matched); entry
+detection misses the sheet and the window's tuning budget is spent. Next
+step is diagnosis on FORWARD data as the register accrues (new days are free
+out-of-sample) — design the range-top significance mechanization there, and
+check any entry filter for the cap/cooldown shift side-effect before
+trusting a backtest delta.
+Side observation (report filter only, NOT a seed change — pattern held in
+ALL THREE runs, same as RubberBand Long): #128 rvol≥5 → 43 % win vs 21 %
+below; #129 rvol≥5 → 46 % win vs 27 % below. The book's "In Play RVOL>5"
+screener factor keeps showing up.
 
 ---
 
@@ -331,7 +338,7 @@ masquerade as book numbers.
 | SC target lookback | 13 bars | mechanization-judgment: 6+6 THEN gaps + the attack bar span at most 13 bars back to the break, so the frozen lookback always contains the post-break spike (8 could slide past it). Must move with the THEN window if that ever changes |
 | SC exit scope | runner | PDF literal ("Trail our stop for the REMAINING ½ … below the 9 EMA") — the 9-EMA close-below manages only the half left after T1; the hard stop protects the rest. Unscoped, 43/78 rows in #126 were pre-target ema9 scratches (median hold 4 min) |
 | wrong-side target guard | engine-wide | engine hygiene, no threshold: a profit-target leg must sit BEYOND the entry fill (long: above, short: below) or it is not armed / not filled — no trader can rest a profit limit behind their fill. Exposed by #127 (21/77 trades banked phantom sub-entry "T1" losses after gapped next-open fills). When no leg arms, a runner-scoped exit governs the whole position from entry (there is no half to wait for) |
-| SC capped-range lookback | 15 bars | mechanization-judgment for the book's noun "an area of resistance / key level / ranges": the level must have capped ALL prints for the last 15 minutes at the break (equality allowed — the pivot bar itself is the max). 15 sits on the book's own consolidation scale (5–20 min, HitchHiker) and exceeds the pivot's 11-bar confirmation span so it adds real constraint. THE one entry-side change for the 07/01–07/20 window (#128 verified the execution layer clean first; entries were untouched through #126→#128) — no further tuning on this window, next adjustments need forward OOS |
+| SC capped-range rule (REVERTED) | was `highest(15,high)[1] ≤ heldPivot` | the one entry-side change for the 07/01–07/20 window — FAILED validation on #129 and was reverted the same day. Evidence: total worsened −16.7 % → −21.5 %, payoff 1.12 → 0.74; the 22 dropped trades netted only −2.3 % but included the ARCHETYPE (JEM 07/01 +16.4 % second-chance-after-first-strike) because a parabolic tape always has prints above older pivots — the rule demanded the level be the absolute 15-bar max, not the top of the CURRENT range; and trimming early entries freed the 2/day cap for later, worse attacks (10 shifted entries, −7.1 %). Lesson recorded: any future significance rule must (a) measure the current range, not the recent max, and (b) be checked against the cap/cooldown shift side-effect. Window budget SPENT — next attempt needs forward OOS |
 
 ### Validation protocol (the fix for "tuning until it dies")
 1. Seeds are FROZEN as the PDF derivation. Arc tests are smoke only.

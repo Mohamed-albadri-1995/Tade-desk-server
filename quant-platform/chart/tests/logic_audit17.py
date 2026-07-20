@@ -193,16 +193,14 @@ ok("runner exits via the 9-EMA fade, not a pre-target scratch",
    bool(tr2) and tr2[0]['reason'] == 'exit' and tr2[0]['exit_ts'] >= bar_ts(24),
    f"trades={[(t['reason'], t.get('exit_ts')) for t in tr2]}")
 
-# SIGNIFICANCE (the capped-range rule): identical break→retest→attack, but a
-# b2 wick to 49.20 sits ABOVE the 48.60 level inside the last 15 bars — the
-# "level" never capped price (overhead supply above it), so the break step
-# must refuse it. The book's setup is a RANGE break; a bump with prints above
-# it minutes ago is not the top of a range.
-h2c = list(h2); h2c[2] = 49.20
-SCEN['SECONDCHURN'] = frame(c2, o2, h2c, l2, v2)
-ok("level with overhead prints inside 15 bars is REJECTED (not a range top)",
-   len(entry_bars(run(sc, 'SECONDCHURN'))) == 0,
-   f"entries={entry_bars(run(sc, 'SECONDCHURN'))}")
+# NOTE — a "capped-range" significance rule (highest(15,high)[1] ≤ level on
+# the break step) was TRIED here and REVERTED on backtest #129 evidence: on a
+# parabolic In-Play tape the recent 15 bars almost always contain prints above
+# any older pivot, so the rule structurally blocked the archetype trade
+# (JEM 07/01 +16.4% runner) while the churn it removed netted ~breakeven, and
+# freeing the 2/day cap exposed later, worse entries (-7.1%). See SCALPS_SPEC
+# provenance. Do not re-add without a mechanization that measures the CURRENT
+# range rather than the absolute recent high.
 
 # AVOID (the abort rule): the level breaks back into range and the "attack"
 # up-close happens BELOW the failed level → must never fire.

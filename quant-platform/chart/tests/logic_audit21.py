@@ -191,12 +191,9 @@ ok("SC half-target frozen, 13-bar lookback spans the full THEN window (6+6+1)",
 ok("SC exit rule scoped to the runner (PDF: trail 'the remaining ½')",
    sc['exit'].get('scope') == 'runner')
 _s1 = sc['entry']['rules'][0]['rules']
-ok("SC break step carries the capped-range significance rule (highest(15)[1] ≤ level)",
-   len(_s1) == 3 and _s1[2]['op'] == 'le'
-   and _s1[2]['left']['key'] == 'extremes.highest'
-   and _s1[2]['left']['params']['length'] == 15
-   and _s1[2]['right']['key'] == 'structure.pivot_high',
-   f"step1={_s1}")
+ok("SC break step is cross+volume ONLY (capped-range rule REVERTED on #129 "
+   "evidence — it blocked the JEM archetype; see SCALPS_SPEC provenance)",
+   len(_s1) == 2, f"step1 has {len(_s1)} rules")
 for nm in ('RubberBand Scalp', 'RubberBand Scalp (Short)', 'Back$ide Scalp',
            'Fashionably Late Scalp'):
     s = seeds[nm]
