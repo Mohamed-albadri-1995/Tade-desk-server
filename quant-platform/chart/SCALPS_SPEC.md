@@ -118,7 +118,7 @@ It is a sniper's trade: wait, let the level prove itself.
 ### Mechanization map
 | piece | where |
 |---|---|
-| significant level | RULE held pivot: `structure.pivot_high(5,5)` with `hold:true` |
+| significant level | RULE held pivot `structure.pivot_high(5,5)` `hold:true` **+ capped-range rule** `highest(15,high)[1] ≤ heldPivot` on the break step — the book's setup is a RANGE break ("stocks that put in ranges"); the level counts only if nothing (not even a wick) traded above it in the last 15 bars. Kills stale chewed-through pivots and bumps with overhead prints — the churn class the SVRE chart exposed (402 raw signals in #127/#128) |
 | break = CLOSE above | RULE `close cross_above heldPivot` |
 | retest touches level | RULE `low ≤ heldPivot` (THEN step 2) |
 | attack closes above prior | RULE `close > close[1]` (THEN step 3) |
@@ -144,14 +144,19 @@ attack bar gaps the next-open fill ABOVE the frozen pullback-high target
 an instant "T1" loss. Leg-math reconstruction: 21 of 77 trades poisoned;
 −25.8 % actual vs −15.1 % with those phantom fills removed. Fixed by the
 WRONG-SIDE GUARD (a target leg must be beyond the fill; if no leg arms, the
-runner-scoped exit manages the full position from entry). Re-run pending.
-KNOWN OPEN QUESTION, still deliberately untouched: `pivot_high(5,5)` held
-forms constantly on 1m (SVRE chart: PH markers everywhere; 402 raw signals in
-#127; ~11 entries/day vs the book's "sniper") — the book's level is the top
-of a RANGE, and "significance of the level" is under-mechanized. Even the
-corrected #127 reconstruction (≈−15 %, ~38 % win) misses the sheet, so the
-ENTRY side is the next single pass once the execution layer is verified
-clean by the re-run.
+runner-scoped exit manages the full position from entry).
+Backtest #128 (same window, guard live): 77 trades, 37.7 % win, −16.7 %,
+payoff 1.12:1 — leg-math audit found ZERO phantom fills and the total landed
+on the #127 reconstruction (−15.1 %), so the EXECUTION LAYER IS VERIFIED
+CLEAN (stops avg −2.4 %, exit bucket net +17.6 %). The remaining deficit vs
+the sheet (50–55 % / 1.9:1) is the ENTRY: 402 raw signals, attacks at
+insignificant levels feeding the stops. The queued entry-side pass is now
+APPLIED — the capped-range significance rule on the break step (see the map).
+This closes the tuning budget for the 07/01–07/20 window: whatever the next
+run shows, further changes wait for forward OOS as the register accrues.
+Side observation (report filter only, NOT a seed change — same pattern as
+RubberBand Long): #128 rvol≥5 → 43 % win / −6.3 %, rvol<5 → 21 % win /
+−10.4 %; the book's "In Play RVOL>5" screener factor keeps showing up.
 
 ---
 
@@ -326,6 +331,7 @@ masquerade as book numbers.
 | SC target lookback | 13 bars | mechanization-judgment: 6+6 THEN gaps + the attack bar span at most 13 bars back to the break, so the frozen lookback always contains the post-break spike (8 could slide past it). Must move with the THEN window if that ever changes |
 | SC exit scope | runner | PDF literal ("Trail our stop for the REMAINING ½ … below the 9 EMA") — the 9-EMA close-below manages only the half left after T1; the hard stop protects the rest. Unscoped, 43/78 rows in #126 were pre-target ema9 scratches (median hold 4 min) |
 | wrong-side target guard | engine-wide | engine hygiene, no threshold: a profit-target leg must sit BEYOND the entry fill (long: above, short: below) or it is not armed / not filled — no trader can rest a profit limit behind their fill. Exposed by #127 (21/77 trades banked phantom sub-entry "T1" losses after gapped next-open fills). When no leg arms, a runner-scoped exit governs the whole position from entry (there is no half to wait for) |
+| SC capped-range lookback | 15 bars | mechanization-judgment for the book's noun "an area of resistance / key level / ranges": the level must have capped ALL prints for the last 15 minutes at the break (equality allowed — the pivot bar itself is the max). 15 sits on the book's own consolidation scale (5–20 min, HitchHiker) and exceeds the pivot's 11-bar confirmation span so it adds real constraint. THE one entry-side change for the 07/01–07/20 window (#128 verified the execution layer clean first; entries were untouched through #126→#128) — no further tuning on this window, next adjustments need forward OOS |
 
 ### Validation protocol (the fix for "tuning until it dies")
 1. Seeds are FROZEN as the PDF derivation. Arc tests are smoke only.

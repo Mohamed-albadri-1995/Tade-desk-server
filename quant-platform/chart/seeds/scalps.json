@@ -638,6 +638,28 @@
          "offset": 1
         }
        }
+      },
+      {
+       "left": {
+        "kind": "primitive",
+        "key": "extremes.highest",
+        "source": "high",
+        "params": {
+         "length": 15
+        },
+        "offset": 1
+       },
+       "op": "le",
+       "right": {
+        "kind": "primitive",
+        "key": "structure.pivot_high",
+        "source": "high",
+        "params": {
+         "left": 5,
+         "right": 5
+        },
+        "hold": true
+       }
       }
      ]
     },
