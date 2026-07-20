@@ -120,6 +120,7 @@
   <button id="liveBtn">▶ Live</button>
   <button id="stratBtn">⚡ Strategy</button>
   <button id="sideBtn" title="show / hide the side panel">☰ Panel</button>
+  <button id="alertsBtn" title="live signal watcher: today's R1 + Shortlist × every saved setup, browser notification + sound on any entry signal">🔔 Alerts</button>
   <span style="width:1px;height:20px;background:var(--border)"></span>
   <label>Add <select id="addPrim"></select></label>
   <input id="addLen" type="number" placeholder="len" title="length/period">
@@ -1140,6 +1141,44 @@ window.addEventListener('load',async()=>{
     document.getElementById(id).addEventListener('change',()=>{ if(LIVE&&id!=='days')startLive(); loadChart(); });
   syncAsofUI();
 });
+/* ── 🔔 live signal alerts ─────────────────────────────────────────────
+   Toggle starts/stops the server watcher (R1 + Shortlist × every saved
+   setup). The page polls /api/alerts/recent every 20 s; each new alert =
+   an audible beep + a browser Notification + a row in a floating log. */
+let AL_ON=false, AL_LAST=Math.floor(Date.now()/1000), AL_TIMER=null;
+const alBtn=document.getElementById('alertsBtn');
+function alBeep(){try{const c=new (window.AudioContext||window.webkitAudioContext)();
+  const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);
+  o.frequency.value=880;g.gain.setValueAtTime(0.25,c.currentTime);
+  o.start();o.frequency.setValueAtTime(1320,c.currentTime+0.15);o.stop(c.currentTime+0.35);}catch(e){}}
+function alLog(a){let d=document.getElementById('alLog');
+  if(!d){d=document.createElement('div');d.id='alLog';
+    d.style.cssText='position:fixed;bottom:8px;right:8px;z-index:99;background:#0f172acc;'
+      +'border:1px solid #334155;border-radius:8px;padding:6px 10px;font-size:12px;'
+      +'max-width:340px;max-height:180px;overflow-y:auto;color:#e2e8f0';
+    document.body.appendChild(d);}
+  const row=document.createElement('div');
+  row.textContent=`⚡ ${a.strategy} · ${a.symbol} ${a.side||''} · ${a.bar}`;
+  d.prepend(row); while(d.children.length>12)d.removeChild(d.lastChild);}
+async function alPoll(){ if(!AL_ON)return;
+  try{const r=await fetch('api/alerts/recent?since_ts='+AL_LAST); const j=await r.json();
+    (j.alerts||[]).forEach(a=>{ AL_LAST=Math.max(AL_LAST,a.ts); alBeep(); alLog(a);
+      if(window.Notification&&Notification.permission==='granted')
+        new Notification('⚡ '+a.strategy,{body:a.symbol+' '+(a.side||'')+' — signal at '+a.bar,
+                         tag:a.strategy+'|'+a.symbol});});
+  }catch(e){} }
+alBtn.onclick=async()=>{
+  if(!AL_ON){
+    if(window.Notification&&Notification.permission==='default')
+      try{await Notification.requestPermission();}catch(e){}
+    try{await fetch('api/alerts/start',{method:'POST'});}catch(e){}
+    AL_ON=true; alBtn.style.color='var(--blue)'; alBtn.textContent='🔔 Alerts ON';
+    AL_TIMER=setInterval(alPoll,20000); alPoll();
+  }else{
+    try{await fetch('api/alerts/stop',{method:'POST'});}catch(e){}
+    AL_ON=false; alBtn.style.color=''; alBtn.textContent='🔔 Alerts';
+    if(AL_TIMER)clearInterval(AL_TIMER);
+  }};
 </script>
 </body>
 </html>

@@ -387,6 +387,34 @@ def strategy_explain_scan(name: str, day: str, tf: str = '1m',
                     '/api/strategy/explain for per-rule counts + without_this.'}
 
 
+@app.post('/api/alerts/start')
+def alerts_start(interval: int | None = None):
+    """Start the live signal watcher: today's R1 + Shortlist x every saved
+    strategy, one scan per `interval` seconds (default 60, min 15)."""
+    from chart import alerts
+    return alerts.start(interval)
+
+
+@app.post('/api/alerts/stop')
+def alerts_stop():
+    from chart import alerts
+    return alerts.stop()
+
+
+@app.get('/api/alerts/status')
+def alerts_status():
+    from chart import alerts
+    return alerts.status()
+
+
+@app.get('/api/alerts/recent')
+def alerts_recent(since_ts: int = 0):
+    """Alerts newer than since_ts (epoch s) — the UI polls this and turns each
+    row into a sound + browser notification."""
+    from chart import alerts
+    return {'alerts': alerts.recent(since_ts)}
+
+
 @app.post('/api/strategy/test')
 def strategy_test(payload: dict = Body(...)):
     """Evaluate a single condition (rule or group) and mark every bar it holds
