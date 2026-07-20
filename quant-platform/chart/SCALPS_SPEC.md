@@ -161,14 +161,28 @@ maxes on nearly every symbol and the two entries are usually unrelated
 levels (the book's "2 strikes" means the SAME level). This produced the
 LADDER rule (see the map) — a CHART-derived fidelity fix, not a
 backtest-delta tune.
-PRE-REGISTERED PREDICTIONS for the validation run (#130) — the rule is
-judged on these, decided BEFORE running: MUST KEEP JEM 07/01 12:17 (+16.4 %)
-and PMA 07/10 10:59 (+4.6 %); MUST DROP JEM 07/01 09:57 (−5.7 %), NVVE
-07/09 10:11 (−6.0 %), SHPH 07/14 10:35 (−2.8 %), LHAI 07/02 11:57 (−5.7 %);
-KIDZ 07/07 12:26 (−3.5 %) is EXPECTED TO SURVIVE and lose (its ladder had
-recovered — an honest miss). Watch the cap/cooldown shift side-effect: count
-NEW entries that appear and their P&L before crediting the rule. If JEM
-12:17 disappears, the rule is wrong — revert immediately, no debate.
+PRE-REGISTERED PREDICTIONS for the validation run — the rule is judged on
+these, decided BEFORE running: MUST KEEP JEM 07/01 12:17 (+16.4 %) and PMA
+07/10 10:59 (+4.6 %); MUST DROP JEM 07/01 09:57 (−5.7 %), NVVE 07/09 10:11
+(−6.0 %), SHPH 07/14 10:35 (−2.8 %), LHAI 07/02 11:57 (−5.7 %); KIDZ 07/07
+12:26 (−3.5 %) EXPECTED TO SURVIVE and lose.
+VERDICT — backtest #131: **6/7 predictions hit, ladder rule VALIDATED.**
+Both keeps kept; JEM 09:57 / NVVE 10:11 / SHPH 10:35 dropped; KIDZ survived
+and lost as expected. MISS: LHAI 11:57 survived — its ladder was RISING (a
+fresh spike-top chase, not a fade): a distinct loser class = the book's
+"over-extension on the initial break" decrease factor, logged as a future
+candidate for its OWN pass on forward OOS data. Aggregate: first PROFITABLE
+run — 71 trades, +7.6 % (from −16.7 %), payoff 1.57:1 (from 1.12), the 18
+dropped trades summed −21.8 %, and this time the cap-shift side-effect was
+POSITIVE (+2.6 %: NVVE re-entered AFTER its dropped first strike and made
++7.2 % — the true second chance), unlike the reverted capped-range rule's
+−7.1 %. STILL BELOW SHEET in aggregate (38 % win vs 50–55 %) — but see the
+In-Play split below: on rvol≥5 names #131 runs 42.3 % win (46.8 % excluding
+scratches), payoff 1.77:1, +19.7 % — essentially AT the sheet. The residual
+gap is the UNIVERSE: 19 trades on rvol<5 names (ZCMD 0.1, SHPH 0.0, LHSW
+0.3, BTOG 1.3 — not In Play by any definition) summed −12.1 %. Fourth
+consecutive run showing this split; the book's screener precondition ("In
+Play, RVOL>5") is a UNIVERSE criterion, R1's job — not a seed rule.
 Side observation (report filter only, NOT a seed change — pattern held in
 ALL THREE runs, same as RubberBand Long): #128 rvol≥5 → 43 % win vs 21 %
 below; #129 rvol≥5 → 46 % win vs 27 % below. The book's "In Play RVOL>5"
