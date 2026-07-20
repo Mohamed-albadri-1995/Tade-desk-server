@@ -951,6 +951,16 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                             d = _risk_dist(t['tp'], ep, atr[j])
                             if d:
                                 lvl = (ep + d) if side == 'long' else (ep - d)
+                    # WRONG-SIDE GUARD — a profit target must be BEYOND the
+                    # entry fill. A violent signal bar can gap the next-open
+                    # fill ABOVE a frozen pullback-high target (backtest #127:
+                    # JEM filled 7.58 against a 7.08 target); a resting limit
+                    # there would fill instantly and book a LOSS as a "target".
+                    # No trader can place that order — drop the leg instead
+                    # (the trade becomes stop + exit-rule managed).
+                    if lvl is not None and ((side == 'long' and lvl <= ep)
+                                            or (side == 'short' and lvl >= ep)):
+                        continue
                     if lvl is not None or arr is not None:
                         tgt_fr.append(t['fraction']); tgt_fixed.append(lvl)
                         tgt_arrs.append(arr); tgt_done.append(False)
@@ -1041,6 +1051,11 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 lv = tgt_fixed[k] if tgt_fixed[k] is not None else tgt_arrs[k][j]
                 if lv is None or lv != lv:     # unformed/NaN this bar → not yet
                     continue
+                # wrong-side guard for TRAILING legs too: a rolling anchor that
+                # sinks to/below the entry is not a profit target this bar —
+                # skip, it may become valid again when the anchor recovers.
+                if (side == 'long' and lv <= ep_cur) or (side == 'short' and lv >= ep_cur):
+                    continue
                 if (side == 'long' and high[j] >= lv) or (side == 'short' and low[j] <= lv):
                     lr = (lv - ep_cur) / ep_cur
                     if side == 'short':
@@ -1068,12 +1083,17 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         if slv is not None and ((side == 'long' and low[j] <= slv) or (side == 'short' and high[j] >= slv)):
             sl_fill = (min(slv, opn[j]) if side == 'long' else max(slv, opn[j]))
             _close(j, sl_fill, 'SL'); in_pos = False; continue
-        if not tgt_fr and tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
+        if not tgt_fr and tpv is not None \
+                and ((side == 'long' and tpv > ep_cur) or (side == 'short' and tpv < ep_cur)) \
+                and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
             _close(j, tpv, 'TP'); in_pos = False; continue
         # exit RULE — deferred during the min-hold window (SL/TP/eod still
-        # fire); with scope 'runner' it is armed only after a leg has banked.
+        # fire); with scope 'runner' it is armed only after a leg has banked —
+        # or immediately when NO leg was armed at entry (a wrong-side/unpriced
+        # target leaves no "first half" to wait for: the whole position IS the
+        # runner, so the trail manages it from the start).
         if em is not None and em[j] and (j - ei) >= min_hold \
-                and (not runner_only or legs):
+                and (not runner_only or legs or not tgt_fr):
             if next_open:
                 if j + 1 < n:
                     pending_exit = True  # market out at the next bar's open
@@ -1091,16 +1111,20 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         # fold any banked partials into the still-open position's mark-to-market
         open_trade = {'ei': ei, 'entry': float(ep_cur),
                       'last': float(close[-1]), 'ret': float(realized + remaining * r),
-                      'legs': list(legs)}
+                      'legs': list(legs), 'tgt_armed': len(tgt_fr)}
     return trades, sl_view, tp_view, open_trade
 
 
 def _exit_now(exit_mask, trade_aware, exit_group, open_trade, side, bars, ctx) -> bool:
     """'Is the exit condition true right now?' — for a trade-aware exit that
     only means anything relative to the OPEN position, if there is one."""
+    # runner-scoped exit is not armed before a leg banks — unless NO target
+    # leg was armed at entry (tgt_armed == 0): then the whole position is the
+    # runner and the rule applies immediately.
     if exit_group and exit_group.get('scope') == 'runner' \
-            and not (open_trade or {}).get('legs'):
-        return False        # runner-scoped exit is not armed before a leg banks
+            and not (open_trade or {}).get('legs') \
+            and (open_trade or {}).get('tgt_armed', 1):
+        return False
     if not trade_aware:
         return bool(exit_mask[-1])
     if not open_trade:

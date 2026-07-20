@@ -138,6 +138,45 @@ ok("_exit_now: runner-scoped exit reports False while no leg has banked",
                {'entry': 10.0, 'ei': 4, 'legs': []}, 'long', bc, None) is False)
 
 print("=" * 64)
+print("PART E — wrong-side guard: a 'profit target' below the fill never banks")
+print("=" * 64)
+# Backtest #127: a violent attack bar gapped the next-open fill ABOVE the
+# frozen pullback-high target (JEM: fill 7.58, target 7.08) — the engine
+# banked the leg instantly at a LOSS and called it T1. 21 of 77 trades were
+# poisoned this way (-25.8% actual vs -15.1% without the phantom fills).
+# E1: frozen target below a gapped next_open fill → leg NOT armed, and with
+#     scope 'runner' the exit rule manages the FULL position immediately.
+ce = [10.00, 10.10, 10.20, 10.15, 10.40, 11.50, 11.30, 11.60, 10.90, 10.80]
+be = frame(ce)
+be.iloc[5, be.columns.get_loc('open')] = 11.40      # the gap: fill far above
+eme = np.array([c < 11.0 for c in ce])              # runner trail stand-in
+risk_e = {'targets': [{'fraction': 0.5, 'tp': {
+    'type': 'prim', 'value': 0.0, 'freeze': True,
+    'anchor': {'kind': 'primitive', 'key': 'extremes.highest',
+               'source': 'high', 'params': {'length': 4}, 'offset': 1}}}]}
+tr, _, _, op = S._pair_trades(be, list(range(10)), mask(10, 4), eme,
+                              'long', risk_e, None, fill='next_open',
+                              exit_scope='runner')
+ok("gapped fill above the frozen target: NO leg banks, full position exits "
+   "on the rule (fallback: no half to wait for)",
+   len(tr) == 1 and not tr[0]['legs'] and tr[0]['reason'] == 'exit'
+   and tr[0]['xi'] == 9 and tr[0]['ret'] < 0,
+   f"tr={[(t['reason'], t['xi'], round(t['ret'], 4), len(t['legs'])) for t in tr]} op={op}")
+# E2: a TRAILING leg whose rolling anchor sinks below the entry is skipped —
+#     the old engine booked the sub-entry level as a 'target' fill.
+cf = [10.20, 10.30, 10.40, 10.30, 9.80, 9.60, 9.90, 10.00]
+bf = frame(cf)
+risk_f = {'targets': [{'fraction': 0.5, 'tp': {
+    'type': 'prim', 'value': 0.0,
+    'anchor': {'kind': 'primitive', 'key': 'extremes.highest',
+               'source': 'high', 'params': {'length': 3}, 'offset': 1}}}]}
+trF2, _, _, opF2 = S._pair_trades(bf, list(range(8)), mask(8, 3), np.zeros(8, bool),
+                                  'long', risk_f, None)
+ok("trailing anchor sunk below entry: sub-entry level never fills as a leg",
+   len(trF2) == 0 and opF2 is not None and not (opF2.get('legs') or []),
+   f"tr={trF2} op={opF2}")
+
+print("=" * 64)
 print("PART D — seed drift: Second Chance carries the fixes, frozen seeds don't")
 print("=" * 64)
 seeds = {s['name']: s for s in json.load(

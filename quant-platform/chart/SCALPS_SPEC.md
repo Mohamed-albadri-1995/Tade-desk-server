@@ -136,12 +136,22 @@ Status: **NOT validated.** Backtest #126 (07/01–07/18 R1, 1m): 78 trades,
 29.5 % win, payoff 1.55:1, −12.3 % (−28 % without JEM's single runner) vs the
 sheet's 50–55 % / 1.9:1. The CSV's leg math isolated two EXECUTION defects
 (self-filling rolling target, whole-position ema9 scratches — both fixed via
-`freeze` + `scope:"runner"`, see the map above). Re-run pending. KNOWN OPEN
-QUESTION, deliberately untouched this pass: `pivot_high(5,5)` held forms
-constantly on 1m (SVRE chart: PH markers everywhere; ~11 entries/day vs the
-book's "sniper") — the book's level is the top of a RANGE, and "significance
-of the level" is under-mechanized. If the re-run still misses the sheet, the
-entry side is next, with funnel evidence, as its own single pass.
+`freeze` + `scope:"runner"`, see the map above).
+Backtest #127 (same window, exits fixed): 77 trades, 39 % win, −25.8 % —
+worse in total because the freeze EXPOSED a third execution defect: a violent
+attack bar gaps the next-open fill ABOVE the frozen pullback-high target
+(JEM: fill 7.58 vs target 7.08), and the engine banked the sub-entry level as
+an instant "T1" loss. Leg-math reconstruction: 21 of 77 trades poisoned;
+−25.8 % actual vs −15.1 % with those phantom fills removed. Fixed by the
+WRONG-SIDE GUARD (a target leg must be beyond the fill; if no leg arms, the
+runner-scoped exit manages the full position from entry). Re-run pending.
+KNOWN OPEN QUESTION, still deliberately untouched: `pivot_high(5,5)` held
+forms constantly on 1m (SVRE chart: PH markers everywhere; 402 raw signals in
+#127; ~11 entries/day vs the book's "sniper") — the book's level is the top
+of a RANGE, and "significance of the level" is under-mechanized. Even the
+corrected #127 reconstruction (≈−15 %, ~38 % win) misses the sheet, so the
+ENTRY side is the next single pass once the execution layer is verified
+clean by the re-run.
 
 ---
 
@@ -315,6 +325,7 @@ masquerade as book numbers.
 | SC frozen stop/target (`freeze:true`) | — | PDF literal: the stop (".02 below the low of the turn candle") and target ("the high of the initial pullback") are levels FIXED before entry. #126 leg math proved the unfrozen forms diverge: rolling `lowest(3)[1]` + ratchet = unintended trailing stop; rolling `highest(8)[1]` = self-filling target (JEM T1 +0.79 % on a +31 % runner) |
 | SC target lookback | 13 bars | mechanization-judgment: 6+6 THEN gaps + the attack bar span at most 13 bars back to the break, so the frozen lookback always contains the post-break spike (8 could slide past it). Must move with the THEN window if that ever changes |
 | SC exit scope | runner | PDF literal ("Trail our stop for the REMAINING ½ … below the 9 EMA") — the 9-EMA close-below manages only the half left after T1; the hard stop protects the rest. Unscoped, 43/78 rows in #126 were pre-target ema9 scratches (median hold 4 min) |
+| wrong-side target guard | engine-wide | engine hygiene, no threshold: a profit-target leg must sit BEYOND the entry fill (long: above, short: below) or it is not armed / not filled — no trader can rest a profit limit behind their fill. Exposed by #127 (21/77 trades banked phantom sub-entry "T1" losses after gapped next-open fills). When no leg arms, a runner-scoped exit governs the whole position from entry (there is no half to wait for) |
 
 ### Validation protocol (the fix for "tuning until it dies")
 1. Seeds are FROZEN as the PDF derivation. Arc tests are smoke only.

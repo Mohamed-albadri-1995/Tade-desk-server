@@ -153,9 +153,12 @@ class Stub:
                              'close': base, 'volume': 1000.0}, index=idx)
 cs._LOADERS['so'] = Stub()
 strat = {'name': 's', 'side': 'long',
-         # always-true entry → opens on the first eligible bar (one-position gated)
+         # enter NEAR THE DIP (close < 100 → bar 4 @99) so the VWAP line sits
+         # ABOVE the entry. The old always-true entry opened bar 0 @103 and the
+         # leg "banked" at ~101 — BELOW entry — which the wrong-side guard now
+         # correctly refuses (a profit target under the fill is a phantom).
          'entry': {'logic': 'AND', 'rules': [{'left': {'kind': 'price', 'field': 'close'},
-                                              'op': 'gt', 'right': {'kind': 'const', 'value': 0}}]},
+                                              'op': 'lt', 'right': {'kind': 'const', 'value': 100}}]},
          'exit': {'logic': 'AND', 'rules': []},
          'risk': {'sl': {'type': 'pct', 'value': 5},
                   'targets': [{'fraction': 0.5, 'tp': {'type': 'prim',
