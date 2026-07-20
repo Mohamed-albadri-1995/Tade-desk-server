@@ -118,7 +118,7 @@ It is a sniper's trade: wait, let the level prove itself.
 ### Mechanization map
 | piece | where |
 |---|---|
-| significant level | RULE held pivot: `structure.pivot_high(5,5)` with `hold:true`. ⚠ UNDER-MECHANIZED (churn: 402 raw signals, SVRE chart) and the one attempted fix FAILED validation — see "SC capped-range rule (REVERTED)" in provenance. A better mechanization must measure the CURRENT range top, not the absolute recent high; design it on forward OOS data |
+| significant level | RULE held pivot `structure.pivot_high(5,5)` `hold:true` **+ LADDER rule** `heldPivot ≥ 0.97 × heldPivot[20]` on the break step. Derived from the USER'S CHART AUDIT of all 7 graded #128 trades: every loser crossed a level in a DESCENDING pivot staircase (NVVE 8.89→7.75, SHPH 4.45→4.24→4.06, KIDZ's slide, JEM's 09:57 post-crash lower-high, LHAI's spike-chase) — buying a lower-high inside a fade, the opposite of the book's "stocks that put in RANGES"; both winners (JEM 12:17, PMA 10:59) broke a flat-to-rising ladder. The 3 % tolerance lets a flat range's pivots wiggle; a real fade ladder drops far more over 20 minutes |
 | break = CLOSE above | RULE `close cross_above heldPivot` |
 | retest touches level | RULE `low ≤ heldPivot` (THEN step 2) |
 | attack closes above prior | RULE `close > close[1]` (THEN step 3) |
@@ -153,13 +153,22 @@ the sheet (50–55 % / 1.9:1) is the ENTRY: 402 raw signals, attacks at
 insignificant levels feeding the stops.
 Backtest #129 tested the capped-range entry rule and FAILED it (see the
 provenance row) — the rule was reverted; the seed is back to the #128 state.
-FINAL STATE FOR THIS WINDOW: **NOT VALIDATED, PARKED.** Execution layer
-verified honest (#128: zero phantom fills, reconstruction matched); entry
-detection misses the sheet and the window's tuning budget is spent. Next
-step is diagnosis on FORWARD data as the register accrues (new days are free
-out-of-sample) — design the range-top significance mechanization there, and
-check any entry filter for the cap/cooldown shift side-effect before
-trusting a backtest delta.
+VISUAL PATTERN AUDIT (the protocol's "user confirms geometry" step): the
+user charted all 7 graded #128 trades. Finding — the detector cannot tell
+the flat top of a RANGE from a LOWER HIGH in a decline; every loser bought a
+descending pivot ladder, both winners broke a flat/rising one; the 2/day cap
+maxes on nearly every symbol and the two entries are usually unrelated
+levels (the book's "2 strikes" means the SAME level). This produced the
+LADDER rule (see the map) — a CHART-derived fidelity fix, not a
+backtest-delta tune.
+PRE-REGISTERED PREDICTIONS for the validation run (#130) — the rule is
+judged on these, decided BEFORE running: MUST KEEP JEM 07/01 12:17 (+16.4 %)
+and PMA 07/10 10:59 (+4.6 %); MUST DROP JEM 07/01 09:57 (−5.7 %), NVVE
+07/09 10:11 (−6.0 %), SHPH 07/14 10:35 (−2.8 %), LHAI 07/02 11:57 (−5.7 %);
+KIDZ 07/07 12:26 (−3.5 %) is EXPECTED TO SURVIVE and lose (its ladder had
+recovered — an honest miss). Watch the cap/cooldown shift side-effect: count
+NEW entries that appear and their P&L before crediting the rule. If JEM
+12:17 disappears, the rule is wrong — revert immediately, no debate.
 Side observation (report filter only, NOT a seed change — pattern held in
 ALL THREE runs, same as RubberBand Long): #128 rvol≥5 → 43 % win vs 21 %
 below; #129 rvol≥5 → 46 % win vs 27 % below. The book's "In Play RVOL>5"
@@ -338,6 +347,7 @@ masquerade as book numbers.
 | SC target lookback | 13 bars | mechanization-judgment: 6+6 THEN gaps + the attack bar span at most 13 bars back to the break, so the frozen lookback always contains the post-break spike (8 could slide past it). Must move with the THEN window if that ever changes |
 | SC exit scope | runner | PDF literal ("Trail our stop for the REMAINING ½ … below the 9 EMA") — the 9-EMA close-below manages only the half left after T1; the hard stop protects the rest. Unscoped, 43/78 rows in #126 were pre-target ema9 scratches (median hold 4 min) |
 | wrong-side target guard | engine-wide | engine hygiene, no threshold: a profit-target leg must sit BEYOND the entry fill (long: above, short: below) or it is not armed / not filled — no trader can rest a profit limit behind their fill. Exposed by #127 (21/77 trades banked phantom sub-entry "T1" losses after gapped next-open fills). When no leg arms, a runner-scoped exit governs the whole position from entry (there is no half to wait for) |
+| SC ladder rule | 0.97 × / 20 bars | USER-CHART-AUDIT derived (7 graded #128 trades, screenshots 07/20): the level being broken must not sit ≥3 % below the level standing 20 minutes earlier — refuses lower-high crosses inside a fade while letting a flat range's pivots wiggle. Numbers are geometry-scale judgment (like RubberBand's 1.5× candle): 20 m spans the book's range scale; 3 % separates range-wiggle from the observed fade ladders (5–15 % drops). Validated ONLY if the pre-registered per-trade predictions in the status section hold on #130 |
 | SC capped-range rule (REVERTED) | was `highest(15,high)[1] ≤ heldPivot` | the one entry-side change for the 07/01–07/20 window — FAILED validation on #129 and was reverted the same day. Evidence: total worsened −16.7 % → −21.5 %, payoff 1.12 → 0.74; the 22 dropped trades netted only −2.3 % but included the ARCHETYPE (JEM 07/01 +16.4 % second-chance-after-first-strike) because a parabolic tape always has prints above older pivots — the rule demanded the level be the absolute 15-bar max, not the top of the CURRENT range; and trimming early entries freed the 2/day cap for later, worse attacks (10 shifted entries, −7.1 %). Lesson recorded: any future significance rule must (a) measure the current range, not the recent max, and (b) be checked against the cap/cooldown shift side-effect. Window budget SPENT — next attempt needs forward OOS |
 
 ### Validation protocol (the fix for "tuning until it dies")

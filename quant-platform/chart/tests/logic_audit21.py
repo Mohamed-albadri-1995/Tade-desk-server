@@ -191,9 +191,14 @@ ok("SC half-target frozen, 13-bar lookback spans the full THEN window (6+6+1)",
 ok("SC exit rule scoped to the runner (PDF: trail 'the remaining ½')",
    sc['exit'].get('scope') == 'runner')
 _s1 = sc['entry']['rules'][0]['rules']
-ok("SC break step is cross+volume ONLY (capped-range rule REVERTED on #129 "
-   "evidence — it blocked the JEM archetype; see SCALPS_SPEC provenance)",
-   len(_s1) == 2, f"step1 has {len(_s1)} rules")
+ok("SC break step = cross + volume + LADDER rule (heldPivot ≥ 0.97×heldPivot[20], "
+   "chart-audit derived; the reverted capped-range rule must NOT return)",
+   len(_s1) == 3 and _s1[2]['op'] == 'ge'
+   and _s1[2]['left'].get('key') == 'structure.pivot_high'
+   and _s1[2]['right'].get('kind') == 'expr'
+   and _s1[2]['right']['a'].get('value') == 0.97
+   and _s1[2]['right']['b'].get('offset') == 20,
+   f"step1={_s1}")
 for nm in ('RubberBand Scalp', 'RubberBand Scalp (Short)', 'Back$ide Scalp',
            'Fashionably Late Scalp'):
     s = seeds[nm]

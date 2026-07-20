@@ -160,38 +160,55 @@ ok("SHORT: covers into VWAP at a profit",
 print("=" * 64)
 print("SCALP 3 — Second Chance: BREAK → quiet RETEST → ATTACK above the level")
 print("=" * 64)
-# pivot high 48.60 at b7 (confirms b12, HELD), break b15 on 3x volume, quiet
-# retest b17 (half the usual volume), attack b18 closes above prior AND above
-# the reclaimed level. Half banks at the FROZEN pullback high (49.30, the b16
-# spike); the runner is managed by the 9-EMA trail ONLY (scope 'runner') and
-# exits on the b24-b26 fade through it — the hard stop never trails up.
-c2 = [48.00, 48.05, 48.15, 48.20, 48.30, 48.40, 48.45, 48.50, 48.40, 48.35, 48.30,
-      48.25, 48.20, 48.15, 48.10, 48.90, 49.20, 48.70, 49.10, 49.20, 49.25, 49.20, 49.15, 49.10,
-      48.95, 48.75, 48.55]
-h2 = [48.10, 48.15, 48.30, 48.35, 48.40, 48.45, 48.50, 48.60, 48.45, 48.40, 48.35,
-      48.30, 48.25, 48.20, 48.15, 49.00, 49.30, 48.80, 49.20, 49.30, 49.32, 49.28, 49.20, 49.15,
-      49.08, 48.95, 48.75]
-l2 = [47.90, 47.95, 48.00, 48.10, 48.20, 48.30, 48.35, 48.40, 48.30, 48.25, 48.20,
-      48.15, 48.10, 48.05, 48.00, 48.20, 48.85, 48.50, 48.65, 49.00, 49.10, 49.05, 49.00, 48.95,
-      48.90, 48.70, 48.50]
-o2 = [47.95, 48.00, 48.10, 48.15, 48.25, 48.35, 48.40, 48.45, 48.42, 48.38, 48.32,
-      48.28, 48.22, 48.18, 48.12, 48.15, 49.00, 48.95, 48.70, 49.05, 49.15, 49.20, 49.15, 49.10,
-      49.05, 48.93, 48.73]
-v2 = [1e5] * 15 + [3e5] + [1e5] + [5e4] + [1e5] * 9
+# 22 warm-up bars carry an EARLIER pivot (48.30 at w5) so the pivot LADDER is
+# readable at the break: heldPivot[20] must exist and the ladder must be flat/
+# rising (48.30 → 48.60). Then: pivot high 48.60 at b29 (confirms b34, HELD),
+# break b37 on 3x volume, quiet retest b39, attack b40 closes above prior AND
+# above the reclaimed level. Half banks at the FROZEN pullback high (49.30);
+# the runner is managed by the 9-EMA trail ONLY (scope 'runner') and exits on
+# the b46-b48 fade through it — the hard stop never trails up.
+_wc = [48.00] * 22
+_wh = [48.10] * 22; _wh[5] = 48.30
+_wl = [47.90] * 22
+_wo = [48.00] * 22
+c2 = _wc + [48.00, 48.05, 48.15, 48.20, 48.30, 48.40, 48.45, 48.50, 48.40, 48.35, 48.30,
+            48.25, 48.20, 48.15, 48.10, 48.90, 49.20, 48.70, 49.10, 49.20, 49.25, 49.20, 49.15, 49.10,
+            48.95, 48.75, 48.55]
+h2 = _wh + [48.10, 48.15, 48.30, 48.35, 48.40, 48.45, 48.50, 48.60, 48.45, 48.40, 48.35,
+            48.30, 48.25, 48.20, 48.15, 49.00, 49.30, 48.80, 49.20, 49.30, 49.32, 49.28, 49.20, 49.15,
+            49.08, 48.95, 48.75]
+l2 = _wl + [47.90, 47.95, 48.00, 48.10, 48.20, 48.30, 48.35, 48.40, 48.30, 48.25, 48.20,
+            48.15, 48.10, 48.05, 48.00, 48.20, 48.85, 48.50, 48.65, 49.00, 49.10, 49.05, 49.00, 48.95,
+            48.90, 48.70, 48.50]
+o2 = _wo + [47.95, 48.00, 48.10, 48.15, 48.25, 48.35, 48.40, 48.45, 48.42, 48.38, 48.32,
+            48.28, 48.22, 48.18, 48.12, 48.15, 49.00, 48.95, 48.70, 49.05, 49.15, 49.20, 49.15, 49.10,
+            49.05, 48.93, 48.73]
+v2 = [1e5] * 22 + [1e5] * 15 + [3e5] + [1e5] + [5e4] + [1e5] * 9
 SCEN['SECOND'] = frame(c2, o2, h2, l2, v2)
 sc = seed('Second Chance Scalp')
 r2 = run(sc, 'SECOND')
 ok("JSON valid / evaluates", r2.get('ok') and r2.get('bars'), r2.get('error', ''))
-ok("break(vol↑) → retest(vol↓) → attack(reclaimed) fires at b18",
-   bar_ts(19) in entry_bars(r2), f"entries={entry_bars(r2)}")
+ok("break(vol↑, flat ladder) → retest(vol↓) → attack(reclaimed) fires at b40",
+   bar_ts(41) in entry_bars(r2), f"entries={entry_bars(r2)}")
 tr2 = r2.get('trades') or []
 _legs2 = (tr2[0].get('legs') or []) if tr2 else []
 ok("half banks AT the frozen pullback high (49.30) — not a tick above entry",
    bool(_legs2) and abs(float(_legs2[0].get('price', 0)) - 49.30) < 1e-6,
    f"trades={[(t['reason'], round(t['ret'], 3), t.get('legs')) for t in tr2]}")
 ok("runner exits via the 9-EMA fade, not a pre-target scratch",
-   bool(tr2) and tr2[0]['reason'] == 'exit' and tr2[0]['exit_ts'] >= bar_ts(24),
+   bool(tr2) and tr2[0]['reason'] == 'exit' and tr2[0]['exit_ts'] >= bar_ts(46),
    f"trades={[(t['reason'], t.get('exit_ts')) for t in tr2]}")
+
+# FALLING LADDER (chart-audit rule, backtests #126-#129 + 7 user screenshots):
+# identical break→retest→attack of 48.60, but the level standing 20 bars ago
+# was 52.00 — a descending pivot staircase (the NVVE/SHPH/KIDZ loser class:
+# buying a lower-high inside a fade). heldPivot ≥ 0.97×heldPivot[20] refuses
+# it. The flat-range arc above (48.30 → 48.60) passes the same rule.
+h2f = list(h2); h2f[5] = 52.00
+SCEN['SECONDFADE'] = frame(c2, o2, h2f, l2, v2)
+ok("descending pivot ladder (52.00 → 48.60) is REJECTED at the break",
+   len(entry_bars(run(sc, 'SECONDFADE'))) == 0,
+   f"entries={entry_bars(run(sc, 'SECONDFADE'))}")
 
 # NOTE — a "capped-range" significance rule (highest(15,high)[1] ≤ level on
 # the break step) was TRIED here and REVERTED on backtest #129 evidence: on a
@@ -204,11 +221,11 @@ ok("runner exits via the 9-EMA fade, not a pre-target scratch",
 
 # AVOID (the abort rule): the level breaks back into range and the "attack"
 # up-close happens BELOW the failed level → must never fire.
-c3 = c2[:15] + [48.90, 48.40, 48.20, 48.45, 48.40, 48.35, 48.30, 48.25, 48.20]
-h3 = h2[:15] + [49.00, 48.60, 48.35, 48.50, 48.48, 48.42, 48.38, 48.32, 48.28]
-l3 = l2[:15] + [48.20, 48.30, 48.10, 48.18, 48.30, 48.28, 48.22, 48.18, 48.12]
-o3 = o2[:15] + [48.15, 48.85, 48.32, 48.22, 48.42, 48.38, 48.33, 48.28, 48.22]
-v3 = [1e5] * 15 + [3e5] + [1e5] + [5e4] + [1e5] * 6
+c3 = c2[:37] + [48.90, 48.40, 48.20, 48.45, 48.40, 48.35, 48.30, 48.25, 48.20]
+h3 = h2[:37] + [49.00, 48.60, 48.35, 48.50, 48.48, 48.42, 48.38, 48.32, 48.28]
+l3 = l2[:37] + [48.20, 48.30, 48.10, 48.18, 48.30, 48.28, 48.22, 48.18, 48.12]
+o3 = o2[:37] + [48.15, 48.85, 48.32, 48.22, 48.42, 48.38, 48.33, 48.28, 48.22]
+v3 = [1e5] * 37 + [3e5] + [1e5] + [5e4] + [1e5] * 6
 SCEN['SECONDFAIL'] = frame(c3, o3, h3, l3, v3)
 ok("attack BELOW the failed level is REJECTED (abort rule)",
    len(entry_bars(run(sc, 'SECONDFAIL'))) == 0,

@@ -638,6 +638,38 @@
          "offset": 1
         }
        }
+      },
+      {
+       "left": {
+        "kind": "primitive",
+        "key": "structure.pivot_high",
+        "source": "high",
+        "params": {
+         "left": 5,
+         "right": 5
+        },
+        "hold": true
+       },
+       "op": "ge",
+       "right": {
+        "kind": "expr",
+        "op": "mul",
+        "a": {
+         "kind": "const",
+         "value": 0.97
+        },
+        "b": {
+         "kind": "primitive",
+         "key": "structure.pivot_high",
+         "source": "high",
+         "params": {
+          "left": 5,
+          "right": 5
+         },
+         "hold": true,
+         "offset": 20
+        }
+       }
       }
      ]
     },
