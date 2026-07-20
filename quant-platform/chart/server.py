@@ -336,6 +336,52 @@ def strategy_explain_route(name: str, symbol: str, day: str,
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/strategy/explain_scan')
+def strategy_explain_scan(name: str, day: str, tf: str = '1m',
+                          feed: str = 'polygon', register: str = 'R1'):
+    """CANDIDATE SWEEP: run the explain funnel over EVERY symbol in that day's
+    frozen register and rank who came closest to firing — so hunting for the
+    right test day/symbol is a query, not chart-scrolling without dates.
+    /api/strategy/explain_scan?name=RubberBand%20Scalp%20(Short)&day=2026-07-07
+    """
+    match = [s for s in store.list_strategies() if s.get('name') == name]
+    if not match:
+        return {'ok': False, 'error': f'no strategy named {name!r}',
+                'have': [s.get('name') for s in store.list_strategies()]}
+    from chart import screener as sc
+    reg = sc.register_rows(register, day)
+    if not reg.get('ok'):
+        return {'ok': False, 'error': f"register fetch failed: {reg.get('error')}"}
+    symbols = []
+    for r in reg.get('rows') or []:
+        t = str(r.get('ticker') or '').upper()
+        if t and t not in symbols:
+            symbols.append(t)
+    if not symbols:
+        return {'ok': True, 'day': day, 'rows': [],
+                'note': f'{register} register has no tickers on {day}'}
+    out = []
+    for sym in symbols:
+        try:
+            e = strat.explain_entry(match[0], sym, tf, 1,
+                                    feed=feed, view='all', asof=day)
+            steps = [st.get('true_bars', 0) for st in (e.get('steps') or [])]
+            out.append({'symbol': sym, 'fires': int(e.get('sequence_fires') or 0),
+                        'step_true_bars': steps})
+        except Exception as ex:                     # noqa: BLE001
+            out.append({'symbol': sym, 'error': str(ex)})
+    def _rank(r):
+        st = r.get('step_true_bars') or []
+        return (-(r.get('fires') or 0),
+                -sum(1 for x in st if x > 0),
+                -(st[-1] if st else 0))
+    out.sort(key=_rank)
+    return {'ok': True, 'day': day, 'strategy': name, 'rows': out,
+            'note': 'ranked by: sequence fires, then how many steps fired at '
+                    'all, then final-step true bars. Drill into a symbol with '
+                    '/api/strategy/explain for per-rule counts + without_this.'}
+
+
 @app.post('/api/strategy/test')
 def strategy_test(payload: dict = Body(...)):
     """Evaluate a single condition (rule or group) and mark every bar it holds
