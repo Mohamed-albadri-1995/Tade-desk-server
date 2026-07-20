@@ -207,6 +207,7 @@
       </div>
       <input id="btSyms" placeholder="symbols: SPY,QQQ" style="width:100%;margin-top:4px">
       <input id="btCost" type="number" step="any" placeholder="cost bps/side (e.g. 5)" title="transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies)." style="width:100%;margin-top:4px">
+      <input id="btMinRvol" type="number" step="any" placeholder="min RVOL — In Play filter (e.g. 5)" title="SMB In-Play universe filter: skip a day·symbol pair unless its HONEST cumulative RVOL (qp rel_volume: volume so far today vs the average by the same time of day, 20 sessions) is at least this at the strategy's session start. Empty = off. This is NOT the register's ctx_rvol (a one-bar TradingView snapshot at ~09:36)." style="width:100%;margin-top:4px">
       <div style="display:flex;gap:4px;margin-top:4px">
         <select id="btPreset" style="flex:1" title="prop-firm preset — fills the fields below; everything stays editable"><option value="">preset: custom</option><option value="ttp">Trade The Pool</option></select>
         <input id="btShares" type="number" placeholder="shares 100" title="fixed share size for $ P&L and per-share fees" style="flex:1;min-width:0">
@@ -1015,6 +1016,7 @@ async function btRun(){
     start:document.getElementById('btStart').value, end:document.getElementById('btEnd').value,
     tf:document.getElementById('btTf').value, feed:document.getElementById('btFeed').value,
     view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0,
+    min_rvol:(document.getElementById('btMinRvol').value!==''?parseFloat(document.getElementById('btMinRvol').value):null),
     shares:parseFloat(document.getElementById('btShares').value)||100,
     fee_per_share:parseFloat(document.getElementById('btFee').value)||0,
     fee_min:parseFloat(document.getElementById('btFeeMin').value)||0,

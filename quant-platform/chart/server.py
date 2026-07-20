@@ -246,6 +246,11 @@ def backtest_report(bid: int):
     if spec.get('fill', 'close') == 'close':
         warn.append("fill = close (optimistic; use 'next open' for live-honest fills)")
     cov = s.get('coverage') or {}
+    if cov.get('rvol_min'):
+        warn.append(f"In-Play filter: qp rvol ≥ {cov['rvol_min']} at {cov.get('rvol_at')} ET — "
+                    f"excluded {cov.get('rvol_below', 0)} below + "
+                    f"{cov.get('rvol_unknown', 0)} unverifiable "
+                    f"(honest cumulative RVOL, not the register's 5-min snapshot)")
     if cov.get('no_data'):
         warn.append(f"{cov['no_data']} of {cov.get('pairs')} day·symbol pairs returned "
                     f"NO bars on feed '{cov.get('feed')}' — the universe was only "

@@ -33,6 +33,7 @@ PARTS = [
     ('logic_audit19.py',    'entry discipline: attempts cap, cooldown, min-hold'),
     ('logic_audit20.py',    'SCALPS_SPEC gaps: cross-symbol market gate + today_vol_max'),
     ('logic_audit21.py',    'exit fidelity: frozen SL/TP anchors + runner-scoped exit rule'),
+    ('logic_audit22.py',    'In-Play universe filter: honest SMB rvol (min_rvol) in the runner'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

@@ -183,6 +183,20 @@ gap is the UNIVERSE: 19 trades on rvol<5 names (ZCMD 0.1, SHPH 0.0, LHSW
 0.3, BTOG 1.3 — not In Play by any definition) summed −12.1 %. Fourth
 consecutive run showing this split; the book's screener precondition ("In
 Play, RVOL>5") is a UNIVERSE criterion, R1's job — not a seed rule.
+⚠ MEASUREMENT CORRECTION (user-caught): the register's ctx_rvol used in the
+splits above is TradingView's `relative_volume_intraday|5` — the relative
+volume of ONE 5-minute bar at the ~09:36 capture, NOT SMB's RVOL. It can
+read 0.02 on a genuine gap day (SHPH, M&A) or 2940 on one bar (LUCY). SMB's
+number ("RVOL > 5 … tells us generally how In Play the stock is") is the
+CUMULATIVE volume so far today vs the average by the same time of day — qp's
+`volume.rel_volume` implements exactly that (verified vs TradingView's
+Relative Volume study, timeframe-invariant). The backtest now has an opt-in
+`min_rvol` universe filter that computes it honestly at the strategy's
+session start, counts every exclusion (below-threshold and unverifiable
+separately), and rides the true value with each trade as ctx `rvol_day` next
+to the snapshot — so the split can be re-measured with the RIGHT number
+before any register-criteria decision. The 4-run split evidence stands as
+directional only until re-run with the honest measure.
 Side observation (report filter only, NOT a seed change — pattern held in
 ALL THREE runs, same as RubberBand Long): #128 rvol≥5 → 43 % win vs 21 %
 below; #129 rvol≥5 → 46 % win vs 27 % below. The book's "In Play RVOL>5"

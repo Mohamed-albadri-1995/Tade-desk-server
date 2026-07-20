@@ -36,6 +36,40 @@ def _et_date(ts_s: int) -> str:
     return pd.Timestamp(int(ts_s), unit='s', tz='UTC').tz_convert(cs._ET).strftime('%Y-%m-%d')
 
 
+def _rvol_at(sym: str, day: str, feed: str, view: str, ref_hhmm: int,
+             length: int = 20) -> float | None:
+    """SMB-style In-Play RVOL for (sym, day), read causally AT `ref_hhmm` ET.
+
+    qp `volume.rel_volume`: cumulative RTH volume from the 09:30 open through
+    the bar, divided by the average cumulative volume at the SAME time-of-day
+    over the prior `length` RTH sessions — the day-trader's "trading 5x its
+    normal volume by now". This is NOT the register's ctx_rvol, which is
+    TradingView's `relative_volume_intraday|5`: the relative volume of ONE
+    5-minute bar at the ~09:36 capture (SHPH printed 0.02 on a genuine M&A
+    gap day; LUCY printed 2940 on one bar). Computed on 5m bars — the
+    primitive is timeframe-invariant — over a 45-calendar-day fetch so the
+    20-session baseline exists. None = unverifiable (no prior sessions /
+    no bars): the caller decides what that means.
+    """
+    import numpy as np
+    bars, _ts, ctx = cs.prepare_bars(sym, '5m', 45, feed, view, day)
+    if bars is None or not len(bars):
+        return None
+    _, _, lines = cs.overlay_arrays(
+        bars, {'key': 'volume.rel_volume', 'source': 'close',
+               'params': {'length': int(length)}}, ctx, causal=True)
+    arr = lines[0][1]
+    et = bars.index.tz_convert(cs._ET)
+    hhmm = np.asarray(et.hour) * 100 + np.asarray(et.minute)
+    on_day = np.asarray(et.strftime('%Y-%m-%d')) == day
+    idx = np.nonzero(on_day & (hhmm <= int(ref_hhmm)))[0]
+    for i in idx[::-1]:                     # last valid value at/before ref
+        v = arr[i]
+        if v == v:
+            return float(v)
+    return None
+
+
 def _dates(spec: dict) -> list[str]:
     """Trading days (Mon-Fri) in [start, end]. Days without bars simply
     produce nothing when evaluated — no special-casing of holidays."""
@@ -253,8 +287,42 @@ def run(spec: dict, progress_cb=None) -> dict:
     cov = {'pairs': len(pairs), 'evaluated': 0, 'no_data': 0,
            'no_data_samples': [], 'signals_on_day': 0, 'signal_pairs': 0,
            'traded_pairs': 0, 'tf': tf, 'feed': feed, 'fill': fill}
+    # In-Play universe filter (opt-in): the book's screener precondition
+    # "RVOL > 5" measured HONESTLY — qp rel_volume at the strategy's session
+    # start, not the register's one-bar TradingView snapshot. A pair below the
+    # threshold, or unverifiable (no prior sessions), is not evaluated; both
+    # are counted separately so the exclusion is never silent.
+    try:
+        min_rvol = float(spec.get('min_rvol'))
+        if min_rvol <= 0:
+            min_rvol = None
+    except (TypeError, ValueError):
+        min_rvol = None
+    rv_ref = int((strategy.get('risk') or {}).get('window_start') or 1000)
+    if min_rvol is not None:
+        cov['rvol_min'] = min_rvol
+        cov['rvol_at'] = rv_ref
+        cov['rvol_below'] = 0
+        cov['rvol_unknown'] = 0
+        cov['rvol_samples'] = []
     bar_counts = []
     for i, (day, sym, rctx) in enumerate(pairs):
+        if min_rvol is not None:
+            try:
+                rv = _rvol_at(sym, day, feed, view, rv_ref)
+            except Exception:  # noqa: BLE001 — a bad fetch = unverifiable
+                rv = None
+            if rv is None or rv < min_rvol:
+                cov['rvol_unknown' if rv is None else 'rvol_below'] += 1
+                if len(cov['rvol_samples']) < 12:
+                    cov['rvol_samples'].append(
+                        f'{day} {sym} rvol=' + ('?' if rv is None else f'{rv:.1f}'))
+                if progress_cb:
+                    progress_cb((i + 1) / len(pairs))
+                continue
+            # the HONEST number rides with every trade of the pair, next to
+            # the register's snapshot ctx_rvol, so reports can compare them
+            rctx = {**(rctx or {}), 'rvol_day': round(rv, 2)}
         try:
             r = strat.evaluate(strategy, sym, tf, base_days, feed=feed,
                                view=view, asof=day, fill=fill,
