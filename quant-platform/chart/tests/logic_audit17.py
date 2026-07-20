@@ -162,16 +162,22 @@ print("SCALP 3 — Second Chance: BREAK → quiet RETEST → ATTACK above the le
 print("=" * 64)
 # pivot high 48.60 at b7 (confirms b12, HELD), break b15 on 3x volume, quiet
 # retest b17 (half the usual volume), attack b18 closes above prior AND above
-# the reclaimed level. Target: half at the pullback high (49.30).
+# the reclaimed level. Half banks at the FROZEN pullback high (49.30, the b16
+# spike); the runner is managed by the 9-EMA trail ONLY (scope 'runner') and
+# exits on the b24-b26 fade through it — the hard stop never trails up.
 c2 = [48.00, 48.05, 48.15, 48.20, 48.30, 48.40, 48.45, 48.50, 48.40, 48.35, 48.30,
-      48.25, 48.20, 48.15, 48.10, 48.90, 49.20, 48.70, 49.10, 49.20, 49.25, 49.20, 49.15, 49.10]
+      48.25, 48.20, 48.15, 48.10, 48.90, 49.20, 48.70, 49.10, 49.20, 49.25, 49.20, 49.15, 49.10,
+      48.95, 48.75, 48.55]
 h2 = [48.10, 48.15, 48.30, 48.35, 48.40, 48.45, 48.50, 48.60, 48.45, 48.40, 48.35,
-      48.30, 48.25, 48.20, 48.15, 49.00, 49.30, 48.80, 49.20, 49.30, 49.32, 49.28, 49.20, 49.15]
+      48.30, 48.25, 48.20, 48.15, 49.00, 49.30, 48.80, 49.20, 49.30, 49.32, 49.28, 49.20, 49.15,
+      49.08, 48.95, 48.75]
 l2 = [47.90, 47.95, 48.00, 48.10, 48.20, 48.30, 48.35, 48.40, 48.30, 48.25, 48.20,
-      48.15, 48.10, 48.05, 48.00, 48.20, 48.85, 48.50, 48.65, 49.00, 49.10, 49.05, 49.00, 48.95]
+      48.15, 48.10, 48.05, 48.00, 48.20, 48.85, 48.50, 48.65, 49.00, 49.10, 49.05, 49.00, 48.95,
+      48.90, 48.70, 48.50]
 o2 = [47.95, 48.00, 48.10, 48.15, 48.25, 48.35, 48.40, 48.45, 48.42, 48.38, 48.32,
-      48.28, 48.22, 48.18, 48.12, 48.15, 49.00, 48.95, 48.70, 49.05, 49.15, 49.20, 49.15, 49.10]
-v2 = [1e5] * 15 + [3e5] + [1e5] + [5e4] + [1e5] * 6
+      48.28, 48.22, 48.18, 48.12, 48.15, 49.00, 48.95, 48.70, 49.05, 49.15, 49.20, 49.15, 49.10,
+      49.05, 48.93, 48.73]
+v2 = [1e5] * 15 + [3e5] + [1e5] + [5e4] + [1e5] * 9
 SCEN['SECOND'] = frame(c2, o2, h2, l2, v2)
 sc = seed('Second Chance Scalp')
 r2 = run(sc, 'SECOND')
@@ -179,9 +185,13 @@ ok("JSON valid / evaluates", r2.get('ok') and r2.get('bars'), r2.get('error', ''
 ok("break(vol↑) → retest(vol↓) → attack(reclaimed) fires at b18",
    bar_ts(19) in entry_bars(r2), f"entries={entry_bars(r2)}")
 tr2 = r2.get('trades') or []
-ok("half banks at the pullback-high target",
-   bool(tr2) and any(l.get('kind') != 'runner' for l in (tr2[0].get('legs') or [])) or
-   (bool(tr2) and tr2[0]['ret'] > 0), f"trades={[(t['reason'], round(t['ret'], 3)) for t in tr2]}")
+_legs2 = (tr2[0].get('legs') or []) if tr2 else []
+ok("half banks AT the frozen pullback high (49.30) — not a tick above entry",
+   bool(_legs2) and abs(float(_legs2[0].get('price', 0)) - 49.30) < 1e-6,
+   f"trades={[(t['reason'], round(t['ret'], 3), t.get('legs')) for t in tr2]}")
+ok("runner exits via the 9-EMA fade, not a pre-target scratch",
+   bool(tr2) and tr2[0]['reason'] == 'exit' and tr2[0]['exit_ts'] >= bar_ts(24),
+   f"trades={[(t['reason'], t.get('exit_ts')) for t in tr2]}")
 
 # AVOID (the abort rule): the level breaks back into range and the "attack"
 # up-close happens BELOW the failed level → must never fire.

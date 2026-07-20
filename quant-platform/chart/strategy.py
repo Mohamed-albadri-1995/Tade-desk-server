@@ -704,7 +704,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  exit_group: dict | None = None, fill: str = 'close',
                  entry_ok=None, eod_close=None, max_per_day=None,
                  cooldown_bars=None, min_hold_bars=None, entry_mode='edge',
-                 max_stop_pct=None, win_start=None, win_end=None):
+                 max_stop_pct=None, win_start=None, win_end=None,
+                 exit_scope: str | None = None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -760,6 +761,14 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             pass
     sl_arr = _anchor_levels(risk.get('sl'), side, bars, ctx)   # trailing line, or None
     tp_arr = _anchor_levels(risk.get('tp'), side, bars, ctx)
+    # `freeze`: evaluate the anchored level ONCE at the signal bar and hold it
+    # for the life of the trade. The PDF's stop ".02 below the low of the turn
+    # candle" and target "the high of the initial pullback" are levels FIXED at
+    # entry — a rolling anchor (lowest(3), highest(8)) re-evaluated per bar
+    # turns the stop into an unintended trailing stop and the target into a
+    # self-filling level (any new N-bar high "reaches" it a tick above entry).
+    sl_frozen = bool((risk.get('sl') or {}).get('freeze'))
+    tp_frozen = bool((risk.get('tp') or {}).get('freeze'))
     # Is a stop CONFIGURED? (fixed types need a finite value; 'prim' is
     # configured by its anchor alone — the % is optional). If yes, an entry
     # whose stop can't be PRICED on that bar (ATR warm-up NaN, anchored line
@@ -795,6 +804,14 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     #                 (SL/TP/eod still protect) — kills 0-min whipsaw exits.
     cooldown = int(cooldown_bars) if cooldown_bars else 0
     min_hold = int(min_hold_bars) if min_hold_bars else 0
+    # exit scope 'runner': the exit RULE manages only the runner — it is armed
+    # once at least one scale-out leg has banked. Before that the hard stop
+    # (and eod) protect the position. This is the PDF's "Half and Trail":
+    # "Trail our stop for the REMAINING ½ … waiting for a 1-minute bar close
+    # below the 9 EMA" — the trail belongs to the remaining half, not to the
+    # whole position from the entry bar. (Passed separately from exit_group
+    # because non-trade-aware exits arrive here as a precomputed mask only.)
+    runner_only = (exit_scope == 'runner')
     et_day = (bars.index.tz_convert(cs._ET).strftime('%Y-%m-%d')
               if (max_per_day or cooldown) else None)
     # SESSION WINDOW (per-strategy, ET hhmm): the PDF setups are time-of-day
@@ -832,7 +849,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         arr = _anchor_levels(tp, side, bars, ctx) if (tp and tp.get('type') == 'prim') else None
         targets.append({'fraction': fr,
                         'r_multiple': (float(rm) if rm not in (None, '', 0) else None),
-                        'tp': tp, 'arr': arr})
+                        'tp': tp, 'arr': arr,
+                        'freeze': bool(tp and tp.get('freeze'))})
     # per-trade scale-out state (reset at each entry)
     remaining = 1.0; realized = 0.0; legs = []
     tgt_fr = []; tgt_fixed = []; tgt_arrs = []; tgt_done = []
@@ -897,6 +915,12 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
                 entered_run = True        # this true-run has now been taken
                 sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
+                # frozen anchors: capture the signal-bar level as a FIXED
+                # scalar; the per-bar trailing array is ignored for this trade.
+                if sl_frozen and e_sl is not None and e_sl == e_sl:
+                    sl = float(e_sl)
+                if tp_frozen and e_tp is not None and e_tp == e_tp:
+                    tp = float(e_tp)
                 if max_per_day:
                     day_count[et_day[ej]] = day_count.get(et_day[ej], 0) + 1
                 # arm scale-out legs for THIS trade. Each leg resolves to a
@@ -908,7 +932,17 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     if (e_sl is not None and e_sl == e_sl) else None
                 for t in targets:
                     lvl = None; arr = t['arr']
-                    if arr is None:
+                    if arr is not None and t['freeze']:
+                        # frozen leg: the anchor's SIGNAL-BAR value is the
+                        # level for the whole trade (the PDF's "high of the
+                        # initial pullback" is set before entry, it does not
+                        # slide along with price). Unformed (NaN) at the
+                        # signal → the leg can't be priced → not armed.
+                        av = arr[j]
+                        if av != av:
+                            continue
+                        lvl = float(av); arr = None
+                    if arr is None and lvl is None:
                         if t['r_multiple'] is not None:
                             if rdist and rdist > 0:
                                 lvl = (ep + t['r_multiple'] * rdist) if side == 'long' \
@@ -955,9 +989,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             in_pos = False; pending_exit = False
             continue
         # effective level this bar: anchored (trailing, may be NaN in warm-up)
-        # beats the fixed scalar; NaN disables the check for that bar.
-        slv = sl_arr[j] if sl_arr is not None else sl
-        tpv = tp_arr[j] if tp_arr is not None else tp
+        # beats the fixed scalar; NaN disables the check for that bar. A FROZEN
+        # anchor was already collapsed to the fixed scalar at entry.
+        slv = sl_arr[j] if (sl_arr is not None and not sl_frozen) else sl
+        tpv = tp_arr[j] if (tp_arr is not None and not tp_frozen) else tp
         if slv is not None and slv != slv:
             slv = None
         if tpv is not None and tpv != tpv:
@@ -1035,8 +1070,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             _close(j, sl_fill, 'SL'); in_pos = False; continue
         if not tgt_fr and tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
             _close(j, tpv, 'TP'); in_pos = False; continue
-        # exit RULE — deferred during the min-hold window (SL/TP/eod still fire)
-        if em is not None and em[j] and (j - ei) >= min_hold:
+        # exit RULE — deferred during the min-hold window (SL/TP/eod still
+        # fire); with scope 'runner' it is armed only after a leg has banked.
+        if em is not None and em[j] and (j - ei) >= min_hold \
+                and (not runner_only or legs):
             if next_open:
                 if j + 1 < n:
                     pending_exit = True  # market out at the next bar's open
@@ -1061,6 +1098,9 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
 def _exit_now(exit_mask, trade_aware, exit_group, open_trade, side, bars, ctx) -> bool:
     """'Is the exit condition true right now?' — for a trade-aware exit that
     only means anything relative to the OPEN position, if there is one."""
+    if exit_group and exit_group.get('scope') == 'runner' \
+            and not (open_trade or {}).get('legs'):
+        return False        # runner-scoped exit is not armed before a leg banks
     if not trade_aware:
         return bool(exit_mask[-1])
     if not open_trade:
@@ -1336,7 +1376,8 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         cooldown_bars=cooldown, min_hold_bars=min_hold,
         entry_mode=(_risk.get('entry_mode') or 'edge'),
         max_stop_pct=_risk.get('max_stop_pct'),
-        win_start=_risk.get('window_start'), win_end=_risk.get('window_end'))
+        win_start=_risk.get('window_start'), win_end=_risk.get('window_end'),
+        exit_scope=(exit_group or {}).get('scope'))
 
     # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what
     # the caller asked for (indicator warm-up). The chart only displays the

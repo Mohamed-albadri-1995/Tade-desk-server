@@ -125,12 +125,23 @@ It is a sniper's trade: wait, let the level prove itself.
 | low-volume retest | RULE `volume < sma(volume,5)` on the retest step |
 | high-volume break | RULE `volume > 1.3×sma(volume,5)` on the break step |
 | abort/no 3rd try | THEN window expiry + RISK `max_entries_per_day: 2` |
-| stop under turn candle | RISK sl anchor `lowest(3,low)[1]` |
-| half at pullback high | RISK target `{type:prim, anchor: highest(8,high)[1], fraction:0.5}` |
-| trail 9-EMA | EXIT rule `close cross_below ema(9)` |
+| stop under turn candle | RISK sl anchor `lowest(3,low)[1]` **frozen at entry** (`freeze:true` — the book's stop is a FIXED level; a rolling low ratchets into an unintended trailing stop) |
+| half at pullback high | RISK target `{type:prim, anchor: highest(13,high)[1], fraction:0.5, freeze:true}` — frozen at the signal bar. 13 spans the whole THEN window (6+6+attack) back to the break bar, so the post-break spike can't slide out of the lookback; unfrozen it self-fills on any new N-bar high (#126: JEM banked T1 at +0.79 % while the runner ran +31 %) |
+| trail 9-EMA (the REMAINING ½ only) | EXIT rule `close cross_below ema(9)` with `scope:"runner"` — armed only after the half banks. Book: "Trail our stop for the remaining ½". Unscoped it scratched full positions at a median 4-min hold (43 of 78 rows in #126) |
 | market WITH the trade | MARKET SPY gate |
 | over-extended break | RULE breakout leg ≤ prior range height (expr on highest/lowest) |
 | times | RISK window 959–1550 |
+
+Status: **NOT validated.** Backtest #126 (07/01–07/18 R1, 1m): 78 trades,
+29.5 % win, payoff 1.55:1, −12.3 % (−28 % without JEM's single runner) vs the
+sheet's 50–55 % / 1.9:1. The CSV's leg math isolated two EXECUTION defects
+(self-filling rolling target, whole-position ema9 scratches — both fixed via
+`freeze` + `scope:"runner"`, see the map above). Re-run pending. KNOWN OPEN
+QUESTION, deliberately untouched this pass: `pivot_high(5,5)` held forms
+constantly on 1m (SVRE chart: PH markers everywhere; ~11 entries/day vs the
+book's "sniper") — the book's level is the top of a RANGE, and "significance
+of the level" is under-mechanized. If the re-run still misses the sheet, the
+entry side is next, with funnel evidence, as its own single pass.
 
 ---
 
@@ -204,6 +215,11 @@ buy programs run for hours; the consolidation break lets us hitch a ride.
 - STOP: `.02 below the consolidation low`. ONE AND DONE.
 - EXIT in waves: 1/2 when the first rush slows (~1R) · 1/2 on the second wave
   (trail: 1-min close below the 9-EMA).
+- ⚠ PENDING for HH's own validation pass: the same exit-fidelity questions
+  #126 exposed on Second Chance apply here structurally — the sl anchor
+  `lowest(5)[1]` is rolling (should likely be `freeze:true` = the fixed
+  consolidation low) and the ema9 trail is unscoped (book trails the second
+  half). Apply only WITH HH backtest evidence, one pass, not preemptively.
 
 ### Quality factors
 - Better: +30 % volume on break · market/sector trending up · consolidation
@@ -296,6 +312,9 @@ masquerade as book numbers.
 | FL anti-chop | VWAP−LoD ≥1 % | DATA-FITTED on backtest #88 (same window) — validated in #89, needs forward OOS |
 | EMA-hug tolerance | box low ≥ 0.995×ema9 | ⚠ CALIBRATED ON A SYNTHETIC ARC — the geometric argument (EMA lags into a box from below) is real, the NUMBER is not evidence. Re-measure on a real confirmed Back$ide chart before trusting. |
 | cooldown | 10 bars | engine hygiene (PDF silent) |
+| SC frozen stop/target (`freeze:true`) | — | PDF literal: the stop (".02 below the low of the turn candle") and target ("the high of the initial pullback") are levels FIXED before entry. #126 leg math proved the unfrozen forms diverge: rolling `lowest(3)[1]` + ratchet = unintended trailing stop; rolling `highest(8)[1]` = self-filling target (JEM T1 +0.79 % on a +31 % runner) |
+| SC target lookback | 13 bars | mechanization-judgment: 6+6 THEN gaps + the attack bar span at most 13 bars back to the break, so the frozen lookback always contains the post-break spike (8 could slide past it). Must move with the THEN window if that ever changes |
+| SC exit scope | runner | PDF literal ("Trail our stop for the REMAINING ½ … below the 9 EMA") — the 9-EMA close-below manages only the half left after T1; the hard stop protects the rest. Unscoped, 43/78 rows in #126 were pre-target ema9 scratches (median hold 4 min) |
 
 ### Validation protocol (the fix for "tuning until it dies")
 1. Seeds are FROZEN as the PDF derivation. Arc tests are smoke only.

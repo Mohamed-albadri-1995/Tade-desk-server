@@ -734,7 +734,8 @@
       }
      }
     }
-   ]
+   ],
+   "scope": "runner"
   },
   "risk": {
    "sl": {
@@ -749,7 +750,8 @@
      "offset": 1
     },
     "value": 0.0,
-    "abs": 0.02
+    "abs": 0.02,
+    "freeze": true
    },
    "targets": [
     {
@@ -761,11 +763,12 @@
        "key": "extremes.highest",
        "source": "high",
        "params": {
-        "length": 8
+        "length": 13
        },
        "offset": 1
       },
-      "value": 0.0
+      "value": 0.0,
+      "freeze": true
      }
     }
    ],
