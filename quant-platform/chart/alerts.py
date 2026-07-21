@@ -185,9 +185,10 @@ def stop() -> dict:
 
 def status() -> dict:
     with _LOCK:
-        return {k: (list(v) if isinstance(v, list) else v)
-                for k, v in _STATE.items() if k != 'alerts'} | {
-                'alerts_buffered': len(_STATE['alerts'])}
+        out = {k: (list(v) if isinstance(v, list) else v)
+               for k, v in _STATE.items() if k != 'alerts'}
+        out['alerts_buffered'] = len(_STATE['alerts'])   # 3.9-safe merge
+        return out
 
 
 def recent(since_ts: int = 0) -> list[dict]:

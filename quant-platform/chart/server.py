@@ -388,11 +388,13 @@ def strategy_explain_scan(name: str, day: str, tf: str = '1m',
 
 
 @app.post('/api/alerts/start')
-def alerts_start(interval: int | None = None):
+def alerts_start(interval: int = 0):
     """Start the live signal watcher: today's R1 + Shortlist x every saved
-    strategy, one scan per `interval` seconds (default 60, min 15)."""
+    strategy, one scan per `interval` seconds (default 60, min 15). 0 = keep
+    the current interval. (No PEP-604 unions in ROUTE signatures — FastAPI
+    evaluates them at import and the server runs Python 3.9.)"""
     from chart import alerts
-    return alerts.start(interval)
+    return alerts.start(interval or None)
 
 
 @app.post('/api/alerts/stop')
