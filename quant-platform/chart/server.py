@@ -246,6 +246,12 @@ def backtest_report(bid: int):
     if spec.get('fill', 'close') == 'close':
         warn.append("fill = close (optimistic; use 'next open' for live-honest fills)")
     cov = s.get('coverage') or {}
+    if cov.get('entry_drops'):
+        _dl = ', '.join(f'{k}={v}' for k, v in sorted(cov['entry_drops'].items(),
+                                                      key=lambda kv: -kv[1]))
+        warn.append(f"signals that did NOT become trades — {_dl} "
+                    f"(outside_window = broke outside the setup's time window; "
+                    f"unpriceable_stop = stop level not formed yet)")
     if cov.get('rvol_min'):
         warn.append(f"In-Play filter: qp rvol ≥ {cov['rvol_min']} at {cov.get('rvol_at')} ET — "
                     f"excluded {cov.get('rvol_below', 0)} below + "

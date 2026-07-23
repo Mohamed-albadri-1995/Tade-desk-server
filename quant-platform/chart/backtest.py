@@ -335,6 +335,11 @@ def run(spec: dict, progress_cb=None) -> dict:
                 if sigs:
                     cov['signal_pairs'] += 1
                     cov['signals_on_day'] += sigs
+                # WHY a fired signal didn't become a trade (window, cap,
+                # unpriceable stop, …) — so "N signals → 0 traded" self-explains
+                for _reason, _cnt in (r.get('entry_drops') or {}).items():
+                    ed = cov.setdefault('entry_drops', {})
+                    ed[_reason] = ed.get(_reason, 0) + int(_cnt)
                 took = False
                 for t in r.get('trades') or []:
                     if _et_date(t['entry_ts']) == day:      # day-slice honesty

@@ -705,7 +705,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  entry_ok=None, eod_close=None, max_per_day=None,
                  cooldown_bars=None, min_hold_bars=None, entry_mode='edge',
                  max_stop_pct=None, win_start=None, win_end=None,
-                 exit_scope: str | None = None):
+                 exit_scope: str | None = None, diag: dict | None = None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -870,22 +870,34 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         if not in_pos:
             fire = (entry_mask[j] and not entered_run) if entry_mode == 'edge' else entry_mask[j]
             if fire:
+                # DIAGNOSTICS: a signal fired but may be dropped before it can
+                # open a trade. Tally WHY so "N signals → 0 traded" is never a
+                # mystery (backtest surfaces this). `diag` is optional.
+                def _drop(reason):
+                    if diag is not None:
+                        diag[reason] = diag.get(reason, 0) + 1
                 if next_open and j + 1 >= n:
+                    _drop('last_bar')
                     continue             # signal on the last bar — no bar to fill on
                 ep = opn[j + 1] if next_open else close[j]
                 ej = j + 1 if next_open else j
                 if entry_ok is not None and not entry_ok[ej]:
+                    _drop('rth_session')
                     continue             # fill moment outside the allowed session
                 if eod_close is not None and eod_close[ej]:
+                    _drop('eod_bar')
                     continue             # never open into the liquidation bar
                 if et_hhmm is not None:  # per-strategy time-of-day window (ET)
                     hm = int(et_hhmm[ej])
                     if (win_start is not None and hm < win_start) or \
                        (win_end is not None and hm > win_end):
+                        _drop('outside_window')
                         continue         # outside the setup's session window
                 if max_per_day and day_count.get(et_day[ej], 0) >= max_per_day:
+                    _drop('daily_cap')
                     continue             # daily attempt cap reached (2 strikes out)
                 if cooldown and last_exit_bar is not None and (j - last_exit_bar) < cooldown:
+                    _drop('cooldown')
                     continue             # still cooling down after the last exit
                 # fixed-distance stops: long → SL BELOW entry / TP above;
                 # short → SL ABOVE entry / TP below. ATR at the SIGNAL bar —
@@ -901,6 +913,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 e_sl = sl_arr[j] if sl_arr is not None else sl
                 e_tp = tp_arr[j] if tp_arr is not None else tp
                 if sl_required and (e_sl is None or e_sl != e_sl):
+                    _drop('unpriceable_stop')
                     continue                       # stop unpriceable → no trade
                 # MAX RISK CAP: refuse an entry whose stop is absurdly far. A
                 # scalp's stop is meant to be tight (RubberBand: ".02 below the
@@ -911,6 +924,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 # stop. (see JEM 2026-07-01: entry 10.38, stop at the 4.98 LoD.)
                 if max_stop_pct and e_sl is not None and e_sl == e_sl and ep:
                     if abs(ep - e_sl) / ep * 100.0 > float(max_stop_pct):
+                        _drop('stop_too_far')
                         continue
                 in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
                 entered_run = True        # this true-run has now been taken
@@ -1385,6 +1399,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
 
     # STATUS pairing: enter while flat on any true entry bar; exit on any true
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
+    _entry_drops: dict = {}      # why fired signals didn't become trades
     entry_ok, eod_close = _session_masks(bars, rules)
     # discipline knobs: the strategy carries its own (saved with it), the panel
     # `rules` can OVERRIDE the attempts cap for a one-off run.
@@ -1401,7 +1416,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         entry_mode=(_risk.get('entry_mode') or 'edge'),
         max_stop_pct=_risk.get('max_stop_pct'),
         win_start=_risk.get('window_start'), win_end=_risk.get('window_end'),
-        exit_scope=(exit_group or {}).get('scope'))
+        exit_scope=(exit_group or {}).get('scope'), diag=_entry_drops)
 
     # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what
     # the caller asked for (indicator warm-up). The chart only displays the
@@ -1525,6 +1540,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         'exits':   [{'time': int(ts[i])} for i in np.nonzero(exit_ev)[0]],
         'markers': markers,
         'series':  series,
+        'entry_drops': dict(_entry_drops),   # why fired signals didn't trade
         'entry_now': bool(entry_mask[-1]),
         'exit_now':  _exit_now(exit_mask, trade_aware, exit_group, open_trade,
                                side, bars, ctx),
