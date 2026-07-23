@@ -1707,7 +1707,8 @@
      "op": "gt",
      "right": {
       "kind": "primitive",
-      "key": "volume.avg_volume",
+      "key": "ma.sma",
+      "source": "volume",
       "params": {
        "length": 20
       },

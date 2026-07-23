@@ -32,10 +32,18 @@ ok("seed: explicit 'above prior close' gate (day_open > prev_day_close)",
    any(r.get('left', {}).get('key') == 'levels.day_open'
        and r.get('right', {}).get('key') == 'levels.prev_day_close'
        for r in SEED['entry']['rules']))
-ok("seed: breakout requires volume > qp volume.avg_volume(20)[1]",
-   any(r.get('left', {}).get('field') == 'volume'
-       and r.get('right', {}).get('key') == 'volume.avg_volume'
-       for r in SEED['entry']['rules']))
+# volume filter must be an INTRADAY-bar average (ma.sma on volume,
+# compute_tf=None) — NOT volume.avg_volume, which is the average DAILY
+# volume (compute_tf='1d', millions of shares) that a 2m bar can never
+# exceed → 0 signals (backtest #136, JEM/VEEE explain: step 6 = 0 bars).
+_vrule = [r for r in SEED['entry']['rules'] if r.get('left', {}).get('field') == 'volume'][0]
+ok("seed: volume filter is ma.sma(volume,20) (intraday), NOT daily avg_volume",
+   _vrule['right'].get('key') == 'ma.sma'
+   and _vrule['right'].get('source') == 'volume')
+import qp as _qp
+from qp.registry import REGISTRY as _REG
+ok("guard: volume.avg_volume is a DAILY primitive (compute_tf=1d) — the trap",
+   getattr(_REG['volume.avg_volume'], 'compute_tf', None) == '1d')
 ok("seed: wick filter uses qp candle.upper_wick / candle.body (not raw expr)",
    any(r.get('left', {}).get('key') == 'candle.upper_wick'
        and (r.get('right', {}).get('b') or {}).get('key') == 'candle.body'
