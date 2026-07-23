@@ -164,6 +164,13 @@ def prev_day_open(bars: Bars):
     return _daily_agg(bars.df, rth_pred(bars.df), 'open', ago=1)
 
 
+@primitive(name='prev_day_close', group='levels',
+           description='Yesterday\'s RTH close, held constant across today.',
+           params=(), inputs=('bars',))
+def prev_day_close(bars: Bars):
+    return _daily_agg(bars.df, rth_pred(bars.df), 'close', ago=1)
+
+
 @primitive(name='day_open', group='levels',
            description='Today\'s RTH open (09:30 ET bar). NaN before today\'s open exists.',
            params=(), inputs=('bars',))

@@ -28,6 +28,10 @@ def seed():
 
 ok("seed: entry window is 09:30–10:00", (SEED['risk'].get('window_start'),
    SEED['risk'].get('window_end')) == (930, 1000))
+ok("seed: explicit 'above prior close' gate (day_open > prev_day_close)",
+   any(r.get('left', {}).get('key') == 'levels.day_open'
+       and r.get('right', {}).get('key') == 'levels.prev_day_close'
+       for r in SEED['entry']['rules']))
 ok("seed: breakout requires volume > qp volume.avg_volume(20)[1]",
    any(r.get('left', {}).get('field') == 'volume'
        and r.get('right', {}).get('key') == 'volume.avg_volume'

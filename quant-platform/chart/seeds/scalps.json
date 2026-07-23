@@ -1649,6 +1649,17 @@
     },
     {
      "left": {
+      "kind": "primitive",
+      "key": "levels.day_open"
+     },
+     "op": "gt",
+     "right": {
+      "kind": "primitive",
+      "key": "levels.prev_day_close"
+     }
+    },
+    {
+     "left": {
       "kind": "price",
       "field": "close"
      },
