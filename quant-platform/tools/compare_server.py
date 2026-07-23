@@ -257,7 +257,7 @@ def _reindex_asof(arr, src_index, dst_index):
 # primitives, so e.g. atr_daily(14) has ~140 daily bars and pine_5day has
 # its 1950 one-minute bars BEFORE the first visible bar — the line then
 # covers the whole visible range at any Days setting.
-_COMPUTE_TF_WARMUP_DAYS = {'1m': 15, '5m': 30, '15m': 45, '30m': 60,
+_COMPUTE_TF_WARMUP_DAYS = {'1m': 15, '2m': 20, '5m': 30, '15m': 45, '30m': 60,
                            '1h': 90, '1d': 200}
 
 # Cap on how many recent pivot events get verification markers — keeps the
@@ -336,7 +336,7 @@ def _series_markers(m, kwargs, arr, ts, bars: pd.DataFrame) -> list:
     return marks
 
 
-_TF_MINUTES = {'1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '1d': 390}
+_TF_MINUTES = {'1m': 1, '2m': 2, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '1d': 390}
 
 
 def overlay_arrays(bars: pd.DataFrame, ov: dict, ctx: dict, causal: bool = False):
@@ -800,7 +800,7 @@ function loadTV() {
     if (typeof TradingView === 'undefined' || !TradingView.widget) return;
     const symbol = document.getElementById('symbol').value.trim().toUpperCase() || 'SPY';
     const tf = document.getElementById('tf').value;
-    const tvInterval = ({ '1m':'1', '5m':'5', '15m':'15', '30m':'30', '1h':'60', '1d':'D' })[tf];
+    const tvInterval = ({ '1m':'1', '2m':'2', '5m':'5', '15m':'15', '30m':'30', '1h':'60', '1d':'D' })[tf];
     const o = currentOverlay();
     const study = o ? TV_STUDIES[o.key] : null;
     document.getElementById('tv').innerHTML = '';

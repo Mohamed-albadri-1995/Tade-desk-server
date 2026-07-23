@@ -108,7 +108,7 @@
 <header>
   <strong style="color:var(--accent)">qp&nbsp;live</strong>
   <label>Symbol <input id="symbol" value="SPY" size="6"></label>
-  <label>TF <select id="tf"><option>1m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
+  <label>TF <select id="tf"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
   <label>Type <select id="ctype"><option value="candles">Candles</option><option value="bars">Bars</option><option value="line">Line</option><option value="area">Area</option><option value="heikin">Heikin Ashi</option></select></label>
   <label>Scale <select id="scaleMode"><option value="0">Linear</option><option value="1">Log</option><option value="2">%</option></select></label>
   <button id="fitBtn" title="fit all bars to view" style="background:#1c2431;color:var(--text2);border:1px solid var(--border)">⤢ Fit</button>
@@ -203,7 +203,7 @@
         <select id="btFill" style="flex:1" title="fill model: next open = honest live fills (a signal at a bar's close becomes a market order at the NEXT bar's open — what the funded account actually gets). close = signal bar's own close, optimistic, for eyeballing only."><option value="next_open" selected>fill: next open</option><option value="close">fill: close</option></select>
       </div>
       <div style="display:flex;gap:4px;margin-top:4px">
-        <select id="btTf" style="flex:1" title="bar timeframe the backtest evaluates on — use the TF you built the strategy on"><option>1m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select>
+        <select id="btTf" style="flex:1" title="bar timeframe the backtest evaluates on — use the TF you built the strategy on"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select>
         <select id="btFeed" style="flex:1" title="data feed for the backtest. polygon covers the whole market; alpaca (IEX) has NO data for many small caps — those pairs would be skipped"><option>alpaca</option><option>polygon</option><option>hybrid</option></select>
       </div>
       <input id="btSyms" placeholder="symbols: SPY,QQQ" style="width:100%;margin-top:4px">

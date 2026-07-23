@@ -355,7 +355,8 @@ _caps = {'RubberBand Scalp': 2, 'RubberBand Scalp (Short)': 2, 'Second Chance Sc
 _wins = {'RubberBand Scalp': (1000, 1330), 'RubberBand Scalp (Short)': (1000, 1330),
          'Second Chance Scalp': (959, 1600), 'Back$ide Scalp': (1000, 1330),
          'HitchHiker Scalp': (930, 1030), 'Fashionably Late Scalp': (1000, 1330)}
-for name, sd in SEEDS.items():
+for name in _caps:                       # PDF scalps only; non-PDF seeds
+    sd = SEEDS[name]                     # (e.g. user's PM Breakout) skip this table
     _r = sd.get('risk') or {}
     ok(f"seed '{name}' caps + cools, no min-hold",
        _r.get('max_entries_per_day') == _caps[name]

@@ -20,7 +20,7 @@ LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid}
 # RTH minutes per trading day (09:30-16:00). Used to translate an indicator's
 # bar-lookback into how many calendar days of history to fetch.
 _RTH_MIN = 390
-_TF_MIN = {'1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '1d': _RTH_MIN}
+_TF_MIN = {'1m': 1, '2m': 2, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '1d': _RTH_MIN}
 
 
 def feed_ok(feed: str) -> bool:
@@ -46,7 +46,7 @@ _HISTORY_FLOOR_DAYS = 40
 
 # Ceiling per timeframe so a heavy combo can't fetch a pathological window and
 # OOM a small box. Comfortably above the 40-day floor for the ones that matter.
-_MAX_DAYS = {'1m': 60, '5m': 120, '15m': 250, '30m': 400, '1h': 500, '1d': 800}
+_MAX_DAYS = {'1m': 60, '2m': 90, '5m': 120, '15m': 250, '30m': 400, '1h': 500, '1d': 800}
 
 
 def _bars_to_days(bars: int, tf: str, buffer: int = 2) -> int:

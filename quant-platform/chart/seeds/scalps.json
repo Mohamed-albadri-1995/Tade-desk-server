@@ -1629,5 +1629,126 @@
    "window_start": 1000,
    "window_end": 1330
   }
+ },
+ {
+  "name": "PM Breakout (2m)",
+  "side": "long",
+  "entry": {
+   "logic": "AND",
+   "rules": [
+    {
+     "left": {
+      "kind": "primitive",
+      "key": "levels.day_open",
+      "source": "open"
+     },
+     "op": "gt",
+     "right": {
+      "kind": "primitive",
+      "key": "levels.prev_day_high",
+      "source": "high"
+     }
+    },
+    {
+     "left": {
+      "kind": "price",
+      "field": "close"
+     },
+     "op": "cross_above",
+     "right": {
+      "kind": "primitive",
+      "key": "levels.pm_high",
+      "source": "high"
+     }
+    },
+    {
+     "left": {
+      "kind": "price",
+      "field": "close"
+     },
+     "op": "gt",
+     "right": {
+      "kind": "price",
+      "field": "open"
+     }
+    },
+    {
+     "left": {
+      "kind": "expr",
+      "op": "sub",
+      "a": {
+       "kind": "price",
+       "field": "high"
+      },
+      "b": {
+       "kind": "price",
+       "field": "close"
+      }
+     },
+     "op": "lt",
+     "right": {
+      "kind": "expr",
+      "op": "mul",
+      "a": {
+       "kind": "const",
+       "value": 0.5
+      },
+      "b": {
+       "kind": "expr",
+       "op": "sub",
+       "a": {
+        "kind": "price",
+        "field": "close"
+       },
+       "b": {
+        "kind": "price",
+        "field": "open"
+       }
+      }
+     }
+    }
+   ]
+  },
+  "exit": {
+   "logic": "AND",
+   "rules": [
+    {
+     "left": {
+      "kind": "price",
+      "field": "close"
+     },
+     "op": "cross_below",
+     "right": {
+      "kind": "primitive",
+      "key": "ma.sma",
+      "source": "close",
+      "params": {
+       "length": 9
+      }
+     }
+    }
+   ]
+  },
+  "risk": {
+   "sl": {
+    "type": "prim",
+    "anchor": {
+     "kind": "primitive",
+     "key": "extremes.lowest",
+     "source": "low",
+     "params": {
+      "length": 1
+     },
+     "offset": 1
+    },
+    "value": 0.0,
+    "abs": 0.02,
+    "freeze": true
+   },
+   "max_entries_per_day": 1,
+   "cooldown_bars": 5,
+   "window_start": 930,
+   "window_end": 1600
+  }
  }
 ]

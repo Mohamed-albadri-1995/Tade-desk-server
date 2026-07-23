@@ -33,6 +33,7 @@ _BASE = 'https://api.polygon.io'
 # timeframe -> (multiplier, timespan)
 _TF_MAP = {
     '1m':  (1, 'minute'),
+    '2m':  (2, 'minute'),
     '5m':  (5, 'minute'),
     '15m': (15, 'minute'),
     '30m': (30, 'minute'),
