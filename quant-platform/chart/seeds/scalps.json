@@ -1639,14 +1639,12 @@
     {
      "left": {
       "kind": "primitive",
-      "key": "levels.day_open",
-      "source": "open"
+      "key": "levels.day_open"
      },
      "op": "gt",
      "right": {
       "kind": "primitive",
-      "key": "levels.prev_day_high",
-      "source": "high"
+      "key": "levels.prev_day_high"
      }
     },
     {
@@ -1657,8 +1655,7 @@
      "op": "cross_above",
      "right": {
       "kind": "primitive",
-      "key": "levels.pm_high",
-      "source": "high"
+      "key": "levels.pm_high"
      }
     },
     {
@@ -1674,16 +1671,8 @@
     },
     {
      "left": {
-      "kind": "expr",
-      "op": "sub",
-      "a": {
-       "kind": "price",
-       "field": "high"
-      },
-      "b": {
-       "kind": "price",
-       "field": "close"
-      }
+      "kind": "primitive",
+      "key": "candle.upper_wick"
      },
      "op": "lt",
      "right": {
@@ -1694,16 +1683,8 @@
        "value": 0.5
       },
       "b": {
-       "kind": "expr",
-       "op": "sub",
-       "a": {
-        "kind": "price",
-        "field": "close"
-       },
-       "b": {
-        "kind": "price",
-        "field": "open"
-       }
+       "kind": "primitive",
+       "key": "candle.body"
       }
      }
     },
@@ -1715,8 +1696,7 @@
      "op": "gt",
      "right": {
       "kind": "primitive",
-      "key": "ma.sma",
-      "source": "volume",
+      "key": "volume.avg_volume",
       "params": {
        "length": 20
       },
