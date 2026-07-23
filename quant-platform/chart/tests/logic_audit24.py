@@ -26,6 +26,13 @@ def seed():
     s['risk'].pop('window_start', None); s['risk'].pop('window_end', None)
     return s
 
+ok("seed: entry window is 09:30–10:00", (SEED['risk'].get('window_start'),
+   SEED['risk'].get('window_end')) == (930, 1000))
+ok("seed: breakout requires volume > sma(volume,20)[1]",
+   any(r.get('left', {}).get('field') == 'volume'
+       and r.get('right', {}).get('source') == 'volume'
+       for r in SEED['entry']['rules']))
+
 # ── build a 2-day 2m frame ────────────────────────────────────────────────
 # Day 1 (prior day): RTH high = 50.50. Day 2: premarket builds a high of
 # 51.00, opens (09:30) at 51.20 — ABOVE yesterday's 50.50 high. Price coils
@@ -57,6 +64,7 @@ rth = bars2m([
     (51.35, 51.40, 51.05, 51.10),   # b7 close below 9-SMA → exit
     (51.10, 51.20, 51.00, 51.15),
 ], '2024-01-09')
+rth.iloc[3, rth.columns.get_loc('volume')] = 3e5   # breakout bar trades on volume
 FULL = pd.concat([d1, pm, rth])
 
 class Stub:
@@ -106,6 +114,20 @@ rg = S.evaluate(seed(), 'X', '2m', 2, feed='pmgate', view='all',
 ok("open below yesterday's high → day gate blocks the entry",
    [e['time'] for e in (rg.get('entries') or [])] == [],
    f"entries={[e['time'] for e in (rg.get('entries') or [])]}")
+
+# NEGATIVE: a textbook breakout candle but on THIN volume must not fire
+rth_lowvol = rth.copy()
+rth_lowvol.iloc[3, rth_lowvol.columns.get_loc('volume')] = 5e4   # < sma(vol,20)=1e5
+FULL_LV = pd.concat([d1, pm, rth_lowvol])
+class StubLV:
+    def load(self, sym, tf, start, end):
+        return FULL_LV[(FULL_LV.index >= start) & (FULL_LV.index < end)]
+cs._LOADERS['pmlv'] = StubLV()
+rl = S.evaluate(seed(), 'X', '2m', 2, feed='pmlv', view='all',
+                asof='2024-01-09', fill='next_open')
+ok("breakout on THIN volume is REJECTED by the volume filter",
+   [e['time'] for e in (rl.get('entries') or [])] == [],
+   f"entries={[e['time'] for e in (rl.get('entries') or [])]}")
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")

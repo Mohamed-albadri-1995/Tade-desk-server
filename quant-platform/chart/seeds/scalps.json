@@ -1706,6 +1706,22 @@
        }
       }
      }
+    },
+    {
+     "left": {
+      "kind": "price",
+      "field": "volume"
+     },
+     "op": "gt",
+     "right": {
+      "kind": "primitive",
+      "key": "ma.sma",
+      "source": "volume",
+      "params": {
+       "length": 20
+      },
+      "offset": 1
+     }
     }
    ]
   },
@@ -1748,7 +1764,7 @@
    "max_entries_per_day": 1,
    "cooldown_bars": 5,
    "window_start": 930,
-   "window_end": 1600
+   "window_end": 1000
   }
  }
 ]
