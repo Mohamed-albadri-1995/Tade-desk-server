@@ -36,6 +36,7 @@ PARTS = [
     ('logic_audit22.py',    'In-Play universe filter: honest SMB rvol (min_rvol) in the runner'),
     ('logic_audit23.py',    'live alerts: scan/dedupe/suppress, window gating, register union'),
     ('logic_audit24.py',    'PM Breakout (2m) seed: day gate + pm-high breakout + wick/body filter'),
+    ('logic_audit25.py',    'real-account risk sizing: 0.5%/trade, compounding, leverage cap'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

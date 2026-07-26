@@ -201,6 +201,124 @@ def _ttp_block(closed: list, opens: list, spec: dict) -> dict | None:
             'wins_below_min': below}
 
 
+def _account_block(closed: list, spec: dict) -> dict | None:
+    """REAL-MONEY accounting: a fixed account risking a fixed % per trade.
+
+    Position size comes from the STOP, not from a share count: risking R
+    dollars with a stop D dollars per share below the entry buys R/D shares,
+    so every trade that stops out loses the SAME % of the account — which is
+    what "0.5% risk per trade" means. Consequences, all deliberate:
+
+    - A trade with NO stop, or a stop at/through the entry, cannot be sized
+      and is EXCLUDED (counted in `unsized`) — never silently sized at 1 share.
+    - Equity COMPOUNDS in trade order: each trade is sized on the equity that
+      existed when it was entered (P&L of everything that closed before it),
+      so a losing streak shrinks size the way a real account does.
+    - CAPITAL CAP: you cannot buy more stock than you have money for. Shares
+      are capped so the position's NOTIONAL (shares x entry) <= `max_leverage`
+      x equity, default 1.0 = CASH (a $100k account never holds more than
+      $100k of stock). A tight stop implies a huge share count — that trade is
+      capped and then risks LESS than `risk_pct`, which is the real-world
+      outcome, not a bug. Capped trades are counted in `size_capped_by_leverage`
+      so the report can say so. Set max_leverage 2/4 only if the account really
+      has that margin.
+    - Fees use the same per-share/min-per-order model as the TTP block, on
+      the ACTUAL sized shares.
+    - Scale-outs: each leg's fraction of the sized position closes at the
+      leg price; the runner closes at the trade's exit.
+    """
+    if not closed:
+        return None
+    try:
+        equity0 = float(spec.get('account_equity') or 0)
+    except (TypeError, ValueError):
+        equity0 = 0.0
+    if equity0 <= 0:
+        return None                     # feature is opt-in
+    try:
+        risk_pct = float(spec.get('risk_pct') or 0)
+    except (TypeError, ValueError):
+        risk_pct = 0.0
+    if risk_pct <= 0:
+        return None
+    lev = float(spec.get('max_leverage', 1) or 1)   # 1.0 = cash, no margin
+    fps = float(spec.get('fee_per_share', 0) or 0)
+    fmin = float(spec.get('fee_min_per_order', 0) or 0)
+    order_fee = (lambda sz: max(fps * sz, fmin)) if (fps or fmin) else (lambda sz: 0.0)
+
+    rows = sorted(closed, key=lambda t: (t.get('entry_ts') or 0))
+    pending: list[tuple[int, float]] = []      # (exit_ts, pnl) not yet credited
+    equity = equity0
+    peak = equity0
+    maxdd = 0.0
+    fees_tot = pnl_tot = 0.0
+    unsized = capped = 0
+    wins = 0
+    sized_n = 0
+    curve = []
+    for t in rows:
+        # credit everything that CLOSED before this entry → sizing equity
+        et_in = t.get('entry_ts') or 0
+        still = []
+        for xt, p in pending:
+            if xt <= et_in:
+                equity += p
+            else:
+                still.append((xt, p))
+        pending = still
+        entry = float(t['entry'])
+        stop = t.get('stop')
+        sgn = 1.0 if t['side'] == 'long' else -1.0
+        per_share_risk = (entry - float(stop)) * sgn if stop is not None else None
+        if not per_share_risk or per_share_risk <= 0 or entry <= 0 or equity <= 0:
+            unsized += 1
+            continue
+        shares = (equity * risk_pct / 100.0) / per_share_risk
+        max_sh = (equity * lev) / entry
+        if shares > max_sh:
+            shares = max_sh
+            capped += 1
+        if shares <= 0:
+            unsized += 1
+            continue
+        # gross P&L over every fill (legs + runner), fees per ORDER
+        gross = 0.0
+        fee = order_fee(shares)                  # the entry order
+        for fr, pps in _fills(t, True):
+            gross += shares * fr * pps
+            fee += order_fee(shares * fr)
+        net = gross - fee
+        fees_tot += fee
+        pnl_tot += net
+        sized_n += 1
+        if net > 0:
+            wins += 1
+        pending.append((t.get('exit_ts') or et_in, net))
+        # equity curve marked when the trade closes (peak/DD on realized)
+        realized_now = equity + sum(p for _, p in pending)
+        peak = max(peak, realized_now)
+        if peak > 0:
+            maxdd = max(maxdd, (peak - realized_now) / peak)
+        curve.append(round(realized_now, 2))
+    equity += sum(p for _, p in pending)         # settle the tail
+    return {
+        'account_equity_start': round(equity0, 2),
+        'risk_pct': risk_pct,
+        'max_leverage': lev,
+        'equity_end': round(equity, 2),
+        'net_pnl_usd': round(pnl_tot, 2),
+        'return_pct': round((equity / equity0 - 1.0) * 100.0, 2),
+        'fees_usd': round(fees_tot, 2),
+        'trades_sized': sized_n,
+        'win_rate_pct': round(100.0 * wins / sized_n, 1) if sized_n else None,
+        'avg_pnl_usd': round(pnl_tot / sized_n, 2) if sized_n else None,
+        'max_drawdown_pct': round(100.0 * maxdd, 2),
+        'unsized_no_stop': unsized,
+        'size_capped_by_leverage': capped,
+        'equity_curve': curve[-400:],
+    }
+
+
 def _summary(closed: list, opens: list, n_pairs: int, errors: list,
              all_dates: list | None = None, cost_bps: float = 0.0,
              spec: dict | None = None, coverage: dict | None = None) -> dict:
@@ -257,6 +375,9 @@ def _summary(closed: list, opens: list, n_pairs: int, errors: list,
     ttp = _ttp_block(closed, opens, spec or {})
     if ttp:
         out['ttp'] = ttp
+    acct = _account_block(closed, spec or {})
+    if acct:
+        out['account'] = acct
     return out
 
 
@@ -353,6 +474,7 @@ def run(spec: dict, progress_cb=None) -> dict:
                         closed.append({'date': day, 'symbol': sym, 'side': side,
                                        'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
                                        'entry': t['entry'], 'exit': t['exit'],
+                                       'stop': t.get('stop'),
                                        'ret': t['ret'] - (2.0 + nlegs) * cost,
                                        'reason': t['reason'],
                                        # diagnostic rides in ctx (no schema change)
@@ -368,6 +490,7 @@ def run(spec: dict, progress_cb=None) -> dict:
                     opens.append({'date': day, 'symbol': sym, 'side': side,
                                   'entry_ts': ot['time'], 'exit_ts': None,
                                   'entry': ot['entry'], 'exit': None,
+                                  'stop': ot.get('stop'),
                                   # entry side + each banked partial (runner open)
                                   'ret': ot['ret_pct'] / 100.0 - (1.0 + nlegs) * cost,
                                   'reason': 'open',

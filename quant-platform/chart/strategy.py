@@ -795,6 +795,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     open_trade = None
     in_pos = False; ei = 0; sl = tp = None; ep_cur = None
     sl_eff = None                        # RATCHET: a stop never loosens (see below)
+    sl_at_entry = None                   # the armed stop AT ENTRY (position sizing)
     pending_exit = False                 # next_open: exit signal seen, fills next bar
     # ── entry DISCIPLINE (all optional, per ET session day) ──
     #  max_per_day    "2 strikes and out": cap attempts/day (PDF 1-2). None=∞.
@@ -929,6 +930,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
                 entered_run = True        # this true-run has now been taken
                 sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
+                sl_at_entry = sl_eff
                 # frozen anchors: capture the signal-bar level as a FIXED
                 # scalar; the per-bar trailing array is ignored for this trade.
                 if sl_frozen and e_sl is not None and e_sl == e_sl:
@@ -1006,6 +1008,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             total = realized + remaining * r
             trades.append({'ei': ei, 'xi': xi, 'ret': float(total), 'reason': reason,
                            'entry': float(ep_cur), 'exit': float(px),
+                           # the ARMED stop at entry — risk-based position
+                           # sizing needs the per-share risk, not just the %
+                           'stop': (float(sl_at_entry) if sl_at_entry is not None
+                                    and sl_at_entry == sl_at_entry else None),
                            'legs': list(legs)})
             last_exit_bar = xi           # start the cooldown clock
         if pending_exit:
@@ -1086,7 +1092,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 last = legs[-1]
                 trades.append({'ei': ei, 'xi': last['xi'], 'ret': float(realized),
                                'reason': last['reason'], 'entry': float(ep_cur),
-                               'exit': last['price'], 'legs': list(legs)})
+                               'exit': last['price'],
+                               'stop': (float(sl_at_entry) if sl_at_entry is not None
+                                        and sl_at_entry == sl_at_entry else None),
+                               'legs': list(legs)})
                 last_exit_bar = last['xi']
                 in_pos = False; continue
         # stop on the REMAINING lot (partials, if any, already banked above).
@@ -1125,6 +1134,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         # fold any banked partials into the still-open position's mark-to-market
         open_trade = {'ei': ei, 'entry': float(ep_cur),
                       'last': float(close[-1]), 'ret': float(realized + remaining * r),
+                      'stop': (float(sl_at_entry) if sl_at_entry is not None
+                               and sl_at_entry == sl_at_entry else None),
                       'legs': list(legs), 'tgt_armed': len(tgt_fr)}
     return trades, sl_view, tp_view, open_trade
 
@@ -1530,6 +1541,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         # EXACTLY this, so preview and backtest can never disagree.
         'trades': [{'entry_ts': int(ts[t['ei']]), 'exit_ts': int(ts[t['xi']]),
                     'entry': t['entry'], 'exit': t['exit'], 'ret': t['ret'],
+                    'stop': t.get('stop'),
                     'reason': t['reason'], 'drop_pct': _drop_at(t['ei'], t['entry']),
                     # scale-out partials, timestamped for the chart (Step 3)
                     'legs': [{'exit_ts': int(ts[g['xi']]), 'price': g['price'],
@@ -1547,6 +1559,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         'stats': stats,
         'open_trade': ({'time': int(ts[open_trade['ei']]),
                         'entry': open_trade['entry'],
+                        'stop': open_trade.get('stop'),
                         'ret_pct': round(100.0 * open_trade['ret'], 3),
                         'drop_pct': _drop_at(open_trade['ei'], open_trade['entry']),
                         'legs': [{'exit_ts': int(ts[g['xi']]), 'price': g['price'],

@@ -227,6 +227,29 @@ def _ttp_html(s: dict) -> str:
 </div>"""
 
 
+def _account_html(s: dict) -> str:
+    a = (s or {}).get('account')
+    if not a:
+        return ''
+    warn = ''
+    if a.get('unsized_no_stop'):
+        warn += (f"<div class=\"warn\">⚠ {a['unsized_no_stop']} trades EXCLUDED — no "
+                 f"usable stop, so risk-based size is undefined</div>")
+    if a.get('size_capped_by_leverage'):
+        warn += (f"<div class=\"warn\">⚠ {a['size_capped_by_leverage']} trades hit the "
+                 f"CAPITAL cap (position would exceed {a['max_leverage']}x the "
+                 f"balance) — they risked LESS than {a['risk_pct']}%</div>")
+    return f"""<h3>Real account — ${a['account_equity_start']:,.0f} risking {a['risk_pct']}% per trade</h3>
+{warn}<div class="grid">
+<div class="kpi"><b>${a['equity_end']:,.2f}</b><span>ending equity (compounded in trade order)</span></div>
+<div class="kpi"><b>{a['return_pct']:+.2f}%</b><span>account return</span></div>
+<div class="kpi"><b>${a['net_pnl_usd']:,.2f}</b><span>net P&amp;L after ${a['fees_usd']:,.2f} commissions</span></div>
+<div class="kpi"><b>{a['max_drawdown_pct']}%</b><span>max drawdown (realized equity)</span></div>
+<div class="kpi"><b>{a['win_rate_pct']}%</b><span>win rate on sized trades ({a['trades_sized']})</span></div>
+<div class="kpi"><b>${a['avg_pnl_usd']:,.2f}</b><span>average P&amp;L per trade</span></div>
+</div>"""
+
+
 @app.get('/api/backtest/{bid}/report')
 def backtest_report(bid: int):
     """Self-contained phone-readable HTML report: clear metric definitions,
@@ -307,6 +330,7 @@ rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_c
 <div class="kpi"><b>{cov.get('signals_on_day', 0)}</b><span>entry signals on {cov.get('signal_pairs', 0)} pairs → {cov.get('traded_pairs', 0)} traded</span></div>''') if cov else ''}
 {(f'''<div class="kpi"><b>{cov.get('scaleout_legs')}</b><span>scale-out partials banked across {cov.get('scaleout_trades', 0)} trades (returns are size-weighted)</span></div>''') if cov and cov.get('scaleout_legs') else ''}
 </div>
+{_account_html(s)}
 {_ttp_html(s)}
 <div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th><th>drop%</th><th>why</th></tr>
 {rows}</table></div>
