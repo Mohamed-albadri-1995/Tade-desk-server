@@ -287,12 +287,27 @@ def backtest_report(bid: int):
                     f"caps; rerun on polygon)")
     _drop = lambda t: (f"{(t.get('ctx') or {}).get('drop_pct'):.2f}%"
                        if (t.get('ctx') or {}).get('drop_pct') is not None else '—')
+    def _acct_cells(t):
+        c = t.get('ctx') or {}
+        sh, pl = c.get('acct_shares'), c.get('acct_pnl_usd')
+        if sh is None or pl is None:
+            note = c.get('acct_note') or '—'
+            return f"<td colspan='4' class='muted'>{note}</td>"
+        return (f"<td>{sh:,.0f}</td><td>${c.get('acct_notional_usd', 0):,.0f}</td>"
+                f"<td class='{'up' if pl > 0 else 'dn'}'>{'+' if pl >= 0 else ''}"
+                f"${pl:,.2f}</td>"
+                f"<td>{c.get('acct_r_multiple') if c.get('acct_r_multiple') is not None else '—'}</td>")
+    _has_acct = bool((s or {}).get('account'))
     rows = ''.join(
         f"<tr><td>{t['date']}</td><td><b>{t['symbol']}</b></td><td>{t['side']}</td>"
         f"<td>{t['entry']:.2f}→{('%.2f' % t['exit']) if t.get('exit') is not None else 'open'}</td>"
         f"<td class='{'up' if (t.get('ret') or 0) > 0 else 'dn'}'>"
-        f"{(t['ret'] * 100):+.2f}%</td><td>{_drop(t)}</td><td>{t['reason']}</td></tr>"
+        f"{(t['ret'] * 100):+.2f}%</td>"
+        + (_acct_cells(t) if _has_acct else '')
+        + f"<td>{_drop(t)}</td><td>{t['reason']}</td></tr>"
         for t in (g.get('trades') or []))
+    _acct_hdr = ('<th>shares</th><th>position</th><th>P&amp;L</th><th>R</th>'
+                 if _has_acct else '')
     m = (lambda k, d='—': s.get(k) if s.get(k) is not None else d)
     html = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -332,14 +347,14 @@ rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_c
 </div>
 {_account_html(s)}
 {_ttp_html(s)}
-<div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th><th>drop%</th><th>why</th></tr>
+<div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th>{_acct_hdr}<th>drop%</th><th>why</th></tr>
 {rows}</table></div>
 <div class="defs"><b>How to read this honestly:</b><br>
 · Every trade uses the exact strategy JSON + verified qp math the chart draws — no re-implementation.<br>
 · Only trades ENTERED on each evaluated day count (no warm-up leakage, no look-ahead).<br>
 · Register universes are frozen as-of each morning → no survivorship bias. Symbol lists carry whatever bias you typed.<br>
 · 'open' rows were still holding at the day window's end — excluded from win rate.<br>
-· Returns are per-unit-position %; position sizing/compounding belongs to the trading tool.</div>
+· {'Returns are per-unit-position %; the ACCOUNT block above is the real-money view — shares sized from the stop, equity compounded in trade order, positions capped at the cash balance.' if _has_acct else 'Returns are per-unit-position %; position sizing/compounding belongs to the trading tool.'}</div>
 </body></html>"""
     return HTMLResponse(html)
 

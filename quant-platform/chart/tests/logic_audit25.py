@@ -109,6 +109,28 @@ ok("net = -$550 (risk + commissions)", abs(i['net_pnl_usd'] + 550) < 1e-6,
    f"net={i['net_pnl_usd']}")
 
 print("=" * 64)
+print("PART H — PER-TRADE detail lands in ctx (persisted + CSV + panel)")
+print("=" * 64)
+rows = [T(10.00, 9.90, 9.90)]
+bt._account_block(rows, {**SPEC, 'fee_per_share': 0.005})
+c = rows[0].get('ctx') or {}
+ok("shares 5,000", c.get('acct_shares') == 5000, f"{c.get('acct_shares')}")
+ok("risk $500 (=0.5% of 100k)", abs(c.get('acct_risk_usd', 0) - 500) < 1e-6,
+   f"{c.get('acct_risk_usd')}")
+ok("position notional $50,000", abs(c.get('acct_notional_usd', 0) - 50000) < 1e-6,
+   f"{c.get('acct_notional_usd')}")
+ok("P&L -$550 (loss + $50 fees)", abs(c.get('acct_pnl_usd', 0) + 550) < 1e-6,
+   f"{c.get('acct_pnl_usd')}")
+ok("R-multiple -1.0 on a stop-out", c.get('acct_r_multiple') == -1.0,
+   f"{c.get('acct_r_multiple')}")
+ok("equity before the trade = 100,000",
+   abs(c.get('acct_equity_before', 0) - 100000) < 1e-6, f"{c.get('acct_equity_before')}")
+rows2 = [T(10.00, 11.00, None)]
+bt._account_block(rows2, SPEC)
+ok("unsized trade carries a NOTE, not silent zeros",
+   (rows2[0].get('ctx') or {}).get('acct_note') is not None)
+
+print("=" * 64)
 print("PART G — off by default (opt-in only)")
 print("=" * 64)
 ok("no account_equity → no account block", bt._account_block([T(10, 11, 9)], {}) is None)

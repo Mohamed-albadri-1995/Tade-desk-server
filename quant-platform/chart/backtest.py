@@ -272,6 +272,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         per_share_risk = (entry - float(stop)) * sgn if stop is not None else None
         if not per_share_risk or per_share_risk <= 0 or entry <= 0 or equity <= 0:
             unsized += 1
+            t.setdefault('ctx', {})['acct_note'] = 'no stop — not sized'
             continue
         shares = (equity * risk_pct / 100.0) / per_share_risk
         max_sh = (equity * lev) / entry
@@ -293,6 +294,18 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         sized_n += 1
         if net > 0:
             wins += 1
+        # PER-TRADE DETAIL — written into ctx (the only per-trade field the
+        # store persists as JSON), so it survives a reload and lands in the
+        # CSV automatically as ctx_* columns.
+        _c = t.setdefault('ctx', {})
+        _c['acct_shares'] = round(shares, 2)
+        _c['acct_risk_usd'] = round(shares * per_share_risk, 2)
+        _c['acct_pnl_usd'] = round(net, 2)
+        _c['acct_fees_usd'] = round(fee, 2)
+        _c['acct_equity_before'] = round(equity, 2)
+        _c['acct_notional_usd'] = round(shares * entry, 2)
+        _c['acct_r_multiple'] = (round(gross / (shares * per_share_risk), 2)
+                                 if per_share_risk > 0 else None)
         pending.append((t.get('exit_ts') or et_in, net))
         # equity curve marked when the trade closes (peak/DD on realized)
         realized_now = equity + sum(p for _, p in pending)

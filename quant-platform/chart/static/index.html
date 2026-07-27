@@ -988,7 +988,12 @@ function btRenderCore(g,extra){
   for(const t of rows){
     const d=document.createElement('div'); d.className='card'; d.style.padding='4px 6px';
     const cls=(t.ret||0)>0?'up':'dn';
-    d.innerHTML=`<span class="tk">${t.symbol}</span> <span class="muted">${t.date}</span> <span class="${cls}" style="float:right">${t.ret!=null?((t.ret*100).toFixed(2)+'%'):'—'} ${t.reason}</span>`;
+    // real-account detail (present when account $ + risk % were set)
+    const _c=t.ctx||{}, _sh=_c.acct_shares, _pl=_c.acct_pnl_usd;
+    const _acct = (_sh!=null&&_pl!=null)
+      ? `<br><span class="muted" style="font-size:11px">${Math.round(_sh).toLocaleString()} sh · $${Math.round(_c.acct_notional_usd||0).toLocaleString()} pos · risk $${Math.round(_c.acct_risk_usd||0)} · <b style="color:${_pl>=0?'#22c55e':'#ef5350'}">${_pl>=0?'+':''}$${_pl.toLocaleString()}</b>${_c.acct_r_multiple!=null?` · ${_c.acct_r_multiple}R`:''}</span>`
+      : (_c.acct_note?`<br><span class="muted" style="font-size:11px">⚠ ${_c.acct_note}</span>`:'');
+    d.innerHTML=`<span class="tk">${t.symbol}</span> <span class="muted">${t.date}</span> <span class="${cls}" style="float:right">${t.ret!=null?((t.ret*100).toFixed(2)+'%'):'—'} ${t.reason}</span>${_acct}`;
     d.title=`${t.side} ${t.entry} → ${t.exit??'(open)'}`;
     d.onclick=async()=>{ // REPLAY the backtest's exact settings on this trade's chart:
       const spec=(g&&g.spec)||{};
