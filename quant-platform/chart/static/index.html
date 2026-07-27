@@ -956,6 +956,12 @@ function btRenderCore(g,extra){
     ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+` · ${s.pairs} pairs`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span id="btErrTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="tap to see which day·symbol pairs failed and why">⚠ ${s.errors} errors</span>`:'')
     : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
   if(s.ttp){ html+=`<br><span style="color:var(--draft)">TTP @ ${s.ttp.shares} sh: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counted $${s.ttp.counted_pnl_usd} · ${s.ttp.wins_below_min} wins < $${s.ttp.min_profit_ps}/sh wasted</span>`; }
+  // REAL ACCOUNT: risk-based sizing (only when account $ + risk % were set)
+  const _ac=BT_LAST&&BT_LAST.summary&&BT_LAST.summary.account;
+  if(_ac){ html+=`<br><span style="color:var(--blue)">ACCOUNT $${_ac.account_equity_start.toLocaleString()} @ ${_ac.risk_pct}% risk: `
+    +`<b>$${_ac.equity_end.toLocaleString()}</b> (${_ac.return_pct>=0?'+':''}${_ac.return_pct}%) · net $${_ac.net_pnl_usd.toLocaleString()} · maxDD ${_ac.max_drawdown_pct}% · ${_ac.trades_sized} sized`
+    +(_ac.unsized_no_stop?` · ⚠ ${_ac.unsized_no_stop} no-stop excluded`:'')
+    +(_ac.size_capped_by_leverage?` · ⚠ ${_ac.size_capped_by_leverage} capped at balance`:'')+`</span>`; }
   const cov=s.coverage;
   if(cov){
     let c=`coverage: <b>${cov.evaluated}/${cov.pairs}</b> pairs had data (${cov.tf}·${cov.feed})`;
