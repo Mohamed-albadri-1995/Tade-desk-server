@@ -56,10 +56,16 @@ sc.register_rows = lambda register='R1', date=None, full=False: {
 OVS = [{'id': 'o1', 'key': 'ma.sma', 'source': 'close',
         'params': {'length': 9}, 'color': '#2563eb'}]
 
+sc.available_dates = lambda register='R1': ['2026-07-13', '2026-07-14']
+
+def sheets_of(html):
+    m = re.search(r'const SHEETS = (\[.*?\]);\n', html, re.S)
+    return json.loads(m.group(1)) if m else []
+
 html = srv.r1_print(day=DAY, tf='5m', feed='prt', overlays=json.dumps(OVS),
                     register='R1', days_before=1, cols=1).body.decode()
-m = re.search(r'const DATA = (\[.*?\]);\n', html, re.S)
-data = json.loads(m.group(1)) if m else []
+sheets = sheets_of(html)
+data = sheets[0]['charts'] if sheets else []
 
 print("=" * 64)
 print("PART A — window: 04:00 ET one day back, through the register day")
@@ -121,10 +127,46 @@ ok("names register, day, tf and indicators in the header",
 # days_before=0 must start on the register day itself
 html0 = srv.r1_print(day=DAY, tf='5m', feed='prt', overlays='[]',
                      register='R1', days_before=0).body.decode()
-d0 = json.loads(re.search(r'const DATA = (\[.*?\]);\n', html0, re.S).group(1))
+d0 = sheets_of(html0)[0]['charts']
 f0 = pd.Timestamp(d0[0]['bars'][0]['time'], unit='s', tz='UTC').tz_convert(ET)
 ok("days_before=0 starts 04:00 ET on the register day",
    f0.strftime('%Y-%m-%d %H:%M') == '2026-07-14 04:00', f'{f0}')
+
+print("=" * 64)
+print("PART E — days AFTER, register-day highlight, and a DATE RANGE")
+print("=" * 64)
+# days_after=0 must stop at the end of the register day
+if data:
+    lastd = pd.Timestamp(data[0]['bars'][-1]['time'], unit='s',
+                         tz='UTC').tz_convert(ET).strftime('%Y-%m-%d')
+    ok("days_after=0 ends on the register day", lastd == '2026-07-14', lastd)
+# the register day itself is flagged for the highlight band
+if data:
+    rd = {pd.Timestamp(b['time'], unit='s', tz='UTC').tz_convert(ET).strftime('%Y-%m-%d')
+          for b in data[0]['bars'] if b.get('rd')}
+    other = {pd.Timestamp(b['time'], unit='s', tz='UTC').tz_convert(ET).strftime('%Y-%m-%d')
+             for b in data[0]['bars'] if not b.get('rd')}
+    ok("ONLY the register day's bars carry the highlight flag",
+       rd == {'2026-07-14'} and '2026-07-14' not in other, f'rd={rd} other={other}')
+ok("the page draws a distinct register-day colour + a legend",
+   'rgba(253,230,138,.55)' in html and 'register day' in html)
+
+# a RANGE prints one section per register day
+htmlR = srv.r1_print(start='2026-07-13', end='2026-07-14', tf='5m', feed='prt',
+                     overlays='[]', register='R1', days_before=0,
+                     days_after=0).body.decode()
+sh = sheets_of(htmlR)
+ok("range 07-13 → 07-14 prints BOTH register days",
+   [x['day'] for x in sh] == ['2026-07-13', '2026-07-14'], f'{[x["day"] for x in sh]}')
+# the day headers are rendered client-side from SHEETS, so assert the DATA
+# drives them (one labelled section per register day) plus the page-break CSS
+ok("each register day becomes its own labelled, page-broken section",
+   len(sh) == 2 and all(x.get('day') for x in sh)
+   and "h.textContent = 'register day ' + sheet.day" in htmlR
+   and 'page-break-before:always' in htmlR)
+# a range that matches no frozen day says so instead of printing nothing
+htmlN = srv.r1_print(start='2020-01-01', end='2020-01-02', feed='prt').body.decode()
+ok("empty range is reported, not silently blank", 'no frozen' in htmlN)
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")

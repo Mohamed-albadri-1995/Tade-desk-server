@@ -1211,45 +1211,59 @@ document.getElementById('printR1Btn').onclick = async () => {
     <div style="font-weight:600;margin-bottom:8px">🖨 Print register day</div>
     <label style="display:block;margin-bottom:6px">Register
       <select id="prReg" style="width:100%"><option>R1</option><option>Shortlist</option></select></label>
-    <label style="display:block;margin-bottom:6px">Date
-      <select id="prDate" style="width:100%"><option>loading…</option></select></label>
+    <label style="display:block;margin-bottom:6px">From
+      <select id="prFrom" style="width:100%"><option>loading…</option></select></label>
+    <label style="display:block;margin-bottom:6px">To
+      <select id="prTo" style="width:100%"><option>loading…</option></select></label>
     <label style="display:block;margin-bottom:6px">Timeframe
       <select id="prTf" style="width:100%">
         <option>1m</option><option>2m</option><option selected>5m</option>
         <option>15m</option><option>30m</option><option>1h</option></select></label>
-    <label style="display:block;margin-bottom:6px">Days before
-      <input id="prDays" type="number" value="1" min="0" max="5" style="width:100%"></label>
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <label style="flex:1">Days before
+        <input id="prDays" type="number" value="1" min="0" max="10" style="width:100%"></label>
+      <label style="flex:1">Days after
+        <input id="prAfter" type="number" value="0" min="0" max="10" style="width:100%"></label>
+    </div>
     <label style="display:block;margin-bottom:6px">Charts per row
       <input id="prCols" type="number" value="1" min="1" max="3" style="width:100%"></label>
     <div style="color:#94a3b8;font-size:11px;margin:6px 0 10px">
-      indicators: ${ovNames}<br>window: 04:00–20:00 ET incl. pre/post</div>
+      indicators: ${ovNames}<br>window: 04:00–20:00 ET incl. pre/post · the register day is highlighted</div>
     <button id="prGo" style="width:100%;background:#2563eb;color:#fff;border:0;
       padding:7px;border-radius:6px;cursor:pointer">Open print sheet</button>`;
   document.body.appendChild(box);
 
   const regSel = document.getElementById('prReg');
-  const dateSel = document.getElementById('prDate');
+  const fromSel = document.getElementById('prFrom');
+  const toSel = document.getElementById('prTo');
   const loadDates = async () => {
-    dateSel.innerHTML = '<option>loading…</option>';
+    fromSel.innerHTML = toSel.innerHTML = '<option>loading…</option>';
     try {
       const r = await fetch('api/screener/dates?register=' + regSel.value);
       const j = await r.json();
-      const ds = (j.dates || []).slice().reverse();
-      dateSel.innerHTML = ds.length ? ds.map(d=>`<option>${d}</option>`).join('')
-                                    : '<option value="">no frozen days</option>';
-    } catch (e) { dateSel.innerHTML = '<option value="">failed to load</option>'; }
+      const ds = (j.dates || []).slice().sort();            // oldest → newest
+      if (!ds.length) { fromSel.innerHTML = toSel.innerHTML =
+          '<option value="">no frozen days</option>'; return; }
+      const opts = ds.map(d=>`<option>${d}</option>`).join('');
+      fromSel.innerHTML = opts; toSel.innerHTML = opts;
+      // default to the LATEST day on both ends (one day, as before)
+      fromSel.value = ds[ds.length-1]; toSel.value = ds[ds.length-1];
+    } catch (e) { fromSel.innerHTML = toSel.innerHTML =
+        '<option value="">failed to load</option>'; }
   };
   regSel.onchange = loadDates;
   await loadDates();
 
   document.getElementById('prGo').onclick = () => {
-    const day = dateSel.value;
-    if (!day) return;
+    let a = fromSel.value, b = toSel.value;
+    if (!a || !b) return;
+    if (a > b) { const t = a; a = b; b = t; }     // tolerate reversed picks
     const qs = new URLSearchParams({
-      day, register: regSel.value,
+      start: a, end: b, register: regSel.value,
       tf: document.getElementById('prTf').value,
       feed: document.getElementById('feed').value,
-      days_before: document.getElementById('prDays').value || '1',
+      days_before: document.getElementById('prDays').value || '0',
+      days_after: document.getElementById('prAfter').value || '0',
       cols: document.getElementById('prCols').value || '1',
       overlays: JSON.stringify(OVERLAYS || []),
     });

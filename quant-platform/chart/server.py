@@ -541,125 +541,181 @@ def chart(symbol: str = 'SPY', tf: str = '5m', days: int = 5,
 
 
 @app.get('/api/r1/print', response_class=HTMLResponse)
-def r1_print(day: str, tf: str = '1m', feed: str = 'polygon',
-             overlays: str = '[]', register: str = 'R1', days_before: int = 1,
+def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
+             feed: str = 'polygon', overlays: str = '[]', register: str = 'R1',
+             days_before: int = 1, days_after: int = 0,
              cols: int = 1, height: int = 420):
-    """PRINT SHEET: one chart per ticker in a register day, on the timeframe
-    and indicators you choose.
+    """PRINT SHEET: one chart per ticker, for EVERY register day in a range.
 
-    Window: the register DAY in full extended hours (04:00-20:00 ET) PLUS
-    `days_before` prior calendar days (also in full), so the previous
-    session's post-market and the overnight into that morning's premarket are
-    on the same chart. view='all' keeps pre/post bars and tints them.
+    Window per register day D: `days_before` calendar days before D through
+    `days_after` calendar days after D, all in FULL extended hours
+    (04:00-20:00 ET). So the previous session's post-market, the overnight,
+    D's premarket/RTH/post-market — and, with days_after, how it followed
+    through — are on one chart. Calendar days (not trading days) so a Monday
+    reaches back through the weekend to Friday.
 
-    Everything is computed by the SAME cs.compute_data() the live chart uses,
-    so a printed chart and the on-screen chart cannot disagree.
+    D's own bars are tinted a distinct colour so the register day itself is
+    unmistakable next to the context days.
+
+    `start`/`end` select the range (inclusive); `day` is accepted as a
+    shorthand for start=end=day. Everything is computed by the SAME
+    cs.compute_data() the live chart uses.
     """
     import json as _json
+    import pandas as _pd
+    if day and not start and not end:
+        start = end = day
+    start = start or end
+    end = end or start
+    if not start:
+        return HTMLResponse('<h3>need a date (start/end, or day)</h3>')
     try:
         ovs = _json.loads(overlays) if overlays else []
     except _json.JSONDecodeError:
         ovs = []
-    reg = sc.register_rows(register, day)
-    if not reg.get('ok'):
-        return HTMLResponse(f"<h3>register fetch failed: {reg.get('error')}</h3>")
-    tickers, seen = [], set()
-    for r in reg.get('rows') or []:
-        t = str(r.get('ticker') or '').strip().upper()
-        if t and t not in seen:
-            seen.add(t); tickers.append(t)
-    if not tickers:
-        return HTMLResponse(f"<h3>{register} has no tickers on {day}</h3>")
 
-    # window start = 04:00 ET, `days_before` CALENDAR days before the register
-    # day (calendar, not trading: a Monday register day then reaches back
-    # through the weekend to Friday, which is what you want to see).
-    import pandas as _pd
-    d0 = _pd.Timestamp(day, tz=cs._ET)
-    win_start = (d0 - _pd.Timedelta(days=int(days_before))).replace(hour=4, minute=0)
-    cutoff = int(win_start.timestamp())
+    # which register days actually exist in the range
+    have = sc.available_dates(register) or []
+    days = sorted(d for d in have if str(start) <= d <= str(end))
+    if not days:
+        return HTMLResponse(
+            f'<h3>no frozen {register} days between {start} and {end}</h3>')
 
-    charts, errors = [], []
-    for sym in tickers:
-        try:
-            # fetch enough calendar days to cover the window + indicator warm-up
-            need = dm.required_days(ovs, tf, int(days_before) + 1)
-            data = cs.compute_data(symbol=sym, tf=tf, days=need, overlays=ovs,
-                                   feed=feed, view='all', asof=day)
-            bars = [b for b in (data.get('bars') or []) if b['time'] >= cutoff]
-            if not bars:
-                errors.append(f'{sym}: no bars in window'); continue
-            ser = []
-            for sr in (data.get('series') or []):
-                vals = [v for v in (sr.get('values') or []) if v['time'] >= cutoff]
-                ser.append({**sr, 'values': vals})
-            charts.append({'symbol': sym, 'bars': bars, 'series': ser})
-        except Exception as e:                      # one bad symbol never kills the sheet
-            errors.append(f'{sym}: {e}')
+    sheets, errors = [], []
+    for d in days:
+        reg = sc.register_rows(register, d)
+        if not reg.get('ok'):
+            errors.append(f'{d}: register fetch failed ({reg.get("error")})')
+            continue
+        tickers, seen = [], set()
+        for r in reg.get('rows') or []:
+            t = str(r.get('ticker') or '').strip().upper()
+            if t and t not in seen:
+                seen.add(t); tickers.append(t)
+        if not tickers:
+            errors.append(f'{d}: no tickers')
+            continue
+
+        d0 = _pd.Timestamp(d, tz=cs._ET)
+        w_start = (d0 - _pd.Timedelta(days=int(days_before))).replace(hour=4, minute=0)
+        w_end = (d0 + _pd.Timedelta(days=int(days_after))).replace(hour=20, minute=0)
+        lo_ts, hi_ts = int(w_start.timestamp()), int(w_end.timestamp())
+        # the register day itself, for the highlight band
+        rd_lo = int(d0.replace(hour=0, minute=0).timestamp())
+        rd_hi = int((d0 + _pd.Timedelta(days=1)).replace(hour=0, minute=0).timestamp())
+        # the fetch must END after the window, so asof moves forward with days_after
+        asof = (d0 + _pd.Timedelta(days=int(days_after))).strftime('%Y-%m-%d')
+        span = int(days_before) + int(days_after) + 1
+
+        charts = []
+        for sym in tickers:
+            try:
+                need = dm.required_days(ovs, tf, span)
+                data = cs.compute_data(symbol=sym, tf=tf, days=need, overlays=ovs,
+                                       feed=feed, view='all', asof=asof)
+                bars = [b for b in (data.get('bars') or [])
+                        if lo_ts <= b['time'] <= hi_ts]
+                if not bars:
+                    errors.append(f'{d} {sym}: no bars in window'); continue
+                for b in bars:                      # mark the register day
+                    b['rd'] = 1 if rd_lo <= b['time'] < rd_hi else 0
+                ser = []
+                for sr in (data.get('series') or []):
+                    ser.append({**sr, 'values': [v for v in (sr.get('values') or [])
+                                                 if lo_ts <= v['time'] <= hi_ts]})
+                charts.append({'symbol': sym, 'bars': bars, 'series': ser})
+            except Exception as e:      # one bad symbol never kills the sheet
+                errors.append(f'{d} {sym}: {e}')
+        if charts:
+            sheets.append({'day': d, 'charts': charts})
 
     ov_names = ', '.join(str(o.get('key', '?')) for o in ovs) or 'none'
-    payload = _json.dumps(charts)
-    err_html = (f'<div class="warn">skipped: {"; ".join(errors[:8])}</div>'
-                if errors else '')
+    payload = _json.dumps(sheets)
+    n_charts = sum(len(s['charts']) for s in sheets)
+    err_html = (f'<div class="warn">skipped: {"; ".join(errors[:10])}'
+                + (f' … +{len(errors) - 10} more' if len(errors) > 10 else '')
+                + '</div>') if errors else ''
+    rng = start if start == end else f'{start} → {end}'
     return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
-<title>{register} {day} — print</title>
+<title>{register} {rng} — print</title>
 <script src="/static/lightweight-charts.js"></script>
 <style>
  body{{background:#fff;color:#111;font:13px system-ui,Segoe UI,Roboto,sans-serif;margin:14px}}
  h2{{margin:0 0 2px}} .sub{{color:#555;margin-bottom:12px}}
+ h3.day{{margin:18px 0 8px;padding:5px 9px;background:#fde68a;border-radius:6px;
+   border:1px solid #f0c96a;break-before:page;page-break-before:always}}
+ h3.day:first-of-type{{break-before:auto;page-break-before:auto}}
  .warn{{background:#fff4e5;border:1px solid #f0c48a;padding:6px 10px;border-radius:6px;margin-bottom:10px}}
  .grid{{display:grid;grid-template-columns:repeat({max(1, int(cols))},1fr);gap:14px}}
  .card{{border:1px solid #ddd;border-radius:8px;padding:8px;break-inside:avoid;page-break-inside:avoid}}
  .tk{{font-weight:700;font-size:14px}} .rng{{color:#666;font-size:11px}}
+ .key{{color:#666;font-size:11px;margin:2px 0 8px}}
+ .sw{{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin:0 3px 0 8px}}
  @media print{{ body{{margin:0}} .card{{border:1px solid #bbb}} .noprint{{display:none}} }}
 </style></head><body>
-<h2>{register} · {day}</h2>
-<div class="sub">{len(charts)} charts · {tf} · feed {feed} · window: {days_before}d before → end of {day}
- (04:00–20:00 ET, pre/post included) · indicators: {ov_names}</div>
+<h2>{register} · {rng}</h2>
+<div class="sub">{n_charts} charts over {len(sheets)} register day(s) · {tf} · feed {feed} ·
+ window: −{days_before}d → +{days_after}d (04:00–20:00 ET, pre/post included) ·
+ indicators: {ov_names}</div>
+<div class="key"><span class="sw" style="background:#fde68a"></span>register day
+ <span class="sw" style="background:rgba(59,130,246,.25)"></span>premarket
+ <span class="sw" style="background:rgba(168,85,247,.25)"></span>post-market</div>
 {err_html}
 <button class="noprint" onclick="window.print()">🖨 Print / Save as PDF</button>
-<div class="grid" id="g"></div>
+<div id="root"></div>
 <script>
-const DATA = {payload};
+const SHEETS = {payload};
 const H = {int(height)};
-const mk = (el) => LightweightCharts.createChart(el, {{
-  width: el.clientWidth, height: H,
-  layout:{{background:{{color:'#fff'}}, textColor:'#333'}},
-  grid:{{vertLines:{{color:'#eee'}}, horzLines:{{color:'#eee'}}}},
-  rightPriceScale:{{borderColor:'#ccc'}},
-  timeScale:{{borderColor:'#ccc', timeVisible:true, secondsVisible:false}},
-}});
-for (const c of DATA) {{
-  const card = document.createElement('div'); card.className='card';
-  const hd = document.createElement('div');
-  const a = c.bars[0], z = c.bars[c.bars.length-1];
-  const fmt = t => new Date(t*1000).toLocaleString('en-US',
-      {{timeZone:'America/New_York', month:'numeric', day:'numeric',
-        hour:'2-digit', minute:'2-digit'}});
-  hd.innerHTML = '<span class="tk">'+c.symbol+'</span> '
-               + '<span class="rng">'+fmt(a.time)+' → '+fmt(z.time)+' ET · '
-               + c.bars.length+' bars</span>';
-  card.appendChild(hd);
-  const box = document.createElement('div'); card.appendChild(box);
-  document.getElementById('g').appendChild(card);
-  const ch = mk(box);
-  const cs_ = ch.addCandlestickSeries({{upColor:'#16a34a', downColor:'#dc2626',
-      borderUpColor:'#16a34a', borderDownColor:'#dc2626',
-      wickUpColor:'#16a34a', wickDownColor:'#dc2626'}});
-  cs_.setData(c.bars);
-  // tint pre/post-market so the extended sessions are obvious on paper
-  const marks = [];
-  for (const b of c.bars) if (b.sess && b.sess !== 'rth')
-      marks.push({{time:b.time, color: b.sess==='pre' ? 'rgba(59,130,246,.10)'
-                                                      : 'rgba(148,163,184,.16)'}});
-  for (const s of (c.series||[])) {{
-    if (!s.values || !s.values.length) continue;
-    const ln = ch.addLineSeries({{color:s.color||'#2563eb', lineWidth:1,
-        lineStyle: s.style||0, priceLineVisible:false, lastValueVisible:false,
-        ...(s.step ? {{lineType:1}} : {{}})}});
-    ln.setData(s.values);
+const root = document.getElementById('root');
+const fmt = t => new Date(t*1000).toLocaleString('en-US',
+    {{timeZone:'America/New_York', month:'numeric', day:'numeric',
+      hour:'2-digit', minute:'2-digit'}});
+for (const sheet of SHEETS) {{
+  const h = document.createElement('h3'); h.className='day';
+  h.textContent = 'register day ' + sheet.day;
+  root.appendChild(h);
+  const grid = document.createElement('div'); grid.className='grid';
+  root.appendChild(grid);
+  for (const c of sheet.charts) {{
+    const card = document.createElement('div'); card.className='card';
+    const a = c.bars[0], z = c.bars[c.bars.length-1];
+    const hd = document.createElement('div');
+    hd.innerHTML = '<span class="tk">'+c.symbol+'</span> <span class="rng">'
+                 + fmt(a.time)+' → '+fmt(z.time)+' ET · '+c.bars.length+' bars</span>';
+    card.appendChild(hd);
+    const box = document.createElement('div'); card.appendChild(box); grid.appendChild(card);
+    const ch = LightweightCharts.createChart(box, {{
+      width: box.clientWidth, height: H,
+      layout:{{background:{{color:'#fff'}}, textColor:'#333'}},
+      grid:{{vertLines:{{color:'#eee'}}, horzLines:{{color:'#eee'}}}},
+      rightPriceScale:{{borderColor:'#ccc'}},
+      timeScale:{{borderColor:'#ccc', timeVisible:true, secondsVisible:false}},
+    }});
+    // background band: REGISTER DAY gets its own colour; pre/post tinted too
+    const bg = ch.addHistogramSeries({{priceScaleId:'bg', priceLineVisible:false,
+        lastValueVisible:false}});
+    ch.priceScale('bg').applyOptions({{scaleMargins:{{top:0, bottom:0}},
+        visible:false}});
+    bg.setData(c.bars.map(b => ({{time:b.time, value:1,
+      color: b.rd ? (b.sess==='pre' ? 'rgba(251,191,36,.30)'
+                   : b.sess==='post' ? 'rgba(251,191,36,.22)'
+                   : 'rgba(253,230,138,.55)')
+                  : (b.sess==='pre' ? 'rgba(59,130,246,.10)'
+                   : b.sess==='post' ? 'rgba(168,85,247,.10)'
+                   : 'rgba(0,0,0,0)')}})));
+    const cs_ = ch.addCandlestickSeries({{upColor:'#16a34a', downColor:'#dc2626',
+        borderUpColor:'#16a34a', borderDownColor:'#dc2626',
+        wickUpColor:'#16a34a', wickDownColor:'#dc2626'}});
+    cs_.setData(c.bars);
+    for (const s of (c.series||[])) {{
+      if (!s.values || !s.values.length) continue;
+      const ln = ch.addLineSeries({{color:s.color||'#2563eb', lineWidth:1,
+          lineStyle:s.style||0, priceLineVisible:false, lastValueVisible:false,
+          ...(s.step ? {{lineType:1}} : {{}})}});
+      ln.setData(s.values);
+    }}
+    ch.timeScale().fitContent();
   }}
-  ch.timeScale().fitContent();
 }}
 </script></body></html>""")
 
