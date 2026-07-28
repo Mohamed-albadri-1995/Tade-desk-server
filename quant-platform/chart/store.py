@@ -137,7 +137,12 @@ def seed_strategies() -> int:
     copy is REFRESHED to the current bundled definition (same id kept) whenever
     it differs, so engine/exit/scale-out updates actually reach them. Insert if
     missing. To customize, Save-As under a NEW name — that name is never a
-    bundled seed, so it is never touched. Returns how many were inserted/updated.
+    bundled seed, so it is never touched.
+
+    A seed carrying `"_keep_user_edits": true` is RESTORE-ONLY: inserted when
+    absent (so a fresh box gets it back) but never overwritten afterwards, so
+    edits made in the browser survive a restart. Returns how many were
+    inserted/updated.
     """
     seeds_dir = Path(__file__).resolve().parent / 'seeds'
     if not seeds_dir.is_dir():
@@ -158,6 +163,13 @@ def seed_strategies() -> int:
             cur = by_name.get(name)
             if cur is None:
                 save_strategy(payload); changed += 1
+                continue
+            # `_keep_user_edits`: RESTORE-ONLY seed. It is bundled so a fresh
+            # box (or a wiped platform.db) gets it back, but once it exists the
+            # stored copy WINS — edits made in the browser survive restarts.
+            # Use it for the user's own strategies; leave it off for OUR
+            # canonical scalps, which must track the bundle.
+            if obj.get('_keep_user_edits'):
                 continue
             stored = {k: v for k, v in cur.items()
                       if k not in ('id', 'updated_at', 'created_at')}
