@@ -554,8 +554,9 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
     through — are on one chart. Calendar days (not trading days) so a Monday
     reaches back through the weekend to Friday.
 
-    D's own bars are tinted a distinct colour so the register day itself is
-    unmistakable next to the context days.
+    Every day in the window is drawn IDENTICALLY — the register day gets no
+    special colour. Only the SESSION is coloured: premarket and post-market
+    are shaded on all days, the regular session is left plain.
 
     `start`/`end` select the range (inclusive); `day` is accepted as a
     shorthand for start=end=day. Everything is computed by the SAME
@@ -600,9 +601,6 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
         w_start = (d0 - _pd.Timedelta(days=int(days_before))).replace(hour=4, minute=0)
         w_end = (d0 + _pd.Timedelta(days=int(days_after))).replace(hour=20, minute=0)
         lo_ts, hi_ts = int(w_start.timestamp()), int(w_end.timestamp())
-        # the register day itself, for the highlight band
-        rd_lo = int(d0.replace(hour=0, minute=0).timestamp())
-        rd_hi = int((d0 + _pd.Timedelta(days=1)).replace(hour=0, minute=0).timestamp())
         # the fetch must END after the window, so asof moves forward with days_after
         asof = (d0 + _pd.Timedelta(days=int(days_after))).strftime('%Y-%m-%d')
         span = int(days_before) + int(days_after) + 1
@@ -617,8 +615,6 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
                         if lo_ts <= b['time'] <= hi_ts]
                 if not bars:
                     errors.append(f'{d} {sym}: no bars in window'); continue
-                for b in bars:                      # mark the register day
-                    b['rd'] = 1 if rd_lo <= b['time'] < rd_hi else 0
                 ser = []
                 for sr in (data.get('series') or []):
                     ser.append({**sr, 'values': [v for v in (sr.get('values') or [])
@@ -657,9 +653,10 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
 <div class="sub">{n_charts} charts over {len(sheets)} register day(s) · {tf} · feed {feed} ·
  window: −{days_before}d → +{days_after}d (04:00–20:00 ET, pre/post included) ·
  indicators: {ov_names}</div>
-<div class="key"><span class="sw" style="background:#fde68a"></span>register day
- <span class="sw" style="background:rgba(59,130,246,.25)"></span>premarket
- <span class="sw" style="background:rgba(168,85,247,.25)"></span>post-market</div>
+<div class="key">shaded = extended hours on every day:
+ <span class="sw" style="background:rgba(59,130,246,.35)"></span>premarket (04:00–09:30)
+ <span class="sw" style="background:rgba(168,85,247,.35)"></span>post-market (16:00–20:00)
+ · unshaded = regular session</div>
 {err_html}
 <button class="noprint" onclick="window.print()">🖨 Print / Save as PDF</button>
 <div id="root"></div>
@@ -696,13 +693,12 @@ for (const sheet of SHEETS) {{
         lastValueVisible:false}});
     ch.priceScale('bg').applyOptions({{scaleMargins:{{top:0, bottom:0}},
         visible:false}});
+    // PRE / POST get their own colour on EVERY day; RTH is plain white, so
+    // the register day looks exactly like its context days.
     bg.setData(c.bars.map(b => ({{time:b.time, value:1,
-      color: b.rd ? (b.sess==='pre' ? 'rgba(251,191,36,.30)'
-                   : b.sess==='post' ? 'rgba(251,191,36,.22)'
-                   : 'rgba(253,230,138,.55)')
-                  : (b.sess==='pre' ? 'rgba(59,130,246,.10)'
-                   : b.sess==='post' ? 'rgba(168,85,247,.10)'
-                   : 'rgba(0,0,0,0)')}})));
+      color: b.sess==='pre'  ? 'rgba(59,130,246,.16)'
+           : b.sess==='post' ? 'rgba(168,85,247,.16)'
+           : 'rgba(0,0,0,0)'}})));
     const cs_ = ch.addCandlestickSeries({{upColor:'#16a34a', downColor:'#dc2626',
         borderUpColor:'#16a34a', borderDownColor:'#dc2626',
         wickUpColor:'#16a34a', wickDownColor:'#dc2626'}});

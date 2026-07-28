@@ -133,23 +133,35 @@ ok("days_before=0 starts 04:00 ET on the register day",
    f0.strftime('%Y-%m-%d %H:%M') == '2026-07-14 04:00', f'{f0}')
 
 print("=" * 64)
-print("PART E — days AFTER, register-day highlight, and a DATE RANGE")
+print("PART E — days AFTER, NO day highlight, session shading, DATE RANGE")
 print("=" * 64)
 # days_after=0 must stop at the end of the register day
 if data:
     lastd = pd.Timestamp(data[0]['bars'][-1]['time'], unit='s',
                          tz='UTC').tz_convert(ET).strftime('%Y-%m-%d')
     ok("days_after=0 ends on the register day", lastd == '2026-07-14', lastd)
-# the register day itself is flagged for the highlight band
+# NO register-day highlight: every day must be drawn identically. Only the
+# SESSION is coloured, on ALL days (pre / post shaded, RTH plain).
 if data:
-    rd = {pd.Timestamp(b['time'], unit='s', tz='UTC').tz_convert(ET).strftime('%Y-%m-%d')
-          for b in data[0]['bars'] if b.get('rd')}
-    other = {pd.Timestamp(b['time'], unit='s', tz='UTC').tz_convert(ET).strftime('%Y-%m-%d')
-             for b in data[0]['bars'] if not b.get('rd')}
-    ok("ONLY the register day's bars carry the highlight flag",
-       rd == {'2026-07-14'} and '2026-07-14' not in other, f'rd={rd} other={other}')
-ok("the page draws a distinct register-day colour + a legend",
-   'rgba(253,230,138,.55)' in html and 'register day' in html)
+    ok("no register-day flag on any bar (all days look the same)",
+       all('rd' not in b for b in data[0]['bars']),
+       f"flagged={[b for b in data[0]['bars'] if 'rd' in b][:1]}")
+ok("the page has NO register-day tint colour",
+   'rgba(253,230,138,.55)' not in html and 'fde68a' not in html.split('h3.day')[-1][:400])
+ok("pre and post are coloured, RTH is transparent",
+   "b.sess==='pre'  ? 'rgba(59,130,246,.16)'" in html
+   and "b.sess==='post' ? 'rgba(168,85,247,.16)'" in html
+   and "'rgba(0,0,0,0)'" in html)
+ok("legend explains the shading applies to EVERY day",
+   'extended hours on every day' in html and 'premarket' in html
+   and 'post-market' in html)
+# the shading must actually appear on a CONTEXT day too, not just the reg day
+if data:
+    ctx_sess = {b['sess'] for b in data[0]['bars']
+                if pd.Timestamp(b['time'], unit='s', tz='UTC').tz_convert(ET)
+                .strftime('%Y-%m-%d') == '2026-07-13'}
+    ok("the day BEFORE also carries pre/rth/post tags (so it is shaded too)",
+       {'pre', 'rth', 'post'} <= ctx_sess, f'{ctx_sess}')
 
 # a RANGE prints one section per register day
 htmlR = srv.r1_print(start='2026-07-13', end='2026-07-14', tf='5m', feed='prt',
