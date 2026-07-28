@@ -540,6 +540,130 @@ def chart(symbol: str = 'SPY', tf: str = '5m', days: int = 5,
         return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
 
 
+@app.get('/api/r1/print', response_class=HTMLResponse)
+def r1_print(day: str, tf: str = '1m', feed: str = 'polygon',
+             overlays: str = '[]', register: str = 'R1', days_before: int = 1,
+             cols: int = 1, height: int = 420):
+    """PRINT SHEET: one chart per ticker in a register day, on the timeframe
+    and indicators you choose.
+
+    Window: the register DAY in full extended hours (04:00-20:00 ET) PLUS
+    `days_before` prior calendar days (also in full), so the previous
+    session's post-market and the overnight into that morning's premarket are
+    on the same chart. view='all' keeps pre/post bars and tints them.
+
+    Everything is computed by the SAME cs.compute_data() the live chart uses,
+    so a printed chart and the on-screen chart cannot disagree.
+    """
+    import json as _json
+    try:
+        ovs = _json.loads(overlays) if overlays else []
+    except _json.JSONDecodeError:
+        ovs = []
+    reg = sc.register_rows(register, day)
+    if not reg.get('ok'):
+        return HTMLResponse(f"<h3>register fetch failed: {reg.get('error')}</h3>")
+    tickers, seen = [], set()
+    for r in reg.get('rows') or []:
+        t = str(r.get('ticker') or '').strip().upper()
+        if t and t not in seen:
+            seen.add(t); tickers.append(t)
+    if not tickers:
+        return HTMLResponse(f"<h3>{register} has no tickers on {day}</h3>")
+
+    # window start = 04:00 ET, `days_before` CALENDAR days before the register
+    # day (calendar, not trading: a Monday register day then reaches back
+    # through the weekend to Friday, which is what you want to see).
+    import pandas as _pd
+    d0 = _pd.Timestamp(day, tz=cs._ET)
+    win_start = (d0 - _pd.Timedelta(days=int(days_before))).replace(hour=4, minute=0)
+    cutoff = int(win_start.timestamp())
+
+    charts, errors = [], []
+    for sym in tickers:
+        try:
+            # fetch enough calendar days to cover the window + indicator warm-up
+            need = dm.required_days(ovs, tf, int(days_before) + 1)
+            data = cs.compute_data(symbol=sym, tf=tf, days=need, overlays=ovs,
+                                   feed=feed, view='all', asof=day)
+            bars = [b for b in (data.get('bars') or []) if b['time'] >= cutoff]
+            if not bars:
+                errors.append(f'{sym}: no bars in window'); continue
+            ser = []
+            for sr in (data.get('series') or []):
+                vals = [v for v in (sr.get('values') or []) if v['time'] >= cutoff]
+                ser.append({**sr, 'values': vals})
+            charts.append({'symbol': sym, 'bars': bars, 'series': ser})
+        except Exception as e:                      # one bad symbol never kills the sheet
+            errors.append(f'{sym}: {e}')
+
+    ov_names = ', '.join(str(o.get('key', '?')) for o in ovs) or 'none'
+    payload = _json.dumps(charts)
+    err_html = (f'<div class="warn">skipped: {"; ".join(errors[:8])}</div>'
+                if errors else '')
+    return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
+<title>{register} {day} — print</title>
+<script src="/static/lightweight-charts.js"></script>
+<style>
+ body{{background:#fff;color:#111;font:13px system-ui,Segoe UI,Roboto,sans-serif;margin:14px}}
+ h2{{margin:0 0 2px}} .sub{{color:#555;margin-bottom:12px}}
+ .warn{{background:#fff4e5;border:1px solid #f0c48a;padding:6px 10px;border-radius:6px;margin-bottom:10px}}
+ .grid{{display:grid;grid-template-columns:repeat({max(1, int(cols))},1fr);gap:14px}}
+ .card{{border:1px solid #ddd;border-radius:8px;padding:8px;break-inside:avoid;page-break-inside:avoid}}
+ .tk{{font-weight:700;font-size:14px}} .rng{{color:#666;font-size:11px}}
+ @media print{{ body{{margin:0}} .card{{border:1px solid #bbb}} .noprint{{display:none}} }}
+</style></head><body>
+<h2>{register} · {day}</h2>
+<div class="sub">{len(charts)} charts · {tf} · feed {feed} · window: {days_before}d before → end of {day}
+ (04:00–20:00 ET, pre/post included) · indicators: {ov_names}</div>
+{err_html}
+<button class="noprint" onclick="window.print()">🖨 Print / Save as PDF</button>
+<div class="grid" id="g"></div>
+<script>
+const DATA = {payload};
+const H = {int(height)};
+const mk = (el) => LightweightCharts.createChart(el, {{
+  width: el.clientWidth, height: H,
+  layout:{{background:{{color:'#fff'}}, textColor:'#333'}},
+  grid:{{vertLines:{{color:'#eee'}}, horzLines:{{color:'#eee'}}}},
+  rightPriceScale:{{borderColor:'#ccc'}},
+  timeScale:{{borderColor:'#ccc', timeVisible:true, secondsVisible:false}},
+}});
+for (const c of DATA) {{
+  const card = document.createElement('div'); card.className='card';
+  const hd = document.createElement('div');
+  const a = c.bars[0], z = c.bars[c.bars.length-1];
+  const fmt = t => new Date(t*1000).toLocaleString('en-US',
+      {{timeZone:'America/New_York', month:'numeric', day:'numeric',
+        hour:'2-digit', minute:'2-digit'}});
+  hd.innerHTML = '<span class="tk">'+c.symbol+'</span> '
+               + '<span class="rng">'+fmt(a.time)+' → '+fmt(z.time)+' ET · '
+               + c.bars.length+' bars</span>';
+  card.appendChild(hd);
+  const box = document.createElement('div'); card.appendChild(box);
+  document.getElementById('g').appendChild(card);
+  const ch = mk(box);
+  const cs_ = ch.addCandlestickSeries({{upColor:'#16a34a', downColor:'#dc2626',
+      borderUpColor:'#16a34a', borderDownColor:'#dc2626',
+      wickUpColor:'#16a34a', wickDownColor:'#dc2626'}});
+  cs_.setData(c.bars);
+  // tint pre/post-market so the extended sessions are obvious on paper
+  const marks = [];
+  for (const b of c.bars) if (b.sess && b.sess !== 'rth')
+      marks.push({{time:b.time, color: b.sess==='pre' ? 'rgba(59,130,246,.10)'
+                                                      : 'rgba(148,163,184,.16)'}});
+  for (const s of (c.series||[])) {{
+    if (!s.values || !s.values.length) continue;
+    const ln = ch.addLineSeries({{color:s.color||'#2563eb', lineWidth:1,
+        lineStyle: s.style||0, priceLineVisible:false, lastValueVisible:false,
+        ...(s.step ? {{lineType:1}} : {{}})}});
+    ln.setData(s.values);
+  }}
+  ch.timeScale().fitContent();
+}}
+</script></body></html>""")
+
+
 @app.websocket('/ws/live')
 async def ws_live(ws: WebSocket):
     """Client sends the current chart request once; the server re-computes the

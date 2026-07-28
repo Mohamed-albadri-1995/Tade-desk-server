@@ -38,6 +38,7 @@ PARTS = [
     ('logic_audit24.py',    'PM Breakout (2m) seed: day gate + pm-high breakout + wick/body filter'),
     ('logic_audit25.py',    'real-account risk sizing: 0.5%/trade, compounding, leverage cap'),
     ('logic_audit26.py',    'user strategies survive deploys: restore-only seeds'),
+    ('logic_audit27.py',    'Print R1 sheet: window, tickers, indicators, page'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

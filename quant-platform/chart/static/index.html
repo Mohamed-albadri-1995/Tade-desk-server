@@ -120,6 +120,7 @@
   <button id="liveBtn">▶ Live</button>
   <button id="stratBtn">⚡ Strategy</button>
   <button id="sideBtn" title="show / hide the side panel">☰ Panel</button>
+  <button id="printR1Btn" title="Print every ticker in an R1/Shortlist day as charts — your timeframe, your indicators, full extended hours plus the previous day">🖨 Print R1</button>
   <button id="alertsBtn" title="live signal watcher: today's R1 + Shortlist × every saved setup, browser notification + sound on any entry signal">🔔 Alerts</button>
   <span style="width:1px;height:20px;background:var(--border)"></span>
   <label>Add <select id="addPrim"></select></label>
@@ -1194,6 +1195,67 @@ alBtn.onclick=async()=>{
     AL_ON=false; alBtn.style.color=''; alBtn.textContent='🔔 Alerts';
     if(AL_TIMER)clearInterval(AL_TIMER);
   }};
+/* ── 🖨 Print R1 ────────────────────────────────────────────────────────
+   Opens a print sheet: one chart per ticker in the chosen register day,
+   on the chosen timeframe, with the indicators currently on the chart. */
+document.getElementById('printR1Btn').onclick = async () => {
+  let box = document.getElementById('prBox');
+  if (box) { box.remove(); return; }
+  box = document.createElement('div');
+  box.id = 'prBox';
+  box.style.cssText = 'position:fixed;top:56px;right:10px;z-index:120;background:#0f172a;'
+    + 'border:1px solid #334155;border-radius:10px;padding:12px;width:300px;'
+    + 'color:#e2e8f0;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.5)';
+  const ovNames = (OVERLAYS||[]).map(o=>o.key).join(', ') || 'none — add some with + Add';
+  box.innerHTML = `
+    <div style="font-weight:600;margin-bottom:8px">🖨 Print register day</div>
+    <label style="display:block;margin-bottom:6px">Register
+      <select id="prReg" style="width:100%"><option>R1</option><option>Shortlist</option></select></label>
+    <label style="display:block;margin-bottom:6px">Date
+      <select id="prDate" style="width:100%"><option>loading…</option></select></label>
+    <label style="display:block;margin-bottom:6px">Timeframe
+      <select id="prTf" style="width:100%">
+        <option>1m</option><option>2m</option><option selected>5m</option>
+        <option>15m</option><option>30m</option><option>1h</option></select></label>
+    <label style="display:block;margin-bottom:6px">Days before
+      <input id="prDays" type="number" value="1" min="0" max="5" style="width:100%"></label>
+    <label style="display:block;margin-bottom:6px">Charts per row
+      <input id="prCols" type="number" value="1" min="1" max="3" style="width:100%"></label>
+    <div style="color:#94a3b8;font-size:11px;margin:6px 0 10px">
+      indicators: ${ovNames}<br>window: 04:00–20:00 ET incl. pre/post</div>
+    <button id="prGo" style="width:100%;background:#2563eb;color:#fff;border:0;
+      padding:7px;border-radius:6px;cursor:pointer">Open print sheet</button>`;
+  document.body.appendChild(box);
+
+  const regSel = document.getElementById('prReg');
+  const dateSel = document.getElementById('prDate');
+  const loadDates = async () => {
+    dateSel.innerHTML = '<option>loading…</option>';
+    try {
+      const r = await fetch('api/screener/dates?register=' + regSel.value);
+      const j = await r.json();
+      const ds = (j.dates || []).slice().reverse();
+      dateSel.innerHTML = ds.length ? ds.map(d=>`<option>${d}</option>`).join('')
+                                    : '<option value="">no frozen days</option>';
+    } catch (e) { dateSel.innerHTML = '<option value="">failed to load</option>'; }
+  };
+  regSel.onchange = loadDates;
+  await loadDates();
+
+  document.getElementById('prGo').onclick = () => {
+    const day = dateSel.value;
+    if (!day) return;
+    const qs = new URLSearchParams({
+      day, register: regSel.value,
+      tf: document.getElementById('prTf').value,
+      feed: document.getElementById('feed').value,
+      days_before: document.getElementById('prDays').value || '1',
+      cols: document.getElementById('prCols').value || '1',
+      overlays: JSON.stringify(OVERLAYS || []),
+    });
+    window.open('api/r1/print?' + qs.toString(), '_blank');
+  };
+};
 </script>
 </body>
 </html>
