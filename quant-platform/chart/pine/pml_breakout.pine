@@ -104,8 +104,9 @@ r5 = open  < sma13                          // 5. open   lt  sma(13)
 r6 = close < sessVwap                       // 6. close  lt  vwap.session
 r7 = close < open                           // 7. close  lt  open   (red candle)
 
-setup = r1 and r2 and r3 and r4 and r5 and r6 and r7
-    and not na(pmLow) and not na(dayOpen) and not na(sessVwap) and not na(todayHigh)
+// NOTE: kept on ONE line. Outside brackets Pine reads a 4-space indent as a
+// new block, not a continuation ("Mismatched input 'and'").
+setup = r1 and r2 and r3 and r4 and r5 and r6 and r7 and not na(pmLow) and not na(dayOpen) and not na(sessVwap) and not na(todayHigh)
 
 // EDGE MODE: qp takes ONE entry per contiguous true-run of the setup. A new
 // false->true edge starts a new run (reset even while in a position).
@@ -166,8 +167,8 @@ if showTbl and barstate.islast
     px    = inPos ? strategy.position_avg_price : na
     shrs  = inPos ? math.abs(strategy.position_size) : (na(sizedQty) ? na : sizedQty)
     slPx  = inPos ? stopPrice : stopNow
-    rUsd  = not na(shrs) and not na(slPx) and not na(px) ? shrs * (slPx - px)
-            : (not na(shrs) and not na(slPx) ? shrs * (slPx - close) : na)
+    refPx = inPos ? px : close
+    rUsd  = not na(shrs) and not na(slPx) ? shrs * (slPx - refPx) : na
     table.cell(tbl, 0, 0, "PML breakout", text_color=color.white, text_size=size.small)
     table.cell(tbl, 1, 0, inPos ? "SHORT" : "flat",
          text_color=inPos ? color.red : color.gray, text_size=size.small)
