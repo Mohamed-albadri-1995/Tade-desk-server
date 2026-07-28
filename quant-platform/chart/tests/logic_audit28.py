@@ -25,6 +25,12 @@ PART E — two alert-watcher faults. (1) start() after stop() spawned a SECOND
 PART F — the print sheet's days_before/days_after were CALENDAR days, so on a
          Monday "1 day before" landed on Sunday (no session) instead of
          Friday — the previous session the docstring promised.
+PART G — SCALE-OUT LEG anchors (risk['targets'][i]['tp']['anchor']) were
+         invisible to both referenced_overlays (warm-up sizing) and
+         _unique_indicators (chart drawing): risk['targets'] is a LIST and
+         both walked only risk.values() dicts. An under-warmed leg anchor is
+         NaN across the window, so the leg never arms and the trade silently
+         runs stop-only — and the target line was never drawn.
 """
 import sys, pathlib, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
@@ -214,6 +220,54 @@ ok("the fetch span covers the whole calendar window, weekend included",
    srv._print_span(ws4, we4) >= 4, f"{srv._print_span(ws4, we4)}")
 ok("a same-day window still fetches at least one day",
    srv._print_span(ws3, we3) >= 1, f"{srv._print_span(ws3, we3)}")
+
+print("=" * 64)
+print("PART G — scale-out LEG anchors are warmed up AND drawn")
+print("=" * 64)
+import json as _json, pathlib as _pl
+from chart import strategy as S
+# a strategy whose ONLY heavy primitive is a scale-out leg's anchor: before
+# the fix it was invisible, so the fetch stayed at the 3-day base and the leg
+# could never price.
+LEG_ONLY = {'name': 'leg anchor only', 'side': 'long',
+            'entry': {'logic': 'AND', 'rules': [
+                {'left': {'kind': 'price', 'field': 'close'}, 'op': 'gt',
+                 'right': {'kind': 'const', 'value': 1}}]},
+            'exit': {'logic': 'AND', 'rules': []},
+            'risk': {'targets': [{'fraction': 0.5, 'tp': {
+                'type': 'prim',
+                'anchor': {'key': 'vwap.nday_block', 'params': {'n_days': 5}}}}]}}
+keys = [o['key'] for o in S.referenced_overlays(LEG_ONLY)]
+ok("a leg anchor is discovered for warm-up sizing",
+   keys == ['vwap.nday_block'], f"{keys}")
+ok("...and it actually extends the fetch (3d base → multi-session)",
+   dm.required_days(S.referenced_overlays(LEG_ONLY), '5m', 3) >= 40,
+   f"{dm.required_days(S.referenced_overlays(LEG_ONLY), '5m', 3)}d")
+ok("a leg anchor is drawn on the chart",
+   [i['key'] for i in S._unique_indicators(LEG_ONLY)] == ['vwap.nday_block'],
+   f"{S._unique_indicators(LEG_ONLY)}")
+# cross-symbol leg anchors were already handled — keep it that way
+X = _json.loads(_json.dumps(LEG_ONLY))
+X['risk']['targets'][0]['tp']['anchor']['symbol'] = 'SPY'
+ok("a cross-symbol leg anchor is still preloaded", S.referenced_symbols(X) == ['SPY'],
+   f"{S.referenced_symbols(X)}")
+ok("...but is NOT drawn from the traded symbol's bars",
+   S._unique_indicators(X) == [], f"{S._unique_indicators(X)}")
+# the real seed that exposed this
+SC = [d for d in _json.loads((_pl.Path(S.__file__).resolve().parent
+                              / 'seeds' / 'scalps.json').read_text())
+      if d['name'] == 'Second Chance Scalp']
+if SC:
+    sk = [o['key'] for o in S.referenced_overlays(SC[0])]
+    ok("Second Chance's extremes.highest(13) leg target is discovered",
+       'extremes.highest' in sk, f"{sk}")
+    ok("...and drawn, so the T1 fill can be checked by eye",
+       'extremes.highest' in [i['key'] for i in S._unique_indicators(SC[0])])
+# a strategy with NO targets must be unchanged
+NOTG = {'name': 'n', 'side': 'long', 'entry': LEG_ONLY['entry'],
+        'exit': {'logic': 'AND', 'rules': []}, 'risk': {}}
+ok("a strategy with no scale-out legs is unaffected",
+   S.referenced_overlays(NOTG) == [] and S._unique_indicators(NOTG) == [])
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")

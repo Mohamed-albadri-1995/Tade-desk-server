@@ -104,6 +104,25 @@ cycle; keep interval ≥60s.
    honest-RVOL run confirms the 4-run directional split.
 5. Premarket-inclusive RVOL definition — only with named evidence.
 6. Phase 5: trading-tool bridge (INTEGRATION.md).
+7. **DECISION NEEDED — `levels.day_open` look-ahead into premarket.**
+   `qp/primitives/levels.py::_daily_agg(ago=0)` gives every bar of a session
+   that session's aggregate, so on a historical frame a 04:00 PREMARKET bar
+   already reads the 09:30 RTH open (reproduced: PM bars = 21.0, the exact
+   09:30 open). The docstring calls this "display convenience", and it is
+   harmless for every strategy we ship (all entry windows are RTH), but a
+   user-built PREMARKET setup using `day_open` would be silently look-ahead.
+   NOT changed in the 2026-07-28 review pass: fixing it would blank the
+   day-open line across premarket on every chart, which is a product
+   decision, not a bug fix. Affects `levels.day_open` only — `prev_day_*`
+   use ago=1 (safe) and `today_high/low`, `pm_high/low`, `vwap.session` are
+   genuinely running. Options: (a) leave as-is and document, (b) NaN before
+   the session's first bar for evaluation while keeping the drawn line, (c)
+   split into `day_open` (display) and a causal variant.
+8. `volume.rel_volume` computes from as little as ONE prior session — the
+   docstring says it needs `length`. A backtest `min_rvol` filter therefore
+   accepts a value built on a 1-day baseline as "verified". Not changed
+   (tightening it would silently drop pairs from past runs); decide whether
+   the filter should require a minimum baseline depth.
 
 ## Rules for any future assistant
 

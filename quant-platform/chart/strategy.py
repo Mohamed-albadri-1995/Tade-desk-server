@@ -523,9 +523,18 @@ def referenced_overlays(strategy: dict) -> list:
                 walk_operand(r.get('right'))
     walk_group(strategy.get('entry'))
     walk_group(strategy.get('exit'))
-    for spec in (strategy.get('risk') or {}).values():        # anchored SL/TP lines
+    risk = strategy.get('risk') or {}
+    for spec in risk.values():                                # anchored SL/TP lines
         if isinstance(spec, dict):
             walk_operand(spec.get('anchor'))
+    # SCALE-OUT LEG anchors live in risk['targets'], a LIST — the loop above
+    # skips it, so a leg anchored to a primitive contributed NOTHING to the
+    # warm-up fetch. Under-warmed, that anchor is NaN across the window, the
+    # leg never arms, and the trade quietly runs stop-only. (referenced_symbols
+    # already walks these; this list was the missing half.)
+    for t in (risk.get('targets') or []):
+        if isinstance(t, dict) and isinstance(t.get('tp'), dict):
+            walk_operand(t['tp'].get('anchor'))
     return out
 
 
@@ -629,9 +638,16 @@ def _unique_indicators(strategy: dict) -> list:
             else:
                 add(r.get('left')); add(r.get('right'))
     walk(strategy.get('entry')); walk(strategy.get('exit'))
-    for spec in (strategy.get('risk') or {}).values():        # draw anchored SL/TP lines too
+    risk = strategy.get('risk') or {}
+    for spec in risk.values():                                # draw anchored SL/TP lines too
         if isinstance(spec, dict):
             add(spec.get('anchor'))
+    # ...and the SCALE-OUT LEG anchors (risk['targets'] is a list, missed by
+    # the loop above): a leg taking half off at "the highest high of the last
+    # 13 bars" is a line the trader has to SEE to verify the fill.
+    for t in (risk.get('targets') or []):
+        if isinstance(t, dict) and isinstance(t.get('tp'), dict):
+            add(t['tp'].get('anchor'))
     return out
 
 
