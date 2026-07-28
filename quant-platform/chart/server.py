@@ -625,6 +625,24 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
         if charts:
             sheets.append({'day': d, 'charts': charts})
 
+    # LEGEND: name + colour of every indicator line, taken from the series the
+    # engine actually produced (not from the request), so the swatch can never
+    # disagree with the drawn line. An overlay that errored is listed as such.
+    legend, seen_lbl = [], set()
+    for sh in sheets:
+        for c in sh['charts']:
+            for sr in c['series']:
+                lbl = str(sr.get('name') or '?')
+                key = (lbl, sr.get('color'))
+                if key in seen_lbl:
+                    continue
+                seen_lbl.add(key)
+                legend.append({'label': lbl, 'color': sr.get('color') or '#2563eb',
+                               'err': bool(sr.get('error'))})
+    ind_html = ''.join(
+        f'<span class="ind"><span class="sw" style="background:{i["color"]}"></span>'
+        f'{i["label"]}{" (failed)" if i["err"] else ""}</span>'
+        for i in legend) or '<span class="ind">none — add indicators on the chart first</span>'
     ov_names = ', '.join(str(o.get('key', '?')) for o in ovs) or 'none'
     payload = _json.dumps(sheets)
     n_charts = sum(len(s['charts']) for s in sheets)
@@ -646,13 +664,14 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
  .card{{border:1px solid #ddd;border-radius:8px;padding:8px;break-inside:avoid;page-break-inside:avoid}}
  .tk{{font-weight:700;font-size:14px}} .rng{{color:#666;font-size:11px}}
  .key{{color:#666;font-size:11px;margin:2px 0 8px}}
- .sw{{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin:0 3px 0 8px}}
+ .sw{{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin:0 4px 0 0}}
+ .ind{{display:inline-block;margin-right:12px;white-space:nowrap}}
  @media print{{ body{{margin:0}} .card{{border:1px solid #bbb}} .noprint{{display:none}} }}
 </style></head><body>
 <h2>{register} · {rng}</h2>
 <div class="sub">{n_charts} charts over {len(sheets)} register day(s) · {tf} · feed {feed} ·
- window: −{days_before}d → +{days_after}d (04:00–20:00 ET, pre/post included) ·
- indicators: {ov_names}</div>
+ window: −{days_before}d → +{days_after}d (04:00–20:00 ET, pre/post included)</div>
+<div class="key"><b>indicators:</b> {ind_html}</div>
 <div class="key">shaded = extended hours on every day:
  <span class="sw" style="background:rgba(59,130,246,.35)"></span>premarket (04:00–09:30)
  <span class="sw" style="background:rgba(168,85,247,.35)"></span>post-market (16:00–20:00)
@@ -680,6 +699,14 @@ for (const sheet of SHEETS) {{
     hd.innerHTML = '<span class="tk">'+c.symbol+'</span> <span class="rng">'
                  + fmt(a.time)+' → '+fmt(z.time)+' ET · '+c.bars.length+' bars</span>';
     card.appendChild(hd);
+    // per-chart indicator legend: name + its exact line colour
+    if ((c.series||[]).length) {{
+      const lg = document.createElement('div'); lg.className='key';
+      lg.innerHTML = c.series.map(s =>
+        '<span class="ind"><span class="sw" style="background:'+(s.color||'#2563eb')
+        + '"></span>' + (s.name||'?') + (s.error ? ' (failed)' : '') + '</span>').join('');
+      card.appendChild(lg);
+    }}
     const box = document.createElement('div'); card.appendChild(box); grid.appendChild(card);
     const ch = LightweightCharts.createChart(box, {{
       width: box.clientWidth, height: H,

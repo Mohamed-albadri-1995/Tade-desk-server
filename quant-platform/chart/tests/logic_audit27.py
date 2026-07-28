@@ -121,8 +121,53 @@ print("PART D — the page is self-contained and renderable")
 print("=" * 64)
 ok("loads the local chart library", '/static/lightweight-charts.js' in html)
 ok("has a print button", 'window.print()' in html)
-ok("names register, day, tf and indicators in the header",
-   'R1' in html and DAY in html and '5m' in html and 'ma.sma' in html)
+ok("names register, day and tf in the header",
+   'R1' in html and DAY in html and '5m' in html)
+
+print("=" * 64)
+print("PART F — every indicator is NAMED with its own colour")
+print("=" * 64)
+# the series the engine produced carry a name and a colour...
+if aaa:
+    s0 = aaa[0]['series'][0]
+    ok("series carries a human name", bool(s0.get('name')), f"{s0.get('name')}")
+    ok("series carries the colour it is drawn with",
+       s0.get('color') == '#2563eb', f"{s0.get('color')}")
+    # ...and the sheet legend uses THOSE, so a swatch cannot disagree with a line
+    ok("sheet legend names the indicator with a matching swatch",
+       f'background:{s0["color"]}' in html and str(s0['name']) in html,
+       f"name={s0.get('name')} color={s0.get('color')}")
+ok("legend is labelled 'indicators:'", '<b>indicators:</b>' in html)
+ok("each chart also carries its own per-chart legend",
+   "lg.innerHTML = c.series.map" in html)
+ok("a failed indicator is labelled '(failed)', never drawn silently",
+   "s.error ? ' (failed)'" in html and '(failed)' in html)
+
+print("=" * 64)
+print("PART G — multi-day indicators get real warm-up (2d VWAP, 5d MA)")
+print("=" * 64)
+from chart import data_manager as _dm
+import qp as _qp
+from qp.registry import REGISTRY as _REG
+# 5-day MA: default length is 1950 ONE-MINUTE bars = 5 RTH sessions. Its
+# warm-up must not depend on the chart timeframe, and must survive the picker
+# sending params:{} (registry defaults).
+d5_none = _dm.required_days([{'key': 'ma.pine_5day', 'params': {}}], '5m', 3)
+d5_15m = _dm.required_days([{'key': 'ma.pine_5day', 'params': {}}], '15m', 3)
+ok("5-day MA with DEFAULT params still gets multi-session warm-up",
+   d5_none >= 7, f'{d5_none}d')
+ok("5-day MA warm-up is timeframe-INVARIANT (computed on 1m)",
+   d5_none == d5_15m, f'5m={d5_none} 15m={d5_15m}')
+ok("5-day MA does not explode the fetch on a coarse TF",
+   d5_15m <= 20, f'{d5_15m}d')
+d2v = _dm.required_days([{'key': 'vwap.nday_block', 'params': {'n_days': 2}}], '1m', 3)
+ok("2-day VWAP gets the multi-session floor", d2v >= 40, f'{d2v}d')
+ok("a plain 9-SMA is NOT over-fetched",
+   _dm.required_days([{'key': 'ma.sma', 'params': {'length': 9}}], '5m', 3) == 3)
+# the print sheet must ASK for that warm-up (it calls required_days per chart)
+ok("the print sheet sizes its fetch with required_days",
+   'dm.required_days(ovs, tf, span)' in
+   open(pathlib.Path(__file__).resolve().parents[1] / 'server.py').read())
 
 # days_before=0 must start on the register day itself
 html0 = srv.r1_print(day=DAY, tf='5m', feed='prt', overlays='[]',

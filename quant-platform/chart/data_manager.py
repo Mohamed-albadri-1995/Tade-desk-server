@@ -73,7 +73,18 @@ def required_days(overlays: list, tf: str, base_days: int) -> int:
         m = REGISTRY.get(ov.get('key'))
         if not m:
             continue
-        params = ov.get('params') or {}
+        # PARAM DEFAULTS: the picker sends only what the user typed, so a
+        # primitive left on its defaults (ma.pine_5day length=1950 = 5 RTH
+        # days) arrived here as {} and got NO warm-up bump at all. Fill the
+        # registry defaults in first, then size the window.
+        params = dict(ov.get('params') or {})
+        for prm in (m.params or ()):
+            params.setdefault(prm.name, prm.default)
+        # bar-count lookbacks must be converted on the timeframe the primitive
+        # is actually COMPUTED on: pine_5day's 1950 bars are 1-MINUTE bars
+        # (compute_tf='1m') = 5 sessions, whether you view 1m, 5m or 15m.
+        # Using the chart tf turned that into a 107-day fetch on a 15m chart.
+        btf = getattr(m, 'compute_tf', None) or tf
         # 1) explicit SESSION-count window (N-day VWAP, N-session lookbacks).
         #    These count trading days → ~1.7x calendar + a week of buffer.
         for pname in ('n_days', 'sessions', 'days', 'lookback_days'):
@@ -87,13 +98,13 @@ def required_days(overlays: list, tf: str, base_days: int) -> int:
             need_days = max(need_days, _HISTORY_FLOOR_DAYS)
         # 3) dynamic_sr's ~300-bar range window can exceed the floor on coarse TFs.
         if m.name == 'dynamic_sr':
-            need_days = max(need_days, _bars_to_days(320, tf))
+            need_days = max(need_days, _bars_to_days(320, btf))
         # 4) pure bar-count lookbacks (EMA/SMA length, pivot left/right, swing).
         for pname in ('length', 'period', 'len', 'pivot_period', 'atr_length',
                       'left', 'right', 'lookback'):
             if pname in params:
                 try:
-                    need_days = max(need_days, _bars_to_days(int(params[pname]), tf))
+                    need_days = max(need_days, _bars_to_days(int(params[pname]), btf))
                 except (TypeError, ValueError):
                     pass
     if need_days <= 0:
