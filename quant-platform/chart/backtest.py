@@ -214,14 +214,19 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     - Equity COMPOUNDS in trade order: each trade is sized on the equity that
       existed when it was entered (P&L of everything that closed before it),
       so a losing streak shrinks size the way a real account does.
-    - CAPITAL CAP: you cannot buy more stock than you have money for. Shares
-      are capped so the position's NOTIONAL (shares x entry) <= `max_leverage`
-      x equity, default 1.0 = CASH (a $100k account never holds more than
-      $100k of stock). A tight stop implies a huge share count — that trade is
-      capped and then risks LESS than `risk_pct`, which is the real-world
-      outcome, not a bug. Capped trades are counted in `size_capped_by_leverage`
-      so the report can say so. Set max_leverage 2/4 only if the account really
-      has that margin.
+    - CAPITAL CAP, PORTFOLIO-WIDE: you cannot buy more stock than you have
+      money for — and that budget is shared by every position open at the same
+      time. Buying power at an entry is `max_leverage` x equity MINUS the
+      notional of the positions still open at that moment (a register backtest
+      runs many symbols on the same day, so concurrency is the norm, not the
+      exception). Shares are capped to what is LEFT; if nothing is left the
+      trade is skipped entirely (`skipped_no_capital`) — the real account
+      could not have taken it. Default max_leverage 1.0 = CASH (a $100k
+      account never holds more than $100k of stock, across ALL names). A tight
+      stop implies a huge share count — that trade is capped and then risks
+      LESS than `risk_pct`, which is the real-world outcome, not a bug. Capped
+      trades are counted in `size_capped_by_leverage`. Set max_leverage 2/4
+      only if the account really has that margin.
     - Fees use the same per-share/min-per-order model as the TTP block, on
       the ACTUAL sized shares.
     - Scale-outs: each leg's fraction of the sized position closes at the
@@ -243,16 +248,23 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         return None
     lev = float(spec.get('max_leverage', 1) or 1)   # 1.0 = cash, no margin
     fps = float(spec.get('fee_per_share', 0) or 0)
-    fmin = float(spec.get('fee_min_per_order', 0) or 0)
+    # the panel posts `fee_min`; `fee_min_per_order` is the block's own output
+    # name. Accept BOTH or the per-order minimum silently reads as $0 here
+    # while the TTP block (which reads `fee_min`) charges it.
+    fmin = float(spec.get('fee_min', spec.get('fee_min_per_order', 0)) or 0)
     order_fee = (lambda sz: max(fps * sz, fmin)) if (fps or fmin) else (lambda sz: 0.0)
 
     rows = sorted(closed, key=lambda t: (t.get('entry_ts') or 0))
-    pending: list[tuple[int, float]] = []      # (exit_ts, pnl) not yet credited
+    # (exit_ts, pnl, notional) of positions entered but not yet closed at the
+    # moment we size the next one. `notional` is what makes the capital cap
+    # PORTFOLIO-wide: concurrent positions share one balance.
+    pending: list = []
     equity = equity0
     peak = equity0
     maxdd = 0.0
     fees_tot = pnl_tot = 0.0
-    unsized = capped = 0
+    unsized = capped = no_capital = 0
+    max_concurrent = 0
     wins = 0
     sized_n = 0
     curve = []
@@ -260,12 +272,13 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         # credit everything that CLOSED before this entry → sizing equity
         et_in = t.get('entry_ts') or 0
         still = []
-        for xt, p in pending:
+        for xt, p, nt in pending:
             if xt <= et_in:
                 equity += p
             else:
-                still.append((xt, p))
+                still.append((xt, p, nt))
         pending = still
+        open_notional = sum(nt for _, _, nt in pending)
         entry = float(t['entry'])
         stop = t.get('stop')
         sgn = 1.0 if t['side'] == 'long' else -1.0
@@ -275,7 +288,13 @@ def _account_block(closed: list, spec: dict) -> dict | None:
             t.setdefault('ctx', {})['acct_note'] = 'no stop — not sized'
             continue
         shares = (equity * risk_pct / 100.0) / per_share_risk
-        max_sh = (equity * lev) / entry
+        # buying power LEFT after the positions already open (portfolio-wide)
+        room = equity * lev - open_notional
+        if room <= 0:
+            no_capital += 1
+            t.setdefault('ctx', {})['acct_note'] = 'no buying power left — skipped'
+            continue
+        max_sh = room / entry
         if shares > max_sh:
             shares = max_sh
             capped += 1
@@ -306,14 +325,16 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         _c['acct_notional_usd'] = round(shares * entry, 2)
         _c['acct_r_multiple'] = (round(gross / (shares * per_share_risk), 2)
                                  if per_share_risk > 0 else None)
-        pending.append((t.get('exit_ts') or et_in, net))
+        _c['acct_open_notional_usd'] = round(open_notional + shares * entry, 2)
+        pending.append((t.get('exit_ts') or et_in, net, shares * entry))
+        max_concurrent = max(max_concurrent, len(pending))
         # equity curve marked when the trade closes (peak/DD on realized)
-        realized_now = equity + sum(p for _, p in pending)
+        realized_now = equity + sum(p for _, p, _ in pending)
         peak = max(peak, realized_now)
         if peak > 0:
             maxdd = max(maxdd, (peak - realized_now) / peak)
         curve.append(round(realized_now, 2))
-    equity += sum(p for _, p in pending)         # settle the tail
+    equity += sum(p for _, p, _ in pending)      # settle the tail
     return {
         'account_equity_start': round(equity0, 2),
         'risk_pct': risk_pct,
@@ -328,6 +349,10 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         'max_drawdown_pct': round(100.0 * maxdd, 2),
         'unsized_no_stop': unsized,
         'size_capped_by_leverage': capped,
+        'skipped_no_capital': no_capital,
+        'max_concurrent_positions': max_concurrent,
+        'fee_per_share': fps,
+        'fee_min_per_order': fmin,
         'equity_curve': curve[-400:],
     }
 

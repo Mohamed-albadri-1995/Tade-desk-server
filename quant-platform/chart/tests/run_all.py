@@ -39,6 +39,7 @@ PARTS = [
     ('logic_audit25.py',    'real-account risk sizing: 0.5%/trade, compounding, leverage cap'),
     ('logic_audit26.py',    'user strategies survive deploys: restore-only seeds'),
     ('logic_audit27.py',    'Print R1 sheet: window, tickers, indicators, page'),
+    ('logic_audit28.py',    'review pass: fees, portfolio capital cap, warm-up cap, alerts, print days'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

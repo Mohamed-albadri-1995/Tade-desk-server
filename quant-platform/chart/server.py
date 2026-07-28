@@ -237,16 +237,29 @@ def _account_html(s: dict) -> str:
                  f"usable stop, so risk-based size is undefined</div>")
     if a.get('size_capped_by_leverage'):
         warn += (f"<div class=\"warn\">⚠ {a['size_capped_by_leverage']} trades hit the "
-                 f"CAPITAL cap (position would exceed {a['max_leverage']}x the "
-                 f"balance) — they risked LESS than {a['risk_pct']}%</div>")
+                 f"CAPITAL cap (the position, PLUS whatever was already open, "
+                 f"would exceed {a['max_leverage']}x the balance) — they risked "
+                 f"LESS than {a['risk_pct']}%</div>")
+    if a.get('skipped_no_capital'):
+        warn += (f"<div class=\"warn\">⚠ {a['skipped_no_capital']} trades SKIPPED — no "
+                 f"buying power left: earlier positions were still open and had "
+                 f"used the whole balance. A real account could not take these.</div>")
+    if not a.get('trades_sized'):
+        warn += ("<div class=\"warn\">⚠ NO trade could be sized — the account numbers "
+                 "below are the starting balance, unchanged.</div>")
+    # every one of these can be None when nothing was sizable — format safely
+    def _n(v, fmt='{:,.2f}', dash='—'):
+        return dash if v is None else fmt.format(v)
     return f"""<h3>Real account — ${a['account_equity_start']:,.0f} risking {a['risk_pct']}% per trade</h3>
 {warn}<div class="grid">
-<div class="kpi"><b>${a['equity_end']:,.2f}</b><span>ending equity (compounded in trade order)</span></div>
-<div class="kpi"><b>{a['return_pct']:+.2f}%</b><span>account return</span></div>
-<div class="kpi"><b>${a['net_pnl_usd']:,.2f}</b><span>net P&amp;L after ${a['fees_usd']:,.2f} commissions</span></div>
-<div class="kpi"><b>{a['max_drawdown_pct']}%</b><span>max drawdown (realized equity)</span></div>
-<div class="kpi"><b>{a['win_rate_pct']}%</b><span>win rate on sized trades ({a['trades_sized']})</span></div>
-<div class="kpi"><b>${a['avg_pnl_usd']:,.2f}</b><span>average P&amp;L per trade</span></div>
+<div class="kpi"><b>${_n(a.get('equity_end'))}</b><span>ending equity (compounded in trade order)</span></div>
+<div class="kpi"><b>{_n(a.get('return_pct'), '{:+.2f}%')}</b><span>account return</span></div>
+<div class="kpi"><b>${_n(a.get('net_pnl_usd'))}</b><span>net P&amp;L after ${_n(a.get('fees_usd'))} commissions</span></div>
+<div class="kpi"><b>{_n(a.get('max_drawdown_pct'), '{}')}%</b><span>max drawdown (realized equity)</span></div>
+<div class="kpi"><b>{_n(a.get('win_rate_pct'), '{}')}%</b><span>win rate on sized trades ({a.get('trades_sized', 0)})</span></div>
+<div class="kpi"><b>${_n(a.get('avg_pnl_usd'))}</b><span>average P&amp;L per trade</span></div>
+<div class="kpi"><b>{a.get('max_concurrent_positions', 0)}</b><span>most positions held at once (they share the {a['max_leverage']}x balance)</span></div>
+<div class="kpi"><b>${a.get('fee_per_share', 0)}/sh, min ${a.get('fee_min_per_order', 0)}</b><span>commission charged per order</span></div>
 </div>"""
 
 
@@ -540,6 +553,37 @@ def chart(symbol: str = 'SPY', tf: str = '5m', days: int = 5,
         return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
 
 
+def _print_window(day: str, days_before: int, days_after: int):
+    """The print window for register day `day`, in ET, as (start, end).
+
+    `days_before`/`days_after` count TRADING days, not calendar days — "one
+    day before a Monday" is the previous SESSION (Friday), which is the whole
+    point of the context day: its post-market and the overnight into the
+    register morning's premarket. Counting calendar days landed on Sunday and
+    silently produced a chart with no context bars at all.
+
+    The window always spans full extended hours: 04:00 ET on the first day
+    through 20:00 ET on the last.
+    """
+    import pandas as _pd
+    d0 = _pd.Timestamp(day).normalize()
+    nb, na = max(0, int(days_before)), max(0, int(days_after))
+    # bdate_range = Mon-Fri. Exchange holidays are not modelled: a holiday in
+    # the span just yields a day with no bars, exactly like any other empty
+    # symbol/day, and is reported as "no bars in window" rather than guessed at.
+    first = _pd.bdate_range(end=d0, periods=nb + 1)[0] if nb else d0
+    last = _pd.bdate_range(start=d0, periods=na + 1)[-1] if na else d0
+    return (_pd.Timestamp(first.strftime('%Y-%m-%d') + ' 04:00', tz=cs._ET),
+            _pd.Timestamp(last.strftime('%Y-%m-%d') + ' 20:00', tz=cs._ET))
+
+
+def _print_span(w_start, w_end) -> int:
+    """CALENDAR days the fetch must cover to fill a print window — the window
+    is measured in trading days but the loader fetches calendar days, so a
+    weekend inside it has to be paid for."""
+    return max(1, int((w_end - w_start).total_seconds() // 86400) + 1)
+
+
 @app.get('/api/r1/print', response_class=HTMLResponse)
 def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
              feed: str = 'polygon', overlays: str = '[]', register: str = 'R1',
@@ -597,18 +641,16 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
             errors.append(f'{d}: no tickers')
             continue
 
-        d0 = _pd.Timestamp(d, tz=cs._ET)
-        w_start = (d0 - _pd.Timedelta(days=int(days_before))).replace(hour=4, minute=0)
-        w_end = (d0 + _pd.Timedelta(days=int(days_after))).replace(hour=20, minute=0)
+        w_start, w_end = _print_window(d, days_before, days_after)
         lo_ts, hi_ts = int(w_start.timestamp()), int(w_end.timestamp())
-        # the fetch must END after the window, so asof moves forward with days_after
-        asof = (d0 + _pd.Timedelta(days=int(days_after))).strftime('%Y-%m-%d')
-        span = int(days_before) + int(days_after) + 1
+        # the fetch must END after the window, so asof is the window's LAST day
+        asof = w_end.strftime('%Y-%m-%d')
+        span = _print_span(w_start, w_end)
+        need = dm.required_days(ovs, tf, span)
 
         charts = []
         for sym in tickers:
             try:
-                need = dm.required_days(ovs, tf, span)
                 data = cs.compute_data(symbol=sym, tf=tf, days=need, overlays=ovs,
                                        feed=feed, view='all', asof=asof)
                 bars = [b for b in (data.get('bars') or [])
@@ -670,7 +712,7 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
 </style></head><body>
 <h2>{register} · {rng}</h2>
 <div class="sub">{n_charts} charts over {len(sheets)} register day(s) · {tf} · feed {feed} ·
- window: −{days_before}d → +{days_after}d (04:00–20:00 ET, pre/post included)</div>
+ window: −{days_before} → +{days_after} TRADING days (04:00–20:00 ET, pre/post included)</div>
 <div class="key"><b>indicators:</b> {ind_html}</div>
 <div class="key">shaded = extended hours on every day:
  <span class="sw" style="background:rgba(59,130,246,.35)"></span>premarket (04:00–09:30)

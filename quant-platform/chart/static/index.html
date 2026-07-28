@@ -962,7 +962,9 @@ function btRenderCore(g,extra){
   if(_ac){ html+=`<br><span style="color:var(--blue)">ACCOUNT $${_ac.account_equity_start.toLocaleString()} @ ${_ac.risk_pct}% risk: `
     +`<b>$${_ac.equity_end.toLocaleString()}</b> (${_ac.return_pct>=0?'+':''}${_ac.return_pct}%) · net $${_ac.net_pnl_usd.toLocaleString()} · maxDD ${_ac.max_drawdown_pct}% · ${_ac.trades_sized} sized`
     +(_ac.unsized_no_stop?` · ⚠ ${_ac.unsized_no_stop} no-stop excluded`:'')
-    +(_ac.size_capped_by_leverage?` · ⚠ ${_ac.size_capped_by_leverage} capped at balance`:'')+`</span>`; }
+    +(_ac.size_capped_by_leverage?` · ⚠ ${_ac.size_capped_by_leverage} capped at balance`:'')
+    +(_ac.skipped_no_capital?` · ⚠ ${_ac.skipped_no_capital} skipped, no buying power`:'')
+    +(_ac.max_concurrent_positions?` · max ${_ac.max_concurrent_positions} positions at once`:'')+`</span>`; }
   const cov=s.coverage;
   if(cov){
     let c=`coverage: <b>${cov.evaluated}/${cov.pairs}</b> pairs had data (${cov.tf}·${cov.feed})`;

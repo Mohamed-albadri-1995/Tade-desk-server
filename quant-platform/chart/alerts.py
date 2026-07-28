@@ -154,32 +154,61 @@ def _default_strats() -> list[dict]:
     return store.list_strategies()
 
 
-def _loop():
-    while _STATE['on']:
+_WAKE = threading.Event()   # the CURRENT generation's stop signal
+_GEN = 0                    # watcher generation; a stale thread sees its gen
+                            # change and retires without touching state
+
+
+def _loop(gen: int, wake: threading.Event):
+    """One watcher generation. `gen` is captured at start(): stop()+start()
+    bumps the generation, so a thread still inside its sleep from the previous
+    generation exits instead of running a SECOND scan loop alongside the new
+    one (which doubled every cycle, every Polygon call and every alert).
+
+    `wake` is that generation's OWN event, so the next start() cannot
+    accidentally un-signal a retiring thread and leave it sleeping."""
+    while _STATE['on'] and gen == _GEN:
         try:
             _cycle(_default_strats, _default_regs, _default_eval)
         except Exception as e:  # noqa: BLE001 — the watcher must survive
             with _LOCK:
                 _STATE['errors'] = (_STATE['errors'] + [f'cycle: {e}'])[-MAX_ERRORS:]
-        time.sleep(max(15, int(_STATE['interval'])))
+        # interruptible sleep: stop() returns immediately instead of leaving a
+        # zombie thread alive for up to a whole interval.
+        if wake.wait(max(15, int(_STATE['interval']))):
+            break
 
 
 def start(interval: int | None = None) -> dict:
-    global _THREAD
+    """Start the watcher (idempotent). NOTHING here may call status(): _LOCK
+    is a plain Lock, not an RLock, and status() takes it too — a second
+    "start" request used to deadlock inside the lock and hang every later
+    /api/alerts/* call for the life of the process."""
+    global _THREAD, _GEN, _WAKE
     with _LOCK:
         if interval:
             _STATE['interval'] = max(15, int(interval))
-        if _STATE['on']:
-            return status()
-        _STATE['on'] = True
-    _THREAD = threading.Thread(target=_loop, daemon=True, name='qp-alerts')
-    _THREAD.start()
+        running = _STATE['on'] and _THREAD is not None and _THREAD.is_alive()
+        if not running:
+            _GEN += 1
+            gen = _GEN
+            _WAKE = threading.Event()   # a FRESH event; the old one stays set
+            wake = _WAKE
+            _STATE['on'] = True
+    if not running:
+        _THREAD = threading.Thread(target=_loop, args=(gen, wake), daemon=True,
+                                   name=f'qp-alerts-{gen}')
+        _THREAD.start()
     return status()
 
 
 def stop() -> dict:
+    global _GEN
     with _LOCK:
         _STATE['on'] = False
+        _GEN += 1                    # retire the current generation
+        wake = _WAKE
+    wake.set()                       # and wake it out of its sleep now
     return status()
 
 
