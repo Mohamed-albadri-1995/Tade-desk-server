@@ -1,53 +1,65 @@
 // PML breakout — SHORT
-// Exact Pine port of the qp strategy "PML breakout" (id 25).
-// Every condition below mirrors one rule in the saved JSON; the comment on
-// each line names the qp primitive it replicates.
+// Exact Pine port of the qp strategy "PML breakout" (saved id 25).
+// Every entry line below is one rule from the saved JSON, in JSON order.
 //
-// USE ON: 2-minute chart, "Extended trading hours" ENABLED on the symbol
-//         (premarket bars are required — pm_low is built from 04:00-09:30 ET).
-//         The script itself ignores premarket for RTH-only values (day_open,
-//         today_high, VWAP) exactly like qp does.
+// USE ON: 2-minute chart, "Extended trading hours" ENABLED on the symbol.
+//         Premarket bars are required — pm_low is built from 04:00-09:30 ET.
+//         RTH-only values (day_open, today_high, VWAP) ignore those PM bars,
+//         exactly like the qp primitives do.
 //
-// qp semantics replicated deliberately:
-//   levels.pm_low     premarket (04:00-09:30 ET) low, running during PM,
-//                     FROZEN for the rest of the day
-//   levels.day_open   today's RTH open (the 09:30 bar's open)
-//   levels.today_high today's RUNNING RTH high (resets each day)
-//   vwap.session      RTH-only session VWAP, resets 09:30, source HLC/3
-//   ma.sma(close,13)  simple MA on close
-//   rule offset:1     "this condition was true 1 bar AGO" (signal shifted
-//                     right one bar) -> the pm_low break must have happened
-//                     on the PREVIOUS bar
-//   for_bars:2        the exit condition must hold on 2 CONSECUTIVE bars
-//   entry window      09:40-10:10 ET, inclusive of the fill bar
-//   stop              pm_low + 0.2*(today_high - pm_low), captured at entry
-//                     and never loosened (qp ratchets protective stops)
+// qp semantics reproduced (not approximated):
+//   levels.pm_low      premarket 04:00-09:30 ET low, running in PM then
+//                      FROZEN for the rest of the day
+//   levels.day_open    today's RTH open (the 09:30 bar's open)
+//   levels.today_high  today's RUNNING RTH high, day-reset
+//   vwap.session       RTH-only, resets 09:30, source HLC/3 (Pine's built-in
+//                      ta.vwap follows the CHART session — would differ with
+//                      extended hours on, so it is computed by hand here)
+//   ma.sma(close,13)   simple MA on close
+//   rule offset:1      "true 1 bar AGO" -> the pm_low break happened on the
+//                      PREVIOUS bar and price is still below now
+//   for_bars:2         exit holds on 2 CONSECUTIVE bars
+//   entry window       09:40-10:10 ET, tested on the FILL bar (next open)
+//   edge entry mode    ONE entry per contiguous true-run of the setup
+//   no cap / cooldown  the saved risk block sets neither -> re-entry allowed
+//                      once flat and a NEW true-run begins
+//   stop               pm_low + 0.2 x (today_high - pm_low), priced at the
+//                      signal bar and RATCHETED (a protective stop never
+//                      loosens; for a short it may only move down)
 //
 //@version=5
 strategy("PML breakout (short)", overlay=true,
      calc_on_every_tick=false,
-     process_orders_on_close=false,          // fills at the NEXT bar's open,
-     pyramiding=0,                           // like the qp 'next_open' model
-     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
-     initial_capital=100000, commission_type=strategy.commission.cash_per_contract,
-     commission_value=0.005)
+     process_orders_on_close=false,      // order at bar close -> fills NEXT open
+     pyramiding=0,
+     initial_capital=50000,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.005)
 
 // ─── inputs ────────────────────────────────────────────────────────────────
-maLen      = input.int(13,   "SMA length")
-stopFrac   = input.float(0.2, "Stop = pm_low + frac x (todayHigh - pm_low)", step=0.05)
-winStart   = input.int(940,  "Entry window start (ET hhmm)")
-winEnd     = input.int(1010, "Entry window end (ET hhmm)")
-riskPct    = input.float(0.5, "Risk % of equity per trade", step=0.1)
-useRisk    = input.bool(true, "Size from the stop (risk %) instead of full equity")
+maLen    = input.int(13,    "SMA length",                       group="Strategy")
+stopFrac = input.float(0.2, "Stop = pm_low + f x (todayHigh - pm_low)", step=0.05, group="Strategy")
+winStart = input.int(940,   "Entry window start (ET hhmm)",     group="Strategy")
+winEnd   = input.int(1010,  "Entry window end (ET hhmm)",       group="Strategy")
+eodFlat  = input.bool(true, "Force flat at 15:50 ET",           group="Strategy")
+
+acctSize = input.float(50000, "Account size $",                 group="Risk")
+riskPct  = input.float(0.5,   "Risk % per trade (loss if stop hits)", step=0.1, group="Risk")
+useLive  = input.bool(false,  "Compound: risk % of CURRENT equity", group="Risk")
+showTbl  = input.bool(true,   "Show position table",            group="Risk")
 
 // ─── ET session helpers ────────────────────────────────────────────────────
-// Pine's time functions on an ET-exchange symbol already report exchange time.
-etHour   = hour(time, "America/New_York")
-etMin    = minute(time, "America/New_York")
-hhmm     = etHour * 100 + etMin
-isRTH    = hhmm >= 930 and hhmm < 1600
-isPM     = hhmm >= 400 and hhmm < 930
-newDay   = ta.change(time("D")) != 0
+etH   = hour(time, "America/New_York")
+etM   = minute(time, "America/New_York")
+hhmm  = etH * 100 + etM
+isRTH = hhmm >= 930 and hhmm < 1600
+isPM  = hhmm >= 400 and hhmm < 930
+newDay = ta.change(time("D")) != 0
+
+// hhmm of the NEXT bar — the bar the order actually fills on, which is what
+// qp gates against (it checks the FILL bar, not the signal bar)
+nextMs   = time + timeframe.in_seconds() * 1000
+nextHHMM = hour(nextMs, "America/New_York") * 100 + minute(nextMs, "America/New_York")
 
 // ─── levels.pm_low : premarket low, frozen after 09:30 ─────────────────────
 var float pmLow = na
@@ -77,77 +89,106 @@ if newDay
     cumPV := 0.0
     cumV  := 0.0
 if isRTH
-    cumPV := cumPV + hlc3 * volume
-    cumV  := cumV + volume
+    cumPV += hlc3 * volume
+    cumV  += volume
 sessVwap = cumV > 0 ? cumPV / cumV : na
 
 sma13 = ta.sma(close, maLen)
 
-// ─── ENTRY RULES (the AND group, in JSON order) ────────────────────────────
-r1 = todayHigh > dayOpen                          // today_high  gt day_open
-brokeNow = ta.crossunder(close, pmLow)            // close cross_below pm_low
-r2 = brokeNow[1]                                  //   ...with rule offset:1
-r3 = close < pmLow                                // close lt pm_low
-r4 = close < sma13                                // close lt sma(13)
-r5 = open  < sma13                                // open  lt sma(13)
-r6 = close < sessVwap                             // close lt vwap.session
-r7 = close < open                                 // red candle
+// ─── ENTRY RULES — the AND group, in saved-JSON order ──────────────────────
+r1 = todayHigh > dayOpen                    // 1. today_high  gt  day_open
+r2 = ta.crossunder(close, pmLow)[1]         // 2. close cross_below pm_low, offset:1
+r3 = close < pmLow                          // 3. close  lt  pm_low
+r4 = close < sma13                          // 4. close  lt  sma(13)
+r5 = open  < sma13                          // 5. open   lt  sma(13)
+r6 = close < sessVwap                       // 6. close  lt  vwap.session
+r7 = close < open                           // 7. close  lt  open   (red candle)
 
-allRules = r1 and r2 and r3 and r4 and r5 and r6 and r7
-        and not na(pmLow) and not na(dayOpen) and not na(sessVwap)
+setup = r1 and r2 and r3 and r4 and r5 and r6 and r7
+    and not na(pmLow) and not na(dayOpen) and not na(sessVwap) and not na(todayHigh)
 
-// entry only inside the ET window (qp checks the FILL bar; with
-// process_orders_on_close=false the fill is the next bar, so require the
-// window to still be open on the next bar too)
-inWindow  = hhmm >= winStart and hhmm <= winEnd
-nextStill = hhmm + 2 <= winEnd                    // 2-minute chart step
-canEnter  = inWindow and nextStill and isRTH
+// EDGE MODE: qp takes ONE entry per contiguous true-run of the setup. A new
+// false->true edge starts a new run (reset even while in a position).
+var bool runTaken = false
+if setup and not setup[1]
+    runTaken := false
 
-entrySignal = allRules and canEnter and strategy.position_size == 0
+// the FILL bar must be inside the window (qp gates the fill, not the signal)
+canFill = nextHHMM >= winStart and nextHHMM <= winEnd
+entrySignal = setup and not runTaken and canFill and strategy.position_size == 0
 
-// ─── STOP: pm_low + frac x (todayHigh - pm_low), fixed at entry ────────────
+// ─── STOP + SIZE ───────────────────────────────────────────────────────────
 stopNow = pmLow + stopFrac * (todayHigh - pmLow)
-var float stopPrice = na
-var float entryFill = na
 
-// position sizing from the stop (mirrors the backtest's account block:
-// shares = equity x risk% / per-share risk, capped by the cash balance)
-qtyFromRisk(entryPx, stopPx) =>
-    perShare = stopPx - entryPx                   // short: stop is ABOVE entry
-    raw      = perShare > 0 ? (strategy.equity * riskPct / 100.0) / perShare : 0.0
-    capped   = math.min(raw, strategy.equity / entryPx)   // no leverage
-    math.max(1, math.floor(capped))
+var float stopPrice = na
+var float sizedQty  = na
+var float riskUsd   = na
+
+equityBase = useLive ? strategy.equity : acctSize
 
 if entrySignal
-    // the stop is priced from THIS bar's values (the completed signal bar),
-    // exactly like qp's "priceability check uses the SIGNAL bar's anchor"
-    sp = stopNow
-    q  = useRisk ? qtyFromRisk(close, sp) : na
+    sp       = stopNow                       // priced at the SIGNAL bar
+    perShare = sp - close                    // short: stop sits ABOVE entry
+    rUsd     = equityBase * riskPct / 100.0
+    raw      = perShare > 0 ? rUsd / perShare : 0.0
+    capped   = math.min(raw, equityBase / close)     // never exceed the balance
+    q        = math.max(1, math.floor(capped))
     strategy.entry("PML", strategy.short, qty=q)
     stopPrice := sp
+    sizedQty  := q
+    riskUsd   := q * perShare
+    runTaken  := true
 
-// qp RATCHET: a protective stop never loosens. For a short it may only move
-// DOWN. (In this setup the stop sits below today_high, so price must trade
-// through it before a new high can print — it never widens in practice.)
+// qp RATCHET: protective stop never loosens (short -> may only move DOWN)
 if strategy.position_size < 0
     stopPrice := na(stopPrice) ? stopNow : math.min(stopPrice, stopNow)
 
 // ─── EXIT: close > sma(13) on 2 CONSECUTIVE bars (for_bars:2) ──────────────
-aboveMa   = close > sma13
-exitRule  = aboveMa and aboveMa[1]
+aboveMa  = close > sma13
+exitRule = aboveMa and aboveMa[1]
 
 if strategy.position_size < 0
     strategy.exit("stop", from_entry="PML", stop=stopPrice)
     if exitRule
         strategy.close("PML", comment="MA exit")
+    if eodFlat and hhmm >= 1550
+        strategy.close("PML", comment="EOD")
+
+if strategy.position_size == 0
+    stopPrice := na
+
+// ─── small position table ──────────────────────────────────────────────────
+var table tbl = table.new(position.top_right, 2, 4,
+     bgcolor=color.new(color.black, 15), border_color=color.new(color.gray, 50),
+     border_width=1)
+if showTbl and barstate.islast
+    inPos = strategy.position_size < 0
+    px    = inPos ? strategy.position_avg_price : na
+    shrs  = inPos ? math.abs(strategy.position_size) : (na(sizedQty) ? na : sizedQty)
+    slPx  = inPos ? stopPrice : stopNow
+    rUsd  = not na(shrs) and not na(slPx) and not na(px) ? shrs * (slPx - px)
+            : (not na(shrs) and not na(slPx) ? shrs * (slPx - close) : na)
+    table.cell(tbl, 0, 0, "PML breakout", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 0, inPos ? "SHORT" : "flat",
+         text_color=inPos ? color.red : color.gray, text_size=size.small)
+    table.cell(tbl, 0, 1, "Shares", text_color=color.gray, text_size=size.small)
+    table.cell(tbl, 1, 1, na(shrs) ? "—" : str.tostring(shrs, "#,###"),
+         text_color=color.white, text_size=size.small)
+    table.cell(tbl, 0, 2, "SL", text_color=color.gray, text_size=size.small)
+    table.cell(tbl, 1, 2, na(slPx) ? "—" : str.tostring(slPx, format.mintick),
+         text_color=color.red, text_size=size.small)
+    table.cell(tbl, 0, 3, "Risk $", text_color=color.gray, text_size=size.small)
+    table.cell(tbl, 1, 3, na(rUsd) ? "—" : str.tostring(rUsd, "#,###"),
+         text_color=color.white, text_size=size.small)
 
 // ─── plots ─────────────────────────────────────────────────────────────────
-plot(pmLow,      "pm_low",      color=color.new(color.fuchsia, 0), style=plot.style_stepline)
-plot(sessVwap,   "VWAP",        color=color.new(color.orange, 0))
-plot(sma13,      "SMA 13",      color=color.new(color.aqua, 0))
-plot(todayHigh,  "today_high",  color=color.new(color.gray, 60), style=plot.style_stepline)
+plot(pmLow,     "pm_low",     color=color.new(color.fuchsia, 0), style=plot.style_stepline)
+plot(sessVwap,  "VWAP",       color=color.new(color.orange, 0))
+plot(sma13,     "SMA 13",     color=color.new(color.aqua, 0))
+plot(todayHigh, "today_high", color=color.new(color.gray, 60), style=plot.style_stepline)
 plot(strategy.position_size < 0 ? stopPrice : na, "stop",
-     color=color.new(color.red, 0), style=plot.style_linebr)
-bgcolor(canEnter ? color.new(color.blue, 92) : na, title="entry window")
+     color=color.new(color.red, 0), style=plot.style_linebr, linewidth=2)
+bgcolor(hhmm >= winStart and hhmm <= winEnd ? color.new(color.blue, 93) : na,
+     title="entry window")
 plotshape(entrySignal, "entry", shape.triangledown, location.abovebar,
      color=color.new(color.red, 0), size=size.tiny)
