@@ -31,6 +31,13 @@ PART G — SCALE-OUT LEG anchors (risk['targets'][i]['tp']['anchor']) were
          both walked only risk.values() dicts. An under-warmed leg anchor is
          NaN across the window, so the leg never arms and the trade silently
          runs stop-only — and the target line was never drawn.
+PART H — the results panel printed whole-run money under a FILTERED view: the
+         ACCOUNT block was read straight from the full run (its sizing
+         compounds and shares one balance, so it cannot follow a filter), and
+         the client TTP mirror recomputed scale-out runs as single fills.
+         Both are now labelled instead of silently answering another question.
+         Also parses the page's JavaScript — a syntax error in index.html
+         kills every button and no other test would notice.
 """
 import sys, pathlib, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
@@ -268,6 +275,43 @@ NOTG = {'name': 'n', 'side': 'long', 'entry': LEG_ONLY['entry'],
         'exit': {'logic': 'AND', 'rules': []}, 'risk': {}}
 ok("a strategy with no scale-out legs is unaffected",
    S.referenced_overlays(NOTG) == [] and S._unique_indicators(NOTG) == [])
+
+print("=" * 64)
+print("PART H — the results panel never reports a number for the wrong set")
+print("=" * 64)
+import re as _re, subprocess as _sp, shutil as _sh, tempfile as _tf, os as _os
+_html = (_pl.Path(S.__file__).resolve().parent / 'static' / 'index.html').read_text()
+# (1) FILTERED view vs the ACCOUNT block. Position size compounds in trade
+# order and shares one capital pool, so removing trades changes the equity
+# path and the buying power of every later trade — the account block is a
+# whole-run quantity and was being printed under a filter as if it followed.
+ok("the account line is labelled 'whole run' when a filter is active",
+   "BT_FILTERS.length?` · <b>whole run</b> — filters not applied" in _html)
+ok("...and explains WHY (compounding + shared balance)",
+   'sizing compounds and shares one balance across every trade' in _html)
+# (2) the client TTP mirror is exact for single-exit runs but prices a trade
+# as one fill; a scale-out run banks partials at leg prices and pays a fee per
+# leg, and `legs` are not persisted per trade.
+ok("the TTP mirror is bypassed when the run scaled out",
+   's.ttp = _sc ? {...BT_LAST.summary.ttp, _whole_run:true}' in _html)
+ok("...using the run's own scale-out count, not a guess",
+   'coverage.scaleout_trades' in _html)
+ok("...and the fallback says it is the whole run", "s.ttp._whole_run?" in _html)
+ok("legs really are absent from the stored trade row (why the mirror can't)",
+   "'legs'" not in _html.split('function btTtp')[1][:600])
+# (3) the whole UI must at least PARSE — a syntax error anywhere in index.html
+# silently kills every button on the page, and nothing else here would catch it
+node = _sh.which('node')
+if node:
+    js = '\n;\n'.join(_re.findall(r'<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>', _html, _re.S))
+    p = _os.path.join(_tf.gettempdir(), 'qp_ui_check.js')
+    open(p, 'w').write(js)
+    r = _sp.run([node, '--check', p], capture_output=True, text=True)
+    ok("index.html's JavaScript parses", r.returncode == 0,
+       (r.stderr or '').strip()[:200])
+    _os.unlink(p)
+else:
+    print("  --   node not installed; JS parse check skipped")
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")

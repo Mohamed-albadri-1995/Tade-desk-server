@@ -924,7 +924,17 @@ function btRefresh(){ if(!BT_LAST)return;
   const ft=btApplyFilters(BT_LAST.trades||[]);
   const s=btMetrics(ft, (BT_LAST.summary&&BT_LAST.summary.dates)||[]);
   s.cost_bps_per_side=BT_LAST.summary&&BT_LAST.summary.cost_bps_per_side;
-  if(BT_LAST.summary&&BT_LAST.summary.ttp){ s.ttp=btTtp(ft.filter(t=>t.reason!=='open'&&t.exit!=null), ft.filter(t=>t.reason==='open'), BT_LAST.summary.ttp); }
+  // TTP for the FILTERED subset. btTtp is an exact mirror of the server for a
+  // single-exit run, but it prices a trade as one fill (entry→exit): a
+  // SCALE-OUT run banks partials at leg prices and pays a commission per leg,
+  // and `legs` are not persisted per trade — so the mirror would quietly
+  // report a different number than the run itself. Fall back to the server's
+  // whole-run block and label it rather than compute a wrong one.
+  const _sc=(BT_LAST.summary&&BT_LAST.summary.coverage&&BT_LAST.summary.coverage.scaleout_trades)||0;
+  if(BT_LAST.summary&&BT_LAST.summary.ttp){
+    s.ttp = _sc ? {...BT_LAST.summary.ttp, _whole_run:true}
+                : btTtp(ft.filter(t=>t.reason!=='open'&&t.exit!=null), ft.filter(t=>t.reason==='open'), BT_LAST.summary.ttp);
+  }
   s.errors=0;
   btRenderFilters();
   btRenderCore({summary:s, trades:ft}, BT_FILTERS.length?` · filtered ${ft.length}/${(BT_LAST.trades||[]).length}`:'');
@@ -956,15 +966,22 @@ function btRenderCore(g,extra){
   let html = s.trades
     ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+` · ${s.pairs} pairs`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span id="btErrTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="tap to see which day·symbol pairs failed and why">⚠ ${s.errors} errors</span>`:'')
     : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
-  if(s.ttp){ html+=`<br><span style="color:var(--draft)">TTP @ ${s.ttp.shares} sh: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counted $${s.ttp.counted_pnl_usd} · ${s.ttp.wins_below_min} wins < $${s.ttp.min_profit_ps}/sh wasted</span>`; }
-  // REAL ACCOUNT: risk-based sizing (only when account $ + risk % were set)
+  if(s.ttp){ html+=`<br><span style="color:var(--draft)">TTP @ ${s.ttp.shares} sh: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counted $${s.ttp.counted_pnl_usd} · ${s.ttp.wins_below_min} wins < $${s.ttp.min_profit_ps}/sh wasted`
+    +(s.ttp._whole_run?` · <b>whole run</b> — filters not applied (this run scales out; per-leg fills are not stored per trade)`:'')+`</span>`; }
+  // REAL ACCOUNT: risk-based sizing (only when account $ + risk % were set).
+  // ALWAYS the whole run: position size compounds in trade order and shares
+  // one capital pool, so dropping trades changes the equity path and the
+  // buying power of everything after them — a "filtered account P&L" is not
+  // the sum of the filtered trades. Say so instead of showing a number that
+  // silently answers a different question.
   const _ac=BT_LAST&&BT_LAST.summary&&BT_LAST.summary.account;
   if(_ac){ html+=`<br><span style="color:var(--blue)">ACCOUNT $${_ac.account_equity_start.toLocaleString()} @ ${_ac.risk_pct}% risk: `
     +`<b>$${_ac.equity_end.toLocaleString()}</b> (${_ac.return_pct>=0?'+':''}${_ac.return_pct}%) · net $${_ac.net_pnl_usd.toLocaleString()} · maxDD ${_ac.max_drawdown_pct}% · ${_ac.trades_sized} sized`
     +(_ac.unsized_no_stop?` · ⚠ ${_ac.unsized_no_stop} no-stop excluded`:'')
     +(_ac.size_capped_by_leverage?` · ⚠ ${_ac.size_capped_by_leverage} capped at balance`:'')
     +(_ac.skipped_no_capital?` · ⚠ ${_ac.skipped_no_capital} skipped, no buying power`:'')
-    +(_ac.max_concurrent_positions?` · max ${_ac.max_concurrent_positions} positions at once`:'')+`</span>`; }
+    +(_ac.max_concurrent_positions?` · max ${_ac.max_concurrent_positions} positions at once`:'')
+    +(BT_FILTERS.length?` · <b>whole run</b> — filters not applied (sizing compounds and shares one balance across every trade)`:'')+`</span>`; }
   const cov=s.coverage;
   if(cov){
     let c=`coverage: <b>${cov.evaluated}/${cov.pairs}</b> pairs had data (${cov.tf}·${cov.feed})`;
