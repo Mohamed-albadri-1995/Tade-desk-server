@@ -1,7 +1,10 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const config = require('../config');
 
-const DB_PATH = path.join(__dirname, '../../data/tradedesk.db');
+// Per-tool database — see src/config.js. Each tool owns its own file so their
+// registers, shortlists, training rows and settings stay entirely separate.
+const DB_PATH = config.dbPath;
 
 require('fs').mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
@@ -85,6 +88,17 @@ db.exec(`
     features TEXT NOT NULL,
     backtest TEXT NOT NULL,
     insights TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS screeners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    filters TEXT NOT NULL,
+    sort TEXT,
+    limit_n INTEGER NOT NULL DEFAULT 50,
+    updated_at INTEGER NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS r4a_train (

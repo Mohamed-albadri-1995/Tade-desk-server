@@ -5,10 +5,15 @@ const fs = require('fs');
 const multer = require('multer');
 const training = require('../training/trainingData');
 
-const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
+const config = require('../config');
+
+const SCORER_URL = config.scorerUrl;
 const router = express.Router();
 
-const TMP_DIR = path.join(__dirname, '..', '..', 'tmp');
+const TMP_DIR = config.tmpDir;
+// The model tree this tool reads. Per-tool, so two tools never display or
+// train over each other's tables.
+const OUTPUTS_DIR = config.modelOutputRoot;
 const upload = multer({ dest: TMP_DIR });
 const R4A_CSV = path.join(TMP_DIR, 'r4a.csv');
 const R4B_CSV = path.join(TMP_DIR, 'r4b.csv');
@@ -173,7 +178,6 @@ router.delete('/training-data', (req, res) => {
 
 // GET /api/analysis/table-data?base=B4&table=main
 // Returns factor_importance + all factor bucket CSVs for a given base/table
-const OUTPUTS_DIR = path.join(__dirname, '..', 'scoring', 'outputs');
 const VALID_BASES = ['B1','B2','B3','B4','B5','B6'];
 
 router.get('/table-data', (req, res) => {

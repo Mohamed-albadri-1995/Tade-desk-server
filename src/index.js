@@ -15,6 +15,7 @@ app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 // Routes
 app.use('/api/registry', require('./routes/registry'));
 app.use('/api/scan', require('./routes/scan'));
+app.use('/api/screeners', require('./routes/screeners'));
 app.use('/api/shortlist', require('./routes/shortlist'));
 app.use('/api/market', require('./routes/market'));
 app.use('/api/news', require('./routes/news'));
@@ -45,9 +46,15 @@ app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/home.html'));
 });
 
-const PORT = process.env.PORT || 3000;
+const config = require('./config');
+config.assertDistinct();
+require('./sideA/seedScreeners').seedScreeners();
+
+const PORT = config.port;
 app.listen(PORT, () => {
-  console.log(`[Server] Screener running on port ${PORT}`);
+  console.log(`[Server] ${config.toolName} (${config.toolId}) running on port ${PORT}`);
+  console.log(`[Server]   db=${config.dbPath}`);
+  console.log(`[Server]   model=${config.modelOutputRoot}  scorer=${config.scorerUrl}`);
 
   // Restore r0 from today's checkpoint if available (mid-day restart recovery)
   try {

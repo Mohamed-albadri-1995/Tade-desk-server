@@ -11,7 +11,7 @@ const training = require('./training/trainingData');
 const r0 = require('./r0/registry');
 const { toETDate } = require('./utils/time');
 
-const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
+const SCORER_URL = require('./config').scorerUrl;
 
 async function autoTrainScorer() {
   const today = toETDate(Date.now());

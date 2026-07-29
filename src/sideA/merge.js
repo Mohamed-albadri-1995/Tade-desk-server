@@ -2,14 +2,11 @@ function mergeScannersIntoR0(scannerResults) {
   // Map<ticker, { stock, screenerKeys }>
   const map = new Map();
 
-  const SCANNER_KEY_MAP = {
-    trend: 'Trend',
-    premarket: 'Pre-Mkt',
-    bigmoves: 'Big Move',
-  };
-
+  // Keys are the screeners' display names, straight from their definitions.
+  // A stock matching several screeners stays ONE row tagged with all of them,
+  // so the overlap between screeners remains visible.
   for (const [scannerName, rows] of Object.entries(scannerResults)) {
-    const key = SCANNER_KEY_MAP[scannerName] || scannerName;
+    const key = scannerName;
     for (const row of rows) {
       const { ticker, stock } = row;
       if (!map.has(ticker)) {

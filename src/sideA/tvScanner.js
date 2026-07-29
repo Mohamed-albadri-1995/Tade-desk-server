@@ -236,8 +236,10 @@ const TV_HEADERS = {
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
-async function runScanner(name) {
-  const body = SCANNERS[name];
+// Run one screener definition (from the database) against TradingView.
+async function runScreener(screener) {
+  const body = buildRequest(screener.filters, screener.sort);
+  if (Number.isFinite(screener.limit)) body.range = [0, screener.limit];
   const resp = await axios.post(TV_URL, body, {
     headers: TV_HEADERS,
     timeout: 15000,
@@ -245,27 +247,55 @@ async function runScanner(name) {
   const rawRows = resp.data.data || [];
   if (rawRows.length > 0) validateTVStructure(rawRows[0]);
   const rows = rawRows.map(mapTVRow).filter(r => r.ticker);
-  return { name, rows };
+  return { name: screener.name, key: screener.key, rows };
 }
 
+/**
+ * Run a screener definition without storing anything — powers the builder's
+ * "test" button, so a filter set can be checked before it is saved.
+ */
+async function testScreener(def) {
+  const started = Date.now();
+  const { rows } = await runScreener({
+    name: def.name || 'test',
+    key: 'test',
+    filters: def.filters,
+    sort: def.sort || { sortBy: 'change', sortOrder: 'desc' },
+    limit: Number.isFinite(def.limit) ? def.limit : 20,
+  });
+  return { count: rows.length, ms: Date.now() - started, rows };
+}
+
+/**
+ * Run every enabled screener this tool defines.
+ *
+ * Definitions come from the database rather than a constant, so the set is
+ * whatever the trader has built for this tool. Results are keyed by the
+ * screener's display name, which is what lands in screenerKeys on the card.
+ */
 async function runAllScanners() {
-  const results = await Promise.allSettled([
-    runScanner('trend'),
-    runScanner('premarket'),
-    runScanner('bigmoves'),
-  ]);
+  const store = require('./screenerStore');
+  const screeners = store.list({ enabledOnly: true });
+
+  if (!screeners.length) {
+    console.warn('[TV Scanner] No enabled screeners defined for this tool.');
+    return {};
+  }
+
+  const results = await Promise.allSettled(screeners.map(runScreener));
 
   const scannerResults = {};
-  for (const r of results) {
+  results.forEach((r, i) => {
     if (r.status === 'fulfilled') {
       scannerResults[r.value.name] = r.value.rows;
     } else {
       const errData = r.reason?.response?.data;
-      console.error('[TV Scanner] Failed:', r.reason?.message, errData ? JSON.stringify(errData).slice(0, 200) : '');
+      console.error(`[TV Scanner] "${screeners[i].name}" failed:`, r.reason?.message,
+        errData ? JSON.stringify(errData).slice(0, 200) : '');
     }
-  }
+  });
   console.log('[TV Scanner] Results:', Object.entries(scannerResults).map(([k,v]) => `${k}:${v.length}`).join(' '));
   return scannerResults;
 }
 
-module.exports = { runAllScanners, mapTVRow, COMMON_COLUMNS };
+module.exports = { runAllScanners, runScreener, testScreener, mapTVRow, COMMON_COLUMNS, buildRequest };

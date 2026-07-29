@@ -6,188 +6,158 @@
 <title>Trade Desk</title>
 <style>
 :root {
-  --bg: #0d0f14;
-  --bg2: #13161e;
-  --bg3: #1a1e28;
-  --border: #2a2f3f;
-  --text: #e2e6f0;
-  --text2: #8b92a5;
-  --text3: #555d70;
-  --accent: #3b82f6;
-  --cyan: #22d3ee;
-  --green: #22c55e;
-  --purple: #a78bfa;
+  --bg:#0d0f14; --bg2:#13161e; --bg3:#1a1e28; --border:#2a2f3f;
+  --text:#e2e6f0; --text2:#8b92a5; --text3:#5a6175;
+  --accent:#4a9eff; --green:#4ade80; --red:#f87171; --amber:#fbbf24;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body {
-  height: 100%;
-  background:
-    radial-gradient(900px 500px at 80% 10%, rgba(59,130,246,.07), transparent 60%),
-    radial-gradient(700px 400px at -5% 90%, rgba(167,139,250,.06), transparent 55%),
-    var(--bg);
-  color: var(--text);
-  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
+* { box-sizing:border-box; }
+body {
+  margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  display:flex; flex-direction:column; align-items:center;
+  padding:48px 20px 40px;
 }
+.logo { font-size:13px; letter-spacing:.28em; color:var(--accent); font-weight:700; }
+.title { font-size:28px; font-weight:700; margin:14px 0 6px; letter-spacing:-.02em; text-align:center; }
+.subtitle { font-size:13px; color:var(--text2); margin-bottom:32px; text-align:center; }
 
-.logo {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text3);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  margin-bottom: 8px;
-}
-.title {
-  font-size: 32px;
-  font-weight: 800;
-  color: var(--text);
-  letter-spacing: -0.02em;
-  margin-bottom: 6px;
-}
-.subtitle {
-  font-size: 13px;
-  color: var(--text3);
-  margin-bottom: 56px;
-}
-
-.cards {
-  display: flex;
-  gap: 20px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
+.cards { display:flex; flex-wrap:wrap; gap:16px; justify-content:center;
+         width:100%; max-width:1000px; }
 .tool-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  width: 260px;
-  padding: 28px 28px 24px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  cursor: pointer;
-  text-decoration: none;
-  color: inherit;
-  transition: border-color .18s, transform .18s, box-shadow .18s;
-  position: relative;
-  overflow: hidden;
+  position:relative; width:300px; background:var(--bg2); border:1px solid var(--border);
+  border-radius:10px; padding:20px; text-decoration:none; color:inherit;
+  display:flex; flex-direction:column; gap:8px; transition:border-color .15s, transform .15s;
+  border-top:3px solid var(--accent);
 }
-.tool-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 16px;
-  opacity: 0;
-  transition: opacity .18s;
-}
-.tool-card.scanner::before { background: radial-gradient(140px 120px at 60% -10%, rgba(34,211,238,.10), transparent); }
-.tool-card.trading::before { background: radial-gradient(140px 120px at 60% -10%, rgba(167,139,250,.10), transparent); }
+.tool-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+.tool-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.tool-card.t2 { border-top-color:#a78bfa; }
+.tool-card.t3 { border-top-color:#fb923c; }
+.tool-card.down { opacity:.55; border-top-color:var(--text3); }
 
-.tool-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 12px 40px rgba(0,0,0,.4);
-}
-.tool-card.scanner:hover { border-color: var(--cyan); }
-.tool-card.trading:hover { border-color: var(--purple); }
-.tool-card:hover::before { opacity: 1; }
+.card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+.card-name { font-size:17px; font-weight:700; letter-spacing:-.01em; }
+.card-port { font-size:10px; color:var(--text3); letter-spacing:.06em; }
+.card-desc { font-size:12px; color:var(--text2); line-height:1.6; min-height:3.2em; }
 
-.card-icon {
-  font-size: 36px;
-  margin-bottom: 18px;
-  line-height: 1;
-}
-.card-name {
-  font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 6px;
-  letter-spacing: -0.01em;
-}
-.tool-card.scanner .card-name { color: var(--cyan); }
-.tool-card.trading .card-name { color: var(--purple); }
+.status { display:flex; align-items:center; gap:6px; font-size:10.5px;
+          letter-spacing:.06em; text-transform:uppercase; }
+.dot { width:7px; height:7px; border-radius:50%; background:var(--text3); flex:none; }
+.status.up .dot { background:var(--green); box-shadow:0 0 6px var(--green); }
+.status.up { color:var(--green); }
+.status.down .dot { background:var(--red); }
+.status.down { color:var(--red); }
+.status.wait .dot { background:var(--amber); }
+.status.wait { color:var(--amber); }
 
-.card-desc {
-  font-size: 12px;
-  color: var(--text2);
-  line-height: 1.6;
-  margin-bottom: 20px;
-}
-.card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.tag {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.tool-card.scanner .tag { background: rgba(34,211,238,.1); color: var(--cyan); border: 1px solid rgba(34,211,238,.2); }
-.tool-card.trading .tag { background: rgba(167,139,250,.1); color: var(--purple); border: 1px solid rgba(167,139,250,.2); }
+.stats { display:flex; gap:10px; flex-wrap:wrap; margin-top:2px; }
+.stat { font-size:10.5px; color:var(--text2); background:var(--bg3);
+        border:1px solid var(--border); border-radius:4px; padding:2px 7px; }
+.arrow { position:absolute; right:18px; bottom:16px; color:var(--accent); font-size:16px; }
 
-.arrow {
-  position: absolute;
-  bottom: 24px;
-  right: 24px;
-  font-size: 16px;
-  color: var(--text3);
-  transition: color .18s, transform .18s;
-}
-.tool-card.scanner:hover .arrow { color: var(--cyan); transform: translateX(3px); }
-.tool-card.trading:hover .arrow { color: var(--purple); transform: translateX(3px); }
-
-.version {
-  position: fixed;
-  bottom: 20px;
-  font-size: 11px;
-  color: var(--text3);
-  letter-spacing: 0.06em;
-}
-
-@media (max-width: 580px) {
-  .title { font-size: 24px; }
-  .cards { flex-direction: column; align-items: center; }
-  .tool-card { width: 100%; max-width: 320px; }
+.note { margin-top:30px; font-size:11px; color:var(--text3); text-align:center;
+        max-width:56ch; line-height:1.7; }
+.version { margin-top:22px; font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
+@media (max-width:580px) {
+  body { padding:32px 14px; }
+  .title { font-size:22px; }
+  .tool-card { width:100%; max-width:340px; }
 }
 </style>
 </head>
 <body>
 
-<div class="logo">Trade Desk</div>
+<div class="logo">TRADE DESK</div>
 <div class="title">What are you doing today?</div>
-<div class="subtitle">Choose your tool to get started</div>
+<div class="subtitle">Each tool screens differently and learns from its own history.</div>
 
-<div class="cards">
+<div class="cards" id="cards"></div>
 
-  <a class="tool-card scanner" href="/scanner">
-    <div class="card-icon">📡</div>
-    <div class="card-name">Scanner</div>
-    <div class="card-desc">
-      Pre-market screening, regime analysis, scoring engine, and shortlist management.
-    </div>
-    <div class="card-tags">
-      <span class="tag">Pre-market</span>
-      <span class="tag">R0 Registry</span>
-      <span class="tag">Scoring</span>
-      <span class="tag">Shortlist</span>
-    </div>
-    <span class="arrow">→</span>
-  </a>
-
-  <!-- Trading tool retired; new one will be built against the qp
-       library and wired via /api/registry + the compare-tool bridge. -->
-
+<div class="note">
+  Every tool runs its own screeners, keeps its own registers and shortlist, and trains
+  its own model. Nothing is shared between them, so what one learns never leaks into another.
 </div>
+<div class="version">v2.0 · multi-tool</div>
 
-<div class="version">v1.0 · Screener</div>
+<script>
+// Tools are defined here rather than fetched, so the landing page still renders
+// its cards when a tool is down — the point is to show you WHICH one is down.
+const TOOLS = [
+  { id:'T1', cls:'',   name:'Screener',  port:3000,
+    desc:'The original: big movers, pre-market volume and trend continuation.' },
+  { id:'T2', cls:'t2', name:'Momentum',  port:3010,
+    desc:'Daily moving averages stacked fast-over-slow, breaking or holding the monthly high.' },
+  { id:'T3', cls:'t3', name:'Gappers',   port:3020,
+    desc:'Pre-market gaps on heavy volume in a small float.' },
+];
+
+// A tool may be served on its own port or behind a path on this host; try the
+// port first, fall back to same-origin so it works either way.
+function baseFor(t) {
+  return `${location.protocol}//${location.hostname}:${t.port}`;
+}
+
+function card(t, state, info) {
+  const cls = state === 'down' ? `${t.cls} down` : t.cls;
+  const label = { up:'online', down:'offline', wait:'checking' }[state];
+  const stats = [];
+  if (info && info.rows != null) stats.push(`${info.rows} live`);
+  if (info && info.model) stats.push(info.model);
+  return `
+    <a class="tool-card ${cls}" href="${baseFor(t)}/scanner">
+      <div class="card-top">
+        <div>
+          <div class="card-name">${t.name}</div>
+          <div class="card-port">${t.id} · PORT ${t.port}</div>
+        </div>
+        <div class="status ${state}"><span class="dot"></span>${label}</div>
+      </div>
+      <div class="card-desc">${t.desc}</div>
+      <div class="stats">${stats.map(s => `<span class="stat">${s}</span>`).join('')}</div>
+      <span class="arrow">→</span>
+    </a>`;
+}
+
+function render(states) {
+  document.getElementById('cards').innerHTML =
+    TOOLS.map(t => card(t, states[t.id].state, states[t.id].info)).join('');
+}
+
+const states = {};
+TOOLS.forEach(t => { states[t.id] = { state:'wait', info:null }; });
+render(states);
+
+async function probe(t) {
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 3000);
+    const r = await fetch(`${baseFor(t)}/health`, { signal: ctl.signal });
+    clearTimeout(timer);
+    if (!r.ok) throw new Error('bad status');
+    await r.json();
+    states[t.id] = { state:'up', info:null };
+
+    // Best-effort extras — a tool that is up but still warming up should not
+    // be shown as down just because these are not ready yet.
+    try {
+      const [reg, an] = await Promise.all([
+        fetch(`${baseFor(t)}/api/registry/today`).then(x => x.json()).catch(() => null),
+        fetch(`${baseFor(t)}/api/analysis/status`).then(x => x.json()).catch(() => null),
+      ]);
+      states[t.id].info = {
+        rows: reg && typeof reg.count === 'number' ? reg.count : null,
+        model: an ? (an.ready ? 'model ready' : 'model not trained') : null,
+      };
+    } catch { /* leave info null */ }
+  } catch {
+    states[t.id] = { state:'down', info:null };
+  }
+  render(states);
+}
+
+TOOLS.forEach(probe);
+setInterval(() => TOOLS.forEach(probe), 30000);
+</script>
 
 </body>
 </html>

@@ -109,10 +109,12 @@ describe('Side A — Scanner Merge Logic', () => {
   });
 
   test('duplicate tickers get merged screenerKeys', () => {
+    // Keys are the screeners' display names, exactly as runAllScanners emits
+    // them from the stored definitions.
     const results = {
-      trend: [makeRow('AAPL')],
-      premarket: [makeRow('AAPL')],
-      bigmoves: [makeRow('AAPL')],
+      'Trend': [makeRow('AAPL')],
+      'Pre-Mkt': [makeRow('AAPL')],
+      'Big Move': [makeRow('AAPL')],
     };
     const merged = mergeScannersIntoR0(results);
     expect(merged.length).toBe(1);

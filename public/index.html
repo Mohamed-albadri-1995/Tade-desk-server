@@ -105,6 +105,51 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .badge-bigmove { background: #f9731620; color: #fb923c; border: 1px solid #f9731640; }
 .badge-hot { background: #f9731630; color: #fb923c; border: 1px solid #f9731660; }
 .badge-catalyst { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+/* ── screener builder ── */
+.sb-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px;
+           flex-wrap:wrap; margin-bottom:14px; }
+.sb-title { font-size:18px; font-weight:700; letter-spacing:-.01em; }
+.sb-tool { font-size:11px; color:var(--text3); font-weight:500; margin-left:6px; }
+.sb-sub { font-size:12px; color:var(--text2); max-width:60ch; margin-top:4px; line-height:1.5; }
+.sb-btn { font:600 12px/1 inherit; padding:7px 12px; border-radius:5px; cursor:pointer;
+          border:1px solid #444; background:var(--bg3); color:var(--text1); }
+.sb-btn:hover { border-color:var(--accent); }
+.sb-primary { background:var(--accent); border-color:var(--accent); color:#08111f; }
+.sb-danger { color:#f87171; border-color:#f8717155; }
+.sb-list { display:flex; flex-direction:column; gap:8px; }
+.sb-card { background:var(--bg2); border:1px solid #2a2f3d; border-radius:7px; padding:11px 13px; }
+.sb-card-top { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+.sb-name { font-weight:700; font-size:14px; }
+.sb-key { font:11px ui-monospace,Menlo,monospace; color:var(--text3); margin-left:6px; }
+.sb-off { opacity:.5; }
+.sb-pill { font:10px ui-monospace,Menlo,monospace; padding:2px 6px; border-radius:3px;
+           border:1px solid #3a4152; color:var(--text2); }
+.sb-rules { margin-top:8px; display:flex; flex-wrap:wrap; gap:4px; }
+.sb-rule { font:11px ui-monospace,Menlo,monospace; background:var(--bg3); border:1px solid #333a4a;
+           border-radius:4px; padding:2px 7px; color:var(--text2); }
+.sb-editor { background:var(--bg2); border:1px solid var(--accent); border-radius:7px;
+             padding:14px; margin-top:12px; }
+.sb-row { display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:6px; margin-bottom:6px;
+          align-items:center; }
+.sb-row select, .sb-row input, .sb-field input, .sb-field select {
+  background:var(--bg3); border:1px solid #3a4152; color:var(--text1); border-radius:4px;
+  padding:6px 8px; font:12px inherit; width:100%; }
+.sb-row select:focus, .sb-row input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+.sb-x { background:none; border:none; color:#f87171; cursor:pointer; font-size:16px; padding:0 6px; }
+.sb-field { margin-bottom:10px; }
+.sb-label { display:block; font-size:11px; color:var(--text3); text-transform:uppercase;
+            letter-spacing:.08em; margin-bottom:4px; }
+.sb-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;
+              border-top:1px solid #2a2f3d; padding-top:12px; }
+.sb-result { margin-top:10px; font:12px ui-monospace,Menlo,monospace; color:var(--text2);
+             background:var(--bg3); border-radius:5px; padding:9px 11px; line-height:1.6; }
+.sb-result.err { color:#f87171; }
+.sb-result.ok { color:#4ade80; }
+.sb-vtype { display:flex; gap:4px; margin-bottom:4px; }
+.sb-vtype button { font:10px inherit; padding:3px 7px; border-radius:3px; cursor:pointer;
+                   border:1px solid #3a4152; background:var(--bg3); color:var(--text3); }
+.sb-vtype button.on { background:var(--accent); color:#08111f; border-color:var(--accent); }
+
 .sig-row { display:flex; flex-wrap:wrap; gap:3px; padding:0 12px 6px; }
 .sig { font-size:9px; font-weight:700; letter-spacing:.02em; padding:1px 5px; border-radius:3px;
        border:1px solid; white-space:nowrap; font-family:ui-monospace,Menlo,monospace; }
@@ -475,6 +520,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   <div class="tab" onclick="switchTab('shortlist',this)">Shortlist</div>
   <div class="tab" onclick="switchTab('warehouse',this)">Warehouse</div>
   <div class="tab" onclick="switchTab('analysis',this)">Analysis</div>
+  <div class="tab" onclick="switchTab('builder',this);loadBuilder()">Screeners</div>
   <div class="tab" onclick="switchTab('settings',this);loadSettings();loadBackupStatus()">Settings</div>
   <div class="tab" onclick="switchTab('monitor',this);loadMonitor()">Monitor</div>
 </div>
@@ -704,6 +750,21 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   </div>
 
   <!-- ═══════════════ SETTINGS TAB ═══════════════ -->
+  <!-- ═══════════════ SCREENER BUILDER TAB ═══════════════ -->
+  <div class="tab-pane" id="tab-builder">
+    <div class="sb-head">
+      <div>
+        <div class="sb-title">Screeners <span id="sb-tool" class="sb-tool"></span></div>
+        <div class="sb-sub">Build filters the same way you would in TradingView. Every rule is
+          <b>field · condition · value</b>, and the value can be a number or another field —
+          so "price above the 20-day EMA" or "5MA above 9MA" are both expressible.</div>
+      </div>
+      <button class="sb-btn sb-primary" onclick="sbNew()">+ New screener</button>
+    </div>
+    <div id="sb-list" class="sb-list"></div>
+    <div id="sb-editor" class="sb-editor" style="display:none"></div>
+  </div>
+
   <div class="tab-pane" id="tab-settings">
     <div class="settings-wrap">
 
@@ -2807,6 +2868,219 @@ function closeChartBtn() {
 // INIT
 // ═══════════════════════════════════════════════════
 loadRegistry();
+
+// ═══════════════ SCREENER BUILDER ═══════════════
+// Filters are TradingView's own { left, operation, right } shape, so a rule
+// built here matches one built in their screener field for field. `right` is
+// either a literal or another column name — that is what lets a rule compare
+// two series ("5MA above 9MA") rather than only a series to a number.
+let SB_META = null;      // { fields, operations }
+let SB_LIST = [];
+let SB_EDIT = null;      // the screener being edited (null = none)
+
+async function loadBuilder() {
+  try {
+    if (!SB_META) {
+      const m = await (await fetch('/api/screeners/meta')).json();
+      SB_META = m;
+      document.getElementById('sb-tool').textContent = `· ${m.tool.name} (${m.tool.id})`;
+    }
+    const d = await (await fetch('/api/screeners')).json();
+    SB_LIST = d.screeners || [];
+    sbRenderList();
+  } catch (e) {
+    document.getElementById('sb-list').innerHTML =
+      `<div class="sb-result err">Could not load screeners: ${esc(e.message)}</div>`;
+  }
+}
+
+// TradingView appends a timeframe to a column with "|": EMA9|1 is the daily
+// EMA9, close|1W the weekly close. Rendered in words so a rule reads as a
+// sentence rather than "EMA 9 1".
+const SB_TF = { '1': 'daily', '1W': 'weekly', '1M': 'monthly', '5': '5m', '15': '15m',
+                '30': '30m', '60': '1h', '120': '2h', '240': '4h' };
+function sbFieldLabel(v) {
+  const parts = String(v).split('|');
+  const base = parts[0];
+  const f = SB_META.fields.find(x => x.value === v) || SB_META.fields.find(x => x.value === base);
+  const label = f ? f.label : base;
+  if (parts.length < 2) return label;
+  return `${label} (${SB_TF[parts[1]] || parts[1]})`;
+}
+function sbOpLabel(v) {
+  const o = SB_META.operations.find(x => x.value === v);
+  return o ? o.label : v;
+}
+function sbRuleText(f) {
+  const right = Array.isArray(f.right) ? f.right.join(' … ') : f.right;
+  const rightIsField = typeof f.right === 'string' && isNaN(f.right);
+  return `${sbFieldLabel(f.left)} ${sbOpLabel(f.operation)} ${rightIsField ? sbFieldLabel(right) : right}`;
+}
+
+function sbRenderList() {
+  const el = document.getElementById('sb-list');
+  if (!SB_LIST.length) {
+    el.innerHTML = `<div class="sb-result">No screeners yet. Click <b>+ New screener</b> to build one.</div>`;
+    return;
+  }
+  el.innerHTML = SB_LIST.map(s => `
+    <div class="sb-card ${s.enabled ? '' : 'sb-off'}">
+      <div class="sb-card-top">
+        <div>
+          <span class="sb-name">${esc(s.name)}</span><span class="sb-key">${esc(s.key)}</span>
+          ${s.enabled ? '' : '<span class="sb-pill">disabled</span>'}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="sb-pill">${s.filters.length} rules</span>
+          <span class="sb-pill">top ${s.limit}</span>
+          <button class="sb-btn" onclick="sbEdit(${s.id})">Edit</button>
+          <button class="sb-btn" onclick="sbToggle(${s.id},${s.enabled ? 0 : 1})">${s.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="sb-btn sb-danger" onclick="sbDelete(${s.id})">Delete</button>
+        </div>
+      </div>
+      <div class="sb-rules">${s.filters.map(f => `<span class="sb-rule">${esc(sbRuleText(f))}</span>`).join('')}</div>
+    </div>`).join('');
+}
+
+function sbNew() {
+  SB_EDIT = { id: null, name: '', enabled: true, limit: 50,
+              filters: [{ left: 'close', operation: 'egreater', right: 1 }],
+              sort: { sortBy: 'change', sortOrder: 'desc' } };
+  sbRenderEditor();
+}
+function sbEdit(id) {
+  const s = SB_LIST.find(x => x.id === id);
+  if (!s) return;
+  SB_EDIT = JSON.parse(JSON.stringify(s));
+  sbRenderEditor();
+}
+function sbClose() {
+  SB_EDIT = null;
+  document.getElementById('sb-editor').style.display = 'none';
+}
+
+function sbRenderEditor() {
+  const e = SB_EDIT, box = document.getElementById('sb-editor');
+  const fieldOpts = v => SB_META.fields.map(f =>
+    `<option value="${f.value}" ${f.value === String(v).split('|')[0] ? 'selected' : ''}>${esc(f.label)}</option>`).join('');
+  const opOpts = v => SB_META.operations.map(o =>
+    `<option value="${o.value}" ${o.value === v ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+
+  const rows = e.filters.map((f, i) => {
+    const rightIsField = typeof f.right === 'string' && isNaN(f.right);
+    return `
+    <div class="sb-row">
+      <select onchange="sbSet(${i},'left',this.value)">${fieldOpts(f.left)}</select>
+      <select onchange="sbSet(${i},'operation',this.value)">${opOpts(f.operation)}</select>
+      <div>
+        <div class="sb-vtype">
+          <button class="${rightIsField ? '' : 'on'}" onclick="sbRightType(${i},'number')">number</button>
+          <button class="${rightIsField ? 'on' : ''}" onclick="sbRightType(${i},'field')">field</button>
+        </div>
+        ${rightIsField
+          ? `<select onchange="sbSet(${i},'right',this.value)">${fieldOpts(f.right)}</select>`
+          : `<input type="text" value="${esc(String(f.right))}" onchange="sbSet(${i},'right',this.value)">`}
+      </div>
+      <button class="sb-x" title="remove rule" onclick="sbDelRule(${i})">×</button>
+    </div>`;
+  }).join('');
+
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div class="sb-field">
+      <label class="sb-label">Name</label>
+      <input type="text" value="${esc(e.name)}" placeholder="e.g. MA Stack Breakout"
+             onchange="SB_EDIT.name=this.value">
+    </div>
+    <label class="sb-label">Rules — a stock must match all of them</label>
+    ${rows}
+    <button class="sb-btn" onclick="sbAddRule()">+ Add rule</button>
+    <div class="sb-row" style="margin-top:12px;grid-template-columns:1fr 1fr 1fr auto">
+      <div><label class="sb-label">Sort by</label>
+        <select onchange="SB_EDIT.sort.sortBy=this.value">${fieldOpts(e.sort.sortBy)}</select></div>
+      <div><label class="sb-label">Direction</label>
+        <select onchange="SB_EDIT.sort.sortOrder=this.value">
+          <option value="desc" ${e.sort.sortOrder === 'desc' ? 'selected' : ''}>High to low</option>
+          <option value="asc" ${e.sort.sortOrder === 'asc' ? 'selected' : ''}>Low to high</option>
+        </select></div>
+      <div><label class="sb-label">Max results</label>
+        <input type="number" min="1" max="200" value="${e.limit}" onchange="SB_EDIT.limit=parseInt(this.value)||50"></div>
+      <div></div>
+    </div>
+    <div class="sb-actions">
+      <button class="sb-btn" onclick="sbTest()">Test on TradingView</button>
+      <button class="sb-btn sb-primary" onclick="sbSave()">${e.id ? 'Save changes' : 'Create screener'}</button>
+      <button class="sb-btn" onclick="sbClose()">Cancel</button>
+    </div>
+    <div id="sb-result"></div>`;
+}
+
+function sbSet(i, key, val) {
+  if (key === 'right' && !isNaN(val) && val.trim() !== '') val = parseFloat(val);
+  SB_EDIT.filters[i][key] = val;
+  if (key === 'left') sbRenderEditor();
+}
+// Switching a rule's value between a literal and another column is the whole
+// point of the builder — "close above 20" vs "close above EMA20".
+function sbRightType(i, type) {
+  SB_EDIT.filters[i].right = type === 'field' ? 'EMA9' : 0;
+  sbRenderEditor();
+}
+function sbAddRule() {
+  SB_EDIT.filters.push({ left: 'close', operation: 'egreater', right: 1 });
+  sbRenderEditor();
+}
+function sbDelRule(i) {
+  SB_EDIT.filters.splice(i, 1);
+  if (!SB_EDIT.filters.length) SB_EDIT.filters.push({ left: 'close', operation: 'egreater', right: 1 });
+  sbRenderEditor();
+}
+
+async function sbTest() {
+  const box = document.getElementById('sb-result');
+  box.className = 'sb-result'; box.textContent = 'Running on TradingView…';
+  try {
+    const r = await fetch('/api/screeners/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(SB_EDIT) });
+    const d = await r.json();
+    if (!d.ok) { box.className = 'sb-result err'; box.textContent = d.error; return; }
+    box.className = 'sb-result ok';
+    const names = d.sample.map(x => `${x.ticker} ${x.change != null ? (x.change > 0 ? '+' : '') + x.change.toFixed(1) + '%' : ''}`).join('   ');
+    box.innerHTML = `${d.count} match${d.count === 1 ? '' : 'es'} · ${d.ms}ms` +
+      (d.count ? `<br>${esc(names)}` : '<br>Nothing matched — the rules may be too tight.');
+  } catch (e) {
+    box.className = 'sb-result err'; box.textContent = e.message;
+  }
+}
+
+async function sbSave() {
+  const box = document.getElementById('sb-result');
+  const isNew = !SB_EDIT.id;
+  try {
+    const r = await fetch(isNew ? '/api/screeners' : `/api/screeners/${SB_EDIT.id}`, {
+      method: isNew ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(SB_EDIT) });
+    const d = await r.json();
+    if (!d.ok) { box.className = 'sb-result err'; box.textContent = d.error; return; }
+    sbClose(); await loadBuilder();
+  } catch (e) {
+    box.className = 'sb-result err'; box.textContent = e.message;
+  }
+}
+
+async function sbToggle(id, enabled) {
+  await fetch(`/api/screeners/${id}`, { method: 'PUT',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !!enabled }) });
+  loadBuilder();
+}
+async function sbDelete(id) {
+  const s = SB_LIST.find(x => x.id === id);
+  if (!confirm(`Delete "${s ? s.name : 'this screener'}"? Stocks already captured keep their tag.`)) return;
+  await fetch(`/api/screeners/${id}`, { method: 'DELETE' });
+  loadBuilder();
+}
+
 </script>
 </body>
 </html>
