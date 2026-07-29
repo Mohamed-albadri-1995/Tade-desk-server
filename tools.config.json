@@ -51,11 +51,11 @@
     },
     {
       "id": "T7",
-      "name": "Finviz Sessions",
+      "name": "Sessions",
       "port": 3060,
       "scorerPort": 3061,
       "accent": "#22d3ee",
-      "desc": "Two session-bound screeners: pre-market gappers, then heavy volume after the open."
+      "desc": "Split by time of day: gaps before the open, heavy volume after it."
     }
   ]
 }

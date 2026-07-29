@@ -315,33 +315,94 @@ describe('run windows', () => {
   });
 });
 
-describe('the Finviz screeners from the video', () => {
-  const { FINVIZ } = require('../src/sideA/seedScreeners');
-  const byKey = k => FINVIZ.find(x => x.key === k);
+describe('the session screeners', () => {
+  const { SESSION_SCREENERS } = require('../src/sideA/seedScreeners');
+  const byKey = k => SESSION_SCREENERS.find(x => x.key === k);
 
   test('both are valid and carry their session', () => {
-    for (const d of FINVIZ) expect(store.validateDefinition(d)).toEqual([]);
-    expect(byKey('fv-premarket').runTo).toBe('09:30');
-    expect(byKey('fv-after-open').runFrom).toBe('09:30');
+    for (const d of SESSION_SCREENERS) expect(store.validateDefinition(d)).toEqual([]);
+    expect(byKey('premarket-gap').runTo).toBe('09:30');
+    expect(byKey('after-open-volume').runFrom).toBe('09:30');
+  });
+
+  test('names say what they look for, not where they came from', () => {
+    for (const d of SESSION_SCREENERS) {
+      expect(d.name).not.toMatch(/finviz|^FV /i);
+      expect(d.key).not.toMatch(/^fv-/);
+    }
   });
 
   test('"gap up or down 3%" is expressed as outside -3..3', () => {
     // TradingView has no absolute-value operator; "not between -3 and 3" is
     // exactly the same set as |gap| > 3.
-    const gap = byKey('fv-premarket').filters.find(f => f.left === 'gap');
+    const gap = byKey('premarket-gap').filters.find(f => f.left === 'gap');
     expect(gap).toEqual({ left: 'gap', operation: 'not_in_range', right: [-3, 3] });
   });
 
   test('the pre-market screener carries ATR and average volume floors', () => {
-    const f = byKey('fv-premarket').filters;
+    const f = byKey('premarket-gap').filters;
     expect(f).toContainEqual({ left: 'ATR', operation: 'egreater', right: 1 });
     expect(f).toContainEqual({ left: 'average_volume_90d_calc', operation: 'egreater', right: 2000000 });
   });
 
   test('the after-open screener uses current volume, not average', () => {
-    const f = byKey('fv-after-open').filters;
+    const f = byKey('after-open-volume').filters;
     expect(f).toContainEqual({ left: 'volume', operation: 'greater', right: 10000000 });
     expect(f).toContainEqual({ left: 'relative_volume_10d_calc', operation: 'greater', right: 3 });
     expect(f).toContainEqual({ left: 'close', operation: 'greater', right: 1 });
+  });
+});
+
+describe('renaming the legacy vendor-named screeners', () => {
+  const db = require('../src/db');
+  const { renameLegacyScreeners } = require('../src/sideA/seedScreeners');
+
+  beforeEach(() => db.prepare('DELETE FROM screeners').run());
+
+  const seedOld = () => {
+    store.create({ key: 'fv-premarket', name: 'FV Pre-Market', runFrom: '04:00', runTo: '09:30',
+      filters: [{ left: 'gap', operation: 'not_in_range', right: [-3, 3] }] });
+    store.create({ key: 'fv-after-open', name: 'FV After Open', runFrom: '09:30', runTo: '16:00',
+      filters: [{ left: 'volume', operation: 'greater', right: 10000000 }] });
+  };
+
+  test('an already-running tool gets the new key and name', () => {
+    seedOld();
+    expect(renameLegacyScreeners().renamed).toBe(2);
+    const keys = store.list().map(s => s.key).sort();
+    expect(keys).toEqual(['after-open-volume', 'premarket-gap']);
+    expect(store.list().map(s => s.name).sort())
+      .toEqual(['After Open Volume', 'Pre-Market Gap']);
+  });
+
+  test('the filters and window are untouched — only the label changes', () => {
+    seedOld();
+    renameLegacyScreeners();
+    const pm = store.list().find(s => s.key === 'premarket-gap');
+    expect(pm.filters).toEqual([{ left: 'gap', operation: 'not_in_range', right: [-3, 3] }]);
+    expect(pm.runFrom).toBe('04:00');
+    expect(pm.runTo).toBe('09:30');
+  });
+
+  test('running it twice changes nothing the second time', () => {
+    seedOld();
+    renameLegacyScreeners();
+    expect(renameLegacyScreeners().renamed).toBe(0);
+    expect(store.list()).toHaveLength(2);
+  });
+
+  test('a screener the trader already built under the new key is not touched', () => {
+    seedOld();
+    store.create({ key: 'premarket-gap', name: 'My Pre-Market Gap',
+      filters: [{ left: 'close', operation: 'greater', right: 5 }] });
+    // create() de-duplicates keys, so force the collision the rename must survive
+    db.prepare("UPDATE screeners SET key = 'premarket-gap' WHERE name = 'My Pre-Market Gap'").run();
+
+    renameLegacyScreeners();
+    const mine = store.list().find(s => s.name === 'My Pre-Market Gap');
+    expect(mine.key).toBe('premarket-gap');
+    expect(store.list().find(s => s.name === 'FV Pre-Market')).toBeTruthy();
+    // the non-clashing one still renames
+    expect(store.list().find(s => s.key === 'after-open-volume')).toBeTruthy();
   });
 });

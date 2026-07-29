@@ -126,12 +126,12 @@ const T6_BASE = {
   ],
 };
 
-// The two Finviz screeners from the video, translated to TradingView fields.
-// Each carries the session it was designed for: the first only runs before the
-// open, the second only after it — running either outside its session would
-// collect rows describing a setup it never meant to test.
-const FINVIZ_PREMARKET = {
-  key: 'fv-premarket', name: 'FV Pre-Market',
+// Two screeners split by session. Each carries the session it was designed for:
+// the first only runs before the open, the second only after it — running
+// either outside its session would collect rows describing a setup it never
+// meant to test.
+const PREMARKET_GAP = {
+  key: 'premarket-gap', name: 'Pre-Market Gap',
   runFrom: '04:00', runTo: '09:30',
   sort: { sortBy: 'premarket_change', sortOrder: 'desc' },
   filters: [
@@ -143,8 +143,8 @@ const FINVIZ_PREMARKET = {
   ],
 };
 
-const FINVIZ_OPEN = {
-  key: 'fv-after-open', name: 'FV After Open',
+const AFTER_OPEN_VOLUME = {
+  key: 'after-open-volume', name: 'After Open Volume',
   runFrom: '09:30', runTo: '16:00',
   sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
   filters: [
@@ -165,16 +165,44 @@ const T6 = pair(T6_BASE);
 // T7 runs the two session-bound screeners. They are NOT mirrored: each is a
 // complete setup for its own session, and the sessions do not overlap, so a
 // stock lands in one or the other rather than both.
-const T7 = [FINVIZ_PREMARKET, FINVIZ_OPEN];
+const T7 = [PREMARKET_GAP, AFTER_OPEN_VOLUME];
 
 const BY_TOOL = { T1, T2, T3, T4, T5, T6, T7 };
 
 // Available to add to any tool from the builder.
-const FINVIZ = [FINVIZ_PREMARKET, FINVIZ_OPEN];
+const SESSION_SCREENERS = [PREMARKET_GAP, AFTER_OPEN_VOLUME];
+
+// T7's two screeners shipped under vendor-flavoured names ("FV Pre-Market")
+// that described where the filters came from rather than what they look for.
+// Renaming the seed alone would not reach a tool that has already started, so
+// the old keys are rewritten in place at boot. Nothing is merged: the rename is
+// skipped if the new key already exists, so a trader who built their own
+// "Pre-Market Gap" keeps it.
+const LEGACY_RENAMES = [
+  { from: 'fv-premarket', to: 'premarket-gap', name: 'Pre-Market Gap' },
+  { from: 'fv-after-open', to: 'after-open-volume', name: 'After Open Volume' },
+];
+
+function renameLegacyScreeners() {
+  let renamed = 0;
+  for (const r of LEGACY_RENAMES) {
+    const old = db.prepare('SELECT id FROM screeners WHERE key = ?').get(r.from);
+    if (!old) continue;
+    const clash = db.prepare('SELECT id FROM screeners WHERE key = ?').get(r.to);
+    if (clash) continue;
+    db.prepare('UPDATE screeners SET key = ?, name = ? WHERE id = ?').run(r.to, r.name, old.id);
+    console.log(`[Screeners] renamed "${r.from}" → "${r.to}"`);
+    renamed++;
+  }
+  return { renamed };
+}
 
 function seedScreeners() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM screeners').get().n;
-  if (count > 0) return { seeded: 0, reason: 'already has screeners' };
+  if (count > 0) {
+    renameLegacyScreeners();
+    return { seeded: 0, reason: 'already has screeners' };
+  }
 
   const defs = BY_TOOL[config.toolId] || T1;
   let seeded = 0;
@@ -190,4 +218,6 @@ function seedScreeners() {
   return { seeded };
 }
 
-module.exports = { seedScreeners, PRESETS: BY_TOOL, FINVIZ };
+module.exports = {
+  seedScreeners, renameLegacyScreeners, PRESETS: BY_TOOL, SESSION_SCREENERS,
+};
