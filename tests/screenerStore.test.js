@@ -129,3 +129,66 @@ describe('seed presets', () => {
     expect(PRESETS.T2.map(s => s.key)).not.toEqual(PRESETS.T3.map(s => s.key));
   });
 });
+
+describe('mirroring a screener', () => {
+  const bull = {
+    name: 'Stack Up', limit: 50, sort: { sortBy: 'change', sortOrder: 'desc' },
+    filters: [
+      { left: 'SMA5|1', operation: 'greater', right: 'EMA9|1' },
+      { left: 'close', operation: 'egreater', right: 'High.1M' },
+      { left: 'change', operation: 'greater', right: 5 },
+      { left: 'close', operation: 'egreater', right: 1 },
+      { left: 'average_volume_10d_calc', operation: 'greater', right: 2000000 },
+    ],
+  };
+
+  test('a series-vs-series rule flips its operator', () => {
+    const m = store.mirrorDefinition(bull);
+    expect(m.filters[0]).toEqual({ left: 'SMA5|1', operation: 'less', right: 'EMA9|1' });
+    expect(m.filters[1]).toEqual({ left: 'close', operation: 'eless', right: 'High.1M' });
+  });
+
+  test('a directional threshold flips operator AND sign', () => {
+    const m = store.mirrorDefinition(bull);
+    expect(m.filters[2]).toEqual({ left: 'change', operation: 'less', right: -5 });
+  });
+
+  test('quality guards survive untouched', () => {
+    // Inverting "price above $1" or "volume above 2M" would select illiquid
+    // junk, not the bearish counterpart of the setup.
+    const m = store.mirrorDefinition(bull);
+    expect(m.filters[3]).toEqual({ left: 'close', operation: 'egreater', right: 1 });
+    expect(m.filters[4]).toEqual({ left: 'average_volume_10d_calc', operation: 'greater', right: 2000000 });
+  });
+
+  test('sorting on a directional field flips, so the best candidates stay on top', () => {
+    expect(store.mirrorDefinition(bull).sort).toEqual({ sortBy: 'change', sortOrder: 'asc' });
+  });
+
+  test('sorting on a non-directional field does not flip', () => {
+    const m = store.mirrorDefinition({ ...bull, sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' } });
+    expect(m.sort).toEqual({ sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' });
+  });
+
+  test('the mirror is itself valid and round-trips back', () => {
+    const m = store.mirrorDefinition(bull);
+    expect(store.validateDefinition(m)).toEqual([]);
+    const back = store.mirrorDefinition({ ...m, name: 'Stack Up' });
+    expect(back.filters).toEqual(bull.filters);   // mirroring twice is identity
+  });
+
+  test('operators with no opposite are left alone', () => {
+    const m = store.mirrorDefinition({
+      name: 'x', filters: [{ left: 'sector', operation: 'equal', right: 'Technology' }],
+    });
+    expect(m.filters[0].operation).toBe('equal');
+  });
+
+  test('createMirror stores it with a distinct name and key', () => {
+    const src = store.create(bull);
+    const mir = store.createMirror(src.id);
+    expect(mir.name).toBe('Stack Up (mirror)');
+    expect(mir.key).not.toBe(src.key);
+    expect(mir.filters[2].right).toBe(-5);
+  });
+});

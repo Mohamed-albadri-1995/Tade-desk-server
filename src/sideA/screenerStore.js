@@ -135,6 +135,70 @@ function validateDefinition(def) {
   return errors;
 }
 
+// ── mirroring ──────────────────────────────────────────────────────────────
+
+// Flipping a screener is not simply inverting every operator. A rule is either
+// DIRECTIONAL — it says which way the stock is going, and its mirror is the
+// opposite — or a QUALITY GUARD ("price above $1", "volume above 2M"), which
+// exists to exclude junk and must survive the flip untouched. Inverting a guard
+// would produce the mirror of the filter rather than the mirror of the setup:
+// "volume below 2M" is illiquid noise, not the bearish counterpart.
+const OPPOSITE_OP = {
+  greater: 'less', less: 'greater',
+  egreater: 'eless', eless: 'egreater',
+  crosses_above: 'crosses_below', crosses_below: 'crosses_above',
+  'above%': 'below%', 'below%': 'above%',
+};
+
+// Fields whose sign carries direction. A numeric threshold on one of these
+// flips sign as well as operator: "change above 5" mirrors to "change below -5".
+const DIRECTIONAL_FIELDS = new Set([
+  'change', 'change_from_open', 'gap', 'premarket_change', 'premarket_gap',
+  'Perf.W', 'Perf.1M', 'Perf.3M', 'Perf.Y',
+]);
+
+function mirrorFilter(f) {
+  const opposite = OPPOSITE_OP[f.operation];
+  if (!opposite) return { ...f };            // equality, has, in_range … leave alone
+
+  const rightIsField = typeof f.right === 'string' && isNaN(f.right);
+  if (rightIsField) {
+    // Comparing two series: the mirror is the same pair, other way round.
+    // "close above EMA9" -> "close below EMA9"; "5MA above 9MA" -> "5MA below 9MA".
+    return { ...f, operation: opposite };
+  }
+
+  const base = baseField(f.left);
+  if (DIRECTIONAL_FIELDS.has(base)) {
+    const n = Number(f.right);
+    return { ...f, operation: opposite, right: Number.isFinite(n) ? -n : f.right };
+  }
+
+  // A numeric threshold on a non-directional field is a quality guard.
+  return { ...f };
+}
+
+/**
+ * Build the mirror of a screener definition — the same structural setup facing
+ * the other way — leaving its quality guards in place.
+ */
+function mirrorDefinition(def) {
+  const filters = (def.filters || []).map(mirrorFilter);
+  const sort = { ...(def.sort || { sortBy: 'change', sortOrder: 'desc' }) };
+  // Sorting on a directional field should also flip, so the mirror's strongest
+  // candidates sit at the top of its list rather than the bottom.
+  if (DIRECTIONAL_FIELDS.has(baseField(sort.sortBy))) {
+    sort.sortOrder = sort.sortOrder === 'desc' ? 'asc' : 'desc';
+  }
+  return {
+    name: `${def.name} (mirror)`,
+    filters,
+    sort,
+    limit: def.limit,
+    enabled: def.enabled !== false,
+  };
+}
+
 // ── storage ────────────────────────────────────────────────────────────────
 
 function rowToScreener(row) {
@@ -230,8 +294,15 @@ function remove(id) {
   return db.prepare('DELETE FROM screeners WHERE id = ?').run(id).changes > 0;
 }
 
+/** Create and store the mirror of an existing screener. */
+function createMirror(id) {
+  const src = get(id);
+  if (!src) throw new Error(`Screener ${id} not found`);
+  return create(mirrorDefinition(src));
+}
+
 module.exports = {
-  list, get, create, update, remove,
+  list, get, create, update, remove, createMirror, mirrorDefinition,
   validateDefinition, validateFilter, isKnownField,
   OPERATIONS, FIELDS,
 };

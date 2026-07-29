@@ -71,6 +71,24 @@ router.put('/:id', express.json(), (req, res) => {
   }
 });
 
+// POST /api/screeners/:id/mirror — store the opposite-facing twin
+router.post('/:id/mirror', (req, res) => {
+  try {
+    res.json({ ok: true, screener: store.createMirror(Number(req.params.id)) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/screeners/preview-mirror — what the mirror WOULD be, unsaved
+router.post('/preview-mirror', express.json(), (req, res) => {
+  try {
+    res.json({ ok: true, definition: store.mirrorDefinition(req.body || {}) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // DELETE /api/screeners/:id
 router.delete('/:id', (req, res) => {
   try {

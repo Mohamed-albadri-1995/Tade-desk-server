@@ -57,51 +57,37 @@ const T1 = [
   },
 ];
 
-// Daily moving averages stacked fast-over-slow, with price breaking the
-// 1-month high — the trend-continuation screener described for tool 2.
-const T2 = [
-  {
-    key: 'ma-stack-breakout', name: 'MA Stack Breakout',
-    sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
-    filters: [
-      { left: 'SMA5|1', operation: 'greater', right: 'EMA9|1' },
-      { left: 'EMA9|1', operation: 'greater', right: 'EMA13|1' },
-      { left: 'EMA13|1', operation: 'greater', right: 'EMA20|1' },
-      { left: 'close', operation: 'egreater', right: 'High.1M' },
-      { left: 'close', operation: 'egreater', right: 1 },
-      { left: 'average_volume_10d_calc', operation: 'greater', right: 500000 },
-    ],
-  },
-  {
-    key: 'ma-stack-pullback', name: 'MA Stack Pullback',
-    sort: { sortBy: 'change', sortOrder: 'desc' },
-    filters: [
-      { left: 'SMA5|1', operation: 'greater', right: 'EMA9|1' },
-      { left: 'EMA9|1', operation: 'greater', right: 'EMA13|1' },
-      { left: 'EMA13|1', operation: 'greater', right: 'EMA20|1' },
-      { left: 'close', operation: 'less', right: 'High.1M' },
-      { left: 'close', operation: 'egreater', right: 'EMA9|1' },
-      { left: 'relative_volume_10d_calc', operation: 'greater', right: 1.5 },
-      { left: 'close', operation: 'egreater', right: 1 },
-    ],
-  },
-];
+// Tools 2 and 3 each ship ONE screener plus its mirror — the same structural
+// setup facing the other way. Pairing them is what makes a month of data
+// answer "is this edge directional, or does this screener just find movers?".
+// The mirror is generated rather than hand-written, so the pair cannot drift.
+const T2_BASE = {
+  key: 'ma-stack-breakout', name: 'MA Stack Breakout',
+  sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
+  filters: [
+    { left: 'SMA5|1', operation: 'greater', right: 'EMA9|1' },
+    { left: 'EMA9|1', operation: 'greater', right: 'EMA13|1' },
+    { left: 'EMA13|1', operation: 'greater', right: 'EMA20|1' },
+    { left: 'close', operation: 'egreater', right: 'High.1M' },
+    { left: 'close', operation: 'egreater', right: 1 },
+    { left: 'average_volume_10d_calc', operation: 'greater', right: 500000 },
+  ],
+};
 
-// A starting point for tool 3 — deliberately different from the other two so
-// its model learns a separate population. Edit freely in the builder.
-const T3 = [
-  {
-    key: 'gap-and-volume', name: 'Gap + Volume',
-    sort: { sortBy: 'premarket_change', sortOrder: 'desc' },
-    filters: [
-      { left: 'premarket_change', operation: 'greater', right: 5 },
-      { left: 'premarket_volume', operation: 'greater', right: 500000 },
-      { left: 'relative_volume_10d_calc', operation: 'greater', right: 2 },
-      { left: 'close', operation: 'egreater', right: 1 },
-      { left: 'float_shares_outstanding', operation: 'less', right: 50000000 },
-    ],
-  },
-];
+const T3_BASE = {
+  key: 'gap-and-volume', name: 'Gap + Volume',
+  sort: { sortBy: 'premarket_change', sortOrder: 'desc' },
+  filters: [
+    { left: 'premarket_change', operation: 'greater', right: 5 },
+    { left: 'premarket_volume', operation: 'greater', right: 500000 },
+    { left: 'relative_volume_10d_calc', operation: 'greater', right: 2 },
+    { left: 'close', operation: 'egreater', right: 1 },
+    { left: 'float_shares_outstanding', operation: 'less', right: 50000000 },
+  ],
+};
+
+const T2 = [T2_BASE, store.mirrorDefinition(T2_BASE)];
+const T3 = [T3_BASE, store.mirrorDefinition(T3_BASE)];
 
 const BY_TOOL = { T1, T2, T3 };
 

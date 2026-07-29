@@ -2934,6 +2934,7 @@ function sbRenderList() {
           <span class="sb-pill">${s.filters.length} rules</span>
           <span class="sb-pill">top ${s.limit}</span>
           <button class="sb-btn" onclick="sbEdit(${s.id})">Edit</button>
+          <button class="sb-btn" onclick="sbMirror(${s.id})" title="Create the opposite-facing twin">Mirror</button>
           <button class="sb-btn" onclick="sbToggle(${s.id},${s.enabled ? 0 : 1})">${s.enabled ? 'Disable' : 'Enable'}</button>
           <button class="sb-btn sb-danger" onclick="sbDelete(${s.id})">Delete</button>
         </div>
@@ -3067,6 +3068,21 @@ async function sbSave() {
   } catch (e) {
     box.className = 'sb-result err'; box.textContent = e.message;
   }
+}
+
+// A mirror is the same structural setup facing the other way: directional
+// rules flip, quality guards ("price above $1", "volume above 2M") stay put —
+// inverting those would select illiquid junk rather than the bearish twin.
+async function sbMirror(id) {
+  const s = SB_LIST.find(x => x.id === id);
+  if (!s) return;
+  if (!confirm(`Create the mirror of "${s.name}"?\n\nDirectional rules flip; ` +
+               `price and volume guards stay as they are.`)) return;
+  const r = await fetch(`/api/screeners/${id}/mirror`, { method: 'POST' });
+  const d = await r.json();
+  if (!d.ok) { alert(d.error); return; }
+  await loadBuilder();
+  sbEdit(d.screener.id);   // open it so the pair can be checked and tuned
 }
 
 async function sbToggle(id, enabled) {
