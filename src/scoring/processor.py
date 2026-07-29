@@ -62,6 +62,14 @@ BASES = [
 ALPHA = 0.5
 K_CONFIDENCE = 5
 
+# How many buckets each factor is cut into. Every bucket's score is a lookup of
+# what its trades historically did, so the bucket has to hold enough of them to
+# mean anything. At 10 buckets a 145-row table gives ~14 trades each and a
+# confidence of n/(n+5) = 0.74; at 5 it gives ~29 and 0.85. Fewer, sturdier
+# buckets beat finer ranking the data cannot support. Override with
+# SCORER_N_BUCKETS if a table ever grows large enough to split further.
+N_BUCKETS = int(os.environ.get('SCORER_N_BUCKETS', '5'))
+
 
 # ─────────────────────────────────────────────────────────
 # FactorAnalysisProcessor
@@ -242,11 +250,11 @@ class FactorAnalysisProcessor:
 
             # Create deciles
             try:
-                bucket_labels, bin_edges = pd.qcut(factor_scores, q=10, labels=False,
+                bucket_labels, bin_edges = pd.qcut(factor_scores, q=N_BUCKETS, labels=False,
                                                    duplicates='drop', retbins=True)
             except Exception:
                 try:
-                    bucket_labels, bin_edges = pd.cut(factor_scores, bins=10, labels=False,
+                    bucket_labels, bin_edges = pd.cut(factor_scores, bins=N_BUCKETS, labels=False,
                                                       retbins=True, duplicates='drop')
                 except Exception:
                     bucket_labels = pd.Series([0] * len(factor_scores), index=X_final.index)
