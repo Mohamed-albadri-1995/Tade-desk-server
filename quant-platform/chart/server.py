@@ -584,47 +584,38 @@ def _print_span(w_start, w_end) -> int:
     return max(1, int((w_end - w_start).total_seconds() // 86400) + 1)
 
 
-@app.get('/api/r1/print', response_class=HTMLResponse)
-def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
-             feed: str = 'polygon', overlays: str = '[]', register: str = 'R1',
-             days_before: int = 1, days_after: int = 0,
-             cols: int = 1, height: int = 420):
-    """PRINT SHEET: one chart per ticker, for EVERY register day in a range.
+def _build_sheets(start: str, end: str, day: str, tf: str, feed: str,
+                  overlays: str, register: str, days_before: int, days_after: int):
+    """Bars + indicator series for every ticker of every register day in a
+    range — the payload BOTH the print sheet and the CSV export are built
+    from, so the two can never disagree about a number.
 
-    Window per register day D: `days_before` calendar days before D through
-    `days_after` calendar days after D, all in FULL extended hours
-    (04:00-20:00 ET). So the previous session's post-market, the overnight,
-    D's premarket/RTH/post-market — and, with days_after, how it followed
-    through — are on one chart. Calendar days (not trading days) so a Monday
-    reaches back through the weekend to Friday.
+    Returns (sheets, errors, ovs, rng, err_msg). `err_msg` non-empty means the
+    request itself was unusable (no date, or no frozen day in the range) and
+    nothing was fetched.
 
-    Every day in the window is drawn IDENTICALLY — the register day gets no
-    special colour. Only the SESSION is coloured: premarket and post-market
-    are shaded on all days, the regular session is left plain.
-
-    `start`/`end` select the range (inclusive); `day` is accepted as a
-    shorthand for start=end=day. Everything is computed by the SAME
-    cs.compute_data() the live chart uses.
+    Window per register day D: `days_before` TRADING days before D through
+    `days_after` TRADING days after D, all in FULL extended hours
+    (04:00-20:00 ET) — see _print_window.
     """
     import json as _json
-    import pandas as _pd
     if day and not start and not end:
         start = end = day
     start = start or end
     end = end or start
     if not start:
-        return HTMLResponse('<h3>need a date (start/end, or day)</h3>')
+        return [], [], [], '', 'need a date (start/end, or day)'
     try:
         ovs = _json.loads(overlays) if overlays else []
     except _json.JSONDecodeError:
         ovs = []
+    rng = start if start == end else f'{start} → {end}'
 
     # which register days actually exist in the range
     have = sc.available_dates(register) or []
     days = sorted(d for d in have if str(start) <= d <= str(end))
     if not days:
-        return HTMLResponse(
-            f'<h3>no frozen {register} days between {start} and {end}</h3>')
+        return [], [], ovs, rng, f'no frozen {register} days between {start} and {end}'
 
     sheets, errors = [], []
     for d in days:
@@ -666,6 +657,36 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
                 errors.append(f'{d} {sym}: {e}')
         if charts:
             sheets.append({'day': d, 'charts': charts})
+    return sheets, errors, ovs, rng, ''
+
+
+@app.get('/api/r1/print', response_class=HTMLResponse)
+def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
+             feed: str = 'polygon', overlays: str = '[]', register: str = 'R1',
+             days_before: int = 1, days_after: int = 0,
+             cols: int = 1, height: int = 420):
+    """PRINT SHEET: one chart per ticker, for EVERY register day in a range.
+
+    Window per register day D: `days_before` TRADING days before D through
+    `days_after` TRADING days after D, all in FULL extended hours
+    (04:00-20:00 ET). So the previous session's post-market, the overnight,
+    D's premarket/RTH/post-market — and, with days_after, how it followed
+    through — are on one chart.
+
+    Every day in the window is drawn IDENTICALLY — the register day gets no
+    special colour. Only the SESSION is coloured: premarket and post-market
+    are shaded on all days, the regular session is left plain.
+
+    `start`/`end` select the range (inclusive); `day` is accepted as a
+    shorthand for start=end=day. Everything is computed by the SAME
+    cs.compute_data() the live chart uses; /api/r1/csv exports these exact
+    numbers as a spreadsheet.
+    """
+    import json as _json
+    sheets, errors, ovs, rng, bad = _build_sheets(
+        start, end, day, tf, feed, overlays, register, days_before, days_after)
+    if bad:
+        return HTMLResponse(f'<h3>{bad}</h3>')
 
     # LEGEND: name + colour of every indicator line, taken from the series the
     # engine actually produced (not from the request), so the swatch can never
@@ -692,7 +713,11 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
     err_html = (f'<div class="warn">skipped: {"; ".join(errors[:10])}'
                 + (f' … +{len(errors) - 10} more' if len(errors) > 10 else '')
                 + '</div>') if errors else ''
-    rng = start if start == end else f'{start} → {end}'
+    # the CSV of the SAME request — one click, same window, same numbers
+    from urllib.parse import urlencode as _ue
+    csv_qs = _ue({'start': start or day, 'end': end or day, 'day': day, 'tf': tf,
+                  'feed': feed, 'overlays': overlays, 'register': register,
+                  'days_before': days_before, 'days_after': days_after})
     return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
 <title>{register} {rng} — print</title>
 <script src="/static/lightweight-charts.js"></script>
@@ -730,6 +755,11 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
  · unshaded = regular session</div>
 {err_html}
 <button class="noprint" onclick="window.print()">🖨 Print / Save as PDF</button>
+<a class="noprint" href="/api/r1/csv?{csv_qs}"
+   style="display:inline-block;margin-left:8px;padding:6px 12px;background:#059669;color:#fff;
+          border-radius:6px;text-decoration:none;font:inherit">⬇ Download CSV</a>
+<span class="noprint" style="color:#666;font-size:11px;margin-left:8px">every bar of every
+ chart above — OHLCV + each indicator's value — same window, same numbers</span>
 <div id="root"></div>
 <script>
 const SHEETS = {payload};
@@ -797,6 +827,86 @@ for (const sheet of SHEETS) {{
   }}
 }}
 </script></body></html>""")
+
+
+@app.get('/api/r1/csv')
+def r1_csv(start: str = '', end: str = '', day: str = '', tf: str = '1m',
+           feed: str = 'polygon', overlays: str = '[]', register: str = 'R1',
+           days_before: int = 1, days_after: int = 0):
+    """The print sheet as a SPREADSHEET — same parameters, same window, same
+    numbers, one row per bar.
+
+    Columns: register_day, symbol, datetime_et, epoch, session (pre/rth/post),
+    open, high, low, close, volume, then ONE COLUMN PER INDICATOR, named
+    exactly as the sheet's legend names it. A bar where an indicator is still
+    warming up is left EMPTY, never zero-filled — a blank means "no value
+    yet", and that distinction is the whole reason to export raw numbers.
+
+    Two indicators can carry the same label (the same primitive added twice on
+    the chart, e.g. two 5-day MAs): the duplicate gets a #2 suffix so the
+    columns stay addressable instead of one silently overwriting the other.
+    """
+    import csv
+    import io
+    import pandas as pd
+    from fastapi.responses import PlainTextResponse
+    sheets, errors, _ovs, rng, bad = _build_sheets(
+        start, end, day, tf, feed, overlays, register, days_before, days_after)
+    if bad:
+        return PlainTextResponse('# ' + bad, status_code=200)
+
+    # COLUMN ORDER: the union of series labels in the order the sheet lists
+    # them, so the spreadsheet reads like the legend. Same (label, colour) key
+    # the legend dedupes on — a repeated primitive is a real second column.
+    cols, seen = [], set()
+    for sh in sheets:
+        for c in sh['charts']:
+            for sr in c['series']:
+                key = (str(sr.get('name') or '?'), sr.get('color'))
+                if key not in seen:
+                    seen.add(key); cols.append(key)
+    names, used = [], {}
+    for lbl, _color in cols:
+        used[lbl] = used.get(lbl, 0) + 1
+        names.append(lbl if used[lbl] == 1 else f'{lbl} #{used[lbl]}')
+
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator='\n')
+    w.writerow(['register_day', 'symbol', 'datetime_et', 'epoch', 'session',
+                'open', 'high', 'low', 'close', 'volume'] + names)
+    et = cs._ET
+    n_rows = 0
+    for sh in sheets:
+        for c in sh['charts']:
+            # each series -> {epoch: value}; a bar with no entry stays blank
+            by_key: dict = {}
+            for sr in c['series']:
+                key = (str(sr.get('name') or '?'), sr.get('color'))
+                m = by_key.setdefault(key, {})
+                for v in (sr.get('values') or []):
+                    m[int(v['time'])] = v.get('value')
+            for b in c['bars']:
+                t = int(b['time'])
+                dt = pd.Timestamp(t, unit='s', tz='UTC').tz_convert(et)
+                row = [sh['day'], c['symbol'], dt.strftime('%Y-%m-%d %H:%M:%S'),
+                       t, b.get('sess', ''),
+                       b.get('open'), b.get('high'), b.get('low'), b.get('close'),
+                       b.get('volume')]
+                for key in cols:
+                    val = by_key.get(key, {}).get(t)
+                    row.append('' if val is None else val)
+                w.writerow(row)
+                n_rows += 1
+    # every skipped symbol is named IN the file — a short export must never
+    # look complete when a ticker silently failed to load.
+    for e in errors:
+        w.writerow(['# skipped', e])
+    fname = (f'{register}_{(start or day) or "x"}_{(end or day) or "x"}_{tf}'
+             .replace('-', '') + '.csv')
+    return PlainTextResponse(
+        buf.getvalue(), media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="{fname}"',
+                 'X-Rows': str(n_rows)})
 
 
 @app.websocket('/ws/live')

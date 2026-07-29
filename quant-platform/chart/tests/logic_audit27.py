@@ -240,6 +240,88 @@ ok("each register day becomes its own labelled, page-broken section",
 htmlN = srv.r1_print(start='2020-01-01', end='2020-01-02', feed='prt').body.decode()
 ok("empty range is reported, not silently blank", 'no frozen' in htmlN)
 
+print("=" * 64)
+print("PART H — CSV export: the SAME numbers as the sheet, one row per bar")
+print("=" * 64)
+import csv as _csv, io as _io
+res = srv.r1_csv(day=DAY, tf='5m', feed='prt', overlays=json.dumps(OVS),
+                 register='R1', days_before=1, days_after=0)
+body = res.body.decode()
+rows = list(_csv.reader(_io.StringIO(body)))
+head, data_rows = rows[0], [r for r in rows[1:] if r and not r[0].startswith('#')]
+ok("it downloads as a file, not a page",
+   'attachment' in res.headers.get('content-disposition', '')
+   and 'text/csv' in res.headers.get('content-type', ''),
+   f"{res.headers.get('content-disposition')}")
+ok("the filename names register, range and timeframe",
+   '.csv' in res.headers.get('content-disposition', '')
+   and 'R1' in res.headers.get('content-disposition', '')
+   and '5m' in res.headers.get('content-disposition', ''))
+ok("header carries the bar columns", head[:10] ==
+   ['register_day', 'symbol', 'datetime_et', 'epoch', 'session',
+    'open', 'high', 'low', 'close', 'volume'], f"{head[:10]}")
+ok("...plus one column per indicator, named as the legend names it",
+   head[10:] == ['sma(length=9)'], f"{head[10:]}")
+# EXACTLY the sheet's bars — same count, same tickers, same window
+sheet_bars = sum(len(c['bars']) for c in data)
+ok("one row per bar of every chart on the sheet",
+   len(data_rows) == sheet_bars, f"csv={len(data_rows)} sheet={sheet_bars}")
+ok("the same tickers, and only those",
+   sorted({r[1] for r in data_rows}) == ['AAA', 'BBB'],
+   f"{sorted({r[1] for r in data_rows})}")
+ok("every row is stamped with its register day",
+   {r[0] for r in data_rows} == {DAY}, f"{ {r[0] for r in data_rows} }")
+# value fidelity: the CSV close and indicator must EQUAL the chart's
+aaa_csv = [r for r in data_rows if r[1] == 'AAA']
+b0 = aaa[0]['bars'][0]
+r0 = aaa_csv[0]
+ok("row 1 is the chart's first bar (same epoch)", int(r0[3]) == b0['time'],
+   f"{r0[3]} vs {b0['time']}")
+ok("OHLCV match the chart bar exactly",
+   [float(r0[5]), float(r0[6]), float(r0[7]), float(r0[8])]
+   == [b0['open'], b0['high'], b0['low'], b0['close']], f"{r0[5:10]}")
+ok("the session tag rides along (pre / rth / post)",
+   {r[4] for r in aaa_csv} == {'pre', 'rth', 'post'}, f"{ {r[4] for r in aaa_csv} }")
+ok("datetime is rendered in ET, not UTC",
+   r0[2].endswith('04:00:00') and r0[2].startswith('2026-07-13'), f"{r0[2]}")
+# the indicator column: warm-up EMPTY, then the chart's exact value
+ind_by_ts = {int(v['time']): v['value'] for v in aaa[0]['series'][0]['values']}
+csv_ind = {int(r[3]): r[10] for r in aaa_csv}
+matched = [t for t in ind_by_ts if csv_ind.get(t) not in (None, '')]
+ok("every drawn indicator value is in the CSV",
+   len(matched) == len(ind_by_ts), f"{len(matched)}/{len(ind_by_ts)}")
+ok("...to the same value, bar for bar",
+   all(abs(float(csv_ind[t]) - ind_by_ts[t]) < 1e-9 for t in matched))
+# and NOTHING is invented: a filled cell exists only where the chart had a
+# point. (The window here starts AFTER the 9-SMA warmed up, so every bar has
+# one — the empty-vs-zero rule is proved on the un-warmed indicator below.)
+ok("no CSV value exists where the chart drew none",
+   {t for t, v in csv_ind.items() if v != ''} == set(ind_by_ts))
+# an indicator that never warms up inside the window must be BLANK, not 0 —
+# a spreadsheet full of zeros would read as "the average was zero".
+res0 = srv.r1_csv(day=DAY, tf='5m', feed='prt', register='R1', days_before=0,
+                  overlays=json.dumps([{'id': 'w', 'key': 'ma.sma', 'source': 'close',
+                                        'params': {'length': 5000}, 'color': '#000'}]))
+r0rows = list(_csv.reader(_io.StringIO(res0.body.decode())))
+w_col = [r[10] for r in r0rows[1:] if r and not r[0].startswith('#')]
+ok("an indicator with no value in the window is EMPTY, never zero",
+   bool(w_col) and set(w_col) == {''}, f"{sorted(set(w_col))[:3]}")
+# a symbol that could not load is NAMED in the file, not silently missing
+ok("the skipped ticker is recorded IN the csv", 'ZZZ' in body and '# skipped' in body)
+# the sheet links to the csv of the SAME request
+ok("the print sheet has a one-click CSV button for its own query",
+   '/api/r1/csv?' in html and 'Download CSV' in html)
+ok("...carrying the same window parameters", 'days_before=1' in html and 'tf=5m' in html)
+# duplicate indicator labels stay addressable (the user's two 5-day MAs)
+res2 = srv.r1_csv(day=DAY, tf='5m', feed='prt', register='R1', days_before=0,
+                  overlays=json.dumps([OVS[0], {**OVS[0], 'id': 'o2', 'color': '#dc2626'}]))
+h2 = list(_csv.reader(_io.StringIO(res2.body.decode())))[0]
+ok("the same indicator added twice yields two DISTINCT columns",
+   h2[10:] == ['sma(length=9)', 'sma(length=9) #2'], f"{h2[10:]}")
+# an empty range explains itself instead of producing a blank file
+empty = srv.r1_csv(start='2020-01-01', end='2020-01-02', feed='prt').body.decode()
+ok("an empty range says why, in the file", 'no frozen' in empty)
+
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)

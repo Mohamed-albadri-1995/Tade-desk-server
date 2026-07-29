@@ -1249,7 +1249,11 @@ document.getElementById('printR1Btn').onclick = async () => {
     <div style="color:#94a3b8;font-size:11px;margin:6px 0 10px">
       indicators: ${ovNames}<br>window: 04:00–20:00 ET incl. pre/post · the register day is highlighted</div>
     <button id="prGo" style="width:100%;background:#2563eb;color:#fff;border:0;
-      padding:7px;border-radius:6px;cursor:pointer">Open print sheet</button>`;
+      padding:7px;border-radius:6px;cursor:pointer">Open print sheet</button>
+    <button id="prCsv" style="width:100%;margin-top:6px;background:#059669;color:#fff;border:0;
+      padding:7px;border-radius:6px;cursor:pointer">⬇ Download CSV</button>
+    <div style="color:#94a3b8;font-size:11px;margin-top:5px">CSV = the same bars and the
+      same indicator values as the sheet, one row per bar (OHLCV + a column per indicator).</div>`;
   document.body.appendChild(box);
 
   const regSel = document.getElementById('prReg');
@@ -1273,11 +1277,13 @@ document.getElementById('printR1Btn').onclick = async () => {
   regSel.onchange = loadDates;
   await loadDates();
 
-  document.getElementById('prGo').onclick = () => {
+  // ONE query string for both outputs, so the CSV can never describe a
+  // different window than the sheet the user just looked at.
+  const prQuery = () => {
     let a = fromSel.value, b = toSel.value;
-    if (!a || !b) return;
+    if (!a || !b) return null;
     if (a > b) { const t = a; a = b; b = t; }     // tolerate reversed picks
-    const qs = new URLSearchParams({
+    return new URLSearchParams({
       start: a, end: b, register: regSel.value,
       tf: document.getElementById('prTf').value,
       feed: document.getElementById('feed').value,
@@ -1286,7 +1292,25 @@ document.getElementById('printR1Btn').onclick = async () => {
       cols: document.getElementById('prCols').value || '1',
       overlays: JSON.stringify(OVERLAYS || []),
     });
-    window.open('api/r1/print?' + qs.toString(), '_blank');
+  };
+  document.getElementById('prGo').onclick = () => {
+    const qs = prQuery();
+    if (qs) window.open('api/r1/print?' + qs.toString(), '_blank');
+  };
+  document.getElementById('prCsv').onclick = (ev) => {
+    const qs = prQuery();
+    if (!qs) return;
+    // a whole range over many tickers takes a while to fetch — say so, since
+    // a download gives no progress of its own.
+    const b = ev.target, was = b.textContent;
+    b.textContent = 'building… (this can take a minute)'; b.disabled = true;
+    // navigating to the URL lets the browser stream it straight to disk; the
+    // Content-Disposition header names the file.
+    const f = document.createElement('iframe');
+    f.style.display = 'none';
+    f.src = 'api/r1/csv?' + qs.toString();
+    document.body.appendChild(f);
+    setTimeout(() => { b.textContent = was; b.disabled = false; }, 4000);
   };
 };
 </script>
