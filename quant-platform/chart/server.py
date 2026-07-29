@@ -637,30 +637,129 @@ def _build_sheets(start: str, end: str, day: str, tf: str, feed: str,
             errors.append(f'{d}: no tickers')
             continue
 
-        w_start, w_end = _print_window(d, days_before, days_after)
-        lo_ts, hi_ts = int(w_start.timestamp()), int(w_end.timestamp())
-        # the fetch must END after the window, so asof is the window's LAST day
-        asof = w_end.strftime('%Y-%m-%d')
-        span = _print_span(w_start, w_end)
-        need = dm.required_days(ovs, tf, span)
+        charts = _charts_for_day(d, tickers, cards, tf, feed, ovs,
+                                 days_before, days_after, errors)
+        if charts:
+            sheets.append({'day': d, 'charts': charts})
+    return sheets, errors, ovs, rng, ''
 
-        charts = []
-        for sym in tickers:
-            try:
-                data = cs.compute_data(symbol=sym, tf=tf, days=need, overlays=ovs,
-                                       feed=feed, view='all', asof=asof)
-                bars = [b for b in (data.get('bars') or [])
-                        if lo_ts <= b['time'] <= hi_ts]
-                if not bars:
-                    errors.append(f'{d} {sym}: no bars in window'); continue
-                ser = []
-                for sr in (data.get('series') or []):
-                    ser.append({**sr, 'values': [v for v in (sr.get('values') or [])
-                                                 if lo_ts <= v['time'] <= hi_ts]})
-                charts.append({'symbol': sym, 'bars': bars, 'series': ser,
-                               'card': cards.get(sym) or {}})
-            except Exception as e:      # one bad symbol never kills the sheet
-                errors.append(f'{d} {sym}: {e}')
+
+def _charts_for_day(d: str, tickers: list, cards: dict, tf: str, feed: str,
+                    ovs: list, days_before: int, days_after: int,
+                    errors: list) -> list:
+    """Bars + indicator series for each ticker, over ONE anchor day's window.
+
+    Shared by the register sheet (every ticker of a frozen day) and the
+    ticker-list sheet (an explicit set of dates you name), so both produce
+    byte-identical charts for the same (ticker, day) — the only difference is
+    how the list of tickers was chosen.
+    """
+    w_start, w_end = _print_window(d, days_before, days_after)
+    lo_ts, hi_ts = int(w_start.timestamp()), int(w_end.timestamp())
+    # the fetch must END after the window, so asof is the window's LAST day
+    asof = w_end.strftime('%Y-%m-%d')
+    span = _print_span(w_start, w_end)
+    need = dm.required_days(ovs, tf, span)
+
+    charts = []
+    for sym in tickers:
+        try:
+            data = cs.compute_data(symbol=sym, tf=tf, days=need, overlays=ovs,
+                                   feed=feed, view='all', asof=asof)
+            bars = [b for b in (data.get('bars') or [])
+                    if lo_ts <= b['time'] <= hi_ts]
+            if not bars:
+                errors.append(f'{d} {sym}: no bars in window'); continue
+            ser = []
+            for sr in (data.get('series') or []):
+                ser.append({**sr, 'values': [v for v in (sr.get('values') or [])
+                                             if lo_ts <= v['time'] <= hi_ts]})
+            charts.append({'symbol': sym, 'bars': bars, 'series': ser,
+                           'card': (cards or {}).get(sym) or {}})
+        except Exception as e:          # one bad symbol never kills the sheet
+            errors.append(f'{d} {sym}: {e}')
+    return charts
+
+
+_TICKER_RE = __import__('re').compile(r'[A-Z][A-Z0-9.\-]{0,5}')
+_DATE_RE = __import__('re').compile(r'\d{4}-\d{2}-\d{2}')
+
+
+def parse_pairs(text: str) -> list:
+    """Read a pasted list of (TICKER, YYYY-MM-DD) pairs, tolerantly.
+
+    Accepts whatever a spreadsheet or a chat message actually produces:
+    `WLDS,2026-07-24` one per line, tab-separated columns, a numbered table,
+    or the same table pasted VERTICALLY (one cell per line). The rule is
+    simply: walk the tokens, remember the last thing that looks like a ticker,
+    and when a date appears, pair them.
+
+    Deliberately ignores the surrounding columns (result, entry, catalyst…) —
+    the card shown on the chart comes from the screener's own frozen register
+    row, not from retyped numbers that could disagree with it.
+
+    Returns [(TICKER, 'YYYY-MM-DD'), ...] in the order given, de-duplicated.
+    """
+    out, seen, last = [], set(), None
+    for tok in __import__('re').split(r'[\s,;|]+', text or ''):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if _DATE_RE.fullmatch(tok):
+            if last:
+                key = (last, tok)
+                if key not in seen:
+                    seen.add(key); out.append(key)
+                last = None          # one date per ticker; don't re-use it
+        elif _TICKER_RE.fullmatch(tok):
+            last = tok
+    return out
+
+
+def _build_pair_sheets(pairs_text: str, tf: str, feed: str, overlays: str,
+                       days_before: int, days_after: int, register: str = 'R1'):
+    """The same sheet payload as _build_sheets, but for an EXPLICIT list of
+    (ticker, date) pairs instead of whole register days — a trade journal, a
+    review list, "these 13 names on these 13 days".
+
+    Pairs are grouped by date so each date is one section, exactly like a
+    register day, and the SAME ticker on two different dates is two charts
+    (that is the normal case in a journal). Where a named ticker happens to
+    have been on that day's register, its frozen card is attached too.
+    """
+    import json as _json
+    try:
+        ovs = _json.loads(overlays) if overlays else []
+    except _json.JSONDecodeError:
+        ovs = []
+    pairs = parse_pairs(pairs_text)
+    if not pairs:
+        return [], [], ovs, '', ('no TICKER + YYYY-MM-DD pairs found — paste '
+                                 'lines like "WLDS,2026-07-24"')
+    by_day: dict = {}
+    for sym, d in pairs:
+        by_day.setdefault(d, [])
+        if sym not in by_day[d]:
+            by_day[d].append(sym)
+    days = sorted(by_day)
+    rng = days[0] if len(days) == 1 else f'{days[0]} → {days[-1]}'
+
+    sheets, errors = [], []
+    for d in days:
+        # the register card is a BONUS here: these dates need not be register
+        # days at all, so a miss is silent — never an error.
+        cards = {}
+        try:
+            reg = sc.register_rows(register, d, full=True)
+            if reg.get('ok'):
+                for r in reg.get('rows') or []:
+                    t = str(r.get('ticker') or '').strip().upper()
+                    if t:
+                        cards[t] = r
+        except Exception:               # noqa: BLE001 — cards are optional
+            pass
+        charts = _charts_for_day(d, by_day[d], cards, tf, feed, ovs,
+                                 days_before, days_after, errors)
         if charts:
             sheets.append({'day': d, 'charts': charts})
     return sheets, errors, ovs, rng, ''
@@ -688,12 +787,31 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
     cs.compute_data() the live chart uses; /api/r1/csv exports these exact
     numbers as a spreadsheet.
     """
-    import json as _json
     sheets, errors, ovs, rng, bad = _build_sheets(
         start, end, day, tf, feed, overlays, register, days_before, days_after)
     if bad:
         return HTMLResponse(f'<h3>{bad}</h3>')
+    from urllib.parse import urlencode as _ue
+    csv_qs = _ue({'start': start or day, 'end': end or day, 'day': day, 'tf': tf,
+                  'feed': feed, 'overlays': overlays, 'register': register,
+                  'days_before': days_before, 'days_after': days_after})
+    cards_qs = _ue({'start': start or day, 'end': end or day, 'day': day,
+                    'register': register})
+    return _sheet_page(sheets, errors, ovs, register, rng, tf, feed,
+                       days_before, days_after, cols, height,
+                       csv_url=f'/api/r1/csv?{csv_qs}',
+                       cards_url=f'/api/r1/cards.csv?{cards_qs}',
+                       day_prefix='register day ')
 
+
+def _sheet_page(sheets: list, errors: list, ovs: list, title: str, rng: str,
+                tf: str, feed: str, days_before: int, days_after: int,
+                cols: int, height: int, csv_url: str = '', cards_url: str = '',
+                day_prefix: str = '') -> HTMLResponse:
+    """Render a sheet payload as the printable page. ONE renderer for both the
+    register sheet and the ticker-list sheet, so a change to the legend, the
+    session shading or the card block reaches both."""
+    import json as _json
     # LEGEND: name + colour of every indicator line, taken from the series the
     # engine actually produced (not from the request), so the swatch can never
     # disagree with the drawn line. An overlay that errored is listed as such.
@@ -719,15 +837,10 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
     err_html = (f'<div class="warn">skipped: {"; ".join(errors[:10])}'
                 + (f' … +{len(errors) - 10} more' if len(errors) > 10 else '')
                 + '</div>') if errors else ''
-    # the CSV of the SAME request — one click, same window, same numbers
-    from urllib.parse import urlencode as _ue
-    csv_qs = _ue({'start': start or day, 'end': end or day, 'day': day, 'tf': tf,
-                  'feed': feed, 'overlays': overlays, 'register': register,
-                  'days_before': days_before, 'days_after': days_after})
-    cards_qs = _ue({'start': start or day, 'end': end or day, 'day': day,
-                    'register': register})
+    if not sheets:
+        return HTMLResponse(f'<h3>nothing to draw — {err_html or "no bars in any window"}</h3>')
     return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
-<title>{register} {rng} — print</title>
+<title>{title} {rng} — print</title>
 <script src="/static/lightweight-charts.js"></script>
 <style>
  body{{background:#fff;color:#111;font:13px system-ui,Segoe UI,Roboto,sans-serif;margin:14px}}
@@ -757,8 +870,8 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
  @media print{{ body{{margin:0}} .card{{border:1px solid #bbb}} .noprint{{display:none}}
    *{{-webkit-print-color-adjust:exact;print-color-adjust:exact}} }}
 </style></head><body>
-<h2>{register} · {rng}</h2>
-<div class="sub">{n_charts} charts over {len(sheets)} register day(s) · {tf} · feed {feed} ·
+<h2>{title} · {rng}</h2>
+<div class="sub">{n_charts} charts over {len(sheets)} day(s) · {tf} · feed {feed} ·
  window: −{days_before} → +{days_after} TRADING days (04:00–20:00 ET, pre/post included)</div>
 <div class="key"><b>indicators:</b> {ind_html}</div>
 <div class="key">shaded = extended hours on every day:
@@ -767,12 +880,12 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
  · unshaded = regular session</div>
 {err_html}
 <button class="noprint" onclick="window.print()">🖨 Print / Save as PDF</button>
-<a class="noprint" href="/api/r1/csv?{csv_qs}"
+{f'''<a class="noprint" href="{csv_url}"
    style="display:inline-block;margin-left:8px;padding:6px 12px;background:#059669;color:#fff;
-          border-radius:6px;text-decoration:none;font:inherit">⬇ Bars CSV</a>
-<a class="noprint" href="/api/r1/cards.csv?{cards_qs}"
+          border-radius:6px;text-decoration:none;font:inherit">⬇ Bars CSV</a>''' if csv_url else ''}
+{f'''<a class="noprint" href="{cards_url}"
    style="display:inline-block;margin-left:6px;padding:6px 12px;background:#7c3aed;color:#fff;
-          border-radius:6px;text-decoration:none;font:inherit">⬇ Cards CSV</a>
+          border-radius:6px;text-decoration:none;font:inherit">⬇ Cards CSV</a>''' if cards_url else ''}
 <span class="noprint" style="color:#666;font-size:11px;margin-left:8px">bars = OHLCV + every
  indicator value, one row per bar · cards = the register row behind each chart</span>
 <div id="root"></div>
@@ -785,7 +898,7 @@ const fmt = t => new Date(t*1000).toLocaleString('en-US',
       hour:'2-digit', minute:'2-digit'}});
 for (const sheet of SHEETS) {{
   const h = document.createElement('h3'); h.className='day';
-  h.textContent = 'register day ' + sheet.day;
+  h.textContent = {_json.dumps(day_prefix)} + sheet.day;
   root.appendChild(h);
   const grid = document.createElement('div'); grid.className='grid';
   root.appendChild(grid);
@@ -892,6 +1005,22 @@ def r1_csv(start: str = '', end: str = '', day: str = '', tf: str = '1m',
     if bad:
         return PlainTextResponse('# ' + bad, status_code=200)
 
+    body, n_rows = _bars_csv(sheets, errors)
+    fname = (f'{register}_{(start or day) or "x"}_{(end or day) or "x"}_{tf}'
+             .replace('-', '') + '.csv')
+    return PlainTextResponse(
+        body, media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="{fname}"',
+                 'X-Rows': str(n_rows)})
+
+
+def _bars_csv(sheets: list, errors: list):
+    """Serialize a sheet payload as the bars CSV — used by BOTH the register
+    export and the ticker-list export, so the two files have identical shape.
+    Returns (csv_text, n_rows)."""
+    import csv
+    import io
+    import pandas as pd
     # COLUMN ORDER: the union of series labels in the order the sheet lists
     # them, so the spreadsheet reads like the legend. Same (label, colour) key
     # the legend dedupes on — a repeated primitive is a real second column.
@@ -938,12 +1067,66 @@ def r1_csv(start: str = '', end: str = '', day: str = '', tf: str = '1m',
     # look complete when a ticker silently failed to load.
     for e in errors:
         w.writerow(['# skipped', e])
-    fname = (f'{register}_{(start or day) or "x"}_{(end or day) or "x"}_{tf}'
-             .replace('-', '') + '.csv')
+    return buf.getvalue(), n_rows
+
+
+@app.post('/api/pairs/parse')
+def pairs_parse(payload: dict = Body(...)):
+    """What the pasted text WILL be read as — shown in the UI before anything
+    is fetched, so a mis-read line is visible instead of quietly producing the
+    wrong chart."""
+    pairs = parse_pairs(str(payload.get('pairs') or ''))
+    return {'ok': True, 'count': len(pairs),
+            'pairs': [{'ticker': t, 'date': d} for t, d in pairs]}
+
+
+@app.get('/api/pairs/print', response_class=HTMLResponse)
+def pairs_print(pairs: str = '', tf: str = '5m', feed: str = 'polygon',
+                overlays: str = '[]', register: str = 'R1',
+                days_before: int = 1, days_after: int = 1,
+                cols: int = 1, height: int = 420):
+    """PRINT SHEET for an explicit LIST of (ticker, date) pairs — a trade
+    journal or review list rather than a whole register day.
+
+    `pairs` is free text: "WLDS,2026-07-24" per line, a tab-separated table
+    with extra columns, or that table pasted vertically — see parse_pairs.
+
+    Identical window, indicators, session shading and register-card block as
+    /api/r1/print; the only difference is how the tickers were chosen. GET
+    (not POST) so the sheet is a real navigable URL — bookmarkable, and its
+    /static assets resolve normally. A few hundred pairs fit in a query
+    string; beyond that, split the list.
+    """
+    sheets, errors, ovs, rng, bad = _build_pair_sheets(
+        pairs, tf, feed, overlays, days_before, days_after, register)
+    if bad:
+        return HTMLResponse(f'<h3>{bad}</h3>')
+    from urllib.parse import urlencode as _ue
+    csv_qs = _ue({'pairs': pairs, 'tf': tf, 'feed': feed, 'overlays': overlays,
+                  'register': register, 'days_before': days_before,
+                  'days_after': days_after})
+    n = sum(len(s['charts']) for s in sheets)
+    return _sheet_page(sheets, errors, ovs, f'my list ({n} charts)', rng,
+                       tf, feed, days_before, days_after, cols, height,
+                       csv_url=f'/api/pairs/csv?{csv_qs}', day_prefix='')
+
+
+@app.get('/api/pairs/csv')
+def pairs_csv(pairs: str = '', tf: str = '5m', feed: str = 'polygon',
+              overlays: str = '[]', register: str = 'R1',
+              days_before: int = 1, days_after: int = 1):
+    """The ticker-list sheet as a spreadsheet — same columns as /api/r1/csv
+    (register_day here is the date you named), one row per bar."""
+    from fastapi.responses import PlainTextResponse
+    sheets, errors, _ovs, _rng, bad = _build_pair_sheets(
+        pairs, tf, feed, overlays, days_before, days_after, register)
+    if bad:
+        return PlainTextResponse('# ' + bad)
+    body, n = _bars_csv(sheets, errors)
     return PlainTextResponse(
-        buf.getvalue(), media_type='text/csv; charset=utf-8',
-        headers={'Content-Disposition': f'attachment; filename="{fname}"',
-                 'X-Rows': str(n_rows)})
+        body, media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename="my_list_bars.csv"',
+                 'X-Rows': str(n)})
 
 
 @app.get('/api/r1/cards.csv')

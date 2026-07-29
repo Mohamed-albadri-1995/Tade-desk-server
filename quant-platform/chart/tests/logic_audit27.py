@@ -245,7 +245,7 @@ ok("range 07-13 → 07-14 prints BOTH register days",
 # drives them (one labelled section per register day) plus the page-break CSS
 ok("each register day becomes its own labelled, page-broken section",
    len(sh) == 2 and all(x.get('day') for x in sh)
-   and "h.textContent = 'register day ' + sheet.day" in htmlR
+   and 'h.textContent = "register day " + sheet.day' in htmlR
    and 'page-break-before:always' in htmlR)
 # a range that matches no frozen day says so instead of printing nothing
 htmlN = srv.r1_print(start='2020-01-01', end='2020-01-02', feed='prt').body.decode()
@@ -381,6 +381,73 @@ ok("an empty range says why", 'no frozen' in
    srv.r1_cards_csv(start='2020-01-01', end='2020-01-02').body.decode())
 ok("the sheet links to BOTH exports for its own query",
    '/api/r1/cards.csv?' in html and 'Cards CSV' in html and 'Bars CSV' in html)
+
+print("=" * 64)
+print("PART J — print MY OWN (ticker, date) list, not a whole register day")
+print("=" * 64)
+P = srv.parse_pairs
+ok("plain lines", P('AAA,2026-07-14\nBBB,2026-07-13')
+   == [('AAA', '2026-07-14'), ('BBB', '2026-07-13')])
+ok("a pasted TABLE with extra columns (result, entry, catalyst…)",
+   P('1\tAAA\t2026-07-14\t8.46R\t2.48\tGap Up\n2\tBBB\t2026-07-13\t1.2R\t9\tM&A')
+   == [('AAA', '2026-07-14'), ('BBB', '2026-07-13')])
+ok("the same table pasted VERTICALLY, one cell per line",
+   P('1\nAAA\n2026-07-14\n8.46R\n2.48\nGap Up\n2\nBBB\n2026-07-13')
+   == [('AAA', '2026-07-14'), ('BBB', '2026-07-13')])
+ok("prose words are not mistaken for tickers",
+   P('Gap Up Bankruptcy Dilution AAA 2026-07-14') == [('AAA', '2026-07-14')])
+ok("the SAME ticker on two dates is two entries (the journal case)",
+   P('AAA,2026-07-13\nAAA,2026-07-14')
+   == [('AAA', '2026-07-13'), ('AAA', '2026-07-14')])
+ok("an exact duplicate line is collapsed",
+   P('AAA,2026-07-14\nAAA,2026-07-14') == [('AAA', '2026-07-14')])
+ok("junk yields nothing rather than a wrong pair", P('hello world 12345') == [])
+ok("the preview endpoint reports what will be read",
+   srv.pairs_parse({'pairs': 'AAA,2026-07-14'})
+   == {'ok': True, 'count': 1, 'pairs': [{'ticker': 'AAA', 'date': '2026-07-14'}]})
+
+lp = srv.pairs_print(pairs='AAA,2026-07-14\nBBB,2026-07-13', tf='5m', feed='prt',
+                     overlays=json.dumps(OVS), days_before=1, days_after=0).body.decode()
+lsh = sheets_of(lp)
+ok("one section per DATE in the list, oldest first",
+   [s['day'] for s in lsh] == ['2026-07-13', '2026-07-14'], f"{[s['day'] for s in lsh]}")
+ok("each date charts only the tickers named for THAT date",
+   [[c['symbol'] for c in s['charts']] for s in lsh] == [['BBB'], ['AAA']],
+   f"{[[c['symbol'] for c in s['charts']] for s in lsh]}")
+# the window is the same rule as the register sheet
+lb = [c for s in lsh if s['day'] == '2026-07-14' for c in s['charts']][0]['bars']
+first = pd.Timestamp(lb[0]['time'], unit='s', tz='UTC').tz_convert(ET)
+ok("same window rule: 04:00 ET one TRADING day before the named date",
+   first.strftime('%Y-%m-%d %H:%M') == '2026-07-13 04:00', f'{first}')
+ok("same session tags, so the same pre/post shading",
+   {b.get('sess') for b in lb} >= {'pre', 'rth', 'post'})
+ok("the register card is still attached when the date IS a register day",
+   any(c.get('card', {}).get('ticker') == 'AAA'
+       for s in lsh for c in s['charts']))
+ok("the day header has NO 'register day' prefix (these are your dates)",
+   "h.textContent = \"\" + sheet.day" in lp, )
+ok("the page names it as your list", 'my list' in lp)
+ok("it carries its own CSV link", '/api/pairs/csv?' in lp)
+ok("no Cards CSV button (a named date need not be a register day)",
+   'Cards CSV' not in lp)
+# a date the register never froze still charts — that is the whole point
+free = srv.pairs_print(pairs='AAA,2026-07-12', tf='5m', feed='prt',
+                       overlays='[]', days_before=0, days_after=0).body.decode()
+ok("a NON-register date still produces a chart",
+   [c['symbol'] for s in sheets_of(free) for c in s['charts']] == ['AAA'],
+   f"{sheets_of(free)}")
+# CSV of the list
+lc = srv.pairs_csv(pairs='AAA,2026-07-14', tf='5m', feed='prt',
+                   overlays=json.dumps(OVS), days_before=0, days_after=0)
+lrows = list(_csv.reader(_io.StringIO(lc.body.decode())))
+ok("the list CSV has the same columns as the register CSV",
+   lrows[0][:10] == ['register_day', 'symbol', 'datetime_et', 'epoch', 'session',
+                     'open', 'high', 'low', 'close', 'volume']
+   and lrows[0][10:] == ['sma(length=9)'], f"{lrows[0]}")
+ok("...and downloads as a file",
+   'attachment' in lc.headers.get('content-disposition', ''))
+ok("an unparseable list explains itself instead of printing nothing",
+   'no TICKER' in srv.pairs_print(pairs='nothing here', feed='prt').body.decode())
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
