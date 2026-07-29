@@ -49,9 +49,20 @@ class Stub:
         return f[(f.index >= start) & (f.index < end)]
 cs._LOADERS['prt'] = Stub()
 
-# fake register: two good tickers + one that will fail to load
-sc.register_rows = lambda register='R1', date=None, full=False: {
-    'ok': True, 'rows': [{'ticker': 'AAA'}, {'ticker': 'BBB'}, {'ticker': 'ZZZ'}]}
+# fake register: two good tickers + one that will fail to load. Rows carry the
+# screener's frozen CARD (score/rvol/gap/... plus an extra column) exactly as
+# register_rows(full=True) returns it, so the sheet and the cards export are
+# tested against real-shaped metadata, not bare tickers.
+def _fake_rows(register='R1', date=None, full=False):
+    def row(t, sc_, px, rv):
+        return {'ticker': t, 'date': date or DAY, 'score': sc_, 'price': px,
+                'change': 0.12, 'gapPct': 18.4, 'rvol': rv, 'atr': 0.31,
+                'regime': 'trend', 'secBias': 'up', 'sector': 'Biotech',
+                'bias': 'long', 'catalyst': 'PR', 'inShortlist': True,
+                'method': 'auto', 'floatShares': 4.2e6}
+    return {'ok': True, 'rows': [row('AAA', 91, 10.5, 7.2), row('BBB', 74, 4.8, 3.1),
+                                 row('ZZZ', 55, 2.0, 1.4)]}
+sc.register_rows = _fake_rows
 
 OVS = [{'id': 'o1', 'key': 'ma.sma', 'source': 'close',
         'params': {'length': 9}, 'color': '#2563eb'}]
@@ -310,7 +321,7 @@ ok("an indicator with no value in the window is EMPTY, never zero",
 ok("the skipped ticker is recorded IN the csv", 'ZZZ' in body and '# skipped' in body)
 # the sheet links to the csv of the SAME request
 ok("the print sheet has a one-click CSV button for its own query",
-   '/api/r1/csv?' in html and 'Download CSV' in html)
+   '/api/r1/csv?' in html and 'Bars CSV' in html)
 ok("...carrying the same window parameters", 'days_before=1' in html and 'tf=5m' in html)
 # duplicate indicator labels stay addressable (the user's two 5-day MAs)
 res2 = srv.r1_csv(day=DAY, tf='5m', feed='prt', register='R1', days_before=0,
@@ -321,6 +332,55 @@ ok("the same indicator added twice yields two DISTINCT columns",
 # an empty range explains itself instead of producing a blank file
 empty = srv.r1_csv(start='2020-01-01', end='2020-01-02', feed='prt').body.decode()
 ok("an empty range says why, in the file", 'no frozen' in empty)
+
+print("=" * 64)
+print("PART I — the REGISTER CARD rides with every chart, and exports")
+print("=" * 64)
+# the sheet already fetched the register rows and kept only the ticker, so a
+# chart showed a stock with no record of WHY the screener flagged it.
+ok("each chart carries its register card",
+   bool(aaa) and isinstance(aaa[0].get('card'), dict) and aaa[0]['card'].get('ticker') == 'AAA',
+   f"{(aaa[0].get('card') if aaa else None)}")
+ok("the rows are fetched with full=True (every frozen column, not the summary)",
+   'sc.register_rows(register, d, full=True)' in
+   open(pathlib.Path(__file__).resolve().parents[1] / 'server.py').read())
+ok("the sheet renders the card under each chart", 'card-meta' in html and 'c.card' in html)
+ok("well-known fields come first, in a FIXED order across charts",
+   "['score','price','change','gapPct','rvol','atr','regime'," in html)
+ok("...then any other column the register carried, alphabetically",
+   'Object.keys(c.card).sort()' in html)
+ok("empty fields are dropped, not printed as blanks",
+   "if (v === null || v === undefined || v === '') return ''" in html)
+
+cres = srv.r1_cards_csv(day=DAY, register='R1')
+crows = list(_csv.reader(_io.StringIO(cres.body.decode())))
+chead, cdata = crows[0], [r for r in crows[1:] if r and not r[0].startswith('#')]
+ok("cards download as their own file",
+   'attachment' in cres.headers.get('content-disposition', '')
+   and 'cards' in cres.headers.get('content-disposition', ''))
+ok("first two columns are the register day and the ticker",
+   chead[:2] == ['register_day', 'ticker'], f"{chead[:2]}")
+ok("one row per ticker on the register — INCLUDING ones with no chart",
+   sorted(r[1] for r in cdata) == ['AAA', 'BBB', 'ZZZ'],
+   f"{[r[1] for r in cdata]}")
+ok("every row is stamped with the register day",
+   {r[0] for r in cdata} == {DAY}, f"{ {r[0] for r in cdata} }")
+ok("the known card fields keep their fixed column order",
+   [c for c in chead if c in ('score', 'price', 'gapPct', 'rvol', 'atr')]
+   == ['score', 'price', 'gapPct', 'rvol', 'atr'], f"{chead}")
+ok("an extra column the register carried lands after the known ones",
+   chead.index('floatShares') > chead.index('inShortlist'), f"{chead}")
+# a range spans every register day in it
+cres2 = srv.r1_cards_csv(start='2026-07-13', end='2026-07-14', register='R1')
+c2 = [r for r in list(_csv.reader(_io.StringIO(cres2.body.decode())))[1:]
+      if r and not r[0].startswith('#')]
+ok("a date RANGE returns every register day in it",
+   sorted({r[0] for r in c2}) == ['2026-07-13', '2026-07-14'],
+   f"{sorted({r[0] for r in c2})}")
+ok("an empty range says why", 'no frozen' in
+   srv.r1_cards_csv(start='2020-01-01', end='2020-01-02').body.decode())
+ok("the sheet links to BOTH exports for its own query",
+   '/api/r1/cards.csv?' in html and 'Cards CSV' in html and 'Bars CSV' in html)
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")

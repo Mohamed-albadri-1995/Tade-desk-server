@@ -1251,9 +1251,13 @@ document.getElementById('printR1Btn').onclick = async () => {
     <button id="prGo" style="width:100%;background:#2563eb;color:#fff;border:0;
       padding:7px;border-radius:6px;cursor:pointer">Open print sheet</button>
     <button id="prCsv" style="width:100%;margin-top:6px;background:#059669;color:#fff;border:0;
-      padding:7px;border-radius:6px;cursor:pointer">⬇ Download CSV</button>
-    <div style="color:#94a3b8;font-size:11px;margin-top:5px">CSV = the same bars and the
-      same indicator values as the sheet, one row per bar (OHLCV + a column per indicator).</div>`;
+      padding:7px;border-radius:6px;cursor:pointer">⬇ Bars CSV</button>
+    <button id="prCards" style="width:100%;margin-top:6px;background:#7c3aed;color:#fff;border:0;
+      padding:7px;border-radius:6px;cursor:pointer">⬇ Register cards CSV</button>
+    <div style="color:#94a3b8;font-size:11px;margin-top:5px">bars = the same bars and indicator
+      values as the sheet, one row per bar · cards = every column the screener froze for each
+      ticker (score, rvol, gap, ATR, regime, sector, catalyst…), one row per ticker. Cards are
+      instant; bars take a while over a long range.</div>`;
   document.body.appendChild(box);
 
   const regSel = document.getElementById('prReg');
@@ -1296,6 +1300,16 @@ document.getElementById('printR1Btn').onclick = async () => {
   document.getElementById('prGo').onclick = () => {
     const qs = prQuery();
     if (qs) window.open('api/r1/print?' + qs.toString(), '_blank');
+  };
+  document.getElementById('prCards').onclick = () => {
+    const qs = prQuery();
+    if (!qs) return;
+    // cards need no bar data, so this returns immediately even over a month
+    const c = new URLSearchParams({start: qs.get('start'), end: qs.get('end'),
+                                   register: qs.get('register')});
+    const f = document.createElement('iframe');
+    f.style.display = 'none'; f.src = 'api/r1/cards.csv?' + c.toString();
+    document.body.appendChild(f);
   };
   document.getElementById('prCsv').onclick = (ev) => {
     const qs = prQuery();

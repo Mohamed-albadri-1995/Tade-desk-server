@@ -619,15 +619,20 @@ def _build_sheets(start: str, end: str, day: str, tf: str, feed: str,
 
     sheets, errors = [], []
     for d in days:
-        reg = sc.register_rows(register, d)
+        # full=True: keep the WHOLE register row, not just the ticker. This is
+        # the screener's own card — score, rvol, gap, regime, sector, catalyst,
+        # and every other column it froze that morning. It was being fetched
+        # and thrown away, so the sheet showed a chart with no idea WHY the
+        # stock was on the register.
+        reg = sc.register_rows(register, d, full=True)
         if not reg.get('ok'):
             errors.append(f'{d}: register fetch failed ({reg.get("error")})')
             continue
-        tickers, seen = [], set()
+        tickers, cards, seen = [], {}, set()
         for r in reg.get('rows') or []:
             t = str(r.get('ticker') or '').strip().upper()
             if t and t not in seen:
-                seen.add(t); tickers.append(t)
+                seen.add(t); tickers.append(t); cards[t] = r
         if not tickers:
             errors.append(f'{d}: no tickers')
             continue
@@ -652,7 +657,8 @@ def _build_sheets(start: str, end: str, day: str, tf: str, feed: str,
                 for sr in (data.get('series') or []):
                     ser.append({**sr, 'values': [v for v in (sr.get('values') or [])
                                                  if lo_ts <= v['time'] <= hi_ts]})
-                charts.append({'symbol': sym, 'bars': bars, 'series': ser})
+                charts.append({'symbol': sym, 'bars': bars, 'series': ser,
+                               'card': cards.get(sym) or {}})
             except Exception as e:      # one bad symbol never kills the sheet
                 errors.append(f'{d} {sym}: {e}')
         if charts:
@@ -718,6 +724,8 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
     csv_qs = _ue({'start': start or day, 'end': end or day, 'day': day, 'tf': tf,
                   'feed': feed, 'overlays': overlays, 'register': register,
                   'days_before': days_before, 'days_after': days_after})
+    cards_qs = _ue({'start': start or day, 'end': end or day, 'day': day,
+                    'register': register})
     return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
 <title>{register} {rng} — print</title>
 <script src="/static/lightweight-charts.js"></script>
@@ -735,6 +743,10 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
  .sw{{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;
    margin:0 4px 0 0;border:1px solid rgba(0,0,0,.45)}}
  .ind{{display:inline-block;margin-right:12px;white-space:nowrap}}
+ .card-meta{{font-size:11px;color:#334155;background:#f1f5f9;border:1px solid #e2e8f0;
+   border-radius:6px;padding:5px 7px;margin:2px 0 8px;line-height:1.7}}
+ .cd{{display:inline-block;margin-right:10px;white-space:nowrap}}
+ .cd b{{color:#64748b;font-weight:600}}
  /* PRINTING: browsers drop every BACKGROUND colour by default, which silently
     erased the whole point of this sheet — the indicator swatches, the
     register-day header and the warning band all came out blank on paper and
@@ -757,9 +769,12 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
 <button class="noprint" onclick="window.print()">🖨 Print / Save as PDF</button>
 <a class="noprint" href="/api/r1/csv?{csv_qs}"
    style="display:inline-block;margin-left:8px;padding:6px 12px;background:#059669;color:#fff;
-          border-radius:6px;text-decoration:none;font:inherit">⬇ Download CSV</a>
-<span class="noprint" style="color:#666;font-size:11px;margin-left:8px">every bar of every
- chart above — OHLCV + each indicator's value — same window, same numbers</span>
+          border-radius:6px;text-decoration:none;font:inherit">⬇ Bars CSV</a>
+<a class="noprint" href="/api/r1/cards.csv?{cards_qs}"
+   style="display:inline-block;margin-left:6px;padding:6px 12px;background:#7c3aed;color:#fff;
+          border-radius:6px;text-decoration:none;font:inherit">⬇ Cards CSV</a>
+<span class="noprint" style="color:#666;font-size:11px;margin-left:8px">bars = OHLCV + every
+ indicator value, one row per bar · cards = the register row behind each chart</span>
 <div id="root"></div>
 <script>
 const SHEETS = {payload};
@@ -792,6 +807,28 @@ for (const sheet of SHEETS) {{
         + '"><span class="sw" style="background:'+(s.color||'#2563eb')
         + '"></span>' + (s.name||'?') + (s.error ? ' (failed)' : '') + '</span>').join('');
       card.appendChild(lg);
+    }}
+    // THE REGISTER CARD — why this stock was on the register that morning.
+    // Every field the screener froze, the well-known ones first in a fixed
+    // order so the same fact is always in the same place across charts, then
+    // anything else it carried, alphabetically. Empty fields are dropped.
+    if (c.card && Object.keys(c.card).length) {{
+      const FIRST = ['score','price','change','gapPct','rvol','atr','regime',
+                     'secBias','sector','bias','catalyst','method','inShortlist'];
+      const seen = new Set(['ticker','date']);
+      const order = [];
+      for (const k of FIRST) if (k in c.card) {{ order.push(k); seen.add(k); }}
+      for (const k of Object.keys(c.card).sort()) if (!seen.has(k)) order.push(k);
+      const cells = order.map(k => {{
+        let v = c.card[k];
+        if (v === null || v === undefined || v === '') return '';
+        if (typeof v === 'number') v = Math.round(v*10000)/10000;
+        return '<span class="cd"><b>'+k+'</b> '+v+'</span>';
+      }}).filter(Boolean).join('');
+      if (cells) {{
+        const cw = document.createElement('div'); cw.className='card-meta';
+        cw.innerHTML = cells; card.appendChild(cw);
+      }}
     }}
     const box = document.createElement('div'); card.appendChild(box); grid.appendChild(card);
     const ch = LightweightCharts.createChart(box, {{
@@ -907,6 +944,64 @@ def r1_csv(start: str = '', end: str = '', day: str = '', tf: str = '1m',
         buf.getvalue(), media_type='text/csv; charset=utf-8',
         headers={'Content-Disposition': f'attachment; filename="{fname}"',
                  'X-Rows': str(n_rows)})
+
+
+@app.get('/api/r1/cards.csv')
+def r1_cards_csv(start: str = '', end: str = '', day: str = '', register: str = 'R1'):
+    """THE REGISTER CARDS as a spreadsheet — one row per (register day,
+    ticker), carrying EVERY column the screener froze that morning: score,
+    rvol, gap %, ATR, price, regime, sector bias, catalyst, and whatever else
+    the register row held.
+
+    This is the "why was it on the list" half of the print sheet, and it needs
+    no bar data at all, so it returns in a second even over a month-long
+    range. Columns are the well-known card fields first, in a fixed order, so
+    the same fact is always in the same column, then any extra fields the
+    register carried, alphabetically.
+    """
+    import csv
+    import io
+    from fastapi.responses import PlainTextResponse
+    if day and not start and not end:
+        start = end = day
+    start = start or end
+    end = end or start
+    if not start:
+        return PlainTextResponse('# need a date (start/end, or day)')
+    have = sc.available_dates(register) or []
+    days = sorted(d for d in have if str(start) <= d <= str(end))
+    if not days:
+        return PlainTextResponse(
+            f'# no frozen {register} days between {start} and {end}')
+
+    rows, errors = [], []
+    for d in days:
+        reg = sc.register_rows(register, d, full=True)
+        if not reg.get('ok'):
+            errors.append(f'{d}: register fetch failed ({reg.get("error")})')
+            continue
+        for r in (reg.get('rows') or []):
+            t = str(r.get('ticker') or '').strip().upper()
+            if t:
+                rows.append({'register_day': d, **r, 'ticker': t})
+
+    FIRST = ['register_day', 'ticker', 'score', 'price', 'change', 'gapPct',
+             'rvol', 'atr', 'regime', 'secBias', 'sector', 'bias', 'catalyst',
+             'method', 'inShortlist', 'date']
+    extra = sorted({k for r in rows for k in r} - set(FIRST))
+    cols = [c for c in FIRST if any(c in r for r in rows)] + extra
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator='\n')
+    w.writerow(cols)
+    for r in rows:
+        w.writerow([('' if r.get(c) is None else r.get(c)) for c in cols])
+    for e in errors:
+        w.writerow(['# skipped', e])
+    fname = (f'{register}_cards_{start}_{end}'.replace('-', '') + '.csv')
+    return PlainTextResponse(
+        buf.getvalue(), media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="{fname}"',
+                 'X-Rows': str(len(rows))})
 
 
 @app.websocket('/ws/live')
