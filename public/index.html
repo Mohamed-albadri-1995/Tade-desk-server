@@ -31,6 +31,30 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 /* ── HEADER ── */
 .header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); }
 .header-logo { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 0.05em; }
+/* ── tool switcher ── */
+.tool-switch { position: relative; }
+.tool-btn { display:flex; align-items:center; gap:7px; background:transparent; border:1px solid transparent;
+  border-radius:6px; padding:5px 9px; cursor:pointer; font:700 16px/1 inherit; color:var(--accent);
+  letter-spacing:.04em; }
+.tool-btn:hover { border-color:#2a2f3f; background:var(--bg2); }
+.tool-btn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.tool-bolt { font-size:14px; }
+.tool-caret { font-size:10px; color:var(--text3); }
+.tool-menu { display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:200;
+  min-width:250px; background:var(--bg2); border:1px solid #2a2f3f; border-radius:8px;
+  padding:5px; box-shadow:0 10px 30px rgba(0,0,0,.5); }
+.tool-menu.open { display:block; }
+.tool-menu-head { font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text3);
+  padding:6px 9px 4px; }
+.tool-item { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:5px;
+  text-decoration:none; color:var(--text); font-size:12.5px; cursor:pointer; }
+.tool-item:hover { background:var(--bg3); }
+.tool-item.current { background:var(--bg3); }
+.tool-item .swatch { width:8px; height:8px; border-radius:2px; flex:none; }
+.tool-item .tname { font-weight:600; }
+.tool-item .tid { font-size:10px; color:var(--text3); margin-left:auto; }
+.tool-item .tcheck { color:var(--accent); font-size:11px; }
+.tool-menu-foot { border-top:1px solid #2a2f3f; margin-top:5px; padding-top:5px; }
 .header-status { font-size: 11px; color: var(--text3); margin-left: auto; }
 .scan-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit; transition: opacity .15s; }
 .scan-btn:hover { opacity: .85; }
@@ -510,7 +534,12 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 <body>
 
 <div class="header">
-  <div class="header-logo">⚡ TRADE DESK</div>
+  <div class="tool-switch">
+    <button class="tool-btn" id="tool-btn" onclick="toggleToolMenu(event)" aria-haspopup="true" aria-expanded="false">
+      <span class="tool-bolt">⚡</span><span id="tool-label">TRADE DESK</span><span class="tool-caret">▾</span>
+    </button>
+    <div class="tool-menu" id="tool-menu" role="menu"></div>
+  </div>
   <button class="scan-btn" id="scan-btn" onclick="runScan()">▶ Run Scan</button>
   <div class="header-status" id="header-status">—</div>
 </div>
@@ -3108,6 +3137,78 @@ async function sbDelete(id) {
   await fetch(`/api/screeners/${id}`, { method: 'DELETE' });
   loadBuilder();
 }
+
+
+// ═══════════════ TOOL SWITCHER ═══════════════
+// The header names the tool this instance IS, and opens a list of the others so
+// you can move between them without going back to the landing page. Tools live
+// on separate ports, so switching is a navigation, not a state change.
+let TOOL_SELF = null, TOOL_LIST = [];
+
+async function initToolSwitcher() {
+  try {
+    const [me, all] = await Promise.all([
+      fetch('/health').then(r => r.json()),
+      fetch('/api/tools').then(r => r.json()),
+    ]);
+    TOOL_SELF = me;
+    TOOL_LIST = all.tools || [];
+    const entry = TOOL_LIST.find(t => t.id === me.tool);
+    const name = (entry && entry.name) || me.name || 'Trade Desk';
+    document.getElementById('tool-label').textContent = name.toUpperCase();
+    if (entry && entry.accent) {
+      document.querySelector('.tool-btn').style.color = entry.accent;
+    }
+    document.title = `${name} · Trade Desk`;
+    renderToolMenu();
+  } catch {
+    document.getElementById('tool-label').textContent = 'TRADE DESK';
+  }
+}
+
+function renderToolMenu() {
+  const here = TOOL_SELF && TOOL_SELF.tool;
+  const items = TOOL_LIST.map(t => {
+    const current = t.id === here;
+    const href = current ? '#' : `${location.protocol}//${location.hostname}:${t.port}/scanner`;
+    return `<a class="tool-item ${current ? 'current' : ''}" role="menuitem"
+      ${current ? 'aria-current="true"' : `href="${href}"`}>
+      <span class="swatch" style="background:${t.accent || 'var(--accent)'}"></span>
+      <span class="tname">${esc(t.name)}</span>
+      <span class="tid">${t.id}</span>
+      ${current ? '<span class="tcheck">●</span>' : ''}
+    </a>`;
+  }).join('');
+  document.getElementById('tool-menu').innerHTML =
+    `<div class="tool-menu-head">Switch tool</div>${items}
+     <div class="tool-menu-foot">
+       <a class="tool-item" href="${location.protocol}//${location.hostname}:3000/">
+         <span class="swatch" style="background:var(--text3)"></span>
+         <span class="tname">All tools</span>
+       </a>
+     </div>`;
+}
+
+function toggleToolMenu(ev) {
+  ev.stopPropagation();
+  const m = document.getElementById('tool-menu');
+  const open = m.classList.toggle('open');
+  document.getElementById('tool-btn').setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+document.addEventListener('click', () => {
+  const m = document.getElementById('tool-menu');
+  if (m && m.classList.contains('open')) {
+    m.classList.remove('open');
+    document.getElementById('tool-btn').setAttribute('aria-expanded', 'false');
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const m = document.getElementById('tool-menu');
+    if (m) m.classList.remove('open');
+  }
+});
+initToolSwitcher();
 
 </script>
 </body>
