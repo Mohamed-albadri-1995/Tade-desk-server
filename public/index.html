@@ -105,6 +105,13 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .badge-bigmove { background: #f9731620; color: #fb923c; border: 1px solid #f9731640; }
 .badge-hot { background: #f9731630; color: #fb923c; border: 1px solid #f9731660; }
 .badge-catalyst { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+.sig-row { display:flex; flex-wrap:wrap; gap:3px; padding:0 12px 6px; }
+.sig { font-size:9px; font-weight:700; letter-spacing:.02em; padding:1px 5px; border-radius:3px;
+       border:1px solid; white-space:nowrap; font-family:ui-monospace,Menlo,monospace; }
+.sig-up  { color:#4ade80; border-color:#4ade8040; background:#4ade8015; }
+.sig-dn  { color:#f87171; border-color:#f8717140; background:#f8717115; }
+.sig-mid { color:var(--text3); border-color:#444; background:#1a1d2e; }
+.sig-hot { color:#fb923c; border-color:#fb923c40; background:#fb923c15; }
 .bias-btn { display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;border:1px solid;cursor:pointer;background:transparent;transition:opacity .15s; }
 .bias-btn:hover { opacity:.8; }
 .bias-btn.bias-auto { color:var(--text3);border-color:#444;background:#1a1d2e; }
@@ -1937,6 +1944,46 @@ function renderCards() {
   grid.innerHTML = rows.map(buildCard).join('');
 }
 
+// Relational signal tags — price vs each level, MA stack, range quarter.
+// Blue = above / constructive, red = below, grey = neutral fact. The % distance
+// rides in the tooltip because 0.1% above and 40% above read very differently.
+const SIG_LEVELS = [
+  ['vsEma9','distEma9','9MA'], ['vsEma13','distEma13','13MA'],
+  ['vsEma20','distEma20','20MA'], ['vsEma50','distEma50','50MA'],
+  ['vsSma5','distSma5','5MA'], ['vsVwap','distVwap','VWAP'],
+  ['vsPrevClose','distPrevClose','PDC'], ['vsOpen','distOpen','OPEN'],
+  ['vsPmHigh','distPmHigh','PMH'], ['vsPmLow','distPmLow','PML'],
+];
+function buildSignalTags(sig) {
+  if (!sig || !Object.keys(sig).length) return '';
+  const t = [];
+  for (const [sideKey, distKey, label] of SIG_LEVELS) {
+    const side = sig[sideKey];
+    if (!side) continue;
+    const d = sig[distKey];
+    const arrow = side === 'above' ? '▲' : '▼';
+    const cls = side === 'above' ? 'sig-up' : 'sig-dn';
+    const tip = d == null ? label : `${label} ${d >= 0 ? '+' : ''}${d.toFixed(2)}%`;
+    t.push(`<span class="sig ${cls}" title="${tip}">${arrow}${label}</span>`);
+  }
+  if (sig.maStack) {
+    const cls = sig.maStack === 'bull' ? 'sig-up' : sig.maStack === 'bear' ? 'sig-dn' : 'sig-mid';
+    const txt = sig.maStack === 'bull' ? '9&gt;13&gt;20&gt;50'
+              : sig.maStack === 'bear' ? '9&lt;13&lt;20&lt;50' : 'MA mixed';
+    t.push(`<span class="sig ${cls}" title="moving-average stack (${sig.maStackScore}/3 in order)">${txt}</span>`);
+  }
+  if (sig.monthQuarter) {
+    const cls = sig.monthQuarter === 'Q1' ? 'sig-dn' : sig.monthQuarter === 'Q4' ? 'sig-up' : 'sig-mid';
+    t.push(`<span class="sig ${cls}" title="quarter of the 1-month range (Q1 = bottom)">${sig.monthQuarter} range</span>`);
+  }
+  if (sig.pmAdrBand) {
+    // >=2 is the band that historically won 52% vs 10% below it
+    const strong = sig.pmAdrBand === '2-3' || sig.pmAdrBand === '3+';
+    t.push(`<span class="sig ${strong ? 'sig-hot' : 'sig-mid'}" title="pre-market range vs a normal day's range">PM/ADR ${sig.pmAdrBand}</span>`);
+  }
+  return t.length ? `<div class="sig-row">${t.join('')}</div>` : '';
+}
+
 // Catalyst badge: icon encodes importance (⚡ major / ● notable / · minor),
 // stale week-old catalysts render dimmed, secondaries listed in the tooltip.
 function catalystTitle(c) {
@@ -1978,6 +2025,7 @@ function buildCard(row) {
     `<span class="badge ${badgeMap[k]||'badge-trend'}">${badgeLabels[k]||k}</span>`
   ).join('');
   const hotBadge = ctx.secHot ? '<span class="badge badge-hot">🔥 HOT</span>' : '';
+  const signalTags = buildSignalTags(row.signals);
   const catalystBadge = catalyst ? catalystBadgeHTML(catalyst) : '';
 
   // Regime display
@@ -2096,6 +2144,7 @@ function buildCard(row) {
   <div class="card-badges">
     ${badges}${hotBadge}${catalystBadge}
   </div>
+  ${signalTags}
 
   <div class="card-body">
 

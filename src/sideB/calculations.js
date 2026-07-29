@@ -1,3 +1,5 @@
+const { computeRelations } = require('./relations');
+
 function computeDerivedFields(stock) {
   const { price, change, open, pmHigh, pmLow, atr, monthHigh, monthLow } = stock;
 
@@ -22,11 +24,13 @@ function computeDerivedFields(stock) {
   };
 }
 
+// Relations read prevClose / monthRangePos / pmAdrRatio, so they must run
+// after computeDerivedFields has produced them.
 function applyDerivedFields(rows) {
-  return rows.map(row => ({
-    ...row,
-    stock: computeDerivedFields(row.stock),
-  }));
+  return rows.map(row => {
+    const stock = computeDerivedFields(row.stock);
+    return { ...row, stock, signals: computeRelations(stock) };
+  });
 }
 
 module.exports = { computeDerivedFields, applyDerivedFields };

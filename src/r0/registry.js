@@ -38,6 +38,7 @@ function upsertRows(rows) {
         bias: 'auto',
         news: null,
         catalyst: null,
+        signals: {},
         score_at_entry: null,
         score_model_ts: null,
         _score: null,

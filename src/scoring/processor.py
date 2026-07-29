@@ -22,6 +22,13 @@ CATEGORICAL_COLS = [
     'sector', 'industry', 'regime', 'regimeLabel', 'secBias',
     'themes', 'catalyst', 'screenerKeys', 'longTerm', 'midTerm',
     'shortTerm', 'broadResolved', 'inShortlist', 'bias',
+    # relational signals (Side B): price vs each level, MA stack,
+    # month-range quarter, pre-market band. Unit-free, so they compare
+    # across a $1 stock and a $99 one -- unlike the raw price columns.
+    'vsEma9', 'vsEma13', 'vsEma20', 'vsEma50',
+    'vsSma5', 'vsVwap', 'vsPrevClose', 'vsOpen',
+    'vsPmHigh', 'vsPmLow', 'maStack', 'monthQuarter',
+    'pmAdrBand', 'aboveAllMas', 'belowAllMas',
 ]
 
 NUMERIC_COLS = [
@@ -30,6 +37,10 @@ NUMERIC_COLS = [
     'atr', 'adrPct', 'dayHigh', 'dayLow', 'monthHigh', 'monthLow',
     'monthRangePos', 'mcap', 'floatShares', 'shortFloat', 'pmHigh',
     'pmLow', 'pmRange', 'pmAdrRatio', 'secScore',
+    # percent distance to each level -- keeps the magnitude the flag drops
+    'distEma9', 'distEma13', 'distEma20', 'distEma50',
+    'distSma5', 'distVwap', 'distPrevClose', 'distOpen',
+    'distPmHigh', 'distPmLow', 'maStackScore', 'dayRangePos',
 ]
 
 ALL_FEATURES = IDENTIFIER_COLS + CATEGORICAL_COLS + NUMERIC_COLS

@@ -2,6 +2,20 @@ const db = require('../db');
 const r0 = require('../r0/registry');
 const { toETDate, toETTime } = require('../utils/time');
 const { getLatestSnapshot } = require('../sideD/engine');
+const { computeRelations, RELATION_FIELDS } = require('../sideB/relations');
+
+// Flatten a row's relational signals into register columns. Rows frozen before
+// signals existed carry none, so they are recomputed from the stored stock
+// fields — which backfills every historical register read, and therefore the
+// R4 training export, without touching the stored JSON.
+function signalCols(row) {
+  const sig = (row && row.signals && Object.keys(row.signals).length)
+    ? row.signals
+    : computeRelations(row && row.stock);
+  const out = {};
+  for (const f of RELATION_FIELDS) out[f] = sig[f] ?? null;
+  return out;
+}
 
 function captureR1() {
   const rows = r0.getTodayRows();
@@ -89,6 +103,7 @@ function getRegisterData(register, date) {
         secHot: row.context?.secHot,
         themes: row.context?.themes,
         bias: row.bias || 'auto',
+        ...signalCols(row),
         // catalyst & news summary
         catalyst: row.catalyst?.label || null,
         lastUpdated: row.lastUpdated,
@@ -148,6 +163,7 @@ function getRegisterData(register, date) {
           secHot: d.context?.secHot,
           themes: d.context?.themes,
           bias: d.bias || 'auto',
+          ...signalCols(d),
           catalyst: d.catalyst?.label || null,
           capturedAt: row.captured_at,
         };
@@ -306,6 +322,7 @@ function getRegisterData(register, date) {
           secHot: d1.context?.secHot,
           themes: d1.context?.themes,
           bias: d1.bias || 'auto',
+          ...signalCols(d1),
           catalyst: d1.catalyst?.label || null,
           // R3A EOD fields
           entryPriceA: r3a.entry_price_a,
@@ -375,6 +392,7 @@ function getRegisterData(register, date) {
           secHot: d1.context?.secHot,
           themes: d1.context?.themes,
           bias: d1.bias || 'auto',
+          ...signalCols(d1),
           catalyst: d1.catalyst?.label || null,
           // R3B EOD fields
           entryPriceB: r3b.entry_price_b,
