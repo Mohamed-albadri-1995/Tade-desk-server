@@ -157,15 +157,41 @@ const DIRECTIONAL_FIELDS = new Set([
   'Perf.W', 'Perf.1M', 'Perf.3M', 'Perf.Y',
 ]);
 
+// Some fields come as a high/low pair, and their mirror is the counterpart —
+// not the same field with the operator flipped. "close above the 1-month high"
+// is a breakout; inverting only the operator gives "close below the 1-month
+// high", which is true of nearly every stock and screens for nothing. The
+// bearish twin is "close below the 1-month LOW".
+const FIELD_MIRROR = {
+  'High.1M': 'Low.1M', 'Low.1M': 'High.1M',
+  'High.3M': 'Low.3M', 'Low.3M': 'High.3M',
+  'price_52_week_high': 'price_52_week_low',
+  'price_52_week_low': 'price_52_week_high',
+  'high': 'low', 'low': 'high',
+};
+
+// Keep any timeframe suffix when swapping to the counterpart field.
+function mirrorFieldName(name) {
+  const [base, ...rest] = String(name).split('|');
+  const flipped = FIELD_MIRROR[base];
+  if (!flipped) return name;
+  return rest.length ? `${flipped}|${rest.join('|')}` : flipped;
+}
+
 function mirrorFilter(f) {
   const opposite = OPPOSITE_OP[f.operation];
   if (!opposite) return { ...f };            // equality, has, in_range … leave alone
 
   const rightIsField = typeof f.right === 'string' && isNaN(f.right);
   if (rightIsField) {
-    // Comparing two series: the mirror is the same pair, other way round.
-    // "close above EMA9" -> "close below EMA9"; "5MA above 9MA" -> "5MA below 9MA".
-    return { ...f, operation: opposite };
+    // Comparing two series: flip the operator, and swap either side to its
+    // counterpart when it has one.
+    return {
+      ...f,
+      left: mirrorFieldName(f.left),
+      operation: opposite,
+      right: mirrorFieldName(f.right),
+    };
   }
 
   const base = baseField(f.left);

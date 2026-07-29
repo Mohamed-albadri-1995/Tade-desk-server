@@ -1,0 +1,53 @@
+{
+  "_comment": "The registry of tools. Everything reads this one file — the deploy script, the landing page, and the seeder — so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
+  "tools": [
+    {
+      "id": "T1",
+      "name": "Screener",
+      "port": 3000,
+      "scorerPort": 3001,
+      "accent": "#4a9eff",
+      "desc": "The original: big movers, pre-market volume and trend continuation."
+    },
+    {
+      "id": "T2",
+      "name": "Momentum",
+      "port": 3010,
+      "scorerPort": 3011,
+      "accent": "#a78bfa",
+      "desc": "Daily moving averages stacked fast-over-slow, breaking the monthly high."
+    },
+    {
+      "id": "T3",
+      "name": "Gappers",
+      "port": 3020,
+      "scorerPort": 3021,
+      "accent": "#fb923c",
+      "desc": "Pre-market gaps on heavy volume in a small float."
+    },
+    {
+      "id": "T4",
+      "name": "VWAP Reclaim",
+      "port": 3030,
+      "scorerPort": 3031,
+      "accent": "#34d399",
+      "desc": "Price crossing back through VWAP with volume behind it."
+    },
+    {
+      "id": "T5",
+      "name": "52-Week Break",
+      "port": 3040,
+      "scorerPort": 3041,
+      "accent": "#f472b6",
+      "desc": "Established names pushing through the 52-week high."
+    },
+    {
+      "id": "T6",
+      "name": "Overextended",
+      "port": 3050,
+      "scorerPort": 3051,
+      "accent": "#facc15",
+      "desc": "RSI stretched with volume — does momentum continue or snap back?"
+    }
+  ]
+}

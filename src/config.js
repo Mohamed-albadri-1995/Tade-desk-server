@@ -16,9 +16,22 @@
  *   MODEL_OUTPUT_ROOT=src/scoring/outputs-t2 node src/index.js
  */
 
+const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
+
+// The registry of every tool — see tools.config.json. Read once here so the
+// landing page, the deploy script and the seeder cannot drift apart.
+function loadRegistry() {
+  try {
+    const raw = fs.readFileSync(path.join(ROOT, 'tools.config.json'), 'utf8');
+    return JSON.parse(raw).tools || [];
+  } catch (err) {
+    console.warn('[Config] could not read tools.config.json:', err.message);
+    return [];
+  }
+}
 
 function resolve(p, fallback) {
   return path.isAbsolute(p || '') ? p : path.join(ROOT, p || fallback);
@@ -44,7 +57,15 @@ const config = {
 
   // Where writeTrainingCSV drops the files the scorer trains from.
   tmpDir: resolve(process.env.TMP_DIR, 'tmp'),
+
+  // Every tool that exists, for the landing page.
+  tools: loadRegistry(),
 };
+
+// Fill in identity from the registry when only TOOL_ID was given, so a tool
+// started by hand still names itself correctly.
+const entry = config.tools.find(t => t.id === TOOL_ID);
+if (entry && !process.env.TOOL_NAME) config.toolName = entry.name;
 
 // Fail loudly rather than let two tools silently share state — the failure mode
 // is one tool's training quietly overwriting another's model.

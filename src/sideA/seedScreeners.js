@@ -86,10 +86,55 @@ const T3_BASE = {
   ],
 };
 
-const T2 = [T2_BASE, store.mirrorDefinition(T2_BASE)];
-const T3 = [T3_BASE, store.mirrorDefinition(T3_BASE)];
+// Price pushing back through VWAP with volume behind it.
+const T4_BASE = {
+  key: 'vwap-reclaim', name: 'VWAP Reclaim',
+  sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
+  filters: [
+    { left: 'close', operation: 'crosses_above', right: 'VWAP' },
+    { left: 'relative_volume_10d_calc', operation: 'greater', right: 2 },
+    { left: 'close', operation: 'egreater', right: 1 },
+    { left: 'average_volume_10d_calc', operation: 'greater', right: 1000000 },
+  ],
+};
 
-const BY_TOOL = { T1, T2, T3 };
+// Deliberately the large-cap end of the market. Every other tool samples cheap
+// small caps, which is what let share price dominate the factor model; this one
+// gives that finding something to be tested against.
+const T5_BASE = {
+  key: '52w-break', name: '52-Week Break',
+  sort: { sortBy: 'change', sortOrder: 'desc' },
+  filters: [
+    { left: 'close', operation: 'egreater', right: 'price_52_week_high' },
+    { left: 'market_cap_basic', operation: 'greater', right: 1000000000 },
+    { left: 'relative_volume_10d_calc', operation: 'greater', right: 1.5 },
+    { left: 'average_volume_10d_calc', operation: 'greater', right: 1000000 },
+  ],
+};
+
+// Stretched on RSI with volume. Its mirror is the oversold side, so the pair
+// asks directly whether extremes continue or revert.
+const T6_BASE = {
+  key: 'overextended', name: 'Overextended',
+  sort: { sortBy: 'change', sortOrder: 'desc' },
+  filters: [
+    { left: 'RSI', operation: 'greater', right: 70 },
+    { left: 'close', operation: 'egreater', right: 'EMA20' },
+    { left: 'relative_volume_10d_calc', operation: 'greater', right: 3 },
+    { left: 'close', operation: 'egreater', right: 1 },
+    { left: 'average_volume_10d_calc', operation: 'greater', right: 1000000 },
+  ],
+};
+
+const pair = base => [base, store.mirrorDefinition(base)];
+
+const T2 = pair(T2_BASE);
+const T3 = pair(T3_BASE);
+const T4 = pair(T4_BASE);
+const T5 = pair(T5_BASE);
+const T6 = pair(T6_BASE);
+
+const BY_TOOL = { T1, T2, T3, T4, T5, T6 };
 
 function seedScreeners() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM screeners').get().n;

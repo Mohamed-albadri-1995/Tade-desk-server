@@ -18,7 +18,7 @@ app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 // the browser drops the response without these headers — a healthy tool then
 // renders as offline. Limited to the read-only endpoints the landing page uses;
 // everything else stays same-origin only.
-const LANDING_PROBE_PATHS = ['/health', '/api/registry/today', '/api/analysis/status'];
+const LANDING_PROBE_PATHS = ['/health', '/api/tools', '/api/registry/today', '/api/analysis/status'];
 app.use((req, res, next) => {
   if (req.method === 'GET' && LANDING_PROBE_PATHS.includes(req.path)) {
     res.set('Access-Control-Allow-Origin', '*');
@@ -38,6 +38,10 @@ app.use('/api/settings', require('./routes/settings'));
 app.use('/api/backup', require('./routes/backup'));
 app.use('/api/monitor', require('./routes/monitor'));
 app.use('/api/analysis', require('./routes/analysis'));
+
+// The tool registry, so the landing page renders whatever is configured
+// rather than a list hardcoded in the page.
+app.get('/api/tools', (req, res) => res.json({ ok: true, tools: config.tools }));
 
 // Health — reports which tool answered, so probing the wrong port is obvious
 app.get('/health', (req, res) => res.json({

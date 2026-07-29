@@ -145,7 +145,13 @@ describe('mirroring a screener', () => {
   test('a series-vs-series rule flips its operator', () => {
     const m = store.mirrorDefinition(bull);
     expect(m.filters[0]).toEqual({ left: 'SMA5|1', operation: 'less', right: 'EMA9|1' });
-    expect(m.filters[1]).toEqual({ left: 'close', operation: 'eless', right: 'High.1M' });
+  });
+
+  test('a breakout rule flips to the counterpart level, not just the operator', () => {
+    // "close >= 1-month high" inverted only on the operator would be
+    // "close <= 1-month high" — true of nearly every stock, and useless.
+    const m = store.mirrorDefinition(bull);
+    expect(m.filters[1]).toEqual({ left: 'close', operation: 'eless', right: 'Low.1M' });
   });
 
   test('a directional threshold flips operator AND sign', () => {
@@ -190,5 +196,61 @@ describe('mirroring a screener', () => {
     expect(mir.name).toBe('Stack Up (mirror)');
     expect(mir.key).not.toBe(src.key);
     expect(mir.filters[2].right).toBe(-5);
+  });
+});
+
+describe('mirroring high/low counterpart fields', () => {
+  // Inverting only the operator on a breakout rule produces a filter that
+  // matches almost everything: "close below the 1-month high" is true of nearly
+  // every stock. The bearish twin of a breakout is a breakDOWN.
+  test('a 1-month high breakout mirrors to a 1-month low breakdown', () => {
+    const m = store.mirrorDefinition({
+      name: 'x', filters: [{ left: 'close', operation: 'egreater', right: 'High.1M' }],
+    });
+    expect(m.filters[0]).toEqual({ left: 'close', operation: 'eless', right: 'Low.1M' });
+  });
+
+  test('52-week high mirrors to 52-week low', () => {
+    const m = store.mirrorDefinition({
+      name: 'x', filters: [{ left: 'close', operation: 'egreater', right: 'price_52_week_high' }],
+    });
+    expect(m.filters[0].right).toBe('price_52_week_low');
+  });
+
+  test('the counterpart swap keeps any timeframe suffix', () => {
+    const m = store.mirrorDefinition({
+      name: 'x', filters: [{ left: 'close', operation: 'greater', right: 'High.1M|1W' }],
+    });
+    expect(m.filters[0].right).toBe('Low.1M|1W');
+  });
+
+  test('a field with no counterpart is left as itself', () => {
+    const m = store.mirrorDefinition({
+      name: 'x', filters: [{ left: 'close', operation: 'greater', right: 'EMA20' }],
+    });
+    expect(m.filters[0]).toEqual({ left: 'close', operation: 'less', right: 'EMA20' });
+  });
+
+  test('counterpart swapping still round-trips', () => {
+    const def = {
+      name: 'Breakout',
+      filters: [
+        { left: 'close', operation: 'egreater', right: 'High.1M' },
+        { left: 'close', operation: 'egreater', right: 1 },
+      ],
+    };
+    const back = store.mirrorDefinition({ ...store.mirrorDefinition(def), name: 'Breakout' });
+    expect(back.filters).toEqual(def.filters);
+  });
+
+  test('every seeded mirror differs from its base in at least one rule', () => {
+    // A mirror identical to its base would silently collect duplicate data for
+    // a month and answer nothing.
+    for (const [tool, defs] of Object.entries(PRESETS)) {
+      if (defs.length !== 2) continue;   // T1 ships three, not a pair
+      const [base, mirror] = defs;
+      expect({ tool, same: JSON.stringify(base.filters) === JSON.stringify(mirror.filters) })
+        .toEqual({ tool, same: false });
+    }
   });
 });

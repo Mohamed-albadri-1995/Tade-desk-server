@@ -13,12 +13,16 @@ BRANCH="${BRANCH:-claude/multi-tool-screeners}"
 ONLY="${1:-}"
 ROOT=~/Tade-desk-server
 
-# id | display name | node port | scorer port
-TOOLS=(
-  "T1|Screener|3000|3001"
-  "T2|Momentum|3010|3011"
-  "T3|Gappers|3020|3021"
-)
+# Tools come from tools.config.json — the single registry the landing page and
+# the app also read, so adding a tool means editing that file alone.
+mapfile -t TOOLS < <(node -e "
+  const t = require('./tools.config.json').tools;
+  t.forEach(x => console.log([x.id, x.name, x.port, x.scorerPort].join('|')));
+")
+if [ ${#TOOLS[@]} -eq 0 ]; then
+  echo "No tools found in tools.config.json"; exit 1
+fi
+echo "Tools: ${#TOOLS[@]}"
 
 echo "=== Trade Desk — multi-tool deploy ==="
 echo "Branch: $BRANCH"

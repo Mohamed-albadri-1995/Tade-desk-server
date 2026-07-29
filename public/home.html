@@ -80,16 +80,11 @@ body {
 <div class="version">v2.0 · multi-tool</div>
 
 <script>
-// Tools are defined here rather than fetched, so the landing page still renders
-// its cards when a tool is down — the point is to show you WHICH one is down.
-const TOOLS = [
-  { id:'T1', cls:'',   name:'Screener',  port:3000,
-    desc:'The original: big movers, pre-market volume and trend continuation.' },
-  { id:'T2', cls:'t2', name:'Momentum',  port:3010,
-    desc:'Daily moving averages stacked fast-over-slow, breaking or holding the monthly high.' },
-  { id:'T3', cls:'t3', name:'Gappers',   port:3020,
-    desc:'Pre-market gaps on heavy volume in a small float.' },
-];
+// Tools come from tools.config.json via /api/tools, so adding one means
+// editing that file alone. Fetched from THIS origin, which is always up
+// (it served this page), then each tool is probed individually — a tool that
+// is down still gets a card, because the point is to show WHICH one is down.
+let TOOLS = [];
 
 // A tool may be served on its own port or behind a path on this host; try the
 // port first, fall back to same-origin so it works either way.
@@ -98,13 +93,14 @@ function baseFor(t) {
 }
 
 function card(t, state, info) {
-  const cls = state === 'down' ? `${t.cls} down` : t.cls;
+  const cls = state === 'down' ? 'down' : '';
   const label = { up:'online', down:'offline', wait:'checking' }[state];
   const stats = [];
   if (info && info.rows != null) stats.push(`${info.rows} live`);
   if (info && info.model) stats.push(info.model);
   return `
-    <a class="tool-card ${cls}" href="${baseFor(t)}/scanner">
+    <a class="tool-card ${cls}" href="${baseFor(t)}/scanner"
+       style="border-top-color:${state === 'down' ? 'var(--text3)' : (t.accent || 'var(--accent)')}">
       <div class="card-top">
         <div>
           <div class="card-name">${t.name}</div>
@@ -124,8 +120,6 @@ function render(states) {
 }
 
 const states = {};
-TOOLS.forEach(t => { states[t.id] = { state:'wait', info:null }; });
-render(states);
 
 async function probe(t) {
   try {
@@ -155,8 +149,22 @@ async function probe(t) {
   render(states);
 }
 
-TOOLS.forEach(probe);
-setInterval(() => TOOLS.forEach(probe), 30000);
+async function start() {
+  try {
+    const r = await fetch('/api/tools');
+    const d = await r.json();
+    TOOLS = d.tools || [];
+  } catch {
+    document.getElementById('cards').innerHTML =
+      '<div class="note">Could not load the tool list.</div>';
+    return;
+  }
+  TOOLS.forEach(t => { states[t.id] = { state:'wait', info:null }; });
+  render(states);
+  TOOLS.forEach(probe);
+  setInterval(() => TOOLS.forEach(probe), 30000);
+}
+start();
 </script>
 
 </body>
