@@ -15,6 +15,7 @@
  */
 
 const db = require('../db');
+const { toETTime } = require('../utils/time');
 
 // TradingView's operators. Kept as an explicit list so the builder UI can offer
 // them and the API can reject anything else rather than forwarding junk.
@@ -118,6 +119,36 @@ function validateFilter(f, index) {
   return null;
 }
 
+// A window is "HH:MM" in Eastern. Both ends must be set, or neither.
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function validateWindow(def) {
+  const from = def.runFrom, to = def.runTo;
+  const hasFrom = from !== undefined && from !== null && from !== '';
+  const hasTo = to !== undefined && to !== null && to !== '';
+  if (!hasFrom && !hasTo) return null;                 // always on
+  if (hasFrom !== hasTo) return 'a run window needs both a start and an end time';
+  if (!HHMM.test(from)) return `invalid start time "${from}" (use HH:MM)`;
+  if (!HHMM.test(to)) return `invalid end time "${to}" (use HH:MM)`;
+  if (from >= to) return 'the run window must start before it ends';
+  return null;
+}
+
+/**
+ * Is this screener due to run at the given moment?
+ *
+ * A screener with no window runs on every scan. One with a window runs only
+ * inside it — so a pre-market screener does not keep firing at 11am and fill
+ * its own dataset with rows that do not belong to the setup it is testing.
+ * Times are compared as "HH:MM" strings in Eastern, which sorts correctly and
+ * sidesteps timezone arithmetic; no trading window crosses midnight.
+ */
+function isActiveAt(screener, ts = Date.now()) {
+  if (!screener.runFrom || !screener.runTo) return true;
+  const now = toETTime(ts);
+  return now >= screener.runFrom && now < screener.runTo;
+}
+
 function validateDefinition(def) {
   const errors = [];
   if (!def.name || !String(def.name).trim()) errors.push('name is required');
@@ -132,6 +163,8 @@ function validateDefinition(def) {
   if (def.sort && def.sort.sortBy && !isKnownField(def.sort.sortBy)) {
     errors.push(`unknown sort field "${def.sort.sortBy}"`);
   }
+  const w = validateWindow(def);
+  if (w) errors.push(w);
   return errors;
 }
 
@@ -222,6 +255,9 @@ function mirrorDefinition(def) {
     sort,
     limit: def.limit,
     enabled: def.enabled !== false,
+    // the twin must run in the same window, or the pair is not comparable
+    runFrom: def.runFrom || null,
+    runTo: def.runTo || null,
   };
 }
 
@@ -236,6 +272,8 @@ function rowToScreener(row) {
     filters: JSON.parse(row.filters),
     sort: row.sort ? JSON.parse(row.sort) : { sortBy: 'change', sortOrder: 'desc' },
     limit: row.limit_n,
+    runFrom: row.run_from || null,
+    runTo: row.run_to || null,
     updatedAt: row.updated_at,
   };
 }
@@ -272,8 +310,8 @@ function create(def) {
   }
 
   const info = db.prepare(`
-    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, run_from, run_to, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     key,
     String(def.name).trim(),
@@ -281,6 +319,8 @@ function create(def) {
     JSON.stringify(def.filters),
     JSON.stringify(def.sort || { sortBy: 'change', sortOrder: 'desc' }),
     Number.isFinite(def.limit) ? def.limit : 50,
+    def.runFrom || null,
+    def.runTo || null,
     Date.now()
   );
   return get(info.lastInsertRowid);
@@ -296,13 +336,16 @@ function update(id, def) {
     sort: def.sort !== undefined ? def.sort : existing.sort,
     enabled: def.enabled !== undefined ? def.enabled : existing.enabled,
     limit: def.limit !== undefined ? def.limit : existing.limit,
+    runFrom: def.runFrom !== undefined ? def.runFrom : existing.runFrom,
+    runTo: def.runTo !== undefined ? def.runTo : existing.runTo,
   };
   const errors = validateDefinition(merged);
   if (errors.length) throw new Error(errors.join('; '));
 
   db.prepare(`
     UPDATE screeners
-       SET name = ?, enabled = ?, filters = ?, sort = ?, limit_n = ?, updated_at = ?
+       SET name = ?, enabled = ?, filters = ?, sort = ?, limit_n = ?,
+           run_from = ?, run_to = ?, updated_at = ?
      WHERE id = ?
   `).run(
     String(merged.name).trim(),
@@ -310,6 +353,8 @@ function update(id, def) {
     JSON.stringify(merged.filters),
     JSON.stringify(merged.sort),
     Number.isFinite(merged.limit) ? merged.limit : 50,
+    merged.runFrom || null,
+    merged.runTo || null,
     Date.now(),
     id
   );
@@ -328,7 +373,7 @@ function createMirror(id) {
 }
 
 module.exports = {
-  list, get, create, update, remove, createMirror, mirrorDefinition,
+  list, get, create, update, remove, createMirror, mirrorDefinition, isActiveAt,
   validateDefinition, validateFilter, isKnownField,
   OPERATIONS, FIELDS,
 };

@@ -126,6 +126,34 @@ const T6_BASE = {
   ],
 };
 
+// The two Finviz screeners from the video, translated to TradingView fields.
+// Each carries the session it was designed for: the first only runs before the
+// open, the second only after it — running either outside its session would
+// collect rows describing a setup it never meant to test.
+const FINVIZ_PREMARKET = {
+  key: 'fv-premarket', name: 'FV Pre-Market',
+  runFrom: '04:00', runTo: '09:30',
+  sort: { sortBy: 'premarket_change', sortOrder: 'desc' },
+  filters: [
+    // "gap up OR down 3%" — a single absolute-value rule is not expressible, so
+    // it is stated as "outside -3%..+3%", which is the same set.
+    { left: 'gap', operation: 'not_in_range', right: [-3, 3] },
+    { left: 'ATR', operation: 'egreater', right: 1 },
+    { left: 'average_volume_90d_calc', operation: 'egreater', right: 2000000 },
+  ],
+};
+
+const FINVIZ_OPEN = {
+  key: 'fv-after-open', name: 'FV After Open',
+  runFrom: '09:30', runTo: '16:00',
+  sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
+  filters: [
+    { left: 'relative_volume_10d_calc', operation: 'greater', right: 3 },
+    { left: 'volume', operation: 'greater', right: 10000000 },
+    { left: 'close', operation: 'greater', right: 1 },
+  ],
+};
+
 const pair = base => [base, store.mirrorDefinition(base)];
 
 const T2 = pair(T2_BASE);
@@ -135,6 +163,9 @@ const T5 = pair(T5_BASE);
 const T6 = pair(T6_BASE);
 
 const BY_TOOL = { T1, T2, T3, T4, T5, T6 };
+
+// Available to add to any tool from the builder.
+const FINVIZ = [FINVIZ_PREMARKET, FINVIZ_OPEN];
 
 function seedScreeners() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM screeners').get().n;
@@ -154,4 +185,4 @@ function seedScreeners() {
   return { seeded };
 }
 
-module.exports = { seedScreeners, PRESETS: BY_TOOL };
+module.exports = { seedScreeners, PRESETS: BY_TOOL, FINVIZ };

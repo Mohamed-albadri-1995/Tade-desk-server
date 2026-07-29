@@ -254,3 +254,94 @@ describe('mirroring high/low counterpart fields', () => {
     }
   });
 });
+
+describe('run windows', () => {
+  const base = { name: 'PM', filters: [{ left: 'close', operation: 'egreater', right: 1 }] };
+  // July, so Eastern is UTC-4.
+  const etAt = (h, m = 0) => Date.UTC(2026, 6, 29, h + 4, m);
+
+  test('no window means it runs on every scan', () => {
+    expect(store.validateDefinition(base)).toEqual([]);
+    expect(store.isActiveAt({ runFrom: null, runTo: null }, etAt(11))).toBe(true);
+  });
+
+  test('a window needs both ends', () => {
+    expect(store.validateDefinition({ ...base, runFrom: '04:00' })[0]).toMatch(/both a start and an end/);
+    expect(store.validateDefinition({ ...base, runTo: '09:30' })[0]).toMatch(/both a start and an end/);
+  });
+
+  test('times must be HH:MM and start before end', () => {
+    expect(store.validateDefinition({ ...base, runFrom: '25:00', runTo: '09:30' })[0]).toMatch(/invalid start/);
+    expect(store.validateDefinition({ ...base, runFrom: '04:00', runTo: '9:30' })[0]).toMatch(/invalid end/);
+    expect(store.validateDefinition({ ...base, runFrom: '10:00', runTo: '09:00' })[0]).toMatch(/start before it ends/);
+  });
+
+  test('a pre-market screener is asleep after the open', () => {
+    const pm = { runFrom: '04:00', runTo: '09:30' };
+    expect(store.isActiveAt(pm, etAt(6))).toBe(true);
+    expect(store.isActiveAt(pm, etAt(9, 29))).toBe(true);
+    expect(store.isActiveAt(pm, etAt(9, 30))).toBe(false);  // end is exclusive
+    expect(store.isActiveAt(pm, etAt(11))).toBe(false);
+  });
+
+  test('an after-open screener is asleep before it', () => {
+    const ao = { runFrom: '09:30', runTo: '16:00' };
+    expect(store.isActiveAt(ao, etAt(6))).toBe(false);
+    expect(store.isActiveAt(ao, etAt(9, 30))).toBe(true);   // start is inclusive
+    expect(store.isActiveAt(ao, etAt(15, 59))).toBe(true);
+    expect(store.isActiveAt(ao, etAt(16))).toBe(false);
+  });
+
+  test('the two sessions do not overlap, so a stock lands in one or the other', () => {
+    const pm = { runFrom: '04:00', runTo: '09:30' };
+    const ao = { runFrom: '09:30', runTo: '16:00' };
+    for (const h of [5, 8, 10, 14]) {
+      expect(store.isActiveAt(pm, etAt(h)) && store.isActiveAt(ao, etAt(h))).toBe(false);
+    }
+  });
+
+  test('the window survives storage and update', () => {
+    const s = store.create({ ...base, name: 'Windowed', runFrom: '04:00', runTo: '09:30' });
+    expect(store.get(s.id).runFrom).toBe('04:00');
+    store.update(s.id, { runTo: '08:00' });
+    expect(store.get(s.id).runTo).toBe('08:00');
+    expect(store.get(s.id).runFrom).toBe('04:00');   // untouched
+  });
+
+  test('a mirror inherits the window, or the pair is not comparable', () => {
+    const m = store.mirrorDefinition({ ...base, runFrom: '04:00', runTo: '09:30' });
+    expect(m.runFrom).toBe('04:00');
+    expect(m.runTo).toBe('09:30');
+  });
+});
+
+describe('the Finviz screeners from the video', () => {
+  const { FINVIZ } = require('../src/sideA/seedScreeners');
+  const byKey = k => FINVIZ.find(x => x.key === k);
+
+  test('both are valid and carry their session', () => {
+    for (const d of FINVIZ) expect(store.validateDefinition(d)).toEqual([]);
+    expect(byKey('fv-premarket').runTo).toBe('09:30');
+    expect(byKey('fv-after-open').runFrom).toBe('09:30');
+  });
+
+  test('"gap up or down 3%" is expressed as outside -3..3', () => {
+    // TradingView has no absolute-value operator; "not between -3 and 3" is
+    // exactly the same set as |gap| > 3.
+    const gap = byKey('fv-premarket').filters.find(f => f.left === 'gap');
+    expect(gap).toEqual({ left: 'gap', operation: 'not_in_range', right: [-3, 3] });
+  });
+
+  test('the pre-market screener carries ATR and average volume floors', () => {
+    const f = byKey('fv-premarket').filters;
+    expect(f).toContainEqual({ left: 'ATR', operation: 'egreater', right: 1 });
+    expect(f).toContainEqual({ left: 'average_volume_90d_calc', operation: 'egreater', right: 2000000 });
+  });
+
+  test('the after-open screener uses current volume, not average', () => {
+    const f = byKey('fv-after-open').filters;
+    expect(f).toContainEqual({ left: 'volume', operation: 'greater', right: 10000000 });
+    expect(f).toContainEqual({ left: 'relative_volume_10d_calc', operation: 'greater', right: 3 });
+    expect(f).toContainEqual({ left: 'close', operation: 'greater', right: 1 });
+  });
+});

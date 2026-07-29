@@ -275,12 +275,21 @@ async function testScreener(def) {
  */
 async function runAllScanners() {
   const store = require('./screenerStore');
-  const screeners = store.list({ enabledOnly: true });
+  const all = store.list({ enabledOnly: true });
+
+  // A screener with a run window only fires inside it, so a pre-market
+  // screener does not keep matching at 11am and fill its own dataset with rows
+  // from a session it was never meant to describe.
+  const now = Date.now();
+  const screeners = all.filter(s => store.isActiveAt(s, now));
+  const asleep = all.length - screeners.length;
 
   if (!screeners.length) {
-    console.warn('[TV Scanner] No enabled screeners defined for this tool.');
+    console.warn(`[TV Scanner] No screeners are due to run right now` +
+      (asleep ? ` (${asleep} outside their window).` : ' — none are defined for this tool.'));
     return {};
   }
+  if (asleep) console.log(`[TV Scanner] ${asleep} screener(s) outside their run window, skipped.`);
 
   const results = await Promise.allSettled(screeners.map(runScreener));
 

@@ -98,6 +98,8 @@ db.exec(`
     filters TEXT NOT NULL,
     sort TEXT,
     limit_n INTEGER NOT NULL DEFAULT 50,
+    run_from TEXT,
+    run_to TEXT,
     updated_at INTEGER NOT NULL
   );
 
