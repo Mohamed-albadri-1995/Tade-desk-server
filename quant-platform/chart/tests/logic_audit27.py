@@ -138,6 +138,21 @@ if aaa:
        f'background:{s0["color"]}' in html and str(s0['name']) in html,
        f"name={s0.get('name')} color={s0.get('color')}")
 ok("legend is labelled 'indicators:'", '<b>indicators:</b>' in html)
+# PRINTING: browsers drop background colours by default, so on paper (and in
+# Save-as-PDF) every swatch, the register-day header and the warning band came
+# out blank — the "name every indicator with its colour" legend identified
+# nothing. Verified against a real 40-page export.
+ok("the sheet forces colours to survive printing",
+   'print-color-adjust:exact' in html and '-webkit-print-color-adjust:exact' in html)
+ok("...inside the @media print block too, not only on screen",
+   html.split('@media print')[1][:220].count('print-color-adjust:exact') >= 1)
+ok("the swatch has a border, so it is visible even if the fill is dropped",
+   'border:1px solid rgba(0,0,0,.45)' in html)
+if aaa:
+    ok("each indicator NAME is drawn in its own line colour (text always prints)",
+       f'<span class="ind" style="color:{s0["color"]}">' in html)
+ok("the per-chart legend colours its names too",
+   "'<span class=\"ind\" style=\"color:'+(s.color||'#2563eb')" in html)
 ok("each chart also carries its own per-chart legend",
    "lg.innerHTML = c.series.map" in html)
 ok("a failed indicator is labelled '(failed)', never drawn silently",

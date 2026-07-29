@@ -682,7 +682,8 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
                 legend.append({'label': lbl, 'color': sr.get('color') or '#2563eb',
                                'err': bool(sr.get('error'))})
     ind_html = ''.join(
-        f'<span class="ind"><span class="sw" style="background:{i["color"]}"></span>'
+        f'<span class="ind" style="color:{i["color"]}">'
+        f'<span class="sw" style="background:{i["color"]}"></span>'
         f'{i["label"]}{" (failed)" if i["err"] else ""}</span>'
         for i in legend) or '<span class="ind">none — add indicators on the chart first</span>'
     ov_names = ', '.join(str(o.get('key', '?')) for o in ovs) or 'none'
@@ -706,9 +707,18 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
  .card{{border:1px solid #ddd;border-radius:8px;padding:8px;break-inside:avoid;page-break-inside:avoid}}
  .tk{{font-weight:700;font-size:14px}} .rng{{color:#666;font-size:11px}}
  .key{{color:#666;font-size:11px;margin:2px 0 8px}}
- .sw{{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin:0 4px 0 0}}
+ .sw{{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;
+   margin:0 4px 0 0;border:1px solid rgba(0,0,0,.45)}}
  .ind{{display:inline-block;margin-right:12px;white-space:nowrap}}
- @media print{{ body{{margin:0}} .card{{border:1px solid #bbb}} .noprint{{display:none}} }}
+ /* PRINTING: browsers drop every BACKGROUND colour by default, which silently
+    erased the whole point of this sheet — the indicator swatches, the
+    register-day header and the warning band all came out blank on paper and
+    in Save-as-PDF. print-color-adjust:exact keeps them. The swatch also has a
+    border, and each indicator's NAME is drawn in its own colour, so the
+    legend still identifies every line even in a browser that ignores it. */
+ *{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+ @media print{{ body{{margin:0}} .card{{border:1px solid #bbb}} .noprint{{display:none}}
+   *{{-webkit-print-color-adjust:exact;print-color-adjust:exact}} }}
 </style></head><body>
 <h2>{register} · {rng}</h2>
 <div class="sub">{n_charts} charts over {len(sheets)} register day(s) · {tf} · feed {feed} ·
@@ -744,8 +754,12 @@ for (const sheet of SHEETS) {{
     // per-chart indicator legend: name + its exact line colour
     if ((c.series||[]).length) {{
       const lg = document.createElement('div'); lg.className='key';
+      // the NAME is drawn in the line's own colour as well as the swatch:
+      // text colour always prints, a background swatch only does when the
+      // browser honours print-color-adjust (see the @media print block).
       lg.innerHTML = c.series.map(s =>
-        '<span class="ind"><span class="sw" style="background:'+(s.color||'#2563eb')
+        '<span class="ind" style="color:'+(s.color||'#2563eb')
+        + '"><span class="sw" style="background:'+(s.color||'#2563eb')
         + '"></span>' + (s.name||'?') + (s.error ? ' (failed)' : '') + '</span>').join('');
       card.appendChild(lg);
     }}
