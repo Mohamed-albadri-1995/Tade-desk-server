@@ -162,7 +162,12 @@ const T4 = pair(T4_BASE);
 const T5 = pair(T5_BASE);
 const T6 = pair(T6_BASE);
 
-const BY_TOOL = { T1, T2, T3, T4, T5, T6 };
+// T7 runs the two session-bound screeners. They are NOT mirrored: each is a
+// complete setup for its own session, and the sessions do not overlap, so a
+// stock lands in one or the other rather than both.
+const T7 = [FINVIZ_PREMARKET, FINVIZ_OPEN];
+
+const BY_TOOL = { T1, T2, T3, T4, T5, T6, T7 };
 
 // Available to add to any tool from the builder.
 const FINVIZ = [FINVIZ_PREMARKET, FINVIZ_OPEN];

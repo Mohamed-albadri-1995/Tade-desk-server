@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { mapTVRow, COMMON_COLUMNS } = require('../sideA/tvScanner');
 const { computeDerivedFields } = require('../sideB/calculations');
+const { computeRelations } = require('../sideB/relations');
 const r0 = require('../r0/registry');
 
 const TV_URL = 'https://scanner.tradingview.com/america/scan?label-product=screener-stock';
@@ -59,8 +60,13 @@ async function refreshStaleInR0() {
   for (const freshRow of fresh) {
     const existing = r0.getRow(freshRow.ticker);
     if (!existing) continue;
-    // Update stock fields + recompute derived fields; preserve everything else
+    // Update stock fields + recompute derived fields; preserve everything else.
+    // A card stops appearing in scanner results once its screener's run window
+    // closes, but it stays on screen and must keep tracking the market — so the
+    // relational signals are recomputed here too. Without this the price would
+    // move all day while the tags still described the morning.
     existing.stock = computeDerivedFields(freshRow.stock);
+    existing.signals = computeRelations(existing.stock);
     existing.lastUpdated = Date.now();
     refreshed++;
   }

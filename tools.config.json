@@ -1,5 +1,5 @@
 {
-  "_comment": "The registry of tools. Everything reads this one file — the deploy script, the landing page, and the seeder — so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
+  "_comment": "The registry of tools. Everything reads this one file \u2014 the deploy script, the landing page, and the seeder \u2014 so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
   "tools": [
     {
       "id": "T1",
@@ -47,7 +47,15 @@
       "port": 3050,
       "scorerPort": 3051,
       "accent": "#facc15",
-      "desc": "RSI stretched with volume — does momentum continue or snap back?"
+      "desc": "RSI stretched with volume \u2014 does momentum continue or snap back?"
+    },
+    {
+      "id": "T7",
+      "name": "Finviz Sessions",
+      "port": 3060,
+      "scorerPort": 3061,
+      "accent": "#22d3ee",
+      "desc": "Two session-bound screeners: pre-market gappers, then heavy volume after the open."
     }
   ]
 }
