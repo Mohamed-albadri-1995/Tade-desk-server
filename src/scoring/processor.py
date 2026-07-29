@@ -6,6 +6,7 @@ Run this offline to retrain the scoring model.
 
 import glob
 import os
+import shutil
 import pickle
 import warnings
 import numpy as np
@@ -82,6 +83,7 @@ class FactorAnalysisProcessor:
 
     def run(self):
         os.makedirs(self.output_root, exist_ok=True)
+        self._written = set()          # (base_id, folder) actually produced this run
         for base in BASES:
             df_base = self.df_a if base['file'] == 'r4a' else self.df_b
             target = base['target']
@@ -94,7 +96,38 @@ class FactorAnalysisProcessor:
                 print(f"[Processor] Processing {base_id} sub_{regime_val} …")
                 self._process_table(df_base.copy(), target, base_id, 'sub', regime_val)
 
+        self._prune_stale_tables()
         print("[Processor] Done.")
+
+    def _prune_stale_tables(self):
+        """Delete table folders this run did not produce.
+
+        A retrain overwrites the tables it regenerates but used to leave every
+        other folder in place, so a regime that no longer appears in the data —
+        or a table that can no longer be built because its rows were cleared —
+        stayed on disk and the scorer kept routing cards to it. That is what
+        made a retrain still return the previous analysis.
+
+        Runs only after every base has been processed, so a training failure
+        leaves the existing model untouched rather than deleting it. Only the
+        B1..B6 trees are touched; anything else under output_root (the setups
+        tree lives here) is left alone.
+        """
+        removed = []
+        for base in BASES:
+            base_dir = os.path.join(self.output_root, base['id'])
+            if not os.path.isdir(base_dir):
+                continue
+            for folder in os.listdir(base_dir):
+                path = os.path.join(base_dir, folder)
+                if not os.path.isdir(path):
+                    continue
+                if (base['id'], folder) not in self._written:
+                    shutil.rmtree(path, ignore_errors=True)
+                    removed.append(f"{base['id']}/{folder}")
+        if removed:
+            print(f"[Processor] Removed {len(removed)} stale table(s) from earlier runs: "
+                  + ', '.join(sorted(removed)))
 
     def _resolve_target(self, df: pd.DataFrame, base: dict) -> pd.Series:
         target = base['target']
@@ -327,6 +360,11 @@ class FactorAnalysisProcessor:
         }
         with open(os.path.join(out_dir, 'metadata.pkl'), 'wb') as f:
             pickle.dump(metadata, f)
+
+        # mark this table as produced by the current run, so the prune step
+        # can tell it apart from a leftover of an earlier one
+        if hasattr(self, '_written'):
+            self._written.add((base_id, folder_name))
 
         print(f"  [OK] {base_id}/{folder_name}: {len(df)} samples, k={k} factors")
 
