@@ -1,3 +1,4 @@
+const config = require('./config');
 const db = require('./db'); // init DB
 
 const express = require('express');
@@ -12,6 +13,19 @@ app.use(express.json());
 // Serve frontend
 app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 
+// The landing page is served by one tool but probes the others, and a
+// different port is a different origin, so those probes are cross-origin and
+// the browser drops the response without these headers — a healthy tool then
+// renders as offline. Limited to the read-only endpoints the landing page uses;
+// everything else stays same-origin only.
+const LANDING_PROBE_PATHS = ['/health', '/api/registry/today', '/api/analysis/status'];
+app.use((req, res, next) => {
+  if (req.method === 'GET' && LANDING_PROBE_PATHS.includes(req.path)) {
+    res.set('Access-Control-Allow-Origin', '*');
+  }
+  next();
+});
+
 // Routes
 app.use('/api/registry', require('./routes/registry'));
 app.use('/api/scan', require('./routes/scan'));
@@ -25,8 +39,10 @@ app.use('/api/backup', require('./routes/backup'));
 app.use('/api/monitor', require('./routes/monitor'));
 app.use('/api/analysis', require('./routes/analysis'));
 
-// Health
-app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
+// Health — reports which tool answered, so probing the wrong port is obvious
+app.get('/health', (req, res) => res.json({
+  ok: true, tool: config.toolId, name: config.toolName, ts: Date.now(),
+}));
 
 // Landing page
 app.get('/', (req, res) => {
@@ -46,7 +62,6 @@ app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/home.html'));
 });
 
-const config = require('./config');
 config.assertDistinct();
 require('./sideA/seedScreeners').seedScreeners();
 

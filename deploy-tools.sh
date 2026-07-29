@@ -115,5 +115,6 @@ except Exception:
 done
 
 echo
-echo "Landing page: http://\$(curl -s ifconfig.me 2>/dev/null || echo localhost):3000/"
+IP=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || echo localhost)
+echo "Landing page: http://${IP}:3000/"
 echo "=== Done ==="
