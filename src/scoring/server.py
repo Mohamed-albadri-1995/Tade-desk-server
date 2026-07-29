@@ -8,13 +8,48 @@ Start:  python3 server.py [--output path/to/outputs] [--port 3001]
 import os
 import sys
 import argparse
+import importlib
 import json
+import time
 from flask import Flask, request, jsonify
 from scorer import LiveScorer
 from setupScorer import SetupLiveScorer
 from setupProcessor import SetupFactorProcessor
 
 app = Flask(__name__)
+
+# ── Staleness guard ───────────────────────────────────────────────────────────
+# A long-lived process keeps processor.py in sys.modules, so a deploy that
+# changes training behaviour has no effect until the process restarts — and a
+# retrain still reports success while writing tables from the old code. Worse,
+# an orphaned scorer holding the port serves /train indefinitely while the
+# supervised one crash-loops. Record what was loaded so it can be compared to
+# what is on disk, and reload when they diverge.
+_PROCESSOR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'processor.py')
+_STARTED_AT = time.time()
+
+
+def _disk_mtime():
+    try:
+        return os.path.getmtime(_PROCESSOR_PATH)
+    except OSError:
+        return None
+
+
+_LOADED_MTIME = _disk_mtime()
+
+
+def _load_processor(force_reload=False):
+    """Import processor, reloading it if the file changed since it was loaded."""
+    global _LOADED_MTIME
+    import processor
+    on_disk = _disk_mtime()
+    reloaded = False
+    if force_reload or (on_disk is not None and on_disk != _LOADED_MTIME):
+        processor = importlib.reload(processor)
+        _LOADED_MTIME = on_disk
+        reloaded = True
+    return processor, reloaded
 scorer: LiveScorer = None
 setup_scorer: SetupLiveScorer = None
 setup_processor: SetupFactorProcessor = None
@@ -23,7 +58,24 @@ setup_processor: SetupFactorProcessor = None
 @app.route('/health', methods=['GET'])
 def health():
     ready = scorer.is_ready() if scorer else False
-    return jsonify({'ok': True, 'ready': ready})
+    on_disk = _disk_mtime()
+    stale = on_disk is not None and _LOADED_MTIME is not None and on_disk != _LOADED_MTIME
+    try:
+        import processor
+        n_buckets = getattr(processor, 'N_BUCKETS', None)
+    except Exception:
+        n_buckets = None
+    return jsonify({
+        'ok': True,
+        'ready': ready,
+        # identity, so a stale process holding the port is obvious rather than
+        # silently answering on behalf of the supervised one
+        'pid': os.getpid(),
+        'uptime_s': round(time.time() - _STARTED_AT),
+        'n_buckets': n_buckets,
+        'output_root': scorer.output_root if scorer else None,
+        'code_stale': stale,
+    })
 
 
 @app.route('/score', methods=['POST'])
@@ -73,14 +125,22 @@ def train():
         return jsonify({'ok': False, 'error': f'R4B CSV not found at {r4b_path}'}), 400
 
     try:
-        # Import processor and run (in the same process for simplicity)
-        from processor import FactorAnalysisProcessor
-        proc = FactorAnalysisProcessor(r4a_path, r4b_path, output_root)
+        # Reload first if processor.py changed since this process started,
+        # otherwise a deploy silently trains with the previous code.
+        processor, reloaded = _load_processor()
+        proc = processor.FactorAnalysisProcessor(r4a_path, r4b_path, output_root)
         proc.run()
         # Invalidate scorer caches so next /score call reloads fresh metadata
         scorer._meta_cache.clear()
         scorer._bucket_cache.clear()
-        return jsonify({'ok': True, 'message': 'Training complete'})
+        return jsonify({
+            'ok': True,
+            'message': 'Training complete',
+            'pid': os.getpid(),
+            'n_buckets': getattr(processor, 'N_BUCKETS', None),
+            'reloaded_processor': reloaded,
+            'output_root': output_root,
+        })
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
 

@@ -56,7 +56,24 @@ router.post('/train', async (req, res) => {
       { r4a: r4aPath, r4b: r4bPath },
       { timeout: 180000 }
     );
-    res.json({ ...resp.data, r4aCount, r4bCount });
+
+    // The scorer reports which process answered and where it wrote. If that is
+    // not the outputs directory this server reads, an orphaned scorer is
+    // holding port 3001 and training is landing somewhere we never display —
+    // which otherwise looks exactly like a retrain that changed nothing.
+    const warnings = [];
+    const wroteTo = resp.data?.output_root;
+    if (wroteTo && path.resolve(wroteTo) !== path.resolve(OUTPUTS_DIR)) {
+      warnings.push(
+        `Training wrote to ${wroteTo}, but this server reads ${OUTPUTS_DIR}. ` +
+        'Another scorer process is likely holding port 3001 — check `lsof -i:3001`.'
+      );
+    }
+    if (resp.data?.reloaded_processor) {
+      warnings.push('Scorer was running outdated training code and reloaded it before training.');
+    }
+
+    res.json({ ...resp.data, r4aCount, r4bCount, ...(warnings.length ? { warnings } : {}) });
   } catch (err) {
     const msg = err.response?.data?.error || err.message;
     res.status(500).json({ ok: false, error: msg });
