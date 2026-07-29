@@ -4,6 +4,7 @@ Reads R4A and R4B CSV files, generates 96 analysis tables + metadata.
 Run this offline to retrain the scoring model.
 """
 
+import glob
 import os
 import pickle
 import warnings
@@ -297,6 +298,14 @@ class FactorAnalysisProcessor:
 
         # Factor importance CSV
         fi_df.to_csv(os.path.join(out_dir, 'factor_importance.csv'), index=False)
+
+        # Clear factor CSVs from any earlier run before writing this one's.
+        # k is data-dependent, so a retrain that keeps fewer factors used to
+        # leave the surplus files behind (e.g. factor_8_buckets.csv sitting in
+        # a k=7 table). The scorer ignores them, but exports and inspection
+        # tools read the directory and reported factors the model never uses.
+        for stale in glob.glob(os.path.join(out_dir, 'factor_*_buckets.csv')):
+            os.remove(stale)
 
         # Bucket CSVs
         for j, bdf in factor_bucket_dfs.items():
