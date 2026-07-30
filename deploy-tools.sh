@@ -99,7 +99,33 @@ pm2 save >/dev/null
 
 echo
 echo "[6/6] Health checks..."
-sleep 5
+
+# Poll rather than sleep-and-hope. Every scorer imports pandas and sklearn at
+# startup, which takes a couple of seconds on its own; seven of them booting at
+# once contend for CPU and take considerably longer. A single check after a flat
+# five seconds reported FAIL for scorers that were fine moments later — and
+# always for the first tools in the list, because those are checked while the
+# contention is at its worst. Waiting for all of them before reporting anything
+# means the verdict describes the deploy rather than the order of the loop.
+wait_up() {  # wait_up <url> <attempts>
+  local url="$1" tries="${2:-20}"
+  for _ in $(seq 1 "$tries"); do
+    curl -s --max-time 3 "$url" >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
+printf "  waiting for %s process(es) to come up" "$(( ${#TOOLS[@]} * 2 ))"
+for entry in "${TOOLS[@]}"; do
+  IFS='|' read -r id name port sport <<< "$entry"
+  [ -n "$ONLY" ] && [ "$ONLY" != "$id" ] && continue
+  wait_up "http://localhost:${port}/health" >/dev/null 2>&1 || true
+  wait_up "http://127.0.0.1:${sport}/health" >/dev/null 2>&1 || true
+  printf "."
+done
+echo
+
 for entry in "${TOOLS[@]}"; do
   IFS='|' read -r id name port sport <<< "$entry"
   [ -n "$ONLY" ] && [ "$ONLY" != "$id" ] && continue
