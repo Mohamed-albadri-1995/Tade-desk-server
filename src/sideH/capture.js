@@ -4,8 +4,14 @@ const yahooClient  = require('../yahoo/client');
 const alpacaClient = require('../alpaca/client');
 const { syncFromWarehouse } = require('../training/trainingData');
 
-const ENTRY_TIME_A = '09:37';
-const ENTRY_TIME_B = '09:40';
+// The two entry times this tool measures outcomes from. They follow the tool's
+// own session — see captureAt in tools.config.json — because measuring a
+// mid-morning setup from a 09:37 entry answers a question nobody asked. A and B
+// keep their names: the scorer picks a base by "entry A or entry B", not by the
+// clock, so the model bases mean the same thing whatever the times are.
+const { captureAt } = require('../config');
+const ENTRY_TIME_A = captureAt.entryA;
+const ENTRY_TIME_B = captureAt.entryB;
 
 // Batch tickers into chunks to stay within Alpaca query-string limits
 function chunk(arr, size) {
@@ -118,7 +124,7 @@ async function captureR3(date) {
       const dailyBars = dailyMap[ticker] || [];
       const atr14 = alpacaClient.computeATR14(dailyBars);
 
-      // R3A — Target Entry at 09:37
+      // R3A — Target Entry (entry A)
       const barA = bars.find(b => b.etTime === ENTRY_TIME_A);
       if (barA) {
         const entryA = barA.o;
@@ -133,7 +139,7 @@ async function captureR3(date) {
         noEntryA++;
       }
 
-      // R3B — Alternative Entry at 09:40
+      // R3B — Alternative Entry (entry B)
       const barB = bars.find(b => b.etTime === ENTRY_TIME_B);
       if (barB) {
         const entryB = barB.o;
@@ -152,8 +158,8 @@ async function captureR3(date) {
 
   writeAll(tickers);
 
-  if (noEntryA > 0) console.warn('[SideH] R3A: missing 09:37 bar for', noEntryA, 'ticker(s)');
-  if (noEntryB > 0) console.warn('[SideH] R3B: missing 09:40 bar for', noEntryB, 'ticker(s)');
+  if (noEntryA > 0) console.warn(`[SideH] R3A: missing ${ENTRY_TIME_A} bar for`, noEntryA, 'ticker(s)');
+  if (noEntryB > 0) console.warn(`[SideH] R3B: missing ${ENTRY_TIME_B} bar for`, noEntryB, 'ticker(s)');
 
   // Push today's joined R4A/R4B rows into the persistent training tables so
   // they survive the daily auto-train rewrite and accumulate across days.

@@ -1,5 +1,5 @@
 {
-  "_comment": "The registry of tools. Everything reads this one file \u2014 the deploy script, the landing page, and the seeder \u2014 so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
+  "_comment": "The registry of tools. Everything reads this one file — the deploy script, the landing page, and the seeder — so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
   "tools": [
     {
       "id": "T1",
@@ -7,7 +7,12 @@
       "port": 3000,
       "scorerPort": 3001,
       "accent": "#4a9eff",
-      "desc": "The original: big movers, pre-market volume and trend continuation."
+      "desc": "The original: big movers, pre-market volume and trend continuation.",
+      "captureAt": {
+        "r1": "09:36",
+        "entryA": "09:37",
+        "entryB": "09:40"
+      }
     },
     {
       "id": "T2",
@@ -15,7 +20,12 @@
       "port": 3010,
       "scorerPort": 3011,
       "accent": "#a78bfa",
-      "desc": "Daily moving averages stacked fast-over-slow, breaking the monthly high."
+      "desc": "Daily moving averages stacked fast-over-slow, breaking the monthly high.",
+      "captureAt": {
+        "r1": "09:46",
+        "entryA": "09:47",
+        "entryB": "09:51"
+      }
     },
     {
       "id": "T3",
@@ -23,7 +33,12 @@
       "port": 3020,
       "scorerPort": 3021,
       "accent": "#fb923c",
-      "desc": "Pre-market gaps on heavy volume in a small float."
+      "desc": "Pre-market gaps on heavy volume in a small float.",
+      "captureAt": {
+        "r1": "09:36",
+        "entryA": "09:37",
+        "entryB": "09:40"
+      }
     },
     {
       "id": "T4",
@@ -31,7 +46,12 @@
       "port": 3030,
       "scorerPort": 3031,
       "accent": "#34d399",
-      "desc": "Price crossing back through VWAP with volume behind it."
+      "desc": "Price crossing back through VWAP with volume behind it.",
+      "captureAt": {
+        "r1": "10:01",
+        "entryA": "10:02",
+        "entryB": "10:06"
+      }
     },
     {
       "id": "T5",
@@ -39,7 +59,12 @@
       "port": 3040,
       "scorerPort": 3041,
       "accent": "#f472b6",
-      "desc": "Established names pushing through the 52-week high."
+      "desc": "Established names pushing through the 52-week high.",
+      "captureAt": {
+        "r1": "09:46",
+        "entryA": "09:47",
+        "entryB": "09:51"
+      }
     },
     {
       "id": "T6",
@@ -47,7 +72,12 @@
       "port": 3050,
       "scorerPort": 3051,
       "accent": "#facc15",
-      "desc": "RSI stretched with volume \u2014 does momentum continue or snap back?"
+      "desc": "RSI stretched with volume — does momentum continue or snap back?",
+      "captureAt": {
+        "r1": "10:16",
+        "entryA": "10:17",
+        "entryB": "10:21"
+      }
     },
     {
       "id": "T7",
@@ -55,7 +85,12 @@
       "port": 3060,
       "scorerPort": 3061,
       "accent": "#22d3ee",
-      "desc": "Split by time of day: gaps before the open, heavy volume after it."
+      "desc": "Split by time of day: gaps before the open, heavy volume after it.",
+      "captureAt": {
+        "r1": "09:36",
+        "entryA": "09:37",
+        "entryB": "09:40"
+      }
     }
   ]
 }

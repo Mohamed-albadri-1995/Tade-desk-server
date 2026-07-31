@@ -203,6 +203,13 @@ const FIELD_MIRROR = {
   'high': 'low', 'low': 'high',
 };
 
+// Bounded oscillators mirror by reflection, not by sign. RSI runs 0–100 with 50
+// in the middle, so the twin of "RSI above 70" is "RSI below 30" — not "RSI
+// below 70" (true of most of the market) and not "RSI above -70" (impossible).
+// Treating RSI as a plain quality guard left the oversold screener asking for
+// stocks that are overbought AND under their 20-EMA, which is close to nothing.
+const REFLECTED_FIELDS = { RSI: 100 };
+
 // Keep any timeframe suffix when swapping to the counterpart field.
 function mirrorFieldName(name) {
   const [base, ...rest] = String(name).split('|');
@@ -231,6 +238,16 @@ function mirrorFilter(f) {
   if (DIRECTIONAL_FIELDS.has(base)) {
     const n = Number(f.right);
     return { ...f, operation: opposite, right: Number.isFinite(n) ? -n : f.right };
+  }
+
+  if (REFLECTED_FIELDS[base] !== undefined) {
+    const span = REFLECTED_FIELDS[base];
+    if (Array.isArray(f.right)) {
+      const [lo, hi] = f.right.map(Number);
+      return { ...f, operation: opposite, right: [span - hi, span - lo] };
+    }
+    const n = Number(f.right);
+    return { ...f, operation: opposite, right: Number.isFinite(n) ? span - n : f.right };
   }
 
   // A numeric threshold on a non-directional field is a quality guard.
@@ -374,6 +391,6 @@ function createMirror(id) {
 
 module.exports = {
   list, get, create, update, remove, createMirror, mirrorDefinition, isActiveAt,
-  validateDefinition, validateFilter, isKnownField,
+  validateDefinition, validateFilter, isKnownField, slugify,
   OPERATIONS, FIELDS,
 };

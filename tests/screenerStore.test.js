@@ -406,3 +406,72 @@ describe('renaming the legacy vendor-named screeners', () => {
     expect(store.list().find(s => s.key === 'after-open-volume')).toBeTruthy();
   });
 });
+
+describe('mirroring a bounded oscillator', () => {
+  test('RSI reflects about its range instead of flipping sign', () => {
+    // "RSI above 70" mirrors to "RSI below 30". Flipping the operator alone
+    // gives "below 70", which is most of the market; negating gives "above
+    // -70", which is every stock that exists.
+    const m = store.mirrorDefinition({
+      name: 'Overbought', filters: [{ left: 'RSI', operation: 'greater', right: 70 }],
+    });
+    expect(m.filters[0]).toEqual({ left: 'RSI', operation: 'less', right: 30 });
+  });
+
+  test('a range reflects both ends and stays the right way round', () => {
+    const m = store.mirrorDefinition({
+      name: 'Mid', filters: [{ left: 'RSI', operation: 'greater', right: [60, 80] }],
+    });
+    expect(m.filters[0].right).toEqual([20, 40]);
+  });
+
+  test('the T6 pair really is overbought against oversold', () => {
+    const { PRESETS } = require('../src/sideA/seedScreeners');
+    const [base, mirror] = PRESETS.T6;
+    const rsi = d => d.filters.find(f => f.left === 'RSI');
+    expect(rsi(base)).toEqual({ left: 'RSI', operation: 'greater', right: 70 });
+    expect(rsi(mirror)).toEqual({ left: 'RSI', operation: 'less', right: 30 });
+    // and the mirror must not ask for both at once
+    const ema = mirror.filters.find(f => f.right === 'EMA20');
+    expect(ema.operation).toBe('eless');
+  });
+});
+
+describe('repairing the stored oversold mirror', () => {
+  const db = require('../src/db');
+  const { repairOversoldMirror } = require('../src/sideA/seedScreeners');
+
+  beforeEach(() => db.prepare('DELETE FROM screeners').run());
+
+  const seedBroken = () => store.create({
+    key: 'overextended-mirror', name: 'Overextended (mirror)',
+    filters: [
+      { left: 'RSI', operation: 'greater', right: 70 },
+      { left: 'close', operation: 'eless', right: 'EMA20' },
+      { left: 'relative_volume_10d_calc', operation: 'greater', right: 3 },
+    ],
+  });
+
+  test('a tool already running gets the contradiction rewritten', () => {
+    seedBroken();
+    expect(repairOversoldMirror().repaired).toBe(1);
+    const f = store.list()[0].filters;
+    expect(f).toContainEqual({ left: 'RSI', operation: 'less', right: 30 });
+    expect(f).not.toContainEqual({ left: 'RSI', operation: 'greater', right: 70 });
+  });
+
+  test('running it twice changes nothing the second time', () => {
+    seedBroken();
+    repairOversoldMirror();
+    expect(repairOversoldMirror().repaired).toBe(0);
+  });
+
+  test('a screener the trader wrote themselves is left alone', () => {
+    store.create({
+      key: 'overextended-mirror', name: 'Mine',
+      filters: [{ left: 'RSI', operation: 'less', right: 25 }],
+    });
+    expect(repairOversoldMirror().repaired).toBe(0);
+    expect(store.list()[0].filters).toEqual([{ left: 'RSI', operation: 'less', right: 25 }]);
+  });
+});

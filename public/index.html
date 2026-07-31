@@ -173,6 +173,9 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   transform:translateX(-50%); white-space:nowrap; }
 .sch-open { position:absolute; top:0; bottom:0; width:1px; background:#4ade8088; z-index:2; }
 .sch-now  { position:absolute; top:0; bottom:0; width:2px; background:#f87171; z-index:3; }
+.sch-capture { margin-top:11px; padding:9px 11px; border-radius:5px; background:var(--bg3);
+  border-left:3px solid #fbbf24; font-size:11.5px; color:var(--text2); line-height:1.6; max-width:78ch; }
+.sch-capture b { color:var(--text); }
 .sch-legend { font-size:11px; color:var(--text3); margin-top:9px; line-height:1.6; }
 .sb-rule { font:11px ui-monospace,Menlo,monospace; background:var(--bg3); border:1px solid #333a4a;
            border-radius:4px; padding:2px 7px; color:var(--text2); }
@@ -3082,6 +3085,7 @@ function sbRenderSchedule() {
   const now = etNowMinutes();
   const nowIn = now >= SCH_FROM && now <= SCH_TO;
   const ticks = [4, 6, 8, 9.5, 11, 13, 15, 16, 18, 20];
+  const cap = SB_META && SB_META.tool && SB_META.tool.captureAt;
 
   const rows = SB_LIST.map(s => {
     const col = screenerColor(s.name);
@@ -3119,6 +3123,12 @@ function sbRenderSchedule() {
         <div class="sch-when"></div>
       </div>
     </div>
+    ${cap ? `<div class="sch-capture">
+      <b>Learning moment — ${esc(cap.r1)} ET.</b> This tool freezes its cards at ${esc(cap.r1)}
+      and measures how far each one ran from ${esc(cap.entryA)} and ${esc(cap.entryB)}. That single
+      snapshot is the only thing the score model ever learns from, so a stock found after
+      ${esc(cap.r1)} shows on screen and can be traded, but never trains the model.
+    </div>` : ''}
     <div class="sch-legend">
       <span style="color:#4ade80">│</span> 09:30 market open
       ${nowIn ? ' &nbsp;·&nbsp; <span style="color:#f87171">│</span> now' : ''}

@@ -14,6 +14,7 @@ const { scoreAllRows } = require('./sideE/score');
 
 const scanStatus = {
   lastRun: null,
+  lastRefresh: null,
   lastRowCount: 0,
   running: false,
   error: null,
@@ -192,6 +193,36 @@ async function runFullScan() {
   }
 }
 
+/**
+ * Re-quote every card on screen without looking for new ones.
+ *
+ * Run windows separate two things that used to be one. Discovery is what a
+ * window gates: after 13:00 a morning screener should stop ADDING candidates.
+ * Refresh is not gated by anything — a card found at 09:40 is still on screen
+ * at 15:00, still being watched, and its price, VWAP, distance to each moving
+ * average and every relational tag have to keep up with the tape.
+ *
+ * Deliberately narrow: quotes and everything derived from them. No scanners, no
+ * news, no re-scoring. That keeps it cheap enough to run every few minutes (one
+ * batched TradingView call for the whole registry), and it keeps the score a
+ * card was given at discovery from drifting underneath the trader.
+ */
+async function runRefreshOnly() {
+  if (scanStatus.running) return { refreshed: 0, skipped: 'scan in progress' };
+  scanStatus.running = true;
+  try {
+    const { refreshAllInR0 } = require('./sideG/staleFetch');
+    const result = await refreshAllInR0();
+    scanStatus.lastRefresh = Date.now();
+    return result;
+  } catch (err) {
+    console.error('[Pipeline] Refresh error:', err.message);
+    return { refreshed: 0, error: err.message };
+  } finally {
+    scanStatus.running = false;
+  }
+}
+
 function getScanStatus() {
   return {
     lastRun: scanStatus.lastRun,
@@ -199,7 +230,8 @@ function getScanStatus() {
     running: scanStatus.running,
     error: scanStatus.error,
     lastReport: scanStatus.lastReport,
+    lastRefresh: scanStatus.lastRefresh,
   };
 }
 
-module.exports = { runFullScan, getScanStatus };
+module.exports = { runFullScan, runRefreshOnly, getScanStatus };

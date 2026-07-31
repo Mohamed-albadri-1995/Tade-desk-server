@@ -35,9 +35,18 @@ async function fetchStaleQuotes(tvSymbols) {
   return results;
 }
 
-async function refreshStaleInR0() {
+/**
+ * Re-quote rows in r0 and recompute everything derived from price.
+ *
+ * `all` decides the target. Inside a scan only the stale rows need it — the
+ * live ones were just written from fresh scanner data. Outside a scan there is
+ * no such distinction: every card on screen is as old as the last scan, and
+ * with the run windows a tool can go hours between scans while the trader is
+ * still watching the cards. That is what `all` is for.
+ */
+async function refreshInR0({ all = false } = {}) {
   const today = require('../utils/time').toETDate(Date.now());
-  const staleRows = r0.getAll().filter(r => !r.liveNow && r.date === today);
+  const staleRows = r0.getAll().filter(r => (all || !r.liveNow) && r.date === today);
 
   if (staleRows.length === 0) return { staleCount: 0, noSymbol: 0, refreshed: 0 };
 
@@ -71,8 +80,11 @@ async function refreshStaleInR0() {
     refreshed++;
   }
 
-  console.log(`[SideG] Refreshed ${refreshed}/${staleRows.length} stale tickers (${noSymbol} skipped — no tvSymbol)`);
+  console.log(`[SideG] Refreshed ${refreshed}/${staleRows.length} ${all ? '' : 'stale '}tickers (${noSymbol} skipped — no tvSymbol)`);
   return { staleCount: staleRows.length, noSymbol, refreshed };
 }
 
-module.exports = { refreshStaleInR0 };
+const refreshStaleInR0 = () => refreshInR0({ all: false });
+const refreshAllInR0 = () => refreshInR0({ all: true });
+
+module.exports = { refreshInR0, refreshStaleInR0, refreshAllInR0 };

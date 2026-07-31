@@ -11,7 +11,10 @@ const router = express.Router();
 router.get('/meta', (req, res) => {
   res.json({
     ok: true,
-    tool: { id: config.toolId, name: config.toolName },
+    // captureAt travels with the tool so the schedule strip can draw the two
+    // moments that decide what this tool ever learns from — when the cards
+    // freeze, and the entries their outcomes are measured against.
+    tool: { id: config.toolId, name: config.toolName, captureAt: config.captureAt },
     fields: store.FIELDS,
     operations: store.OPERATIONS,
   });

@@ -62,10 +62,49 @@ const config = {
   tools: loadRegistry(),
 };
 
+// ── capture times ──────────────────────────────────────────────────────────
+// The model only ever learns from one moment a day: r1 freezes the cards, and
+// r3 measures how far each ran from two entry times shortly after. Those were
+// fixed at 09:36 / 09:37 / 09:40, which is right for a tool that hunts at the
+// open and useless for one that does not — a screener that starts at 10:00
+// would have frozen an empty register every day and never trained at all.
+//
+// So the times follow the tool. Each is set just after its own screeners wake
+// up, which is where its candidates actually appear.
+//
+// What this does NOT fix: the times are still fixed per tool, so a setup that
+// fires at 14:00 is measured from the tool's morning snapshot. Making the
+// snapshot follow each card's own discovery time is a change to the register
+// model itself, not to a schedule.
+const DEFAULT_CAPTURE = { r1: '09:36', entryA: '09:37', entryB: '09:40' };
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function readCapture(entry) {
+  const from = (entry && entry.captureAt) || {};
+  const out = { ...DEFAULT_CAPTURE };
+  for (const k of ['r1', 'entryA', 'entryB']) {
+    const v = process.env[`CAPTURE_${k.toUpperCase()}`] || from[k];
+    if (!v) continue;
+    if (!HHMM.test(v)) {
+      console.warn(`[Config] ignoring invalid capture time ${k}="${v}" (use HH:MM)`);
+      continue;
+    }
+    out[k] = v;
+  }
+  if (!(out.r1 < out.entryA && out.entryA < out.entryB)) {
+    console.warn(`[Config] capture times must run r1 < entryA < entryB ` +
+      `(got ${out.r1}, ${out.entryA}, ${out.entryB}) — falling back to defaults`);
+    return { ...DEFAULT_CAPTURE };
+  }
+  return out;
+}
+
 // Fill in identity from the registry when only TOOL_ID was given, so a tool
 // started by hand still names itself correctly.
 const entry = config.tools.find(t => t.id === TOOL_ID);
 if (entry && !process.env.TOOL_NAME) config.toolName = entry.name;
+
+config.captureAt = readCapture(entry);
 
 // Fail loudly rather than let two tools silently share state — the failure mode
 // is one tool's training quietly overwriting another's model.
