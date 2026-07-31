@@ -35,6 +35,16 @@ Configuration, first match wins:
   2. chart/screener_sources.json — same shape, committed so it survives deploys
   3. env SCREENER_URL (or localhost:3000) as a single source called 'default'
 
+PORTS. Each tool runs two: an APP port (the page you open) and a private
+SCORER port, app+1, bound to 127.0.0.1. Point this module at the APP port —
+the scorer speaks a different API and answers 404 to a warehouse request.
+Tools are numbered in tens (3000/3001, 3010/3011, … 3060/3061), so an eighth
+tool is 3070 and one more line here.
+
+This service runs ON the same box, so it reaches every tool over localhost.
+Whether a tool's app port is open in the AWS security group only affects
+browsing it from outside — it has no bearing on what the chart can read.
+
 Endpoints used (each screener, mounted under /api/warehouse):
   GET /available-dates?register=R1        -> ["2026-07-10", ...]
   GET /R1/:date            (or Shortlist) -> [ {ticker, _score, regime, ...} ]

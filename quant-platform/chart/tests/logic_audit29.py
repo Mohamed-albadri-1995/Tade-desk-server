@@ -162,9 +162,24 @@ os.environ['SCREENER_SOURCES'] = 'not json at all'
 ok("broken config falls back to a single working source, never zero",
    len(sc.reload_sources()) == 1)
 del os.environ['SCREENER_SOURCES']
-ok("the shipped screener_sources.json is valid and lists the tools",
-   len(json.loads((pathlib.Path(sc.__file__).resolve().parent
-                   / 'screener_sources.json').read_text())) >= 1)
+shipped = json.loads((pathlib.Path(sc.__file__).resolve().parent
+                      / 'screener_sources.json').read_text())
+ok("the shipped screener_sources.json lists all seven tools", len(shipped) == 7,
+   f"{len(shipped)}")
+ok("ids are unique (they land in ctx_source on every backtest trade)",
+   len({s['id'] for s in shipped}) == 7)
+# Each tool runs an APP port and a private SCORER port at app+1 bound to
+# 127.0.0.1. The scorer speaks a different API and 404s a warehouse request,
+# so pointing a source at one would look like a broken screener forever.
+ports = sorted(int(s['url'].rsplit(':', 1)[1]) for s in shipped)
+ok("every source points at an APP port (multiple of 10), never a scorer port",
+   all(p % 10 == 0 for p in ports), f"{ports}")
+ok("the tools are the documented 3000..3060 ladder",
+   ports == [3000, 3010, 3020, 3030, 3040, 3050, 3060], f"{ports}")
+ok("no source points at a scorer port (app+1)",
+   not ({p + 1 for p in ports} & set(ports)))
+ok("all reached over localhost — the AWS security group is irrelevant here",
+   all('localhost' in s['url'] or '127.0.0.1' in s['url'] for s in shipped))
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")

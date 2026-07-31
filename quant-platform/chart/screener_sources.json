@@ -1,9 +1,9 @@
 [
-  {"id": "s1", "name": "Scanner 1", "url": "http://localhost:3000"},
-  {"id": "s2", "name": "Scanner 2", "url": "http://localhost:3001"},
-  {"id": "s3", "name": "Scanner 3", "url": "http://localhost:3002"},
-  {"id": "s4", "name": "Scanner 4", "url": "http://localhost:3003"},
-  {"id": "s5", "name": "Scanner 5", "url": "http://localhost:3004"},
-  {"id": "s6", "name": "Scanner 6", "url": "http://localhost:3005"},
-  {"id": "s7", "name": "Scanner 7", "url": "http://localhost:3006"}
+  {"id": "screener",  "name": "T1 Screener",      "url": "http://localhost:3000"},
+  {"id": "momentum",  "name": "T2 Momentum",      "url": "http://localhost:3010"},
+  {"id": "gappers",   "name": "T3 Gappers",       "url": "http://localhost:3020"},
+  {"id": "vwap",      "name": "T4 VWAP Reclaim",  "url": "http://localhost:3030"},
+  {"id": "wk52",      "name": "T5 52-Week Break", "url": "http://localhost:3040"},
+  {"id": "overext",   "name": "T6 Overextended",  "url": "http://localhost:3050"},
+  {"id": "sessions",  "name": "T7 Sessions",      "url": "http://localhost:3060"}
 ]
