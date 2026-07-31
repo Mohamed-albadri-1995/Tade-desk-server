@@ -83,6 +83,50 @@ chk('real rejection at resistance = bounce_down',
 chk('close_pos=0.3 loosens the doji guard',
     S._eval_rule(rule(P(),'bounce_up',C(100),op_params={'close_pos':0.3}), bd, None), [False,False,True])
 
+print("== A2. bounce v4: touch and confirmation on DIFFERENT bars (within) ==")
+# The most common real bounce: a weak hammer taps the MA, the NEXT candle
+# confirms. Same-bar rules (within=1) rightly reject the hammer alone — but
+# the pair IS a valid bounce, and within=3 must see it.
+b2b=bars_from(close=[101.0, 100.30, 101.10],
+              o    =[101.0, 100.90, 100.40],
+              h    =[101.5, 101.00, 101.20],
+              l    =[100.8, 100.05, 100.35])  # bar1 taps 100, closes weak (pos .26)
+chk('within=1 (default): weak-touch-then-confirm NOT seen (old behavior)',
+    S._eval_rule(rule(P(),'bounce_up',C(100)), b2b, None), [False,False,False])
+chk('within=3: fires on the confirmation bar',
+    S._eval_rule(rule(P(),'bounce_up',C(100),op_params={'within':3}), b2b, None),
+    [False,False,True])
+# a decisive CLOSE through the level between touch and confirm = breakdown,
+# and the later reclaim is a CROSS — never a bounce, whatever the window
+bbrk=bars_from(close=[101.0,  99.50, 101.10],
+               o    =[101.0, 100.90, 100.20],
+               h    =[101.5, 101.00, 101.20],
+               l    =[100.8,  99.40, 100.10])
+chk('breakdown close between touch and confirm kills it (within=3)',
+    S._eval_rule(rule(P(),'bounce_up',C(100),op_params={'within':3}), bbrk, None),
+    [False,False,False])
+# window boundary: touch at bar1, drift bar2, confirm bar3 -> needs within>=3
+b3b=bars_from(close=[101.0, 100.30, 100.25, 101.10],
+              o    =[101.0, 100.90, 100.30, 100.30],
+              h    =[101.5, 101.00, 100.40, 101.20],
+              l    =[100.8, 100.05, 100.20, 100.28])
+chk('touch->drift->confirm inside within=3',
+    S._eval_rule(rule(P(),'bounce_up',C(100),op_params={'within':3}), b3b, None),
+    [False,False,False,True])
+chk('same shape outside within=2 window: no fire',
+    S._eval_rule(rule(P(),'bounce_up',C(100),op_params={'within':2}), b3b, None),
+    [False,False,False,False])
+# bounce_down mirror: weak poke at resistance, next bar confirms down
+b2d=bars_from(close=[99.0, 99.70, 98.80],
+              o    =[99.0, 99.20, 99.50],
+              h    =[99.4, 100.10, 99.60],
+              l    =[98.7, 99.10, 98.70])
+chk('bounce_down within=3: poke then confirm-down fires',
+    S._eval_rule(rule(P(),'bounce_down',C(100),op_params={'within':3}), b2d, None),
+    [False,False,True])
+chk('bounce_down within=1: same shape not seen (old behavior)',
+    S._eval_rule(rule(P(),'bounce_down',C(100)), b2d, None), [False,False,False])
+
 print("== B. STATUS entries/exits in trade pairing ==")
 n=8
 b=bars_from(close=[100]*n, h=[100.2]*n, l=[99.8]*n)
@@ -97,13 +141,23 @@ b2=bars_from(close=[100,100,100,100,100,100],
              l=[99.8,99.8,98.5,99.8,98.5,99.8])   # SL 1% (=99) hit at idx2 and idx4
 entry_status=np.array([False,True,True,True,True,True])   # setup stays valid
 risk={'sl':{'type':'pct','value':1}}
+# EDGE default: a persistent true-run is ONE setup → one entry (no nonsense
+# re-entry after the stop-out while the same condition still holds).
 tr2,_SL,_TP,_OP=S._pair_trades(b2, list(range(6)), entry_status, np.zeros(6,bool), 'long', risk, None)
-chkv('re-enters while status holds', [(t['ei'],t['xi'],t['reason']) for t in tr2],
+chkv('edge default: persistent run enters ONCE', [(t['ei'],t['xi'],t['reason']) for t in tr2],
+     [(1,2,'SL')])
+# STATUS mode (opt-in) restores the old any-true-bar re-entry
+tr2s,_,_,_=S._pair_trades(b2, list(range(6)), entry_status, np.zeros(6,bool), 'long', risk, None, entry_mode='status')
+chkv('status mode: re-enters while it holds', [(t['ei'],t['xi'],t['reason']) for t in tr2s],
      [(1,2,'SL'),(3,4,'SL')])
-# but a one-bar signal (edge-like mask) does NOT re-enter
+# a spiky mask (each true bar preceded by false) = a NEW run each time → re-enters
+entry_spiky=np.array([False,True,False,True,False,True])
+tr3,_SL,_TP,_OP=S._pair_trades(b2, list(range(6)), entry_spiky, np.zeros(6,bool), 'long', risk, None)
+chkv('spiky mask: each edge is a new setup', len(tr3)>=2, True)
+# one-bar signal → single trade
 entry_once=np.array([False,True,False,False,False,False])
-tr3,_SL,_TP,_OP=S._pair_trades(b2, list(range(6)), entry_once, np.zeros(6,bool), 'long', risk, None)
-chkv('one-shot signal: single trade', len(tr3), 1)
+tr4,_,_,_=S._pair_trades(b2, list(range(6)), entry_once, np.zeros(6,bool), 'long', risk, None)
+chkv('one-shot signal: single trade', len(tr4), 1)
 
 print("== C. volume composition (no new primitives needed) ==")
 # volume > sma(volume, 3): rel volume spike via existing pieces

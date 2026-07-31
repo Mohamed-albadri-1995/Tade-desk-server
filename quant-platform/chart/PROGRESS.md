@@ -378,6 +378,81 @@ redraw does NOT touch a manual zoom (your zoom survives Compute/params). The
 Verified headless: manual@700 → switch → autoScale true and $1 candles fill
 the view; same-symbol redraw keeps manual; Fit restores. Screenshot proof.
 
+### It.21 — Phase 4: backtest engine (steps 1-8, see PHASE4_PLAN.md)  [DONE]
+Fill model ('close' preview vs 'next_open' honest live fills, 14 cases);
+evaluate() exposes its trades so the backtester consumes the preview's exact
+output; backtests + backtest_trades store; chart/backtest.py runner with
+DAY-SLICE honesty (only day-D entries count for D), per-day register
+membership (R1/Shortlist), open-vs-closed separation, summary with win rate /
+total % / max drawdown / equity curve; API (POST /api/backtest + poll/list/
+delete, one-at-a-time guard, spec validated before creating a row); 🧪
+Backtest UI panel (saved strategy, symbols or register universe, date range,
+fill selector, progress poll, summary + equity curve in the osc pane, trade
+list where a click replays that chart as-of that day). +50 new hand-computed
+cases across parts 9-11; suite total 215; ALL GREEN; headless UI smoke clean.
+
+### It.22 — Trade The Pool preset: fees, min-profit, session rules  [DONE]
+Researched TTP terms (site + reviews): $0.005/sh min $0.75/order; wins under
+$0.10/share don't count toward the target (losses always do); auto-liquidation
+starts 15:50 ET. Implemented: engine session masks (entry_ok = RTH only,
+eod_close = forced flat on the last bar before 15:50, reason 'eod'; next_open
+fills landing outside the window are dropped; pending exits can't leak across
+days) — works with ALL-DAY charts so pre/post data still feeds indicators.
+Backtester: shares + per-share fee with per-order minimum (round trip 2x,
+open 1x), TTP block in summary (net $, COUNTED $ under the min-profit rule,
+wasted-win count, fees $) + report KPI cards + UI preset (fills 0.005/0.75/
+0.10/RTH+EOD/next_open; all editable). CSV gains pnl_ps ($/share). Also
+pinned the user's ONE-POSITION invariant with explicit tests (repeated
+signals ignored while holding; re-arm only after SL/TP/exit/eod). +17 cases
+(part 12) — suite ALL GREEN.
+
+### It.23 — loop it.2: PHASE-1 FOUNDATION BUG — higher-TF look-ahead  [DONE]
+User widened the review loop to start from Phase 1 ("if phase 1 is wrong, 2
+and 3 are wrong"). Fresh read of the data layer found exactly that class of
+bug: daily bars are stamped at the day's START, so the at-or-before reindex
+handed day D's COMPLETED daily value (full-day ATR range / volume) to D's own
+09:31 bar. On the CHART this matches TradingView (their security() history
+repaints identically — it is how atr_daily/avg_volume passed TV verification)
+— but the strategy/backtest layer was reading tomorrow's newspaper: 'moved >
+2 daily ATR' at 10:00 knew the day's final range. FIX: overlay_arrays gains
+causal=True (strategy engine, SL-ATR, anchored levels, strategy-drawn lines);
+when compute_tf is COARSER than the display tf the reindex shifts one src bar
+→ intraday bars during D see D-1's completed value only. Finer compute TFs
+(pine_5day 1m) stay unshifted (complete within the display bar at close
+semantics). Chart overlay picker keeps TV-parity mode (approved look).
+Hand-computed proof (part 13): D3 TR=5 vs D2 TR=1 → chart mode 5.0 at 09:30,
+causal 1.0; avg_volume same law; engine + expr read causal; daily-on-daily
+identical both modes. Suite ALL GREEN.
+
+## FULL-TOOL REVIEW LOOP (finite patch list — no infinite loop)
+Each patch: review → debug → fix → commit → report. Loop STOPS after the
+final patch + one clean full pass. Check off as completed:
+- [x] P1  Data-layer boundaries: vendor end-INCLUSIVITY leaked D+1's daily
+      bar into asof=D replays (dailies are stamped midnight ET = the window
+      end). prepare_bars + compute_tf fetch now cut strictly < end on
+      replays; LIVE keeps the boundary (developing) bar. Tests part 14.
+- [x] P2  data_manager + live WS: FOUND — alpaca-1m 7-day cap silently
+      truncated multi-day warm-up (month VWAP!) → loud banner warning now
+- [x] P3  Screener bridge: clean (4th pass — dates, latest fallback, R1
+      _score vs Shortlist score mapping, error surfacing)
+- [x] P4  Engine corners: eod supersedes same-bar next_open exit signal;
+      fill landing ON the liquidation bar blocked (part 12 → 20 cases)
+- [x] P5  Store+API: backtest-start double-POST race closed with a lock
+- [x] P6  Frontend: smoke green at 390px + 900px (banner, error-samples
+      toggle, builder, backtest panel), no JS errors
+- [x] P7  FINAL: full suite ALL GREEN (250+ cases, 15 parts) — LOOP CLOSED.
+      Next real work needs USER input: run backtests on real data and report
+      anything that looks wrong; then the trading-tool bridge (Phase 5).
+
+### It.24 — loop patch P1: asof replay boundary  [DONE]
+Alpaca/Polygon treat `end` as inclusive; daily bars are stamped at midnight
+ET; asof=D sets end = D+1 00:00 ET → historical replays could include D+1's
+daily bar (the future) in daily displays AND in the compute_tf daily fetch.
+Fix: on replays (ctx.asof), slice strictly before `end` in prepare_bars and
+in overlay_arrays' HTF fetch; live keeps the boundary bar (the developing
+candle is the point of live). Proven with a deliberately end-inclusive stub
+loader stamping dailies at ET midnight (part 14, 7 cases). Suite ALL GREEN.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop
@@ -391,3 +466,122 @@ Open items that need the USER, not more building:
      TradingView verification before approval.
 As Opus 4.8: further changes from here are cosmetic/subjective or need your
 input — so this is a natural stop unless you point me at something specific.
+
+### It.25 — first real-data run (#16) diagnosed: coverage honesty  [DONE]
+User ran "Vwap bounce" on register R1 (07/08→07/14, TTP rules, next_open)
+and got 1 trade — rightly called it impossible. Root causes, all fixed:
+1. SILENT no-data skips: a pair whose feed returns zero bars was neither an
+   error nor counted anywhere. Alpaca (IEX) carries no bars for many small-cap
+   gappers, so most of R1 could vanish without a trace. run() now counts
+   evaluated / no-data (named samples) / signal / traded pairs, per-day pair
+   counts, median bars → summary.coverage (part 15, 19 cases).
+2. Backtest silently inherited the CHART's tf + feed selects (feed defaults
+   to alpaca on first load, persisted before the server hint applies). The
+   panel now has its own visible TF + feed selects; backtest feed defaults to
+   the server's default_feed (polygon when keyed); '' normalizes server-side.
+3. btRender wired the ⚠ errors tap handler BEFORE `innerHTML +=` appended the
+   TTP line — re-parsing destroyed the listener, so the errors toggle was
+   dead whenever a TTP block was shown. One innerHTML write, then wire.
+UI shows: pairs count always + coverage line with tappable no-data list;
+report shows coverage KPIs + a PARTIALLY-EVALUATED warning. Suite ALL GREEN
+(16 parts). Headless smoke at 390/900px: toggles alive, no JS errors.
+
+### It.26 — phantom signal ladders (stacked arrows at one bar)  [DONE]
+User's SPY preview showed columns of identical entry/exit arrows at single
+x-positions. Cause: required_days() EXTENDS the evaluate fetch for indicator
+warm-up (pine_5day len 1950 on 1m: 5 requested days -> ~13, alpaca-capped 7),
+so eval returned markers/series/trades on warm-up bars the chart never
+displays — lightweight-charts snaps unknown marker times onto the nearest
+bar it has, stacking them into ladders. Not real trades (one-position
+invariant holds); a pure display lie. Fixed at three layers:
+1. evaluate(): every output (markers, entries/exits, trades, series incl.
+   SL/TP views, bar count, stats, first/last) sliced to the REQUESTED window;
+   warm-up keeps feeding indicator values + position state carried in. A
+   pre-window open position is still reported, just not drawn.
+2. test_condition(): same slice — the fire-rate % now describes the bars the
+   user is looking at, not invisible warm-up bars.
+3. refreshMarkers(): drops any marker outside PRICEBARS' time range (belt &
+   braces against any future bar-set mismatch).
+Audit part 16 (17 cases) forces a 2->13-day extension and pins all of it.
+Suite ALL GREEN (17 parts).
+
+### It.27 — bounce v4: touch and confirmation may be different candles  [DONE]
+User (SRXH 07/09, riding ema16): "our rule of bounce excludes very valid
+bounce." True — v3 demanded ONE candle to touch the level, close back above
+it, close above prev close AND close in the top 40% of its range. The most
+common real bounce (weak hammer taps the MA, NEXT candle confirms) failed.
+v4 adds `within` (op_param, default 1 = exact old behavior, UI 'win'):
+the confirmation may come up to N-1 bars after the touch, provided no bar
+in between CLOSES through the level beyond tol (spring wicks fine,
+breakdowns kill it; a reclaim after a breakdown close is a CROSS, not a
+bounce). Fires on the confirmation bar. All v3 guards intact: from-side +
+open-side on the touch bar, wick tol, doji/close_pos on the confirm bar.
+Part 3 +8 cases (two-bar shape, breakdown kill, window boundary, down
+mirror); all old attack cases pass unchanged = within=1 equivalence.
+Suite ALL GREEN (17 parts). Headless: 'win' input renders, stores op_params.
+
+### It.28 — "loser in backtest, winner alone" investigated: replay mode  [DONE]
+User: ZCMD 2026-07-07 shows -2.50% in backtest #22 but evaluating it alone
+shows a winner. Investigated, not assumed:
+1. Engine consistency PROVEN, not asserted: part 15 sec 4 pins bit-for-bit
+   equality between a backtest row and evaluate() under the same settings
+   (entry_ts, prices, ret, reason). No nondeterminism.
+2. The real cause: the Evaluate preview runs close-fill with NO session
+   rules; the backtest ran next-open fill + TTP rules. Hand-built case in
+   the suite: identical signals are +1.000% at close fill and -1.176% at
+   next-open (signal close 50.00, next open 51.00 spike). On 1m runners the
+   fill model alone flips signs — that is the honesty it exists for.
+3. Tool so the user can SEE it: tapping a backtest trade row now REPLAYS
+   that run — loads the symbol as-of the trade date, switches tf/feed to the
+   run's, loads the run's strategy, evaluates with the run's fill+rules, and
+   labels the stat line 'backtest #N replay: next-open fill · session rules
+   ON'. /api/strategy/evaluate accepts rules; EVALMODE tracks the mode and
+   the stat line always names it; Clear signals resets to pure preview.
+Suite ALL GREEN (17 parts, part 15 now 23 cases). Headless: tap injects
+fill/rules/symbol/asof/tf into the evaluate request, label renders.
+
+### It.29 — rising/falling v3: price terms, not a unitless statistic  [DONE]
+User (with 3 TV scripts): "the rising and falling check is very stupid and
+not related to rise or fall at all." Correct: v2 scored net move / residual
+noise — on smooth lines (VWAPs, long MAs) the noise term ~0 made the score
+explode, so any str>= threshold was arbitrary and the number had no unit a
+trader could reason about (they were typing str>=10, str>=20 blind).
+v3, built from their scripts' two honest idioms ('5D MA Rising' = ma>ma[N];
+L3 VWAP slope score = net up-checkpoints):
+  rising over N bars =
+    1. DIRECTION  line > its value N bars ago
+    2. MAGNITUDE  optional min_pct: net move >= min_pct% of the start
+    3. CONSISTENCY >= consistency (default 0.75) of the window's NONZERO
+       bar-to-bar changes point that way (flat bars don't count against it —
+       step lines like pm_low that move rarely but one-way still qualify)
+Flat = neither. v2's min_strength is ignored if present in saved strategies
+(engine no longer reads it); qp's plottable trend.slope untouched (frozen).
+UI: 'str>=' replaced by 'net>=%' + 'cons>=' with explanatory titles.
+Part 2 sec E2: 12 hand-computed cases (magnitude gate, consistency knob,
+step lines, flat-neither, falling mirror, min_strength ignored). Old part-1
+monotone/chop and part-2 seeded-noise engine tests pass unchanged under v3.
+Suite ALL GREEN (17 parts).
+
+### It.30 — validate the 5 pro scalps build in the tool (pre-Phase-5)  [DONE]
+User gave a 10-page PDF of 5 professional scalps (RubberBand, Second Chance,
+Back$ide, HitchHiker, Fashionably Late) and asked: before Phase 5, prove the
+tool can actually MAKE these — understand → convert to logic → build each →
+if primitives short, add+test → loop. Result:
+- ALL 5 entries + core exits build with EXISTING primitives. No new
+  primitive needed (today_low/high, extremes.highest/lowest, rel_volume,
+  pivot_high/low, vwap.session, ema, atr_daily, pivots.floor, window_high/low
+  all already in the 69-primitive registry).
+- Each built as real strategy JSON and fired through the FULL evaluate()
+  path against hand-crafted trigger bars — new audit part 17 (13 checks),
+  suite ALL GREEN (18 parts).
+- Two real lessons surfaced (documented in chart/SCALPS.md): (a) cross_above
+  + rising must use consistency 0 at the cross bar (the MA has just turned,
+  not yet a consistent run); (b) EMA/VWAP need warm-up before the cross —
+  fine live (fires ~10:00am) but a preview window must include pre-cross bars.
+- The ONE modeling boundary: scale-outs (thirds/halves/waves) and
+  entry-frozen measured-move targets are BRACKET-ORDER behavior, not signal
+  generation. Engine stays one-position/one-exit (preview=backtest=live);
+  the partials become take-profit legs on the trading-tool side in Phase 5.
+chart/SCALPS.md = plain-English → builder-rows conversion for all 5 + the
+coverage table + the Phase-5 boundary. This is the go/no-go the user wanted
+before the bridge.

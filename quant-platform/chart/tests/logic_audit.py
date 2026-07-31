@@ -158,7 +158,7 @@ chk('nan right -> False', S._apply_op('gt', np.array([1.,2,3]), np.array([np.nan
 
 print("== 14. sub-line selection (floor R2, dyn sr3, bb upper) ==")
 _orig=cs.overlay_arrays
-def fake_overlay(bars, ov, ctx):
+def fake_overlay(bars, ov, ctx, causal=False):
     key=ov.get('key'); n=len(bars)
     if key=='pivots.floor':
         lines=[('P',np.full(n,100.)),('R1',np.full(n,101.)),('R2',np.full(n,102.)),('R3',np.full(n,103.)),

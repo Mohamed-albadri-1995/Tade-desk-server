@@ -25,7 +25,7 @@ import pandas as pd
 _CACHE_DIR = Path.home() / '.qp-cache'
 _BASE = 'https://data.alpaca.markets/v2/stocks'
 
-_TF_MAP = {'1m': '1Min', '5m': '5Min', '15m': '15Min', '30m': '30Min',
+_TF_MAP = {'1m': '1Min', '2m': '2Min', '5m': '5Min', '15m': '15Min', '30m': '30Min',
            '1h': '1Hour', '1d': '1Day'}
 
 

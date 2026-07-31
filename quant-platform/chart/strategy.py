@@ -8,7 +8,11 @@ also the exact series the Phase 4 backtest will replay day-by-day.
 
 Schema (JSON)
 -------------
-operand:                                    (any operand may add "offset": n = n bars ago)
+operand:              (any operand may add "offset": n = n bars ago,
+                       and "hold": true = forward-fill its last real value —
+                       carries a SPARSE primitive like structure.pivot_high
+                       forward into a persistent, fixed level. hold applies
+                       BEFORE offset. See _hold(); no look-ahead.)
   {"kind":"primitive","key":"ma.ema","source":"close","params":{"length":9},"sub":null}
   {"kind":"price","field":"close|open|high|low|hl2|hlc3|ohlc4|volume"}
   {"kind":"time","field":"minutes|hhmm|hour|minute"}   # ET bar time-of-day
@@ -24,10 +28,13 @@ rule:
                         # (applied after for/within; operand offsets shift
                         # values, this shifts the rule's own result)
   OP ∈ gt lt ge le eq neq cross_above cross_below rising falling bounce_up bounce_down
-    rising/falling  — regression slope of `left` over op_params.lookback bars,
-                      measured as net move ÷ window volatility, is ≥ / ≤
-                      op_params.min_strength. A flat/choppy series is NEITHER
-                      (strength ~0). right ignored.
+    rising/falling  — `left` over op_params.lookback bars, in PRICE terms:
+                      (1) ends above/below where it started; (2) optionally by
+                      at least op_params.min_pct % of the start; (3) at least
+                      op_params.consistency (default 0.75) of the window's
+                      bar-to-bar CHANGES point that way (flat bars don't count
+                      against it). A flat/choppy series is NEITHER. right
+                      ignored.
     bounce_up/down  — the price bar bounces off `right` (an MA/level): a wick comes
                       within op_params.tol_pct of it and the bar closes back on the
                       right side (support held / resistance held).
@@ -47,6 +54,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pandas as pd
 
 import tools.compare_server as cs
 
@@ -61,8 +69,8 @@ _BOUNCE = ('bounce_up', 'bounce_down')  # left = price bar, right = reference le
 _PRICE_FIELDS = ('close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'volume')
 
 # Defaults for the configurable operators (overridable per rule via op_params).
-_SLOPE_LOOKBACK = 12      # bars in the regression window
-_SLOPE_MIN_STRENGTH = 2.0 # min |net move ÷ residual noise| to count as a trend
+_SLOPE_LOOKBACK = 12       # bars the line is measured over
+_SLOPE_CONSISTENCY = 0.75  # fraction of the window's moves that must agree
                           # (pure noise reads |strength|≈0.9, so 2.0 ≈ "clearly a trend":
                           # chop false-fires ~3-4%, real trends score 5-50+)
 _BOUNCE_TOL_PCT = 0.15    # how close (in %) the wick must come to the level to "touch"
@@ -99,10 +107,64 @@ def _shift(arr: np.ndarray, offset: int) -> np.ndarray:
     return np.concatenate((np.full(off, np.nan), arr[:-off]))
 
 
+def _hold(arr: np.ndarray) -> np.ndarray:
+    """Forward-fill: carry each last real (non-NaN) value forward until the next
+    one appears (Pine's `fixnan`). Turns a SPARSE primitive — one that only
+    prints on some bars, like structure.pivot_high/low (NaN except on a
+    confirmation bar), or a session level — into a PERSISTENT step line you can
+    use as a real, fixed level: 'the last swing high, held' IS the horizontal
+    resistance a trader draws. Past-only (a value can only be carried FORWARD
+    from a bar already seen), so it never introduces look-ahead. Bars before the
+    first real value stay NaN."""
+    arr = np.asarray(arr, dtype=float)
+    mask = ~np.isnan(arr)
+    if not mask.any():
+        return arr
+    idx = np.where(mask, np.arange(arr.size), 0)
+    np.maximum.accumulate(idx, out=idx)         # index of the last real value
+    out = arr[idx]
+    out[:int(np.argmax(mask))] = np.nan          # nothing to hold before the first
+    return out
+
+
+def _causal_align(values: np.ndarray, src_index, dst_index) -> np.ndarray:
+    """Reference-symbol series → the traded symbol's timeline. Each destination
+    bar sees the value at the LAST source bar at-or-before its own time
+    (merge-asof; the same no-look-ahead rule as the higher-TF causal reindex).
+    Destination bars before the first source bar are NaN."""
+    if len(src_index) == 0:
+        return np.full(len(dst_index), np.nan)
+    src = src_index.asi8
+    dst = dst_index.asi8
+    idx = np.searchsorted(src, dst, side='right') - 1
+    vals = np.asarray(values, dtype=float)
+    return np.where(idx >= 0, vals[np.clip(idx, 0, None)], np.nan)
+
+
 # ── operand → aligned float array ──────────────────────────────────────────
 def _operand_array(operand: dict, bars, ctx, trade: dict | None = None) -> np.ndarray:
     if not isinstance(operand, dict):
         raise ValueError('operand must be an object')
+    # CROSS-SYMBOL (market) operand: "symbol": "SPY" computes this operand on
+    # the reference symbol's bars (preloaded by evaluate()/test_condition from
+    # the same feed) and causally aligns it onto the traded symbol's timeline.
+    # offset/hold apply on the REFERENCE timeline (SPY[1] = SPY's prior bar).
+    # This powers every "market trending with/against" factor in SCALPS_SPEC.
+    ref_sym = operand.get('symbol')
+    if ref_sym:
+        rbars = (ctx.get('_ref_bars') or {}).get(str(ref_sym).upper())
+        if rbars is None:
+            raise ValueError(f'reference bars for {ref_sym!r} not loaded — '
+                             'cross-symbol operands run through evaluate()/'
+                             'test_condition, which preload them')
+        if len(rbars) == 0:                     # feed failed → NaN → rule False
+            return np.full(len(bars), np.nan)   # (fail-safe: gate blocks entry)
+        sub_op = {k: v for k, v in operand.items() if k != 'symbol'}
+        if sub_op.get('kind') == 'trade':
+            raise ValueError('trade fields (entry/bars/P&L) live on the traded '
+                             'symbol — they cannot carry a "symbol" reference')
+        rarr = _operand_array(sub_op, rbars, ctx, trade)
+        return _causal_align(rarr, rbars.index, bars.index)
     kind = operand.get('kind', 'primitive')
     n = len(bars)
     if kind == 'trade':
@@ -162,9 +224,12 @@ def _operand_array(operand: dict, bars, ctx, trade: dict | None = None) -> np.nd
                 raise ValueError(f'unknown expr op {eop!r}')
     elif kind == 'primitive':
         key = operand.get('key')
+        # causal=True: a coarser-timeframe primitive (atr_daily, avg_volume)
+        # only shows the last COMPLETED higher-TF bar — no same-day look-ahead
         _, _, lines = cs.overlay_arrays(
             bars, {'key': key, 'source': operand.get('source', 'close'),
-                   'params': _merge_defaults(key, operand.get('params'))}, ctx)
+                   'params': _merge_defaults(key, operand.get('params'))}, ctx,
+            causal=True)
         sub = operand.get('sub')
         if sub:                                   # dict-output primitive line
             base = next((arr for s, arr in lines if s == sub), None)
@@ -174,7 +239,10 @@ def _operand_array(operand: dict, bars, ctx, trade: dict | None = None) -> np.nd
             base = lines[0][1]
     else:
         raise ValueError(f'unknown operand kind {kind!r}')
-    return _shift(np.asarray(base, dtype=float), operand.get('offset', 0))
+    base = np.asarray(base, dtype=float)
+    if operand.get('hold'):                       # forward-fill, THEN shift
+        base = _hold(base)                        # (a sparse pivot → a held level)
+    return _shift(base, operand.get('offset', 0))
 
 
 # ── comparison / cross operators → boolean array ───────────────────────────
@@ -209,17 +277,48 @@ def _apply_op(op: str, L: np.ndarray, R: np.ndarray, p: dict | None = None) -> n
 
 
 def _slope_flag(L: np.ndarray, op: str, p: dict) -> np.ndarray:
-    # Same math as the plottable `trend.slope` primitive — one source of truth,
-    # so what you SEE when you plot slope is exactly what rising/falling tests.
-    from qp.primitives.trend import slope_strength
-    lookback = int(p.get('lookback', _SLOPE_LOOKBACK))
-    thr = float(p.get('min_strength', _SLOPE_MIN_STRENGTH))
-    s = slope_strength(L, lookback)
-    with np.errstate(invalid='ignore'):
-        out = (s >= thr) if op == 'rising' else (s <= -thr)
-    out = np.asarray(out, dtype=bool)
-    out[np.isnan(s)] = False
-    return out
+    """rising/falling v3 — measured in PRICE terms a trader can verify by eye,
+    replacing the old noise-normalized regression score whose 'strength' had
+    no unit (on smooth lines like VWAPs the noise term ~0 made the score
+    explode, so any threshold was arbitrary). Three checks over `lookback`:
+      1. DIRECTION — the line ends above (rising) / below (falling) where it
+         started N bars ago (TV idiom: '5D MA Rising' = ma > ma[N]).
+      2. MAGNITUDE — optional min_pct: the net move is at least min_pct% of
+         the start value ('rising by ≥0.2% over 12 bars').
+      3. CONSISTENCY — at least `consistency` (default 0.75) of the window's
+         NONZERO bar-to-bar changes point the same way (the L3 slope-score
+         idea). Flat bars don't count against it, so step lines (pm_low,
+         day levels) that move rarely but always one way still qualify.
+    A flat line is neither rising nor falling. min_strength (v2) is ignored."""
+    n = len(L)
+    N = max(1, int(p.get('lookback', _SLOPE_LOOKBACK) or _SLOPE_LOOKBACK))
+    min_pct = float(p.get('min_pct', 0.0) or 0.0)
+    cons = min(max(float(p.get('consistency', _SLOPE_CONSISTENCY)), 0.0), 1.0)
+    ref = np.full(n, np.nan)
+    if n > N:
+        ref[N:] = L[:-N]
+    with np.errstate(invalid='ignore', divide='ignore'):
+        net = L - ref
+        d = np.diff(L, prepend=np.nan)
+        up = (d > 0).astype(np.float64)     # NaN diffs count as neither
+        dn = (d < 0).astype(np.float64)
+        cu, cd = np.cumsum(up), np.cumsum(dn)
+        cup, cdn = cu.copy(), cd.copy()     # rolling sums of the last N diffs
+        if n > N:
+            cup[N:] = cu[N:] - cu[:-N]
+            cdn[N:] = cd[N:] - cd[:-N]
+        nz = cup + cdn
+        good = cup if op == 'rising' else cdn
+        signed = net if op == 'rising' else -net
+        ok = signed > 0
+        if min_pct > 0:
+            ok = ok & (signed >= np.abs(ref) * min_pct / 100.0)
+        if cons > 0:
+            frac = good / np.where(nz > 0, nz, 1.0)
+            ok = ok & (nz > 0) & (frac >= cons)
+    ok = np.asarray(ok, dtype=bool)
+    ok[np.isnan(L) | np.isnan(ref)] = False
+    return ok
 
 
 def _bounce_flag(op: str, bars, R: np.ndarray, p: dict) -> np.ndarray:
@@ -229,13 +328,21 @@ def _bounce_flag(op: str, bars, R: np.ndarray, p: dict) -> np.ndarray:
     (2) TOUCH within `tol_pct` of R with its wick, and (3) TURN back, closing on
     the original side with momentum. bounce_up = support held; bounce_down =
     resistance held. Guarding on 'from above/below' is what stops it from firing
-    every bar when price is hugging the level."""
+    every bar when price is hugging the level.
+
+    The touch and the turn do NOT have to be the same candle: a weak hammer
+    that taps the MA followed by a strong confirmation bar is the most common
+    real bounce shape. `within` (default 1 = same bar) lets the confirmation
+    come up to N bars after the touch, as long as no bar in between CLOSES
+    decisively through the level (beyond tol — a brief spring is allowed, a
+    breakdown is not). Fires on the confirmation bar."""
     tol = float(p.get('tol_pct', _BOUNCE_TOL_PCT)) / 100.0
-    # how decisively the bar must close AWAY from the level: the close must sit
-    # in the top `close_pos` fraction of the bar's range for bounce_up (bottom
-    # for bounce_down). Kills the doji/long-wick case — a bar that merely
-    # TOUCHED and closed mid-range is not a bounce.
+    # how decisively the confirmation bar must close AWAY from the level: the
+    # close must sit in the top `close_pos` fraction of its own range for
+    # bounce_up (bottom for bounce_down). Kills the doji/long-wick case — a
+    # bar that merely TOUCHED and closed mid-range is not a bounce.
     cpos = float(p.get('close_pos', _BOUNCE_CLOSE_POS))
+    w = max(1, min(20, int(p.get('within', 1) or 1)))
     low = bars['low'].to_numpy(float);   high = bars['high'].to_numpy(float)
     close = bars['close'].to_numpy(float)
     opn = bars['open'].to_numpy(float)
@@ -245,21 +352,32 @@ def _bounce_flag(op: str, bars, R: np.ndarray, p: dict) -> np.ndarray:
     with np.errstate(invalid='ignore', divide='ignore'):
         pos = np.where(rng > 0, (close - low) / rng, 0.5)   # 1 = closed at the high
         if op == 'bounce_up':
-            from_above = (prev_close >= prev_R) & (opn >= R)  # was above AND the bar
-            #      STARTED above — a bar that opened below support and closed above
-            #      it CROSSED the level, it didn't bounce off it.
-            touched = low <= R * (1 + tol)              # wick dipped to it
-            held = close > R                            # closed back above
-            turning = (close > prev_close) & (pos >= cpos)  # closed strong, near
-            #      the top of its own range — touch-and-GO, not touch-and-hover
-            out = from_above & touched & held & turning
+            # the TOUCH bar: was above AND started above — a bar that opened
+            # below support and closed above it CROSSED the level, no bounce —
+            # and its wick dipped to within tol of the level.
+            touch = (prev_close >= prev_R) & (opn >= R) & (low <= R * (1 + tol))
+            # bars from the touch to the confirmation must not CLOSE through
+            # the level beyond tol (spring wicks fine, breakdowns kill it)
+            held = close >= R * (1 - tol)
+            # the CONFIRMATION bar: back above the level, up vs previous close,
+            # closed strong near the top of its own range — touch-and-GO
+            confirm = (close > R) & (close > prev_close) & (pos >= cpos)
         else:
-            from_below = (prev_close <= prev_R) & (opn <= R)
-            touched = high >= R * (1 - tol)             # wick poked up to it
-            held = close < R                            # closed back below
-            turning = (close < prev_close) & (pos <= 1.0 - cpos)
-            out = from_below & touched & held & turning
-    out = np.asarray(out, dtype=bool)
+            touch = (prev_close <= prev_R) & (opn <= R) & (high >= R * (1 - tol))
+            held = close <= R * (1 + tol)
+            confirm = (close < R) & (close < prev_close) & (pos <= 1.0 - cpos)
+    touch = np.asarray(touch, dtype=bool)
+    held = np.asarray(held, dtype=bool)
+    confirm = np.asarray(confirm, dtype=bool)
+
+    def _sh(a: np.ndarray, k: int) -> np.ndarray:
+        return a if k == 0 else np.concatenate((np.zeros(k, dtype=bool), a[:-k]))
+
+    out = confirm & touch                    # same-bar touch-and-go (within=1)
+    hold_run = np.ones(len(close), dtype=bool)
+    for off in range(1, w):                  # touch `off` bars back, closes held since
+        hold_run &= _sh(held, off)
+        out |= confirm & _sh(touch, off) & hold_run
     out[np.isnan(R) | np.isnan(prev_R) | np.isnan(prev_close)] = False
     return out
 
@@ -405,10 +523,92 @@ def referenced_overlays(strategy: dict) -> list:
                 walk_operand(r.get('right'))
     walk_group(strategy.get('entry'))
     walk_group(strategy.get('exit'))
-    for spec in (strategy.get('risk') or {}).values():        # anchored SL/TP lines
+    risk = strategy.get('risk') or {}
+    for spec in risk.values():                                # anchored SL/TP lines
         if isinstance(spec, dict):
             walk_operand(spec.get('anchor'))
+    # SCALE-OUT LEG anchors live in risk['targets'], a LIST — the loop above
+    # skips it, so a leg anchored to a primitive contributed NOTHING to the
+    # warm-up fetch. Under-warmed, that anchor is NaN across the window, the
+    # leg never arms, and the trade quietly runs stop-only. (referenced_symbols
+    # already walks these; this list was the missing half.)
+    for t in (risk.get('targets') or []):
+        if isinstance(t, dict) and isinstance(t.get('tp'), dict):
+            walk_operand(t['tp'].get('anchor'))
     return out
+
+
+def referenced_symbols(strategy: dict) -> list:
+    """Distinct cross-symbol references ("symbol" on any operand, e.g. the
+    SPY market gate) used anywhere in the strategy's rules."""
+    out: set = set()
+
+    def walk_operand(o):
+        if not isinstance(o, dict):
+            return
+        if o.get('symbol'):
+            out.add(str(o['symbol']).upper())
+        if o.get('kind') == 'expr':
+            walk_operand(o.get('a')); walk_operand(o.get('b'))
+
+    def walk_group(g):
+        for r in (g or {}).get('rules') or []:
+            if 'rules' in r or 'logic' in r:
+                walk_group(r)
+            else:
+                walk_operand(r.get('left'))
+                walk_operand(r.get('right'))
+    walk_group(strategy.get('entry'))
+    walk_group(strategy.get('exit'))
+    # risk anchors too: a symbol'd SL/TP anchor whose reference bars were never
+    # preloaded would raise inside _anchor_levels, get swallowed, and leave the
+    # trade UNPROTECTED — so they must be discovered here like any rule operand.
+    risk = strategy.get('risk') or {}
+    for spec in risk.values():
+        if isinstance(spec, dict):
+            walk_operand(spec.get('anchor'))
+    for t in (risk.get('targets') or []):
+        if isinstance(t, dict) and isinstance(t.get('tp'), dict):
+            walk_operand(t['tp'].get('anchor'))
+    return sorted(out)
+
+
+_REF_CACHE: dict = {}     # (feed, sym, tf, days, view, asof) → bars; ASOF-ONLY
+
+
+def _preload_ref_bars(strategy_like: dict, symbol: str, bars, ctx,
+                      tf: str, days: int, feed: str, view: str,
+                      asof: str | None) -> None:
+    """Fetch each cross-symbol reference's bars over the SAME window/feed and
+    stash them in ctx for _operand_array. A failed fetch stores an EMPTY frame
+    → the operand evaluates NaN → its rule is False (the gate fails safe by
+    blocking entries rather than crashing or silently passing).
+
+    Historical runs (asof set) cache per (feed,sym,tf,days,view,asof): a
+    register backtest evaluates every pair of a day with the same asof, so the
+    market symbol (SPY) is fetched ONCE per day, not once per pair — without
+    this, a rate-limited feed (Polygon 429) would blank the gate randomly.
+    Live runs (asof None) are never cached (bars must track 'now')."""
+    ref_syms = referenced_symbols(strategy_like)
+    if not ref_syms:
+        return
+    refs = ctx.setdefault('_ref_bars', {})
+    refs[str(symbol).upper()] = bars          # self-reference is harmless
+    for rs in ref_syms:
+        if rs in refs:
+            continue
+        key = (feed, rs, tf, int(days), view, asof) if asof else None
+        rb = _REF_CACHE.get(key) if key else None
+        if rb is None:
+            try:
+                rb, _, _ = cs.prepare_bars(rs, tf, days, feed, view, asof)
+                if key and len(rb):           # cache successes only
+                    if len(_REF_CACHE) > 512:
+                        _REF_CACHE.clear()
+                    _REF_CACHE[key] = rb
+            except Exception:
+                rb = bars.iloc[0:0]
+        refs[rs] = rb
 
 
 def _unique_indicators(strategy: dict) -> list:
@@ -419,6 +619,9 @@ def _unique_indicators(strategy: dict) -> list:
     def add(o):
         if not isinstance(o, dict):
             return
+        if o.get('symbol'):
+            return    # cross-symbol operand: drawing it from the TRADED bars
+                      # would plot the wrong symbol's data — skip the line
         if o.get('kind') == 'expr':
             add(o.get('a')); add(o.get('b')); return
         if o.get('kind', 'primitive') == 'primitive' and o.get('key'):
@@ -435,9 +638,16 @@ def _unique_indicators(strategy: dict) -> list:
             else:
                 add(r.get('left')); add(r.get('right'))
     walk(strategy.get('entry')); walk(strategy.get('exit'))
-    for spec in (strategy.get('risk') or {}).values():        # draw anchored SL/TP lines too
+    risk = strategy.get('risk') or {}
+    for spec in risk.values():                                # draw anchored SL/TP lines too
         if isinstance(spec, dict):
             add(spec.get('anchor'))
+    # ...and the SCALE-OUT LEG anchors (risk['targets'] is a list, missed by
+    # the loop above): a leg taking half off at "the highest high of the last
+    # 13 bars" is a line the trader has to SEE to verify the fill.
+    for t in (risk.get('targets') or []):
+        if isinstance(t, dict) and isinstance(t.get('tp'), dict):
+            add(t['tp'].get('anchor'))
     return out
 
 
@@ -448,7 +658,8 @@ def _indicator_series(strategy: dict, bars, ts, ctx) -> list:
             series.extend(cs._one_overlay(
                 bars, ts, {**spec, 'params': _merge_defaults(spec['key'], spec['params']),
                            'id': f'strat{i}',
-                           'color': _IND_PALETTE[i % len(_IND_PALETTE)]}, ctx))
+                           'color': _IND_PALETTE[i % len(_IND_PALETTE)]}, ctx,
+                causal=True))
         except Exception:  # noqa: BLE001 — a missing-history indicator just won't draw
             pass
     return series
@@ -491,11 +702,26 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
     except (TypeError, ValueError):
         pct = 0.0
     shift = (1.0 - pct / 100.0) if side == 'long' else (1.0 + pct / 100.0)
-    return np.asarray(arr, dtype=float) * shift
+    out = np.asarray(arr, dtype=float) * shift
+    # `abs`: a fixed DOLLAR offset in the protective direction — the PDF's
+    # literal ".02 below the low" is two CENTS, not a percent; on a $4 stock
+    # 0.05% is $0.002, ten times tighter than the book and wick-stops trades
+    # the book survives. pct and abs stack (usually one or the other).
+    try:
+        absv = float(spec.get('abs') or 0.0)
+    except (TypeError, ValueError):
+        absv = 0.0
+    if absv:
+        out = out - absv if side == 'long' else out + absv
+    return out
 
 
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
-                 exit_group: dict | None = None):
+                 exit_group: dict | None = None, fill: str = 'close',
+                 entry_ok=None, eod_close=None, max_per_day=None,
+                 cooldown_bars=None, min_hold_bars=None, entry_mode='edge',
+                 max_stop_pct=None, win_start=None, win_end=None,
+                 exit_scope: str | None = None, diag: dict | None = None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -503,11 +729,39 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     true — even if it was already true before the entry (a flip-edge would
     miss that). PROTOCOL (fixed priority, so the three exit paths never
     conflict): 1) SL — protection is checked first, and wins if SL and TP fall
-    in the same bar (conservative); 2) TP; 3) the exit-rule status (at that
-    bar's close). SL/TP are either a fixed distance from entry (pct / ATR× /
-    points) or ANCHORED to an indicator line (type 'prim') that trails bar by
-    bar. Full day-by-day sim is Phase 4; this makes the preview honest."""
+    in the same bar (conservative); 2) TP; 3) the exit-rule status. SL/TP are
+    either a fixed distance from entry (pct / ATR× / points) or ANCHORED to an
+    indicator line (type 'prim') that trails bar by bar.
+
+    FILL MODEL (`fill`):
+      'close'     — entries and exit-rule exits fill at the SIGNAL bar's close
+                    (the chart-preview assumption; optimistic by ~one spread).
+      'next_open' — the honest live assumption: a signal evaluated at bar j's
+                    close turns into a market order filled at bar j+1's OPEN.
+                    Consequences, all implemented: a signal on the last bar
+                    produces NO trade; the position exists from bar j+1, so
+                    SL/TP are live for the REST of that bar (a gap through the
+                    stop right after entry stops out same-bar); an exit-rule
+                    signal at bar x fills at open[x+1] and that market exit
+                    precedes intrabar SL/TP on the fill bar (the open prints
+                    first); fixed SL/TP distances anchor to the OPEN fill
+                    price, ATR taken at the signal bar (last completed bar).
+    TP fills intrabar AT the level. A STOP fills at the level on a within-bar
+    touch, but at the OPEN when the bar GAPS through it (opens already beyond
+    the level) — a market order can't fill at a price the tape skipped, so the
+    gap slippage is charged (what the funded account really pays).
+
+    SESSION RULES (prop-firm style, e.g. Trade The Pool):
+      entry_ok  — boolean mask of bars where OPENING a position is allowed
+                  (RTH only). The FILL bar must be allowed: with next_open a
+                  signal whose fill would land outside the window is dropped.
+      eod_close — boolean mask marking each day's forced-liquidation bar; any
+                  position still open there exits AT THAT BAR'S CLOSE, reason
+                  'eod', after intrabar SL/TP had their chance. A pending
+                  next-open exit can never leak across the day boundary
+                  because the eod bar flattens first."""
     close = bars['close'].to_numpy(float)
+    opn = bars['open'].to_numpy(float)
     high = bars['high'].to_numpy(float)
     low = bars['low'].to_numpy(float)
     n = len(close)
@@ -516,12 +770,21 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     if (risk.get('sl') or {}).get('type') == 'atr' or (risk.get('tp') or {}).get('type') == 'atr':
         try:
             _, _, lines = cs.overlay_arrays(
-                bars, {'key': 'volatility.atr', 'source': 'close', 'params': {'length': 14}}, ctx)
+                bars, {'key': 'volatility.atr', 'source': 'close', 'params': {'length': 14}}, ctx,
+                causal=True)
             atr = lines[0][1]
         except Exception:
             pass
     sl_arr = _anchor_levels(risk.get('sl'), side, bars, ctx)   # trailing line, or None
     tp_arr = _anchor_levels(risk.get('tp'), side, bars, ctx)
+    # `freeze`: evaluate the anchored level ONCE at the signal bar and hold it
+    # for the life of the trade. The PDF's stop ".02 below the low of the turn
+    # candle" and target "the high of the initial pullback" are levels FIXED at
+    # entry — a rolling anchor (lowest(3), highest(8)) re-evaluated per bar
+    # turns the stop into an unintended trailing stop and the target into a
+    # self-filling level (any new N-bar high "reaches" it a tick above entry).
+    sl_frozen = bool((risk.get('sl') or {}).get('freeze'))
+    tp_frozen = bool((risk.get('tp') or {}).get('freeze'))
     # Is a stop CONFIGURED? (fixed types need a finite value; 'prim' is
     # configured by its anchor alone — the % is optional). If yes, an entry
     # whose stop can't be PRICED on that bar (ATR warm-up NaN, anchored line
@@ -543,76 +806,366 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     # (a fixed stop plots flat, an anchored one visibly trails its line).
     sl_view = np.full(n, np.nan)
     tp_view = np.full(n, np.nan)
+    next_open = (fill == 'next_open')
     trades = []
     open_trade = None
-    in_pos = False; ei = 0; sl = tp = None
+    in_pos = False; ei = 0; sl = tp = None; ep_cur = None
+    sl_eff = None                        # RATCHET: a stop never loosens (see below)
+    sl_at_entry = None                   # the armed stop AT ENTRY (position sizing)
+    pending_exit = False                 # next_open: exit signal seen, fills next bar
+    # ── entry DISCIPLINE (all optional, per ET session day) ──
+    #  max_per_day    "2 strikes and out": cap attempts/day (PDF 1-2). None=∞.
+    #  cooldown_bars  after an exit, block new entries for N bars (stops
+    #                 re-taking the same chop 2-3 minutes later).
+    #  min_hold_bars  the exit RULE can't fire in the first N bars after entry
+    #                 (SL/TP/eod still protect) — kills 0-min whipsaw exits.
+    cooldown = int(cooldown_bars) if cooldown_bars else 0
+    min_hold = int(min_hold_bars) if min_hold_bars else 0
+    # exit scope 'runner': the exit RULE manages only the runner — it is armed
+    # once at least one scale-out leg has banked. Before that the hard stop
+    # (and eod) protect the position. This is the PDF's "Half and Trail":
+    # "Trail our stop for the REMAINING ½ … waiting for a 1-minute bar close
+    # below the 9 EMA" — the trail belongs to the remaining half, not to the
+    # whole position from the entry bar. (Passed separately from exit_group
+    # because non-trade-aware exits arrive here as a precomputed mask only.)
+    runner_only = (exit_scope == 'runner')
+    et_day = (bars.index.tz_convert(cs._ET).strftime('%Y-%m-%d')
+              if (max_per_day or cooldown) else None)
+    # SESSION WINDOW (per-strategy, ET hhmm): the PDF setups are time-of-day
+    # plays (RubberBand/Back$ide/Fashionably Late 10:00–13:30, HitchHiker the
+    # opening drive, …). An entry may only OPEN inside [win_start, win_end];
+    # SL/TP/exit still manage a position that runs past it, and eod still
+    # flattens. None = no window (all session).
+    et_hhmm = None
+    if win_start is not None or win_end is not None:
+        _et = bars.index.tz_convert(cs._ET)
+        et_hhmm = np.asarray(_et.hour) * 100 + np.asarray(_et.minute)
+    day_count: dict = {}
+    last_exit_bar = None                  # index of the most recent exit (this day)
+    cur_day = None
+    entered_run = False                   # edge mode: entered the current true-run?
     em = exit_mask                       # per-trade exit mask when trade-aware
+    # SCALE-OUT legs (optional): each takes a FRACTION off at a target. The
+    # trigger is EITHER an R-multiple of the initial risk (needs an SL), OR a
+    # `tp` spec like the single TP — fixed distance (pct/atr/points) or a
+    # prim-anchored line (trails per bar). The runner (1 − Σfraction) rides to
+    # SL/exit/eod. See SCALEOUT_PLAN.md.
+    targets = []
+    for t in ((risk or {}).get('targets') or []):
+        if not isinstance(t, dict):
+            continue
+        try:
+            fr = float(t.get('fraction'))
+        except (TypeError, ValueError):
+            continue
+        if fr <= 0:
+            continue
+        rm = t.get('r_multiple')
+        tp = t.get('tp') if isinstance(t.get('tp'), dict) else None
+        # a prim-anchored leg target trails per bar → precompute its array once
+        arr = _anchor_levels(tp, side, bars, ctx) if (tp and tp.get('type') == 'prim') else None
+        targets.append({'fraction': fr,
+                        'r_multiple': (float(rm) if rm not in (None, '', 0) else None),
+                        'tp': tp, 'arr': arr,
+                        'freeze': bool(tp and tp.get('freeze'))})
+    # per-trade scale-out state (reset at each entry)
+    remaining = 1.0; realized = 0.0; legs = []
+    tgt_fr = []; tgt_fixed = []; tgt_arrs = []; tgt_done = []
     for j in range(n):
+        # new ET day → reset the per-day cooldown clock
+        if et_day is not None and et_day[j] != cur_day:
+            cur_day = et_day[j]; last_exit_bar = None
+        # ENTRY trigger model. 'edge' (default): one entry per contiguous
+        # true-RUN of the setup group — a fresh false→true edge starts a new
+        # run (reset even while in a position); within a run we enter ONCE, at
+        # the first ENTERABLE bar (so a warm-up/blocked edge bar doesn't lose
+        # the setup), and never re-enter that same run. So a condition that
+        # stays true for many bars is ONE setup; a spiky mask (cross/break/
+        # sequence) is a new run each time. 'status' = the old any-true-bar mode.
+        if entry_mode == 'edge' and entry_mask[j] and not (j > 0 and entry_mask[j - 1]):
+            entered_run = False           # a new true-run began
         if not in_pos:
-            if entry_mask[j]:
-                ep = close[j]
+            fire = (entry_mask[j] and not entered_run) if entry_mode == 'edge' else entry_mask[j]
+            if fire:
+                # DIAGNOSTICS: a signal fired but may be dropped before it can
+                # open a trade. Tally WHY so "N signals → 0 traded" is never a
+                # mystery (backtest surfaces this). `diag` is optional.
+                def _drop(reason):
+                    if diag is not None:
+                        diag[reason] = diag.get(reason, 0) + 1
+                if next_open and j + 1 >= n:
+                    _drop('last_bar')
+                    continue             # signal on the last bar — no bar to fill on
+                ep = opn[j + 1] if next_open else close[j]
+                ej = j + 1 if next_open else j
+                if entry_ok is not None and not entry_ok[ej]:
+                    _drop('rth_session')
+                    continue             # fill moment outside the allowed session
+                if eod_close is not None and eod_close[ej]:
+                    _drop('eod_bar')
+                    continue             # never open into the liquidation bar
+                if et_hhmm is not None:  # per-strategy time-of-day window (ET)
+                    hm = int(et_hhmm[ej])
+                    if (win_start is not None and hm < win_start) or \
+                       (win_end is not None and hm > win_end):
+                        _drop('outside_window')
+                        continue         # outside the setup's session window
+                if max_per_day and day_count.get(et_day[ej], 0) >= max_per_day:
+                    _drop('daily_cap')
+                    continue             # daily attempt cap reached (2 strikes out)
+                if cooldown and last_exit_bar is not None and (j - last_exit_bar) < cooldown:
+                    _drop('cooldown')
+                    continue             # still cooling down after the last exit
                 # fixed-distance stops: long → SL BELOW entry / TP above;
-                # short → SL ABOVE entry / TP below. (Anchored ones use the array.)
+                # short → SL ABOVE entry / TP below. ATR at the SIGNAL bar —
+                # the last COMPLETED bar at fill time in both models.
                 sd = _risk_dist(risk.get('sl'), ep, atr[j])
                 td = _risk_dist(risk.get('tp'), ep, atr[j])
                 if side == 'long':
                     sl = ep - sd if sd else None; tp = ep + td if td else None
                 else:
                     sl = ep + sd if sd else None; tp = ep - td if td else None
+                # priceability check uses the SIGNAL bar's anchored value (the
+                # last completed one) — the trailing array takes over per bar.
                 e_sl = sl_arr[j] if sl_arr is not None else sl
                 e_tp = tp_arr[j] if tp_arr is not None else tp
                 if sl_required and (e_sl is None or e_sl != e_sl):
+                    _drop('unpriceable_stop')
                     continue                       # stop unpriceable → no trade
-                in_pos = True; ei = j
+                # MAX RISK CAP: refuse an entry whose stop is absurdly far. A
+                # scalp's stop is meant to be tight (RubberBand: ".02 below the
+                # low of the day", because the snapback candle marks the LoD).
+                # When the entry fires far ABOVE the LoD (a continuation bounce,
+                # not a snapback), the LoD-anchored stop can be 50%+ away — a
+                # trade no one would take. Skip it, exactly like an unpriceable
+                # stop. (see JEM 2026-07-01: entry 10.38, stop at the 4.98 LoD.)
+                if max_stop_pct and e_sl is not None and e_sl == e_sl and ep:
+                    if abs(ep - e_sl) / ep * 100.0 > float(max_stop_pct):
+                        _drop('stop_too_far')
+                        continue
+                in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
+                entered_run = True        # this true-run has now been taken
+                sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
+                sl_at_entry = sl_eff
+                # frozen anchors: capture the signal-bar level as a FIXED
+                # scalar; the per-bar trailing array is ignored for this trade.
+                if sl_frozen and e_sl is not None and e_sl == e_sl:
+                    sl = float(e_sl)
+                if tp_frozen and e_tp is not None and e_tp == e_tp:
+                    tp = float(e_tp)
+                if max_per_day:
+                    day_count[et_day[ej]] = day_count.get(et_day[ej], 0) + 1
+                # arm scale-out legs for THIS trade. Each leg resolves to a
+                # FIXED level (R-multiple or fixed distance) or a per-bar ARRAY
+                # (prim-anchored). R-multiple legs need a priceable stop.
+                remaining = 1.0; realized = 0.0; legs = []
+                tgt_fr = []; tgt_fixed = []; tgt_arrs = []; tgt_done = []
+                rdist = ((ep - e_sl) if side == 'long' else (e_sl - ep)) \
+                    if (e_sl is not None and e_sl == e_sl) else None
+                for t in targets:
+                    lvl = None; arr = t['arr']
+                    if arr is not None and t['freeze']:
+                        # frozen leg: the anchor's SIGNAL-BAR value is the
+                        # level for the whole trade (the PDF's "high of the
+                        # initial pullback" is set before entry, it does not
+                        # slide along with price). Unformed (NaN) at the
+                        # signal → the leg can't be priced → not armed.
+                        av = arr[j]
+                        if av != av:
+                            continue
+                        lvl = float(av); arr = None
+                    if arr is None and lvl is None:
+                        if t['r_multiple'] is not None:
+                            if rdist and rdist > 0:
+                                lvl = (ep + t['r_multiple'] * rdist) if side == 'long' \
+                                    else (ep - t['r_multiple'] * rdist)
+                        elif t['tp'] is not None:
+                            d = _risk_dist(t['tp'], ep, atr[j])
+                            if d:
+                                lvl = (ep + d) if side == 'long' else (ep - d)
+                    # WRONG-SIDE GUARD — a profit target must be BEYOND the
+                    # entry fill. A violent signal bar can gap the next-open
+                    # fill ABOVE a frozen pullback-high target (backtest #127:
+                    # JEM filled 7.58 against a 7.08 target); a resting limit
+                    # there would fill instantly and book a LOSS as a "target".
+                    # No trader can place that order — drop the leg instead
+                    # (the trade becomes stop + exit-rule managed).
+                    if lvl is not None and ((side == 'long' and lvl <= ep)
+                                            or (side == 'short' and lvl >= ep)):
+                        continue
+                    if lvl is not None or arr is not None:
+                        tgt_fr.append(t['fraction']); tgt_fixed.append(lvl)
+                        tgt_arrs.append(arr); tgt_done.append(False)
                 if exit_group is not None:
                     # exit rules reference the Trade operand → evaluate the
                     # exit condition FOR THIS TRADE (its own entry price/bar)
                     em = _eval_group(exit_group, bars, ctx,
                                      trade={'entry': ep, 'ei': ei, 'side': side})
-                if e_sl is not None and e_sl == e_sl:
-                    sl_view[j] = e_sl
-                if e_tp is not None and e_tp == e_tp:
-                    tp_view[j] = e_tp
+                if not next_open:        # close fill: entry bar is exempt; arm views
+                    if e_sl is not None and e_sl == e_sl:
+                        sl_view[j] = e_sl
+                    if e_tp is not None and e_tp == e_tp:
+                        tp_view[j] = e_tp
+                    continue
+            continue
+        # ── in a position ──
+        # next_open: a market exit ordered at the previous close fills at THIS
+        # bar's open — chronologically BEFORE any intrabar SL/TP this bar.
+        # close the REMAINING fraction at (px, reason); weighted return folds in
+        # any partials already banked. legs=[] and remaining=1 ⇒ identical to the
+        # old single-exit math.
+        def _close(xi, px, reason):
+            nonlocal last_exit_bar
+            r = (px - ep_cur) / ep_cur
+            if side == 'short':
+                r = -r
+            if reason == 'SL' and r > 0:     # ratcheted stop hit in profit = trail
+                reason = 'trail'
+            total = realized + remaining * r
+            trades.append({'ei': ei, 'xi': xi, 'ret': float(total), 'reason': reason,
+                           'entry': float(ep_cur), 'exit': float(px),
+                           # the ARMED stop at entry — risk-based position
+                           # sizing needs the per-share risk, not just the %
+                           'stop': (float(sl_at_entry) if sl_at_entry is not None
+                                    and sl_at_entry == sl_at_entry else None),
+                           'legs': list(legs)})
+            last_exit_bar = xi           # start the cooldown clock
+        if pending_exit:
+            _close(j, opn[j], 'exit')
+            in_pos = False; pending_exit = False
             continue
         # effective level this bar: anchored (trailing, may be NaN in warm-up)
-        # beats the fixed scalar; NaN disables the check for that bar.
-        slv = sl_arr[j] if sl_arr is not None else sl
-        tpv = tp_arr[j] if tp_arr is not None else tp
+        # beats the fixed scalar; NaN disables the check for that bar. A FROZEN
+        # anchor was already collapsed to the fixed scalar at entry.
+        slv = sl_arr[j] if (sl_arr is not None and not sl_frozen) else sl
+        tpv = tp_arr[j] if (tp_arr is not None and not tp_frozen) else tp
         if slv is not None and slv != slv:
             slv = None
         if tpv is not None and tpv != tpv:
             tpv = None
+        # RATCHET — a protective stop NEVER loosens. A long stop can trail UP
+        # with a rising anchor (9-EMA) but must never move DOWN; a short stop
+        # never moves up. Without this, a stop anchored to a running extreme
+        # (low-of-day, rolling low) chases price down every bar and can never
+        # be breached — the position bleeds to EOD unprotected. Ratcheting
+        # freezes such a stop at its entry level (exactly ".02 below the LoD
+        # at entry") while still letting genuine trailing stops tighten.
+        if slv is not None:
+            if sl_eff is None:
+                sl_eff = slv
+            else:
+                sl_eff = max(sl_eff, slv) if side == 'long' else min(sl_eff, slv)
+            slv = sl_eff
+        else:
+            slv = sl_eff                 # anchor NaN this bar → hold the last level
         if slv is not None:
             sl_view[j] = slv
         if tpv is not None:
             tp_view[j] = tpv
-        px = reason = None
+        # PRIORITY — faithful to how a resting BRACKET order actually fills
+        # (this is the order that trades the funded account, so the backtest
+        # must match it or "same JSON live" diverges on the P&L):
+        #  1) scale-out target legs are resting LIMIT orders, each on its own
+        #     share lot. A bar whose range trades THROUGH a leg fills it — that
+        #     lot is booked regardless of what else the bar does. So bank every
+        #     reached leg FIRST, then the stop applies only to what's LEFT.
+        #     (A real exchange bracket fills a partial-limit AND the stop on the
+        #     same bar; the old "stop takes everything, discard the partial"
+        #     understated every scale-out that pulled back into its stop.)
+        #  2) EXCEPTION — a bar that GAPS through the stop at the open: the stop
+        #     is the first print of the bar, the whole remaining lot is gone
+        #     before price could trade up to any target, so no partial banks.
+        #  3) stop on the remaining lot.  4) a SINGLE TP (no legs) is the whole
+        #     position, mutually exclusive with the stop on one bar → assume the
+        #     stop (conservative).  5) exit rule.  6) eod.
+        gap_stop = slv is not None and ((side == 'long' and opn[j] <= slv)
+                                        or (side == 'short' and opn[j] >= slv))
+        if tgt_fr and not gap_stop:            # scale-out: bank each reached leg
+            for k in range(len(tgt_fr)):
+                if tgt_done[k]:
+                    continue
+                lv = tgt_fixed[k] if tgt_fixed[k] is not None else tgt_arrs[k][j]
+                if lv is None or lv != lv:     # unformed/NaN this bar → not yet
+                    continue
+                # wrong-side guard for TRAILING legs too: a rolling anchor that
+                # sinks to/below the entry is not a profit target this bar —
+                # skip, it may become valid again when the anchor recovers.
+                if (side == 'long' and lv <= ep_cur) or (side == 'short' and lv >= ep_cur):
+                    continue
+                if (side == 'long' and high[j] >= lv) or (side == 'short' and low[j] <= lv):
+                    lr = (lv - ep_cur) / ep_cur
+                    if side == 'short':
+                        lr = -lr
+                    # never bank more than what's left (fractions summing >1 are
+                    # user error — clamp so a trade can't exceed 100% of size)
+                    fr_take = tgt_fr[k] if tgt_fr[k] <= remaining else remaining
+                    realized += fr_take * lr
+                    remaining -= fr_take
+                    tgt_done[k] = True
+                    legs.append({'xi': j, 'price': float(lv), 'fraction': float(fr_take),
+                                 'ret': float(lr), 'reason': f'T{k + 1}'})
+            if remaining <= 1e-9:              # fully scaled out at the last leg
+                last = legs[-1]
+                trades.append({'ei': ei, 'xi': last['xi'], 'ret': float(realized),
+                               'reason': last['reason'], 'entry': float(ep_cur),
+                               'exit': last['price'],
+                               'stop': (float(sl_at_entry) if sl_at_entry is not None
+                                        and sl_at_entry == sl_at_entry else None),
+                               'legs': list(legs)})
+                last_exit_bar = last['xi']
+                in_pos = False; continue
+        # stop on the REMAINING lot (partials, if any, already banked above).
+        # A stop is a MARKET order once touched: if the bar GAPS through it (opens
+        # already beyond the level), you fill at the open, not the level — that
+        # slippage is a real cost the funded account eats, so the backtest must
+        # too. A within-bar touch (open on the safe side) fills at the level.
         if slv is not None and ((side == 'long' and low[j] <= slv) or (side == 'short' and high[j] >= slv)):
-            px, reason = slv, 'SL'
-        elif tpv is not None and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
-            px, reason = tpv, 'TP'
-        elif em is not None and em[j]:
-            px, reason = close[j], 'exit'
-        if px is not None:
-            r = (px - close[ei]) / close[ei]
-            if side == 'short':
-                r = -r
-            trades.append({'ei': ei, 'xi': j, 'ret': float(r), 'reason': reason,
-                           'entry': float(close[ei]), 'exit': float(px)})
-            in_pos = False
+            sl_fill = (min(slv, opn[j]) if side == 'long' else max(slv, opn[j]))
+            _close(j, sl_fill, 'SL'); in_pos = False; continue
+        if not tgt_fr and tpv is not None \
+                and ((side == 'long' and tpv > ep_cur) or (side == 'short' and tpv < ep_cur)) \
+                and ((side == 'long' and high[j] >= tpv) or (side == 'short' and low[j] <= tpv)):
+            _close(j, tpv, 'TP'); in_pos = False; continue
+        # exit RULE — deferred during the min-hold window (SL/TP/eod still
+        # fire); with scope 'runner' it is armed only after a leg has banked —
+        # or immediately when NO leg was armed at entry (a wrong-side/unpriced
+        # target leaves no "first half" to wait for: the whole position IS the
+        # runner, so the trail manages it from the start).
+        if em is not None and em[j] and (j - ei) >= min_hold \
+                and (not runner_only or legs or not tgt_fr):
+            if next_open:
+                if j + 1 < n:
+                    pending_exit = True  # market out at the next bar's open
+                # else: no bar left to fill on — stays open to the window end
+            else:
+                _close(j, close[j], 'exit'); in_pos = False; continue
+        # forced end-of-day flat: nothing survives the liquidation bar
+        if eod_close is not None and eod_close[j]:
+            _close(j, close[j], 'eod'); in_pos = False; pending_exit = False; continue
     if in_pos:
         # still holding at the window's end — report it instead of hiding it
-        r = (close[-1] - close[ei]) / close[ei]
+        r = (close[-1] - ep_cur) / ep_cur
         if side == 'short':
             r = -r
-        open_trade = {'ei': ei, 'entry': float(close[ei]),
-                      'last': float(close[-1]), 'ret': float(r)}
+        # fold any banked partials into the still-open position's mark-to-market
+        open_trade = {'ei': ei, 'entry': float(ep_cur),
+                      'last': float(close[-1]), 'ret': float(realized + remaining * r),
+                      'stop': (float(sl_at_entry) if sl_at_entry is not None
+                               and sl_at_entry == sl_at_entry else None),
+                      'legs': list(legs), 'tgt_armed': len(tgt_fr)}
     return trades, sl_view, tp_view, open_trade
 
 
 def _exit_now(exit_mask, trade_aware, exit_group, open_trade, side, bars, ctx) -> bool:
     """'Is the exit condition true right now?' — for a trade-aware exit that
     only means anything relative to the OPEN position, if there is one."""
+    # runner-scoped exit is not armed before a leg banks — unless NO target
+    # leg was armed at entry (tgt_armed == 0): then the whole position is the
+    # runner and the rule applies immediately.
+    if exit_group and exit_group.get('scope') == 'runner' \
+            and not (open_trade or {}).get('legs') \
+            and (open_trade or {}).get('tgt_armed', 1):
+        return False
     if not trade_aware:
         return bool(exit_mask[-1])
     if not open_trade:
@@ -624,6 +1177,23 @@ def _exit_now(exit_mask, trade_aware, exit_group, open_trade, side, bars, ctx) -
         return bool(em[-1])
     except Exception:
         return False
+
+
+def _draw_operand(nd: dict, arr, ts, tag: str) -> list:
+    """Explicit chart series for a left/right operand whose value isn't a plain
+    registry line — an `expr` (computed) or a `hold` (forward-filled) operand.
+    A HELD operand draws as a STEP line (holds flat until the next real value),
+    so the held level is visible and verifiable by eye in 'Test a condition'."""
+    if not isinstance(nd, dict) or not (nd.get('kind') == 'expr' or nd.get('hold')):
+        return []
+    vals = [{'time': int(t), 'value': float(v)} for t, v in zip(ts, arr) if v == v]
+    if not vals:
+        return []
+    held = bool(nd.get('hold'))
+    name = (f"{nd.get('key','value')} (held)" if held
+            else ('expr' if tag == 'L' else 'expr(R)'))
+    return [{'name': name, 'color': '#14b8a6' if held else '#eab308',
+             'style': 0, 'step': held, 'values': vals}]
 
 
 def test_condition(node: dict, symbol: str, tf: str, days: int,
@@ -641,33 +1211,41 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
                          'use Evaluate to see it per trade'}
     strat_like = {'entry': node if ('rules' in node or 'logic' in node)
                   else {'logic': 'AND', 'rules': [node]}}
+    days_req = int(days)
     days = dm.required_days(referenced_overlays(strat_like), tf, days)
     bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
     n = len(bars)
     if n == 0:
         return {'ok': True, 'bars': 0, 'true': 0, 'pct': 0.0, 'markers': [],
                 'series': [], 'now': False, 'left_now': None, 'right_now': None}
+    _preload_ref_bars(strat_like, symbol, bars, ctx, tf, days, feed, view, asof)
     is_group = ('rules' in node or 'logic' in node)
     mask = _eval_group(node, bars, ctx) if is_group else _eval_rule(node, bars, ctx)
+    # only the requested window: warm-up bars aren't displayed, so dots there
+    # would snap onto the chart's boundary bars, and the fire-rate % must
+    # describe the bars the user is actually looking at (see evaluate()).
+    vis = np.asarray(bars.index >= (ctx['end'] - pd.Timedelta(days=days_req)))
+    if not vis.any():
+        vis = np.ones(n, dtype=bool)
+    mask = mask & vis
+    n = int(vis.sum())
     idx = np.nonzero(mask)[0]
     markers = [{'time': int(ts[i]), 'position': 'aboveBar', 'shape': 'circle',
                 'color': '#3b82f6', 'text': ''} for i in idx]
     # Draw the exact indicators this condition reads (so you SEE the values, not
     # just the fire dots) + the current value of the left operand.
-    series = _indicator_series(strat_like, bars, ts, ctx)
+    series = list(_indicator_series(strat_like, bars, ts, ctx))
     left_now = right_now = None
     if not is_group and isinstance(node.get('left'), dict):
         try:
             la = _operand_array(node['left'], bars, ctx)
             if la[-1] == la[-1]:
                 left_now = round(float(la[-1]), 4)
-            # a composed (expr) left value isn't a registry primitive, so draw
-            # it explicitly — otherwise you couldn't SEE the computed number.
-            if node['left'].get('kind') == 'expr':
-                vals = [{'time': int(t), 'value': float(v)} for t, v in zip(ts, la) if v == v]
-                if vals:
-                    series = list(series) + [{'name': 'expr', 'color': '#eab308',
-                                              'style': 0, 'step': False, 'values': vals}]
+            # a composed (expr) or HELD operand isn't a plain registry line, so
+            # draw it explicitly — otherwise you couldn't SEE the value. A HELD
+            # operand draws as a STEP line (it holds flat until the next real
+            # value): that IS the persistent level, so 'hold' is verifiable by eye.
+            series += _draw_operand(node['left'], la, ts, 'L')
         except Exception:
             pass
     if not is_group and isinstance(node.get('right'), dict) and node.get('op') not in _UNARY:
@@ -675,9 +1253,15 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
             ra = _operand_array(node['right'], bars, ctx)
             if ra[-1] == ra[-1]:
                 right_now = round(float(ra[-1]), 4)
+            series += _draw_operand(node['right'], ra, ts, 'R')
         except Exception:
             pass
-    et = bars.index.tz_convert(cs._ET)
+    wsec = int((ctx['end'] - pd.Timedelta(days=days_req)
+                - pd.Timestamp('1970-01-01', tz='UTC')) // pd.Timedelta(seconds=1))
+    series = [dict(s, values=[v for v in (s.get('values') or [])
+                              if v['time'] >= wsec]) for s in series]
+    series = [s for s in series if s['values']]
+    et = bars.index[vis].tz_convert(cs._ET)
     return {'ok': True, 'bars': n, 'true': int(mask.sum()),
             'pct': round(100.0 * mask.sum() / n, 1), 'now': bool(mask[-1]),
             'markers': markers, 'series': series,
@@ -686,10 +1270,136 @@ def test_condition(node: dict, symbol: str, tf: str, days: int,
             'last': et[-1].strftime('%Y-%m-%d %H:%M ET')}
 
 
+def _rule_label(r: dict) -> str:
+    """Compact human label for a rule — for the explain funnel."""
+    def o(x):
+        if not isinstance(x, dict):
+            return str(x)
+        k = x.get('kind', 'primitive')
+        if k == 'price':
+            s = x.get('field', '?')
+        elif k == 'const':
+            s = str(x.get('value'))
+        elif k == 'time':
+            s = f"time.{x.get('field', 'hhmm')}"
+        elif k == 'expr':
+            s = f"({o(x.get('a'))} {x.get('op', '?')} {o(x.get('b'))})"
+        else:
+            p = ','.join(str(v) for v in (x.get('params') or {}).values())
+            s = f"{(x.get('key') or '?').split('.')[-1]}({p})"
+        if x.get('offset'):
+            s += f"[{x['offset']}]"
+        if x.get('symbol'):
+            s += f"@{x['symbol']}"
+        return s
+    lab = f"{o(r.get('left'))} {r.get('op', '?')}"
+    if r.get('right') is not None:
+        lab += f" {o(r.get('right'))}"
+    return lab
+
+
+def explain_entry(strategy: dict, symbol: str, tf: str, days: int,
+                  feed: str = 'polygon', view: str = 'all',
+                  asof: str | None = None) -> dict:
+    """The SIGNAL FUNNEL: evaluate every step of the entry group — and every
+    rule inside each step — INDEPENDENTLY, and report how many visible bars
+    each was true on. When a strategy fires 0 trades, this names the exact
+    blocking rule instead of leaving it to guesswork. Diagnostic only: reads
+    the same bars/ctx as evaluate(), changes nothing."""
+    from chart import data_manager as dm
+    days_req = int(days)
+    days = dm.required_days(referenced_overlays(strategy), tf, days)
+    bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
+    n = len(bars)
+    if n == 0:
+        return {'ok': True, 'bars': 0, 'steps': [], 'sequence_fires': 0}
+    _preload_ref_bars(strategy, symbol, bars, ctx, tf, days, feed, view, asof)
+    vis = np.asarray(bars.index >= (ctx['end'] - pd.Timedelta(days=days_req)))
+    if not vis.any():
+        vis = np.ones(n, dtype=bool)
+    entry = strategy.get('entry') or {}
+    steps_out = []
+    for si, step in enumerate(entry.get('rules') or []):
+        is_grp = 'rules' in step or 'logic' in step
+        try:
+            m = _eval_group(step, bars, ctx) if is_grp else _eval_rule(step, bars, ctx)
+        except Exception as e:                      # a broken rule IS the finding
+            steps_out.append({'step': si + 1, 'error': str(e)}); continue
+        rules_out = []
+        masks = []
+        for r in (step.get('rules') or []) if is_grp else [step]:
+            try:
+                if 'rules' in r or 'logic' in r:
+                    rm = _eval_group(r, bars, ctx); lab = f"[{r.get('logic', 'group')}]"
+                else:
+                    rm = _eval_rule(r, bars, ctx); lab = _rule_label(r)
+                rules_out.append({'rule': lab, 'true_bars': int((rm & vis).sum())})
+                masks.append(np.asarray(rm, dtype=bool))
+            except Exception as e:
+                rules_out.append({'rule': _rule_label(r), 'error': str(e)})
+                masks.append(None)
+        step_true = int((m & vis).sum())
+        # LEAVE-ONE-OUT: when an AND step never fires JOINTLY even though every
+        # rule fires individually, the counts can't say which rules exclude
+        # each other. For each rule, count the bars where all the OTHERS agree:
+        # a rule with without_this > 0 is a BINDING constraint (drop it and the
+        # step would fire); without_this == 0 means it isn't the one in the way.
+        if (is_grp and step.get('logic', 'AND') == 'AND' and step_true == 0
+                and len(masks) > 1 and all(x is not None for x in masks)):
+            for k in range(len(masks)):
+                others = vis.copy()
+                for j, mk in enumerate(masks):
+                    if j != k:
+                        others &= mk
+                rules_out[k]['without_this'] = int(others.sum())
+        steps_out.append({'step': si + 1, 'true_bars': step_true,
+                          'rules': rules_out})
+    try:
+        full = _eval_group(entry, bars, ctx)
+        fires = int((full & vis).sum())
+    except Exception as e:
+        return {'ok': False, 'error': str(e), 'steps': steps_out}
+    return {'ok': True, 'bars': int(vis.sum()), 'logic': entry.get('logic', 'AND'),
+            'window': entry.get('window'), 'sequence_fires': fires,
+            'steps': steps_out,
+            'note': 'true_bars counts each step/rule INDEPENDENTLY (state, not '
+                    'sequence-gated); sequence_fires is the full ordered entry. '
+                    'A step with 0 true_bars — or its 0-bar rule — is the blocker.'}
+
+
+def _session_masks(bars, rules: dict | None):
+    """Prop-firm session rules → (entry_ok, eod_close) masks, or (None, None).
+    rules = {'rth_entries': bool, 'eod_close': bool,
+             'entry_start': 930, 'entry_cutoff': 1550}
+    entry_cutoff 1550 mirrors Trade The Pool: liquidation begins 10 minutes
+    before the 16:00 close, so nothing may open at/after 15:50 and anything
+    still held exits on each day's last bar before the cutoff."""
+    if not rules or not (rules.get('rth_entries') or rules.get('eod_close')):
+        return None, None
+    et = bars.index.tz_convert(cs._ET)
+    hhmm = np.asarray(et.hour, dtype=int) * 100 + np.asarray(et.minute, dtype=int)
+    start = int(rules.get('entry_start', 930))
+    cutoff = int(rules.get('entry_cutoff', 1550))
+    entry_ok = ((hhmm >= start) & (hhmm < cutoff)) if rules.get('rth_entries') else None
+    eod = None
+    if rules.get('eod_close'):
+        eod = np.zeros(len(bars), dtype=bool)
+        days_key = et.strftime('%Y-%m-%d')
+        last_for_day = {}
+        for i in range(len(bars)):
+            if hhmm[i] < cutoff:
+                last_for_day[days_key[i]] = i
+        for i in last_for_day.values():
+            eod[i] = True
+    return entry_ok, eod
+
+
 def evaluate(strategy: dict, symbol: str, tf: str, days: int,
              feed: str = 'polygon', view: str = 'all',
-             asof: str | None = None) -> dict:
+             asof: str | None = None, fill: str = 'close',
+             rules: dict | None = None) -> dict:
     from chart import data_manager as dm
+    days_req = int(days)                   # what the CALLER asked to see
     days = dm.required_days(referenced_overlays(strategy), tf, days)
     bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
     n = len(bars)
@@ -701,6 +1411,9 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
 
     side = strategy.get('side', 'long')
     exit_group = strategy.get('exit')
+    # Cross-symbol (market gate) operands need their reference bars loaded
+    # before any rule evaluates. Same window, same feed, causally aligned.
+    _preload_ref_bars(strategy, symbol, bars, ctx, tf, days, feed, view, asof)
     # Trade-operand exits (P&L %, bars held, entry price) depend on WHICH
     # position is open, so no single global exit mask exists — the pairing
     # loop evaluates the exit group per trade instead.
@@ -713,30 +1426,74 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
 
     # STATUS pairing: enter while flat on any true entry bar; exit on any true
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
+    _entry_drops: dict = {}      # why fired signals didn't become trades
+    entry_ok, eod_close = _session_masks(bars, rules)
+    # discipline knobs: the strategy carries its own (saved with it), the panel
+    # `rules` can OVERRIDE the attempts cap for a one-off run.
+    _risk = strategy.get('risk') or {}
+    mpd = (rules or {}).get('max_entries_per_day') or _risk.get('max_entries_per_day')
+    mpd = int(mpd) if mpd else None
+    cooldown = _risk.get('cooldown_bars')
+    min_hold = _risk.get('min_hold_bars')
     trades, sl_view, tp_view, open_trade = _pair_trades(
         bars, ts, entry_mask, exit_mask, side, strategy.get('risk'), ctx,
-        exit_group=exit_group if trade_aware else None)
+        exit_group=exit_group if trade_aware else None, fill=fill,
+        entry_ok=entry_ok, eod_close=eod_close, max_per_day=mpd,
+        cooldown_bars=cooldown, min_hold_bars=min_hold,
+        entry_mode=(_risk.get('entry_mode') or 'edge'),
+        max_stop_pct=_risk.get('max_stop_pct'),
+        win_start=_risk.get('window_start'), win_end=_risk.get('window_end'),
+        exit_scope=(exit_group or {}).get('scope'), diag=_entry_drops)
+
+    # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what
+    # the caller asked for (indicator warm-up). The chart only displays the
+    # requested window — signals/trades/series on warm-up bars would be
+    # handed to the chart library with times it has no bars for, and it snaps
+    # them onto the nearest bar it DOES have: a phantom ladder of stacked
+    # arrows at one spot. Slice every output to the requested window. The
+    # warm-up bars keep doing their real job (indicator values + the position
+    # state carried into the window).
+    wstart = ctx['end'] - pd.Timedelta(days=days_req)
+    vis = np.asarray(bars.index >= wstart)
+    if not vis.any():                       # degenerate; window ends at data end
+        vis = np.ones(n, dtype=bool)
+    entry_ev = entry_ev & vis
+    exit_ev = exit_ev & vis
+    trades = [t for t in trades if vis[t['ei']]]
+    pre_window_open = open_trade is not None and not vis[open_trade['ei']]
 
     up_shape = 'arrowUp' if side == 'long' else 'arrowDown'
     up_pos = 'belowBar' if side == 'long' else 'aboveBar'
     markers = []
-    # Every bar the ENTRY condition first fires (clean arrow, no repeated text —
-    # keeps a dense chart readable). Shown even if nothing "closes".
-    edge_times = set()
+    # TRADES vs SIGNALS must LOOK different, or the chart lies:
+    #  - solid arrow  = a position actually OPENED here (one per trade — the
+    #    engine holds at most one position, tests part 12)
+    #  - faint dot    = the entry condition fired but NO trade opened (already
+    #    in a position / session rules / unpriceable stop). Informational.
+    entered = {t['ei'] for t in trades}
+    if open_trade and not pre_window_open:  # a pre-window entry has no bar to draw on
+        entered.add(open_trade['ei'])
     for i in np.nonzero(entry_ev)[0]:
-        edge_times.add(int(ts[i]))
-        markers.append({'time': int(ts[i]), 'position': up_pos,
+        if i in entered:
+            continue                      # real entry drawn below
+        markers.append({'time': int(ts[i]), 'position': up_pos, 'size': 1,
+                        'shape': 'circle', 'color': '#475569', 'text': ''})
+    for ei in sorted(entered):
+        markers.append({'time': int(ts[ei]), 'position': up_pos, 'size': 2,
                         'shape': up_shape, 'color': '#22c55e', 'text': ''})
-    # ...plus RE-entries: a trade taken while the signal was still on (e.g.
-    # right after a stop-out) isn't a fresh edge, but it IS an entry.
+    # scale-out partials: a small teal tick at each banked leg (T1/T2…), so the
+    # chart shows WHERE fractions came off before the runner's final exit.
+    for t in list(trades) + ([open_trade] if open_trade else []):
+        for g in (t.get('legs') or []):
+            pct = int(round(g['fraction'] * 100))
+            markers.append({'time': int(ts[g['xi']]), 'size': 1,
+                            'position': 'aboveBar' if side == 'long' else 'belowBar',
+                            'shape': 'circle', 'color': '#14b8a6',
+                            'text': f"{g['reason']} {pct}%"})
+    # each trade's exit carries its reason; exactly one FINAL exit per trade.
     for t in trades:
-        if int(ts[t['ei']]) not in edge_times:
-            markers.append({'time': int(ts[t['ei']]), 'position': up_pos,
-                            'shape': up_shape, 'color': '#22c55e', 'text': ''})
-    # ...plus the exit of each taken trade — THIS carries the reason label.
-    for t in trades:
-        col = {'SL': '#ef5350', 'TP': '#22c55e', 'exit': '#94a3b8'}.get(t['reason'], '#ef5350')
-        markers.append({'time': int(ts[t['xi']]),
+        col = {'SL': '#ef5350', 'TP': '#22c55e', 'trail': '#16a34a', 'exit': '#94a3b8', 'eod': '#f5a623'}.get(t['reason'], '#ef5350')
+        markers.append({'time': int(ts[t['xi']]), 'size': 2,
                         'position': 'aboveBar' if side == 'long' else 'belowBar',
                         'shape': 'arrowDown' if side == 'long' else 'arrowUp',
                         'color': col, 'text': t['reason']})
@@ -766,21 +1523,64 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         if vals:
             series = list(series) + [{'name': nm, 'color': col, 'style': 2,
                                       'step': True, 'values': vals}]
+    # series points on warm-up bars would also land on bars the chart lacks
+    wsec = int((wstart - pd.Timestamp('1970-01-01', tz='UTC'))
+               // pd.Timedelta(seconds=1))
+    series = [dict(s, values=[v for v in (s.get('values') or [])
+                              if v['time'] >= wsec]) for s in series]
+    series = [s for s in series if s['values']]
 
-    et = bars.index.tz_convert(cs._ET)
+    # DIAGNOSTIC — "drop %": how far the name was EXTENDED DOWN at entry, as
+    # (session VWAP − low-of-day) ÷ entry × 100. It separates a real extension
+    # setup (big drop → the stock actually fell away from VWAP and recovered)
+    # from flat chop (tiny drop → nothing happened). Ride it on each trade so a
+    # backtest can show it. Computed once, NaN-safe; None if unavailable.
+    _vwap_arr = _low_arr = None
+    if trades or open_trade:
+        try:
+            _vwap_arr = cs.overlay_arrays(bars, {'key': 'vwap.session', 'source': 'close'}, ctx, causal=True)[2][0][1]
+            _low_arr = cs.overlay_arrays(bars, {'key': 'levels.today_low', 'source': 'close'}, ctx, causal=True)[2][0][1]
+        except Exception:
+            _vwap_arr = _low_arr = None
+    def _drop_at(ei, ep):
+        if _vwap_arr is None or _low_arr is None or not ep:
+            return None
+        try:
+            v = float((_vwap_arr[ei] - _low_arr[ei]) / ep * 100.0)
+            return round(v, 2) if v == v else None
+        except Exception:
+            return None
+    et = bars.index[vis].tz_convert(cs._ET)
     return {
-        'ok': True, 'bars': n, 'side': side,
+        'ok': True, 'bars': int(vis.sum()), 'side': side,
+        # the actual simulated trades — the backtester (Phase 4) consumes
+        # EXACTLY this, so preview and backtest can never disagree.
+        'trades': [{'entry_ts': int(ts[t['ei']]), 'exit_ts': int(ts[t['xi']]),
+                    'entry': t['entry'], 'exit': t['exit'], 'ret': t['ret'],
+                    'stop': t.get('stop'),
+                    'reason': t['reason'], 'drop_pct': _drop_at(t['ei'], t['entry']),
+                    # scale-out partials, timestamped for the chart (Step 3)
+                    'legs': [{'exit_ts': int(ts[g['xi']]), 'price': g['price'],
+                              'fraction': g['fraction'], 'ret': g['ret'],
+                              'reason': g['reason']} for g in t.get('legs') or []]}
+                   for t in trades],
         'entries': [{'time': int(ts[i])} for i in np.nonzero(entry_ev)[0]],
         'exits':   [{'time': int(ts[i])} for i in np.nonzero(exit_ev)[0]],
         'markers': markers,
         'series':  series,
+        'entry_drops': dict(_entry_drops),   # why fired signals didn't trade
         'entry_now': bool(entry_mask[-1]),
         'exit_now':  _exit_now(exit_mask, trade_aware, exit_group, open_trade,
                                side, bars, ctx),
         'stats': stats,
         'open_trade': ({'time': int(ts[open_trade['ei']]),
                         'entry': open_trade['entry'],
-                        'ret_pct': round(100.0 * open_trade['ret'], 3)}
+                        'stop': open_trade.get('stop'),
+                        'ret_pct': round(100.0 * open_trade['ret'], 3),
+                        'drop_pct': _drop_at(open_trade['ei'], open_trade['entry']),
+                        'legs': [{'exit_ts': int(ts[g['xi']]), 'price': g['price'],
+                                  'fraction': g['fraction'], 'ret': g['ret'],
+                                  'reason': g['reason']} for g in open_trade.get('legs') or []]}
                        if open_trade else None),
         'first': et[0].strftime('%Y-%m-%d %H:%M ET'),
         'last':  et[-1].strftime('%Y-%m-%d %H:%M ET'),

@@ -164,6 +164,13 @@ def prev_day_open(bars: Bars):
     return _daily_agg(bars.df, rth_pred(bars.df), 'open', ago=1)
 
 
+@primitive(name='prev_day_close', group='levels',
+           description='Yesterday\'s RTH close, held constant across today.',
+           params=(), inputs=('bars',))
+def prev_day_close(bars: Bars):
+    return _daily_agg(bars.df, rth_pred(bars.df), 'close', ago=1)
+
+
 @primitive(name='day_open', group='levels',
            description='Today\'s RTH open (09:30 ET bar). NaN before today\'s open exists.',
            params=(), inputs=('bars',))
@@ -183,6 +190,31 @@ def today_high(bars: Bars):
            params=(), inputs=('bars',))
 def today_low(bars: Bars):
     return _running_session_extreme(bars.df, rth_pred(bars.df), 'low')
+
+
+@primitive(name='today_vol_max', group='levels',
+           description='Today\'s running RTH maximum single-bar volume so far '
+                       '(the volume analogue of today_high). Powers "one of '
+                       'the day\'s biggest volume bars" checks.',
+           params=(), inputs=('bars',))
+def today_vol_max(bars: Bars):
+    df = bars.df
+    pred = rth_pred(df)
+    et = df.index.tz_convert(_ET)
+    vol = df['volume'].to_numpy(dtype=float)
+    n = len(df)
+    out = np.full(n, np.nan)
+    cur_day = None
+    cur_max = np.nan
+    for i in range(n):
+        t = et[i]
+        if t.date() != cur_day:
+            cur_day = t.date()
+            cur_max = np.nan
+        if pred(t):
+            cur_max = vol[i] if np.isnan(cur_max) else max(cur_max, vol[i])
+        out[i] = cur_max
+    return out
 
 
 @primitive(name='window_high', group='levels',

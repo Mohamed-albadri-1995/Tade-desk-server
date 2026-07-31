@@ -33,6 +33,41 @@ def _db() -> sqlite3.Connection:
                 updated_at REAL NOT NULL
             )
         """)
+        _conn.execute("""
+            CREATE TABLE IF NOT EXISTS backtests (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                spec       TEXT NOT NULL,           -- run spec JSON
+                status     TEXT NOT NULL,           -- running | done | error
+                progress   REAL NOT NULL DEFAULT 0, -- 0..1
+                summary    TEXT,                    -- stats JSON when done
+                error      TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+        """)
+        _conn.execute("""
+            CREATE TABLE IF NOT EXISTS backtest_trades (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                bt_id    INTEGER NOT NULL,
+                date     TEXT NOT NULL,             -- ET session date YYYY-MM-DD
+                symbol   TEXT NOT NULL,
+                side     TEXT NOT NULL,
+                entry_ts INTEGER NOT NULL,          -- epoch s (UTC)
+                exit_ts  INTEGER,                   -- NULL = still open at day end
+                entry    REAL NOT NULL,
+                exit     REAL,
+                ret      REAL,                      -- fractional return (signed)
+                reason   TEXT,                      -- SL | TP | exit | open
+                ctx      TEXT                       -- frozen register card JSON
+            )
+        """)
+        try:  # migration for DBs created before the ctx column existed
+            _conn.execute('ALTER TABLE backtest_trades ADD COLUMN ctx TEXT')
+        except sqlite3.OperationalError:
+            pass
+        _conn.execute("""CREATE INDEX IF NOT EXISTS idx_bt_trades
+                         ON backtest_trades (bt_id, date)""")
         _conn.commit()
     return _conn
 
@@ -92,5 +127,142 @@ def delete_strategy(sid: int) -> bool:
     with _lock:
         db = _db()
         cur = db.execute('DELETE FROM strategies WHERE id = ?', (sid,))
+        db.commit()
+    return cur.rowcount > 0
+
+
+def seed_strategies() -> int:
+    """Sync the bundled seed strategies (chart/seeds/*.json) into the DB on
+    every startup. These 5 are OUR canonical, maintained strategies: a stored
+    copy is REFRESHED to the current bundled definition (same id kept) whenever
+    it differs, so engine/exit/scale-out updates actually reach them. Insert if
+    missing. To customize, Save-As under a NEW name — that name is never a
+    bundled seed, so it is never touched.
+
+    A seed carrying `"_keep_user_edits": true` is RESTORE-ONLY: inserted when
+    absent (so a fresh box gets it back) but never overwritten afterwards, so
+    edits made in the browser survive a restart. Returns how many were
+    inserted/updated.
+    """
+    seeds_dir = Path(__file__).resolve().parent / 'seeds'
+    if not seeds_dir.is_dir():
+        return 0
+    by_name = {s['name']: s for s in list_strategies()}
+    changed = 0
+    for f in sorted(seeds_dir.glob('*.json')):
+        try:
+            docs = json.loads(f.read_text())
+        except Exception:
+            continue
+        for obj in (docs if isinstance(docs, list) else [docs]):
+            name = (obj.get('name') or '').strip()
+            if not name:
+                continue
+            payload = {k: v for k, v in obj.items() if k != 'id'}
+            payload['_seed'] = True                # mark as a bundled seed
+            cur = by_name.get(name)
+            if cur is None:
+                save_strategy(payload); changed += 1
+                continue
+            # `_keep_user_edits`: RESTORE-ONLY seed. It is bundled so a fresh
+            # box (or a wiped platform.db) gets it back, but once it exists the
+            # stored copy WINS — edits made in the browser survive restarts.
+            # Use it for the user's own strategies; leave it off for OUR
+            # canonical scalps, which must track the bundle.
+            if obj.get('_keep_user_edits'):
+                continue
+            stored = {k: v for k, v in cur.items()
+                      if k not in ('id', 'updated_at', 'created_at')}
+            if stored != payload:                  # bundle changed → refresh in place
+                payload['id'] = cur['id']
+                save_strategy(payload); changed += 1
+    return changed
+
+
+# ── Phase 4: backtest runs ──────────────────────────────────────────────────
+def create_backtest(name: str, spec: dict) -> int:
+    now = time.time()
+    with _lock:
+        cur = _db().execute(
+            'INSERT INTO backtests (name, spec, status, progress, created_at, updated_at) '
+            'VALUES (?,?,?,?,?,?)',
+            ((name or 'Backtest').strip()[:120], json.dumps(spec), 'running', 0.0, now, now))
+        _db().commit()
+        return cur.lastrowid
+
+
+def update_backtest(bt_id: int, status: str | None = None, progress: float | None = None,
+                    summary: dict | None = None, error: str | None = None) -> None:
+    sets, vals = ['updated_at=?'], [time.time()]
+    if status is not None:
+        sets.append('status=?'); vals.append(status)
+    if progress is not None:
+        sets.append('progress=?'); vals.append(float(progress))
+    if summary is not None:
+        sets.append('summary=?'); vals.append(json.dumps(summary))
+    if error is not None:
+        sets.append('error=?'); vals.append(str(error)[:500])
+    vals.append(bt_id)
+    with _lock:
+        _db().execute(f'UPDATE backtests SET {", ".join(sets)} WHERE id=?', vals)
+        _db().commit()
+
+
+def add_bt_trades(bt_id: int, trades: list) -> None:
+    """trades: [{date, symbol, side, entry_ts, exit_ts, entry, exit, ret, reason}]"""
+    if not trades:
+        return
+    rows = [(bt_id, t['date'], t['symbol'], t['side'], int(t['entry_ts']),
+             (int(t['exit_ts']) if t.get('exit_ts') is not None else None),
+             float(t['entry']),
+             (float(t['exit']) if t.get('exit') is not None else None),
+             (float(t['ret']) if t.get('ret') is not None else None),
+             t.get('reason'),
+             (json.dumps(t['ctx']) if t.get('ctx') else None)) for t in trades]
+    with _lock:
+        _db().executemany(
+            'INSERT INTO backtest_trades (bt_id, date, symbol, side, entry_ts, exit_ts, '
+            'entry, exit, ret, reason, ctx) VALUES (?,?,?,?,?,?,?,?,?,?,?)', rows)
+        _db().commit()
+
+
+def get_backtest(bt_id: int, with_trades: bool = True) -> dict | None:
+    with _lock:
+        row = _db().execute('SELECT * FROM backtests WHERE id=?', (bt_id,)).fetchone()
+        tr = (_db().execute('SELECT * FROM backtest_trades WHERE bt_id=? '
+                            'ORDER BY entry_ts', (bt_id,)).fetchall()
+              if (row and with_trades) else [])
+    if not row:
+        return None
+    out = dict(row)
+    out['spec'] = json.loads(out['spec'])
+    out['summary'] = json.loads(out['summary']) if out.get('summary') else None
+    if with_trades:
+        out['trades'] = []
+        for r in tr:
+            d = dict(r)
+            d['ctx'] = json.loads(d['ctx']) if d.get('ctx') else {}
+            out['trades'].append(d)
+    return out
+
+
+def list_backtests() -> list:
+    with _lock:
+        rows = _db().execute(
+            'SELECT id, name, status, progress, summary, created_at, updated_at '
+            'FROM backtests ORDER BY id DESC LIMIT 100').fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d['summary'] = json.loads(d['summary']) if d.get('summary') else None
+        out.append(d)
+    return out
+
+
+def delete_backtest(bt_id: int) -> bool:
+    with _lock:
+        db = _db()
+        cur = db.execute('DELETE FROM backtests WHERE id=?', (bt_id,))
+        db.execute('DELETE FROM backtest_trades WHERE bt_id=?', (bt_id,))
         db.commit()
     return cur.rowcount > 0
