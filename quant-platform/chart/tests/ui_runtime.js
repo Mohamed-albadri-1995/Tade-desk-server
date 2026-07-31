@@ -121,7 +121,8 @@ try {
 for (const fn of ['loadChart', 'pickStock', 'toggleDrawer', '_resizeChart',
                   'jumpToDate', 'loadSources', 'fillRegPicker', 'loadRegister',
                   'loadRegDates', 'renderRegister', 'toggleLive', 'initChart',
-                  'drawSnapshot', 'syncAsofUI', 'btRefresh', 'btRenderCore']) {
+                  'drawSnapshot', 'syncAsofUI', 'btRefresh', 'btRenderCore',
+                  '_syncViewportHeight']) {
   ok('`' + fn + '` is defined at top level', typeof ctx[fn] === 'function',
      'got ' + typeof ctx[fn]);
 }
@@ -141,6 +142,27 @@ try { ctx.fillRegPicker(doc.getElementById('regReg'),
         [{ value: 'a:R1', label: 'R1 — A' }], 'a:R1');
       ok('fillRegPicker() runs', true); }
 catch (e) { ok('fillRegPicker() runs', false, e.message); }
+
+// MOBILE VIEWPORT HEIGHT. `100vh` on Android Chrome / iOS Safari is the height
+// the page would have with the URL bar HIDDEN, so with the bar showing the body
+// is taller than the visible area — and with overflow:hidden the bottom of the
+// chart, where lightweight-charts draws the TIME AXIS, is unreachable. Reported
+// twice from a phone as "horizontal scale is not exist".
+ok('body height uses dvh (the visible viewport), not only vh',
+   /body\s*\{[^}]*height:\s*100dvh/.test(html), 'no 100dvh on body');
+ok('...with 100vh kept before it as the fallback',
+   /body\s*\{[^}]*height:\s*100vh;\s*height:\s*100dvh/.test(html));
+ok('and a JS fallback re-pins the height where dvh is unsupported',
+   /CSS\.supports\('height',\s*'100dvh'\)/.test(html)
+   && /visualViewport/.test(html));
+ok('the fallback is re-applied on resize and orientation change',
+   /addEventListener\('resize',\s*_syncViewportHeight\)/.test(html)
+   && /orientationchange/.test(html));
+try { ctx._syncViewportHeight(); ok('_syncViewportHeight() runs', true); }
+catch (e) { ok('_syncViewportHeight() runs', false, e.message); }
+// the drawer must never cover the axis either (the other cause, same symptom)
+ok('an open drawer reserves its height instead of covering the chart',
+   /body\.drawer-open main \{ padding-bottom/.test(html));
 
 console.log('\n' + '='.repeat(64));
 console.log('RESULT  PASS=' + PASS + '  FAIL=' + FAIL);
