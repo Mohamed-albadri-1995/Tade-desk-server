@@ -195,3 +195,49 @@ describe('the tool explains its own schedule', () => {
     expect(WINDOW_NOTES['something-i-made-up']).toBeUndefined();
   });
 });
+
+describe('T9 is the benchmark', () => {
+  const registry = require('../tools.config.json').tools;
+  const t9 = PRESETS.T9;
+
+  test('one screener, one rule of its own — the rest is the floor', () => {
+    expect(t9).toHaveLength(1);
+    expect(t9[0].filters).toEqual([{ left: 'close', operation: 'greater', right: 5 }]);
+  });
+
+  test('ranked by relative volume, top 20 — that is the whole method', () => {
+    expect(t9[0].sort).toEqual({ sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' });
+    expect(t9[0].limit).toBe(20);
+  });
+
+  test('no mirror: "unusually active" has no opposite side', () => {
+    expect(t9[0].name).not.toMatch(/mirror/i);
+    expect(t9.some(d => /mirror/i.test(d.name))).toBe(false);
+  });
+
+  test('it carries no structural filter, or it would stop being a benchmark', () => {
+    // The moment this screener says anything about direction, pattern or trend,
+    // it becomes another clever tool and there is nothing plain left to compare
+    // the clever ones against.
+    const structural = /EMA|SMA|VWAP|High\.|Low\.|RSI|52_week|crosses|premarket_change|gap/i;
+    for (const f of t9[0].filters) {
+      expect({ rule: f.left, structural: structural.test(f.left) || structural.test(String(f.right)) })
+        .toEqual({ rule: f.left, structural: false });
+    }
+  });
+
+  test('it is measured at the same moment as the tools it benchmarks', () => {
+    // A different capture time would make every comparison partly a comparison
+    // of clocks rather than of screeners.
+    const cap = id => registry.find(t => t.id === id).captureAt;
+    const { r1, entryA, entryB } = cap('T9');
+    expect({ r1, entryA, entryB }).toEqual({
+      r1: cap('T1').r1, entryA: cap('T1').entryA, entryB: cap('T1').entryB,
+    });
+  });
+
+  test('it sees the whole regular session, like the tools it is compared to', () => {
+    expect(t9[0].runFrom).toBe('09:30');
+    expect(t9[0].runTo).toBe('16:00');
+  });
+});

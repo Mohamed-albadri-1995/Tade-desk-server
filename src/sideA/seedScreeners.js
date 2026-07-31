@@ -279,6 +279,8 @@ const WINDOW_NOTES = {
   canslim: 'Regular session only. This is a months-long list rather than a daily hunt: the fundamental filters barely move intraday, and the new-high and volume conditions only mean something while the market is open.',
   'canslim-pullback': 'Regular session only, same reason as the breakout screener it accompanies.',
 
+  'stocks-in-play': 'Regular session only, and the whole day of it. This is the benchmark every other screener is measured against, so it has to see the same market they do — narrowing its window would flatter or punish it for reasons that have nothing to do with the comparison.',
+
   'premarket-gap': 'Pre-market only, by definition — it is looking for the gap before the market opens on it.',
   'after-open-volume': 'Regular session only. It wants volume that has actually traded today, which does not exist before the bell.',
 };
@@ -311,7 +313,39 @@ const T7 = [PREMARKET_GAP, AFTER_OPEN_VOLUME];
 // screener is tagged there — see canslim.js.
 const T8 = [CANSLIM_BASE, CANSLIM_PULLBACK];
 
-const BY_TOOL = { T1, T2, T3, T4, T5, T6, T7, T8 };
+// T9 is the benchmark, and it is deliberately the dumbest screener here: liquid
+// stocks over $5, ranked by how unusually active they are, top 20. No pattern,
+// no direction, no structure — just "what is busy today".
+//
+// It exists to be beaten. Every other tool claims that some structure — a
+// stacked moving average, a VWAP reclaim, a 52-week break — finds better movers
+// than simply taking today's most active liquid names. Until now there was
+// nothing plain to test that claim against, because every tool was clever.
+//
+// The one strong published day-trading result behind this: the edge came almost
+// entirely from the relative-volume screen. Dropping it took the same strategy
+// from a Sharpe of 2.81 to 0.48. So the plain list is not a straw man — it is a
+// genuinely hard benchmark, which is exactly what makes it useful.
+//
+// The price floor is the study's own ($5, to exclude penny-stock noise);
+// everything else it required — average volume and ATR minimums — the
+// tradability floor already supplies to every screener.
+const STOCKS_IN_PLAY = {
+  key: 'stocks-in-play', name: 'Stocks in Play',
+  runFrom: '09:30', runTo: '16:00',
+  limit: 20,
+  sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
+  filters: [
+    { left: 'close', operation: 'greater', right: 5 },
+  ],
+};
+
+// No mirror: there is no direction to flip. The screener does not say up or
+// down, only "unusually active", so its opposite would be "quiet stocks" —
+// which is not the other side of this setup, it is the absence of it.
+const T9 = [STOCKS_IN_PLAY];
+
+const BY_TOOL = { T1, T2, T3, T4, T5, T6, T7, T8, T9 };
 
 // Available to add to any tool from the builder.
 const SESSION_SCREENERS = [PREMARKET_GAP, AFTER_OPEN_VOLUME];

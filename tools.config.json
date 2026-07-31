@@ -112,6 +112,20 @@
         "entryB": "09:51",
         "why": "CANSLIM names are position candidates rather than day trades, so the exact minute matters less here than anywhere else. It shares T2's timing — fifteen minutes past the open, once the first spike has settled — so the two breakout tools stay directly comparable."
       }
+    },
+    {
+      "id": "T9",
+      "name": "Stocks in Play",
+      "port": 3080,
+      "scorerPort": 3081,
+      "accent": "#94a3b8",
+      "desc": "The benchmark. Liquid stocks over $5, ranked by unusual volume, top 20 — no pattern, no direction. Every other tool has to beat this.",
+      "captureAt": {
+        "r1": "09:36",
+        "entryA": "09:37",
+        "entryB": "09:40",
+        "why": "Identical to T1's timing on purpose. This tool exists to be compared against, so it has to be photographed and measured at exactly the same moment as the tools it is benchmarking — a different capture time would make every comparison partly a comparison of clocks."
+      }
     }
   ]
 }

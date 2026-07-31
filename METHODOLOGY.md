@@ -3,7 +3,7 @@
 What each tool hunts for, why its filters are what they are, and how it is
 measured. One file, kept next to the code it describes.
 
-Eight tools run the same software against different screeners. Each has its own
+Nine tools run the same software against different screeners. Each has its own
 database, its own model and its own training history — nothing is shared, so
 one tool's results cannot contaminate another's.
 
@@ -402,6 +402,51 @@ learn from it and the scorecard can be sliced by it.
 
 **Capture:** photo 09:46, entries 09:47 / 09:51 — the same timing as T2, so the
 two breakout tools stay directly comparable.
+
+---
+
+## T9 — Stocks in Play · port 3080
+
+**The benchmark, and deliberately the dumbest screener here.**
+
+```
+close > 5
+```
+
+That is its only rule. The tradability floor supplies the rest — average volume
+≥ 1M, ATR ≥ $1, ATR ≥ 3% of price. Sort by relative volume, take the top 20.
+
+No pattern. No direction. No structure. Just *what is unusually active today*.
+
+**Why it exists.** Every other tool makes the same implicit claim: that some
+structure — a stacked moving average, a VWAP reclaim, a 52-week break — finds
+better movers than simply taking today's most active liquid names. Until this
+tool there was nothing plain to test that claim against, because every tool was
+clever.
+
+At the end of the month the comparison reads directly:
+
+```
+T9  Stocks in Play      35% good moves     ← the number to beat
+T2  MA Stack Breakout   52%                the structure is earning its keep
+T4  VWAP Reclaim        34%                no better than doing nothing clever
+```
+
+**It is not a straw man.** In the one strong published day-trading result, the
+edge came almost entirely from the relative-volume screen: dropping it took the
+same strategy from a Sharpe of 2.81 to 0.48, below buy-and-hold. Ranking by
+unusual volume is a hard benchmark.
+
+**No mirror.** There is no direction to flip. The opposite of "unusually active"
+is "quiet", which is not the other side of this setup — it is the absence of it.
+
+**Nothing structural may ever be added to it.** The moment this screener says
+something about trend or pattern it becomes another clever tool, and there is
+nothing plain left to compare the clever ones against. A test enforces this.
+
+**Capture:** photo 09:36, entries 09:37 / 09:40 — identical to T1 on purpose. A
+different capture time would make every comparison partly a comparison of clocks
+rather than of screeners.
 
 ---
 
