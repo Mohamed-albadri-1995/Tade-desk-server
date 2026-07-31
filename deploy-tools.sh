@@ -90,16 +90,26 @@ npm install --silent
 # to satisfy this project — and anything else on the machine that depended on
 # the versions that were there silently gets different ones. That is a deploy of
 # the screener changing an unrelated tool underneath it.
+#
+# The virtualenv is created with --system-site-packages, which matters on a box
+# this size. Without it, pip downloads and installs its own pandas, numpy and
+# scikit-learn — around 150MB of wheels, and minutes of thrashing on a machine
+# with under a gigabyte of RAM. With it, packages already present are visible
+# and count as satisfied, so a deploy usually installs nothing at all.
+#
+# It still fixes the bug: pip can READ the shared packages but every install it
+# does goes into .venv, so a screener deploy can no longer change the versions
+# another program on this machine depends on.
 VENV="$ROOT/.venv"
 PY="$VENV/bin/python"
 if [ ! -x "$PY" ]; then
-  echo "  creating Python virtualenv at .venv"
-  python3 -m venv "$VENV" 2>/dev/null || true
+  echo "  creating Python virtualenv at .venv (reusing packages already installed)"
+  python3 -m venv --system-site-packages "$VENV" 2>/dev/null || true
 fi
 if [ -x "$PY" ]; then
-  "$PY" -m pip install --upgrade pip --quiet 2>/dev/null || true
-  "$PY" -m pip install -r src/scoring/requirements.txt --quiet
-  echo "  python: $("$PY" --version 2>&1) (isolated)"
+  echo "  checking Python packages (nothing to download if they are already present)…"
+  "$PY" -m pip install -r src/scoring/requirements.txt --quiet --disable-pip-version-check
+  echo "  python: $("$PY" --version 2>&1) — installs isolated to .venv"
 else
   echo "  WARNING: could not create a virtualenv — falling back to the shared"
   echo "           Python environment. This can change package versions for"
