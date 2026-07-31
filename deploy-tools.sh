@@ -70,11 +70,32 @@ for dir in $NEIGHBOURS; do
   fi
 done
 
+# Remember where the neighbours were, so a change to them can be reported.
+declare -A BEFORE
+for dir in $NEIGHBOURS; do
+  [ -e "$dir" ] && BEFORE[$dir]=$(git log -1 --format='%h' -- "$dir" 2>/dev/null)
+done
+
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 echo "  now at: $(git log --oneline -1)"
+
+# A neighbour whose files moved is now stale ON DISK while its process still
+# runs the old code from memory. Everything looks fine until the next restart or
+# reboot quietly loads different code — so say so at the moment it happens,
+# rather than leaving it to be discovered later.
 for dir in $NEIGHBOURS; do
-  [ -e "$dir" ] && echo "  $dir/ at: $(git log -1 --format='%h %s' -- "$dir")"
+  [ -e "$dir" ] || continue
+  after=$(git log -1 --format='%h' -- "$dir" 2>/dev/null)
+  echo "  $dir/ at: $(git log -1 --format='%h %s' -- "$dir")"
+  if [ -n "${BEFORE[$dir]}" ] && [ "${BEFORE[$dir]}" != "$after" ]; then
+    echo
+    echo "  NOTE: $dir/ changed on disk (${BEFORE[$dir]} → $after)."
+    echo "        Its running process still holds the OLD code in memory. Restart it"
+    echo "        when convenient so the two agree — for the chart tool that is:"
+    echo "          sudo systemctl restart qp-chart"
+    echo
+  fi
 done
 
 echo
