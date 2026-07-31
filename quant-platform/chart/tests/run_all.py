@@ -7,6 +7,7 @@ is the regression gate for the strategy engine: run it after ANY change to
 chart/strategy.py, chart/store.py, or the qp glue before deploying.
 """
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -42,12 +43,17 @@ PARTS = [
     ('logic_audit28.py',    'review pass: fees, portfolio capital cap, warm-up cap, alerts, print days'),
     ('logic_audit29.py',    'multi-source screeners: N scanning tools, merge, attribution, dead-source'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
+    ('ui_runtime.js',       'browser UI: page script evaluates, click handlers run'),
 ]
 
 failed = []
 for name, what in PARTS:
-    r = subprocess.run([sys.executable, str(HERE / name)],
-                       capture_output=True, text=True)
+    cmd = ([sys.executable, str(HERE / name)] if name.endswith('.py')
+           else ['node', str(HERE / name)])
+    if name.endswith('.js') and not shutil.which('node'):
+        print(f'[skip] {name:22s} {what}\n        node not installed')
+        continue
+    r = subprocess.run(cmd, capture_output=True, text=True)
     tail = (r.stdout or '').strip().splitlines()
     verdict = tail[-1] if tail else '(no output)'
     status = 'ok ' if r.returncode == 0 else 'FAIL'

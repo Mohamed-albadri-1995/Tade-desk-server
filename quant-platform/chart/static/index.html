@@ -81,6 +81,14 @@
   /* ── strategy builder drawer ── */
   #drawer { position:absolute; left:0; right:0; bottom:0; height:42vh; background:var(--panel); border-top:1px solid var(--border); z-index:6; display:none; flex-direction:column; }
   #drawer.open { display:flex; }
+  /* The drawer is absolutely positioned OVER the bottom of <main>, and
+     lightweight-charts draws its TIME AXIS along the bottom edge of its own
+     canvas — so an open drawer buried the date/time scale completely (it was
+     drawn, just underneath). Reserve the drawer's height as padding on main:
+     absolutely-positioned children still sit against the padding box, so the
+     drawer does not move, while the chart shrinks and its axis stays visible.
+     --drawerH is kept in sync by the resize grip. */
+  body.drawer-open main { padding-bottom: var(--drawerH, 42vh); }
   #drawer .dhead { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; font-size:12px; }
   #drawer .dhead input, #drawer .dhead select { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:5px 7px; border-radius:5px; font-size:12px; }
   #drawer .dbody { flex:1; display:flex; gap:12px; padding:10px 12px; overflow:auto; min-height:0; }
@@ -115,7 +123,7 @@
   <label>Days <input id="days" type="number" value="5" min="1" max="730" style="width:60px"></label>
   <label>Feed <select id="feed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
   <label>Session <select id="view"><option value="all">All-day</option><option value="regular">Regular</option></select></label>
-  <label title="Replay the chart as of a past date (blank = live/now). Set automatically when you click a screener register stock.">As-of <input id="asof" type="date" style="width:130px"></label>
+  <label title="REPLAY cutoff: hide every bar after this date, so a setup is judged as it stood then. Blank = full tape through today. Clicking a register stock does NOT set this — it loads everything and scrolls to that day.">As-of <input id="asof" type="date" style="width:130px"></label>
   <button id="compute">Compute</button>
   <button id="liveBtn">▶ Live</button>
   <button id="stratBtn">⚡ Strategy</button>
@@ -461,9 +469,19 @@ async function loadChart(){
     if(!j.ok){ document.getElementById('status').textContent='error: '+(j.error||'').slice(0,120); return; }
     drawSnapshot(j);
     banner(j.warn||'');
+    // scroll to the register day (set by pickStock) — the data runs to today,
+    // we just land on that session. Say so if it could not be found, rather
+    // than silently leaving the view somewhere else.
+    let jtag='';
+    if(JUMP_DATE){
+      jtag=jumpToDate(JUMP_DATE)
+        ? ` · <span style="color:var(--blue)">jumped to ${JUMP_DATE}</span>`
+        : ` · <span style="color:var(--draft)">⚠ no bars on ${JUMP_DATE} in this window</span>`;
+      JUMP_DATE=null;
+    }
     const tag=asof?` · as of ${asof}`:'';
     const ovErr=document.getElementById('status').dataset.ovErr;
-    document.getElementById('status').innerHTML=`${symbol} · ${j.first} → ${j.last} · ${(j.bars||[]).length} bars · ${OVERLAYS.length} overlay(s)${tag}`+(ovErr?` · <span style="color:var(--draft)">⚠ ${ovErr}</span>`:'');
+    document.getElementById('status').innerHTML=`${symbol} · ${j.first} → ${j.last} · ${(j.bars||[]).length} bars · ${OVERLAYS.length} overlay(s)${tag}${jtag}`+(ovErr?` · <span style="color:var(--draft)">⚠ ${ovErr}</span>`:'');
     renderRegister();           // keep the register highlight on the loaded symbol
     if(LIVE&&!asof) startLive();       // re-subscribe with the new params (live only)
   }catch(e){ document.getElementById('status').textContent='error: '+e.message; }
@@ -618,12 +636,40 @@ function renderRegister(){
     box.appendChild(el);
   }
 }
+/* Clicking a register stock NAVIGATES to that day — it does not truncate the
+   chart at it. As-of is a REPLAY cutoff (hide everything after date D, for
+   evaluating a setup as it stood); reviewing a register name is the opposite
+   job: you want the whole tape THROUGH TODAY and to land on that session, so
+   you can see what happened next. So: clear as-of, widen the window far
+   enough back to contain the date, load, then scroll to it.
+   As-of is still there and still honest — set it by hand for a true replay. */
+let JUMP_DATE=null;                 // 'YYYY-MM-DD' to scroll to after loading
+const _ET_YMD=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',
+  year:'numeric',month:'2-digit',day:'2-digit'});
+function jumpToDate(d){
+  if(!d||!PRICEBARS.length||!CHART)return false;
+  const hit=[];
+  for(let i=0;i<PRICEBARS.length;i++)
+    if(_ET_YMD.format(new Date(PRICEBARS[i].time*1000))===d)hit.push(i);
+  if(!hit.length)return false;        // that session is not in the loaded data
+  const pad=Math.max(10,Math.round(hit.length*0.35));   // a little context either side
+  const a=PRICEBARS[Math.max(0,hit[0]-pad)].time;
+  const b=PRICEBARS[Math.min(PRICEBARS.length-1,hit[hit.length-1]+pad)].time;
+  try{ CHART.timeScale().setVisibleRange({from:a,to:b}); return true; }catch(_){ return false; }
+}
 function pickStock(c){
   document.getElementById('symbol').value=c.ticker;
   const date=document.getElementById('regDate').value||c.date||'';
-  document.getElementById('asof').value=date;
-  if(date&&feedHas('polygon'))document.getElementById('feed').value='polygon';  // deep history for a past day
-  if(LIVE)toggleLive();                 // a past register day isn't live
+  document.getElementById('asof').value='';        // navigate, don't truncate
+  if(date&&feedHas('polygon'))document.getElementById('feed').value='polygon';  // deep history
+  if(date){
+    // the window must reach BACK to that date and forward to now, or there
+    // would be nothing to scroll to. Never shrink the user's own setting.
+    const back=Math.ceil((Date.now()-Date.parse(date+'T00:00:00Z'))/86400000)+5;
+    const cur=Number(document.getElementById('days').value)||5;
+    if(back>cur)document.getElementById('days').value=Math.min(back,400);
+    JUMP_DATE=date;
+  }
   syncAsofUI(); renderRegister(); loadChart();
 }
 
@@ -1148,7 +1194,16 @@ async function evalStrategy(){
     document.getElementById('stratStat').innerHTML=`${(j.entries||[]).length} entry signals · ${(s?s.trades:0)} trades${op} · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%${by}`:(j.open_trade||j.exit_now===undefined?'':' · add an exit or SL/TP to close trades'))+` <span class="muted">${mode}</span>`;
   }catch(e){ document.getElementById('stratStat').textContent='error: '+e.message; }
 }
-function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open); document.getElementById('stratBtn').classList.toggle('on',open); if(open&&CHART){ setTimeout(()=>{const el=document.getElementById('chart'); CHART.applyOptions({height:el.clientHeight});},50); } }
+// top-level: toggleDrawer and the resize grips all need it (it used to be a
+// const inside the load handler, invisible to anything declared outside it)
+function _resizeChart(){ if(CHART){ const el=document.getElementById('chart'); CHART.applyOptions({width:el.clientWidth,height:el.clientHeight}); } }
+function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open);
+  // reserve the drawer's height on <main> so it never covers the chart's time
+  // axis (see the #drawer CSS note)
+  document.body.classList.toggle('drawer-open',open);
+  if(open) document.documentElement.style.setProperty('--drawerH', (d.getBoundingClientRect().height||window.innerHeight*0.42)+'px');
+  document.getElementById('stratBtn').classList.toggle('on',open);
+  setTimeout(_resizeChart,50); }
 function restore(){
   ['symbol','tf','days','feed','view'].forEach(k=>{ const v=localStorage.getItem('qpc_'+k); if(v)document.getElementById(k).value=v; });
   try{ const a=JSON.parse(localStorage.getItem('qpc_ov')||'[]'); if(Array.isArray(a)&&a.length){ OVERLAYS=a; _nid=Math.max(...a.map(o=>parseInt((o.id||'o0').slice(1))||0))+1; SELECTED=localStorage.getItem('qpc_sel')||a[0].id; } }catch(_){}
@@ -1174,7 +1229,6 @@ window.addEventListener('load',async()=>{
   const applyScale=()=>{ const m=parseInt(document.getElementById('scaleMode').value,10)||0; localStorage.setItem('qpc_scale',m); try{CHART.priceScale('right').applyOptions({mode:m});}catch(_){} };
   document.getElementById('scaleMode').addEventListener('change',applyScale); applyScale();
   document.getElementById('fitBtn').onclick=()=>{ try{CHART.priceScale('right').applyOptions({autoScale:true});}catch(_){} try{CHART.priceScale('osc').applyOptions({autoScale:true});}catch(_){} try{CHART.timeScale().fitContent();}catch(_){} };
-  const _resizeChart=()=>{ if(CHART){ const el=document.getElementById('chart'); CHART.applyOptions({width:el.clientWidth,height:el.clientHeight}); } };
   const closeSide=()=>{ document.getElementById('side').classList.add('hide'); document.body.classList.remove('side-open'); setTimeout(_resizeChart,60); };
   const openSide=()=>{ document.getElementById('side').classList.remove('hide'); document.body.classList.add('side-open'); setTimeout(_resizeChart,60); };
   document.getElementById('sideBtn').onclick=()=>{ document.getElementById('side').classList.contains('hide')?openSide():closeSide(); };
@@ -1193,7 +1247,7 @@ window.addEventListener('load',async()=>{
     window.addEventListener('mouseup',up); window.addEventListener('touchend',up);
   }
   _resizable('sideGrip', ()=>document.getElementById('side').getBoundingClientRect().width, (st,dx)=>{ const w=Math.max(180,Math.min(window.innerWidth*0.92, st-dx)); const s=document.getElementById('side'); s.style.flexBasis=w+'px'; s.style.width=w+'px'; s.style.maxWidth='none'; _resizeChart(); });
-  _resizable('drawerGrip', ()=>document.getElementById('drawer').getBoundingClientRect().height, (st,dx,dy)=>{ const h=Math.max(110,Math.min(window.innerHeight*0.85, st-dy)); document.getElementById('drawer').style.height=h+'px'; _resizeChart(); });
+  _resizable('drawerGrip', ()=>document.getElementById('drawer').getBoundingClientRect().height, (st,dx,dy)=>{ const h=Math.max(110,Math.min(window.innerHeight*0.85, st-dy)); document.getElementById('drawer').style.height=h+'px'; document.documentElement.style.setProperty('--drawerH', h+'px'); _resizeChart(); });
   document.getElementById('stratBtn').onclick=toggleDrawer;
   document.getElementById('drawerClose').onclick=toggleDrawer;
   document.getElementById('stratEval').onclick=evalStrategy;
