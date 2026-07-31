@@ -44,6 +44,30 @@ def feed_ok(feed: str) -> bool:
 _HISTORY_GROUPS = {'vwap', 'levels', 'pivots', 'structure', 'dynamic_sr'}
 _HISTORY_FLOOR_DAYS = 40
 
+# Primitives whose real warm-up the generic rules CANNOT infer, measured
+# empirically (recompute over shrinking histories until today's value stops
+# changing — see logic_audit30). Without these the line is drawn from the
+# wrong anchor and looks perfectly plausible:
+#   prev_month_open  the previous month's FIRST session is up to two calendar
+#                    months back (31 + 31), beyond the 40-day group floor.
+#   yearly / prev_year anchors need a year or two. They cannot be met on 1m
+#   (capped at 60 days) — _snapshot warns rather than drawing a wrong level.
+_WARMUP_DAYS = {
+    'levels.prev_month_open': 70,
+    'levels.monthly_open': 45,
+    'levels.monthly_high': 45,
+    'levels.monthly_low': 45,
+    'levels.yearly_open': 400,
+    'levels.prev_year_open': 750,
+}
+
+# Primitives whose `length` counts SESSIONS, not bars. rel_volume's default
+# length=20 means twenty prior RTH sessions (~28 calendar days); read as bars
+# it asked for 3 days, so the rvol on screen was computed against a handful of
+# days instead of twenty — the number the In-Play filter and the register
+# cards are built on.
+_SESSION_LENGTH_KEYS = {'volume.rel_volume'}
+
 # Ceiling per timeframe so a heavy combo can't fetch a pathological window and
 # OOM a small box. Comfortably above the 40-day floor for the ones that matter.
 _MAX_DAYS = {'1m': 60, '2m': 90, '5m': 120, '15m': 250, '30m': 400, '1h': 500, '1d': 800}
@@ -85,9 +109,15 @@ def required_days(overlays: list, tf: str, base_days: int) -> int:
         # (compute_tf='1m') = 5 sessions, whether you view 1m, 5m or 15m.
         # Using the chart tf turned that into a 107-day fetch on a 15m chart.
         btf = getattr(m, 'compute_tf', None) or tf
+        # 0) measured requirement for the anchors the generic rules get wrong
+        if ov.get('key') in _WARMUP_DAYS:
+            need_days = max(need_days, _WARMUP_DAYS[ov['key']])
         # 1) explicit SESSION-count window (N-day VWAP, N-session lookbacks).
         #    These count trading days → ~1.7x calendar + a week of buffer.
-        for pname in ('n_days', 'sessions', 'days', 'lookback_days'):
+        sess_names = ['n_days', 'sessions', 'days', 'lookback_days']
+        if ov.get('key') in _SESSION_LENGTH_KEYS:
+            sess_names.append('length')
+        for pname in sess_names:
             if pname in params:
                 try:
                     need_days = max(need_days, math.ceil(int(params[pname]) * 1.7) + 7)
@@ -102,11 +132,16 @@ def required_days(overlays: list, tf: str, base_days: int) -> int:
         # 4) pure bar-count lookbacks (EMA/SMA length, pivot left/right, swing).
         for pname in ('length', 'period', 'len', 'pivot_period', 'atr_length',
                       'left', 'right', 'lookback'):
-            if pname in params:
+            if pname in params and not (pname == 'length'
+                                        and ov.get('key') in _SESSION_LENGTH_KEYS):
                 try:
                     need_days = max(need_days, _bars_to_days(int(params[pname]), btf))
                 except (TypeError, ValueError):
                     pass
+    # Even a single-bar primitive (candle.body, true_range) needs the bar
+    # BEFORE the window starts, or its very first visible value is blank.
+    if overlays and need_days <= 0:
+        need_days = 1
     if need_days <= 0:
         return int(base_days)
     # WARM-UP IS EXTRA HISTORY, NOT A MINIMUM WINDOW. `need_days` is how much

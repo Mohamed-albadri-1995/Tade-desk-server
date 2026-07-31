@@ -42,6 +42,7 @@ PARTS = [
     ('logic_audit27.py',    'Print R1 sheet: window, tickers, indicators, page'),
     ('logic_audit28.py',    'review pass: fees, portfolio capital cap, warm-up cap, alerts, print days'),
     ('logic_audit29.py',    'multi-source screeners: N scanning tools, merge, attribution, dead-source'),
+    ('logic_audit30.py',    'warm-up sweep: every primitive gets the history it measurably needs'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     ('ui_runtime.js',       'browser UI: page script evaluates, click handlers run'),
 ]
