@@ -163,6 +163,10 @@ const defaults = [
   ['shortlistMinScore', '70'],
   ['shortlistTopN', '5'],
   ['scorerEntryTime', '9:40'],
+  // Tradability floor — applied to every screener on this tool. See tradable.js.
+  ['minAvgVolume', '1000000'],
+  ['minAtr', '1'],
+  ['minAtrPct', '3'],
   ['regimeSampleThreshold', '150'],
   ['finnhubApiKey', ''],
   ['githubBackupToken', ''],

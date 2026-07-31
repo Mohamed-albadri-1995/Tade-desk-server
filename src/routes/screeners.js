@@ -18,6 +18,14 @@ router.get('/meta', (req, res) => {
     fields: store.FIELDS,
     operations: store.OPERATIONS,
     windowNotes: require('../sideA/seedScreeners').WINDOW_NOTES,
+    // The floor applies to every screener, so it belongs on the screener page
+    // rather than buried in settings where nobody would connect it to a result
+    // count that looked lower than expected.
+    floor: (() => {
+      const tradable = require('../sideA/tradable');
+      const t = tradable.thresholds();
+      return { ...t, rules: tradable.describe(t) };
+    })(),
   });
 });
 

@@ -201,6 +201,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .sc-watch { background:#eab30822; color:#facc15; border:1px solid #eab30844; }
 .sc-drop  { background:#ef444422; color:#f87171; border:1px solid #ef444444; }
 .sc-none  { background:var(--bg3); color:var(--text3); border:1px solid #2a2f3d; }
+.floor-rules { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.floor-rule { font:11.5px ui-monospace,Menlo,monospace; background:#22d3ee14; color:#67e8f9;
+  border:1px solid #22d3ee3d; border-radius:4px; padding:4px 9px; }
+.sc-base code { font-size:11px; background:var(--bg3); padding:1px 5px; border-radius:3px; color:var(--text2); }
 .sc-base { font-size:11.5px; color:var(--text3); margin-top:10px; line-height:1.6; }
 .sc-base b { color:var(--text2); }
 .sch-legend { font-size:11px; color:var(--text3); margin-top:9px; line-height:1.6; }
@@ -876,6 +880,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
       </div>
       <button class="sb-btn sb-primary" onclick="sbNew()">+ New screener</button>
     </div>
+    <div id="sb-floor"></div>
     <div id="sb-schedule"></div>
     <div id="sb-list" class="sb-list"></div>
     <div id="sb-editor" class="sb-editor" style="display:none"></div>
@@ -3363,7 +3368,26 @@ function sbWindowNote(s) {
   return (SB_META && SB_META.windowNotes && SB_META.windowNotes[s.key]) || null;
 }
 
+// The floor is invisible in every screener's rule list because it is not in any
+// of them — it is added to all of them at scan time. Stating it here is what
+// stops a result count that looks low from being a mystery.
+function sbRenderFloor() {
+  const el = document.getElementById('sb-floor');
+  const f = SB_META && SB_META.floor;
+  if (!el || !f) return;
+  el.innerHTML = `<div class="sc-wrap" style="margin-bottom:12px">
+    <div class="sc-title">Tradability floor — applies to every screener</div>
+    <div class="sc-sub">Not a strategy, a precondition. A stock too thin to get out of, or with too
+      little daily range to pay for the risk, is not a candidate whatever a screener thinks of it.
+      These three run on top of every screener below, including any you build.</div>
+    <div class="floor-rules">${f.rules.map(r => `<span class="floor-rule">${esc(r)}</span>`).join('')}</div>
+    <div class="sc-base">Change them in <b>Settings</b> — <code>minAvgVolume</code>,
+      <code>minAtr</code>, <code>minAtrPct</code>. Set one to 0 to switch that leg off.</div>
+  </div>`;
+}
+
 function sbRenderList() {
+  sbRenderFloor();
   sbRenderSchedule();
   const el = document.getElementById('sb-list');
   if (!SB_LIST.length) {

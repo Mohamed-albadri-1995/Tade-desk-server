@@ -17,6 +17,11 @@ const SETTING_RULES = {
   shortlistTopN:          { type: 'int', min: 1,    max: 50  },
   scorerEntryTime:        { type: 'str', maxLen: 10 },
   regimeSampleThreshold:  { type: 'int', min: 1,    max: 500 },
+  // Tradability floor. Zero disables an individual leg; the upper bounds stop a
+  // typo (an extra zero on volume) from silently emptying every screener.
+  minAvgVolume:           { type: 'int',   min: 0, max: 100000000 },
+  minAtr:                 { type: 'float', min: 0, max: 100 },
+  minAtrPct:              { type: 'float', min: 0, max: 100 },
   finnhubApiKey:          { type: 'str', maxLen: 100 },
   githubBackupToken:      { type: 'str', maxLen: 200 },
   alpacaApiKey:           { type: 'str', maxLen: 100 },

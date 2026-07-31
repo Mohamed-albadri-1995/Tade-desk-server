@@ -238,7 +238,12 @@ const TV_HEADERS = {
 
 // Run one screener definition (from the database) against TradingView.
 async function runScreener(screener) {
-  const body = buildRequest(screener.filters, screener.sort);
+  // The tradability floor rides along with every screener — see tradable.js.
+  // A stock too thin to get out of, or with too little range to pay for the
+  // risk, is not a candidate whatever the strategy says about it.
+  const tradable = require('./tradable');
+  const t = tradable.thresholds();
+  const body = buildRequest([...screener.filters, ...tradable.serverFilters(t)], screener.sort);
   if (Number.isFinite(screener.limit)) body.range = [0, screener.limit];
   const resp = await axios.post(TV_URL, body, {
     headers: TV_HEADERS,
@@ -246,8 +251,12 @@ async function runScreener(screener) {
   });
   const rawRows = resp.data.data || [];
   if (rawRows.length > 0) validateTVStructure(rawRows[0]);
-  const rows = rawRows.map(mapTVRow).filter(r => r.ticker);
-  return { name: screener.name, key: screener.key, rows };
+  const mapped = rawRows.map(mapTVRow).filter(r => r.ticker);
+  const { kept, dropped } = tradable.applyLocal(mapped, t);
+  if (dropped) {
+    console.log(`[TV Scanner] "${screener.name}": ${dropped} row(s) below ${t.minAtrPct}% ATR`);
+  }
+  return { name: screener.name, key: screener.key, rows: kept, floorDropped: dropped };
 }
 
 /**
