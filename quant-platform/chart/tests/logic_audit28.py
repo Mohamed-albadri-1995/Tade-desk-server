@@ -40,6 +40,8 @@ PART H — the results panel printed whole-run money under a FILTERED view: the
          kills every button and no other test would notice.
 """
 import sys, pathlib, time
+import numpy as np
+import pandas as pd
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 PASS = 0; FAIL = 0
@@ -312,6 +314,72 @@ if node:
     _os.unlink(p)
 else:
     print("  --   node not installed; JS parse check skipped")
+
+print("=" * 64)
+print("PART I — warm-up sits BEFORE the window, so long indicators start at bar 1")
+print("=" * 64)
+# Reported from a phone: the 5-day MA began a third of the way across a
+# multi-week chart while the 9/13/20 SMAs spanned it. required_days returned
+# max(window, warm-up) — so a 20-day request fetched 20 days and the MA could
+# not produce a value until ~5 sessions in. Warm-up is EXTRA history.
+P5 = [{'key': 'ma.pine_5day', 'params': {}}]
+ok("a 20-day window now fetches the window PLUS the warm-up",
+   dm.required_days(P5, '1m', 20) == 20 + dm.required_days(P5, '1m', 0),
+   f"{dm.required_days(P5, '1m', 20)}")
+ok("...and the same at every window size",
+   all(dm.required_days(P5, '5m', n) > n for n in (3, 5, 10, 20, 30)))
+ok("no overlays still fetches exactly what was asked",
+   dm.required_days([], '5m', 20) == 20)
+ok("the per-timeframe ceiling still bounds the total",
+   dm.required_days([{'key': 'vwap.nday_block', 'params': {'n_days': 2}}], '1m', 20) == 60)
+
+# end to end through _snapshot: extra bars are fetched, then sliced away, and
+# the indicator covers the FIRST VISIBLE bar
+import tools.compare_server as _cs2
+ET2 = 'America/New_York'
+_idx = []
+_d = pd.Timestamp('2026-06-15', tz=ET2)
+while _d < pd.Timestamp('2026-07-15', tz=ET2):
+    if _d.weekday() < 5:
+        t = _d.replace(hour=4)
+        while t.hour < 20:
+            _idx.append(t); t += pd.Timedelta(minutes=5)
+    _d += pd.Timedelta(days=1)
+_idx = pd.DatetimeIndex(_idx).tz_convert('UTC')
+_px = np.linspace(10.0, 20.0, len(_idx))
+_FR = pd.DataFrame({'open': _px, 'high': _px + .05, 'low': _px - .05,
+                    'close': _px, 'volume': np.full(len(_idx), 1e5)}, index=_idx)
+class _Stub2:
+    def load(self, sym, tf, start, end):
+        return _FR[(_FR.index >= start) & (_FR.index < end)]
+_cs2._LOADERS['warm'] = _Stub2()
+
+LONG = [{'id': 'L', 'key': 'ma.sma', 'source': 'close',
+         'params': {'length': 400}, 'color': '#0f0'}]     # ~8 days of 5m bars
+snap = srv._snapshot('AAA', '5m', 3, 'warm', 'all', LONG, asof='2026-07-14')
+bars = snap['bars']
+span_days = (bars[-1]['time'] - bars[0]['time']) / 86400.0
+ok("the chart shows the window that was ASKED for, not the fetch",
+   span_days <= 3.5, f"{span_days:.1f} days of bars")
+ok("extra history really was fetched (and is reported)",
+   snap.get('warmup_days', 0) > 0, f"{snap.get('warmup_days')}")
+vals = snap['series'][0]['values']
+ok("the long indicator has a value on the FIRST VISIBLE bar",
+   bool(vals) and vals[0]['time'] == bars[0]['time'],
+   f"first bar={bars[0]['time']} first value={(vals or [{}])[0].get('time')}")
+ok("...and on the last one, so it spans the whole chart",
+   bool(vals) and vals[-1]['time'] == bars[-1]['time'])
+ok("no series value survives outside the visible window",
+   all(v['time'] >= bars[0]['time'] for v in vals))
+# a short indicator is unaffected
+SHORT = [{'id': 'S', 'key': 'ma.sma', 'source': 'close',
+          'params': {'length': 9}, 'color': '#00f'}]
+s2 = srv._snapshot('AAA', '5m', 3, 'warm', 'all', SHORT, asof='2026-07-14')
+ok("a short indicator also starts at the first visible bar",
+   s2['series'][0]['values'][0]['time'] == s2['bars'][0]['time'])
+# with NO overlays nothing is sliced
+s3 = srv._snapshot('AAA', '5m', 3, 'warm', 'all', [], asof='2026-07-14')
+ok("no overlays → no warm-up, no slicing", 'warmup_days' not in s3)
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")

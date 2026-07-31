@@ -532,21 +532,57 @@ def strategy_evaluate(payload: dict = Body(...)):
 
 def _snapshot(symbol: str, tf: str, days: int, feed: str, view: str,
               overlays: list, asof: str | None = None) -> dict:
-    """Candles + indicator series for the requested window. Auto-extends the
-    fetch window so every indicator has enough warm-up history. `asof`
-    (YYYY-MM-DD) replays the stock as of a historical register date."""
-    days = dm.required_days(overlays, tf, days)
-    out = cs.compute_data(symbol=symbol.upper(), tf=tf, days=days,
+    """Candles + indicator series for the requested window.
+
+    The FETCH is extended so every indicator has its warm-up history BEFORE
+    the window starts (a 5-day MA needs ~9 days of bars before its first
+    value, so on a 20-day chart it would otherwise be blank for the first
+    third). Those extra bars exist only to feed the maths — the RESULT is
+    sliced back to the days that were asked for, so "Days: 20" still draws 20
+    days, now with every indicator running edge to edge.
+
+    `asof` (YYYY-MM-DD) replays the stock as of a historical register date.
+    """
+    want = int(days)
+    fetched = dm.required_days(overlays, tf, want)
+    out = cs.compute_data(symbol=symbol.upper(), tf=tf, days=fetched,
                           overlays=overlays, feed=feed, view=view,
                           asof=asof or None)
+    bars = out.get('bars') or []
+    if bars and fetched > want:
+        # keep the LAST `want` days of the fetched span; the warm-up bars have
+        # done their job inside the indicator maths already
+        import pandas as _pd
+        cutoff = int((_pd.Timestamp(bars[-1]['time'], unit='s', tz='UTC')
+                      - _pd.Timedelta(days=want)).timestamp())
+        vis = [b for b in bars if b['time'] >= cutoff]
+        if vis:                       # never slice the chart away to nothing
+            out['bars'] = vis
+            out['series'] = [
+                {**s, 'values': [v for v in (s.get('values') or [])
+                                 if v['time'] >= cutoff]}
+                for s in (out.get('series') or [])]
+            out['day_starts'] = [d for d in (out.get('day_starts') or [])
+                                 if (d.get('time') if isinstance(d, dict) else d) >= cutoff]
+            out['first'] = (_pd.Timestamp(vis[0]['time'], unit='s', tz='UTC')
+                            .tz_convert(cs._ET).strftime('%Y-%m-%d %H:%M ET'))
+            out['warmup_days'] = fetched - want
     # NEVER silently under-warm an indicator: Alpaca's 1m feed is capped to a
     # 7-day window inside prepare_bars, so anything needing more history
     # (month VWAP, weekly levels, 5-day MA) is computed on a truncated window.
-    if tf == '1m' and feed == 'alpaca' and days > 7:
+    if tf == '1m' and feed == 'alpaca' and fetched > 7:
         out['warn'] = (f'alpaca 1m is capped to a 7-day window but these '
-                       f'overlays need ~{days} days of warm-up — multi-day '
+                       f'overlays need ~{fetched} days of history — multi-day '
                        f'VWAPs/levels are UNRELIABLE here. Use the polygon '
                        f'feed (or a coarser TF) for them.')
+    # the per-timeframe ceiling can bite before the warm-up is satisfied; say
+    # so rather than let a long indicator start part-way across the chart
+    elif fetched >= dm._MAX_DAYS.get(tf, 400) and fetched < want + dm.required_days(
+            overlays, tf, 0):
+        out['warn'] = (f'{tf} fetches are capped at {fetched} days, which is '
+                       f'less than this window plus the warm-up these overlays '
+                       f'need — the longest ones may start part-way in. Use a '
+                       f'coarser timeframe or fewer days.')
     return out
 
 

@@ -188,8 +188,15 @@ ok("5-day MA does not explode the fetch on a coarse TF",
    d5_15m <= 20, f'{d5_15m}d')
 d2v = _dm.required_days([{'key': 'vwap.nday_block', 'params': {'n_days': 2}}], '1m', 3)
 ok("2-day VWAP gets the multi-session floor", d2v >= 40, f'{d2v}d')
-ok("a plain 9-SMA is NOT over-fetched",
-   _dm.required_days([{'key': 'ma.sma', 'params': {'length': 9}}], '5m', 3) == 3)
+# Warm-up is EXTRA history added BEFORE the window (see logic_audit28 PART I),
+# so every indicator adds something — but a 9-bar SMA must add a token amount,
+# not a multi-session block like the 5-day MA does.
+_sma9 = _dm.required_days([{'key': 'ma.sma', 'params': {'length': 9}}], '5m', 3)
+ok("a plain 9-SMA adds only a token warm-up, never a multi-session block",
+   3 < _sma9 <= 6, f'{_sma9}d for a 3-day window')
+ok("...and far less than the 5-day MA needs",
+   _sma9 < _dm.required_days([{'key': 'ma.pine_5day', 'params': {}}], '5m', 3),
+   f'{_sma9} vs {_dm.required_days([{"key": "ma.pine_5day", "params": {}}], "5m", 3)}')
 # the print sheet must ASK for that warm-up (it calls required_days per chart)
 ok("the print sheet sizes its fetch with required_days",
    'dm.required_days(ovs, tf, span)' in

@@ -109,11 +109,18 @@ def required_days(overlays: list, tf: str, base_days: int) -> int:
                     pass
     if need_days <= 0:
         return int(base_days)
-    # The ceiling bounds the WARM-UP BUMP, never the caller's own request:
-    # capping the max() would let ADDING an indicator SHRINK the window
-    # (a 200-day 5m request came back as 120 days the moment any overlay was
-    # attached). Cap the bump, then honour whichever is larger.
-    return max(int(base_days), min(need_days, _MAX_DAYS.get(tf, 400)))
+    # WARM-UP IS EXTRA HISTORY, NOT A MINIMUM WINDOW. `need_days` is how much
+    # history an indicator must chew through BEFORE its first value exists, so
+    # it has to sit BEFORE the window the user asked to see — otherwise the
+    # indicator is blank across the early part of that window. max() got this
+    # wrong: a 20-day request with a 5-day MA (≈9 days of warm-up) fetched 20
+    # days, and the MA only appeared a third of the way in.
+    #     want: [ warm-up ][ the window you asked for ]
+    #     was:  [ ........ the window you asked for ...]
+    # The ceiling still bounds the total so a heavy combo cannot OOM the box;
+    # the caller's own request is never reduced by it.
+    total = int(base_days) + int(need_days)
+    return max(int(base_days), min(total, _MAX_DAYS.get(tf, 400)))
 
 
 def load_bars(symbol: str, tf: str, days: int, feed: str,
