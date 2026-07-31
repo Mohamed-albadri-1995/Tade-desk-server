@@ -18,7 +18,13 @@ app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 // the browser drops the response without these headers — a healthy tool then
 // renders as offline. Limited to the read-only endpoints the landing page uses;
 // everything else stays same-origin only.
-const LANDING_PROBE_PATHS = ['/health', '/api/tools', '/api/registry/today', '/api/analysis/status'];
+// The landing page is served from one tool's port and reads from all of them,
+// so these few GETs are cross-origin by construction. Kept to an explicit list:
+// everything else stays same-origin only.
+const LANDING_PROBE_PATHS = [
+  '/health', '/api/tools', '/api/registry/today', '/api/analysis/status',
+  '/api/analysis/screener-report',   // the month-end comparison across tools
+];
 app.use((req, res, next) => {
   if (req.method === 'GET' && LANDING_PROBE_PATHS.includes(req.path)) {
     res.set('Access-Control-Allow-Origin', '*');

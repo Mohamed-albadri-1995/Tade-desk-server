@@ -55,6 +55,32 @@ body {
         border:1px solid var(--border); border-radius:4px; padding:2px 7px; }
 .arrow { position:absolute; right:18px; bottom:16px; color:var(--accent); font-size:16px; }
 
+/* ── month-end comparison ── */
+.cmp-wrap { margin-top:34px; width:100%; max-width:1000px; text-align:center; }
+.cmp-btn { font:600 13px/1 inherit; padding:10px 20px; border-radius:6px; cursor:pointer;
+  background:var(--accent); color:#08111f; border:none; }
+.cmp-btn:hover { opacity:.9; }
+.cmp-btn:disabled { opacity:.5; cursor:default; }
+.cmp-hint { font-size:11.5px; color:var(--text3); margin-top:8px; line-height:1.6; }
+.cmp-hint b { color:var(--text2); }
+.cmp-scroll { overflow-x:auto; margin-top:18px; }
+.cmp-tbl { width:100%; border-collapse:collapse; font-size:12px; min-width:600px; text-align:right; }
+.cmp-tbl th { font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--text3);
+  padding:7px 8px; border-bottom:1px solid var(--border); white-space:nowrap; font-weight:600; }
+.cmp-tbl td { padding:8px; border-bottom:1px solid #1b1f2b; font-variant-numeric:tabular-nums;
+  white-space:nowrap; }
+.cmp-tbl th:first-child, .cmp-tbl td:first-child,
+.cmp-tbl th:nth-child(2), .cmp-tbl td:nth-child(2) { text-align:left; }
+.cmp-tool { color:var(--text3); font-size:11px; }
+.cmp-mark { background:#94a3b81a; }
+.cmp-mark td { border-top:1px solid #94a3b855; border-bottom:1px solid #94a3b855; font-weight:700; }
+.cmp-v { font-size:10px; font-weight:700; padding:2px 7px; border-radius:3px; }
+.cmp-beat { background:#22c55e22; color:#4ade80; border:1px solid #22c55e44; }
+.cmp-same { background:#eab30822; color:#facc15; border:1px solid #eab30844; }
+.cmp-lose { background:#ef444422; color:#f87171; border:1px solid #ef444444; }
+.cmp-none { background:#ffffff0d; color:var(--text3); border:1px solid var(--border); }
+.cmp-foot { font-size:11.5px; color:var(--text3); margin-top:12px; line-height:1.7; text-align:left;
+  max-width:80ch; margin-left:auto; margin-right:auto; }
 .note { margin-top:30px; font-size:11px; color:var(--text3); text-align:center;
         max-width:56ch; line-height:1.7; }
 .version { margin-top:22px; font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
@@ -72,6 +98,13 @@ body {
 <div class="subtitle">Each tool screens differently and learns from its own history.</div>
 
 <div class="cards" id="cards"></div>
+
+<div class="cmp-wrap">
+  <button class="cmp-btn" id="cmp-btn" onclick="loadComparison()">Compare every screener</button>
+  <div class="cmp-hint">Pulls the scorecard from all nine tools and ranks every screener
+    against <b>Stocks in Play</b> — the plain list that does nothing clever.</div>
+  <div id="cmp-out"></div>
+</div>
 
 <div class="note">
   Every tool runs its own screeners, keeps its own registers and shortlist, and trains
@@ -165,6 +198,104 @@ async function start() {
   setInterval(() => TOOLS.forEach(probe), 30000);
 }
 start();
+
+// ═══════════════ MONTH-END COMPARISON ═══════════════
+// Every tool holds its own scorecard, which is right — they are separate
+// experiments. But the question at the end of the month is a comparison, and
+// answering it by opening nine tabs and reading numbers off each is how the
+// comparison quietly stops being made. So this pulls all of them into one table
+// and does the only sum that matters: did this screener beat the plain list?
+const BENCH_TOOL = 'T9';
+const BENCH_NAME = 'Stocks in Play';
+
+// Beating the benchmark by less than this is not beating it. A month gives a
+// few dozen cards per screener, and a couple of points on a sample that size is
+// noise wearing a verdict's clothes.
+const MARGIN = 5;
+
+async function loadComparison() {
+  const btn = document.getElementById('cmp-btn');
+  const out = document.getElementById('cmp-out');
+  btn.disabled = true;
+  btn.textContent = 'Reading all tools…';
+  out.innerHTML = '';
+
+  const rows = [];
+  let bench = null;
+
+  await Promise.all(TOOLS.map(async t => {
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 6000);
+      const r = await fetch(`${baseFor(t)}/api/analysis/screener-report?entry=B`, { signal: ctl.signal });
+      clearTimeout(timer);
+      const d = await r.json();
+      if (!d.ok) return;
+      for (const s of d.screeners || []) {
+        const row = { tool: t.id, toolName: t.name, accent: t.accent, ...s };
+        rows.push(row);
+        if (t.id === BENCH_TOOL && s.name === BENCH_NAME) bench = row;
+      }
+    } catch { /* a tool that is down simply contributes nothing */ }
+  }));
+
+  btn.disabled = false;
+  btn.textContent = 'Compare every screener';
+
+  if (!rows.length) {
+    out.innerHTML = `<div class="cmp-foot">No captured days yet on any tool. This fills in
+      after the first end-of-day capture — one row per card, per day.</div>`;
+    return;
+  }
+
+  // Judged screeners first, then by hit rate. A screener with too little data
+  // is listed but never ranked above one that has earned its place.
+  rows.sort((a, b) => (a.thin !== b.thin ? (a.thin ? 1 : -1) : (b.goodPct || 0) - (a.goodPct || 0)));
+
+  const verdictFor = s => {
+    if (s.thin) return ['cmp-none', 'not enough data'];
+    if (!bench || bench.thin) return ['cmp-none', 'no benchmark yet'];
+    if (s.name === BENCH_NAME && s.tool === BENCH_TOOL) return ['cmp-none', 'the benchmark'];
+    const edge = (s.goodPct || 0) - (bench.goodPct || 0);
+    if (edge >= MARGIN) return ['cmp-beat', `beats it by ${edge.toFixed(0)} pts`];
+    if (edge <= -MARGIN) return ['cmp-lose', `loses by ${Math.abs(edge).toFixed(0)} pts`];
+    return ['cmp-same', 'no better than plain'];
+  };
+
+  const body = rows.map(s => {
+    const [cls, text] = verdictFor(s);
+    const isBench = s.tool === BENCH_TOOL && s.name === BENCH_NAME;
+    return `<tr class="${isBench ? 'cmp-mark' : ''}">
+      <td>${s.name}</td>
+      <td class="cmp-tool" style="color:${isBench ? '#94a3b8' : s.accent || ''}">${s.tool} ${s.toolName}</td>
+      <td>${s.cards}</td>
+      <td>${s.days}</td>
+      <td>${s.avgUpR ?? '—'}</td>
+      <td>${s.avgDownR ?? '—'}</td>
+      <td>${s.goodPct ?? '—'}%</td>
+      <td>${s.consistency ?? '—'}%</td>
+      <td><span class="cmp-v ${cls}">${text}</span></td>
+    </tr>`;
+  }).join('');
+
+  out.innerHTML = `<div class="cmp-scroll"><table class="cmp-tbl">
+      <tr><th>Screener</th><th>Tool</th><th>Cards</th><th>Days</th><th>Avg R</th>
+          <th>Avg −R</th><th>≥1.3R</th><th>Days hit</th><th>vs plain list</th></tr>
+      ${body}</table></div>
+    <div class="cmp-foot">
+      ${bench && !bench.thin
+        ? `<b>The plain list made a good move ${bench.goodPct}% of the time</b>
+           over ${bench.cards} cards on ${bench.days} days. Everything above is measured against
+           that. A screener has to beat it by ${MARGIN} points to count as beating it — a month
+           gives a few dozen cards each, and two or three points on that sample is noise.`
+        : `<b>No benchmark yet.</b> T9 (Stocks in Play) needs captured days before anything can
+           be compared to it — until then the columns are real but the verdicts are not.`}
+      <br><br>
+      <b>What to do with this:</b> cut everything that loses to the plain list or matches it —
+      those screeners are finding busy stocks the long way round. Keep what beats it, and only
+      then start asking which entry, stop and target suit what each one finds.
+    </div>`;
+}
 </script>
 
 </body>
