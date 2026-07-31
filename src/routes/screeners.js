@@ -17,6 +17,7 @@ router.get('/meta', (req, res) => {
     tool: { id: config.toolId, name: config.toolName, captureAt: config.captureAt },
     fields: store.FIELDS,
     operations: store.OPERATIONS,
+    windowNotes: require('../sideA/seedScreeners').WINDOW_NOTES,
   });
 });
 

@@ -176,6 +176,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .sch-capture { margin-top:11px; padding:9px 11px; border-radius:5px; background:var(--bg3);
   border-left:3px solid #fbbf24; font-size:11.5px; color:var(--text2); line-height:1.6; max-width:78ch; }
 .sch-capture b { color:var(--text); }
+.sch-why, .sb-why { margin-top:8px; font-size:11.5px; color:var(--text2); line-height:1.6; max-width:78ch; }
+.sb-why { padding-top:8px; border-top:1px solid #242938; }
+.sch-why-k, .sb-why-k { display:block; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:#fbbf24; margin-bottom:3px; }
 .sch-legend { font-size:11px; color:var(--text3); margin-top:9px; line-height:1.6; }
 .sb-rule { font:11px ui-monospace,Menlo,monospace; background:var(--bg3); border:1px solid #333a4a;
            border-radius:4px; padding:2px 7px; color:var(--text2); }
@@ -3124,10 +3128,13 @@ function sbRenderSchedule() {
       </div>
     </div>
     ${cap ? `<div class="sch-capture">
-      <b>Learning moment — ${esc(cap.r1)} ET.</b> This tool freezes its cards at ${esc(cap.r1)}
-      and measures how far each one ran from ${esc(cap.entryA)} and ${esc(cap.entryB)}. That single
-      snapshot is the only thing the score model ever learns from, so a stock found after
-      ${esc(cap.r1)} shows on screen and can be traded, but never trains the model.
+      <b>Learning moment — ${esc(cap.r1)} ET.</b> Once a day this tool takes a photo of every card
+      on screen at ${esc(cap.r1)}, then measures how far each one ran from ${esc(cap.entryA)} and
+      ${esc(cap.entryB)}. Photo plus result is one training row — the only thing the score model
+      ever learns from. A stock found after ${esc(cap.r1)} still shows here and can be traded, but
+      it is not in the photo, so it teaches the model nothing.
+      ${cap.why ? `<div class="sch-why"><span class="sch-why-k">Why ${esc(cap.r1)} for this tool</span>
+        ${esc(cap.why)}</div>` : ''}
     </div>` : ''}
     <div class="sch-legend">
       <span style="color:#4ade80">│</span> 09:30 market open
@@ -3135,6 +3142,12 @@ function sbRenderSchedule() {
       &nbsp;·&nbsp; times are Eastern
     </div>
   </div>`;
+}
+
+// Only the screeners this tool ships with carry a stated reason. One the trader
+// built has none, which is right — they chose its window themselves.
+function sbWindowNote(s) {
+  return (SB_META && SB_META.windowNotes && SB_META.windowNotes[s.key]) || null;
 }
 
 function sbRenderList() {
@@ -3164,6 +3177,9 @@ function sbRenderList() {
         </div>
       </div>
       <div class="sb-rules">${s.filters.map(f => `<span class="sb-rule">${esc(sbRuleText(f))}</span>`).join('')}</div>
+      ${sbWindowNote(s) ? `<div class="sb-why">
+        <span class="sb-why-k">${s.runFrom ? `Why ${esc(s.runFrom)}–${esc(s.runTo)}` : 'Why no window'}</span>
+        ${esc(sbWindowNote(s))}</div>` : ''}
     </div>`).join('');
 }
 

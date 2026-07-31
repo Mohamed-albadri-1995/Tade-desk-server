@@ -137,7 +137,16 @@ describe('every tool can actually train', () => {
   });
 
   test('T1 keeps the original capture times, so its history stays comparable', () => {
-    expect(capOf('T1')).toEqual({ r1: '09:36', entryA: '09:37', entryB: '09:40' });
+    const { r1, entryA, entryB } = capOf('T1');
+    expect({ r1, entryA, entryB }).toEqual({ r1: '09:36', entryA: '09:37', entryB: '09:40' });
+  });
+
+  test('every tool states why its times were chosen', () => {
+    // A time with no stated reason is a number the trader has to take on trust.
+    for (const t of registry) {
+      expect({ id: t.id, hasWhy: typeof t.captureAt.why === 'string' && t.captureAt.why.length > 40 })
+        .toEqual({ id: t.id, hasWhy: true });
+    }
   });
 
   test('r1 lands one minute after a discovery scan, never on top of one', () => {
@@ -165,5 +174,24 @@ describe('every tool can actually train', () => {
       expect({ id: t.id, ok: entryA >= '09:30' && entryB <= '16:00' })
         .toEqual({ id: t.id, ok: true });
     }
+  });
+});
+
+describe('the tool explains its own schedule', () => {
+  const { WINDOW_NOTES, PRESETS: P } = require('../src/sideA/seedScreeners');
+  const store2 = require('../src/sideA/screenerStore');
+
+  test('every seeded screener, mirrors included, states why it runs when it does', () => {
+    for (const [id, defs] of Object.entries(P)) {
+      for (const d of defs) {
+        const key = store2.slugify(d.key || d.name);
+        expect({ id, key, explained: typeof WINDOW_NOTES[key] === 'string' })
+          .toEqual({ id, key, explained: true });
+      }
+    }
+  });
+
+  test('a screener the trader builds has no canned reason — they chose it', () => {
+    expect(WINDOW_NOTES['something-i-made-up']).toBeUndefined();
   });
 });

@@ -191,7 +191,37 @@ const AFTER_OPEN_VOLUME = {
   ],
 };
 
-const pair = base => [base, store.mirrorDefinition(base)];
+// Why each seeded screener runs when it does, in the trader's terms rather
+// than the code's. Served to the Screeners tab so the schedule explains itself
+// on screen — the reasoning is worth nothing sitting in a comment nobody with
+// the tool open can read. Keyed by screener key; a screener the trader builds
+// has no entry, which is correct — they chose its window.
+const WINDOW_NOTES = {
+  trend: 'No window. T1 is the control the other tools are compared against, so it is left exactly as it always ran.',
+  premarket: 'No window, deliberately. Its filters say pre-market only, but the Big Move + Pre-Mkt overlap is read off the cards frozen at 09:36 — a window would stop it running in the 09:30–09:36 scans and delete that measurement.',
+  bigmoves: 'No window. Relative volume means something at any hour, and T1 stays the control.',
+
+  'ma-stack-breakout': 'Regular session only. The daily MA stack barely moves intraday, so what is really being timed is the break — and a break on pre-market liquidity is not a break. Stops at 15:00 because one in the last hour leaves no session to work with.',
+  'gap-and-volume': 'Pre-market and the first hour. Built on premarket_change and premarket_volume, which stop moving at the bell — left running all day it would re-report the same names until the close and none of it would be new.',
+  'vwap-reclaim': 'The one that stays awake into the afternoon, because a reclaim is a reversal and those come late. Starts at 09:45 rather than the bell: VWAP off the first few prints is not yet a level anything is reclaiming. Stops at 15:30, when a reclaim has no session left to resolve in.',
+  '52w-break': 'The whole regular session. These break on institutional flow, which arrives at any hour and often late in the day. Pre-market is excluded on purpose — a 52-week high printed on a handful of thin shares is not a break.',
+  overextended: 'Waits until 10:00. At the open RSI still describes yesterday; extension is something the session builds. Then runs to the close, because a stock can be stretched at any hour and the fade is the trade.',
+
+  'premarket-gap': 'Pre-market only, by definition — it is looking for the gap before the market opens on it.',
+  'after-open-volume': 'Regular session only. It wants volume that has actually traded today, which does not exist before the bell.',
+};
+
+// A mirror runs in its base's window, so it inherits the reason too. Its key is
+// whatever slugifying the mirror's NAME produces — "Gap + Volume (mirror)"
+// becomes "gap-volume-mirror", not "gap-and-volume-mirror" — so the key comes
+// from the definition rather than from appending a suffix by hand.
+const pair = base => {
+  const mirror = store.mirrorDefinition(base);
+  const baseKey = store.slugify(base.key || base.name);
+  const note = WINDOW_NOTES[baseKey];
+  if (note) WINDOW_NOTES[store.slugify(mirror.key || mirror.name)] = note;
+  return [base, mirror];
+};
 
 const T2 = pair(T2_BASE);
 const T3 = pair(T3_BASE);
@@ -311,5 +341,6 @@ function seedScreeners() {
 
 module.exports = {
   seedScreeners, renameLegacyScreeners, applyDefaultWindows, repairOversoldMirror,
+  WINDOW_NOTES,
   PRESETS: BY_TOOL, SESSION_SCREENERS,
 };

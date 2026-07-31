@@ -81,7 +81,10 @@ const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 function readCapture(entry) {
   const from = (entry && entry.captureAt) || {};
-  const out = { ...DEFAULT_CAPTURE };
+  // The reasoning travels with the times. A time with no stated reason is a
+  // number someone has to take on trust, and the trader reading the schedule is
+  // the one who has to decide whether it is right for how they trade.
+  const out = { ...DEFAULT_CAPTURE, why: from.why || null };
   for (const k of ['r1', 'entryA', 'entryB']) {
     const v = process.env[`CAPTURE_${k.toUpperCase()}`] || from[k];
     if (!v) continue;
