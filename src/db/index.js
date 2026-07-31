@@ -122,6 +122,35 @@ db.exec(`
   );
 `);
 
+// ── column migrations ──────────────────────────────────────────────────────
+// CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so a
+// column added to the schema above never reaches a database created before it.
+// The tools deployed earliest are the ones that miss out, which is exactly
+// backwards: they hold the most history and are the most expensive to rebuild.
+//
+// This crashed T2 and T3 on every start — a screeners table with no run_from,
+// and code that had started reading it.
+function ensureColumns(table, columns) {
+  let existing;
+  try {
+    existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+  } catch {
+    return;                       // table not there at all; the schema owns it
+  }
+  for (const [name, decl] of Object.entries(columns)) {
+    if (existing.has(name)) continue;
+    try {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${decl}`);
+      console.log(`[DB] added missing column ${table}.${name}`);
+    } catch (err) {
+      console.warn(`[DB] could not add ${table}.${name}: ${err.message}`);
+    }
+  }
+}
+
+// Run windows, added after the first tools were already running.
+ensureColumns('screeners', { run_from: 'TEXT', run_to: 'TEXT' });
+
 // Default settings
 const defaults = [
   ['hotImmediateThreshold', '60'],
