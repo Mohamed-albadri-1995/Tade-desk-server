@@ -12,6 +12,11 @@ const { refreshStaleInR0 } = require('./sideG/staleFetch');
 const { toETDate } = require('./utils/time');
 const { scoreAllRows } = require('./sideE/score');
 
+const config = require('./config');
+
+// The tool whose screeners define CANSLIM membership. Everything else reads.
+const CANSLIM_TOOL = 'T8';
+
 const scanStatus = {
   lastRun: null,
   lastRefresh: null,
@@ -88,6 +93,24 @@ async function runFullScan() {
     await stageWrap(report, 'sideB', async () => {
       withDerived = applyDerivedFields(merged);
       return { rowCount: withDerived.length };
+    })();
+
+    // CANSLIM cross-tag (non-fatal). The tool that runs the CANSLIM screeners
+    // publishes its matches; every tool reads that list and tags any of its own
+    // candidates that appear on it. A label only — nothing here changes which
+    // stocks were found, so one tool still cannot influence another's results.
+    await stageWrapSoft(report, 'canslim', async () => {
+      const canslim = require('./sideA/canslim');
+      if (config.toolId === CANSLIM_TOOL) {
+        const matched = merged
+          .filter(r => (r.screenerKeys || []).some(k => /canslim/i.test(k)))
+          .map(r => r.ticker);
+        const res = canslim.recordMembers(matched);
+        canslim.tagRows(withDerived);
+        return { published: matched.length, members: res.total, expired: res.expired };
+      }
+      const { tagged, memberCount } = canslim.tagRows(withDerived);
+      return { tagged, memberCount };
     })();
 
     // Side D: Market Context (non-fatal)

@@ -98,6 +98,20 @@
         "entryB": "09:40",
         "why": "The pre-market screener is what feeds training here, and its candidates are all in by the bell — so the photo goes at 09:36. The after-open screener finds tradable stocks all day, but they arrive after the photo and do not train the model."
       }
+    },
+    {
+      "id": "T8",
+      "name": "CANSLIM",
+      "port": 3070,
+      "scorerPort": 3071,
+      "accent": "#c084fc",
+      "desc": "O'Neil growth criteria: earnings accelerating, at a 52-week high, leading the market. Its names are tagged wherever else they appear.",
+      "captureAt": {
+        "r1": "09:46",
+        "entryA": "09:47",
+        "entryB": "09:51",
+        "why": "CANSLIM names are position candidates rather than day trades, so the exact minute matters less here than anywhere else. It shares T2's timing — fifteen minutes past the open, once the first spike has settled — so the two breakout tools stay directly comparable."
+      }
     }
   ]
 }

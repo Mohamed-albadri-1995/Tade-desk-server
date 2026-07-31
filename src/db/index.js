@@ -46,6 +46,8 @@ db.exec(`
     atr14 REAL,
     up_r_a REAL,
     down_r_a REAL,
+    or_high REAL,
+    or_low REAL,
     captured_at INTEGER NOT NULL,
     PRIMARY KEY (date, ticker)
   );
@@ -59,6 +61,8 @@ db.exec(`
     atr14 REAL,
     up_r_b REAL,
     down_r_b REAL,
+    or_high REAL,
+    or_low REAL,
     captured_at INTEGER NOT NULL,
     PRIMARY KEY (date, ticker)
   );
@@ -150,6 +154,13 @@ function ensureColumns(table, columns) {
 
 // Run windows, added after the first tools were already running.
 ensureColumns('screeners', { run_from: 'TEXT', run_to: 'TEXT' });
+
+// The 09:30–09:35 opening range. Free to capture — the 1-minute bars are
+// already fetched for the outcome maths — and it is the trigger level for the
+// one day-trading setup with published evidence behind it, so not recording it
+// would mean a month of data that cannot answer the question afterwards.
+ensureColumns('r3a', { or_high: 'REAL', or_low: 'REAL' });
+ensureColumns('r3b', { or_high: 'REAL', or_low: 'REAL' });
 
 // Default settings
 const defaults = [

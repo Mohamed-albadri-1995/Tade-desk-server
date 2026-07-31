@@ -81,7 +81,21 @@ const FIELDS = [
   { value: 'ATR',                         label: 'ATR',                      kind: 'number' },
   { value: 'Perf.W',                      label: 'Performance week %',       kind: 'number' },
   { value: 'Perf.1M',                     label: 'Performance month %',      kind: 'number' },
+  { value: 'Perf.3M',                     label: 'Performance 3-month %',    kind: 'number' },
+  { value: 'Perf.6M',                     label: 'Performance 6-month %',    kind: 'number' },
+  { value: 'Perf.Y',                      label: 'Performance 1-year %',     kind: 'number' },
   { value: 'RSI',                         label: 'RSI',                      kind: 'number' },
+  // Fundamentals — added for CANSLIM. TradingView ignores filters on column
+  // names it does not recognise (ignore_unknown_fields), so a typo here would
+  // not error, it would silently widen the screener. Verify with
+  // `node scripts/verify-tv-fields.js` on a machine that can reach TradingView.
+  { value: 'earnings_per_share_diluted_yoy_growth_fq',  label: 'EPS growth, latest quarter YoY %', kind: 'number' },
+  { value: 'earnings_per_share_diluted_yoy_growth_fy',  label: 'EPS growth, last year YoY %',      kind: 'number' },
+  { value: 'earnings_per_share_diluted_yoy_growth_ttm', label: 'EPS growth, trailing 12m YoY %',   kind: 'number' },
+  { value: 'total_revenue_yoy_growth_fq',               label: 'Revenue growth, latest quarter YoY %', kind: 'number' },
+  { value: 'total_revenue_yoy_growth_ttm',              label: 'Revenue growth, trailing 12m YoY %',   kind: 'number' },
+  { value: 'return_on_equity',                          label: 'Return on equity %',               kind: 'number' },
+  { value: 'total_shares_outstanding_fundamental',      label: 'Shares outstanding',               kind: 'number' },
   { value: 'sector',                      label: 'Sector',                   kind: 'string' },
   { value: 'exchange',                    label: 'Exchange',                 kind: 'string' },
 ];

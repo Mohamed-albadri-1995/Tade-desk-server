@@ -3,7 +3,7 @@
 What each tool hunts for, why its filters are what they are, and how it is
 measured. One file, kept next to the code it describes.
 
-Seven tools run the same software against different screeners. Each has its own
+Eight tools run the same software against different screeners. Each has its own
 database, its own model and its own training history — nothing is shared, so
 one tool's results cannot contaminate another's.
 
@@ -49,6 +49,12 @@ downR = (entry − ll) / ATR14      how far it went against you first
 Both are positive numbers. ATR14 is built from daily bars **strictly before
 today**, so nothing looks ahead. Bars are regular session only — pre-market and
 after-hours spikes cannot inflate a result.
+
+The **opening range** (09:30–09:35 high and low) is recorded for every card on
+every tool, whether or not that tool trades it. The bars are already fetched, and
+those two levels are the trigger for the one day-trading setup with published
+evidence behind it — a month of data collected without them could not be asked
+the question afterwards.
 
 A **good move** is `upR ≥ 1.3`. The same threshold the model calls a win, so the
 scorecard and the model are not grading on different curves.
@@ -340,6 +346,62 @@ participation has shown up.
 feeds training here — its candidates are all in by the bell. The after-open
 screener finds tradable stocks all day, but they arrive after the photo and do
 not train the model.
+
+---
+
+## T8 — CANSLIM · port 3070
+
+**Looking for:** O'Neil's growth criteria — a profitable, accelerating company
+at a new high while leading the market. Deliberately slow: a handful of names
+that stay interesting for months, not a daily hunt.
+
+```
+earnings_per_share_diluted_yoy_growth_fq ≥ 25     C — latest quarter, YoY
+earnings_per_share_diluted_yoy_growth_fy ≥ 25     A — and not a one-quarter accident
+total_revenue_yoy_growth_fq ≥ 15                  sales behind the earnings
+close ≥ price_52_week_high                        N — at or through the 52-week high
+Perf.6M > 30                                      L — leading
+relative_volume_10d_calc > 1.5                    S — demand showing up today
+total_shares_outstanding_fundamental < 1B         S — a cap on supply
+market_cap_basic > $300M                          institutions cannot buy what does not trade
+```
+
+**Second screener — CANSLIM Pullback.** Same company quality, but back at its
+50-day rather than breaking out: `close ≥ SMA50` and `close ≤ EMA20`. O'Neil
+buys breakouts; the pullback is where the same name is usually cheaper. It is
+not a mirror — the mirror of a growth screener would be a collapsing company,
+which is not what this tool is for.
+
+### What CANSLIM cannot be, honestly
+
+| Letter | Status |
+|---|---|
+| **I** — institutional sponsorship | **Left out.** There is no dependable screener column for it. Faking it with something that merely sounds similar would be worse than its absence. |
+| **M** — market in an uptrend | **Not a filter, on purpose.** It describes the whole market, not a stock. The regime engine already stamps it on every card; filtering on it here would hide candidates on weak days — exactly the days worth recording for the comparison later. |
+| **L** — leader | **The weak link.** O'Neil's RS Rating is a percentile rank against every other stock, which a screener cannot compute. Six-month performance is a plain threshold, so a strong market lets more names through and a weak one fewer. It measures strength, not leadership. |
+
+### The cross-tag
+
+CANSLIM matches are written to a shared list every other tool reads. When one of
+those names turns up in an unrelated screener — a VWAP reclaim, a gap, a big
+volume day — the card is tagged **★ CANSLIM** with how many days it has held its
+place on the list.
+
+Membership lasts **90 days** from the last time a name qualified, so it does not
+drop off the day it stops printing a new high. Re-qualifying extends it without
+resetting its age.
+
+This is the only place tools see each other, and the shape of it matters: the
+list is a **label, never a filter**. Reading it cannot add or remove a single
+candidate from any screener, and a tool that cannot find or parse the file
+scans normally with no tags. The isolation that matters — one tool's data never
+deciding another tool's candidates — is intact.
+
+`canslim` also travels into the registers as a yes/no field, so the model can
+learn from it and the scorecard can be sliced by it.
+
+**Capture:** photo 09:46, entries 09:47 / 09:51 — the same timing as T2, so the
+two breakout tools stay directly comparable.
 
 ---
 

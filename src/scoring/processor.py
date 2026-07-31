@@ -22,7 +22,7 @@ IDENTIFIER_COLS = ['ticker', 'date', 'capturedAt']
 
 CATEGORICAL_COLS = [
     'sector', 'industry', 'regime', 'regimeLabel', 'secBias',
-    'themes', 'catalyst', 'screenerKeys', 'longTerm', 'midTerm',
+    'themes', 'catalyst', 'canslim', 'screenerKeys', 'longTerm', 'midTerm',
     'shortTerm', 'broadResolved', 'inShortlist', 'bias',
     # relational signals (Side B): price vs each level, MA stack,
     # month-range quarter, pre-market band. Unit-free, so they compare

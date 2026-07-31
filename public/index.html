@@ -128,6 +128,9 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .badge-premarket { background: #a78bfa20; color: #c4b5fd; border: 1px solid #a78bfa40; }
 .badge-bigmove { background: #f9731620; color: #fb923c; border: 1px solid #f9731640; }
 /* screener badge: colour comes from the screener's name, set inline */
+.badge-canslim { background:#c084fc1f; color:#d8b4fe; border:1px solid #c084fc55;
+  text-transform:none; letter-spacing:0; }
+.badge-canslim b { font-weight:700; opacity:.8; }
 .badge-scr { background: #ffffff08; border: 1px solid; text-transform: none; letter-spacing: 0; }
 .badge-scr b { font-weight: 700; opacity: .85; margin-left: 2px; font-variant-numeric: tabular-nums; }
 /* a screener that matched earlier today but is not matching right now */
@@ -2378,6 +2381,14 @@ function buildCard(row) {
       s.at ? ` <b>${fmtET24(s.at)}</b>` : ''}</span>`;
   }).join('');
   const hotBadge = ctx.secHot ? '<span class="badge badge-hot">🔥 HOT</span>' : '';
+  // A CANSLIM name showing up in an unrelated screener is worth knowing at the
+  // moment it appears, not at the end of the month. The days count is the point
+  // of it — how long the name has held its place on that list.
+  const canslimBadge = row.canslim === 'yes'
+    ? `<span class="badge badge-canslim" title="On the CANSLIM list${
+        row.canslimDays != null ? ` for ${row.canslimDays} day(s)` : ''}">★ CANSLIM${
+        row.canslimDays != null ? ` <b>${row.canslimDays}d</b>` : ''}</span>`
+    : '';
   const signalTags = buildSignalTags(row.signals);
   const catalystBadge = catalyst ? catalystBadgeHTML(catalyst) : '';
 
@@ -2495,7 +2506,7 @@ function buildCard(row) {
   </div>
 
   <div class="card-badges">
-    ${badges}${hotBadge}${catalystBadge}
+    ${canslimBadge}${badges}${hotBadge}${catalystBadge}
   </div>
   ${signalTags}
 
@@ -2918,12 +2929,12 @@ async function loadWarehouse() {
 }
 
 const WH_COLS = {
-  r0: ['ticker','date','liveNow','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','lastUpdated'],
-  r1: ['ticker','date','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','capturedAt'],
+  r0: ['ticker','date','liveNow','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','canslim','lastUpdated'],
+  r1: ['ticker','date','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','canslim','capturedAt'],
   r3a: ['date','ticker','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
   r3b: ['date','ticker','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
-  r4a: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
-  r4b: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
+  r4a: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','canslim','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
+  r4b: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','canslim','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
   shortlist: ['date','ticker','tvSymbol','addedAt','method','price','change','sector','score','exported','exportedAt'],
 };
 

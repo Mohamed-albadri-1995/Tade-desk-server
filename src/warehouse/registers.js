@@ -106,6 +106,7 @@ function getRegisterData(register, date) {
         ...signalCols(row),
         // catalyst & news summary
         catalyst: row.catalyst?.label || null,
+        canslim: row.canslim || 'no',
         lastUpdated: row.lastUpdated,
       }));
     }
@@ -165,6 +166,7 @@ function getRegisterData(register, date) {
           bias: d.bias || 'auto',
           ...signalCols(d),
           catalyst: d.catalyst?.label || null,
+          canslim: d.canslim || 'no',
           capturedAt: row.captured_at,
         };
       });
@@ -324,6 +326,7 @@ function getRegisterData(register, date) {
           bias: d1.bias || 'auto',
           ...signalCols(d1),
           catalyst: d1.catalyst?.label || null,
+          canslim: d1.canslim || 'no',
           // R3A EOD fields
           entryPriceA: r3a.entry_price_a,
           hhA: r3a.hh_a,
@@ -394,6 +397,7 @@ function getRegisterData(register, date) {
           bias: d1.bias || 'auto',
           ...signalCols(d1),
           catalyst: d1.catalyst?.label || null,
+          canslim: d1.canslim || 'no',
           // R3B EOD fields
           entryPriceB: r3b.entry_price_b,
           hhB: r3b.hh_b,

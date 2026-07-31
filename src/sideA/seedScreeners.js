@@ -163,6 +163,75 @@ const T6_BASE = {
   ],
 };
 
+// CANSLIM — O'Neil's growth-stock criteria, as far as a screener can express
+// them. Deliberately slow: a few names that stay interesting for months, not a
+// daily hunt. Each letter, and what it can honestly be:
+//
+//   C  Current quarterly earnings up sharply → EPS growth, latest quarter YoY
+//   A  Annual earnings growing              → EPS growth, last full year YoY
+//   N  New high                             → at or through the 52-week high
+//   S  Supply and demand                    → volume surge against a supply cap
+//   L  Leader, not laggard                  → 6-month performance as an RS proxy
+//   I  Institutional sponsorship            → NOT AVAILABLE, left out
+//   M  Market in an uptrend                 → NOT a filter, see below
+//
+// I has no dependable screener column, so it is omitted rather than faked with
+// something that merely sounds similar. M is a statement about the whole market
+// rather than about a stock: the regime engine already stamps it on every card,
+// and filtering on it here would only hide candidates on weak days — exactly
+// the days worth recording for the comparison later.
+//
+// The L proxy is the weak link and worth being explicit about. O'Neil's RS
+// Rating is a percentile rank against every other stock, which a screener
+// cannot compute. Six-month performance is a plain threshold, so a strong
+// market lets more names through and a weak one fewer. It measures strength,
+// not leadership.
+const CANSLIM_BASE = {
+  key: 'canslim', name: 'CANSLIM',
+  runFrom: '09:30', runTo: '16:00',
+  limit: 50,
+  sort: { sortBy: 'Perf.6M', sortOrder: 'desc' },
+  filters: [
+    // C — the current quarter
+    { left: 'earnings_per_share_diluted_yoy_growth_fq', operation: 'egreater', right: 25 },
+    // A — and not a one-quarter accident
+    { left: 'earnings_per_share_diluted_yoy_growth_fy', operation: 'egreater', right: 25 },
+    // sales behind the earnings, so the growth is not only cost-cutting
+    { left: 'total_revenue_yoy_growth_fq', operation: 'egreater', right: 15 },
+    // N — at or through the 52-week high
+    { left: 'close', operation: 'egreater', right: 'price_52_week_high' },
+    // L — leading, by the only measure available
+    { left: 'Perf.6M', operation: 'greater', right: 30 },
+    // S — demand showing up today, against a cap on supply
+    { left: 'relative_volume_10d_calc', operation: 'greater', right: 1.5 },
+    { left: 'total_shares_outstanding_fundamental', operation: 'less', right: 1000000000 },
+    // institutions cannot buy what does not trade
+    { left: 'market_cap_basic', operation: 'greater', right: 300000000 },
+  ],
+};
+
+// The same company, still growing, pulling back to its 50-day rather than
+// breaking out. O'Neil buys breakouts; the pullback is where the same name is
+// usually cheaper. Kept as a second screener rather than a mirror — the mirror
+// of a growth screener would be a collapsing company, which is not a setup this
+// tool is for.
+const CANSLIM_PULLBACK = {
+  key: 'canslim-pullback', name: 'CANSLIM Pullback',
+  runFrom: '09:30', runTo: '16:00',
+  limit: 50,
+  sort: { sortBy: 'Perf.6M', sortOrder: 'desc' },
+  filters: [
+    { left: 'earnings_per_share_diluted_yoy_growth_fq', operation: 'egreater', right: 25 },
+    { left: 'earnings_per_share_diluted_yoy_growth_fy', operation: 'egreater', right: 25 },
+    { left: 'Perf.6M', operation: 'greater', right: 30 },
+    // still in the uptrend...
+    { left: 'close', operation: 'egreater', right: 'SMA50' },
+    // ...but back near the line rather than extended away from it
+    { left: 'close', operation: 'eless', right: 'EMA20' },
+    { left: 'market_cap_basic', operation: 'greater', right: 300000000 },
+  ],
+};
+
 // Two screeners split by session. Each carries the session it was designed for:
 // the first only runs before the open, the second only after it — running
 // either outside its session would collect rows describing a setup it never
@@ -207,6 +276,9 @@ const WINDOW_NOTES = {
   '52w-break': 'The whole regular session. These break on institutional flow, which arrives at any hour and often late in the day. Pre-market is excluded on purpose — a 52-week high printed on a handful of thin shares is not a break.',
   overextended: 'Waits until 10:00. At the open RSI still describes yesterday; extension is something the session builds. Then runs to the close, because a stock can be stretched at any hour and the fade is the trade.',
 
+  canslim: 'Regular session only. This is a months-long list rather than a daily hunt: the fundamental filters barely move intraday, and the new-high and volume conditions only mean something while the market is open.',
+  'canslim-pullback': 'Regular session only, same reason as the breakout screener it accompanies.',
+
   'premarket-gap': 'Pre-market only, by definition — it is looking for the gap before the market opens on it.',
   'after-open-volume': 'Regular session only. It wants volume that has actually traded today, which does not exist before the bell.',
 };
@@ -234,7 +306,12 @@ const T6 = pair(T6_BASE);
 // stock lands in one or the other rather than both.
 const T7 = [PREMARKET_GAP, AFTER_OPEN_VOLUME];
 
-const BY_TOOL = { T1, T2, T3, T4, T5, T6, T7 };
+// T8 is the CANSLIM tool. Its matches are also written to a shared member list
+// that every other tool reads, so a CANSLIM name turning up in an unrelated
+// screener is tagged there — see canslim.js.
+const T8 = [CANSLIM_BASE, CANSLIM_PULLBACK];
+
+const BY_TOOL = { T1, T2, T3, T4, T5, T6, T7, T8 };
 
 // Available to add to any tool from the builder.
 const SESSION_SCREENERS = [PREMARKET_GAP, AFTER_OPEN_VOLUME];
