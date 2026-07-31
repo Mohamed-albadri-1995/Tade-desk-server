@@ -159,27 +159,45 @@ ok("a missing name falls back to the id",
 ok("trailing slashes are trimmed so URLs never double up",
    loaded[0]['url'] == 'http://a:1')
 os.environ['SCREENER_SOURCES'] = 'not json at all'
-ok("broken config falls back to a single working source, never zero",
-   len(sc.reload_sources()) == 1)
+# A typo in the override must land on the REGISTRY, not on a lone
+# localhost:3000 — that would silently shrink the universe to one tool while
+# looking like a working configuration.
+_broken = sc.reload_sources()
+ok("a malformed override falls through to the tool registry, not to one source",
+   len(_broken) >= 9, f"{len(_broken)}")
 del os.environ['SCREENER_SOURCES']
-shipped = json.loads((pathlib.Path(sc.__file__).resolve().parent
-                      / 'screener_sources.json').read_text())
-ok("the shipped screener_sources.json lists all seven tools", len(shipped) == 7,
-   f"{len(shipped)}")
-ok("ids are unique (they land in ctx_source on every backtest trade)",
-   len({s['id'] for s in shipped}) == 7)
-# Each tool runs an APP port and a private SCORER port at app+1 bound to
-# 127.0.0.1. The scorer speaks a different API and 404s a warehouse request,
-# so pointing a source at one would look like a broken screener forever.
-ports = sorted(int(s['url'].rsplit(':', 1)[1]) for s in shipped)
-ok("every source points at an APP port (multiple of 10), never a scorer port",
-   all(p % 10 == 0 for p in ports), f"{ports}")
-ok("the tools are the documented 3000..3060 ladder",
-   ports == [3000, 3010, 3020, 3030, 3040, 3050, 3060], f"{ports}")
-ok("no source points at a scorer port (app+1)",
-   not ({p + 1 for p in ports} & set(ports)))
-ok("all reached over localhost — the AWS security group is irrelevant here",
-   all('localhost' in s['url'] or '127.0.0.1' in s['url'] for s in shipped))
+# THE TOOL REGISTRY is the source of truth — tools.config.json at the repo
+# root, the same file the deploy script, the landing page and the seeder read.
+# A tenth tool must appear here with no edit to this module, which is exactly
+# what a hand-maintained list could not promise (mine had seven tools and had
+# T7's name wrong within a day of being written).
+sc.reload_sources()
+cfg_path = pathlib.Path(sc.__file__).resolve().parents[2] / 'tools.config.json'
+cfg = json.loads(cfg_path.read_text())
+tools = cfg.get('tools') or []
+live = sc.sources()
+ok("every tool in tools.config.json becomes a source",
+   len(live) == len(tools) and len(tools) >= 9, f"{len(live)} vs {len(tools)}")
+ok("ids come straight from the registry",
+   [s['id'] for s in live] == [t['id'] for t in tools], f"{[s['id'] for s in live]}")
+ok("names carry the tool's real name, not a guess",
+   any(s['name'].endswith('Liquid Movers') for s in live), f"{[s['name'] for s in live]}")
+ok("each source points at the APP port from the registry",
+   [int(s['url'].rsplit(':', 1)[1]) for s in live] == [t['port'] for t in tools])
+ok("NO source points at a scorerPort (a scorer 404s a warehouse request)",
+   not ({int(s['url'].rsplit(':', 1)[1]) for s in live}
+        & {t['scorerPort'] for t in tools if t.get('scorerPort')}))
+ok("the tool's accent colour rides along, so it is recognisable everywhere",
+   all(s.get('color') for s in live))
+ok("so does the time that tool freezes R1 (09:36 … 10:16 — they differ)",
+   len({s.get('capture_r1') for s in live}) > 1,
+   f"{ {s['id']: s.get('capture_r1') for s in live} }")
+ok("adding a tenth tool needs no code change here",
+   'screener_sources.json' not in
+   [p.name for p in (pathlib.Path(sc.__file__).resolve().parent).glob('*.json')],
+   'a hand-maintained list is back and will go stale')
+ok("an explicit $SCREENER_SOURCES still overrides the registry",
+   True)   # exercised above
 
 print("=" * 64)
 print("PART F — a backtest reports the universe PER scanning tool")

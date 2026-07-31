@@ -1,9 +1,0 @@
-[
-  {"id": "screener",  "name": "T1 Screener",      "url": "http://localhost:3000"},
-  {"id": "momentum",  "name": "T2 Momentum",      "url": "http://localhost:3010"},
-  {"id": "gappers",   "name": "T3 Gappers",       "url": "http://localhost:3020"},
-  {"id": "vwap",      "name": "T4 VWAP Reclaim",  "url": "http://localhost:3030"},
-  {"id": "wk52",      "name": "T5 52-Week Break", "url": "http://localhost:3040"},
-  {"id": "overext",   "name": "T6 Overextended",  "url": "http://localhost:3050"},
-  {"id": "sessions",  "name": "T7 Sessions",      "url": "http://localhost:3060"}
-]
