@@ -164,6 +164,22 @@ catch (e) { ok('_syncViewportHeight() runs', false, e.message); }
 ok('an open drawer reserves its height instead of covering the chart',
    /body\.drawer-open main \{ padding-bottom/.test(html));
 
+// STALE SHELL. Mobile Chrome caches the HTML document and a phone has no easy
+// hard-refresh, so after a deploy the browser kept serving the previous page —
+// the multi-source register picker was simply absent, which reads as a broken
+// feature rather than an old page. The server sends no-store; the page also
+// checks its own hash against the one the server reports.
+ok('the page fetches health with cache:no-store',
+   /fetch\('\/api\/health',\s*\{\s*cache:\s*'no-store'\s*\}\)/.test(html));
+ok('it compares its own hash with the server-reported one',
+   /crypto\.subtle\.digest\('SHA-256'/.test(html) && /mine!==h\.ui/.test(html));
+ok('a stale page is announced, not left to be discovered',
+   /STALE PAGE/.test(html) && /CACHED page from before the last deploy/.test(html));
+// and the register picker is genuinely built from the server's source list
+ok('the register picker is filled from /api/screener/sources, not hardcoded',
+   /fillRegPicker\(document\.getElementById\('regReg'\)/.test(html));
+ok('the old hardcoded "R1 (all)" label is gone', !/R1 \(all\)/.test(html));
+
 console.log('\n' + '='.repeat(64));
 console.log('RESULT  PASS=' + PASS + '  FAIL=' + FAIL);
 console.log('='.repeat(64));

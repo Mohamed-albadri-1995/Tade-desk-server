@@ -531,8 +531,26 @@ function toggleLive(){
 }
 
 async function initHealth(){
-  try{ const h=await (await fetch('/api/health')).json();
-    document.getElementById('build').textContent='build '+(h.build||'?');
+  try{ const h=await (await fetch('/api/health',{cache:'no-store'})).json();
+    // STALE-SHELL DETECTOR. The server hashes the index.html it serves; this
+    // page hashes itself. If they differ, the browser is running a CACHED
+    // copy from before the last deploy — which looks exactly like a missing
+    // feature, and cost a round trip of "where did my scanners go?".
+    let mine='';
+    try{
+      const txt=await (await fetch(location.pathname||'/',{cache:'reload'})).text();
+      const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(txt));
+      mine=[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,8);
+    }catch(_){}
+    const stale = mine && h.ui && mine!==h.ui;
+    document.getElementById('build').textContent='build '+(h.build||'?')
+      +(stale?' · STALE PAGE':'');
+    if(stale){
+      document.getElementById('build').style.color='#f59e0b';
+      banner('You are viewing a CACHED page from before the last deploy — new '
+            +'controls will be missing. Pull down to refresh, or close this tab '
+            +'and reopen '+location.host+'. (page '+mine+' vs server '+h.ui+')');
+    }
     FEEDS=h.feeds||{};
     for(const id of ['feed','btFeed']){
       const sel=document.getElementById(id);

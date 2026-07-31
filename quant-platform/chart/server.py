@@ -54,12 +54,35 @@ except Exception:          # never let a seed problem stop the server
 
 @app.get('/', response_class=HTMLResponse)
 def index():
-    return (_STATIC / 'index.html').read_text()
+    """The app shell. NEVER cached.
+
+    Mobile Chrome caches an HTML document aggressively and there is no
+    convenient hard-refresh on a phone, so after a deploy the browser kept
+    rendering the PREVIOUS page — new controls simply absent, which reads as
+    "the feature is broken" rather than "you are looking at last week's HTML".
+    no-store forces a fetch every load; the page carries its own file
+    fingerprint (see /api/health `ui`) so a stale shell can always be proven
+    rather than argued about.
+    """
+    html = (_STATIC / 'index.html').read_text()
+    return HTMLResponse(html, headers={
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma': 'no-cache', 'Expires': '0'})
+
+
+def _ui_fingerprint() -> str:
+    """Short hash of the served index.html — proves which UI a browser has."""
+    import hashlib
+    try:
+        return hashlib.sha256((_STATIC / 'index.html').read_bytes()).hexdigest()[:8]
+    except OSError:
+        return '????????'
 
 
 @app.get('/api/health')
 def health():
-    return {'ok': True, 'build': cs._BUILD, 'primitives': len(cs.REGISTRY),
+    return {'ok': True, 'build': cs._BUILD, 'ui': _ui_fingerprint(),
+            'primitives': len(cs.REGISTRY),
             **cs._feed_status()}
 
 
