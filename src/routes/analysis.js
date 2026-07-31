@@ -133,6 +133,18 @@ router.post('/upload-csv', upload.single('file'), (req, res) => {
   }
 });
 
+// GET /api/analysis/screener-report?entry=A|B — which screeners find movers.
+// Not a trade report: it measures the move each card made, which is the only
+// thing a screener is responsible for.
+router.get('/screener-report', (req, res) => {
+  try {
+    const { buildScreenerReport } = require('../analysis/screenerReport');
+    res.json(buildScreenerReport({ entry: req.query.entry === 'A' ? 'A' : 'B' }));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /api/analysis/training-summary — accumulated training data overview
 router.get('/training-summary', (req, res) => {
   try {

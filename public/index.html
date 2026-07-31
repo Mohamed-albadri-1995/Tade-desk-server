@@ -180,6 +180,29 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .sb-why { padding-top:8px; border-top:1px solid #242938; }
 .sch-why-k, .sb-why-k { display:block; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
   color:#fbbf24; margin-bottom:3px; }
+/* ── screener scorecard ── */
+.sc-wrap { background:var(--bg2); border:1px solid #2a2f3d; border-radius:8px; padding:14px 16px; margin-bottom:16px; }
+.sc-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:12px; }
+.sc-title { font-size:15px; font-weight:700; }
+.sc-sub { font-size:11.5px; color:var(--text2); line-height:1.6; max-width:80ch; margin-top:3px; }
+.sc-empty { font-size:12px; color:var(--text3); padding:10px 0; }
+.sc-scroll { overflow-x:auto; }
+.sc-tbl { width:100%; border-collapse:collapse; font-size:12px; min-width:640px; }
+.sc-tbl th { text-align:right; font-size:9.5px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--text3); font-weight:600; padding:6px 8px; border-bottom:1px solid #2a2f3d; white-space:nowrap; }
+.sc-tbl th:first-child, .sc-tbl td:first-child { text-align:left; }
+.sc-tbl td { padding:8px; border-bottom:1px solid #1e2233; text-align:right;
+  font-variant-numeric:tabular-nums; white-space:nowrap; }
+.sc-tbl tr:last-child td { border-bottom:none; }
+.sc-name { font-weight:600; }
+.sc-thin td { opacity:.5; }
+.sc-v { font-size:10px; font-weight:700; padding:2px 7px; border-radius:3px; letter-spacing:.04em; }
+.sc-keep  { background:#22c55e22; color:#4ade80; border:1px solid #22c55e44; }
+.sc-watch { background:#eab30822; color:#facc15; border:1px solid #eab30844; }
+.sc-drop  { background:#ef444422; color:#f87171; border:1px solid #ef444444; }
+.sc-none  { background:var(--bg3); color:var(--text3); border:1px solid #2a2f3d; }
+.sc-base { font-size:11.5px; color:var(--text3); margin-top:10px; line-height:1.6; }
+.sc-base b { color:var(--text2); }
 .sch-legend { font-size:11px; color:var(--text3); margin-top:9px; line-height:1.6; }
 .sb-rule { font:11px ui-monospace,Menlo,monospace; background:var(--bg3); border:1px solid #333a4a;
            border-radius:4px; padding:2px 7px; color:var(--text2); }
@@ -693,6 +716,24 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <button class="an-btn" onclick="anCheckStatus()">&#8635; Refresh Status</button>
       </div>
 
+      <!-- Which screeners find movers -->
+      <div class="sc-wrap">
+        <div class="sc-head">
+          <div>
+            <div class="sc-title">Screener scorecard</div>
+            <div class="sc-sub">Which screeners find stocks that <b>move</b>. There is no stop,
+              target or exit here — it measures how far each card ran after the entry time, in ATR.
+              That is the only thing a screener is responsible for; whether a move is tradable is a
+              question about setups, and comes after you know which screeners are worth keeping.</div>
+          </div>
+          <select class="filter-select" id="sc-entry" onchange="loadScreenerReport()">
+            <option value="B">Entry B</option>
+            <option value="A">Entry A</option>
+          </select>
+        </div>
+        <div id="sc-body"><div class="sc-empty">Loading…</div></div>
+      </div>
+
       <!-- Service Status -->
       <div class="an-grid">
         <div class="an-card">
@@ -1104,7 +1145,7 @@ function switchTab(name, el) {
   if (name === 'market') loadMarket();
   if (name === 'shortlist') loadShortlist();
   if (name === 'warehouse') loadWarehouseDates();
-  if (name === 'analysis') anCheckStatus();
+  if (name === 'analysis') { anCheckStatus(); loadScreenerReport(); }
 }
 
 // ═══════════════════════════════════════════════════
@@ -3009,6 +3050,61 @@ function closeChartBtn() {
 // them, so loading the registry first would render one pass of unlabelled
 // badges before correcting itself.
 loadScreenerNames().then(loadRegistry);
+
+// ═══════════════ SCREENER SCORECARD ═══════════════
+// The question is "which screeners find stocks that move", so every column is
+// about the move: how far it ran, how often it ran far enough, and on how many
+// separate days. Consistency is the one that decides: a screener whose good
+// moves all landed on two wild days is not something you can plan around.
+async function loadScreenerReport() {
+  const el = document.getElementById('sc-body');
+  const entry = document.getElementById('sc-entry').value;
+  try {
+    const d = await (await fetch(`/api/analysis/screener-report?entry=${entry}`)).json();
+    if (!d.ok) { el.innerHTML = `<div class="sc-empty">${esc(d.error || 'no data')}</div>`; return; }
+    if (!d.screeners.length) {
+      el.innerHTML = `<div class="sc-empty">No captured days yet. This fills in after the first
+        end-of-day capture — one row per card, per day.</div>`;
+      return;
+    }
+    const vcls = { keep: 'sc-keep', watch: 'sc-watch', drop: 'sc-drop' };
+    const rows = d.screeners.map(s => `
+      <tr class="${s.thin ? 'sc-thin' : ''}">
+        <td class="sc-name">${esc(s.name)}</td>
+        <td>${s.cards}</td>
+        <td>${s.days}</td>
+        <td>${s.medUpR ?? '—'}</td>
+        <td>${s.avgUpR ?? '—'}</td>
+        <td>${s.avgDownR ?? '—'}</td>
+        <td>${s.goodPct ?? '—'}%</td>
+        <td>${s.bigPct ?? '—'}%</td>
+        <td>${s.consistency ?? '—'}%</td>
+        <td><span class="sc-v ${vcls[s.verdict] || 'sc-none'}">${esc(s.verdict)}</span></td>
+      </tr>`).join('');
+    el.innerHTML = `<div class="sc-scroll"><table class="sc-tbl">
+      <tr>
+        <th>Screener</th><th>Cards</th><th>Days</th>
+        <th title="half its cards did better than this">Median R</th>
+        <th>Avg R</th>
+        <th title="how far it went against you first, on average">Avg −R</th>
+        <th title="share of cards that ran ${d.goodR}R or more">≥${d.goodR}R</th>
+        <th title="share of cards that ran ${d.bigR}R or more">≥${d.bigR}R</th>
+        <th title="share of days it produced at least one ${d.goodR}R move">Days hit</th>
+        <th>Verdict</th>
+      </tr>${rows}</table></div>
+      <div class="sc-base">
+        ${d.baseline ? `<b>Tool baseline:</b> ${d.baseline.cards} cards over ${d.baseline.days} days,
+          avg ${d.baseline.avgUpR}R, ${d.baseline.goodPct}% reached ${d.goodR}R.
+          A screener only earns its place by beating this — comparing across tools compares
+          universes, not screeners.<br>` : ''}
+        <b>Verdict</b> is blunt on purpose: <i>keep</i> = ${d.goodR}R at least 35% of the time on at
+        least half its days. <i>drop</i> = neither. Anything under ${d.minCards} cards or
+        ${d.minDays} days is greyed out and left unjudged — too little to mean anything.
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="sc-empty">Could not load: ${esc(e.message)}</div>`;
+  }
+}
 
 // ═══════════════ SCREENER BUILDER ═══════════════
 // Filters are TradingView's own { left, operation, right } shape, so a rule
