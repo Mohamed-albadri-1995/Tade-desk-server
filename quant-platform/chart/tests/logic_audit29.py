@@ -181,6 +181,104 @@ ok("no source points at a scorer port (app+1)",
 ok("all reached over localhost — the AWS security group is irrelevant here",
    all('localhost' in s['url'] or '127.0.0.1' in s['url'] for s in shipped))
 
+print("=" * 64)
+print("PART F — a backtest reports the universe PER scanning tool")
+print("=" * 64)
+# Seven tools do not contribute equally: one with months of frozen registers
+# supplies nearly every pair while one switched on last week supplies a
+# handful. A merged run must say so, or it reads as a seven-way comparison
+# when it is one tool plus noise.
+import chart.backtest as btm
+import chart.strategy as _S
+
+sc._SOURCES = [{'id': 'old', 'name': 'T1 Screener', 'url': 'http://x:3000'},
+               {'id': 'new', 'name': 'T2 Momentum', 'url': 'http://x:3001'}]
+WH2 = {
+    'http://x:3000': {'dates': ['2026-07-13', '2026-07-14'],
+                      'R1': {'2026-07-13': [{'ticker': 'AAA', '_score': 90},
+                                            {'ticker': 'BBB', '_score': 80}],
+                             '2026-07-14': [{'ticker': 'AAA', '_score': 90},
+                                            {'ticker': 'CCC', '_score': 70}]}},
+    'http://x:3001': {'dates': ['2026-07-14'],           # switched on late
+                      'R1': {'2026-07-14': [{'ticker': 'DDD', '_score': 95}]}},
+}
+def fake_get2(path, base=''):
+    wh = WH2.get(base)
+    if wh is None:
+        raise RuntimeError('refused')
+    if path.startswith('/available-dates'):
+        return wh['dates']
+    reg, _, date = path.lstrip('/').partition('/')
+    return wh.get(reg, {}).get(date, [])
+sc._get = fake_get2
+
+prs = btm._pairs({'universe': {'kind': 'register', 'register': '*:R1'},
+                  'start': '2026-07-13', 'end': '2026-07-14'})
+# 07-13: old AAA+BBB = 2.  07-14: old AAA+CCC and new DDD = 3.  -> 5
+ok("pairs come from both tools", len(prs) == 5, f"{len(prs)}")
+ok("every pair knows which tool surfaced it",
+   all((p[2] or {}).get('source') for p in prs))
+srcs = sorted({(p[2] or {}).get('source') for p in prs})
+ok("...and both tools are represented", srcs == ['new', 'old'], f"{srcs}")
+
+# run() with a strategy that never fires: no trades, but coverage must still
+# break the universe down by tool
+NOFIRE = {'name': 'never', 'side': 'long',
+          'entry': {'logic': 'AND', 'rules': [
+              {'left': {'kind': 'price', 'field': 'close'}, 'op': 'lt',
+               'right': {'kind': 'const', 'value': -1}}]},
+          'exit': {'logic': 'AND', 'rules': []}, 'risk': {}}
+_orig_eval = _S.evaluate
+_S.evaluate = lambda *a, **k: {'ok': True, 'bars': 100, 'entries': [],
+                               'trades': [], 'open_trade': None}
+try:
+    out = btm.run({'strategy': NOFIRE, 'tf': '5m', 'feed': 'polygon',
+                   'universe': {'kind': 'register', 'register': '*:R1'},
+                   'start': '2026-07-13', 'end': '2026-07-14'})
+finally:
+    _S.evaluate = _orig_eval
+bs = (out['summary'].get('coverage') or {}).get('by_source')
+ok("coverage carries a per-tool breakdown", bool(bs), f"{bs}")
+by = {b['source']: b for b in (bs or [])}
+ok("the long-running tool's pair count is right", by.get('old', {}).get('pairs') == 4,
+   f"{by.get('old')}")
+ok("the newly-added tool's is too", by.get('new', {}).get('pairs') == 1,
+   f"{by.get('new')}")
+ok("each tool reports how many DAYS it actually covered",
+   by.get('old', {}).get('days') == 2 and by.get('new', {}).get('days') == 1,
+   f"{[(k, v.get('days')) for k, v in by.items()]}")
+ok("...and its share of the universe",
+   by.get('old', {}).get('pct_of_pairs') == 80.0, f"{by.get('old', {}).get('pct_of_pairs')}")
+ok("tools are listed biggest-contributor first", bs[0]['source'] == 'old')
+ok("the human name rides along, not just the id",
+   by.get('old', {}).get('name') == 'T1 Screener')
+ok("a lopsided run is called out explicitly",
+   'not a like-for-like comparison' in
+   ((out['summary'].get('coverage') or {}).get('source_imbalance') or ''),
+   f"{(out['summary'].get('coverage') or {}).get('source_imbalance')}")
+# a single-source run needs no such warning
+out1 = None
+try:
+    _S.evaluate = lambda *a, **k: {'ok': True, 'bars': 100, 'entries': [],
+                                   'trades': [], 'open_trade': None}
+    out1 = btm.run({'strategy': NOFIRE, 'tf': '5m', 'feed': 'polygon',
+                    'universe': {'kind': 'register', 'register': 'old:R1'},
+                    'start': '2026-07-13', 'end': '2026-07-14'})
+finally:
+    _S.evaluate = _orig_eval
+c1 = out1['summary'].get('coverage') or {}
+ok("a single-tool run is not flagged as imbalanced",
+   'source_imbalance' not in c1)
+ok("...but still reports which tool it was",
+   [b['source'] for b in (c1.get('by_source') or [])] == ['old'],
+   f"{c1.get('by_source')}")
+# and the UI/report actually surface it
+_ui = (pathlib.Path(sc.__file__).resolve().parent / 'static' / 'index.html').read_text()
+ok("the results panel shows the per-tool breakdown", 'by scanning tool:' in _ui)
+ok("the printed report shows it too",
+   'universe by scanning tool' in
+   (pathlib.Path(sc.__file__).resolve().parent / 'server.py').read_text())
+
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)

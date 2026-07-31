@@ -306,6 +306,14 @@ def backtest_report(bid: int):
                     f"excluded {cov.get('rvol_below', 0)} below + "
                     f"{cov.get('rvol_unknown', 0)} unverifiable "
                     f"(honest cumulative RVOL, not the register's 5-min snapshot)")
+    if cov.get('by_source'):
+        _bs = ' · '.join(
+            f"{b['name']}: {b['pairs']} pairs ({b['pct_of_pairs']}%) over {b['days']}d, "
+            f"{b['trades']} trades, {b['total_return_pct']:+.2f}%"
+            for b in cov['by_source'])
+        warn.append('universe by scanning tool — ' + _bs)
+    if cov.get('source_imbalance'):
+        warn.append(cov['source_imbalance'])
     if cov.get('no_data'):
         warn.append(f"{cov['no_data']} of {cov.get('pairs')} day·symbol pairs returned "
                     f"NO bars on feed '{cov.get('feed')}' — the universe was only "

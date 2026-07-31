@@ -446,6 +446,19 @@ def run(spec: dict, progress_cb=None) -> dict:
     cov = {'pairs': len(pairs), 'evaluated': 0, 'no_data': 0,
            'no_data_samples': [], 'signals_on_day': 0, 'signal_pairs': 0,
            'traded_pairs': 0, 'tf': tf, 'feed': feed, 'fill': fill}
+    # PER SCANNING TOOL. With several screeners merged ('*:R1'), the tools do
+    # NOT contribute equally: one with months of frozen registers supplies
+    # nearly every pair while a tool switched on last week supplies a handful.
+    # Without this the run reads as a seven-way comparison when it is really
+    # one tool plus noise. Counted here, per source, so the report can say so.
+    by_src: dict = {}
+    for _d, _s, _rc in pairs:
+        sid = ((_rc or {}).get('source') or 'symbols')
+        e = by_src.setdefault(sid, {'pairs': 0, 'days': set(), 'evaluated': 0,
+                                    'traded': 0, 'trades': 0,
+                                    'name': (_rc or {}).get('source_name') or sid})
+        e['pairs'] += 1
+        e['days'].add(_d)
     # In-Play universe filter (opt-in): the book's screener precondition
     # "RVOL > 5" measured HONESTLY — qp rel_volume at the strategy's session
     # start, not the register's one-bar TradingView snapshot. A pair below the
@@ -466,6 +479,7 @@ def run(spec: dict, progress_cb=None) -> dict:
         cov['rvol_samples'] = []
     bar_counts = []
     for i, (day, sym, rctx) in enumerate(pairs):
+        _src = by_src.get((rctx or {}).get('source') or 'symbols')
         if min_rvol is not None:
             try:
                 rv = _rvol_at(sym, day, feed, view, rv_ref)
@@ -488,6 +502,8 @@ def run(spec: dict, progress_cb=None) -> dict:
                                rules=spec.get('rules'))
             if r.get('ok') and r.get('bars'):
                 cov['evaluated'] += 1
+                if _src:
+                    _src['evaluated'] += 1
                 bar_counts.append(int(r['bars']))
                 sigs = sum(1 for e in (r.get('entries') or [])
                            if _et_date(e['time']) == day)
@@ -536,6 +552,8 @@ def run(spec: dict, progress_cb=None) -> dict:
                                   'legs': ot.get('legs') or []})  # banked partials
                 if took:
                     cov['traded_pairs'] += 1
+                    if _src:
+                        _src['traded'] += 1
             else:
                 cov['no_data'] += 1
                 if len(cov['no_data_samples']) < 12:
@@ -553,6 +571,34 @@ def run(spec: dict, progress_cb=None) -> dict:
         per_day[d] = per_day.get(d, 0) + 1
     cov['pairs_per_day'] = per_day
     all_dates = sorted(per_day)
+
+    # PER-SOURCE roll-up. Trades are attributed by the ctx the pair carried, so
+    # a merged run can be read tool by tool instead of as one blended number.
+    for t in closed:
+        e = by_src.get((t.get('ctx') or {}).get('source') or 'symbols')
+        if e:
+            e['trades'] += 1
+    _tot_ret: dict = {}
+    for t in closed:
+        sid = (t.get('ctx') or {}).get('source') or 'symbols'
+        _tot_ret[sid] = _tot_ret.get(sid, 0.0) + t['ret']
+    if len(by_src) > 1 or 'symbols' not in by_src:
+        cov['by_source'] = sorted(
+            ({'source': sid, 'name': e['name'], 'pairs': e['pairs'],
+              'days': len(e['days']), 'evaluated': e['evaluated'],
+              'traded_pairs': e['traded'], 'trades': e['trades'],
+              'pct_of_pairs': round(100.0 * e['pairs'] / max(1, len(pairs)), 1),
+              'total_return_pct': round(100.0 * _tot_ret.get(sid, 0.0), 3)}
+             for sid, e in by_src.items()),
+            key=lambda x: -x['pairs'])
+        # the headline honesty check: is this really a multi-tool comparison,
+        # or one tool plus a rounding error?
+        top = cov['by_source'][0]
+        if len(cov['by_source']) > 1 and top['pct_of_pairs'] >= 80:
+            cov['source_imbalance'] = (
+                f"{top['name']} supplied {top['pct_of_pairs']}% of all pairs — "
+                f"this is not a like-for-like comparison between tools yet; the "
+                f"others have too little frozen register history in this range")
     summary = _summary(closed, opens, len(pairs), errors,
                        all_dates=all_dates,
                        cost_bps=float(spec.get('cost_bps', 0.0) or 0.0),

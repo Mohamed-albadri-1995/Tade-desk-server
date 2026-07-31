@@ -1094,6 +1094,16 @@ function btRenderCore(g,extra){
     c+=` · signals on ${cov.signal_pairs} pairs (${cov.signals_on_day})·traded ${cov.traded_pairs}`;
     if(cov.bars_median!=null)c+=` · ~${cov.bars_median} bars/pair`;
     html+=`<br><span class="muted" style="font-size:10px">${c}</span>`;
+    // PER SCANNING TOOL — which screener supplied the universe, and how much
+    // of it. Without this a run that is 92% one tool reads as a seven-way test.
+    if(cov.by_source&&cov.by_source.length){
+      const rows=cov.by_source.map(s=>`<span style="margin-right:10px;white-space:nowrap">`
+        +`<b>${s.name}</b> ${s.pairs} pairs (${s.pct_of_pairs}%) · ${s.days}d · `
+        +`${s.trades} trades · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%</span>`).join('');
+      html+=`<br><span class="muted" style="font-size:10px">by scanning tool: ${rows}</span>`;
+      if(cov.source_imbalance)
+        html+=`<br><span style="font-size:10px;color:var(--draft)">⚠ ${cov.source_imbalance}</span>`;
+    }
   }
   if(extra)html+=`<span class="muted">${extra}</span>`;
   sum.innerHTML=html;   // ONE write — appending after wiring would destroy the tap handlers
