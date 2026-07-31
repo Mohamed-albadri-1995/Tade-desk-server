@@ -87,11 +87,11 @@
     },
     {
       "id": "T7",
-      "name": "Sessions",
+      "name": "Liquid Movers",
       "port": 3060,
       "scorerPort": 3061,
       "accent": "#22d3ee",
-      "desc": "Split by time of day: gaps before the open, heavy volume after it.",
+      "desc": "Heavy real volume and real range — gapping before the open, then trading 10M+ shares after it.",
       "captureAt": {
         "r1": "09:36",
         "entryA": "09:37",
