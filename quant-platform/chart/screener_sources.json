@@ -1,0 +1,9 @@
+[
+  {"id": "s1", "name": "Scanner 1", "url": "http://localhost:3000"},
+  {"id": "s2", "name": "Scanner 2", "url": "http://localhost:3001"},
+  {"id": "s3", "name": "Scanner 3", "url": "http://localhost:3002"},
+  {"id": "s4", "name": "Scanner 4", "url": "http://localhost:3003"},
+  {"id": "s5", "name": "Scanner 5", "url": "http://localhost:3004"},
+  {"id": "s6", "name": "Scanner 6", "url": "http://localhost:3005"},
+  {"id": "s7", "name": "Scanner 7", "url": "http://localhost:3006"}
+]

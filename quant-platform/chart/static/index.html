@@ -192,9 +192,11 @@
     <div id="sideTop"><b>Panel</b><span id="sideClose" title="close panel">✕</span></div>
     <h3>Screener register</h3>
     <div id="regBar">
-      <select id="regReg"><option value="R1">R1 (all)</option><option value="Shortlist">Shortlist</option></select>
+      <select id="regReg" title="which scanning tool's register to browse"><option value="R1">R1</option><option value="Shortlist">Shortlist</option></select>
       <select id="regDate"></select>
     </div>
+    <div id="srcBar" class="muted" style="font-size:10px;margin:2px 0 4px"></div>
+    <div id="regWarn" class="muted" style="font-size:10px;margin:0 0 4px"></div>
     <div id="regList"><div class="muted">Loading register…</div></div>
     <h3>🧪 Backtest</h3>
     <div id="btBox" style="font-size:11px">
@@ -527,6 +529,41 @@ function syncAsofUI(){
   lb.disabled=!!asof; lb.style.opacity=asof?.5:1;
   lb.title=asof?'Live is off while As-of is set (a past date). Clear As-of to go live.':'';
 }
+/* ── scanning tools (multi-source) ────────────────────────────────────────
+   Several scanning tools run side by side, each freezing its OWN R1 and
+   Shortlist. The source rides on the register string — 'R1' (default tool),
+   's3:R1' (one tool), '*:R1' (all of them merged) — so every picker is just
+   a list of those strings and nothing downstream had to change. */
+let REG_OPTIONS=[];
+function fillRegPicker(sel, opts, keep){
+  const cur = keep!==undefined ? keep : sel.value;
+  sel.innerHTML='';
+  for(const o of opts){ const e=document.createElement('option');
+    e.value=o.value; e.textContent=o.label; sel.appendChild(e); }
+  if(cur && opts.some(o=>o.value===cur)) sel.value=cur;
+}
+async function loadSources(){
+  try{
+    const j=await (await fetch('/api/screener/sources')).json();
+    REG_OPTIONS=j.options||[];
+    if(REG_OPTIONS.length){
+      fillRegPicker(document.getElementById('regReg'), REG_OPTIONS,
+                    REG_OPTIONS.length>1?REG_OPTIONS[0].value:'R1');
+      // backtest universe keeps "Symbols" first, then every register option
+      const bu=document.getElementById('btUni');
+      fillRegPicker(bu, [{value:'symbols',label:'Symbols'},
+        ...REG_OPTIONS.map(o=>({value:o.value,label:'Register '+o.label}))], 'symbols');
+    }
+    // one line saying which tools answered — a dead scanner must be visible,
+    // not mistaken for "no candidates today"
+    const bar=document.getElementById('srcBar'); const ss=j.sources||[];
+    if(bar) bar.innerHTML = ss.map(s=>
+      '<span title="'+s.url+(s.ok?'':' — '+((s.error||'')+'').slice(0,120))+'" style="margin-right:8px;color:'
+      +(s.ok?'var(--green,#22c55e)':'#ef4444')+'">'+(s.ok?'●':'○')+' '+s.name
+      +(s.ok?' ('+(s.r1_dates||0)+'d)':' down')+'</span>').join('');
+    return ss;
+  }catch(e){ return []; }
+}
 async function loadRegDates(){
   const reg=document.getElementById('regReg').value, sel=document.getElementById('regDate');
   try{
@@ -543,8 +580,16 @@ async function loadRegister(){
   try{
     const qs=new URLSearchParams({register:reg}); if(date)qs.set('date',date);
     const j=await (await fetch('/api/screener/register?'+qs)).json();
-    if(!j.ok){ REG_ROWS=[]; box.innerHTML='<div class="muted">Screener not reachable on :3000 — start it to browse R1 / Shortlist.<br><span style="color:var(--text3)">'+((j.error||'')+'').slice(0,90)+'</span></div>'; return; }
-    REG_ROWS=j.rows||[]; renderRegister();
+    const warn=document.getElementById('regWarn');
+    if(!j.ok){ REG_ROWS=[]; if(warn)warn.innerHTML=''; box.innerHTML='<div class="muted">No scanning tool answered for '+reg+' — start it, or check chart/screener_sources.json.<br><span style="color:var(--text3)">'+((j.error||'')+'').slice(0,140)+'</span></div>'; return; }
+    // a PARTIAL answer (some tools down) must be visible — a thinner universe
+    // otherwise looks exactly like a quiet day. Its own element, because
+    // renderRegister() rebuilds regList from scratch.
+    if(warn) warn.innerHTML=(j.sources_failed&&j.sources_failed.length)
+      ? '<span style="color:#f59e0b">⚠ '+j.sources_failed.length+' scanning tool(s) did not answer — this list is INCOMPLETE: '
+        +(j.sources_failed.join('; ')+'').slice(0,120)+'</span>' : '';
+    REG_ROWS=j.rows||[];
+    renderRegister();
   }catch(e){ REG_ROWS=[]; box.innerHTML='<div class="muted">error: '+e.message+'</div>'; }
 }
 function scoreColor(s){ if(typeof s!=='number')return{bg:'#1c2431',fg:'#94a3b8'};
@@ -562,7 +607,11 @@ function renderRegister(){
     const el=document.createElement('div'); el.className='card'+(c.ticker===curSym?' on':'');
     const chg=(typeof c.change==='number')?`<span class="${c.change>=0?'up':'dn'}" style="font-size:11px">${fmtPct(c.change)}</span>`:'';
     const meta=[c.regime,c.sector,c.secBias&&('sec '+c.secBias)].filter(Boolean).join(' · ');
-    const meta2=[c.gapPct!=null?'gap '+fmtPct(c.gapPct):null, c.rvol!=null?'rvol '+Number(c.rvol).toFixed(1):null, c.method?('★'+c.method):null].filter(Boolean).join(' · ');
+    // WHICH scanning tool found it — and when more than one did, say so:
+    // independent scanners agreeing is a signal worth seeing on the card.
+    const src=c.source_count>1 ? '<b style="color:#22c55e">'+c.source_count+'× '+c.sources+'</b>'
+                               : (c.source_name||c.source||'');
+    const meta2=[c.gapPct!=null?'gap '+fmtPct(c.gapPct):null, c.rvol!=null?'rvol '+Number(c.rvol).toFixed(1):null, c.method?('★'+c.method):null, src||null].filter(Boolean).join(' · ');
     el.innerHTML=`<div class="top"><span class="tk">${c.ticker}</span>${chg}<span class="sc" style="background:${sc.bg};color:${sc.fg}">${typeof c.score==='number'?Math.round(c.score):'—'}</span></div>`
       +`<div class="meta">${meta||'—'}</div>`+(meta2?`<div class="meta">${meta2}</div>`:'');
     el.onclick=()=>pickStock(c);
@@ -1111,6 +1160,7 @@ window.addEventListener('load',async()=>{
   if(typeof LightweightCharts==='undefined'){ banner('Chart library did not load (/static/lightweight-charts.js).'); return; }
   try{ initChart(); }catch(e){ banner('Chart init failed: '+e.message); return; }
   loadChart();
+  await loadSources();          // must fill the register pickers FIRST
   loadRegDates();
   // strategy builder
   seedTemplate(); renderStrat(); loadStrategies();
@@ -1229,7 +1279,7 @@ document.getElementById('printR1Btn').onclick = async () => {
   box.innerHTML = `
     <div style="font-weight:600;margin-bottom:8px">🖨 Print register day</div>
     <label style="display:block;margin-bottom:6px">Register
-      <select id="prReg" style="width:100%"><option>R1</option><option>Shortlist</option></select></label>
+      <select id="prReg" style="width:100%"><option value="R1">R1</option><option value="Shortlist">Shortlist</option></select></label>
     <label style="display:block;margin-bottom:6px">From
       <select id="prFrom" style="width:100%"><option>loading…</option></select></label>
     <label style="display:block;margin-bottom:6px">To
@@ -1274,6 +1324,8 @@ document.getElementById('printR1Btn').onclick = async () => {
   document.body.appendChild(box);
 
   const regSel = document.getElementById('prReg');
+  if (REG_OPTIONS.length) fillRegPicker(regSel, REG_OPTIONS,
+                                        REG_OPTIONS.length>1?REG_OPTIONS[0].value:'R1');
   const fromSel = document.getElementById('prFrom');
   const toSel = document.getElementById('prTo');
   const loadDates = async () => {

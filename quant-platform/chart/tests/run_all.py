@@ -40,6 +40,7 @@ PARTS = [
     ('logic_audit26.py',    'user strategies survive deploys: restore-only seeds'),
     ('logic_audit27.py',    'Print R1 sheet: window, tickers, indicators, page'),
     ('logic_audit28.py',    'review pass: fees, portfolio capital cap, warm-up cap, alerts, print days'),
+    ('logic_audit29.py',    'multi-source screeners: N scanning tools, merge, attribution, dead-source'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
 ]
 

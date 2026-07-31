@@ -75,9 +75,12 @@ def in_window(strategy: dict, hhmm: int, grace_min: int = 5) -> bool:
 
 
 def _symbols_today(reg_fn) -> list[str]:
-    """Union of today's R1 + Shortlist tickers (order kept, first-seen)."""
+    """Union of today's R1 + Shortlist tickers across EVERY scanning tool
+    (order kept, first-seen). '*:' means all configured sources — a name any
+    of the seven scanners flagged today is a name worth watching, and the
+    merge in screener.register_rows already collapses duplicates."""
     out: list[str] = []
-    for reg in ('R1', 'Shortlist'):
+    for reg in ('*:R1', '*:Shortlist'):
         try:
             rows = reg_fn(reg)
         except Exception:  # noqa: BLE001 — screener down ≠ alerts crash

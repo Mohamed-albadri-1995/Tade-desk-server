@@ -71,7 +71,20 @@ def primitives():
 # ── Phase 2: screener register navigation ──────────────────────────────────
 @app.get('/api/screener/health')
 def screener_health():
-    return {'registers': sc.REGISTERS, **sc.health()}
+    return {'registers': sc.REGISTERS, 'options': sc.register_options(),
+            **sc.health()}
+
+
+@app.get('/api/screener/sources')
+def screener_sources(reload: int = 0):
+    """Every configured scanning tool and whether it is UP right now, plus the
+    register options the pickers should offer. `reload=1` re-reads the config
+    (chart/screener_sources.json or $SCREENER_SOURCES) without a restart."""
+    if reload:
+        sc.reload_sources()
+    return {'ok': True, 'sources': sc.source_health(),
+            'default': sc.default_source(), 'registers': sc.REGISTERS,
+            'options': sc.register_options()}
 
 
 @app.get('/api/screener/dates')

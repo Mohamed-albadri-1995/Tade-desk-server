@@ -61,16 +61,27 @@ ok("after window_end → out", not al.in_window(S1, 1331))
 ok("no window → always in", al.in_window(S2, 933))
 
 print("=" * 64)
-print("PART C — _symbols_today: R1 + Shortlist union, failure-safe")
+print("PART C — _symbols_today: R1 + Shortlist union, EVERY scanning tool")
 print("=" * 64)
+asked = []
 def regs(reg):
-    return {'R1': {'ok': True, 'rows': [{'ticker': 'aaa'}, {'ticker': 'BBB'}]},
-            'Shortlist': {'ok': True, 'rows': [{'ticker': 'BBB'}, {'ticker': 'CCC'}]}}[reg]
+    asked.append(reg)
+    return {'*:R1': {'ok': True, 'rows': [{'ticker': 'aaa'}, {'ticker': 'BBB'}]},
+            '*:Shortlist': {'ok': True, 'rows': [{'ticker': 'BBB'}, {'ticker': 'CCC'}]}}[reg]
 ok("union, uppercased, deduped, order kept",
    al._symbols_today(regs) == ['AAA', 'BBB', 'CCC'], f"{al._symbols_today(regs)}")
+# the watcher must cover ALL configured scanners, not just the default one:
+# a name only the 5th tool flagged still deserves an alert.
+ok("it asks for ALL sources ('*:'), not one tool's register",
+   asked[:2] == ['*:R1', '*:Shortlist'], f"{asked[:2]}")
 def regs_down(reg):
     raise RuntimeError('screener down')
 ok("screener down → empty list, no crash", al._symbols_today(regs_down) == [])
+# a register read that comes back not-ok (every source failed) is skipped,
+# never treated as "no candidates"
+ok("a not-ok register contributes nothing rather than emptying the list",
+   al._symbols_today(lambda reg: {'ok': reg == '*:R1', 'rows': [{'ticker': 'X'}]})
+   == ['X'])
 
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
