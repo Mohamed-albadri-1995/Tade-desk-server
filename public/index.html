@@ -384,9 +384,23 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .job-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 10px; }
 .job-card.disabled { opacity: 0.5; }
 .job-card-info { flex: 1; min-width: 0; }
-.job-card-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The name is the whole point of the row — wrap it rather than cut it off.
+   "Discovery — Pre-…" and "Discovery — Open…" are the same to a reader. */
+.job-card-name { font-size: 13px; font-weight: 600; line-height: 1.35; }
+.job-when { font-size: 12px; color: var(--text2); margin-top: 3px; line-height: 1.45; }
+.job-next { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.job-next b { color: var(--accent); font-variant-numeric: tabular-nums; }
 .job-card-cron { font-family: monospace; font-size: 11px; color: #aaa; margin-top: 2px; }
-.job-card-meta { font-size: 11px; color: #aaa; margin-top: 3px; }
+.job-card-meta { font-size: 11px; color: #aaa; margin-top: 4px; }
+.job-cron-raw { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: #4a5062;
+  margin-left: 6px; white-space: nowrap; }
+/* the card stacks on a phone, where the buttons would otherwise squeeze the text */
+.job-card { align-items: flex-start; }
+@media (max-width: 560px) {
+  .job-card { flex-direction: column; }
+  .job-card-actions { width: 100%; }
+  .job-card-actions .job-toggle { flex: 1; }
+}
 .job-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .sched-day-btn { padding: 5px 9px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg3); color: var(--text3); font-size: 12px; cursor: pointer; }
 .sched-day-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
@@ -1853,6 +1867,104 @@ async function loadMonitor() {
   }
 }
 
+// ── reading a schedule ─────────────────────────────────────────────────────
+// The jobs list printed raw cron ("*/30 4-8 * * 1-5"), which answers the
+// question "when does this run?" only if you already know cron. Every job is
+// turned into a sentence, and — the thing actually being asked — the next time
+// it will fire.
+function cronField(f, v) {
+  if (f === '*') return true;
+  return String(f).split(',').some(part => {
+    if (part.includes('/')) {
+      const [range, stepRaw] = part.split('/');
+      const step = Number(stepRaw);
+      if (range === '*') return v % step === 0;
+      const [lo, hi] = range.split('-').map(Number);
+      return v >= lo && v <= (hi ?? lo) && (v - lo) % step === 0;
+    }
+    if (part.includes('-')) {
+      const [lo, hi] = part.split('-').map(Number);
+      return v >= lo && v <= hi;
+    }
+    return Number(part) === v;
+  });
+}
+
+const ET_PARTS = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'America/New_York', hour12: false,
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', weekday: 'short',
+});
+const DOW_NUM = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+function etParts(date) {
+  const p = {};
+  for (const { type, value } of ET_PARTS.formatToParts(date)) p[type] = value;
+  return {
+    min: +p.minute, hour: +p.hour, dom: +p.day, mon: +p.month,
+    dow: DOW_NUM[p.weekday], label: `${p.weekday} ${p.hour}:${p.minute}`,
+    hh: p.hour, mm: p.minute, weekday: p.weekday,
+  };
+}
+
+// Everything runs on a cron minute, so stepping a minute at a time is exact.
+// Eight days covers any weekly pattern including a long weekend.
+function nextCronRun(expr, from = new Date()) {
+  const parts = String(expr).trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const d = new Date(from.getTime() + 60000 - (from.getTime() % 60000));
+  for (let i = 0; i < 60 * 24 * 8; i++) {
+    const p = etParts(d);
+    if (cronField(parts[0], p.min) && cronField(parts[1], p.hour) &&
+        cronField(parts[2], p.dom) && cronField(parts[3], p.mon) &&
+        cronField(parts[4], p.dow)) {
+      const today = etParts(from);
+      const when = p.dom === today.dom ? 'today' : p.weekday;
+      return { at: new Date(d), text: `${when} ${p.hh}:${p.mm}` };
+    }
+    d.setTime(d.getTime() + 60000);
+  }
+  return null;
+}
+
+const pad2 = n => String(n).padStart(2, '0');
+
+function cronToWords(expr) {
+  const p = String(expr).trim().split(/\s+/);
+  if (p.length !== 5) return expr;
+  const [mi, ho, , , dw] = p;
+
+  const days = dw === '1-5' ? 'Mon–Fri' : dw === '*' ? 'every day' : `day ${dw}`;
+
+  // hour span, for the "every N minutes between X and Y" shapes
+  const hourSpan = () => {
+    if (ho === '*') return { lo: 0, hi: 23 };
+    if (ho.includes('-')) { const [a, b] = ho.split('-').map(Number); return { lo: a, hi: b }; }
+    if (!isNaN(ho)) return { lo: +ho, hi: +ho };
+    return null;
+  };
+
+  if (mi.startsWith('*/')) {
+    const step = mi.slice(2);
+    const s = hourSpan();
+    if (s) return `Every ${step} min, ${pad2(s.lo)}:00–${pad2(s.hi)}:59 · ${days}`;
+    return `Every ${step} min · ${days}`;
+  }
+
+  const mins = mi.split(',');
+  const hours = ho.split(',');
+  if (mins.length === 1 && hours.length === 1 && !ho.includes('-')) {
+    return `${pad2(+ho)}:${pad2(+mi)} · ${days}`;
+  }
+  if (hours.length === 1 && !ho.includes('-')) {
+    const times = mins.map(m => `${pad2(+ho)}:${pad2(+m)}`);
+    return times.length <= 3
+      ? `${times.join(', ')} · ${days}`
+      : `${times.length}× between ${times[0]} and ${times[times.length - 1]} · ${days}`;
+  }
+  return `${expr} · ${days}`;
+}
+
 function renderMonitorJobs() {
   const container = document.getElementById('monitor-jobs-cards');
   if (!monitorJobs.length) {
@@ -1860,20 +1972,25 @@ function renderMonitorJobs() {
     return;
   }
   container.innerHTML = monitorJobs.map(j => {
-    const lastRun = j.lastRunAt ? new Date(j.lastRunAt).toLocaleTimeString() : 'Never';
+    const lastRun = j.lastRunAt ? fmtET24(j.lastRunAt) + ' ET' : 'never';
     const statusDot = j.lastStatus === 'ok'
-      ? '<span style="color:var(--green)">● OK</span>'
+      ? '<span style="color:var(--green)">● ran OK</span>'
       : j.lastStatus === 'error'
-        ? '<span style="color:var(--red)">● Error</span>'
-        : '<span style="color:#555">● Not run</span>';
-    const dur = j.lastDuration != null ? ' · ' + (j.lastDuration/1000).toFixed(1) + 's' : '';
+        ? '<span style="color:var(--red)">● failed</span>'
+        : '<span style="color:#555">● not run yet</span>';
+    const dur = j.lastDuration != null ? ' in ' + (j.lastDuration/1000).toFixed(1) + 's' : '';
     const toggleClass = j.enabled ? 'on' : 'off';
     const toggleLabel = j.enabled ? 'ON' : 'OFF';
+    const next = j.enabled ? nextCronRun(j.schedule) : null;
     return `<div class="job-card${j.enabled ? '' : ' disabled'}">
       <div class="job-card-info">
         <div class="job-card-name">${esc(j.name)}</div>
-        <div class="job-card-cron">${esc(j.schedule)}</div>
-        <div class="job-card-meta">${statusDot}${dur} · Last: ${lastRun}</div>
+        <div class="job-when">${esc(cronToWords(j.schedule))}</div>
+        <div class="job-next">${j.enabled
+          ? (next ? `Next run <b>${esc(next.text)}</b> ET` : 'Next run —')
+          : 'Turned off — will not run'}</div>
+        <div class="job-card-meta">${statusDot}${dur} · last ${lastRun}
+          <span class="job-cron-raw" title="the raw cron expression">${esc(j.schedule)}</span></div>
         ${j.lastError ? `<div style="color:var(--red);font-size:11px;margin-top:2px">${esc(j.lastError)}</div>` : ''}
       </div>
       <div class="job-card-actions">
