@@ -367,6 +367,17 @@ exit_now for trade-aware exits is computed against the open position if one
 exists. Suite: +11 cases (both user examples verbatim) → 131 total, all green;
 UI roundtrip verified.
 
+### It.20 — auto-rescale on symbol change  [DONE]
+Bug: open SPY (~$700), drag/pinch the PRICE AXIS (lightweight-charts flips the
+scale to MANUAL mode permanently), then switch to a $1 stock → the chart keeps
+the old $700 range: candles off-screen, "empty space". Fix: drawSnapshot tracks
+symbol|tf; when the instrument changes it restores autoScale on the right +
+osc scales and fits the time scale (TradingView behavior). A same-symbol
+redraw does NOT touch a manual zoom (your zoom survives Compute/params). The
+⤢ Fit button now also restores price auto-scale — the manual escape hatch.
+Verified headless: manual@700 → switch → autoScale true and $1 candles fill
+the view; same-symbol redraw keeps manual; Fit restores. Screenshot proof.
+
 ## Status: approaching exit door
 Combining logic is fully general (nested groups · Expr arithmetic · offset ·
 sustained · K-of-N · sequence · SL/TP · all params exposed). Inspection loop

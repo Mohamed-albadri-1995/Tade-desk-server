@@ -4,3 +4,4 @@ __pycache__/
 /data/
 !quant-platform/qp/data/
 !quant-platform/data/
+.venv/

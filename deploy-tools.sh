@@ -33,14 +33,76 @@ cd "$ROOT"
 echo
 echo "[1/6] Pulling latest code..."
 git fetch origin "$BRANCH"
+
+# This repository holds more than the screener — quant-platform/ is a separate
+# tool living in the same tree. `git reset --hard` does not know that: it
+# rewrites EVERY tracked file to match the branch, so deploying the screener
+# from a branch whose quant-platform is older silently reverts that tool.
+#
+# That is not hypothetical; it is what this guard was written for. Check before
+# destroying anything, and say exactly what would be lost.
+NEIGHBOURS="quant-platform"
+for dir in $NEIGHBOURS; do
+  [ -e "$dir" ] || continue
+
+  dirty=$(git status --porcelain -- "$dir")
+  if [ -n "$dirty" ]; then
+    echo
+    echo "  STOPPED: you have uncommitted work in $dir/ that this deploy would destroy:"
+    echo "$dirty" | sed 's/^/     /'
+    echo
+    echo "  Commit or stash it first:  git add $dir && git commit -m 'wip'"
+    exit 1
+  fi
+
+  behind=$(git log --oneline "origin/$BRANCH..HEAD" -- "$dir" 2>/dev/null)
+  if [ -n "$behind" ]; then
+    echo
+    echo "  STOPPED: $dir/ here is AHEAD of origin/$BRANCH. Resetting would lose:"
+    echo "$behind" | sed 's/^/     /'
+    echo
+    echo "  Push those commits, or merge them into $BRANCH, before deploying."
+    exit 1
+  fi
+done
+
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 echo "  now at: $(git log --oneline -1)"
+for dir in $NEIGHBOURS; do
+  [ -e "$dir" ] && echo "  $dir/ at: $(git log -1 --format='%h %s' -- "$dir")"
+done
 
 echo
 echo "[2/6] Dependencies..."
 npm install --silent
-pip3 install -r src/scoring/requirements.txt --quiet
+
+# Python dependencies go in a virtualenv belonging to this project, NOT into the
+# shared user environment.
+#
+# `pip3 install -r requirements.txt` writes to the site-packages every Python
+# program on this box shares. requirements.txt asks for pandas, numpy,
+# scikit-learn and flask with ">=" bounds, so pip is free to move those versions
+# to satisfy this project — and anything else on the machine that depended on
+# the versions that were there silently gets different ones. That is a deploy of
+# the screener changing an unrelated tool underneath it.
+VENV="$ROOT/.venv"
+PY="$VENV/bin/python"
+if [ ! -x "$PY" ]; then
+  echo "  creating Python virtualenv at .venv"
+  python3 -m venv "$VENV" 2>/dev/null || true
+fi
+if [ -x "$PY" ]; then
+  "$PY" -m pip install --upgrade pip --quiet 2>/dev/null || true
+  "$PY" -m pip install -r src/scoring/requirements.txt --quiet
+  echo "  python: $("$PY" --version 2>&1) (isolated)"
+else
+  echo "  WARNING: could not create a virtualenv — falling back to the shared"
+  echo "           Python environment. This can change package versions for"
+  echo "           other programs on this machine. Install python3-venv to fix."
+  PY=python3
+  pip3 install -r src/scoring/requirements.txt --quiet
+fi
 
 echo
 echo "[3/6] Clearing anything holding the tool ports..."
@@ -60,8 +122,20 @@ for entry in "${TOOLS[@]}"; do
   [ -n "$ONLY" ] && [ "$ONLY" != "$id" ] && continue
   pm2 delete "tool-${id}" 2>/dev/null || true
   pm2 delete "scorer-${id}" 2>/dev/null || true
+  # Free the port, but only from OUR processes. This loop used to kill whatever
+  # held the port, no questions asked — so anything else on this machine that
+  # happened to listen on 3000–3081 was killed by a screener deploy. A port
+  # number is not proof of ownership.
   for p in "$port" "$sport"; do
-    lsof -t -i:"$p" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+    for pid in $(lsof -t -i:"$p" 2>/dev/null); do
+      cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo '')
+      cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null || echo '')
+      case "$cmd$cwd" in
+        *"$ROOT"*) kill -9 "$pid" 2>/dev/null || true ;;
+        *) echo "  NOT killing pid $pid on port $p — it is not ours:"
+           echo "     ${cmd:0:100}" ;;
+      esac
+    done
   done
 done
 # T1 kept the original process names before tools existed.
@@ -87,7 +161,7 @@ for entry in "${TOOLS[@]}"; do
   mkdir -p "$out" "$tmp"
 
   echo "  ${id} (${name}) — app :${port}  scorer :${sport}"
-  pm2 start src/scoring/server.py --name "scorer-${id}" --interpreter python3 \
+  pm2 start src/scoring/server.py --name "scorer-${id}" --interpreter "$PY" \
     -- --output "$out" --port "$sport" >/dev/null
 
   TOOL_ID="$id" TOOL_NAME="$name" PORT="$port" \
@@ -95,6 +169,14 @@ for entry in "${TOOLS[@]}"; do
   SCORER_URL="http://127.0.0.1:${sport}" \
     pm2 start src/index.js --name "tool-${id}" --update-env >/dev/null
 done
+# pm2 save rewrites the startup list from whatever is running RIGHT NOW, so a
+# process that happened to be stopped at this moment would be dropped from it
+# and would not come back after a reboot. Say what is being saved.
+echo
+echo "  saving pm2 process list ($(pm2 jlist 2>/dev/null | node -e "
+  let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+    try{const j=JSON.parse(s);console.log(j.map(p=>p.name).join(', '))}catch{console.log('?')}
+  });" 2>/dev/null || echo '?'))"
 pm2 save >/dev/null
 
 echo
