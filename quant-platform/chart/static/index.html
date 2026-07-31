@@ -603,9 +603,12 @@ async function loadSources(){
     // one line saying which tools answered — a dead scanner must be visible,
     // not mistaken for "no candidates today"
     const bar=document.getElementById('srcBar'); const ss=j.sources||[];
+    // each tool in its OWN accent (straight from tools.config.json) so a tool
+    // is recognisable here, on its own landing page and on the register cards
     if(bar) bar.innerHTML = ss.map(s=>
-      '<span title="'+s.url+(s.ok?'':' — '+((s.error||'')+'').slice(0,120))+'" style="margin-right:8px;color:'
-      +(s.ok?'var(--green,#22c55e)':'#ef4444')+'">'+(s.ok?'●':'○')+' '+s.name
+      '<span title="'+s.url+(s.capture_r1?' · R1 frozen '+s.capture_r1:'')
+      +(s.ok?'':' — '+((s.error||'')+'').slice(0,120))+'" style="margin-right:8px;color:'
+      +(s.ok?(s.color||'#22c55e'):'#ef4444')+'">'+(s.ok?'●':'○')+' '+s.name
       +(s.ok?' ('+(s.r1_dates||0)+'d)':' down')+'</span>').join('');
     return ss;
   }catch(e){ return []; }

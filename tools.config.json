@@ -1,0 +1,131 @@
+{
+  "_comment": "The registry of tools. Everything reads this one file — the deploy script, the landing page, and the seeder — so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
+  "tools": [
+    {
+      "id": "T1",
+      "name": "Screener",
+      "port": 3000,
+      "scorerPort": 3001,
+      "accent": "#4a9eff",
+      "desc": "The original: big movers, pre-market volume and trend continuation.",
+      "captureAt": {
+        "r1": "09:36",
+        "entryA": "09:37",
+        "entryB": "09:40",
+        "why": "Kept exactly as it always was. T1 is the control the other tools are measured against, and its one proven edge — Big Move + Pre-Mkt, 54% win against 13% — is read off the 09:36 photo. Moving it would make old cards and new cards no longer comparable."
+      }
+    },
+    {
+      "id": "T2",
+      "name": "Momentum",
+      "port": 3010,
+      "scorerPort": 3011,
+      "accent": "#a78bfa",
+      "desc": "Daily moving averages stacked fast-over-slow, breaking the monthly high.",
+      "captureAt": {
+        "r1": "09:46",
+        "entryA": "09:47",
+        "entryB": "09:51",
+        "why": "A breakout on the opening spike is often just the spike. 09:46 gives the break fifteen minutes to hold above the monthly high before the photo is taken, so the model learns from breaks that survived rather than every stock that touched the level."
+      }
+    },
+    {
+      "id": "T3",
+      "name": "Gappers",
+      "port": 3020,
+      "scorerPort": 3021,
+      "accent": "#fb923c",
+      "desc": "Pre-market gaps on heavy volume in a small float.",
+      "captureAt": {
+        "r1": "09:36",
+        "entryA": "09:37",
+        "entryB": "09:40",
+        "why": "A gap is an opening trade. The photo goes at 09:36 and entries at 09:37 and 09:40, which is where a gap either continues or fails — waiting longer would measure something that had already resolved."
+      }
+    },
+    {
+      "id": "T4",
+      "name": "VWAP Reclaim",
+      "port": 3030,
+      "scorerPort": 3031,
+      "accent": "#34d399",
+      "desc": "Price crossing back through VWAP with volume behind it.",
+      "captureAt": {
+        "r1": "10:01",
+        "entryA": "10:02",
+        "entryB": "10:06",
+        "why": "VWAP off the first few prints is not a level anything is reclaiming. By 10:01 there is half an hour of real volume behind it, so a reclaim means what it says."
+      }
+    },
+    {
+      "id": "T5",
+      "name": "52-Week Break",
+      "port": 3040,
+      "scorerPort": 3041,
+      "accent": "#f472b6",
+      "desc": "Established names pushing through the 52-week high.",
+      "captureAt": {
+        "r1": "09:46",
+        "entryA": "09:47",
+        "entryB": "09:51",
+        "why": "Same reasoning as T2: fifteen minutes past the open, so a 52-week high that was one opening print has already failed and is not in the photo."
+      }
+    },
+    {
+      "id": "T6",
+      "name": "Overextended",
+      "port": 3050,
+      "scorerPort": 3051,
+      "accent": "#facc15",
+      "desc": "RSI stretched with volume — does momentum continue or snap back?",
+      "captureAt": {
+        "r1": "10:16",
+        "entryA": "10:17",
+        "entryB": "10:21",
+        "why": "Extension is something the session builds. At the open RSI still describes yesterday's close; by 10:16 the stretch being faded was made today."
+      }
+    },
+    {
+      "id": "T7",
+      "name": "Liquid Movers",
+      "port": 3060,
+      "scorerPort": 3061,
+      "accent": "#22d3ee",
+      "desc": "Heavy real volume and real range — gapping before the open, then trading 10M+ shares after it.",
+      "captureAt": {
+        "r1": "09:36",
+        "entryA": "09:37",
+        "entryB": "09:40",
+        "why": "The pre-market screener is what feeds training here, and its candidates are all in by the bell — so the photo goes at 09:36. The after-open screener finds tradable stocks all day, but they arrive after the photo and do not train the model."
+      }
+    },
+    {
+      "id": "T8",
+      "name": "CANSLIM",
+      "port": 3070,
+      "scorerPort": 3071,
+      "accent": "#c084fc",
+      "desc": "O'Neil growth criteria: earnings accelerating, at a 52-week high, leading the market. Its names are tagged wherever else they appear.",
+      "captureAt": {
+        "r1": "09:46",
+        "entryA": "09:47",
+        "entryB": "09:51",
+        "why": "CANSLIM names are position candidates rather than day trades, so the exact minute matters less here than anywhere else. It shares T2's timing — fifteen minutes past the open, once the first spike has settled — so the two breakout tools stay directly comparable."
+      }
+    },
+    {
+      "id": "T9",
+      "name": "Stocks in Play",
+      "port": 3080,
+      "scorerPort": 3081,
+      "accent": "#94a3b8",
+      "desc": "The benchmark. Liquid stocks over $5, ranked by unusual volume, top 20 — no pattern, no direction. Every other tool has to beat this.",
+      "captureAt": {
+        "r1": "09:36",
+        "entryA": "09:37",
+        "entryB": "09:40",
+        "why": "Identical to T1's timing on purpose. This tool exists to be compared against, so it has to be photographed and measured at exactly the same moment as the tools it is benchmarking — a different capture time would make every comparison partly a comparison of clocks."
+      }
+    }
+  ]
+}

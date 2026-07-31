@@ -32,14 +32,19 @@ would only hide it. The highest-scoring row supplies the rest of the card.
 
 Configuration, first match wins:
   1. env SCREENER_SOURCES — JSON [{"id","name","url"}, ...]
-  2. chart/screener_sources.json — same shape, committed so it survives deploys
-  3. env SCREENER_URL (or localhost:3000) as a single source called 'default'
+  2. tools.config.json at the repo root — THE REGISTRY. It is what the deploy
+     script, the landing page and the seeder already read, and its own comment
+     promises "adding a tool means adding an entry here and nothing else".
+     So this module reads it too: a tenth tool appears here automatically,
+     with its real name, port and accent colour, and nothing needs editing.
+  3. chart/screener_sources.json — a manual override, for running the chart on
+     a box that does not carry the tools repo.
+  4. env SCREENER_URL (or localhost:3000) as a single source called 'default'
 
 PORTS. Each tool runs two: an APP port (the page you open) and a private
-SCORER port, app+1, bound to 127.0.0.1. Point this module at the APP port —
-the scorer speaks a different API and answers 404 to a warehouse request.
-Tools are numbered in tens (3000/3001, 3010/3011, … 3060/3061), so an eighth
-tool is 3070 and one more line here.
+SCORER port, app+1, bound to 127.0.0.1. Only the APP port speaks the warehouse
+API — a scorer answers 404 to it. tools.config.json names both, and only
+`port` is ever used here, so the scorer can no longer be picked by mistake.
 
 This service runs ON the same box, so it reaches every tool over localhost.
 Whether a tool's app port is open in the AWS security group only affects
@@ -71,32 +76,79 @@ _TIMEOUT = float(os.environ.get('SCREENER_TIMEOUT', '6'))
 REGISTERS = ['R1', 'Shortlist']
 
 _SOURCES_FILE = pathlib.Path(__file__).resolve().parent / 'screener_sources.json'
+# chart/ -> quant-platform/ -> repo root, where the tool registry lives
+_TOOLS_CONFIG = pathlib.Path(__file__).resolve().parents[2] / 'tools.config.json'
+_TOOLS_HOST = os.environ.get('TOOLS_HOST', 'http://localhost')
 ALL = '*'                      # source id meaning "every configured source"
 
 
+def _from_tools_config() -> list:
+    """Read the repo's tool registry — the file the deploy script, the landing
+    page and the seeder already read. Only `port` (the app port) is used; the
+    `scorerPort` beside it speaks a different API and must never be pointed at.
+    """
+    try:
+        doc = json.loads(_TOOLS_CONFIG.read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for t in (doc.get('tools') or []):
+        port = t.get('port')
+        tid = str(t.get('id') or '').strip()
+        if not port or not tid:
+            continue
+        name = str(t.get('name') or tid).strip()
+        out.append({
+            'id': tid,                                   # 'T1' … stable, short
+            'name': f'{tid} {name}' if name != tid else tid,
+            'url': f'{_TOOLS_HOST.rstrip("/")}:{int(port)}',
+            'color': t.get('accent'),
+            # each tool freezes its register at its OWN time (09:36 … 10:16);
+            # carried through so a card is read against the right moment
+            'capture_r1': ((t.get('captureAt') or {}).get('r1')),
+        })
+    return out
+
+
+def _parse_list(raw: str) -> list:
+    """A hand-written [{id,name,url}, ...] override → source dicts, or []."""
+    try:
+        docs = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    out = []
+    for i, d in enumerate(docs if isinstance(docs, list) else []):
+        if not isinstance(d, dict):
+            continue
+        url = str(d.get('url') or '').rstrip('/')
+        if not url:
+            continue
+        sid = str(d.get('id') or f's{i + 1}').strip()
+        out.append({'id': sid, 'name': str(d.get('name') or sid), 'url': url,
+                    'color': d.get('color'), 'capture_r1': d.get('capture_r1')})
+    return out
+
+
 def _load_sources() -> list:
-    """[{id, name, url}, ...] — see the module docstring for precedence."""
-    raw = os.environ.get('SCREENER_SOURCES')
-    if not raw and _SOURCES_FILE.is_file():
+    """[{id, name, url, ...}, ...] — see the module docstring for precedence.
+
+    Each step is tried in turn and a step that yields NOTHING (missing file,
+    malformed JSON, no usable entry) falls through to the next. A typo in
+    $SCREENER_SOURCES therefore lands on the tool registry rather than on a
+    lone localhost:3000, which would silently shrink the universe to one tool.
+    """
+    for candidate in (
+            lambda: _parse_list(os.environ.get('SCREENER_SOURCES') or ''),
+            _from_tools_config,
+            lambda: _parse_list(_SOURCES_FILE.read_text()
+                                if _SOURCES_FILE.is_file() else ''),
+    ):
         try:
-            raw = _SOURCES_FILE.read_text()
+            got = candidate()
         except OSError:
-            raw = None
-    if raw:
-        try:
-            docs = json.loads(raw)
-            out = []
-            for i, d in enumerate(docs if isinstance(docs, list) else []):
-                url = str(d.get('url') or '').rstrip('/')
-                if not url:
-                    continue
-                sid = str(d.get('id') or f's{i + 1}').strip()
-                out.append({'id': sid, 'name': str(d.get('name') or sid),
-                            'url': url})
-            if out:
-                return out
-        except (ValueError, TypeError):
-            pass          # fall through to the single-source default
+            got = []
+        if got:
+            return got
     return [{'id': 'default', 'name': 'screener', 'url': SCREENER_URL}]
 
 
