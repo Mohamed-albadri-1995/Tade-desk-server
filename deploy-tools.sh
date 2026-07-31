@@ -45,13 +45,17 @@ NEIGHBOURS="quant-platform"
 for dir in $NEIGHBOURS; do
   [ -e "$dir" ] || continue
 
-  dirty=$(git status --porcelain -- "$dir")
+  # Only what `git reset --hard` would actually destroy: tracked files that
+  # differ from the index or HEAD. Untracked files ("??") survive a hard reset
+  # untouched, so stopping for a stray log file would be a false alarm — and a
+  # guard that cries wolf is one that gets worked around.
+  dirty=$(git status --porcelain -- "$dir" | grep -v '^??' || true)
   if [ -n "$dirty" ]; then
     echo
-    echo "  STOPPED: you have uncommitted work in $dir/ that this deploy would destroy:"
+    echo "  STOPPED: you have uncommitted changes in $dir/ that this deploy would destroy:"
     echo "$dirty" | sed 's/^/     /'
     echo
-    echo "  Commit or stash it first:  git add $dir && git commit -m 'wip'"
+    echo "  Commit or stash them first:  git add $dir && git commit -m 'wip'"
     exit 1
   fi
 
