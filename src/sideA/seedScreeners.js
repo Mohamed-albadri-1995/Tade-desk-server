@@ -459,6 +459,26 @@ function tightenAfterOpenVolume() {
   return { tightened: 1 };
 }
 
+// Mirrors created before the link was recorded carry it only in their name.
+// Recover what can be recovered — a "X (mirror)" sitting alongside an "X" — so
+// existing pairs report correctly without anyone re-creating them. One that has
+// already been renamed cannot be recovered this way; it is re-linked from the
+// builder.
+function backfillMirrorLinks() {
+  let linked = 0;
+  const rows = db.prepare('SELECT id, name, mirror_of FROM screeners').all();
+  const byName = new Map(rows.map(r => [r.name, r]));
+  for (const r of rows) {
+    if (r.mirror_of) continue;
+    const m = /^(.*) \(mirror\)$/i.exec(r.name);
+    if (!m || !byName.has(m[1])) continue;
+    db.prepare('UPDATE screeners SET mirror_of = ? WHERE id = ?').run(m[1], r.id);
+    console.log(`[Screeners] "${r.name}" recorded as the mirror of "${m[1]}"`);
+    linked++;
+  }
+  return { linked };
+}
+
 function seedScreeners() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM screeners').get().n;
   if (count > 0) {
@@ -466,6 +486,7 @@ function seedScreeners() {
     applyDefaultWindows();
     repairOversoldMirror();
     tightenAfterOpenVolume();
+    backfillMirrorLinks();
     return { seeded: 0, reason: 'already has screeners' };
   }
 
@@ -485,7 +506,7 @@ function seedScreeners() {
 
 module.exports = {
   seedScreeners, renameLegacyScreeners, applyDefaultWindows, repairOversoldMirror,
-  tightenAfterOpenVolume,
+  tightenAfterOpenVolume, backfillMirrorLinks,
   WINDOW_NOTES,
   PRESETS: BY_TOOL, SESSION_SCREENERS,
 };

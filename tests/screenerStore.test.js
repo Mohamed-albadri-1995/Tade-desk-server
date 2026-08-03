@@ -532,3 +532,63 @@ describe('the after-open screener needs a move, not just volume', () => {
     expect(store.list()[0].filters).toHaveLength(1);
   });
 });
+
+describe('a mirror stays paired after being renamed', () => {
+  const db = require('../src/db');
+  const { backfillMirrorLinks } = require('../src/sideA/seedScreeners');
+
+  beforeEach(() => db.prepare('DELETE FROM screeners').run());
+
+  test('createMirror records what it mirrors', () => {
+    const base = store.create({ name: 'Stack Up', filters: [{ left: 'RSI', operation: 'greater', right: 70 }] });
+    const m = store.createMirror(base.id);
+    expect(m.mirrorOf).toBe('Stack Up');
+  });
+
+  test('renaming the mirror does not break the link', () => {
+    // The real case: the trader renamed "MA Stack Breakout (mirror)" to
+    // "MA Stack Pullback", and name-based pairing lost it silently — the whole
+    // directional comparison went missing for that tool with no error anywhere.
+    const base = store.create({ name: 'MA Stack Breakout', filters: [{ left: 'RSI', operation: 'greater', right: 70 }] });
+    const m = store.createMirror(base.id);
+    const renamed = store.update(m.id, { name: 'MA Stack Pullback' });
+    expect(renamed.name).toBe('MA Stack Pullback');
+    expect(renamed.mirrorOf).toBe('MA Stack Breakout');
+  });
+
+  test('renaming the BASE leaves a stale link, and says so honestly', () => {
+    // Recorded by name, so renaming the base does break it. Worth knowing:
+    // the pair simply stops being reported rather than reporting nonsense.
+    const base = store.create({ name: 'Old Name', filters: [{ left: 'RSI', operation: 'greater', right: 70 }] });
+    const m = store.createMirror(base.id);
+    store.update(base.id, { name: 'New Name' });
+    expect(store.get(m.id).mirrorOf).toBe('Old Name');
+    expect(store.list().some(s => s.name === 'Old Name')).toBe(false);
+  });
+
+  test('the link can be set and cleared by hand', () => {
+    const a = store.create({ name: 'A', filters: [{ left: 'RSI', operation: 'greater', right: 70 }] });
+    const b = store.create({ name: 'B', filters: [{ left: 'RSI', operation: 'less', right: 30 }] });
+    expect(store.update(b.id, { mirrorOf: 'A' }).mirrorOf).toBe('A');
+    expect(store.update(b.id, { mirrorOf: null }).mirrorOf).toBeNull();
+  });
+
+  test('an unrelated update leaves the link alone', () => {
+    const a = store.create({ name: 'A', filters: [{ left: 'RSI', operation: 'greater', right: 70 }] });
+    const b = store.create({ name: 'B', mirrorOf: 'A', filters: [{ left: 'RSI', operation: 'less', right: 30 }] });
+    expect(store.update(b.id, { enabled: false }).mirrorOf).toBe('A');
+  });
+
+  test('old pairs made before the link existed are recovered by name', () => {
+    store.create({ name: 'Alpha', filters: [{ left: 'RSI', operation: 'greater', right: 70 }] });
+    store.create({ name: 'Alpha (mirror)', filters: [{ left: 'RSI', operation: 'less', right: 30 }] });
+    expect(backfillMirrorLinks().linked).toBe(1);
+    expect(store.list().find(s => s.name === 'Alpha (mirror)').mirrorOf).toBe('Alpha');
+  });
+
+  test('the backfill does not invent a link where the base is gone', () => {
+    store.create({ name: 'Orphan (mirror)', filters: [{ left: 'RSI', operation: 'less', right: 30 }] });
+    expect(backfillMirrorLinks().linked).toBe(0);
+    expect(store.list()[0].mirrorOf).toBeNull();
+  });
+});

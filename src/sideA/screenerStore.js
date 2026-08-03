@@ -305,6 +305,9 @@ function rowToScreener(row) {
     limit: row.limit_n,
     runFrom: row.run_from || null,
     runTo: row.run_to || null,
+    // The screener this one mirrors, by name. Survives renaming either side,
+    // which a "(mirror)" suffix does not.
+    mirrorOf: row.mirror_of || null,
     updatedAt: row.updated_at,
   };
 }
@@ -341,8 +344,8 @@ function create(def) {
   }
 
   const info = db.prepare(`
-    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, run_from, run_to, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, run_from, run_to, mirror_of, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     key,
     String(def.name).trim(),
@@ -352,6 +355,7 @@ function create(def) {
     Number.isFinite(def.limit) ? def.limit : 50,
     def.runFrom || null,
     def.runTo || null,
+    def.mirrorOf || null,
     Date.now()
   );
   return get(info.lastInsertRowid);
@@ -369,6 +373,7 @@ function update(id, def) {
     limit: def.limit !== undefined ? def.limit : existing.limit,
     runFrom: def.runFrom !== undefined ? def.runFrom : existing.runFrom,
     runTo: def.runTo !== undefined ? def.runTo : existing.runTo,
+    mirrorOf: def.mirrorOf !== undefined ? def.mirrorOf : existing.mirrorOf,
   };
   const errors = validateDefinition(merged);
   if (errors.length) throw new Error(errors.join('; '));
@@ -376,7 +381,7 @@ function update(id, def) {
   db.prepare(`
     UPDATE screeners
        SET name = ?, enabled = ?, filters = ?, sort = ?, limit_n = ?,
-           run_from = ?, run_to = ?, updated_at = ?
+           run_from = ?, run_to = ?, mirror_of = ?, updated_at = ?
      WHERE id = ?
   `).run(
     String(merged.name).trim(),
@@ -386,6 +391,7 @@ function update(id, def) {
     Number.isFinite(merged.limit) ? merged.limit : 50,
     merged.runFrom || null,
     merged.runTo || null,
+    merged.mirrorOf || null,
     Date.now(),
     id
   );
@@ -400,7 +406,8 @@ function remove(id) {
 function createMirror(id) {
   const src = get(id);
   if (!src) throw new Error(`Screener ${id} not found`);
-  return create(mirrorDefinition(src));
+  // Record what it mirrors, so the pair survives either one being renamed.
+  return create({ ...mirrorDefinition(src), mirrorOf: src.name });
 }
 
 module.exports = {

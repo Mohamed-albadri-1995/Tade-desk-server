@@ -285,10 +285,16 @@ function renderPairs(rows, bench) {
     byTool.get(r.tool).push(r);
   }
 
+  // Prefer the recorded link. Falling back to the name suffix keeps pairs that
+  // were made before the link existed and have not been renamed — but a mirror
+  // the trader renamed is only findable by the recorded link, which is why it
+  // is recorded.
   const pairs = [];
   for (const list of byTool.values()) {
-    for (const m of list.filter(r => MIRROR.test(r.name))) {
-      const base = list.find(r => r.name === m.name.replace(MIRROR, ''));
+    for (const m of list) {
+      const baseName = m.mirrorOf || (MIRROR.test(m.name) ? m.name.replace(MIRROR, '') : null);
+      if (!baseName) continue;
+      const base = list.find(r => r.name === baseName);
       if (base) pairs.push({ base, mirror: m });
     }
   }
@@ -312,7 +318,7 @@ function renderPairs(rows, bench) {
       cls = 'cmp-same'; text = 'no clear difference';
     }
     return `<tr>
-      <td>${base.name}</td>
+      <td>${base.name} <span class="cmp-tool">vs ${mirror.name}</span></td>
       <td class="cmp-tool" style="color:${base.accent || ''}">${base.tool}</td>
       <td>${base.cards + mirror.cards}</td>
       <td>${base.goodPct ?? '—'}%</td>

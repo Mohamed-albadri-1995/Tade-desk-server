@@ -78,6 +78,16 @@ function buildScreenerReport({ entry = 'B' } = {}) {
     }
   }
 
+  // What each screener mirrors, so the report can pair them even after either
+  // side has been renamed. Read from the store rather than guessed from the
+  // name — that guess is exactly what broke.
+  let mirrorOf = new Map();
+  try {
+    for (const def of require('../sideA/screenerStore').list()) {
+      if (def.mirrorOf) mirrorOf.set(def.name, def.mirrorOf);
+    }
+  } catch { /* a report should still render if the store is unreadable */ }
+
   const screeners = [...byScreener.entries()].map(([name, s]) => {
     const n = s.up.length;
     const good = s.up.filter(v => v >= GOOD_R).length;
@@ -94,6 +104,7 @@ function buildScreenerReport({ entry = 'B' } = {}) {
 
     return {
       name,
+      mirrorOf: mirrorOf.get(name) || null,
       cards: n,
       days,
       avgUpR: round(mean(s.up)),

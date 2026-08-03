@@ -104,6 +104,7 @@ db.exec(`
     limit_n INTEGER NOT NULL DEFAULT 50,
     run_from TEXT,
     run_to TEXT,
+    mirror_of TEXT,
     updated_at INTEGER NOT NULL
   );
 
@@ -154,6 +155,12 @@ function ensureColumns(table, columns) {
 
 // Run windows, added after the first tools were already running.
 ensureColumns('screeners', { run_from: 'TEXT', run_to: 'TEXT' });
+
+// Which screener a mirror was made from. Recorded rather than inferred from the
+// name: the pairing used to be read off a "(mirror)" suffix, so renaming a
+// mirror — which is a perfectly ordinary thing to do — silently unpaired it and
+// the whole directional comparison went missing for that tool.
+ensureColumns('screeners', { mirror_of: 'TEXT' });
 
 // The 09:30–09:35 opening range. Free to capture — the 1-minute bars are
 // already fetched for the outcome maths — and it is the trigger level for the

@@ -181,6 +181,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .sch-capture { margin-top:11px; padding:9px 11px; border-radius:5px; background:var(--bg3);
   border-left:3px solid #fbbf24; font-size:11.5px; color:var(--text2); line-height:1.6; max-width:78ch; }
 .sch-capture b { color:var(--text); }
+.sb-mirror { margin-top:9px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.sb-mirror select { background:var(--bg3); border:1px solid #333a4a; color:var(--text);
+  font:11.5px inherit; padding:4px 7px; border-radius:4px; }
+.sb-mirror-note { font-size:11px; color:var(--text3); }
 .sch-why, .sb-why { margin-top:8px; font-size:11.5px; color:var(--text2); line-height:1.6; max-width:78ch; }
 .sb-why { padding-top:8px; border-top:1px solid #242938; }
 .sch-why-k, .sb-why-k { display:block; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
@@ -3434,10 +3438,30 @@ function sbRenderList() {
         </div>
       </div>
       <div class="sb-rules">${s.filters.map(f => `<span class="sb-rule">${esc(sbRuleText(f))}</span>`).join('')}</div>
+      <div class="sb-mirror">
+        <span class="sb-why-k">Mirror of</span>
+        <select onchange="sbSetMirror(${s.id}, this.value)">
+          <option value="">— not a mirror —</option>
+          ${SB_LIST.filter(o => o.id !== s.id).map(o =>
+            `<option value="${esc(o.name)}" ${o.name === s.mirrorOf ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}
+        </select>
+        <span class="sb-mirror-note">Pairs the two in the directional comparison. Recorded, so
+          renaming either one does not break it.</span>
+      </div>
       ${sbWindowNote(s) ? `<div class="sb-why">
         <span class="sb-why-k">${s.runFrom ? `Why ${esc(s.runFrom)}–${esc(s.runTo)}` : 'Why no window'}</span>
         ${esc(sbWindowNote(s))}</div>` : ''}
     </div>`).join('');
+}
+
+async function sbSetMirror(id, name) {
+  // Empty string clears the link, which is why it is sent as null rather than
+  // left out — an omitted field means "unchanged" to the update endpoint.
+  await fetch(`/api/screeners/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mirrorOf: name || null }),
+  });
+  loadBuilder();
 }
 
 function sbNew() {
