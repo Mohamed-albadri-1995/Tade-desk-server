@@ -24,6 +24,7 @@ app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 const LANDING_PROBE_PATHS = [
   '/health', '/api/tools', '/api/registry/today', '/api/analysis/status',
   '/api/analysis/screener-report',   // the month-end comparison across tools
+  '/api/shortlist/all-tools',        // the unified shortlist
 ];
 app.use((req, res, next) => {
   if (req.method === 'GET' && LANDING_PROBE_PATHS.includes(req.path)) {

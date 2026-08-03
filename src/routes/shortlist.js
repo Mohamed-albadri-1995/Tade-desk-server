@@ -48,4 +48,17 @@ router.post('/run-rule', (req, res) => {
   res.json({ ok: true, entry });
 });
 
+// GET /api/shortlist/all-tools — the union across every tool for a date.
+// Served with a permissive origin because the landing page reads it from a
+// different port; see LANDING_PROBE_PATHS in index.js.
+router.get('/all-tools', (req, res) => {
+  try {
+    const { union } = require('../sideF/globalShortlist');
+    const date = req.query.date || require('../utils/time').toETDate(Date.now());
+    res.json({ ok: true, date, rows: union(date) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

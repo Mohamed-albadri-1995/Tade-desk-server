@@ -28,6 +28,16 @@ function saveShortlistEntry(entry) {
     entry.exported ? 1 : 0,
     entry.exportedAt || null
   );
+
+  // Every write to this tool's shortlist goes through here — the auto rule, a
+  // manual toggle, an export — so this one line is what keeps the unified list
+  // across all tools current without any of them opting in. Non-fatal: a tool
+  // that cannot publish still has its own shortlist.
+  try {
+    require('./globalShortlist').publish(entry.date, entry.items);
+  } catch (err) {
+    console.warn('[Shortlist] could not publish to the unified list:', err.message);
+  }
 }
 
 function runAutoRule({ force = false } = {}) {

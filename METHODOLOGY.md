@@ -450,6 +450,27 @@ rather than of screeners.
 
 ---
 
+## The unified shortlist
+
+Every tool keeps its own shortlist — each is a separate experiment. But the
+trader is one person with one account, so **anything shortlisted on any tool
+appears on the unified list, by design**. There is nothing to opt into.
+
+It is on the landing page, sorted by how many tools agreed. A name three tools
+picked independently is a different proposition from one that appeared on a
+single list, and that is the question the list exists to answer.
+
+Each tool publishes its own shortlist whenever it changes — the auto-rule, a
+manual star, an export — so the union is never behind. On a card, a name another
+tool has starred shows **★ also T1 T7**. That badge never touches this tool's
+own star: `inShortlist` stays this tool's decision, and it is the one the model
+reads.
+
+Same rule as the CANSLIM share: a **view, never a filter**. Reading it cannot
+add or remove a candidate, change a score, or alter a register row anywhere.
+
+---
+
 ## Reading the scorecard
 
 **Analysis → Screener scorecard**, per screener, over every captured day:

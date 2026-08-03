@@ -347,8 +347,11 @@ describe('the session screeners', () => {
 
   test('the after-open screener uses current volume, not average', () => {
     const f = byKey('after-open-volume').filters;
+    // `volume` is what has traded TODAY, not an average — that is the point of
+    // this screener. The relative-volume threshold is a tuning number and is
+    // asserted as "there is one", not as a specific value.
     expect(f).toContainEqual({ left: 'volume', operation: 'greater', right: 10000000 });
-    expect(f).toContainEqual({ left: 'relative_volume_10d_calc', operation: 'greater', right: 3 });
+    expect(f.some(x => x.left === 'relative_volume_10d_calc')).toBe(true);
     expect(f).toContainEqual({ left: 'close', operation: 'greater', right: 1 });
   });
 });
@@ -473,5 +476,59 @@ describe('repairing the stored oversold mirror', () => {
     });
     expect(repairOversoldMirror().repaired).toBe(0);
     expect(store.list()[0].filters).toEqual([{ left: 'RSI', operation: 'less', right: 25 }]);
+  });
+});
+
+describe('the after-open screener needs a move, not just volume', () => {
+  const db = require('../src/db');
+  const { tightenAfterOpenVolume, PRESETS: P } = require('../src/sideA/seedScreeners');
+
+  beforeEach(() => db.prepare('DELETE FROM screeners').run());
+
+  const seedLoose = () => store.create({
+    key: 'after-open-volume', name: 'After Open Volume',
+    runFrom: '09:30', runTo: '16:00',
+    filters: [
+      { left: 'relative_volume_10d_calc', operation: 'greater', right: 3 },
+      { left: 'volume', operation: 'greater', right: 10000000 },
+      { left: 'close', operation: 'greater', right: 1 },
+    ],
+  });
+
+  test('the shipped screener now requires a real move', () => {
+    // Its pre-market twin has always demanded a 3% gap; asking only for volume
+    // returned a hundred large liquid names that were going nowhere.
+    const f = P.T7.find(d => d.key === 'after-open-volume').filters;
+    expect(f).toContainEqual({ left: 'change', operation: 'not_in_range', right: [-3, 3] });
+  });
+
+  test('direction-agnostic, like the gap rule it mirrors', () => {
+    const pm = P.T7.find(d => d.key === 'premarket-gap').filters.find(f => f.left === 'gap');
+    const ao = P.T7.find(d => d.key === 'after-open-volume').filters.find(f => f.left === 'change');
+    expect(ao.operation).toBe(pm.operation);
+    expect(ao.right).toEqual(pm.right);
+  });
+
+  test('a tool already running is tightened in place', () => {
+    seedLoose();
+    expect(tightenAfterOpenVolume().tightened).toBe(1);
+    const f = store.list()[0].filters;
+    expect(f.some(x => x.left === 'change')).toBe(true);
+    expect(f.find(x => x.left === 'relative_volume_10d_calc').right).toBe(4);
+  });
+
+  test('running it twice changes nothing the second time', () => {
+    seedLoose();
+    tightenAfterOpenVolume();
+    expect(tightenAfterOpenVolume().tightened).toBe(0);
+  });
+
+  test('a screener the trader has already edited is left alone', () => {
+    store.create({
+      key: 'after-open-volume', name: 'After Open Volume',
+      filters: [{ left: 'relative_volume_10d_calc', operation: 'greater', right: 8 }],
+    });
+    expect(tightenAfterOpenVolume().tightened).toBe(0);
+    expect(store.list()[0].filters).toHaveLength(1);
   });
 });

@@ -254,8 +254,16 @@ const AFTER_OPEN_VOLUME = {
   runFrom: '09:30', runTo: '16:00',
   sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
   filters: [
-    { left: 'relative_volume_10d_calc', operation: 'greater', right: 3 },
+    { left: 'relative_volume_10d_calc', operation: 'greater', right: 4 },
     { left: 'volume', operation: 'greater', right: 10000000 },
+    // The move itself. Its pre-market twin has always required a 3% gap; this
+    // one asked only for volume, so on any ordinary day a hundred perfectly
+    // liquid stocks that were going nowhere qualified. Volume without movement
+    // is a description of a large company, not a candidate.
+    //
+    // Direction-agnostic, exactly like the gap rule it mirrors: "outside
+    // -3%..+3%" is how an absolute value is written here.
+    { left: 'change', operation: 'not_in_range', right: [-3, 3] },
     { left: 'close', operation: 'greater', right: 1 },
   ],
 };
@@ -427,12 +435,37 @@ function repairOversoldMirror() {
   return { repaired: 1 };
 }
 
+// The after-open screener shipped asking only for volume, with no condition on
+// the stock actually moving — its pre-market twin has always required a 3% gap.
+// On an ordinary day that let through a hundred large, liquid, motionless
+// names. Seeding cannot reach a tool that is already running, so the movement
+// rule is added in place, and only to a screener still carrying the exact
+// original filter set.
+function tightenAfterOpenVolume() {
+  const row = db.prepare('SELECT id, filters FROM screeners WHERE key = ?').get('after-open-volume');
+  if (!row) return { tightened: 0 };
+  let filters;
+  try { filters = JSON.parse(row.filters); } catch { return { tightened: 0 }; }
+
+  const hasMove = filters.some(f => /^(change|change_from_open|gap)$/.test(f.left));
+  const isOriginal = filters.length === 3
+    && filters.some(f => f.left === 'relative_volume_10d_calc' && Number(f.right) === 3)
+    && filters.some(f => f.left === 'volume' && Number(f.right) === 10000000);
+  if (hasMove || !isOriginal) return { tightened: 0 };
+
+  db.prepare('UPDATE screeners SET filters = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(AFTER_OPEN_VOLUME.filters), Date.now(), row.id);
+  console.log('[Screeners] "after-open-volume" now requires a 3% move, not just volume');
+  return { tightened: 1 };
+}
+
 function seedScreeners() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM screeners').get().n;
   if (count > 0) {
     renameLegacyScreeners();
     applyDefaultWindows();
     repairOversoldMirror();
+    tightenAfterOpenVolume();
     return { seeded: 0, reason: 'already has screeners' };
   }
 
@@ -452,6 +485,7 @@ function seedScreeners() {
 
 module.exports = {
   seedScreeners, renameLegacyScreeners, applyDefaultWindows, repairOversoldMirror,
+  tightenAfterOpenVolume,
   WINDOW_NOTES,
   PRESETS: BY_TOOL, SESSION_SCREENERS,
 };

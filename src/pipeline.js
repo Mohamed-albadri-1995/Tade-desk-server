@@ -174,7 +174,14 @@ async function runFullScan() {
     // Side F: Restore inShortlist flags from DB (non-fatal)
     await stageWrapSoft(report, 'sideF', async () => {
       syncShortlistToR0();
-      return {};
+      // Then mark anything ANY tool has shortlisted. A name three tools picked
+      // independently is a different proposition from one that appeared on a
+      // single list, and that is worth seeing on the card rather than by
+      // opening nine tabs. A view only — inShortlist, which the model reads,
+      // stays this tool's own decision.
+      const globalShortlist = require('./sideF/globalShortlist');
+      const { tagged, memberCount } = globalShortlist.tagRows(r0.getAll(), today);
+      return { globalTagged: tagged, globalMembers: memberCount };
     })();
 
     // r0 summary

@@ -63,6 +63,16 @@ body {
 .cmp-btn:disabled { opacity:.5; cursor:default; }
 .cmp-hint { font-size:11.5px; color:var(--text3); margin-top:8px; line-height:1.6; }
 .cmp-hint b { color:var(--text2); }
+.uni-title { font-size:15px; font-weight:700; margin-bottom:4px; }
+.uni-grid { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:14px; }
+.uni-chip { display:flex; align-items:center; gap:8px; background:var(--bg2);
+  border:1px solid var(--border); border-radius:7px; padding:8px 12px; }
+.uni-chip.multi { border-color:#eab30877; background:#eab30810; }
+.uni-tkr { font-weight:700; font-size:13px; letter-spacing:.02em; }
+.uni-by { font-size:10.5px; color:var(--text3); font-family:ui-monospace,Menlo,monospace; }
+.uni-n { font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px;
+  background:#eab30822; color:#facc15; border:1px solid #eab30844; }
+.uni-empty { font-size:12px; color:var(--text3); margin-top:14px; }
 .cmp-scroll { overflow-x:auto; margin-top:18px; }
 .cmp-tbl { width:100%; border-collapse:collapse; font-size:12px; min-width:600px; text-align:right; }
 .cmp-tbl th { font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--text3);
@@ -98,6 +108,14 @@ body {
 <div class="subtitle">Each tool screens differently and learns from its own history.</div>
 
 <div class="cards" id="cards"></div>
+
+<div class="cmp-wrap" id="uni-wrap">
+  <div class="uni-title">Shortlist — every tool</div>
+  <div class="cmp-hint">Anything shortlisted on any tool appears here, by design. Names picked by
+    more than one tool sort to the top: independent agreement is a different proposition from one
+    list's opinion.</div>
+  <div id="uni-out"><div class="cmp-hint" style="margin-top:14px">Loading…</div></div>
+</div>
 
 <div class="cmp-wrap">
   <button class="cmp-btn" id="cmp-btn" onclick="loadComparison()">Compare every screener</button>
@@ -198,6 +216,34 @@ async function start() {
   setInterval(() => TOOLS.forEach(probe), 30000);
 }
 start();
+
+// ═══════════════ UNIFIED SHORTLIST ═══════════════
+// Every tool publishes its own shortlist to a shared file whenever it changes,
+// so this is a read of the union rather than a poll of nine tools — one request
+// to whichever tool is serving this page, not nine that fail one at a time.
+async function loadUnifiedShortlist() {
+  const out = document.getElementById('uni-out');
+  if (!out) return;
+  try {
+    const d = await (await fetch('/api/shortlist/all-tools')).json();
+    const rows = (d && d.rows) || [];
+    if (!rows.length) {
+      out.innerHTML = `<div class="uni-empty">Nothing shortlisted yet today. Star a card on any
+        tool, or wait for the auto-rule, and it appears here.</div>`;
+      return;
+    }
+    out.innerHTML = `<div class="uni-grid">${rows.map(r => `
+      <div class="uni-chip ${r.count > 1 ? 'multi' : ''}">
+        <span class="uni-tkr">${r.ticker}</span>
+        ${r.count > 1 ? `<span class="uni-n">${r.count} tools</span>` : ''}
+        <span class="uni-by">${r.tools.map(t => t.id).join(' ')}</span>
+      </div>`).join('')}</div>`;
+  } catch (e) {
+    out.innerHTML = `<div class="uni-empty">Could not load: ${e.message}</div>`;
+  }
+}
+loadUnifiedShortlist();
+setInterval(loadUnifiedShortlist, 60000);
 
 // ═══════════════ MONTH-END COMPARISON ═══════════════
 // Every tool holds its own scorecard, which is right — they are separate
