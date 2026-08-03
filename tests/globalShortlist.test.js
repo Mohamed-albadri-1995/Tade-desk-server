@@ -134,3 +134,39 @@ describe('tagging rows', () => {
     expect(rows.map(r => r.ticker)).toEqual(['AAA', 'BBB', 'CCC']);
   });
 });
+
+describe('what reaches the month of data', () => {
+  // A field that exists on the card but never reaches r1/r4 is a question the
+  // month cannot answer afterwards, however good it looks on screen.
+  const fs2 = require('fs');
+  const registers = fs2.readFileSync(require('path').join(__dirname, '../src/warehouse/registers.js'), 'utf8');
+  const processor = fs2.readFileSync(require('path').join(__dirname, '../src/scoring/processor.py'), 'utf8');
+
+  test('shortlistedElsewhere is written into every register, not just the card', () => {
+    // r1, r2-side card, r4a and r4b — four places.
+    expect((registers.match(/shortlistedElsewhere:/g) || []).length).toBe(4);
+  });
+
+  test('the discovery time is carried as a number the model can use', () => {
+    expect((registers.match(/foundMinsFromOpen:/g) || []).length).toBe(4);
+    expect(processor).toContain("'foundMinsFromOpen'");
+  });
+
+  test('both are features the model actually reads', () => {
+    expect(processor).toContain("'shortlistedElsewhere'");
+  });
+});
+
+describe('minutes from the opening bell', () => {
+  const { toETTime } = require('../src/utils/time');
+  // Rebuild the same arithmetic the register uses, against real timestamps.
+  const mins = ts => {
+    const [h, m] = toETTime(ts).split(':').map(Number);
+    return (h * 60 + m) - (9 * 60 + 30);
+  };
+  const et = (h, m) => Date.UTC(2026, 7, 3, h + 4, m);   // ET = UTC-4 in August
+
+  test('the bell itself is zero', () => expect(mins(et(9, 30))).toBe(0));
+  test('a pre-market find is negative', () => expect(mins(et(8, 0))).toBe(-90));
+  test('an afternoon find is a large positive', () => expect(mins(et(14, 0))).toBe(270));
+});

@@ -3,8 +3,15 @@ const r0 = require('../r0/registry');
 const { toETDate } = require('../utils/time');
 
 function getSetting(key) {
+  // A row that exists but holds a blank or non-numeric value used to come back
+  // as NaN, and `NaN ?? default` is NaN — the ?? only catches null and
+  // undefined. Every `score >= minScore` comparison against NaN is false, so
+  // the auto rule would find nothing eligible and shortlist nobody, silently
+  // and every day. Anything that is not a real number is treated as absent so
+  // the caller's default actually applies.
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
-  return row ? parseFloat(row.value) : null;
+  const n = row ? parseFloat(row.value) : NaN;
+  return Number.isFinite(n) ? n : null;
 }
 
 function getShortlistEntry(date) {

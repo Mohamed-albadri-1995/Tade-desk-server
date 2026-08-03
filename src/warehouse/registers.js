@@ -17,6 +17,28 @@ function signalCols(row) {
   return out;
 }
 
+/**
+ * When this card was first found, in minutes from the opening bell.
+ *
+ * seenAt records the moment each screener first matched, which is what the card
+ * shows — but a map cannot go into a training row, and the question worth
+ * asking of a month of data is scalar: does a candidate found at 09:35 behave
+ * differently from one found at 14:00? Negative before the open, so a
+ * pre-market find reads as -90 rather than as a large positive number.
+ *
+ * Null when the row predates the seenAt field, rather than a guessed zero that
+ * would read as "found exactly at the bell".
+ */
+function foundMinsFromOpen(row) {
+  const times = Object.values(row?.seenAt || {}).filter(Number.isFinite);
+  const earliest = times.length ? Math.min(...times) : row?.firstSeen;
+  if (!Number.isFinite(earliest)) return null;
+  const hhmm = toETTime(earliest);
+  if (!/^\d\d:\d\d$/.test(hhmm)) return null;
+  const [h, m] = hhmm.split(':').map(Number);
+  return (h * 60 + m) - (9 * 60 + 30);
+}
+
 function captureR1() {
   const rows = r0.getTodayRows();
   const date = toETDate(Date.now());
@@ -107,6 +129,8 @@ function getRegisterData(register, date) {
         // catalyst & news summary
         catalyst: row.catalyst?.label || null,
         canslim: row.canslim || 'no',
+        shortlistedElsewhere: row.shortlistedElsewhere || 'no',
+        foundMinsFromOpen: foundMinsFromOpen(row),
         lastUpdated: row.lastUpdated,
       }));
     }
@@ -167,6 +191,8 @@ function getRegisterData(register, date) {
           ...signalCols(d),
           catalyst: d.catalyst?.label || null,
           canslim: d.canslim || 'no',
+          shortlistedElsewhere: d.shortlistedElsewhere || 'no',
+          foundMinsFromOpen: foundMinsFromOpen(d),
           capturedAt: row.captured_at,
         };
       });
@@ -327,6 +353,8 @@ function getRegisterData(register, date) {
           ...signalCols(d1),
           catalyst: d1.catalyst?.label || null,
           canslim: d1.canslim || 'no',
+          shortlistedElsewhere: d1.shortlistedElsewhere || 'no',
+          foundMinsFromOpen: foundMinsFromOpen(d1),
           // R3A EOD fields
           entryPriceA: r3a.entry_price_a,
           hhA: r3a.hh_a,
@@ -398,6 +426,8 @@ function getRegisterData(register, date) {
           ...signalCols(d1),
           catalyst: d1.catalyst?.label || null,
           canslim: d1.canslim || 'no',
+          shortlistedElsewhere: d1.shortlistedElsewhere || 'no',
+          foundMinsFromOpen: foundMinsFromOpen(d1),
           // R3B EOD fields
           entryPriceB: r3b.entry_price_b,
           hhB: r3b.hh_b,

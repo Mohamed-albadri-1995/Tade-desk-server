@@ -11,7 +11,13 @@
   "jest": {
     "moduleNameMapper": {
       "^uuid$": "<rootDir>/tests/__mocks__/uuid.js"
-    }
+    },
+    "_comment_testPathIgnorePatterns": "trading.integration.test.js exercises src/trading/* and src/journal/*, which are not in this repository and never have been on any branch — the file arrived in an unrelated commit. Requiring them at load time failed the whole suite on every run, which is the surest way to stop anyone noticing a real failure. It is ignored rather than deleted, so it is still here if that tool is ever built; remove this line then.",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/quant-platform/",
+      "<rootDir>/tests/trading.integration.test.js"
+    ]
   },
   "repository": {
     "type": "git",

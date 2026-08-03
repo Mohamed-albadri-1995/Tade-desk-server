@@ -56,6 +56,17 @@ those two levels are the trigger for the one day-trading setup with published
 evidence behind it — a month of data collected without them could not be asked
 the question afterwards.
 
+Two more things are recorded on every card so the month can be asked about them
+later: **when it was found**, as minutes from the opening bell (negative before
+it), and whether **another tool had shortlisted it**. Both reach r1 and r4, so
+the scorecard and the model can use them.
+
+> One caveat on the discovery time: cards captured before it existed have none,
+> and the trainer fills a missing number with zero — which on this scale reads
+> as "found exactly at the bell". Only rows from before this change are
+> affected, and they are a shrinking minority as the month fills in. Nothing
+> else uses zero as a real value here.
+
 A **good move** is `upR ≥ 1.3`. The same threshold the model calls a win, so the
 scorecard and the model are not grading on different curves.
 
