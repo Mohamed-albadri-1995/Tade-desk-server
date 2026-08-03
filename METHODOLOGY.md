@@ -497,6 +497,32 @@ add or remove a candidate, change a score, or alter a register row anywhere.
 | **Days hit** | share of days that produced at least one good move |
 | Verdict | keep / watch / drop |
 
+### Two comparisons, on the landing page
+
+**Compare every screener** pulls all nine scorecards into one table and ranks
+every screener against **Stocks in Play** — the plain list. A screener has to
+beat it by 5 points to count, because a month gives a few dozen cards each and
+two or three points on that sample is noise. Entry A and entry B are both
+selectable.
+
+Its limit, stated plainly: the plain list samples liquid stocks over $5, and
+some tools deliberately sample elsewhere — small floats, billion-dollar
+companies — so part of any gap is a difference of universe rather than of
+screener. It is still the right question, because the alternative is trading a
+screener with nothing to compare it to; just do not read a 3-point gap as proof.
+
+**Does direction matter?** pairs each screener with its own mirror. This is the
+cleaner of the two, and the reason the mirrors exist: a screener and its
+opposite-facing twin run in the same window over the same universe by
+construction, so what separates them is direction and little else. Three
+outcomes:
+
+| Verdict | Meaning |
+|---|---|
+| **directional** | one side clearly beats the other — the direction is doing real work |
+| **both sides work** | it finds movers; the direction is decoration. Worth knowing before trading it one way. |
+| **neither beats the plain list** | the pair is noise whichever way it faces |
+
 **Days hit is the column that decides.** A screener whose good moves all landed
 on two wild days has a flattering average and is not something anyone can plan
 around, so a *keep* needs both a rate and a spread of days.

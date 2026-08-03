@@ -61,6 +61,10 @@ body {
   background:var(--accent); color:#08111f; border:none; }
 .cmp-btn:hover { opacity:.9; }
 .cmp-btn:disabled { opacity:.5; cursor:default; }
+.cmp-sel { font:600 12px/1 inherit; padding:9px 12px; border-radius:6px; margin-left:8px;
+  background:var(--bg2); color:var(--text); border:1px solid var(--border); cursor:pointer; }
+.pair-wrap { margin-top:26px; }
+.pair-title { font-size:13px; font-weight:700; margin-bottom:4px; }
 .cmp-hint { font-size:11.5px; color:var(--text3); margin-top:8px; line-height:1.6; }
 .cmp-hint b { color:var(--text2); }
 .uni-title { font-size:15px; font-weight:700; margin-bottom:4px; }
@@ -119,6 +123,10 @@ body {
 
 <div class="cmp-wrap">
   <button class="cmp-btn" id="cmp-btn" onclick="loadComparison()">Compare every screener</button>
+  <select class="cmp-sel" id="cmp-entry" onchange="loadComparison()">
+    <option value="B">Entry B</option>
+    <option value="A">Entry A</option>
+  </select>
   <div class="cmp-hint">Pulls the scorecard from all nine tools and ranks every screener
     against <b>Stocks in Play</b> — the plain list that does nothing clever.</div>
   <div id="cmp-out"></div>
@@ -259,6 +267,74 @@ const BENCH_NAME = 'Stocks in Play';
 // noise wearing a verdict's clothes.
 const MARGIN = 5;
 
+// ── the mirror question ────────────────────────────────────────────────────
+// Five tools ship a screener and its mirror, and the pair exists to answer one
+// thing: is the edge DIRECTIONAL, or does this screener simply find stocks that
+// move? Nothing reported it until now, so the reason the mirrors were built was
+// the one question a month of data could not be asked.
+//
+// This is also the CLEANER of the two comparisons on this page. A screener and
+// its own twin run in the same window over the same universe by construction,
+// so the difference between them is direction and little else — where a
+// comparison against the plain list is partly a comparison of universes.
+function renderPairs(rows, bench) {
+  const MIRROR = / \(mirror\)$/i;
+  const byTool = new Map();
+  for (const r of rows) {
+    if (!byTool.has(r.tool)) byTool.set(r.tool, []);
+    byTool.get(r.tool).push(r);
+  }
+
+  const pairs = [];
+  for (const list of byTool.values()) {
+    for (const m of list.filter(r => MIRROR.test(r.name))) {
+      const base = list.find(r => r.name === m.name.replace(MIRROR, ''));
+      if (base) pairs.push({ base, mirror: m });
+    }
+  }
+  if (!pairs.length) return '';
+
+  const benchPct = bench && !bench.thin ? bench.goodPct : null;
+
+  const body = pairs.map(({ base, mirror }) => {
+    const edge = (base.goodPct || 0) - (mirror.goodPct || 0);
+    let cls, text;
+    if (base.thin || mirror.thin) {
+      cls = 'cmp-none'; text = 'not enough data';
+    } else if (Math.abs(edge) >= MARGIN) {
+      cls = 'cmp-beat';
+      text = `directional — ${edge > 0 ? 'base' : 'mirror'} side by ${Math.abs(edge).toFixed(0)} pts`;
+    } else if (benchPct !== null && base.goodPct >= benchPct + MARGIN && mirror.goodPct >= benchPct + MARGIN) {
+      cls = 'cmp-same'; text = 'both sides work — it finds movers, not a direction';
+    } else if (benchPct !== null && base.goodPct < benchPct + MARGIN && mirror.goodPct < benchPct + MARGIN) {
+      cls = 'cmp-lose'; text = 'neither side beats the plain list';
+    } else {
+      cls = 'cmp-same'; text = 'no clear difference';
+    }
+    return `<tr>
+      <td>${base.name}</td>
+      <td class="cmp-tool" style="color:${base.accent || ''}">${base.tool}</td>
+      <td>${base.cards + mirror.cards}</td>
+      <td>${base.goodPct ?? '—'}%</td>
+      <td>${mirror.goodPct ?? '—'}%</td>
+      <td>${base.avgUpR ?? '—'}</td>
+      <td>${mirror.avgUpR ?? '—'}</td>
+      <td><span class="cmp-v ${cls}">${text}</span></td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="pair-wrap">
+    <div class="pair-title">Does direction matter? — each screener against its own mirror</div>
+    <div class="cmp-hint">The reason the mirrors exist, and the cleaner of the two tests on this
+      page: a screener and its opposite-facing twin run in the same window over the same universe,
+      so what separates them is direction and little else.</div>
+    <div class="cmp-scroll"><table class="cmp-tbl">
+      <tr><th>Pair</th><th>Tool</th><th>Cards</th><th>&ge;1.3R base</th><th>&ge;1.3R mirror</th>
+          <th>Avg R base</th><th>Avg R mirror</th><th>Verdict</th></tr>
+      ${body}</table></div>
+  </div>`;
+}
+
 async function loadComparison() {
   const btn = document.getElementById('cmp-btn');
   const out = document.getElementById('cmp-out');
@@ -266,6 +342,7 @@ async function loadComparison() {
   btn.textContent = 'Reading all tools…';
   out.innerHTML = '';
 
+  const entry = (document.getElementById('cmp-entry') || {}).value || 'B';
   const rows = [];
   let bench = null;
 
@@ -273,7 +350,7 @@ async function loadComparison() {
     try {
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 6000);
-      const r = await fetch(`${baseFor(t)}/api/analysis/screener-report?entry=B`, { signal: ctl.signal });
+      const r = await fetch(`${baseFor(t)}/api/analysis/screener-report?entry=${entry}`, { signal: ctl.signal });
       clearTimeout(timer);
       const d = await r.json();
       if (!d.ok) return;
@@ -324,7 +401,7 @@ async function loadComparison() {
     </tr>`;
   }).join('');
 
-  out.innerHTML = `<div class="cmp-scroll"><table class="cmp-tbl">
+  out.innerHTML = renderPairs(rows, bench) + `<div class="cmp-scroll"><table class="cmp-tbl">
       <tr><th>Screener</th><th>Tool</th><th>Cards</th><th>Days</th><th>Avg R</th>
           <th>Avg −R</th><th>≥1.3R</th><th>Days hit</th><th>vs plain list</th></tr>
       ${body}</table></div>
@@ -340,6 +417,14 @@ async function loadComparison() {
       <b>What to do with this:</b> cut everything that loses to the plain list or matches it —
       those screeners are finding busy stocks the long way round. Keep what beats it, and only
       then start asking which entry, stop and target suit what each one finds.
+      <br><br>
+      <b>The limit of this comparison, stated plainly:</b> the plain list samples liquid stocks
+      over $5, and some tools deliberately sample elsewhere — small floats, billion-dollar
+      companies. So part of any gap is a difference of universe, not of screener. It is still the
+      right question to ask, because the alternative is trading a screener with nothing to compare
+      it to at all; just do not read a 3-point gap as proof. The mirror table above does not have
+      this problem: a screener and its own twin sample the same universe by construction, which is
+      what makes it the cleaner test.
     </div>`;
 }
 </script>
