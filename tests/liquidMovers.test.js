@@ -50,6 +50,43 @@ describe('Liquid Movers was not filtering for liquidity', () => {
     for (const d of P.T7) expect(d.limit).toBe(25);
   });
 
+  test('the after-open screener uses no rule that drifts with the clock', () => {
+    // `volume` is cumulative shares traded so far today: zero at 09:30, largest
+    // at 16:00. A threshold on it is impossible in the morning and trivial by
+    // the close, so the screener fills up as the session runs rather than
+    // finding heavy traders. relative_volume_10d_calc divides day-to-date
+    // volume by a full-day average and climbs for the same reason.
+    const { PRESETS } = require('../src/sideA/seedScreeners');
+    const ao = PRESETS.T7.find(d => d.key === 'after-open-volume');
+    for (const bad of ['volume', 'relative_volume_10d_calc']) {
+      expect({ rule: bad, present: ao.filters.some(f => f.left === bad) })
+        .toEqual({ rule: bad, present: false });
+    }
+  });
+
+  test('it uses the two volume fields that mean the same all day', () => {
+    const { PRESETS } = require('../src/sideA/seedScreeners');
+    const ao = PRESETS.T7.find(d => d.key === 'after-open-volume');
+    // a ten-day average: fixed all session
+    expect(ao.filters.some(f => f.left === 'average_volume_10d_calc')).toBe(true);
+    // this 5-minute bar against what that bar usually does: time-matched
+    expect(ao.filters.some(f => f.left === 'relative_volume_intraday|5')).toBe(true);
+  });
+
+  test('a running tool has the drifting rules removed, not retuned', () => {
+    store.create({ key: 'after-open-volume', name: 'After Open Volume', limit: 50,
+      filters: [
+        { left: 'relative_volume_10d_calc', operation: 'greater', right: 4 },
+        { left: 'volume', operation: 'greater', right: 10000000 },
+        { left: 'close', operation: 'greater', right: 1 },
+      ] });
+    tightenLiquidMovers();
+    const f = store.list()[0].filters;
+    expect(f.some(x => x.left === 'volume')).toBe(false);
+    expect(f.some(x => x.left === 'relative_volume_10d_calc')).toBe(false);
+    expect(f.some(x => x.left === 'relative_volume_intraday|5')).toBe(true);
+  });
+
   test('a running tool has the floor raised and the limit cut', () => {
     seedAsShipped();
     expect(tightenLiquidMovers().changed).toBe(2);

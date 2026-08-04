@@ -346,12 +346,22 @@ Direction-agnostic on purpose. TradingView has no absolute-value operator, so
 **After Open Volume** — 09:30–16:00
 
 ```
-relative_volume_10d_calc > 4
-volume > 10M shares                   actually traded today, not an average
+average_volume_10d_calc > 5M          a big liquid name — fixed all day
+relative_volume_intraday|5 > 3        volume arriving NOW, measured against what
+                                      this time of day usually does
 change not between −3% and +3%        and actually moving
 close > $5                            ten million shares of a $1.50 stock is
                                       $15M — a penny-stock frenzy, not liquidity
 ```
+
+**Every rule here means the same thing at 09:40 as at 15:40**, and that is the
+point. `volume` is *cumulative shares traded so far today* — zero at the bell,
+largest at the close — so "volume > 10M" is impossible in the morning and
+trivial by the afternoon. It does not find heavy traders; the screener simply
+fills up as the session runs. `relative_volume_10d_calc` has the same flaw:
+it divides day-to-date volume by a full-day average, so it climbs all session
+too. Both are gone rather than retuned — no threshold makes a cumulative
+counter mean one thing all day.
 
 Both take the **top 25**, not 50.
 
@@ -360,7 +370,10 @@ choice: it asks what has traded *today*, so the screener only fires once real
 participation has shown up.
 
 **What was wrong with it.** This tool returned 75 names in a day, which is not a
-short list of liquid movers. Three reasons, all now fixed. The price floor was
+short list of liquid movers. Four reasons, all now fixed.
+
+The largest was the one above: both of its volume rules grew through the
+session, so the list could only get longer. The price floor was
 $1, so ten million shares of a $1.50 stock qualified — fifteen million dollars,
 a penny-stock frenzy rather than liquidity; at $5 the same share count is fifty
 million, and $5 is the one price floor in the research with published evidence

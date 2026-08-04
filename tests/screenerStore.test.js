@@ -345,18 +345,17 @@ describe('the session screeners', () => {
     expect(f).toContainEqual({ left: 'average_volume_90d_calc', operation: 'egreater', right: 2000000 });
   });
 
-  test('the after-open screener uses current volume, not average', () => {
+  test('the after-open screener uses volume measures that do not drift', () => {
+    // This test used to assert the opposite — "current volume, not average" —
+    // and the premise was wrong. `volume` is cumulative shares traded SO FAR
+    // today: zero at the bell, largest at the close. A threshold on it is a
+    // different condition every hour, so the screener filled up as the session
+    // ran instead of finding heavy traders.
     const f = byKey('after-open-volume').filters;
-    // `volume` is what has traded TODAY, not an average — that is the point of
-    // this screener. The relative-volume threshold is a tuning number and is
-    // asserted as "there is one", not as a specific value.
-    expect(f).toContainEqual({ left: 'volume', operation: 'greater', right: 10000000 });
-    expect(f.some(x => x.left === 'relative_volume_10d_calc')).toBe(true);
-    // There is a price floor, and it is meaningful for a liquidity screener:
-    // ten million shares of a dollar stock is not a liquid mover. The exact
-    // number is asserted in the Liquid Movers suite, which owns it.
+    expect(f.some(x => x.left === 'volume')).toBe(false);
+    expect(f.some(x => x.left === 'average_volume_10d_calc')).toBe(true);
+    expect(f.some(x => x.left === 'relative_volume_intraday|5')).toBe(true);
     const floor = f.find(x => x.left === 'close');
-    expect(floor).toBeDefined();
     expect(Number(floor.right)).toBeGreaterThanOrEqual(5);
   });
 });
@@ -519,7 +518,10 @@ describe('the after-open screener needs a move, not just volume', () => {
     expect(tightenAfterOpenVolume().tightened).toBe(1);
     const f = store.list()[0].filters;
     expect(f.some(x => x.left === 'change')).toBe(true);
-    expect(f.find(x => x.left === 'relative_volume_10d_calc').right).toBe(4);
+    // The relative-volume rule this once asserted was day-to-date and drifted
+    // with the clock; it is gone rather than retuned. See the Liquid Movers
+    // suite, which owns that reasoning.
+    expect(f.some(x => x.left === 'relative_volume_10d_calc')).toBe(false);
   });
 
   test('running it twice changes nothing the second time', () => {

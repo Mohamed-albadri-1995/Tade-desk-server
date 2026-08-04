@@ -258,14 +258,32 @@ const PREMARKET_GAP = {
   ],
 };
 
+// Rebuilt around ONE observation: `volume` is cumulative shares traded so far
+// today. It is zero at 09:30 and largest at 16:00, so "volume > 10M" is not one
+// condition — it is an impossible one in the morning and a trivial one by the
+// close. A screener built on it does not find heavy traders, it slowly fills up
+// as the session runs, which is exactly what was seen: 75 names by the end of
+// the day.
+//
+// `relative_volume_10d_calc` has the same flaw for the same reason: it divides
+// volume SO FAR TODAY by a full-day average, so it climbs all session too.
+//
+// The two fields that do not drift are the ones this screener now uses.
+// `average_volume_10d_calc` is a ten-day average and is fixed all day — it says
+// "this is a big liquid name". `relative_volume_intraday|5` compares the
+// current five-minute bar against what that bar usually does, so it is
+// time-matched and says "volume is arriving RIGHT NOW" at 09:40 exactly as it
+// does at 15:40.
 const AFTER_OPEN_VOLUME = {
   key: 'after-open-volume', name: 'After Open Volume',
   runFrom: '09:30', runTo: '16:00',
   limit: 25,
-  sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
+  sort: { sortBy: 'relative_volume_intraday|5', sortOrder: 'desc' },
   filters: [
-    { left: 'relative_volume_10d_calc', operation: 'greater', right: 4 },
-    { left: 'volume', operation: 'greater', right: 10000000 },
+    // A big liquid name. Fixed all day, so it means the same at 09:40 and 15:40.
+    { left: 'average_volume_10d_calc', operation: 'greater', right: 5000000 },
+    // Volume arriving now, measured against what this time of day usually does.
+    { left: 'relative_volume_intraday|5', operation: 'greater', right: 3 },
     // The move itself. Its pre-market twin has always required a 3% gap; this
     // one asked only for volume, so on any ordinary day a hundred perfectly
     // liquid stocks that were going nowhere qualified. Volume without movement
@@ -490,8 +508,16 @@ const T7_TIGHTENING = {
   ],
   'after-open-volume': [
     { left: 'close', operation: 'greater', right: 5 },
+    { left: 'average_volume_10d_calc', operation: 'greater', right: 5000000 },
+    { left: 'relative_volume_intraday|5', operation: 'greater', right: 3 },
   ],
 };
+
+// Rules whose value depends on the time of day. A threshold on either is a
+// different condition at 09:40 than at 15:40, so they are removed outright
+// rather than retuned — there is no number that makes a cumulative counter mean
+// one thing all session.
+const T7_TIME_DEPENDENT = ['volume', 'relative_volume_10d_calc'];
 
 function tightenLiquidMovers() {
   if (config.toolId !== 'T7') return { changed: 0 };
@@ -521,6 +547,12 @@ function tightenLiquidMovers() {
         touched = true;
       }
     }
+    if (key === 'after-open-volume') {
+      const before = filters.length;
+      filters = filters.filter(f => !T7_TIME_DEPENDENT.includes(f.left));
+      if (filters.length !== before) touched = true;
+    }
+
     const limit = row.limit_n > 25 ? 25 : row.limit_n;
     if (!touched && limit === row.limit_n) continue;
 
