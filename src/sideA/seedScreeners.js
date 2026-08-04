@@ -240,18 +240,28 @@ const PREMARKET_GAP = {
   key: 'premarket-gap', name: 'Pre-Market Gap',
   runFrom: '04:00', runTo: '09:30',
   sort: { sortBy: 'premarket_change', sortOrder: 'desc' },
+  limit: 25,
   filters: [
     // "gap up OR down 3%" — a single absolute-value rule is not expressible, so
     // it is stated as "outside -3%..+3%", which is the same set.
     { left: 'gap', operation: 'not_in_range', right: [-3, 3] },
     { left: 'ATR', operation: 'egreater', right: 1 },
     { left: 'average_volume_90d_calc', operation: 'egreater', right: 2000000 },
+    // A gap with no pre-market trade behind it is a quote, not a move — it can
+    // vanish at the bell. Average volume says the stock is normally liquid; it
+    // says nothing about today. Same reasoning already applied in T3, at the
+    // larger size this tool is for.
+    { left: 'premarket_volume', operation: 'greater', right: 1000000 },
+    // The one price floor in the research with published evidence behind it:
+    // the 2024 ORB study used opening price > $5 to exclude penny-stock noise.
+    { left: 'close', operation: 'greater', right: 5 },
   ],
 };
 
 const AFTER_OPEN_VOLUME = {
   key: 'after-open-volume', name: 'After Open Volume',
   runFrom: '09:30', runTo: '16:00',
+  limit: 25,
   sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
   filters: [
     { left: 'relative_volume_10d_calc', operation: 'greater', right: 4 },
@@ -264,7 +274,11 @@ const AFTER_OPEN_VOLUME = {
     // Direction-agnostic, exactly like the gap rule it mirrors: "outside
     // -3%..+3%" is how an absolute value is written here.
     { left: 'change', operation: 'not_in_range', right: [-3, 3] },
-    { left: 'close', operation: 'greater', right: 1 },
+    // Was $1, which is the whole reason this tool filled up. Ten million shares
+    // of a $1.50 stock is fifteen million dollars — a penny-stock frenzy, not a
+    // liquid mover. At $5 the same share count is fifty million dollars, and
+    // the floor is the one the ORB study used to exclude exactly this noise.
+    { left: 'close', operation: 'greater', right: 5 },
   ],
 };
 
@@ -459,6 +473,65 @@ function tightenAfterOpenVolume() {
   return { tightened: 1 };
 }
 
+// T7 was returning 75 names for a tool called Liquid Movers, and the reason was
+// a price floor of $1. Ten million shares of a $1.50 stock is fifteen million
+// dollars — a penny-stock frenzy, not a liquid mover; at $5 the same share
+// count is fifty million. $5 is also the one price floor in the research with
+// published evidence behind it. Two more leaks alongside it: a gap screener
+// with no requirement that anything traded in the pre-market, and a limit of
+// fifty per screener when the evidence-backed recipe takes the top twenty.
+//
+// Rules are ADDED rather than the filter set replaced, so a screener the trader
+// has tuned keeps its own numbers and only gains the floor it was missing.
+const T7_TIGHTENING = {
+  'premarket-gap': [
+    { left: 'premarket_volume', operation: 'greater', right: 1000000 },
+    { left: 'close', operation: 'greater', right: 5 },
+  ],
+  'after-open-volume': [
+    { left: 'close', operation: 'greater', right: 5 },
+  ],
+};
+
+function tightenLiquidMovers() {
+  if (config.toolId !== 'T7') return { changed: 0 };
+  let changed = 0;
+  for (const [key, additions] of Object.entries(T7_TIGHTENING)) {
+    const row = db.prepare('SELECT id, filters, limit_n FROM screeners WHERE key = ?').get(key);
+    if (!row) continue;
+    let filters;
+    try { filters = JSON.parse(row.filters); } catch { continue; }
+
+    let touched = false;
+    for (const add of additions) {
+      const existing = filters.find(f => f.left === add.left);
+      if (!existing) {
+        filters.push(add);
+        touched = true;
+        continue;
+      }
+      // A rule is already there. Raise it only when it is EXACTLY the value
+      // this tool shipped with — that is the leak, not a decision anyone made.
+      // Any other number is the trader's and is left alone, even if it is
+      // lower than the new floor.
+      const isShippedDefault = add.left === 'close'
+        && existing.operation === 'greater' && Number(existing.right) === 1;
+      if (isShippedDefault) {
+        existing.right = add.right;
+        touched = true;
+      }
+    }
+    const limit = row.limit_n > 25 ? 25 : row.limit_n;
+    if (!touched && limit === row.limit_n) continue;
+
+    db.prepare('UPDATE screeners SET filters = ?, limit_n = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(filters), limit, Date.now(), row.id);
+    console.log(`[Screeners] tightened "${key}" — ${filters.length} rules, top ${limit}`);
+    changed++;
+  }
+  return { changed };
+}
+
 // Mirrors created before the link was recorded carry it only in their name.
 // Recover what can be recovered — a "X (mirror)" sitting alongside an "X" — so
 // existing pairs report correctly without anyone re-creating them. One that has
@@ -487,6 +560,7 @@ function seedScreeners() {
     repairOversoldMirror();
     tightenAfterOpenVolume();
     backfillMirrorLinks();
+    tightenLiquidMovers();
     return { seeded: 0, reason: 'already has screeners' };
   }
 
@@ -506,7 +580,7 @@ function seedScreeners() {
 
 module.exports = {
   seedScreeners, renameLegacyScreeners, applyDefaultWindows, repairOversoldMirror,
-  tightenAfterOpenVolume, backfillMirrorLinks,
+  tightenAfterOpenVolume, backfillMirrorLinks, tightenLiquidMovers,
   WINDOW_NOTES,
   PRESETS: BY_TOOL, SESSION_SCREENERS,
 };

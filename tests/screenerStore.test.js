@@ -352,7 +352,12 @@ describe('the session screeners', () => {
     // asserted as "there is one", not as a specific value.
     expect(f).toContainEqual({ left: 'volume', operation: 'greater', right: 10000000 });
     expect(f.some(x => x.left === 'relative_volume_10d_calc')).toBe(true);
-    expect(f).toContainEqual({ left: 'close', operation: 'greater', right: 1 });
+    // There is a price floor, and it is meaningful for a liquidity screener:
+    // ten million shares of a dollar stock is not a liquid mover. The exact
+    // number is asserted in the Liquid Movers suite, which owns it.
+    const floor = f.find(x => x.left === 'close');
+    expect(floor).toBeDefined();
+    expect(Number(floor.right)).toBeGreaterThanOrEqual(5);
   });
 });
 

@@ -335,7 +335,9 @@ session, and the sessions do not overlap, so a stock lands in one or the other.
 ```
 gap not between −3% and +3%           moving either way, at least 3%
 ATR ≥ $1
-average_volume_90d_calc ≥ 2M
+average_volume_90d_calc ≥ 2M          normally liquid
+premarket_volume > 1M                 and trading TODAY, not just quoted
+close > $5                            the evidence-backed price floor
 ```
 
 Direction-agnostic on purpose. TradingView has no absolute-value operator, so
@@ -344,14 +346,28 @@ Direction-agnostic on purpose. TradingView has no absolute-value operator, so
 **After Open Volume** — 09:30–16:00
 
 ```
-relative_volume_10d_calc > 3
+relative_volume_10d_calc > 4
 volume > 10M shares                   actually traded today, not an average
-close > 1
+change not between −3% and +3%        and actually moving
+close > $5                            ten million shares of a $1.50 stock is
+                                      $15M — a penny-stock frenzy, not liquidity
 ```
+
+Both take the **top 25**, not 50.
 
 **Why these filters.** `volume` rather than average volume is the distinctive
 choice: it asks what has traded *today*, so the screener only fires once real
 participation has shown up.
+
+**What was wrong with it.** This tool returned 75 names in a day, which is not a
+short list of liquid movers. Three reasons, all now fixed. The price floor was
+$1, so ten million shares of a $1.50 stock qualified — fifteen million dollars,
+a penny-stock frenzy rather than liquidity; at $5 the same share count is fifty
+million, and $5 is the one price floor in the research with published evidence
+behind it. The gap screener asked only that a stock is *normally* liquid, never
+that anything traded in the pre-market — a gap with no trade behind it is a
+quote that can vanish at the bell. And each screener took the top 50 when the
+evidence-backed recipe takes the top 20.
 
 **Capture:** photo 09:36, entries 09:37 / 09:40. The pre-market screener is what
 feeds training here — its candidates are all in by the bell. The after-open
