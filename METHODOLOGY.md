@@ -349,19 +349,29 @@ Direction-agnostic on purpose. TradingView has no absolute-value operator, so
 average_volume_10d_calc > 5M          a big liquid name — fixed all day
 relative_volume_intraday|5 > 3        volume arriving NOW, measured against what
                                       this time of day usually does
+volume > 10M shares                   the source recipe's condition, kept
 change not between −3% and +3%        and actually moving
 close > $5                            ten million shares of a $1.50 stock is
                                       $15M — a penny-stock frenzy, not liquidity
 ```
 
-**Every rule here means the same thing at 09:40 as at 15:40**, and that is the
-point. `volume` is *cumulative shares traded so far today* — zero at the bell,
-largest at the close — so "volume > 10M" is impossible in the morning and
-trivial by the afternoon. It does not find heavy traders; the screener simply
-fills up as the session runs. `relative_volume_10d_calc` has the same flaw:
-it divides day-to-date volume by a full-day average, so it climbs all session
-too. Both are gone rather than retuned — no threshold makes a cumulative
-counter mean one thing all day.
+**On the ten-million-share rule.** `volume` is *cumulative shares traded so far
+today* — zero at the bell, largest at the close — so as the only real condition
+it was impossible in the morning and trivial by the afternoon, and the list
+could only grow. It is kept, because it is the condition the source recipe asks
+for, but it no longer carries the screener alone: a name must also be big
+(a fixed ten-day average), moving 3%, and taking unusual volume *in the current
+five minutes*. Those three mean the same at 09:40 as at 15:40.
+
+The side effect is that this screener is naturally quiet early on — at 10:00
+very few stocks have traded ten million shares. That is correct rather than a
+fault: the rule asks what *has* traded, and at 10:00 the honest answer is "not
+much yet".
+
+`relative_volume_10d_calc` was removed outright, and that one is not a
+judgement call: it divides day-to-date volume by a *full-day* average, so no
+threshold makes it mean one thing all session, and unlike the ten-million rule
+it is nobody's stated requirement.
 
 Both take the **top 25**, not 50.
 

@@ -352,7 +352,9 @@ describe('the session screeners', () => {
     // different condition every hour, so the screener filled up as the session
     // ran instead of finding heavy traders.
     const f = byKey('after-open-volume').filters;
-    expect(f.some(x => x.left === 'volume')).toBe(false);
+    // `volume` stays — it is the source recipe's condition — but it is now one
+    // rule among several rather than the only thing holding the list down.
+    expect(f.some(x => x.left === 'volume')).toBe(true);
     expect(f.some(x => x.left === 'average_volume_10d_calc')).toBe(true);
     expect(f.some(x => x.left === 'relative_volume_intraday|5')).toBe(true);
     const floor = f.find(x => x.left === 'close');

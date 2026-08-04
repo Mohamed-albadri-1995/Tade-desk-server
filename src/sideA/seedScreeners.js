@@ -284,6 +284,18 @@ const AFTER_OPEN_VOLUME = {
     { left: 'average_volume_10d_calc', operation: 'greater', right: 5000000 },
     // Volume arriving now, measured against what this time of day usually does.
     { left: 'relative_volume_intraday|5', operation: 'greater', right: 3 },
+    // The source recipe's condition, kept: ten million shares ACTUALLY traded
+    // today. On its own it was the problem — it is a cumulative counter, so it
+    // meant nothing in the morning and everything by the close, and the list
+    // could only grow. Alongside the rules above it is no longer doing that
+    // work alone: a name still has to be big, moving 3%, and taking unusual
+    // volume in the current five minutes.
+    //
+    // It does make this screener naturally quiet early on — at 10:00 very few
+    // stocks have traded ten million shares. That is correct rather than a
+    // fault: the condition asks what HAS traded, and at 10:00 the honest answer
+    // is "not much yet".
+    { left: 'volume', operation: 'greater', right: 10000000 },
     // The move itself. Its pre-market twin has always required a 3% gap; this
     // one asked only for volume, so on any ordinary day a hundred perfectly
     // liquid stocks that were going nowhere qualified. Volume without movement
@@ -510,14 +522,18 @@ const T7_TIGHTENING = {
     { left: 'close', operation: 'greater', right: 5 },
     { left: 'average_volume_10d_calc', operation: 'greater', right: 5000000 },
     { left: 'relative_volume_intraday|5', operation: 'greater', right: 3 },
+    { left: 'volume', operation: 'greater', right: 10000000 },
   ],
 };
 
-// Rules whose value depends on the time of day. A threshold on either is a
-// different condition at 09:40 than at 15:40, so they are removed outright
-// rather than retuned — there is no number that makes a cumulative counter mean
-// one thing all session.
-const T7_TIME_DEPENDENT = ['volume', 'relative_volume_10d_calc'];
+// relative_volume_10d_calc divides day-to-date volume by a FULL-day average, so
+// it climbs all session and cannot be made to mean one thing. Removed rather
+// than retuned.
+//
+// `volume` is cumulative too, but it is the source recipe's own condition and
+// it is kept — see the screener above. The difference is that it no longer
+// carries the screener alone.
+const T7_TIME_DEPENDENT = ['relative_volume_10d_calc'];
 
 function tightenLiquidMovers() {
   if (config.toolId !== 'T7') return { changed: 0 };

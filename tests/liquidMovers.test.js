@@ -50,18 +50,33 @@ describe('Liquid Movers was not filtering for liquidity', () => {
     for (const d of P.T7) expect(d.limit).toBe(25);
   });
 
-  test('the after-open screener uses no rule that drifts with the clock', () => {
-    // `volume` is cumulative shares traded so far today: zero at 09:30, largest
-    // at 16:00. A threshold on it is impossible in the morning and trivial by
-    // the close, so the screener fills up as the session runs rather than
-    // finding heavy traders. relative_volume_10d_calc divides day-to-date
-    // volume by a full-day average and climbs for the same reason.
+  test("the source recipe's ten-million-share condition is kept", () => {
+    // It came from the video this tool was built from. It is cumulative and so
+    // it does drift — but it is the trader's stated requirement, and with the
+    // rules below it no longer carries the screener on its own.
     const { PRESETS } = require('../src/sideA/seedScreeners');
     const ao = PRESETS.T7.find(d => d.key === 'after-open-volume');
-    for (const bad of ['volume', 'relative_volume_10d_calc']) {
-      expect({ rule: bad, present: ao.filters.some(f => f.left === bad) })
-        .toEqual({ rule: bad, present: false });
+    expect(ao.filters).toContainEqual({ left: 'volume', operation: 'greater', right: 10000000 });
+  });
+
+  test('it never carries the screener alone', () => {
+    // The drift only mattered because nothing else held the list down. Every
+    // one of these means the same at 09:40 as at 15:40.
+    const { PRESETS } = require('../src/sideA/seedScreeners');
+    const ao = PRESETS.T7.find(d => d.key === 'after-open-volume');
+    for (const steady of ['average_volume_10d_calc', 'relative_volume_intraday|5', 'change', 'close']) {
+      expect({ rule: steady, present: ao.filters.some(f => f.left === steady) })
+        .toEqual({ rule: steady, present: true });
     }
+  });
+
+  test('the day-to-date relative volume is gone, because it cannot be fixed', () => {
+    // Unlike `volume`, this one is not anybody's stated requirement — it
+    // divides day-to-date volume by a FULL-day average, so no threshold makes
+    // it mean one thing all session.
+    const { PRESETS } = require('../src/sideA/seedScreeners');
+    const ao = PRESETS.T7.find(d => d.key === 'after-open-volume');
+    expect(ao.filters.some(f => f.left === 'relative_volume_10d_calc')).toBe(false);
   });
 
   test('it uses the two volume fields that mean the same all day', () => {
@@ -82,9 +97,10 @@ describe('Liquid Movers was not filtering for liquidity', () => {
       ] });
     tightenLiquidMovers();
     const f = store.list()[0].filters;
-    expect(f.some(x => x.left === 'volume')).toBe(false);
     expect(f.some(x => x.left === 'relative_volume_10d_calc')).toBe(false);
     expect(f.some(x => x.left === 'relative_volume_intraday|5')).toBe(true);
+    // the recipe's own condition survives the migration
+    expect(f.some(x => x.left === 'volume')).toBe(true);
   });
 
   test('a running tool has the floor raised and the limit cut', () => {
