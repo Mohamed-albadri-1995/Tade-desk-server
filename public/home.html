@@ -76,6 +76,8 @@ body {
 .uni-by { font-size:10.5px; color:var(--text3); font-family:ui-monospace,Menlo,monospace; }
 .uni-n { font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px;
   background:#eab30822; color:#facc15; border:1px solid #eab30844; }
+.uni-link { color:inherit; text-decoration:none; border-bottom:1px dotted var(--text3); }
+.uni-link:hover { color:var(--accent); border-bottom-color:var(--accent); }
 .uni-empty { font-size:12px; color:var(--text3); margin-top:14px; }
 .cmp-scroll { overflow-x:auto; margin-top:18px; }
 .cmp-tbl { width:100%; border-collapse:collapse; font-size:12px; min-width:600px; text-align:right; }
@@ -229,6 +231,14 @@ start();
 // Every tool publishes its own shortlist to a shared file whenever it changes,
 // so this is a read of the union rather than a poll of nine tools — one request
 // to whichever tool is serving this page, not nine that fail one at a time.
+// Where a ticker's card lives: the tool that shortlisted it, on its own port,
+// deep-linked. The tool opens the card itself — see openCardFromUrl there.
+function cardUrl(tool, ticker, date) {
+  const t = TOOLS.find(x => x.id === tool.id);
+  const base = t ? baseFor(t) : `${location.protocol}//${location.hostname}:3000`;
+  return `${base}/scanner?ticker=${encodeURIComponent(ticker)}&date=${encodeURIComponent(date)}`;
+}
+
 async function loadUnifiedShortlist() {
   const out = document.getElementById('uni-out');
   if (!out) return;
@@ -240,11 +250,18 @@ async function loadUnifiedShortlist() {
         tool, or wait for the auto-rule, and it appears here.</div>`;
       return;
     }
+    // This page cannot render a card — it has no registry of its own — so each
+    // chip hands off to a tool that actually holds the data, deep-linked to the
+    // ticker. Every tool that picked the name is its own link, because their
+    // cards differ: same stock, different screeners, different score.
     out.innerHTML = `<div class="uni-grid">${rows.map(r => `
       <div class="uni-chip ${r.count > 1 ? 'multi' : ''}">
-        <span class="uni-tkr">${r.ticker}</span>
+        <a class="uni-tkr uni-link" href="${cardUrl(r.tools[0], r.ticker, d.date)}"
+           title="Open ${r.ticker} on ${r.tools[0].name}">${r.ticker}</a>
         ${r.count > 1 ? `<span class="uni-n">${r.count} tools</span>` : ''}
-        <span class="uni-by">${r.tools.map(t => t.id).join(' ')}</span>
+        <span class="uni-by">${r.tools.map(t =>
+          `<a class="uni-link" href="${cardUrl(t, r.ticker, d.date)}"
+              title="Open on ${t.name}">${t.id}</a>`).join(' ')}</span>
       </div>`).join('')}</div>`;
   } catch (e) {
     out.innerHTML = `<div class="uni-empty">Could not load: ${e.message}</div>`;

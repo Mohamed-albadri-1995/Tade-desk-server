@@ -582,6 +582,21 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .feature-val { min-width:40px; text-align:right; font-size:11px; font-weight:600; color:var(--text3); }
 
 /* ── TABLE INSPECTOR MODAL ── */
+.card-overlay { display:none; position:fixed; inset:0; z-index:400; background:#000000cc;
+  padding:24px 14px; overflow-y:auto; }
+.card-overlay.open { display:block; }
+.card-modal { max-width:560px; margin:0 auto; background:var(--bg2); border:1px solid var(--border);
+  border-radius:10px; overflow:hidden; }
+.card-modal-head { display:flex; justify-content:space-between; align-items:center; gap:12px;
+  padding:12px 14px; border-bottom:1px solid var(--border); background:var(--bg3); }
+.card-modal-title { font-size:16px; font-weight:700; letter-spacing:.02em; }
+.card-modal-sub { font-size:11px; color:var(--text3); margin-left:8px; }
+.card-modal-body { padding:12px; }
+.card-modal-body .card { margin:0; }
+.card-modal-msg { font-size:12.5px; color:var(--text2); line-height:1.7; padding:14px 4px; }
+.sl-card { cursor:pointer; }
+.sl-card:hover { border-color:var(--accent); }
+.sl-open-hint { font-size:10px; color:var(--text3); margin-top:6px; }
 .ti-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.8); z-index:2000; align-items:flex-start; justify-content:center; padding:20px; overflow-y:auto; }
 .ti-overlay.open { display:flex; }
 .ti-modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:100%; max-width:900px; margin:auto; overflow:hidden; }
@@ -1116,6 +1131,20 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
     </div>
   </div>
 
+</div>
+
+<!-- Full card, opened from a shortlist row or from ?ticker= -->
+<div class="card-overlay" id="card-overlay" onclick="if(event.target===this)closeCardModal()">
+  <div class="card-modal">
+    <div class="card-modal-head">
+      <div>
+        <span class="card-modal-title" id="card-modal-title">—</span>
+        <span class="card-modal-sub" id="card-modal-sub"></span>
+      </div>
+      <button class="ti-close" onclick="closeCardModal()">✕ Close</button>
+    </div>
+    <div class="card-modal-body" id="card-modal-body"></div>
+  </div>
 </div>
 
 <!-- Table Inspector Modal -->
@@ -2857,7 +2886,8 @@ function renderShortlistDate(entry) {
   }
   grid.innerHTML = items.map(item => {
     const chg = item.change || 0;
-    return `<div class="sl-card">
+    return `<div class="sl-card" onclick="openCard('${item.ticker}','${currentSLDate}')"
+        title="Open the full card">
       <div class="sl-ticker">${item.ticker}</div>
       <div class="sl-meta">
         <div class="sl-row"><span class="sl-key">Score</span><span class="sl-val">${item.score != null ? item.score : '—'}</span></div>
@@ -2867,7 +2897,9 @@ function renderShortlistDate(entry) {
         <div class="sl-row"><span class="sl-key">Method</span><span class="sl-val ${item.method==='auto'?'method-auto':'method-manual'}">${item.method}</span></div>
         <div class="sl-row"><span class="sl-key">Added</span><span class="sl-val" style="font-size:10px;color:var(--text2)">${fmtTime(item.addedAt)}</span></div>
       </div>
-      <button class="sl-remove-btn" onclick="removeSL('${item.ticker}')">✕ Remove</button>
+      <div class="sl-open-hint">tap for the full card</div>
+      <button class="sl-remove-btn"
+        onclick="event.stopPropagation();removeSL('${item.ticker}')">✕ Remove</button>
     </div>`;
   }).join('');
 }
@@ -3251,6 +3283,59 @@ async function loadScreenerReport() {
     el.innerHTML = `<div class="sc-empty">Could not load: ${esc(e.message)}</div>`;
   }
 }
+
+// ═══════════════ FULL CARD, ON DEMAND ═══════════════
+// The shortlist stores a summary — score, price, change — which is enough to
+// list and not enough to decide anything. The card itself already exists, live
+// in r0 for today and frozen in r1 for any earlier date, so this fetches
+// whichever applies and renders it with buildCard: the same function the
+// screener uses, so what opens here is the real card rather than a second
+// version of it that can drift.
+async function openCard(ticker, date) {
+  const overlay = document.getElementById('card-overlay');
+  const body = document.getElementById('card-modal-body');
+  document.getElementById('card-modal-title').textContent = ticker;
+  document.getElementById('card-modal-sub').textContent = date ? date : '';
+  body.innerHTML = '<div class="card-modal-msg">Loading…</div>';
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  try {
+    const url = `/api/card/${encodeURIComponent(ticker)}` + (date ? `?date=${encodeURIComponent(date)}` : '');
+    const d = await (await fetch(url)).json();
+    if (!d.ok) {
+      body.innerHTML = `<div class="card-modal-msg">${esc(d.error || 'Not found')}${
+        d.lastSeen ? `<br><br><a href="#" onclick="openCard('${esc(ticker)}','${esc(d.lastSeen)}');return false;"
+          style="color:var(--accent)">Open the ${esc(d.lastSeen)} card instead</a>` : ''}</div>`;
+      return;
+    }
+    document.getElementById('card-modal-sub').textContent = d.source === 'live'
+      ? 'live — still updating'
+      : `frozen ${d.date}${d.capturedAt ? ' at ' + fmtET24(d.capturedAt) : ''}`;
+    body.innerHTML = buildCard(d.card);
+  } catch (e) {
+    body.innerHTML = `<div class="card-modal-msg">Could not load: ${esc(e.message)}</div>`;
+  }
+}
+
+function closeCardModal() {
+  document.getElementById('card-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeCardModal();
+});
+
+// Deep link: /scanner?ticker=AAPL[&date=YYYY-MM-DD]. This is what the unified
+// shortlist on the landing page links to — it cannot render a card itself, so
+// it hands off to the tool that owns the data.
+(function openCardFromUrl() {
+  const q = new URLSearchParams(location.search);
+  const t = q.get('ticker');
+  if (!t) return;
+  // Wait for the registry, so a live card has its row to render.
+  setTimeout(() => openCard(t.toUpperCase(), q.get('date') || null), 700);
+})();
 
 // ═══════════════ SCREENER BUILDER ═══════════════
 // Filters are TradingView's own { left, operation, right } shape, so a rule

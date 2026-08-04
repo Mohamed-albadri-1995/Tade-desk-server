@@ -45,6 +45,7 @@ app.use('/api/settings', require('./routes/settings'));
 app.use('/api/backup', require('./routes/backup'));
 app.use('/api/monitor', require('./routes/monitor'));
 app.use('/api/analysis', require('./routes/analysis'));
+app.use('/api/card', require('./routes/card'));
 
 // The tool registry, so the landing page renders whatever is configured
 // rather than a list hardcoded in the page.
