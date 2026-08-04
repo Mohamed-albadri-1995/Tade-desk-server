@@ -146,6 +146,11 @@ body {
 // (it served this page), then each tool is probed individually — a tool that
 // is down still gets a card, because the point is to show WHICH one is down.
 let TOOLS = [];
+// Anything that needs a tool's PORT has to wait for this. The list arrives over
+// the network, so code that reads TOOLS on page load reads an empty array and
+// silently gets the wrong answer — which is how every shortlist link ended up
+// pointing at port 3000.
+let TOOLS_READY = null;
 
 // A tool may be served on its own port or behind a path on this host; try the
 // port first, fall back to same-origin so it works either way.
@@ -212,9 +217,12 @@ async function probe(t) {
 
 async function start() {
   try {
-    const r = await fetch('/api/tools');
-    const d = await r.json();
-    TOOLS = d.tools || [];
+    // Resolves after TOOLS is assigned, not merely after the response lands —
+    // so anyone awaiting it can read TOOLS and be sure it is populated.
+    TOOLS_READY = fetch('/api/tools')
+      .then(r => r.json())
+      .then(d => { TOOLS = d.tools || []; return TOOLS; });
+    await TOOLS_READY;
   } catch {
     document.getElementById('cards').innerHTML =
       '<div class="note">Could not load the tool list.</div>';
@@ -233,16 +241,24 @@ start();
 // to whichever tool is serving this page, not nine that fail one at a time.
 // Where a ticker's card lives: the tool that shortlisted it, on its own port,
 // deep-linked. The tool opens the card itself — see openCardFromUrl there.
+// There is no sensible default port here. Guessing one sends the reader to a
+// tool that never saw the stock, which reads as "this stock has never been on
+// this list" — a wrong answer that looks like a real one. So an unknown tool
+// returns null and the caller renders plain text instead of a broken link.
 function cardUrl(tool, ticker, date) {
   const t = TOOLS.find(x => x.id === tool.id);
-  const base = t ? baseFor(t) : `${location.protocol}//${location.hostname}:3000`;
-  return `${base}/scanner?ticker=${encodeURIComponent(ticker)}&date=${encodeURIComponent(date)}`;
+  if (!t) return null;
+  return `${baseFor(t)}/scanner?ticker=${encodeURIComponent(ticker)}&date=${encodeURIComponent(date)}`;
 }
 
 async function loadUnifiedShortlist() {
   const out = document.getElementById('uni-out');
   if (!out) return;
   try {
+    // The ports come from /api/tools, and a link built before that lands is a
+    // link to nowhere. Wait for it — this is the first paint, so it is the one
+    // the reader actually clicks.
+    if (TOOLS_READY) { try { await TOOLS_READY; } catch { /* start() reports it */ } }
     const d = await (await fetch('/api/shortlist/all-tools')).json();
     const rows = (d && d.rows) || [];
     if (!rows.length) {
@@ -254,15 +270,21 @@ async function loadUnifiedShortlist() {
     // chip hands off to a tool that actually holds the data, deep-linked to the
     // ticker. Every tool that picked the name is its own link, because their
     // cards differ: same stock, different screeners, different score.
-    out.innerHTML = `<div class="uni-grid">${rows.map(r => `
+    // A tool in the shortlist file that is not in tools.config.json has no port
+    // to link to. That is a configuration problem, and saying so beats sending
+    // the reader to whichever tool happens to answer.
+    out.innerHTML = `<div class="uni-grid">${rows.map(r => {
+      const url = (tool) => cardUrl(tool, r.ticker, d.date);
+      const chip = (tool, label, cls, title) => url(tool)
+        ? `<a class="${cls} uni-link" href="${url(tool)}" title="${title}">${label}</a>`
+        : `<span class="${cls}" title="${tool.id} is not in tools.config.json — no port to open">${label}</span>`;
+      return `
       <div class="uni-chip ${r.count > 1 ? 'multi' : ''}">
-        <a class="uni-tkr uni-link" href="${cardUrl(r.tools[0], r.ticker, d.date)}"
-           title="Open ${r.ticker} on ${r.tools[0].name}">${r.ticker}</a>
+        ${chip(r.tools[0], r.ticker, 'uni-tkr', `Open ${r.ticker} on ${r.tools[0].name}`)}
         ${r.count > 1 ? `<span class="uni-n">${r.count} tools</span>` : ''}
         <span class="uni-by">${r.tools.map(t =>
-          `<a class="uni-link" href="${cardUrl(t, r.ticker, d.date)}"
-              title="Open on ${t.name}">${t.id}</a>`).join(' ')}</span>
-      </div>`).join('')}</div>`;
+          chip(t, t.id, '', `Open on ${t.name}`)).join(' ')}</span>
+      </div>`; }).join('')}</div>`;
   } catch (e) {
     out.innerHTML = `<div class="uni-empty">Could not load: ${e.message}</div>`;
   }
