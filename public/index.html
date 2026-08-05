@@ -11,9 +11,15 @@
   --bg3: #1a1e28;
   --bg4: #212535;
   --border: #2a2f3f;
-  --text: #e2e6f0;
-  --text2: #8b92a5;
-  --text3: #555d70;
+  /* Measured against --bg, not chosen by eye. The old --text3 was #555d70,
+     which is 2.9:1 — under the 4.5:1 minimum for body text and the most-used
+     colour on the page, so labels, section titles and the low/high numbers
+     under every range bar were the least readable things on the card. On a
+     phone in daylight that is not a subtlety, it is the difference between a
+     card you can read and one you cannot. */
+  --text: #e2e6f0;      /* 15.3:1 */
+  --text2: #a8b0c2;     /*  8.8:1 */
+  --text3: #868ea1;     /*  5.8:1 — was 2.9:1 */
   --accent: #3b82f6;
   --green: #22c55e;
   --red: #ef4444;
@@ -49,16 +55,54 @@
      ──────────────────────────────────────────────────────────────────────── */
   --m-up: #4ade80;
   --m-down: #f87171;
-  --m-size-0: #484f60;
+  /* size-0 recedes by being grey rather than by being dim — hue carries the
+     ramp, so it can stay legible. It was 2.3:1, which is not "recessive", it
+     is invisible. */
+  --m-size-0: #868ea1;
   --m-size-1: #67c9e8;
   --m-size-2: #22d3ee;
   --m-size-3: #a5f3fc;
   --m-model: #fb923c;
   --m-other: #c084fc;
   --m-mine: #eab308;
-  --m-none: #555d70;
+  --m-none: #868ea1;
   --m-chrome: #3b82f6;
 }
+
+/* ── SUNLIGHT ───────────────────────────────────────────────────────────────
+   A dark theme outdoors is a mirror. This is not a light theme — a white page
+   in the sun is its own problem, and the whole colour language above is built
+   for a dark background — it is the same theme pushed to the contrast the
+   screen can actually deliver: true black, which an OLED renders as off
+   pixels, against near-white text. Every meaning keeps its hue so nothing has
+   to be relearned; only the separation changes.
+   Toggled from the header, remembered in localStorage. */
+body.sunlight {
+  --bg: #000000;
+  --bg2: #0a0c11;
+  --bg3: #12151d;
+  --bg4: #1c2029;
+  --border: #454d61;      /* 1.4:1 → 4.4:1, so panels have visible edges */
+  --text: #ffffff;        /* 21:1 */
+  --text2: #ccd3e0;       /* 14:1 */
+  --text3: #aab2c4;       /* 10:1 — was the worst offender */
+  --m-up: #5cf08f;
+  --m-down: #ff8a8a;
+  --m-size-0: #9aa2b5;
+  --m-size-1: #7fd8f2;
+  --m-size-2: #35e0f8;
+  --m-size-3: #bdf7ff;
+  --m-model: #ffa552;
+  --m-other: #d3a3ff;
+  --m-mine: #ffd633;
+  --m-none: #aab2c4;
+  --m-chrome: #6aa5ff;
+}
+/* Thin text is the first thing to disappear in glare, whatever its colour. */
+body.sunlight .price-label, body.sunlight .section-title, body.sunlight .rb-name,
+body.sunlight .range-labels, body.sunlight .news-item, body.sunlight .lg-v,
+body.sunlight .card-port, body.sunlight .rb-ath-gap { font-weight: 600; }
+body.sunlight .sig, body.sunlight .badge { font-weight: 700; }
 
 /* Magnitude, as a set of classes, so one ramp serves every "how much" number
    on the card and the brightness means the same thing each time. */
@@ -100,6 +144,11 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .scan-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit; transition: opacity .15s; }
 .scan-btn:hover { opacity: .85; }
 .scan-btn:disabled { opacity: .5; cursor: not-allowed; }
+.sun-btn { background: none; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text3); font-size: 14px; line-height: 1; padding: 5px 9px; cursor: pointer;
+  font-family: inherit; }
+.sun-btn:hover { color: var(--text2); }
+.sun-btn.on { color: var(--m-mine); border-color: var(--m-mine); }
 
 /* ── TABS ── */
 .tabs { display: flex; gap: 2px; padding: 10px 20px 0; background: var(--bg2); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; flex-shrink: 0; }
@@ -423,7 +472,14 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .news-item { padding: 4px 0; border-bottom: 1px solid #1e2233; font-size: 11px; color: var(--text2); display: flex; gap: 6px; align-items: flex-start; }
 .news-item:last-child { border-bottom: none; }
 .news-src { font-size: 9px; font-weight: 700; color: var(--text3); min-width: 40px; padding-top: 1px; }
-.news-headline { line-height: 1.4; }
+.news-headline { line-height: 1.4; flex: 1; }
+/* Age sits at the end of the row, right-aligned, so a column of them can be
+   scanned without reading the headlines. */
+.news-age { font-size: 10px; font-weight: 700; white-space: nowrap; padding-top: 1px;
+  font-variant-numeric: tabular-nums; }
+.na-fresh { color: var(--m-size-3); }   /* under 6h — this is today's reason */
+.na-today { color: var(--m-size-1); }
+.na-old   { color: var(--m-none); }     /* yesterday or older — context */
 .load-news-btn { background: var(--bg4); border: 1px solid var(--border); border-radius: 5px; padding: 5px 12px; color: var(--text2); font-size: 11px; cursor: pointer; font-family: inherit; margin-top: 6px; width: 100%; }
 .load-news-btn:hover { border-color: var(--accent); color: var(--accent); }
 .news-fetched { font-size: 10px; color: var(--text3); margin-top: 4px; }
@@ -750,6 +806,8 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
     <div class="tool-menu" id="tool-menu" role="menu"></div>
   </div>
   <button class="scan-btn" id="scan-btn" onclick="runScan()">▶ Run Scan</button>
+  <button class="sun-btn" id="sun-btn" onclick="toggleSunlight()"
+          title="high contrast, for reading the screen outdoors">☀</button>
   <div class="header-status" id="header-status">—</div>
 </div>
 
@@ -1455,6 +1513,15 @@ function anExportCSV(register) {
     });
 }
 
+
+// Sunlight mode. Applied before first paint further down the file, so the page
+// does not flash the dark palette on load when it is already switched on.
+function toggleSunlight() {
+  const on = document.body.classList.toggle('sunlight');
+  try { localStorage.setItem('sunlight', on ? '1' : '0'); } catch { /* private mode */ }
+  const b = document.getElementById('sun-btn');
+  if (b) { b.classList.toggle('on', on); b.title = on ? 'back to normal contrast' : 'high contrast, for reading the screen outdoors'; }
+}
 
 function toggleScoreBreakdown(ticker) {
   const el = document.getElementById('sb-' + ticker);
@@ -2492,6 +2559,37 @@ const SIG_LEVELS = [
   ['vsPrevClose','distPrevClose','PDC'], ['vsOpen','distOpen','OPEN'],
   ['vsPmHigh','distPmHigh','PMH'], ['vsPmLow','distPmLow','PML'],
 ];
+/* News timestamps.
+ *
+ * Finnhub and Yahoo send unix seconds, EDGAR sends a date string — the same
+ * normalisation the backend does in src/sideC/news.js, repeated here because
+ * the card reads the raw source arrays rather than the merged list.
+ */
+function newsMs(dt) {
+  if (typeof dt === 'number' && isFinite(dt) && dt > 0) return dt < 1e12 ? dt * 1000 : dt;
+  if (typeof dt === 'string') { const p = Date.parse(dt); if (isFinite(p)) return p; }
+  return null;
+}
+
+// Age, not a clock time. "2h ago" answers the question being asked — is this
+// why it is moving — where "09:14" makes you do the subtraction yourself. The
+// exact timestamp is in the tooltip for when it matters.
+function newsAge(ms) {
+  const mins = Math.round((Date.now() - ms) / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const h = Math.round(mins / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.round(h / 24);
+  return `${d}d`;
+}
+
+// Fresh news is the news that explains today. Anything past a day is context.
+function newsAgeClass(ms) {
+  const h = (Date.now() - ms) / 3600000;
+  return h < 6 ? 'na-fresh' : h < 24 ? 'na-today' : 'na-old';
+}
+
 // The PM/ADR ramp. Below 1.00× the badge recedes; above it, each step is the
 // same hue turned up. Keyed by the band strings pmBand() emits in
 // src/sideB/relations.js — change them there and this must follow.
@@ -2710,17 +2808,33 @@ function buildCard(row) {
   const dayRange = s.dayHigh && s.dayLow ? (s.dayHigh - s.dayLow) : null;
   const moveATR = dayRange && s.atr ? (dayRange / s.atr).toFixed(2) + '× ATR' : '—';
 
-  // News items (combine all sources, max 5)
+  // News items (combine all sources, max 5).
+  //
+  // Every source already carries a timestamp and the card was dropping it,
+  // which left five headlines that could each be twenty minutes or six days
+  // old with no way to tell them apart. That is the difference between the
+  // reason a stock is moving right now and a story it already digested, and
+  // the whole point of the news block is telling those apart. Sorted newest
+  // first for the same reason.
   let newsItems = [];
   if (news) {
-    const finnhub = (news.finnhub||[]).slice(0,2).map(n => ({ src:'FH', h: n.headline||n.summary||'' }));
-    const yahoo = (news.yahoo||[]).slice(0,2).map(n => ({ src:'YH', h: n.title||n.headline||'' }));
-    const edgar = (news.edgar||[]).slice(0,2).map(n => ({ src:'SEC', h: n.title||n.headline||'' }));
-    newsItems = [...finnhub, ...yahoo, ...edgar].slice(0,5);
+    const pick = (arr, src, hKeys) => (arr || []).slice(0, 3).map(n => ({
+      src,
+      h: hKeys.map(k => n[k]).find(Boolean) || '',
+      at: newsMs(n.datetime),
+      url: n.url || null,
+    }));
+    newsItems = [
+      ...pick(news.finnhub, 'FH', ['headline', 'summary']),
+      ...pick(news.yahoo, 'YH', ['title', 'headline']),
+      ...pick(news.edgar, 'SEC', ['title', 'headline']),
+    ].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 5);
   }
   const newsHTML = newsItems.length ? `
     <ul class="news-list">${newsItems.map(n =>
-      `<li class="news-item"><span class="news-src">${n.src}</span><span class="news-headline">${esc(n.h)}</span></li>`
+      `<li class="news-item"><span class="news-src">${n.src}</span><span class="news-headline">${esc(n.h)}</span>${
+        n.at ? `<span class="news-age ${newsAgeClass(n.at)}" title="${new Date(n.at).toLocaleString('en-US',{timeZone:'America/New_York'})} ET">${newsAge(n.at)}</span>` : ''
+      }</li>`
     ).join('')}</ul>
     ${news.fetchedAt ? `<div class="news-fetched">Fetched ${fmtTime(news.fetchedAt)} ET</div>` : ''}
   ` : `<button class="load-news-btn" onclick="loadNews('${row.ticker}',this)">Load News</button>`;
@@ -4133,6 +4247,18 @@ document.addEventListener('keydown', e => {
   }
 });
 initToolSwitcher();
+
+// Restore sunlight mode. Runs at the end of the script, before the first data
+// arrives, so a page opened outdoors comes up readable rather than flashing
+// the low-contrast palette and then correcting itself.
+(function restoreSunlight() {
+  let on = false;
+  try { on = localStorage.getItem('sunlight') === '1'; } catch { /* private mode */ }
+  if (!on) return;
+  document.body.classList.add('sunlight');
+  const b = document.getElementById('sun-btn');
+  if (b) { b.classList.add('on'); b.title = 'back to normal contrast'; }
+})();
 
 </script>
 </body>
