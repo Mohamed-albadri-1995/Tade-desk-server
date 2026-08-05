@@ -49,7 +49,9 @@ app.use('/api/card', require('./routes/card'));
 
 // The tool registry, so the landing page renders whatever is configured
 // rather than a list hardcoded in the page.
-app.get('/api/tools', (req, res) => res.json({ ok: true, tools: config.tools }));
+app.get('/api/tools', (req, res) => res.json({
+  ok: true, tools: config.tools, apps: config.apps,
+}));
 
 // Health — reports which tool answered, so probing the wrong port is obvious
 app.get('/health', (req, res) => res.json({

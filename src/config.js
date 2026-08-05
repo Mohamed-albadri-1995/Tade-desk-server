@@ -23,10 +23,10 @@ const ROOT = path.join(__dirname, '..');
 
 // The registry of every tool — see tools.config.json. Read once here so the
 // landing page, the deploy script and the seeder cannot drift apart.
-function loadRegistry() {
+function loadRegistry(key = 'tools') {
   try {
     const raw = fs.readFileSync(path.join(ROOT, 'tools.config.json'), 'utf8');
-    return JSON.parse(raw).tools || [];
+    return JSON.parse(raw)[key] || [];
   } catch (err) {
     console.warn('[Config] could not read tools.config.json:', err.message);
     return [];
@@ -60,6 +60,11 @@ const config = {
 
   // Every tool that exists, for the landing page.
   tools: loadRegistry(),
+
+  // Whole applications on this box — the chart platform alongside this one.
+  // The landing page shows them above the screener grid so there is one address
+  // to remember rather than one per program.
+  apps: loadRegistry('apps'),
 };
 
 // ── capture times ──────────────────────────────────────────────────────────

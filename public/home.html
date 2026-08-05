@@ -21,6 +21,34 @@ body {
 .title { font-size:28px; font-weight:700; margin:14px 0 6px; letter-spacing:-.02em; text-align:center; }
 .subtitle { font-size:13px; color:var(--text2); margin-bottom:32px; text-align:center; }
 
+/* The applications. Bigger than a tool card on purpose — the choice between
+   charting and screening is made before the choice of which screener, and the
+   page should read in that order. */
+.apps { display:flex; flex-wrap:wrap; gap:16px; justify-content:center;
+        width:100%; max-width:1000px; margin:20px 0 8px; }
+.app-card {
+  position:relative; flex:1 1 320px; max-width:480px; background:var(--bg2);
+  border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:12px;
+  padding:22px 24px; text-decoration:none; color:inherit; display:flex;
+  flex-direction:column; gap:9px; transition:border-color .15s, transform .15s;
+}
+.app-card:hover { transform:translateY(-2px); }
+.app-card.is-self { cursor:default; opacity:.82; }
+.app-card.is-self:hover { transform:none; }
+.app-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.app-name { font-size:19px; font-weight:700; letter-spacing:-.01em; }
+.app-desc { font-size:12.5px; color:var(--text2); line-height:1.6; }
+.app-foot { display:flex; align-items:center; gap:8px; margin-top:2px;
+            font-size:11px; color:var(--text3); }
+.app-here { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+            color:var(--text3); border:1px solid var(--border); border-radius:4px; padding:1px 6px; }
+.app-arrow { margin-left:auto; font-size:16px; color:var(--text3); }
+.app-card:hover .app-arrow { color:var(--accent); }
+
+.section-head { font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--text3); margin:34px 0 10px; text-align:center; width:100%; }
+.section-head::before, .section-head::after { content:'——'; opacity:.4; margin:0 10px; }
+
 .cards { display:flex; flex-wrap:wrap; gap:16px; justify-content:center;
          width:100%; max-width:1000px; }
 .tool-card {
@@ -111,7 +139,14 @@ body {
 
 <div class="logo">TRADE DESK</div>
 <div class="title">What are you doing today?</div>
-<div class="subtitle">Each tool screens differently and learns from its own history.</div>
+
+<!-- The whole box, from one address. These are different programs with
+     different jobs — charting and backtesting on one side, screening on the
+     other — and they used to be two port numbers to remember. -->
+<div class="apps" id="apps"></div>
+
+<div class="section-head">Screeners</div>
+<div class="subtitle">Nine of them. Each screens differently and learns from its own history.</div>
 
 <div class="cards" id="cards"></div>
 
@@ -151,11 +186,51 @@ let TOOLS = [];
 // silently gets the wrong answer — which is how every shortlist link ended up
 // pointing at port 3000.
 let TOOLS_READY = null;
+let APPS = [];
 
 // A tool may be served on its own port or behind a path on this host; try the
 // port first, fall back to same-origin so it works either way.
 function baseFor(t) {
   return `${location.protocol}//${location.hostname}:${t.port}`;
+}
+
+/* The applications.
+ *
+ * These are not screener tools and they are not probed like them. The chart
+ * platform is a separate program that does not serve this page's /health and
+ * has no reason to send CORS headers for it, so asking "is it up" from here
+ * gets a network error whether it is up or not. Claiming "offline" on that
+ * basis would be a lie the page cannot back up, so no status is shown — the
+ * card is a door, and you find out by opening it.
+ *
+ * The one it CAN speak for is itself: the app serving this page is up by
+ * definition, and says so.
+ */
+function appCard(a) {
+  // The app serving this page is not a link — it would point at the page you
+  // are already on. It still gets a card, so both halves of the box are
+  // visible in one place and it is obvious which one you are in.
+  const self = a.isSelf === true;
+  const tag = self ? 'div' : 'a';
+  const href = self ? '' : ` href="${location.protocol}//${location.hostname}:${a.port}${a.path || '/'}"`;
+  return `
+    <${tag} class="app-card${self ? ' is-self' : ''}"${href} style="border-left-color:${a.accent || 'var(--accent)'}">
+      <div class="app-name" style="color:${a.accent || 'var(--text)'}">${a.name}</div>
+      <div class="app-desc">${a.desc || ''}</div>
+      <div class="app-foot">
+        <span>port ${a.port}</span>
+        ${self ? '<span class="app-here">you are here</span>'
+               : '<span class="app-arrow">→</span>'}
+      </div>
+    </${tag}>`;
+}
+
+function renderApps() {
+  const el = document.getElementById('apps');
+  if (!el) return;
+  // The screener entry is this page — sending it to itself is a loop, so it
+  // becomes the "you are here" marker instead of a second copy of the grid.
+  el.innerHTML = APPS.map(appCard).join('');
 }
 
 function card(t, state, info) {
@@ -221,8 +296,9 @@ async function start() {
     // so anyone awaiting it can read TOOLS and be sure it is populated.
     TOOLS_READY = fetch('/api/tools')
       .then(r => r.json())
-      .then(d => { TOOLS = d.tools || []; return TOOLS; });
+      .then(d => { TOOLS = d.tools || []; APPS = d.apps || []; return TOOLS; });
     await TOOLS_READY;
+    renderApps();
   } catch {
     document.getElementById('cards').innerHTML =
       '<div class="note">Could not load the tool list.</div>';

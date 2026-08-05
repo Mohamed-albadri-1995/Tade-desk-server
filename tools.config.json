@@ -1,5 +1,5 @@
 {
-  "_comment": "The registry of tools. Everything reads this one file — the deploy script, the landing page, and the seeder — so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
+  "_comment": "The registry of tools. Everything reads this one file \u2014 the deploy script, the landing page, and the seeder \u2014 so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
   "tools": [
     {
       "id": "T1",
@@ -12,7 +12,7 @@
         "r1": "09:36",
         "entryA": "09:37",
         "entryB": "09:40",
-        "why": "Kept exactly as it always was. T1 is the control the other tools are measured against, and its one proven edge — Big Move + Pre-Mkt, 54% win against 13% — is read off the 09:36 photo. Moving it would make old cards and new cards no longer comparable."
+        "why": "Kept exactly as it always was. T1 is the control the other tools are measured against, and its one proven edge \u2014 Big Move + Pre-Mkt, 54% win against 13% \u2014 is read off the 09:36 photo. Moving it would make old cards and new cards no longer comparable."
       }
     },
     {
@@ -40,7 +40,7 @@
         "r1": "09:36",
         "entryA": "09:37",
         "entryB": "09:40",
-        "why": "A gap is an opening trade. The photo goes at 09:36 and entries at 09:37 and 09:40, which is where a gap either continues or fails — waiting longer would measure something that had already resolved."
+        "why": "A gap is an opening trade. The photo goes at 09:36 and entries at 09:37 and 09:40, which is where a gap either continues or fails \u2014 waiting longer would measure something that had already resolved."
       }
     },
     {
@@ -77,7 +77,7 @@
       "port": 3050,
       "scorerPort": 3051,
       "accent": "#facc15",
-      "desc": "RSI stretched with volume — does momentum continue or snap back?",
+      "desc": "RSI stretched with volume \u2014 does momentum continue or snap back?",
       "captureAt": {
         "r1": "10:16",
         "entryA": "10:17",
@@ -91,12 +91,12 @@
       "port": 3060,
       "scorerPort": 3061,
       "accent": "#22d3ee",
-      "desc": "Heavy real volume and real range — gapping before the open, then trading 10M+ shares after it.",
+      "desc": "Heavy real volume and real range \u2014 gapping before the open, then trading 10M+ shares after it.",
       "captureAt": {
         "r1": "09:36",
         "entryA": "09:37",
         "entryB": "09:40",
-        "why": "The pre-market screener is what feeds training here, and its candidates are all in by the bell — so the photo goes at 09:36. The after-open screener finds tradable stocks all day, but they arrive after the photo and do not train the model."
+        "why": "The pre-market screener is what feeds training here, and its candidates are all in by the bell \u2014 so the photo goes at 09:36. The after-open screener finds tradable stocks all day, but they arrive after the photo and do not train the model."
       }
     },
     {
@@ -110,7 +110,7 @@
         "r1": "09:46",
         "entryA": "09:47",
         "entryB": "09:51",
-        "why": "CANSLIM names are position candidates rather than day trades, so the exact minute matters less here than anywhere else. It shares T2's timing — fifteen minutes past the open, once the first spike has settled — so the two breakout tools stay directly comparable."
+        "why": "CANSLIM names are position candidates rather than day trades, so the exact minute matters less here than anywhere else. It shares T2's timing \u2014 fifteen minutes past the open, once the first spike has settled \u2014 so the two breakout tools stay directly comparable."
       }
     },
     {
@@ -119,13 +119,33 @@
       "port": 3080,
       "scorerPort": 3081,
       "accent": "#94a3b8",
-      "desc": "The benchmark. Liquid stocks over $5, ranked by unusual volume, top 20 — no pattern, no direction. Every other tool has to beat this.",
+      "desc": "The benchmark. Liquid stocks over $5, ranked by unusual volume, top 20 \u2014 no pattern, no direction. Every other tool has to beat this.",
       "captureAt": {
         "r1": "09:36",
         "entryA": "09:37",
         "entryB": "09:40",
-        "why": "Identical to T1's timing on purpose. This tool exists to be compared against, so it has to be photographed and measured at exactly the same moment as the tools it is benchmarking — a different capture time would make every comparison partly a comparison of clocks."
+        "why": "Identical to T1's timing on purpose. This tool exists to be compared against, so it has to be photographed and measured at exactly the same moment as the tools it is benchmarking \u2014 a different capture time would make every comparison partly a comparison of clocks."
       }
+    }
+  ],
+  "_apps_comment": "Whole applications on this box, as opposed to the screener tools above. The landing page lists these first: they are different programs with different jobs, not nine variants of one. Added here rather than hardcoded in the page so a new app means one entry and nothing else.",
+  "apps": [
+    {
+      "id": "QP",
+      "name": "Chart & Backtest",
+      "port": 8765,
+      "path": "/?v=4",
+      "accent": "#a78bfa",
+      "desc": "The quant platform: price charts, strategy backtests and Universe R1 runs over frozen screener days."
+    },
+    {
+      "id": "SCR",
+      "name": "Screener Suite",
+      "port": 3000,
+      "path": "/",
+      "accent": "#4a9eff",
+      "desc": "Nine screeners running side by side, each collecting its own history so they can be compared at the end of the month.",
+      "isSelf": true
     }
   ]
 }
