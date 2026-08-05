@@ -461,7 +461,13 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 
 /* themes */
 .themes-row { display: flex; gap: 5px; flex-wrap: wrap; }
-.theme-tag { font-size: 10px; padding: 2px 7px; background: #22d3ee15; border: 1px solid #22d3ee30; color: var(--cyan); border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+/* A theme is a category, not a quantity. It was wearing cyan, which in the
+   colour language means "how much" — so "AI" was claiming to be a large
+   number. Neutral, like the screener badges, for the same reason: identity
+   does not get to borrow a meaning. */
+.theme-tag { font-size: 10px; padding: 2px 7px; background: #ffffff08;
+  border: 1px solid var(--border); color: var(--text2); border-radius: 4px;
+  font-weight: 600; text-transform: uppercase; }
 
 /* sector */
 .sector-line { font-size: 11px; color: var(--text2); }
@@ -2839,9 +2845,14 @@ function buildCard(row) {
     ${news.fetchedAt ? `<div class="news-fetched">Fetched ${fmtTime(news.fetchedAt)} ET</div>` : ''}
   ` : `<button class="load-news-btn" onclick="loadNews('${row.ticker}',this)">Load News</button>`;
 
-  // Themes
+  // Themes — which market stories this stock belongs to.
+  //
+  // These were rendered as bare tags in a section with no heading, so a stock
+  // in the AI theme opened its details on the word "AI" floating alone above
+  // Market Context, reading as a stray control rather than a fact about the
+  // stock. Every other block on the card is labelled; this one is now too.
   const themesHTML = (ctx.themes||[]).length
-    ? `<div class="themes-row">${ctx.themes.map(t => `<span class="theme-tag">${t}</span>`).join('')}</div>`
+    ? `<div class="themes-row">${ctx.themes.map(t => `<span class="theme-tag">${esc(t)}</span>`).join('')}</div>`
     : '';
 
   // Sector bias display
@@ -2968,7 +2979,10 @@ function buildCard(row) {
     <div class="card-more-body" id="more-${row.ticker}" hidden>
 
     <!-- THEMES -->
-    ${themesHTML ? `<div class="card-section">${themesHTML}</div>` : ''}
+    ${themesHTML ? `<div class="card-section">
+      <div class="section-title">Themes</div>
+      ${themesHTML}
+    </div>` : ''}
 
     <!-- MARKET CONTEXT -->
     <div class="card-section">
