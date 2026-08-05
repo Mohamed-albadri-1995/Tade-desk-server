@@ -24,7 +24,48 @@
   --bull: #22c55e;
   --bear: #ef4444;
   --neutral: #8b92a5;
+
+  /* ── THE COLOUR LANGUAGE ────────────────────────────────────────────────
+     One meaning per colour, everywhere on the card, so that reading it stops
+     being a lookup and becomes a reflex. The names below are the meanings —
+     use these, never a raw hex, anywhere the colour is saying something. If a
+     new thing needs a colour, it belongs to one of these six categories or it
+     does not get a colour.
+
+       m-up / m-down   DIRECTION. Price relative to something: above/below a
+                       moving average, up/down on the day. Nothing else is ever
+                       green or red — a good score is not "up".
+       m-size-0..3     MAGNITUDE. How big, never whether that is good. One hue
+                       at four intensities: absent, present, notable, extreme.
+                       Shared by PM/ADR, RVOL, float, sector heat, so the same
+                       brightness means the same "how much" wherever it appears.
+       m-model         THE MODEL'S OPINION. The score, and only the score.
+       m-other         SOMEONE ELSE'S OPINION. Another tool's shortlist, the
+                       CANSLIM list — corroboration from outside this tool.
+       m-mine          YOUR OWN MARK. The shortlist star. Nothing else.
+       m-none          NO CLAIM. Missing data, below a threshold, switched off.
+       m-chrome        FURNITURE. Links, borders, bar fills. Carries no meaning
+                       and must never be used where something is being said.
+     ──────────────────────────────────────────────────────────────────────── */
+  --m-up: #4ade80;
+  --m-down: #f87171;
+  --m-size-0: #484f60;
+  --m-size-1: #67c9e8;
+  --m-size-2: #22d3ee;
+  --m-size-3: #a5f3fc;
+  --m-model: #fb923c;
+  --m-other: #c084fc;
+  --m-mine: #eab308;
+  --m-none: #555d70;
+  --m-chrome: #3b82f6;
 }
+
+/* Magnitude, as a set of classes, so one ramp serves every "how much" number
+   on the card and the brightness means the same thing each time. */
+.mag-0 { color: var(--m-size-0); }
+.mag-1 { color: var(--m-size-1); }
+.mag-2 { color: var(--m-size-2); }
+.mag-3 { color: var(--m-size-3); font-weight: 700; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; min-height: 100vh; }
 
@@ -110,10 +151,13 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .card-change.pos { color: var(--green); background: #22c55e15; }
 .card-change.neg { color: var(--red); background: #ef444415; }
 .card-right { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+/* Score is the MODEL speaking, so it is one colour at three strengths rather
+   than green/amber/red. A green 80 used to read as "up 80", which is not what
+   the number says — green belongs to price direction and nothing else. */
 .card-score { font-size: 20px; font-weight: 700; color: #fff; }
-.score-high { color: var(--green); }
-.score-mid { color: var(--orange); }
-.score-low { color: var(--text2); }
+.score-high { color: var(--m-model); }
+.score-mid  { color: var(--m-model); opacity: .72; }
+.score-low  { color: var(--m-none); }
 .star-btn { background: none; border: none; cursor: pointer; font-size: 18px; padding: 0; line-height: 1; }
 .live-dot { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--green); }
 .live-dot::before { content: '●'; font-size: 8px; }
@@ -128,16 +172,24 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .badge-premarket { background: #a78bfa20; color: #c4b5fd; border: 1px solid #a78bfa40; }
 .badge-bigmove { background: #f9731620; color: #fb923c; border: 1px solid #f9731640; }
 /* screener badge: colour comes from the screener's name, set inline */
-.badge-also { background:#eab30820; color:#fde047; border:1px solid #eab30855;
+/* "Another tool shortlisted this" and "this is on the CANSLIM list" are the
+   same kind of statement — someone other than this tool vouching for the name —
+   so they share one colour. It used to be yellow, which is the colour of YOUR
+   star, and the two claims are not the same: one is your decision, the other is
+   a machine's. */
+.badge-also { background:#c084fc1f; color:var(--m-other); border:1px solid #c084fc55;
   text-transform:none; letter-spacing:0; }
 .badge-canslim { background:#c084fc1f; color:#d8b4fe; border:1px solid #c084fc55;
   text-transform:none; letter-spacing:0; }
 .badge-canslim b { font-weight:700; opacity:.8; }
-.badge-scr { background: #ffffff08; border: 1px solid; text-transform: none; letter-spacing: 0; }
+.badge-scr { background: #ffffff08; border: 1px solid var(--border); color: var(--text2);
+  text-transform: none; letter-spacing: 0; }
 .badge-scr b { font-weight: 700; opacity: .85; margin-left: 2px; font-variant-numeric: tabular-nums; }
 /* a screener that matched earlier today but is not matching right now */
 .badge-past { opacity: .55; border-style: dashed !important; }
-.badge-hot { background: #f9731630; color: #fb923c; border: 1px solid #f9731660; }
+/* Sector heat is a HOW MUCH, not a verdict and not the model's opinion, so it
+   joins the magnitude ramp rather than borrowing the score's orange. */
+.badge-hot { background: #22d3ee1f; color: var(--m-size-2); border: 1px solid #22d3ee66; }
 .badge-catalyst { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
 /* ── screener builder ── */
 .sb-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px;
@@ -254,11 +306,11 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
    is good, and a green badge would be answering a question the number never
    asked. Below the threshold it recedes; above it, it gets louder the further
    past 1 it goes. */
-.pmadr-a  { color:#484f60; border-color:#2a2f3f; background:#151822; }
+.pmadr-a  { color:var(--m-size-0); border-color:#2a2f3f; background:#151822; }
 .pmadr-b  { color:#5f6779; border-color:#333a4c; background:#171b26; }
-.pmadr-1  { color:#67c9e8; border-color:#22d3ee33; background:#22d3ee10; }
-.pmadr-2  { color:#22d3ee; border-color:#22d3ee66; background:#22d3ee1f; }
-.pmadr-3  { color:#a5f3fc; border-color:#22d3ee; background:#22d3ee33;
+.pmadr-1  { color:var(--m-size-1); border-color:#22d3ee33; background:#22d3ee10; }
+.pmadr-2  { color:var(--m-size-2); border-color:#22d3ee66; background:#22d3ee1f; }
+.pmadr-3  { color:var(--m-size-3); border-color:#22d3ee; background:#22d3ee33;
             box-shadow:0 0 7px #22d3ee55; }
 .bias-btn { display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;border:1px solid;cursor:pointer;background:transparent;transition:opacity .15s; }
 .bias-btn:hover { opacity:.8; }
@@ -325,6 +377,36 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 /* The top Volume & Float block butts against the header, so it needs its own
    separator rather than borrowing card-body's. */
 .vf-top { background: var(--bg2); border-bottom: 1px solid var(--border); }
+/* The fold. Chrome, not meaning — it is a control, so it takes no colour from
+   the language above. */
+.card-more { width:100%; background:none; border:none; border-top:1px solid #1e2233;
+  color:var(--text3); font-family:inherit; font-size:10px; font-weight:700;
+  letter-spacing:.08em; text-transform:uppercase; padding:8px 14px; text-align:left;
+  cursor:pointer; }
+.card-more:hover { color:var(--text2); background:#ffffff05; }
+.card-more[aria-expanded="true"] { border-bottom:1px solid #1e2233; }
+
+/* In-card chart */
+.card-chart { height: 190px; border-radius: 6px; overflow: hidden;
+  background: var(--bg); border: 1px solid #1e2233; }
+.cchart-idle { height:100%; display:flex; align-items:center; justify-content:center;
+  font-size:10px; color:var(--text3); text-align:center; padding:0 12px; }
+.chart-expand { float:right; cursor:pointer; color:var(--m-chrome); font-size:10px;
+  text-transform:none; letter-spacing:0; font-weight:600; }
+.chart-expand:hover { text-decoration:underline; }
+
+/* Colour legend */
+.legend { margin: 0 0 10px; border:1px solid var(--border); border-radius:8px;
+  background: var(--bg2); }
+.legend summary { cursor:pointer; padding:8px 12px; font-size:11px; font-weight:700;
+  letter-spacing:.06em; text-transform:uppercase; color:var(--text3); }
+.legend summary:hover { color:var(--text2); }
+.legend-grid { padding: 4px 12px 12px; display:flex; flex-direction:column; gap:7px; }
+.lg-row { display:flex; align-items:flex-start; gap:9px; }
+.lg-sw { width:12px; height:12px; border-radius:3px; flex:0 0 12px; margin-top:2px; }
+.lg-ramp { background:linear-gradient(90deg,var(--m-size-0),var(--m-size-1),var(--m-size-2),var(--m-size-3)); }
+.lg-k { font-size:11px; font-weight:700; color:var(--text2); flex:0 0 46px; }
+.lg-v { font-size:11px; color:var(--text3); line-height:1.5; }
 
 /* themes */
 .themes-row { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -699,6 +781,36 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
       </select>
       <span class="row-count" id="row-count">0 stocks</span>
     </div>
+
+    <!-- The colour language, written down where the cards are.
+         The point of a fixed legend is that you stop needing it: every colour
+         means one thing on every card, so after a few weeks the card is read
+         rather than decoded. It is collapsed because it is a reference, not a
+         feature. -->
+    <details class="legend">
+      <summary>What the colours mean</summary>
+      <div class="legend-grid">
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-up)"></span>
+          <span class="lg-k">green</span><span class="lg-v">direction — above / up. Nothing else is ever green.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-down)"></span>
+          <span class="lg-k">red</span><span class="lg-v">direction — below / down.</span></div>
+        <div class="lg-row"><span class="lg-sw lg-ramp"></span>
+          <span class="lg-k">cyan</span><span class="lg-v">how much. Four brightnesses: unremarkable → notable → extreme.
+            Same ramp for RVOL, float, market cap, short %, PM/ADR and sector heat.
+            Bright means big, never good.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-model)"></span>
+          <span class="lg-k">orange</span><span class="lg-v">the model's opinion — the score, and only the score.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-other)"></span>
+          <span class="lg-k">violet</span><span class="lg-v">someone else's opinion — another tool's shortlist, the CANSLIM list.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-mine)"></span>
+          <span class="lg-k">yellow</span><span class="lg-v">your own mark — the star you put there.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-none)"></span>
+          <span class="lg-k">grey</span><span class="lg-v">no claim — missing, below threshold, or switched off.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-chrome)"></span>
+          <span class="lg-k">blue</span><span class="lg-v">furniture — links, borders, bar fills. Says nothing.</span></div>
+      </div>
+    </details>
+
     <div class="cards-grid" id="cards-grid">
       <div class="empty">Run a scan or wait for scheduled data.</div>
     </div>
@@ -1345,6 +1457,20 @@ function anExportCSV(register) {
 function toggleScoreBreakdown(ticker) {
   const el = document.getElementById('sb-' + ticker);
   if (el) el.classList.toggle('open');
+}
+
+// The detail half of the card. Closed on load, because the top of the card is
+// meant to be readable in one glance and twenty cards of market context is not
+// a glance. State is not remembered between renders on purpose: the card
+// re-renders every refresh, and a card that reopened itself mid-scroll would
+// move the page under your thumb.
+function toggleCardMore(ticker, btn) {
+  const el = document.getElementById('more-' + ticker);
+  if (!el) return;
+  const open = el.hidden;
+  el.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  btn.textContent = open ? '▴ Hide details' : '▾ Details';
 }
 
 let _modelInfoCache = null;
@@ -2350,11 +2476,13 @@ function renderCards() {
     return;
   }
   grid.innerHTML = rows.map(buildCard).join('');
+  observeCharts();   // the nodes just changed, so the observer must be reattached
 }
 
 // Relational signal tags — price vs each level, MA stack, range quarter.
-// Blue = above / constructive, red = below, grey = neutral fact. The % distance
-// rides in the tooltip because 0.1% above and 40% above read very differently.
+// Green = above, red = below, grey = neutral fact — see the colour language in
+// :root. The % distance rides in the tooltip because 0.1% above and 40% above
+// read very differently.
 const SIG_LEVELS = [
   ['vsEma9','distEma9','9MA'], ['vsEma13','distEma13','13MA'],
   ['vsEma20','distEma20','20MA'], ['vsEma50','distEma50','50MA'],
@@ -2439,7 +2567,8 @@ function buildCard(row) {
   const changeSign = change >= 0 ? '+' : '';
   const scoreClass = score >= 70 ? 'score-high' : score >= 40 ? 'score-mid' : 'score-low';
   const starIcon = row.inShortlist ? '★' : '☆';
-  const starStyle = row.inShortlist ? 'color:#eab308' : 'color:var(--text3)';
+  // Yellow is reserved for this — your own mark, nothing else on the card.
+  const starStyle = row.inShortlist ? 'color:var(--m-mine)' : 'color:var(--m-none)';
 
   // Screener badges — one per screener that has matched today, each stamped
   // with the time IT found the stock. Without the time, a candidate a screener
@@ -2455,8 +2584,14 @@ function buildCard(row) {
     const live = nowMatching.has(s.name);
     const tip = `${s.name}: first matched ${s.at ? fmtET24(s.at) : 'unknown'} ET${win}${
       live ? '' : ' · not matching now'}`;
+    // The screener's colour is an IDENTITY, not a claim — it says which
+    // screener, not whether that is good. Identity used to be the badge's text
+    // colour, which meant a screener whose hash landed on yellow was saying
+    // "you starred this" and one landing on green was saying "above". So the
+    // hue moved to a stripe down the left edge: still tells the screeners
+    // apart, no longer speaks the language the rest of the card speaks.
     return `<span class="badge badge-scr${live ? '' : ' badge-past'}"
-      style="color:${col};border-color:${col}55" title="${esc(tip)}">${esc(s.name)}${
+      style="border-left:3px solid ${col}" title="${esc(tip)}">${esc(s.name)}${
       s.at ? ` <b>${fmtET24(s.at)}</b>` : ''}</span>`;
   }).join('');
   const hotBadge = ctx.secHot ? '<span class="badge badge-hot">🔥 HOT</span>' : '';
@@ -2477,6 +2612,28 @@ function buildCard(row) {
     : '';
   const signalTags = buildSignalTags(row.signals, s);
   const catalystBadge = catalyst ? catalystBadgeHTML(catalyst) : '';
+
+  // Volume & Float, on the magnitude ramp.
+  //
+  // These four numbers were all the same white, which made the block a wall of
+  // digits you had to read one at a time — and it now sits at the top of the
+  // card, where it is meant to answer "is this tradable at all" at a glance.
+  // Each is a HOW MUCH, so each gets the same four-step ramp used by PM/ADR:
+  // dim when it is unremarkable, bright when it is the reason to look. The
+  // thresholds are where the number starts changing how the stock behaves, not
+  // where it starts being good — a 3M float is not a buy, it is a warning that
+  // it will move like one.
+  const magClass = (v, t1, t2, t3, invert) => {
+    if (v == null) return 'mag-0';
+    const rank = invert
+      ? (v <= t3 ? 3 : v <= t2 ? 2 : v <= t1 ? 1 : 0)
+      : (v >= t3 ? 3 : v >= t2 ? 2 : v >= t1 ? 1 : 0);
+    return `mag-${rank}`;
+  };
+  const magRvol  = magClass(s.rvol, 1.5, 3, 5);
+  const magFloat = magClass(s.floatShares, 50e6, 20e6, 10e6, true);   // smaller is louder
+  const magShort = magClass(s.shortFloat, 5, 10, 20);
+  const magCap   = magClass(s.mcap, 2e9, 300e6, 50e6, true);          // smaller is louder
 
   // Regime display
   const regimeInfo = getRegimeDisplay(ctx.regime);
@@ -2630,10 +2787,10 @@ function buildCard(row) {
   <div class="card-section vf-top">
     <div class="section-title">Volume &amp; Float</div>
     <div class="price-grid">
-      <div class="price-row"><span class="price-label">RVOL</span><span class="price-val">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
-      <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val">${fmtMcap(s.mcap)}</span></div>
-      <div class="price-row"><span class="price-label">Float</span><span class="price-val">${fmtShares(s.floatShares)}</span></div>
-      <div class="price-row"><span class="price-label">Short %</span><span class="price-val">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : '—'}</span></div>
+      <div class="price-row"><span class="price-label">RVOL</span><span class="price-val ${magRvol}" title="volume against a normal day — 1.5× notable, 5× extreme">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
+      <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val ${magCap}" title="smaller moves further — under $300M is notable, under $50M is extreme">${fmtMcap(s.mcap)}</span></div>
+      <div class="price-row"><span class="price-label">Float</span><span class="price-val ${magFloat}" title="shares actually available — under 20M is notable, under 10M is extreme">${fmtShares(s.floatShares)}</span></div>
+      <div class="price-row"><span class="price-label">Short %</span><span class="price-val ${magShort}" title="short interest as a share of float — 10% notable, 20% extreme">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : '—'}</span></div>
     </div>
   </div>
 
@@ -2651,6 +2808,32 @@ function buildCard(row) {
       <div class="section-title">Range</div>
       ${rangeBar}
     </div>` : ''}
+
+    <!-- NEWS — why the stock is moving belongs next to how much it is moving,
+         not eight sections below it. -->
+    <div class="card-section">
+      <div class="section-title">News ${catalyst ? '· ' + (catalyst.tier === 1 ? '⚡ ' : '') + catalyst.label + (catalyst.others && catalyst.others.length ? ' <span style="opacity:0.6;font-weight:400">+ ' + catalyst.others.map(o => o.label).join(', ') + '</span>' : '') : ''}</div>
+      <div id="news-${row.ticker}">${newsHTML}</div>
+    </div>
+
+    <!-- CHART — shown rather than hidden behind a click, but mounted only when
+         the card is actually on screen. See mountChart(). -->
+    <div class="card-section">
+      <div class="section-title">Chart
+        <span class="chart-expand" onclick="openChart('${row.ticker}')" title="open the full chart">⤢ full</span>
+      </div>
+      <div class="card-chart" id="cchart-${row.ticker}"
+           data-sym="${esc(s.tvSymbol || row.ticker)}" data-tkr="${esc(row.ticker)}">
+        <div class="cchart-idle">chart loads when this card is on screen</div>
+      </div>
+    </div>
+
+    <!-- Everything above this line is the card. Everything below it is the
+         detail behind the card, folded away by default: it is worth having and
+         it is not worth scrolling past twenty times a morning. -->
+    <button class="card-more" onclick="toggleCardMore('${row.ticker}',this)"
+            aria-expanded="false">▾ Details</button>
+    <div class="card-more-body" id="more-${row.ticker}" hidden>
 
     <!-- THEMES -->
     ${themesHTML ? `<div class="card-section">${themesHTML}</div>` : ''}
@@ -2704,12 +2887,7 @@ function buildCard(row) {
       </div>
     </div>
 
-    <!-- NEWS -->
-    <div class="card-section">
-      <div class="section-title">News ${catalyst ? '· ' + (catalyst.tier === 1 ? '⚡ ' : '') + catalyst.label + (catalyst.others && catalyst.others.length ? ' <span style="opacity:0.6;font-weight:400">+ ' + catalyst.others.map(o => o.label).join(', ') + '</span>' : '') : ''}</div>
-      <div id="news-${row.ticker}">${newsHTML}</div>
-    </div>
-
+    </div><!-- /card-more-body -->
   </div>
 
   ${(() => {
@@ -3260,6 +3438,78 @@ const INDEX_TV_SYMBOL = {
 };
 
 let tvWidget = null;
+
+/* ── In-card charts ─────────────────────────────────────────────────────────
+ *
+ * A chart on every card, without a chart on every card.
+ *
+ * The screener routinely shows 25 to 100 stocks and each TradingView widget is
+ * an iframe with its own socket and its own memory. Building them all on render
+ * would take a phone out at the knees, and most would be for cards that are
+ * never scrolled to. So a card declares where its chart goes and nothing is
+ * built until the card is actually on screen.
+ *
+ * Widgets are also torn down on the way out, with a small number kept alive, or
+ * a long scroll would leave sixty live iframes behind it — the same problem
+ * arriving slowly instead of all at once.
+ */
+const CHART_MAX_LIVE = 4;          // roughly two screens' worth on a phone
+const _liveCharts = [];            // ticker order, oldest first
+let _chartObserver = null;
+
+function mountChart(el) {
+  const tkr = el.dataset.tkr;
+  if (el.dataset.mounted === '1') return;
+  // tv.js is a remote script; if it has not loaded, say so rather than leaving
+  // an empty box that looks like a broken card.
+  if (typeof TradingView === 'undefined' || !TradingView.widget) {
+    el.innerHTML = '<div class="cchart-idle">chart unavailable — TradingView did not load</div>';
+    return;
+  }
+  el.dataset.mounted = '1';
+  el.innerHTML = '';
+  new TradingView.widget({
+    autosize: true,
+    symbol: el.dataset.sym,
+    interval: 'D',
+    timezone: 'America/New_York',
+    theme: 'dark',
+    style: '1',
+    locale: 'en',
+    toolbar_bg: '#13161e',
+    enable_publishing: false,
+    hide_top_toolbar: true,     // the card is not the place to draw on
+    hide_legend: true,
+    save_image: false,
+    container_id: el.id,
+    overrides: {
+      'paneProperties.background': '#0d0f14',
+      'paneProperties.backgroundType': 'solid',
+    },
+  });
+
+  _liveCharts.push(tkr);
+  while (_liveCharts.length > CHART_MAX_LIVE) unmountChart(_liveCharts.shift());
+}
+
+function unmountChart(tkr) {
+  const el = document.getElementById('cchart-' + tkr);
+  if (!el) return;
+  el.dataset.mounted = '';
+  el.innerHTML = '<div class="cchart-idle">chart loads when this card is on screen</div>';
+}
+
+// Called after every render, since renderCards() replaces the nodes the
+// observer was watching.
+function observeCharts() {
+  if (!('IntersectionObserver' in window)) return;   // then no charts, not a crash
+  if (_chartObserver) _chartObserver.disconnect();
+  _liveCharts.length = 0;
+  _chartObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) mountChart(e.target);
+  }, { rootMargin: '200px 0px' });   // start just before it is needed
+  document.querySelectorAll('.card-chart').forEach(el => _chartObserver.observe(el));
+}
 
 function openChart(sym) {
   const tvSym = INDEX_TV_SYMBOL[sym] || sym;

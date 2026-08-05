@@ -167,6 +167,32 @@ const COLUMN_EXPECTED_TYPES = {
   'premarket_high': ['number', 'null'], 'premarket_low': ['number', 'null'],
 };
 
+/**
+ * Is the response positionally aligned with the columns we asked for?
+ *
+ * mapTVRow reads values by index — `d[colIdx['ATR']]` — which is only correct
+ * while the response array lines up with COMMON_COLUMNS one for one. Requests
+ * go out with `ignore_unknown_fields: true`, so a column TradingView does not
+ * recognise is dropped rather than refused. If a drop also shortens the row,
+ * every field after it shifts by one and the data is not wrong in a way anyone
+ * would notice: ATR reads a market cap, the tradability floor passes the wrong
+ * stocks, and a month of collection is quietly ruined.
+ *
+ * So the length is checked before anything is mapped, and a mismatch means no
+ * rows rather than shifted rows. Losing a scan is recoverable; recording a
+ * scan's worth of misaligned numbers into the training set is not.
+ */
+function columnsAligned(sampleRow) {
+  const d = (sampleRow && sampleRow.d) || [];
+  if (d.length === COMMON_COLUMNS.length) return true;
+  console.error(
+    `[TV Scanner] ABORT: response has ${d.length} values for ${COMMON_COLUMNS.length} ` +
+    'requested columns. Fields are read by position, so mapping this would ' +
+    'silently shift every column. Refusing the batch — check COMMON_COLUMNS ' +
+    'against scripts/verify-tv-fields.js for a name TradingView dropped.');
+  return false;
+}
+
 let _structureWarned = false;
 function validateTVStructure(sampleRow) {
   if (_structureWarned) return;
@@ -268,6 +294,9 @@ async function runScreener(screener) {
     timeout: 15000,
   });
   const rawRows = resp.data.data || [];
+  if (rawRows.length > 0 && !columnsAligned(rawRows[0])) {
+    return { name: screener.name, key: screener.key, rows: [], floorDropped: 0, misaligned: true };
+  }
   if (rawRows.length > 0) validateTVStructure(rawRows[0]);
   const mapped = rawRows.map(mapTVRow).filter(r => r.ticker);
   const { kept, dropped } = tradable.applyLocal(mapped, t);

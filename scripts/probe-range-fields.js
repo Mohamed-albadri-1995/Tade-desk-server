@@ -39,11 +39,23 @@ const GROUPS = [
   ['all-time — is there a low to pair with High.All?', [
     'High.All', 'Low.All', 'price_all_time_high', 'price_all_time_low',
   ]],
+  ['short float — why is Short % always a dash?', [
+    'short_percentage_of_float', 'short_interest', 'shares_short',
+    'short_ratio', 'days_to_cover', 'float_shares_percent_current_shares_outstanding',
+    'short_percentage_of_shares_outstanding',
+  ]],
   ['already in use — these should all pass, as a sanity check', [
     'High.1M', 'Low.1M', 'High.3M', 'Low.3M',
     'price_52_week_high', 'price_52_week_low',
   ]],
 ];
+
+// Short float is the one field where "the column exists" is not the answer.
+// TradingView may know the name and still have nothing in it for most US
+// tickers, in which case the dash is correct and no amount of renaming fixes
+// it. So the short-float names get sampled across several stocks rather than
+// one, and the output says how many of them actually carried a value.
+const SHORT_SAMPLE = ['AAPL', 'TSLA', 'GME', 'AMC', 'F', 'PLUG', 'RIOT'];
 
 // AAPL, so a column that exists but is always null is visible as such.
 async function probe(field) {
@@ -68,16 +80,49 @@ async function probe(field) {
   }
 }
 
+// How many of SHORT_SAMPLE actually carry a value for this column.
+async function coverage(field) {
+  const body = {
+    columns: ['name', field],
+    filter: [{ left: 'name', operation: 'in_range', right: SHORT_SAMPLE }],
+    markets: ['america'],
+    options: { lang: 'en' },
+    range: [0, SHORT_SAMPLE.length],
+    ignore_unknown_fields: false,
+  };
+  try {
+    const r = await axios.post(URL, body, { headers: HEADERS, timeout: 20000 });
+    const rows = (r.data && r.data.data) || [];
+    const hits = rows.filter(x => x.d[1] != null);
+    return { n: rows.length, hits: hits.length,
+      example: hits[0] ? `${hits[0].d[0]}=${hits[0].d[1]}` : null };
+  } catch {
+    return null;
+  }
+}
+
 (async () => {
   const good = [];
   for (const [title, fields] of GROUPS) {
     console.log(`\n${title}`);
     console.log('─'.repeat(title.length));
+    const isShort = /short float/.test(title);
     for (const f of fields) {
       const r = await probe(f);
-      if (r.ok && !r.empty) { good.push(f); console.log(`  YES  ${f.padEnd(20)} AAPL = ${r.val}`); }
-      else if (r.ok)        { console.log(`  ~    ${f.padEnd(20)} column exists but is empty for AAPL`); }
-      else                  { console.log(`  no   ${f.padEnd(20)} ${r.msg}`); }
+      const pad = f.padEnd(48);
+      if (r.ok && !r.empty)      { good.push(f); console.log(`  YES  ${pad} AAPL = ${r.val}`); }
+      else if (r.ok)             { console.log(`  ~    ${pad} column exists, empty for AAPL`); }
+      else                       { console.log(`  no   ${pad} ${r.msg}`); }
+
+      // For a column that exists at all, how widely is it populated? An empty
+      // column and a missing column look the same on the card and need
+      // opposite fixes.
+      if (isShort && r.ok) {
+        await new Promise(s => setTimeout(s, 400));
+        const c = await coverage(f);
+        if (c) console.log(`       └─ ${c.hits}/${c.n} of ${SHORT_SAMPLE.join(',')} have a value` +
+          (c.example ? `  e.g. ${c.example}` : ''));
+      }
       await new Promise(s => setTimeout(s, 400));
     }
   }
