@@ -601,3 +601,77 @@ describe('a mirror stays paired after being renamed', () => {
     expect(store.list()[0].mirrorOf).toBeNull();
   });
 });
+
+// ── linking a RENAMED mirror ────────────────────────────────────────────────
+// The month-end comparison reads pairs, and a pair is only a pair if the mirror
+// records which screener it came from. That link used to be recovered from the
+// name — "X (mirror)" — which lasts exactly until someone gives the mirror a
+// better name. T2's became "MA Stack Pullback" and the pair silently vanished
+// from the comparison while both screeners carried on collecting.
+describe('linking a mirror that has been renamed', () => {
+  const db = require('../src/db');
+  const { linkMirrorsByFilters, backfillMirrorLinks } = require('../src/sideA/seedScreeners');
+
+  const PARENT = {
+    key: 'ma-stack-breakout', name: 'MA Stack Breakout',
+    filters: [
+      { left: 'SMA5|1', operation: 'greater', right: 'EMA9|1' },
+      { left: 'EMA9|1', operation: 'greater', right: 'EMA13|1' },
+      { left: 'close', operation: 'egreater', right: 'High.1M' },
+    ],
+  };
+
+  beforeEach(() => db.prepare('DELETE FROM screeners').run());
+
+  const seedPair = (mirrorName) => {
+    store.create(PARENT);
+    const m = store.mirrorDefinition(PARENT);
+    store.create({ key: 'renamed-mirror', name: mirrorName, filters: m.filters, sort: m.sort });
+  };
+
+  test('a renamed mirror is found by its filters', () => {
+    seedPair('MA Stack Pullback');
+    expect(backfillMirrorLinks().linked).toBe(0);        // the name rule cannot see it
+    expect(linkMirrorsByFilters().linked).toBe(1);
+    const pullback = store.list().find(s => s.name === 'MA Stack Pullback');
+    expect(pullback.mirrorOf).toBe('MA Stack Breakout');
+  });
+
+  test('the parent is not linked to itself or to its own mirror', () => {
+    seedPair('MA Stack Pullback');
+    linkMirrorsByFilters();
+    const parent = store.list().find(s => s.name === 'MA Stack Breakout');
+    expect(parent.mirrorOf).toBeFalsy();
+  });
+
+  test('running twice changes nothing the second time', () => {
+    seedPair('MA Stack Pullback');
+    expect(linkMirrorsByFilters().linked).toBe(1);
+    expect(linkMirrorsByFilters().linked).toBe(0);
+  });
+
+  test('an already-linked mirror is left alone', () => {
+    seedPair('MA Stack Pullback');
+    const m = store.list().find(s => s.name === 'MA Stack Pullback');
+    db.prepare('UPDATE screeners SET mirror_of = ? WHERE id = ?').run('Something Else', m.id);
+    expect(linkMirrorsByFilters().linked).toBe(0);
+    expect(store.list().find(s => s.id === m.id).mirrorOf).toBe('Something Else');
+  });
+
+  // Two unrelated screeners must not be paired up just because neither has a
+  // direction to flip — a screener that mirrors to itself matches everything.
+  test('screeners with nothing directional to flip are not paired', () => {
+    store.create({ key: 'a', name: 'Liquid A', filters: [{ left: 'close', operation: 'egreater', right: 5 }] });
+    store.create({ key: 'b', name: 'Liquid B', filters: [{ left: 'close', operation: 'egreater', right: 5 }] });
+    expect(linkMirrorsByFilters().linked).toBe(0);
+    for (const s of store.list()) expect(s.mirrorOf).toBeFalsy();
+  });
+
+  test('an unrelated screener is not linked to anything', () => {
+    seedPair('MA Stack Pullback');
+    store.create({ key: 'gap', name: 'Gap + Volume',
+      filters: [{ left: 'premarket_change', operation: 'greater', right: 3 }] });
+    linkMirrorsByFilters();
+    expect(store.list().find(s => s.name === 'Gap + Volume').mirrorOf).toBeFalsy();
+  });
+});

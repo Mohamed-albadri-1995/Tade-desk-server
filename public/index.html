@@ -4248,12 +4248,14 @@ document.addEventListener('keydown', e => {
 });
 initToolSwitcher();
 
-// Restore sunlight mode. Runs at the end of the script, before the first data
-// arrives, so a page opened outdoors comes up readable rather than flashing
-// the low-contrast palette and then correcting itself.
+// Sunlight is ON unless it has been explicitly switched off. This tool is read
+// on a phone, outdoors, at the open — that is the normal case, not the
+// exception, so it is the default and the darker palette is the opt-out.
+// Runs at the end of the script, before the first data arrives, so the page
+// comes up readable rather than flashing the low-contrast palette first.
 (function restoreSunlight() {
-  let on = false;
-  try { on = localStorage.getItem('sunlight') === '1'; } catch { /* private mode */ }
+  let on = true;
+  try { on = localStorage.getItem('sunlight') !== '0'; } catch { /* private mode */ }
   if (!on) return;
   document.body.classList.add('sunlight');
   const b = document.getElementById('sun-btn');
