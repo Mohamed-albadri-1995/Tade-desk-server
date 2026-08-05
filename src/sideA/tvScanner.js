@@ -16,6 +16,16 @@ const COMMON_COLUMNS = [
   'VWAP',
   'High.1M',
   'Low.1M',
+  // Wider ranges, for the card's range bars. One month said where a stock sat
+  // over twenty sessions and nothing about whether that was also the top of the
+  // year — which is the difference between a breakout and a bounce in a
+  // downtrend. All-time has a high and no usable low, so it is shown as a
+  // distance rather than a position.
+  'High.3M',
+  'Low.3M',
+  'price_52_week_high',
+  'price_52_week_low',
+  'High.All',
   'high',
   'low',
   'ATR',
@@ -147,6 +157,9 @@ const COLUMN_EXPECTED_TYPES = {
   'market_cap_basic': ['number', 'null'], 'sector': ['string', 'null'],
   'industry': ['string', 'null'], 'change_from_open': ['number', 'null'],
   'VWAP': ['number', 'null'], 'High.1M': ['number', 'null'], 'Low.1M': ['number', 'null'],
+  'High.3M': ['number', 'null'], 'Low.3M': ['number', 'null'],
+  'price_52_week_high': ['number', 'null'], 'price_52_week_low': ['number', 'null'],
+  'High.All': ['number', 'null'],
   'high': ['number', 'null'], 'low': ['number', 'null'], 'ATR': ['number', 'null'],
   'short_percentage_of_float': ['number', 'null'], 'float_shares_outstanding': ['number', 'null'],
   'EMA9': ['number', 'null'], 'EMA13': ['number', 'null'], 'EMA20': ['number', 'null'],
@@ -211,6 +224,11 @@ function mapTVRow(rawTV) {
       sma5: getNum('SMA5'),
       monthHigh: getNum('High.1M'),
       monthLow: getNum('Low.1M'),
+      quarterHigh: getNum('High.3M'),
+      quarterLow: getNum('Low.3M'),
+      yearHigh: getNum('price_52_week_high'),
+      yearLow: getNum('price_52_week_low'),
+      allTimeHigh: getNum('High.All'),
       dayHigh: getNum('high'),
       dayLow: getNum('low'),
       atr: getNum('ATR'),

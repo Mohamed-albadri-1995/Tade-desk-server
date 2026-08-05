@@ -1,5 +1,22 @@
 const { computeRelations } = require('./relations');
 
+/**
+ * Where price sits inside a high/low pair, 0 = on the low, 100 = on the high.
+ *
+ * Returns null rather than a number when the range cannot be read — a missing
+ * end, or a high that is not above the low. The month version used to return 0
+ * for a flat range, which reads as "sitting on its low" and is a claim the data
+ * does not support; the card now draws no bar at all instead. Kept for
+ * monthRangePos too, except that one still answers 0, because it is a stored
+ * register field the model trains on and changing what it means mid-run would
+ * silently split the training set in two.
+ */
+function rangePos(price, low, high) {
+  if (price == null || low == null || high == null) return null;
+  if (!(high > low)) return null;
+  return ((price - low) / (high - low)) * 100;
+}
+
 function computeDerivedFields(stock) {
   const { price, change, open, pmHigh, pmLow, atr, monthHigh, monthLow } = stock;
 
@@ -20,6 +37,9 @@ function computeDerivedFields(stock) {
     pmRange,
     adrPct,
     monthRangePos,
+    // The wider ranges are display-only, so they are free to say "unknown".
+    quarterRangePos: rangePos(price, stock.quarterLow, stock.quarterHigh),
+    yearRangePos: rangePos(price, stock.yearLow, stock.yearHigh),
     pmAdrRatio,
   };
 }
@@ -33,4 +53,4 @@ function applyDerivedFields(rows) {
   });
 }
 
-module.exports = { computeDerivedFields, applyDerivedFields };
+module.exports = { computeDerivedFields, applyDerivedFields, rangePos };

@@ -93,6 +93,60 @@ describe('Side B — computeDerivedFields', () => {
     });
   });
 
+  // ─── quarter / year range positions ──────────────────────────────────────
+  // These are display-only, so unlike monthRangePos they are allowed to say
+  // "unknown" instead of answering 0 — a bar drawn at 0 reads as "sitting on
+  // its low", which is a claim missing data does not support.
+  describe('quarterRangePos / yearRangePos', () => {
+    const base = { price: 50, change: 0, open: 50, pmHigh: 0, pmLow: 0, atr: 1, monthHigh: 60, monthLow: 40 };
+
+    test('price at the midpoint of each wider range → 50%', () => {
+      const out = computeDerivedFields({ ...base, quarterLow: 40, quarterHigh: 60, yearLow: 0, yearHigh: 100 });
+      expect(r(out.quarterRangePos)).toBe(r(50));
+      expect(r(out.yearRangePos)).toBe(r(50));
+    });
+
+    test('the three ranges are independent — same price, different positions', () => {
+      const out = computeDerivedFields({
+        ...base, monthHigh: 55, monthLow: 45,   // price 50 → 50% of the month
+        quarterLow: 30, quarterHigh: 55,        //          → 80% of the quarter
+        yearLow: 10, yearHigh: 90,              //          → 50% of the year
+      });
+      expect(r(out.monthRangePos)).toBe(r(50));
+      expect(r(out.quarterRangePos)).toBe(r(80));
+      expect(r(out.yearRangePos)).toBe(r(50));
+    });
+
+    test('a missing end → null, so no bar is drawn', () => {
+      const out = computeDerivedFields({ ...base, quarterLow: null, quarterHigh: 60 });
+      expect(out.quarterRangePos).toBeNull();
+    });
+
+    test('absent entirely → null rather than NaN', () => {
+      const out = computeDerivedFields(base);
+      expect(out.quarterRangePos).toBeNull();
+      expect(out.yearRangePos).toBeNull();
+    });
+
+    test('a flat range → null, not 0', () => {
+      const out = computeDerivedFields({ ...base, quarterLow: 50, quarterHigh: 50 });
+      expect(out.quarterRangePos).toBeNull();
+    });
+
+    test('an inverted pair is refused rather than returning a negative', () => {
+      const out = computeDerivedFields({ ...base, yearLow: 90, yearHigh: 10 });
+      expect(out.yearRangePos).toBeNull();
+    });
+
+    test('price outside the range is reported honestly, not clamped', () => {
+      // Clamping is the card's job — the number should still say "above the
+      // year high", because a stock through its 52-week high is the whole point
+      // of several of these screeners.
+      const out = computeDerivedFields({ ...base, price: 120, yearLow: 0, yearHigh: 100 });
+      expect(r(out.yearRangePos)).toBe(r(120));
+    });
+  });
+
   // ─── pmAdrRatio ──────────────────────────────────────────────────────────
   describe('pmAdrRatio = pmRange / atr', () => {
     test('standard case: pmRange=10, atr=5 → pmAdrRatio=2', () => {

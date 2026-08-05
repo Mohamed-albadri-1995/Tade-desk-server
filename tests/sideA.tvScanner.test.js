@@ -33,6 +33,11 @@ function buildRawRow(overrides = {}) {
   d[idx['SMA5']]                          = 11.8;
   d[idx['premarket_high']]               = 13;
   d[idx['premarket_low']]                = 11;
+  d[idx['High.3M']]                       = 18;
+  d[idx['Low.3M']]                        = 6;
+  d[idx['price_52_week_high']]            = 24;
+  d[idx['price_52_week_low']]             = 3;
+  d[idx['High.All']]                      = 40;
 
   const base = { s: 'AMEX:TEST', d };
   Object.assign(base, overrides.root || {});
@@ -143,7 +148,8 @@ describe('Side A — mapTVRow', () => {
       const { stock } = mapTVRow(row);
       const expected = ['tvSymbol','price','open','change','vwap','ema9','ema13','ema20','ema50',
         'sma5','monthHigh','monthLow','dayHigh','dayLow','atr','mcap','floatShares','shortFloat',
-        'sector','industry','pmHigh','pmLow','rvol'];
+        'sector','industry','pmHigh','pmLow','rvol',
+        'quarterHigh','quarterLow','yearHigh','yearLow','allTimeHigh'];
       for (const field of expected) {
         expect(stock).toHaveProperty(field);
       }
@@ -163,6 +169,31 @@ describe('Side A — mapTVRow', () => {
       expect(stock.sector).toBe('Technology');
       expect(stock.pmHigh).toBe(13);
       expect(stock.pmLow).toBe(11);
+    });
+
+    // The wider ranges feed the card's range bars. Each pair has to come back
+    // on the right field: TradingView answers by position in COMMON_COLUMNS,
+    // so a column inserted in the wrong place silently shifts every field
+    // after it and the year bar would quietly be drawing the quarter.
+    test('the wider range columns map to their own fields', () => {
+      const { stock } = mapTVRow(buildRawRow());
+      expect(stock.monthHigh).toBe(15);
+      expect(stock.monthLow).toBe(8);
+      expect(stock.quarterHigh).toBe(18);
+      expect(stock.quarterLow).toBe(6);
+      expect(stock.yearHigh).toBe(24);
+      expect(stock.yearLow).toBe(3);
+      expect(stock.allTimeHigh).toBe(40);
+    });
+
+    test('a missing wider range comes back null, not zero', () => {
+      const row = buildRawRow({ d: { 'High.3M': null, 'Low.3M': null, 'High.All': null } });
+      const { stock } = mapTVRow(row);
+      expect(stock.quarterHigh).toBeNull();
+      expect(stock.quarterLow).toBeNull();
+      expect(stock.allTimeHigh).toBeNull();
+      // and the ones that are present are unaffected
+      expect(stock.yearHigh).toBe(24);
     });
   });
 

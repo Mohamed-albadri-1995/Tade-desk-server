@@ -249,6 +249,17 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .sig-dn  { color:#f87171; border-color:#f8717140; background:#f8717115; }
 .sig-mid { color:var(--text3); border-color:#444; background:#1a1d2e; }
 .sig-hot { color:#fb923c; border-color:#fb923c40; background:#fb923c15; }
+/* PM/ADR — one hue, five intensities, threshold at 1.00×. Deliberately NOT
+   red/green: the ratio says how big the pre-market range is, not whether that
+   is good, and a green badge would be answering a question the number never
+   asked. Below the threshold it recedes; above it, it gets louder the further
+   past 1 it goes. */
+.pmadr-a  { color:#484f60; border-color:#2a2f3f; background:#151822; }
+.pmadr-b  { color:#5f6779; border-color:#333a4c; background:#171b26; }
+.pmadr-1  { color:#67c9e8; border-color:#22d3ee33; background:#22d3ee10; }
+.pmadr-2  { color:#22d3ee; border-color:#22d3ee66; background:#22d3ee1f; }
+.pmadr-3  { color:#a5f3fc; border-color:#22d3ee; background:#22d3ee33;
+            box-shadow:0 0 7px #22d3ee55; }
 .bias-btn { display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;border:1px solid;cursor:pointer;background:transparent;transition:opacity .15s; }
 .bias-btn:hover { opacity:.8; }
 .bias-btn.bias-auto { color:var(--text3);border-color:#444;background:#1a1d2e; }
@@ -296,6 +307,24 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .range-bar-fill { position: absolute; left: 0; top: 0; height: 100%; background: var(--accent); border-radius: 2px; }
 .range-bar-marker { position: absolute; top: -3px; width: 2px; height: 10px; background: #fff; border-radius: 1px; }
 .range-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text3); margin-top: 2px; }
+/* Several bars in one block. The name and the percentage sit on one line above
+   each bar so the low/high pair underneath stays readable without repeating a
+   heading three times. */
+.rb { margin-bottom: 9px; }
+.rb:last-child { margin-bottom: 0; }
+.rb-head { display:flex; justify-content:space-between; align-items:baseline; }
+.rb-name { font-size:10px; color:var(--text2); font-weight:600; letter-spacing:.04em; }
+.rb-pct  { font-size:10px; color:var(--text); font-weight:700; }
+/* All-time gets a row, not a bar — see the comment where athRow is built. */
+.rb-ath { display:flex; align-items:baseline; gap:8px; margin-top:9px;
+          padding-top:8px; border-top:1px dashed #262b3b; }
+.rb-ath-label { font-size:10px; color:var(--text2); font-weight:600; letter-spacing:.04em; }
+.rb-ath-val { font-size:11px; font-weight:700; }
+.rb-ath-gap { font-size:10px; color:var(--text3); margin-left:auto; }
+.rb-ath-gap.at-high { color:#a5f3fc; font-weight:700; }
+/* The top Volume & Float block butts against the header, so it needs its own
+   separator rather than borrowing card-body's. */
+.vf-top { background: var(--bg2); border-bottom: 1px solid var(--border); }
 
 /* themes */
 .themes-row { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -2333,7 +2362,15 @@ const SIG_LEVELS = [
   ['vsPrevClose','distPrevClose','PDC'], ['vsOpen','distOpen','OPEN'],
   ['vsPmHigh','distPmHigh','PMH'], ['vsPmLow','distPmLow','PML'],
 ];
-function buildSignalTags(sig) {
+// The PM/ADR ramp. Below 1.00× the badge recedes; above it, each step is the
+// same hue turned up. Keyed by the band strings pmBand() emits in
+// src/sideB/relations.js — change them there and this must follow.
+const PMADR_CLASS = {
+  '<0.5': 'pmadr-a', '0.5-1': 'pmadr-b', '1-2': 'pmadr-1',
+  '2-3': 'pmadr-2', '3+': 'pmadr-3',
+};
+
+function buildSignalTags(sig, s) {
   if (!sig || !Object.keys(sig).length) return '';
   const t = [];
   for (const [sideKey, distKey, label] of SIG_LEVELS) {
@@ -2356,9 +2393,16 @@ function buildSignalTags(sig) {
     t.push(`<span class="sig ${cls}" title="quarter of the 1-month range (Q1 = bottom)">${sig.monthQuarter} range</span>`);
   }
   if (sig.pmAdrBand) {
-    // >=2 is the band that historically won 52% vs 10% below it
-    const strong = sig.pmAdrBand === '2-3' || sig.pmAdrBand === '3+';
-    t.push(`<span class="sig ${strong ? 'sig-hot' : 'sig-mid'}" title="pre-market range vs a normal day's range">PM/ADR ${sig.pmAdrBand}</span>`);
+    // 1.0 is the threshold — pre-market has covered a whole normal day's range.
+    // Past it is not automatically good and not automatically bad, so red/green
+    // would be putting a verdict on a number that does not carry one. One hue,
+    // five steps: dim below the threshold because there is nothing to look at,
+    // and progressively louder above it. Loud means big, not good.
+    // (>=2 is the band that historically won 52% vs 10% below it — which is a
+    // reason to look, not a reason to colour it green.)
+    const cls = PMADR_CLASS[sig.pmAdrBand] || 'sig-mid';
+    const ratio = s && s.pmAdrRatio != null ? `${s.pmAdrRatio.toFixed(2)}×` : null;
+    t.push(`<span class="sig ${cls}" title="pre-market range vs a normal day's range — band ${sig.pmAdrBand}, threshold 1.00×">PM/ADR ${sig.pmAdrBand}${ratio ? ` · ${ratio}` : ''}</span>`);
   }
   return t.length ? `<div class="sig-row">${t.join('')}</div>` : '';
 }
@@ -2431,7 +2475,7 @@ function buildCard(row) {
         row.canslimDays != null ? ` for ${row.canslimDays} day(s)` : ''}">★ CANSLIM${
         row.canslimDays != null ? ` <b>${row.canslimDays}d</b>` : ''}</span>`
     : '';
-  const signalTags = buildSignalTags(row.signals);
+  const signalTags = buildSignalTags(row.signals, s);
   const catalystBadge = catalyst ? catalystBadgeHTML(catalyst) : '';
 
   // Regime display
@@ -2456,15 +2500,46 @@ function buildCard(row) {
     `<span class="ema-item"><span class="ema-name">EMA${e.n}</span> <span class="ema-val ${price>=e.v?'ema-above':'ema-below'}">${fmt(e.v)}</span></span>`
   ).join('');
 
-  // Month range bar
-  const mpos = s.monthRangePos != null ? s.monthRangePos : null;
-  const rangeBar = mpos != null ? `
-    <div class="range-bar-wrap">
-      <div class="range-bar-fill" style="width:${clamp(mpos,0,100)}%"></div>
-      <div class="range-bar-marker" style="left:calc(${clamp(mpos,0,100)}% - 1px)"></div>
-    </div>
-    <div class="range-labels"><span>L ${fmt(s.monthLow)}</span><span>${mpos.toFixed(0)}% into range</span><span>H ${fmt(s.monthHigh)}</span></div>
-  ` : '';
+  // Range bars — one per timeframe, stacked.
+  //
+  // A single month bar said where the stock sat over 20 sessions and nothing
+  // about whether that was also the top of the year. Several bars answer the
+  // question the one bar was being asked to answer on its own: 91% of the month
+  // and 40% of the year is a different stock from 91% of both.
+  //
+  // Each bar carries its own low and high, because they are different numbers
+  // and a shared axis would be a lie.
+  const rangeBars = [
+    { label: 'Month',   low: s.monthLow,     high: s.monthHigh,     pos: s.monthRangePos },
+    { label: 'Quarter', low: s.quarterLow,   high: s.quarterHigh,   pos: s.quarterRangePos },
+    { label: 'Year',    low: s.yearLow,      high: s.yearHigh,      pos: s.yearRangePos },
+  ].filter(b => b.pos != null && b.low != null && b.high != null).map(b => {
+    const p = clamp(b.pos, 0, 100);
+    return `
+    <div class="rb">
+      <div class="rb-head"><span class="rb-name">${b.label}</span><span class="rb-pct">${b.pos.toFixed(0)}%</span></div>
+      <div class="range-bar-wrap">
+        <div class="range-bar-fill" style="width:${p}%"></div>
+        <div class="range-bar-marker" style="left:calc(${p}% - 1px)"></div>
+      </div>
+      <div class="range-labels"><span>L ${fmt(b.low)}</span><span></span><span>H ${fmt(b.high)}</span></div>
+    </div>`;
+  }).join('');
+
+  // All-time is not a range — there is only a high, no low to sit between, and
+  // a stock's all-time low is usually a number from a decade ago that means
+  // nothing today. So it gets a distance instead of a bar: how far under the
+  // record the stock is, which is the only thing the one number supports.
+  const athPct = (s.allTimeHigh && price) ? ((price / s.allTimeHigh) - 1) * 100 : null;
+  const athRow = athPct != null ? `
+    <div class="rb-ath" title="the all-time high has no matching low, so this is a distance rather than a position in a range">
+      <span class="rb-ath-label">All-time high</span>
+      <span class="rb-ath-val">${fmt(s.allTimeHigh)}</span>
+      <span class="rb-ath-gap ${athPct >= -0.01 ? 'at-high' : ''}">${
+        athPct >= -0.01 ? 'at the high' : `${Math.abs(athPct).toFixed(0)}% below`}</span>
+    </div>` : '';
+
+  const rangeBar = (rangeBars || athRow) ? rangeBars + athRow : '';
 
   // Move
   const dayRange = s.dayHigh && s.dayLow ? (s.dayHigh - s.dayLow) : null;
@@ -2547,12 +2622,35 @@ function buildCard(row) {
     </div>
   </div>
 
+  <!-- VOLUME & FLOAT — first thing under the name.
+       Whether a stock is tradable at all is decided by float, cap and RVOL,
+       and that decision comes before anything the badges say. It was at the
+       bottom of the card, which put it after every reason to be interested and
+       before none of them. -->
+  <div class="card-section vf-top">
+    <div class="section-title">Volume &amp; Float</div>
+    <div class="price-grid">
+      <div class="price-row"><span class="price-label">RVOL</span><span class="price-val">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
+      <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val">${fmtMcap(s.mcap)}</span></div>
+      <div class="price-row"><span class="price-label">Float</span><span class="price-val">${fmtShares(s.floatShares)}</span></div>
+      <div class="price-row"><span class="price-label">Short %</span><span class="price-val">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : '—'}</span></div>
+    </div>
+  </div>
+
   <div class="card-badges">
     ${alsoBadge}${canslimBadge}${badges}${hotBadge}${catalystBadge}
   </div>
   ${signalTags}
 
   <div class="card-body">
+
+    <!-- RANGE — straight after the MA tags, because both answer "where is this
+         thing sitting", one against its moving averages and one against its
+         own history. -->
+    ${rangeBar ? `<div class="card-section">
+      <div class="section-title">Range</div>
+      ${rangeBar}
+    </div>` : ''}
 
     <!-- THEMES -->
     ${themesHTML ? `<div class="card-section">${themesHTML}</div>` : ''}
@@ -2583,23 +2681,6 @@ function buildCard(row) {
 
     <!-- EMAs -->
     ${emas ? `<div class="card-section"><div class="section-title">EMAs</div><div class="ema-row">${emas}</div></div>` : ''}
-
-    <!-- MONTH RANGE -->
-    <div class="card-section">
-      <div class="section-title">1-Month Range</div>
-      ${rangeBar}
-    </div>
-
-    <!-- VOLUME & FLOAT -->
-    <div class="card-section">
-      <div class="section-title">Volume & Float</div>
-      <div class="price-grid">
-        <div class="price-row"><span class="price-label">RVOL</span><span class="price-val">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
-        <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val">${fmtMcap(s.mcap)}</span></div>
-        <div class="price-row"><span class="price-label">Float</span><span class="price-val">${fmtShares(s.floatShares)}</span></div>
-        <div class="price-row"><span class="price-label">Short %</span><span class="price-val">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : '—'}</span></div>
-      </div>
-    </div>
 
     <!-- ATR & MOVE -->
     <div class="card-section">
