@@ -37,7 +37,8 @@ function computeDerivedFields(stock) {
     pmRange,
     adrPct,
     monthRangePos,
-    // The wider ranges are display-only, so they are free to say "unknown".
+    // The other ranges are display-only, so they are free to say "unknown".
+    weekRangePos: rangePos(price, stock.weekLow, stock.weekHigh),
     quarterRangePos: rangePos(price, stock.quarterLow, stock.quarterHigh),
     yearRangePos: rangePos(price, stock.yearLow, stock.yearHigh),
     pmAdrRatio,

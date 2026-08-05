@@ -97,7 +97,7 @@ describe('Side B — computeDerivedFields', () => {
   // These are display-only, so unlike monthRangePos they are allowed to say
   // "unknown" instead of answering 0 — a bar drawn at 0 reads as "sitting on
   // its low", which is a claim missing data does not support.
-  describe('quarterRangePos / yearRangePos', () => {
+  describe('weekRangePos / quarterRangePos / yearRangePos', () => {
     const base = { price: 50, change: 0, open: 50, pmHigh: 0, pmLow: 0, atr: 1, monthHigh: 60, monthLow: 40 };
 
     test('price at the midpoint of each wider range → 50%', () => {
@@ -106,15 +106,24 @@ describe('Side B — computeDerivedFields', () => {
       expect(r(out.yearRangePos)).toBe(r(50));
     });
 
-    test('the three ranges are independent — same price, different positions', () => {
+    test('the four ranges are independent — same price, different positions', () => {
+      // The whole reason for four bars: 100% of the week and 50% of the year is
+      // a different stock from 100% of both, and one bar cannot say which.
       const out = computeDerivedFields({
-        ...base, monthHigh: 55, monthLow: 45,   // price 50 → 50% of the month
-        quarterLow: 30, quarterHigh: 55,        //          → 80% of the quarter
-        yearLow: 10, yearHigh: 90,              //          → 50% of the year
+        ...base, weekLow: 48, weekHigh: 50,     // price 50 → 100% of the week
+        monthHigh: 55, monthLow: 45,            //          →  50% of the month
+        quarterLow: 30, quarterHigh: 55,        //          →  80% of the quarter
+        yearLow: 10, yearHigh: 90,              //          →  50% of the year
       });
+      expect(r(out.weekRangePos)).toBe(r(100));
       expect(r(out.monthRangePos)).toBe(r(50));
       expect(r(out.quarterRangePos)).toBe(r(80));
       expect(r(out.yearRangePos)).toBe(r(50));
+    });
+
+    test('week uses a trailing five sessions, so a flat week is null not zero', () => {
+      const out = computeDerivedFields({ ...base, weekLow: 50, weekHigh: 50 });
+      expect(out.weekRangePos).toBeNull();
     });
 
     test('a missing end → null, so no bar is drawn', () => {

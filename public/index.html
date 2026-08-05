@@ -2667,6 +2667,7 @@ function buildCard(row) {
   // Each bar carries its own low and high, because they are different numbers
   // and a shared axis would be a lie.
   const rangeBars = [
+    { label: 'Week',    low: s.weekLow,      high: s.weekHigh,      pos: s.weekRangePos },
     { label: 'Month',   low: s.monthLow,     high: s.monthHigh,     pos: s.monthRangePos },
     { label: 'Quarter', low: s.quarterLow,   high: s.quarterHigh,   pos: s.quarterRangePos },
     { label: 'Year',    low: s.yearLow,      high: s.yearHigh,      pos: s.yearRangePos },
@@ -2683,10 +2684,15 @@ function buildCard(row) {
     </div>`;
   }).join('');
 
-  // All-time is not a range — there is only a high, no low to sit between, and
-  // a stock's all-time low is usually a number from a decade ago that means
-  // nothing today. So it gets a distance instead of a bar: how far under the
-  // record the stock is, which is the only thing the one number supports.
+  // All-time deliberately gets a distance, not a bar.
+  //
+  // `Low.All` does exist — this was checked, not assumed — and for AAPL it
+  // comes back as $0.049, the split-adjusted price from 1980. A bar drawn from
+  // there would put every stock that has ever gone up somewhere north of 85%,
+  // which discriminates between nothing and would sit next to three real bars
+  // looking like it meant something. The distance under the record is the one
+  // claim a single all-time number actually supports.
+  //   → if you are here to "add the missing all-time low", read the above.
   const athPct = (s.allTimeHigh && price) ? ((price / s.allTimeHigh) - 1) * 100 : null;
   const athRow = athPct != null ? `
     <div class="rb-ath" title="the all-time high has no matching low, so this is a distance rather than a position in a range">
@@ -2790,7 +2796,11 @@ function buildCard(row) {
       <div class="price-row"><span class="price-label">RVOL</span><span class="price-val ${magRvol}" title="volume against a normal day — 1.5× notable, 5× extreme">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
       <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val ${magCap}" title="smaller moves further — under $300M is notable, under $50M is extreme">${fmtMcap(s.mcap)}</span></div>
       <div class="price-row"><span class="price-label">Float</span><span class="price-val ${magFloat}" title="shares actually available — under 20M is notable, under 10M is extreme">${fmtShares(s.floatShares)}</span></div>
-      <div class="price-row"><span class="price-label">Short %</span><span class="price-val ${magShort}" title="short interest as a share of float — 10% notable, 20% extreme">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : '—'}</span></div>
+      <div class="price-row"><span class="price-label">Short %</span><span class="price-val ${magShort}" title="${
+        s.shortFloat != null
+          ? 'short interest as a share of float — 10% notable, 20% extreme'
+          : 'TradingView’s scanner does not serve short interest on any name — seven column names were probed against seven stocks including GME and every one came back empty. This is not missing data for this stock, it is a field the source does not provide.'
+        }">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : 'n/a'}</span></div>
     </div>
   </div>
 

@@ -33,6 +33,8 @@ function buildRawRow(overrides = {}) {
   d[idx['SMA5']]                          = 11.8;
   d[idx['premarket_high']]               = 13;
   d[idx['premarket_low']]                = 11;
+  d[idx['High.5D']]                       = 13;
+  d[idx['Low.5D']]                        = 10;
   d[idx['High.3M']]                       = 18;
   d[idx['Low.3M']]                        = 6;
   d[idx['price_52_week_high']]            = 24;
@@ -149,7 +151,7 @@ describe('Side A — mapTVRow', () => {
       const expected = ['tvSymbol','price','open','change','vwap','ema9','ema13','ema20','ema50',
         'sma5','monthHigh','monthLow','dayHigh','dayLow','atr','mcap','floatShares','shortFloat',
         'sector','industry','pmHigh','pmLow','rvol',
-        'quarterHigh','quarterLow','yearHigh','yearLow','allTimeHigh'];
+        'weekHigh','weekLow','quarterHigh','quarterLow','yearHigh','yearLow','allTimeHigh'];
       for (const field of expected) {
         expect(stock).toHaveProperty(field);
       }
@@ -177,6 +179,8 @@ describe('Side A — mapTVRow', () => {
     // after it and the year bar would quietly be drawing the quarter.
     test('the wider range columns map to their own fields', () => {
       const { stock } = mapTVRow(buildRawRow());
+      expect(stock.weekHigh).toBe(13);
+      expect(stock.weekLow).toBe(10);
       expect(stock.monthHigh).toBe(15);
       expect(stock.monthLow).toBe(8);
       expect(stock.quarterHigh).toBe(18);
