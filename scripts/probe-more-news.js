@@ -29,26 +29,47 @@ const BIG = (process.argv[2] || 'AAPL').toUpperCase();
 const THIN = (process.argv[3] || 'WYHG').toUpperCase();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
+/*
+ * Read the keys the way the tool does, and say where they came from.
+ *
+ * This first probe read the database directly and reported HTTP 401 twice,
+ * which read as "the keys are wrong" — while the same keys were working fine
+ * in the chart platform three directories away. They were not the same keys.
+ * The database still held the pair retired with the algo tool, and a stale
+ * value that wins silently over a good one is indistinguishable from a bad
+ * credential.
+ *
+ * So: the shared resolver, and the source printed next to the result. A 401 on
+ * a key from the database and a 401 on a key from the shared file are
+ * different problems.
+ */
 function alpacaKeys() {
   try {
-    const db = require('../src/db');
-    const get = (k) => {
-      const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(k);
-      return (r && r.value) || '';
+    const { getKey, keySource } = require('../src/sharedKeys');
+    return {
+      key: getKey('alpacaApiKey', 'APCA_API_KEY_ID'),
+      secret: getKey('alpacaApiSecret', 'APCA_API_SECRET_KEY'),
+      from: keySource('alpacaApiKey', 'APCA_API_KEY_ID'),
     };
-    return { key: get('alpacaApiKey'), secret: get('alpacaApiSecret') };
   } catch {
-    return { key: process.env.ALPACA_API_KEY || '', secret: process.env.ALPACA_API_SECRET || '' };
+    return {
+      key: process.env.APCA_API_KEY_ID || '',
+      secret: process.env.APCA_API_SECRET_KEY || '',
+      from: 'environment',
+    };
   }
 }
+
+let lastKeySource = null;
 
 const SOURCES = [
   {
     name: 'Alpaca (Benzinga feed)',
     note: 'symbol-tagged, real financial newsroom; uses the keys already in Settings',
     build: (t) => {
-      const { key, secret } = alpacaKeys();
+      const { key, secret, from } = alpacaKeys();
       if (!key || !secret) return null;
+      lastKeySource = from;
       return {
         url: `https://data.alpaca.markets/v1beta1/news?symbols=${t}&limit=10`,
         opts: { headers: { 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret }, timeout: 12000 },
@@ -99,11 +120,16 @@ async function probe(src, ticker) {
     console.log(src.name);
     console.log('─'.repeat(src.name.length));
     console.log(`  ${src.note}`);
+    lastKeySource = null;
     for (const t of [BIG, THIN]) {
       const r = await probe(src, t);
       if (r.skip) { console.log(`  ${t.padEnd(6)} skipped — ${r.skip}`); continue; }
-      if (r.err) { console.log(`  ${t.padEnd(6)} no — ${r.err}`); continue; }
-      console.log(`  ${t.padEnd(6)} ${r.n} item(s)${r.n ? `\n           e.g. ${String(r.sample).slice(0, 90)}` : ''}`);
+      if (r.err) {
+        console.log(`  ${t.padEnd(6)} no — ${r.err}${lastKeySource ? `   (key came from: ${lastKeySource})` : ''}`);
+        continue;
+      }
+      console.log(`  ${t.padEnd(6)} ${r.n} item(s)${lastKeySource ? `   (key from: ${lastKeySource})` : ''}${
+        r.n ? `\n           e.g. ${String(r.sample).slice(0, 90)}` : ''}`);
       await new Promise(s => setTimeout(s, 700));
     }
     console.log('');
