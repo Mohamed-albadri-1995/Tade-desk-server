@@ -477,6 +477,97 @@ async function fetchTradingView(tvSymbol) {
   }
 }
 
+/*
+ * Google News — the fallback, and only the fallback.
+ *
+ * Probed against a well-covered stock and a thin one, because the thin one is
+ * the whole question: CELH pulled twenty items from the other three sources
+ * and WYHG, up 205% the same session, pulled none inside three weeks. Google
+ * had 28 for WYHG, including "WYHG Stock Whipsaws As Traders Zero In On
+ * Volatile Setup". That is the gap, closed.
+ *
+ * It is not promoted to a primary source, for two reasons.
+ *
+ * It sends no symbol list. Every other source says which tickers a story is
+ * about, which is what makes a listing separable by structure; here the word
+ * filter is all there is, and that is the weaker instrument. Scoping the query
+ * to "TICKER" stock helps and does not replace it.
+ *
+ * And it is an aggregator being called per stock per cycle. Nine tools times
+ * twenty-odd live rows every few minutes is a request volume worth respecting,
+ * and one that would eventually be answered with a 429 for everybody. So it is
+ * asked only when the sources that carry symbol tags came back thin — which is
+ * the only case it was added for.
+ */
+const GOOGLE_MIN_ITEMS = 2;   // below this from the tagged sources, go looking
+
+/*
+ * RSS, parsed with regex rather than a dependency.
+ *
+ * Justified only because this is one endpoint with a fixed, simple shape —
+ * flat <item> elements, no namespaces, no nesting — and a parser would be a
+ * new package for one caller. If a second RSS source ever appears, this should
+ * become a real parser instead.
+ */
+function parseRssItems(xml) {
+  const text = String(xml || '');
+  const out = [];
+  const blocks = text.match(/<item>[\s\S]*?<\/item>/g) || [];
+  const tag = (block, name) => {
+    const m = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`));
+    if (!m) return null;
+    return m[1]
+      .replace(/^\s*<!\[CDATA\[/, '').replace(/\]\]>\s*$/, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+      .trim();
+  };
+  for (const b of blocks) {
+    const title = tag(b, 'title');
+    if (!title) continue;
+    out.push({ title, link: tag(b, 'link'), pubDate: tag(b, 'pubDate'), publisher: tag(b, 'source') });
+  }
+  return out;
+}
+
+async function fetchGoogleNews(ticker) {
+  try {
+    const q = encodeURIComponent(`"${ticker}" stock`);
+    const resp = await axios.get(
+      `https://news.google.com/rss/search?q=${q}&hl=en-US&gl=US&ceid=US:en`,
+      { timeout: 8000, responseType: 'text',
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' } }
+    );
+    const raw = parseRssItems(resp.data);
+    if (!raw.length && !/\<rss|\<feed/i.test(String(resp.data).slice(0, 400))) {
+      return bad('unreadable', 'answered, but not an RSS feed');
+    }
+    let dropped = 0;
+    const items = raw
+      .filter(n => {
+        // No symbol list here, so the word filter carries it alone.
+        if (isRoundup(n.title, null)) { dropped++; return false; }
+        return true;
+      })
+      .slice(0, 10)
+      .map(n => ({
+        // Google appends " - Publisher" to every title; the publisher is
+        // already its own field, and leaving it in the headline puts a source
+        // name inside the sentence the classifier reads.
+        headline: n.publisher && n.title.endsWith(` - ${n.publisher}`)
+          ? n.title.slice(0, -(n.publisher.length + 3))
+          : n.title.replace(/\s+-\s+[^-]{2,40}$/, ''),
+        url: n.link || null,
+        datetime: n.pubDate,
+        provider: n.publisher || null,
+        source: 'google',
+      }));
+    return { items, status: 'ok', dropped };
+  } catch (err) {
+    return fetchError(err);
+  }
+}
+
 async function fetchYahoo(ticker) {
   try {
     const resp = await axios.get(
@@ -630,14 +721,23 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
     if (withinDays(n.datetime, MAX_NEWS_AGE_DAYS, now)) return true;
     aged++; return false;
   });
-  const tradingview = recent(tv.items), yahoo = recent(yh.items), edgar = recent(ed.items);
+  let tradingview = recent(tv.items), yahoo = recent(yh.items), edgar = recent(ed.items);
+
+  // Only when the symbol-tagged sources came back thin. See fetchGoogleNews.
+  const tagged = tradingview.length + yahoo.length + edgar.length;
+  let gn = { items: [], status: 'not-needed', detail: `${tagged} item(s) from tagged sources`, dropped: 0 };
+  if (tagged < GOOGLE_MIN_ITEMS) {
+    gn = await fetchGoogleNews(ticker);
+    gn.items = recent(gn.items);
+  }
+  const google = gn.items;
 
   // The same story reaches us from more than one source now, and the classifier
   // counts corroboration — two copies of one headline would read as two outlets
   // independently confirming it. Deduplicated on the normalised headline, with
   // the earliest timestamp kept, since that is when the story actually broke.
   const seen = new Map();
-  for (const n of [...tradingview, ...yahoo, ...edgar]) {
+  for (const n of [...tradingview, ...yahoo, ...edgar, ...google]) {
     if (!n.headline) continue;
     const key = normalizeHeadline(n.headline);
     const ts = toMs(n.datetime);
@@ -661,11 +761,12 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
     tradingview: { status: tv.status, detail: tv.detail || null, count: tradingview.length, dropped: tv.dropped || 0 },
     yahoo: { status: yh.status, detail: yh.detail || null, count: yahoo.length, dropped: yh.dropped || 0 },
     edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length, dropped: ed.dropped || 0 },
+    google: { status: gn.status, detail: gn.detail || null, count: google.length, dropped: gn.dropped || 0 },
   };
 
   return {
     news: {
-      tradingview, yahoo, edgar, sources,
+      tradingview, yahoo, edgar, google, sources,
       // How many were company-specific but too old to be today's reason.
       // Separate from `dropped`, which is listings: different problems.
       agedOut: aged,

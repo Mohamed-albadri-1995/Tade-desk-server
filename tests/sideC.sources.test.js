@@ -382,3 +382,101 @@ describe('old stories are not today\'s reason', () => {
     expect(news.sources.tradingview.status).toBe('ok');   // the source worked fine
   });
 });
+
+/*
+ * Google News, as a fallback and only as a fallback.
+ *
+ * Added because of one measurement: CELH pulled twenty items from the three
+ * symbol-tagged sources and WYHG, up 205% the same session, pulled none inside
+ * three weeks. Google had 28 for WYHG. That is the gap it exists to close.
+ *
+ * It is not promoted, for two reasons the tests below pin. It sends no symbol
+ * list, so listings rest on the word filter alone rather than on structure.
+ * And it is an aggregator called per stock per cycle — nine tools times twenty
+ * live rows every few minutes — so it is asked only when the tagged sources
+ * came back thin.
+ */
+describe('Google News fills the gap without becoming the source', () => {
+  const rss = (items) => `<?xml version="1.0"?><rss version="2.0"><channel>${
+    items.map(i => `<item><title><![CDATA[${i.t}]]></title><link>${i.l || 'https://x'}</link>` +
+      `<pubDate>${i.d || new Date().toUTCString()}</pubDate>` +
+      `<source url="https://p">${i.p || 'StockStory'}</source></item>`).join('')
+  }</channel></rss>`;
+
+  function mockAll({ tvItems = [], googleXml = rss([]) } = {}) {
+    jest.spyOn(axios, 'get').mockImplementation((url) => {
+      if (url.includes('news.google.com')) return Promise.resolve({ data: googleXml });
+      if (url.includes('tradingview')) return Promise.resolve({ data: tvItems });
+      if (url.includes('yahoo')) return Promise.resolve({ data: { news: [] } });
+      if (url.includes('sec.gov')) return Promise.resolve({ data: { hits: { hits: [] } } });
+      return Promise.reject(new Error('unexpected: ' + url));
+    });
+  }
+
+  test('it is not called when the tagged sources answered', async () => {
+    const spy = jest.fn();
+    jest.spyOn(axios, 'get').mockImplementation((url) => {
+      if (url.includes('news.google.com')) { spy(); return Promise.resolve({ data: rss([{ t: 'x' }]) }); }
+      if (url.includes('tradingview')) return Promise.resolve({ data: [tvStory(), tvStory({ title: 'Second story' })] });
+      if (url.includes('yahoo')) return Promise.resolve({ data: { news: [] } });
+      return Promise.resolve({ data: { hits: { hits: [] } } });
+    });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(spy).not.toHaveBeenCalled();
+    expect(news.sources.google.status).toBe('not-needed');
+    expect(news.google).toEqual([]);
+  });
+
+  // The WYHG case exactly.
+  test('it IS called when they came back thin, and its items are used', async () => {
+    mockAll({ googleXml: rss([{ t: 'WYHG Stock Whipsaws As Traders Zero In On Volatile Setup - timothysykes.com' }]) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.google.status).toBe('ok');
+    expect(news.google).toHaveLength(1);
+    expect(news.google[0].headline).toBe('WYHG Stock Whipsaws As Traders Zero In On Volatile Setup');
+  });
+
+  test('the publisher suffix is stripped out of the headline', async () => {
+    // It is already its own field, and leaving it in puts a source name inside
+    // the sentence the catalyst classifier reads.
+    mockAll({ googleXml: rss([{ t: 'Company wins FDA approval - Reuters', p: 'Reuters' }]) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.google[0].headline).toBe('Company wins FDA approval');
+    expect(news.google[0].provider).toBe('Reuters');
+  });
+
+  test('listings are still removed, on wording alone', async () => {
+    mockAll({ googleXml: rss([{ t: 'Top Premarket Gainers - Benzinga' }, { t: 'Company wins FDA approval - Reuters' }]) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.google).toHaveLength(1);
+    expect(news.sources.google.dropped).toBe(1);
+  });
+
+  test('an old Google story is aged out like any other', async () => {
+    const old = new Date(Date.now() - 60 * 86400000).toUTCString();
+    mockAll({ googleXml: rss([{ t: 'Ancient story - X', d: old }]) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.google).toEqual([]);
+    expect(news.agedOut).toBe(1);
+  });
+
+  test('a page that is not RSS is reported, not read as no news', async () => {
+    mockAll({ googleXml: '<!doctype html><html><body>sorry</body></html>' });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.google.status).toBe('unreadable');
+  });
+
+  test('an empty feed is a real answer', async () => {
+    mockAll({ googleXml: rss([]) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.google.status).toBe('ok');
+    expect(news.google).toEqual([]);
+  });
+
+  test('its items can form a catalyst when they are fresh', async () => {
+    mockAll({ googleXml: rss([{ t: 'Company to acquire rival in $2B deal - Reuters' }]) });
+    const { catalyst } = await fetchNewsForTicker('AAA', TV);
+    expect(catalyst).toBeTruthy();
+    expect(catalyst.label).toBe('M&A');
+  });
+});

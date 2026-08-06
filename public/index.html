@@ -2569,7 +2569,8 @@ function newsState(row) {
   // `finnhub` is read for cards frozen before it was replaced by TradingView —
   // an old card should still report what it actually had.
   const count = (n.tradingview || []).length + (n.yahoo || []).length
-              + (n.edgar || []).length + (n.finnhub || []).length;
+              + (n.edgar || []).length + (n.google || []).length
+              + (n.finnhub || []).length;
   return count > 0 ? 'has' : 'none';
 }
 
@@ -3020,6 +3021,8 @@ function buildCard(row) {
     }));
     newsItems = [
       ...pick(news.tradingview, 'TV', ['headline', 'summary']),
+      // Only present when the tagged sources came thin — see fetchGoogleNews.
+      ...pick(news.google, 'GN', ['headline', 'summary']),
       ...pick(news.yahoo, 'YH', ['title', 'headline']),
       ...pick(news.edgar, 'SEC', ['title', 'headline']),
     ].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 5);
@@ -3033,7 +3036,9 @@ function buildCard(row) {
   const srcNote = (() => {
     const s = news && news.sources;
     if (!s) return '';
-    const broken = Object.entries(s).filter(([, v]) => v.status && v.status !== 'ok');
+    // 'not-needed' is Google saying it was never asked because the tagged
+    // sources answered — that is the system working, not a fault.
+    const broken = Object.entries(s).filter(([, v]) => v.status && v.status !== 'ok' && v.status !== 'not-needed');
     if (!broken.length) return '';
     return `<div class="news-src-warn" title="${esc(broken.map(([k, v]) => `${k}: ${v.detail || v.status}`).join(' · '))}">
       ⚠ ${broken.map(([k]) => k).join(', ')} not answering — the list below is what the rest found</div>`;
