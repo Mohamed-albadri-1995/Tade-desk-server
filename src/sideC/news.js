@@ -446,10 +446,48 @@ async function fetchYahoo(ticker) {
  */
 const SEC_USER_AGENT = process.env.SEC_USER_AGENT || 'TradeDesk Screener admin@trade-desk.local';
 
+// A filing is news for about as long as it is news. The first run after the
+// request was fixed returned filings from 2023 — three years old, listed
+// beside a story from 54 minutes ago as though they were the same kind of
+// thing. The window is asked for in the query and enforced again on the way
+// out, because a search that ignores the parameter should not be trusted to
+// have honoured it.
+const EDGAR_DAYS = 14;
+
+const ymd = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+/*
+ * EDGAR's full-text search does not document its response shape and it has
+ * changed before. Rather than reading one field and printing "SEC Filing" when
+ * it is absent — which is what produced a list of five identical rows — every
+ * name the form type has been seen under is tried, and an item that yields
+ * neither a form nor a date is dropped rather than shown as a placeholder.
+ */
+function edgarItem(h) {
+  const s = (h && h._source) || {};
+  const form = s.form_type || s.form || s.root_form || s.type || null;
+  const dateStr = s.file_date || s.filed_at || s.period_ending || s.period_of_report || null;
+  const ts = toMs(dateStr);
+  if (!form && !ts) return null;
+  const label = form
+    ? `${form}${dateStr ? ` — filed ${String(dateStr).slice(0, 10)}` : ''}`
+    : `SEC filing — ${String(dateStr).slice(0, 10)}`;
+  const cik = s.entity_id || s.cik || (Array.isArray(s.ciks) ? s.ciks[0] : null);
+  return {
+    headline: label,
+    url: cik && h._id ? `https://www.sec.gov/Archives/edgar/data/${cik}/${h._id}` : null,
+    datetime: dateStr,
+    source: 'edgar',
+  };
+}
+
 async function fetchEdgar(ticker) {
   try {
+    const now = Date.now();
+    const from = ymd(now - EDGAR_DAYS * 86400000);
     const resp = await axios.get(
-      `https://efts.sec.gov/LATEST/search-index?q=%22${encodeURIComponent(ticker)}%22&forms=8-K,S-3`,
+      `https://efts.sec.gov/LATEST/search-index?q=%22${encodeURIComponent(ticker)}%22` +
+      `&forms=8-K,S-3&dateRange=custom&startdt=${from}&enddt=${ymd(now)}`,
       {
         timeout: 8000,
         headers: {
@@ -461,14 +499,18 @@ async function fetchEdgar(ticker) {
       }
     );
     const hits = resp.data?.hits?.hits || [];
-    return ok(hits.slice(0, 5).map(h => ({
-      headline: h._source?.period_of_report
-        ? `${h._source.form_type} — ${h._source.period_of_report}`
-        : h._source?.form_type || 'SEC Filing',
-      url: `https://www.sec.gov/Archives/edgar/data/${h._source?.entity_id}/${h._id}`,
-      datetime: h._source?.period_of_report || h._source?.file_date,
-      source: 'edgar',
-    })));
+    const cutoff = now - EDGAR_DAYS * 86400000;
+    let dropped = 0;
+    const items = hits
+      .map(edgarItem)
+      .filter(it => {
+        if (!it) { dropped++; return false; }
+        const ts = toMs(it.datetime);
+        if (ts && ts < cutoff) { dropped++; return false; }
+        return true;
+      })
+      .slice(0, 5);
+    return { items, status: 'ok', dropped };
   } catch (err) {
     return fetchError(err);
   }
@@ -521,7 +563,7 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
   const sources = {
     tradingview: { status: tv.status, detail: tv.detail || null, count: tradingview.length, dropped: tv.dropped || 0 },
     yahoo: { status: yh.status, detail: yh.detail || null, count: yahoo.length, dropped: yh.dropped || 0 },
-    edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length, dropped: 0 },
+    edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length, dropped: ed.dropped || 0 },
   };
 
   return {

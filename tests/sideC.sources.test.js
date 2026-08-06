@@ -186,3 +186,63 @@ describe('market listings are removed on the way in', () => {
     if (catalyst) expect(catalyst.corroboration || 1).toBe(1);
   });
 });
+
+/*
+ * SEC filings, after the first live run.
+ *
+ * Fixing the User-Agent got EDGAR answering for the first time, and what it
+ * answered with was five rows reading "SEC Filing", dated 1159 and 1162 days
+ * ago — sitting in the news list beside a story from 54 minutes earlier as
+ * though they were the same kind of thing. A three-year-old 8-K is not news,
+ * and a row that says only "SEC Filing" is not information.
+ */
+describe('SEC filings are recent, or they are not shown', () => {
+  const hit = (over = {}) => ({
+    _id: 'x', _source: { form_type: '8-K', file_date: '2026-08-05', entity_id: '1', ...over },
+  });
+  const edgarHits = (hits) => () => Promise.resolve({ data: { hits: { hits } } });
+
+  test('the request asks for a date range', async () => {
+    let url = null;
+    mockHosts({ edgar: (u) => { url = u; return Promise.resolve({ data: { hits: { hits: [] } } }); } });
+    await fetchNewsForTicker('AAA', TV);
+    expect(url).toMatch(/startdt=\d{4}-\d{2}-\d{2}/);
+    expect(url).toMatch(/enddt=\d{4}-\d{2}-\d{2}/);
+  });
+
+  // Asked for is not the same as honoured.
+  test('an old filing is dropped even if the search returns it anyway', async () => {
+    const old = new Date(Date.now() - 1159 * 86400000).toISOString().slice(0, 10);
+    mockHosts({ edgar: edgarHits([hit({ file_date: old }), hit()]) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.edgar).toHaveLength(1);
+    expect(news.edgar[0].headline).toContain('8-K');
+    expect(news.sources.edgar.dropped).toBe(1);
+  });
+
+  test('a filing with neither a form nor a date is dropped, not shown as a placeholder', async () => {
+    mockHosts({ edgar: edgarHits([{ _id: 'y', _source: {} }, hit()]) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.edgar).toHaveLength(1);
+    expect(news.edgar.some(i => i.headline === 'SEC Filing')).toBe(false);
+    expect(news.sources.edgar.dropped).toBe(1);
+  });
+
+  // The shape is undocumented and has changed before, so the alternatives are
+  // read rather than assumed.
+  test.each([
+    ['form', 'root_form'],
+    ['type', 'form'],
+  ])('the form type is found under %s as well', async (name) => {
+    mockHosts({ edgar: edgarHits([{ _id: 'z', _source: { [name]: '8-K', file_date: '2026-08-05', entity_id: '1' } }]) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.edgar[0].headline).toContain('8-K');
+  });
+
+  test('a filing with only a date still says something useful', async () => {
+    mockHosts({ edgar: edgarHits([{ _id: 'w', _source: { file_date: '2026-08-05', entity_id: '1' } }]) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.edgar).toHaveLength(1);
+    expect(news.edgar[0].headline).toContain('2026-08-05');
+  });
+});
