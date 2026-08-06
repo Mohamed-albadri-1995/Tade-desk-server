@@ -552,3 +552,110 @@ describe('Finnhub is filtered like everything else', () => {
     expect(news.finnhub[0].url).toBe('https://finnhub.io/story/1');
   });
 });
+
+/*
+ * Alpaca — Benzinga's newsroom, and the answer to the coverage question.
+ *
+ * Probed against a well-covered stock and a thin one, which is the test that
+ * matters. For WYHG — up 205% with nothing inside three weeks from anywhere
+ * else — it returned "Wing Yip Food Holdings Halted On Circuit Breaker To The
+ * Downside; Stock Now Up 299.95%". Same day, that company, that halt.
+ *
+ * It carries listings as well: the first CELH item was "S&P 500, Dow Fall as
+ * Brent Jumps 4%, SanDisk Trims Losses: Stock Market Today". But it also
+ * carries `symbols`, so those come out structurally rather than on wording,
+ * which is why it goes in as a primary source and Google did not.
+ */
+describe('Alpaca is a primary source, filtered like the rest', () => {
+  const bzStory = (over = {}) => ({
+    headline: 'Company wins FDA clearance', url: 'https://benzinga/1',
+    created_at: new Date().toISOString(), source: 'benzinga', symbols: ['AAA'], ...over,
+  });
+  function withAlpaca(news, extra = {}) {
+    process.env.APCA_API_KEY_ID = 'k';
+    process.env.APCA_API_SECRET_KEY = 's';
+    jest.spyOn(axios, 'get').mockImplementation((url) => {
+      if (url.includes('alpaca')) return Promise.resolve({ data: { news } });
+      if (url.includes('yahoo')) return Promise.resolve({ data: { news: [] } });
+      if (url.includes('sec.gov')) return Promise.resolve({ data: { hits: { hits: [] } } });
+      if (url.includes('news.google.com')) return Promise.resolve({ data: '<rss><channel></channel></rss>' });
+      return Promise.resolve({ data: extra.tv || [] });
+    });
+  }
+  afterEach(() => {
+    delete process.env.APCA_API_KEY_ID;
+    delete process.env.APCA_API_SECRET_KEY;
+  });
+
+  test('no keys reads as a missing key, not as no news', async () => {
+    mockHosts({});
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.alpaca.status).toBe('no-key');
+  });
+
+  test('keys present — items come back and carry their URL', async () => {
+    withAlpaca([bzStory()]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.alpaca.status).toBe('ok');
+    expect(news.alpaca).toHaveLength(1);
+    expect(news.alpaca[0].url).toBe('https://benzinga/1');
+    expect(news.alpaca[0].provider).toBe('benzinga');
+  });
+
+  // The CELH case: a market wrap tagged with every index constituent it names.
+  test('a listing is dropped on its symbol count', async () => {
+    const wide = Array.from({ length: 30 }, (_, i) => `X${i}`);
+    withAlpaca([
+      bzStory({ headline: 'S&P 500, Dow Fall as Brent Jumps 4%: Stock Market Today', symbols: wide }),
+      bzStory(),
+    ]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.alpaca).toHaveLength(1);
+    expect(news.sources.alpaca.dropped).toBe(1);
+  });
+
+  // …and on wording too, for the ones tagged narrowly.
+  test('a market wrap tagged to one symbol is still caught', async () => {
+    withAlpaca([bzStory({ headline: 'Stock Market Today: indexes drift', symbols: ['AAA'] })]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.alpaca).toEqual([]);
+    expect(news.sources.alpaca.dropped).toBe(1);
+  });
+
+  test('old Alpaca stories age out like any other', async () => {
+    withAlpaca([bzStory({ created_at: new Date(Date.now() - 60 * 86400000).toISOString() })]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.alpaca).toEqual([]);
+    expect(news.agedOut).toBe(1);
+  });
+
+  // The WYHG case: it alone is enough to keep the aggregator out of it.
+  test('it counts as tagged coverage, so Google stays unasked', async () => {
+    withAlpaca([
+      bzStory({ headline: 'Wing Yip Food Holdings Halted On Circuit Breaker To The Downside' }),
+      bzStory({ headline: 'Second real story about the company' }),
+    ]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.google.status).toBe('not-needed');
+  });
+
+  test('a body with no news list is reported, not read as silence', async () => {
+    process.env.APCA_API_KEY_ID = 'k'; process.env.APCA_API_SECRET_KEY = 's';
+    jest.spyOn(axios, 'get').mockImplementation((url) =>
+      url.includes('alpaca') ? Promise.resolve({ data: { message: 'forbidden' } })
+        : Promise.resolve({ data: {} }));
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.alpaca.status).toBe('unreadable');
+  });
+
+  test('a 401 is reported as denied — the keys, not the stock', async () => {
+    process.env.APCA_API_KEY_ID = 'k'; process.env.APCA_API_SECRET_KEY = 's';
+    jest.spyOn(axios, 'get').mockImplementation((url) =>
+      url.includes('alpaca')
+        ? Promise.reject(Object.assign(new Error('x'), { response: { status: 401 } }))
+        : Promise.resolve({ data: {} }));
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.alpaca.status).toBe('denied');
+    expect(news.sources.alpaca.detail).toMatch(/401/);
+  });
+});

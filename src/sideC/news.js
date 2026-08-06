@@ -358,7 +358,7 @@ function withinDays(dt, days, now = Date.now()) {
 const ROUNDUP_WORDS = new RegExp([
   'most active', 'top (premarket|pre-market|midday|after-hours) (gainers|decliners|losers)',
   'top (gainers|losers)', 'biggest (movers|gainers|losers)', 'stocks? (moving|to watch|making moves)',
-  'market (wrap|open|close|movers)', 'winners and losers', 'what to watch',
+  'market (wrap|open|close|movers)', 'stock market today', 'winners and losers', 'what to watch',
   'trending (stocks|tickers)', 'hot stocks',
 ].join('|'), 'i');
 
@@ -474,6 +474,59 @@ async function fetchTradingView(tvSymbol) {
         source: 'tradingview',
       }));
     return { items: kept, status: 'ok', dropped };
+  } catch (err) {
+    return fetchError(err);
+  }
+}
+
+/*
+ * Alpaca — Benzinga's newsroom, symbol-tagged.
+ *
+ * Probed against a well-covered stock and a thin one, which is the test that
+ * matters: for WYHG, up 205% with nothing inside three weeks from anywhere
+ * else, it returned "Wing Yip Food Holdings Halted On Circuit Breaker To The
+ * Downside; Stock Now Up 299.95%" — same day, that company, that halt. That is
+ * the gap Google was covering with an aggregator, covered properly.
+ *
+ * It carries listings too — the first CELH item was "S&P 500, Dow Fall as Brent
+ * Jumps 4%, SanDisk Trims Losses: Stock Market Today" — but it also carries the
+ * field that catches them: `symbols`, the tickers a story is actually about.
+ * So it goes in as a primary source rather than a fallback, and its listings
+ * are removed the same structural way TradingView's are.
+ *
+ * The keys are the ones the chart platform has been using all along. They took
+ * a while to find because each tool's database held an older pair that
+ * outranked them silently — see sharedKeys.js.
+ */
+async function fetchAlpaca(ticker) {
+  const key = getKey('alpacaApiKey', 'APCA_API_KEY_ID');
+  const secret = getKey('alpacaApiSecret', 'APCA_API_SECRET_KEY');
+  if (!key || !secret) return bad('no-key', `no Alpaca keys — add them to ${sharedKeysFile()}`);
+  try {
+    const start = new Date(Date.now() - MAX_NEWS_AGE_DAYS * 86400000).toISOString();
+    const resp = await axios.get(
+      `https://data.alpaca.markets/v1beta1/news?symbols=${encodeURIComponent(ticker)}&start=${start}&limit=20&sort=desc`,
+      { timeout: 8000, headers: { 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret } }
+    );
+    const raw = resp.data && Array.isArray(resp.data.news) ? resp.data.news : null;
+    if (raw === null) return bad('unreadable', 'answered, but no news list in the response');
+    let dropped = 0;
+    const items = raw
+      .filter(n => {
+        const related = Array.isArray(n.symbols) ? n.symbols.length : null;
+        if (isRoundup(n.headline, related)) { dropped++; return false; }
+        return true;
+      })
+      .slice(0, 10)
+      .map(n => ({
+        headline: n.headline,
+        url: n.url || null,
+        datetime: n.created_at || n.updated_at,
+        provider: n.source || null,
+        related: Array.isArray(n.symbols) ? n.symbols.length : null,
+        source: 'alpaca',
+      }));
+    return { items, status: 'ok', dropped };
   } catch (err) {
     return fetchError(err);
   }
@@ -756,8 +809,9 @@ function toMs(dt) {
  * @param tvSymbol  EXCHANGE:TICKER, for TradingView — stock.tvSymbol
  */
 async function fetchNewsForTicker(ticker, tvSymbol) {
-  const [tv, yh, ed, fh] = await Promise.all([
+  const [tv, ap, yh, ed, fh] = await Promise.all([
     fetchTradingView(tvSymbol),
+    fetchAlpaca(ticker),
     fetchYahoo(ticker),
     fetchEdgar(ticker),
     fetchFinnhub(ticker),
@@ -773,11 +827,12 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
     if (withinDays(n.datetime, MAX_NEWS_AGE_DAYS, now)) return true;
     aged++; return false;
   });
-  let tradingview = recent(tv.items), yahoo = recent(yh.items),
+  let tradingview = recent(tv.items), alpaca = recent(ap.items), yahoo = recent(yh.items),
       edgar = recent(ed.items), finnhub = recent(fh.items);
 
   // Only when the symbol-tagged sources came back thin. See fetchGoogleNews.
-  const tagged = tradingview.length + yahoo.length + edgar.length + finnhub.length;
+  const tagged = tradingview.length + alpaca.length + yahoo.length
+               + edgar.length + finnhub.length;
   let gn = { items: [], status: 'not-needed', detail: `${tagged} item(s) from tagged sources`, dropped: 0 };
   if (tagged < GOOGLE_MIN_ITEMS) {
     gn = await fetchGoogleNews(ticker);
@@ -790,7 +845,7 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
   // independently confirming it. Deduplicated on the normalised headline, with
   // the earliest timestamp kept, since that is when the story actually broke.
   const seen = new Map();
-  for (const n of [...tradingview, ...yahoo, ...edgar, ...finnhub, ...google]) {
+  for (const n of [...tradingview, ...alpaca, ...yahoo, ...edgar, ...finnhub, ...google]) {
     if (!n.headline) continue;
     const key = normalizeHeadline(n.headline);
     const ts = toMs(n.datetime);
@@ -812,6 +867,7 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
   // listings looks identical to a quiet one without it.
   const sources = {
     tradingview: { status: tv.status, detail: tv.detail || null, count: tradingview.length, dropped: tv.dropped || 0 },
+    alpaca: { status: ap.status, detail: ap.detail || null, count: alpaca.length, dropped: ap.dropped || 0 },
     yahoo: { status: yh.status, detail: yh.detail || null, count: yahoo.length, dropped: yh.dropped || 0 },
     edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length, dropped: ed.dropped || 0 },
     finnhub: { status: fh.status, detail: fh.detail || null, count: finnhub.length, dropped: fh.dropped || 0 },
@@ -820,7 +876,7 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
 
   return {
     news: {
-      tradingview, yahoo, edgar, finnhub, google, sources,
+      tradingview, alpaca, yahoo, edgar, finnhub, google, sources,
       // How many were company-specific but too old to be today's reason.
       // Separate from `dropped`, which is listings: different problems.
       agedOut: aged,

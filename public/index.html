@@ -2573,7 +2573,7 @@ function newsState(row) {
   if (!n) return 'unchecked';
   // `finnhub` is read for cards frozen before it was replaced by TradingView —
   // an old card should still report what it actually had.
-  const count = (n.tradingview || []).length + (n.yahoo || []).length
+  const count = (n.tradingview || []).length + (n.alpaca || []).length + (n.yahoo || []).length
               + (n.edgar || []).length + (n.google || []).length
               + (n.finnhub || []).length;
   return count > 0 ? 'has' : 'none';
@@ -3027,6 +3027,7 @@ function buildCard(row) {
     }));
     newsItems = [
       ...pick(news.tradingview, 'TV', ['headline', 'summary']),
+      ...pick(news.alpaca, 'BZ', ['headline', 'summary']),
       ...pick(news.finnhub, 'FH', ['headline', 'summary']),
       // Only present when the tagged sources came thin — see fetchGoogleNews.
       ...pick(news.google, 'GN', ['headline', 'summary']),
