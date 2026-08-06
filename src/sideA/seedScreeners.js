@@ -196,6 +196,57 @@ const T6_BASE = {
 // cannot compute. Six-month performance is a plain threshold, so a strong
 // market lets more names through and a weak one fewer. It measures strength,
 // not leadership.
+/*
+ * WHO is a growth stock, as opposed to which of them did something today.
+ *
+ * The two were one screener, and that was wrong in a way worth stating plainly:
+ * a company does not stop being a growth company overnight. Its quarterly
+ * earnings change four times a year. But the screener also demanded a new
+ * 52-week high on above-average volume, so a name joined the list on the days
+ * it broke out and vanished on the days it did not — and the CANSLIM tag every
+ * other tool reads was really a breakout tag wearing a growth label.
+ *
+ * So this screener holds the slow half only: earnings, sales, size, and
+ * six-month strength. Nothing here can be true today and false tomorrow.
+ * Membership then lasts ninety days from the last confirmation (canslim.js),
+ * which is the horizon O'Neil's criteria are meant for.
+ *
+ * Two things follow from it being a list rather than a trade idea:
+ *
+ *   labelOnly means its matches never become cards and never enter r0. The
+ *   tool's candidates still come from the breakout and pullback screeners
+ *   below, so nothing about what gets collected or trained on changes shape.
+ *
+ *   The tradability floor does not apply, for the same reason. A $600 name with
+ *   1.5% of daily range is a growth company that is not a day trade; letting
+ *   the floor decide membership would put today's volatility back in charge of
+ *   an answer that is supposed to be about the business.
+ *
+ * It runs in one narrow window because fundamentals do not move intraday.
+ */
+const CANSLIM_UNIVERSE = {
+  key: 'canslim-universe', name: 'CANSLIM Universe',
+  labelOnly: true,
+  checkFrom: '09:45', checkTo: '16:00',
+  runFrom: '09:30', runTo: '09:45',
+  limit: 200,
+  sort: { sortBy: 'Perf.6M', sortOrder: 'desc' },
+  filters: [
+    // C — the current quarter
+    { left: 'earnings_per_share_diluted_yoy_growth_fq', operation: 'egreater', right: 25 },
+    // A — and not a one-quarter accident
+    { left: 'earnings_per_share_diluted_yoy_growth_fy', operation: 'egreater', right: 25 },
+    // sales behind the earnings, so the growth is not only cost-cutting
+    { left: 'total_revenue_yoy_growth_fq', operation: 'egreater', right: 15 },
+    // L — leading, by the only measure available
+    { left: 'Perf.6M', operation: 'greater', right: 30 },
+    // S — a cap on supply
+    { left: 'total_shares_outstanding_fundamental', operation: 'less', right: 1000000000 },
+    // institutions cannot buy what does not trade
+    { left: 'market_cap_basic', operation: 'greater', right: 300000000 },
+  ],
+};
+
 const CANSLIM_BASE = {
   key: 'canslim', name: 'CANSLIM',
   checkFrom: '09:45', checkTo: '16:00',
@@ -346,6 +397,7 @@ const WINDOW_NOTES = {
   '52w-break': 'The whole regular session. These break on institutional flow, which arrives at any hour and often late in the day. Pre-market is excluded on purpose — a 52-week high printed on a handful of thin shares is not a break.',
   overextended: 'Waits until 10:00. At the open RSI still describes yesterday; extension is something the session builds. Then runs to the close, because a stock can be stretched at any hour and the fade is the trade.',
 
+  'canslim-universe': 'A list, not a hunt. Nothing in it can be true today and false tomorrow — quarterly earnings change four times a year — so it runs once, in the first fifteen minutes, and membership then holds for ninety days. It is the only screener exempt from the tradability floor: a $600 growth name with 1.5% of daily range is still a growth company, it is just not a day trade.',
   canslim: 'Regular session only. This is a months-long list rather than a daily hunt: the fundamental filters barely move intraday, and the new-high and volume conditions only mean something while the market is open.',
   'canslim-pullback': 'Regular session only, same reason as the breakout screener it accompanies.',
 
@@ -381,7 +433,7 @@ const T7 = [PREMARKET_GAP, AFTER_OPEN_VOLUME];
 // T8 is the CANSLIM tool. Its matches are also written to a shared member list
 // that every other tool reads, so a CANSLIM name turning up in an unrelated
 // screener is tagged there — see canslim.js.
-const T8 = [CANSLIM_BASE, CANSLIM_PULLBACK];
+const T8 = [CANSLIM_UNIVERSE, CANSLIM_BASE, CANSLIM_PULLBACK];
 
 // T9 is the benchmark, and it is deliberately the dumbest screener here: liquid
 // stocks over $5, ranked by how unusually active they are, top 20. No pattern,
@@ -735,6 +787,7 @@ function seedScreeners() {
     applyCheckWindows();
     retimeT2Breakout();
     tightenLiquidMovers();
+    addCanslimUniverse();
     return { seeded: 0, reason: 'already has screeners' };
   }
 
@@ -752,10 +805,33 @@ function seedScreeners() {
   return { seeded };
 }
 
+/*
+ * T8 databases created before the split have two screeners that both mix "is
+ * this a growth company" with "did it break out today", and a member list built
+ * from whichever names did both. Add the universe screener so membership starts
+ * coming from the slow half.
+ *
+ * The existing screeners are left exactly as they are. They are still the two
+ * setups the tool trades, and rewriting a screener's filters underneath a month
+ * of collected cards would make the history describe rules that were never run.
+ */
+function addCanslimUniverse() {
+  if (config.toolId !== 'T8') return;
+  const exists = db.prepare('SELECT id FROM screeners WHERE key = ?').get('canslim-universe');
+  if (exists) return;
+  try {
+    store.create(CANSLIM_UNIVERSE);
+    console.log('[Screeners] added "CANSLIM Universe" — membership now comes from the fundamentals '
+      + 'alone, so a name no longer joins the list only on days it breaks out');
+  } catch (err) {
+    console.warn(`[Screeners] could not add CANSLIM Universe: ${err.message}`);
+  }
+}
+
 module.exports = {
   seedScreeners, renameLegacyScreeners, applyDefaultWindows, repairOversoldMirror,
   tightenAfterOpenVolume, backfillMirrorLinks, linkMirrorsByFilters, tightenLiquidMovers,
-  applyCheckWindows, retimeT2Breakout,
+  applyCheckWindows, retimeT2Breakout, addCanslimUniverse,
   WINDOW_NOTES,
   PRESETS: BY_TOOL, SESSION_SCREENERS,
 };

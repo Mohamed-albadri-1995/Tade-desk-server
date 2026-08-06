@@ -297,9 +297,16 @@ async function runScreener(screener) {
   // The tradability floor rides along with every screener — see tradable.js.
   // A stock too thin to get out of, or with too little range to pay for the
   // risk, is not a candidate whatever the strategy says about it.
+  //
+  // A LABEL-ONLY screener is the exception. It is not proposing trades, it is
+  // deciding who belongs on a list, and the floor answers a different question:
+  // a $600 growth name with 1.5% daily range is still a growth company, it is
+  // just not a day trade. Applying the floor there would make membership depend
+  // on today's volatility, which is exactly the bug it exists to fix.
   const tradable = require('./tradable');
   const t = tradable.thresholds();
-  const body = buildRequest([...screener.filters, ...tradable.serverFilters(t)], screener.sort);
+  const floor = screener.labelOnly ? [] : tradable.serverFilters(t);
+  const body = buildRequest([...screener.filters, ...floor], screener.sort);
   if (Number.isFinite(screener.limit)) body.range = [0, screener.limit];
   const resp = await axios.post(TV_URL, body, {
     headers: TV_HEADERS,
@@ -311,9 +318,12 @@ async function runScreener(screener) {
   }
   if (rawRows.length > 0) validateTVStructure(rawRows[0]);
   const mapped = rawRows.map(mapTVRow).filter(r => r.ticker);
+  if (screener.labelOnly) {
+    return { name: screener.name, key: screener.key, rows: mapped, floorDropped: 0, labelOnly: true };
+  }
   const { kept, dropped } = tradable.applyLocal(mapped, t);
   if (dropped) {
-    console.log(`[TV Scanner] "${screener.name}": ${dropped} row(s) below ${t.minAtrPct}% ATR`);
+    console.log(`[TV Scanner] "${screener.name}": ${dropped} row(s) below ${t.minAtrPct}% ADR`);
   }
   return { name: screener.name, key: screener.key, rows: kept, floorDropped: dropped };
 }
@@ -361,18 +371,25 @@ async function runAllScanners() {
 
   const results = await Promise.allSettled(screeners.map(runScreener));
 
-  const scannerResults = {};
+  // Two piles, kept apart on purpose. `candidates` become cards and travel into
+  // r0 and every register downstream; `labels` only maintain a list. Mixing
+  // them would put stocks nobody could trade into the training data, which is
+  // the cost that made a slow-moving universe screener impossible before.
+  const candidates = {};
+  const labels = {};
   results.forEach((r, i) => {
     if (r.status === 'fulfilled') {
-      scannerResults[r.value.name] = r.value.rows;
+      (r.value.labelOnly ? labels : candidates)[r.value.name] = r.value.rows;
     } else {
       const errData = r.reason?.response?.data;
       console.error(`[TV Scanner] "${screeners[i].name}" failed:`, r.reason?.message,
         errData ? JSON.stringify(errData).slice(0, 200) : '');
     }
   });
-  console.log('[TV Scanner] Results:', Object.entries(scannerResults).map(([k,v]) => `${k}:${v.length}`).join(' '));
-  return scannerResults;
+  const shown = xs => Object.entries(xs).map(([k, v]) => `${k}:${v.length}`).join(' ');
+  console.log('[TV Scanner] Results:', shown(candidates)
+    + (Object.keys(labels).length ? `  | labels ${shown(labels)}` : ''));
+  return { candidates, labels };
 }
 
 module.exports = { runAllScanners, runScreener, testScreener, mapTVRow, COMMON_COLUMNS, buildRequest };

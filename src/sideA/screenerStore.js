@@ -354,6 +354,11 @@ function rowToScreener(row) {
     // The screener this one mirrors, by name. Survives renaming either side,
     // which a "(mirror)" suffix does not.
     mirrorOf: row.mirror_of || null,
+    // A screener that maintains a LIST rather than proposing trades. Its
+    // matches never reach r0, and the tradability floor does not apply — see
+    // canslim-universe, where "is this a growth company" has nothing to do
+    // with whether you could day-trade it today.
+    labelOnly: !!row.label_only,
     updatedAt: row.updated_at,
   };
 }
@@ -390,8 +395,8 @@ function create(def) {
   }
 
   const info = db.prepare(`
-    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, run_from, run_to, check_from, check_to, mirror_of, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, run_from, run_to, check_from, check_to, mirror_of, label_only, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     key,
     String(def.name).trim(),
@@ -404,6 +409,7 @@ function create(def) {
     def.checkFrom || null,
     def.checkTo || null,
     def.mirrorOf || null,
+    def.labelOnly ? 1 : 0,
     Date.now()
   );
   return get(info.lastInsertRowid);
@@ -424,6 +430,7 @@ function update(id, def) {
     checkFrom: def.checkFrom !== undefined ? def.checkFrom : existing.checkFrom,
     checkTo: def.checkTo !== undefined ? def.checkTo : existing.checkTo,
     mirrorOf: def.mirrorOf !== undefined ? def.mirrorOf : existing.mirrorOf,
+    labelOnly: def.labelOnly !== undefined ? def.labelOnly : existing.labelOnly,
   };
   const errors = validateDefinition(merged);
   if (errors.length) throw new Error(errors.join('; '));
@@ -432,7 +439,7 @@ function update(id, def) {
     UPDATE screeners
        SET name = ?, enabled = ?, filters = ?, sort = ?, limit_n = ?,
            run_from = ?, run_to = ?, check_from = ?, check_to = ?,
-           mirror_of = ?, updated_at = ?
+           mirror_of = ?, label_only = ?, updated_at = ?
      WHERE id = ?
   `).run(
     String(merged.name).trim(),
@@ -445,6 +452,7 @@ function update(id, def) {
     merged.checkFrom || null,
     merged.checkTo || null,
     merged.mirrorOf || null,
+    merged.labelOnly ? 1 : 0,
     Date.now(),
     id
   );

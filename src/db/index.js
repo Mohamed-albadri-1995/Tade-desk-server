@@ -107,6 +107,7 @@ db.exec(`
     check_to TEXT,
     run_to TEXT,
     mirror_of TEXT,
+    label_only INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL
   );
 
@@ -161,6 +162,10 @@ ensureColumns('screeners', { run_from: 'TEXT', run_to: 'TEXT' });
 // They are not the same thing and conflating them is why the pre-market gap
 // screener looked worth checking at 04:30, when it had found nothing yet.
 ensureColumns('screeners', { check_from: 'TEXT', check_to: 'TEXT' });
+// A screener that maintains a LIST rather than proposing trades. Its matches
+// never enter r0 and it is exempt from the tradability floor, because "is this
+// a growth company" is not a question about whether you could day-trade it.
+ensureColumns('screeners', { label_only: 'INTEGER NOT NULL DEFAULT 0' });
 
 // Which screener a mirror was made from. Recorded rather than inferred from the
 // name: the pairing used to be read off a "(mirror)" suffix, so renaming a

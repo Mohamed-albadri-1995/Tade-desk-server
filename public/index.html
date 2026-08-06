@@ -4360,7 +4360,8 @@ function sbRenderList() {
           ${s.enabled ? '' : '<span class="sb-pill">disabled</span>'}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <span class="sb-pill">${s.filters.length} rules${sbFloorCount() ? ` + ${sbFloorCount()} floor` : ''}</span>
+          <span class="sb-pill">${s.filters.length} rules${!s.labelOnly && sbFloorCount() ? ` + ${sbFloorCount()} floor` : ''}</span>
+          ${s.labelOnly ? '<span class="sb-pill sb-when">list only</span>' : ''}
           <span class="sb-pill">top ${s.limit}</span>
           ${s.runFrom
             ? `<span class="sb-pill sb-when">runs ${s.runFrom}–${s.runTo} ET</span>`
@@ -4372,7 +4373,12 @@ function sbRenderList() {
         </div>
       </div>
       <div class="sb-rules">${s.filters.map(f => `<span class="sb-rule">${esc(sbRuleText(f))}</span>`).join('')
-        + sbFloorRules()}</div>
+        + (s.labelOnly ? '' : sbFloorRules())}</div>
+      ${s.labelOnly ? `<div class="sb-why">
+        <span class="sb-why-k">List only</span>
+        Maintains a list; it does not produce cards. Its matches never enter the day's registers,
+        and the tradability floor does not apply — membership is about the company, not about
+        whether it could be day-traded today.</div>` : ''}
       <div class="sb-mirror">
         <span class="sb-why-k">Mirror of</span>
         <select onchange="sbSetMirror(${s.id}, this.value)">
@@ -4452,7 +4458,7 @@ function sbRenderEditor() {
     <label class="sb-label">Rules — a stock must match all of them</label>
     ${rows}
     <button class="sb-btn" onclick="sbAddRule()">+ Add rule</button>
-    ${sbFloorCount() ? `<div class="sb-rules" style="margin-top:10px">
+    ${sbFloorCount() && !e.labelOnly ? `<div class="sb-rules" style="margin-top:10px">
       <span class="sb-why-k" style="align-self:center">Always added</span>${sbFloorRules()}</div>
       <div class="sb-mirror-note">Every screener on this tool gets these on top of its own rules —
         no need to repeat them here. Change them in Settings → Tradability floor.</div>` : ''}

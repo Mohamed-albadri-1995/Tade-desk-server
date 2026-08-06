@@ -17,6 +17,12 @@ const config = require('./config');
 // The tool whose screeners define CANSLIM membership. Everything else reads.
 const CANSLIM_TOOL = 'T8';
 
+// The screener that decides WHO is a growth stock, as opposed to which of them
+// did something today. Membership has to come from the slow half or it stops
+// meaning anything: a company is not a growth company on Tuesday and an
+// ordinary one on Wednesday because it happened not to print a new high.
+const CANSLIM_UNIVERSE = 'canslim-universe';
+
 const scanStatus = {
   lastRun: null,
   lastRefresh: null,
@@ -82,10 +88,12 @@ async function runFullScan() {
 
     // Side A: TradingView Scanners (fatal)
     let merged;
+    let labelResults = {};
     await stageWrap(report, 'sideA', async () => {
-      const scannerResults = await runAllScanners();
-      merged = mergeScannersIntoR0(scannerResults);
-      return { rowCount: merged.length };
+      const { candidates, labels } = await runAllScanners();
+      labelResults = labels;
+      merged = mergeScannersIntoR0(candidates);
+      return { rowCount: merged.length, labelLists: Object.keys(labels).length };
     })();
 
     // Side B: Internal Calculations (fatal)
@@ -102,9 +110,23 @@ async function runFullScan() {
     await stageWrapSoft(report, 'canslim', async () => {
       const canslim = require('./sideA/canslim');
       if (config.toolId === CANSLIM_TOOL) {
-        const matched = merged
-          .filter(r => (r.screenerKeys || []).some(k => /canslim/i.test(k)))
-          .map(r => r.ticker);
+        // From the universe screener alone. Reading it off the cards instead —
+        // which is what this did — meant a name only joined on a day it broke
+        // out on volume, so the list tracked breakouts and called them growth.
+        const store = require('./sideA/screenerStore');
+        const universe = store.list({ enabledOnly: true })
+          .find(s => s.key === CANSLIM_UNIVERSE);
+        const matched = universe
+          ? (labelResults[universe.name] || []).map(r => r.ticker)
+          : [];
+        // No universe screener, or it did not run in this scan: leave the list
+        // exactly as it was. Recording an empty scan would expire every member
+        // ninety days later on the strength of one skipped run.
+        if (!matched.length) {
+          const held = canslim.currentMembers().size;
+          canslim.tagRows(withDerived);
+          return { published: 0, members: held, skipped: universe ? 'not scanned' : 'no universe screener' };
+        }
         const res = canslim.recordMembers(matched);
         canslim.tagRows(withDerived);
         return { published: matched.length, members: res.total, expired: res.expired };

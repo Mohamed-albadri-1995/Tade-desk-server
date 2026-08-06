@@ -100,13 +100,14 @@ describe('tagging', () => {
 });
 
 describe('the CANSLIM screeners', () => {
-  test('T8 ships the breakout and the pullback, both valid', () => {
-    expect(PRESETS.T8.map(d => d.name)).toEqual(['CANSLIM', 'CANSLIM Pullback']);
+  test('T8 ships the universe, the breakout and the pullback, all valid', () => {
+    expect(PRESETS.T8.map(d => d.name))
+      .toEqual(['CANSLIM Universe', 'CANSLIM', 'CANSLIM Pullback']);
     for (const d of PRESETS.T8) expect(store.validateDefinition(d)).toEqual([]);
   });
 
   test('every letter that can be expressed is present', () => {
-    const f = PRESETS.T8[0].filters;
+    const f = PRESETS.T8.find(d => d.key === 'canslim').filters;
     const has = left => f.some(x => x.left === left);
     expect(has('earnings_per_share_diluted_yoy_growth_fq')).toBe(true);   // C
     expect(has('earnings_per_share_diluted_yoy_growth_fy')).toBe(true);   // A
@@ -134,5 +135,78 @@ describe('the CANSLIM screeners', () => {
           .toEqual({ field: f.left, known: true });
       }
     }
+  });
+});
+
+/*
+ * Who is a growth stock, versus which of them did something today.
+ *
+ * The trader's own observation, and it is the whole bug: "there is no stock
+ * that will be identified as growth today but not tomorrow." The screener that
+ * fed membership demanded a new 52-week high on above-average volume, so a
+ * company joined the list on the days it broke out and dropped off the days it
+ * did not — the CANSLIM tag every other tool reads was a breakout tag with a
+ * growth label on it.
+ */
+describe('membership comes from the slow half', () => {
+  const universe = PRESETS.T8.find(d => d.key === 'canslim-universe');
+  const breakout = PRESETS.T8.find(d => d.key === 'canslim');
+
+  // Anything that can be true today and false tomorrow. A rule on one of these
+  // belongs to the entry, never to the identity.
+  const DAILY = [
+    'price_52_week_high', 'relative_volume_10d_calc', 'relative_volume_intraday',
+    'volume', 'change', 'gap', 'premarket_change', 'premarket_volume',
+    'VWAP', 'RSI', 'High.1M', 'Low.1M', 'SMA50', 'EMA20',
+  ];
+  const mentionsDaily = f =>
+    DAILY.some(d => String(f.left).includes(d) || String(f.right).includes(d));
+
+  test('nothing in the universe screener can change between two sessions', () => {
+    for (const f of universe.filters) {
+      expect({ rule: `${f.left} ${f.operation} ${f.right}`, daily: mentionsDaily(f) })
+        .toEqual({ rule: `${f.left} ${f.operation} ${f.right}`, daily: false });
+    }
+  });
+
+  test('the breakout screener still carries the timing the universe dropped', () => {
+    // Splitting them must not quietly delete the entry trigger — that would
+    // turn the tool's candidate list into the universe list.
+    expect(breakout.filters.some(mentionsDaily)).toBe(true);
+    expect(breakout.filters.some(f => f.right === 'price_52_week_high')).toBe(true);
+  });
+
+  test('the universe keeps every fundamental the breakout screener tests', () => {
+    // If the two disagreed on what a growth company is, a name could trade the
+    // breakout without ever being a member, which is the same bug reversed.
+    const slow = breakout.filters.filter(f => !mentionsDaily(f));
+    for (const f of slow) {
+      expect({ rule: f.left, inUniverse: universe.filters.some(u => u.left === f.left) })
+        .toEqual({ rule: f.left, inUniverse: true });
+    }
+  });
+
+  test('it maintains a list rather than proposing trades', () => {
+    // labelOnly is what keeps its matches out of r0. Without it the tool would
+    // start collecting cards for stocks it has no intention of trading, and
+    // the training data would change shape for a labelling fix.
+    expect(universe.labelOnly).toBe(true);
+    expect(breakout.labelOnly).toBeFalsy();
+  });
+
+  test('only the universe screener is exempt from the tradability floor', () => {
+    const tv = require('../src/sideA/tvScanner');
+    const tradable = require('../src/sideA/tradable');
+    const sent = def => tv.buildRequest(
+      [...def.filters, ...(def.labelOnly ? [] : tradable.serverFilters())], def.sort).filter;
+    const hasFloorRule = rules => rules.some(r => r.left === 'average_volume_10d_calc');
+    expect(hasFloorRule(sent(universe))).toBe(false);
+    expect(hasFloorRule(sent(breakout))).toBe(true);
+  });
+
+  test('membership lasts a quarter, which is the horizon the criteria describe', () => {
+    // Ninety days from the last confirmation, so a member that stops printing
+    // new highs is still a member — the point of separating the two.
+    expect(canslim.MEMBER_DAYS).toBe(90);
   });
 });
