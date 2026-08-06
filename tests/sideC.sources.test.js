@@ -480,7 +480,8 @@ describe('Google News fills the gap without becoming the source', () => {
     mockAll({ googleXml: rss([{ t: 'Company to acquire rival in $2B deal - Reuters' }]) });
     const { catalyst } = await fetchNewsForTicker('AAA', TV);
     expect(catalyst).toBeTruthy();
-    expect(catalyst.label).toBe('M&A');
+    // The buyer side — see the "one event, one name" block in sideC.test.js.
+    expect(catalyst.label).toBe('Acquiring');
   });
 });
 

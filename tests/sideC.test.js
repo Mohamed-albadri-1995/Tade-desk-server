@@ -29,9 +29,22 @@ describe('Side C — Catalyst Classification', () => {
     expect(r.sentiment).toBe('bear');
   });
 
-  test('acquisition → M&A (bull)', () => {
+  /*
+   * This asserted M&A/bull, which was the old single label for both sides of a
+   * deal. A company announcing it is buying a rival is the one paying the
+   * premium — that is not the bullish event a takeover target is, and calling
+   * them the same thing told the card the wrong story half the time. See the
+   * "one event, one name" block below.
+   */
+  test('announcing an acquisition → Acquiring, and not bullish', () => {
     const r = classifyCatalyst(['Company announces acquisition of rival']);
-    expect(r.label).toBe('M&A');
+    expect(r.label).toBe('Acquiring');
+    expect(r.sentiment).toBe('neutral');
+  });
+
+  test('being the target → Takeover Target (bull)', () => {
+    const r = classifyCatalyst(['Company receives buyout offer at $40 per share']);
+    expect(r.label).toBe('Takeover Target');
     expect(r.sentiment).toBe('bull');
   });
 
@@ -417,5 +430,137 @@ describe('Side C — live-deploy findings (2026-07-13)', () => {
     const c = combineCatalyst(news, { gapPct: -12, rvol: 8, change: -14, price: 2.2, monthHigh: 12, monthLow: 2.5, adrPct: 15 });
     expect(c.label).toBe('Reverse Split');
     expect(c.others.map(o => o.label)).toContain('Gap Down');
+  });
+});
+
+/*
+ * Two ways a classifier can be wrong about names, both raised from live use:
+ * giving one event two names because it was worded differently, and giving two
+ * different events the same name because they share a word.
+ */
+describe('Side C — one event, one name; one name, one event', () => {
+  const ts = Date.now();
+  const labels = (h) => classifyCatalysts([{ headline: h, ts }]).map(x => x.def.label);
+  const label = (h) => labels(h)[0] || null;
+
+  // ── the same event, said five ways ──────────────────────────────────────
+  test.each([
+    ['Company prices $100M public offering'],
+    ['Company announces at-the-market program'],
+    ['Company completes private placement'],
+    ['Company announces registered direct offering'],
+    ['Company prices upsized offering of common stock'],
+  ])('%s → Dilution', (h) => expect(label(h)).toBe('Dilution'));
+
+  test.each([
+    ['Q2 earnings beat estimates'],
+    ['Company tops Wall Street consensus'],
+    ['Blowout quarter as revenue surpasses forecasts'],
+    ['Earnings exceed analyst expectations'],
+  ])('%s → Earnings Beat', (h) => expect(label(h)).toBe('Earnings Beat'));
+
+  /*
+   * A European marketing authorisation is an FDA approval with a different
+   * agency's name on it. It gets the same label, because inventing a second
+   * one would be two names for one event — which is the thing this describe
+   * block exists to prevent.
+   */
+  test.each([
+    ['FDA grants approval for lead drug'],
+    ['Arrowhead Reports Marketing Authorization for Redemplo in EU'],
+    ['Company receives CE mark for its device'],
+    ['Drug approved in Japan'],
+  ])('%s → FDA Approval', (h) => expect(label(h)).toBe('FDA Approval'));
+
+  // Late filing puts a company on the same clock to the same delisting.
+  test.each([
+    ['Company receives deficiency notice from Nasdaq'],
+    ['INVO Fertility Receives Nasdaq Notification Regarding Late Filing of Quarterly Report'],
+    ['Company unable to timely file its annual report'],
+  ])('%s → Delisting Risk', (h) => expect(label(h)).toBe('Delisting Risk'));
+
+  // ── different events that share a word ──────────────────────────────────
+  /*
+   * Being bought and doing the buying are opposite trades: a target gaps to
+   * the offer price, an acquirer sells off because it is paying the premium.
+   * One label marked bullish told the card the wrong thing half the time.
+   */
+  test('being acquired and acquiring are not the same catalyst', () => {
+    expect(label('Company receives unsolicited buyout offer at $40/share')).toBe('Takeover Target');
+    expect(label('Company agrees to be acquired by X')).toBe('Takeover Target');
+    expect(label('Company to acquire rival for $2B')).toBe('Acquiring');
+    expect(label('Company completes acquisition of SmallCo')).toBe('Acquiring');
+  });
+
+  test('the target reading is bullish, the acquirer reading is not', () => {
+    const t = classifyCatalysts([{ headline: 'Company agrees to be acquired by X', ts }])[0];
+    const a = classifyCatalysts([{ headline: 'Company to acquire rival for $2B', ts }])[0];
+    expect(t.def.sentiment).toBe('bull');
+    expect(a.def.sentiment).toBe('neutral');
+    expect(t.def.tier).toBeLessThan(a.def.tier);   // the target moves harder
+  });
+
+  test('wording that does not say which side stays neutral rather than guessing', () => {
+    expect(label('Company merges with peer in all-stock deal')).toBe('M&A');
+  });
+
+  test('one merger story still yields one catalyst, not three', () => {
+    // All three live in the same family precisely so this cannot happen.
+    expect(labels('Company agrees to be acquired by X in a merger agreement')).toHaveLength(1);
+  });
+
+  /*
+   * "Halted" is two unrelated events. A biotech stopping a study is a failed
+   * drug; a stock stopping on a circuit breaker is volatility, and it was on
+   * the WYHG card the day it moved 205%.
+   */
+  test('a trial halt and a trading halt are different catalysts', () => {
+    expect(label('Company halts enrollment in its Phase 3 trial')).toBe('Trial Fail');
+    expect(label('Shares halted on circuit breaker to the downside')).toBe('Trading Halt');
+    expect(label('Trading halted pending news')).toBe('Trading Halt');
+    expect(label('FDA places lead program on clinical hold')).toBe('FDA Rejection');
+  });
+
+  test('a trading halt takes no direction — the exchange did not say which way', () => {
+    const h = classifyCatalysts([{ headline: 'Shares halted on circuit breaker', ts }])[0];
+    expect(h.def.sentiment).toBe('neutral');
+  });
+
+  test('buying back your own shares is not buying a company', () => {
+    expect(label('Company announces $50M share repurchase program')).toBe('Buyback');
+    expect(label('Company announces $50M registered direct offering')).toBe('Dilution');
+  });
+
+  /*
+   * "buys" was briefly in the acquisition pattern and matched fifty-eight
+   * headlines, most of them brokers rating shares. One loose verb is enough to
+   * fill a category with the wrong events.
+   */
+  test.each([
+    ['UBS Adjusts JFrog Price Target to $92 From $80, Maintains Buy Rating'],
+    ['Is Lexicon Pharmaceuticals (LXRX) A Good Stock To Buy Now?'],
+    ['1 Russell 2000 Stock on Our Buy List and 2 That Underwhelm'],
+    ['Lexicon vs. Pfizer: Which Drugmaker Stock Is a Better Buy in 2026?'],
+  ])('analyst language is not an acquisition: %s', (h) => {
+    expect(label(h)).not.toBe('Acquiring');
+  });
+
+  test('a real acquisition still lands', () => {
+    expect(label('Rocket Lab to acquire Iridium in $8bn cash and stock deal')).toBe('Acquiring');
+    expect(label('Sadot Completes Acquisition of Anira Consulting')).toBe('Acquiring');
+  });
+
+  test('index inclusion is caught however the index is named', () => {
+    expect(label('AtaiBeckley to Join the Russell Indexes')).toBe('Index Add');
+    expect(label('Company added to the S&P 500')).toBe('Index Add');
+  });
+
+  // The guards that were already there must survive all of the above.
+  test('regaining compliance is not delisting risk', () => {
+    expect(label('Company regains compliance with Nasdaq minimum bid price')).toBeNull();
+  });
+
+  test('a scheduled earnings date is still not a catalyst', () => {
+    expect(label('Company to report Q2 earnings Tuesday')).toBeNull();
   });
 });

@@ -45,15 +45,42 @@ const CATALYST_PATTERNS = [
   { id: 'bankruptcy', tier: 1, label: 'Bankruptcy', sentiment: 'bear', color: '#ef4444',
     pattern: /\b(chapter (7|11)|bankruptcy (protection|filing|petition)|files? for bankruptcy|going[- ]concern (doubt|warning)|insolven)/i,
     guard: /\b(emerg(es|ed|ing) from|exits? |avoid(s|ed|ing)? |not filing)\b/i },
+  /*
+   * A drug clearing its regulator, whichever regulator that is.
+   *
+   * "Arrowhead Reports Marketing Authorization for Redemplo in EU" was missed:
+   * the wording only covered the American route. A European marketing
+   * authorisation is the same event with a different agency's name on it, and
+   * splitting it into its own label would be two names for one thing — so it
+   * lands here rather than in a new category. The label stays "FDA Approval"
+   * because that is what it is called on the desk, and the detail carries which
+   * body granted it.
+   */
   { id: 'fda_approval', tier: 1, label: 'FDA Approval', sentiment: 'bull', color: '#4ade80',
-    pattern: /\b(fda|ema|mhra) (grants? )?(full |accelerated )?approv|pdufa approval|receives? (fda|marketing|regulatory) (approval|authorization|clearance)|510\(k\) clearance|emergency use authorization|ce mark/i,
-    guard: /\b(seek(s|ing)?|files? for|submits?|awaiting|decision (date|expected)|pdufa date)\b/i },
+    pattern: /\b(fda|ema|mhra|nmpa|pmda|health canada|european commission) (grants?|issues?|approves?)? ?(full |accelerated |conditional )?approv|pdufa approval|receives? (fda |marketing |regulatory |ec )?(approval|authorization|authorisation|clearance)|marketing (authorization|authorisation)|510\(k\) clearance|emergency use authorization|ce mark|approved (in|by) (the )?(eu|europe|uk|japan|china|canada)/i,
+    guard: /\b(seek(s|ing)?|files? for|submits?|applies for|awaiting|decision (date|expected)|pdufa date|under review)\b/i },
   { id: 'fda_rejection', tier: 1, label: 'FDA Rejection', sentiment: 'bear', color: '#ef4444',
     pattern: /\b(complete response letter|crl\b|fda (reject|declin|refus)|clinical hold|refuse[sd]? to file)/i },
   { id: 'trial_win', tier: 1, label: 'Trial Win', sentiment: 'bull', color: '#4ade80',
     pattern: /\b(met (its )?(primary|key) endpoint|positive (topline|top-line|interim|phase) (results|data)|phase (1|2|3|i{1,3})b? (trial|study|data|results).{0,40}(positive|success|met|achiev)|clinical trial success|statistically significant (improvement|benefit))/i },
   { id: 'trial_fail', tier: 1, label: 'Trial Fail', sentiment: 'bear', color: '#f87171',
-    pattern: /\b(fail(s|ed)? to (meet|achieve|demonstrate)|miss(es|ed)? (its )?(primary|key) endpoint|did not meet (its )?(primary|key) endpoint|discontinu(es?|ing|ed) (the |its )?(trial|study|program)|halts? (the |its )?(trial|study)|clinical trial fail)/i },
+    pattern: /\b(fail(s|ed)? to (meet|achieve|demonstrate)|miss(es|ed)? (its )?(primary|key) endpoint|did not meet (its )?(primary|key) endpoint|discontinu(es?|ing|ed) (the |its )?(trial|study|program)|halts? (the |its )?(trial|study|enrollment)|halts? enrollment|clinical (trial|study) (fail|halt)|places? .{0,20}on clinical hold)/i,
+    guard: /\b(circuit breaker|trading (was )?halt|halted (for|on|pending) (trading|volatility|news))\b/i },
+  /*
+   * A trading halt, which is NOT a trial halt.
+   *
+   * Both are "halted" and they are unrelated events with opposite audiences: a
+   * biotech stopping a study is a failed drug, a stock stopping on a circuit
+   * breaker is volatility. Each pattern now guards against the other's wording
+   * so one word cannot put two different events under one name.
+   *
+   * Neutral on purpose. A halt says the exchange stopped trading, not which way
+   * it resumes — the direction is in the rest of the headline, and inventing one
+   * here would be the same mistake as a bias with nothing behind it.
+   */
+  { id: 'trading_halt', tier: 2, label: 'Trading Halt', sentiment: 'neutral', color: '#fb923c',
+    pattern: /\b(halted on (a )?circuit breaker|circuit breaker halt|trading (is |was )?halted|halted (for|pending) (trading|volatility|news|a news pending)|volatility (trading )?(halt|pause)|limit (up|down) halt)/i,
+    guard: /\b(trial|study|enrollment|clinical hold)\b/i },
   { id: 'earnings_beat', tier: 1, label: 'Earnings Beat', sentiment: 'bull', color: '#34d399', family: 'earnings',
     pattern: /\b((earnings|eps|revenue|profit|results?) (beat|top(s|ped)?|exceed|surpass|crush)|(beats?|tops?) ((on|q[1-4]|quarterly|analyst|street|consensus|wall street) )*(estimates|expectations|the street|forecasts|consensus|top and bottom)|(exceeds?|surpass(es|ed)?) (estimates|expectations|analyst)|blowout (quarter|earnings|results)|record (quarterly )?(revenue|profit|earnings)|earnings surprise)/i,
     guard: SCHEDULED_EARNINGS },
@@ -66,9 +93,42 @@ const CATALYST_PATTERNS = [
   { id: 'guidance_cut', tier: 1, label: 'Guidance Cut', sentiment: 'bear', color: '#f87171',
     pattern: /\b(cut(s|ting)?|lower(s|ed|ing)?|slash(es|ed|ing)?|trims?|withdraw(s|ing|n)?|suspends?) (its |their |full[- ]year |fiscal |annual |fy ?\d* |20\d\d |q[1-4] |revenue |sales |eps |profit )*(guidance|outlook|forecast)|guidance below (estimates|consensus|expectations)|guides? (below|lower)|profit warning|warns? on (profit|revenue|sales)/i,
     guard: SCHEDULED_EARNINGS },
-  { id: 'mna', tier: 1, label: 'M&A', sentiment: 'bull', color: '#a78bfa',
-    pattern: /\b(acquisition of|to acquire|acquires?|to be acquired|merger (agreement|with)|merges? with|buyout (offer|bid|proposal)?|takeover (offer|bid|approach|target)?|take[- ]private|tender offer|receives? (an? )?(unsolicited |non[- ]binding |revised )?(acquisition |buyout |takeover )?(proposal|offer|bid)|definitive (merger )?agreement to (buy|acquire)|explor(es?|ing) (strategic alternatives|a sale))/i,
-    guard: /\b(talent acquisition|customer acquisition|data acquisition|land acquisition)\b/i },
+  /*
+   * M&A is two different events and used to be one label.
+   *
+   * Being bought and doing the buying are opposite trades. A takeover target
+   * gaps to the offer price and stops moving; an acquirer usually sells off,
+   * because it is the one paying the premium and taking on the integration. One
+   * name for both, marked bullish, told the card the wrong thing half the time
+   * and — until technical catalysts were barred from setting bias — set a long
+   * bias on a stock that had just agreed to spend two billion dollars.
+   *
+   * Three entries, one family, so a single story still yields a single
+   * catalyst: the target reading, the acquirer reading, and a neutral fallback
+   * for wording that genuinely does not say which side this company is on
+   * ("merges with", "merger of equals"). Ordered target-first, since that is
+   * the one that moves price hardest and the phrasing is unambiguous.
+   */
+  { id: 'mna_target', tier: 1, label: 'Takeover Target', sentiment: 'bull', color: '#a78bfa', family: 'mna',
+    pattern: /\b(to be acquired|agrees? to be (acquired|bought)|receives? (an? )?(unsolicited |non[- ]binding |revised |sweetened )?(acquisition |buyout |takeover |merger )?(proposal|offer|bid)|buyout (offer|bid|proposal)|takeover (offer|bid|approach|target)|take[- ]private (deal|transaction|offer)|tender offer for|explor(es?|ing) (strategic alternatives|a sale|a potential sale)|acquisition of (the company|all outstanding))/i,
+    guard: /\b(rejects?|rejected|withdraws?|terminates?|walks? away)\b/i },
+  /*
+   * "buys" is not in this pattern, and the reason is worth keeping.
+   *
+   * It was, briefly, and it matched fifty-eight headlines of which most were
+   * analyst and listicle language: "Maintains Buy Rating", "A Good Stock To Buy
+   * Now?", "1 Russell 2000 Stock on Our Buy List". One loose verb, and a
+   * category about companies purchasing other companies filled up with brokers
+   * rating shares. It cost one real headline — "Nextpower Buys Zimmermann" —
+   * to remove it, which is the trade the design rule at the top of this file
+   * describes: every pattern needs the event context around the word.
+   */
+  { id: 'mna_buyer', tier: 2, label: 'Acquiring', sentiment: 'neutral', color: '#a78bfa', family: 'mna',
+    pattern: /\b(to acquire|acquires? |acquisition of|agreement to (buy|acquire|purchase)|definitive (merger )?agreement to (buy|acquire)|(completes?|closes?|announces?) (the )?acquisition|acquir(es|ing) (a )?(majority |controlling )?stake)/i,
+    guard: /\b(talent acquisition|customer acquisition|data acquisition|land acquisition|user acquisition|to be acquired|acquisition of (the company|all outstanding)|buy rating|stocks? to buy|buy list|better buy|worth buying)\b/i },
+  { id: 'mna', tier: 1, label: 'M&A', sentiment: 'neutral', color: '#a78bfa', family: 'mna',
+    pattern: /\b(merger (agreement|with)|merges? with|merger of equals|combination with)/i,
+    guard: /\b(talent acquisition|customer acquisition)\b/i },
   { id: 'offering', tier: 1, label: 'Dilution', sentiment: 'bear', color: '#f87171', family: 'dilution',
     pattern: /\b((public|secondary|direct|equity|share|stock|common stock|underwritten|units?) offering|offering of (shares|common stock|units|securities)|registered direct (offering|placement)|at[- ]the[- ]market (offering|program|facility)|atm (offering|program)|private placement|pric(es|ed|ing) (its |an? )*(upsized )?offering|proposed (public )?offering|convertible (senior )?notes? offering|sells? (shares|stock) to raise|capital raise|dilut(es?|ion|ive))/i,
     guard: /\boffering (customers|clients|users|patients|investors education|free|a new (product|service|feature))\b/i },
@@ -98,13 +158,16 @@ const CATALYST_PATTERNS = [
     pattern: /\b(\d+[- ]for[- ]1 (stock )?split|stock split)/i,
     guard: /\breverse\b/i },
   { id: 'index_add', tier: 2, label: 'Index Add', sentiment: 'bull', color: '#a78bfa', family: 'index',
-    pattern: /\b((added to|joins?|to join|set to join|inclusion in) (the )?(s&p ?(500|400|600)|nasdaq[- ]?100|russell ?(1000|2000|3000)|dow jones))/i },
+    pattern: /\b((added to|joins?|to join|set to join|inclusion in) (the )?(s&p ?(500|400|600)|nasdaq[- ]?100|russell ?(1000|2000|3000)?( indexes| index)?|dow jones))/i },
   { id: 'index_remove', tier: 2, label: 'Index Removal', sentiment: 'bear', color: '#f87171', family: 'index',
     pattern: /\b((removed|dropped|deleted) from (the )?(s&p|nasdaq[- ]?100|russell|dow jones))/i },
   { id: 'uplisting', tier: 2, label: 'Uplisting', sentiment: 'bull', color: '#86efac', family: 'listing',
     pattern: /\b(uplist|approved for listing on (the )?(nasdaq|nyse)|begins? trading on (the )?(nasdaq|nyse))/i },
+  /* Late filing lands here rather than in a category of its own: a company
+     that cannot file on time is on the same clock towards the same delisting,
+     and giving it a second name would be two names for one consequence. */
   { id: 'delisting', tier: 2, label: 'Delisting Risk', sentiment: 'bear', color: '#f87171', family: 'listing',
-    pattern: /\b(delist|non[- ]compliance|listing (deficiency|requirement)|minimum bid price (requirement|rule)|(deficiency|compliance) (notice|notification|letter) from (the )?(nasdaq|nyse))/i,
+    pattern: /\b(delist|non[- ]compliance|listing (deficiency|requirement)|minimum bid price (requirement|rule)|(deficiency|compliance) (notice|notification|letter) from (the )?(nasdaq|nyse)|(nasdaq|nyse) notification regarding late filing|late filing of (its )?(quarterly|annual) report|unable to (timely )?file|notification of (late filing|filing delinquency)|form 12b-25|files? form nt )/i,
     guard: /\b(regain(s|ed)?|back in|cures?[sd]?) compliance\b/i },
   { id: 'legal', tier: 2, label: 'Legal Risk', sentiment: 'bear', color: '#f472b6',
     pattern: /\b(lawsuit|class action|sec (charg|investigat|probe|subpoena)|doj (investigat|probe|charg)|criminal (charges|probe)|fraud (charges?|allegations?)|under investigation)/i,
