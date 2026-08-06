@@ -6,6 +6,11 @@
  * validation warning on every run.
  */
 module.exports = {
+  // Runs before any test module is required, because the thing it isolates —
+  // where API keys are read from — is resolved at require time. See the file
+  // for the deploy-only failure that made it necessary.
+  setupFiles: ['<rootDir>/tests/setup.env.js'],
+
   moduleNameMapper: {
     '^uuid$': '<rootDir>/tests/__mocks__/uuid.js',
   },
