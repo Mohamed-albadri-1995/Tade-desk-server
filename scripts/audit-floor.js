@@ -98,34 +98,59 @@ function audit(t) {
 
     const breach = { price: [], volume: [], atr: [], atrPct: [] };
     let unknown = 0;
+    const allDates = new Set();
 
     for (const r of rows) {
       let blob;
       try { blob = JSON.parse(r.data); } catch { continue; }
       const { price, avgVolume, atr } = fields(blob);
-      const who = `${r.ticker}@${r.date}`;
+      allDates.add(r.date);
+      // Carry the numbers, not just the name. "Below the floor" covers two very
+      // different findings — a stock that drifted a few cents under it during
+      // the session, and a stored value that is nonsense — and only the figures
+      // tell them apart.
+      const hit = (got, want) => ({ date: r.date, ticker: r.ticker, got, want });
 
-      if (f.minPrice > 0 && price !== null && price < f.minPrice) breach.price.push(who);
-      if (f.minAvgVolume > 0 && avgVolume !== null && avgVolume < f.minAvgVolume) breach.volume.push(who);
-      if (f.minAtr > 0 && atr !== null && atr < f.minAtr) breach.atr.push(who);
+      if (f.minPrice > 0 && price !== null && price < f.minPrice) breach.price.push(hit(price, f.minPrice));
+      if (f.minAvgVolume > 0 && avgVolume !== null && avgVolume < f.minAvgVolume) breach.volume.push(hit(avgVolume, f.minAvgVolume));
+      if (f.minAtr > 0 && atr !== null && atr < f.minAtr) breach.atr.push(hit(atr, f.minAtr));
 
       if (f.minAtrPct > 0) {
         if (atr === null || price === null || price <= 0) unknown++;
-        else if ((atr / price) * 100 < f.minAtrPct) breach.atrPct.push(who);
+        else if ((atr / price) * 100 < f.minAtrPct) breach.atrPct.push(hit(+((atr / price) * 100).toFixed(2), f.minAtrPct));
       }
     }
 
     const total = Object.values(breach).reduce((a, b) => a + b.length, 0);
     const verdict = total === 0 ? 'clean' : `${total} breach(es)`;
+    const span = [...allDates].sort();
     console.log(`  ${name.padEnd(11)} ${String(rows.length).padStart(6)} rows   ${verdict}`
-      + (unknown ? `   ${unknown} with ATR or price missing (not checkable)` : ''));
+      + `   dates ${span[0] || '-'}..${span[span.length - 1] || '-'}`
+      + (unknown ? `   ${unknown} not checkable` : ''));
 
     for (const [leg, hits] of Object.entries(breach)) {
       if (!hits.length) continue;
       const label = { price: 'below min price', volume: 'below min avg volume',
         atr: 'below min ADR $', atrPct: 'below min ADR %' }[leg];
+
+      // Which DATES the breaches fall on is the question that decides what this
+      // is. Confined to old dates, it is history collected under a floor that
+      // has since changed, or before the column-alignment guard existed. Spread
+      // across every date including the most recent, something is letting them
+      // through now.
+      const byDate = {};
+      for (const h of hits) byDate[h.date] = (byDate[h.date] || 0) + 1;
+      const dates = Object.keys(byDate).sort();
+      const worst = hits.slice().sort((a, b) => a.got - b.got)[0];
+
       console.log(`      ${String(hits.length).padStart(5)}  ${label}`
-        + (listThem ? `  → ${hits.slice(0, 40).join(' ')}${hits.length > 40 ? ' …' : ''}` : ''));
+        + `   on ${dates.length}/${span.length} day(s): ${dates.join(' ')}`);
+      console.log(`             worst ${worst.ticker} ${worst.got} vs ${worst.want} required`);
+      if (listThem) {
+        console.log('             ' + hits.slice(0, 25)
+          .map(h => `${h.ticker}@${h.date}=${h.got}`).join('  ')
+          + (hits.length > 25 ? '  …' : ''));
+      }
     }
   }
   db.close();
