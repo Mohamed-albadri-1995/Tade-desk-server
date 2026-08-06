@@ -435,6 +435,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .rb-ath-val { font-size:11px; font-weight:700; }
 .rb-ath-gap { font-size:10px; color:var(--text3); margin-left:auto; }
 .rb-ath-gap.at-high { color:#a5f3fc; font-weight:700; }
+/* A window whose history crosses a share consolidation. Not an error and not a
+   result — a measurement that cannot be made, said out loud. */
+.rb-split { font-size:10px; color:var(--text3); font-style:italic; margin-top:8px;
+  padding-top:7px; border-top:1px dashed #262b3b; line-height:1.5; }
 /* The top Volume & Float block butts against the header, so it needs its own
    separator rather than borrowing card-body's. */
 .vf-top { background: var(--bg2); border-bottom: 1px solid var(--border); }
@@ -2911,12 +2915,44 @@ function buildCard(row) {
   //
   // Each bar carries its own low and high, because they are different numbers
   // and a shared axis would be a lie.
-  const rangeBars = [
+  /*
+   * Reverse splits break the wider windows.
+   *
+   * TradingView's historical highs are not split-adjusted, so a stock that has
+   * done a 1-for-100 carries pre-split prices in its quarter, year and
+   * all-time figures. PAVS came through with a year high of $148,800 against a
+   * $3.76 low — a 39,000× range — and its own news feed carrying the reverse
+   * split that caused it. INLF the same, with a quarter high of $958.
+   *
+   * Left alone this is worse than missing data. The bar reads 0%, which says
+   * the stock is sitting on its 52-week low: a maximum-oversold signal,
+   * arrived at by arithmetic on two prices that were never the same currency.
+   *
+   * The windows nest — a week is inside a month is inside a quarter — so a
+   * legitimate high can only grow as the window widens, and it grows by market
+   * moves. A tenfold jump between two adjacent windows is not a market move,
+   * it is a split boundary, and every window from there out is contaminated.
+   * Those are dropped and said so, rather than drawn.
+   */
+  const SPLIT_JUMP = 10;
+  const rawBars = [
     { label: 'Week',    low: s.weekLow,      high: s.weekHigh,      pos: s.weekRangePos },
     { label: 'Month',   low: s.monthLow,     high: s.monthHigh,     pos: s.monthRangePos },
     { label: 'Quarter', low: s.quarterLow,   high: s.quarterHigh,   pos: s.quarterRangePos },
     { label: 'Year',    low: s.yearLow,      high: s.yearHigh,      pos: s.yearRangePos },
-  ].filter(b => b.pos != null && b.low != null && b.high != null).map(b => {
+  ].filter(b => b.pos != null && b.low != null && b.high != null);
+
+  let splitFrom = null;
+  for (let i = 1; i < rawBars.length; i++) {
+    if (rawBars[i].high > rawBars[i - 1].high * SPLIT_JUMP) { splitFrom = i; break; }
+  }
+  const usableBars = splitFrom == null ? rawBars : rawBars.slice(0, splitFrom);
+  const splitNote = splitFrom == null ? '' : `
+    <div class="rb-split" title="${esc(rawBars[splitFrom].label)} high $${fmt(rawBars[splitFrom].high)} against ${esc(rawBars[splitFrom - 1].label)} high $${fmt(rawBars[splitFrom - 1].high)} — prices from before a share consolidation, not a move">
+      ${rawBars.slice(splitFrom).map(b => b.label).join(', ')} not shown — the history crosses a reverse split
+    </div>`;
+
+  const rangeBars = usableBars.map(b => {
     const p = clamp(b.pos, 0, 100);
     return `
     <div class="rb">
@@ -2938,16 +2974,28 @@ function buildCard(row) {
   // looking like it meant something. The distance under the record is the one
   // claim a single all-time number actually supports.
   //   → if you are here to "add the missing all-time low", read the above.
-  const athPct = (s.allTimeHigh && price) ? ((price / s.allTimeHigh) - 1) * 100 : null;
+  //
+  // The same split problem reaches this number and hits it hardest, because it
+  // looks the furthest back: PAVS came through with an all-time high of
+  // $14,640,000 and the card dutifully reported "100% below". A distance that
+  // rounds to 100% for every stock that has ever consolidated its shares is
+  // not a distance, and it sat in the position where a real one would.
+  const widest = usableBars.length ? usableBars[usableBars.length - 1].high : null;
+  const athSplit = s.allTimeHigh != null && widest != null && s.allTimeHigh > widest * SPLIT_JUMP;
+  const athPct = (s.allTimeHigh && price && !athSplit) ? ((price / s.allTimeHigh) - 1) * 100 : null;
   const athRow = athPct != null ? `
     <div class="rb-ath" title="the all-time high has no matching low, so this is a distance rather than a position in a range">
       <span class="rb-ath-label">All-time high</span>
       <span class="rb-ath-val">${fmt(s.allTimeHigh)}</span>
       <span class="rb-ath-gap ${athPct >= -0.01 ? 'at-high' : ''}">${
         athPct >= -0.01 ? 'at the high' : `${Math.abs(athPct).toFixed(0)}% below`}</span>
-    </div>` : '';
+    </div>` : (athSplit ? `
+    <div class="rb-ath" title="all-time high $${fmt(s.allTimeHigh)} is a pre-consolidation price — the distance from it would be arithmetic on two different share counts">
+      <span class="rb-ath-label">All-time high</span>
+      <span class="rb-ath-gap">not comparable — pre-split price</span>
+    </div>` : '');
 
-  const rangeBar = (rangeBars || athRow) ? rangeBars + athRow : '';
+  const rangeBar = (rangeBars || splitNote || athRow) ? rangeBars + splitNote + athRow : '';
 
   // Move
   const dayRange = s.dayHigh && s.dayLow ? (s.dayHigh - s.dayLow) : null;
