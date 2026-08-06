@@ -277,15 +277,6 @@ function classifyCatalyst(headlines, now = Date.now()) {
   return primary;
 }
 
-function getFinnhubKey() {
-  try {
-    const db = require('../db');
-    const row = db.prepare("SELECT value FROM settings WHERE key = 'finnhubApiKey'").get();
-    if (row && row.value) return row.value;
-  } catch { /* ignore */ }
-  return process.env.FINNHUB_API_KEY || '';
-}
-
 /*
  * Why a source returned nothing.
  *
@@ -302,6 +293,39 @@ function getFinnhubKey() {
 function ok(items) { return { items, status: 'ok' }; }
 function bad(status, detail) { return { items: [], status, detail }; }
 
+/*
+ * Roundups.
+ *
+ * "Top Premarket Gainers", "BC-Most Active Stocks", "Top Midday Decliners" —
+ * 15% of everything delivered over 23 days, and four headlines account for
+ * nearly all of it. They report that a stock moved, which is the one thing the
+ * screener already established, and say nothing about why. Worse, they reach
+ * the catalyst classifier, where words like "gainers" and "surge" are exactly
+ * what it is looking for.
+ *
+ * They cannot be filtered by wording alone without also catching real stories,
+ * so the primary test is structural: a wire story about one company is tagged
+ * to one or two symbols, and a roundup is tagged to every name it lists. Both
+ * TradingView and Yahoo publish that list. Over the threshold, the story is
+ * about the market rather than about this stock.
+ *
+ * The word list stays as a second pass, for sources that send no symbol list
+ * at all — it only ever removes, never rescues.
+ */
+const MAX_RELATED_SYMBOLS = 8;
+
+const ROUNDUP_WORDS = new RegExp([
+  'most active', 'top (premarket|pre-market|midday|after-hours) (gainers|decliners|losers)',
+  'top (gainers|losers)', 'biggest (movers|gainers|losers)', 'stocks? (moving|to watch|making moves)',
+  'market (wrap|open|close|movers)', 'winners and losers', 'what to watch',
+  'trending (stocks|tickers)', 'hot stocks',
+].join('|'), 'i');
+
+function isRoundup(headline, relatedCount) {
+  if (Number.isFinite(relatedCount) && relatedCount > MAX_RELATED_SYMBOLS) return true;
+  return ROUNDUP_WORDS.test(headline || '');
+}
+
 function fetchError(err) {
   const code = err.response && err.response.status;
   if (code === 401 || code === 403) return bad('denied', `HTTP ${code}`);
@@ -311,23 +335,61 @@ function fetchError(err) {
   return bad('error', err.code || err.message);
 }
 
-async function fetchFinnhub(ticker) {
-  const apiKey = getFinnhubKey();
-  // Not an error and not silence: nobody has entered a key. Settings → Finnhub.
-  if (!apiKey) return bad('no-key', 'no Finnhub API key in Settings');
+/*
+ * TradingView headlines.
+ *
+ * Finnhub used to sit here and never once returned an item — no key was ever
+ * entered — and by the trader's own experience of it elsewhere, what it does
+ * return is mostly "what is hot today" listings rather than company news. It is
+ * gone rather than fixed.
+ *
+ * TradingView is the replacement, and it is a better source for one specific
+ * reason: every story arrives with `relatedSymbols`, the list of tickers it is
+ * actually about. That is the field Yahoo never gave us, and it is what makes
+ * a roundup separable from a story by structure instead of by guessing at
+ * wording. It also sends `urgency`, its own breaking-news marker.
+ *
+ * Needs the exchange-qualified symbol — NASDAQ:AAPL, not AAPL, which returns
+ * HTTP 400. Side A already stores that as stock.tvSymbol.
+ */
+const TV_NEWS_URL = 'https://news-headlines.tradingview.com/v2/headlines';
+const TV_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  Origin: 'https://www.tradingview.com',
+  Referer: 'https://www.tradingview.com/',
+  Accept: 'application/json',
+};
+
+async function fetchTradingView(tvSymbol) {
+  if (!tvSymbol || !String(tvSymbol).includes(':')) {
+    // Without the exchange prefix the endpoint answers 400. Say which it is,
+    // rather than reporting an empty news day for the stock.
+    return bad('no-symbol', 'needs EXCHANGE:TICKER — none on this row');
+  }
   try {
-    const to = new Date().toISOString().slice(0, 10);
-    const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     const resp = await axios.get(
-      `https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${from}&to=${to}&token=${apiKey}`,
-      { timeout: 8000 }
+      `${TV_NEWS_URL}?client=overview&lang=en&symbol=${encodeURIComponent(tvSymbol)}`,
+      { headers: TV_HEADERS, timeout: 8000 }
     );
-    return ok((resp.data || []).slice(0, 10).map(n => ({
-      headline: n.headline,
-      url: n.url,
-      datetime: n.datetime,
-      source: 'finnhub',
-    })));
+    const items = Array.isArray(resp.data) ? resp.data : (resp.data && resp.data.items) || [];
+    let dropped = 0;
+    const kept = items
+      .filter(n => {
+        const related = Array.isArray(n.relatedSymbols) ? n.relatedSymbols.length : null;
+        if (isRoundup(n.title, related)) { dropped++; return false; }
+        return true;
+      })
+      .slice(0, 10)
+      .map(n => ({
+        headline: n.title,
+        url: n.link || (n.storyPath ? `https://www.tradingview.com${n.storyPath}` : null),
+        datetime: n.published,
+        provider: (n.source && (n.source.name || n.source)) || n.provider || null,
+        urgent: n.urgency === 1 || n.urgency === '1',
+        related: Array.isArray(n.relatedSymbols) ? n.relatedSymbols.length : null,
+        source: 'tradingview',
+      }));
+    return { items: kept, status: 'ok', dropped };
   } catch (err) {
     return fetchError(err);
   }
@@ -340,18 +402,29 @@ async function fetchYahoo(ticker) {
       { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } }
     );
     const news = resp.data?.news || [];
-    // Yahoo search returns market-wide roundups and other companies' stories
-    // too ("Most Active Stocks", ...). Only keep items Yahoo itself tagged
-    // with this ticker — untagged roundups must not create catalysts.
-    return ok(news
+    // Requiring Yahoo's own tag was already here, and it is not enough: Yahoo
+    // tags "Top Premarket Gainers" with every ticker it lists, so the roundup
+    // passes the test on the very stock it is burying. Across 23 days that let
+    // 177 listing items through — 15% of everything delivered — and four
+    // headlines were most of them. The tag list is also the fix: a story about
+    // one company names one or two symbols, a listing names forty.
+    let dropped = 0;
+    const kept = news
       .filter(n => Array.isArray(n.relatedTickers) && n.relatedTickers.includes(ticker))
+      .filter(n => {
+        if (isRoundup(n.title, n.relatedTickers.length)) { dropped++; return false; }
+        return true;
+      })
       .slice(0, 10)
       .map(n => ({
         headline: n.title,
         url: n.link,
         datetime: n.providerPublishTime,
+        provider: n.publisher || null,
+        related: n.relatedTickers.length,
         source: 'yahoo',
-      })));
+      }));
+    return { items: kept, status: 'ok', dropped };
   } catch (err) {
     return fetchError(err);
   }
@@ -401,7 +474,7 @@ async function fetchEdgar(ticker) {
   }
 }
 
-// Both finnhub `datetime` and yahoo `providerPublishTime` are unix seconds;
+// TradingView `published` and Yahoo `providerPublishTime` are unix seconds;
 // EDGAR carries a date string. Normalize to ms (or null).
 function toMs(dt) {
   if (Number.isFinite(dt) && dt > 0) return dt < 1e12 ? dt * 1000 : dt;
@@ -412,35 +485,52 @@ function toMs(dt) {
   return null;
 }
 
-async function fetchNewsForTicker(ticker) {
-  const [fh, yh, ed] = await Promise.all([
-    fetchFinnhub(ticker),
+/**
+ * @param ticker    bare symbol, for Yahoo and EDGAR
+ * @param tvSymbol  EXCHANGE:TICKER, for TradingView — stock.tvSymbol
+ */
+async function fetchNewsForTicker(ticker, tvSymbol) {
+  const [tv, yh, ed] = await Promise.all([
+    fetchTradingView(tvSymbol),
     fetchYahoo(ticker),
     fetchEdgar(ticker),
   ]);
 
-  const finnhub = fh.items, yahoo = yh.items, edgar = ed.items;
+  const tradingview = tv.items, yahoo = yh.items, edgar = ed.items;
 
-  // EDGAR items participate too: an S-3 filing is a dilution-risk signal the
-  // wire services often never write a headline for.
-  const allItems = [...finnhub, ...yahoo, ...edgar]
-    .filter(n => n.headline)
-    .map(n => ({ headline: n.headline, ts: toMs(n.datetime) }));
+  // The same story reaches us from more than one source now, and the classifier
+  // counts corroboration — two copies of one headline would read as two outlets
+  // independently confirming it. Deduplicated on the normalised headline, with
+  // the earliest timestamp kept, since that is when the story actually broke.
+  const seen = new Map();
+  for (const n of [...tradingview, ...yahoo, ...edgar]) {
+    if (!n.headline) continue;
+    const key = normalizeHeadline(n.headline);
+    const ts = toMs(n.datetime);
+    const prev = seen.get(key);
+    if (!prev || (ts && prev.ts && ts < prev.ts)) seen.set(key, { headline: n.headline, ts });
+  }
+  const allItems = [...seen.values()];
 
   const catalyst = classifyCatalyst(allItems);
 
   // Kept beside the items, and stored on the card, so "no news" can be read as
-  // what it is: a quiet stock, or a source that never answered.
+  // what it is: a quiet stock, or a source that never answered. `dropped` is
+  // the roundup count — worth seeing, because a source sending nothing but
+  // listings looks identical to a quiet one without it.
   const sources = {
-    finnhub: { status: fh.status, detail: fh.detail || null, count: finnhub.length },
-    yahoo: { status: yh.status, detail: yh.detail || null, count: yahoo.length },
-    edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length },
+    tradingview: { status: tv.status, detail: tv.detail || null, count: tradingview.length, dropped: tv.dropped || 0 },
+    yahoo: { status: yh.status, detail: yh.detail || null, count: yahoo.length, dropped: yh.dropped || 0 },
+    edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length, dropped: 0 },
   };
 
   return {
-    news: { finnhub, yahoo, edgar, sources, fetchedAt: new Date().toISOString() },
+    news: { tradingview, yahoo, edgar, sources, fetchedAt: new Date().toISOString() },
     catalyst,
   };
 }
 
-module.exports = { fetchNewsForTicker, classifyCatalyst, classifyCatalysts, CATALYST_PATTERNS };
+module.exports = {
+  fetchNewsForTicker, classifyCatalyst, classifyCatalysts, CATALYST_PATTERNS,
+  isRoundup, MAX_RELATED_SYMBOLS,
+};

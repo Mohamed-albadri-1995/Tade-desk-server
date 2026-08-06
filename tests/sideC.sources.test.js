@@ -1,149 +1,188 @@
 /*
- * Where the news comes from, and what happens when it doesn't come.
+ * Where the news comes from, what happens when it doesn't come, and what gets
+ * thrown away on the way in.
  *
- * These exist because of what 23 days of backups showed: 11,359 news items, every
- * one of them from Yahoo. Finnhub and EDGAR returned nothing on every day for
- * every stock — Finnhub because no API key was ever entered, EDGAR because the
- * SEC refuses requests that do not identify themselves and the request sent no
- * headers at all. Both failures were caught by a bare `catch { return []; }`,
- * which made a dead source and a quiet stock produce identical output.
+ * These exist because of what 23 days of backups showed: 11,359 news items,
+ * every one from Yahoo. Finnhub returned nothing on every day because no key
+ * was ever entered; EDGAR returned nothing because the SEC refuses requests
+ * that do not identify themselves. Both failures were caught by a bare
+ * `catch { return []; }`, which made a dead source and a quiet stock produce
+ * identical output for the entire history of the tool.
  *
- * A third of the news pipeline was switched off for the entire history of the
- * tool and nothing anywhere said so. The tests below are the alarm that was
- * missing: every fetcher must report HOW it did, not only what it found.
+ * And of what got through: 15% of delivered items were market listings — "Top
+ * Premarket Gainers", "BC-Most Active Stocks" — which report that a stock moved,
+ * the one thing the screener already knew, while feeding the catalyst
+ * classifier the exact words it hunts for.
+ *
+ * So: every fetcher reports HOW it did, and listings are removed by structure
+ * rather than by hoping the wording gives them away.
  */
 
 const axios = require('axios');
+const { fetchNewsForTicker, isRoundup, MAX_RELATED_SYMBOLS } = require('../src/sideC/news');
 
-let mockKey = '';
-jest.mock('../src/db', () => ({
-  prepare: () => ({ get: () => (mockKey ? { value: mockKey } : undefined) }),
-}));
+const TV = 'NASDAQ:AAA';
 
-const { fetchNewsForTicker } = require('../src/sideC/news');
+beforeEach(() => jest.restoreAllMocks());
 
-beforeEach(() => {
-  mockKey = '';
-  delete process.env.FINNHUB_API_KEY;
-  jest.restoreAllMocks();
-});
-
-// Route each host to its own canned answer, so one source can fail while the
-// others succeed — which is the situation that actually occurred.
-function mockHosts({ finnhub, yahoo, edgar }) {
+function mockHosts({ tv, yahoo, edgar }) {
   jest.spyOn(axios, 'get').mockImplementation((url, opts) => {
-    if (url.includes('finnhub.io')) return finnhub(url, opts);
-    if (url.includes('yahoo')) return yahoo(url, opts);
-    if (url.includes('sec.gov')) return edgar(url, opts);
+    if (url.includes('tradingview')) return (tv || empty)(url, opts);
+    if (url.includes('yahoo')) return (yahoo || empty)(url, opts);
+    if (url.includes('sec.gov')) return (edgar || empty)(url, opts);
     return Promise.reject(new Error('unexpected host: ' + url));
   });
 }
-
-const okYahoo = () => Promise.resolve({ data: { news: [
-  { title: 'Shares jump', link: 'u', providerPublishTime: 1770000000, relatedTickers: ['AAA'] },
-] } });
-const denied = (code) => () => Promise.reject(Object.assign(new Error('x'), { response: { status: code } }));
 const empty = () => Promise.resolve({ data: {} });
+const denied = (code) => () => Promise.reject(Object.assign(new Error('x'), { response: { status: code } }));
+const tvStory = (over = {}) => ({
+  id: '1', title: 'Company wins FDA clearance', published: 1770000000,
+  link: 'https://x', relatedSymbols: [{ symbol: TV }], urgency: 2,
+  source: { name: 'Reuters' }, ...over,
+});
+const yahooStory = (over = {}) => ({
+  title: 'Company wins FDA clearance', link: 'u', providerPublishTime: 1770000000,
+  relatedTickers: ['AAA'], publisher: 'Reuters', ...over,
+});
 
 describe('a source reports how it did, not just what it found', () => {
 
-  test('no Finnhub key is reported as a missing key, not as no news', async () => {
-    mockHosts({ finnhub: empty, yahoo: okYahoo, edgar: empty });
-    const { news } = await fetchNewsForTicker('AAA');
-    expect(news.sources.finnhub.status).toBe('no-key');
-    expect(news.sources.finnhub.detail).toMatch(/Settings/);
-    expect(news.finnhub).toEqual([]);
-    // …and the source that did work is untouched by the one that didn't
-    expect(news.sources.yahoo.status).toBe('ok');
-    expect(news.yahoo).toHaveLength(1);
+  test('a row with no exchange-qualified symbol says so, rather than reporting no news', async () => {
+    mockHosts({ yahoo: () => Promise.resolve({ data: { news: [yahooStory()] } }) });
+    const { news } = await fetchNewsForTicker('AAA', undefined);
+    expect(news.sources.tradingview.status).toBe('no-symbol');
+    expect(news.tradingview).toEqual([]);
+    expect(news.yahoo).toHaveLength(1);          // the others carry on
   });
 
-  test('a key present means Finnhub is actually called', async () => {
-    mockKey = 'abc123';
+  test('TradingView is called with the exchange-qualified symbol', async () => {
     let called = null;
-    mockHosts({
-      finnhub: (url) => { called = url; return Promise.resolve({ data: [
-        { headline: 'FDA clearance', url: 'u', datetime: 1770000000 }] }); },
-      yahoo: okYahoo, edgar: empty,
-    });
-    const { news } = await fetchNewsForTicker('AAA');
-    expect(called).toContain('token=abc123');
-    expect(news.sources.finnhub.status).toBe('ok');
-    expect(news.finnhub[0].headline).toBe('FDA clearance');
+    mockHosts({ tv: (url) => { called = url; return Promise.resolve({ data: [tvStory()] }); } });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(decodeURIComponent(called)).toContain(TV);
+    expect(news.sources.tradingview.status).toBe('ok');
+    expect(news.tradingview[0].headline).toBe('Company wins FDA clearance');
   });
 
   // The specific bug: the SEC denies anonymous automated requests.
   test('the SEC request identifies itself, or it gets refused', async () => {
-    mockKey = 'k';
     let headers = null;
-    mockHosts({
-      finnhub: empty, yahoo: okYahoo,
-      edgar: (url, opts) => { headers = opts && opts.headers; return Promise.resolve({ data: { hits: { hits: [] } } }); },
-    });
-    await fetchNewsForTicker('AAA');
-    expect(headers).toBeTruthy();
-    expect(headers['User-Agent']).toBeTruthy();
+    mockHosts({ edgar: (url, opts) => { headers = opts && opts.headers; return Promise.resolve({ data: { hits: { hits: [] } } }); } });
+    await fetchNewsForTicker('AAA', TV);
+    expect(headers && headers['User-Agent']).toBeTruthy();
     expect(String(headers['User-Agent']).length).toBeGreaterThan(5);
   });
 
-  test('a 403 from the SEC is recorded as denied, not as silence', async () => {
-    mockHosts({ finnhub: empty, yahoo: okYahoo, edgar: denied(403) });
-    const { news } = await fetchNewsForTicker('AAA');
+  test('a 403 is recorded as denied, not as silence', async () => {
+    mockHosts({ edgar: denied(403) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
     expect(news.sources.edgar.status).toBe('denied');
     expect(news.sources.edgar.detail).toMatch(/403/);
   });
 
   test('rate limiting is its own answer', async () => {
-    mockKey = 'k';
-    mockHosts({ finnhub: denied(429), yahoo: okYahoo, edgar: empty });
-    const { news } = await fetchNewsForTicker('AAA');
-    expect(news.sources.finnhub.status).toBe('rate-limited');
+    mockHosts({ tv: denied(429) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.tradingview.status).toBe('rate-limited');
   });
 
   test('a timeout is distinguishable from an empty answer', async () => {
-    mockHosts({
-      finnhub: empty, edgar: empty,
-      yahoo: () => Promise.reject(Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })),
-    });
-    const { news } = await fetchNewsForTicker('AAA');
+    mockHosts({ yahoo: () => Promise.reject(Object.assign(new Error('t'), { code: 'ECONNABORTED' })) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
     expect(news.sources.yahoo.status).toBe('timeout');
   });
 
   // The distinction the whole change is for.
   test('a genuinely quiet stock is "ok", not an error', async () => {
-    mockKey = 'k';
     mockHosts({
-      finnhub: () => Promise.resolve({ data: [] }),
+      tv: () => Promise.resolve({ data: [] }),
       yahoo: () => Promise.resolve({ data: { news: [] } }),
       edgar: () => Promise.resolve({ data: { hits: { hits: [] } } }),
     });
-    const { news } = await fetchNewsForTicker('AAA');
-    for (const s of ['finnhub', 'yahoo', 'edgar']) {
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    for (const s of ['tradingview', 'yahoo', 'edgar']) {
       expect(news.sources[s].status).toBe('ok');
       expect(news.sources[s].count).toBe(0);
     }
   });
 
   test('one source failing does not lose the others', async () => {
-    mockKey = 'k';   // or Finnhub short-circuits on no-key before it can be denied
-    mockHosts({ finnhub: denied(401), yahoo: okYahoo, edgar: denied(403) });
-    const { news } = await fetchNewsForTicker('AAA');
+    mockHosts({ tv: denied(500), yahoo: () => Promise.resolve({ data: { news: [yahooStory()] } }), edgar: denied(403) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
     expect(news.yahoo).toHaveLength(1);
-    expect(news.sources.finnhub.status).toBe('denied');
+    expect(news.sources.tradingview.status).toBe('error');
     expect(news.sources.edgar.status).toBe('denied');
-    expect(news.sources.yahoo.count).toBe(1);
   });
 
-  test('EDGAR filings still become items when the request succeeds', async () => {
+  test('Finnhub is gone entirely — no call, no source entry', async () => {
+    const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(spy.mock.calls.every(c => !String(c[0]).includes('finnhub'))).toBe(true);
+    expect(news.sources.finnhub).toBeUndefined();
+  });
+});
+
+describe('market listings are removed on the way in', () => {
+
+  test('a story tagged to more symbols than a story can be about is a listing', () => {
+    const many = MAX_RELATED_SYMBOLS + 1;
+    expect(isRoundup('Some perfectly normal headline', many)).toBe(true);
+    expect(isRoundup('Some perfectly normal headline', 2)).toBe(false);
+  });
+
+  // These four accounted for most of the 177 that got through.
+  test.each([
+    'Top Premarket Gainers',
+    'BC-Most Active Stocks',
+    'Top Premarket Decliners',
+    'Top Midday Gainers',
+  ])('%s is caught even when the symbol list is small', (headline) => {
+    expect(isRoundup(headline, 1)).toBe(true);
+  });
+
+  test('a real story is not caught by the word list', () => {
+    for (const h of [
+      'Pfizer wins FDA approval for gene therapy',
+      'Shares surge after Q2 earnings beat',
+      'Company announces $200M offering',
+      'Analyst upgrades stock to buy',
+    ]) expect(isRoundup(h, 1)).toBe(false);
+  });
+
+  test('TradingView listings are dropped and counted', async () => {
+    const wide = Array.from({ length: 40 }, (_, i) => ({ symbol: `X${i}` }));
+    mockHosts({ tv: () => Promise.resolve({ data: [
+      tvStory({ title: 'Top Premarket Gainers', relatedSymbols: wide }),
+      tvStory(),
+    ] }) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.tradingview).toHaveLength(1);
+    expect(news.tradingview[0].headline).toBe('Company wins FDA clearance');
+    expect(news.sources.tradingview.dropped).toBe(1);
+  });
+
+  // Yahoo tags its listings with every ticker in them, so requiring its own tag
+  // never excluded them — the listing passes on the very stock it buries.
+  test('a Yahoo listing tagged with this ticker is still dropped', async () => {
+    mockHosts({ yahoo: () => Promise.resolve({ data: { news: [
+      yahooStory({ title: 'Top Premarket Gainers', relatedTickers: ['AAA', 'BBB', 'CCC'] }),
+      yahooStory(),
+    ] } }) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.yahoo).toHaveLength(1);
+    expect(news.sources.yahoo.dropped).toBe(1);
+  });
+
+  test('the same story from two sources is counted once', async () => {
+    // Otherwise the classifier reads it as two outlets independently
+    // corroborating one event, and rates it higher for being duplicated.
     mockHosts({
-      finnhub: empty, yahoo: () => Promise.resolve({ data: { news: [] } }),
-      edgar: () => Promise.resolve({ data: { hits: { hits: [
-        { _id: 'x', _source: { form_type: '8-K', period_of_report: '2026-08-04', entity_id: '1' } },
-      ] } } }),
+      tv: () => Promise.resolve({ data: [tvStory()] }),
+      yahoo: () => Promise.resolve({ data: { news: [yahooStory()] } }),
     });
-    const { news } = await fetchNewsForTicker('AAA');
-    expect(news.edgar).toHaveLength(1);
-    expect(news.edgar[0].headline).toContain('8-K');
-    expect(news.sources.edgar.count).toBe(1);
+    const { news, catalyst } = await fetchNewsForTicker('AAA', TV);
+    expect(news.tradingview).toHaveLength(1);
+    expect(news.yahoo).toHaveLength(1);          // both keep their own copy to show
+    if (catalyst) expect(catalyst.corroboration || 1).toBe(1);
   });
 });

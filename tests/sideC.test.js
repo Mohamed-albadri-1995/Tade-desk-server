@@ -341,9 +341,54 @@ describe('Side C — auto bias from catalyst type', () => {
       .toMatchObject({ bias: 'long', source: 'context' });
   });
 
-  test('no catalyst → context logic unchanged (default long)', () => {
-    expect(resolveAutoBias({ bias: 'auto', context: {} }).bias).toBe('long');
+  test('no catalyst → the tape decides, when the tape says anything', () => {
     expect(resolveAutoBias({ bias: 'auto', context: bearCtx }).bias).toBe('short');
+    expect(resolveAutoBias({ bias: 'auto', context: bullCtx }).bias).toBe('long');
+  });
+
+  /*
+   * This used to end `return 'long'` and this test used to assert it. An empty
+   * context means the short-term trend, the sector and the long-term view all
+   * declined to answer — that is the absence of a bias, and returning one
+   * anyway made it indistinguishable on the card from a read that was earned.
+   * The nine cards biased this way in the backups went 0 for 9.
+   */
+  test('nothing to go on → no bias, rather than a default', () => {
+    const r = resolveAutoBias({ bias: 'auto', context: {} });
+    expect(r.bias).toBeNull();
+    expect(r.source).toBe('none');
+  });
+
+  test('a partial context still answers when one leg is clear', () => {
+    expect(resolveAutoBias({ bias: 'auto', context: { longTerm: 'BULLISH' } }).bias).toBe('long');
+    expect(resolveAutoBias({ bias: 'auto', context: { longTerm: 'BEARISH' } }).bias).toBe('short');
+    expect(resolveAutoBias({ bias: 'auto', context: { shortTerm: 'NEUTRAL', secBias: 'NEUTRAL' } }).bias).toBeNull();
+  });
+
+  /*
+   * A technical catalyst is the screener's own filter restated — "Gap Up" on a
+   * gap screener, where every stock gapped. 39 of 100 catalysts in the backups
+   * were technicals, 30 of them Gap Up, and each set a bias at tier 2.
+   */
+  test('a technical catalyst does not set bias', () => {
+    const tech = { label: 'Gap Up', sentiment: 'bull', tier: 2, stale: false, source: 'technical' };
+    // …even when the tape would not have given a direction on its own
+    const r = resolveAutoBias({ bias: 'auto', catalyst: tech, context: {} });
+    expect(r.bias).toBeNull();
+    expect(r.source).toBe('none');
+    // …and even at tier 1
+    const major = { ...tech, tier: 1 };
+    expect(resolveAutoBias({ bias: 'auto', catalyst: major, context: {} }).bias).toBeNull();
+    // the same catalyst from a story still does
+    const story = { ...tech, source: 'news' };
+    expect(resolveAutoBias({ bias: 'auto', catalyst: story, context: {} }))
+      .toMatchObject({ bias: 'long', source: 'catalyst' });
+  });
+
+  test('a technical catalyst never overrides the tape either', () => {
+    const tech = { label: 'Gap Up', sentiment: 'bull', tier: 1, stale: false, source: 'technical' };
+    expect(resolveAutoBias({ bias: 'auto', catalyst: tech, context: bearCtx }))
+      .toMatchObject({ bias: 'short', source: 'context' });
   });
 });
 

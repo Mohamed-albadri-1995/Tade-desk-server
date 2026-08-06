@@ -505,6 +505,12 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   border: 1px solid #fb923c33; border-radius: 4px; padding: 4px 7px; margin-bottom: 6px;
   line-height: 1.5; }
 .news-none { font-size: 11px; color: var(--text3); padding: 2px 0; }
+/* The tape restated. Neutral because it is not a claim about what happens
+   next — see catalystBadgeHTML. */
+.badge-tape { background:#ffffff08; color:var(--text2); border:1px solid var(--border);
+  text-transform:none; letter-spacing:0; }
+/* Bias with nothing behind it says so. */
+.bias-noread { opacity:.75; font-style:italic; }
 
 /* ── MARKET TAB ── */
 .market-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 16px; }
@@ -1236,9 +1242,14 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <div class="settings-section-title">API Keys</div>
         <div class="settings-grid">
           <div class="settings-field">
-            <label>Finnhub API Key</label>
-            <div class="settings-hint" id="finnhub-status">Loading…</div>
-            <input type="password" class="settings-input" id="s-finnhubApiKey" placeholder="Paste new key to update" autocomplete="off">
+            <label>News sources</label>
+            <!-- No key to enter. TradingView's headline feed and the SEC's
+                 filing search are both public, and Yahoo's search endpoint
+                 needs no credential. Finnhub used to live here; it never
+                 returned an item in 23 days and what it does return is mostly
+                 listings rather than company news, so it was removed rather
+                 than fixed. -->
+            <div class="settings-hint">TradingView · Yahoo · SEC EDGAR — all public, no key needed.</div>
           </div>
           <div class="settings-field">
             <label>GitHub Backup Token</label>
@@ -1247,12 +1258,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
-          <button class="settings-save-btn" onclick="saveSettings(['finnhubApiKey','githubBackupToken'], this)">Save API Keys</button>
-          <button class="settings-reset-btn" onclick="testKey('finnhub','test-finnhub')">Test Finnhub</button>
+          <button class="settings-save-btn" onclick="saveSettings(['githubBackupToken'], this)">Save API Keys</button>
           <button class="settings-reset-btn" onclick="testKey('github','test-github')">Test GitHub</button>
         </div>
         <span class="settings-msg" id="msg-api"></span>
-        <div id="test-finnhub" class="settings-test-result"></div>
         <div id="test-github" class="settings-test-result"></div>
       </div>
 
@@ -1840,7 +1849,7 @@ const MSG_IDS = {
   hotSustainedSessions: 'msg-hot', hotFloorThreshold: 'msg-hot', coolOffDays: 'msg-hot',
   sectorBullishThreshold: 'msg-bias', sectorBearishThreshold: 'msg-bias',
   shortlistMinScore: 'msg-shortlist', shortlistTopN: 'msg-shortlist',
-  finnhubApiKey: 'msg-api', githubBackupToken: 'msg-api',
+  githubBackupToken: 'msg-api',
   aiApiKey: 'msg-ai', aiModel: 'msg-ai',
   scorerEntryTime: 'msg-scorer',
   regimeSampleThreshold: 'msg-scorer',
@@ -1953,11 +1962,7 @@ async function loadSettings() {
     for (const [key, val] of Object.entries(settings)) {
       const el = document.getElementById('s-' + key);
       if (!el) continue;
-      if (key === 'finnhubApiKey') {
-        document.getElementById('finnhub-status').textContent =
-          val === 'set' ? 'Key is set on server' : 'No key set — news fetch disabled';
-        el.placeholder = val === 'set' ? 'Paste new key to replace' : 'Paste key here';
-      } else if (key === 'githubBackupToken') {
+else if (key === 'githubBackupToken') {
         document.getElementById('github-token-status').textContent =
           val === 'set' ? 'Token is set — auto-backup enabled' : 'No token — backup disabled';
         el.placeholder = val === 'set' ? 'Paste new token to replace' : 'Paste GitHub PAT here';
@@ -1991,7 +1996,7 @@ async function saveSettings(keys, btn) {
     const el = document.getElementById('s-' + key);
     if (!el) continue;
     const v = el.value.trim();
-    if (['finnhubApiKey','githubBackupToken','aiApiKey'].includes(key) && v === '') continue; // skip if left blank
+    if (['githubBackupToken','aiApiKey'].includes(key) && v === '') continue; // skip if left blank
     body[key] = el.type === 'number' ? Number(v) : v;
   }
   if (Object.keys(body).length === 0) return;
@@ -2010,11 +2015,6 @@ async function saveSettings(keys, btn) {
     if (data.ok) {
       msgEl.textContent = 'Saved';
       msgEl.style.color = 'var(--green)';
-      if (body.finnhubApiKey) {
-        document.getElementById('finnhub-status').textContent = 'Key is set on server';
-        document.getElementById('s-finnhubApiKey').value = '';
-        document.getElementById('s-finnhubApiKey').placeholder = 'Paste new key to replace';
-      }
       if (body.githubBackupToken) {
         document.getElementById('github-token-status').textContent = 'Token is set — auto-backup enabled';
         document.getElementById('s-githubBackupToken').value = '';
@@ -2561,7 +2561,10 @@ function seenList(row) {
 function newsState(row) {
   const n = row.news;
   if (!n) return 'unchecked';
-  const count = (n.finnhub || []).length + (n.yahoo || []).length + (n.edgar || []).length;
+  // `finnhub` is read for cards frozen before it was replaced by TradingView —
+  // an old card should still report what it actually had.
+  const count = (n.tradingview || []).length + (n.yahoo || []).length
+              + (n.edgar || []).length + (n.finnhub || []).length;
   return count > 0 ? 'has' : 'none';
 }
 
@@ -2753,9 +2756,21 @@ function catalystBadgeHTML(c) {
   // Old-format catalysts (pre-v2 rows restored from checkpoint) have no tier
   // — render them the way the old UI did (⚡) rather than as minor.
   const tier = c.tier || 1;
-  const icon = c.source === 'technical' ? '📈' : tier === 1 ? '⚡' : tier === 2 ? '●' : '·';
+  const tech = c.source === 'technical';
+  const icon = tech ? '📈' : tier === 1 ? '⚡' : tier === 2 ? '●' : '·';
   const dim = c.stale ? 'opacity:0.55;' : '';
   const extra = c.others && c.others.length ? ` <span style="opacity:0.7">+${c.others.length}</span>` : '';
+  /*
+   * A technical catalyst is a description of what the tape just did, and on a
+   * screener that filtered for exactly that, it is the filter read back. Over
+   * 23 days 30 of them were "Gap Up" — on gap screeners, where every stock
+   * gapped. It no longer sets bias (see sideC/bias.js), and it should not look
+   * like the ones that do: neutral, and labelled as the tape rather than as a
+   * reason.
+   */
+  if (tech) {
+    return `<span class="badge badge-tape" title="${catalystTitle(c)} — this is the tape, not a story: it describes the move rather than explaining it, and does not set bias">${icon} ${c.label}${extra}</span>`;
+  }
   return `<span class="badge badge-catalyst" title="${catalystTitle(c)}" style="${dim}background:${c.color}20;color:${c.color};border:1px solid ${c.color}40">${icon} ${c.label}${extra}</span>`;
 }
 
@@ -2955,7 +2970,7 @@ function buildCard(row) {
       url: n.url || null,
     }));
     newsItems = [
-      ...pick(news.finnhub, 'FH', ['headline', 'summary']),
+      ...pick(news.tradingview, 'TV', ['headline', 'summary']),
       ...pick(news.yahoo, 'YH', ['title', 'headline']),
       ...pick(news.edgar, 'SEC', ['title', 'headline']),
     ].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 5);
@@ -3007,6 +3022,9 @@ function buildCard(row) {
   const bias = row.bias || 'auto';
   const biasLabels = { auto: '⊙ AUTO', long: '▲ LONG', short: '▼ SHORT' };
   // Auto-computed: derive from context when bias='auto'
+  // Mirrors contextBias() in src/sideC/bias.js — including the null. This runs
+  // only for a row that has not been through Side C yet; if it ends in a
+  // default the card shows a direction the server would not have given it.
   function computeAutoBias(ctx) {
     const short = ctx.shortTerm;
     const sec = ctx.secBias;
@@ -3016,14 +3034,25 @@ function buildCard(row) {
     if (sec === 'BEARISH' && short !== 'BULLISH') return 'short';
     if (short === 'BULLISH' || sec === 'BULLISH') return 'long';
     if (lt === 'BEARISH') return 'short';
-    return 'long';
+    if (lt === 'BULLISH') return 'long';
+    return null;
   }
   // Prefer the server-resolved auto bias (catalyst-aware); fall back to the
   // local context-only derivation when the row hasn't been through Side C yet.
-  const autoBiasResult = bias === 'auto' ? (row.autoBias?.bias || computeAutoBias(ctx)) : null;
+  // `autoBias` may exist with bias:null — "asked, nothing to say" — which is
+  // not the same as "not asked yet", so the presence of the object decides
+  // whether to fall back rather than the truthiness of the direction.
+  const autoBiasResult = bias === 'auto'
+    ? (row.autoBias ? row.autoBias.bias : computeAutoBias(ctx))
+    : null;
   const autoBiasSrc = bias === 'auto' && row.autoBias?.source === 'catalyst' ? ' ⚡' : '';
   const autoBiasTitle = row.autoBias?.reason ? ` title="auto: ${esc(row.autoBias.reason)}"` : '';
-  const autoLabel = autoBiasResult ? ` <span class="bias-auto-label"${autoBiasTitle}>(${autoBiasResult}${autoBiasSrc})</span>` : '';
+  // No direction is a result, not a blank. Saying so beats an empty bracket,
+  // and beats the "(long)" this used to print when nothing pointed anywhere.
+  const autoLabel = bias !== 'auto' ? ''
+    : autoBiasResult
+      ? ` <span class="bias-auto-label"${autoBiasTitle}>(${autoBiasResult}${autoBiasSrc})</span>`
+      : ` <span class="bias-auto-label bias-noread"${autoBiasTitle || ' title="nothing in the catalyst or the tape points either way"'}>(no read)</span>`;
   const biasHTML = `<button class="bias-btn bias-${bias}" onclick="cycleBias('${row.ticker}',this)">${biasLabels[bias]}${autoLabel}</button>`;
 
   return `
@@ -3224,7 +3253,7 @@ async function loadNews(ticker, btn) {
     // re-render just the news section
     let items = [];
     if (d.news) {
-      const fh = (d.news.finnhub||[]).slice(0,2).map(n => ({ src:'FH', h: n.headline||n.summary||'' }));
+      const fh = (d.news.tradingview||[]).slice(0,2).map(n => ({ src:'TV', h: n.headline||n.summary||'' }));
       const yh = (d.news.yahoo||[]).slice(0,2).map(n => ({ src:'YH', h: n.title||n.headline||'' }));
       const eg = (d.news.edgar||[]).slice(0,2).map(n => ({ src:'SEC', h: n.title||n.headline||'' }));
       items = [...fh, ...yh, ...eg].slice(0,5);

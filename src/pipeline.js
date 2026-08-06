@@ -163,7 +163,9 @@ async function runFullScan() {
     await stageWrapSoft(report, 'sideC', async () => {
       const liveRows = r0.getAll().filter(r => r.liveNow);
       const results = await Promise.allSettled(
-        liveRows.map(row => fetchNewsForTicker(row.ticker).then(({ news, catalyst }) => {
+        // tvSymbol is the exchange-qualified form (NASDAQ:AAPL) TradingView's
+        // headline endpoint requires; a bare ticker gets a 400 back.
+        liveRows.map(row => fetchNewsForTicker(row.ticker, row.stock && row.stock.tvSymbol).then(({ news, catalyst }) => {
           r0.updateNews(row.ticker, news, combineCatalyst(catalyst, row.stock));
         }))
       );

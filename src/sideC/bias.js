@@ -15,6 +15,19 @@
  *     behavior, as the fallback.
  */
 
+/**
+ * Direction from the tape, or null when the tape is not saying anything.
+ *
+ * This used to end `return 'long'` — a default, reached when the short-term
+ * trend, the sector and the long-term view had all declined to answer. That is
+ * not a bias, it is the absence of one wearing a bias's clothes, and the card
+ * showed it the same way it showed a real read. Across the backups the nine
+ * cards biased this way went 0 for 9.
+ *
+ * Null now, and the card says "no read" rather than inventing one. An opinion
+ * manufactured from no evidence is worse than no opinion, because it is
+ * indistinguishable from one that was earned.
+ */
 function contextBias(ctx) {
   const short = ctx?.shortTerm;
   const sec = ctx?.secBias;
@@ -24,7 +37,8 @@ function contextBias(ctx) {
   if (sec === 'BEARISH' && short !== 'BULLISH') return 'short';
   if (short === 'BULLISH' || sec === 'BULLISH') return 'long';
   if (lt === 'BEARISH') return 'short';
-  return 'long'; // default to Long in uptrend regimes
+  if (lt === 'BULLISH') return 'long';
+  return null;
 }
 
 /**
@@ -39,7 +53,21 @@ function resolveAutoBias(row) {
 
   const cat = row?.catalyst;
   const ctx = row?.context || {};
-  if (cat && (cat.sentiment === 'bull' || cat.sentiment === 'bear') && !cat.stale) {
+
+  /*
+   * A technical catalyst must not set direction.
+   *
+   * "Gap Up" on a gap screener is the screener's own filter read back as if it
+   * were news — every stock on that list gapped, so it separates nothing. Over
+   * 23 days, 39 of 100 catalysts were technicals and 30 of those were literally
+   * Gap Up; they are tier 2, so each one was setting a bias. Those cards ran
+   * -0.06R net while the news-sourced ones ran +0.18R.
+   *
+   * They stay on the card — the tape moving hard is worth seeing — but as a
+   * description of what happened, not a prediction of what happens next.
+   */
+  const fromNews = cat && cat.source !== 'technical';
+  if (fromNews && (cat.sentiment === 'bull' || cat.sentiment === 'bear') && !cat.stale) {
     const dir = cat.sentiment === 'bull' ? 'long' : 'short';
     if (cat.tier === 1) {
       return { bias: dir, source: 'catalyst', reason: `${cat.label} (major)` };
@@ -53,7 +81,12 @@ function resolveAutoBias(row) {
     }
   }
 
-  return { bias: contextBias(ctx), source: 'context', reason: 'trend/sector context' };
+  const ctxDir = contextBias(ctx);
+  if (ctxDir) return { bias: ctxDir, source: 'context', reason: 'trend/sector context' };
+
+  // Nothing said anything. That is an answer, and a more useful one than a
+  // coin-flip dressed as a read.
+  return { bias: null, source: 'none', reason: 'no directional evidence' };
 }
 
 module.exports = { resolveAutoBias, contextBias };

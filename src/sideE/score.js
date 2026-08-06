@@ -21,6 +21,16 @@ const {
 
 // Maps r0 bias field → LiveScorer bias string. Manual bias wins, then a
 // fresh directional catalyst, then trend/sector context (see sideC/bias.js).
+//
+// resolveAutoBias can now answer null — no directional evidence — and the card
+// shows that honestly rather than inventing a direction. The scorer cannot:
+// it has to choose a lookup table, and there are only two. Long is the choice
+// for "unknown", because it is what the table was built from — the screeners
+// hunt strength and the long side is where nearly all the training rows are.
+//
+// This is a different question from the one the card answers. The card says
+// "which way should I trade this", and "I don't know" is a real answer there.
+// This says "which table do I read the score from", where it is not.
 function resolveCardBias(row) {
   return resolveAutoBias(row).bias === 'short' ? 'Short' : 'Long';
 }
