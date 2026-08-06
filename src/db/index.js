@@ -103,6 +103,8 @@ db.exec(`
     sort TEXT,
     limit_n INTEGER NOT NULL DEFAULT 50,
     run_from TEXT,
+    check_from TEXT,
+    check_to TEXT,
     run_to TEXT,
     mirror_of TEXT,
     updated_at INTEGER NOT NULL
@@ -155,6 +157,10 @@ function ensureColumns(table, columns) {
 
 // Run windows, added after the first tools were already running.
 ensureColumns('screeners', { run_from: 'TEXT', run_to: 'TEXT' });
+// When it is worth OPENING the tool, as opposed to when the screener scans.
+// They are not the same thing and conflating them is why the pre-market gap
+// screener looked worth checking at 04:30, when it had found nothing yet.
+ensureColumns('screeners', { check_from: 'TEXT', check_to: 'TEXT' });
 
 // Which screener a mirror was made from. Recorded rather than inferred from the
 // name: the pairing used to be read off a "(mirror)" suffix, so renaming a

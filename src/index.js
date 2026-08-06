@@ -53,10 +53,31 @@ app.get('/api/tools', (req, res) => res.json({
   ok: true, tools: config.tools, apps: config.apps,
 }));
 
-// Health — reports which tool answered, so probing the wrong port is obvious
-app.get('/health', (req, res) => res.json({
-  ok: true, tool: config.toolId, name: config.toolName, ts: Date.now(),
-}));
+// Health — reports which tool answered, so probing the wrong port is obvious.
+// It also carries when this tool is worth OPENING, because the landing page
+// lists nine of them and the useful question there is "which of these should I
+// be looking at right now" rather than "which are running".
+app.get('/health', (req, res) => {
+  let check = null;
+  try {
+    const store = require('./sideA/screenerStore');
+    const list = store.list({ enabledOnly: true });
+    const w = store.checkWindow(list);
+    check = w ? {
+      from: w.from, to: w.to,
+      now: list.some(s => store.isWorthCheckingAt(s)),
+      screeners: list.map(s => ({
+        name: s.name,
+        from: s.checkFrom || s.runFrom || '04:00',
+        to: s.checkTo || s.runTo || '16:00',
+        now: store.isWorthCheckingAt(s),
+      })),
+    } : null;
+  } catch { /* a tool with no screeners yet still answers */ }
+  res.json({
+    ok: true, tool: config.toolId, name: config.toolName, ts: Date.now(), check,
+  });
+});
 
 // Landing page
 app.get('/', (req, res) => {

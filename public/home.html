@@ -83,6 +83,16 @@ body {
         border:1px solid var(--border); border-radius:4px; padding:2px 7px; }
 .arrow { position:absolute; right:18px; bottom:16px; color:var(--accent); font-size:16px; }
 
+/* ── when this tool is worth opening ──
+   Nine tools on one page and only two or three are useful at any given hour.
+   "check 08:00–09:30" is the answer to the question actually being asked here,
+   which is not "is it running" but "should I be looking at it now". */
+.check { font-size:10.5px; border-radius:4px; padding:2px 7px; margin-top:2px;
+  align-self:flex-start; border:1px solid var(--border);
+  color:var(--text3); background:var(--bg3); }
+.check.now { color:#052e16; background:var(--green); border-color:var(--green); font-weight:700; }
+.tool-card.asleep { opacity:.72; }
+
 /* ── month-end comparison ── */
 .cmp-wrap { margin-top:34px; width:100%; max-width:1000px; text-align:center; }
 .cmp-btn { font:600 13px/1 inherit; padding:10px 20px; border-radius:6px; cursor:pointer;
@@ -233,8 +243,24 @@ function renderApps() {
   el.innerHTML = APPS.map(appCard).join('');
 }
 
-function card(t, state, info) {
-  const cls = state === 'down' ? 'down' : '';
+/*
+ * "Check 08:00–09:30" — the hours this tool is worth OPENING, which is a
+ * different question from the hours it runs. T7 scans pre-market and there is
+ * nothing to look at afterwards; T6 needs the session to build the extension it
+ * fades, so opening it at 09:35 shows an empty list and a wasted trip. The
+ * window comes from the tool's own screeners rather than a table written here,
+ * so editing a screener's window moves this line with it.
+ */
+function checkLine(check) {
+  if (!check) return '';
+  return `<span class="check${check.now ? ' now' : ''}" title="${
+    (check.screeners || []).map(s => `${s.name}: ${s.from}–${s.to}`).join('\n')
+  }">${check.now ? '● CHECK NOW' : 'check'} ${check.from}–${check.to} ET</span>`;
+}
+
+function card(t, state, info, check) {
+  const cls = (state === 'down' ? 'down' : '')
+    + (state === 'up' && check && !check.now ? ' asleep' : '');
   const label = { up:'online', down:'offline', wait:'checking' }[state];
   const stats = [];
   if (info && info.rows != null) stats.push(`${info.rows} live`);
@@ -250,6 +276,7 @@ function card(t, state, info) {
         <div class="status ${state}"><span class="dot"></span>${label}</div>
       </div>
       <div class="card-desc">${t.desc}</div>
+      ${checkLine(check)}
       <div class="stats">${stats.map(s => `<span class="stat">${s}</span>`).join('')}</div>
       <span class="arrow">→</span>
     </a>`;
@@ -257,7 +284,7 @@ function card(t, state, info) {
 
 function render(states) {
   document.getElementById('cards').innerHTML =
-    TOOLS.map(t => card(t, states[t.id].state, states[t.id].info)).join('');
+    TOOLS.map(t => card(t, states[t.id].state, states[t.id].info, states[t.id].check)).join('');
 }
 
 const states = {};
@@ -269,8 +296,10 @@ async function probe(t) {
     const r = await fetch(`${baseFor(t)}/health`, { signal: ctl.signal });
     clearTimeout(timer);
     if (!r.ok) throw new Error('bad status');
-    await r.json();
-    states[t.id] = { state:'up', info:null };
+    const h = await r.json();
+    // The tool computes "now" against its own clock, not the phone's — the
+    // phone travels and the market does not.
+    states[t.id] = { state:'up', info:null, check: h.check || null };
 
     // Best-effort extras — a tool that is up but still warming up should not
     // be shown as down just because these are not ready yet.
@@ -285,7 +314,7 @@ async function probe(t) {
       };
     } catch { /* leave info null */ }
   } catch {
-    states[t.id] = { state:'down', info:null };
+    states[t.id] = { state:'down', info:null, check:null };
   }
   render(states);
 }
@@ -304,7 +333,7 @@ async function start() {
       '<div class="note">Could not load the tool list.</div>';
     return;
   }
-  TOOLS.forEach(t => { states[t.id] = { state:'wait', info:null }; });
+  TOOLS.forEach(t => { states[t.id] = { state:'wait', info:null, check:null }; });
   render(states);
   TOOLS.forEach(probe);
   setInterval(() => TOOLS.forEach(probe), 30000);

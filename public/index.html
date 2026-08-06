@@ -114,7 +114,9 @@ body.sunlight .sig, body.sunlight .badge { font-weight: 700; }
 body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; min-height: 100vh; }
 
 /* ── HEADER ── */
-.header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); }
+/* Wraps rather than overflowing: on a phone the buttons plus the check badge
+   are wider than the screen, and the badge is the thing you came to read. */
+.header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .header-logo { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 0.05em; }
 /* ── tool switcher ── */
 .tool-switch { position: relative; }
@@ -141,6 +143,15 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .tool-item .tcheck { color:var(--accent); font-size:11px; }
 .tool-menu-foot { border-top:1px solid #2a2f3f; margin-top:5px; padding-top:5px; }
 .header-status { font-size: 11px; color: var(--text3); margin-left: auto; }
+/* ── "check now" vs "come back later" ──
+   Nine tools, and each is useful for a couple of hours a day. Green means the
+   list in front of you is worth reading right now; grey means it will be, at
+   the stated time, and what is on screen is history. */
+.check-badge { margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  border-radius: 5px; padding: 4px 10px; border: 1px solid var(--border);
+  color: var(--text3); background: var(--bg3); white-space: nowrap; }
+.check-badge.now { color: #052e16; background: var(--green); border-color: var(--green); }
+.check-badge + .header-status { margin-left: 12px; }
 .scan-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit; transition: opacity .15s; }
 .scan-btn:hover { opacity: .85; }
 .scan-btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -850,6 +861,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   <button class="scan-btn" id="scan-btn" onclick="runScan()">▶ Run Scan</button>
   <button class="sun-btn" id="sun-btn" onclick="toggleSunlight()"
           title="high contrast, for reading the screen outdoors">☀</button>
+  <!-- When this tool is worth OPENING, as opposed to when it runs. Kept in the
+       header rather than the Screeners tab because it answers a question you
+       have on arrival, not one you go looking for. -->
+  <div class="check-badge" id="check-badge" hidden></div>
   <div class="header-status" id="header-status">—</div>
 </div>
 
@@ -1207,6 +1222,43 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <button class="settings-save-btn" onclick="saveSettings(['hotImmediateThreshold','hotSustainedThreshold','hotSustainedSessions','hotFloorThreshold','coolOffDays'], this)">Save Hot Sector</button>
         <button class="settings-reset-btn" onclick="resetHotState(this)">Reset Hot State</button>
         <span class="settings-msg" id="msg-hot"></span>
+      </div>
+
+      <!-- Tradability floor -->
+      <!-- These four are added to EVERY screener at scan time, so they are the
+           only rules that are true of the whole tool. They were described on
+           the Screeners tab but had no fields anywhere, which made "change them
+           in Settings" an instruction that could not be followed. -->
+      <div class="settings-section">
+        <div class="settings-section-title">Tradability floor — every screener, every tool</div>
+        <div class="settings-hint" style="margin:-4px 0 12px">
+          Not a strategy, a precondition: too cheap, too thin, or too little daily range and the
+          setup does not matter. Set any one to <b>0</b> to switch that leg off.
+        </div>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label>Minimum price ($)</label>
+            <div class="settings-hint">Below this the spread eats the trade</div>
+            <input type="number" class="settings-input" id="s-minPrice" min="0" max="10000" step="0.5">
+          </div>
+          <div class="settings-field">
+            <label>Minimum average volume (shares/day)</label>
+            <div class="settings-hint">10-day average — can you get out of the position?</div>
+            <input type="number" class="settings-input" id="s-minAvgVolume" min="0" max="100000000" step="100000">
+          </div>
+          <div class="settings-field">
+            <label>Minimum ADR ($)</label>
+            <div class="settings-hint">ATR(14) in dollars — is there room to pay for the risk?</div>
+            <input type="number" class="settings-input" id="s-minAtr" min="0" max="100" step="0.25">
+          </div>
+          <div class="settings-field">
+            <label>Minimum ADR (% of price)</label>
+            <div class="settings-hint">Range relative to the stock — a $2 ADR on a $200 stock is nothing</div>
+            <input type="number" class="settings-input" id="s-minAtrPct" min="0" max="100" step="0.5">
+          </div>
+        </div>
+        <button class="settings-save-btn" onclick="saveSettings(['minPrice','minAvgVolume','minAtr','minAtrPct'], this)">Save Floor</button>
+        <span class="settings-msg" id="msg-floor"></span>
       </div>
 
       <!-- Sector Bias Thresholds -->
@@ -1857,6 +1909,7 @@ async function anUploadCSV(register) {
 const MSG_IDS = {
   hotImmediateThreshold: 'msg-hot', hotSustainedThreshold: 'msg-hot',
   hotSustainedSessions: 'msg-hot', hotFloorThreshold: 'msg-hot', coolOffDays: 'msg-hot',
+  minPrice: 'msg-floor', minAvgVolume: 'msg-floor', minAtr: 'msg-floor', minAtrPct: 'msg-floor',
   sectorBullishThreshold: 'msg-bias', sectorBearishThreshold: 'msg-bias',
   shortlistMinScore: 'msg-shortlist', shortlistTopN: 'msg-shortlist',
   githubBackupToken: 'msg-api',
@@ -1925,7 +1978,13 @@ const AI_PROVIDERS = {
 };
 
 function onAiProviderChange() {
-  const provider = document.getElementById('s-aiProvider').value;
+  // The AI section is optional and is not on every build of this page. Without
+  // this guard the throw lands inside loadSettings' loop and every field after
+  // it stays blank — which is how the tradability floor could read as unset
+  // while every scan was applying it.
+  const sel = document.getElementById('s-aiProvider');
+  if (!sel) return;
+  const provider = sel.value;
   const cfg = AI_PROVIDERS[provider];
   document.getElementById('ai-key-hint').textContent = cfg.keyHint;
   document.getElementById('s-aiApiKey').placeholder = cfg.keyPlaceholder;
@@ -3970,6 +4029,26 @@ function closeChartBtn() {
 // them, so loading the registry first would render one pass of unlabelled
 // badges before correcting itself.
 loadScreenerNames().then(loadRegistry);
+
+// ── when to open this tool ─────────────────────────────────────────────────
+// Answered by the server, not here: the window comes from this tool's own
+// screeners and "now" is measured on the market's clock. A phone in another
+// timezone would otherwise be told to check T7 at midnight.
+async function loadCheckWindow() {
+  const el = document.getElementById('check-badge');
+  if (!el) return;
+  try {
+    const h = await (await fetch('/health')).json();
+    const c = h && h.check;
+    if (!c) { el.hidden = true; return; }
+    el.hidden = false;
+    el.classList.toggle('now', !!c.now);
+    el.textContent = c.now ? `● CHECK NOW · until ${c.to} ET` : `check ${c.from}–${c.to} ET`;
+    el.title = (c.screeners || []).map(s => `${s.name}: ${s.from}–${s.to}`).join('\n');
+  } catch { el.hidden = true; }
+}
+loadCheckWindow();
+setInterval(loadCheckWindow, 60000);
 
 // ═══════════════ SCREENER SCORECARD ═══════════════
 // The question is "which screeners find stocks that move", so every column is

@@ -38,6 +38,7 @@ function floorFor(db) {
     } catch { return d; }
   };
   return {
+    minPrice: get('minPrice', 1),
     minAvgVolume: get('minAvgVolume', 1000000),
     minAtr: get('minAtr', 1),
     minAtrPct: get('minAtrPct', 3),
@@ -107,9 +108,10 @@ function show(t) {
     if (s.mirror_of) console.log(`    mirror of "${s.mirror_of}"`);
     console.log('    rules:');
     for (const f of filters) console.log(`      ${f.left} ${op(f.operation)} ${fmtRight(f.right)}`);
+    console.log(`      + price >= $${floor.minPrice}                  (floor)`);
     console.log(`      + avg volume >= ${floor.minAvgVolume.toLocaleString()}   (floor)`);
-    console.log(`      + ATR >= $${floor.minAtr}                    (floor)`);
-    console.log(`      + ATR >= ${floor.minAtrPct}% of price            (floor)`);
+    console.log(`      + ADR >= $${floor.minAtr}                    (floor)`);
+    console.log(`      + ADR >= ${floor.minAtrPct}% of price            (floor)`);
   }
 }
 

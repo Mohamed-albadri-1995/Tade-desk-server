@@ -29,6 +29,10 @@ const store = require('./screenerStore');
 const T1 = [
   {
     key: 'trend', name: 'Trend',
+    // No RUN window — T1 is the control and scans all day. Check windows are
+    // display only, and they are still worth stating: "all day" is true of the
+    // collection, not of when a human gets anything out of looking.
+    checkFrom: '09:35', checkTo: '16:00',
     sort: { sortBy: 'change', sortOrder: 'desc' },
     filters: [
       { left: 'close', operation: 'egreater', right: 20 },
@@ -47,6 +51,7 @@ const T1 = [
   },
   {
     key: 'premarket', name: 'Pre-Mkt',
+    checkFrom: '08:00', checkTo: '09:45',
     sort: { sortBy: 'premarket_volume', sortOrder: 'desc' },
     filters: [
       { left: 'close', operation: 'egreater', right: 0.5 },
@@ -58,6 +63,7 @@ const T1 = [
   },
   {
     key: 'bigmoves', name: 'Big Move',
+    checkFrom: '09:35', checkTo: '16:00',
     sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
     filters: [
       { left: 'relative_volume_10d_calc', operation: 'greater', right: 10 },
@@ -78,7 +84,7 @@ const T1 = [
 // closing hour.
 const T2_BASE = {
   key: 'ma-stack-breakout', name: 'MA Stack Breakout',
-  runFrom: '09:30', runTo: '15:00',
+  runFrom: '09:00', runTo: '10:00', checkFrom: '09:15', checkTo: '10:30',
   sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
   filters: [
     { left: 'SMA5|1', operation: 'greater', right: 'EMA9|1' },
@@ -97,6 +103,7 @@ const T2_BASE = {
 // continues or fails.
 const T3_BASE = {
   key: 'gap-and-volume', name: 'Gap + Volume',
+  checkFrom: '08:00', checkTo: '10:30',
   runFrom: '04:00', runTo: '10:30',
   sort: { sortBy: 'premarket_change', sortOrder: 'desc' },
   filters: [
@@ -116,6 +123,7 @@ const T3_BASE = {
 // left to resolve in.
 const T4_BASE = {
   key: 'vwap-reclaim', name: 'VWAP Reclaim',
+  checkFrom: '10:00', checkTo: '15:30',
   runFrom: '09:45', runTo: '15:30',
   sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
   filters: [
@@ -135,6 +143,7 @@ const T4_BASE = {
 // printed on a handful of thin pre-market shares is not a break.
 const T5_BASE = {
   key: '52w-break', name: '52-Week Break',
+  checkFrom: '09:45', checkTo: '16:00',
   runFrom: '09:30', runTo: '16:00',
   sort: { sortBy: 'change', sortOrder: 'desc' },
   filters: [
@@ -152,6 +161,7 @@ const T5_BASE = {
 // close — a stock can be stretched at any hour, and the fade is the trade.
 const T6_BASE = {
   key: 'overextended', name: 'Overextended',
+  checkFrom: '10:15', checkTo: '16:00',
   runFrom: '10:00', runTo: '16:00',
   sort: { sortBy: 'change', sortOrder: 'desc' },
   filters: [
@@ -188,6 +198,7 @@ const T6_BASE = {
 // not leadership.
 const CANSLIM_BASE = {
   key: 'canslim', name: 'CANSLIM',
+  checkFrom: '09:45', checkTo: '16:00',
   runFrom: '09:30', runTo: '16:00',
   limit: 50,
   sort: { sortBy: 'Perf.6M', sortOrder: 'desc' },
@@ -217,6 +228,7 @@ const CANSLIM_BASE = {
 // tool is for.
 const CANSLIM_PULLBACK = {
   key: 'canslim-pullback', name: 'CANSLIM Pullback',
+  checkFrom: '09:45', checkTo: '16:00',
   runFrom: '09:30', runTo: '16:00',
   limit: 50,
   sort: { sortBy: 'Perf.6M', sortOrder: 'desc' },
@@ -238,6 +250,11 @@ const CANSLIM_PULLBACK = {
 // meant to test.
 const PREMARKET_GAP = {
   key: 'premarket-gap', name: 'Pre-Market Gap',
+  // Runs from 04:00 but is not worth READING until the gap has stopped moving.
+  // Opening it at 06:00 shows a list that will be different by the bell, so the
+  // check window starts ten minutes out and covers the first half hour, which
+  // is the whole life of a gap trade.
+  checkFrom: '09:20', checkTo: '10:00',
   runFrom: '04:00', runTo: '09:30',
   sort: { sortBy: 'premarket_change', sortOrder: 'desc' },
   limit: 25,
@@ -276,6 +293,7 @@ const PREMARKET_GAP = {
 // does at 15:40.
 const AFTER_OPEN_VOLUME = {
   key: 'after-open-volume', name: 'After Open Volume',
+  checkFrom: '09:45', checkTo: '16:00',
   runFrom: '09:30', runTo: '16:00',
   limit: 25,
   sort: { sortBy: 'relative_volume_intraday|5', sortOrder: 'desc' },
@@ -384,6 +402,7 @@ const T8 = [CANSLIM_BASE, CANSLIM_PULLBACK];
 // tradability floor already supplies to every screener.
 const STOCKS_IN_PLAY = {
   key: 'stocks-in-play', name: 'Stocks in Play',
+  checkFrom: '09:45', checkTo: '16:00',
   runFrom: '09:30', runTo: '16:00',
   limit: 20,
   sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
@@ -650,6 +669,60 @@ function linkMirrorsByFilters() {
   return { linked };
 }
 
+/**
+ * When it is worth OPENING the tool, which is not when the screener scans.
+ *
+ * The pre-market gap screener starts scanning at 04:00 and has nothing worth
+ * looking at until the pre-market has volume in it; the overextended screener
+ * cannot say anything before 10:00 because at the bell RSI still describes
+ * yesterday. Both were displaying their scan window, which reads as an
+ * invitation to open the tool at 04:30 and find an empty screen.
+ *
+ * Filled in only where it is missing, so a check window set by hand stays.
+ */
+function applyCheckWindows() {
+  const defs = BY_TOOL[config.toolId] || [];
+  let applied = 0;
+  for (const def of defs) {
+    if (!def.checkFrom && !def.checkTo) continue;
+    const key = store.slugify(def.key || def.name);
+    const row = db.prepare('SELECT id, check_from, check_to FROM screeners WHERE key = ?').get(key);
+    if (!row || row.check_from || row.check_to) continue;
+    db.prepare('UPDATE screeners SET check_from = ?, check_to = ?, updated_at = ? WHERE id = ?')
+      .run(def.checkFrom || null, def.checkTo || null, Date.now(), row.id);
+    applied++;
+  }
+  if (applied) console.log(`[Screeners] check window set on ${applied} screener(s)`);
+  return { applied };
+}
+
+/**
+ * T2's breakout window, retimed on the trader's instruction.
+ *
+ * It ran 09:30–15:00 and was later edited to 09:30–12:00. Both are wrong for
+ * how the tool is actually used: momentum positions here are closed by 10:30,
+ * so anything the screener finds after 10:00 is a candidate that cannot be
+ * traded — it arrives, fills the list, and trains the model on setups nobody
+ * took. And it started at the bell, which meant the list did not exist while
+ * there was still time to read it before the open.
+ *
+ * 09:00–10:00. One-time, flagged in settings, so a later edit in the builder
+ * is not undone on every restart.
+ */
+function retimeT2Breakout() {
+  if (config.toolId !== 'T2') return { applied: 0 };
+  const done = db.prepare("SELECT value FROM settings WHERE key = 't2BreakoutRetimed'").get();
+  if (done && done.value) return { applied: 0 };
+  const row = db.prepare("SELECT id FROM screeners WHERE key = 'ma-stack-breakout'").get();
+  if (row) {
+    db.prepare('UPDATE screeners SET run_from = ?, run_to = ?, updated_at = ? WHERE id = ?')
+      .run('09:00', '10:00', Date.now(), row.id);
+    console.log('[Screeners] "MA Stack Breakout" retimed to 09:00–10:00 ET');
+  }
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('t2BreakoutRetimed', '1')").run();
+  return { applied: row ? 1 : 0 };
+}
+
 function seedScreeners() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM screeners').get().n;
   if (count > 0) {
@@ -659,6 +732,8 @@ function seedScreeners() {
     tightenAfterOpenVolume();
     backfillMirrorLinks();
     linkMirrorsByFilters();   // catches the renamed ones the name rule misses
+    applyCheckWindows();
+    retimeT2Breakout();
     tightenLiquidMovers();
     return { seeded: 0, reason: 'already has screeners' };
   }
@@ -680,6 +755,7 @@ function seedScreeners() {
 module.exports = {
   seedScreeners, renameLegacyScreeners, applyDefaultWindows, repairOversoldMirror,
   tightenAfterOpenVolume, backfillMirrorLinks, linkMirrorsByFilters, tightenLiquidMovers,
+  applyCheckWindows, retimeT2Breakout,
   WINDOW_NOTES,
   PRESETS: BY_TOOL, SESSION_SCREENERS,
 };

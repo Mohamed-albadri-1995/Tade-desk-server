@@ -17,6 +17,7 @@ afterAll(() => {
 
 const set = (k, v) => db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)').run(k, String(v));
 const reset = () => {
+  set('minPrice', 1);
   set('minAvgVolume', 1000000);
   set('minAtr', 1);
   set('minAtrPct', 3);
@@ -25,13 +26,13 @@ beforeEach(reset);
 
 describe('thresholds', () => {
   test('the defaults are the ones asked for', () => {
-    expect(tradable.thresholds()).toEqual({ minAvgVolume: 1000000, minAtr: 1, minAtrPct: 3 });
+    expect(tradable.thresholds()).toEqual({ minPrice: 1, minAvgVolume: 1000000, minAtr: 1, minAtrPct: 3 });
   });
 
   test('settings win, so raising the bar is a form field not a deploy', () => {
     set('minAvgVolume', 5000000);
     set('minAtrPct', 5);
-    expect(tradable.thresholds()).toEqual({ minAvgVolume: 5000000, minAtr: 1, minAtrPct: 5 });
+    expect(tradable.thresholds()).toEqual({ minPrice: 1, minAvgVolume: 5000000, minAtr: 1, minAtrPct: 5 });
   });
 
   test('a corrupt setting falls back rather than disabling the floor', () => {
@@ -51,24 +52,37 @@ describe('thresholds', () => {
 });
 
 describe('the half TradingView enforces', () => {
-  test('volume and ATR go to the server, where the top-N is decided', () => {
+  test('price, volume and ADR go to the server, where the top-N is decided', () => {
     // Filtering these after the fetch would spend the screener's 50 slots on
     // stocks that were never eligible and hand back a short list.
     expect(tradable.serverFilters()).toEqual([
+      { left: 'close', operation: 'egreater', right: 1 },
       { left: 'average_volume_10d_calc', operation: 'egreater', right: 1000000 },
       { left: 'ATR', operation: 'egreater', right: 1 },
     ]);
   });
 
   test('a leg set to zero sends no filter at all', () => {
+    set('minPrice', 0);
     set('minAvgVolume', 0);
     set('minAtr', 0);
     expect(tradable.serverFilters()).toEqual([]);
   });
+
+  test('the price leg is a floor on its own, independent of the others', () => {
+    // Raising it must not disturb the two legs beside it — the failure mode
+    // being guarded against is one edit in Settings silently retuning the tool.
+    set('minPrice', 5);
+    expect(tradable.serverFilters()).toEqual([
+      { left: 'close', operation: 'egreater', right: 5 },
+      { left: 'average_volume_10d_calc', operation: 'egreater', right: 1000000 },
+      { left: 'ATR', operation: 'egreater', right: 1 },
+    ]);
+  });
 });
 
 describe('the half TradingView cannot express', () => {
-  const t = { minAvgVolume: 1000000, minAtr: 1, minAtrPct: 3 };
+  const t = { minPrice: 1, minAvgVolume: 1000000, minAtr: 1, minAtrPct: 3 };
 
   test('ATR as a share of price', () => {
     expect(tradable.passesLocal({ atr: 1.0, price: 20 }, t)).toBe(true);    // 5%
@@ -110,8 +124,8 @@ describe('the half TradingView cannot express', () => {
 
 describe('what the screener page shows', () => {
   test('reads as the rules they are', () => {
-    expect(tradable.describe({ minAvgVolume: 1000000, minAtr: 1, minAtrPct: 3 }))
-      .toEqual(['average volume ≥ 1M shares', 'ATR ≥ $1', 'ATR ≥ 3% of price']);
+    expect(tradable.describe({ minPrice: 1, minAvgVolume: 1000000, minAtr: 1, minAtrPct: 3 }))
+      .toEqual(['price ≥ $1', 'average volume ≥ 1M shares', 'ADR ≥ $1', 'ADR ≥ 3% of price']);
   });
 });
 
@@ -121,7 +135,7 @@ describe('every screener gets it, including future ones', () => {
     // TradingView carrying three.
     const own = [{ left: 'RSI', operation: 'greater', right: 70 }];
     const sent = [...own, ...tradable.serverFilters()];
-    expect(sent).toHaveLength(3);
+    expect(sent).toHaveLength(4);
     expect(sent[0]).toEqual(own[0]);
     expect(sent.map(f => f.left)).toContain('average_volume_10d_calc');
     expect(sent.map(f => f.left)).toContain('ATR');

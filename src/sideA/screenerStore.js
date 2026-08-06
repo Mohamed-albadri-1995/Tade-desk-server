@@ -163,6 +163,43 @@ function isActiveAt(screener, ts = Date.now()) {
   return now >= screener.runFrom && now < screener.runTo;
 }
 
+/**
+ * Is it worth OPENING this screener right now?
+ *
+ * Different question from isActiveAt, and the difference is the whole reason
+ * this exists. The pre-market gap screener is active from 04:00 and has nothing
+ * to show until the pre-market has volume in it; the overextended screener is
+ * active from 10:00 but is still describing yesterday's RSI for the first
+ * fifteen minutes. Showing the scan window as though it were an invitation is
+ * how you end up opening a tool at 04:30 and finding an empty screen.
+ *
+ * A screener with no check window falls back to its run window, and one with
+ * neither is always worth a look — which is right for T1, whose screeners run
+ * all day by design.
+ */
+function isWorthCheckingAt(screener, ts = Date.now()) {
+  const from = screener.checkFrom || screener.runFrom;
+  const to = screener.checkTo || screener.runTo;
+  if (!from || !to) return true;
+  const now = toETTime(ts);
+  return now >= from && now < to;
+}
+
+/**
+ * The tool's overall check window: earliest start, latest end, across its
+ * enabled screeners. A tool is worth opening if ANY of its screeners is.
+ */
+function checkWindow(screeners) {
+  const on = (screeners || []).filter(s => s.enabled !== false);
+  if (!on.length) return null;
+  const froms = on.map(s => s.checkFrom || s.runFrom).filter(Boolean);
+  const tos = on.map(s => s.checkTo || s.runTo).filter(Boolean);
+  // A screener with no window at all runs — and is worth checking — all day,
+  // so it widens the tool's window to the whole session rather than narrowing it.
+  if (froms.length < on.length || tos.length < on.length) return { from: '04:00', to: '16:00' };
+  return { from: froms.sort()[0], to: tos.sort().slice(-1)[0] };
+}
+
 function validateDefinition(def) {
   const errors = [];
   if (!def.name || !String(def.name).trim()) errors.push('name is required');
@@ -289,6 +326,10 @@ function mirrorDefinition(def) {
     // the twin must run in the same window, or the pair is not comparable
     runFrom: def.runFrom || null,
     runTo: def.runTo || null,
+    // …and it is worth reading at the same hours, for the same reason: the
+    // mirror is the other side of one experiment, not a screener of its own.
+    checkFrom: def.checkFrom || null,
+    checkTo: def.checkTo || null,
   };
 }
 
@@ -305,6 +346,11 @@ function rowToScreener(row) {
     limit: row.limit_n,
     runFrom: row.run_from || null,
     runTo: row.run_to || null,
+    // When to LOOK. A screener can be scanning for hours before it has
+    // anything worth opening the tool for — the pre-market gap screener runs
+    // from 04:00 and has nothing to show until the pre-market has volume in it.
+    checkFrom: row.check_from || null,
+    checkTo: row.check_to || null,
     // The screener this one mirrors, by name. Survives renaming either side,
     // which a "(mirror)" suffix does not.
     mirrorOf: row.mirror_of || null,
@@ -344,8 +390,8 @@ function create(def) {
   }
 
   const info = db.prepare(`
-    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, run_from, run_to, mirror_of, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, run_from, run_to, check_from, check_to, mirror_of, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     key,
     String(def.name).trim(),
@@ -355,6 +401,8 @@ function create(def) {
     Number.isFinite(def.limit) ? def.limit : 50,
     def.runFrom || null,
     def.runTo || null,
+    def.checkFrom || null,
+    def.checkTo || null,
     def.mirrorOf || null,
     Date.now()
   );
@@ -373,6 +421,8 @@ function update(id, def) {
     limit: def.limit !== undefined ? def.limit : existing.limit,
     runFrom: def.runFrom !== undefined ? def.runFrom : existing.runFrom,
     runTo: def.runTo !== undefined ? def.runTo : existing.runTo,
+    checkFrom: def.checkFrom !== undefined ? def.checkFrom : existing.checkFrom,
+    checkTo: def.checkTo !== undefined ? def.checkTo : existing.checkTo,
     mirrorOf: def.mirrorOf !== undefined ? def.mirrorOf : existing.mirrorOf,
   };
   const errors = validateDefinition(merged);
@@ -381,7 +431,8 @@ function update(id, def) {
   db.prepare(`
     UPDATE screeners
        SET name = ?, enabled = ?, filters = ?, sort = ?, limit_n = ?,
-           run_from = ?, run_to = ?, mirror_of = ?, updated_at = ?
+           run_from = ?, run_to = ?, check_from = ?, check_to = ?,
+           mirror_of = ?, updated_at = ?
      WHERE id = ?
   `).run(
     String(merged.name).trim(),
@@ -391,6 +442,8 @@ function update(id, def) {
     Number.isFinite(merged.limit) ? merged.limit : 50,
     merged.runFrom || null,
     merged.runTo || null,
+    merged.checkFrom || null,
+    merged.checkTo || null,
     merged.mirrorOf || null,
     Date.now(),
     id
@@ -412,6 +465,7 @@ function createMirror(id) {
 
 module.exports = {
   list, get, create, update, remove, createMirror, mirrorDefinition, isActiveAt,
+  isWorthCheckingAt, checkWindow,
   validateDefinition, validateFilter, isKnownField, slugify,
   OPERATIONS, FIELDS,
 };

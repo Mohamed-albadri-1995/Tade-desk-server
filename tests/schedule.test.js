@@ -88,10 +88,19 @@ describe('the windows match what each tool is for', () => {
     expect(store.isActiveAt(o, at(15, 50))).toBe(true);
   });
 
-  test('T2 breakouts need the regular session and not the closing hour', () => {
+  /*
+   * Retimed to 09:00–10:00 on the trader's instruction, and the reasoning is
+   * the point: momentum positions here are closed by 10:30, so a candidate
+   * found at 11:00 is one that cannot be traded — it fills the list and trains
+   * the model on setups nobody took. Opening at 09:00 rather than the bell
+   * means the list exists while there is still time to read it before the open.
+   */
+  test('T2 breakouts stop before the positions they feed are closed', () => {
     const b = win('T2', 'ma-stack-breakout');
-    expect(store.isActiveAt(b, at(8, 0))).toBe(false);
-    expect(store.isActiveAt(b, at(11, 0))).toBe(true);
+    expect(store.isActiveAt(b, at(8, 30))).toBe(false);   // before it starts
+    expect(store.isActiveAt(b, at(9, 15))).toBe(true);    // pre-open, list forming
+    expect(store.isActiveAt(b, at(9, 45))).toBe(true);
+    expect(store.isActiveAt(b, at(11, 0))).toBe(false);   // trade is already closed
     expect(store.isActiveAt(b, at(15, 30))).toBe(false);
   });
 
@@ -239,5 +248,107 @@ describe('T9 is the benchmark', () => {
   test('it sees the whole regular session, like the tools it is compared to', () => {
     expect(t9[0].runFrom).toBe('09:30');
     expect(t9[0].runTo).toBe('16:00');
+  });
+});
+
+/*
+ * When to OPEN a tool, which is a different question from when it runs.
+ *
+ * Nine tools on one landing page and each is useful for a couple of hours a
+ * day. The run window says when a screener adds candidates; the check window
+ * says when the list it built is worth a human reading. They diverge on
+ * purpose: T7's gap screener runs from 04:00 because it needs the whole
+ * pre-market to see the gap form, but the list is not final until the bell.
+ */
+describe('when to open each tool', () => {
+  const chk = (tool, key) => win(tool, key);
+
+  test('every seeded screener says when it is worth reading', () => {
+    for (const [id, defs] of Object.entries(PRESETS)) {
+      for (const d of defs) {
+        expect({ id, key: d.key || d.name, from: !!d.checkFrom, to: !!d.checkTo })
+          .toEqual({ id, key: d.key || d.name, from: true, to: true });
+      }
+    }
+  });
+
+  test('T7 gaps: runs from 04:00, but not worth opening until the bell is close', () => {
+    // The trader's own words — no benefit opening T7 before the open. A list
+    // read at 06:00 is a list that will have changed by 09:30.
+    const g = chk('T7', 'premarket-gap');
+    expect(store.isActiveAt(g, at(6, 0))).toBe(true);            // collecting
+    expect(store.isWorthCheckingAt(g, at(6, 0))).toBe(false);    // not for reading
+    expect(store.isWorthCheckingAt(g, at(9, 25))).toBe(true);
+    expect(store.isWorthCheckingAt(g, at(9, 45))).toBe(true);
+    expect(store.isWorthCheckingAt(g, at(11, 0))).toBe(false);
+  });
+
+  test('T6 fades: nothing to see before the session has built the extension', () => {
+    const o = chk('T6', 'overextended');
+    expect(store.isWorthCheckingAt(o, at(9, 45))).toBe(false);
+    expect(store.isWorthCheckingAt(o, at(11, 0))).toBe(true);
+  });
+
+  test('T3 gappers: this one IS worth opening before the open', () => {
+    const g = chk('T3', 'gap-and-volume');
+    expect(store.isWorthCheckingAt(g, at(8, 30))).toBe(true);
+    expect(store.isWorthCheckingAt(g, at(13, 0))).toBe(false);
+  });
+
+  test('T2 momentum: readable from 09:15, dead once the trade is closed at 10:30', () => {
+    const b = chk('T2', 'ma-stack-breakout');
+    expect(store.isWorthCheckingAt(b, at(9, 20))).toBe(true);
+    expect(store.isWorthCheckingAt(b, at(10, 45))).toBe(false);
+  });
+
+  test('a screener with no window at all is worth checking any time', () => {
+    // T1 has no run window by design, and absence of a window must not read as
+    // "never open this" — the tool would look permanently asleep.
+    expect(store.isWorthCheckingAt({ name: 'x' }, at(6, 0))).toBe(true);
+    expect(store.isWorthCheckingAt({ name: 'x' }, at(15, 0))).toBe(true);
+  });
+
+  test('a tool with one windowless screener widens to the whole day, never narrows', () => {
+    // Reporting a narrow window for a tool that is in fact live all day would
+    // send the trader away from a list that was worth reading.
+    const w = store.checkWindow([
+      { name: 'timed', checkFrom: '10:00', checkTo: '11:00' },
+      { name: 'always' },
+    ]);
+    expect(w).toEqual({ from: '04:00', to: '16:00' });
+  });
+
+  test('the tool window spans its screeners: earliest start, latest end', () => {
+    const w = store.checkWindow([
+      { name: 'a', checkFrom: '09:20', checkTo: '10:00' },
+      { name: 'b', checkFrom: '09:45', checkTo: '16:00' },
+    ]);
+    expect(w).toEqual({ from: '09:20', to: '16:00' });
+  });
+
+  test('a disabled screener does not advertise hours the tool cannot serve', () => {
+    const w = store.checkWindow([
+      { name: 'off', enabled: false, checkFrom: '04:00', checkTo: '16:00' },
+      { name: 'on', checkFrom: '10:00', checkTo: '11:00' },
+    ]);
+    expect(w).toEqual({ from: '10:00', to: '11:00' });
+  });
+
+  test('no screeners at all reports nothing rather than a made-up window', () => {
+    expect(store.checkWindow([])).toBeNull();
+  });
+
+  test('the check window sits inside the hours the tool actually collects', () => {
+    // A tool telling you to look at 15:00 while its screeners stopped at 10:00
+    // is pointing at a stale list. Checking may START before a run window (the
+    // list from the previous session is still on screen) but must not extend
+    // past the point where nothing is being refreshed.
+    for (const [id, defs] of Object.entries(PRESETS)) {
+      for (const d of defs) {
+        if (!d.runTo) continue;   // T1 runs all day
+        expect({ id, key: d.key || d.name, ok: d.checkFrom < d.checkTo })
+          .toEqual({ id, key: d.key || d.name, ok: true });
+      }
+    }
   });
 });

@@ -19,9 +19,10 @@
 const db = require('./../db');
 
 const DEFAULTS = {
+  minPrice: 1,             // dollars — below this the spread eats the trade
   minAvgVolume: 1000000,   // shares/day, 10-day average — can you get out?
-  minAtr: 1,               // dollars, ATR(14) — is there room to pay for risk?
-  minAtrPct: 3,            // ATR as % of price — room relative to the stock
+  minAtr: 1,               // dollars, ADR/ATR(14) — is there room to pay for risk?
+  minAtrPct: 3,            // ADR as % of price — room relative to the stock
 };
 
 function num(key, fallback) {
@@ -41,6 +42,7 @@ function num(key, fallback) {
 
 function thresholds() {
   return {
+    minPrice: num('minPrice', DEFAULTS.minPrice),
     minAvgVolume: num('minAvgVolume', DEFAULTS.minAvgVolume),
     minAtr: num('minAtr', DEFAULTS.minAtr),
     minAtrPct: num('minAtrPct', DEFAULTS.minAtrPct),
@@ -56,6 +58,11 @@ function thresholds() {
  */
 function serverFilters(t = thresholds()) {
   const out = [];
+  // Price first: it is the cheapest rule to evaluate and the one that removes
+  // the most stocks nobody here would trade at any volume.
+  if (t.minPrice > 0) {
+    out.push({ left: 'close', operation: 'egreater', right: t.minPrice });
+  }
   if (t.minAvgVolume > 0) {
     out.push({ left: 'average_volume_10d_calc', operation: 'egreater', right: t.minAvgVolume });
   }
@@ -94,9 +101,10 @@ function applyLocal(rows, t = thresholds()) {
 /** Human-readable, for the Screeners tab. */
 function describe(t = thresholds()) {
   return [
+    `price ≥ $${t.minPrice}`,
     `average volume ≥ ${(t.minAvgVolume / 1e6).toFixed(t.minAvgVolume % 1e6 ? 1 : 0)}M shares`,
-    `ATR ≥ $${t.minAtr}`,
-    `ATR ≥ ${t.minAtrPct}% of price`,
+    `ADR ≥ $${t.minAtr}`,
+    `ADR ≥ ${t.minAtrPct}% of price`,
   ];
 }
 
