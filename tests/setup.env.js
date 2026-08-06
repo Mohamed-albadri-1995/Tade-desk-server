@@ -33,3 +33,25 @@ process.env.SHARED_KEYS_FILE = path.join(os.tmpdir(), 'jest-no-such-keys-file.js
 // it at the top of the file, which runs after this.
 process.env.DB_PATH = process.env.DB_PATH
   || path.join(os.tmpdir(), `jest-default-${process.pid}.db`);
+
+/*
+ * The third source, and the one that caught this out twice.
+ *
+ * Blocking the file and the database left the environment, which is where the
+ * tests themselves put a key when they want one present — so it looked like the
+ * source under the test's control. It is not: the deployment box exports the
+ * Alpaca credentials for the chart platform that shares the machine, so
+ * `mockHosts({})` ran with a live key in scope and the fetcher went looking for
+ * a host nobody had mocked. Finnhub happened not to be exported, which is why
+ * only half the failure disappeared when the other two sources were cut off.
+ *
+ * Cleared here rather than in the suites: this runs before any test module
+ * loads, and a suite that wants a key sets it afterwards in beforeEach, so the
+ * value under test is always the one the test wrote.
+ *
+ * Every variable getKey falls back to belongs on this list — grep for getKey(
+ * in src/ if a fourth credential is ever added.
+ */
+for (const v of ['APCA_API_KEY_ID', 'APCA_API_SECRET_KEY', 'FINNHUB_API_KEY']) {
+  delete process.env[v];
+}
