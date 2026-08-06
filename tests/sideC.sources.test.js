@@ -35,13 +35,17 @@ function mockHosts({ tv, yahoo, edgar }) {
 }
 const empty = () => Promise.resolve({ data: {} });
 const denied = (code) => () => Promise.reject(Object.assign(new Error('x'), { response: { status: code } }));
+// Timestamps are relative, not fixed. A hard-coded date silently ages past the
+// news window as time passes and the fixtures start failing for a reason that
+// has nothing to do with what they test.
+const NOW_S = () => Math.floor(Date.now() / 1000);
 const tvStory = (over = {}) => ({
-  id: '1', title: 'Company wins FDA clearance', published: 1770000000,
+  id: '1', title: 'Company wins FDA clearance', published: NOW_S(),
   link: 'https://x', relatedSymbols: [{ symbol: TV }], urgency: 2,
   source: { name: 'Reuters' }, ...over,
 });
 const yahooStory = (over = {}) => ({
-  title: 'Company wins FDA clearance', link: 'u', providerPublishTime: 1770000000,
+  title: 'Company wins FDA clearance', link: 'u', providerPublishTime: NOW_S(),
   relatedTickers: ['AAA'], publisher: 'Reuters', ...over,
 });
 
@@ -197,8 +201,9 @@ describe('market listings are removed on the way in', () => {
  * and a row that says only "SEC Filing" is not information.
  */
 describe('SEC filings are recent, or they are not shown', () => {
+  const today = new Date().toISOString().slice(0, 10);
   const hit = (over = {}) => ({
-    _id: 'x', _source: { form_type: '8-K', file_date: '2026-08-05', entity_id: '1', ...over },
+    _id: 'x', _source: { form_type: '8-K', file_date: today, entity_id: '1', ...over },
   });
   const edgarHits = (hits) => () => Promise.resolve({ data: { hits: { hits } } });
 
@@ -234,16 +239,16 @@ describe('SEC filings are recent, or they are not shown', () => {
     ['form', 'root_form'],
     ['type', 'form'],
   ])('the form type is found under %s as well', async (name) => {
-    mockHosts({ edgar: edgarHits([{ _id: 'z', _source: { [name]: '8-K', file_date: '2026-08-05', entity_id: '1' } }]) });
+    mockHosts({ edgar: edgarHits([{ _id: 'z', _source: { [name]: '8-K', file_date: today, entity_id: '1' } }]) });
     const { news } = await fetchNewsForTicker('AAA', TV);
     expect(news.edgar[0].headline).toContain('8-K');
   });
 
   test('a filing with only a date still says something useful', async () => {
-    mockHosts({ edgar: edgarHits([{ _id: 'w', _source: { file_date: '2026-08-05', entity_id: '1' } }]) });
+    mockHosts({ edgar: edgarHits([{ _id: 'w', _source: { file_date: today, entity_id: '1' } }]) });
     const { news } = await fetchNewsForTicker('AAA', TV);
     expect(news.edgar).toHaveLength(1);
-    expect(news.edgar[0].headline).toContain('2026-08-05');
+    expect(news.edgar[0].headline).toContain(today);
   });
 });
 
@@ -295,5 +300,85 @@ describe('TradingView headlines are found wherever the envelope puts them', () =
     mockHosts({ tv: () => Promise.resolve({ data: { symbols: [{ symbol: 'AAA', exchange: 'NASDAQ' }] } }) });
     const { news } = await fetchNewsForTicker('AAA', TV);
     expect(news.sources.tradingview.status).toBe('unreadable');
+  });
+});
+
+/*
+ * Age — the other half of "relevant".
+ *
+ * A story can be about this company and nothing else and still have nothing to
+ * do with why the stock is moving today. On the live screen WYHG's entire news
+ * list was two items from 51 days ago about regaining a Nasdaq listing
+ * requirement, sitting under a 205% move; PAVS carried a REVERSE SPLIT
+ * catalyst built from a headline 42 days old.
+ *
+ * The classifier already down-weighted age, which is not the same as excluding
+ * it: with nothing to compete against, a stale story still wins, still becomes
+ * the catalyst, and still sets a bias.
+ */
+describe('old stories are not today\'s reason', () => {
+  const { MAX_CATALYST_AGE_DAYS, MAX_NEWS_AGE_DAYS } = require('../src/sideC/news');
+  const daysAgo = (d) => Math.floor((Date.now() - d * 86400000) / 1000);
+
+  test('the two windows are ordered — show more than you conclude from', () => {
+    expect(MAX_CATALYST_AGE_DAYS).toBeLessThan(MAX_NEWS_AGE_DAYS);
+  });
+
+  test('a story past the display window is not shown, and is counted', async () => {
+    mockHosts({ tv: () => Promise.resolve({ data: [
+      tvStory({ title: 'Regains compliance with Nasdaq minimum bid', published: daysAgo(51) }),
+      tvStory({ published: daysAgo(1) }),
+    ] }) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.tradingview).toHaveLength(1);
+    expect(news.agedOut).toBe(1);
+  });
+
+  // The PAVS case exactly.
+  test('a 42-day-old story does not become today\'s catalyst', async () => {
+    mockHosts({ tv: () => Promise.resolve({ data: [
+      tvStory({ title: 'Company announces 1-for-100 reverse share split', published: daysAgo(42) }),
+    ] }) });
+    const { catalyst, news } = await fetchNewsForTicker('AAA', TV);
+    expect(catalyst).toBeFalsy();
+    expect(news.agedOut).toBe(1);
+  });
+
+  test('a story inside the display window but outside the catalyst window is shown, not concluded from', async () => {
+    const mid = Math.floor((MAX_CATALYST_AGE_DAYS + MAX_NEWS_AGE_DAYS) / 2);
+    mockHosts({ tv: () => Promise.resolve({ data: [
+      tvStory({ title: 'Company announces $200M offering', published: daysAgo(mid) }),
+    ] }) });
+    const { catalyst, news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.tradingview).toHaveLength(1);      // visible as context
+    expect(news.agedOut).toBe(0);
+    expect(catalyst).toBeFalsy();                  // but not the reason
+  });
+
+  test('a fresh story still becomes the catalyst', async () => {
+    mockHosts({ tv: () => Promise.resolve({ data: [
+      tvStory({ title: 'Company announces $200M registered direct offering', published: daysAgo(1) }),
+    ] }) });
+    const { catalyst } = await fetchNewsForTicker('AAA', TV);
+    expect(catalyst).toBeTruthy();
+  });
+
+  // EDGAR dates filings loosely and some sources send none at all.
+  test('an item with no timestamp is kept — unknown age is not old age', async () => {
+    mockHosts({ tv: () => Promise.resolve({ data: { items: [
+      { id: '1', title: 'Company wins FDA clearance', published: null, timestamp: 1 },
+    ] } }) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.agedOut).toBe(0);
+  });
+
+  test('all of it too old reads as "nothing recent", not "nothing at all"', async () => {
+    mockHosts({ tv: () => Promise.resolve({ data: [
+      tvStory({ published: daysAgo(60) }), tvStory({ title: 'Another old one', published: daysAgo(80) }),
+    ] }) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.tradingview).toEqual([]);
+    expect(news.agedOut).toBe(2);
+    expect(news.sources.tradingview.status).toBe('ok');   // the source worked fine
   });
 });

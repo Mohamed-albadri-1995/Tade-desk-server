@@ -314,6 +314,45 @@ function bad(status, detail) { return { items: [], status, detail }; }
  */
 const MAX_RELATED_SYMBOLS = 8;
 
+/*
+ * Age.
+ *
+ * The other half of "relevant". A story can be about this company and this
+ * company alone and still have nothing to do with why the stock is moving
+ * today. On the live screen WYHG's entire news list was two items from 51 days
+ * ago about regaining a Nasdaq listing requirement, sitting under a 205% move.
+ * PAVS was worse: a REVERSE SPLIT catalyst on today's card, built from a
+ * headline 42 days old.
+ *
+ * The classifier already down-weighted age and that is not the same as
+ * excluding it — a stale story with nothing to compete against still wins,
+ * still becomes the catalyst, and still sets a bias. Two cutoffs, because
+ * showing something and drawing a conclusion from it are different bars:
+ *
+ *   CATALYST — 7 days. Past a week a story is priced in; whatever is moving
+ *   the stock today is something else, and naming the old one is worse than
+ *   naming nothing because it reads as an explanation.
+ *
+ *   DISPLAY — 21 days. Wider, because context has some value once it is
+ *   labelled with its age, and the card labels it. Past three weeks it is
+ *   history, and a list of history under a stock that just moved 200% is not
+ *   a news list.
+ */
+const MAX_CATALYST_AGE_DAYS = 7;
+const MAX_NEWS_AGE_DAYS = 21;
+
+function ageDays(dt, now = Date.now()) {
+  const ms = toMs(dt);
+  return ms == null ? null : (now - ms) / 86400000;
+}
+
+// An item with no timestamp is kept: unknown age is not the same as old, and
+// dropping it would lose EDGAR filings and anything a source dates loosely.
+function withinDays(dt, days, now = Date.now()) {
+  const a = ageDays(dt, now);
+  return a == null || a <= days;
+}
+
 const ROUNDUP_WORDS = new RegExp([
   'most active', 'top (premarket|pre-market|midday|after-hours) (gainers|decliners|losers)',
   'top (gainers|losers)', 'biggest (movers|gainers|losers)', 'stocks? (moving|to watch|making moves)',
@@ -581,7 +620,17 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
     fetchEdgar(ticker),
   ]);
 
-  const tradingview = tv.items, yahoo = yh.items, edgar = ed.items;
+  const now = Date.now();
+
+  // Old stories are not shown at all. WYHG's whole news list was two items
+  // from 51 days ago under a 205% move — that is not a news list, it is a
+  // history section in the place where the reason should be.
+  let aged = 0;
+  const recent = (items) => items.filter(n => {
+    if (withinDays(n.datetime, MAX_NEWS_AGE_DAYS, now)) return true;
+    aged++; return false;
+  });
+  const tradingview = recent(tv.items), yahoo = recent(yh.items), edgar = recent(ed.items);
 
   // The same story reaches us from more than one source now, and the classifier
   // counts corroboration — two copies of one headline would read as two outlets
@@ -595,9 +644,14 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
     const prev = seen.get(key);
     if (!prev || (ts && prev.ts && ts < prev.ts)) seen.set(key, { headline: n.headline, ts });
   }
-  const allItems = [...seen.values()];
 
-  const catalyst = classifyCatalyst(allItems);
+  // A tighter bar for drawing a conclusion than for showing something. Past a
+  // week the story is priced in, and naming it as today's catalyst is worse
+  // than naming nothing — it reads as an explanation. PAVS carried a REVERSE
+  // SPLIT catalyst off a 42-day-old headline before this.
+  const forCatalyst = [...seen.values()]
+    .filter(n => withinDays(n.ts, MAX_CATALYST_AGE_DAYS, now));
+  const catalyst = classifyCatalyst(forCatalyst);
 
   // Kept beside the items, and stored on the card, so "no news" can be read as
   // what it is: a quiet stock, or a source that never answered. `dropped` is
@@ -610,12 +664,19 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
   };
 
   return {
-    news: { tradingview, yahoo, edgar, sources, fetchedAt: new Date().toISOString() },
+    news: {
+      tradingview, yahoo, edgar, sources,
+      // How many were company-specific but too old to be today's reason.
+      // Separate from `dropped`, which is listings: different problems.
+      agedOut: aged,
+      catalystWindowDays: MAX_CATALYST_AGE_DAYS,
+      fetchedAt: new Date().toISOString(),
+    },
     catalyst,
   };
 }
 
 module.exports = {
   fetchNewsForTicker, classifyCatalyst, classifyCatalysts, CATALYST_PATTERNS,
-  isRoundup, MAX_RELATED_SYMBOLS,
+  isRoundup, MAX_RELATED_SYMBOLS, MAX_CATALYST_AGE_DAYS, MAX_NEWS_AGE_DAYS,
 };

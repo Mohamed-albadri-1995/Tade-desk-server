@@ -508,7 +508,8 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .news-src-warn { font-size: 10px; color: var(--m-model); background: #fb923c12;
   border: 1px solid #fb923c33; border-radius: 4px; padding: 4px 7px; margin-bottom: 6px;
   line-height: 1.5; }
-.news-none { font-size: 11px; color: var(--text3); padding: 2px 0; }
+.news-none { font-size: 11px; color: var(--text3); padding: 2px 0; line-height:1.6; }
+.news-aged { font-size: 10px; color: var(--text3); font-style: italic; margin-top: 5px; }
 /* The tape restated. Neutral because it is not a claim about what happens
    next — see catalystBadgeHTML. */
 .badge-tape { background:#ffffff08; color:var(--text2); border:1px solid var(--border);
@@ -3038,6 +3039,12 @@ function buildCard(row) {
       ⚠ ${broken.map(([k]) => k).join(', ')} not answering — the list below is what the rest found</div>`;
   })();
 
+  // "Nothing recent" and "nothing at all" are different, and the second is the
+  // one that should worry you on a stock that has moved 200%.
+  const agedNote = (news && news.agedOut)
+    ? `<div class="news-aged">${news.agedOut} older ${news.agedOut === 1 ? 'story' : 'stories'} not shown — past three weeks it is history, not the reason</div>`
+    : '';
+
   const newsHTML = newsItems.length ? `
     ${srcNote}
     <ul class="news-list">${newsItems.map(n =>
@@ -3045,9 +3052,13 @@ function buildCard(row) {
         n.at ? `<span class="news-age ${newsAgeClass(n.at)}" title="${new Date(n.at).toLocaleString('en-US',{timeZone:'America/New_York'})} ET">${newsAge(n.at)}</span>` : ''
       }</li>`
     ).join('')}</ul>
+    ${agedNote}
     ${news.fetchedAt ? `<div class="news-fetched">Fetched ${fmtTime(news.fetchedAt)} ET</div>` : ''}
   ` : (news && news.fetchedAt
-    ? `${srcNote}<div class="news-none">Checked ${fmtTime(news.fetchedAt)} ET — nothing found.</div>`
+    ? `${srcNote}<div class="news-none">Checked ${fmtTime(news.fetchedAt)} ET — ${
+        news.agedOut ? `nothing in the last three weeks. ${news.agedOut} older ${
+          news.agedOut === 1 ? 'story' : 'stories'} exist, none of them today's reason.`
+        : 'nothing found.'}</div>`
     : `<button class="load-news-btn" onclick="loadNews('${row.ticker}',this)">Load News</button>`);
 
   // Themes — which market stories this stock belongs to.
