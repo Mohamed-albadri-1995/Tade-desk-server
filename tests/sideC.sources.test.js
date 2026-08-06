@@ -246,3 +246,54 @@ describe('SEC filings are recent, or they are not shown', () => {
     expect(news.edgar[0].headline).toContain('2026-08-05');
   });
 });
+
+/*
+ * The envelope.
+ *
+ * TradingView answered 25 items when probed and zero in production. The
+ * difference was not the symbol: the probe searched the whole response for the
+ * headlines, and the tool assumed they sat at the top level or under `.items`.
+ * A wrong guess about shape was being reported as a quiet stock — the same
+ * silent failure the source-status work exists to prevent, arriving by a
+ * different route.
+ */
+describe('TradingView headlines are found wherever the envelope puts them', () => {
+  const story = () => tvStory();
+
+  test.each([
+    ['top-level array', (s) => [s]],
+    ['under .items', (s) => ({ items: [s] })],
+    ['under .news.items', (s) => ({ news: { items: [s] } })],
+    ['under .data.stories', (s) => ({ data: { stories: [s] } })],
+    ['nested two deep', (s) => ({ result: { payload: { list: [s] } } })],
+  ])('%s', async (_label, wrap) => {
+    mockHosts({ tv: () => Promise.resolve({ data: wrap(story()) }) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.tradingview.status).toBe('ok');
+    expect(news.tradingview).toHaveLength(1);
+    expect(news.tradingview[0].headline).toBe('Company wins FDA clearance');
+  });
+
+  test('an empty answer is a quiet stock, not an unreadable one', async () => {
+    for (const body of [[], { items: [] }]) {
+      mockHosts({ tv: () => Promise.resolve({ data: body }) });
+      const { news } = await fetchNewsForTicker('AAA', TV);
+      expect(news.sources.tradingview.status).toBe('ok');
+      expect(news.tradingview).toEqual([]);
+    }
+  });
+
+  // The case that actually happened, and the one it must never look like.
+  test('a shape with no headlines in it is reported, not passed off as no news', async () => {
+    mockHosts({ tv: () => Promise.resolve({ data: { error: 'symbol not found' } }) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.tradingview.status).toBe('unreadable');
+    expect(news.sources.tradingview.count).toBe(0);
+  });
+
+  test('objects that are not headlines are not mistaken for them', async () => {
+    mockHosts({ tv: () => Promise.resolve({ data: { symbols: [{ symbol: 'AAA', exchange: 'NASDAQ' }] } }) });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.tradingview.status).toBe('unreadable');
+  });
+});

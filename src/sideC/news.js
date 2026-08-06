@@ -360,6 +360,44 @@ const TV_HEADERS = {
   Accept: 'application/json',
 };
 
+/*
+ * Find the headlines wherever they are.
+ *
+ * The endpoint is undocumented and its envelope is not stable — this code
+ * originally assumed the array sat at the top level or under `.items`, which
+ * is exactly the assumption that produced "answering, zero items" in
+ * production while the probe, which searched the whole tree, found 25. That is
+ * the same failure the source-status work was written to eliminate, reached by
+ * a different route: a wrong guess about shape reported as an empty news day.
+ *
+ * So: search for it. An object with a title and a timestamp is a headline
+ * wherever it is nested, and null means the response was genuinely not
+ * something we know how to read — which is reported as such rather than as
+ * silence.
+ */
+function findHeadlineArray(data) {
+  const seen = new Set();
+  const looksLikeHeadline = (x) => x && typeof x === 'object' &&
+    (x.title || x.headline) &&
+    (x.published || x.publishedAt || x.datetime || x.timestamp);
+
+  const walk = (node) => {
+    if (!node || typeof node !== 'object' || seen.has(node)) return null;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      if (node.some(looksLikeHeadline)) return node.filter(looksLikeHeadline);
+      for (const x of node) { const r = walk(x); if (r) return r; }
+      return null;
+    }
+    for (const v of Object.values(node)) { const r = walk(v); if (r) return r; }
+    return null;
+  };
+  // An empty array anywhere is a real "no news" answer, not an unreadable one.
+  if (Array.isArray(data) && data.length === 0) return [];
+  if (data && typeof data === 'object' && Array.isArray(data.items) && !data.items.length) return [];
+  return walk(data);
+}
+
 async function fetchTradingView(tvSymbol) {
   if (!tvSymbol || !String(tvSymbol).includes(':')) {
     // Without the exchange prefix the endpoint answers 400. Say which it is,
@@ -371,7 +409,12 @@ async function fetchTradingView(tvSymbol) {
       `${TV_NEWS_URL}?client=overview&lang=en&symbol=${encodeURIComponent(tvSymbol)}`,
       { headers: TV_HEADERS, timeout: 8000 }
     );
-    const items = Array.isArray(resp.data) ? resp.data : (resp.data && resp.data.items) || [];
+    const items = findHeadlineArray(resp.data);
+    // A shape we cannot read is not a quiet stock. Saying "ok, nothing found"
+    // here would be the same silent failure the source-status work removed.
+    if (items === null) {
+      return bad('unreadable', 'answered, but no headline array in the response');
+    }
     let dropped = 0;
     const kept = items
       .filter(n => {
