@@ -343,6 +343,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .sch-legend { font-size:11px; color:var(--text3); margin-top:9px; line-height:1.6; }
 .sb-rule { font:11px ui-monospace,Menlo,monospace; background:var(--bg3); border:1px solid #333a4a;
            border-radius:4px; padding:2px 7px; color:var(--text2); }
+/* Shared rules, in the same list but visibly not this screener's own — same
+   cyan as the floor block above, so the two read as one thing. */
+.sb-rule.is-floor { background:#22d3ee14; border-color:#22d3ee3d; color:#67e8f9; }
+.sb-rule.is-floor::before { content:'+ '; opacity:.65; }
 .sb-editor { background:var(--bg2); border:1px solid var(--accent); border-radius:7px;
              padding:14px; margin-top:12px; }
 .sb-row { display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:6px; margin-bottom:6px;
@@ -4316,6 +4320,30 @@ function sbRenderFloor() {
   </div>`;
 }
 
+/*
+ * The floor, shown inside every screener's rule list.
+ *
+ * It is stated once at the top of this tab, but that is not where anyone looks
+ * when they are asking what a particular screener does. A screener whose card
+ * lists six rules while the scan sends ten is a card you cannot reason from —
+ * you would work out why a name is missing by checking six rules it passes.
+ *
+ * Marked as shared rather than merged in silently: these are not this
+ * screener's rules and editing them here would change all of them.
+ */
+function sbFloorCount() {
+  const f = SB_META && SB_META.floor;
+  return f && f.rules ? f.rules.length : 0;
+}
+
+function sbFloorRules() {
+  const f = SB_META && SB_META.floor;
+  if (!f || !f.rules) return '';
+  return f.rules.map(r =>
+    `<span class="sb-rule is-floor" title="Applies to every screener on this tool — change it in Settings">${esc(r)}</span>`
+  ).join('');
+}
+
 function sbRenderList() {
   sbRenderFloor();
   sbRenderSchedule();
@@ -4332,7 +4360,7 @@ function sbRenderList() {
           ${s.enabled ? '' : '<span class="sb-pill">disabled</span>'}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <span class="sb-pill">${s.filters.length} rules</span>
+          <span class="sb-pill">${s.filters.length} rules${sbFloorCount() ? ` + ${sbFloorCount()} floor` : ''}</span>
           <span class="sb-pill">top ${s.limit}</span>
           ${s.runFrom
             ? `<span class="sb-pill sb-when">runs ${s.runFrom}–${s.runTo} ET</span>`
@@ -4343,7 +4371,8 @@ function sbRenderList() {
           <button class="sb-btn sb-danger" onclick="sbDelete(${s.id})">Delete</button>
         </div>
       </div>
-      <div class="sb-rules">${s.filters.map(f => `<span class="sb-rule">${esc(sbRuleText(f))}</span>`).join('')}</div>
+      <div class="sb-rules">${s.filters.map(f => `<span class="sb-rule">${esc(sbRuleText(f))}</span>`).join('')
+        + sbFloorRules()}</div>
       <div class="sb-mirror">
         <span class="sb-why-k">Mirror of</span>
         <select onchange="sbSetMirror(${s.id}, this.value)">
@@ -4423,6 +4452,10 @@ function sbRenderEditor() {
     <label class="sb-label">Rules — a stock must match all of them</label>
     ${rows}
     <button class="sb-btn" onclick="sbAddRule()">+ Add rule</button>
+    ${sbFloorCount() ? `<div class="sb-rules" style="margin-top:10px">
+      <span class="sb-why-k" style="align-self:center">Always added</span>${sbFloorRules()}</div>
+      <div class="sb-mirror-note">Every screener on this tool gets these on top of its own rules —
+        no need to repeat them here. Change them in Settings → Tradability floor.</div>` : ''}
     <div class="sb-row" style="margin-top:12px;grid-template-columns:1fr 1fr 1fr auto">
       <div><label class="sb-label">Sort by</label>
         <select onchange="SB_EDIT.sort.sortBy=this.value">${fieldOpts(e.sort.sortBy)}</select></div>
