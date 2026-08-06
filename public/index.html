@@ -643,7 +643,11 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .page-info { font-size: 11px; color: var(--text3); }
 
 /* ── EMPTY / LOADING ── */
-.empty { color: var(--text3); font-size: 13px; padding: 40px; text-align: center; }
+.empty { color: var(--text3); font-size: 13px; padding: 40px; text-align: center; line-height: 1.7; }
+.clear-filters { display:block; margin:14px auto 0; background:none; border:1px solid var(--border);
+  color:var(--text2); font-family:inherit; font-size:11px; border-radius:6px;
+  padding:6px 12px; cursor:pointer; }
+.clear-filters:hover { border-color:var(--m-chrome); color:var(--text); }
 .loading { color: var(--text3); font-size: 13px; padding: 20px; text-align: center; }
 
 /* ── CHART MODAL ── */
@@ -837,6 +841,24 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
       <!-- filled from this tool's own screeners; see loadScreenerNames() -->
       <select class="filter-select" id="screener-filter" onchange="renderCards()">
         <option value="all">All Scanners</option>
+      </select>
+      <!-- "Not checked yet" is a real answer, not a tidy-up: Side C only
+           fetches news for live rows and is allowed to fail, so a stock can
+           genuinely never have been asked. Lumping those in with "no news"
+           would filter on a fact nobody established. -->
+      <select class="filter-select" id="news-filter" onchange="renderCards()"
+              title="news is fetched for live rows each run — a stale row may never have been asked">
+        <option value="all">News: any</option>
+        <option value="has">Has news</option>
+        <option value="none">No news</option>
+        <option value="unchecked">Not checked yet</option>
+      </select>
+      <select class="filter-select" id="catalyst-filter" onchange="renderCards()"
+              title="a catalyst is a classified reason to move, read off the headlines">
+        <option value="all">Catalyst: any</option>
+        <option value="has">Has catalyst</option>
+        <option value="major">⚡ Major only</option>
+        <option value="none">No catalyst</option>
       </select>
       <select class="filter-select" id="sort-select" onchange="renderCards()">
         <option value="score">Sort: Score ↓</option>
@@ -2511,10 +2533,28 @@ function seenList(row) {
   return names.map(n => ({ name: n, at: seen[n] })).sort((a, b) => (a.at || 0) - (b.at || 0));
 }
 
+/* Does this row have news, and do we actually know?
+ *
+ * Three states, not two. Side C fetches news for every LIVE row each pipeline,
+ * so a row that has gone stale — or one from a run where the news stage failed,
+ * it is a soft stage — was never asked. Folding "we asked and there was
+ * nothing" together with "we never asked" into a single "no news" would filter
+ * out stocks on a fact that was never established, which is the kind of wrong
+ * answer that looks like a right one.
+ */
+function newsState(row) {
+  const n = row.news;
+  if (!n) return 'unchecked';
+  const count = (n.finnhub || []).length + (n.yahoo || []).length + (n.edgar || []).length;
+  return count > 0 ? 'has' : 'none';
+}
+
 function getFilteredSorted() {
   const query = document.getElementById('search-input').value.toLowerCase();
   const filter = document.getElementById('screener-filter').value;
   const sort = document.getElementById('sort-select').value;
+  const newsF = (document.getElementById('news-filter') || {}).value || 'all';
+  const catF = (document.getElementById('catalyst-filter') || {}).value || 'all';
 
   let rows = r0Data.filter(row => {
     if (query && !row.ticker.toLowerCase().includes(query) && !(row.stock?.sector||'').toLowerCase().includes(query)) return false;
@@ -2522,6 +2562,17 @@ function getFilteredSorted() {
     // ("pre", "big"), which quietly matched the wrong screener as soon as a
     // tool had two whose names shared a word.
     if (filter !== 'all' && !seenList(row).some(s => s.name === filter)) return false;
+
+    if (newsF !== 'all' && newsState(row) !== newsF) return false;
+
+    if (catF !== 'all') {
+      const c = row.catalyst;
+      if (catF === 'has' && !c) return false;
+      if (catF === 'none' && c) return false;
+      // Tier 1 is the "⚡ major" band the card marks with a bolt — an earnings
+      // release or an FDA decision, not a routine analyst note.
+      if (catF === 'major' && !(c && c.tier === 1)) return false;
+    }
     return true;
   });
 
@@ -2542,12 +2593,41 @@ function getFilteredSorted() {
   return rows;
 }
 
+// Which filters are narrowing the list right now, in words.
+function activeFilters() {
+  const on = [];
+  const val = (id) => (document.getElementById(id) || {}).value;
+  const text = (id) => { const el = document.getElementById(id); return el && el.selectedOptions[0] ? el.selectedOptions[0].textContent : ''; };
+  if ((document.getElementById('search-input') || {}).value) on.push(`"${document.getElementById('search-input').value}"`);
+  if (val('screener-filter') && val('screener-filter') !== 'all') on.push(text('screener-filter'));
+  if (val('news-filter') && val('news-filter') !== 'all') on.push(text('news-filter'));
+  if (val('catalyst-filter') && val('catalyst-filter') !== 'all') on.push(text('catalyst-filter'));
+  return on;
+}
+
+function clearFilters() {
+  const s = document.getElementById('search-input'); if (s) s.value = '';
+  for (const id of ['screener-filter', 'news-filter', 'catalyst-filter']) {
+    const el = document.getElementById(id); if (el) el.value = 'all';
+  }
+  renderCards();
+}
+
 function renderCards() {
   const rows = getFilteredSorted();
-  document.getElementById('row-count').textContent = rows.length + ' stocks';
+  const on = activeFilters();
+  // "0 stocks" after a scan and "0 stocks because four filters are on" are
+  // different situations, and the count alone cannot tell them apart.
+  document.getElementById('row-count').textContent = on.length
+    ? `${rows.length} of ${r0Data.length}`
+    : `${rows.length} stocks`;
   const grid = document.getElementById('cards-grid');
   if (!rows.length) {
-    grid.innerHTML = '<div class="empty">No stocks match. Run a scan during market hours.</div>';
+    grid.innerHTML = on.length
+      ? `<div class="empty">Nothing matches ${on.map(esc).join(' + ')}.<br>
+           ${r0Data.length} stock(s) are loaded.
+           <button class="clear-filters" onclick="clearFilters()">Clear filters</button></div>`
+      : '<div class="empty">No stocks match. Run a scan during market hours.</div>';
     return;
   }
   grid.innerHTML = rows.map(buildCard).join('');
