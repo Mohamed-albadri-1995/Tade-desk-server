@@ -5,3 +5,9 @@ __pycache__/
 !quant-platform/qp/data/
 !quant-platform/data/
 .venv/
+
+# API keys, shared across the nine tools. Secrets — see src/sharedKeys.js.
+# /data/ is already ignored; this is belt-and-braces in case that ever changes,
+# because a key committed to a public repo is a key that has been published.
+keys.json
+**/keys.json

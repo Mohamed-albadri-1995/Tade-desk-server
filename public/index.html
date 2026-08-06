@@ -493,6 +493,11 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .news-item:last-child { border-bottom: none; }
 .news-src { font-size: 9px; font-weight: 700; color: var(--text3); min-width: 40px; padding-top: 1px; }
 .news-headline { line-height: 1.4; flex: 1; }
+/* A headline that goes somewhere. Chrome-blue on hover only — the link is
+   navigation, and navigation carries no meaning in the colour language. */
+.news-link { color: inherit; text-decoration: none; cursor: pointer;
+  border-bottom: 1px solid transparent; }
+.news-link:hover { color: var(--text); border-bottom-color: var(--m-chrome); }
 /* Age sits at the end of the row, right-aligned, so a column of them can be
    scanned without reading the headlines. */
 .news-age { font-size: 10px; font-weight: 700; white-space: nowrap; padding-top: 1px;
@@ -3018,9 +3023,11 @@ function buildCard(row) {
       h: hKeys.map(k => n[k]).find(Boolean) || '',
       at: newsMs(n.datetime),
       url: n.url || null,
+      provider: n.provider || null,
     }));
     newsItems = [
       ...pick(news.tradingview, 'TV', ['headline', 'summary']),
+      ...pick(news.finnhub, 'FH', ['headline', 'summary']),
       // Only present when the tagged sources came thin — see fetchGoogleNews.
       ...pick(news.google, 'GN', ['headline', 'summary']),
       ...pick(news.yahoo, 'YH', ['title', 'headline']),
@@ -3053,7 +3060,15 @@ function buildCard(row) {
   const newsHTML = newsItems.length ? `
     ${srcNote}
     <ul class="news-list">${newsItems.map(n =>
-      `<li class="news-item"><span class="news-src">${n.src}</span><span class="news-headline">${esc(n.h)}</span>${
+      `<li class="news-item"><span class="news-src">${n.src}</span>${
+        // A headline is a summary of something. If the source told us where
+        // that something is, the headline is the way to it — reading the story
+        // was otherwise a matter of retyping it into a search engine.
+        n.url
+          ? `<a class="news-headline news-link" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer"
+               onclick="event.stopPropagation()" title="${esc(n.provider || 'open the full story')} — opens in a new tab">${esc(n.h)}</a>`
+          : `<span class="news-headline">${esc(n.h)}</span>`
+      }${
         n.at ? `<span class="news-age ${newsAgeClass(n.at)}" title="${new Date(n.at).toLocaleString('en-US',{timeZone:'America/New_York'})} ET">${newsAge(n.at)}</span>` : ''
       }</li>`
     ).join('')}</ul>

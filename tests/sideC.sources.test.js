@@ -118,11 +118,14 @@ describe('a source reports how it did, not just what it found', () => {
     expect(news.sources.edgar.status).toBe('denied');
   });
 
-  test('Finnhub is gone entirely — no call, no source entry', async () => {
-    const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} });
+  // Finnhub is back — a key exists now, and "it returned nothing" was always
+  // "nobody gave it a key". Without one it must say so rather than read as a
+  // quiet stock, which is the whole point of the source statuses.
+  test('no Finnhub key reads as a missing key, not as no news', async () => {
+    mockHosts({});
     const { news } = await fetchNewsForTicker('AAA', TV);
-    expect(spy.mock.calls.every(c => !String(c[0]).includes('finnhub'))).toBe(true);
-    expect(news.sources.finnhub).toBeUndefined();
+    expect(news.sources.finnhub.status).toBe('no-key');
+    expect(news.sources.finnhub.detail).toMatch(/keys\.json|Finnhub key/);
   });
 });
 
@@ -478,5 +481,74 @@ describe('Google News fills the gap without becoming the source', () => {
     const { catalyst } = await fetchNewsForTicker('AAA', TV);
     expect(catalyst).toBeTruthy();
     expect(catalyst.label).toBe('M&A');
+  });
+});
+
+/*
+ * Finnhub, restored.
+ *
+ * It was removed on the strength of two facts: zero items in 23 days, and the
+ * trader's own experience that "it has so much junk news". The first turned
+ * out to be that no key had ever been entered. The second is real and is a
+ * filtering problem, not a reason to leave a key unused — its company-news
+ * endpoint is per-symbol, so it does not have Yahoo's habit of tagging a
+ * listing with forty tickers; what it sends instead is volume. The listing
+ * filter and the seven-day catalyst window are the instruments for that, and
+ * they already run over every source.
+ */
+describe('Finnhub is filtered like everything else', () => {
+  const fhStory = (over = {}) => ({
+    headline: 'Company wins FDA clearance', url: 'https://f',
+    datetime: Math.floor(Date.now() / 1000), source: 'Reuters', ...over,
+  });
+  function withKey(items) {
+    process.env.FINNHUB_API_KEY = 'test-key';
+    jest.spyOn(axios, 'get').mockImplementation((url) => {
+      if (url.includes('finnhub.io')) return Promise.resolve({ data: items });
+      if (url.includes('yahoo')) return Promise.resolve({ data: { news: [] } });
+      if (url.includes('sec.gov')) return Promise.resolve({ data: { hits: { hits: [] } } });
+      if (url.includes('news.google.com')) return Promise.resolve({ data: '<rss><channel></channel></rss>' });
+      return Promise.resolve({ data: [] });
+    });
+  }
+  afterEach(() => { delete process.env.FINNHUB_API_KEY; });
+
+  test('a key from the environment is used when no tool has its own', async () => {
+    withKey([fhStory()]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.finnhub.status).toBe('ok');
+    expect(news.finnhub).toHaveLength(1);
+  });
+
+  test('its listings are dropped on wording, since it sends no symbol list', async () => {
+    withKey([fhStory({ headline: 'Top Premarket Gainers' }), fhStory()]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.finnhub).toHaveLength(1);
+    expect(news.sources.finnhub.dropped).toBe(1);
+  });
+
+  test('its old stories age out like any other source', async () => {
+    withKey([fhStory({ datetime: Math.floor((Date.now() - 60 * 86400000) / 1000) })]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.finnhub).toEqual([]);
+    expect(news.agedOut).toBe(1);
+  });
+
+  test('it counts toward "not thin", so Google stays unasked', async () => {
+    withKey([fhStory(), fhStory({ headline: 'Second real story' })]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.google.status).toBe('not-needed');
+  });
+
+  test('a body that is not a list is reported, not read as silence', async () => {
+    withKey({ error: 'invalid api key' });
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.sources.finnhub.status).toBe('unreadable');
+  });
+
+  test('the story URL survives, so the headline can be opened', async () => {
+    withKey([fhStory({ url: 'https://finnhub.io/story/1' })]);
+    const { news } = await fetchNewsForTicker('AAA', TV);
+    expect(news.finnhub[0].url).toBe('https://finnhub.io/story/1');
   });
 });

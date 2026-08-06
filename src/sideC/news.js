@@ -1,4 +1,6 @@
 const axios = require('axios');
+const { getKey, FILE: SHARED_KEYS_FILE } = require('../sharedKeys');
+const sharedKeysFile = () => SHARED_KEYS_FILE;
 
 /*
  * Catalyst classification v2.
@@ -478,6 +480,55 @@ async function fetchTradingView(tvSymbol) {
 }
 
 /*
+ * Finnhub.
+ *
+ * Removed once, on the evidence that it had returned zero items in 23 days —
+ * which turned out to be because no key had ever been entered — and on the
+ * trader's experience of it elsewhere: "so much junk news". Both readings were
+ * fair and neither is a reason to leave a key unused now that there is one.
+ *
+ * The junk is the point of interest. Its company-news endpoint is per-symbol,
+ * so it does not have Yahoo's problem of tagging a listing with forty tickers;
+ * what it sends instead is volume — syndicated filler, price-move recaps,
+ * "why X is moving" pieces from content farms. The listing filter and the
+ * seven-day catalyst window are exactly the instruments for that, and both
+ * already run over every source. So it goes in with the others and is judged
+ * by what survives them.
+ */
+async function fetchFinnhub(ticker) {
+  const apiKey = getKey('finnhubApiKey', 'FINNHUB_API_KEY');
+  if (!apiKey) return bad('no-key', `no Finnhub key — add it to ${sharedKeysFile()}`);
+  try {
+    const to = new Date().toISOString().slice(0, 10);
+    const from = new Date(Date.now() - MAX_NEWS_AGE_DAYS * 86400000).toISOString().slice(0, 10);
+    const resp = await axios.get(
+      `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}&token=${apiKey}`,
+      { timeout: 8000 }
+    );
+    const raw = Array.isArray(resp.data) ? resp.data : null;
+    if (raw === null) return bad('unreadable', 'answered, but not a list of stories');
+    let dropped = 0;
+    const items = raw
+      .filter(n => {
+        // Per-symbol endpoint, so no symbol list to count — wording only.
+        if (isRoundup(n.headline, null)) { dropped++; return false; }
+        return true;
+      })
+      .slice(0, 10)
+      .map(n => ({
+        headline: n.headline,
+        url: n.url || null,
+        datetime: n.datetime,
+        provider: n.source || null,
+        source: 'finnhub',
+      }));
+    return { items, status: 'ok', dropped };
+  } catch (err) {
+    return fetchError(err);
+  }
+}
+
+/*
  * Google News — the fallback, and only the fallback.
  *
  * Probed against a well-covered stock and a thin one, because the thin one is
@@ -705,10 +756,11 @@ function toMs(dt) {
  * @param tvSymbol  EXCHANGE:TICKER, for TradingView — stock.tvSymbol
  */
 async function fetchNewsForTicker(ticker, tvSymbol) {
-  const [tv, yh, ed] = await Promise.all([
+  const [tv, yh, ed, fh] = await Promise.all([
     fetchTradingView(tvSymbol),
     fetchYahoo(ticker),
     fetchEdgar(ticker),
+    fetchFinnhub(ticker),
   ]);
 
   const now = Date.now();
@@ -721,10 +773,11 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
     if (withinDays(n.datetime, MAX_NEWS_AGE_DAYS, now)) return true;
     aged++; return false;
   });
-  let tradingview = recent(tv.items), yahoo = recent(yh.items), edgar = recent(ed.items);
+  let tradingview = recent(tv.items), yahoo = recent(yh.items),
+      edgar = recent(ed.items), finnhub = recent(fh.items);
 
   // Only when the symbol-tagged sources came back thin. See fetchGoogleNews.
-  const tagged = tradingview.length + yahoo.length + edgar.length;
+  const tagged = tradingview.length + yahoo.length + edgar.length + finnhub.length;
   let gn = { items: [], status: 'not-needed', detail: `${tagged} item(s) from tagged sources`, dropped: 0 };
   if (tagged < GOOGLE_MIN_ITEMS) {
     gn = await fetchGoogleNews(ticker);
@@ -737,7 +790,7 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
   // independently confirming it. Deduplicated on the normalised headline, with
   // the earliest timestamp kept, since that is when the story actually broke.
   const seen = new Map();
-  for (const n of [...tradingview, ...yahoo, ...edgar, ...google]) {
+  for (const n of [...tradingview, ...yahoo, ...edgar, ...finnhub, ...google]) {
     if (!n.headline) continue;
     const key = normalizeHeadline(n.headline);
     const ts = toMs(n.datetime);
@@ -761,12 +814,13 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
     tradingview: { status: tv.status, detail: tv.detail || null, count: tradingview.length, dropped: tv.dropped || 0 },
     yahoo: { status: yh.status, detail: yh.detail || null, count: yahoo.length, dropped: yh.dropped || 0 },
     edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length, dropped: ed.dropped || 0 },
+    finnhub: { status: fh.status, detail: fh.detail || null, count: finnhub.length, dropped: fh.dropped || 0 },
     google: { status: gn.status, detail: gn.detail || null, count: google.length, dropped: gn.dropped || 0 },
   };
 
   return {
     news: {
-      tradingview, yahoo, edgar, google, sources,
+      tradingview, yahoo, edgar, finnhub, google, sources,
       // How many were company-specific but too old to be today's reason.
       // Separate from `dropped`, which is listings: different problems.
       agedOut: aged,
