@@ -86,12 +86,30 @@ body {
 /* ── when this tool is worth opening ──
    Nine tools on one page and only two or three are useful at any given hour.
    "check 08:00–09:30" is the answer to the question actually being asked here,
-   which is not "is it running" but "should I be looking at it now". */
-.check { font-size:10.5px; border-radius:4px; padding:2px 7px; margin-top:2px;
-  align-self:flex-start; border:1px solid var(--border);
-  color:var(--text3); background:var(--bg3); }
-.check.now { color:#052e16; background:var(--green); border-color:var(--green); font-weight:700; }
-.tool-card.asleep { opacity:.72; }
+   which is not "is it running" but "should I be looking at it now".
+
+   Sized and coloured to be read at a glance in daylight rather than hunted for.
+   The first version of this was small grey text under the description, which is
+   the same washed-out grey that was already unreadable outdoors — it was on the
+   page and might as well not have been. It now sits directly under the tool
+   name, ahead of the description, because it is the line that decides whether
+   the rest of the card is worth reading at all. */
+.check { font:700 12.5px/1 ui-monospace,Menlo,monospace; letter-spacing:.02em;
+  border-radius:5px; padding:6px 10px; margin:2px 0 4px; align-self:flex-start;
+  border:1px solid #4a5163; color:#c9d1e4; background:#20263a; }
+.check.now { color:#04220f; background:var(--green); border-color:var(--green); }
+.tool-card.asleep { opacity:.82; }
+
+/* The one-line answer, above the nine cards: which of them are live right now.
+   Without it the reader compares nine time ranges against a clock. */
+.now-bar { width:100%; max-width:1000px; margin:2px auto 14px; padding:12px 16px;
+  border-radius:9px; text-align:center; font-size:13.5px; line-height:1.6;
+  border:1px solid var(--border); background:var(--bg2); color:var(--text2); }
+.now-bar.live { border-color:var(--green); background:#4ade8016; color:var(--text); }
+.now-bar b { color:var(--green); }
+.now-bar .nb-clock { font:700 12px ui-monospace,Menlo,monospace; color:var(--text3);
+  display:block; margin-bottom:4px; letter-spacing:.05em; }
+.now-bar .nb-next { color:var(--text2); }
 
 /* ── month-end comparison ── */
 .cmp-wrap { margin-top:34px; width:100%; max-width:1000px; text-align:center; }
@@ -157,6 +175,8 @@ body {
 
 <div class="section-head">Screeners</div>
 <div class="subtitle">Nine of them. Each screens differently and learns from its own history.</div>
+
+<div class="now-bar" id="now-bar">Checking which tools are live…</div>
 
 <div class="cards" id="cards"></div>
 
@@ -255,7 +275,52 @@ function checkLine(check) {
   if (!check) return '';
   return `<span class="check${check.now ? ' now' : ''}" title="${
     (check.screeners || []).map(s => `${s.name}: ${s.from}–${s.to}`).join('\n')
-  }">${check.now ? '● CHECK NOW' : 'check'} ${check.from}–${check.to} ET</span>`;
+  }">${check.now ? `● CHECK NOW · till ${check.to}` : `check ${check.from}–${check.to}`} ET</span>`;
+}
+
+/*
+ * One line above the nine cards: which of them are worth opening right now.
+ *
+ * The per-card window answers "when is this one useful". Nine of those is a
+ * table the reader has to compare against a clock before they can act, and on a
+ * phone at 09:20 that is the wrong amount of work for a question with a
+ * two-word answer. So the answer is stated, and the cards become the detail.
+ *
+ * When nothing is live, the useful thing is not "nothing" — it is which tool
+ * opens next and at what time.
+ */
+function renderNowBar(states) {
+  const el = document.getElementById('now-bar');
+  if (!el) return;
+
+  const up = TOOLS.filter(t => states[t.id] && states[t.id].check);
+  if (!up.length) { el.textContent = 'No tool is reporting its hours yet.'; el.className = 'now-bar'; return; }
+
+  // The market's clock, taken from a tool rather than the phone — the phone
+  // travels and the market does not.
+  const clock = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date());
+
+  const live = up.filter(t => states[t.id].check.now);
+  if (live.length) {
+    el.className = 'now-bar live';
+    el.innerHTML = `<span class="nb-clock">${clock} ET</span>`
+      + `Check now: ${live.map(t => `<b>${t.name}</b> <span class="nb-next">(till ${states[t.id].check.to})</span>`).join(' · ')}`;
+    return;
+  }
+
+  // Nothing live. The next one to open is the earliest start still ahead of the
+  // clock; if the day is over, it is the earliest start of any of them.
+  const starts = up.map(t => ({ name: t.name, from: states[t.id].check.from }));
+  const ahead = starts.filter(x => x.from > clock).sort((a, b) => a.from.localeCompare(b.from));
+  const next = ahead.length ? ahead : starts.slice().sort((a, b) => a.from.localeCompare(b.from));
+  const at = next[0].from;
+  const together = next.filter(x => x.from === at).map(x => x.name).join(', ');
+  el.className = 'now-bar';
+  el.innerHTML = `<span class="nb-clock">${clock} ET</span>`
+    + `Nothing to check right now. Next: <b>${together}</b> at ${at} ET`
+    + (ahead.length ? '' : ' <span class="nb-next">(tomorrow)</span>');
 }
 
 function card(t, state, info, check) {
@@ -275,8 +340,8 @@ function card(t, state, info, check) {
         </div>
         <div class="status ${state}"><span class="dot"></span>${label}</div>
       </div>
-      <div class="card-desc">${t.desc}</div>
       ${checkLine(check)}
+      <div class="card-desc">${t.desc}</div>
       <div class="stats">${stats.map(s => `<span class="stat">${s}</span>`).join('')}</div>
       <span class="arrow">→</span>
     </a>`;
@@ -285,6 +350,7 @@ function card(t, state, info, check) {
 function render(states) {
   document.getElementById('cards').innerHTML =
     TOOLS.map(t => card(t, states[t.id].state, states[t.id].info, states[t.id].check)).join('');
+  renderNowBar(states);
 }
 
 const states = {};
