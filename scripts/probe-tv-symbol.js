@@ -45,6 +45,12 @@ async function tryOne(symbol) {
 }
 
 // Same search the tool now uses, so what this reports is what the tool sees.
+//
+// An empty list and a body we cannot read are different answers and this used
+// to print both as "NO headline array found" — which made a stock TradingView
+// simply has nothing on look identical to a broken response. That is the exact
+// confusion the source statuses exist to prevent, so the probe must not make
+// it either.
 function findHeadlineArray(data) {
   const seen = new Set();
   const looks = (x) => x && typeof x === 'object' && (x.title || x.headline) &&
@@ -60,6 +66,8 @@ function findHeadlineArray(data) {
     for (const v of Object.values(node)) { const r = walk(v); if (r) return r; }
     return null;
   };
+  if (Array.isArray(data) && data.length === 0) return [];
+  if (data && typeof data === 'object' && Array.isArray(data.items) && !data.items.length) return [];
   return walk(data);
 }
 
@@ -120,8 +128,12 @@ function pathTo(data, target) {
       else {
         const items = findHeadlineArray(r.data);
         const n = items ? items.length : 0;
-        console.log(`  ${label.padEnd(12)} ${String(sym).padEnd(18)} ${
-          items === null ? 'answered, NO headline array found' : `YES — ${n} item(s)`}`);
+        const verdict = items === null
+          ? `answered, but the shape is UNREADABLE — keys: ${
+              Array.isArray(r.data) ? '(array)' : Object.keys(r.data || {}).join(',') || '(empty body)'}`
+          : n === 0 ? 'answered, genuinely no news for this symbol'
+          : `YES — ${n} item(s)`;
+        console.log(`  ${label.padEnd(12)} ${String(sym).padEnd(18)} ${verdict}`);
         if (items && items.length && !shapeShown) {
           shapeShown = true;
           console.log(`      array found at: ${pathTo(r.data, items) || '(filtered copy — see envelope)'}`);
