@@ -286,24 +286,50 @@ function getFinnhubKey() {
   return process.env.FINNHUB_API_KEY || '';
 }
 
+/*
+ * Why a source returned nothing.
+ *
+ * All three fetchers used to answer an empty array for every reason there is:
+ * no API key, a 403, a timeout, or a genuinely quiet stock. Those are not the
+ * same fact and only one of them is about the stock. Twenty-three days of
+ * backups show finnhub and edgar returning zero items on every single day —
+ * 11,359 stories, all of them Yahoo's — and nothing anywhere said a word,
+ * because "no news" is what a broken source and a quiet ticker both look like.
+ *
+ * Each fetcher now reports how it did alongside what it found, and the card
+ * shows it. A source that is misconfigured says so once, where it can be fixed.
+ */
+function ok(items) { return { items, status: 'ok' }; }
+function bad(status, detail) { return { items: [], status, detail }; }
+
+function fetchError(err) {
+  const code = err.response && err.response.status;
+  if (code === 401 || code === 403) return bad('denied', `HTTP ${code}`);
+  if (code === 429) return bad('rate-limited', 'HTTP 429');
+  if (code) return bad('error', `HTTP ${code}`);
+  if (err.code === 'ECONNABORTED') return bad('timeout', 'took too long');
+  return bad('error', err.code || err.message);
+}
+
 async function fetchFinnhub(ticker) {
+  const apiKey = getFinnhubKey();
+  // Not an error and not silence: nobody has entered a key. Settings → Finnhub.
+  if (!apiKey) return bad('no-key', 'no Finnhub API key in Settings');
   try {
-    const apiKey = getFinnhubKey();
-    if (!apiKey) return [];
     const to = new Date().toISOString().slice(0, 10);
     const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     const resp = await axios.get(
       `https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${from}&to=${to}&token=${apiKey}`,
       { timeout: 8000 }
     );
-    return (resp.data || []).slice(0, 10).map(n => ({
+    return ok((resp.data || []).slice(0, 10).map(n => ({
       headline: n.headline,
       url: n.url,
       datetime: n.datetime,
       source: 'finnhub',
-    }));
-  } catch {
-    return [];
+    })));
+  } catch (err) {
+    return fetchError(err);
   }
 }
 
@@ -317,7 +343,7 @@ async function fetchYahoo(ticker) {
     // Yahoo search returns market-wide roundups and other companies' stories
     // too ("Most Active Stocks", ...). Only keep items Yahoo itself tagged
     // with this ticker — untagged roundups must not create catalysts.
-    return news
+    return ok(news
       .filter(n => Array.isArray(n.relatedTickers) && n.relatedTickers.includes(ticker))
       .slice(0, 10)
       .map(n => ({
@@ -325,29 +351,53 @@ async function fetchYahoo(ticker) {
         url: n.link,
         datetime: n.providerPublishTime,
         source: 'yahoo',
-      }));
-  } catch {
-    return [];
+      })));
+  } catch (err) {
+    return fetchError(err);
   }
 }
+
+/*
+ * SEC filings.
+ *
+ * This asked for filings for 23 days and got nothing, every day, for every
+ * stock. The request went out with no headers at all, and the SEC refuses
+ * anonymous automated traffic — their access policy requires a User-Agent
+ * naming the requester, and a request without one is denied rather than
+ * answered empty. The catch swallowed the refusal and returned [], which is
+ * indistinguishable from "this company has not filed anything".
+ *
+ * An 8-K is the filing that carries the events worth trading — the merger, the
+ * offering, the resignation — so this was the source most worth having and the
+ * one that never once ran.
+ */
+const SEC_USER_AGENT = process.env.SEC_USER_AGENT || 'TradeDesk Screener admin@trade-desk.local';
 
 async function fetchEdgar(ticker) {
   try {
     const resp = await axios.get(
-      `https://efts.sec.gov/LATEST/search-index?q=${ticker}&forms=8-K,S-3`,
-      { timeout: 8000 }
+      `https://efts.sec.gov/LATEST/search-index?q=%22${encodeURIComponent(ticker)}%22&forms=8-K,S-3`,
+      {
+        timeout: 8000,
+        headers: {
+          // Required. See https://www.sec.gov/os/webmaster-faq#developers
+          'User-Agent': SEC_USER_AGENT,
+          'Accept-Encoding': 'gzip, deflate',
+          Accept: 'application/json',
+        },
+      }
     );
     const hits = resp.data?.hits?.hits || [];
-    return hits.slice(0, 5).map(h => ({
+    return ok(hits.slice(0, 5).map(h => ({
       headline: h._source?.period_of_report
         ? `${h._source.form_type} — ${h._source.period_of_report}`
         : h._source?.form_type || 'SEC Filing',
       url: `https://www.sec.gov/Archives/edgar/data/${h._source?.entity_id}/${h._id}`,
-      datetime: h._source?.period_of_report,
+      datetime: h._source?.period_of_report || h._source?.file_date,
       source: 'edgar',
-    }));
-  } catch {
-    return [];
+    })));
+  } catch (err) {
+    return fetchError(err);
   }
 }
 
@@ -363,11 +413,13 @@ function toMs(dt) {
 }
 
 async function fetchNewsForTicker(ticker) {
-  const [finnhub, yahoo, edgar] = await Promise.all([
+  const [fh, yh, ed] = await Promise.all([
     fetchFinnhub(ticker),
     fetchYahoo(ticker),
     fetchEdgar(ticker),
   ]);
+
+  const finnhub = fh.items, yahoo = yh.items, edgar = ed.items;
 
   // EDGAR items participate too: an S-3 filing is a dilution-risk signal the
   // wire services often never write a headline for.
@@ -377,8 +429,16 @@ async function fetchNewsForTicker(ticker) {
 
   const catalyst = classifyCatalyst(allItems);
 
+  // Kept beside the items, and stored on the card, so "no news" can be read as
+  // what it is: a quiet stock, or a source that never answered.
+  const sources = {
+    finnhub: { status: fh.status, detail: fh.detail || null, count: finnhub.length },
+    yahoo: { status: yh.status, detail: yh.detail || null, count: yahoo.length },
+    edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length },
+  };
+
   return {
-    news: { finnhub, yahoo, edgar, fetchedAt: new Date().toISOString() },
+    news: { finnhub, yahoo, edgar, sources, fetchedAt: new Date().toISOString() },
     catalyst,
   };
 }

@@ -235,6 +235,16 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .badge-canslim b { font-weight:700; opacity:.8; }
 .badge-scr { background: #ffffff08; border: 1px solid var(--border); color: var(--text2);
   text-transform: none; letter-spacing: 0; }
+/* First sighting on this tool. Leads the badge row because it is the question
+   asked first: could I have had this? Not on the colour ramp — the time is a
+   fact, and early is not the same as good. */
+.first-seen { font-size:10px; font-weight:600; padding:2px 7px; border-radius:4px;
+  background:#ffffff08; border:1px solid var(--border); color:var(--text2);
+  letter-spacing:0; white-space:nowrap; }
+.first-seen b { font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
+.first-seen.fs-pre   { border-color:#a78bfa44; }
+.first-seen.fs-early { border-color:#4ade8044; }
+.first-seen.fs-late  { border-color:var(--border); opacity:.9; }
 .badge-scr b { font-weight: 700; opacity: .85; margin-left: 2px; font-variant-numeric: tabular-nums; }
 /* a screener that matched earlier today but is not matching right now */
 .badge-past { opacity: .55; border-style: dashed !important; }
@@ -489,6 +499,12 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .load-news-btn { background: var(--bg4); border: 1px solid var(--border); border-radius: 5px; padding: 5px 12px; color: var(--text2); font-size: 11px; cursor: pointer; font-family: inherit; margin-top: 6px; width: 100%; }
 .load-news-btn:hover { border-color: var(--accent); color: var(--accent); }
 .news-fetched { font-size: 10px; color: var(--text3); margin-top: 4px; }
+/* A source that is not answering is a fact about the tool, not about the
+   stock, so it is marked rather than left to look like silence. */
+.news-src-warn { font-size: 10px; color: var(--m-model); background: #fb923c12;
+  border: 1px solid #fb923c33; border-radius: 4px; padding: 4px 7px; margin-bottom: 6px;
+  line-height: 1.5; }
+.news-none { font-size: 11px; color: var(--text3); padding: 2px 0; }
 
 /* ── MARKET TAB ── */
 .market-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 16px; }
@@ -2756,6 +2772,34 @@ function buildCard(row) {
   // Yellow is reserved for this — your own mark, nothing else on the card.
   const starStyle = row.inShortlist ? 'color:var(--m-mine)' : 'color:var(--m-none)';
 
+  /* When this stock first appeared anywhere on this tool.
+   *
+   * The per-screener badges carry a time each, which answers "when did THIS
+   * screener find it" — useful, and not the question asked when you are looking
+   * at a list at 14:00 wondering whether you could have had this at the open.
+   * The earliest sighting across every screener is one number and it is the one
+   * that decides whether a trade was ever available.
+   *
+   * Minutes from the bell rather than a clock time on its own, because "09:36"
+   * needs the open subtracted from it and "+6m" does not. Negative is
+   * pre-market, which is a different kind of sighting and reads as one.
+   */
+  const firstSeenAt = (() => {
+    const times = seenList(row).map(s => s.at).filter(Boolean);
+    if (row.firstSeen) times.push(row.firstSeen);
+    return times.length ? Math.min(...times) : null;
+  })();
+  const firstSeenHTML = firstSeenAt ? (() => {
+    const m = minsFromOpen(firstSeenAt);
+    const rel = m == null ? '' : m < 0 ? `${-m}m before open` : m === 0 ? 'at the open' : `+${m}m`;
+    const cls = m == null ? '' : m < 0 ? 'fs-pre' : m <= 30 ? 'fs-early' : 'fs-late';
+    return `<span class="first-seen ${cls}"
+      title="first seen on this tool at ${fmtET24(firstSeenAt)} ET${
+        m == null ? '' : m < 0 ? ', in the pre-market' : `, ${m} minute(s) after the open`
+      } — the earliest any screener here matched it">
+      first seen <b>${fmtET24(firstSeenAt)}</b>${rel ? ` · ${rel}` : ''}</span>`;
+  })() : '';
+
   // Screener badges — one per screener that has matched today, each stamped
   // with the time IT found the stock. Without the time, a candidate a screener
   // first threw up at 15:00 is indistinguishable from one that has been on the
@@ -2916,14 +2960,32 @@ function buildCard(row) {
       ...pick(news.edgar, 'SEC', ['title', 'headline']),
     ].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 5);
   }
+  // Which sources actually answered.
+  //
+  // "No news" used to mean any of: a quiet stock, a missing API key, or the SEC
+  // refusing the request. Those need opposite responses and the card showed the
+  // same blank either way — for 23 days two of the three sources returned
+  // nothing at all and the card never said so.
+  const srcNote = (() => {
+    const s = news && news.sources;
+    if (!s) return '';
+    const broken = Object.entries(s).filter(([, v]) => v.status && v.status !== 'ok');
+    if (!broken.length) return '';
+    return `<div class="news-src-warn" title="${esc(broken.map(([k, v]) => `${k}: ${v.detail || v.status}`).join(' · '))}">
+      ⚠ ${broken.map(([k]) => k).join(', ')} not answering — the list below is what the rest found</div>`;
+  })();
+
   const newsHTML = newsItems.length ? `
+    ${srcNote}
     <ul class="news-list">${newsItems.map(n =>
       `<li class="news-item"><span class="news-src">${n.src}</span><span class="news-headline">${esc(n.h)}</span>${
         n.at ? `<span class="news-age ${newsAgeClass(n.at)}" title="${new Date(n.at).toLocaleString('en-US',{timeZone:'America/New_York'})} ET">${newsAge(n.at)}</span>` : ''
       }</li>`
     ).join('')}</ul>
     ${news.fetchedAt ? `<div class="news-fetched">Fetched ${fmtTime(news.fetchedAt)} ET</div>` : ''}
-  ` : `<button class="load-news-btn" onclick="loadNews('${row.ticker}',this)">Load News</button>`;
+  ` : (news && news.fetchedAt
+    ? `${srcNote}<div class="news-none">Checked ${fmtTime(news.fetchedAt)} ET — nothing found.</div>`
+    : `<button class="load-news-btn" onclick="loadNews('${row.ticker}',this)">Load News</button>`);
 
   // Themes — which market stories this stock belongs to.
   //
@@ -3018,7 +3080,7 @@ function buildCard(row) {
   </div>
 
   <div class="card-badges">
-    ${alsoBadge}${canslimBadge}${badges}${hotBadge}${catalystBadge}
+    ${firstSeenHTML}${alsoBadge}${canslimBadge}${badges}${hotBadge}${catalystBadge}
   </div>
   ${signalTags}
 
@@ -3633,6 +3695,20 @@ function fmtET24(ts) {
     hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York',
   });
 }
+// Minutes from the opening bell, in New York, negative before it.
+// Read off the same ET clock fmtET24 prints, so the two can never disagree —
+// computing this from the browser's own timezone would put a phone in Riyadh
+// seven hours out and the card would confidently say so.
+function minsFromOpen(ts) {
+  if (!ts) return null;
+  const hhmm = new Date(ts).toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York',
+  });
+  const [h, m] = hhmm.split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return (h * 60 + m) - (9 * 60 + 30);
+}
+
 function fmtMcap(v) {
   if (v == null) return '—';
   if (v >= 1e9) return '$' + (v/1e9).toFixed(2) + 'B';
