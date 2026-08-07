@@ -84,6 +84,24 @@ app.get('/health', (req, res) => {
   });
 });
 
+/*
+ * An unknown /api path is a 404, not the landing page.
+ *
+ * The catch-all below serves home.html for anything unmatched, which is right
+ * for a browser URL and badly wrong for an API call: the caller gets HTTP 200
+ * and a page of HTML where it asked for data. That is what happened when the
+ * TradingView export was called against a server that had not been restarted
+ * yet — the fetch succeeded, the response looked fine to `r.ok`, and the whole
+ * landing page ended up on the clipboard.
+ *
+ * A 404 makes the same situation obvious at the first hop instead of the last.
+ * Placed after every API router and before the SPA fallback, so it only sees
+ * paths nothing else claimed.
+ */
+app.use('/api', (req, res) => {
+  res.status(404).json({ ok: false, error: 'No such endpoint', path: req.originalUrl });
+});
+
 // Landing page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/home.html'));
@@ -105,8 +123,20 @@ app.get('/{*path}', (req, res) => {
 config.assertDistinct();
 require('./sideA/seedScreeners').seedScreeners();
 
+/*
+ * Only listen when this file is the program being run.
+ *
+ * pm2 starts it as `node src/index.js`, so the server binds exactly as before.
+ * A test that requires it gets the configured app and nothing else — no port
+ * taken, no scheduler started, no open handle keeping the process alive after
+ * the assertions finish.
+ *
+ * Without this, the route ORDER could not be tested at all, and that is where
+ * the unmatched-/api bug lived: any test mounting the routers on their own
+ * would pass while the deployed app went on serving HTML for unknown API paths.
+ */
 const PORT = config.port;
-app.listen(PORT, () => {
+if (require.main === module) app.listen(PORT, () => {
   console.log(`[Server] ${config.toolName} (${config.toolId}) running on port ${PORT}`);
   console.log(`[Server]   db=${config.dbPath}`);
   console.log(`[Server]   model=${config.modelOutputRoot}  scorer=${config.scorerUrl}`);

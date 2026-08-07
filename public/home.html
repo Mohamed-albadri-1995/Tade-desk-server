@@ -623,10 +623,35 @@ async function loadUnifiedShortlist() {
  * been rendered minutes ago and a stale watchlist is a worse failure than a
  * slow button.
  */
+/*
+ * `r.ok` is not enough to trust a response body.
+ *
+ * The server's catch-all used to serve the landing page for any unmatched path,
+ * so calling this endpoint against a server that had not been restarted yet
+ * returned HTTP 200 and a page of HTML — which the clipboard duly received.
+ * That is fixed on the server, but the client should not have believed it
+ * either: a status code says the request arrived somewhere, not that the
+ * somewhere was right.
+ *
+ * So the payload is checked against what it claims to be. A symbol is letters,
+ * digits, dots and dashes, optionally exchange-qualified. Anything else is not
+ * a watchlist and must not reach the clipboard, where a wrong paste looks
+ * exactly like a right one.
+ */
+const SYMBOL_RE = /^[A-Z0-9][A-Z0-9._-]*(:[A-Z0-9][A-Z0-9._-]*)?$/i;
+
 async function tvSymbols(format) {
   const r = await fetch(`/api/shortlist/all-tools/export?format=${format}`);
-  if (!r.ok) throw new Error('export failed');
-  return (await r.text()).trim();
+  if (!r.ok) throw new Error(`export failed (${r.status})`);
+  const text = (await r.text()).trim();
+  if (!text) return '';
+  const parts = text.split(format === 'csv' ? ',' : '\n').map(x => x.trim()).filter(Boolean);
+  const bad = parts.find(x => !SYMBOL_RE.test(x));
+  if (bad) {
+    throw new Error(`that is not a symbol list — got "${String(bad).slice(0, 40)}". `
+      + 'The server may be running older code; redeploy and try again.');
+  }
+  return parts.join(format === 'csv' ? ',' : '\n');
 }
 
 /*
@@ -671,9 +696,14 @@ async function copyShortlistForTV(btn) {
   let text;
   try {
     text = await tvSymbols('csv');
-  } catch {
-    btn.textContent = 'Could not read the list';
-    setTimeout(() => { btn.textContent = original; }, 2500);
+  } catch (e) {
+    // Say what went wrong rather than "could not read the list". The likely
+    // cause is a server that has not been restarted, and that is fixable in one
+    // command by someone who is told which one.
+    btn.textContent = 'Not a symbol list — redeploy';
+    const out = document.getElementById('uni-tv-text');
+    if (out) { out.style.display = ''; out.value = String(e.message || e); }
+    setTimeout(() => { btn.textContent = original; }, 4000);
     return;
   }
   if (!text) {
