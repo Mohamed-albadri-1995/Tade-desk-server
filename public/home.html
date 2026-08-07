@@ -111,6 +111,12 @@ body {
   display:block; margin-bottom:4px; letter-spacing:.05em; }
 .now-bar .nb-next { color:var(--text2); }
 
+/* Group headings inside the card grid. Full width so the flex row breaks on
+   them, which is what turns a shuffled-looking list into a grouped one. */
+.group-head { width:100%; font-size:11px; font-weight:700; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--text3); margin:10px 0 -4px; padding-left:2px; }
+.group-head:first-child { margin-top:0; }
+
 /* ── month-end comparison ── */
 .cmp-wrap { margin-top:34px; width:100%; max-width:1000px; text-align:center; }
 .cmp-btn { font:600 13px/1 inherit; padding:10px 20px; border-radius:6px; cursor:pointer;
@@ -347,9 +353,80 @@ function card(t, state, info, check) {
     </a>`;
 }
 
+/*
+ * The market's clock, from the browser but in New York time. Used only for
+ * ORDERING; whether a tool is live is still decided by the tool itself, which
+ * is the answer that must not depend on where the phone is.
+ */
+function etClock() {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date());
+}
+
+/*
+ * Order the nine by when they matter, not by their number.
+ *
+ * T1…T9 is the order they were built in, and it is the wrong one to read at
+ * 09:20 — it puts the tool you should be looking at somewhere in the middle of
+ * a list of eight you should not. Four groups, in the order the day uses them:
+ *
+ *   live now      — and within that, the one closing soonest first. If two are
+ *                   open, the one you are about to lose is the urgent one.
+ *   opens later   — soonest first, so "what's next" is at the top of the rest.
+ *   done for today— it has had its hours; it is history until tomorrow.
+ *   no hours      — offline, or not reporting. Nothing to say about it.
+ *
+ * The tool's own ID stays on every card, so a specific one is still findable
+ * when the order has moved it.
+ */
+function byWhenItMatters(states) {
+  const now = etClock();
+  return (a, b) => {
+    const ca = states[a.id] && states[a.id].check;
+    const cb = states[b.id] && states[b.id].check;
+    const rank = (c) => {
+      if (!c) return 3;                      // nothing to say
+      if (c.now) return 0;                   // open right now
+      return c.from > now ? 1 : 2;           // still to come / already closed
+    };
+    const ra = rank(ca), rb = rank(cb);
+    if (ra !== rb) return ra - rb;
+    if (ra === 0) return ca.to.localeCompare(cb.to);       // closing soonest first
+    if (ra === 3) return 0;                                 // leave as configured
+    return ca.from.localeCompare(cb.from);                  // opening soonest first
+  };
+}
+
+/*
+ * Headings between the groups.
+ *
+ * Without them the new order just looks like the cards have been shuffled —
+ * the reader has to infer the rule from the badges before the order helps
+ * rather than confuses. A one-word heading makes the sort self-explaining, and
+ * it is also where "nothing is open" gets said in the list itself rather than
+ * only in the bar above it.
+ */
+const GROUP_LABEL = ['Open now', 'Later today', 'Done for today', 'No hours reported'];
+
 function render(states) {
-  document.getElementById('cards').innerHTML =
-    TOOLS.map(t => card(t, states[t.id].state, states[t.id].info, states[t.id].check)).join('');
+  const now = etClock();
+  const groupOf = (t) => {
+    const c = states[t.id] && states[t.id].check;
+    if (!c) return 3;
+    if (c.now) return 0;
+    return c.from > now ? 1 : 2;
+  };
+
+  const ordered = TOOLS.slice().sort(byWhenItMatters(states));
+  let last = -1;
+  const html = [];
+  for (const t of ordered) {
+    const g = groupOf(t);
+    if (g !== last) { html.push(`<div class="group-head">${GROUP_LABEL[g]}</div>`); last = g; }
+    html.push(card(t, states[t.id].state, states[t.id].info, states[t.id].check));
+  }
+  document.getElementById('cards').innerHTML = html.join('');
   renderNowBar(states);
 }
 
