@@ -3,10 +3,11 @@
  * Remove stored rows that the tradability floor would never have collected.
  *
  * They exist for a plain reason: the floor was written on 2026-07-31, and the
- * registers go back to 2026-07-30. Rows from before it landed were collected
- * under no floor at all, so a $0.0002 ATR or a $0.12 share price got in
- * legitimately at the time. Nothing is leaking through now — audit-floor.js
- * shows the breaches confined to those first days.
+ * registers start well before that — T1's go back to 2026-06-29. Rows from
+ * before it landed were collected under no floor at all, so a $0.0002 ATR or a
+ * $0.12 share price got in legitimately at the time. Nothing is leaking
+ * through now, and the dates are what say so: across every tool the breaches
+ * stop on 2026-07-31 and there are none after it.
  *
  * But they are still in the training tables, and that is the part worth acting
  * on. A model fitted on stocks the desk cannot trade learns from moves nobody
@@ -95,11 +96,13 @@ function purge(t) {
   const db = new Database(file, { readonly: !commit });
   const f = floorFor(db);
   const doomed = {};
+  const sizes = {};
   let total = 0;
 
   for (const table of REGISTERS) {
     let rows = [];
     try { rows = db.prepare(`SELECT date, ticker, data FROM ${table}`).all(); } catch { continue; }
+    sizes[table] = rows.length;
     const hits = [];
     for (const r of rows) {
       let blob;
@@ -112,12 +115,38 @@ function purge(t) {
 
   if (!total) { db.close(); return 0; }
 
+  /*
+   * The share, not just the count.
+   *
+   * "309 rows" is not a number anyone can decide on. Removing 4% of a training
+   * set is housekeeping; removing 40% of it is a different act, and T1 is the
+   * tool with a month of history and the one measured edge on it. The figure
+   * that makes the decision is how much of each register goes, and how much is
+   * left — a register cut to twenty rows cannot support the comparison it was
+   * collected for, whatever the rows that remain deserve.
+   */
   console.log(`\n${t.id} · ${t.name}  —  ${total} row(s)`);
+  console.log('  effect on each register:');
+  for (const table of REGISTERS) {
+    const n = (doomed[table] || []).length;
+    const of = sizes[table] || 0;
+    if (!of) continue;
+    const pct = ((n / of) * 100).toFixed(n / of >= 0.1 ? 0 : 1);
+    console.log(`    ${table.padEnd(11)} ${String(n).padStart(4)} of ${String(of).padStart(5)}`
+      + `  = ${String(pct).padStart(4)}% removed, ${of - n} left`);
+  }
+
+  const showDetail = !args.includes('--quiet');
   for (const [table, hits] of Object.entries(doomed)) {
     const byDate = {};
     for (const h of hits) (byDate[h.date] = byDate[h.date] || []).push(h);
+    const dates = Object.keys(byDate).sort();
+    if (!showDetail) {
+      console.log(`  ${table}: ${dates[0]} … ${dates[dates.length - 1]} (${dates.length} day(s))`);
+      continue;
+    }
     console.log(`  ${table}`);
-    for (const date of Object.keys(byDate).sort()) {
+    for (const date of dates) {
       const list = byDate[date];
       console.log(`    ${date}  ${String(list.length).padStart(3)} row(s)  `
         + list.slice(0, 6).map(h => `${h.ticker} (${h.why})`).join(', ')
@@ -150,6 +179,7 @@ function purge(t) {
 console.log(commit
   ? 'REMOVING rows the tradability floor would have excluded. Each database is copied first.'
   : 'DRY RUN — nothing will be changed. Add --yes to actually delete.');
+console.log('Add --quiet for the summary without the per-day ticker lists.');
 
 let grand = 0;
 for (const t of tools) {
