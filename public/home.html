@@ -134,6 +134,32 @@ body {
 .tv-fallback { width:100%; margin-top:10px; padding:10px; border-radius:6px;
   background:var(--bg3); color:var(--text); border:1px solid var(--accent);
   font:12px/1.6 ui-monospace,Menlo,monospace; resize:vertical; word-break:break-all; }
+/* ── alerts ── */
+.al-fire { display:flex; align-items:center; gap:10px; flex-wrap:wrap; text-align:left;
+  background:var(--bg2); border:1px solid var(--border); border-left:3px solid var(--amber);
+  border-radius:7px; padding:9px 12px; margin-top:8px; }
+.al-fire .al-t { font-weight:700; font-size:14px; letter-spacing:.02em; }
+.al-fire .al-when { font:11px ui-monospace,Menlo,monospace; color:var(--text3); }
+.al-fire .al-what { font-size:12px; color:var(--text2); }
+.al-fire .al-tool { font-size:10px; font-weight:700; color:var(--text3);
+  border:1px solid var(--border); border-radius:3px; padding:1px 6px; }
+.al-fire.fresh { border-left-color:var(--green); background:#4ade8010; }
+.al-rules-head { display:flex; align-items:center; justify-content:space-between;
+  margin-top:22px; font-size:11px; font-weight:700; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--text3); }
+.al-rule { display:flex; align-items:center; gap:10px; flex-wrap:wrap; text-align:left;
+  background:var(--bg2); border:1px solid var(--border); border-radius:7px;
+  padding:9px 12px; margin-top:8px; font-size:12px; }
+.al-rule.off { opacity:.5; }
+.al-rule .al-cond { font:11.5px ui-monospace,Menlo,monospace; color:var(--text2); }
+.al-rule .al-scope { font-size:10.5px; color:var(--text3); }
+.al-form { text-align:left; background:var(--bg2); border:1px solid var(--accent);
+  border-radius:8px; padding:14px; margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;
+  align-items:center; }
+.al-form input, .al-form select { font:12px inherit; padding:7px 9px; border-radius:5px;
+  background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+.al-form label { font-size:11px; color:var(--text3); display:flex; flex-direction:column; gap:3px; }
+.al-err { color:var(--red); font-size:11.5px; width:100%; }
 .uni-title { font-size:15px; font-weight:700; margin-bottom:4px; }
 .uni-grid { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:14px; }
 .uni-chip { display:flex; align-items:center; gap:8px; background:var(--bg2);
@@ -209,6 +235,26 @@ body {
 <div class="now-bar" id="now-bar">Checking which tools are live…</div>
 
 <div class="cards" id="cards"></div>
+
+<!-- ═══════════ ALERTS ═══════════
+     Its own section, and placed above the lists because it is the only thing
+     on this page that is time-critical: a shortlist can be read whenever, an
+     alert that fired eleven minutes ago is already stale. -->
+<div class="cmp-wrap" id="al-wrap">
+  <div class="uni-title">Alerts</div>
+  <div class="cmp-hint">Rules run inside every screener on each scan, so they need no separate
+    feed — but that also means they see the market at <b>scan granularity</b>, roughly every five
+    minutes. A break that happens and fails inside one interval is never seen.</div>
+
+  <div id="al-fires"><div class="cmp-hint" style="margin-top:14px">Loading…</div></div>
+
+  <div class="al-rules-head">
+    <span>Rules</span>
+    <button class="cmp-sel" onclick="alToggleForm()" id="al-add">+ New rule</button>
+  </div>
+  <div id="al-form" class="al-form" style="display:none"></div>
+  <div id="al-rules"></div>
+</div>
 
 <div class="cmp-wrap" id="uni-wrap">
   <div class="uni-title">Shortlist — every tool</div>
@@ -786,6 +832,154 @@ async function loadCanslim() {
   }
 }
 loadCanslim();
+
+// ═══════════════ ALERTS ═══════════════
+// Rules live in one shared file and are evaluated inside every screener on its
+// own scan, so this page only reads and writes them — it never evaluates. That
+// keeps one copy of the logic on the server rather than a second one here that
+// could disagree about what "crossed" means.
+let AL_META = null;
+
+async function alMeta() {
+  if (!AL_META) AL_META = await (await fetch('/api/alerts/meta')).json();
+  return AL_META;
+}
+
+const alAgo = (ms) => {
+  const m = Math.floor((Date.now() - ms) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`;
+};
+
+async function loadFires() {
+  const out = document.getElementById('al-fires');
+  if (!out) return;
+  try {
+    const d = await (await fetch('/api/alerts/fires?limit=40')).json();
+    const fires = (d && d.fires) || [];
+    if (!fires.length) {
+      out.innerHTML = `<div class="cmp-hint" style="margin-top:14px">Nothing has fired today.</div>`;
+      return;
+    }
+    // Anything inside the last two scans is marked fresh — that is the window
+    // in which an alert is still something you can act on rather than read.
+    out.innerHTML = fires.map(f => `
+      <div class="al-fire${Date.now() - (f.at || 0) < 10 * 60000 ? ' fresh' : ''}">
+        <span class="al-t">${f.ticker}</span>
+        <span class="al-tool">${f.toolId || ''}</span>
+        <span class="al-what">${f.rule || ''}${f.price != null ? ` @ ${f.price}` : ''}</span>
+        <span class="al-when" style="margin-left:auto">${alAgo(f.at || 0)}</span>
+        <a class="tv-link" href="${tvUrl(f.ticker)}" target="_blank" rel="noopener">TV&nbsp;↗</a>
+      </div>`).join('');
+  } catch {
+    out.innerHTML = '<div class="cmp-hint" style="margin-top:14px">Could not read alerts.</div>';
+  }
+}
+
+async function loadRules() {
+  const out = document.getElementById('al-rules');
+  if (!out) return;
+  const m = await alMeta();
+  const opLabel = v => (m.operators.find(o => o.value === v) || {}).label || v;
+  try {
+    const d = await (await fetch('/api/alerts/rules')).json();
+    const rules = (d && d.rules) || [];
+    if (!rules.length) {
+      out.innerHTML = `<div class="cmp-hint" style="margin-top:10px">No rules yet.
+        A first one: <b>price crosses above pmHigh</b>, no scope — every tool, every stock.</div>`;
+      return;
+    }
+    out.innerHTML = rules.map(r => {
+      const tools = (r.scope?.tools || []).join(' ');
+      const tks = (r.scope?.tickers || []).join(' ');
+      // An unscoped rule says so in words. "(blank)" reads as a missing value
+      // rather than as the deliberate "everything" it is.
+      const scope = [tools ? `tools: ${tools}` : 'all tools',
+                     tks ? `only ${tks}` : 'any stock'].join(' · ');
+      return `
+      <div class="al-rule${r.enabled === false ? ' off' : ''}">
+        <b>${r.name}</b>
+        <span class="al-cond">${r.left} ${opLabel(r.operator)} ${r.right}</span>
+        <span class="al-scope">${scope}</span>
+        <span style="margin-left:auto"></span>
+        <button class="cmp-sel" style="margin:0" onclick="alToggle(${r.id}, ${r.enabled === false})">${
+          r.enabled === false ? 'Enable' : 'Disable'}</button>
+        <button class="cmp-sel" style="margin:0" onclick="alDelete(${r.id})">Delete</button>
+      </div>`;
+    }).join('');
+  } catch {
+    out.innerHTML = '<div class="cmp-hint">Could not read rules.</div>';
+  }
+}
+
+async function alToggleForm() {
+  const box = document.getElementById('al-form');
+  if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+  const m = await alMeta();
+  box.style.display = '';
+  box.innerHTML = `
+    <label>Name<input id="alf-name" placeholder="Break PM high" size="16"></label>
+    <label>When<select id="alf-left">${m.fields.map(f => `<option>${f}</option>`).join('')}</select></label>
+    <label>&nbsp;<select id="alf-op">${
+      m.operators.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}</select></label>
+    <label>Level<input id="alf-right" placeholder="pmHigh or a number" size="14"
+       list="alf-fields"><datalist id="alf-fields">${
+       m.fields.map(f => `<option>${f}</option>`).join('')}</datalist></label>
+    <label>Tools <span style="color:var(--text3)">(blank = all)</span>
+      <input id="alf-tools" placeholder="T2 T7" size="10" style="text-transform:uppercase"></label>
+    <label>Stocks <span style="color:var(--text3)">(blank = any)</span>
+      <input id="alf-tickers" placeholder="AAPL TSLA" size="12" style="text-transform:uppercase"></label>
+    <button class="cmp-btn" onclick="alSave()">Save rule</button>
+    <div class="al-err" id="alf-err"></div>`;
+  document.getElementById('alf-left').value = 'price';
+  document.getElementById('alf-right').value = 'pmHigh';
+}
+
+const alList = id => (document.getElementById(id).value || '')
+  .split(/[\s,]+/).map(x => x.trim().toUpperCase()).filter(Boolean);
+
+async function alSave() {
+  const err = document.getElementById('alf-err');
+  err.textContent = '';
+  const body = {
+    name: document.getElementById('alf-name').value,
+    left: document.getElementById('alf-left').value,
+    operator: document.getElementById('alf-op').value,
+    right: document.getElementById('alf-right').value,
+    scope: { tools: alList('alf-tools'), tickers: alList('alf-tickers') },
+  };
+  const r = await fetch('/api/alerts/rules', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  // The server's message names the field and lists the options; replacing it
+  // with "invalid" here would throw away the only thing that makes it fixable.
+  if (!d.ok) { err.textContent = d.error || 'could not save'; return; }
+  document.getElementById('al-form').style.display = 'none';
+  loadRules();
+}
+
+async function alToggle(id, enable) {
+  const d = await (await fetch('/api/alerts/rules')).json();
+  const r = (d.rules || []).find(x => String(x.id) === String(id));
+  if (!r) return;
+  await fetch('/api/alerts/rules', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...r, enabled: !!enable }),
+  });
+  loadRules();
+}
+
+async function alDelete(id) {
+  if (!confirm('Delete this rule?')) return;
+  await fetch('/api/alerts/rules/' + id, { method: 'DELETE' });
+  loadRules();
+}
+
+loadFires();
+loadRules();
+// The scans that produce alerts run every five minutes, so polling faster than
+// that would only redraw the same list.
+setInterval(loadFires, 60000);
 setInterval(loadUnifiedShortlist, 60000);
 
 // ═══════════════ MONTH-END COMPARISON ═══════════════

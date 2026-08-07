@@ -27,6 +27,9 @@ const LANDING_PROBE_PATHS = [
   '/api/shortlist/all-tools',        // the unified shortlist
   '/api/shortlist/all-tools/export', // …and it as a TradingView symbol list
   '/api/canslim',                    // the shared growth-stock list
+  '/api/alerts/rules',               // the alert rules
+  '/api/alerts/fires',               // …and what they fired today
+  '/api/alerts/meta',                // fields and operators for the builder
 ];
 app.use((req, res, next) => {
   if (req.method === 'GET' && LANDING_PROBE_PATHS.includes(req.path)) {
@@ -51,6 +54,8 @@ app.use('/api/card', require('./routes/card'));
 // The one list that is shared rather than per-tool, so the landing page can
 // show it once instead of nine times. Any tool can answer it — see the route.
 app.use('/api/canslim', require('./routes/canslim'));
+// Alert rules and the day's fires. Shared files, so any tool can serve them.
+app.use('/api/alerts', require('./routes/alerts'));
 
 // The tool registry, so the landing page renders whatever is configured
 // rather than a list hardcoded in the page.

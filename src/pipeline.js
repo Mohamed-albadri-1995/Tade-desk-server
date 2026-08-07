@@ -23,6 +23,17 @@ const CANSLIM_TOOL = 'T8';
 // ordinary one on Wednesday because it happened not to print a new high.
 const CANSLIM_UNIVERSE = 'canslim-universe';
 
+/*
+ * Which side of each rule every stock was on, last pass.
+ *
+ * Module state rather than the database: it is worthless after a restart by
+ * design. A remembered side from before a restart would be compared against a
+ * price fetched now, and the gap between them could be an hour — which would
+ * report a crossing that may never have happened. Losing it costs one missed
+ * alert per stock; keeping it would invent them.
+ */
+const alertPrev = {};
+
 const scanStatus = {
   lastRun: null,
   lastRefresh: null,
@@ -84,6 +95,9 @@ async function runFullScan() {
     if (hasPreviousDay) {
       console.log('[Pipeline] Day boundary detected — flushing r0');
       r0.clearAll();
+      // …and the alert memory with it. Yesterday's close against this
+      // morning's pre-market price is a gap, not a crossing.
+      for (const k of Object.keys(alertPrev)) delete alertPrev[k];
     }
 
     // Side A: TradingView Scanners (fatal)
@@ -133,6 +147,34 @@ async function runFullScan() {
       }
       const { tagged, memberCount } = canslim.tagRows(withDerived);
       return { tagged, memberCount };
+    })();
+
+    /*
+     * Alerts (non-fatal).
+     *
+     * After Side B, because the rules compare price against levels that Side B
+     * derives, and BEFORE scoring, because an alert is about what the tape did
+     * and must not wait on a model that is allowed to be down.
+     *
+     * Evaluated on the merged rows for THIS tool only — a rule scoped to T2 is
+     * not this tool's business. The previous side per (rule, ticker) lives in
+     * module state and is cleared at the day boundary along with r0, so a
+     * crossing is never measured against yesterday.
+     */
+    await stageWrapSoft(report, 'alerts', async () => {
+      const engine = require('./alerts/engine');
+      const alertStore = require('./alerts/store');
+      const rules = alertStore.listRules();
+      if (!rules.length) return { rules: 0, fired: 0 };
+      const fires = engine.evaluate({
+        rules, rows: withDerived, toolId: config.toolId, prev: alertPrev, date: today,
+      });
+      if (fires.length) {
+        alertStore.publishFires(fires, today);
+        console.log(`[Alerts] ${fires.length} fired: `
+          + fires.map(f => `${f.ticker} ${f.rule}`).join(', '));
+      }
+      return { rules: rules.length, fired: fires.length, watched: Object.keys(alertPrev).length };
     })();
 
     // Side D: Market Context (non-fatal)
