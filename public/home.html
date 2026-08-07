@@ -145,6 +145,13 @@ body {
    days to run reads as a warning about nothing. Neutral by default; amber only
    where it means something. */
 #cs-out .uni-n { background:#c084fc1c; color:#d8b4fe; border-color:#c084fc44; }
+/* Out to TradingView. Small and quiet on both lists: on a shortlist chip the
+   ticker already opens the card that explains why the name is there, so this
+   sits beside it rather than replacing it. */
+.tv-link { font-size:10px; font-weight:700; letter-spacing:.04em; text-decoration:none;
+  color:var(--text3); border:1px solid var(--border); border-radius:4px;
+  padding:2px 6px; white-space:nowrap; }
+.tv-link:hover { color:var(--accent); border-color:var(--accent); }
 #cs-out .cs-soon .uni-n { background:#eab30822; color:#facc15; border-color:#eab30866; }
 .uni-tkr { font-weight:700; font-size:13px; letter-spacing:.02em; }
 .uni-by { font-size:10.5px; color:var(--text3); font-family:ui-monospace,Menlo,monospace; }
@@ -517,6 +524,24 @@ start();
 // tool that never saw the stock, which reads as "this stock has never been on
 // this list" — a wrong answer that looks like a real one. So an unknown tool
 // returns null and the caller renders plain text instead of a broken link.
+/*
+ * Out to TradingView itself.
+ *
+ * Both lists on this page name stocks, and the thing you want next after
+ * reading a name is usually the chart. The ticker on a shortlist chip already
+ * has a job — it opens the card on the tool that found it, which is the answer
+ * to "why is this here" — so this is a separate target rather than a hijack of
+ * that one.
+ *
+ * Only the bare ticker is available here: neither the shortlist file nor the
+ * member list carries the exchange. TradingView resolves a bare symbol itself,
+ * which is right nearly always and ambiguous for a dual-listed name. The
+ * scanner's own cards do have the qualified symbol and use it.
+ */
+function tvUrl(ticker) {
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`;
+}
+
 function cardUrl(tool, ticker, date) {
   const t = TOOLS.find(x => x.id === tool.id);
   if (!t) return null;
@@ -556,6 +581,8 @@ async function loadUnifiedShortlist() {
         ${r.count > 1 ? `<span class="uni-n">${r.count} tools</span>` : ''}
         <span class="uni-by">${r.tools.map(t =>
           chip(t, t.id, '', `Open on ${t.name}`)).join(' ')}</span>
+        <a class="tv-link" href="${tvUrl(r.ticker)}" target="_blank" rel="noopener"
+           title="Open ${r.ticker} on TradingView">TV&nbsp;↗</a>
       </div>`; }).join('')}</div>`;
   } catch (e) {
     out.innerHTML = `<div class="uni-empty">Could not load: ${e.message}</div>`;
@@ -590,9 +617,12 @@ async function loadCanslim() {
            title="First qualified ${r.held} day(s) ago · last qualified ${
              r.lastSeenDays === 0 ? 'today' : `${r.lastSeenDays} day(s) ago`
            } · confirmed ${r.confirmations}x · drops off in ${r.expiresIn} day(s)">
-        <span class="uni-tkr">${r.ticker}</span>
+        <a class="uni-tkr uni-link" href="${tvUrl(r.ticker)}" target="_blank" rel="noopener"
+           >${r.ticker}</a>
         <span class="uni-by">${r.held}d held</span>
         <span class="uni-n">${r.expiresIn}d left</span>
+        <a class="tv-link" href="${tvUrl(r.ticker)}" target="_blank" rel="noopener"
+           title="Open ${r.ticker} on TradingView">TV&nbsp;↗</a>
       </div>`).join('')}</div>
       <div class="cmp-hint">${rows.length} member(s)${
         d.updatedAt ? ` · list written ${Math.floor((Date.now() - d.updatedAt) / 60000)} min ago` : ''
