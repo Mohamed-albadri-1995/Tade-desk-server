@@ -28,6 +28,14 @@ const COMMON_COLUMNS = [
   // High.3M, so all four bars answer the same shape of question.
   // (`High.W` / `High.1W` are accepted names that come back empty — probed and
   // confirmed against AAPL, see scripts/probe-range-fields.js.)
+  //
+  // VERIFIED AGAINST LIVE DATA, not just accepted as a name. High.5D differed
+  // from High.1M on seven of eight stocks in scripts/probe-week-range.js. The
+  // eighth was a fresh earnings reaction that had made the month's high and its
+  // low inside five days — which is the correct answer, not a broken column.
+  // `high|1W` also works and gives nearly the same numbers, but it is
+  // week-to-date: on a Monday it is one session and by Friday five, so the bars
+  // would not be comparable across days.
   'High.5D',
   'Low.5D',
   'High.3M',
