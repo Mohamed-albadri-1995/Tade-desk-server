@@ -211,6 +211,16 @@ body {
     more than one tool sort to the top: independent agreement is a different proposition from one
     list's opinion.</div>
   <div id="uni-out"><div class="cmp-hint" style="margin-top:14px">Loading…</div></div>
+  <!-- Hidden until there is something to send. A pair of dead buttons over an
+       empty list is worse than no buttons. -->
+  <div id="uni-tv" style="display:none">
+    <button class="cmp-btn" onclick="copyShortlistForTV(this)">Copy all for TradingView</button>
+    <button class="cmp-sel" onclick="downloadShortlistForTV()">Download .txt</button>
+    <div class="cmp-hint">Every tool's picks in one list, exchange-qualified.
+      <b>Copy</b> then paste into TradingView's watchlist symbol box, or
+      <b>Download</b> and use Watchlist → ⋮ → <b>Import list…</b> — TradingView has no
+      public way to write a watchlist from outside, so the import is the whole route in.</div>
+  </div>
 </div>
 
 <!-- The other shared list. Unlike the shortlist it is not about today: these
@@ -558,6 +568,8 @@ async function loadUnifiedShortlist() {
     if (TOOLS_READY) { try { await TOOLS_READY; } catch { /* start() reports it */ } }
     const d = await (await fetch('/api/shortlist/all-tools')).json();
     const rows = (d && d.rows) || [];
+    const tvBox = document.getElementById('uni-tv');
+    if (tvBox) tvBox.style.display = rows.length ? '' : 'none';
     if (!rows.length) {
       out.innerHTML = `<div class="uni-empty">Nothing shortlisted yet today. Star a card on any
         tool, or wait for the auto-rule, and it appears here.</div>`;
@@ -588,6 +600,51 @@ async function loadUnifiedShortlist() {
     out.innerHTML = `<div class="uni-empty">Could not load: ${e.message}</div>`;
   }
 }
+/*
+ * Out to a TradingView watchlist, in one action.
+ *
+ * There is no public API for writing one, and obtaining the credentials that
+ * would allow it is not a trade worth making for a list of ticker symbols. The
+ * import is the supported route, so both of its forms are offered: the
+ * clipboard for a paste, and a file for "Import list…". Nine tools' worth in
+ * one go — the per-tool export inside each scanner still exists, and merging
+ * nine of those by hand was the thing worth removing.
+ *
+ * Fetched fresh rather than rebuilt from what is on screen: the panel may have
+ * been rendered minutes ago and a stale watchlist is a worse failure than a
+ * slow button.
+ */
+async function tvSymbols(format) {
+  const r = await fetch(`/api/shortlist/all-tools/export?format=${format}`);
+  if (!r.ok) throw new Error('export failed');
+  return (await r.text()).trim();
+}
+
+async function copyShortlistForTV(btn) {
+  const original = btn.textContent;
+  try {
+    const text = await tvSymbols('csv');
+    if (!text) { btn.textContent = 'Nothing to copy'; setTimeout(() => btn.textContent = original, 1800); return; }
+    await navigator.clipboard.writeText(text);
+    btn.textContent = `Copied ${text.split(',').length} symbols`;
+  } catch {
+    // Clipboard access is refused on an insecure origin, which is exactly what
+    // this page is served over. Saying so beats a button that silently does
+    // nothing — and the download below does not need permission.
+    btn.textContent = 'Copy blocked — use Download';
+  }
+  setTimeout(() => { btn.textContent = original; }, 2500);
+}
+
+function downloadShortlistForTV() {
+  const a = document.createElement('a');
+  a.href = '/api/shortlist/all-tools/export';
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 loadUnifiedShortlist();
 
 // ═══════════════ CANSLIM MEMBERS ═══════════════

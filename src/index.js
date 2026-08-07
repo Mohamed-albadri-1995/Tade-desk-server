@@ -25,6 +25,7 @@ const LANDING_PROBE_PATHS = [
   '/health', '/api/tools', '/api/registry/today', '/api/analysis/status',
   '/api/analysis/screener-report',   // the month-end comparison across tools
   '/api/shortlist/all-tools',        // the unified shortlist
+  '/api/shortlist/all-tools/export', // …and it as a TradingView symbol list
   '/api/canslim',                    // the shared growth-stock list
 ];
 app.use((req, res, next) => {

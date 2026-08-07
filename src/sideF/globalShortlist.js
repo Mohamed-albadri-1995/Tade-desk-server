@@ -65,6 +65,19 @@ function publish(date, items) {
     date,
     updatedAt: Date.now(),
     tickers: (items || []).map(i => String(i.ticker || i).toUpperCase()),
+    // The exchange-qualified symbol alongside the bare ticker, for the export
+    // to TradingView. NASDAQ:AAPL and AAPL are not interchangeable there — a
+    // bare symbol resolves to whichever listing TradingView prefers, which for
+    // a dual-listed name need not be the one that was screened.
+    //
+    // A separate map rather than a change to `tickers`, so a tool running older
+    // code still reads the list it always did instead of a shape it does not
+    // recognise. Only present where Side A supplied a symbol.
+    symbols: (items || []).reduce((acc, i) => {
+      const t = String(i.ticker || i).toUpperCase();
+      if (i && i.tvSymbol) acc[t] = i.tvSymbol;
+      return acc;
+    }, {}),
   };
   state.updatedAt = Date.now();
   writeAll(state);
@@ -84,8 +97,13 @@ function union(date) {
   for (const [toolId, entry] of Object.entries(state.tools || {})) {
     if (!entry || entry.date !== date) continue;
     for (const ticker of entry.tickers || []) {
-      if (!byTicker.has(ticker)) byTicker.set(ticker, { ticker, tools: [] });
-      byTicker.get(ticker).tools.push({ id: toolId, name: entry.name || toolId });
+      if (!byTicker.has(ticker)) byTicker.set(ticker, { ticker, symbol: null, tools: [] });
+      const row = byTicker.get(ticker);
+      // First tool to supply a qualified symbol wins. They should agree; if two
+      // ever disagreed, taking the first is at least stable rather than
+      // depending on the order the file happened to be written in.
+      if (!row.symbol && entry.symbols && entry.symbols[ticker]) row.symbol = entry.symbols[ticker];
+      row.tools.push({ id: toolId, name: entry.name || toolId });
     }
   }
   return [...byTicker.values()]

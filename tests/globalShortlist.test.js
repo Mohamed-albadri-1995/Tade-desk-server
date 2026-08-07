@@ -170,3 +170,69 @@ describe('minutes from the opening bell', () => {
   test('a pre-market find is negative', () => expect(mins(et(8, 0))).toBe(-90));
   test('an afternoon find is a large positive', () => expect(mins(et(14, 0))).toBe(270));
 });
+
+/*
+ * Out to a TradingView watchlist.
+ *
+ * There is no public API for writing one, so the export is the whole route in:
+ * a symbol list to paste, or a file for "Import list…". What matters here is
+ * that the symbols are the ones that were actually screened.
+ */
+describe('the shared list carries the exchange-qualified symbol', () => {
+  const gs = require('../src/sideF/globalShortlist');
+
+  test('published entries record the symbol beside the ticker', () => {
+    gs.publish('2026-08-07', [
+      { ticker: 'AAPL', tvSymbol: 'NASDAQ:AAPL' },
+      { ticker: 'ZTS', tvSymbol: 'NYSE:ZTS' },
+    ]);
+    const row = gs.union('2026-08-07').find(r => r.ticker === 'AAPL');
+    expect(row.symbol).toBe('NASDAQ:AAPL');
+  });
+
+  test('a ticker with no symbol is still listed, just unqualified', () => {
+    // Side A does not always supply one, and dropping the name would be a
+    // silently shorter watchlist — worse than an unqualified symbol, which
+    // TradingView will still resolve.
+    gs.publish('2026-08-07', [{ ticker: 'NOSYM' }]);
+    const row = gs.union('2026-08-07').find(r => r.ticker === 'NOSYM');
+    expect(row).toBeTruthy();
+    expect(row.symbol).toBeNull();
+  });
+
+  test('the older shape still reads — tickers without a symbols map', () => {
+    // A tool running previous code publishes no `symbols` key at all. It must
+    // keep appearing on the unified list rather than vanishing from it.
+    const fs = require('fs');
+    fs.writeFileSync(gs.FILE, JSON.stringify({
+      tools: { T4: { name: 'VWAP Reclaim', date: '2026-08-07', tickers: ['OLD'] } },
+    }));
+    const row = gs.union('2026-08-07').find(r => r.ticker === 'OLD');
+    expect(row).toEqual(expect.objectContaining({ ticker: 'OLD', symbol: null, count: 1 }));
+  });
+
+  test('one stock picked by two tools is one watchlist entry', () => {
+    const fs = require('fs');
+    fs.writeFileSync(gs.FILE, JSON.stringify({
+      tools: {
+        T1: { name: 'Screener', date: '2026-08-07', tickers: ['AAPL'], symbols: { AAPL: 'NASDAQ:AAPL' } },
+        T7: { name: 'Liquid Movers', date: '2026-08-07', tickers: ['AAPL'], symbols: { AAPL: 'NASDAQ:AAPL' } },
+      },
+    }));
+    const rows = gs.union('2026-08-07').filter(r => r.ticker === 'AAPL');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].count).toBe(2);
+    expect(rows[0].symbol).toBe('NASDAQ:AAPL');
+  });
+
+  test('a symbol from one tool covers the same ticker published bare by another', () => {
+    const fs = require('fs');
+    fs.writeFileSync(gs.FILE, JSON.stringify({
+      tools: {
+        T1: { name: 'Screener', date: '2026-08-07', tickers: ['ZTS'] },
+        T7: { name: 'Liquid Movers', date: '2026-08-07', tickers: ['ZTS'], symbols: { ZTS: 'NYSE:ZTS' } },
+      },
+    }));
+    expect(gs.union('2026-08-07').find(r => r.ticker === 'ZTS').symbol).toBe('NYSE:ZTS');
+  });
+});
