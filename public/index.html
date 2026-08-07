@@ -251,6 +251,15 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .badge-canslim { background:#c084fc1f; color:#d8b4fe; border:1px solid #c084fc55;
   text-transform:none; letter-spacing:0; }
 .badge-canslim b { font-weight:700; opacity:.8; }
+/* Everything agreeing. Uses the card's own up/down colours rather than a new
+   one — the point is that this badge is those tags, summarised, so introducing
+   a third colour would break the one-meaning-per-colour rule the rest of the
+   card follows. */
+.badge-align { font-weight: 700; letter-spacing: .04em; }
+.badge-align.bull { background: var(--m-up-bg, #22c55e1f); color: var(--m-up, #4ade80);
+  border: 1px solid var(--m-up, #4ade80); }
+.badge-align.bear { background: var(--m-down-bg, #ef44441f); color: var(--m-down, #f87171);
+  border: 1px solid var(--m-down, #f87171); }
 .badge-scr { background: #ffffff08; border: 1px solid var(--border); color: var(--text2);
   text-transform: none; letter-spacing: 0; }
 /* First sighting on this tool. Leads the badge row because it is the question
@@ -917,6 +926,15 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <option value="has">Has catalyst</option>
         <option value="major">⚡ Major only</option>
         <option value="none">No catalyst</option>
+      </select>
+      <!-- Everything pointing the same way at once. See alignment() for what
+           counts and, more importantly, what does not. -->
+      <select class="filter-select" id="align-filter" onchange="renderCards()"
+              title="every level, the MA stack and the catalyst all agreeing on one direction">
+        <option value="all">Aligned: any</option>
+        <option value="bull">▲ Fully bullish</option>
+        <option value="bear">▼ Fully bearish</option>
+        <option value="either">Either direction</option>
       </select>
       <select class="filter-select" id="sort-select" onchange="renderCards()">
         <option value="score">Sort: Score ↓</option>
@@ -2649,12 +2667,58 @@ function newsState(row) {
   return count > 0 ? 'has' : 'none';
 }
 
+/*
+ * "Everything agrees."
+ *
+ * A card carries ten level flags, a moving-average stack and a catalyst, and
+ * the case worth finding is the one where none of them disagrees: price above
+ * every average and every reference level, the stack in order, and a story
+ * pointing the same way. Reading that off twelve tags one at a time is exactly
+ * the work the trader described doing by eye.
+ *
+ * TWO THINGS ARE DELIBERATELY NOT REQUIRED, and they are the reason this is a
+ * function rather than "all flags green".
+ *
+ * The pre-market extreme on the far side. A bullish card need not be above the
+ * pre-market HIGH — that is a level the stock may simply not have reached yet,
+ * and demanding it would throw away the setups that are still setting up. Its
+ * mirror applies to a bearish card and the pre-market low. Note the near side
+ * is still required: a bull must hold above the pre-market LOW, because losing
+ * it is a disagreement rather than an absence.
+ *
+ * The position in the monthly range. Q4 on a bull and Q2 on a bear both appear
+ * in the trader's own examples of a fully aligned card, so the quarter is not
+ * evidence either way here — it says where the stock has been, not what every
+ * signal is currently saying.
+ *
+ * A missing flag is not agreement. Anything null fails the check, so a card
+ * with half its levels unresolved never counts as aligned; "we could not tell"
+ * and "everything lines up" must not look the same.
+ */
+const ALIGN_BULL = ['vsEma9', 'vsEma13', 'vsEma20', 'vsEma50', 'vsSma5',
+                    'vsVwap', 'vsPrevClose', 'vsOpen', 'vsPmLow'];
+const ALIGN_BEAR = ['vsEma9', 'vsEma13', 'vsEma20', 'vsEma50', 'vsSma5',
+                    'vsVwap', 'vsPrevClose', 'vsOpen', 'vsPmHigh'];
+
+function alignment(row) {
+  const sig = row.signals || {};
+  const cat = row.catalyst;
+  const sent = cat && cat.sentiment;
+
+  const allAre = (keys, want) => keys.every(k => sig[k] === want);
+
+  if (allAre(ALIGN_BULL, 'above') && sig.maStack === 'bull' && sent === 'bull') return 'bull';
+  if (allAre(ALIGN_BEAR, 'below') && sig.maStack === 'bear' && sent === 'bear') return 'bear';
+  return null;
+}
+
 function getFilteredSorted() {
   const query = document.getElementById('search-input').value.toLowerCase();
   const filter = document.getElementById('screener-filter').value;
   const sort = document.getElementById('sort-select').value;
   const newsF = (document.getElementById('news-filter') || {}).value || 'all';
   const catF = (document.getElementById('catalyst-filter') || {}).value || 'all';
+  const alignF = (document.getElementById('align-filter') || {}).value || 'all';
 
   let rows = r0Data.filter(row => {
     if (query && !row.ticker.toLowerCase().includes(query) && !(row.stock?.sector||'').toLowerCase().includes(query)) return false;
@@ -2672,6 +2736,11 @@ function getFilteredSorted() {
       // Tier 1 is the "⚡ major" band the card marks with a bolt — an earnings
       // release or an FDA decision, not a routine analyst note.
       if (catF === 'major' && !(c && c.tier === 1)) return false;
+    }
+
+    if (alignF !== 'all') {
+      const a = alignment(row);
+      if (alignF === 'either' ? !a : a !== alignF) return false;
     }
     return true;
   });
@@ -2702,12 +2771,13 @@ function activeFilters() {
   if (val('screener-filter') && val('screener-filter') !== 'all') on.push(text('screener-filter'));
   if (val('news-filter') && val('news-filter') !== 'all') on.push(text('news-filter'));
   if (val('catalyst-filter') && val('catalyst-filter') !== 'all') on.push(text('catalyst-filter'));
+  if (val('align-filter') && val('align-filter') !== 'all') on.push(text('align-filter'));
   return on;
 }
 
 function clearFilters() {
   const s = document.getElementById('search-input'); if (s) s.value = '';
-  for (const id of ['screener-filter', 'news-filter', 'catalyst-filter']) {
+  for (const id of ['screener-filter', 'news-filter', 'catalyst-filter', 'align-filter']) {
     const el = document.getElementById(id); if (el) el.value = 'all';
   }
   renderCards();
@@ -2938,6 +3008,17 @@ function buildCard(row) {
     : '';
   const signalTags = buildSignalTags(row.signals, s);
   const catalystBadge = catalyst ? catalystBadgeHTML(catalyst) : '';
+
+  // The one badge that says something none of the others do: not "this is
+  // strong" but "nothing here disagrees". Placed with the catalyst because it
+  // depends on one, and because the pair is the whole claim.
+  const align = alignment(row);
+  const alignBadge = align
+    ? `<span class="badge badge-align ${align}" title="Every level, the moving-average stack and the catalyst point ${
+        align === 'bull' ? 'up' : 'down'
+      }. The pre-market ${align === 'bull' ? 'high' : 'low'} and the monthly-range quarter are not part of this.">${
+        align === 'bull' ? '▲▲ ALL BULL' : '▼▼ ALL BEAR'}</span>`
+    : '';
 
   // Volume & Float, on the magnitude ramp.
   //
@@ -3262,7 +3343,7 @@ function buildCard(row) {
   </div>
 
   <div class="card-badges">
-    ${firstSeenHTML}${alsoBadge}${canslimBadge}${badges}${hotBadge}${catalystBadge}
+    ${firstSeenHTML}${alsoBadge}${canslimBadge}${badges}${hotBadge}${alignBadge}${catalystBadge}
   </div>
   ${signalTags}
 
