@@ -203,6 +203,52 @@ function columnsAligned(sampleRow) {
   return false;
 }
 
+/*
+ * A column that is accepted but returns another column's values.
+ *
+ * `ignore_unknown_fields: true` makes a misspelled name disappear, and
+ * columnsAligned catches that because the response gets shorter. This is the
+ * other failure and it is worse, because it produces confident numbers rather
+ * than a blank: a name TradingView accepts while serving something else. It
+ * reached the card as a weekly range bar reading exactly the same low and high
+ * as the monthly one.
+ *
+ * The windows nest, so for ONE stock a five-day high equal to the one-month
+ * high is ordinary — it means the monthly high was made this week. Across a
+ * whole result set it is not ordinary, it is a definition. So the check needs
+ * a population, and it needs enough of one to mean anything.
+ *
+ * Reported rather than corrected. What the right column name is cannot be
+ * decided from here — scripts/probe-week-range.js answers that against the
+ * live API — and quietly blanking the field would trade a wrong bar for a
+ * missing one without anyone learning why.
+ */
+const MIN_ROWS_TO_JUDGE = 20;
+let _windowWarned = false;
+
+function checkWindowsDiffer(rows, screenerName) {
+  if (_windowWarned || rows.length < MIN_ROWS_TO_JUDGE) return;
+  const pairs = [
+    ['week', 'month', 'weekHigh', 'weekLow', 'monthHigh', 'monthLow'],
+    ['month', 'quarter', 'monthHigh', 'monthLow', 'quarterHigh', 'quarterLow'],
+  ];
+  for (const [narrow, wide, nh, nl, wh, wl] of pairs) {
+    const usable = rows.filter(r => [nh, nl, wh, wl].every(k => r.stock?.[k] != null));
+    if (usable.length < MIN_ROWS_TO_JUDGE) continue;
+    const identical = usable.filter(r =>
+      r.stock[nh] === r.stock[wh] && r.stock[nl] === r.stock[wl]).length;
+    if (identical === usable.length) {
+      _windowWarned = true;
+      console.error(
+        `[TV Scanner] "${screenerName}": the ${narrow} range is identical to the ${wide} range ` +
+        `on all ${usable.length} rows. One stock can do that; every stock cannot. The ${narrow} ` +
+        'columns are almost certainly serving another window\'s values — run ' +
+        'scripts/probe-week-range.js on the server to find the right names.');
+      return;
+    }
+  }
+}
+
 let _structureWarned = false;
 function validateTVStructure(sampleRow) {
   if (_structureWarned) return;
@@ -321,6 +367,7 @@ async function runScreener(screener) {
   if (screener.labelOnly) {
     return { name: screener.name, key: screener.key, rows: mapped, floorDropped: 0, labelOnly: true };
   }
+  checkWindowsDiffer(mapped, screener.name);
   const { kept, dropped } = tradable.applyLocal(mapped, t);
   if (dropped) {
     console.log(`[TV Scanner] "${screener.name}": ${dropped} row(s) below ${t.minAtrPct}% ADR`);
@@ -392,4 +439,10 @@ async function runAllScanners() {
   return { candidates, labels };
 }
 
-module.exports = { runAllScanners, runScreener, testScreener, mapTVRow, COMMON_COLUMNS, buildRequest };
+module.exports = {
+  runAllScanners, runScreener, testScreener, mapTVRow, COMMON_COLUMNS, buildRequest,
+  checkWindowsDiffer, MIN_ROWS_TO_JUDGE,
+  // Test seam only: the warning fires once per process so a scan every fifteen
+  // minutes does not fill the log with the same line.
+  _resetWindowWarning: () => { _windowWarned = false; },
+};

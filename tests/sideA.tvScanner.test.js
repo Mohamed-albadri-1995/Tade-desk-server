@@ -202,3 +202,81 @@ describe('Side A — mapTVRow', () => {
   });
 
 });
+
+/*
+ * A column TradingView accepts while serving something else.
+ *
+ * `ignore_unknown_fields: true` makes a misspelled name vanish, and
+ * columnsAligned catches that because the response gets shorter. This is the
+ * other failure and it is the worse one: it produces confident numbers instead
+ * of a blank. It reached a card as a weekly range bar reading exactly the same
+ * low and high as the monthly bar beneath it.
+ */
+describe('nested range windows have to actually differ', () => {
+  const tv = require('../src/sideA/tvScanner');
+  const spy = () => jest.spyOn(console, 'error').mockImplementation(() => {});
+
+  const rows = (n, fn) => Array.from({ length: n }, (_, i) => ({ ticker: `T${i}`, stock: fn(i) }));
+  const nested = i => ({
+    weekHigh: 100 + i, weekLow: 90 - i,
+    monthHigh: 110 + i, monthLow: 80 - i,
+    quarterHigh: 120 + i, quarterLow: 70 - i,
+  });
+  const weekEqualsMonth = i => ({
+    weekHigh: 110 + i, weekLow: 80 - i,
+    monthHigh: 110 + i, monthLow: 80 - i,
+    quarterHigh: 120 + i, quarterLow: 70 - i,
+  });
+
+  beforeEach(() => tv._resetWindowWarning());
+  afterEach(() => jest.restoreAllMocks());
+
+  test('properly nested windows say nothing', () => {
+    const err = spy();
+    tv.checkWindowsDiffer(rows(40, nested), 'Trend');
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  test('a week identical to the month on every row is reported', () => {
+    const err = spy();
+    tv.checkWindowsDiffer(rows(40, weekEqualsMonth), 'Trend');
+    expect(err).toHaveBeenCalled();
+    expect(err.mock.calls[0][0]).toMatch(/week range is identical to the month range/);
+    expect(err.mock.calls[0][0]).toMatch(/probe-week-range/);
+  });
+
+  test('one stock at its monthly high is not evidence of anything', () => {
+    // This is the case the check must not fire on: a five-day high equal to the
+    // one-month high simply means the month's high was made this week, which is
+    // ordinary and true of any stock breaking out.
+    const err = spy();
+    const mixed = rows(40, i => (i === 3 ? weekEqualsMonth(i) : nested(i)));
+    tv.checkWindowsDiffer(mixed, 'Trend');
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  test('a small result set is not judged at all', () => {
+    // Five stocks all at their monthly highs is a market condition, not a bug.
+    const err = spy();
+    tv.checkWindowsDiffer(rows(5, weekEqualsMonth), 'Gap + Volume');
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  test('rows missing the fields are not counted as agreement', () => {
+    // Nulls must not be read as "the two windows match" — that would fire the
+    // warning on a provider outage and send someone hunting a column-name bug
+    // that does not exist.
+    const err = spy();
+    tv.checkWindowsDiffer(rows(40, () => ({ weekHigh: null, weekLow: null,
+      monthHigh: null, monthLow: null })), 'Trend');
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  test('it says it once, not on every scan', () => {
+    const err = spy();
+    tv.checkWindowsDiffer(rows(40, weekEqualsMonth), 'Trend');
+    tv.checkWindowsDiffer(rows(40, weekEqualsMonth), 'Trend');
+    tv.checkWindowsDiffer(rows(40, weekEqualsMonth), 'Big Move');
+    expect(err).toHaveBeenCalledTimes(1);
+  });
+});
