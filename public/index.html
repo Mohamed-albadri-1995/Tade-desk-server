@@ -214,6 +214,9 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   color: var(--text3); border: 1px solid var(--border); border-radius: 4px;
   padding: 2px 6px; white-space: nowrap; }
 .tv-link:hover { color: var(--accent); border-color: var(--accent); }
+/* Amber, matching the alerts app itself — the two are one feature and should
+   not look like two. */
+.alert-link:hover { color: var(--amber, #fbbf24); border-color: var(--amber, #fbbf24); }
 .card-price { font-size: 15px; font-weight: 700; color: var(--text);
   font-variant-numeric: tabular-nums; }
 .card-change { font-size: 13px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
@@ -3326,6 +3329,9 @@ function buildCard(row) {
         <a class="tv-link" href="${tvUrl(s.tvSymbol || row.ticker)}" target="_blank" rel="noopener"
            title="Open ${esc(s.tvSymbol || row.ticker)} on TradingView"
            onclick="event.stopPropagation()">TV&nbsp;↗</a>
+        ${alertUrl(row.ticker) ? `<a class="tv-link alert-link" href="${alertUrl(row.ticker)}"
+           title="Create an alert for ${esc(row.ticker)}"
+           onclick="event.stopPropagation()">⚠&nbsp;alert</a>` : ''}
         <!-- The price itself. It used to live in the Price block, which is now
              folded away, and a card that says +434% without saying of what is
              not a card you can act on: the same move is a different trade at
@@ -4123,6 +4129,27 @@ function observeCharts() {
  */
 function tvUrl(sym) {
   return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(sym)}`;
+}
+
+/*
+ * "Alert me on this one" — from the card, not from a form.
+ *
+ * Typing a ticker into a rule builder is the step where the wrong stock gets
+ * watched: the name is already on screen, and retyping it is both work and a
+ * chance to be wrong. So the card links to the alerts app carrying the ticker,
+ * and the rule opens already scoped to it.
+ *
+ * The port comes from the registry rather than being written here, so moving
+ * the app is one edit to tools.config.json.
+ */
+let ALERTS_APP = null;
+fetch('/api/tools').then(r => r.json())
+  .then(d => { ALERTS_APP = (d.apps || []).find(a => a.id === 'ALERTS') || null; renderCards(); })
+  .catch(() => {});
+
+function alertUrl(ticker) {
+  if (!ALERTS_APP) return null;
+  return `${location.protocol}//${location.hostname}:${ALERTS_APP.port}/?ticker=${encodeURIComponent(ticker)}`;
 }
 
 function openChart(sym) {

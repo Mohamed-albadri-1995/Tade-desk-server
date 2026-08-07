@@ -22,8 +22,14 @@ const router = express.Router();
 // field added to the engine appears in the UI without a second edit — the way
 // a form and its validator disagree is by being written twice.
 router.get('/meta', (req, res) => {
+  // Read from the registry file rather than a tool's config: the alerts
+  // service has no TOOL_ID and should still be able to offer every tool.
   let tools = [];
-  try { tools = require('../config').tools.map(t => ({ id: t.id, name: t.name })); } catch { /* none */ }
+  try {
+    const reg = JSON.parse(require('fs').readFileSync(
+      require('path').join(__dirname, '..', '..', 'tools.config.json'), 'utf8'));
+    tools = (reg.tools || []).map(t => ({ id: t.id, name: t.name }));
+  } catch { /* none */ }
   res.json({ ok: true, fields: engine.FIELDS, operators: engine.OPERATORS, tools });
 });
 

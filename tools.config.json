@@ -146,6 +146,14 @@
       "accent": "#4a9eff",
       "desc": "Nine screeners running side by side, each collecting its own history so they can be compared at the end of the month.",
       "isSelf": true
+    },
+    {
+      "id": "ALERTS",
+      "name": "Alerts",
+      "port": 3090,
+      "path": "/",
+      "accent": "#fbbf24",
+      "desc": "Rules that watch every screener's cards and tell you when one crosses a level. Per stock, per tool, or both."
     }
   ]
 }

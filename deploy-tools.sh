@@ -204,6 +204,14 @@ for entry in "${TOOLS[@]}"; do
   SCORER_URL="http://127.0.0.1:${sport}" \
     pm2 start src/index.js --name "tool-${id}" --update-env >/dev/null
 done
+
+# The alerts service. One process, not nine: the rules and the fires are shared
+# files, and it does not evaluate anything — the screeners already do that on
+# their own scans, holding the cards the rules compare. A tenth process
+# re-fetching the same data would be a second opinion on what "crossed" means.
+ALERTS_PORT=$(node -e "const a=require('./tools.config.json').apps.find(x=>x.id==='ALERTS');process.stdout.write(String(a?a.port:3090))")
+echo "  ALERTS — app :${ALERTS_PORT}"
+ALERTS_PORT="$ALERTS_PORT" pm2 start src/alerts/server.js --name "alerts" --update-env >/dev/null
 # pm2 save rewrites the startup list from whatever is running RIGHT NOW, so a
 # process that happened to be stopped at this moment would be dropped from it
 # and would not come back after a reboot. Say what is being saved.

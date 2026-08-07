@@ -23,9 +23,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const config = require('../config');
 
-const DIR = path.dirname(config.dbPath);
+/*
+ * The data directory, resolved WITHOUT a tool's config.
+ *
+ * These files belong to the desk, not to T1 — and the alerts service is its own
+ * process with no database and no TOOL_ID. Deriving the path from a tool's
+ * dbPath would have made a shared file depend on which tool happened to be
+ * asking, which is exactly backwards.
+ */
+const DIR = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const RULES_FILE = process.env.ALERT_RULES_FILE || path.join(DIR, 'alert-rules.json');
 const FIRES_FILE = process.env.ALERT_FIRES_FILE || path.join(DIR, 'alert-fires.json');
 
@@ -109,6 +116,8 @@ function publishFires(fires, date) {
   if (!fires || !fires.length) return { published: 0 };
   const state = readJSON(FIRES_FILE, { tools: {} });
   state.tools = state.tools || {};
+  // Required lazily: only the screeners publish, and they always have a config.
+  const config = require('../config');
   const mine = state.tools[config.toolId];
   // A new day starts an empty list rather than appending to yesterday's —
   // otherwise the first alert of the morning arrives below yesterday's close.

@@ -251,3 +251,77 @@ describe('a malformed rule is refused with a reason', () => {
       .toMatch(/not a ticker/);
   });
 });
+
+/*
+ * The alerts service is its own process on its own port.
+ *
+ * What matters structurally: it must not need a TOOL_ID or a database, because
+ * everything it touches is a shared file. A dependency on one tool's config
+ * would make a desk-wide list belong to T1, and the service would refuse to
+ * start on its own.
+ */
+describe('the alerts service stands alone', () => {
+  const request = require('supertest');
+  const os = require('os');
+  const path = require('path');
+  const fs = require('fs');
+  let app;
+  const dir = path.join(os.tmpdir(), `alsrv-${process.pid}`);
+
+  beforeAll(() => {
+    fs.mkdirSync(dir, { recursive: true });
+    process.env.DATA_DIR = dir;
+    // Deliberately NO TOOL_ID and no DB_PATH — if the service needs either,
+    // this require throws and the suite says so.
+    delete process.env.TOOL_ID;
+    app = require('../src/alerts/server');
+  });
+
+  afterAll(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* gone */ } });
+
+  test('it answers /health without a database', async () => {
+    const r = await request(app).get('/health');
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual(expect.objectContaining({ ok: true, app: 'ALERTS' }));
+  });
+
+  test('it serves the alerts page for any path — deep links carry a ticker', async () => {
+    const r = await request(app).get('/?ticker=NVDA');
+    expect(r.status).toBe(200);
+    expect(r.text).toMatch(/Alerts/);
+  });
+
+  test('it offers every configured tool, without being one', async () => {
+    const r = await request(app).get('/api/alerts/meta');
+    expect(r.body.tools.map(t => t.id)).toEqual(
+      expect.arrayContaining(['T1', 'T2', 'T9']));
+  });
+
+  test('rules round-trip through the shared file', async () => {
+    const made = await request(app).post('/api/alerts/rules').send({
+      name: 'Break PM high', left: 'price', operator: 'crosses_above', right: 'pmHigh',
+      scope: { tools: ['T2'], tickers: ['nvda'] },
+    });
+    expect(made.body.ok).toBe(true);
+    // Normalised on the way in, so every reader sees one shape.
+    expect(made.body.rule.scope).toEqual({ tools: ['T2'], tickers: ['NVDA'] });
+
+    const back = await request(app).get('/api/alerts/rules');
+    expect(back.body.rules).toHaveLength(1);
+    expect(fs.existsSync(path.join(dir, 'alert-rules.json'))).toBe(true);
+  });
+
+  test('a bad rule is a 400 with the reason, not a 500', async () => {
+    // A rule typed wrong is not a server fault, and the message is the only
+    // thing that makes it fixable from a phone.
+    const r = await request(app).post('/api/alerts/rules').send({
+      name: 'x', left: 'nonsense', operator: 'crosses_above', right: 'pmHigh',
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/left must be one of/);
+  });
+
+  test('deleting a rule that is not there is a 404, not a silent success', async () => {
+    expect((await request(app).delete('/api/alerts/rules/9999')).status).toBe(404);
+  });
+});

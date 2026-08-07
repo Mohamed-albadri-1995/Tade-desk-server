@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alerts · Trade Desk</title>
+<style>
+:root {
+  --bg:#0d0f14; --bg2:#13161e; --bg3:#1a1e28; --border:#2a2f3f;
+  --text:#e2e6f0; --text2:#8b92a5; --text3:#5a6175;
+  --accent:#fbbf24; --green:#4ade80; --red:#f87171; --blue:#4a9eff;
+}
+* { box-sizing:border-box; }
+body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; padding:22px 16px 60px; }
+.wrap { max-width:900px; margin:0 auto; }
+.top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
+.home { font-size:11px; color:var(--text3); text-decoration:none; border:1px solid var(--border);
+  border-radius:5px; padding:4px 9px; }
+.home:hover { color:var(--blue); border-color:var(--blue); }
+.sub { font-size:12px; color:var(--text2); line-height:1.7; margin:8px 0 18px; }
+.sub b { color:var(--text); }
+
+/* The noise controls. Deliberately at the top and stateful: an alerting page
+   whose sound is off without saying so is worse than one with no sound. */
+.noise { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 14px;
+  border:1px solid var(--border); border-radius:8px; background:var(--bg2); margin-bottom:8px; }
+.btn { font:600 12px/1 inherit; padding:8px 12px; border-radius:6px; cursor:pointer;
+  background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+.btn:hover { border-color:var(--blue); }
+.btn.on { background:var(--green); color:#04220f; border-color:var(--green); }
+.btn.primary { background:var(--accent); color:#221701; border-color:var(--accent); }
+.note { font-size:11px; color:var(--text3); line-height:1.6; }
+.note.warn { color:var(--accent); }
+
+.sec { font-size:11px; font-weight:700; letter-spacing:.13em; text-transform:uppercase;
+  color:var(--text3); margin:26px 0 4px; display:flex; align-items:center; justify-content:space-between; }
+
+.fire { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--bg2);
+  border:1px solid var(--border); border-left:3px solid var(--text3);
+  border-radius:8px; padding:10px 13px; margin-top:8px; }
+.fire.fresh { border-left-color:var(--green); background:#4ade800f; }
+.fire .t { font-weight:700; font-size:15px; }
+.fire .tool { font-size:10px; font-weight:700; color:var(--text3);
+  border:1px solid var(--border); border-radius:3px; padding:1px 6px; }
+.fire .what { font-size:12px; color:var(--text2); }
+.fire .when { font:11px ui-monospace,Menlo,monospace; color:var(--text3); margin-left:auto; }
+.lnk { font-size:10px; font-weight:700; text-decoration:none; color:var(--text3);
+  border:1px solid var(--border); border-radius:4px; padding:2px 6px; white-space:nowrap; }
+.lnk:hover { color:var(--blue); border-color:var(--blue); }
+
+.rule { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--bg2);
+  border:1px solid var(--border); border-radius:8px; padding:10px 13px; margin-top:8px; font-size:12px; }
+.rule.off { opacity:.45; }
+.rule .cond { font:11.5px ui-monospace,Menlo,monospace; color:var(--text2); }
+.rule .scope { font-size:10.5px; color:var(--text3); }
+.rule .spacer { margin-left:auto; }
+
+.form { background:var(--bg2); border:1px solid var(--accent); border-radius:9px;
+  padding:15px; margin-top:10px; display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+.form label { font-size:10.5px; color:var(--text3); display:flex; flex-direction:column; gap:4px;
+  text-transform:uppercase; letter-spacing:.06em; }
+.form input, .form select { font:12px inherit; padding:8px 10px; border-radius:6px;
+  background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+.form .err { color:var(--red); font-size:11.5px; width:100%; }
+.chips { display:flex; gap:6px; flex-wrap:wrap; }
+.chip { font-size:11px; padding:5px 9px; border-radius:5px; cursor:pointer;
+  background:var(--bg3); color:var(--text2); border:1px solid var(--border); user-select:none; }
+.chip.on { background:var(--blue); color:#08111f; border-color:var(--blue); }
+.empty { font-size:12px; color:var(--text3); margin-top:12px; line-height:1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="top">
+  <h1>⚠ Alerts</h1>
+  <a class="home" id="home-link" href="/">← all tools</a>
+</div>
+<div class="sub">Rules are evaluated inside every screener on its own scan, so they need no separate
+  data feed. That also fixes their resolution: <b>they see the market roughly every five minutes</b>.
+  A break that happens and fails inside one interval is never seen.</div>
+
+<div class="noise">
+  <button class="btn" id="snd" onclick="toggleSound()">🔊 Sound: off</button>
+  <button class="btn" id="ntf" onclick="askNotify()">🔔 Notifications</button>
+  <span class="note" id="noise-note"></span>
+</div>
+
+<div class="sec"><span>Fired today</span><span class="note" id="fire-count"></span></div>
+<div id="fires"><div class="empty">Loading…</div></div>
+
+<div class="sec">
+  <span>Rules</span>
+  <button class="btn primary" onclick="toggleForm()">+ New rule</button>
+</div>
+<div id="form" class="form" style="display:none"></div>
+<div id="rules"></div>
+
+</div>
+<script>
+/*
+ * The alerts page.
+ *
+ * It reads; it never evaluates. The screeners do that on their scans because
+ * they already hold the data, and a second evaluator here would eventually
+ * disagree with them about what "crossed" means.
+ */
+let META = null, TOOLS = [], SEEN = new Set(), FIRST_LOAD = true;
+let SOUND = localStorage.getItem('al_sound') === '1';
+let AC = null;
+
+const qs = new URLSearchParams(location.search);
+
+async function meta() {
+  if (!META) META = await (await fetch('/api/alerts/meta')).json();
+  return META;
+}
+
+fetch('/api/tools').then(r => r.json()).then(d => {
+  TOOLS = d.tools || [];
+  // Back to whichever app serves the landing page, on its own port.
+  const scr = (d.apps || []).find(a => a.id === 'SCR');
+  if (scr) document.getElementById('home-link').href =
+    `${location.protocol}//${location.hostname}:${scr.port}/`;
+}).catch(() => {});
+
+const toolPort = id => (TOOLS.find(t => t.id === id) || {}).port;
+const cardUrl = (f) => {
+  const p = toolPort(f.toolId);
+  return p ? `${location.protocol}//${location.hostname}:${p}/scanner?ticker=${
+    encodeURIComponent(f.ticker)}&date=${encodeURIComponent(f.date || '')}` : null;
+};
+const tvUrl = t => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t)}`;
+const ago = ms => { const m = Math.floor((Date.now() - ms) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm ago'; };
+
+/* ── the noise ──────────────────────────────────────────────────────────────
+ * Three ways to be told, and they do not degrade to nothing.
+ *
+ * Sound is the one that always works. It is synthesised rather than loaded so
+ * there is no asset to 404, and it needs one tap first because every browser
+ * blocks audio until the page has been interacted with — hence a button that
+ * reports its own state rather than a setting that silently does nothing.
+ *
+ * A browser notification is better when it works and is not available here:
+ * Notification.requestPermission() is blocked on an insecure origin, and this
+ * page is served over plain http on an IP. The button asks anyway, because the
+ * day the server gets a certificate it should start working with no code
+ * change — and reports honestly when the browser refuses. */
+function beep(times = 2) {
+  if (!SOUND) return;
+  try {
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+    for (let i = 0; i < times; i++) {
+      const o = AC.createOscillator(), g = AC.createGain();
+      const t0 = AC.currentTime + i * 0.22;
+      o.frequency.setValueAtTime(i ? 660 : 880, t0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+      o.connect(g); g.connect(AC.destination);
+      o.start(t0); o.stop(t0 + 0.2);
+    }
+  } catch { /* audio unavailable — the banner and the title still carry it */ }
+}
+
+function toggleSound() {
+  SOUND = !SOUND;
+  localStorage.setItem('al_sound', SOUND ? '1' : '0');
+  // The tap that enables it is also the gesture the browser needs, so the test
+  // beep proves it works rather than promising it will.
+  if (SOUND) { try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); AC.resume(); } catch {} beep(1); }
+  paintNoise();
+}
+
+async function askNotify() {
+  if (!('Notification' in window)) { note('This browser has no notification support. Sound still works.', true); return; }
+  try {
+    const p = await Notification.requestPermission();
+    if (p === 'granted') { new Notification('Trade Desk alerts are on'); }
+    else note('The browser refused notifications. On a plain http:// address most browsers '
+      + 'block them entirely — sound and the on-screen list still work.', true);
+  } catch {
+    note('Notifications are blocked on this address (they need https). Sound still works.', true);
+  }
+  paintNoise();
+}
+
+function note(msg, warn) {
+  const el = document.getElementById('noise-note');
+  el.textContent = msg; el.className = 'note' + (warn ? ' warn' : '');
+}
+
+function paintNoise() {
+  const s = document.getElementById('snd');
+  s.textContent = SOUND ? '🔊 Sound: on' : '🔈 Sound: off';
+  s.className = 'btn' + (SOUND ? ' on' : '');
+  const n = document.getElementById('ntf');
+  const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+  n.textContent = perm === 'granted' ? '🔔 Notifications: on' : '🔔 Notifications';
+  n.className = 'btn' + (perm === 'granted' ? ' on' : '');
+  if (perm !== 'granted' && !document.getElementById('noise-note').textContent) {
+    note(window.isSecureContext
+      ? 'Tap the bell to allow notifications.'
+      : 'This page is on http://, where browsers block notifications. Turn Sound on instead — '
+        + 'it works everywhere, and the list below updates every minute.', !window.isSecureContext);
+  }
+}
+
+function announce(fires) {
+  if (!fires.length) return;
+  beep(Math.min(3, fires.length));
+  if (('Notification' in window) && Notification.permission === 'granted') {
+    const f = fires[0];
+    const body = fires.length === 1 ? `${f.rule}${f.price != null ? ` @ ${f.price}` : ''}`
+      : `${f.ticker} and ${fires.length - 1} more`;
+    try { new Notification(`⚠ ${f.ticker} · ${f.toolId || ''}`, { body, tag: 'td-alert' }); } catch {}
+  }
+  // The title carries it even when the tab is in the background with sound off.
+  document.title = `(${fires.length}) Alerts · Trade Desk`;
+  setTimeout(() => { document.title = 'Alerts · Trade Desk'; }, 30000);
+}
+
+/* ── the feed ── */
+async function loadFires() {
+  const out = document.getElementById('fires');
+  try {
+    const d = await (await fetch('/api/alerts/fires?limit=60')).json();
+    const fires = d.fires || [];
+    document.getElementById('fire-count').textContent = fires.length ? `${fires.length} today` : '';
+    if (!fires.length) { out.innerHTML = '<div class="empty">Nothing has fired today.</div>'; return; }
+
+    // Only what arrived since the last poll is announced. On the first load
+    // everything is "new", and announcing a morning's worth of alerts at once
+    // is noise that teaches you to mute the page.
+    const fresh = fires.filter(f => !SEEN.has(`${f.ruleId}|${f.ticker}|${f.at}`));
+    fires.forEach(f => SEEN.add(`${f.ruleId}|${f.ticker}|${f.at}`));
+    if (!FIRST_LOAD) announce(fresh);
+    FIRST_LOAD = false;
+
+    out.innerHTML = fires.map(f => {
+      const card = cardUrl(f);
+      return `<div class="fire${Date.now() - (f.at || 0) < 10 * 60000 ? ' fresh' : ''}">
+        <span class="t">${f.ticker}</span>
+        <span class="tool">${f.toolId || ''}</span>
+        <span class="what">${f.rule || ''}${f.price != null ? ` @ ${f.price}` : ''}</span>
+        <span class="when">${ago(f.at || 0)}</span>
+        ${card ? `<a class="lnk" href="${card}">card</a>` : ''}
+        <a class="lnk" href="${tvUrl(f.ticker)}" target="_blank" rel="noopener">TV ↗</a>
+      </div>`;
+    }).join('');
+  } catch {
+    out.innerHTML = '<div class="empty">Could not read the fires.</div>';
+  }
+}
+
+/* ── the rules ── */
+async function loadRules() {
+  const out = document.getElementById('rules');
+  const m = await meta();
+  const opLabel = v => (m.operators.find(o => o.value === v) || {}).label || v;
+  try {
+    const d = await (await fetch('/api/alerts/rules')).json();
+    const rules = d.rules || [];
+    if (!rules.length) {
+      out.innerHTML = `<div class="empty">No rules yet. A first one:
+        <b>price crosses above pmHigh</b> with no scope — every tool, every stock.</div>`;
+      return;
+    }
+    out.innerHTML = rules.map(r => {
+      const tools = (r.scope?.tools || []).join(' ');
+      const tks = (r.scope?.tickers || []).join(' ');
+      // An unscoped rule says "all tools · any stock" in words. A blank reads
+      // as a missing value rather than the deliberate "everything" it is.
+      const scope = `${tools ? 'tools: ' + tools : 'all tools'} · ${tks ? 'only ' + tks : 'any stock'}`;
+      return `<div class="rule${r.enabled === false ? ' off' : ''}">
+        <b>${r.name}</b>
+        <span class="cond">${r.left} ${opLabel(r.operator)} ${r.right}</span>
+        <span class="scope">${scope}</span>
+        <span class="spacer"></span>
+        <button class="btn" onclick="toggleRule(${r.id}, ${r.enabled === false})">${
+          r.enabled === false ? 'Enable' : 'Disable'}</button>
+        <button class="btn" onclick="delRule(${r.id})">Delete</button>
+      </div>`;
+    }).join('');
+  } catch {
+    out.innerHTML = '<div class="empty">Could not read the rules.</div>';
+  }
+}
+
+let PICKED = new Set();
+function pickTool(id, el) {
+  PICKED.has(id) ? PICKED.delete(id) : PICKED.add(id);
+  el.className = 'chip' + (PICKED.has(id) ? ' on' : '');
+}
+
+async function toggleForm(prefill) {
+  const box = document.getElementById('form');
+  if (!prefill && box.style.display !== 'none') { box.style.display = 'none'; return; }
+  const m = await meta();
+  PICKED = new Set();
+  box.style.display = '';
+  box.innerHTML = `
+    <label>Name<input id="f-name" placeholder="Break PM high" size="15"></label>
+    <label>When<select id="f-left">${m.fields.map(f => `<option>${f}</option>`).join('')}</select></label>
+    <label>&nbsp;<select id="f-op">${m.operators.map(o =>
+      `<option value="${o.value}">${o.label}</option>`).join('')}</select></label>
+    <label>Level<input id="f-right" list="f-fields" placeholder="pmHigh or 5" size="13">
+      <datalist id="f-fields">${m.fields.map(f => `<option>${f}</option>`).join('')}</datalist></label>
+    <label style="flex:1 1 100%">Tools — none selected means every tool
+      <div class="chips">${m.tools.map(t =>
+        `<span class="chip" onclick="pickTool('${t.id}', this)">${t.id}</span>`).join('')}</div></label>
+    <label style="flex:1 1 240px">Stocks — blank means any stock
+      <input id="f-tickers" placeholder="AAPL TSLA" style="text-transform:uppercase"></label>
+    <button class="btn primary" onclick="saveRule()">Save rule</button>
+    <div class="err" id="f-err"></div>`;
+  document.getElementById('f-left').value = 'price';
+  document.getElementById('f-right').value = 'pmHigh';
+  if (prefill && prefill.ticker) {
+    document.getElementById('f-tickers').value = prefill.ticker;
+    document.getElementById('f-name').value = `${prefill.ticker} — break PM high`;
+  }
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+const list = id => (document.getElementById(id).value || '')
+  .split(/[\s,]+/).map(x => x.trim().toUpperCase()).filter(Boolean);
+
+async function saveRule() {
+  const err = document.getElementById('f-err');
+  err.textContent = '';
+  const r = await fetch('/api/alerts/rules', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: document.getElementById('f-name').value,
+      left: document.getElementById('f-left').value,
+      operator: document.getElementById('f-op').value,
+      right: document.getElementById('f-right').value,
+      scope: { tools: [...PICKED], tickers: list('f-tickers') },
+    }),
+  });
+  const d = await r.json();
+  // The server names the offending field and lists the options; replacing that
+  // with "invalid" would throw away the only thing that makes it fixable.
+  if (!d.ok) { err.textContent = d.error || 'could not save'; return; }
+  document.getElementById('form').style.display = 'none';
+  loadRules();
+}
+
+async function toggleRule(id, enable) {
+  const d = await (await fetch('/api/alerts/rules')).json();
+  const r = (d.rules || []).find(x => String(x.id) === String(id));
+  if (!r) return;
+  await fetch('/api/alerts/rules', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...r, enabled: !!enable }) });
+  loadRules();
+}
+
+async function delRule(id) {
+  if (!confirm('Delete this rule?')) return;
+  await fetch('/api/alerts/rules/' + id, { method: 'DELETE' });
+  loadRules();
+}
+
+paintNoise();
+loadFires();
+loadRules();
+// A card's "add alert" button links here with the ticker, so the rule opens
+// already scoped to the stock that was on screen.
+if (qs.get('ticker')) toggleForm({ ticker: qs.get('ticker').toUpperCase() });
+// The scans that produce alerts run every five minutes; polling faster only
+// redraws the same list.
+setInterval(loadFires, 60000);
+</script>
+</body>
+</html>
