@@ -82,9 +82,13 @@ def _dates(spec: dict) -> list[str]:
     return [d.strftime('%Y-%m-%d') for d in days]
 
 
-def _pairs(spec: dict) -> list[tuple[str, str]]:
+def _pairs(spec: dict, strategy: dict | None = None) -> list[tuple[str, str]]:
     """(day, symbol) evaluation pairs. Symbols universe: same list every day.
-    Register universe: the screener's frozen membership FOR that day."""
+    Register universe: the screener's frozen membership FOR that day. Tools
+    universe: the same, unioned across the setup's own tools.
+
+    `strategy` is optional so the pure-spec callers (and tests) still work; it
+    is only read to default the tool list."""
     uni = spec.get('universe') or {}
     kind = uni.get('kind', 'symbols')
     if kind == 'symbols':
@@ -92,35 +96,69 @@ def _pairs(spec: dict) -> list[tuple[str, str]]:
         if not syms:
             raise ValueError('universe.symbols is empty')
         return [(d, s, {}) for d in _dates(spec) for s in syms]
-    if kind == 'register':
+    if kind in ('register', 'tools'):
         from chart import screener as sc
-        reg = uni.get('register', 'R1')
+        register = uni.get('register', 'R1')
+
+        if kind == 'tools':
+            # The setup's own tools, expanded to one register per tool.
+            #
+            # This is the question worth asking of a setup: not "does it work
+            # on some symbols" but "does it work on the stocks the tool that
+            # will run it actually finds". A setup assigned to T2 backtested
+            # over T1's picks measures a pairing that will never happen.
+            #
+            # The tools come from the spec when given and from the strategy
+            # itself otherwise, so the default run of a setup is the one that
+            # matches how it will be used.
+            # Spec first, then the setup's own assignment. Being able to
+            # override matters: "how would T2's setup have done on T7's picks"
+            # is a real question, and it must not require editing the setup.
+            tools = uni.get('tools') or (strategy or {}).get('tools') or []
+            if not tools:
+                raise ValueError(
+                    'this setup is not assigned to any tool yet — set its tools, '
+                    'or pick a universe explicitly')
+            registers = [f'{t}:{register}' for t in tools]
+        else:
+            registers = [register]
+
         want = set(_dates(spec))
-        dates = [d for d in (sc.available_dates(reg) or []) if d in want]
-        if not dates:
-            raise ValueError(f'no {reg} register dates between '
-                             f'{spec.get("start")} and {spec.get("end")} — is the '
-                             f'screener reachable and does it have frozen days in range?')
-        pairs = []
-        for d in sorted(dates):
-            rows = sc.register_rows(reg, d, full=True)
-            if not rows.get('ok'):
-                raise ValueError(f'screener register fetch failed for {d}: '
-                                 f'{rows.get("error", "unreachable")}')
-            seen = set()             # ONE position per symbol per day
-            for r in rows.get('rows') or []:
-                t = (r.get('ticker') or '').strip().upper()
-                if t and t not in seen:
-                    seen.add(t)
-                    # the FULL frozen R1/Shortlist card rides along with every
-                    # trade so results can be filtered by ANY register column.
-                    # Dedup: a symbol listed twice in a day's register would be
-                    # a SECOND evaluate() pair and slip the per-day attempt cap
-                    # (which is enforced per pair) — so the same name could
-                    # double-trade. The engine holds one position per symbol.
-                    pairs.append((d, t, r))
+        # Union across the tools, per day. Two tools flagging the same name on
+        # the same day is ONE evaluation: the setup either triggers on that
+        # stock that day or it does not, and counting it twice would inflate
+        # every statistic in proportion to how much the tools overlap.
+        by_day: dict = {}
+        seen_dates = set()
+        for reg in registers:
+            dates = [d for d in (sc.available_dates(reg) or []) if d in want]
+            seen_dates.update(dates)
+            for d in sorted(dates):
+                rows = sc.register_rows(reg, d, full=True)
+                if not rows.get('ok'):
+                    raise ValueError(f'screener register fetch failed for {d}: '
+                                     f'{rows.get("error", "unreachable")}')
+                day = by_day.setdefault(d, {})
+                for r in rows.get('rows') or []:
+                    t = (r.get('ticker') or '').strip().upper()
+                    # First tool to supply the row wins. The FULL frozen card
+                    # rides along with every trade so results can be filtered by
+                    # ANY register column. Dedup matters beyond tidiness: a
+                    # second pair for the same symbol would slip the per-day
+                    # attempt cap, which is enforced per pair, and the same name
+                    # could double-trade.
+                    if t and t not in day:
+                        day[t] = dict(r, _tool=reg.split(':')[0] if ':' in reg else None)
+
+        if not seen_dates:
+            raise ValueError(f'no {register} register dates between '
+                             f'{spec.get("start")} and {spec.get("end")} for '
+                             f'{", ".join(registers)} — is the screener reachable '
+                             f'and does it have frozen days in range?')
+
+        pairs = [(d, t, r) for d in sorted(by_day) for t, r in by_day[d].items()]
         if not pairs:
-            raise ValueError(f'{reg} register has no tickers in range')
+            raise ValueError(f'{", ".join(registers)} has no tickers in range')
         return pairs
     raise ValueError(f'unknown universe kind {kind!r}')
 
@@ -435,7 +473,7 @@ def run(spec: dict, progress_cb=None) -> dict:
     # a backtest without them lies). Fractional cost per SIDE in basis points
     # (spread + slippage + commission); a round trip pays it twice.
     cost = float(spec.get('cost_bps', 0.0) or 0.0) / 10000.0
-    pairs = _pairs(spec)
+    pairs = _pairs(spec, strategy)
 
     closed, opens, errors = [], [], []
     # COVERAGE accounting — "1 trade" is uninterpretable unless the run also
