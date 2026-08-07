@@ -25,6 +25,7 @@ const LANDING_PROBE_PATHS = [
   '/health', '/api/tools', '/api/registry/today', '/api/analysis/status',
   '/api/analysis/screener-report',   // the month-end comparison across tools
   '/api/shortlist/all-tools',        // the unified shortlist
+  '/api/canslim',                    // the shared growth-stock list
 ];
 app.use((req, res, next) => {
   if (req.method === 'GET' && LANDING_PROBE_PATHS.includes(req.path)) {
@@ -46,6 +47,9 @@ app.use('/api/backup', require('./routes/backup'));
 app.use('/api/monitor', require('./routes/monitor'));
 app.use('/api/analysis', require('./routes/analysis'));
 app.use('/api/card', require('./routes/card'));
+// The one list that is shared rather than per-tool, so the landing page can
+// show it once instead of nine times. Any tool can answer it — see the route.
+app.use('/api/canslim', require('./routes/canslim'));
 
 // The tool registry, so the landing page renders whatever is configured
 // rather than a list hardcoded in the page.

@@ -134,6 +134,18 @@ body {
 .uni-chip { display:flex; align-items:center; gap:8px; background:var(--bg2);
   border:1px solid var(--border); border-radius:7px; padding:8px 12px; }
 .uni-chip.multi { border-color:#eab30877; background:#eab30810; }
+/* Same purple the CANSLIM badge uses on a card, so the two read as one thing.
+   Scoped to the CANSLIM panel: an unscoped .uni-chip rule here would sit after
+   .uni-chip.multi and recolour the shortlist's chips as a side effect. The
+   amber variant marks a name about to expire — its badge is about to turn off
+   everywhere else. */
+#cs-out .uni-chip { border-color:#c084fc55; background:#c084fc12; }
+#cs-out .uni-chip.cs-soon { border-color:#eab30877; background:#eab30812; }
+/* The days-left pill inherits the shortlist's amber, which on a name with 90
+   days to run reads as a warning about nothing. Neutral by default; amber only
+   where it means something. */
+#cs-out .uni-n { background:#c084fc1c; color:#d8b4fe; border-color:#c084fc44; }
+#cs-out .cs-soon .uni-n { background:#eab30822; color:#facc15; border-color:#eab30866; }
 .uni-tkr { font-weight:700; font-size:13px; letter-spacing:.02em; }
 .uni-by { font-size:10.5px; color:var(--text3); font-family:ui-monospace,Menlo,monospace; }
 .uni-n { font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px;
@@ -192,6 +204,18 @@ body {
     more than one tool sort to the top: independent agreement is a different proposition from one
     list's opinion.</div>
   <div id="uni-out"><div class="cmp-hint" style="margin-top:14px">Loading…</div></div>
+</div>
+
+<!-- The other shared list. Unlike the shortlist it is not about today: these
+     are companies, and membership lasts a quarter. It belongs here rather than
+     inside a tool because every tool reads it. -->
+<div class="cmp-wrap" id="cs-wrap">
+  <div class="uni-title">CANSLIM — the growth list</div>
+  <div class="cmp-hint">Who is a growth company, decided once a day on earnings and sales rather
+    than on what the tape did. A name stays for 90 days from the last time it qualified, so this
+    changes with the earnings calendar and not with the market. Every tool tags its own cards
+    from this list — it is a label and never a filter.</div>
+  <div id="cs-out"><div class="cmp-hint" style="margin-top:14px">Loading…</div></div>
 </div>
 
 <div class="cmp-wrap">
@@ -538,6 +562,46 @@ async function loadUnifiedShortlist() {
   }
 }
 loadUnifiedShortlist();
+
+// ═══════════════ CANSLIM MEMBERS ═══════════════
+// One shared file, so this is a single read from whichever tool serves the
+// page rather than a poll of nine.
+async function loadCanslim() {
+  const out = document.getElementById('cs-out');
+  if (!out) return;
+  try {
+    const d = await (await fetch('/api/canslim')).json();
+    const rows = (d && d.members) || [];
+    if (!rows.length) {
+      // An empty list is a real answer — before the day's first Universe scan,
+      // or because nothing currently clears all six rules. Saying which is
+      // possible is what stops it reading as a broken panel.
+      out.innerHTML = `<div class="cmp-hint" style="margin-top:14px">
+        Nobody on the list. Either T8 has not run its Universe screener yet today
+        (09:30–09:45 ET, weekdays), or no stock currently meets all six criteria.</div>`;
+      return;
+    }
+    // Expiry is the fact with a consequence somewhere else: when a name goes,
+    // its badge turns off on every other tool's cards, and a change nobody was
+    // warned about reads as a bug.
+    const soon = rows.filter(r => r.expiresIn <= 14);
+    out.innerHTML = `<div class="uni-grid">${rows.map(r => `
+      <div class="uni-chip${r.expiresIn <= 14 ? ' cs-soon' : ''}"
+           title="First qualified ${r.held} day(s) ago · last qualified ${
+             r.lastSeenDays === 0 ? 'today' : `${r.lastSeenDays} day(s) ago`
+           } · confirmed ${r.confirmations}x · drops off in ${r.expiresIn} day(s)">
+        <span class="uni-tkr">${r.ticker}</span>
+        <span class="uni-by">${r.held}d held</span>
+        <span class="uni-n">${r.expiresIn}d left</span>
+      </div>`).join('')}</div>
+      <div class="cmp-hint">${rows.length} member(s)${
+        d.updatedAt ? ` · list written ${Math.floor((Date.now() - d.updatedAt) / 60000)} min ago` : ''
+      }${soon.length ? ` · <b>${soon.map(r => r.ticker).join(', ')}</b> expiring within two weeks` : ''}</div>`;
+  } catch {
+    out.innerHTML = '<div class="cmp-hint" style="margin-top:14px">Could not read the CANSLIM list.</div>';
+  }
+}
+loadCanslim();
 setInterval(loadUnifiedShortlist, 60000);
 
 // ═══════════════ MONTH-END COMPARISON ═══════════════
