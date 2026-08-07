@@ -373,9 +373,46 @@ describe('Side C — auto bias from catalyst type', () => {
   });
 
   test('a partial context still answers when one leg is clear', () => {
-    expect(resolveAutoBias({ bias: 'auto', context: { longTerm: 'BULLISH' } }).bias).toBe('long');
-    expect(resolveAutoBias({ bias: 'auto', context: { longTerm: 'BEARISH' } }).bias).toBe('short');
+    expect(resolveAutoBias({ bias: 'auto', context: { shortTerm: 'BULLISH' } }).bias).toBe('long');
+    expect(resolveAutoBias({ bias: 'auto', context: { secBias: 'BEARISH' } }).bias).toBe('short');
     expect(resolveAutoBias({ bias: 'auto', context: { shortTerm: 'NEUTRAL', secBias: 'NEUTRAL' } }).bias).toBeNull();
+  });
+
+  /*
+   * The long-term market view no longer sets a stock's direction.
+   *
+   * Measured across all nine tools: longTerm was BULLISH on every row of every
+   * tool for the whole sample — it is SPY above its 200-day with a golden
+   * cross, which simply did not change. As the last rung it therefore fired
+   * whenever the others declined and always said "long", so the ladder
+   * answered on 100% of rows and matched always-long exactly in six of nine
+   * tools.
+   *
+   * The claim it was making is the real objection: "the index is above its
+   * 200-day, therefore THIS stock is a long" says nothing about the stock, and
+   * it was the default answer for every card without a catalyst.
+   */
+  test('the long-term market view alone is no longer a direction', () => {
+    expect(resolveAutoBias({ bias: 'auto', context: { longTerm: 'BULLISH' } }).bias).toBeNull();
+    expect(resolveAutoBias({ bias: 'auto', context: { longTerm: 'BEARISH' } }).bias).toBeNull();
+  });
+
+  test('…and it cannot overturn what the stock and its sector say', () => {
+    // The failure mode being guarded against is removing it from the ladder but
+    // leaving it able to tip a decision somewhere else.
+    const bullTape = { shortTerm: 'BULLISH', secBias: 'NEUTRAL' };
+    for (const lt of ['BULLISH', 'BEARISH', 'RECOVERING', 'WEAKENING', undefined]) {
+      expect({ lt, bias: resolveAutoBias({ bias: 'auto', context: { ...bullTape, longTerm: lt } }).bias })
+        .toEqual({ lt, bias: 'long' });
+    }
+  });
+
+  test('a card with only the market to go on now says nothing at all', () => {
+    // This is the change that makes the earlier "no default" fix real: with the
+    // long-term rung in place it never once took effect on live data.
+    const r = resolveAutoBias({ bias: 'auto', context: { longTerm: 'BULLISH', shortTerm: 'NEUTRAL', secBias: 'NEUTRAL' } });
+    expect(r.bias).toBeNull();
+    expect(r.source).toBe('none');
   });
 
   /*
