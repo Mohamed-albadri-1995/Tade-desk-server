@@ -102,15 +102,66 @@ async function fetchMorning(tickers, date, {
     return { bars: {}, sources: {}, missing: [], waitedMs: 0, attempts: 0, degraded: [] };
   }
 
-  const bars = {};
-  const sources = {};
+  /*
+   * ONE FEED FOR THE WHOLE UNIVERSE, and this is not a preference.
+   *
+   * The setup RANKS by extension and takes the top two, so every candidate's
+   * extension has to be measured on the same ruler. Topping up a Polygon
+   * universe with Yahoo bars for the names Polygon missed produces a list where
+   * some extensions were computed from one tape and some from another — and
+   * those disagree by more than the gap between second place and fifth. The
+   * ranking would then be partly a ranking of feeds.
+   *
+   * So each feed is asked for the ENTIRE universe and accepted only if it
+   * covers enough of it. Mixing is the last resort, when no single feed can,
+   * and it is reported rather than absorbed.
+   */
+  let bars = {};
+  let sources = {};
   let tries = 0;
+  let chosen = null;
 
-  while (tries < attempts) {
+  const coverageOf = (got) =>
+    list.filter(t => reachesDecision(got[t], lastWanted)).length / list.length;
+
+  while (tries < attempts && !chosen) {
     tries++;
-    if (!list.some(t => !reachesDecision(bars[t], lastWanted))) break;
+    for (const src of order) {
+      if (!src.available()) continue;
+      let got;
+      try {
+        got = await src.fetch(list, date);
+      } catch (err) {
+        console.warn(`[Setups] ${src.id} bars failed:`, err.message);
+        continue;
+      }
+      const label = src.label ? src.label() : src.id;
+      const cov = coverageOf(got || {});
+      // Keep the best attempt seen, so a retry that does worse cannot lose
+      // ground and an exhausted loop still has the best available data.
+      if (cov > coverageOf(bars)) {
+        bars = {};
+        sources = {};
+        for (const [t, b] of Object.entries(got || {})) {
+          if (b && b.length) { bars[t] = b; sources[t] = label; }
+        }
+      }
+      if (cov >= minCoverage) { chosen = label; break; }
+      console.log(`[Setups] ${src.id} covered ${Math.round(cov * 100)}% of the universe`);
+    }
+    if (!chosen && tries < attempts) {
+      console.log(`[Setups] no feed covered ${Math.round(minCoverage * 100)}% — waiting`);
+      await sleep(waitMs);
+    }
+  }
 
-    // Each feed is asked only for what the ones before it could not supply.
+  /*
+   * Nothing reached the bar on its own. Rather than decide on a fifth of the
+   * universe, fill the gaps from the other feeds — a ranking over a mixed tape
+   * is compromised, but a ranking over four names out of forty is not a
+   * ranking at all. `mixed` carries the compromise to the alert.
+   */
+  if (!chosen) {
     for (const src of order) {
       const need = list.filter(t => !reachesDecision(bars[t], lastWanted));
       if (!need.length) break;
@@ -119,22 +170,16 @@ async function fetchMorning(tickers, date, {
         const got = await src.fetch(need, date);
         const label = src.label ? src.label() : src.id;
         for (const [t, b] of Object.entries(got || {})) {
-          if (b && b.length) { bars[t] = b; sources[t] = label; }
+          if (b && b.length && !reachesDecision(bars[t], lastWanted)) {
+            bars[t] = b; sources[t] = label;
+          }
         }
-      } catch (err) {
-        console.warn(`[Setups] ${src.id} bars failed:`, err.message);
-      }
-    }
-
-    const have = list.filter(t => reachesDecision(bars[t], lastWanted)).length;
-    if (have / list.length >= minCoverage) break;
-    if (tries < attempts) {
-      console.log(`[Setups] ${have}/${list.length} tickers have the ${lastWanted} bar — waiting`);
-      await sleep(waitMs);
+      } catch { /* already reported above */ }
     }
   }
 
   const missing = list.filter(t => !reachesDecision(bars[t], lastWanted));
+  const used = [...new Set(Object.values(sources))];
   // IEX volume is a fraction of the tape, so a VWAP from it is not the level a
   // chart shows. Named per ticker so the alert can carry the caveat only where
   // it applies rather than as blanket small print.
@@ -144,6 +189,11 @@ async function fetchMorning(tickers, date, {
 
   return {
     bars, sources, missing, degraded,
+    feed: chosen || (used.length === 1 ? used[0] : null),
+    // True when the candidates were not all measured on the same tape, which
+    // makes the ranking partly a ranking of feeds.
+    mixed: used.length > 1,
+    used,
     waitedMs: Date.now() - started,
     attempts: tries,
     coverage: list.length ? (list.length - missing.length) / list.length : 1,

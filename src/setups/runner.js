@@ -73,9 +73,18 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     return { ok: true, picks: [], universe: 0, fires: [fire] };
   }
 
-  const data = await barsSource.fetchMorning(list, day, {
+  const fetched = await barsSource.fetchMorning(list, day, {
     lastWanted: lastWantedBar(setup.decisionTime),
   });
+  // Defaults for every field this function reads. The fetch reports a lot about
+  // its own quality and every one of those fields is optional to produce, so a
+  // missing one must degrade the ALERT's detail, never take out the run that
+  // was about to name two trades.
+  const data = {
+    bars: {}, sources: {}, missing: [], degraded: [], used: [],
+    feed: null, mixed: false, coverage: 1, waitedMs: 0, attempts: 1,
+    ...fetched,
+  };
 
   const out = setup.module.run(data.bars, setup.params);
 
@@ -125,6 +134,23 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     });
   }
 
+  /*
+   * The ranking is only as comparable as the tape underneath it. Extension
+   * decides which two names are taken, extension comes from VWAP, and VWAP
+   * comes from volume — so candidates measured on different feeds were not
+   * ranked against each other on the same ruler. That is a caveat about the
+   * SELECTION, not about any one pick, so it gets its own line.
+   */
+  if (data.mixed) {
+    fires.push({
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      date: day, at: Date.now(), kind: 'setup', level: 'warn',
+      detail: `Ranked across mixed feeds (${data.used.join(' + ')}) — no single feed `
+        + 'covered the list. Extensions from different tapes are not directly '
+        + 'comparable, so the choice of the top 2 is less reliable than usual.',
+    });
+  }
+
   // A gap in the universe changes the ranking, because the ranking is over the
   // universe. Worth its own line rather than a footnote on a pick.
   if (data.missing.length) {
@@ -148,6 +174,9 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     picks: out.picks,
     counts: out.counts,
     data: {
+      feed: data.feed,
+      mixed: data.mixed,
+      used: data.used,
       coverage: data.coverage,
       missing: data.missing,
       degraded: data.degraded,
@@ -158,6 +187,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     fires,
   };
   console.log(`[Setups] ${setup.id}: ${out.picks.length} pick(s) from ${list.length} cards `
+    + `on ${data.feed || data.used.join('+') || 'no feed'} `
     + `(${Math.round(data.coverage * 100)}% had bars, waited ${Math.round(data.waitedMs / 1000)}s)`);
   return result;
 }

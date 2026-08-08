@@ -60,6 +60,7 @@ function feed(barsByTicker, extra = {}) {
     bars: barsByTicker,
     sources: Object.fromEntries(Object.keys(barsByTicker).map(t => [t, 'yahoo'])),
     missing: [], degraded: [], waitedMs: 0, attempts: 1, coverage: 1,
+    feed: 'yahoo', mixed: false, used: ['yahoo'],
     ...extra,
   });
 }
@@ -206,5 +207,54 @@ describe('ownership and dry runs', () => {
     const none = await runner.runDue('11:30', { date: DATE });
     expect(none).toEqual([]);
     expect(bars.fetchMorning).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * The setup RANKS and takes the top two, so every candidate's extension has to
+ * be measured on the same tape. Feeds disagree by more than the gap between
+ * second place and fifth — measured against the spec's reference log, Yahoo and
+ * Polygon extensions differed by up to 2.4 points — so a universe assembled
+ * from two feeds is a ranking that is partly a ranking of feeds. It is allowed,
+ * because deciding on four names out of forty is worse, but it is never silent.
+ */
+describe('mixed feeds', () => {
+  test('a ranking built on more than one tape says so', async () => {
+    feed({ FAST: rising(3), SLOW: rising(1) }, {
+      mixed: true, used: ['polygon', 'yahoo'], feed: null,
+      sources: { FAST: 'polygon', SLOW: 'yahoo' },
+    });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }, { ticker: 'SLOW' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    const warn = store.recentFires(DATE).find(f => f.level === 'warn');
+    expect(warn.detail).toMatch(/mixed feeds \(polygon \+ yahoo\)/);
+    expect(warn.detail).toMatch(/not directly comparable/);
+  });
+
+  test('one tape for everything raises nothing to ignore', async () => {
+    feed({ FAST: rising(3), SLOW: rising(1) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }, { ticker: 'SLOW' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    expect(store.recentFires(DATE).some(f => f.level === 'warn')).toBe(false);
+  });
+
+  test('the feed is reported on the run, so a fire can be traced to its tape', async () => {
+    feed({ FAST: rising(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    const out = await runner.runSetup(SETUP, { date: DATE });
+    expect(out.data.feed).toBe('yahoo');
+  });
+
+  /*
+   * The fetch reports a lot about its own quality, and every one of those
+   * fields is optional to produce. A missing one must cost detail in the alert,
+   * never the two trades the run was about to name.
+   */
+  test('a fetch that reports nothing about itself still produces the picks', async () => {
+    bars.fetchMorning.mockResolvedValue({ bars: { FAST: rising(3) } });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    const out = await runner.runSetup(SETUP, { date: DATE });
+    expect(out.picks).toHaveLength(1);
+    expect(store.recentFires(DATE).some(f => f.level === 'trade')).toBe(true);
   });
 });
