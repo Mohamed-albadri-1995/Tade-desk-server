@@ -67,10 +67,65 @@ echo "── installing Caddy ────────────────�
 if command -v caddy >/dev/null; then
   echo "  already installed: $(caddy version | head -1)"
 else
-  # Amazon Linux 2023 is dnf/yum. Caddy publishes a COPR repo for RHEL-likes.
-  sudo dnf install -y 'dnf-command(copr)' >/dev/null 2>&1 || true
-  sudo dnf copr enable -y '@caddy/caddy' >/dev/null 2>&1 || true
-  sudo dnf install -y caddy
+  # NOT the COPR repo. COPR is a Fedora build service; Amazon Linux 2023 has no
+  # copr plugin and no caddy package, so `dnf install caddy` ends in
+  # "Unable to find a match: caddy". The official static binary from GitHub is
+  # the supported route on distributions Caddy does not package for.
+  case "$(uname -m)" in
+    x86_64)  ARCH=amd64 ;;
+    aarch64) ARCH=arm64 ;;
+    *) echo "!! unsupported CPU: $(uname -m)"; exit 1 ;;
+  esac
+
+  # Ask GitHub for the current release; fall back to a known-good pin so a rate
+  # limit or an offline moment does not leave the box half-configured.
+  VER="$(curl -fsS --max-time 15 https://api.github.com/repos/caddyserver/caddy/releases/latest 2>/dev/null \
+         | grep -m1 '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/' || true)"
+  case "$VER" in
+    ''|*[!0-9.]*) VER=2.8.4 ;;
+  esac
+  echo "  caddy v$VER ($ARCH)"
+
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  curl -fsSL --max-time 120 \
+    "https://github.com/caddyserver/caddy/releases/download/v${VER}/caddy_${VER}_linux_${ARCH}.tar.gz" \
+    -o "$TMP/caddy.tar.gz"
+  tar -xzf "$TMP/caddy.tar.gz" -C "$TMP" caddy
+  sudo install -m 0755 "$TMP/caddy" /usr/bin/caddy
+
+  # The package would have created these. Doing it by hand keeps the rest of the
+  # script — chown caddy:caddy, systemctl restart caddy — working unchanged.
+  sudo groupadd --system caddy 2>/dev/null || true
+  sudo useradd --system --gid caddy --create-home --home-dir /var/lib/caddy \
+       --shell /usr/sbin/nologin --comment "Caddy web server" caddy 2>/dev/null || true
+
+  sudo tee /etc/systemd/system/caddy.service >/dev/null <<'UNIT'
+[Unit]
+Description=Caddy
+Documentation=https://caddyserver.com/docs/
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+# Ports 80 and 443 are privileged; the service does not run as root, so it is
+# granted just the one capability that lets it bind them.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo systemctl daemon-reload
+  echo "  installed: $(caddy version | head -1)"
 fi
 
 echo
