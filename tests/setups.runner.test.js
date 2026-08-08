@@ -1,0 +1,210 @@
+/*
+ * Turning a setup's picks into alerts that arrive.
+ *
+ * The property that matters most here is not the arithmetic — that is tested
+ * against the spec in setups.vwapExtension.test.js — it is that a run ALWAYS
+ * says something. From a phone, "the setup ran and nothing qualified", "the
+ * data never arrived" and "the process was down" all look identical: an empty
+ * feed. So each of those has to produce its own line, and that is what is
+ * pinned here.
+ */
+
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
+
+const FIRES = path.join(os.tmpdir(), `setup-fires-${process.pid}.json`);
+process.env.ALERT_FIRES_FILE = FIRES;
+process.env.TOOL_ID = 'T2';
+process.env.TOOL_NAME = 'Momentum';
+
+jest.mock('../src/setups/bars');
+jest.mock('../src/r0/registry', () => ({ getTodayRows: jest.fn(() => []) }));
+
+const bars = require('../src/setups/bars');
+const r0 = require('../src/r0/registry');
+const runner = require('../src/setups/runner');
+const setups = require('../src/setups');
+const store = require('../src/alerts/store');
+
+const SETUP = setups.get('T2-VWAP-EXT');
+const DATE = '2026-08-10';
+
+/** A morning that produces a clean LONG, steeper for a bigger `mult`. */
+function rising(mult) {
+  const out = [];
+  for (let i = 0; i < 25; i++) {
+    const mins = 9 * 60 + 30 + i;
+    out.push({
+      etTime: `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`,
+      o: 10 + i * 0.1 * mult, h: 10 + i * 0.1 * mult,
+      l: 9.9 + i * 0.1 * mult, c: 10 + i * 0.1 * mult, v: 1000,
+    });
+  }
+  return out;
+}
+function flat() {
+  const out = [];
+  for (let i = 0; i < 25; i++) {
+    const mins = 9 * 60 + 30 + i;
+    out.push({
+      etTime: `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`,
+      o: 10, h: 10, l: 10, c: 10, v: 1000,
+    });
+  }
+  return out;
+}
+
+function feed(barsByTicker, extra = {}) {
+  bars.fetchMorning.mockResolvedValue({
+    bars: barsByTicker,
+    sources: Object.fromEntries(Object.keys(barsByTicker).map(t => [t, 'yahoo'])),
+    missing: [], degraded: [], waitedMs: 0, attempts: 1, coverage: 1,
+    ...extra,
+  });
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  try { fs.unlinkSync(FIRES); } catch { /* absent */ }
+  r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }, { ticker: 'SLOW' }, { ticker: 'FLAT' }]);
+});
+afterAll(() => { try { fs.unlinkSync(FIRES); } catch { /* absent */ } });
+
+describe('the decision bar', () => {
+  test('is the minute before the decision time', () => {
+    expect(runner.lastWantedBar('10:00')).toBe('09:59');
+    expect(runner.lastWantedBar('09:35')).toBe('09:34');
+  });
+});
+
+describe('a run that finds trades', () => {
+  test('publishes one alert per pick, with the whole plan in it', async () => {
+    feed({ FAST: rising(3), SLOW: rising(1), FLAT: flat() });
+    const out = await runner.runSetup(SETUP, { date: DATE });
+
+    expect(out.picks.map(p => p.ticker)).toEqual(['FAST', 'SLOW']);
+    const fires = store.recentFires(DATE);
+    expect(fires.filter(f => f.level === 'trade')).toHaveLength(2);
+
+    const f = fires.find(x => x.ticker === 'FAST');
+    expect(f.setup.signal).toBe('LONG');
+    expect(f.setup.stop).toBeCloseTo(f.setup.decisionVwap, 10);
+    expect(f.setup.target).toBeGreaterThan(f.setup.entry);
+  });
+
+  /*
+   * The notification body is all a phone shows. It has to carry the four things
+   * needed to place the trade without opening anything.
+   */
+  test('the text says direction, price, stop and target', async () => {
+    feed({ FAST: rising(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    const detail = store.recentFires(DATE).find(f => f.ticker === 'FAST').detail;
+    expect(detail).toMatch(/^BUY FAST/);
+    expect(detail).toMatch(/stop [\d.]+ \(VWAP, fixed\)/);
+    expect(detail).toMatch(/target [\d.]+/);
+  });
+
+  test('the caution travels with the trade, not just the documentation', async () => {
+    feed({ FAST: rising(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    expect(store.recentFires(DATE)[0].setup.caution).toMatch(/not a validated edge/i);
+  });
+});
+
+/*
+ * Silence is the enemy. Each of these is a different situation and each has to
+ * be distinguishable from the others in the feed.
+ */
+describe('a run that finds nothing still says so', () => {
+  test('nothing qualified, with the counts behind it', async () => {
+    feed({ FLAT: flat() });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FLAT' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    const fires = store.recentFires(DATE);
+    expect(fires).toHaveLength(1);
+    expect(fires[0].level).toBe('info');
+    expect(fires[0].detail).toMatch(/Nothing qualified/);
+    expect(fires[0].detail).toMatch(/1 evaluated/);
+  });
+
+  test('an empty card list is its own message, not "nothing qualified"', async () => {
+    r0.getTodayRows.mockReturnValue([]);
+    await runner.runSetup(SETUP, { date: DATE });
+    const fires = store.recentFires(DATE);
+    expect(fires[0].detail).toMatch(/No cards on the list/);
+    expect(bars.fetchMorning).not.toHaveBeenCalled();
+  });
+
+  test('missing bars are reported, because the ranking was over fewer names', async () => {
+    feed({ FAST: rising(3) }, { missing: ['GONE', 'ALSOGONE'], coverage: 0.33 });
+    await runner.runSetup(SETUP, { date: DATE });
+    const warn = store.recentFires(DATE).find(f => f.level === 'warn');
+    expect(warn.detail).toMatch(/No 09:59 bar for GONE, ALSOGONE/);
+  });
+
+  test('a crash is published too, rather than leaving an empty feed', async () => {
+    bars.fetchMorning.mockRejectedValue(new Error('feed down'));
+    await runner.runDue('10:00', { date: DATE });
+    const err = store.recentFires(DATE).find(f => f.level === 'error');
+    expect(err.detail).toMatch(/Did not run: feed down/);
+  });
+});
+
+/*
+ * The VWAP is the stop. A VWAP computed from IEX volume — a few percent of the
+ * consolidated tape — is not the level a chart draws, so a pick built on one
+ * has to say so on the pick itself rather than in blanket small print.
+ */
+describe('feed quality', () => {
+  test('an IEX-sourced pick carries the warning', async () => {
+    feed({ FAST: rising(3) }, {
+      sources: { FAST: 'alpaca:iex' }, degraded: ['FAST'],
+    });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    const f = store.recentFires(DATE).find(x => x.ticker === 'FAST');
+    expect(f.setup.source).toBe('alpaca:iex');
+    expect(f.setup.feedWarning).toMatch(/IEX/);
+  });
+
+  test('a consolidated-tape pick carries no warning to ignore', async () => {
+    feed({ FAST: rising(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    expect(store.recentFires(DATE).find(x => x.ticker === 'FAST').setup.feedWarning).toBeNull();
+  });
+});
+
+describe('ownership and dry runs', () => {
+  test('a preview publishes nothing', async () => {
+    feed({ FAST: rising(3) });
+    const out = await runner.runSetup(SETUP, { date: DATE, dryRun: true });
+    expect(out.picks).toHaveLength(1);
+    expect(store.recentFires(DATE)).toHaveLength(0);
+  });
+
+  test('a preview can be given its own universe, so any tool can inspect it', async () => {
+    feed({ AAA: rising(3) });
+    await runner.runSetup(SETUP, { date: DATE, dryRun: true, tickers: ['AAA'] });
+    expect(bars.fetchMorning).toHaveBeenCalledWith(['AAA'], DATE, expect.anything());
+  });
+
+  test('the wrong tool refuses to run it for real', async () => {
+    const foreign = { ...SETUP, toolId: 'T7' };
+    const out = await runner.runSetup(foreign, { date: DATE });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/belongs to T7/);
+    expect(store.recentFires(DATE)).toHaveLength(0);
+  });
+
+  test('runDue only runs setups whose decision time matches', async () => {
+    feed({ FAST: rising(3) });
+    const none = await runner.runDue('11:30', { date: DATE });
+    expect(none).toEqual([]);
+    expect(bars.fetchMorning).not.toHaveBeenCalled();
+  });
+});

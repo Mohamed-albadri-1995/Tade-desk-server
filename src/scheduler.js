@@ -216,6 +216,42 @@ function startScheduler() {
   registerJob('Daily Backup 5:30 PM', '30 17 * * 1-5', 'America/New_York', () => pushBackup());
   registerJob('Midnight r0 Flush', '0 0 * * *', 'America/New_York', () => { r0.clearAll(); });
 
+  /*
+   * ── setups ──
+   *
+   * A setup ranks the whole universe at one instant, so both of its inputs have
+   * to be right AT that instant, and each gets its own job.
+   *
+   * The universe scan exists because the ordinary discovery cadence lands at
+   * 09:55 and then not again until 10:00. That would leave the card list five
+   * minutes old at the one moment it is read — and a name that appeared at
+   * 09:56 is exactly the kind the setup is looking for. One extra scan, whose
+   * only job is to be recent.
+   *
+   * The decision job fires on the minute. It does NOT assume the data is there:
+   * at 10:00:00 the 09:59 bar is a fraction of a second old and neither feed
+   * has necessarily published it. The runner waits for that bar and reports how
+   * long it waited, rather than evaluating a 29-minute morning as if it were
+   * the whole thing.
+   *
+   * Registered on every tool; each runs only the setups that name it, so eight
+   * of the nine processes register a job that does nothing. That is cheaper
+   * than nine different schedules to keep in step.
+   */
+  const setupDefs = require('./setups');
+  const mine = setupDefs.forTool(require('./config').toolId);
+  for (const setup of mine) {
+    const { runDue } = require('./setups/runner');
+    if (setup.universeScanAt) {
+      const [uh, um] = setup.universeScanAt.split(':').map(Number);
+      registerJob(`Setup Universe Scan ${setup.universeScanAt} (${setup.id})`,
+        `${um} ${uh} * * 1-5`, 'America/New_York', () => runFullScan());
+    }
+    const [dh, dm] = setup.decisionTime.split(':').map(Number);
+    registerJob(`Setup Decision ${setup.decisionTime} (${setup.id})`,
+      `${dm} ${dh} * * 1-5`, 'America/New_York', () => runDue(setup.decisionTime));
+  }
+
   // Job identity comes from the name, so renaming a job leaves its old row
   // behind holding a schedule nothing reads any more. Harmless until someone
   // opens the table to work out why a change had no effect.

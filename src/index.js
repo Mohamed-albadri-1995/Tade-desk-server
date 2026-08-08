@@ -30,6 +30,7 @@ const LANDING_PROBE_PATHS = [
   '/api/alerts/rules',               // the alert rules
   '/api/alerts/fires',               // …and what they fired today
   '/api/alerts/meta',                // fields and operators for the builder
+  '/api/setups',                     // the setups, for the alerts app to list
 ];
 app.use((req, res, next) => {
   if (req.method === 'GET' && LANDING_PROBE_PATHS.includes(req.path)) {
@@ -56,6 +57,9 @@ app.use('/api/card', require('./routes/card'));
 app.use('/api/canslim', require('./routes/canslim'));
 // Alert rules and the day's fires. Shared files, so any tool can serve them.
 app.use('/api/alerts', require('./routes/alerts'));
+// Setups: strategies that rank the whole universe at one moment, rather than
+// comparing rows one at a time the way an alert rule does.
+app.use('/api/setups', require('./routes/setups'));
 
 // The tool registry, so the landing page renders whatever is configured
 // rather than a list hardcoded in the page.

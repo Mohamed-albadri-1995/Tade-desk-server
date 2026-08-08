@@ -50,6 +50,27 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   border:1px solid var(--border); border-radius:4px; padding:2px 6px; white-space:nowrap; }
 .lnk:hover { color:var(--blue); border-color:var(--blue); }
 
+/* ── setup fires ──
+   A setup's message is a trade, not a crossing: a side, an entry, a stop that
+   does not move and a target. It gets a block rather than a row because all
+   four have to be readable at a glance on a phone, and a flex row would drop
+   them onto one line and truncate the end — which is where the stop is. */
+.fire.setup { display:block; }
+.su-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.su-tag { font-size:10px; font-weight:800; letter-spacing:.06em; border-radius:3px;
+  padding:2px 7px; background:var(--bg3); color:var(--text2); border:1px solid var(--border); }
+.fire.lvl-trade { border-left-color:var(--amber, #fbbf24); }
+.fire.lvl-trade .su-tag { background:#fbbf2418; color:#fbbf24; border-color:#fbbf2455; }
+.fire.lvl-warn { border-left-color:#fb923c; }
+.fire.lvl-error { border-left-color:var(--red, #ef4444); }
+.su-detail { font-size:13px; line-height:1.55; margin-top:7px; overflow-wrap:anywhere; }
+.fire.lvl-info .su-detail { font-size:12px; color:var(--text2); }
+/* Loud. The stop is computed from volume, and on the IEX feed that volume is a
+   few percent of the tape — so this stop is not the line a chart would draw. */
+.su-warn { font-size:11px; color:#fb923c; margin-top:6px; }
+.su-caution { font-size:10.5px; color:var(--text3); margin-top:5px; font-style:italic; }
+.su-links { margin-top:8px; display:flex; gap:6px; }
+
 .rule { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--bg2);
   border:1px solid var(--border); border-radius:8px; padding:10px 13px; margin-top:8px; font-size:12px; }
 .rule.off { opacity:.45; }
@@ -78,9 +99,12 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <h1>⚠ Alerts</h1>
   <a class="home" id="home-link" href="/">← all tools</a>
 </div>
-<div class="sub">Rules are evaluated inside every screener on its own scan, so they need no separate
-  data feed. That also fixes their resolution: <b>they see the market roughly every five minutes</b>.
-  A break that happens and fails inside one interval is never seen.</div>
+<div class="sub">Two different things arrive here, and they do not have the same resolution.
+  <br><b>Rules</b> are evaluated inside every screener on its own scan, so they need no separate data
+  feed — and <b>see the market roughly every five minutes</b>. A break that happens and fails inside
+  one interval is never seen.
+  <br><b>Setups</b> wake once at a fixed time, pull <b>1-minute bars</b> for the whole card list and
+  rank it. They are not watching all day; they answer one question at one moment.</div>
 
 <div class="noise">
   <button class="btn" id="snd" onclick="toggleSound()">🔊 Sound: off</button>
@@ -108,6 +132,14 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
  * disagree with them about what "crossed" means.
  */
 let META = null, TOOLS = [], SEEN = new Set(), FIRST_LOAD = true;
+
+/* Rule names are typed by hand and setup detail is assembled from ticker
+   symbols, both of which land in innerHTML below. Escaped on the way in. */
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 let SOUND = localStorage.getItem('al_sound') === '1';
 let AC = null;
 
@@ -214,9 +246,17 @@ function announce(fires) {
   beep(Math.min(3, fires.length));
   if (('Notification' in window) && Notification.permission === 'granted') {
     const f = fires[0];
-    const body = fires.length === 1 ? `${f.rule}${f.price != null ? ` @ ${f.price}` : ''}`
-      : `${f.ticker} and ${fires.length - 1} more`;
-    try { new Notification(`⚠ ${f.ticker} · ${f.toolId || ''}`, { body, tag: 'td-alert' }); } catch {}
+    // A setup writes the whole trade into `detail` — side, price, stop, target.
+    // That is the one string worth putting in front of someone, because a
+    // notification is often all they will see: acting on it should not require
+    // opening the page. A rule alert has no such line, so it keeps its summary.
+    const body = fires.length === 1
+      ? (f.kind === 'setup' ? f.detail : `${f.rule}${f.price != null ? ` @ ${f.price}` : ''}`)
+      : `${f.ticker || f.rule} and ${fires.length - 1} more`;
+    const title = f.kind === 'setup'
+      ? `${f.setup ? '▲ SETUP' : 'Setup'} · ${f.ticker || f.rule}`
+      : `⚠ ${f.ticker} · ${f.toolId || ''}`;
+    try { new Notification(title, { body, tag: 'td-alert' }); } catch {}
   }
   // The title carries it even when the tab is in the background with sound off.
   document.title = `(${fires.length}) Alerts · Trade Desk`;
@@ -241,11 +281,36 @@ async function loadFires() {
     FIRST_LOAD = false;
 
     out.innerHTML = fires.map(f => {
+      const fresh = Date.now() - (f.at || 0) < 10 * 60000 ? ' fresh' : '';
+      // A setup does not fit the rule row. Its message is a trade — a side, a
+      // stop and a target — and a row built for "TICKER crossed pmHigh" would
+      // throw all of that away. The lines that are not trades (nothing
+      // qualified, bars missing, it crashed) are kept deliberately plain: they
+      // exist so that silence never has to be interpreted, not to be read
+      // closely.
+      if (f.kind === 'setup') {
+        const st = f.setup;
+        return `<div class="fire setup lvl-${esc(f.level || 'info')}${fresh}">
+          <div class="su-head">
+            <span class="su-tag">${st ? esc(st.signal) : esc((f.level || 'info').toUpperCase())}</span>
+            ${f.ticker ? `<span class="t">${esc(f.ticker)}</span>` : ''}
+            <span class="tool">${esc(f.rule || '')}</span>
+            <span class="when">${ago(f.at || 0)}</span>
+          </div>
+          <div class="su-detail">${esc(f.detail || '')}</div>
+          ${st && st.feedWarning ? `<div class="su-warn">${esc(st.feedWarning)}</div>` : ''}
+          ${st && st.caution ? `<div class="su-caution">${esc(st.caution)}</div>` : ''}
+          ${f.ticker ? `<div class="su-links">
+            ${cardUrl(f) ? `<a class="lnk" href="${cardUrl(f)}">card</a>` : ''}
+            <a class="lnk" href="${tvUrl(f.ticker)}" target="_blank" rel="noopener">TV ↗</a>
+          </div>` : ''}
+        </div>`;
+      }
       const card = cardUrl(f);
-      return `<div class="fire${Date.now() - (f.at || 0) < 10 * 60000 ? ' fresh' : ''}">
-        <span class="t">${f.ticker}</span>
-        <span class="tool">${f.toolId || ''}</span>
-        <span class="what">${f.rule || ''}${f.price != null ? ` @ ${f.price}` : ''}</span>
+      return `<div class="fire${fresh}">
+        <span class="t">${esc(f.ticker)}</span>
+        <span class="tool">${esc(f.toolId || '')}</span>
+        <span class="what">${esc(f.rule || '')}${f.price != null ? ` @ ${esc(f.price)}` : ''}</span>
         <span class="when">${ago(f.at || 0)}</span>
         ${card ? `<a class="lnk" href="${card}">card</a>` : ''}
         <a class="lnk" href="${tvUrl(f.ticker)}" target="_blank" rel="noopener">TV ↗</a>
