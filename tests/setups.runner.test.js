@@ -30,10 +30,17 @@ const store = require('../src/alerts/store');
 const SETUP = setups.get('T2-VWAP-EXT');
 const DATE = '2026-08-10';
 
-/** A morning that produces a clean LONG, steeper for a bigger `mult`. */
+/*
+ * A morning that produces a clean LONG, steeper for a bigger `mult`.
+ *
+ * Thirty bars, 09:30 through 09:59, because that is what a real morning is —
+ * and because the decision bar being 09:59 is load-bearing. A fixture ending at
+ * 09:54 would silently exercise the "the feed had not published the decision
+ * bar" path in every test that used it.
+ */
 function rising(mult) {
   const out = [];
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 30; i++) {
     const mins = 9 * 60 + 30 + i;
     out.push({
       etTime: `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`,
@@ -45,7 +52,7 @@ function rising(mult) {
 }
 function flat() {
   const out = [];
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 30; i++) {
     const mins = 9 * 60 + 30 + i;
     out.push({
       etTime: `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`,
@@ -256,5 +263,88 @@ describe('mixed feeds', () => {
     const out = await runner.runSetup(SETUP, { date: DATE });
     expect(out.picks).toHaveLength(1);
     expect(store.recentFires(DATE).some(f => f.level === 'trade')).toBe(true);
+  });
+});
+
+/*
+ * The 09:59 bar closes at 10:00:00.000 and no feed is obliged to have published
+ * it by then. Waiting for it indefinitely is the obvious choice and the wrong
+ * one — the trade is entered at market on sight, so a minute of waiting costs
+ * more than the bar is worth. Deciding on an earlier bar is the right trade-off
+ * AND a different decision from the tested one, so it is never silent.
+ */
+describe('when the decision bar has not been published', () => {
+  /** A morning that stops early, as a slow feed would deliver it at 10:00. */
+  function short(mult, bars = 26) {          // 09:30 … 09:55
+    return rising(mult).slice(0, bars);
+  }
+
+  test('the run still produces the trade rather than waiting past the minute', async () => {
+    feed({ FAST: short(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    const out = await runner.runSetup(SETUP, { date: DATE });
+    expect(out.picks).toHaveLength(1);
+    expect(store.recentFires(DATE).some(f => f.level === 'trade')).toBe(true);
+  });
+
+  test('and says which bar it actually used', async () => {
+    feed({ FAST: short(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    const warn = store.recentFires(DATE).find(f => f.level === 'warn');
+    expect(warn.detail).toMatch(/09:59 bar had not been published/);
+    expect(warn.detail).toMatch(/FAST was decided on 09:55/);
+  });
+
+  test('the bar used is on the pick itself, not only in the warning', async () => {
+    feed({ FAST: short(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    expect(store.recentFires(DATE).find(f => f.ticker === 'FAST').setup.decisionAt)
+      .toBe('09:55');
+  });
+
+  test('a complete morning raises nothing', async () => {
+    feed({ FAST: rising(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    expect(store.recentFires(DATE).some(f => f.level === 'warn')).toBe(false);
+    expect(store.recentFires(DATE).find(f => f.ticker === 'FAST').setup.decisionAt)
+      .toBe('09:59');
+  });
+});
+
+/*
+ * Position sizing. Risk per share runs from 0.3% to 5% of price across these
+ * candidates, so a fixed dollar amount would risk fifteen times more on one
+ * than another for no reason anyone chose.
+ */
+describe('share count', () => {
+  const risk = require('../src/setups/risk');
+
+  test('is absent until the account settings are, which is the honest output', async () => {
+    jest.spyOn(risk, 'settings').mockReturnValue({
+      accountSize: null, riskPerTrade: null, maxPositionPct: 100, updatedAt: null });
+    feed({ FAST: rising(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    const f = store.recentFires(DATE).find(x => x.ticker === 'FAST');
+    expect(f.setup.size).toBeNull();
+    expect(f.detail).toMatch(/^BUY FAST/);          // no invented quantity
+    risk.settings.mockRestore();
+  });
+
+  test('leads the alert text once they are set', async () => {
+    jest.spyOn(risk, 'settings').mockReturnValue({
+      accountSize: 25000, riskPerTrade: 250, maxPositionPct: 100, updatedAt: 1 });
+    feed({ FAST: rising(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    await runner.runSetup(SETUP, { date: DATE });
+    const f = store.recentFires(DATE).find(x => x.ticker === 'FAST');
+    expect(f.setup.size.shares).toBeGreaterThan(0);
+    expect(f.detail).toMatch(new RegExp(`^BUY ${f.setup.size.shares} FAST`));
+    // What it actually risks must be at or under what was asked for.
+    expect(f.setup.size.riskDollars).toBeLessThanOrEqual(250);
+    risk.settings.mockRestore();
   });
 });

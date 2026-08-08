@@ -66,7 +66,10 @@ describe('which feed answers', () => {
     polygon.fetchIntradayBars.mockResolvedValue({ AAA: tape() });
     yahoo.fetchIntradayBars.mockResolvedValue({ BBB: tape() });
     const out = await bars.fetchMorning(['AAA', 'BBB'], DATE, { attempts: 1, waitMs: 0 });
-    expect(yahoo.fetchIntradayBars).toHaveBeenLastCalledWith(['BBB'], DATE);
+    // Several in flight: this is the feed that serves 10:00, and one ticker at
+    // a time turns forty cards into twenty seconds of waiting.
+    expect(yahoo.fetchIntradayBars)
+      .toHaveBeenLastCalledWith(['BBB'], DATE, { concurrency: expect.any(Number) });
     expect(out.mixed).toBe(true);
     expect(out.used.sort()).toEqual(['polygon', 'yahoo']);
   });

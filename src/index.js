@@ -30,6 +30,7 @@ const LANDING_PROBE_PATHS = [
   '/api/alerts/rules',               // the alert rules
   '/api/alerts/fires',               // …and what they fired today
   '/api/alerts/meta',                // fields and operators for the builder
+  '/api/alerts/risk',                // account size and risk per trade
   '/api/setups',                     // the setups, for the alerts app to list
 ];
 app.use((req, res, next) => {

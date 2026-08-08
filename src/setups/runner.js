@@ -18,6 +18,7 @@ const r0 = require('../r0/registry');
 const { toETDate } = require('../utils/time');
 const setups = require('./index');
 const barsSource = require('./bars');
+const risk = require('./risk');
 const alertStore = require('../alerts/store');
 
 /** The minute before the decision — the last bar that must have closed. */
@@ -39,10 +40,13 @@ function universe() {
  * Direction, ticker, where the stop is and where the target is — the four
  * things needed to place the trade.
  */
-function describePick(pick) {
+function describePick(pick, size) {
   const p = pick.plan;
   const side = pick.signal === 'LONG' ? 'BUY' : 'SHORT';
-  return `${side} ${pick.ticker} — now ~${p.entry.toFixed(2)}, `
+  // The share count leads when it is known, because it is the part you cannot
+  // work out in your head while the bar you are entering on is forming.
+  const qty = size && size.shares > 0 ? `${size.shares} ` : '';
+  return `${side} ${qty}${pick.ticker} — now ~${p.entry.toFixed(2)}, `
     + `stop ${p.stop.toFixed(2)} (VWAP, fixed), target ${p.target.toFixed(2)} `
     + `· risk ${p.riskPct.toFixed(2)}% · ${pick.extension.toFixed(2)}% from VWAP`;
 }
@@ -88,7 +92,14 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
 
   const out = setup.module.run(data.bars, setup.params);
 
-  const fires = out.picks.map(pick => ({
+  // Read once for the whole run, so both picks are sized against the same
+  // settings even if they are edited while this is executing.
+  const riskCfg = risk.settings();
+
+  const fires = out.picks.map(pick => {
+    const size = risk.sizeFor(
+      { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
+    return {
     ruleId: setup.id,
     rule: setup.name,
     ticker: pick.ticker,
@@ -97,7 +108,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     at: Date.now(),
     kind: 'setup',
     level: 'trade',
-    detail: describePick(pick),
+    detail: describePick(pick, size),
     price: pick.plan.entry,
     // Everything the card cannot show but the trade needs. Kept on the fire so
     // the record of what was signalled survives the day it was signalled.
@@ -112,6 +123,10 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       decisionVwap: pick.decisionVwap,
       decisionClose: pick.decisionClose,
       rangePosition: pick.rangePosition,
+      // Which minute the decision was actually taken on. Normally 09:59; when
+      // the feed had not published it inside the deadline it is the last bar
+      // that existed, and that changes both the close and the VWAP slightly.
+      decisionAt: pick.decisionAt,
       source: data.sources[pick.ticker] || 'unknown',
       caution: setup.caution,
       // Only where it applies. IEX volume is a fraction of the tape, so this
@@ -119,8 +134,12 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       feedWarning: data.degraded.includes(pick.ticker)
         ? 'VWAP from the IEX feed only — the chart\'s VWAP will differ. Check before using this stop.'
         : null,
+      // null when account size and risk per trade have not been set. An
+      // invented size is worse than none: it looks like a decision.
+      size,
     },
-  }));
+    };
+  });
 
   // Always say something, including "nothing". From a phone, a setup that
   // published nothing and a setup that never ran look exactly the same.
@@ -148,6 +167,27 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       detail: `Ranked across mixed feeds (${data.used.join(' + ')}) — no single feed `
         + 'covered the list. Extensions from different tapes are not directly '
         + 'comparable, so the choice of the top 2 is less reliable than usual.',
+    });
+  }
+
+  /*
+   * The decision was taken on an earlier bar than intended.
+   *
+   * The 09:59 bar closes at 10:00:00.000 and no feed is obliged to have
+   * published it by then. Rather than wait past the minute the trade is worth
+   * entering in, the run decides on the last bar that existed — which is the
+   * right trade-off and still a different decision from the tested one, so it
+   * is said out loud rather than absorbed.
+   */
+  const wanted = lastWantedBar(setup.decisionTime);
+  const early = out.picks.filter(p => p.decisionAt && p.decisionAt < wanted);
+  if (early.length) {
+    fires.push({
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      date: day, at: Date.now(), kind: 'setup', level: 'warn',
+      detail: `The ${wanted} bar had not been published, so `
+        + `${early.map(p => `${p.ticker} was decided on ${p.decisionAt}`).join(' and ')}`
+        + '. Close and VWAP differ slightly from the tested setup.',
     });
   }
 

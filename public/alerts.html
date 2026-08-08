@@ -50,6 +50,16 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   border:1px solid var(--border); border-radius:4px; padding:2px 6px; white-space:nowrap; }
 .lnk:hover { color:var(--blue); border-color:var(--blue); }
 
+/* ── position sizing ── */
+.risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
+  border:1px solid var(--border); border-radius:8px; padding:12px 13px; }
+.risk label { display:flex; flex-direction:column; gap:4px; font-size:11px; color:var(--text3); }
+.risk input, .risk select { background:var(--bg3); border:1px solid var(--border);
+  border-radius:6px; padding:7px 9px; color:var(--text); font-family:inherit; font-size:13px;
+  width:130px; }
+.risk-hint { flex-basis:100%; line-height:1.55; }
+.note.live { color:var(--amber, #fbbf24); font-weight:700; }
+
 /* ── setup fires ──
    A setup's message is a trade, not a crossing: a side, an entry, a stop that
    does not move and a target. It gets a block rather than a row because all
@@ -67,6 +77,10 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .fire.lvl-info .su-detail { font-size:12px; color:var(--text2); }
 /* Loud. The stop is computed from volume, and on the IEX feed that volume is a
    few percent of the tape — so this stop is not the line a chart would draw. */
+/* The share count. Green because it is the one line that turns a plan into an
+   order, and it is the line most likely to be read while standing up. */
+.su-size { font-size:12px; font-weight:700; color:var(--green); margin-top:6px; }
+.su-size.dim { font-weight:400; color:var(--text3); }
 .su-warn { font-size:11px; color:#fb923c; margin-top:6px; }
 .su-caution { font-size:10.5px; color:var(--text3); margin-top:5px; font-style:italic; }
 .su-links { margin-top:8px; display:flex; gap:6px; }
@@ -110,6 +124,36 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <button class="btn" id="snd" onclick="toggleSound()">🔊 Sound: off</button>
   <button class="btn" id="ntf" onclick="askNotify()">🔔 Notifications</button>
   <span class="note" id="noise-note"></span>
+  <span class="note" id="next-decision"></span>
+</div>
+
+<!-- Position sizing. Here rather than in a screener's settings because it is a
+     property of the account: the setup runs inside one tool, but the money is
+     the same money whichever tool signalled. -->
+<div class="sec">
+  <span>Position size</span>
+  <span class="note" id="risk-note"></span>
+</div>
+<div class="risk">
+  <label>Account size
+    <input id="acct" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 25000">
+  </label>
+  <label>Risk per trade
+    <input id="rpt" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 250">
+  </label>
+  <label>Max position
+    <select id="mpp">
+      <option value="100">100% of account</option>
+      <option value="50">50%</option>
+      <option value="33">33%</option>
+      <option value="25">25%</option>
+    </select>
+  </label>
+  <button class="btn primary" onclick="saveRisk()">Save</button>
+  <div class="note risk-hint">Shares are worked out from what you lose if the stop is hit,
+    not from a fixed dollar amount — risk per share runs from 0.3% to 5% of price across
+    these candidates, so a fixed amount would risk fifteen times more on one than another.
+    <b>Leave these blank and alerts arrive without a share count.</b></div>
 </div>
 
 <div class="sec"><span>Fired today</span><span class="note" id="fire-count"></span></div>
@@ -263,6 +307,53 @@ function announce(fires) {
   setTimeout(() => { document.title = 'Alerts · Trade Desk'; }, 30000);
 }
 
+/* ── position sizing ── */
+async function loadRisk() {
+  try {
+    const d = await (await fetch('/api/alerts/risk')).json();
+    const r = d.risk || {};
+    if (r.accountSize) document.getElementById('acct').value = r.accountSize;
+    if (r.riskPerTrade) document.getElementById('rpt').value = r.riskPerTrade;
+    if (r.maxPositionPct) document.getElementById('mpp').value = String(r.maxPositionPct);
+    paintRiskNote(r);
+  } catch { /* the panel is still usable — saving is what matters */ }
+}
+
+function paintRiskNote(r) {
+  const el = document.getElementById('risk-note');
+  if (!el) return;
+  el.className = 'note';
+  if (!r || !r.riskPerTrade) {
+    el.textContent = 'not set — alerts will have no share count';
+    return;
+  }
+  // What the setting MEANS, in the units of the thing it controls. "$250" is a
+  // number; "$250 per trade, 1.0% of the account" is a decision.
+  const pct = r.accountSize ? ` · ${((r.riskPerTrade / r.accountSize) * 100).toFixed(2)}% of the account` : '';
+  el.textContent = `risking $${r.riskPerTrade} per trade${pct}`;
+}
+
+async function saveRisk() {
+  const el = document.getElementById('risk-note');
+  const body = {
+    accountSize: document.getElementById('acct').value.trim(),
+    riskPerTrade: document.getElementById('rpt').value.trim(),
+    maxPositionPct: document.getElementById('mpp').value,
+  };
+  try {
+    const r = await fetch('/api/alerts/risk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'could not save');
+    paintRiskNote(d.risk);
+  } catch (e) {
+    el.className = 'note';
+    el.textContent = `not saved — ${e.message}`;
+  }
+}
+
 /* ── the feed ── */
 async function loadFires() {
   const out = document.getElementById('fires');
@@ -298,6 +389,14 @@ async function loadFires() {
             <span class="when">${ago(f.at || 0)}</span>
           </div>
           <div class="su-detail">${esc(f.detail || '')}</div>
+          ${st && st.size ? `<div class="su-size">${
+            st.size.shares > 0
+              ? `${st.size.shares} shares · $${st.size.positionValue.toFixed(0)} position · `
+                + `risks $${st.size.riskDollars.toFixed(0)} if stopped`
+              : esc(st.size.reason || 'no size')
+          }${st.size.capped ? ` — ${esc(st.size.capped)}` : ''}</div>` : ''}
+          ${st && st.size === null ? '<div class="su-size dim">no share count — set '
+            + 'account size and risk per trade above</div>' : ''}
           ${st && st.feedWarning ? `<div class="su-warn">${esc(st.feedWarning)}</div>` : ''}
           ${st && st.caution ? `<div class="su-caution">${esc(st.caution)}</div>` : ''}
           ${f.ticker ? `<div class="su-links">
@@ -465,12 +564,77 @@ async function delRule(id) {
 paintNoise();
 loadFires();
 loadRules();
+loadRisk();
 // A card's "add alert" button links here with the ticker, so the rule opens
 // already scoped to the stock that was on screen.
 if (qs.get('ticker')) toggleForm({ ticker: qs.get('ticker').toUpperCase() });
-// The scans that produce alerts run every five minutes; polling faster only
-// redraws the same list.
-setInterval(loadFires, 60000);
+/*
+ * How often to look, which is not one number.
+ *
+ * Alert RULES ride the five-minute scan, so a minute between polls costs
+ * nothing. A SETUP is different: it fires once, within seconds of its decision
+ * time, and the trade it names is entered at market immediately — the spec
+ * measures a one-minute delay moving average R from +1.17 to +0.99. Arriving up
+ * to a minute late would give away most of what the setup is worth.
+ *
+ * So the page watches closely around a decision and loosely the rest of the
+ * time. The decision times come from the setups themselves rather than a
+ * hardcoded 10:00, so changing one moves this with it.
+ */
+let DECISIONS = [];
+fetch('/api/setups').then(r => r.json())
+  .then(d => { DECISIONS = (d.setups || []).map(s => s.decisionTime).filter(Boolean); })
+  .catch(() => { /* no setups listed — the loose cadence still applies */ });
+
+function minutesToNextDecision() {
+  const now = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date());
+  const [h, m] = now.split(':').map(Number);
+  const nowMin = h * 60 + m;
+  let best = Infinity;
+  for (const t of DECISIONS) {
+    const [dh, dm] = String(t).split(':').map(Number);
+    const diff = (dh * 60 + dm) - nowMin;
+    if (diff >= -3 && diff < best) best = diff;      // still watching just after
+  }
+  return best;
+}
+
+let pollTimer = null;
+function schedulePoll() {
+  const away = minutesToNextDecision();
+  // Two minutes either side of a decision, look every three seconds. The alert
+  // exists to be acted on inside the minute it arrives.
+  const ms = away <= 2 ? 3000 : (away <= 10 ? 15000 : 60000);
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => { loadFires(); schedulePoll(); }, ms);
+}
+schedulePoll();
+
+/*
+ * A setup fires at a fixed minute, and a browser only notifies while its page
+ * is running. On a phone that is the whole catch: a backgrounded tab is
+ * throttled or suspended, so the alert can be minutes late or wait for the tab
+ * to be opened. Saying when the next decision is due is what makes that
+ * manageable — it tells you when to have this page in front of you.
+ */
+function paintNextDecision() {
+  const el = document.getElementById('next-decision');
+  if (!el || !DECISIONS.length) return;
+  const away = minutesToNextDecision();
+  el.className = away <= 2 ? 'note live' : 'note';
+  // Infinity means every decision today has already run. Saying nothing then
+  // reads as "this feature is off"; the useful answer is when the next one is.
+  el.textContent = !Number.isFinite(away)
+      ? `next setup decision ${DECISIONS.slice().sort().join(', ')} ET tomorrow`
+    : away < 0 ? 'setup decision just ran — watching'
+    : away === 0 ? 'setup decision is NOW'
+    : away <= 60 ? `next setup decision in ${away} min — keep this page open`
+    : `next setup decision at ${DECISIONS.slice().sort().join(', ')} ET`;
+}
+setInterval(paintNextDecision, 20000);
+setTimeout(paintNextDecision, 1500);
 </script>
 </body>
 </html>

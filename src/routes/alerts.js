@@ -60,4 +60,25 @@ router.get('/fires', (req, res) => {
   res.json({ ok: true, date, fires: store.recentFires(date, limit) });
 });
 
+/*
+ * Position sizing: account size and what you risk per trade.
+ *
+ * Lives with the alerts rather than in a screener's settings because it is a
+ * property of the account, not of T2 — the setup runs inside one tool but the
+ * money is the same money whichever tool signalled. Same shared-file reasoning
+ * as the rules themselves, so any process can read it and the alerts app can
+ * edit it.
+ */
+router.get('/risk', (req, res) => {
+  res.json({ ok: true, risk: require('../setups/risk').settings() });
+});
+
+router.post('/risk', express.json(), (req, res) => {
+  try {
+    res.json({ ok: true, risk: require('../setups/risk').save(req.body || {}) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

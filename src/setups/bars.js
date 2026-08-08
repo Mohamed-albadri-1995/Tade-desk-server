@@ -91,7 +91,12 @@ const SOURCES = [
   {
     id: 'yahoo',
     available: () => true,
-    fetch: (tickers, date) => yahooClient.fetchIntradayBars(tickers, date),
+    // Several in flight. This is the feed that actually serves 10:00, and one
+    // ticker at a time turns forty cards into twenty seconds of waiting while
+    // the bar being entered on is still forming.
+    fetch: (tickers, date) => yahooClient.fetchIntradayBars(tickers, date, {
+      concurrency: Number(process.env.YAHOO_CONCURRENCY || 6),
+    }),
   },
   {
     id: 'alpaca',
@@ -124,8 +129,28 @@ function reachesDecision(bars, lastWanted) {
  */
 async function fetchMorning(tickers, date, {
   lastWanted = '09:59',
-  attempts = 6,
-  waitMs = 10000,
+  /*
+   * A DEADLINE, not a retry count — and this is the decision that keeps the
+   * alert inside the minute it is worth acting in.
+   *
+   * The 09:59 bar closes at 10:00:00.000 and no feed is obliged to have
+   * published it by then. Waiting for it indefinitely is the obvious thing and
+   * the wrong one: six attempts ten seconds apart means an alert at 10:01 on
+   * the morning the feed is slow, and the trade is entered at market on sight,
+   * so a minute of waiting costs more than the bar is worth. The spec measures
+   * a four-cent difference in fill flipping a full 2R outcome.
+   *
+   * So: poll hard for a short window, then decide with what exists. The
+   * evaluation uses the LAST bar in the morning window whatever it is, so a
+   * missing 09:59 means the decision is taken on 09:58 — a slightly different
+   * close and VWAP, and a signal that arrives while it is still actionable.
+   * Which bar was actually used is reported, and the alert says so when it is
+   * not the intended one.
+   */
+  deadlineMs = 20000,
+  pollMs = 2500,
+  attempts = Infinity,
+  waitMs = null,
   minCoverage = 0.8,
   // Naming a feed pins the run to it. Used by the verification script, so the
   // implementation can be held against the spec on the spec's own feed rather
@@ -167,7 +192,10 @@ async function fetchMorning(tickers, date, {
   const coverageOf = (got) =>
     list.filter(t => reachesDecision(got[t], lastWanted)).length / list.length;
 
-  while (tries < attempts && !chosen) {
+  const gap = waitMs == null ? pollMs : waitMs;      // waitMs kept for tests
+  const outOfTime = () => Date.now() - started >= deadlineMs;
+
+  while (tries < attempts && !chosen && !(tries > 0 && outOfTime())) {
     tries++;
     for (const src of order) {
       if (!src.available(list, date, today)) continue;
@@ -192,9 +220,11 @@ async function fetchMorning(tickers, date, {
       if (cov >= minCoverage) { chosen = label; break; }
       console.log(`[Setups] ${src.id} covered ${Math.round(cov * 100)}% of the universe`);
     }
-    if (!chosen && tries < attempts) {
-      console.log(`[Setups] no feed covered ${Math.round(minCoverage * 100)}% — waiting`);
-      await sleep(waitMs);
+    if (!chosen && tries < attempts && !outOfTime()) {
+      const left = Math.round((deadlineMs - (Date.now() - started)) / 1000);
+      console.log(`[Setups] no feed covered ${Math.round(minCoverage * 100)}% `
+        + `of the ${lastWanted} bar — retrying, ${left}s before deciding without it`);
+      await sleep(gap);
     }
   }
 

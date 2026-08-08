@@ -36,6 +36,35 @@ app.use((req, res, next) => {
 
 app.use('/api/alerts', require('../routes/alerts'));
 
+/*
+ * The setups, so the page knows when a decision is due.
+ *
+ * It needs this for one reason that matters: a setup fires within seconds of a
+ * fixed minute and the trade is entered at market immediately, so the page
+ * polls every three seconds around that minute instead of every sixty. Without
+ * knowing the time it would either poll fast all day or deliver a time-critical
+ * alert up to a minute late.
+ *
+ * Served from the registry rather than from a tool, because this process has no
+ * database and does not need one to read a list of definitions. It cannot RUN a
+ * setup — that needs the owning tool's card list — so no run endpoints here.
+ */
+app.get('/api/setups', (req, res) => {
+  try {
+    const setups = require('../setups');
+    res.json({
+      ok: true,
+      setups: setups.SETUPS.map(s => ({
+        id: s.id, name: s.name, toolId: s.toolId,
+        decisionTime: s.decisionTime, universeScanAt: s.universeScanAt || null,
+        describe: s.describe, caution: s.caution, liveFeed: s.liveFeed || null,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Where a tool lives, so the page can deep-link a fire back to its card.
 app.get('/api/tools', (req, res) => {
   try {
