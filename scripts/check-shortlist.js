@@ -74,7 +74,7 @@ console.log(`shared file: ${path.relative(ROOT, FILE)}`);
 if (!fs.existsSync(FILE)) {
   console.log('  DOES NOT EXIST — no tool has ever published.');
   console.log('  Cause 2: the running processes predate the unified list.');
-  console.log('  Fix:     bash deploy-tools.sh   (restarts every tool on current code)');
+  console.log('  Fix:     bash deploy-tools.sh, then wait for one scan (~5 min).');
   process.exit(0);
 }
 
@@ -123,6 +123,10 @@ if (!missing.length && union.size > 0) {
   for (const [id, n] of missing) console.log(`  ${id} — ${n} in its database`);
   console.log();
   console.log('That is cause 2: those processes are running code from before the');
-  console.log('unified list, and only publish on the NEXT change to their shortlist.');
-  console.log('Fix: bash deploy-tools.sh');
+  console.log('unified list, so their shortlists were written without ever being');
+  console.log('published, and nothing retries — publishing happens on a CHANGE.');
+  console.log();
+  console.log('Fix: bash deploy-tools.sh, then wait for one scan (~5 min).');
+  console.log('Current code re-asserts each tool\'s entry on every scan, so the');
+  console.log('entries above appear on their own once the tools are restarted.');
 }

@@ -85,6 +85,33 @@ function publish(date, items) {
 }
 
 /**
+ * Publish only if what is already on file differs from what we would write.
+ *
+ * `publish` runs on a CHANGE to a tool's shortlist, which leaves a gap that is
+ * invisible until you go looking for it: a tool whose shortlist was written
+ * before this file existed — or during a spell when the write failed — never
+ * changes it again that day, so it never publishes, and it is simply absent
+ * from the unified list until tomorrow. Restarting does not fix it either;
+ * there is still no change to trigger on.
+ *
+ * So the pipeline calls this on every scan. It converges instead of drifting:
+ * whatever the reason an entry went missing, the next scan puts it back. The
+ * comparison is what makes that affordable — in the steady state nothing has
+ * changed, so nothing is written, and nine tools scanning are not nine
+ * processes rewriting one file every few minutes and racing each other over it.
+ */
+function republish(date, items) {
+  const tickers = (items || []).map(i => String(i.ticker || i).toUpperCase());
+  const mine = (readAll().tools || {})[config.toolId];
+  const same = mine
+    && mine.date === date
+    && (mine.tickers || []).length === tickers.length
+    && (mine.tickers || []).every((t, i) => t === tickers[i]);
+  if (same) return { published: 0, reason: 'unchanged' };
+  return publish(date, items);
+}
+
+/**
  * The union for a date: every ticker any tool shortlisted, with who picked it.
  *
  * Sorted by how many tools agreed, because that is the question the unified
@@ -138,4 +165,4 @@ function tagRows(rows, date) {
   return { tagged, memberCount: members.size };
 }
 
-module.exports = { FILE, publish, union, membersFor, tagRows, readAll };
+module.exports = { FILE, publish, republish, union, membersFor, tagRows, readAll };

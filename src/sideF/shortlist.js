@@ -144,6 +144,20 @@ function syncShortlistToR0() {
   for (const item of entry.items) {
     r0.setInShortlist(item.ticker, true);
   }
+
+  // And re-assert this tool's entry on the unified list. saveShortlistEntry
+  // publishes on a change, which is enough right up until a publish is missed —
+  // a tool upgraded mid-session, a write that failed, a shortlist last touched
+  // before the shared file existed. In every one of those the tool is absent
+  // from the unified list for the rest of the day and nothing triggers a retry,
+  // because nothing about its own shortlist has changed. This runs each scan
+  // and writes only when the file disagrees, so a missed publish repairs itself
+  // rather than needing to be noticed.
+  try {
+    require('./globalShortlist').republish(today, entry.items);
+  } catch (err) {
+    console.warn('[Shortlist] could not re-publish to the unified list:', err.message);
+  }
 }
 
 function getTodayShortlist() {

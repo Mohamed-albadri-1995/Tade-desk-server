@@ -236,3 +236,55 @@ describe('the shared list carries the exchange-qualified symbol', () => {
     expect(gs.union('2026-08-07').find(r => r.ticker === 'ZTS').symbol).toBe('NYSE:ZTS');
   });
 });
+
+/*
+ * Re-publishing, which is what makes a missed publish repair itself.
+ *
+ * `publish` fires on a change to a tool's shortlist. That is enough until a
+ * publish is missed — a tool upgraded mid-session, a failed write, a shortlist
+ * last touched before this file existed. After any of those the tool is absent
+ * from the union for the rest of the day, and nothing retries, because its own
+ * shortlist has not changed. `republish` runs each scan and closes that.
+ */
+describe('republish', () => {
+  test('an entry that never reached the file is put there', () => {
+    expect(gsl.readAll().tools.T4).toBeUndefined();
+    gsl.republish(DATE, [{ ticker: 'aaa' }, { ticker: 'bbb' }]);
+    expect(gsl.readAll().tools.T4.tickers).toEqual(['AAA', 'BBB']);
+  });
+
+  test('an unchanged entry is not rewritten', () => {
+    gsl.publish(DATE, [{ ticker: 'AAA' }]);
+    const before = gsl.readAll().tools.T4.updatedAt;
+    const r = gsl.republish(DATE, [{ ticker: 'AAA' }]);
+    expect(r).toEqual({ published: 0, reason: 'unchanged' });
+    expect(gsl.readAll().tools.T4.updatedAt).toBe(before);
+  });
+
+  test('a changed list is written', () => {
+    gsl.publish(DATE, [{ ticker: 'AAA' }]);
+    gsl.republish(DATE, [{ ticker: 'AAA' }, { ticker: 'CCC' }]);
+    expect(gsl.readAll().tools.T4.tickers).toEqual(['AAA', 'CCC']);
+  });
+
+  test('the same tickers under a new date are written, not skipped', () => {
+    gsl.publish(OTHER, [{ ticker: 'AAA' }]);
+    gsl.republish(DATE, [{ ticker: 'AAA' }]);
+    expect(gsl.readAll().tools.T4.date).toBe(DATE);
+    expect(gsl.union(DATE).map(r => r.ticker)).toEqual(['AAA']);
+  });
+
+  test('another tool\'s entry survives a republish', () => {
+    publishAs('T1', 'Screener', DATE, ['ZZZ']);
+    gsl.republish(DATE, [{ ticker: 'AAA' }]);
+    expect(gsl.union(DATE).map(r => r.ticker).sort()).toEqual(['AAA', 'ZZZ']);
+  });
+
+  test('it is still a view — republishing changes no tool\'s own rows', () => {
+    publishAs('T1', 'Screener', DATE, ['ZZZ']);
+    const rows = [{ ticker: 'AAA' }, { ticker: 'ZZZ' }];
+    gsl.republish(DATE, [{ ticker: 'AAA' }]);
+    gsl.tagRows(rows, DATE);
+    expect(rows.every(r => r.inShortlist === undefined)).toBe(true);
+  });
+});
