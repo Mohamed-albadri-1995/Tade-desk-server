@@ -1,12 +1,15 @@
 /*
  * Turning a setup's picks into alerts that arrive.
  *
- * The property that matters most here is not the arithmetic — that is tested
- * against the spec in setups.vwapExtension.test.js — it is that a run ALWAYS
- * says something. From a phone, "the setup ran and nothing qualified", "the
- * data never arrived" and "the process was down" all look identical: an empty
- * feed. So each of those has to produce its own line, and that is what is
- * pinned here.
+ * The runner no longer decides anything. The strategy is a qp seed built from
+ * qp primitives and the ranking is chart/decide.py, using the same metric a
+ * backtest uses — so what is tested here is the part that is genuinely this
+ * side's: hand the card list over, and turn what comes back into something a
+ * person can act on from a phone.
+ *
+ * The property that matters most is that a run ALWAYS says something. From a
+ * phone, "nothing qualified", "the platform was down" and "the process was
+ * dead" all look identical: an empty feed. So each produces its own line.
  */
 
 const os = require('os');
@@ -18,10 +21,10 @@ process.env.ALERT_FIRES_FILE = FIRES;
 process.env.TOOL_ID = 'T2';
 process.env.TOOL_NAME = 'Momentum';
 
-jest.mock('../src/setups/bars');
+jest.mock('../src/setups/qpClient');
 jest.mock('../src/r0/registry', () => ({ getTodayRows: jest.fn(() => []) }));
 
-const bars = require('../src/setups/bars');
+const qp = require('../src/setups/qpClient');
 const r0 = require('../src/r0/registry');
 const runner = require('../src/setups/runner');
 const setups = require('../src/setups');
@@ -31,43 +34,26 @@ const SETUP = setups.get('T2-VWAP-EXT');
 const DATE = '2026-08-10';
 
 /*
- * A morning that produces a clean LONG, steeper for a bigger `mult`.
- *
- * Thirty bars, 09:30 through 09:59, because that is what a real morning is —
- * and because the decision bar being 09:59 is load-bearing. A fixture ending at
- * 09:54 would silently exercise the "the feed had not published the decision
- * bar" path in every test that used it.
+ * One pick in the shape chart/decide.py returns. The numbers are qp's — which
+ * is the point: this side re-derives none of them.
  */
-function rising(mult) {
-  const out = [];
-  for (let i = 0; i < 30; i++) {
-    const mins = 9 * 60 + 30 + i;
-    out.push({
-      etTime: `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`,
-      o: 10 + i * 0.1 * mult, h: 10 + i * 0.1 * mult,
-      l: 9.9 + i * 0.1 * mult, c: 10 + i * 0.1 * mult, v: 1000,
-    });
-  }
-  return out;
-}
-function flat() {
-  const out = [];
-  for (let i = 0; i < 30; i++) {
-    const mins = 9 * 60 + 30 + i;
-    out.push({
-      etTime: `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`,
-      o: 10, h: 10, l: 10, c: 10, v: 1000,
-    });
-  }
-  return out;
+function pick(symbol, { side = 'long', entry = 29.05, stop = 27.68,
+                        metric = 4.949, at = '10:00' } = {}) {
+  const risk = Math.abs(entry - stop);
+  return {
+    symbol, side, entry, stop, metric, entry_at: at, rank: 1,
+    risk, risk_pct: (risk / entry) * 100,
+    target: side === 'long' ? entry + 2 * risk : entry - 2 * risk,
+    target_r: 2.0,
+  };
 }
 
-function feed(barsByTicker, extra = {}) {
-  bars.fetchMorning.mockResolvedValue({
-    bars: barsByTicker,
-    sources: Object.fromEntries(Object.keys(barsByTicker).map(t => [t, 'yahoo'])),
-    missing: [], degraded: [], waitedMs: 0, attempts: 1, coverage: 1,
-    feed: 'yahoo', mixed: false, used: ['yahoo'],
+/** What qp answered. Everything the runner reports flows from this. */
+function decided(picks, extra = {}) {
+  qp.decide.mockResolvedValue({
+    ok: true, date: DATE, feed: 'yahoo', tf: '1m',
+    universe: picks.length, picks, candidates: picks, errors: [],
+    counts: { evaluated: picks.length, signalled: picks.length, errored: 0 },
     ...extra,
   });
 }
@@ -75,7 +61,7 @@ function feed(barsByTicker, extra = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   try { fs.unlinkSync(FIRES); } catch { /* absent */ }
-  r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }, { ticker: 'SLOW' }, { ticker: 'FLAT' }]);
+  r0.getTodayRows.mockReturnValue([{ ticker: 'LIFE' }, { ticker: 'LSCC' }]);
 });
 afterAll(() => { try { fs.unlinkSync(FIRES); } catch { /* absent */ } });
 
@@ -86,19 +72,49 @@ describe('the decision bar', () => {
   });
 });
 
+describe('what it asks qp for', () => {
+  test('the card list, the setup\'s strategy, and its ranking', async () => {
+    decided([]);
+    await runner.runSetup(SETUP, { date: DATE });
+    expect(qp.decide).toHaveBeenCalledWith(expect.objectContaining({
+      strategyId: SETUP.strategyId,
+      symbols: ['LIFE', 'LSCC'],
+      date: DATE,
+      tf: '1m',
+      topN: 2,
+    }));
+  });
+
+  /*
+   * Yahoo, and this is not a default worth losing. Polygon's free plan is a day
+   * behind, so at 10:00 it holds yesterday; alpaca's free tier is IEX.
+   */
+  test('on the feed that can actually serve a live decision', async () => {
+    decided([]);
+    await runner.runSetup(SETUP, { date: DATE });
+    expect(qp.decide).toHaveBeenCalledWith(expect.objectContaining({ feed: 'yahoo' }));
+  });
+
+  test('an empty card list asks qp nothing at all', async () => {
+    r0.getTodayRows.mockReturnValue([]);
+    await runner.runSetup(SETUP, { date: DATE });
+    expect(qp.decide).not.toHaveBeenCalled();
+    expect(store.recentFires(DATE)[0].detail).toMatch(/No cards on the list/);
+  });
+});
+
 describe('a run that finds trades', () => {
-  test('publishes one alert per pick, with the whole plan in it', async () => {
-    feed({ FAST: rising(3), SLOW: rising(1), FLAT: flat() });
+  test('publishes one alert per pick, carrying qp\'s numbers unchanged', async () => {
+    decided([pick('LIFE'), pick('LSCC', { entry: 129.56, stop: 126.08, metric: 2.76 })]);
     const out = await runner.runSetup(SETUP, { date: DATE });
 
-    expect(out.picks.map(p => p.ticker)).toEqual(['FAST', 'SLOW']);
-    const fires = store.recentFires(DATE);
-    expect(fires.filter(f => f.level === 'trade')).toHaveLength(2);
-
-    const f = fires.find(x => x.ticker === 'FAST');
+    expect(out.picks.map(p => p.ticker)).toEqual(['LIFE', 'LSCC']);
+    const f = store.recentFires(DATE).find(x => x.ticker === 'LIFE');
     expect(f.setup.signal).toBe('LONG');
-    expect(f.setup.stop).toBeCloseTo(f.setup.decisionVwap, 10);
-    expect(f.setup.target).toBeGreaterThan(f.setup.entry);
+    expect(f.setup.entry).toBe(29.05);
+    expect(f.setup.stop).toBe(27.68);        // the stop IS the frozen VWAP
+    expect(f.setup.extension).toBe(4.949);
+    expect(f.setup.target).toBeCloseTo(31.79, 2);
   });
 
   /*
@@ -106,18 +122,21 @@ describe('a run that finds trades', () => {
    * needed to place the trade without opening anything.
    */
   test('the text says direction, price, stop and target', async () => {
-    feed({ FAST: rising(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    await runner.runSetup(SETUP, { date: DATE });
-    const detail = store.recentFires(DATE).find(f => f.ticker === 'FAST').detail;
-    expect(detail).toMatch(/^BUY FAST/);
+    decided([pick('LIFE')]);
+    const detail = (await runner.runSetup(SETUP, { date: DATE })).fires[0].detail;
+    expect(detail).toMatch(/^BUY .*LIFE/);
     expect(detail).toMatch(/stop [\d.]+ \(VWAP, fixed\)/);
     expect(detail).toMatch(/target [\d.]+/);
   });
 
+  test('a short reads as SHORT, not BUY', async () => {
+    decided([pick('BBNX', { side: 'short', entry: 13.77, stop: 14.36, metric: 4.28 })]);
+    expect((await runner.runSetup(SETUP, { date: DATE })).fires[0].detail)
+      .toMatch(/^SHORT /);
+  });
+
   test('the caution travels with the trade, not just the documentation', async () => {
-    feed({ FAST: rising(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    decided([pick('LIFE')]);
     await runner.runSetup(SETUP, { date: DATE });
     expect(store.recentFires(DATE)[0].setup.caution).toMatch(/not a validated edge/i);
   });
@@ -129,188 +148,41 @@ describe('a run that finds trades', () => {
  */
 describe('a run that finds nothing still says so', () => {
   test('nothing qualified, with the counts behind it', async () => {
-    feed({ FLAT: flat() });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FLAT' }]);
+    decided([], { counts: { evaluated: 34, signalled: 0, errored: 0 } });
     await runner.runSetup(SETUP, { date: DATE });
     const fires = store.recentFires(DATE);
     expect(fires).toHaveLength(1);
     expect(fires[0].level).toBe('info');
     expect(fires[0].detail).toMatch(/Nothing qualified/);
-    expect(fires[0].detail).toMatch(/1 evaluated/);
+    expect(fires[0].detail).toMatch(/34 evaluated/);
   });
 
-  test('an empty card list is its own message, not "nothing qualified"', async () => {
-    r0.getTodayRows.mockReturnValue([]);
-    await runner.runSetup(SETUP, { date: DATE });
-    const fires = store.recentFires(DATE);
-    expect(fires[0].detail).toMatch(/No cards on the list/);
-    expect(bars.fetchMorning).not.toHaveBeenCalled();
-  });
-
-  test('missing bars are reported, because the ranking was over fewer names', async () => {
-    feed({ FAST: rising(3) }, { missing: ['GONE', 'ALSOGONE'], coverage: 0.33 });
+  test('symbols qp could not evaluate are named — the ranking was over fewer', async () => {
+    decided([pick('LIFE')], {
+      errors: [{ symbol: 'GONE', error: 'no bars' }, { symbol: 'ALSOGONE', error: 'no bars' }],
+    });
     await runner.runSetup(SETUP, { date: DATE });
     const warn = store.recentFires(DATE).find(f => f.level === 'warn');
-    expect(warn.detail).toMatch(/No 09:59 bar for GONE, ALSOGONE/);
-  });
-
-  test('a crash is published too, rather than leaving an empty feed', async () => {
-    bars.fetchMorning.mockRejectedValue(new Error('feed down'));
-    await runner.runDue('10:00', { date: DATE });
-    const err = store.recentFires(DATE).find(f => f.level === 'error');
-    expect(err.detail).toMatch(/Did not run: feed down/);
-  });
-});
-
-/*
- * The VWAP is the stop. A VWAP computed from IEX volume — a few percent of the
- * consolidated tape — is not the level a chart draws, so a pick built on one
- * has to say so on the pick itself rather than in blanket small print.
- */
-describe('feed quality', () => {
-  test('an IEX-sourced pick carries the warning', async () => {
-    feed({ FAST: rising(3) }, {
-      sources: { FAST: 'alpaca:iex' }, degraded: ['FAST'],
-    });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    await runner.runSetup(SETUP, { date: DATE });
-    const f = store.recentFires(DATE).find(x => x.ticker === 'FAST');
-    expect(f.setup.source).toBe('alpaca:iex');
-    expect(f.setup.feedWarning).toMatch(/IEX/);
-  });
-
-  test('a consolidated-tape pick carries no warning to ignore', async () => {
-    feed({ FAST: rising(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    await runner.runSetup(SETUP, { date: DATE });
-    expect(store.recentFires(DATE).find(x => x.ticker === 'FAST').setup.feedWarning).toBeNull();
-  });
-});
-
-describe('ownership and dry runs', () => {
-  test('a preview publishes nothing', async () => {
-    feed({ FAST: rising(3) });
-    const out = await runner.runSetup(SETUP, { date: DATE, dryRun: true });
-    expect(out.picks).toHaveLength(1);
-    expect(store.recentFires(DATE)).toHaveLength(0);
-  });
-
-  test('a preview can be given its own universe, so any tool can inspect it', async () => {
-    feed({ AAA: rising(3) });
-    await runner.runSetup(SETUP, { date: DATE, dryRun: true, tickers: ['AAA'] });
-    expect(bars.fetchMorning).toHaveBeenCalledWith(['AAA'], DATE, expect.anything());
-  });
-
-  test('the wrong tool refuses to run it for real', async () => {
-    const foreign = { ...SETUP, toolId: 'T7' };
-    const out = await runner.runSetup(foreign, { date: DATE });
-    expect(out.ok).toBe(false);
-    expect(out.reason).toMatch(/belongs to T7/);
-    expect(store.recentFires(DATE)).toHaveLength(0);
-  });
-
-  test('runDue only runs setups whose decision time matches', async () => {
-    feed({ FAST: rising(3) });
-    const none = await runner.runDue('11:30', { date: DATE });
-    expect(none).toEqual([]);
-    expect(bars.fetchMorning).not.toHaveBeenCalled();
-  });
-});
-
-/*
- * The setup RANKS and takes the top two, so every candidate's extension has to
- * be measured on the same tape. Feeds disagree by more than the gap between
- * second place and fifth — measured against the spec's reference log, Yahoo and
- * Polygon extensions differed by up to 2.4 points — so a universe assembled
- * from two feeds is a ranking that is partly a ranking of feeds. It is allowed,
- * because deciding on four names out of forty is worse, but it is never silent.
- */
-describe('mixed feeds', () => {
-  test('a ranking built on more than one tape says so', async () => {
-    feed({ FAST: rising(3), SLOW: rising(1) }, {
-      mixed: true, used: ['polygon', 'yahoo'], feed: null,
-      sources: { FAST: 'polygon', SLOW: 'yahoo' },
-    });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }, { ticker: 'SLOW' }]);
-    await runner.runSetup(SETUP, { date: DATE });
-    const warn = store.recentFires(DATE).find(f => f.level === 'warn');
-    expect(warn.detail).toMatch(/mixed feeds \(polygon \+ yahoo\)/);
-    expect(warn.detail).toMatch(/not directly comparable/);
-  });
-
-  test('one tape for everything raises nothing to ignore', async () => {
-    feed({ FAST: rising(3), SLOW: rising(1) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }, { ticker: 'SLOW' }]);
-    await runner.runSetup(SETUP, { date: DATE });
-    expect(store.recentFires(DATE).some(f => f.level === 'warn')).toBe(false);
-  });
-
-  test('the feed is reported on the run, so a fire can be traced to its tape', async () => {
-    feed({ FAST: rising(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    const out = await runner.runSetup(SETUP, { date: DATE });
-    expect(out.data.feed).toBe('yahoo');
+    expect(warn.detail).toMatch(/GONE, ALSOGONE/);
   });
 
   /*
-   * The fetch reports a lot about its own quality, and every one of those
-   * fields is optional to produce. A missing one must cost detail in the alert,
-   * never the two trades the run was about to name.
+   * qp being down is the failure this architecture introduced, so it is the one
+   * that most needs to be loud. A missing platform must not look like a quiet
+   * morning.
    */
-  test('a fetch that reports nothing about itself still produces the picks', async () => {
-    bars.fetchMorning.mockResolvedValue({ bars: { FAST: rising(3) } });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    const out = await runner.runSetup(SETUP, { date: DATE });
-    expect(out.picks).toHaveLength(1);
-    expect(store.recentFires(DATE).some(f => f.level === 'trade')).toBe(true);
-  });
-});
-
-/*
- * The 09:59 bar closes at 10:00:00.000 and no feed is obliged to have published
- * it by then. Waiting for it indefinitely is the obvious choice and the wrong
- * one — the trade is entered at market on sight, so a minute of waiting costs
- * more than the bar is worth. Deciding on an earlier bar is the right trade-off
- * AND a different decision from the tested one, so it is never silent.
- */
-describe('when the decision bar has not been published', () => {
-  /** A morning that stops early, as a slow feed would deliver it at 10:00. */
-  function short(mult, bars = 26) {          // 09:30 … 09:55
-    return rising(mult).slice(0, bars);
-  }
-
-  test('the run still produces the trade rather than waiting past the minute', async () => {
-    feed({ FAST: short(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    const out = await runner.runSetup(SETUP, { date: DATE });
-    expect(out.picks).toHaveLength(1);
-    expect(store.recentFires(DATE).some(f => f.level === 'trade')).toBe(true);
+  test('the platform being unreachable is published, not swallowed', async () => {
+    qp.decide.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8765'));
+    await runner.runDue('10:00', { date: DATE });
+    const err = store.recentFires(DATE).find(f => f.level === 'error');
+    expect(err.detail).toMatch(/Did not run: connect ECONNREFUSED/);
   });
 
-  test('and says which bar it actually used', async () => {
-    feed({ FAST: short(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    await runner.runSetup(SETUP, { date: DATE });
-    const warn = store.recentFires(DATE).find(f => f.level === 'warn');
-    expect(warn.detail).toMatch(/09:59 bar had not been published/);
-    expect(warn.detail).toMatch(/FAST was decided on 09:55/);
-  });
-
-  test('the bar used is on the pick itself, not only in the warning', async () => {
-    feed({ FAST: short(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    await runner.runSetup(SETUP, { date: DATE });
-    expect(store.recentFires(DATE).find(f => f.ticker === 'FAST').setup.decisionAt)
-      .toBe('09:55');
-  });
-
-  test('a complete morning raises nothing', async () => {
-    feed({ FAST: rising(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    await runner.runSetup(SETUP, { date: DATE });
-    expect(store.recentFires(DATE).some(f => f.level === 'warn')).toBe(false);
-    expect(store.recentFires(DATE).find(f => f.ticker === 'FAST').setup.decisionAt)
-      .toBe('09:59');
+  test('and so is qp answering that it could not decide', async () => {
+    qp.decide.mockRejectedValue(new Error("no strategy for 'T2 10:00 VWAP Extension'"));
+    await runner.runDue('10:00', { date: DATE });
+    expect(store.recentFires(DATE).find(f => f.level === 'error').detail)
+      .toMatch(/no strategy for/);
   });
 });
 
@@ -325,55 +197,77 @@ describe('share count', () => {
   test('is absent until the account settings are, which is the honest output', async () => {
     jest.spyOn(risk, 'settings').mockReturnValue({
       accountSize: null, riskPerTrade: null, maxPositionPct: 100, updatedAt: null });
-    feed({ FAST: rising(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    decided([pick('LIFE')]);
     await runner.runSetup(SETUP, { date: DATE });
-    const f = store.recentFires(DATE).find(x => x.ticker === 'FAST');
+    const f = store.recentFires(DATE)[0];
     expect(f.setup.size).toBeNull();
-    expect(f.detail).toMatch(/^BUY FAST/);          // no invented quantity
+    expect(f.detail).toMatch(/^BUY LIFE/);          // no invented quantity
     risk.settings.mockRestore();
   });
 
   test('leads the alert text once they are set', async () => {
     jest.spyOn(risk, 'settings').mockReturnValue({
       accountSize: 25000, riskPerTrade: 250, maxPositionPct: 100, updatedAt: 1 });
-    feed({ FAST: rising(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    decided([pick('LIFE')]);
     await runner.runSetup(SETUP, { date: DATE });
-    const f = store.recentFires(DATE).find(x => x.ticker === 'FAST');
-    expect(f.setup.size.shares).toBeGreaterThan(0);
-    expect(f.detail).toMatch(new RegExp(`^BUY ${f.setup.size.shares} FAST`));
-    // What it actually risks must be at or under what was asked for.
+    const f = store.recentFires(DATE)[0];
+    expect(f.setup.size.shares).toBe(182);          // floor(250 / 1.37)
+    expect(f.detail).toMatch(/^BUY 182 LIFE/);
     expect(f.setup.size.riskDollars).toBeLessThanOrEqual(250);
     risk.settings.mockRestore();
+  });
+});
+
+describe('ownership and dry runs', () => {
+  test('a preview publishes nothing', async () => {
+    decided([pick('LIFE')]);
+    const out = await runner.runSetup(SETUP, { date: DATE, dryRun: true });
+    expect(out.picks).toHaveLength(1);
+    expect(store.recentFires(DATE)).toHaveLength(0);
+  });
+
+  test('a preview can be given its own universe, so any tool can inspect it', async () => {
+    decided([pick('AAA')]);
+    await runner.runSetup(SETUP, { date: DATE, dryRun: true, tickers: ['AAA'] });
+    expect(qp.decide).toHaveBeenCalledWith(expect.objectContaining({ symbols: ['AAA'] }));
+  });
+
+  test('the wrong tool refuses to run it for real', async () => {
+    const foreign = { ...SETUP, toolId: 'T7' };
+    const out = await runner.runSetup(foreign, { date: DATE });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/belongs to T7/);
+    expect(store.recentFires(DATE)).toHaveLength(0);
+  });
+
+  test('runDue only runs setups whose decision time matches', async () => {
+    decided([pick('LIFE')]);
+    expect(await runner.runDue('11:30', { date: DATE })).toEqual([]);
+    expect(qp.decide).not.toHaveBeenCalled();
   });
 });
 
 /*
  * A setup switched off from the alerts page does not run — and does not
  * announce that it did not run. "Nothing qualified" every morning for something
- * you deliberately turned off is the message that teaches you to stop reading
- * the feed.
+ * deliberately turned off is what teaches you to stop reading the feed.
  */
 describe('switching a setup off', () => {
   const prefs = require('../src/setups/prefs');
 
   test('runDue skips it, silently', async () => {
     jest.spyOn(prefs, 'isEnabled').mockReturnValue(false);
-    feed({ FAST: rising(3) });
-    const out = await runner.runDue('10:00', { date: DATE });
-    expect(out).toEqual([]);
-    expect(bars.fetchMorning).not.toHaveBeenCalled();
+    decided([pick('LIFE')]);
+    expect(await runner.runDue('10:00', { date: DATE })).toEqual([]);
+    expect(qp.decide).not.toHaveBeenCalled();
     expect(store.recentFires(DATE)).toHaveLength(0);
     prefs.isEnabled.mockRestore();
   });
 
   test('and runs it again when switched back on', async () => {
     jest.spyOn(prefs, 'isEnabled').mockReturnValue(true);
-    feed({ FAST: rising(3) });
-    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
-    const out = await runner.runDue('10:00', { date: DATE });
-    expect(out).toHaveLength(1);
+    decided([pick('LIFE')]);
+    expect(await runner.runDue('10:00', { date: DATE })).toHaveLength(1);
     expect(store.recentFires(DATE).some(f => f.level === 'trade')).toBe(true);
     prefs.isEnabled.mockRestore();
   });

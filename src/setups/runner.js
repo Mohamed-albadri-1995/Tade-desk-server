@@ -1,11 +1,15 @@
 /*
  * Running a setup, and turning its picks into alerts you actually receive.
  *
- * The pieces are deliberately separate: vwapExtension.js decides, bars.js
- * fetches, and this file is the only thing that knows about the clock, the
- * registry and the alert feed. That is what lets the decision be tested against
- * the spec without a network, and lets this be read as "where does the data
- * come from and where does the answer go".
+ * This file knows about the clock, the card list and the alert feed. It does
+ * not know how the setup decides anything — that is qp's, entirely. The
+ * strategy is a seed built from qp primitives and the ranking is
+ * chart/decide.py, using the same metric a backtest uses.
+ *
+ * There used to be a second implementation here, in JavaScript. Two engines for
+ * one strategy means two readings of "ten bars back" and a live trade that can
+ * disagree with the backtest that justified it, with no way to tell which is
+ * right because both look correct. It is gone.
  *
  * A run always publishes something. If nothing qualifies, that is an answer —
  * "looked at 34, nothing qualified" — and it is the answer that stops you
@@ -17,7 +21,7 @@ const config = require('../config');
 const r0 = require('../r0/registry');
 const { toETDate } = require('../utils/time');
 const setups = require('./index');
-const barsSource = require('./bars');
+const qp = require('./qpClient');
 const risk = require('./risk');
 const prefs = require('./prefs');
 const alertStore = require('../alerts/store');
@@ -78,20 +82,57 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     return { ok: true, picks: [], universe: 0, fires: [fire] };
   }
 
-  const fetched = await barsSource.fetchMorning(list, day, {
-    lastWanted: lastWantedBar(setup.decisionTime),
+  /*
+   * The decision itself belongs to qp, and nothing here recomputes any part of
+   * it. The strategy is a seed built from qp primitives; the ranking is
+   * chart/decide.py using the same metric a backtest uses. This function hands
+   * over the card list and formats what comes back.
+   */
+  const decided = await qp.decide({
+    strategyId: setup.strategyId,
+    symbols: list,
+    date: day,
+    tf: setup.tf || '1m',
+    feed: setup.feed || 'yahoo',
+    topN: (setup.rank && setup.rank.topN) || 2,
+    targetR: setup.targetR || 2.0,
   });
-  // Defaults for every field this function reads. The fetch reports a lot about
-  // its own quality and every one of those fields is optional to produce, so a
-  // missing one must degrade the ALERT's detail, never take out the run that
-  // was about to name two trades.
-  const data = {
-    bars: {}, sources: {}, missing: [], degraded: [], used: [],
-    feed: null, mixed: false, coverage: 1, waitedMs: 0, attempts: 1,
-    ...fetched,
+
+  // qp's shape, translated once into the shape the alerts already speak. Every
+  // number comes from qp — none is recalculated here.
+  const out = {
+    picks: (decided.picks || []).map(p => ({
+      ticker: p.symbol,
+      signal: String(p.side || '').toUpperCase(),
+      extension: p.metric,
+      decisionAt: p.entry_at,
+      decisionVwap: p.stop,        // the stop IS the session VWAP, frozen
+      decisionClose: p.entry,
+      rangePosition: null,         // qp asserts it in the rules; it is not returned
+      plan: {
+        entry: p.entry, stop: p.stop, risk: p.risk,
+        riskPct: p.risk_pct, target: p.target, targetR: p.target_r,
+      },
+    })),
+    counts: {
+      evaluated: (decided.counts && decided.counts.evaluated) || list.length,
+      signalled: (decided.counts && decided.counts.signalled) || 0,
+      invalidated: 0,              // qp rejects inside the strategy, not as a stage
+      skipped: (decided.counts && decided.counts.errored) || 0,
+    },
   };
 
-  const out = setup.module.run(data.bars, setup.params);
+  // What the fetch used to report about its own quality now comes from qp, or
+  // is simply not knowable from here. Kept in the same shape so the alert
+  // formatting below did not have to change.
+  const data = {
+    sources: Object.fromEntries((decided.picks || []).map(p => [p.symbol, decided.feed])),
+    missing: (decided.errors || []).map(e => e.symbol),
+    degraded: decided.feed === 'alpaca' ? (decided.picks || []).map(p => p.symbol) : [],
+    used: [decided.feed], feed: decided.feed, mixed: false,
+    coverage: list.length ? 1 - ((decided.errors || []).length / list.length) : 1,
+    waitedMs: 0, attempts: 1,
+  };
 
   // Read once for the whole run, so both picks are sized against the same
   // settings even if they are edited while this is executing.
@@ -168,27 +209,6 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       detail: `Ranked across mixed feeds (${data.used.join(' + ')}) — no single feed `
         + 'covered the list. Extensions from different tapes are not directly '
         + 'comparable, so the choice of the top 2 is less reliable than usual.',
-    });
-  }
-
-  /*
-   * The decision was taken on an earlier bar than intended.
-   *
-   * The 09:59 bar closes at 10:00:00.000 and no feed is obliged to have
-   * published it by then. Rather than wait past the minute the trade is worth
-   * entering in, the run decides on the last bar that existed — which is the
-   * right trade-off and still a different decision from the tested one, so it
-   * is said out loud rather than absorbed.
-   */
-  const wanted = lastWantedBar(setup.decisionTime);
-  const early = out.picks.filter(p => p.decisionAt && p.decisionAt < wanted);
-  if (early.length) {
-    fires.push({
-      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
-      date: day, at: Date.now(), kind: 'setup', level: 'warn',
-      detail: `The ${wanted} bar had not been published, so `
-        + `${early.map(p => `${p.ticker} was decided on ${p.decisionAt}`).join(' and ')}`
-        + '. Close and VWAP differ slightly from the tested setup.',
     });
   }
 

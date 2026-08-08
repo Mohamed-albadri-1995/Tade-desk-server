@@ -32,6 +32,30 @@ from chart import store
 from chart import strategy as strat
 
 
+def rank_metric(side: str, entry, stop) -> float | None:
+    """How strong a signal is, for ranking the day's signals against each other.
+
+    The distance from entry to the stop, as a percent. For a VWAP-anchored stop
+    that IS the distance from VWAP — the metric the T2 setup ranks on — computed
+    from fields already on the trade rather than by recomputing an indicator.
+
+    Public, and imported by chart/decide.py, which takes the same decision live
+    over a card list. Two definitions of one number would let a live pick and a
+    backtested pick be ranked differently while both looked correct.
+
+    None when there is no usable stop: such a signal cannot be sized or ranked,
+    and must never be silently treated as the weakest rather than as unusable.
+    """
+    try:
+        e = float(entry)
+        s = float(stop) if stop is not None else 0.0
+    except (TypeError, ValueError):
+        return None
+    if not s or e <= 0 or s <= 0:
+        return None
+    return ((e / s - 1.0) if side == 'long' else (s / e - 1.0)) * 100.0
+
+
 def _et_date(ts_s: int) -> str:
     return pd.Timestamp(int(ts_s), unit='s', tz='UTC').tz_convert(cs._ET).strftime('%Y-%m-%d')
 
@@ -663,15 +687,9 @@ def run(spec: dict, progress_cb=None) -> dict:
         top_n = int(rank.get('top_n') or 0)
         metric = str(rank.get('metric') or 'vwap_extension')
 
-        def _score(t):
-            e, s = float(t['entry']), t.get('stop')
-            if not s or e <= 0 or s <= 0:
-                return None
-            return ((e / s - 1.0) if t['side'] == 'long' else (s / e - 1.0)) * 100.0
-
         by_date: dict = {}
         for t in closed:
-            sc = _score(t)
+            sc = rank_metric(t['side'], t['entry'], t.get('stop'))
             t.setdefault('ctx', {})['rank_metric'] = (
                 round(sc, 6) if sc is not None else None)
             by_date.setdefault(t['date'], []).append(t)

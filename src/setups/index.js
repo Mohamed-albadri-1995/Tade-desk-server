@@ -12,13 +12,39 @@
  * asking T1 to evaluate it would be evaluating a different universe.
  */
 
-const vwapExtension = require('./vwapExtension');
+/*
+ * A setup is a BINDING, not an implementation.
+ *
+ * What it names: which qp strategy decides it, which tool's card list is the
+ * universe, when the decision is taken, and how the day's signals are ranked
+ * against each other. Nothing here computes anything.
+ *
+ * The strategy itself is a qp seed built from qp primitives, and the ranking is
+ * chart/decide.py using the same metric a backtest uses. That is deliberate and
+ * it is the whole design: one engine. A second implementation on this side
+ * meant two readings of "ten bars back" and a live trade that could disagree
+ * with the backtest that justified it, with no way to tell which was right.
+ *
+ * Adding a setup is therefore an entry in this list plus a seed in qp — no new
+ * code on either side.
+ */
 
 const SETUPS = [
   {
     id: 'T2-VWAP-EXT',
     name: 'T2 10:00 VWAP extension',
     toolId: 'T2',
+    // The qp strategies that decide it. Matched by name prefix, because a setup
+    // is usually a long and a short saved as a pair — see chart/seeds/.
+    strategyId: 'T2 10:00 VWAP Extension',
+    // The cross-symbol step, which no strategy can take: evaluate() sees one
+    // symbol. Same shape as backtest.py's rank_per_day.
+    rank: { metric: 'vwap_extension', topN: 2 },
+    tf: '1m',
+    // Yahoo, because this is the live path: polygon's free plan is a day behind
+    // and would return nothing for today, and alpaca's free tier is IEX.
+    feed: 'yahoo',
+    targetR: 2.0,
     // Evaluated once the bar before this has closed. The spec tested 09:35 and
     // 09:45 and both were worse, so this is a result rather than a preference.
     decisionTime: '10:00',
@@ -27,8 +53,6 @@ const SETUPS = [
     // list five minutes stale at the one moment it is read. Cheap insurance:
     // one extra scan whose only job is to be recent.
     universeScanAt: '09:58',
-    module: vwapExtension,
-    params: vwapExtension.DEFAULTS,
     // Said in the alert itself, not just here. Eight trades over four days,
     // with the ranking metric chosen after looking at those four days.
     caution: '8 trades over 4 sessions, metric chosen in hindsight — not a validated edge. Trade small.',

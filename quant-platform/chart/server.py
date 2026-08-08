@@ -519,6 +519,57 @@ def alerts_recent(since_ts: int = 0):
     return {'alerts': alerts.recent(since_ts)}
 
 
+@app.post('/api/setup/decide')
+def setup_decide(payload: dict = Body(...)):
+    """Run a strategy across a universe on one date and return the RANKED picks.
+
+    The last step of a setup that a strategy cannot take: evaluate() sees one
+    symbol, and the setup trades only the strongest few of the day's signals.
+    Same ranking metric as a backtest — chart.backtest.rank_metric, imported
+    rather than restated — so a live pick and a backtested pick are scored by
+    one definition.
+
+    Body: {strategy_id | strategies, symbols[], date, tf, feed, top_n, target_r}
+
+    `feed` defaults to yahoo because this is the live path: polygon is a day
+    behind on the free plan and would return nothing for today, and alpaca's
+    free tier is IEX.
+    """
+    try:
+        from chart import decide as dec
+        strategies = payload.get('strategies')
+        if not strategies:
+            sid = payload.get('strategy_id')
+            if not sid:
+                return JSONResponse({'ok': False,
+                                     'error': 'strategies or strategy_id required'})
+            # Every strategy whose name starts with the id — a setup is usually
+            # a long and a short saved as a pair.
+            allst = store.list_strategies()
+            strategies = [s for s in allst
+                          if str(s.get('id')) == str(sid)
+                          or str(s.get('name', '')).startswith(str(sid))]
+            if not strategies:
+                return JSONResponse({'ok': False, 'error': f'no strategy for {sid!r}'})
+
+        symbols = [str(s).upper().strip() for s in (payload.get('symbols') or []) if str(s).strip()]
+        if not symbols:
+            return JSONResponse({'ok': False, 'error': 'symbols required'})
+
+        out = dec.decide(
+            strategies, symbols,
+            date=str(payload.get('date') or ''),
+            tf=payload.get('tf', '1m'),
+            feed=payload.get('feed', 'yahoo'),
+            top_n=int(payload.get('top_n') or 2),
+            target_r=float(payload.get('target_r') or 2.0),
+            days=int(payload.get('days') or 2),
+        )
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
+
+
 @app.post('/api/strategy/test')
 def strategy_test(payload: dict = Body(...)):
     """Evaluate a single condition (rule or group) and mark every bar it holds
