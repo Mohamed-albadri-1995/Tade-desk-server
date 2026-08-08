@@ -290,6 +290,31 @@ async function loadRules() {
   }
 }
 
+/*
+ * The level is a SELECT, not an input with a datalist.
+ *
+ * It was a datalist, and on mobile Chrome that is a text box with no dropdown
+ * at all — the suggestions simply never appear, so the field looked broken and
+ * the only way to use it was to know the field names by heart. A select is
+ * plain, works everywhere, and cannot be typed wrong.
+ *
+ * A number is still allowed, through an explicit "a number…" option that
+ * reveals a numeric input. Two controls rather than one, but each does one
+ * thing: the alternative is a text box that means a field name sometimes and a
+ * price other times, which is the kind of field people get wrong under time
+ * pressure.
+ */
+function onLevelKind() {
+  const isNum = document.getElementById('f-right-kind').value === '__num';
+  document.getElementById('f-num-wrap').style.display = isNum ? '' : 'none';
+  if (isNum) document.getElementById('f-right-num').focus();
+}
+
+function levelValue() {
+  const kind = document.getElementById('f-right-kind').value;
+  return kind === '__num' ? document.getElementById('f-right-num').value : kind;
+}
+
 let PICKED = new Set();
 function pickTool(id, el) {
   PICKED.has(id) ? PICKED.delete(id) : PICKED.add(id);
@@ -307,8 +332,11 @@ async function toggleForm(prefill) {
     <label>When<select id="f-left">${m.fields.map(f => `<option>${f}</option>`).join('')}</select></label>
     <label>&nbsp;<select id="f-op">${m.operators.map(o =>
       `<option value="${o.value}">${o.label}</option>`).join('')}</select></label>
-    <label>Level<input id="f-right" list="f-fields" placeholder="pmHigh or 5" size="13">
-      <datalist id="f-fields">${m.fields.map(f => `<option>${f}</option>`).join('')}</datalist></label>
+    <label>Level<select id="f-right-kind" onchange="onLevelKind()">${
+      m.fields.map(f => `<option value="${f}">${f}</option>`).join('')
+      }<option value="__num">a number…</option></select></label>
+    <label id="f-num-wrap" style="display:none">Value
+      <input id="f-right-num" type="number" step="any" inputmode="decimal" placeholder="5" size="7"></label>
     <label style="flex:1 1 100%">Tools — none selected means every tool
       <div class="chips">${m.tools.map(t =>
         `<span class="chip" onclick="pickTool('${t.id}', this)">${t.id}</span>`).join('')}</div></label>
@@ -317,11 +345,15 @@ async function toggleForm(prefill) {
     <button class="btn primary" onclick="saveRule()">Save rule</button>
     <div class="err" id="f-err"></div>`;
   document.getElementById('f-left').value = 'price';
-  document.getElementById('f-right').value = 'pmHigh';
+  document.getElementById('f-right-kind').value = 'pmHigh';
+  onLevelKind();
   if (prefill && prefill.ticker) {
     document.getElementById('f-tickers').value = prefill.ticker;
     document.getElementById('f-name').value = `${prefill.ticker} — break PM high`;
   }
+  // Tapping a select on a phone needs room; the form is at the bottom of a
+  // long page and the picker opens off-screen without this.
+  document.getElementById('f-name').focus({ preventScroll: true });
   box.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -337,7 +369,7 @@ async function saveRule() {
       name: document.getElementById('f-name').value,
       left: document.getElementById('f-left').value,
       operator: document.getElementById('f-op').value,
-      right: document.getElementById('f-right').value,
+      right: levelValue(),
       scope: { tools: [...PICKED], tickers: list('f-tickers') },
     }),
   });
