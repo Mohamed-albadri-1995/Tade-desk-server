@@ -134,7 +134,12 @@ mkdir -p "$ROOT/deploy"
 node "$ROOT/scripts/make-caddyfile.js" "$DOMAIN" > "$ROOT/deploy/Caddyfile"
 sudo mkdir -p /etc/caddy /var/log/caddy
 sudo cp "$ROOT/deploy/Caddyfile" /etc/caddy/Caddyfile
-sudo chown -R caddy:caddy /var/log/caddy 2>/dev/null || true
+# Not silenced. The service runs as caddy and writes an access log here; if this
+# chown fails the service exits immediately with "permission denied" on the log
+# file, which reads like a certificate problem and sends you looking in the
+# wrong place entirely.
+sudo chown -R caddy:caddy /var/log/caddy
+sudo chown -R caddy:caddy /var/lib/caddy 2>/dev/null || true
 echo "  /etc/caddy/Caddyfile"
 
 # Refuse to start on a config Caddy cannot parse, rather than finding out from
@@ -146,6 +151,18 @@ echo "── starting ───────────────────�
 sudo systemctl enable caddy >/dev/null 2>&1 || true
 sudo systemctl restart caddy
 sleep 6
+
+# Separate "the service is dead" from "the certificate has not arrived yet".
+# Both look identical from curl, and they need opposite responses: one is a
+# thing to fix now, the other is a thing to wait out.
+if ! sudo systemctl is-active --quiet caddy; then
+  echo
+  echo "!! Caddy started and exited. The reason is on the Status line below —"
+  echo "   read that line, not the stack of INFO messages above it."
+  echo
+  sudo systemctl status caddy --no-pager | head -12
+  exit 1
+fi
 
 if curl -fsS --max-time 20 "https://$DOMAIN/health" >/dev/null 2>&1; then
   echo
