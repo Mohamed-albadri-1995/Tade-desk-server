@@ -285,6 +285,60 @@ ok("the extension is stored per trade, so a run can be audited",
 ok("each trade knows its rank within the day",
    {t['symbol']: t['ctx']['rank_in_day'] for t in out['trades']}['AAA'] == 1)
 
+print("=" * 64)
+print("PART F — one run, BOTH books, ranked across the whole day")
+print("=" * 64)
+# The spec ranks "across the entire universe" — 07-31 selects FFAI long AND
+# COHU short. Two separate backtests would rank inside each side and pick
+# different names, so a run has to be able to carry both books at once.
+rows2 = [trade('LNG1', '2026-08-04', 105.0, 100.0, 'long'),    # ext 5.0
+         trade('LNG2', '2026-08-04', 101.0, 100.0, 'long'),    # ext 1.0
+         trade('SHT1', '2026-08-04', 100.0, 104.0, 'short'),   # ext 4.0
+         trade('SHT2', '2026-08-04', 100.0, 100.5, 'short')]   # ext 0.5
+_by2 = {(r['date'], r['symbol']): r for r in rows2}
+def fake_eval2(strategy, sym, tf, days, **kw):
+    r = _by2.get((kw['asof'], sym))
+    # each book only claims the names of its own side
+    if r is None or r['side'] != strategy.get('side'):
+        return {'ok': True, 'bars': 100, 'entries': [], 'trades': [], 'open_trade': None}
+    return {'ok': True, 'bars': 100, 'entries': [], 'open_trade': None,
+            'trades': [{'entry_ts': r['entry_ts'], 'exit_ts': r['exit_ts'],
+                        'entry': r['entry'], 'exit': r['exit'], 'stop': r['stop'],
+                        'ret': r['ret'], 'reason': 'TP', 'legs': []}]}
+saved2 = bt._pairs
+bt._pairs = lambda spec: [(r['date'], r['symbol'], {}) for r in rows2]
+_orig2, _S.evaluate = _S.evaluate, fake_eval2
+def _book(side):
+    return {'name': f'book {side}', 'side': side,
+            'entry': {'logic': 'AND', 'rules': []},
+            'exit': {'logic': 'AND', 'rules': []}, 'risk': {}}
+try:
+    out2 = bt.run({'strategies': [_book('long'), _book('short')],
+                   'tf': '1m', 'feed': 'polygon',
+                   'universe': {'kind': 'symbols', 'symbols': ['X']},
+                   'start': '2026-08-04', 'end': '2026-08-04',
+                   'rank_per_day': {'metric': 'vwap_extension', 'top_n': 2}})
+finally:
+    _S.evaluate = _orig2
+    bt._pairs = saved2
+picked = sorted(t['symbol'] for t in out2['trades'])
+ok("the top 2 are taken across BOTH books, not 2 per side",
+   picked == ['LNG1', 'SHT1'], f"{picked}")
+ok("...which means a short can outrank a long",
+   {t['symbol']: t['side'] for t in out2['trades']} == {'LNG1': 'long', 'SHT1': 'short'})
+ok("each trade names the book it came from",
+   sorted(t['ctx']['strategy'] for t in out2['trades']) == ['book long', 'book short'],
+   f"{[t['ctx'].get('strategy') for t in out2['trades']]}")
+ok("the summary names both strategies",
+   out2['summary']['strategy_name'] == 'book long + book short',
+   f"{out2['summary'].get('strategy_name')}")
+ok("...and reports the side as 'both'", out2['summary']['strategy_side'] == 'both')
+ok("a pair is counted ONCE even though two books evaluated it",
+   out2['summary']['coverage']['evaluated'] == 4,
+   f"{out2['summary']['coverage']['evaluated']}")
+ok("extension ranks correctly across sides (5.0 > 4.0 > 1.0 > 0.5)",
+   round(sorted(t['ctx']['rank_metric'] for t in out2['trades'])[-1], 6) == 5.0)
+
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)

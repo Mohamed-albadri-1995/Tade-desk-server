@@ -219,6 +219,7 @@
     <h3>🧪 Backtest</h3>
     <div id="btBox" style="font-size:11px">
       <select id="btStrat" style="width:100%"><option value="">— saved strategy —</option></select>
+      <select id="btStrat2" style="width:100%;margin-top:4px" title="Optional SECOND strategy — usually the short book of the same setup. Both are evaluated on every day-symbol pair and their trades are POOLED, so a per-day ranking picks across both sides. Ranking each side in its own run would select different names."><option value="">— second book (optional, e.g. the short side) —</option></select>
       <div style="display:flex;gap:4px;margin-top:4px">
         <select id="btUni" style="flex:1"><option value="symbols">Symbols</option><option value="R1">Register R1</option><option value="Shortlist">Shortlist</option></select>
         <select id="btFill" style="flex:1" title="fill model: next open = honest live fills (a signal at a bar's close becomes a market order at the NEXT bar's open — what the funded account actually gets). close = signal bar's own close, optimistic, for eyeballing only."><option value="next_open" selected>fill: next open</option><option value="close">fill: close</option></select>
@@ -963,6 +964,8 @@ async function loadStrategies(){
   const sel=document.getElementById('stratLoad'); sel.innerHTML='<option value="">— saved —</option>';
   for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);} if(STRAT.id)sel.value=STRAT.id;
   const bsel=document.getElementById('btStrat'); if(bsel){ const keep=bsel.value; bsel.innerHTML='<option value="">— saved strategy —</option>'; for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; bsel.appendChild(o);} if(keep)bsel.value=keep; }
+  // the optional SECOND book gets the same list (see the tooltip on the select)
+  const bsel2=document.getElementById('btStrat2'); if(bsel2){ const keep2=bsel2.value; bsel2.innerHTML='<option value="">— second book (optional, e.g. the short side) —</option>'; for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; bsel2.appendChild(o);} if(keep2)bsel2.value=keep2; }
 }
 
 // ── Phase 4: backtest panel ──
@@ -1183,6 +1186,8 @@ async function btRun(){
   const uni=document.getElementById('btUni').value;
   const spec={ name:'bt '+new Date().toISOString().slice(0,16),
     strategy_id:parseInt(sid,10),
+    strategy_ids:(function(){ const b=document.getElementById('btStrat2').value;
+      return b?[parseInt(sid,10),parseInt(b,10)]:null; })(),
     universe: uni==='symbols'
       ? {kind:'symbols', symbols:(document.getElementById('btSyms').value||'').split(',').map(s=>s.trim()).filter(Boolean)}
       : {kind:'register', register:uni},

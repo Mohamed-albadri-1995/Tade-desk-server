@@ -125,6 +125,30 @@ def _pairs(spec: dict) -> list[tuple[str, str]]:
     raise ValueError(f'unknown universe kind {kind!r}')
 
 
+def _resolve_strategies(spec: dict) -> list:
+    """One or MORE strategies for a single run.
+
+    A setup whose selection step ranks across the whole universe usually has a
+    long book and a short book, and the rank is taken over BOTH ("top 2 across
+    the entire universe", not top 2 longs and top 2 shorts). Running them as
+    two separate backtests would rank inside each side and select different
+    names. `strategy_ids: [a, b]` (or `strategies: [{...}, {...}]`) evaluates
+    every one of them on the same pair and pools the trades, so the per-day
+    ranking sees the day the way the spec describes it.
+    """
+    many = spec.get('strategies')
+    if isinstance(many, list) and many:
+        out = []
+        for s in many:
+            out.append(_resolve_strategy({'strategy': s} if isinstance(s, dict)
+                                         else {'strategy_id': s}))
+        return out
+    ids = spec.get('strategy_ids')
+    if isinstance(ids, list) and ids:
+        return [_resolve_strategy({'strategy_id': i}) for i in ids]
+    return [_resolve_strategy(spec)]
+
+
 def _resolve_strategy(spec: dict) -> dict:
     s = spec.get('strategy')
     if isinstance(s, dict) and (s.get('entry') or s.get('exit')):
@@ -422,8 +446,7 @@ def _summary(closed: list, opens: list, n_pairs: int, errors: list,
 def run(spec: dict, progress_cb=None) -> dict:
     """Execute the backtest. Returns {'summary', 'trades'} — `trades` rows are
     store-shaped (see store.add_bt_trades). Raises ValueError on a bad spec."""
-    strategy = _resolve_strategy(spec)
-    side = strategy.get('side', 'long')
+    strategies = _resolve_strategies(spec)
     # `or` (not dict defaults): the UI can send '' for an untouched select, and
     # an empty feed/tf must NOT reach the loaders as a mystery value.
     tf = spec.get('tf') or '5m'
@@ -470,7 +493,13 @@ def run(spec: dict, progress_cb=None) -> dict:
             min_rvol = None
     except (TypeError, ValueError):
         min_rvol = None
-    rv_ref = int((strategy.get('risk') or {}).get('window_start') or 1000)
+    # the rvol reference time comes from the EARLIEST session window in the
+    # run — with a long and a short book the two share a decision time, and if
+    # they ever differ the earlier one is the honest place to measure
+    _wins = [int((st.get('risk') or {}).get('window_start') or 0)
+             for st in strategies]
+    _wins = [w for w in _wins if w] or [1000]
+    rv_ref = min(_wins)
     if min_rvol is not None:
         cov['rvol_min'] = min_rvol
         cov['rvol_at'] = rv_ref
@@ -496,15 +525,27 @@ def run(spec: dict, progress_cb=None) -> dict:
             # the HONEST number rides with every trade of the pair, next to
             # the register's snapshot ctx_rvol, so reports can compare them
             rctx = {**(rctx or {}), 'rvol_day': round(rv, 2)}
-        try:
-            r = strat.evaluate(strategy, sym, tf, base_days, feed=feed,
-                               view=view, asof=day, fill=fill,
-                               rules=spec.get('rules'))
-            if r.get('ok') and r.get('bars'):
-                cov['evaluated'] += 1
-                if _src:
-                    _src['evaluated'] += 1
-                bar_counts.append(int(r['bars']))
+        # EVERY strategy in the run is evaluated on this pair. One run can
+        # carry a long book and a short book so that a per-day ranking sees
+        # the whole day — "top 2 across the entire universe" is not the same
+        # as top 2 longs plus top 2 shorts.
+        took = False          # did ANY strategy trade this pair?
+        counted = False       # count the pair as evaluated once, not per strategy
+        for strategy in strategies:
+            side = strategy.get('side', 'long')
+            sname = strategy.get('name') or 'strategy'
+            try:
+                r = strat.evaluate(strategy, sym, tf, base_days, feed=feed,
+                                   view=view, asof=day, fill=fill,
+                                   rules=spec.get('rules'))
+                if not (r.get('ok') and r.get('bars')):
+                    continue
+                if not counted:
+                    counted = True
+                    cov['evaluated'] += 1
+                    if _src:
+                        _src['evaluated'] += 1
+                    bar_counts.append(int(r['bars']))
                 sigs = sum(1 for e in (r.get('entries') or [])
                            if _et_date(e['time']) == day)
                 if sigs:
@@ -515,25 +556,27 @@ def run(spec: dict, progress_cb=None) -> dict:
                 for _reason, _cnt in (r.get('entry_drops') or {}).items():
                     ed = cov.setdefault('entry_drops', {})
                     ed[_reason] = ed.get(_reason, 0) + int(_cnt)
-                took = False
                 for t in r.get('trades') or []:
-                    if _et_date(t['entry_ts']) == day:      # day-slice honesty
-                        took = True
-                        nlegs = len(t.get('legs') or [])
-                        cov['scaleout_legs'] = cov.get('scaleout_legs', 0) + nlegs
-                        if nlegs:
-                            cov['scaleout_trades'] = cov.get('scaleout_trades', 0) + 1
-                        # slippage cost per SIDE: entry + every exit fill (each
-                        # partial + the runner). Single exit → 2 sides as before.
-                        closed.append({'date': day, 'symbol': sym, 'side': side,
-                                       'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
-                                       'entry': t['entry'], 'exit': t['exit'],
-                                       'stop': t.get('stop'),
-                                       'ret': t['ret'] - (2.0 + nlegs) * cost,
-                                       'reason': t['reason'],
-                                       # diagnostic rides in ctx (no schema change)
-                                       'ctx': {**(rctx or {}), 'drop_pct': t.get('drop_pct')},
-                                       'legs': t.get('legs') or []})  # for per-fill TTP
+                    if _et_date(t['entry_ts']) != day:      # day-slice honesty
+                        continue
+                    took = True
+                    nlegs = len(t.get('legs') or [])
+                    cov['scaleout_legs'] = cov.get('scaleout_legs', 0) + nlegs
+                    if nlegs:
+                        cov['scaleout_trades'] = cov.get('scaleout_trades', 0) + 1
+                    # slippage cost per SIDE: entry + every exit fill (each
+                    # partial + the runner). Single exit → 2 sides as before.
+                    closed.append({'date': day, 'symbol': sym, 'side': side,
+                                   'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
+                                   'entry': t['entry'], 'exit': t['exit'],
+                                   'stop': t.get('stop'),
+                                   'ret': t['ret'] - (2.0 + nlegs) * cost,
+                                   'reason': t['reason'],
+                                   # diagnostics ride in ctx (no schema change)
+                                   'ctx': {**(rctx or {}),
+                                           'drop_pct': t.get('drop_pct'),
+                                           'strategy': sname},
+                                   'legs': t.get('legs') or []})
                 ot = r.get('open_trade')
                 if ot and _et_date(ot['time']) == day:
                     took = True
@@ -548,18 +591,20 @@ def run(spec: dict, progress_cb=None) -> dict:
                                   # entry side + each banked partial (runner open)
                                   'ret': ot['ret_pct'] / 100.0 - (1.0 + nlegs) * cost,
                                   'reason': 'open',
-                                  'ctx': {**(rctx or {}), 'drop_pct': ot.get('drop_pct')},
-                                  'legs': ot.get('legs') or []})  # banked partials
-                if took:
-                    cov['traded_pairs'] += 1
-                    if _src:
-                        _src['traded'] += 1
-            else:
-                cov['no_data'] += 1
-                if len(cov['no_data_samples']) < 12:
-                    cov['no_data_samples'].append(f'{day} {sym}')
-        except Exception as e:  # noqa: BLE001 — one bad day/symbol must not kill the run
-            errors.append(f'{day} {sym}: {e}')
+                                  'ctx': {**(rctx or {}),
+                                          'drop_pct': ot.get('drop_pct'),
+                                          'strategy': sname},
+                                  'legs': ot.get('legs') or []})
+            except Exception as e:  # noqa: BLE001 — one bad pair must not kill the run
+                errors.append(f'{day} {sym} [{sname}]: {e}')
+        if not counted:
+            cov['no_data'] += 1
+            if len(cov['no_data_samples']) < 12:
+                cov['no_data_samples'].append(f'{day} {sym}')
+        if took:
+            cov['traded_pairs'] += 1
+            if _src:
+                _src['traded'] += 1
         if progress_cb:
             progress_cb((i + 1) / len(pairs))
 
@@ -647,8 +692,11 @@ def run(spec: dict, progress_cb=None) -> dict:
                        cost_bps=float(spec.get('cost_bps', 0.0) or 0.0),
                        spec=spec, coverage=cov)
     # which strategy produced this run — so every export self-identifies
-    summary['strategy_name'] = strategy.get('name') or 'Untitled'
-    summary['strategy_side'] = side
+    summary['strategy_name'] = ' + '.join(
+        (st.get('name') or 'Untitled') for st in strategies)
+    summary['strategy_side'] = ('both' if len({st.get('side', 'long')
+                                               for st in strategies}) > 1
+                                else strategies[0].get('side', 'long'))
     return {'summary': summary, 'trades': closed + opens}
 
 
