@@ -179,6 +179,16 @@ if [ -z "$ONLY" ] || [ "$ONLY" = "T1" ]; then
   pm2 delete scorer 2>/dev/null || true
 fi
 
+# The alerts app is deleted here for the same reason the tools are: pm2 start on
+# a name it already has refuses with "Script already launched", which every
+# deploy has printed at the end and which is easy to read as a harmless notice.
+# It is not harmless — it means the alerts process kept running the code it was
+# started with while everything around it was replaced. It is a single process
+# and not part of the per-tool loop above, so it needs its own line.
+if [ -z "$ONLY" ]; then
+  pm2 delete alerts 2>/dev/null || true
+fi
+
 echo
 echo "[5/6] Starting tools..."
 mkdir -p data
@@ -209,9 +219,14 @@ done
 # files, and it does not evaluate anything — the screeners already do that on
 # their own scans, holding the cards the rules compare. A tenth process
 # re-fetching the same data would be a second opinion on what "crossed" means.
-ALERTS_PORT=$(node -e "const a=require('./tools.config.json').apps.find(x=>x.id==='ALERTS');process.stdout.write(String(a?a.port:3090))")
-echo "  ALERTS — app :${ALERTS_PORT}"
-ALERTS_PORT="$ALERTS_PORT" pm2 start src/alerts/server.js --name "alerts" --update-env >/dev/null
+# Skipped entirely when deploying one tool: --only T2 should not restart the
+# alerts app, and starting it while it is already running is what produced the
+# "Script already launched" line on every single-tool deploy.
+if [ -z "$ONLY" ]; then
+  ALERTS_PORT=$(node -e "const a=require('./tools.config.json').apps.find(x=>x.id==='ALERTS');process.stdout.write(String(a?a.port:3090))")
+  echo "  ALERTS — app :${ALERTS_PORT}"
+  ALERTS_PORT="$ALERTS_PORT" pm2 start src/alerts/server.js --name "alerts" --update-env >/dev/null
+fi
 # pm2 save rewrites the startup list from whatever is running RIGHT NOW, so a
 # process that happened to be stopped at this moment would be dropped from it
 # and would not come back after a reboot. Say what is being saved.
