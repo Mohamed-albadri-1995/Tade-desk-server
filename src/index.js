@@ -84,8 +84,19 @@ app.get('/health', (req, res) => {
       })),
     } : null;
   } catch { /* a tool with no screeners yet still answers */ }
+
+  // What this tool actually screens for, generated from the live definitions.
+  // Carried on /health rather than on an endpoint of its own because the
+  // landing page already probes this once per tool every 30 seconds — a second
+  // request per card would be nine more, to say something that changes only
+  // when a screener is edited.
+  let summary = null;
+  try {
+    summary = require('./sideA/screenerSummary').summarise();
+  } catch { /* same as check: a tool with no screeners still answers */ }
+
   res.json({
-    ok: true, tool: config.toolId, name: config.toolName, ts: Date.now(), check,
+    ok: true, tool: config.toolId, name: config.toolName, ts: Date.now(), check, summary,
   });
 });
 

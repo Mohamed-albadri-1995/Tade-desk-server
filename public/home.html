@@ -58,7 +58,37 @@ body {
   border-top:3px solid var(--accent);
 }
 .tool-card:hover { border-color:var(--accent); transform:translateY(-2px); }
-.tool-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+/* The link is now inside the card rather than being the card, so the focus ring
+   has to follow it — otherwise keyboard focus lands on something invisible. */
+.tc-open { text-decoration:none; color:inherit; display:flex; flex-direction:column; gap:8px; }
+.tc-open:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:6px; }
+
+/* ── what it screens for ──
+   Generated from the tool's live screener definitions, so it cannot drift from
+   what the scanner actually runs. Shut by default: nine cards' worth of rules
+   open at once is a wall, and the question here is which tool to open. */
+.screens { font-size:11.5px; }
+.screens > summary { cursor:pointer; list-style:none; color:var(--text2);
+  padding:5px 0; display:flex; align-items:center; gap:6px; }
+.screens > summary::-webkit-details-marker { display:none; }
+.screens > summary::before { content:'▸'; color:var(--accent); font-size:.85em; transition:transform .15s; }
+.screens[open] > summary::before { transform:rotate(90deg); }
+.sc-body { border-left:2px solid var(--border); padding:2px 0 2px 10px;
+  margin:2px 0 4px 3px; display:flex; flex-direction:column; gap:9px; }
+.sc-name { font-size:11px; font-weight:700; color:var(--text);
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.sc-tag { font-size:9.5px; font-weight:600; color:var(--text3); background:var(--bg3);
+  border:1px solid var(--border); border-radius:3px; padding:1px 5px; text-transform:uppercase;
+  letter-spacing:.04em; }
+.sc-when { font-size:10px; font-weight:400; color:var(--text3); }
+/* The rules themselves. overflow-wrap because a rule naming two columns is a
+   long line and a 300px card is not going to grow for it. */
+.sc-rules { margin:3px 0 0; padding-left:16px; color:var(--text2); line-height:1.55;
+  overflow-wrap:anywhere; }
+.sc-rules li { margin:1px 0; }
+.sc-none { list-style:none; padding-left:0; font-style:italic; color:var(--text3); }
+.sc-cadence { font-size:10.5px; color:var(--text3); border-top:1px dashed var(--border);
+  padding-top:6px; }
 .tool-card.t2 { border-top-color:#a78bfa; }
 .tool-card.t3 { border-top-color:#fb923c; }
 .tool-card.down { opacity:.55; border-top-color:var(--text3); }
@@ -291,6 +321,15 @@ body {
 // editing that file alone. Fetched from THIS origin, which is always up
 // (it served this page), then each tool is probed individually — a tool that
 // is down still gets a card, because the point is to show WHICH one is down.
+/* Screener names and rule text are typed by hand in the Screeners tab and come
+   back here through /health, so they reach this page as untrusted strings and
+   are written straight into innerHTML. Escaped on the way in. */
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 let TOOLS = [];
 // Anything that needs a tool's PORT has to wait for this. The list arrives over
 // the network, so code that reads TOOLS on page load reads an empty array and
@@ -418,28 +457,107 @@ function renderNowBar(states) {
     + (ahead.length ? '' : ' <span class="nb-next">(tomorrow)</span>');
 }
 
-function card(t, state, info, check) {
+/*
+ * What the tool screens for, from the tool.
+ *
+ * tools.config.json carries a sentence per tool, written once. The screeners
+ * underneath it are edited from the Screeners tab whenever a rule turns out to
+ * be wrong, and nothing keeps the two in step — so the card slowly comes to
+ * describe a tool that no longer exists, while still being read. The generated
+ * version cannot drift: it is built from the same rows the scanner runs, and it
+ * arrives on the /health probe the page already makes every 30 seconds.
+ *
+ * Folded shut. Nine cards' worth of rules open at once is a wall, and the
+ * question at 09:20 is which tool to open, not which columns it compares. The
+ * summary line above it — how many screeners, when they scan — is the part that
+ * answers that, so it stays visible.
+ *
+ * The static sentence stays as the first line. It says what the tool is FOR,
+ * which the rules never do: "breaking the monthly high" is the intent, "Price
+ * (close) above Monthly high" is the mechanism.
+ */
+function screensBlock(t, summary) {
+  if (!summary || !summary.screeners || !summary.screeners.length) return '';
+  const list = summary.screeners;
+  const n = list.length;
+
+  // A screener with no window runs on every scan, which makes the tool's span
+  // the whole scanning day whatever the others say.
+  const windowed = list.filter(s => s.runFrom && s.runTo);
+  const scans = windowed.length < n
+    ? 'all day'
+    : windowed.map(s => s.runFrom).sort()[0]
+      + '–' + windowed.map(s => s.runTo).sort().reverse()[0];
+  const when = s => (s.runFrom && s.runTo)
+    ? `scans ${esc(s.runFrom)}–${esc(s.runTo)}` : 'scans all day';
+
+  const body = list.map(s => `
+    <div class="sc-item">
+      <div class="sc-name">${esc(s.name)}
+        ${s.labelOnly ? '<span class="sc-tag">list only</span>' : ''}
+        ${s.mirrorOf ? `<span class="sc-tag">mirror of ${esc(s.mirrorOf)}</span>` : ''}
+        <span class="sc-when">${when(s)}</span>
+      </div>
+      ${s.rules.length
+        ? `<ul class="sc-rules">${s.rules.map(r => `<li>${esc(r)}</li>`).join('')}</ul>`
+        : '<div class="sc-rules sc-none">no filters — everything matches</div>'}
+    </div>`).join('');
+
+  // The floor is not any one screener's rule; it is appended to all of them at
+  // scan time, so a stock below it is never collected by anything. Listed once,
+  // as the shared condition it is — and label-only screeners are exempt, which
+  // is why they are tagged above.
+  const floor = (summary.floor || []).length
+    ? `<div class="sc-item">
+         <div class="sc-name">Applied to every screener above
+           <span class="sc-when">tradability floor</span></div>
+         <ul class="sc-rules">${summary.floor.map(r => `<li>${esc(r)}</li>`).join('')}</ul>
+       </div>` : '';
+
+  const cadence = (summary.cadence || [])
+    .map(c => `${esc(c.when)} ${esc(c.every)}`).join(' · ');
+
+  return `
+    <details class="screens" onclick="event.stopPropagation()">
+      <summary>${n} screener${n === 1 ? '' : 's'} · ${scans === 'all day'
+        ? 'scans all day' : `scans ${esc(scans)} ET`}</summary>
+      <div class="sc-body">
+        ${body}${floor}
+        ${cadence ? `<div class="sc-cadence">Looks ${cadence}</div>` : ''}
+      </div>
+    </details>`;
+}
+
+function card(t, state, info, check, summary) {
   const cls = (state === 'down' ? 'down' : '')
     + (state === 'up' && check && !check.now ? ' asleep' : '');
   const label = { up:'online', down:'offline', wait:'checking' }[state];
   const stats = [];
   if (info && info.rows != null) stats.push(`${info.rows} live`);
   if (info && info.model) stats.push(info.model);
+  // The card was one big <a>. It cannot stay one: a <details> inside an anchor
+  // is invalid HTML — interactive content nested in interactive content — and
+  // in practice tapping "3 screeners" opens the tool instead of the list, which
+  // is the one thing the expander must not do. So the anchor now covers the
+  // part that means "open this tool", and the expander is its sibling.
   return `
-    <a class="tool-card ${cls}" href="${baseFor(t)}/scanner"
+    <div class="tool-card ${cls}"
        style="border-top-color:${state === 'down' ? 'var(--text3)' : (t.accent || 'var(--accent)')}">
-      <div class="card-top">
-        <div>
-          <div class="card-name">${t.name}</div>
-          <div class="card-port">${t.id} · PORT ${t.port}</div>
+      <a class="tc-open" href="${baseFor(t)}/scanner">
+        <div class="card-top">
+          <div>
+            <div class="card-name">${t.name}</div>
+            <div class="card-port">${t.id} · PORT ${t.port}</div>
+          </div>
+          <div class="status ${state}"><span class="dot"></span>${label}</div>
         </div>
-        <div class="status ${state}"><span class="dot"></span>${label}</div>
-      </div>
-      ${checkLine(check)}
-      <div class="card-desc">${t.desc}</div>
+        ${checkLine(check)}
+        <div class="card-desc">${t.desc}</div>
+      </a>
+      ${screensBlock(t, summary)}
       <div class="stats">${stats.map(s => `<span class="stat">${s}</span>`).join('')}</div>
       <span class="arrow">→</span>
-    </a>`;
+    </div>`;
 }
 
 /*
@@ -513,7 +631,8 @@ function render(states) {
   for (const t of ordered) {
     const g = groupOf(t);
     if (g !== last) { html.push(`<div class="group-head">${GROUP_LABEL[g]}</div>`); last = g; }
-    html.push(card(t, states[t.id].state, states[t.id].info, states[t.id].check));
+    html.push(card(t, states[t.id].state, states[t.id].info, states[t.id].check,
+                   states[t.id].summary));
   }
   document.getElementById('cards').innerHTML = html.join('');
   renderNowBar(states);
@@ -531,7 +650,7 @@ async function probe(t) {
     const h = await r.json();
     // The tool computes "now" against its own clock, not the phone's — the
     // phone travels and the market does not.
-    states[t.id] = { state:'up', info:null, check: h.check || null };
+    states[t.id] = { state:'up', info:null, check: h.check || null, summary: h.summary || null };
 
     // Best-effort extras — a tool that is up but still warming up should not
     // be shown as down just because these are not ready yet.
