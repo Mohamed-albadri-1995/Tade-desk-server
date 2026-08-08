@@ -29,6 +29,41 @@
 
 const yahooClient = require('../yahoo/client');
 const alpacaClient = require('../alpaca/client');
+const polygonClient = require('../polygon/client');
+
+/*
+ * The order feeds are tried, and why it is this order.
+ *
+ * Polygon first because the setup's reference numbers were derived on it —
+ * verifying against Yahoo gave every direction right and six of eight entry
+ * prices right to the cent, while the extensions moved by up to 2.4 points.
+ * The VWAP formula is identical on both sides; what differs is the volume. And
+ * extension is the RANKING metric, so a feed that shifts it shifts which two
+ * names are traded. Matching the feed is part of running the tested setup.
+ *
+ * Polygon's free plan may not serve today's bars at 10:00, and its rate limit
+ * cannot carry a large universe, so it is a preference and never a requirement.
+ * Whatever answered is recorded per ticker and repeated on the alert.
+ */
+const SOURCES = [
+  {
+    id: 'polygon',
+    available: () => polygonClient.hasKey(),
+    fetch: (tickers, date) => polygonClient.fetchIntradayBars(tickers, date),
+  },
+  {
+    id: 'yahoo',
+    available: () => true,
+    fetch: (tickers, date) => yahooClient.fetchIntradayBars(tickers, date),
+  },
+  {
+    id: 'alpaca',
+    available: () => true,
+    fetch: (tickers, date) => alpacaClient.fetchIntradayBars(tickers, date),
+    // The feed matters enough to be named on every ticker it supplied.
+    label: () => `alpaca:${alpacaClient.getFeed()}`,
+  },
+];
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -55,7 +90,12 @@ async function fetchMorning(tickers, date, {
   attempts = 6,
   waitMs = 10000,
   minCoverage = 0.8,
+  // Naming a feed pins the run to it. Used by the verification script, so the
+  // implementation can be held against the spec on the spec's own feed rather
+  // than on whichever one happened to answer.
+  only = null,
 } = {}) {
+  const order = only ? SOURCES.filter(s => s.id === only) : SOURCES;
   const list = [...new Set((tickers || []).map(t => String(t).toUpperCase()).filter(Boolean))];
   const started = Date.now();
   if (!list.length) {
@@ -68,30 +108,21 @@ async function fetchMorning(tickers, date, {
 
   while (tries < attempts) {
     tries++;
-    const need = list.filter(t => !reachesDecision(bars[t], lastWanted));
-    if (!need.length) break;
+    if (!list.some(t => !reachesDecision(bars[t], lastWanted))) break;
 
-    // Yahoo first: full volume, so the VWAP is the one on the chart.
-    try {
-      const got = await yahooClient.fetchIntradayBars(need, date);
-      for (const [t, b] of Object.entries(got || {})) {
-        if (b && b.length) { bars[t] = b; sources[t] = 'yahoo'; }
-      }
-    } catch (err) {
-      console.warn('[Setups] Yahoo bars failed:', err.message);
-    }
-
-    // Alpaca fills whatever is still short, in one request.
-    const stillNeed = list.filter(t => !reachesDecision(bars[t], lastWanted));
-    if (stillNeed.length) {
+    // Each feed is asked only for what the ones before it could not supply.
+    for (const src of order) {
+      const need = list.filter(t => !reachesDecision(bars[t], lastWanted));
+      if (!need.length) break;
+      if (!src.available()) continue;
       try {
-        const got = await alpacaClient.fetchIntradayBars(stillNeed, date);
-        const feed = alpacaClient.getFeed();
+        const got = await src.fetch(need, date);
+        const label = src.label ? src.label() : src.id;
         for (const [t, b] of Object.entries(got || {})) {
-          if (b && b.length) { bars[t] = b; sources[t] = `alpaca:${feed}`; }
+          if (b && b.length) { bars[t] = b; sources[t] = label; }
         }
       } catch (err) {
-        console.warn('[Setups] Alpaca bars failed:', err.message);
+        console.warn(`[Setups] ${src.id} bars failed:`, err.message);
       }
     }
 
@@ -119,4 +150,4 @@ async function fetchMorning(tickers, date, {
   };
 }
 
-module.exports = { fetchMorning, reachesDecision };
+module.exports = { fetchMorning, reachesDecision, SOURCES };

@@ -2,7 +2,9 @@
 /*
  * Hold the T2 VWAP-extension implementation against the spec's reference log.
  *
- *   node scripts/verify-setup.js
+ *   node scripts/verify-setup.js                 whatever feed answers first
+ *   node scripts/verify-setup.js --feed=polygon  the feed the spec was built on
+ *   node scripts/verify-setup.js --feed=yahoo
  *
  * setup_spec.md section 6 ships eight trades with their direction, entry price,
  * extension and risk. Those numbers came from a separate analysis of real
@@ -16,11 +18,17 @@
  * policy blocks the data hosts — so it lives here to be run on the box that
  * has them.
  *
- * WHAT A MISMATCH MEANS. Not necessarily a bug. The most likely cause is the
- * feed: these figures assume the consolidated tape, and if Yahoo is unreachable
- * and the fallback is Alpaca's IEX feed, every VWAP is computed from a few
- * percent of the volume and will differ. The script prints which feed supplied
- * each ticker so the two explanations can be told apart.
+ * WHAT A MISMATCH MEANS. Usually the feed, not a bug — and that has now been
+ * measured rather than assumed. Run against Yahoo, every direction came out
+ * right and six of the eight entry prices matched to the cent, while the
+ * extensions moved by up to 2.4 points. Direction and entry depend only on
+ * prices; extension depends on VWAP, and VWAP depends on VOLUME. The formula is
+ * identical to the quant platform's, so what differs between the two is the
+ * tape each feed reports.
+ *
+ * The reference numbers were produced on Polygon, the platform's default. So
+ * --feed=polygon is the run that tests THIS code, and a run on any other feed
+ * tests the feed. The column on the right says which one answered.
  */
 
 const path = require('path');
@@ -48,6 +56,15 @@ const TOL = { entry: 0.02, pct: 0.06 };
 const near = (got, want, tol) => got != null && Math.abs(got - want) <= tol;
 const pad = (v, n) => String(v).padEnd(n);
 
+const FEED = (process.argv.find(a => a.startsWith('--feed=')) || '').split('=')[1] || null;
+if (FEED && !barsSource.SOURCES.some(s => s.id === FEED)) {
+  console.error(`Unknown feed "${FEED}". Have: ${barsSource.SOURCES.map(s => s.id).join(', ')}`);
+  process.exit(2);
+}
+console.log(FEED
+  ? `Feed: ${FEED} only.${FEED === 'polygon' ? ' This is the one the spec was built on.' : ''}`
+  : 'Feed: whichever answers first (Polygon, then Yahoo, then Alpaca).');
+
 (async () => {
   const byDate = new Map();
   for (const r of REFERENCE) {
@@ -63,7 +80,7 @@ const pad = (v, n) => String(v).padEnd(n);
     const tickers = rows.map(r => r.ticker);
     // Deliberately the same fetch path the live run uses, so a data problem
     // shows up here rather than only at 10:00 on a Monday.
-    const data = await barsSource.fetchMorning(tickers, date, { attempts: 1, waitMs: 0 });
+    const data = await barsSource.fetchMorning(tickers, date, { attempts: 1, waitMs: 0, only: FEED });
 
     console.log(`\n${date}`);
     for (const r of rows) {
