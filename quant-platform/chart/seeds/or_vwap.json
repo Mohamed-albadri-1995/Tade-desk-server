@@ -1,0 +1,468 @@
+[
+  {
+    "name": "OR + VWAP 09:35 (Long)",
+    "side": "long",
+    "_keep_user_edits": true,
+    "entry": {
+      "logic": "AND",
+      "rules": [
+        {
+          "left": {
+            "kind": "price",
+            "field": "close"
+          },
+          "op": "gt",
+          "right": {
+            "kind": "primitive",
+            "key": "vwap.session",
+            "source": "close"
+          }
+        },
+        {
+          "left": {
+            "kind": "primitive",
+            "key": "vwap.session",
+            "source": "close"
+          },
+          "op": "gt",
+          "right": {
+            "kind": "primitive",
+            "key": "vwap.session",
+            "source": "close",
+            "offset": 3
+          }
+        },
+        {
+          "left": {
+            "kind": "expr",
+            "op": "div",
+            "a": {
+              "kind": "expr",
+              "op": "sub",
+              "a": {
+                "kind": "price",
+                "field": "close"
+              },
+              "b": {
+                "kind": "primitive",
+                "key": "levels.window_low",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              }
+            },
+            "b": {
+              "kind": "expr",
+              "op": "sub",
+              "a": {
+                "kind": "primitive",
+                "key": "levels.window_high",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              },
+              "b": {
+                "kind": "primitive",
+                "key": "levels.window_low",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              }
+            }
+          },
+          "op": "ge",
+          "right": {
+            "kind": "const",
+            "value": 0.55
+          }
+        },
+        {
+          "left": {
+            "kind": "expr",
+            "op": "sub",
+            "a": {
+              "kind": "price",
+              "field": "close"
+            },
+            "b": {
+              "kind": "expr",
+              "op": "add",
+              "a": {
+                "kind": "primitive",
+                "key": "levels.window_low",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              },
+              "b": {
+                "kind": "expr",
+                "op": "div",
+                "a": {
+                  "kind": "expr",
+                  "op": "sub",
+                  "a": {
+                    "kind": "primitive",
+                    "key": "levels.window_high",
+                    "source": "close",
+                    "params": {
+                      "start": 930,
+                      "end": 935
+                    }
+                  },
+                  "b": {
+                    "kind": "primitive",
+                    "key": "levels.window_low",
+                    "source": "close",
+                    "params": {
+                      "start": 930,
+                      "end": 935
+                    }
+                  }
+                },
+                "b": {
+                  "kind": "const",
+                  "value": 2
+                }
+              }
+            }
+          },
+          "op": "ge",
+          "right": {
+            "kind": "expr",
+            "op": "mul",
+            "a": {
+              "kind": "primitive",
+              "key": "volatility.atr",
+              "source": "close",
+              "params": {
+                "length": 14
+              }
+            },
+            "b": {
+              "kind": "const",
+              "value": 0.5
+            }
+          }
+        }
+      ]
+    },
+    "exit": {
+      "logic": "AND",
+      "scope": "runner",
+      "rules": [
+        {
+          "left": {
+            "kind": "price",
+            "field": "close"
+          },
+          "op": "cross_below",
+          "right": {
+            "kind": "primitive",
+            "key": "vwap.session",
+            "source": "close"
+          }
+        }
+      ]
+    },
+    "risk": {
+      "sl": {
+        "type": "prim",
+        "anchor": {
+          "kind": "expr",
+          "op": "add",
+          "a": {
+            "kind": "primitive",
+            "key": "levels.window_low",
+            "source": "close",
+            "params": {
+              "start": 930,
+              "end": 935
+            }
+          },
+          "b": {
+            "kind": "expr",
+            "op": "div",
+            "a": {
+              "kind": "expr",
+              "op": "sub",
+              "a": {
+                "kind": "primitive",
+                "key": "levels.window_high",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              },
+              "b": {
+                "kind": "primitive",
+                "key": "levels.window_low",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              }
+            },
+            "b": {
+              "kind": "const",
+              "value": 2
+            }
+          }
+        },
+        "value": 0.0,
+        "freeze": true
+      },
+      "targets": [
+        {
+          "fraction": 0.5,
+          "r_multiple": 2.0
+        }
+      ],
+      "window_start": 935,
+      "window_end": 935,
+      "max_entries_per_day": 1
+    }
+  },
+  {
+    "name": "OR + VWAP 09:35 (Short)",
+    "side": "short",
+    "_keep_user_edits": true,
+    "entry": {
+      "logic": "AND",
+      "rules": [
+        {
+          "left": {
+            "kind": "price",
+            "field": "close"
+          },
+          "op": "lt",
+          "right": {
+            "kind": "primitive",
+            "key": "vwap.session",
+            "source": "close"
+          }
+        },
+        {
+          "left": {
+            "kind": "primitive",
+            "key": "vwap.session",
+            "source": "close"
+          },
+          "op": "lt",
+          "right": {
+            "kind": "primitive",
+            "key": "vwap.session",
+            "source": "close",
+            "offset": 3
+          }
+        },
+        {
+          "left": {
+            "kind": "expr",
+            "op": "div",
+            "a": {
+              "kind": "expr",
+              "op": "sub",
+              "a": {
+                "kind": "price",
+                "field": "close"
+              },
+              "b": {
+                "kind": "primitive",
+                "key": "levels.window_low",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              }
+            },
+            "b": {
+              "kind": "expr",
+              "op": "sub",
+              "a": {
+                "kind": "primitive",
+                "key": "levels.window_high",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              },
+              "b": {
+                "kind": "primitive",
+                "key": "levels.window_low",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              }
+            }
+          },
+          "op": "le",
+          "right": {
+            "kind": "const",
+            "value": 0.45
+          }
+        },
+        {
+          "left": {
+            "kind": "expr",
+            "op": "sub",
+            "a": {
+              "kind": "expr",
+              "op": "add",
+              "a": {
+                "kind": "primitive",
+                "key": "levels.window_low",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              },
+              "b": {
+                "kind": "expr",
+                "op": "div",
+                "a": {
+                  "kind": "expr",
+                  "op": "sub",
+                  "a": {
+                    "kind": "primitive",
+                    "key": "levels.window_high",
+                    "source": "close",
+                    "params": {
+                      "start": 930,
+                      "end": 935
+                    }
+                  },
+                  "b": {
+                    "kind": "primitive",
+                    "key": "levels.window_low",
+                    "source": "close",
+                    "params": {
+                      "start": 930,
+                      "end": 935
+                    }
+                  }
+                },
+                "b": {
+                  "kind": "const",
+                  "value": 2
+                }
+              }
+            },
+            "b": {
+              "kind": "price",
+              "field": "close"
+            }
+          },
+          "op": "ge",
+          "right": {
+            "kind": "expr",
+            "op": "mul",
+            "a": {
+              "kind": "primitive",
+              "key": "volatility.atr",
+              "source": "close",
+              "params": {
+                "length": 14
+              }
+            },
+            "b": {
+              "kind": "const",
+              "value": 0.5
+            }
+          }
+        }
+      ]
+    },
+    "exit": {
+      "logic": "AND",
+      "scope": "runner",
+      "rules": [
+        {
+          "left": {
+            "kind": "price",
+            "field": "close"
+          },
+          "op": "cross_above",
+          "right": {
+            "kind": "primitive",
+            "key": "vwap.session",
+            "source": "close"
+          }
+        }
+      ]
+    },
+    "risk": {
+      "sl": {
+        "type": "prim",
+        "anchor": {
+          "kind": "expr",
+          "op": "add",
+          "a": {
+            "kind": "primitive",
+            "key": "levels.window_low",
+            "source": "close",
+            "params": {
+              "start": 930,
+              "end": 935
+            }
+          },
+          "b": {
+            "kind": "expr",
+            "op": "div",
+            "a": {
+              "kind": "expr",
+              "op": "sub",
+              "a": {
+                "kind": "primitive",
+                "key": "levels.window_high",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              },
+              "b": {
+                "kind": "primitive",
+                "key": "levels.window_low",
+                "source": "close",
+                "params": {
+                  "start": 930,
+                  "end": 935
+                }
+              }
+            },
+            "b": {
+              "kind": "const",
+              "value": 2
+            }
+          }
+        },
+        "value": 0.0,
+        "freeze": true
+      },
+      "targets": [
+        {
+          "fraction": 0.5,
+          "r_multiple": 2.0
+        }
+      ],
+      "window_start": 935,
+      "window_end": 935,
+      "max_entries_per_day": 1
+    }
+  }
+]
