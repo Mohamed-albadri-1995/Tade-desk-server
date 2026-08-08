@@ -348,3 +348,33 @@ describe('share count', () => {
     risk.settings.mockRestore();
   });
 });
+
+/*
+ * A setup switched off from the alerts page does not run — and does not
+ * announce that it did not run. "Nothing qualified" every morning for something
+ * you deliberately turned off is the message that teaches you to stop reading
+ * the feed.
+ */
+describe('switching a setup off', () => {
+  const prefs = require('../src/setups/prefs');
+
+  test('runDue skips it, silently', async () => {
+    jest.spyOn(prefs, 'isEnabled').mockReturnValue(false);
+    feed({ FAST: rising(3) });
+    const out = await runner.runDue('10:00', { date: DATE });
+    expect(out).toEqual([]);
+    expect(bars.fetchMorning).not.toHaveBeenCalled();
+    expect(store.recentFires(DATE)).toHaveLength(0);
+    prefs.isEnabled.mockRestore();
+  });
+
+  test('and runs it again when switched back on', async () => {
+    jest.spyOn(prefs, 'isEnabled').mockReturnValue(true);
+    feed({ FAST: rising(3) });
+    r0.getTodayRows.mockReturnValue([{ ticker: 'FAST' }]);
+    const out = await runner.runDue('10:00', { date: DATE });
+    expect(out).toHaveLength(1);
+    expect(store.recentFires(DATE).some(f => f.level === 'trade')).toBe(true);
+    prefs.isEnabled.mockRestore();
+  });
+});

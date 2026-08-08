@@ -27,9 +27,25 @@ router.get('/', (req, res) => {
       describe: s.describe,
       caution: s.caution,
       liveFeed: s.liveFeed || null,
+      enabled: require('../setups/prefs').isEnabled(s.id),
       mine: s.toolId === config.toolId,
     })),
   });
+});
+
+/*
+ * Switch a setup on or off.
+ *
+ * The definition itself stays in code — its windows, cutoffs and ranking are
+ * the thing that was tested, not a form to fill in. What belongs to the trader
+ * is whether it runs, and any process can serve this because it is a shared
+ * file rather than a tool's database.
+ */
+router.post('/:id/enabled', express.json(), (req, res) => {
+  const setup = setups.get(req.params.id);
+  if (!setup) return res.status(404).json({ ok: false, error: 'No such setup' });
+  const enabled = require('../setups/prefs').setEnabled(setup.id, req.body?.enabled);
+  res.json({ ok: true, id: setup.id, enabled });
 });
 
 /*

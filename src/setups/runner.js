@@ -19,6 +19,7 @@ const { toETDate } = require('../utils/time');
 const setups = require('./index');
 const barsSource = require('./bars');
 const risk = require('./risk');
+const prefs = require('./prefs');
 const alertStore = require('../alerts/store');
 
 /** The minute before the decision — the last bar that must have closed. */
@@ -234,7 +235,12 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
 
 /** Every setup this tool owns, run in turn. Used by the scheduler. */
 async function runDue(decisionTime, opts = {}) {
-  const mine = setups.forTool(config.toolId).filter(s => s.decisionTime === decisionTime);
+  const mine = setups.forTool(config.toolId)
+    .filter(s => s.decisionTime === decisionTime)
+    // Switched off from the alerts page. Silently skipped rather than
+    // publishing "nothing qualified": you turned it off, and a message every
+    // morning saying so is the thing that makes people stop reading the feed.
+    .filter(s => prefs.isEnabled(s.id));
   const out = [];
   for (const setup of mine) {
     try {

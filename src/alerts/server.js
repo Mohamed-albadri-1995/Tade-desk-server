@@ -52,14 +52,31 @@ app.use('/api/alerts', require('../routes/alerts'));
 app.get('/api/setups', (req, res) => {
   try {
     const setups = require('../setups');
+    const prefs = require('../setups/prefs');
     res.json({
       ok: true,
       setups: setups.SETUPS.map(s => ({
         id: s.id, name: s.name, toolId: s.toolId,
         decisionTime: s.decisionTime, universeScanAt: s.universeScanAt || null,
         describe: s.describe, caution: s.caution, liveFeed: s.liveFeed || null,
+        params: s.params,
+        enabled: prefs.isEnabled(s.id),
       })),
     });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Switching one off is a shared file, so this process can do it even though it
+// cannot run a setup — running needs the owning tool's card list.
+app.post('/api/setups/:id/enabled', express.json(), (req, res) => {
+  try {
+    const setups = require('../setups');
+    const setup = setups.get(req.params.id);
+    if (!setup) return res.status(404).json({ ok: false, error: 'No such setup' });
+    const enabled = require('../setups/prefs').setEnabled(setup.id, req.body?.enabled);
+    res.json({ ok: true, id: setup.id, enabled });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

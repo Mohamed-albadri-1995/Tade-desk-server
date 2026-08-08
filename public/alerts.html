@@ -50,6 +50,20 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   border:1px solid var(--border); border-radius:4px; padding:2px 6px; white-space:nowrap; }
 .lnk:hover { color:var(--blue); border-color:var(--blue); }
 
+/* ── setups, the definitions ──
+   NOT .setup: a FIRED setup alert below already carries that class, and an
+   unscoped rule here would restyle every one of them. That exact collision has
+   already cost a debugging session once on the landing page. */
+.setup-def { background:var(--bg2); border:1px solid var(--border);
+  border-left:3px solid var(--accent); border-radius:8px; padding:11px 13px; margin-top:8px; }
+.setup-def.off { opacity:.5; border-left-color:var(--text3); }
+.setup-def .t { font-weight:700; font-size:14px; }
+.setup-def .btn { margin-left:auto; padding:5px 11px; }
+.st-rules { margin:8px 0 0; padding-left:17px; font-size:11.5px; color:var(--text2);
+  line-height:1.6; overflow-wrap:anywhere; }
+.st-rules li { margin:2px 0; }
+.st-meta { font-size:10.5px; color:var(--text3); margin-top:7px; }
+
 /* ── position sizing ── */
 .risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
   border:1px solid var(--border); border-radius:8px; padding:12px 13px; }
@@ -155,6 +169,16 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
     these candidates, so a fixed amount would risk fifteen times more on one than another.
     <b>Leave these blank and alerts arrive without a share count.</b></div>
 </div>
+
+<!-- Setups get their own list for the same reason rules do. Before this they
+     existed only in the moment they fired: you could not see which setups there
+     were, when they would run, or switch one off. With more than one that stops
+     being cosmetic. -->
+<div class="sec">
+  <span>Setups</span>
+  <span class="note">strategies that rank at a fixed time — not rules</span>
+</div>
+<div id="setups"><div class="empty">Loading…</div></div>
 
 <div class="sec"><span>Fired today</span><span class="note" id="fire-count"></span></div>
 <div id="fires"><div class="empty">Loading…</div></div>
@@ -305,6 +329,57 @@ function announce(fires) {
   // The title carries it even when the tab is in the background with sound off.
   document.title = `(${fires.length}) Alerts · Trade Desk`;
   setTimeout(() => { document.title = 'Alerts · Trade Desk'; }, 30000);
+}
+
+/* ── setups ──
+ * Listed whether or not they have fired, because "what will run at 10:00, and
+ * is it on" is a question you ask BEFORE the decision, not after it.
+ */
+let SETUPS = [];
+async function loadSetups() {
+  const out = document.getElementById('setups');
+  if (!out) return;
+  try {
+    const d = await (await fetch('/api/setups')).json();
+    SETUPS = d.setups || [];
+    DECISIONS = SETUPS.filter(s => s.enabled !== false)
+      .map(s => s.decisionTime).filter(Boolean);
+    paintNextDecision();
+    if (!SETUPS.length) {
+      out.innerHTML = '<div class="empty">No setups defined.</div>';
+      return;
+    }
+    out.innerHTML = SETUPS.map(s => {
+      const on = s.enabled !== false;
+      return `<div class="setup-def${on ? '' : ' off'}">
+        <div class="su-head">
+          <span class="t">${esc(s.name)}</span>
+          <span class="tool">${esc(s.toolId)}</span>
+          <span class="su-tag">${esc(s.decisionTime)} ET</span>
+          <button class="btn${on ? ' on' : ''}" onclick="toggleSetup('${esc(s.id)}', ${!on})">
+            ${on ? 'On' : 'Off'}</button>
+        </div>
+        <ul class="st-rules">${(s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
+        <div class="st-meta">
+          ${s.universeScanAt ? `extra scan ${esc(s.universeScanAt)} to freshen the list · ` : ''}
+          feed: ${esc(s.liveFeed || 'default')}
+        </div>
+        ${s.caution ? `<div class="su-caution">${esc(s.caution)}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch {
+    out.innerHTML = '<div class="empty">Could not read the setups.</div>';
+  }
+}
+
+async function toggleSetup(id, enabled) {
+  try {
+    await fetch(`/api/setups/${encodeURIComponent(id)}/enabled`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+  } catch { /* the reload below shows whether it took */ }
+  loadSetups();
 }
 
 /* ── position sizing ── */
@@ -565,6 +640,7 @@ paintNoise();
 loadFires();
 loadRules();
 loadRisk();
+loadSetups();
 // A card's "add alert" button links here with the ticker, so the rule opens
 // already scoped to the stock that was on screen.
 if (qs.get('ticker')) toggleForm({ ticker: qs.get('ticker').toUpperCase() });
@@ -581,10 +657,9 @@ if (qs.get('ticker')) toggleForm({ ticker: qs.get('ticker').toUpperCase() });
  * time. The decision times come from the setups themselves rather than a
  * hardcoded 10:00, so changing one moves this with it.
  */
+// Filled by loadSetups(), which is also what draws the list. A setup that is
+// switched off is not a decision to watch for, so the two cannot drift apart.
 let DECISIONS = [];
-fetch('/api/setups').then(r => r.json())
-  .then(d => { DECISIONS = (d.setups || []).map(s => s.decisionTime).filter(Boolean); })
-  .catch(() => { /* no setups listed — the loose cadence still applies */ });
 
 function minutesToNextDecision() {
   const now = new Intl.DateTimeFormat('en-US', {
@@ -621,7 +696,14 @@ schedulePoll();
  */
 function paintNextDecision() {
   const el = document.getElementById('next-decision');
-  if (!el || !DECISIONS.length) return;
+  if (!el) return;
+  // No decision times means every setup is switched off. Saying nothing there
+  // reads as "still loading"; the truthful line is that nothing will fire.
+  if (!DECISIONS.length) {
+    el.className = 'note';
+    el.textContent = SETUPS.length ? 'every setup is off — nothing will fire' : '';
+    return;
+  }
   const away = minutesToNextDecision();
   el.className = away <= 2 ? 'note live' : 'note';
   // Infinity means every decision today has already run. Saying nothing then
