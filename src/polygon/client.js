@@ -23,14 +23,47 @@
  * discovered on a Monday morning.
  */
 
+const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
 const { getKey } = require('../sharedKeys');
 const { toETTime, toETDate } = require('../utils/time');
 
 const BASE = 'https://api.polygon.io';
 
+/*
+ * The quant platform keeps its keys in quant-platform/.env and loads them
+ * itself at startup, so `POLYGON_API_KEY` exists for that program and not for
+ * these ones — the screeners are started by pm2 with their own environment and
+ * never see it. The first run of check-feeds reported "no POLYGON_API_KEY
+ * configured" on a box that has one and uses it daily.
+ *
+ * Read rather than copied. One key in one place, visible to both programs, is
+ * the arrangement that cannot drift; duplicating it into settings would mean
+ * rotating it twice and discovering the second copy months later.
+ *
+ * The file is gitignored on the platform side, which is why the key is read
+ * from there and never written anywhere here.
+ */
+function fromQuantPlatformEnv(name) {
+  try {
+    const file = path.join(__dirname, '..', '..', 'quant-platform', '.env');
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq < 1) continue;
+      if (trimmed.slice(0, eq).trim().replace(/^export\s+/, '') !== name) continue;
+      // Strip surrounding quotes, which a hand-edited .env usually has.
+      return trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, '');
+    }
+  } catch { /* no file, or unreadable — fall through to the other sources */ }
+  return '';
+}
+
 function apiKey() {
-  return getKey('polygonApiKey', 'POLYGON_API_KEY');
+  return getKey('polygonApiKey', 'POLYGON_API_KEY')
+    || fromQuantPlatformEnv('POLYGON_API_KEY');
 }
 
 function hasKey() {

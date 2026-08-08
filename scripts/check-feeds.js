@@ -27,7 +27,32 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const { toETDate, toETTime } = require(path.join(ROOT, 'src', 'utils', 'time'));
 
-const DATE = process.argv[2] || toETDate(Date.now());
+/*
+ * Default to the last weekday, not to today.
+ *
+ * Run on a Saturday, every feed correctly returns nothing, and a report that
+ * says "no bars" next to "cannot serve the 10:00 decision live" reads as three
+ * broken feeds. It is a closed market. The weekend is the most likely time to
+ * be sitting down to check this, so the default has to survive it.
+ *
+ * Weekends only. Holidays are not handled — an empty result on a holiday still
+ * looks like a failure, which is why the day is always printed.
+ */
+function lastWeekday(ts = Date.now()) {
+  const d = new Date(ts);
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(d.getTime() - i * 86400000);
+    const name = day.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/New_York' });
+    if (name !== 'Sat' && name !== 'Sun') return toETDate(day.getTime());
+  }
+  return toETDate(ts);
+}
+
+const TODAY = toETDate(Date.now());
+const ASKED = process.argv[2] || null;
+const DATE = ASKED || lastWeekday();
+const DOW = new Date(`${DATE}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long' });
+const IS_WEEKEND = DOW === 'Saturday' || DOW === 'Sunday';
 const PROBE_TICKERS = ['AAPL', 'MSFT'];
 
 const yahoo = require(path.join(ROOT, 'src', 'yahoo', 'client'));
@@ -57,15 +82,24 @@ function summarise(bars) {
 }
 
 (async () => {
-  console.log(`date ${DATE} · now ${toETTime(Date.now())} ET`);
-  console.log(`asking each feed for ${PROBE_TICKERS.join(', ')} 09:30–09:59\n`);
+  console.log(`date ${DATE} (${DOW}) · now ${toETTime(Date.now())} ET`);
+  if (!ASKED && DATE !== TODAY) {
+    console.log(`(${TODAY} is a weekend — checking the last trading day instead)`);
+  }
+  if (IS_WEEKEND) {
+    console.log('\n!! That is a weekend. Every feed will correctly return nothing,');
+    console.log('   which says nothing about whether they work. Pass a weekday.');
+  }
+  console.log(`\nasking each feed for ${PROBE_TICKERS.join(', ')} 09:30–09:59\n`);
 
   const results = {};
 
   for (const [name, fn, note] of [
     ['polygon', () => polygon.hasKey()
       ? polygon.fetchIntradayBars(PROBE_TICKERS, DATE)
-      : Promise.reject(new Error('no POLYGON_API_KEY configured')),
+      : Promise.reject(new Error(
+        'no key — looked in settings, data/keys.json, POLYGON_API_KEY '
+        + 'and quant-platform/.env')),
       'the feed the spec was built on'],
     ['yahoo', () => yahoo.fetchIntradayBars(PROBE_TICKERS, DATE), 'consolidated, fast'],
     ['alpaca', () => alpaca.fetchIntradayBars(PROBE_TICKERS, DATE),
@@ -105,9 +139,17 @@ function summarise(bars) {
     console.log('so a disagreement here is a disagreement about the trade list.');
   }
 
-  const today = DATE === toETDate(Date.now());
-  if (today) {
-    console.log('\nThis was today. A feed showing "no bars" or missing 09:59 cannot');
-    console.log('serve the 10:00 decision live, whatever it does for past dates.');
+  console.log();
+  if (IS_WEEKEND) {
+    console.log('Nothing above means anything — the market was shut. Re-run on a weekday,');
+    console.log('or pass one:  node scripts/check-feeds.js ' + lastWeekday());
+  } else if (DATE === TODAY) {
+    console.log('This was TODAY, so it is the real test: a feed that reaches 09:59 here');
+    console.log('can serve the 10:00 decision live. One that does not, cannot — whatever');
+    console.log('it manages for past dates.');
+  } else {
+    console.log(`This was ${DATE}, a past session, so it only shows which feeds hold`);
+    console.log('history. Whether one can serve the 10:00 decision LIVE is a different');
+    console.log('question, and only a run during market hours answers it.');
   }
 })();
