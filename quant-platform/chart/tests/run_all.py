@@ -44,6 +44,7 @@ PARTS = [
     ('logic_audit29.py',    'multi-source screeners: N scanning tools, merge, attribution, dead-source'),
     ('logic_audit30.py',    'warm-up sweep: every primitive gets the history it measurably needs'),
     ('logic_audit31.py',    'OR + session VWAP 09:35 setup: timing, gates, 2R half, VWAP trail'),
+    ('logic_audit32.py',    'T2 10:00 VWAP-extension: direction, invalidation, stop-first, per-day rank'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     ('ui_runtime.js',       'browser UI: page script evaluates, click handlers run'),
 ]

@@ -227,6 +227,7 @@
     <h3>🧪 Backtest</h3>
     <div id="btBox" style="font-size:11px">
       <select id="btStrat" style="width:100%"><option value="">— saved strategy —</option></select>
+      <select id="btStrat2" style="width:100%;margin-top:4px" title="Optional SECOND strategy — usually the short book of the same setup. Both are evaluated on every day-symbol pair and their trades are POOLED, so a per-day ranking picks across both sides. Ranking each side in its own run would select different names."><option value="">— second book (optional, e.g. the short side) —</option></select>
       <div style="display:flex;gap:4px;margin-top:4px">
         <select id="btUni" style="flex:1"><option value="symbols">Symbols</option><option value="R1">Register R1</option><option value="Shortlist">Shortlist</option></select>
         <select id="btFill" style="flex:1" title="fill model: next open = honest live fills (a signal at a bar's close becomes a market order at the NEXT bar's open — what the funded account actually gets). close = signal bar's own close, optimistic, for eyeballing only."><option value="next_open" selected>fill: next open</option><option value="close">fill: close</option></select>
@@ -239,6 +240,7 @@
       <input id="btCost" type="number" step="any" placeholder="cost bps/side (e.g. 5)" title="transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies)." style="width:100%;margin-top:4px">
       <input id="btEquity" type="number" step="any" value="100000" placeholder="account $ (e.g. 100000)" title="REAL ACCOUNT sizing: starting equity. Position size per trade = (equity x risk%) / (entry - stop), so every stop-out loses the same % of the account. Equity compounds in trade order. Empty = off." style="width:100%;margin-top:4px">
       <input id="btRiskPct" type="number" step="any" value="0.5" placeholder="risk % per trade (e.g. 0.5)" title="Percent of CURRENT equity lost if the stop is hit. Requires the strategy to define a stop." style="width:100%;margin-top:4px">
+      <input id="btTopN" type="number" step="1" min="0" placeholder="top N per day by VWAP extension (blank = take every signal)" title="RANK the day's signals against each other and trade only the strongest N, across the whole universe. Extension = distance from entry to the VWAP stop, in percent. Blank/0 = off, take every signal. This is a cross-symbol decision, so it happens in the runner after all symbols are evaluated — a strategy cannot see the other names." style="width:100%;margin-top:4px">
       <input id="btMinRvol" type="number" step="any" placeholder="min RVOL — In Play filter (e.g. 5)" title="SMB In-Play universe filter: skip a day·symbol pair unless its HONEST cumulative RVOL (qp rel_volume: volume so far today vs the average by the same time of day, 20 sessions) is at least this at the strategy's session start. Empty = off. This is NOT the register's ctx_rvol (a one-bar TradingView snapshot at ~09:36)." style="width:100%;margin-top:4px">
       <div style="display:flex;gap:4px;margin-top:4px">
         <select id="btPreset" style="flex:1" title="prop-firm preset — fills the fields below; everything stays editable"><option value="">preset: custom</option><option value="ttp">Trade The Pool</option></select>
@@ -975,6 +977,8 @@ async function loadStrategies(){
   const sel=document.getElementById('stratLoad'); sel.innerHTML='<option value="">— saved —</option>';
   for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);} if(STRAT.id)sel.value=STRAT.id;
   const bsel=document.getElementById('btStrat'); if(bsel){ const keep=bsel.value; bsel.innerHTML='<option value="">— saved strategy —</option>'; for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; bsel.appendChild(o);} if(keep)bsel.value=keep; }
+  // the optional SECOND book gets the same list (see the tooltip on the select)
+  const bsel2=document.getElementById('btStrat2'); if(bsel2){ const keep2=bsel2.value; bsel2.innerHTML='<option value="">— second book (optional, e.g. the short side) —</option>'; for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; bsel2.appendChild(o);} if(keep2)bsel2.value=keep2; }
 }
 
 // ── Phase 4: backtest panel ──
@@ -1126,6 +1130,8 @@ function btRenderCore(g,extra){
     let c=`coverage: <b>${cov.evaluated}/${cov.pairs}</b> pairs had data (${cov.tf}·${cov.feed})`;
     if(cov.no_data)c+=` · <span id="btNdTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="the feed returned ZERO bars for these — they were never evaluated. Small caps often have no alpaca (IEX) data; use polygon.">${cov.no_data} no-data</span>`;
     c+=` · signals on ${cov.signal_pairs} pairs (${cov.signals_on_day})·traded ${cov.traded_pairs}`;
+    if(cov.rank_per_day)c+=` · <b>ranked</b>: kept top ${cov.rank_per_day.top_n}/day `
+      +`(${cov.rank_per_day.kept} kept, ${cov.rank_per_day.dropped_by_rank} dropped by rank)`;
     if(cov.bars_median!=null)c+=` · ~${cov.bars_median} bars/pair`;
     html+=`<br><span class="muted" style="font-size:10px">${c}</span>`;
     // PER SCANNING TOOL — which screener supplied the universe, and how much
@@ -1193,6 +1199,8 @@ async function btRun(){
   const uni=document.getElementById('btUni').value;
   const spec={ name:'bt '+new Date().toISOString().slice(0,16),
     strategy_id:parseInt(sid,10),
+    strategy_ids:(function(){ const b=document.getElementById('btStrat2').value;
+      return b?[parseInt(sid,10),parseInt(b,10)]:null; })(),
     universe: uni==='symbols'
       ? {kind:'symbols', symbols:(document.getElementById('btSyms').value||'').split(',').map(s=>s.trim()).filter(Boolean)}
       : {kind:'register', register:uni},
@@ -1200,6 +1208,8 @@ async function btRun(){
     tf:document.getElementById('btTf').value, feed:document.getElementById('btFeed').value,
     view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0,
     min_rvol:(document.getElementById('btMinRvol').value!==''?parseFloat(document.getElementById('btMinRvol').value):null),
+    rank_per_day:(function(){ const n=parseInt(document.getElementById('btTopN').value,10);
+      return (Number.isFinite(n)&&n>0)?{metric:'vwap_extension',top_n:n}:null; })(),
     account_equity:parseFloat(document.getElementById('btEquity').value)||0,
     risk_pct:parseFloat(document.getElementById('btRiskPct').value)||0,
     shares:parseFloat(document.getElementById('btShares').value)||100,

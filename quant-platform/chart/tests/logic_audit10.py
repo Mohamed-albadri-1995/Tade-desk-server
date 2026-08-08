@@ -130,9 +130,13 @@ chkv('day-10 has both tickers', sorted(t['symbol'] for t in out2['trades']
 ctxs = {(t['date'], t['symbol']): t.get('ctx') or {} for t in out2['trades']}
 chkv('R1 card rides with each trade', ctxs[('2024-01-09', 'AAA')].get('score'), 71)
 chkv('per-day ctx differs', ctxs[('2024-01-10', 'AAA')].get('regime'), 'CHOP')
-# symbols universe carries NO register card — only the drop_pct diagnostic
-chkv('symbols universe ctx has no register card (only the diagnostic)',
-     all(set(t.get('ctx') or {}) <= {'drop_pct'} for t in out['trades']), True)
+# symbols universe carries NO register card — only the run's own diagnostics
+# (drop_pct, and `strategy`, which names the strategy that produced the trade
+# so a run carrying a long book AND a short book stays attributable)
+chkv('symbols universe ctx has no register card (only diagnostics)',
+     all(set(t.get('ctx') or {}) <= {'drop_pct', 'strategy'} for t in out['trades']), True)
+chkv('every trade names the strategy that produced it',
+     all((t.get('ctx') or {}).get('strategy') for t in out['trades']), True)
 chkv('drop_pct diagnostic rides on each trade',
      all('drop_pct' in (t.get('ctx') or {}) for t in out['trades']), True)
 # DEDUP: a day's register listing the same symbol twice must yield ONE pair —
