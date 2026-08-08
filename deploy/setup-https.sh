@@ -167,6 +167,32 @@ fi
 if curl -fsS --max-time 20 "https://$DOMAIN/health" >/dev/null 2>&1; then
   echo
   echo "  https://$DOMAIN is live."
+
+  # Point the landing page's Alerts card here. Without this it keeps building
+  # the link from its own protocol and host — http://<ip>:3090 — which lands on
+  # the insecure origin where the notification prompt is refused. The
+  # certificate would exist and nothing would use it.
+  #
+  # Written only now, after the certificate is confirmed working: a landing page
+  # linking to an https address that does not answer is worse than one linking
+  # to the http address that does. data/ is gitignored, so this survives pulls.
+  mkdir -p "$ROOT/data"
+  node -e '
+    const fs = require("fs"), p = process.argv[1], url = process.argv[2];
+    let m = {};
+    try { m = JSON.parse(fs.readFileSync(p, "utf8")) || {}; } catch {}
+    m.ALERTS = url;
+    fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
+  ' "$ROOT/data/app-urls.json" "https://$DOMAIN"
+  echo "  landing page → data/app-urls.json (Alerts card now opens the https address)"
+  # The page reads this through /api/tools, which is served by the screener
+  # process, so that process has to be told. Reloading only the tools leaves the
+  # alerts app itself alone.
+  if command -v pm2 >/dev/null; then
+    pm2 reload /^tool-/ >/dev/null 2>&1 || pm2 restart all >/dev/null 2>&1 || true
+    echo "  screeners reloaded so the card picks it up"
+  fi
+
   echo
   echo "  Open it on the phone and tap 🔔 Notifications — it should now ASK"
   echo "  rather than refuse. That is the whole point of this."

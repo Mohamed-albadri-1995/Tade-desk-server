@@ -67,6 +67,30 @@ const config = {
   apps: loadRegistry('apps'),
 };
 
+/*
+ * Public addresses for apps that have one, from data/app-urls.json:
+ *
+ *   { "ALERTS": "https://mbtradedesk.duckdns.org" }
+ *
+ * Kept out of tools.config.json on purpose. The registry is committed, and a
+ * domain is not — it belongs to whoever deployed this box, it is set by
+ * deploy/setup-https.sh once a certificate has actually been issued, and an
+ * edit to a tracked file is an edit that makes the next `git pull` refuse to
+ * run. data/ is gitignored, so writing here survives every pull.
+ *
+ * Absent, unreadable or malformed leaves every app on host:port, which is what
+ * it was before any of this existed. A landing page is not worth failing to
+ * start over.
+ */
+try {
+  const raw = fs.readFileSync(path.join(ROOT, 'data', 'app-urls.json'), 'utf8');
+  const urls = JSON.parse(raw);
+  for (const app of config.apps) {
+    const u = urls[app.id];
+    if (typeof u === 'string' && /^https?:\/\//.test(u)) app.url = u;
+  }
+} catch { /* no overrides — host:port, as before */ }
+
 // ── capture times ──────────────────────────────────────────────────────────
 // The model only ever learns from one moment a day: r1 freezes the cards, and
 // r3 measures how far each ran from two entry times shortly after. Those were

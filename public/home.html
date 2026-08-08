@@ -139,6 +139,19 @@ body {
 .uni-chip { display:flex; align-items:center; gap:8px; background:var(--bg2);
   border:1px solid var(--border); border-radius:7px; padding:8px 12px; }
 .uni-chip.multi { border-color:#eab30877; background:#eab30810; }
+/* The CANSLIM panel is a <details>. Its headline has to look like the other
+   panel titles rather than like a browser disclosure widget, so the native
+   marker is replaced with one that sits on the same baseline as the text. */
+.cs-summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:8px; }
+.cs-summary::-webkit-details-marker { display:none; }
+.cs-summary::before { content:'▸'; color:#c084fc; font-size:.8em; transition:transform .15s; }
+#cs-wrap[open] .cs-summary::before { transform:rotate(90deg); }
+/* The count is the reason to open it, so it is legible while shut. Amber only
+   when something is about to drop off — that is the change that turns a badge
+   off on every other tool's cards, which reads as a bug if it is a surprise. */
+.cs-count { font-size:12px; font-weight:400; color:var(--dim); }
+.cs-count b { color:#facc15; font-weight:600; }
+
 /* Same purple the CANSLIM badge uses on a card, so the two read as one thing.
    Scoped to the CANSLIM panel: an unscoped .uni-chip rule here would sit after
    .uni-chip.multi and recolour the shortlist's chips as a side effect. The
@@ -234,15 +247,27 @@ body {
 
 <!-- The other shared list. Unlike the shortlist it is not about today: these
      are companies, and membership lasts a quarter. It belongs here rather than
-     inside a tool because every tool reads it. -->
-<div class="cmp-wrap" id="cs-wrap">
-  <div class="uni-title">CANSLIM — the growth list</div>
+     inside a tool because every tool reads it.
+
+     Folded shut, unlike the shortlist above it. The two lists answer questions
+     of very different urgency: the shortlist is what to look at this morning
+     and changes hourly, while membership here turns over on the earnings
+     calendar and is the same list it was last week. Thirty-odd tickers that
+     rarely change, sat open above the thing you actually came to read, are
+     noise — so the headline carries the count and the drop-offs, which is the
+     part worth knowing at a glance, and the names are one tap away.
+
+     The panel still LOADS while shut, because the count in the headline is the
+     reason to open it. -->
+<details class="cmp-wrap" id="cs-wrap">
+  <summary class="uni-title cs-summary">CANSLIM — the growth list
+    <span class="cs-count" id="cs-count"></span></summary>
   <div class="cmp-hint">Who is a growth company, decided once a day on earnings and sales rather
     than on what the tape did. A name stays for 90 days from the last time it qualified, so this
     changes with the earnings calendar and not with the market. Every tool tags its own cards
     from this list — it is a label and never a filter.</div>
   <div id="cs-out"><div class="cmp-hint" style="margin-top:14px">Loading…</div></div>
-</div>
+</details>
 
 <div class="cmp-wrap">
   <button class="cmp-btn" id="cmp-btn" onclick="loadComparison()">Compare every screener</button>
@@ -298,13 +323,27 @@ function appCard(a) {
   // visible in one place and it is obvious which one you are in.
   const self = a.isSelf === true;
   const tag = self ? 'div' : 'a';
-  const href = self ? '' : ` href="${location.protocol}//${location.hostname}:${a.port}${a.path || '/'}"`;
+  // An app can declare its own address, and then that wins over host:port.
+  // The alerts app is the case this exists for: it sits behind https on a real
+  // domain, and it has to, because a browser refuses to grant notification
+  // permission to a page served over plain http. Building its link from this
+  // page's own protocol and host would send every visit straight back to the
+  // http origin where the permission prompt is refused — the one thing the
+  // certificate was obtained to prevent. See deploy/setup-https.sh, which
+  // writes the address after issuing the certificate.
+  const url = a.url
+    ? a.url.replace(/\/$/, '') + (a.path && a.path !== '/' ? a.path : '')
+    : `${location.protocol}//${location.hostname}:${a.port}${a.path || '/'}`;
+  const href = self ? '' : ` href="${url}"`;
+  // Say where it actually goes. "port 3090" under a card that opens an https
+  // domain is a wrong answer to "which port do I open in AWS".
+  const where = a.url ? new URL(url).host : `port ${a.port}`;
   return `
     <${tag} class="app-card${self ? ' is-self' : ''}"${href} style="border-left-color:${a.accent || 'var(--accent)'}">
       <div class="app-name" style="color:${a.accent || 'var(--text)'}">${a.name}</div>
       <div class="app-desc">${a.desc || ''}</div>
       <div class="app-foot">
-        <span>port ${a.port}</span>
+        <span>${where}</span>
         ${self ? '<span class="app-here">you are here</span>'
                : '<span class="app-arrow">→</span>'}
       </div>
@@ -750,10 +789,17 @@ loadUnifiedShortlist();
 async function loadCanslim() {
   const out = document.getElementById('cs-out');
   if (!out) return;
+  // The headline stays shut, so it has to carry enough for the reader to decide
+  // whether opening it is worth it — the count, and anything expiring.
+  const head = (txt) => {
+    const el = document.getElementById('cs-count');
+    if (el) el.innerHTML = txt;
+  };
   try {
     const d = await (await fetch('/api/canslim')).json();
     const rows = (d && d.members) || [];
     if (!rows.length) {
+      head('· empty');
       // An empty list is a real answer — before the day's first Universe scan,
       // or because nothing currently clears all six rules. Saying which is
       // possible is what stops it reading as a broken panel.
@@ -766,6 +812,8 @@ async function loadCanslim() {
     // its badge turns off on every other tool's cards, and a change nobody was
     // warned about reads as a bug.
     const soon = rows.filter(r => r.expiresIn <= 14);
+    head(`· ${rows.length} name${rows.length === 1 ? '' : 's'}`
+      + (soon.length ? ` · <b>${soon.length} expiring</b>` : ''));
     out.innerHTML = `<div class="uni-grid">${rows.map(r => `
       <div class="uni-chip${r.expiresIn <= 14 ? ' cs-soon' : ''}"
            title="First qualified ${r.held} day(s) ago · last qualified ${
@@ -782,6 +830,7 @@ async function loadCanslim() {
         d.updatedAt ? ` · list written ${Math.floor((Date.now() - d.updatedAt) / 60000)} min ago` : ''
       }${soon.length ? ` · <b>${soon.map(r => r.ticker).join(', ')}</b> expiring within two weeks` : ''}</div>`;
   } catch {
+    head('· could not load');
     out.innerHTML = '<div class="cmp-hint" style="margin-top:14px">Could not read the CANSLIM list.</div>';
   }
 }
