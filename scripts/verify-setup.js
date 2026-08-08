@@ -76,8 +76,25 @@ console.log(FEED
   let matched = 0;
   const problems = [];
 
+  let first = true;
   for (const [date, rows] of byDate) {
     const tickers = rows.map(r => r.ticker);
+
+    /*
+     * Polygon's free plan allows five requests a minute and there is no grouped
+     * endpoint for minute bars, so eight tickers cannot be fetched in one go:
+     * the first run got two dates in and then reported "no bars" for the
+     * remaining six, which reads as missing data rather than as a rate limit.
+     * Waiting between dates is slow and correct; being told the wrong thing
+     * quickly is neither.
+     */
+    if (!first && (FEED === 'polygon' || !FEED)) {
+      process.stdout.write('\n(pausing 60s for the Polygon rate limit)');
+      await new Promise(r => setTimeout(r, 60000));
+      process.stdout.write('\r                                        \r');
+    }
+    first = false;
+
     // Deliberately the same fetch path the live run uses, so a data problem
     // shows up here rather than only at 10:00 on a Monday.
     const data = await barsSource.fetchMorning(tickers, date, { attempts: 1, waitMs: 0, only: FEED });
@@ -107,12 +124,24 @@ console.log(FEED
       checked++;
       if (all) matched++;
       else {
+        /*
+         * Which numbers disagree localises the cause, so the detail is printed
+         * rather than left to be worked out. Risk uses the entry and the VWAP;
+         * extension uses the VWAP and the 09:59 CLOSE. So risk matching while
+         * extension does not means the VWAP is right and the decision bar is
+         * not — a different question entirely from a feed disagreement, and one
+         * the bar count and close will answer.
+         */
         problems.push(`${date} ${r.ticker}: `
           + [!dirOK && `direction ${out.signal} vs ${r.dir}`,
              !entryOK && `entry ${entry} vs ${r.entry}`,
              !extOK && `extension ${out.extension?.toFixed(2)} vs ${r.ext}`,
              !riskOK && `risk ${plan?.riskPct?.toFixed(2)} vs ${r.risk}`,
-            ].filter(Boolean).join(', '));
+            ].filter(Boolean).join(', ')
+          + (riskOK && !extOK
+            ? `  ← risk matches, so the VWAP is right and the 09:59 close is not`
+              + ` (${out.bars} bars, decision ${out.decisionAt}, close ${out.decisionClose})`
+            : ''));
       }
 
       console.log(`  ${pad(r.ticker, 6)} ${all ? 'OK  ' : 'DIFF'}`
@@ -131,8 +160,12 @@ console.log(FEED
   }
   console.log('\nDifferences:');
   for (const p of problems) console.log(`  ${p}`);
-  console.log('\nBefore treating these as bugs, check the feed column above. The spec\'s');
-  console.log('numbers assume the consolidated tape; anything marked alpaca:iex was');
-  console.log('computed from a few percent of the volume and its VWAP will differ.');
+  console.log('\nReading the differences:');
+  console.log('  "no bars"                  usually the Polygon rate limit, not missing data.');
+  console.log('  direction or entry wrong   a real problem in this code.');
+  console.log('  only the extension wrong   the VWAP is right (risk matches) and the');
+  console.log('                             decision bar is not — compare the bar count.');
+  console.log('\nFeed differences are small: measured on a liquid name the three agree');
+  console.log('to within 0.06%, so the feed does not explain a gap of whole points.');
   process.exit(1);
 })();

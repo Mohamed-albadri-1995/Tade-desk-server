@@ -1,13 +1,17 @@
 /*
  * Choosing a feed, and waiting for the decision bar.
  *
- * This is not plumbing. The setup ranks by VWAP extension, VWAP is computed
- * from volume, and the three feeds do not report the same volume — so which one
- * answers changes which two names get traded. Measured against the spec's own
- * reference log on Yahoo bars, every direction was right and six of eight entry
- * prices matched to the cent, while extensions moved by up to 2.4 points. The
- * order these are tried in, and the record of which one answered, are therefore
- * part of the setup rather than an implementation detail.
+ * This is not plumbing. The setup ranks by VWAP extension and takes the top
+ * two, so every candidate has to be measured on the same tape — a list built
+ * from two feeds is partly a ranking of feeds.
+ *
+ * How far apart the feeds actually are was measured rather than assumed, and
+ * the assumption was wrong. On a liquid morning the three agree on VWAP to
+ * within 0.06% — even Alpaca's IEX feed, which carried a twenty-fifth of the
+ * volume, still tracked the price. So the feed is not the reason a backtest
+ * number and a live number differ by whole points. What it changes is the last
+ * decimal of a stop, and more than that on thin names, which is why the source
+ * is recorded per ticker and repeated on the alert.
  */
 
 jest.mock('../src/yahoo/client');
@@ -53,11 +57,18 @@ describe('which feed answers', () => {
     expect(out.sources.AAA).toBe('yahoo');
   });
 
-  test('each feed is asked only for what the previous one could not supply', async () => {
+  /*
+   * When no single feed covers the list, the gaps are filled from the others —
+   * a compromised ranking beats a ranking over a fifth of the universe. This is
+   * the last resort, not the normal path, and it is what sets `mixed`.
+   */
+  test('when nothing covers the list, the gaps are filled and the mixture reported', async () => {
     polygon.fetchIntradayBars.mockResolvedValue({ AAA: tape() });
     yahoo.fetchIntradayBars.mockResolvedValue({ BBB: tape() });
-    await bars.fetchMorning(['AAA', 'BBB'], DATE, { attempts: 1, waitMs: 0 });
-    expect(yahoo.fetchIntradayBars).toHaveBeenCalledWith(['BBB'], DATE);
+    const out = await bars.fetchMorning(['AAA', 'BBB'], DATE, { attempts: 1, waitMs: 0 });
+    expect(yahoo.fetchIntradayBars).toHaveBeenLastCalledWith(['BBB'], DATE);
+    expect(out.mixed).toBe(true);
+    expect(out.used.sort()).toEqual(['polygon', 'yahoo']);
   });
 
   test('a feed that throws does not stop the ones after it', async () => {
@@ -155,5 +166,48 @@ describe('the universe list', () => {
     const out = await bars.fetchMorning([], DATE);
     expect(out.missing).toEqual([]);
     expect(polygon.fetchIntradayBars).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * Polygon costs one request per symbol and its free plan allows five a minute,
+ * so a card list of forty is not slow on that plan — it is impossible. Asking
+ * anyway spends the first minute of the decision collecting 429s before falling
+ * through to a feed that would have answered at once, which is the worst
+ * possible use of 10:00.
+ */
+describe('the Polygon rate limit', () => {
+  test('a small universe still uses it', async () => {
+    polygon.fetchIntradayBars.mockResolvedValue({ AAA: tape(), BBB: tape() });
+    const out = await bars.fetchMorning(['AAA', 'BBB'], DATE, { attempts: 1, waitMs: 0 });
+    expect(out.feed).toBe('polygon');
+  });
+
+  test('a card-list-sized universe skips it entirely', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => `T${i}`);
+    yahoo.fetchIntradayBars.mockResolvedValue(
+      Object.fromEntries(many.map(t => [t, tape()])));
+    const out = await bars.fetchMorning(many, DATE, { attempts: 1, waitMs: 0 });
+    expect(polygon.fetchIntradayBars).not.toHaveBeenCalled();
+    expect(out.feed).toBe('yahoo');
+  });
+
+  test('the limit is raisable, for a paid key', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => `T${i}`);
+    jest.resetModules();
+    process.env.POLYGON_MAX_SYMBOLS = '500';
+    const p2 = require('../src/polygon/client');
+    const y2 = require('../src/yahoo/client');
+    const a2 = require('../src/alpaca/client');
+    p2.hasKey.mockReturnValue(true);
+    a2.getFeed.mockReturnValue('iex');
+    y2.fetchIntradayBars.mockResolvedValue({});
+    a2.fetchIntradayBars.mockResolvedValue({});
+    p2.fetchIntradayBars.mockResolvedValue(Object.fromEntries(many.map(t => [t, tape()])));
+    const bars2 = require('../src/setups/bars');
+    const out = await bars2.fetchMorning(many, DATE, { attempts: 1, waitMs: 0 });
+    expect(out.feed).toBe('polygon');
+    delete process.env.POLYGON_MAX_SYMBOLS;
+    jest.resetModules();
   });
 });

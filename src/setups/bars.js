@@ -5,19 +5,25 @@
  *
  * The setup's stop is the session VWAP, and VWAP is volume-weighted. So the
  * volume in these bars is not a display field — it sets the price the trade is
- * risked against. Two feeds are available and they do not agree:
+ * risked against. Three feeds are available and none is simply best:
  *
- *   Yahoo   consolidated tape. Full volume, so the VWAP matches what a chart
- *           shows. Rate-limits from an AWS address, and is fetched one ticker
- *           at a time, so it is the slow one.
- *   Alpaca  one request for the whole universe, fast. But the free tier is the
- *           IEX feed, which is a few percent of the consolidated tape — a VWAP
- *           built from it is a different number from the one on the chart, and
- *           the error is not a constant offset.
+ *   Polygon  the feed the reference numbers were derived on. No grouped
+ *            endpoint for minute bars, so a universe costs one request per
+ *            symbol and the free plan allows five a minute — usable for a
+ *            handful of names, not for a card list.
+ *   Yahoo    consolidated tape, a whole morning per request, fast enough for a
+ *            real universe. Rate-limits from an AWS address.
+ *   Alpaca   one request for every symbol at once. But the free tier is IEX,
+ *            which carried 0.17M shares of AAPL on a morning where the
+ *            consolidated tape carried 4.2M — a twenty-fifth of the volume.
  *
- * Yahoo is therefore tried first and Alpaca fills the gaps. Where Alpaca's IEX
- * feed supplied a bar, the result says so, per ticker, and the alert repeats it.
- * A wrong stop presented without qualification is worse than a late alert.
+ * MEASURED, because the guess was wrong. On liquid names the three VWAPs agree
+ * to within 0.06% — even IEX, whose tiny sample still tracks the price closely.
+ * So the feed is NOT the reason a backtest number and a live number differ by
+ * points; that story was told here before it was checked, and the check
+ * disproved it. What the feed does change is the last decimal of a stop, and on
+ * thin names rather more, which is why the source is still recorded per ticker
+ * and repeated on the alert.
  *
  * THE OTHER HALF is being sure the data has actually arrived. At 10:00:00 the
  * 09:59 bar has existed for a fraction of a second and neither feed has
@@ -32,23 +38,44 @@ const alpacaClient = require('../alpaca/client');
 const polygonClient = require('../polygon/client');
 
 /*
- * The order feeds are tried, and why it is this order.
+ * The order feeds are tried.
  *
- * Polygon first because the setup's reference numbers were derived on it —
- * verifying against Yahoo gave every direction right and six of eight entry
- * prices right to the cent, while the extensions moved by up to 2.4 points.
- * The VWAP formula is identical on both sides; what differs is the volume. And
- * extension is the RANKING metric, so a feed that shifts it shifts which two
- * names are traded. Matching the feed is part of running the tested setup.
+ * Polygon first, because the reference numbers were derived on it and matching
+ * the tape removes one variable when a live result is compared against the
+ * backtest. It is a preference and nothing more — the measured disagreement
+ * between these feeds on a liquid name is under 0.06%.
  *
- * Polygon's free plan may not serve today's bars at 10:00, and its rate limit
- * cannot carry a large universe, so it is a preference and never a requirement.
- * Whatever answered is recorded per ticker and repeated on the alert.
+ * Yahoo second because it is the only one that can serve a whole card list
+ * quickly on the consolidated tape. Alpaca last because its free tier is IEX.
  */
+/*
+ * Polygon has no grouped endpoint for minute aggregates, so a universe costs
+ * one request per symbol, and the free plan allows five a minute. Forty cards
+ * is therefore not slow on that plan — it is impossible: the sixth call returns
+ * 429 and every one after it does too.
+ *
+ * Asking anyway would burn the first minute of the decision on rate-limit
+ * errors before falling through to a feed that could have answered
+ * immediately, which is the worst possible use of 10:00. So above this size
+ * Polygon is skipped outright and the log says why.
+ *
+ * Raise it if the plan is paid — a paid key has no per-minute cap worth
+ * modelling, and then Polygon can serve the whole list.
+ */
+const POLYGON_MAX_SYMBOLS = Number(process.env.POLYGON_MAX_SYMBOLS || 5);
+
 const SOURCES = [
   {
     id: 'polygon',
-    available: () => polygonClient.hasKey(),
+    available: (list) => {
+      if (!polygonClient.hasKey()) return false;
+      if (list.length > POLYGON_MAX_SYMBOLS) {
+        console.log(`[Setups] skipping Polygon: ${list.length} symbols exceeds the `
+          + `${POLYGON_MAX_SYMBOLS}/min free-plan limit (set POLYGON_MAX_SYMBOLS if paid)`);
+        return false;
+      }
+      return true;
+    },
     fetch: (tickers, date) => polygonClient.fetchIntradayBars(tickers, date),
   },
   {
@@ -127,7 +154,7 @@ async function fetchMorning(tickers, date, {
   while (tries < attempts && !chosen) {
     tries++;
     for (const src of order) {
-      if (!src.available()) continue;
+      if (!src.available(list)) continue;
       let got;
       try {
         got = await src.fetch(list, date);
@@ -165,7 +192,7 @@ async function fetchMorning(tickers, date, {
     for (const src of order) {
       const need = list.filter(t => !reachesDecision(bars[t], lastWanted));
       if (!need.length) break;
-      if (!src.available()) continue;
+      if (!src.available(need)) continue;
       try {
         const got = await src.fetch(need, date);
         const label = src.label ? src.label() : src.id;
