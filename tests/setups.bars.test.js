@@ -211,3 +211,47 @@ describe('the Polygon rate limit', () => {
     jest.resetModules();
   });
 });
+
+/*
+ * The free Polygon plan is a DAY BEHIND. At 10:00 on Monday it holds Friday, so
+ * it can never serve the live decision — and asking is not merely slow, it is
+ * asking a feed for a day it does not have, every morning, forever.
+ *
+ * The filter in the client means stale bars could never have been mistaken for
+ * today's; what this prevents is the wasted minute at exactly the wrong moment.
+ */
+describe('Polygon is a backtest feed', () => {
+  const { toETDate } = require('../src/utils/time');
+  const TODAY = toETDate(Date.now());
+
+  test('it is not asked for today', async () => {
+    yahoo.fetchIntradayBars.mockResolvedValue({ AAA: tape() });
+    const out = await bars.fetchMorning(['AAA'], TODAY, { attempts: 1, waitMs: 0 });
+    expect(polygon.fetchIntradayBars).not.toHaveBeenCalled();
+    expect(out.feed).toBe('yahoo');
+  });
+
+  test('it is asked for a past session', async () => {
+    polygon.fetchIntradayBars.mockResolvedValue({ AAA: tape() });
+    const out = await bars.fetchMorning(['AAA'], '2026-08-07', { attempts: 1, waitMs: 0 });
+    expect(out.feed).toBe('polygon');
+  });
+
+  test('a paid plan can opt back in', async () => {
+    jest.resetModules();
+    process.env.POLYGON_LIVE = '1';
+    const p2 = require('../src/polygon/client');
+    const y2 = require('../src/yahoo/client');
+    const a2 = require('../src/alpaca/client');
+    p2.hasKey.mockReturnValue(true);
+    a2.getFeed.mockReturnValue('iex');
+    y2.fetchIntradayBars.mockResolvedValue({});
+    a2.fetchIntradayBars.mockResolvedValue({});
+    p2.fetchIntradayBars.mockResolvedValue({ AAA: tape() });
+    const bars2 = require('../src/setups/bars');
+    const out = await bars2.fetchMorning(['AAA'], TODAY, { attempts: 1, waitMs: 0 });
+    expect(out.feed).toBe('polygon');
+    delete process.env.POLYGON_LIVE;
+    jest.resetModules();
+  });
+});

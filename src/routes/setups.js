@@ -26,6 +26,7 @@ router.get('/', (req, res) => {
       params: s.params,
       describe: s.describe,
       caution: s.caution,
+      liveFeed: s.liveFeed || null,
       mine: s.toolId === config.toolId,
     })),
   });

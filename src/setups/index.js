@@ -32,6 +32,11 @@ const SETUPS = [
     // Said in the alert itself, not just here. Eight trades over four days,
     // with the ranking metric chosen after looking at those four days.
     caution: '8 trades over 4 sessions, metric chosen in hindsight — not a validated edge. Trade small.',
+    // Which feed actually serves this live, and why it is not the one the
+    // numbers came from. Polygon's free plan is a day behind, so at 10:00 it
+    // holds yesterday; it stays the backtest feed and Yahoo runs the decision.
+    // The two agree on VWAP to within 0.06% on a liquid morning.
+    liveFeed: 'yahoo (Polygon free is a day behind; they agree to ~0.06% on VWAP)',
     describe: [
       'At 10:00, on T2\'s card list only.',
       'Keep: price the right side of session VWAP, VWAP sloping the same way, close in the top 55% (long) or bottom 45% (short) of the 09:30–09:59 range.',
