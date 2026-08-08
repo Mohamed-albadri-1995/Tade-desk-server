@@ -4175,9 +4175,26 @@ fetch('/api/tools').then(r => r.json())
   .then(d => { ALERTS_APP = (d.apps || []).find(a => a.id === 'ALERTS') || null; renderCards(); })
   .catch(() => {});
 
+/*
+ * The ⚠ alert link on a card.
+ *
+ * Built from the app's own declared address when it has one, and only from this
+ * page's protocol and host when it does not. That distinction is the whole
+ * point: the alerts app has to be reached over https, because a browser refuses
+ * Notification.requestPermission() to a page on a plain http origin — and this
+ * page is still http. Composing the link from location.protocol therefore sends
+ * every card straight back to the origin where notifications cannot be granted,
+ * with a working certificate sitting unused beside it.
+ *
+ * The address comes from /api/tools, which reads data/app-urls.json. See
+ * src/config.js; it is written by deploy/setup-https.sh or scripts/set-app-url.js.
+ */
 function alertUrl(ticker) {
   if (!ALERTS_APP) return null;
-  return `${location.protocol}//${location.hostname}:${ALERTS_APP.port}/?ticker=${encodeURIComponent(ticker)}`;
+  const base = ALERTS_APP.url
+    ? ALERTS_APP.url.replace(/\/$/, '')
+    : `${location.protocol}//${location.hostname}:${ALERTS_APP.port}`;
+  return `${base}/?ticker=${encodeURIComponent(ticker)}`;
 }
 
 function openChart(sym) {
