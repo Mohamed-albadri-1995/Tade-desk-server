@@ -566,6 +566,49 @@ def run(spec: dict, progress_cb=None) -> dict:
     if bar_counts:
         bar_counts.sort()
         cov['bars_median'] = int(bar_counts[len(bar_counts) // 2])
+    # PER-DAY RANKING (opt-in). Some setups are not "take every signal" — they
+    # score the day's signals against EACH OTHER and trade only the strongest
+    # few. That is a cross-symbol decision, so it cannot live in a strategy:
+    # evaluate() sees one symbol at a time and has no idea what the others did.
+    # It belongs here, where the whole day is in hand.
+    #   spec: {"rank_per_day": {"metric": "vwap_extension", "top_n": 2}}
+    # `vwap_extension` is the distance from entry to the stop, as a percent —
+    # which for a VWAP-anchored stop IS the distance from VWAP, the metric the
+    # spec ranks on, computed from fields already on the trade.
+    rank = spec.get('rank_per_day') or None
+    if rank and closed:
+        top_n = int(rank.get('top_n') or 0)
+        metric = str(rank.get('metric') or 'vwap_extension')
+
+        def _score(t):
+            e, s = float(t['entry']), t.get('stop')
+            if not s or e <= 0 or s <= 0:
+                return None
+            return ((e / s - 1.0) if t['side'] == 'long' else (s / e - 1.0)) * 100.0
+
+        by_date: dict = {}
+        for t in closed:
+            sc = _score(t)
+            t.setdefault('ctx', {})['rank_metric'] = (
+                round(sc, 6) if sc is not None else None)
+            by_date.setdefault(t['date'], []).append(t)
+        keep, dropped = [], 0
+        for d, rows in by_date.items():
+            # strongest first; ties broken by ticker so a run is reproducible
+            # (the spec's morning-volume tie-break is not on the trade row)
+            rows.sort(key=lambda t: (-(t['ctx'].get('rank_metric') if
+                                       t['ctx'].get('rank_metric') is not None else -1e9),
+                                     t['symbol']))
+            for i, t in enumerate(rows):
+                t['ctx']['rank_in_day'] = i + 1
+                if t['ctx'].get('rank_metric') is None or (top_n and i >= top_n):
+                    dropped += 1
+                else:
+                    keep.append(t)
+        closed = keep
+        cov['rank_per_day'] = {'metric': metric, 'top_n': top_n,
+                               'kept': len(keep), 'dropped_by_rank': dropped}
+
     per_day: dict = {}
     for d, _, _ in pairs:
         per_day[d] = per_day.get(d, 0) + 1

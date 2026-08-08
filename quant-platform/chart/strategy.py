@@ -785,6 +785,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     # self-filling level (any new N-bar high "reaches" it a tick above entry).
     sl_frozen = bool((risk.get('sl') or {}).get('freeze'))
     tp_frozen = bool((risk.get('tp') or {}).get('freeze'))
+    stop_first = bool(risk.get('stop_first'))   # see the priority block below
     # Is a stop CONFIGURED? (fixed types need a finite value; 'prim' is
     # configured by its anchor alone — the % is optional). If yes, an entry
     # whose stop can't be PRICED on that bar (ATR warm-up NaN, anchored line
@@ -1080,7 +1081,16 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         #     stop (conservative).  5) exit rule.  6) eod.
         gap_stop = slv is not None and ((side == 'long' and opn[j] <= slv)
                                         or (side == 'short' and opn[j] >= slv))
-        if tgt_fr and not gap_stop:            # scale-out: bank each reached leg
+        # `stop_first` (opt-in, risk.stop_first): when ONE bar touches both the
+        # stop and a target, assume the STOP filled. Intrabar order is unknown,
+        # so this is the conservative reading — some published specs state it
+        # explicitly and their reported results depend on it. Default OFF: the
+        # normal model banks a resting limit that the bar traded through and
+        # then applies the stop to what is left, which is what a real bracket
+        # does when the target is hit first.
+        stop_touch = slv is not None and ((side == 'long' and low[j] <= slv)
+                                          or (side == 'short' and high[j] >= slv))
+        if tgt_fr and not gap_stop and not (stop_first and stop_touch):
             for k in range(len(tgt_fr)):
                 if tgt_done[k]:
                     continue
