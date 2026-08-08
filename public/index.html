@@ -183,7 +183,13 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .row-count { color: var(--text3); font-size: 11px; margin-left: auto; }
 
 /* ── CARDS GRID ── */
-.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+/* min(360px, 100%) rather than a bare 360px: a grid track has no obligation to
+   fit its container, so on a viewport narrower than the minimum every card is
+   wider than the screen and the page scrolls sideways. The min() makes the
+   track give way instead. The 600px media query below handles the ordinary
+   phone; this handles the narrow ones it does not reach, and desktop-mode
+   browsing where the media query never fires at all. */
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr)); gap: 14px; }
 
 /* ── CARD ── */
 .card {
@@ -205,6 +211,28 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   background: var(--bg3);
   border-bottom: 1px solid var(--border);
 }
+/*
+ * The left half must be allowed to shrink, and this one line is the whole bug.
+ *
+ * A flex item will not go narrower than its content unless told to, so on a
+ * phone the ticker line stayed at its full width and pushed the score column
+ * off the right-hand edge of the card. .card has overflow:hidden, so that did
+ * not clip harmlessly — the score, the register link and the star were simply
+ * deleted, with nothing on screen to suggest they had ever been there.
+ *
+ * min-width:0 makes this block yield instead. Its own contents wrap (see
+ * .card-idline) and the score column keeps its place at the top right, which is
+ * why the header itself does NOT wrap: letting it wrap does prevent the
+ * clipping, but drops the score onto a line of its own and leaves a band of
+ * empty card above it.
+ */
+.card-head-left { flex: 1 1 auto; min-width: 0; }
+/* Ticker, TV, alert, price, change, Live — six things on one line, which fits
+   on a desktop column and does not on a phone. Wrapping is what keeps them all
+   readable instead of trimming the last two off. */
+.card-idline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+/* Two words with a middot between them, on a card that may be 150px wide. */
+.card-sector { font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
 .card-ticker { font-size: 18px; font-weight: 700; color: #fff; cursor: pointer; }
 .card-ticker:hover { color: var(--accent); text-decoration: underline; }
 /* Out to TradingView itself. Deliberately quiet and small: the ticker beside it
@@ -3323,8 +3351,8 @@ function buildCard(row) {
   return `
 <div class="card${row.inShortlist?' in-shortlist':''}${!row.liveNow?' stale':''}" id="card-${row.ticker}">
   <div class="card-header">
-    <div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+    <div class="card-head-left">
+      <div class="card-idline">
         <span class="card-ticker" onclick="openChart('${row.ticker}')">${row.ticker}</span>
         <a class="tv-link" href="${tvUrl(s.tvSymbol || row.ticker)}" target="_blank" rel="noopener"
            title="Open ${esc(s.tvSymbol || row.ticker)} on TradingView"
@@ -3341,7 +3369,7 @@ function buildCard(row) {
         <span class="card-change ${change>=0?'pos':'neg'}">${changeSign}${change.toFixed(2)}%</span>
         ${row.liveNow ? '<span class="live-dot">Live</span>' : '<span class="stale-dot">Stale</span>'}
       </div>
-      <div style="font-size:11px;color:var(--text2)">${esc(s.sector||'')} · ${esc(s.industry||'')}</div>
+      <div class="card-sector">${esc(s.sector||'')} · ${esc(s.industry||'')}</div>
     </div>
     <div class="card-right">
       <div onclick="${score != null ? `toggleScoreBreakdown('${row.ticker}')` : ''}" style="cursor:${score != null ? 'pointer' : 'default'};text-align:right">
