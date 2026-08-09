@@ -45,9 +45,9 @@ app.use('/api/alerts', require('../routes/alerts'));
  * knowing the time it would either poll fast all day or deliver a time-critical
  * alert up to a minute late.
  *
- * Served from the registry rather than from a tool, because this process has no
- * database and does not need one to read a list of definitions. It cannot RUN a
- * setup — that needs the owning tool's card list — so no run endpoints here.
+ * Served by asking qp rather than a tool, because this process has no database
+ * and does not need one to read a list of strategies. It cannot RUN a setup —
+ * that needs the owning tool's card list — so no run endpoints here.
  */
 app.get('/api/setups', async (req, res) => {
   try {
@@ -94,10 +94,9 @@ app.post('/api/setups/:id/settings', express.json(), (req, res) => {
 
 // Switching one off is a shared file, so this process can do it even though it
 // cannot run a setup — running needs the owning tool's card list.
-app.post('/api/setups/:id/enabled', express.json(), (req, res) => {
+app.post('/api/setups/:id/enabled', express.json(), async (req, res) => {
   try {
-    const setups = require('../setups');
-    const setup = setups.get(req.params.id);
+    const setup = await require('../setups/catalog').get(req.params.id);
     if (!setup) return res.status(404).json({ ok: false, error: 'No such setup' });
     const enabled = require('../setups/prefs').setEnabled(setup.id, req.body?.enabled);
     res.json({ ok: true, id: setup.id, enabled });

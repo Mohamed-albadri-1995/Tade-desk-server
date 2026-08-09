@@ -1,5 +1,5 @@
 const express = require('express');
-const setups = require('../setups');
+const catalog = require('../setups/catalog');
 const runner = require('../setups/runner');
 const config = require('../config');
 const { toETDate } = require('../utils/time');
@@ -12,9 +12,11 @@ const router = express.Router();
  * Every tool answers, listing every setup, because the alerts app is served
  * from one place and needs the whole picture. `mine` is what separates "this
  * tool will run it" from "this tool knows about it".
+ *
+ * The list comes from qp, live. A strategy built there this morning is here
+ * this morning; one deleted there is gone. Nothing is registered on this side.
  */
 router.get('/', async (req, res) => {
-  const catalog = require('../setups/catalog');
   res.json({
     ok: true,
     toolId: config.toolId,
@@ -22,15 +24,17 @@ router.get('/', async (req, res) => {
       id: s.id,
       name: s.name,
       tools: s.tools,
+      sides: s.sides,
+      strategies: s.strategies,
       decisionTime: s.decisionTime,
       universeScanAt: s.universeScanAt || null,
-      params: s.params,
       describe: s.describe,
       caution: s.caution,
       liveFeed: s.liveFeed || null,
+      topN: (s.rank || {}).topN || 2,
       universe: require('../setups/universe').describe(s.universe),
       universeRules: (s.universe && s.universe.rules) || [],
-      enabled: require('../setups/prefs').isEnabled(s.id),
+      enabled: s.enabled,
       mine: (s.tools || []).includes(config.toolId),
     })),
   });
@@ -39,13 +43,13 @@ router.get('/', async (req, res) => {
 /*
  * Switch a setup on or off.
  *
- * The definition itself stays in code — its windows, cutoffs and ranking are
- * the thing that was tested, not a form to fill in. What belongs to the trader
- * is whether it runs, and any process can serve this because it is a shared
- * file rather than a tool's database.
+ * The definition itself is the qp strategy — its windows, cutoffs and rules are
+ * the thing that was tested, and they are edited in the builder that tested
+ * them. What belongs to this side is whether it runs at all, and any process
+ * can serve this because it is a shared file rather than a tool's database.
  */
-router.post('/:id/enabled', express.json(), (req, res) => {
-  const setup = setups.get(req.params.id);
+router.post('/:id/enabled', express.json(), async (req, res) => {
+  const setup = await catalog.get(req.params.id);
   if (!setup) return res.status(404).json({ ok: false, error: 'No such setup' });
   const enabled = require('../setups/prefs').setEnabled(setup.id, req.body?.enabled);
   res.json({ ok: true, id: setup.id, enabled });
@@ -63,7 +67,7 @@ router.post('/:id/enabled', express.json(), (req, res) => {
  * second evaluation at 10:20 is a different setup with a worse edge.
  */
 router.get('/:id/run', async (req, res) => {
-  const setup = setups.get(req.params.id);
+  const setup = await catalog.get(req.params.id);
   if (!setup) return res.status(404).json({ ok: false, error: 'No such setup' });
 
   const date = req.query.date || toETDate(Date.now());
@@ -87,17 +91,19 @@ router.get('/:id/run', async (req, res) => {
  * POST /api/setups/:id/fire — run it for real, now.
  *
  * The scheduled run is the one that matters; this exists for the morning the
- * process was restarting at 10:00. Refused from a tool that does not own the
- * setup, because the universe would be that tool's card list and the answer
- * would look identical to a correct one.
+ * process was restarting at 10:00. Refused from a tool the setup does not name,
+ * because the universe would be that tool's card list and the answer would look
+ * identical to a correct one.
  */
 router.post('/:id/fire', async (req, res) => {
-  const setup = setups.get(req.params.id);
+  const setup = await catalog.get(req.params.id);
   if (!setup) return res.status(404).json({ ok: false, error: 'No such setup' });
-  if (setup.toolId !== config.toolId) {
+  const owners = setup.tools || [];
+  if (!owners.includes(config.toolId)) {
     return res.status(400).json({
       ok: false,
-      error: `${setup.id} belongs to ${setup.toolId}; run it there so it sees the right card list`,
+      error: `${setup.id} belongs to ${owners.join(', ') || 'no tool'}; `
+        + `run it there so it sees the right card list (this is ${config.toolId})`,
     });
   }
   try {

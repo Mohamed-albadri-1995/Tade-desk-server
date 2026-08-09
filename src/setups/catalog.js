@@ -38,6 +38,10 @@ const prefs = require('./prefs');
 
 /** 1000 → '10:00'. qp stores the window as an integer HHMM. */
 function hhmm(windowStart) {
+  // Absent means absent. Number(null) and Number('') are both 0, which would
+  // turn a strategy with no entry window into a setup scheduled for midnight —
+  // one that never fires and never says why.
+  if (windowStart === null || windowStart === undefined || windowStart === '') return null;
   const n = Number(windowStart);
   if (!Number.isFinite(n)) return null;
   const h = Math.floor(n / 100);

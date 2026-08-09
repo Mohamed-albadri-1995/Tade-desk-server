@@ -7,9 +7,10 @@
  * what setups there were, when they would run, or turn one off — and with a
  * second setup that stops being a cosmetic problem.
  *
- * The definitions stay in code, because a setup is an algorithm and not a form:
- * its windows, cutoffs and ranking are the thing that was tested. What belongs
- * to the trader is whether it runs at all, and that is what this holds.
+ * The definition stays in qp, because a setup is an algorithm and not a form:
+ * its windows, cutoffs and rules are the thing that was tested, and they are
+ * edited in the builder that tested them. What belongs to this side is whether
+ * it runs at all — plus the few things qp cannot see, which is what this holds.
  *
  * data/setup-prefs.json, beside the alert rules and the risk settings, for the
  * same reason: the alerts app has no database and must be able to write it,
