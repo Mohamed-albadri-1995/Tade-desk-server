@@ -75,6 +75,24 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .st-rule .st-v { width:110px; }
 .st-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
 
+/* ── strategies waiting to be assigned ──
+   Dimmer than a setup and deliberately so: these do not run. The list is a
+   to-do, and it must not read as nine things firing every morning. */
+.unassigned { background:var(--bg2); border:1px dashed var(--border);
+  border-radius:8px; padding:11px 13px; margin-top:8px; }
+.ua-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding:8px 0; border-top:1px solid var(--border); }
+.ua-row:first-of-type { border-top:0; }
+.ua-name { font-size:12.5px; font-weight:600; flex:1 1 160px; min-width:0;
+  overflow-wrap:anywhere; }
+.ua-tools { display:flex; gap:5px; flex-wrap:wrap; }
+/* A tap target, not a checkbox: this is used from a phone with one thumb. */
+.ua-tool { font-size:11px; font-weight:700; border:1px solid var(--border);
+  border-radius:5px; padding:5px 9px; background:var(--bg3); color:var(--text3);
+  cursor:pointer; user-select:none; }
+.ua-tool.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.ua-blocked { font-size:10.5px; color:var(--text3); }
+
 /* ── position sizing ── */
 .risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
   border:1px solid var(--border); border-radius:8px; padding:12px 13px; }
@@ -190,6 +208,13 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <span class="note">strategies that rank at a fixed time — not rules</span>
 </div>
 <div id="setups"><div class="empty">Loading…</div></div>
+
+<!-- The assignment step, which had nowhere to happen. A strategy becomes a
+     setup by naming its tools, and until it does it appears in no list here —
+     so the one thing left to decide was the one thing this page could not do.
+     It belongs here rather than in the chart tool because the decision is
+     "whose cards should this run on", and this is where those alerts arrive. -->
+<div id="unassigned"></div>
 
 <div class="sec"><span>Fired today</span><span class="note" id="fire-count"></span></div>
 <div id="fires"><div class="empty">Loading…</div></div>
@@ -392,6 +417,91 @@ async function loadSetups() {
   } catch {
     out.innerHTML = '<div class="empty">Could not read the setups.</div>';
   }
+}
+
+/* ── assigning a strategy to a tool ──
+ *
+ * The last step of building a setup, and the only one that was still a trip to
+ * another tool on another port. A strategy is built and backtested in the chart
+ * tool; which screener's cards it should run against is decided here, where its
+ * alerts land. Tapping a tool writes it straight back to the chart tool — there
+ * is no copy of it on this side to fall out of step.
+ *
+ * Long and short are assigned together, because they are one setup: assigning
+ * only one half produces a setup that ranks half the signals and looks correct.
+ */
+let TOOL_IDS = [];
+async function loadUnassigned() {
+  const out = document.getElementById('unassigned');
+  if (!out) return;
+  let list;
+  try {
+    const d = await (await fetch('/api/strategies')).json();
+    if (!d.ok) throw new Error(d.error || 'no');
+    list = d.strategies || [];
+  } catch {
+    // Silent. qp being down already shows up where it matters — the setups
+    // list — and a second red line about the same outage is noise.
+    out.innerHTML = '';
+    return;
+  }
+  if (!TOOL_IDS.length) {
+    try {
+      const t = await (await fetch('/api/tools')).json();
+      TOOL_IDS = (t.tools || []).map(x => x.id).filter(Boolean);
+    } catch { TOOL_IDS = []; }
+  }
+
+  // One row per setup, not per strategy: the long and the short of one idea are
+  // one decision. Keyed the same way the setups list groups them.
+  const groups = new Map();
+  for (const s of list) {
+    if (!groups.has(s.base)) groups.set(s.base, { base: s.base, ids: [], tools: [], at: s.decisionTime, missing: new Set() });
+    const g = groups.get(s.base);
+    g.ids.push(s.id);
+    for (const t of s.tools) if (!g.tools.includes(t)) g.tools.push(t);
+    for (const m of s.missing) g.missing.add(m);
+    if (!g.at) g.at = s.decisionTime;
+  }
+  const waiting = [...groups.values()].filter(g => !g.tools.length);
+  if (!waiting.length) { out.innerHTML = ''; return; }
+
+  UNASSIGNED = waiting;
+  out.innerHTML = `<div class="unassigned">
+    <div class="note">In the chart tool but not running here. Pick the tool
+      whose card list it should rank, and it becomes a setup above.</div>
+    ${waiting.map((g, i) => `<div class="ua-row">
+      <span class="ua-name">${esc(g.base)}${g.at ? ` <span class="su-tag">${esc(g.at)} ET</span>` : ''}</span>
+      ${g.missing.has('entry window')
+        ? `<span class="ua-blocked">no entry window — set one in the chart tool
+             first, it is the decision time</span>`
+        : `<div class="ua-tools">${TOOL_IDS.map(t =>
+             `<span class="ua-tool" onclick="assignTool(${i}, '${esc(t)}')">${esc(t)}</span>`
+           ).join('')}</div>`}
+    </div>`).join('')}
+  </div>`;
+}
+
+let UNASSIGNED = [];
+async function assignTool(i, toolId) {
+  const g = UNASSIGNED[i];
+  if (!g) return;
+  try {
+    // Every strategy in the group, so a long/short pair is never half-assigned.
+    for (const id of g.ids) {
+      const r = await (await fetch(`/api/strategies/${encodeURIComponent(id)}/tools`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tools: [toolId] }),
+      })).json();
+      if (!r.ok) throw new Error(r.error || 'refused');
+    }
+  } catch (err) {
+    alert(`Could not assign: ${err.message}`);
+    return;
+  }
+  // Both lists, because the strategy has just moved from one to the other.
+  await loadSetups();
+  await loadUnassigned();
 }
 
 /*
@@ -740,6 +850,7 @@ loadFires();
 loadRules();
 loadRisk();
 loadSetups();
+loadUnassigned();
 // A card's "add alert" button links here with the ticker, so the rule opens
 // already scoped to the stock that was on screen.
 if (qs.get('ticker')) toggleForm({ ticker: qs.get('ticker').toUpperCase() });

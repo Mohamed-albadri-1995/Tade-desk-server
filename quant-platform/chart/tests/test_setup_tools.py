@@ -199,3 +199,64 @@ def test_the_plain_register_universe_still_behaves_as_it_did(fake):
     fake({'R1': {'2026-08-03': [{'ticker': 'AAA'}, {'ticker': 'AAA'}, {'ticker': 'BBB'}]}})
     pairs = backtest._pairs({**SPEC, 'universe': {'kind': 'register', 'register': 'R1'}})
     assert [t for _, t, _ in pairs] == ['AAA', 'BBB']       # deduped, order kept
+
+
+# ── assigning tools without rewriting the strategy ────────────────────────
+#
+# Saving a strategy means writing the whole document back. That is right for
+# the builder and wrong for assignment: the screener would have to round-trip
+# every rule through another process to change one field, and any bug in that
+# round trip silently rewrites the logic that was backtested. set_tools touches
+# the tools list and provably nothing else, and the route is a wrapper over it.
+
+@pytest.fixture
+def fresh(monkeypatch, tmp_path):
+    """An empty database, so a test never edits real strategies."""
+    monkeypatch.setattr(store, '_DB', tmp_path / 'q.db')
+    monkeypatch.setattr(store, '_conn', None)
+    yield
+    monkeypatch.setattr(store, '_conn', None)
+
+
+BODY = {'name': 'X', 'side': 'long', 'risk': {'window_start': 1000},
+        'entry': {'logic': 'AND', 'rules': [{'left': 'a'}]}}
+
+
+def test_assigning_tools_leaves_the_rest_of_the_strategy_untouched(fresh):
+    saved = store.save_strategy(dict(BODY))
+    assert saved['tools'] == []
+
+    store.set_tools(saved['id'], ['T2'])
+    after = store.get_strategy(saved['id'])
+    assert after['tools'] == ['T2']
+    # Everything that decides a trade comes back identical.
+    for k in ('name', 'side', 'risk', 'entry'):
+        assert after[k] == BODY[k]
+
+
+def test_assigning_updates_the_same_strategy_rather_than_adding_one(fresh):
+    saved = store.save_strategy(dict(BODY))
+    store.set_tools(saved['id'], ['T2'])
+    assert [s['id'] for s in store.list_strategies()] == [saved['id']]
+
+
+def test_a_typo_is_refused_and_changes_nothing(fresh):
+    # A silently dropped id gives a setup that no tool ever runs, and it looks
+    # exactly like one that is assigned and simply never triggering.
+    saved = store.save_strategy({**BODY, 'tools': ['T2']})
+    with pytest.raises(ValueError):
+        store.set_tools(saved['id'], ['T99'])
+    assert store.get_strategy(saved['id'])['tools'] == ['T2']
+
+
+def test_clearing_the_tools_takes_it_out_of_the_screener(fresh):
+    saved = store.save_strategy({**BODY, 'tools': ['T2']})
+    store.set_tools(saved['id'], [])
+    assert store.get_strategy(saved['id'])['tools'] == []
+
+
+def test_an_unknown_strategy_is_reported_rather_than_created(fresh):
+    # None, not a new row: a mistyped id must not quietly become a second
+    # strategy that nothing ever runs.
+    assert store.set_tools(424242, ['T2']) is None
+    assert store.list_strategies() == []

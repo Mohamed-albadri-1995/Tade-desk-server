@@ -70,6 +70,26 @@ async function strategies(timeoutMs = 10000) {
   return Array.isArray(d) ? d : (d.strategies || []);
 }
 
+/**
+ * Assign the tools a strategy belongs to.
+ *
+ * The one write this side makes to qp, and it is deliberately the narrowest
+ * one: which screeners run it. Not its rules, not its window — those are the
+ * builder's, and a round trip through here is how a rule gets rewritten by
+ * accident. qp has an endpoint that touches this field alone for that reason.
+ *
+ * It is here because assignment is the step that belongs on this side: a
+ * strategy is built and backtested in qp, and the decision about which
+ * screener's card list it should run against is made where those cards are.
+ */
+async function setTools(id, tools, timeoutMs = 10000) {
+  const res = await axios.post(`${baseUrl()}/api/strategies/${id}/tools`,
+    { tools }, { timeout: timeoutMs, headers: { 'Content-Type': 'application/json' } });
+  const d = res.data || {};
+  if (!d.ok) throw new Error(d.error || 'qp refused the tools');
+  return d.strategy;
+}
+
 /** Is the platform up? Asked before a decision so "down" is a distinct answer. */
 async function health(timeoutMs = 5000) {
   try {
@@ -80,4 +100,4 @@ async function health(timeoutMs = 5000) {
   }
 }
 
-module.exports = { decide, strategies, health, baseUrl };
+module.exports = { decide, strategies, setTools, health, baseUrl };

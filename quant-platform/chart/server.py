@@ -145,6 +145,30 @@ def strategies_get(sid: int):
     return {'ok': bool(s), 'strategy': s}
 
 
+@app.post('/api/strategies/{sid}/tools')
+def strategies_set_tools(sid: int, payload: dict = Body(...)):
+    """Assign the scanning tools a strategy belongs to, and nothing else.
+
+    Saving a strategy means POSTing the whole document back, which is right for
+    the builder and wrong for everything else: assigning a tool from the
+    screener would mean round-tripping every rule through another process, and
+    any bug in that round trip silently rewrites the logic. This touches one
+    field on the stored document and cannot touch the rest.
+
+    It exists because the tools list is the one part of a strategy that is not
+    decided in the builder. A strategy is built and backtested first and only
+    then assigned, usually from the screener where its alerts will appear.
+    """
+    try:
+        saved = store.set_tools(sid, payload.get('tools'))
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
+    if saved is None:
+        return JSONResponse({'ok': False, 'error': f'no strategy {sid}'},
+                            status_code=200)
+    return {'ok': True, 'strategy': saved}
+
+
 @app.delete('/api/strategies/{sid}')
 def strategies_delete(sid: int):
     return {'ok': store.delete_strategy(sid)}

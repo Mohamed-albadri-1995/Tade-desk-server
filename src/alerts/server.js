@@ -105,6 +105,68 @@ app.post('/api/setups/:id/enabled', express.json(), async (req, res) => {
   }
 });
 
+/*
+ * Every strategy in qp, assigned or not — the picker's list.
+ *
+ * A strategy becomes a setup by naming its tools, and until it does it appears
+ * nowhere: not in the setups list, which is the point, and so not anywhere you
+ * could assign it either. That left the one remaining step — "this strategy
+ * should run on T2's cards" — as a trip to another tool on another port to type
+ * a tool id into a text box, which is exactly the copying this was meant to end.
+ *
+ * So the list is served whole, with what each strategy still needs in order to
+ * run, and the assignment happens where the alerts are read.
+ */
+app.get('/api/strategies', async (req, res) => {
+  try {
+    const catalog = require('../setups/catalog');
+    const list = await require('../setups/qpClient').strategies();
+    res.json({
+      ok: true,
+      strategies: list.map(s => {
+        const at = catalog.hhmm((s.risk || {}).window_start);
+        return {
+          id: s.id,
+          name: s.name,
+          base: catalog.baseName(s.name),
+          side: s.side || null,
+          tools: Array.isArray(s.tools) ? s.tools : [],
+          decisionTime: at,
+          // Why it is not a setup yet, in the words the page can show. An
+          // unassigned strategy and one with no entry window are different
+          // problems with different fixes, and only one of them is fixable here.
+          missing: [
+            ...(Array.isArray(s.tools) && s.tools.length ? [] : ['tools']),
+            ...(at ? [] : ['entry window']),
+          ],
+        };
+      }),
+    });
+  } catch (err) {
+    // Distinct from an empty list: qp being down is not the same answer as qp
+    // holding no strategies, and the page must not offer to fix the wrong one.
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
+/*
+ * Assign a strategy's tools — the one write this side makes to qp.
+ *
+ * Narrow on purpose. The rules, the window and the side stay the builder's;
+ * this changes which screeners run it, which is the decision that belongs where
+ * the cards are. qp validates the ids against the live tool list, so a typo is
+ * refused rather than quietly producing a setup no tool ever runs.
+ */
+app.post('/api/strategies/:id/tools', express.json(), async (req, res) => {
+  try {
+    const tools = Array.isArray(req.body?.tools) ? req.body.tools : [];
+    const saved = await require('../setups/qpClient').setTools(req.params.id, tools);
+    res.json({ ok: true, id: req.params.id, tools: (saved && saved.tools) || [] });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // Where a tool lives, so the page can deep-link a fire back to its card.
 app.get('/api/tools', (req, res) => {
   try {

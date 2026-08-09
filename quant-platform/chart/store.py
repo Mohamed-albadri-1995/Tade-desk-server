@@ -174,6 +174,26 @@ def save_strategy(obj: dict) -> dict:
     return get_strategy(sid)
 
 
+def set_tools(sid: int, raw) -> dict | None:
+    """Assign a strategy's tools, and touch nothing else about it.
+
+    Saving means writing the whole document back, which is right for the
+    builder and wrong for assignment: another process would have to round-trip
+    every rule to change one field, and a bug in that round trip rewrites the
+    logic that was backtested without saying so. This reads the stored
+    document, replaces one key and writes it back.
+
+    Returns None when there is no such strategy — a missing one must be
+    reported, not created, or a typo in an id silently produces a second
+    strategy that nothing runs. Raises on an unknown tool id, same as saving.
+    """
+    s = get_strategy(sid)
+    if not s:
+        return None
+    s['tools'] = normalise_tools(raw)
+    return save_strategy(s)
+
+
 def delete_strategy(sid: int) -> bool:
     with _lock:
         db = _db()
