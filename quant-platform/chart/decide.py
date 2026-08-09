@@ -60,7 +60,7 @@ def _et_date(ts_seconds: int) -> str:
 
 
 def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
-                    feed: str, days: int = 2) -> list:
+                    feed: str, days: int = 2, fill: str = 'close') -> list:
     """Every signal this symbol produced on `date`, across the strategies given.
 
     A setup is usually two strategies — a long and a short — and a symbol can
@@ -74,7 +74,7 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
     for s in strategies:
         try:
             res = strat.evaluate(s, symbol=symbol, tf=tf, days=days,
-                                 feed=feed, view='regular', asof=date)
+                                 feed=feed, view='regular', asof=date, fill=fill)
         except Exception as e:                       # noqa: BLE001 — reported, not raised
             out.append({'symbol': symbol, 'strategy': s.get('name'),
                         'error': str(e)})
@@ -132,7 +132,7 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
 
 def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
            feed: str = 'yahoo', top_n: int = 2, target_r: float = 2.0,
-           days: int = 2, workers: int = _WORKERS) -> dict:
+           days: int = 2, workers: int = _WORKERS, fill: str = 'close') -> dict:
     """Run the strategies over the universe and return the ranked picks.
 
     Returns the picks AND every candidate that was considered, because "why is
@@ -149,7 +149,7 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
     # restored by the ranking below, so concurrency cannot change which two
     # names are taken — only how long it takes to name them.
     def one(sym):
-        return evaluate_symbol(strategies, sym, date, tf, feed, days=days)
+        return evaluate_symbol(strategies, sym, date, tf, feed, days=days, fill=fill)
 
     if symbols:
         with ThreadPoolExecutor(max_workers=max(1, min(workers, len(symbols)))) as pool:
@@ -191,6 +191,13 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
         # missed.
         'took_ms': int((time.time() - started) * 1000),
         'workers': workers,
+        # WHICH PRICE THE ENTRY IS. 'close' fills at the signal bar's close;
+        # 'next_open' fills at the following bar's open, which is what a market
+        # order actually gets. It changes the entry, and through it the risk,
+        # the target and the ranking metric — so it is reported rather than
+        # assumed. Measured on 2026-08-06: LSCC came out at 128.74 on 'close'
+        # against the spec's 129.56, which is the 10:00 bar's own range.
+        'fill': fill,
         'universe': len(symbols),
         'picks': picks,
         'candidates': candidates,

@@ -45,6 +45,17 @@ const SETUPS = [
     // and would return nothing for today, and alpaca's free tier is IEX.
     feed: 'yahoo',
     targetR: 2.0,
+    // Which price the entry is taken at. 'close' fills at the signal bar's
+    // close; 'next_open' at the following bar's open, which is what a market
+    // order actually gets — and what setup_spec.md §4 asks for, since it
+    // decides on the 09:59 close and enters on the 10:00 open.
+    //
+    // Left at 'close' because the seed pins its entry WINDOW to 10:00, so the
+    // signal bar is already 10:00 and next_open would fill at 10:01. Making
+    // this match the spec means moving the seed's window to 09:59 AND setting
+    // next_open — the two go together, and the seed is not this file's to
+    // change. See the note in the runner's alert.
+    fill: 'close',
     // Evaluated once the bar before this has closed. The spec tested 09:35 and
     // 09:45 and both were worse, so this is a result rather than a preference.
     decisionTime: '10:00',

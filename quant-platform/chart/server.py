@@ -564,6 +564,12 @@ def setup_decide(payload: dict = Body(...)):
             top_n=int(payload.get('top_n') or 2),
             target_r=float(payload.get('target_r') or 2.0),
             days=int(payload.get('days') or 2),
+            # 'close' fills at the signal bar's close; 'next_open' at the
+            # following bar's open, which is what a market order really gets.
+            # It moves the entry, and with it the risk, the target and the
+            # ranking metric, so it is a caller's decision rather than a default
+            # nobody chose.
+            fill=str(payload.get('fill') or 'close'),
         )
         return JSONResponse(out)
     except Exception as e:

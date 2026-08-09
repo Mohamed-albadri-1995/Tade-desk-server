@@ -139,7 +139,7 @@ def test_parallel_evaluation_cannot_change_the_picks(monkeypatch):
 
     prices = {'AAA': (10.0, 9.0), 'BBB': (10.0, 9.5), 'CCC': (10.0, 9.8)}
 
-    def fake(strategies, sym, date, tf, feed, days=2):
+    def fake(strategies, sym, date, tf, feed, days=2, fill='close'):
         _t.sleep(random.uniform(0, 0.03))       # uneven, so order really varies
         e, s = prices[sym]
         return [{'symbol': sym, 'strategy': 'X', 'side': 'long',
@@ -163,7 +163,7 @@ def test_a_run_reports_how_long_it_took():
 def test_one_symbol_failing_does_not_stop_the_others(monkeypatch):
     from chart import decide as dec
 
-    def fake(strategies, sym, date, tf, feed, days=2):
+    def fake(strategies, sym, date, tf, feed, days=2, fill='close'):
         if sym == 'BAD':
             return [{'symbol': sym, 'strategy': 'X', 'error': 'no bars'}]
         return [{'symbol': sym, 'strategy': 'X', 'side': 'long', 'entry': 10.0,
@@ -185,7 +185,7 @@ def test_one_symbol_failing_does_not_stop_the_others(monkeypatch):
 def test_an_open_trade_is_picked_up_from_its_own_timestamp_field(monkeypatch):
     from chart import decide as dec
 
-    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof):
+    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof, fill='close'):
         return {
             'ok': True, 'side': 'long', 'trades': [],
             # Exactly the shape chart/strategy.evaluate returns: `time`.
@@ -207,7 +207,7 @@ def test_an_open_trade_with_no_timestamp_is_an_error_not_a_silent_drop(monkeypat
     """The failure that hid the bug: a missing field looked like no signal."""
     from chart import decide as dec
 
-    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof):
+    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof, fill='close'):
         return {'ok': True, 'side': 'long', 'trades': [],
                 'open_trade': {'entry': 29.05, 'stop': 27.68}}
 
@@ -221,7 +221,7 @@ def test_an_open_trade_with_no_timestamp_is_an_error_not_a_silent_drop(monkeypat
 def test_an_open_trade_from_another_session_is_not_taken(monkeypatch):
     from chart import decide as dec
 
-    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof):
+    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof, fill='close'):
         return {'ok': True, 'side': 'long', 'trades': [],
                 'open_trade': {'time': int(pd.Timestamp('2026-08-05 10:00',
                                                         tz=_ET_TZ).timestamp()),
@@ -233,3 +233,35 @@ def test_an_open_trade_from_another_session_is_not_taken(monkeypatch):
 
 
 _ET_TZ = 'America/New_York'
+
+
+# ── which price the entry is ─────────────────────────────────────────────────
+# 'close' fills at the signal bar's close; 'next_open' at the following bar's
+# open, which is what a market order really gets. It moves the entry, and
+# through it the risk, the target and the ranking metric — so a caller must be
+# able to choose it, and the run must say which was used.
+#
+# Measured on 2026-08-06: LSCC came out at 128.74 on 'close' against the spec's
+# 129.56. LIFE differed by a penny. That spread is one bar's range, not a feed
+# disagreement, which is how the convention showed itself.
+
+def test_the_fill_convention_reaches_the_strategy(monkeypatch):
+    from chart import decide as dec
+    seen = {}
+
+    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof, fill='close'):
+        seen['fill'] = fill
+        return {'ok': True, 'side': 'long', 'trades': [], 'open_trade': None}
+
+    monkeypatch.setattr(dec.strat, 'evaluate', fake_evaluate)
+    dec.evaluate_symbol([{'name': 'S', 'side': 'long'}], 'LIFE', '2026-08-06',
+                        '1m', 'yahoo', fill='next_open')
+    assert seen['fill'] == 'next_open', 'the caller\'s fill never reached evaluate'
+
+
+def test_a_run_reports_which_fill_it_used():
+    """Two runs of the same day can differ only by this, so it is part of the
+    answer rather than a setting somebody has to remember."""
+    from chart import decide as dec
+    assert dec.decide([], [], '2026-08-06')['fill'] == 'close'
+    assert dec.decide([], [], '2026-08-06', fill='next_open')['fill'] == 'next_open'

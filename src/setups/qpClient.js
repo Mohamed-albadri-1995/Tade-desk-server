@@ -37,9 +37,9 @@ function baseUrl() {
  */
 async function decide({ strategyId, strategies, symbols, date, tf = '1m',
                         feed = 'yahoo', topN = 2, targetR = 2.0,
-                        timeoutMs = 45000 }) {
+                        fill = 'close', timeoutMs = 45000 }) {
   const body = {
-    symbols, date, tf, feed, top_n: topN, target_r: targetR,
+    symbols, date, tf, feed, top_n: topN, target_r: targetR, fill,
   };
   if (strategies) body.strategies = strategies;
   else body.strategy_id = strategyId;
