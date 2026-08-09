@@ -74,21 +74,40 @@ def _range_for(tf: str, start: pd.Timestamp, end: pd.Timestamp) -> str:
 
     Asking for a range and filtering locally avoids period1/period2, whose
     timezone handling is the usual source of an off-by-one-session bug.
+
+    THE RANGE MUST BE ONE YAHOO ALLOWS FOR THE INTERVAL, and that is narrower
+    than it looks. `interval=1m&range=3mo` is not "more than it has" — it is a
+    422, no data at all. The first version of this computed the range from the
+    span qp asked for, which for a strategy referencing session VWAP and window
+    levels is a 40-day floor, so every 1-minute request became 3mo and every one
+    of them failed.
+
+    Yahoo serves roughly a month of 1-minute history and at most a week per
+    request, so 5d is the ceiling there whatever was asked for. That is enough
+    for this loader's job: it exists for the live decision and recent sessions,
+    and anything needing real history uses polygon.
     """
     span = max(1, int((end - start).total_seconds() // 86400) + 1)
-    cap = _MAX_DAYS.get(tf, 30)
-    days = min(span + 2, cap)          # +2 so a weekend cannot eat the window
-    if days <= 1:
-        return '1d'
-    if days <= 5:
-        return '5d'
-    if days <= 30:
-        return '1mo'
-    if days <= 90:
-        return '3mo'
-    if days <= 365:
-        return '1y'
-    return '2y'
+    days = min(span + 2, _MAX_DAYS.get(tf, 30))   # +2 so a weekend cannot eat it
+    tokens = _RANGE_TOKENS.get(tf, _RANGE_TOKENS['1d'])
+    for limit, token in tokens:
+        if days <= limit:
+            return token
+    return tokens[-1][1]
+
+
+# What each interval may actually be asked for. Ordered smallest first; the
+# last entry is the ceiling, and asking beyond it is a 422 rather than a
+# truncated answer.
+_RANGE_TOKENS = {
+    '1m':  [(1, '1d'), (5, '5d')],
+    '5m':  [(1, '1d'), (5, '5d'), (30, '1mo'), (60, '3mo')],
+    '15m': [(1, '1d'), (5, '5d'), (30, '1mo'), (60, '3mo')],
+    '30m': [(1, '1d'), (5, '5d'), (30, '1mo'), (60, '3mo')],
+    '1h':  [(5, '5d'), (30, '1mo'), (90, '3mo'), (365, '1y'), (730, '2y')],
+    '1d':  [(5, '5d'), (30, '1mo'), (90, '3mo'), (365, '1y'), (730, '2y'),
+            (1825, '5y'), (3650, '10y')],
+}
 
 
 def _fetch(symbol: str, params: dict) -> dict:
@@ -104,7 +123,13 @@ def _fetch(symbol: str, params: dict) -> dict:
                 return result
         except (urllib.error.URLError, urllib.error.HTTPError, ValueError) as e:
             last = e
-    raise RuntimeError(f'Yahoo returned no chart for {symbol}: {last}')
+    # The parameters are in the message on purpose. This failed once as a bare
+    # "HTTP Error 422", which says nothing about WHICH combination Yahoo
+    # refused — and the answer was interval=1m with range=3mo, forty lines away
+    # in a history floor. An error that names what was asked for is the
+    # difference between a minute and an afternoon.
+    asked = f"interval={params.get('interval')} range={params.get('range')}"
+    raise RuntimeError(f'Yahoo returned no chart for {symbol} ({asked}): {last}')
 
 
 def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,

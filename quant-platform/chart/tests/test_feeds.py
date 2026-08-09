@@ -79,3 +79,44 @@ def test_yahoo_returns_the_expected_frame_shape_when_empty():
     df.index = pd.DatetimeIndex([], tz='UTC', name='t')
     assert list(df.columns) == ['open', 'high', 'low', 'close', 'volume']
     assert hasattr(yahoo, 'load')
+
+
+# ── the range Yahoo is asked for ─────────────────────────────────────────────
+# `interval=1m&range=3mo` is not "more history than it has" — it is a 422 and
+# no data at all. qp applies a 40-day floor to any strategy referencing session
+# VWAP or window levels, so EVERY 1-minute request became 3mo and every one of
+# them failed, with the cause forty lines away from the error.
+
+@pytest.mark.parametrize('span_days', [1, 2, 5, 40, 400])
+def test_one_minute_never_asks_beyond_what_yahoo_serves(span_days):
+    from tools.data.yahoo import _range_for
+    end = pd.Timestamp('2026-08-06T20:00:00Z')
+    got = _range_for('1m', end - pd.Timedelta(days=span_days), end)
+    assert got in ('1d', '5d'), (
+        f'1m asked for range={got}; Yahoo answers 422 for anything longer, so a '
+        'wide history request must be capped rather than passed through')
+
+
+@pytest.mark.parametrize('tf,allowed', [
+    ('5m', {'1d', '5d', '1mo', '3mo'}),
+    ('15m', {'1d', '5d', '1mo', '3mo'}),
+    ('1h', {'5d', '1mo', '3mo', '1y', '2y'}),
+    ('1d', {'5d', '1mo', '3mo', '1y', '2y', '5y', '10y'}),
+])
+def test_every_interval_stays_inside_its_own_ceiling(tf, allowed):
+    from tools.data.yahoo import _range_for
+    end = pd.Timestamp('2026-08-06T20:00:00Z')
+    for span in (1, 5, 40, 400, 4000):
+        got = _range_for(tf, end - pd.Timedelta(days=span), end)
+        assert got in allowed, f'{tf} asked for range={got} at span {span}d'
+
+
+def test_a_wider_request_never_returns_a_narrower_range():
+    """Monotonic, so asking for more history can never quietly fetch less."""
+    from tools.data.yahoo import _range_for
+    order = ['1d', '5d', '1mo', '3mo', '1y', '2y', '5y', '10y']
+    end = pd.Timestamp('2026-08-06T20:00:00Z')
+    for tf in ('1m', '5m', '1h', '1d'):
+        seen = [order.index(_range_for(tf, end - pd.Timedelta(days=d), end))
+                for d in (1, 5, 30, 90, 400, 4000)]
+        assert seen == sorted(seen), f'{tf} range is not monotonic: {seen}'
