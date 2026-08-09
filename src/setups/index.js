@@ -82,13 +82,58 @@ const SETUPS = [
   },
 ];
 
+/*
+ * Setups added after deployment, from data/setups.json.
+ *
+ * The list above is the one that ships. This is the one you add to, and it is a
+ * file in data/ for the same reasons the alert rules and the risk settings are:
+ * it survives `git pull`, it needs no rebuild, and it can be written by a script
+ * rather than by editing JavaScript over SSH from a phone.
+ *
+ * Same shape as an entry above, because it IS one — a binding naming a qp
+ * strategy, a tool, a time and a ranking. Nothing here computes anything, so
+ * there is no more risk in loading one from a file than from this module.
+ *
+ * A file entry with an id that already exists REPLACES the built-in one. That
+ * is deliberate: it is how a shipped setup gets its ranking or its filter
+ * adjusted without a code change, and how a bad edit is undone by deleting a
+ * line rather than by reverting a commit.
+ */
+function userSetups() {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const dir = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
+    const file = process.env.SETUPS_FILE || path.join(dir, 'setups.json');
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const list = Array.isArray(raw) ? raw : (raw.setups || []);
+    return list.filter(s => s && s.id && s.toolId && s.strategyId);
+  } catch {
+    return [];                    // absent or unreadable — the built-ins stand
+  }
+}
+
+/** Everything defined, built-in and added, with added winning on a clash. */
+function all() {
+  const added = userSetups();
+  const ids = new Set(added.map(s => s.id));
+  return [...SETUPS.filter(s => !ids.has(s.id)), ...added];
+}
+
 /** Every setup this tool is responsible for running. */
 function forTool(toolId) {
-  return SETUPS.filter(s => s.toolId === toolId);
+  return all().filter(s => s.toolId === toolId);
 }
 
 function get(id) {
-  return SETUPS.find(s => s.id === id) || null;
+  return all().find(s => s.id === id) || null;
 }
 
-module.exports = { SETUPS, forTool, get };
+module.exports = {
+  // A getter, so a setup added while the process is running is picked up on the
+  // next read rather than at the next restart. The decision is once a day; a
+  // file read per call is nothing beside a network fetch per symbol.
+  get SETUPS() { return all(); },
+  BUILT_IN: SETUPS,
+  all, forTool, get,
+};
