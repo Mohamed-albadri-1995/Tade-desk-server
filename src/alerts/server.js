@@ -62,7 +62,7 @@ app.get('/api/setups', async (req, res) => {
         id: s.id, name: s.name, tools: s.tools,
         decisionTime: s.decisionTime, universeScanAt: s.universeScanAt || null,
         describe: s.describe, caution: s.caution, liveFeed: s.liveFeed || null,
-        sides: s.sides, strategies: s.strategies,
+        sides: s.sides, strategies: s.strategies, strategyIds: s.strategyIds,
         topN: (s.rank || {}).topN || 2,
         universe: universe.describe(s.universe),
         universeRules: (s.universe && s.universe.rules) || [],

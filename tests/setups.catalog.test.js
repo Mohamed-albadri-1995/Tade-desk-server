@@ -77,6 +77,24 @@ test('a long and a short are one setup, not two', async () => {
  * one strategy; a 09:35 opening-range strategy must schedule at 09:35 without
  * anyone remembering to say so anywhere.
  */
+/*
+ * The qp rows behind a setup, carried so its tools can be changed later.
+ * Without them a setup could be assigned once and never reassigned — adding a
+ * second tool, or moving it off the wrong one, would mean going back to the
+ * builder, which is the dead end the picker exists to remove.
+ */
+test('a setup carries the ids of the strategies behind it', async () => {
+  qp.strategies.mockResolvedValue([{ ...T2_LONG, id: 7 }, { ...T2_SHORT, id: 8 }]);
+  const s = (await catalog.list())[0];
+  expect(s.strategyIds.sort()).toEqual([7, 8]);
+});
+
+test('a strategy saved without an id does not contribute a null one', async () => {
+  // A null would be posted back as a path segment and write to nothing.
+  qp.strategies.mockResolvedValue([{ ...T2_LONG, id: 7 }, { ...T2_SHORT, id: undefined }]);
+  expect((await catalog.list())[0].strategyIds).toEqual([7]);
+});
+
 test('the decision time is read from the strategy entry window', async () => {
   qp.strategies.mockResolvedValue([
     T2_LONG,

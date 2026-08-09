@@ -26,6 +26,7 @@ router.get('/', async (req, res) => {
       tools: s.tools,
       sides: s.sides,
       strategies: s.strategies,
+      strategyIds: s.strategyIds,
       decisionTime: s.decisionTime,
       universeScanAt: s.universeScanAt || null,
       describe: s.describe,

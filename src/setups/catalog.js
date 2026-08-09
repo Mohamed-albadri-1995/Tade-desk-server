@@ -110,12 +110,18 @@ async function list() {
         universeScanAt: minutesBefore(at, 2),
         sides: [],
         strategies: [],
+        // The qp rows behind the group. Carried because changing which tools
+        // run a setup means writing to every strategy in it — a long and a
+        // short are one setup, and assigning half of a pair gives one that
+        // ranks half its signals while looking perfectly correct.
+        strategyIds: [],
       });
     }
     const g = groups.get(key);
     for (const t of tools) if (!g.tools.includes(t)) g.tools.push(t);
     if (s.side && !g.sides.includes(s.side)) g.sides.push(s.side);
     g.strategies.push(s.name);
+    if (s.id !== undefined && s.id !== null) g.strategyIds.push(s.id);
   }
 
   // The parts qp cannot hold, merged on top.

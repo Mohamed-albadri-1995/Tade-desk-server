@@ -92,6 +92,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   cursor:pointer; user-select:none; }
 .ua-tool.on { background:var(--accent); border-color:var(--accent); color:#fff; }
 .ua-blocked { font-size:10.5px; color:var(--text3); }
+.ua-label { font-size:10.5px; color:var(--text3); text-transform:uppercase;
+  letter-spacing:.05em; }
+/* The same row of tools on a setup that is already running, so adding a second
+   tool or moving it to the right one is a tap rather than a trip elsewhere. */
+.st-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:9px; }
 
 /* ── position sizing ── */
 .risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
@@ -372,9 +377,24 @@ function announce(fires) {
  * is it on" is a question you ask BEFORE the decision, not after it.
  */
 let SETUPS = [], SETUP_FIELDS = [], SETUP_OPS = [];
+
+/* The configured tools, fetched once. Both lists draw a row of them, so this
+ * has to be in hand BEFORE either renders — a setup drawn with an empty tool
+ * row looks like a setup that cannot be reassigned. */
+let TOOL_IDS = [];
+async function ensureTools() {
+  if (TOOL_IDS.length) return TOOL_IDS;
+  try {
+    const t = await (await fetch('/api/tools')).json();
+    TOOL_IDS = (t.tools || []).map(x => x.id).filter(Boolean);
+  } catch { TOOL_IDS = []; }
+  return TOOL_IDS;
+}
+
 async function loadSetups() {
   const out = document.getElementById('setups');
   if (!out) return;
+  await ensureTools();
   try {
     const d = await (await fetch('/api/setups')).json();
     SETUPS = d.setups || [];
@@ -398,10 +418,19 @@ async function loadSetups() {
       return `<div class="setup-def${on ? '' : ' off'}">
         <div class="su-head">
           <span class="t">${esc(s.name)}</span>
-          ${(s.tools || []).map(t => `<span class="tool">${esc(t)}</span>`).join('')}
           <span class="su-tag">${esc(s.decisionTime)} ET</span>
           <button class="btn${on ? ' on' : ''}" onclick="toggleSetup('${esc(s.id)}', ${!on})">
             ${on ? 'On' : 'Off'}</button>
+        </div>
+        <!-- The tools stay editable after the first one is picked. A setup that
+             could be assigned once and never changed made adding a second tool,
+             or moving it to the right one, a trip back to the chart tool — the
+             same dead end the picker below was built to remove. -->
+        <div class="st-tools">
+          <span class="ua-label">runs on</span>
+          <div class="ua-tools">${TOOL_IDS.map(t => `<span
+            class="ua-tool${(s.tools || []).includes(t) ? ' on' : ''}"
+            onclick="setSetupTool(${i}, '${esc(t)}')">${esc(t)}</span>`).join('')}</div>
         </div>
         <ul class="st-rules">${(s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
         ${s.universe ? `<div class="st-gate">Only cards where ${esc(s.universe)}</div>` : ''}
@@ -430,10 +459,10 @@ async function loadSetups() {
  * Long and short are assigned together, because they are one setup: assigning
  * only one half produces a setup that ranks half the signals and looks correct.
  */
-let TOOL_IDS = [];
 async function loadUnassigned() {
   const out = document.getElementById('unassigned');
   if (!out) return;
+  await ensureTools();
   let list;
   try {
     const d = await (await fetch('/api/strategies')).json();
@@ -445,13 +474,6 @@ async function loadUnassigned() {
     out.innerHTML = '';
     return;
   }
-  if (!TOOL_IDS.length) {
-    try {
-      const t = await (await fetch('/api/tools')).json();
-      TOOL_IDS = (t.tools || []).map(x => x.id).filter(Boolean);
-    } catch { TOOL_IDS = []; }
-  }
-
   // One row per setup, not per strategy: the long and the short of one idea are
   // one decision. Keyed the same way the setups list groups them.
   const groups = new Map();
@@ -483,25 +505,60 @@ async function loadUnassigned() {
 }
 
 let UNASSIGNED = [];
+
+/**
+ * Write one setup's tools, to every qp strategy in it.
+ *
+ * All of them, always: a long and a short are one setup, and assigning half a
+ * pair produces a setup that ranks half the day's signals while looking exactly
+ * like a working one.
+ */
+async function writeTools(ids, tools) {
+  for (const id of ids) {
+    const r = await (await fetch(`/api/strategies/${encodeURIComponent(id)}/tools`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tools }),
+    })).json();
+    if (!r.ok) throw new Error(r.error || 'refused');
+  }
+  // Both lists: the strategy may have just crossed between them in either
+  // direction — gaining its first tool, or losing its last.
+  await loadSetups();
+  await loadUnassigned();
+}
+
 async function assignTool(i, toolId) {
   const g = UNASSIGNED[i];
   if (!g) return;
-  try {
-    // Every strategy in the group, so a long/short pair is never half-assigned.
-    for (const id of g.ids) {
-      const r = await (await fetch(`/api/strategies/${encodeURIComponent(id)}/tools`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tools: [toolId] }),
-      })).json();
-      if (!r.ok) throw new Error(r.error || 'refused');
-    }
-  } catch (err) {
-    alert(`Could not assign: ${err.message}`);
-    return;
-  }
-  // Both lists, because the strategy has just moved from one to the other.
-  await loadSetups();
-  await loadUnassigned();
+  try { await writeTools(g.ids, [toolId]); }
+  catch (err) { alert(`Could not assign: ${err.message}`); }
+}
+
+/**
+ * Add or remove a tool on a setup that is already running.
+ *
+ * The same write, from the other side. A setup can genuinely belong to several
+ * tools — one strategy over T2's and T7's cards is one setup ranking a wider
+ * list, not two — and the tool it was first given is often not the right one.
+ */
+async function setSetupTool(i, toolId) {
+  const s = SETUPS[i];
+  if (!s) return;
+  const have = s.tools || [];
+  const next = have.includes(toolId)
+    ? have.filter(t => t !== toolId)
+    : [...have, toolId];
+
+  // Removing the last one is not an error — it is how a setup is retired
+  // without deleting the strategy or losing its backtests — but it does stop
+  // it running, and that is worth one tap of confirmation.
+  if (!next.length
+      && !confirm(`Remove the last tool from "${s.name}"?\n\n`
+        + 'It stops running and moves back to the list below. '
+        + 'The strategy and its backtests are untouched.')) return;
+
+  try { await writeTools(s.strategyIds || [], next); }
+  catch (err) { alert(`Could not change the tools: ${err.message}`); }
 }
 
 /*
