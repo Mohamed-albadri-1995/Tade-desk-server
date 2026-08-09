@@ -49,23 +49,46 @@ app.use('/api/alerts', require('../routes/alerts'));
  * database and does not need one to read a list of definitions. It cannot RUN a
  * setup — that needs the owning tool's card list — so no run endpoints here.
  */
-app.get('/api/setups', (req, res) => {
+app.get('/api/setups', async (req, res) => {
   try {
-    const setups = require('../setups');
-    const prefs = require('../setups/prefs');
+    const catalog = require('../setups/catalog');
+    const universe = require('../setups/universe');
+    const list = await catalog.list();
     res.json({
       ok: true,
-      setups: setups.SETUPS.map(s => ({
-        id: s.id, name: s.name, toolId: s.toolId,
+      // Empty is a real answer and a different one from an error: it means qp
+      // has no strategy that both names its tools and has an entry window.
+      setups: list.map(s => ({
+        id: s.id, name: s.name, tools: s.tools,
         decisionTime: s.decisionTime, universeScanAt: s.universeScanAt || null,
         describe: s.describe, caution: s.caution, liveFeed: s.liveFeed || null,
-        params: s.params,
-        universe: require('../setups/universe').describe(s.universe),
-        enabled: prefs.isEnabled(s.id),
+        sides: s.sides, strategies: s.strategies,
+        topN: (s.rank || {}).topN || 2,
+        universe: universe.describe(s.universe),
+        universeRules: (s.universe && s.universe.rules) || [],
+        enabled: s.enabled,
       })),
+      fields: Object.entries(universe.FIELDS).map(([k, v]) => ({ value: k, label: v.label, kind: v.kind })),
+      operators: universe.OPERATORS,
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/*
+ * The parts the screener owns: the card-field filter and how many to take.
+ *
+ * Not the strategy, not the tools, not the time — those are the qp strategy's
+ * and editing them here would put two copies out of step. This endpoint exists
+ * precisely because bias, score and catalyst are things qp cannot see.
+ */
+app.post('/api/setups/:id/settings', express.json(), (req, res) => {
+  try {
+    const saved = require('../setups/prefs').saveSettings(req.params.id, req.body || {});
+    res.json({ ok: true, id: req.params.id, settings: saved });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
   }
 });
 

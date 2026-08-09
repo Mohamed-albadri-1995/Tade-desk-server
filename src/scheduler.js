@@ -219,38 +219,50 @@ function startScheduler() {
   /*
    * ── setups ──
    *
-   * A setup ranks the whole universe at one instant, so both of its inputs have
-   * to be right AT that instant, and each gets its own job.
+   * ONE job, every minute, rather than two jobs per setup registered at boot.
    *
-   * The universe scan exists because the ordinary discovery cadence lands at
-   * 09:55 and then not again until 10:00. That would leave the card list five
-   * minutes old at the one moment it is read — and a name that appeared at
-   * 09:56 is exactly the kind the setup is looking for. One extra scan, whose
-   * only job is to be recent.
+   * A setup's definition lives in qp: its tools, and its decision time, which
+   * is the entry window of the strategy itself. Registering cron jobs at
+   * startup would freeze that — a strategy built in qp at eleven o'clock would
+   * not run until the tools were restarted, one deleted there would keep
+   * firing, and a decision time edited there would be ignored. The whole point
+   * of reading the catalog live is lost the moment the schedule is a snapshot.
    *
-   * The decision job fires on the minute. It does NOT assume the data is there:
-   * at 10:00:00 the 09:59 bar is a fraction of a second old and neither feed
-   * has necessarily published it. The runner waits for that bar and reports how
-   * long it waited, rather than evaluating a 29-minute morning as if it were
-   * the whole thing.
+   * So the tick asks. Every minute of the session it reads which setups this
+   * tool owns and whether any is due now. That is a file read and one call to
+   * a service on the same box, once a minute, against a decision worth being
+   * right about.
    *
-   * Registered on every tool; each runs only the setups that name it, so eight
-   * of the nine processes register a job that does nothing. That is cheaper
-   * than nine different schedules to keep in step.
+   * The universe scan two minutes earlier exists because the ordinary discovery
+   * cadence can leave the card list five minutes old at the one moment it is
+   * read — and a name that appeared in those five minutes is exactly the kind a
+   * setup is looking for.
    */
-  const setupDefs = require('./setups');
-  const mine = setupDefs.forTool(require('./config').toolId);
-  for (const setup of mine) {
-    const { runDue } = require('./setups/runner');
-    if (setup.universeScanAt) {
-      const [uh, um] = setup.universeScanAt.split(':').map(Number);
-      registerJob(`Setup Universe Scan ${setup.universeScanAt} (${setup.id})`,
-        `${um} ${uh} * * 1-5`, 'America/New_York', () => runFullScan());
-    }
-    const [dh, dm] = setup.decisionTime.split(':').map(Number);
-    registerJob(`Setup Decision ${setup.decisionTime} (${setup.id})`,
-      `${dm} ${dh} * * 1-5`, 'America/New_York', () => runDue(setup.decisionTime));
-  }
+  registerJob('Setup Tick (every minute, 04:00–16:00)',
+    '* 4-16 * * 1-5', 'America/New_York', async () => {
+      const now = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(new Date());
+      const catalog = require('./setups/catalog');
+      const { runDue } = require('./setups/runner');
+      let due = [];
+      try {
+        due = await catalog.forTool(require('./config').toolId);
+      } catch (err) {
+        console.warn('[Setups] could not read the catalog:', err.message);
+        return;
+      }
+      // Freshen the card list for anything deciding shortly.
+      if (due.some(s => s.universeScanAt === now && s.enabled !== false)) {
+        console.log(`[Setups] ${now} — pre-decision scan`);
+        await runFullScan();
+      }
+      const firing = due.filter(s => s.decisionTime === now && s.enabled !== false);
+      if (firing.length) {
+        console.log(`[Setups] ${now} — ${firing.length} setup(s) due`);
+        await runDue(now);
+      }
+    });
 
   // Job identity comes from the name, so renaming a job leaves its old row
   // behind holding a schedule nothing reads any more. Harmless until someone

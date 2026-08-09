@@ -66,7 +66,14 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
    what the setup DOES, it is which stocks it is allowed to look at, and reading
    the two as one thing is how "2 of 40" gets mistaken for "2 of 12". */
 .st-gate { font-size:11px; color:var(--blue); margin-top:7px; }
-.st-meta { font-size:10.5px; color:var(--text3); margin-top:7px; }
+".st-meta { font-size:10.5px; color:var(--text3); margin-top:7px; }
+.st-meta .lnk { margin-left:8px; }
+.st-edit { margin-top:10px; border-top:1px dashed var(--border); padding-top:10px; }
+.st-rule { display:flex; gap:6px; align-items:center; margin-top:6px; flex-wrap:wrap; }
+.st-rule select, .st-rule input { background:var(--bg3); border:1px solid var(--border);
+  border-radius:5px; padding:6px 8px; color:var(--text); font:12px inherit; }
+.st-rule .st-v { width:110px; }
+.st-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
 
 /* ── position sizing ── */
 .risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
@@ -339,7 +346,7 @@ function announce(fires) {
  * Listed whether or not they have fired, because "what will run at 10:00, and
  * is it on" is a question you ask BEFORE the decision, not after it.
  */
-let SETUPS = [];
+let SETUPS = [], SETUP_FIELDS = [], SETUP_OPS = [];
 async function loadSetups() {
   const out = document.getElementById('setups');
   if (!out) return;
@@ -349,16 +356,24 @@ async function loadSetups() {
     DECISIONS = SETUPS.filter(s => s.enabled !== false)
       .map(s => s.decisionTime).filter(Boolean);
     paintNextDecision();
+    SETUP_FIELDS = d.fields || [];
+    SETUP_OPS = d.operators || [];
     if (!SETUPS.length) {
-      out.innerHTML = '<div class="empty">No setups defined.</div>';
+      // Empty is a real answer, and the reason is specific: a strategy becomes
+      // a setup by naming its tools and having an entry window. Saying which is
+      // missing beats "no setups", which reads as something being broken.
+      out.innerHTML = `<div class="empty">No setups yet. A strategy in the chart tool
+        becomes a setup here once it <b>names the tools it belongs to</b> and has an
+        <b>entry window</b> — the window is its decision time. Build and backtest it
+        there; it appears here on its own.</div>`;
       return;
     }
-    out.innerHTML = SETUPS.map(s => {
+    out.innerHTML = SETUPS.map((s, i) => {
       const on = s.enabled !== false;
       return `<div class="setup-def${on ? '' : ' off'}">
         <div class="su-head">
           <span class="t">${esc(s.name)}</span>
-          <span class="tool">${esc(s.toolId)}</span>
+          ${(s.tools || []).map(t => `<span class="tool">${esc(t)}</span>`).join('')}
           <span class="su-tag">${esc(s.decisionTime)} ET</span>
           <button class="btn${on ? ' on' : ''}" onclick="toggleSetup('${esc(s.id)}', ${!on})">
             ${on ? 'On' : 'Off'}</button>
@@ -366,14 +381,93 @@ async function loadSetups() {
         <ul class="st-rules">${(s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
         ${s.universe ? `<div class="st-gate">Only cards where ${esc(s.universe)}</div>` : ''}
         <div class="st-meta">
-          ${s.universeScanAt ? `extra scan ${esc(s.universeScanAt)} to freshen the list · ` : ''}
-          feed: ${esc(s.liveFeed || 'default')}
+          ${s.universeScanAt ? `extra scan ${esc(s.universeScanAt)} · ` : ''}
+          feed: ${esc(s.liveFeed || 'default')} · top ${esc(s.topN || 2)}
+          <button class="lnk" onclick="editSetup(${i})">edit filter</button>
         </div>
+        <div class="st-edit" id="st-edit-${i}" style="display:none"></div>
         ${s.caution ? `<div class="su-caution">${esc(s.caution)}</div>` : ''}
       </div>`;
     }).join('');
   } catch {
     out.innerHTML = '<div class="empty">Could not read the setups.</div>';
+  }
+}
+
+/*
+ * The filter editor. Only the card-field gate and the count are editable here:
+ * the strategy, its tools and its time belong to the qp strategy, and offering
+ * to change them in two places is how two copies stop agreeing.
+ */
+function editSetup(i) {
+  const s = SETUPS[i];
+  const box = document.getElementById(`st-edit-${i}`);
+  if (!box) return;
+  if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+  const rules = (s.universeRules || []).length ? s.universeRules : [{ left: '', op: '', right: '' }];
+  box.style.display = '';
+  box.innerHTML = `
+    <div class="note">Only run on cards where…  <b>these are the screener's own
+      fields</b> — the chart tool cannot see them.</div>
+    <div id="st-rules-${i}">${rules.map((r, j) => ruleRow(i, j, r)).join('')}</div>
+    <div class="st-actions">
+      <button class="btn" onclick="addRuleRow(${i})">+ condition</button>
+      <label class="note">match
+        <select id="st-logic-${i}">
+          <option value="AND"${(s.universeRules && s.logic) === 'OR' ? '' : ' selected'}>all</option>
+          <option value="OR">any</option>
+        </select>
+      </label>
+      <label class="note">take top
+        <input id="st-top-${i}" type="number" min="1" max="10" value="${esc(s.topN || 2)}" style="width:60px">
+      </label>
+      <button class="btn primary" onclick="saveSetup(${i})">Save</button>
+      <span class="note" id="st-msg-${i}"></span>
+    </div>`;
+}
+
+function ruleRow(i, j, r = {}) {
+  return `<div class="st-rule" data-row="${j}">
+    <select class="st-f">${['<option value="">field…</option>']
+      .concat(SETUP_FIELDS.map(f =>
+        `<option value="${esc(f.value)}"${f.value === r.left ? ' selected' : ''}>${esc(f.label)}</option>`)).join('')}</select>
+    <select class="st-o">${['<option value="">is…</option>']
+      .concat(SETUP_OPS.map(o =>
+        `<option value="${esc(o.value)}"${o.value === (r.op || r.operator) ? ' selected' : ''}>${esc(o.label)}</option>`)).join('')}</select>
+    <input class="st-v" value="${esc(r.right ?? '')}" placeholder="value">
+    <button class="lnk" onclick="this.parentNode.remove()">×</button>
+  </div>`;
+}
+
+function addRuleRow(i) {
+  const box = document.getElementById(`st-rules-${i}`);
+  box.insertAdjacentHTML('beforeend', ruleRow(i, box.children.length));
+}
+
+async function saveSetup(i) {
+  const s = SETUPS[i];
+  const msg = document.getElementById(`st-msg-${i}`);
+  const rules = [...document.querySelectorAll(`#st-rules-${i} .st-rule`)].map(row => ({
+    left: row.querySelector('.st-f').value,
+    op: row.querySelector('.st-o').value,
+    right: row.querySelector('.st-v').value,
+  })).filter(r => r.left && r.op && r.right !== '');
+  const body = {
+    universe: rules.length
+      ? { logic: document.getElementById(`st-logic-${i}`).value, rules }
+      : null,
+    topN: Number(document.getElementById(`st-top-${i}`).value) || 2,
+  };
+  try {
+    const r = await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'could not save');
+    loadSetups();
+  } catch (e) {
+    msg.textContent = e.message;
   }
 }
 

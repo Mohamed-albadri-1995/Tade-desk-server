@@ -41,6 +41,51 @@ function isEnabled(setupId) {
   return !entry || entry.enabled !== false;
 }
 
+/*
+ * Everything else the screener holds about a setup whose definition lives in
+ * qp: the card-field filter, how many to take, the feed. Preferences ABOUT a
+ * setup rather than a definition OF one — the definition is the qp strategy,
+ * and duplicating any of it here would put two copies out of step.
+ */
+function settingsFor(setupId) {
+  const e = read().setups[setupId] || {};
+  return {
+    universe: e.universe || null,
+    topN: e.topN || null,
+    tf: e.tf || null,
+    feed: e.feed || null,
+    targetR: e.targetR || null,
+    fill: e.fill || null,
+    caution: e.caution || null,
+  };
+}
+
+/** Save those settings. Only the keys given are touched. */
+function saveSettings(setupId, patch) {
+  const state = read();
+  state.setups = state.setups || {};
+  const cur = state.setups[setupId] || {};
+  const next = { ...cur };
+  for (const k of ['universe', 'topN', 'tf', 'feed', 'targetR', 'fill', 'caution']) {
+    if (!(k in patch)) continue;
+    const v = patch[k];
+    if (v === null || v === '' || v === undefined) delete next[k];
+    else next[k] = v;
+  }
+  if (next.universe) {
+    const errors = require('./universe').validate(next.universe);
+    if (errors.length) throw new Error(errors.join('; '));
+  }
+  next.updatedAt = Date.now();
+  state.setups[setupId] = next;
+  state.updatedAt = Date.now();
+  fs.mkdirSync(path.dirname(FILE), { recursive: true });
+  const tmp = `${FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, FILE);
+  return settingsFor(setupId);
+}
+
 function setEnabled(setupId, enabled) {
   const state = read();
   state.setups = state.setups || {};
@@ -57,4 +102,4 @@ function setEnabled(setupId, enabled) {
   return isEnabled(setupId);
 }
 
-module.exports = { FILE, isEnabled, setEnabled };
+module.exports = { FILE, isEnabled, setEnabled, settingsFor, saveSettings };

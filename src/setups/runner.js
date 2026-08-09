@@ -20,7 +20,7 @@
 const config = require('../config');
 const r0 = require('../r0/registry');
 const { toETDate } = require('../utils/time');
-const setups = require('./index');
+const catalog = require('./catalog');
 const qp = require('./qpClient');
 const risk = require('./risk');
 const universeFilter = require('./universe');
@@ -71,8 +71,11 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
   const day = date || toETDate(Date.now());
   const started = Date.now();
 
-  if (setup.toolId !== config.toolId && !dryRun) {
-    return { ok: false, reason: `belongs to ${setup.toolId}, this is ${config.toolId}` };
+  // A setup names the tools it belongs to — the qp strategy carries them — so a
+  // setup used by three tools is one object rather than three copies that drift.
+  const owners = setup.tools || (setup.toolId ? [setup.toolId] : []);
+  if (owners.length && !owners.includes(config.toolId) && !dryRun) {
+    return { ok: false, reason: `belongs to ${owners.join(', ')}, this is ${config.toolId}` };
   }
 
   /*
@@ -101,7 +104,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     // every one. That is a fact about the filter, and a filter nobody can see
     // working is a filter that gets blamed for the wrong thing.
     const fire = {
-      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
       date: day, at: Date.now(), kind: 'setup', level: 'info',
       detail: `All ${gate.dropped.length} card(s) were removed by the filter `
         + `(${universeFilter.describe(setup.universe)}). `
@@ -113,7 +116,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
 
   if (!list.length) {
     const fire = {
-      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
       date: day, at: Date.now(), kind: 'setup', level: 'info',
       detail: 'No cards on the list at the decision — nothing to rank.',
     };
@@ -185,7 +188,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     ruleId: setup.id,
     rule: setup.name,
     ticker: pick.ticker,
-    toolId: setup.toolId,
+    toolId: config.toolId,
     date: day,
     at: Date.now(),
     kind: 'setup',
@@ -231,7 +234,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
    */
   if (gate.filtered) {
     fires.push({
-      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
       date: day, at: Date.now(), kind: 'setup', level: 'info',
       detail: `Filter: ${gate.kept.length + gate.dropped.length} card(s) → `
         + `${gate.kept.length} passed (${universeFilter.describe(setup.universe)})`
@@ -246,7 +249,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
   // published nothing and a setup that never ran look exactly the same.
   if (!fires.length) {
     fires.push({
-      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
       date: day, at: Date.now(), kind: 'setup', level: 'info',
       detail: `Nothing qualified. ${out.counts.evaluated} evaluated, `
         + `${out.counts.signalled} had a direction, ${out.counts.invalidated} invalidated`
@@ -263,7 +266,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
    */
   if (data.mixed) {
     fires.push({
-      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
       date: day, at: Date.now(), kind: 'setup', level: 'warn',
       detail: `Ranked across mixed feeds (${data.used.join(' + ')}) — no single feed `
         + 'covered the list. Extensions from different tapes are not directly '
@@ -275,7 +278,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
   // universe. Worth its own line rather than a footnote on a pick.
   if (data.missing.length) {
     fires.push({
-      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
       date: day, at: Date.now(), kind: 'setup', level: 'warn',
       detail: `No ${lastWantedBar(setup.decisionTime)} bar for `
         + `${data.missing.slice(0, 8).join(', ')}`
@@ -315,7 +318,9 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
 
 /** Every setup this tool owns, run in turn. Used by the scheduler. */
 async function runDue(decisionTime, opts = {}) {
-  const mine = setups.forTool(config.toolId)
+  // Read live, so a strategy built in qp this morning runs this morning and one
+  // deleted there stops — the whole reason the catalog is not a snapshot.
+  const mine = (await catalog.forTool(config.toolId))
     .filter(s => s.decisionTime === decisionTime)
     // Switched off from the alerts page. Silently skipped rather than
     // publishing "nothing qualified": you turned it off, and a message every
@@ -330,7 +335,7 @@ async function runDue(decisionTime, opts = {}) {
       // A crash must not be silence either.
       const day = opts.date || toETDate(Date.now());
       alertStore.publishFires([{
-        ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+        ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
         date: day, at: Date.now(), kind: 'setup', level: 'error',
         detail: `Did not run: ${err.message}`,
       }], day);

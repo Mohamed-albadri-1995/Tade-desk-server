@@ -13,14 +13,15 @@ const router = express.Router();
  * from one place and needs the whole picture. `mine` is what separates "this
  * tool will run it" from "this tool knows about it".
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
+  const catalog = require('../setups/catalog');
   res.json({
     ok: true,
     toolId: config.toolId,
-    setups: setups.SETUPS.map(s => ({
+    setups: (await catalog.list()).map(s => ({
       id: s.id,
       name: s.name,
-      toolId: s.toolId,
+      tools: s.tools,
       decisionTime: s.decisionTime,
       universeScanAt: s.universeScanAt || null,
       params: s.params,
@@ -28,8 +29,9 @@ router.get('/', (req, res) => {
       caution: s.caution,
       liveFeed: s.liveFeed || null,
       universe: require('../setups/universe').describe(s.universe),
+      universeRules: (s.universe && s.universe.rules) || [],
       enabled: require('../setups/prefs').isEnabled(s.id),
-      mine: s.toolId === config.toolId,
+      mine: (s.tools || []).includes(config.toolId),
     })),
   });
 });

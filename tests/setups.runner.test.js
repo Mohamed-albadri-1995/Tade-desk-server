@@ -22,15 +22,30 @@ process.env.TOOL_ID = 'T2';
 process.env.TOOL_NAME = 'Momentum';
 
 jest.mock('../src/setups/qpClient');
+jest.mock('../src/setups/catalog');
 jest.mock('../src/r0/registry', () => ({ getTodayRows: jest.fn(() => []) }));
 
 const qp = require('../src/setups/qpClient');
+const catalog = require('../src/setups/catalog');
 const r0 = require('../src/r0/registry');
 const runner = require('../src/setups/runner');
-const setups = require('../src/setups');
 const store = require('../src/alerts/store');
 
-const SETUP = setups.get('T2-VWAP-EXT');
+/*
+ * A setup as the catalog builds it from qp: the strategy carries its tools and
+ * its decision time, so neither is retyped here.
+ */
+const SETUP = {
+  id: 'T2 10:00 VWAP Extension@10:00',
+  name: 'T2 10:00 VWAP Extension',
+  strategyId: 'T2 10:00 VWAP Extension',
+  tools: ['T2'],
+  decisionTime: '10:00',
+  universeScanAt: '09:58',
+  rank: { metric: 'vwap_extension', topN: 2 },
+  tf: '1m', feed: 'yahoo', targetR: 2.0, fill: 'close',
+  caution: 'Backtest it in qp before trusting it live — not a validated edge.',
+};
 const DATE = '2026-08-10';
 
 /*
@@ -62,6 +77,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   try { fs.unlinkSync(FIRES); } catch { /* absent */ }
   r0.getTodayRows.mockReturnValue([{ ticker: 'LIFE' }, { ticker: 'LSCC' }]);
+  // The catalog is read live from qp, so runDue asks it every time.
+  catalog.forTool.mockResolvedValue([SETUP]);
 });
 afterAll(() => { try { fs.unlinkSync(FIRES); } catch { /* absent */ } });
 
@@ -233,7 +250,7 @@ describe('ownership and dry runs', () => {
   });
 
   test('the wrong tool refuses to run it for real', async () => {
-    const foreign = { ...SETUP, toolId: 'T7' };
+    const foreign = { ...SETUP, tools: ['T7'] };
     const out = await runner.runSetup(foreign, { date: DATE });
     expect(out.ok).toBe(false);
     expect(out.reason).toMatch(/belongs to T7/);

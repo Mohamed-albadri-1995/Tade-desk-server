@@ -56,6 +56,20 @@ async function decide({ strategyId, strategies, symbols, date, tf = '1m',
   return data;
 }
 
+/**
+ * Every strategy saved in qp.
+ *
+ * This is what makes the setups list live rather than copied: build a strategy
+ * there, give it tools, and it appears in the screener; edit it and this
+ * follows; delete it and it goes. Nothing on this side restates its logic, its
+ * tools or its decision time.
+ */
+async function strategies(timeoutMs = 10000) {
+  const res = await axios.get(`${baseUrl()}/api/strategies`, { timeout: timeoutMs });
+  const d = res.data || {};
+  return Array.isArray(d) ? d : (d.strategies || []);
+}
+
 /** Is the platform up? Asked before a decision so "down" is a distinct answer. */
 async function health(timeoutMs = 5000) {
   try {
@@ -66,4 +80,4 @@ async function health(timeoutMs = 5000) {
   }
 }
 
-module.exports = { decide, health, baseUrl };
+module.exports = { decide, strategies, health, baseUrl };
