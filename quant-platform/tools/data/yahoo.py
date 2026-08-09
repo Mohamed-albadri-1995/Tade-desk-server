@@ -99,14 +99,30 @@ def _range_for(tf: str, start: pd.Timestamp, end: pd.Timestamp) -> str:
 # What each interval may actually be asked for. Ordered smallest first; the
 # last entry is the ceiling, and asking beyond it is a 422 rather than a
 # truncated answer.
+# MEASURED against the service, not read from documentation — see
+# chart/tests/tools_yahoo_limits.py, which is what produced these. The first
+# version of this table was guessed and had 5m and 15m reaching 3mo; both
+# answer 422 there, so every 5- and 15-minute request beyond a month returned
+# nothing at all.
+#
+# Measured 2026-08-09:
+#   1m   5d      1mo and beyond → 422
+#   5m   1mo     3mo and beyond → 422
+#   15m  1mo     3mo and beyond → 422
+#   1h   1y      not probed past 1y
+#   1d   1y      not probed past 1y
+#
+# The last two are capped at what was actually seen to work rather than at what
+# is probably allowed. Being conservative costs some history and nothing else;
+# being wrong costs every bar, because the failure mode here is 422 rather than
+# a short answer. Re-run the probe with the longer ranges to raise them.
 _RANGE_TOKENS = {
     '1m':  [(1, '1d'), (5, '5d')],
-    '5m':  [(1, '1d'), (5, '5d'), (30, '1mo'), (60, '3mo')],
-    '15m': [(1, '1d'), (5, '5d'), (30, '1mo'), (60, '3mo')],
-    '30m': [(1, '1d'), (5, '5d'), (30, '1mo'), (60, '3mo')],
-    '1h':  [(5, '5d'), (30, '1mo'), (90, '3mo'), (365, '1y'), (730, '2y')],
-    '1d':  [(5, '5d'), (30, '1mo'), (90, '3mo'), (365, '1y'), (730, '2y'),
-            (1825, '5y'), (3650, '10y')],
+    '5m':  [(1, '1d'), (5, '5d'), (30, '1mo')],
+    '15m': [(1, '1d'), (5, '5d'), (30, '1mo')],
+    '30m': [(1, '1d'), (5, '5d'), (30, '1mo')],
+    '1h':  [(5, '5d'), (30, '1mo'), (90, '3mo'), (365, '1y')],
+    '1d':  [(5, '5d'), (30, '1mo'), (90, '3mo'), (365, '1y')],
 }
 
 

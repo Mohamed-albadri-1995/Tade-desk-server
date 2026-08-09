@@ -74,7 +74,7 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
     for s in strategies:
         try:
             res = strat.evaluate(s, symbol=symbol, tf=tf, days=days,
-                                 feed=feed, view='rth', asof=date)
+                                 feed=feed, view='regular', asof=date)
         except Exception as e:                       # noqa: BLE001 — reported, not raised
             out.append({'symbol': symbol, 'strategy': s.get('name'),
                         'error': str(e)})

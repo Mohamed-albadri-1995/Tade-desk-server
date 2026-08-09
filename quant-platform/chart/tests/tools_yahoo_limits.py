@@ -36,7 +36,7 @@ import pandas as pd                                        # noqa: E402
 from tools.data import yahoo                               # noqa: E402
 
 
-RANGES = ['1d', '5d', '1mo', '3mo', '6mo', '1y']
+RANGES = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y']
 INTERVALS = ['1m', '5m', '15m', '1h', '1d']
 
 # A liquid name, so an empty answer means the RANGE was refused rather than the

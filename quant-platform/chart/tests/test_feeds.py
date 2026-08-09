@@ -97,11 +97,14 @@ def test_one_minute_never_asks_beyond_what_yahoo_serves(span_days):
         'wide history request must be capped rather than passed through')
 
 
+# Measured 2026-08-09 by chart/tests/tools_yahoo_limits.py, not read from
+# documentation. 5m and 15m answer 422 at 3mo — the guessed table had them
+# reaching it, so every request beyond a month returned nothing.
 @pytest.mark.parametrize('tf,allowed', [
-    ('5m', {'1d', '5d', '1mo', '3mo'}),
-    ('15m', {'1d', '5d', '1mo', '3mo'}),
-    ('1h', {'5d', '1mo', '3mo', '1y', '2y'}),
-    ('1d', {'5d', '1mo', '3mo', '1y', '2y', '5y', '10y'}),
+    ('5m', {'1d', '5d', '1mo'}),
+    ('15m', {'1d', '5d', '1mo'}),
+    ('1h', {'5d', '1mo', '3mo', '1y'}),
+    ('1d', {'5d', '1mo', '3mo', '1y'}),
 ])
 def test_every_interval_stays_inside_its_own_ceiling(tf, allowed):
     from tools.data.yahoo import _range_for
@@ -114,7 +117,7 @@ def test_every_interval_stays_inside_its_own_ceiling(tf, allowed):
 def test_a_wider_request_never_returns_a_narrower_range():
     """Monotonic, so asking for more history can never quietly fetch less."""
     from tools.data.yahoo import _range_for
-    order = ['1d', '5d', '1mo', '3mo', '1y', '2y', '5y', '10y']
+    order = ['1d', '5d', '1mo', '3mo', '1y']
     end = pd.Timestamp('2026-08-06T20:00:00Z')
     for tf in ('1m', '5m', '1h', '1d'):
         seen = [order.index(_range_for(tf, end - pd.Timedelta(days=d), end))
