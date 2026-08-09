@@ -27,6 +27,7 @@ router.get('/', (req, res) => {
       describe: s.describe,
       caution: s.caution,
       liveFeed: s.liveFeed || null,
+      universe: require('../setups/universe').describe(s.universe),
       enabled: require('../setups/prefs').isEnabled(s.id),
       mine: s.toolId === config.toolId,
     })),

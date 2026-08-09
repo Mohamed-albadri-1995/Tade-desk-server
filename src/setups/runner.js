@@ -23,6 +23,7 @@ const { toETDate } = require('../utils/time');
 const setups = require('./index');
 const qp = require('./qpClient');
 const risk = require('./risk');
+const universeFilter = require('./universe');
 const prefs = require('./prefs');
 const alertStore = require('../alerts/store');
 
@@ -33,11 +34,14 @@ function lastWantedBar(decisionTime) {
   return `${String(Math.floor(prev / 60)).padStart(2, '0')}:${String(prev % 60).padStart(2, '0')}`;
 }
 
+/** This tool's card list for today — the rows, not just the tickers. */
+function universeRows() {
+  return r0.getTodayRows().filter(r => r && r.ticker);
+}
+
 /** The universe: this tool's card list for today, and nothing else about it. */
 function universe() {
-  return r0.getTodayRows()
-    .map(row => String(row.ticker || '').toUpperCase())
-    .filter(Boolean);
+  return universeRows().map(row => String(row.ticker).toUpperCase());
 }
 
 /**
@@ -71,7 +75,42 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     return { ok: false, reason: `belongs to ${setup.toolId}, this is ${config.toolId}` };
   }
 
-  const list = tickers && tickers.length ? tickers : universe();
+  /*
+   * The card-field layer, applied BEFORE qp rather than after.
+   *
+   * qp has never heard of bias, score or catalyst — they exist only on a card —
+   * so this is the one thing it cannot do rather than a duplicate of anything.
+   * It runs first because the setup ranks and takes the top two: filtering
+   * afterwards means the filter eats picks and leaves gaps, while filtering
+   * first means the ranking happens among the names that would actually be
+   * taken. It is also the difference between evaluating twelve symbols at 10:00
+   * and evaluating forty.
+   */
+  let list;
+  let gate = { filtered: false, kept: [], dropped: [], reasons: {} };
+  if (tickers && tickers.length) {
+    list = tickers;
+  } else {
+    const rows = universeRows();
+    gate = universeFilter.apply(rows, setup.universe);
+    list = gate.kept.map(r => String(r.ticker).toUpperCase());
+  }
+
+  if (!list.length && gate.filtered && gate.dropped.length) {
+    // Distinct from "no cards": the tool found stocks and the filter removed
+    // every one. That is a fact about the filter, and a filter nobody can see
+    // working is a filter that gets blamed for the wrong thing.
+    const fire = {
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      date: day, at: Date.now(), kind: 'setup', level: 'info',
+      detail: `All ${gate.dropped.length} card(s) were removed by the filter `
+        + `(${universeFilter.describe(setup.universe)}). `
+        + Object.entries(gate.reasons).map(([k, n]) => `${n}× ${k}`).join('; '),
+    };
+    if (!dryRun) alertStore.publishFires([fire], day);
+    return { ok: true, picks: [], universe: 0, gate, fires: [fire] };
+  }
+
   if (!list.length) {
     const fire = {
       ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
@@ -96,6 +135,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     feed: setup.feed || 'yahoo',
     topN: (setup.rank && setup.rank.topN) || 2,
     targetR: setup.targetR || 2.0,
+    fill: setup.fill || 'close',
   });
 
   // qp's shape, translated once into the shape the alerts already speak. Every
@@ -183,6 +223,25 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     };
   });
 
+  /*
+   * What the filter did, when there was one. A gate that silently halves the
+   * universe is a gate you cannot audit: two picks out of forty and two out of
+   * twelve are different statements about the same morning, and only one of
+   * them is what happened.
+   */
+  if (gate.filtered) {
+    fires.push({
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: setup.toolId,
+      date: day, at: Date.now(), kind: 'setup', level: 'info',
+      detail: `Filter: ${gate.kept.length + gate.dropped.length} card(s) → `
+        + `${gate.kept.length} passed (${universeFilter.describe(setup.universe)})`
+        + (Object.keys(gate.reasons).length
+          ? ` · removed by ${Object.entries(gate.reasons)
+            .map(([k, n]) => `${n}× ${k}`).join('; ')}`
+          : ''),
+    });
+  }
+
   // Always say something, including "nothing". From a phone, a setup that
   // published nothing and a setup that never ran look exactly the same.
   if (!fires.length) {
@@ -232,6 +291,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     setupId: setup.id,
     date: day,
     universe: list.length,
+    gate: { filtered: gate.filtered, kept: list.length, dropped: gate.dropped.length },
     picks: out.picks,
     counts: out.counts,
     data: {

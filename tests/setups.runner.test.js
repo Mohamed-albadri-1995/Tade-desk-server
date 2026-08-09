@@ -272,3 +272,80 @@ describe('switching a setup off', () => {
     prefs.isEnabled.mockRestore();
   });
 });
+
+/*
+ * The card-field filter, applied BEFORE qp.
+ *
+ * The order is the whole point. The setup ranks and takes the top two, so
+ * filtering afterwards means the filter eats picks and leaves gaps — rank 3,
+ * which passed the filter, is discarded before anyone sees it. Filtering first
+ * means the ranking happens among the names that would actually be taken, and
+ * qp evaluates twelve symbols at 10:00 instead of forty.
+ */
+describe('the card-field filter', () => {
+  const gated = { ...SETUP, universe: { rules: [
+    { left: 'bias', op: 'eq', right: 'BULLISH' },
+  ] } };
+
+  function rows() {
+    return [
+      { ticker: 'GOOD', bias: 'BULLISH', _score: 80, stock: { price: 30 } },
+      { ticker: 'BAD', bias: 'BEARISH', _score: 90, stock: { price: 30 } },
+    ];
+  }
+
+  test('only the cards that passed are sent to qp', async () => {
+    r0.getTodayRows.mockReturnValue(rows());
+    decided([pick('GOOD')]);
+    await runner.runSetup(gated, { date: DATE });
+    expect(qp.decide).toHaveBeenCalledWith(
+      expect.objectContaining({ symbols: ['GOOD'] }));
+  });
+
+  test('the run says how many the filter removed and why', async () => {
+    r0.getTodayRows.mockReturnValue(rows());
+    decided([pick('GOOD')]);
+    await runner.runSetup(gated, { date: DATE });
+    const line = store.recentFires(DATE).find(f => /Filter:/.test(f.detail || ''));
+    expect(line.detail).toMatch(/2 card\(s\) → 1 passed/);
+    expect(line.detail).toMatch(/Bias is BULLISH/);
+  });
+
+  test('a setup with no filter sends the whole card list', async () => {
+    r0.getTodayRows.mockReturnValue(rows());
+    decided([pick('GOOD')]);
+    await runner.runSetup(SETUP, { date: DATE });
+    expect(qp.decide).toHaveBeenCalledWith(
+      expect.objectContaining({ symbols: ['GOOD', 'BAD'] }));
+    expect(store.recentFires(DATE).some(f => /Filter:/.test(f.detail || ''))).toBe(false);
+  });
+
+  /*
+   * "The filter removed everything" and "the tool found nothing" are different
+   * mornings, and a filter nobody can see working gets blamed for the wrong one.
+   */
+  test('a filter that removes everything says so, and does not call qp', async () => {
+    r0.getTodayRows.mockReturnValue([
+      { ticker: 'BAD', bias: 'BEARISH', _score: 90, stock: { price: 30 } },
+    ]);
+    await runner.runSetup(gated, { date: DATE });
+    expect(qp.decide).not.toHaveBeenCalled();
+    const f = store.recentFires(DATE)[0];
+    expect(f.detail).toMatch(/All 1 card\(s\) were removed by the filter/);
+    expect(f.detail).toMatch(/1× Bias is BULLISH/);
+  });
+
+  test('an empty card list is still its own message, not a filter message', async () => {
+    r0.getTodayRows.mockReturnValue([]);
+    await runner.runSetup(gated, { date: DATE });
+    expect(store.recentFires(DATE)[0].detail).toMatch(/No cards on the list/);
+  });
+
+  test('the setup\'s fill convention reaches qp', async () => {
+    r0.getTodayRows.mockReturnValue(rows());
+    decided([pick('GOOD')]);
+    await runner.runSetup({ ...SETUP, fill: 'next_open' }, { date: DATE });
+    expect(qp.decide).toHaveBeenCalledWith(
+      expect.objectContaining({ fill: 'next_open' }));
+  });
+});

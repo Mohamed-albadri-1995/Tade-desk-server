@@ -60,6 +60,7 @@ app.get('/api/setups', (req, res) => {
         decisionTime: s.decisionTime, universeScanAt: s.universeScanAt || null,
         describe: s.describe, caution: s.caution, liveFeed: s.liveFeed || null,
         params: s.params,
+        universe: require('../setups/universe').describe(s.universe),
         enabled: prefs.isEnabled(s.id),
       })),
     });
