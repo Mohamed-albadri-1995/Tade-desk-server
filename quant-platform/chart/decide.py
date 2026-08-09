@@ -101,19 +101,32 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
             })
         # A position still open at the end of the window is the live case: the
         # entry has fired and nothing has closed it yet, which at 10:00 is
-        # exactly what a fresh signal looks like.
+        # exactly what a fresh signal looks like. It is also the ONLY shape a
+        # fresh signal has, so getting it wrong loses every trade.
+        #
+        # It carries `time`, not `entry_ts` — a closed trade uses entry_ts and
+        # an open one does not. Reading the wrong field returned 0, which is
+        # 1970, which never matches the date, so the pick was dropped without a
+        # word and the run reported "nothing qualified" on a day with two
+        # signals. Hence the explicit failure below rather than another default.
         ot = res.get('open_trade')
-        if ot and _et_date(ot.get('entry_ts', 0)) == date:
-            out.append({
-                'symbol': symbol,
-                'strategy': s.get('name'),
-                'side': res.get('side') or s.get('side') or 'long',
-                'entry': ot.get('entry'),
-                'stop': ot.get('stop'),
-                'entry_at': _hhmm(ot['entry_ts']),
-                'entry_ts': int(ot['entry_ts']),
-                'open': True,
-            })
+        if ot:
+            when = ot.get('time', ot.get('entry_ts'))
+            if when is None:
+                out.append({'symbol': symbol, 'strategy': s.get('name'),
+                            'error': 'open_trade carried no timestamp — '
+                                     f'has {sorted(ot)}'})
+            elif _et_date(when) == date:
+                out.append({
+                    'symbol': symbol,
+                    'strategy': s.get('name'),
+                    'side': res.get('side') or s.get('side') or 'long',
+                    'entry': ot.get('entry'),
+                    'stop': ot.get('stop'),
+                    'entry_at': _hhmm(when),
+                    'entry_ts': int(when),
+                    'open': True,
+                })
     return out
 
 

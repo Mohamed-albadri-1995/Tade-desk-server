@@ -117,19 +117,25 @@ def run(symbol: str, date: str, prefix: str, feed: str, tf: str, minute: str):
             try:
                 t = strat.test_condition(node, symbol=symbol, tf=tf, days=2,
                                          feed=feed, view='regular', asof=date)
-                marks = t.get('markers') or t.get('true_bars') or []
-                # Did it hold at the decision minute specifically?
+                # Markers are keyed by unix TIME, not by bar index. Reading
+                # them as indexes made every rule report false — including
+                # rule 1 of the long and rule 1 of the short, which are
+                # opposites and cannot both be false. That impossibility is
+                # what gave the bug away.
+                marks = t.get('markers') or []
                 held = None
                 if len(bars):
                     et = pd.DatetimeIndex(
                         pd.to_datetime(ts, unit='s', utc=True)).tz_convert(_ET)
-                    want = [j for j, x in enumerate(et)
+                    want = [int(ts[j]) for j, x in enumerate(et)
                             if x.strftime('%Y-%m-%d') == date
                             and x.strftime('%H:%M') == minute]
-                    if want and isinstance(marks, list) and marks:
-                        idx = {m.get('index') if isinstance(m, dict) else m
-                               for m in marks}
-                        held = want[0] in idx
+                    if want:
+                        fired = {m.get('time') for m in marks if isinstance(m, dict)}
+                        held = want[0] in fired
+                        pct = t.get('pct')
+                        if pct is not None:
+                            print(f'       (held on {t.get("true", 0)} bars, {pct}% of the window)')
                 flag = ('TRUE ' if held else 'false') if held is not None else '  ?  '
                 print(f'    {i}. [{flag}] {_describe_node(node)}')
             except Exception as e:                          # noqa: BLE001
@@ -139,6 +145,23 @@ def run(symbol: str, date: str, prefix: str, feed: str, tf: str, minute: str):
             when = pd.Timestamp(t['entry_ts'], unit='s', tz='UTC').tz_convert(_ET)
             print(f"\n  TRADE {when:%Y-%m-%d %H:%M} entry={t['entry']} "
                   f"stop={t.get('stop')} exit={t.get('exit')} ({t.get('reason')})")
+
+        # The OPEN trade, spelled out with its raw fields.
+        #
+        # This is the shape a live signal actually has — the entry has fired and
+        # nothing has closed it — and it is the one this tool did not print. It
+        # said "open_trade=yes" and stopped, while decide() was reading the
+        # wrong key out of it and dropping the pick in silence. A summary that
+        # omits the field the caller depends on is how a bug survives a
+        # debugging session.
+        ot = res.get('open_trade')
+        if ot:
+            when = pd.Timestamp(ot.get('time', 0), unit='s', tz='UTC').tz_convert(_ET)
+            print(f"\n  OPEN TRADE {when:%Y-%m-%d %H:%M} entry={ot.get('entry')} "
+                  f"stop={ot.get('stop')}")
+            print(f"    fields: {sorted(ot)}")
+            print("    ↑ decide() reads 'time' from this. A closed trade uses "
+                  "'entry_ts'; an open one does not.")
         print()
 
 

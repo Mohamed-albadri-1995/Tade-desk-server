@@ -173,3 +173,63 @@ def test_one_symbol_failing_does_not_stop_the_others(monkeypatch):
     out = dec.decide([{'name': 'X'}], ['GOOD', 'BAD'], '2026-08-10')
     assert [p['symbol'] for p in out['picks']] == ['GOOD']
     assert [e['symbol'] for e in out['errors']] == ['BAD']
+
+
+# ── the open trade is what a live signal looks like ──────────────────────────
+# At 10:00 the entry has just fired and nothing has closed it, so the signal
+# arrives as `open_trade`, not as a closed trade. It carries `time`; a CLOSED
+# trade carries `entry_ts`. Reading entry_ts off an open trade returned 0 —
+# 1970 — which never matches the date, so every live pick was dropped without a
+# word and the run reported "nothing qualified" on a day with two signals.
+
+def test_an_open_trade_is_picked_up_from_its_own_timestamp_field(monkeypatch):
+    from chart import decide as dec
+
+    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof):
+        return {
+            'ok': True, 'side': 'long', 'trades': [],
+            # Exactly the shape chart/strategy.evaluate returns: `time`.
+            'open_trade': {'time': int(pd.Timestamp('2026-08-06 10:00', tz=_ET_TZ)
+                                       .timestamp()),
+                           'entry': 29.05, 'stop': 27.68},
+        }
+
+    monkeypatch.setattr(dec.strat, 'evaluate', fake_evaluate)
+    rows = dec.evaluate_symbol([{'name': 'S', 'side': 'long'}], 'LIFE',
+                               '2026-08-06', '1m', 'yahoo')
+    assert len(rows) == 1, 'the live signal was dropped'
+    assert rows[0]['entry'] == 29.05
+    assert rows[0]['entry_at'] == '10:00'
+    assert rows[0].get('open') is True
+
+
+def test_an_open_trade_with_no_timestamp_is_an_error_not_a_silent_drop(monkeypatch):
+    """The failure that hid the bug: a missing field looked like no signal."""
+    from chart import decide as dec
+
+    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof):
+        return {'ok': True, 'side': 'long', 'trades': [],
+                'open_trade': {'entry': 29.05, 'stop': 27.68}}
+
+    monkeypatch.setattr(dec.strat, 'evaluate', fake_evaluate)
+    rows = dec.evaluate_symbol([{'name': 'S', 'side': 'long'}], 'LIFE',
+                               '2026-08-06', '1m', 'yahoo')
+    assert len(rows) == 1
+    assert 'no timestamp' in rows[0]['error']
+
+
+def test_an_open_trade_from_another_session_is_not_taken(monkeypatch):
+    from chart import decide as dec
+
+    def fake_evaluate(strategy, symbol, tf, days, feed, view, asof):
+        return {'ok': True, 'side': 'long', 'trades': [],
+                'open_trade': {'time': int(pd.Timestamp('2026-08-05 10:00',
+                                                        tz=_ET_TZ).timestamp()),
+                               'entry': 29.05, 'stop': 27.68}}
+
+    monkeypatch.setattr(dec.strat, 'evaluate', fake_evaluate)
+    assert dec.evaluate_symbol([{'name': 'S', 'side': 'long'}], 'LIFE',
+                               '2026-08-06', '1m', 'yahoo') == []
+
+
+_ET_TZ = 'America/New_York'
