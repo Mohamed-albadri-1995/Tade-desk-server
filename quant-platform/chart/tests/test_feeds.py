@@ -120,3 +120,53 @@ def test_a_wider_request_never_returns_a_narrower_range():
         seen = [order.index(_range_for(tf, end - pd.Timedelta(days=d), end))
                 for d in (1, 5, 30, 90, 400, 4000)]
         assert seen == sorted(seen), f'{tf} range is not monotonic: {seen}'
+
+
+# ── the decision has a deadline ──────────────────────────────────────────────
+# The setup fires at 10:00 and the trade is entered at market on sight, so the
+# whole card list has to be evaluated inside the minute it is worth acting in.
+# Sequentially that is one network fetch per symbol; the parallel version is
+# what makes the deadline reachable. What must NOT change is which two names
+# come out — concurrency may reorder completion, never the ranking.
+
+def test_parallel_evaluation_cannot_change_the_picks(monkeypatch):
+    import random
+    import time as _t
+    from chart import decide as dec
+
+    prices = {'AAA': (10.0, 9.0), 'BBB': (10.0, 9.5), 'CCC': (10.0, 9.8)}
+
+    def fake(strategies, sym, date, tf, feed, days=2):
+        _t.sleep(random.uniform(0, 0.03))       # uneven, so order really varies
+        e, s = prices[sym]
+        return [{'symbol': sym, 'strategy': 'X', 'side': 'long',
+                 'entry': e, 'stop': s, 'entry_at': '10:00', 'entry_ts': 0}]
+
+    monkeypatch.setattr(dec, 'evaluate_symbol', fake)
+    for _ in range(5):                          # repeated: a race shows up once
+        out = dec.decide([{'name': 'X'}], ['CCC', 'AAA', 'BBB'],
+                         '2026-08-10', workers=3)
+        assert [p['symbol'] for p in out['picks']] == ['AAA', 'BBB']
+
+
+def test_a_run_reports_how_long_it_took():
+    """Whether the alert arrived while it was still actionable is a fact about
+    the run, not a hope about it."""
+    from chart import decide as dec
+    out = dec.decide([], [], '2026-08-10')
+    assert 'took_ms' in out and isinstance(out['took_ms'], int)
+
+
+def test_one_symbol_failing_does_not_stop_the_others(monkeypatch):
+    from chart import decide as dec
+
+    def fake(strategies, sym, date, tf, feed, days=2):
+        if sym == 'BAD':
+            return [{'symbol': sym, 'strategy': 'X', 'error': 'no bars'}]
+        return [{'symbol': sym, 'strategy': 'X', 'side': 'long', 'entry': 10.0,
+                 'stop': 9.0, 'entry_at': '10:00', 'entry_ts': 0}]
+
+    monkeypatch.setattr(dec, 'evaluate_symbol', fake)
+    out = dec.decide([{'name': 'X'}], ['GOOD', 'BAD'], '2026-08-10')
+    assert [p['symbol'] for p in out['picks']] == ['GOOD']
+    assert [e['symbol'] for e in out['errors']] == ['BAD']

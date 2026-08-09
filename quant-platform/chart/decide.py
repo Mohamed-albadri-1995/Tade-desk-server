@@ -25,12 +25,28 @@ pick can never be ranked by two different definitions of the same number.
 
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 
 from chart import strategy as strat
 from chart.backtest import rank_metric
 
 _ET = 'America/New_York'
+
+# How many symbols are evaluated at once.
+#
+# THIS IS A DEADLINE PROBLEM, not a throughput one. The decision is taken at
+# 10:00 and the trade is entered at market on sight, so the whole card list has
+# to be evaluated inside the minute it is worth acting in. Sequentially that is
+# one network fetch per symbol — forty of them, and the alert arrives after the
+# move it was describing.
+#
+# Threads rather than processes because the time goes on the network, not the
+# maths. Both strategies for one symbol run in the same worker so the second
+# hits the parquet cache the first just filled instead of fetching twice.
+_WORKERS = 8
 
 
 def _hhmm(ts_seconds: int) -> str:
@@ -103,21 +119,30 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
 
 def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
            feed: str = 'yahoo', top_n: int = 2, target_r: float = 2.0,
-           days: int = 2) -> dict:
+           days: int = 2, workers: int = _WORKERS) -> dict:
     """Run the strategies over the universe and return the ranked picks.
 
     Returns the picks AND every candidate that was considered, because "why is
     this not on the list" is the question actually asked of a ranking and it
-    cannot be answered from the list alone.
+    cannot be answered from the list alone. `took_ms` is reported for the same
+    reason the decision has a fixed time: whether it arrived while it was still
+    worth acting on is a fact about the run, not a hope about it.
     """
+    started = time.time()
     candidates: list = []
     errors: list = []
-    for sym in symbols:
-        for row in evaluate_symbol(strategies, sym, date, tf, feed, days=days):
-            if row.get('error'):
-                errors.append(row)
-            else:
-                candidates.append(row)
+
+    # Evaluated in parallel because this runs against a deadline. Order is
+    # restored by the ranking below, so concurrency cannot change which two
+    # names are taken — only how long it takes to name them.
+    def one(sym):
+        return evaluate_symbol(strategies, sym, date, tf, feed, days=days)
+
+    if symbols:
+        with ThreadPoolExecutor(max_workers=max(1, min(workers, len(symbols)))) as pool:
+            for rows in pool.map(one, symbols):
+                for row in rows:
+                    (errors if row.get('error') else candidates).append(row)
 
     signalled = []
     for c in candidates:
@@ -148,6 +173,11 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
         'date': date,
         'feed': feed,
         'tf': tf,
+        # The decision has a deadline, so how long it took is part of the
+        # answer. A run that names the right two names at 10:01 is a run that
+        # missed.
+        'took_ms': int((time.time() - started) * 1000),
+        'workers': workers,
         'universe': len(symbols),
         'picks': picks,
         'candidates': candidates,
