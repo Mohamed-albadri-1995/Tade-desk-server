@@ -41,11 +41,18 @@ import qp  # noqa: E402  — populates REGISTRY via primitive decorators
 from qp.registry import REGISTRY, get_approval, save_approval
 from qp.primitives.bars import Bars
 from qp.primitives._session import in_rth as _in_rth, in_premarket as _in_premarket
-from tools.data import alpaca, polygon, hybrid
+from tools.data import alpaca, polygon, hybrid, yahoo
 
 # Data feeds the compare tool can pull bars from. Each module exposes the
 # same load(symbol, tf, start, end) → tz-aware UTC OHLCV DataFrame.
-_LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid}
+#
+# This list and chart/data_manager.LOADERS are BOTH consulted — data_manager
+# for the chart's own fetches, this one for everything that goes through
+# prepare_bars(), which is what strategy.evaluate() uses. Registering a feed in
+# one and not the other gets you "unknown feed 'yahoo'" from the half you
+# forgot, which is exactly how yahoo shipped the first time.
+_LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid,
+            'yahoo': yahoo}
 
 
 def _load_dotenv() -> None:
