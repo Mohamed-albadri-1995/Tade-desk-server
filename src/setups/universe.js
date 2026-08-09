@@ -69,8 +69,29 @@ const OPERATORS = [
 ];
 const OP_SET = new Set(OPERATORS.map(o => o.value));
 
-const num = v => (v === null || v === undefined || v === '' || Number.isNaN(Number(v))
-  ? null : Number(v));
+/*
+ * A number, including the way people actually write the big ones.
+ *
+ * "market cap below 50M" is the natural way to say it and 50000000 is not —
+ * on a phone it is also nine taps and a miscount. Without this, "50M" parses
+ * to nothing, the rule cannot be evaluated, and an unevaluable rule DROPS the
+ * card: the filter silently removes the entire list and the setup reports that
+ * nothing qualified. The failure is invisible and points at the wrong thing.
+ *
+ * Suffixes are read case-insensitively and a bare number is unchanged, so
+ * anything already saved keeps meaning what it meant.
+ */
+const SUFFIX = { k: 1e3, m: 1e6, b: 1e9, t: 1e12 };
+function num(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const s = String(v).trim().replace(/[$,\s]/g, '');
+  const m = /^(-?\d*\.?\d+)([kmbt])?%?$/i.exec(s);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
+  return m[2] ? n * SUFFIX[m[2].toLowerCase()] : n;
+}
 
 /**
  * One rule against one card.
@@ -177,7 +198,8 @@ function validate(filter) {
   if (!filter) return errors;
   if (!Array.isArray(filter.rules)) return ['rules must be a list'];
   filter.rules.forEach((r, i) => {
-    if (!FIELDS[String(r?.left || '')]) {
+    const field = FIELDS[String(r?.left || '')];
+    if (!field) {
       errors.push(`rule ${i + 1}: unknown field ${JSON.stringify(r?.left)}`);
     }
     if (!OP_SET.has(String(r?.operator || r?.op || ''))) {
@@ -185,6 +207,13 @@ function validate(filter) {
     }
     if (r?.right === undefined || r?.right === null || r?.right === '') {
       errors.push(`rule ${i + 1}: needs a value to compare against`);
+    } else if (field && field.kind === 'number' && num(r.right) === null) {
+      // Refused at the door rather than at 10:00. A value that cannot be read
+      // makes its rule unevaluable, and an unevaluable rule drops every card —
+      // so the setup would report "nothing qualified" every morning and the
+      // typo would never be the obvious suspect.
+      errors.push(`rule ${i + 1}: ${field.label} needs a number `
+        + `— ${JSON.stringify(r.right)} is not one (50M, 1.5B and 500k are fine)`);
     }
   });
   return errors;

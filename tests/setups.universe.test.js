@@ -153,3 +153,71 @@ describe('rejecting a malformed filter at the door', () => {
       .toEqual([]);
   });
 });
+
+
+/* ── the way people actually write big numbers ──
+ *
+ * "market cap below 50M" is how the filter gets described out loud, and
+ * 50000000 is nine taps and a miscount on a phone. Before this, "50M" parsed
+ * to nothing, the rule became unevaluable, and an unevaluable rule DROPS the
+ * card — so the filter removed the whole list and the setup reported that
+ * nothing qualified. Nothing pointed at the typo.
+ */
+describe('numeric values with a suffix', () => {
+  const row = { stock: { mcap: 40e6, floatShares: 12e6, price: 7.5 } };
+  const test1 = (left, operator, right) => u.testRule({ left, operator, right }, row);
+
+  test('K, M, B and T are read', () => {
+    expect(test1('mcap', 'below', '50M')).toBe(true);
+    expect(test1('mcap', 'below', '30M')).toBe(false);
+    expect(test1('mcap', 'above', '0.03B')).toBe(true);
+    expect(test1('floatShares', 'above', '500k')).toBe(true);
+  });
+
+  test('case does not matter, because a phone capitalises', () => {
+    expect(test1('mcap', 'below', '50m')).toBe(true);
+    expect(test1('mcap', 'below', '50M')).toBe(true);
+  });
+
+  test('commas, dollar signs and stray spaces are tolerated', () => {
+    expect(test1('mcap', 'below', ' $50,000,000 ')).toBe(true);
+    expect(test1('price', 'below', '$10')).toBe(true);
+  });
+
+  test('a plain number still means exactly what it meant', () => {
+    // Anything already saved must not change meaning under this.
+    expect(test1('mcap', 'below', '50000000')).toBe(true);
+    expect(test1('mcap', 'below', 50000000)).toBe(true);
+    expect(test1('price', 'above', '7.4')).toBe(true);
+    expect(test1('price', 'above', '-1')).toBe(true);
+  });
+
+  test('a value that is not a number is still unevaluable, not zero', () => {
+    // Reading it as 0 would make "below 0" pass nothing and "above 0" pass
+    // everything — a filter that is confidently wrong beats one that admits it.
+    expect(test1('mcap', 'below', 'fifty')).toBeNull();
+    expect(test1('mcap', 'below', '50MM')).toBeNull();
+  });
+});
+
+/*
+ * A number that cannot be read is refused when it is typed, not at 10:00. The
+ * cost of letting it through is a setup that reports "nothing qualified" every
+ * morning — which looks like a quiet market, not a broken filter.
+ */
+describe('validating what was typed', () => {
+  test('a number field given words is refused, and says what is allowed', () => {
+    const errors = u.validate({ rules: [{ left: 'mcap', operator: 'below', right: 'fifty' }] });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/Market cap/);
+    expect(errors[0]).toMatch(/50M/);
+  });
+
+  test('a suffixed number passes', () => {
+    expect(u.validate({ rules: [{ left: 'mcap', operator: 'below', right: '50M' }] })).toEqual([]);
+  });
+
+  test('a text field is not held to it', () => {
+    expect(u.validate({ rules: [{ left: 'bias', operator: 'eq', right: 'BULLISH' }] })).toEqual([]);
+  });
+});

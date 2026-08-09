@@ -581,8 +581,8 @@ function editSetup(i) {
       <button class="btn" onclick="addRuleRow(${i})">+ condition</button>
       <label class="note">match
         <select id="st-logic-${i}">
-          <option value="AND"${(s.universeRules && s.logic) === 'OR' ? '' : ' selected'}>all</option>
-          <option value="OR">any</option>
+          <option value="AND"${s.universeLogic === 'OR' ? '' : ' selected'}>all</option>
+          <option value="OR"${s.universeLogic === 'OR' ? ' selected' : ''}>any</option>
         </select>
       </label>
       <label class="note">take top
@@ -601,7 +601,7 @@ function ruleRow(i, j, r = {}) {
     <select class="st-o">${['<option value="">is…</option>']
       .concat(SETUP_OPS.map(o =>
         `<option value="${esc(o.value)}"${o.value === (r.op || r.operator) ? ' selected' : ''}>${esc(o.label)}</option>`)).join('')}</select>
-    <input class="st-v" value="${esc(r.right ?? '')}" placeholder="value">
+    <input class="st-v" value="${esc(r.right ?? '')}" placeholder="e.g. 50M">
     <button class="lnk" onclick="this.parentNode.remove()">×</button>
   </div>`;
 }

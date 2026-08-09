@@ -66,6 +66,10 @@ app.get('/api/setups', async (req, res) => {
         topN: (s.rank || {}).topN || 2,
         universe: universe.describe(s.universe),
         universeRules: (s.universe && s.universe.rules) || [],
+        // Sent back so the editor reopens on what was saved. Without it the
+        // control always read "all", and re-saving silently turned an OR
+        // filter into an AND one — a different filter, quietly.
+        universeLogic: (s.universe && s.universe.logic) || 'AND',
         enabled: s.enabled,
       })),
       fields: Object.entries(universe.FIELDS).map(([k, v]) => ({ value: k, label: v.label, kind: v.kind })),

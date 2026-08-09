@@ -13,6 +13,16 @@
  * because a setup nobody runs looks exactly like a setup that never triggers.
  */
 
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
+
+// Its own preferences file: a test that saved a filter into the real one would
+// switch a live setup's universe on the deployment box.
+const PREFS = path.join(os.tmpdir(), `setup-prefs-assign-${process.pid}.json`);
+process.env.SETUP_PREFS_FILE = PREFS;
+afterAll(() => { try { fs.unlinkSync(PREFS); } catch { /* absent */ } });
+
 const request = require('supertest');
 
 jest.mock('../src/setups/qpClient', () => ({
@@ -114,4 +124,36 @@ test('only the tools are forwarded, whatever else is posted', async () => {
   await request(app).post('/api/strategies/1/tools')
     .send({ tools: ['T2'], name: 'renamed', risk: { window_start: 1 } }).expect(200);
   expect(qp.setTools).toHaveBeenCalledWith('1', ['T2']);
+});
+
+/*
+ * The filter's match mode has to survive a round trip.
+ *
+ * "market cap below 50M OR float above 10M" saved fine and then reopened
+ * reading "all", so the next save turned it into an AND — a different filter,
+ * silently, and one that would usually keep nothing.
+ */
+describe('the match mode comes back with the filter', () => {
+  const prefs = require('../src/setups/prefs');
+  const S = { id: 9, name: 'Fashionably Late Scalp', side: 'long',
+              tools: ['T2'], risk: { window_start: 1000 } };
+
+  test('an OR filter is reported as OR', async () => {
+    qp.strategies.mockResolvedValue([S]);
+    const id = (await request(app).get('/api/setups')).body.setups[0].id;
+    prefs.saveSettings(id, { universe: { logic: 'OR', rules: [
+      { left: 'mcap', operator: 'below', right: '50M' },
+      { left: 'floatShares', operator: 'above', right: '10M' },
+    ] } });
+
+    const s = (await request(app).get('/api/setups')).body.setups[0];
+    expect(s.universeLogic).toBe('OR');
+    expect(s.universe).toMatch(/ OR /);
+    expect(s.universeRules).toHaveLength(2);
+  });
+
+  test('no filter reads as AND rather than as nothing', async () => {
+    qp.strategies.mockResolvedValue([{ ...S, name: 'Untouched', id: 10 }]);
+    expect((await request(app).get('/api/setups')).body.setups[0].universeLogic).toBe('AND');
+  });
 });

@@ -35,6 +35,10 @@ router.get('/', async (req, res) => {
       topN: (s.rank || {}).topN || 2,
       universe: require('../setups/universe').describe(s.universe),
       universeRules: (s.universe && s.universe.rules) || [],
+      // Sent back so the editor reopens on what was saved. Without it the
+      // control always read "all", and re-saving silently turned an OR filter
+      // into an AND one — a different filter, quietly.
+      universeLogic: (s.universe && s.universe.logic) || 'AND',
       enabled: s.enabled,
       mine: (s.tools || []).includes(config.toolId),
     })),
