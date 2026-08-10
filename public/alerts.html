@@ -99,6 +99,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 /* Red, and the only red control on the page. This is the one that spends
    money, and it should not look like the tool pickers beside it. */
 .ua-tool.live { background:var(--red); border-color:var(--red); color:#fff; }
+.btn.live { background:var(--red); border-color:var(--red); color:#fff; }
 .ua-blocked { font-size:10.5px; color:var(--text3); }
 .ua-label { font-size:10.5px; color:var(--text3); text-transform:uppercase;
   letter-spacing:.05em; }
@@ -214,6 +215,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <button class="lnk" id="ntf-test" onclick="testPush()">test</button>
   <span class="note" id="noise-note"></span>
   <span class="note" id="next-decision"></span>
+  <!-- The loudest thing on the page when it is on. A system that opens
+       positions by itself must never be doing so quietly. -->
+  <span class="note" id="algo-state"></span>
 </div>
 
 <!-- Position sizing. Here rather than in a screener's settings because it is a
@@ -278,7 +282,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      sends is the one computed there — and deliberately two switches, because
      "configured" and "sending real orders" should not be the same tap. -->
 <div class="sec">
-  <span>Live orders</span>
+  <span>Algo trading</span>
   <span class="note" id="broker-state">off</span>
 </div>
 <div class="risk" id="broker">
@@ -304,14 +308,16 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
     <select id="bk-bracket"><option value="1">send with order</option><option value="0">entry only</option></select>
   </label>
   <button class="btn primary" onclick="saveBroker()">Save</button>
-  <button class="btn" id="bk-arm" onclick="toggleArm()">Arm</button>
+  <button class="btn" id="bk-arm" onclick="toggleArm()">Algo trading: OFF</button>
   <button class="btn" onclick="testBroker()">Send 1 test share</button>
   <div class="note risk-hint" id="bk-note">
-    Orders are <b>off</b> until you save a hook and press Arm. Quantity is always
-    whole shares, and is reduced to fit the buying power left rather than sent to
-    be rejected. <b>The buying power above is a number you enter</b> — SignalStack
-    cannot be asked for it, so this side keeps its own tally and the broker's own
-    refusal is the real backstop.
+    With this <b>ON</b>, a setup that fires opens a <b>real position by itself</b> —
+    entry, stop and target — with no tap from you. It needs two things to be true:
+    this switch, and <b>orders</b> on the setup itself. Either one off means alert
+    only. Quantity is always whole shares and is reduced to fit the buying power
+    left rather than sent to be rejected. <b>The buying power above is a number
+    you enter</b> — SignalStack cannot be asked for it, so this side keeps its own
+    tally and the broker's own refusal is the real backstop.
   </div>
   <!-- The callback URL. SignalStack posts here when an order is PROCESSED,
        which is the half its reply to us cannot give: filled at another price,
@@ -926,7 +932,8 @@ async function toggleAutoTrade(i) {
   } catch (e) {
     alert(`Could not change it: ${e.message}`);
   }
-  loadSetups();
+  await loadSetups();
+  loadBroker();                 // the banner counts the setups that will trade
 }
 
 async function toggleSetup(id, enabled) {
@@ -1203,8 +1210,11 @@ async function loadBroker() {
     document.getElementById('bk-bracket').value = b.bracket ? '1' : '0';
 
     const arm = document.getElementById('bk-arm');
-    arm.textContent = b.armed ? 'ARMED — disarm' : 'Arm';
-    arm.className = 'btn' + (b.armed ? ' on' : '');
+    // One label, saying which state it is IN rather than what the tap does —
+    // a button reading "Arm" beside a system that is already armed is the
+    // ambiguity worth spending a word to remove.
+    arm.textContent = b.armed ? 'ALGO TRADING: ON — tap to stop' : 'Algo trading: OFF';
+    arm.className = 'btn' + (b.armed ? ' live' : '');
     const st = document.getElementById('broker-state');
     const used = (d.orders || []).filter(o => o.sent).length;
     st.textContent = b.armed
@@ -1212,6 +1222,16 @@ async function loadBroker() {
         + `${b.maxTradesPerDay ? ` · ${used}/${b.maxTradesPerDay} trades used` : ` · ${used} trades`}`
       : (b.hasWebhook ? 'configured, not armed' : 'off');
     st.className = 'note' + (b.armed ? ' live' : '');
+
+    const algo = document.getElementById('algo-state');
+    if (algo) {
+      const live = (SETUPS || []).filter(x => x.autoTrade).length;
+      algo.textContent = b.armed
+        ? (live ? `⚡ ALGO TRADING ON — ${live} setup(s) will open real positions`
+                : '⚡ algo trading on, but no setup has orders enabled')
+        : '';
+      algo.className = 'note' + (b.armed && live ? ' live' : '');
+    }
 
     const cb = document.getElementById('bk-callback');
     cb.innerHTML = d.callbackUrl
@@ -1288,9 +1308,15 @@ async function toggleArm() {
   const armed = BROKER && BROKER.broker.armed;
   if (!armed) {
     const p = BROKER && BROKER.broker.buyingPower;
-    if (!confirm('Arm live orders?\n\nEvery setup that fires will send a REAL order '
-      + `to Trade The Pool, sized by your risk settings and capped at $${p || '—'} `
-      + 'of buying power.\n\nThe stop and target go with it. Nothing else is sent.')) return;
+    const live = (SETUPS || []).filter(x => x.autoTrade).map(x => x.name);
+    if (!confirm('Turn algo trading ON?\n\nReal positions will be opened '
+      + 'automatically, with no tap from you.\n\n'
+      + (live.length
+          ? `These setups will trade: ${live.join(', ')}.`
+          : 'No setup has "orders" switched on yet, so nothing will trade until '
+            + 'one does.')
+      + `\n\nSized by your risk settings, capped at $${p || '—'} of buying power, `
+      + 'stop and target attached.')) return;
   }
   await saveBroker({ armed: !armed, enabled: true });
 }
@@ -1523,9 +1549,11 @@ if (('Notification' in window) && Notification.permission === 'granted') subscri
 loadFires();
 loadRules();
 loadRisk();
-loadSetups();
+// The broker banner counts the setups that will trade, so the setups have to be
+// in hand before it is drawn — otherwise it reads "0 setups" for a second on
+// every load, which is the reassuring answer and the wrong one.
+loadSetups().then(loadBroker);
 loadHistory();
-loadBroker();
 loadUnassigned();
 // A card's "add alert" button links here with the ticker, so the rule opens
 // already scoped to the stock that was on screen.

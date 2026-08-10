@@ -364,6 +364,106 @@ function splitLegs(quantity, plan) {
   return { parts, unplaceable };
 }
 
+/*
+ * Prices go on the wire at two decimals, and the stop rounds the safe way.
+ *
+ * A target at 31.7925 is a sub-penny price. Brokers reject those, and a
+ * rejection at 10:00:03 cannot be fixed in time — the R-multiples the strategy
+ * works in produce them constantly, so this is not an edge case.
+ *
+ * The DIRECTION of the rounding is a risk decision, not a formatting one. The
+ * share count was computed from the exact stop, so widening the stop by a
+ * fraction of a cent makes the position risk more than the amount that was
+ * chosen. The stop therefore rounds TOWARDS the entry — never past it — and the
+ * position risks a hair less than asked rather than a hair more. Targets round
+ * to nearest, where nothing is at stake either way.
+ */
+function tick(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+function stopTick(stop, action) {
+  const n = Number(stop);
+  // buy: the stop is below the entry, so UP is towards it. sell: the reverse.
+  const v = action === 'buy' ? Math.ceil(n * 100) / 100 : Math.floor(n * 100) / 100;
+  return Math.round(v * 100) / 100;      // kills 27.680000000000003
+}
+
+/**
+ * Everything that must be true of a body before it is allowed on the wire.
+ *
+ * This is the last gate, and it exists because the two shapes this sends are
+ * built by different paths — one bracket for a single stop and target, several
+ * for a scale-out — and a mistake in either produces a body that is still valid
+ * JSON. SignalStack would take it and the broker would do something with it.
+ *
+ * Every check here is a rejection or a wrong position, not a style preference.
+ */
+function validateBody(body, { side, entry } = {}) {
+  const errors = [];
+  const isNum = v => typeof v === 'number' && Number.isFinite(v);
+
+  if (!body || typeof body !== 'object') return ['no body'];
+  if (!body.symbol || !/^[A-Z][A-Z0-9.\-]*$/.test(body.symbol)) {
+    errors.push(`symbol ${JSON.stringify(body.symbol)} is not a ticker`);
+  }
+  if (body.action !== 'buy' && body.action !== 'sell') {
+    errors.push(`action ${JSON.stringify(body.action)} must be buy or sell`);
+  }
+  // The one that cannot be got wrong: a fraction is rejected or truncated
+  // somewhere downstream, and either way the position is not the sized one.
+  if (!Number.isInteger(body.quantity) || body.quantity < 1) {
+    errors.push(`quantity ${JSON.stringify(body.quantity)} must be a whole number of shares`);
+  }
+  if (body.quantity_type !== 'fixed') {
+    // 'cash' would read the same number as dollars.
+    errors.push("quantity_type must be 'fixed' — 'cash' would mean dollars");
+  }
+
+  for (const k of ['stop_loss_price', 'take_profit_price',
+                   'stop_loss_price_distance', 'stop_loss_price_percent']) {
+    if (k in body && !isNum(body[k])) errors.push(`${k} is not a number`);
+    if (isNum(body[k]) && body[k] <= 0) errors.push(`${k} must be above zero`);
+    if (isNum(body[k]) && k.endsWith('_price')
+        && Math.round(body[k] * 100) !== body[k] * 100) {
+      errors.push(`${k} ${body[k]} is a sub-penny price`);
+    }
+  }
+
+  // Two stops is not a stop.
+  if ('stop_loss_price' in body
+      && ('stop_loss_price_percent' in body || 'stop_loss_price_distance' in body)) {
+    errors.push('a fixed stop and a trailing stop cannot both be sent');
+  }
+
+  /*
+   * The side check. A long whose stop sits above its entry is not a tight stop,
+   * it is an instant exit — and a target on the wrong side is an order that
+   * fills immediately at a loss. Both are valid JSON and neither is catchable
+   * anywhere later.
+   */
+  if (isNum(Number(entry)) && Number(entry) > 0) {
+    const e = Number(entry);
+    if (isNum(body.stop_loss_price)) {
+      const wrong = body.action === 'buy' ? body.stop_loss_price >= e
+                                          : body.stop_loss_price <= e;
+      if (wrong) {
+        errors.push(`a ${body.action} cannot have its stop at ${body.stop_loss_price} `
+          + `with the entry at ${e}`);
+      }
+    }
+    if (isNum(body.take_profit_price)) {
+      const wrong = body.action === 'buy' ? body.take_profit_price <= e
+                                          : body.take_profit_price >= e;
+      if (wrong) {
+        errors.push(`a ${body.action} cannot have its target at ${body.take_profit_price} `
+          + `with the entry at ${e}`);
+      }
+    }
+  }
+  return errors;
+}
+
 /** LONG opens with a buy, SHORT with a sell. The bridge takes no other verbs. */
 function actionFor(signal) {
   const s = String(signal || '').toUpperCase();
@@ -501,8 +601,8 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
   };
   // The stop is the risk model; the target is what makes it 2R. Both are
   // decided at the same instant as the entry, so they travel with it.
-  if (cfg.bracket && Number(stop) > 0) body.stop_loss_price = Number(stop);
-  if (cfg.bracket && Number(target) > 0) body.take_profit_price = Number(target);
+  if (cfg.bracket && Number(stop) > 0) body.stop_loss_price = stopTick(stop, action);
+  if (cfg.bracket && Number(target) > 0) body.take_profit_price = tick(target);
 
   /*
    * A TRAILING stop, when the strategy's is one and it can be said as a
@@ -518,8 +618,8 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
    */
   const trail = plan && plan.trail;
   if (cfg.bracket && trail && Number(trail.value) > 0) {
-    if (trail.kind === 'pct') body.stop_loss_price_percent = Number(trail.value);
-    else body.stop_loss_price_distance = Number(trail.value);
+    if (trail.kind === 'pct') body.stop_loss_price_percent = tick(trail.value);
+    else body.stop_loss_price_distance = tick(trail.value);
     delete body.stop_loss_price;
   }
 
@@ -533,11 +633,28 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
   const orders = (plan && plan.legs && plan.legs.length > 1)
     ? split.parts.map(part => {
       const b = { ...body, quantity: part.quantity };
-      if (part.target && cfg.bracket) b.take_profit_price = Number(part.target.toFixed(4));
+      if (part.target && cfg.bracket) b.take_profit_price = tick(part.target);
+      // The runner has no target and must not inherit the previous leg's.
       else delete b.take_profit_price;
       return b;
     })
     : [body];
+
+  /*
+   * The last gate, applied to EVERY body including each leg of a scale-out.
+   *
+   * Both shapes are built by different paths and a mistake in either is still
+   * valid JSON — SignalStack would accept it and the broker would act on it. A
+   * body that fails here is not sent at all: an order refused by this side
+   * loses one trade, an order placed on the wrong side of its stop loses more
+   * than that.
+   */
+  for (const b of orders) {
+    const errors = validateBody(b, { side: signal, entry: price });
+    if (errors.length) {
+      return { blocked: 'invalid', reason: `refused to send: ${errors.join('; ')}` };
+    }
+  }
 
   return { body: orders[0], orders, action, fit,
            legs: split.parts, unplaceable: split.unplaceable };
@@ -897,6 +1014,7 @@ module.exports = {
   FILE, LEDGER, HOOK_RE,
   settings, publicSettings, save, mask,
   orders, committed, remaining, tradesToday, fitQuantity, actionFor, splitLegs,
+  validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled,
