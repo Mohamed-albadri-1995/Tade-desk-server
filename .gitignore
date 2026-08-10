@@ -17,3 +17,9 @@ keys.json
 # send notifications to every subscribed phone as if they were this desk.
 push-keys.json
 **/push-keys.json
+
+# The SignalStack webhook URL. It is not a "config value": anyone holding it
+# can place orders in the brokerage account it is wired to. /data/ is already
+# ignored — this is the same belt-and-braces, for the same reason.
+broker.json
+**/broker.json

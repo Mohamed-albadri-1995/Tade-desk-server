@@ -171,6 +171,55 @@ app.post('/api/strategies/:id/tools', express.json(), async (req, res) => {
   }
 });
 
+/*
+ * The broker connection — SignalStack, to Trade The Pool.
+ *
+ * The URL is never returned. Anyone holding it can place orders in the account,
+ * so the page gets a masked version, enough to tell two hooks apart and useless
+ * to anyone reading over a shoulder.
+ */
+const broker = require('../broker/signalstack');
+
+app.get('/api/broker', (req, res) => {
+  const { toETDate } = require('../utils/time');
+  const day = toETDate(Date.now());
+  const cfg = broker.settings();
+  res.json({
+    ok: true,
+    broker: broker.publicSettings(),
+    // This side's own tally, labelled as an estimate everywhere it appears.
+    committedToday: broker.committed(day),
+    remaining: broker.remaining(day, cfg),
+    orders: broker.orders(day).sort((a, b) => (b.at || 0) - (a.at || 0)),
+  });
+});
+
+app.post('/api/broker', express.json(), (req, res) => {
+  try {
+    res.json({ ok: true, broker: broker.save(req.body || {}) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+/*
+ * Send one share, to the test hook when one is configured.
+ *
+ * The only way to learn that a URL is wrong, an account is disconnected or a
+ * symbol is unsupported is to send something. Finding that out at 10:00:02 with
+ * a real position on the line is not a plan.
+ */
+app.post('/api/broker/test', express.json(), async (req, res) => {
+  try {
+    res.json({ ok: true, result: await broker.test({
+      symbol: req.body?.symbol || 'AAPL',
+      useTestHook: req.body?.useTestHook !== false,
+    }) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // Where a tool lives, so the page can deep-link a fire back to its card.
 app.get('/api/tools', (req, res) => {
   try {

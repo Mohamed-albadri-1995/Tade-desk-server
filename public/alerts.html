@@ -235,6 +235,45 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
     <b>Leave these blank and alerts arrive without a share count.</b></div>
 </div>
 
+<!-- Live orders. Deliberately below position size, because the share count it
+     sends is the one computed there — and deliberately two switches, because
+     "configured" and "sending real orders" should not be the same tap. -->
+<div class="sec">
+  <span>Live orders</span>
+  <span class="note" id="broker-state">off</span>
+</div>
+<div class="risk" id="broker">
+  <label>SignalStack hook
+    <input id="bk-url" placeholder="https://app.signalstack.com/hook/…" style="width:230px">
+  </label>
+  <label>Test hook <span class="note">optional</span>
+    <input id="bk-test-url" placeholder="…/hook/TEST…" style="width:200px">
+  </label>
+  <label>Buying power $
+    <input id="bk-power" type="number" min="0" step="100" placeholder="e.g. 20000">
+  </label>
+  <label>Max per order $
+    <input id="bk-max" type="number" min="0" step="100" placeholder="optional">
+  </label>
+  <label>Shorts
+    <select id="bk-short"><option value="1">allowed</option><option value="0">no</option></select>
+  </label>
+  <label>Stop + target
+    <select id="bk-bracket"><option value="1">send with order</option><option value="0">entry only</option></select>
+  </label>
+  <button class="btn primary" onclick="saveBroker()">Save</button>
+  <button class="btn" id="bk-arm" onclick="toggleArm()">Arm</button>
+  <button class="btn" onclick="testBroker()">Send 1 test share</button>
+  <div class="note risk-hint" id="bk-note">
+    Orders are <b>off</b> until you save a hook and press Arm. Quantity is always
+    whole shares, and is reduced to fit the buying power left rather than sent to
+    be rejected. <b>The buying power above is a number you enter</b> — SignalStack
+    cannot be asked for it, so this side keeps its own tally and the broker's own
+    refusal is the real backstop.
+  </div>
+  <div class="note risk-hint" id="bk-orders"></div>
+</div>
+
 <!-- Setups get their own list for the same reason rules do. Before this they
      existed only in the moment they fired: you could not see which setups there
      were, when they would run, or switch one off. With more than one that stops
@@ -921,6 +960,114 @@ async function loadFires() {
   }
 }
 
+/* ── live orders ──
+ *
+ * Two switches, not one. `enabled` means configured; `armed` means real orders
+ * leave the box. They are separate because the dangerous one must not be the
+ * tap you make while setting the safe one up, and because a bad morning has to
+ * be stoppable without deleting the configuration.
+ */
+let BROKER = null;
+async function loadBroker() {
+  try {
+    const d = await (await fetch('/api/broker')).json();
+    if (!d.ok) return;
+    BROKER = d;
+    const b = d.broker;
+    document.getElementById('bk-url').placeholder =
+      b.hasWebhook ? `saved · ${b.webhookUrl}` : 'https://app.signalstack.com/hook/…';
+    document.getElementById('bk-test-url').placeholder =
+      b.hasTestWebhook ? `saved · ${b.testWebhookUrl}` : '…/hook/TEST…';
+    if (b.buyingPower) document.getElementById('bk-power').value = b.buyingPower;
+    if (b.maxOrderValue) document.getElementById('bk-max').value = b.maxOrderValue;
+    document.getElementById('bk-short').value = b.allowShort ? '1' : '0';
+    document.getElementById('bk-bracket').value = b.bracket ? '1' : '0';
+
+    const arm = document.getElementById('bk-arm');
+    arm.textContent = b.armed ? 'ARMED — disarm' : 'Arm';
+    arm.className = 'btn' + (b.armed ? ' on' : '');
+    const st = document.getElementById('broker-state');
+    st.textContent = b.armed
+      ? `armed · $${(d.remaining ?? 0).toFixed(0)} of $${b.buyingPower} left today`
+      : (b.hasWebhook ? 'configured, not armed' : 'off');
+    st.className = 'note' + (b.armed ? ' live' : '');
+
+    // The day's orders, because "did it go in" must be answerable without
+    // opening the broker on a second device.
+    const rows = (d.orders || []).slice(0, 12);
+    document.getElementById('bk-orders').innerHTML = rows.length
+      ? `<b>Today:</b> ${rows.map(o => `${esc(clockET(o.at))} ${esc(o.action || '')} `
+          + `${esc(o.quantity ?? o.asked ?? 0)} ${esc(o.symbol)} — `
+          + (o.sent ? `${esc(o.status || 'sent')}${o.fillPrice ? ` @ ${esc(o.fillPrice)}` : ''}`
+                    : `<span class="warn">${esc(o.skipped || o.error || 'not sent')}</span>`)
+          + (o.reduced ? ` (${esc(o.reduced)})` : '')).join('<br>')}`
+      : '';
+  } catch { /* the panel simply stays as it was */ }
+}
+
+async function saveBroker(patch) {
+  const v = id => document.getElementById(id).value.trim();
+  const body = patch || {
+    webhookUrl: v('bk-url') || undefined,
+    testWebhookUrl: v('bk-test-url') || undefined,
+    buyingPower: v('bk-power') || undefined,
+    maxOrderValue: v('bk-max') || undefined,
+    allowShort: document.getElementById('bk-short').value === '1',
+    bracket: document.getElementById('bk-bracket').value === '1',
+    enabled: true,
+  };
+  try {
+    const r = await (await fetch('/api/broker', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })).json();
+    if (!r.ok) throw new Error(r.error || 'could not save');
+    // Cleared once saved: the URL is a credential and leaving it on screen is
+    // the same mistake as printing it.
+    document.getElementById('bk-url').value = '';
+    document.getElementById('bk-test-url').value = '';
+    await loadBroker();
+    return true;
+  } catch (e) {
+    document.getElementById('bk-note').innerHTML = `<b class="warn">${esc(e.message)}</b>`;
+    return false;
+  }
+}
+
+/* Arming is the tap that starts spending money, so it asks once and says
+ * exactly what will happen. Disarming never asks. */
+async function toggleArm() {
+  const armed = BROKER && BROKER.broker.armed;
+  if (!armed) {
+    const p = BROKER && BROKER.broker.buyingPower;
+    if (!confirm('Arm live orders?\n\nEvery setup that fires will send a REAL order '
+      + `to Trade The Pool, sized by your risk settings and capped at $${p || '—'} `
+      + 'of buying power.\n\nThe stop and target go with it. Nothing else is sent.')) return;
+  }
+  await saveBroker({ armed: !armed, enabled: true });
+}
+
+async function testBroker() {
+  const note = document.getElementById('bk-note');
+  note.textContent = 'sending 1 share…';
+  try {
+    const d = await (await fetch('/api/broker/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: 'AAPL' }),
+    })).json();
+    if (!d.ok) throw new Error(d.error);
+    const r = d.result;
+    note.innerHTML = r.sent
+      ? `Sent to the <b>${esc(r.hook)}</b> hook: ${esc(r.status || 'accepted')}`
+        + `${r.orderId ? ` · order ${esc(r.orderId)}` : ''}`
+        + `${r.fillPrice ? ` · filled @ ${esc(r.fillPrice)}` : ''}`
+      : `<b class="warn">Refused (${esc(r.httpStatus)}): ${esc(r.message || 'no message')}</b>`;
+    loadBroker();
+  } catch (e) {
+    note.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
+  }
+}
+
 /* ── the record ──
  *
  * Every fire, kept for good, with the wall-clock second it happened. The point
@@ -1130,6 +1277,7 @@ loadRules();
 loadRisk();
 loadSetups();
 loadHistory();
+loadBroker();
 loadUnassigned();
 // A card's "add alert" button links here with the ticker, so the rule opens
 // already scoped to the stock that was on screen.

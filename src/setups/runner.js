@@ -25,6 +25,7 @@ const qp = require('./qpClient');
 const risk = require('./risk');
 const universeFilter = require('./universe');
 const prefs = require('./prefs');
+const broker = require('../broker/signalstack');
 const alertStore = require('../alerts/store');
 
 /** The minute before the decision — the last bar that must have closed. */
@@ -58,6 +59,26 @@ function describePick(pick, size) {
   return `${side} ${qty}${pick.ticker} — now ~${p.entry.toFixed(2)}, `
     + `stop ${p.stop.toFixed(2)} (VWAP, fixed), target ${p.target.toFixed(2)} `
     + `· risk ${p.riskPct.toFixed(2)}% · ${pick.extension.toFixed(2)}% from VWAP`;
+}
+
+/**
+ * What the broker did, in the same sentence as the trade.
+ *
+ * Appended to the detail line rather than added below it, because the detail
+ * line is what a notification shows on a locked phone — and "did it actually go
+ * in" is the second thing anyone wants to know there. Silence would read as
+ * "yes": an alert that looks identical whether or not an order was placed is
+ * the one failure this must not have.
+ */
+function orderLine(o) {
+  if (!o) return '';
+  if (o.skipped) return ` · ORDER: not sent (${o.skipped})`;
+  if (!o.sent) return ` · ORDER FAILED — ${o.error || 'refused'}. Place it by hand.`;
+  const filled = o.status === 'filled';
+  return ` · ORDER ${filled ? 'FILLED' : String(o.status || 'accepted').toUpperCase()}`
+    + ` ${o.quantity}${o.fillPrice ? ` @ ${o.fillPrice}` : ''}`
+    + `${o.bracket ? ' with stop+target' : ' — STOP NOT SENT, place it'}`
+    + `${o.reduced ? ` (${o.reduced})` : ''}`;
 }
 
 /**
@@ -181,6 +202,48 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
   // settings even if they are edited while this is executing.
   const riskCfg = risk.settings();
 
+  /*
+   * The orders, placed before the alerts are published.
+   *
+   * That order matters. The entry is taken at market on sight, so the seconds
+   * between the decision and the order are the difference between the price
+   * that was ranked and the price that is paid — and publishing first would
+   * spend them formatting text. The alert then CARRIES what the broker did, so
+   * one message answers "what fired" and "did it go in".
+   *
+   * Sequential rather than parallel: the second order is sized against what the
+   * first one actually committed, and firing both at once would size both
+   * against the full buying power and overspend it by design.
+   */
+  const orders = {};
+  if (!dryRun) {
+    for (const pick of out.picks) {
+      const size = risk.sizeFor(
+        { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
+      if (!size || !(size.shares > 0)) continue;
+      try {
+        orders[pick.ticker] = await broker.placeOrder({
+          symbol: pick.ticker,
+          signal: pick.signal,
+          quantity: size.shares,
+          price: pick.plan.entry,
+          // The stop is the frozen VWAP and the target is 2R — both decided at
+          // this same instant, so they go with the entry as a bracket rather
+          // than being left for whoever reaches their phone first.
+          stop: pick.plan.stop,
+          target: pick.plan.target,
+          date: day,
+          source: `${setup.id} (${config.toolId})`,
+        });
+      } catch (err) {
+        // A broker that cannot be reached must not stop the alert. The alert is
+        // the thing you can still act on by hand; losing it because the
+        // automatic path failed would turn a degraded morning into a blind one.
+        orders[pick.ticker] = { sent: false, error: err.message };
+      }
+    }
+  }
+
   const fires = out.picks.map(pick => {
     const size = risk.sizeFor(
       { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
@@ -193,7 +256,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     at: Date.now(),
     kind: 'setup',
     level: 'trade',
-    detail: describePick(pick, size),
+    detail: describePick(pick, size) + orderLine(orders[pick.ticker]),
     price: pick.plan.entry,
     // Everything the card cannot show but the trade needs. Kept on the fire so
     // the record of what was signalled survives the day it was signalled.
@@ -208,6 +271,11 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       decisionVwap: pick.decisionVwap,
       decisionClose: pick.decisionClose,
       rangePosition: pick.rangePosition,
+      // What the broker did with it, on the alert itself. One message answers
+      // both "what fired" and "did it go in" — two messages, or a state you
+      // have to go and look up, is how a rejected order becomes a position
+      // somebody believes they are holding.
+      order: orders[pick.ticker] || null,
       // Which minute the decision was actually taken on. Normally 09:59; when
       // the feed had not published it inside the deadline it is the last bar
       // that existed, and that changes both the close and the VWAP slightly.
