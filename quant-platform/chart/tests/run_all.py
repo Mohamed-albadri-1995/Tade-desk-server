@@ -45,14 +45,34 @@ PARTS = [
     ('logic_audit30.py',    'warm-up sweep: every primitive gets the history it measurably needs'),
     ('logic_audit31.py',    'OR + session VWAP 09:35 setup: timing, gates, 2R half, VWAP trail'),
     ('logic_audit32.py',    'T2 10:00 VWAP-extension: direction, invalidation, stop-first, per-day rank'),
+    ('logic_audit33.py',    'cross-tool integration: run() reaches _pairs, tool assignment survives'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
+    # pytest-style parts, written by the scanner-tool side of this repo. They
+    # are in the SAME gate on purpose: both live failures of 2026-08-10 came
+    # from two sessions editing this repo, each green against the code it could
+    # see. One gate is what makes that visible.
+    ('test_setup_tools.py', 'a setup carries its tools, and backtests on their picks'),
+    ('test_feeds.py',       'feed loaders: yahoo ceilings, registry, interval limits'),
     ('ui_runtime.js',       'browser UI: page script evaluates, click handlers run'),
 ]
 
+def _has_pytest() -> bool:
+    return subprocess.run([sys.executable, '-c', 'import pytest'],
+                          capture_output=True).returncode == 0
+
+
 failed = []
 for name, what in PARTS:
-    cmd = ([sys.executable, str(HERE / name)] if name.endswith('.py')
-           else ['node', str(HERE / name)])
+    if name.startswith('test_'):                       # pytest-style part
+        if not _has_pytest():
+            print(f'[skip] {name:22s} {what}\n        pytest not installed '
+                  f'(pip install pytest)')
+            continue
+        cmd = [sys.executable, '-m', 'pytest', '-q', str(HERE / name)]
+    elif name.endswith('.py'):
+        cmd = [sys.executable, str(HERE / name)]
+    else:
+        cmd = ['node', str(HERE / name)]
     if name.endswith('.js') and not shutil.which('node'):
         print(f'[skip] {name:22s} {what}\n        node not installed')
         continue

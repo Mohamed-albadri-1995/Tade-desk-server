@@ -250,7 +250,7 @@ class _FakeStrat(dict):
 bt._resolve_strategy = lambda spec: {'name': 'x', 'side': 'long',
                                      'entry': {'logic': 'AND', 'rules': []},
                                      'exit': {'logic': 'AND', 'rules': []}, 'risk': {}}
-bt._pairs = lambda spec: [(r['date'], r['symbol'], {}) for r in rows]
+bt._pairs = lambda spec, strategy=None: [(r["date"], r["symbol"], {}) for r in rows]
 _by = {(r['date'], r['symbol']): r for r in rows}
 def fake_eval(strategy, sym, tf, days, **kw):
     r = _by[(kw['asof'], sym)]
@@ -306,7 +306,7 @@ def fake_eval2(strategy, sym, tf, days, **kw):
                         'entry': r['entry'], 'exit': r['exit'], 'stop': r['stop'],
                         'ret': r['ret'], 'reason': 'TP', 'legs': []}]}
 saved2 = bt._pairs
-bt._pairs = lambda spec: [(r['date'], r['symbol'], {}) for r in rows2]
+bt._pairs = lambda spec, strategy=None: [(r["date"], r["symbol"], {}) for r in rows2]
 _orig2, _S.evaluate = _S.evaluate, fake_eval2
 def _book(side):
     return {'name': f'book {side}', 'side': side,

@@ -19,10 +19,22 @@ before every deploy. A `git reset --hard` to either branch overwrites the
 other tool, which has already happened once — never deploy a branch that
 lacks the other's work.
 
+**The failure mode to expect from that arrangement** (it has already bitten
+twice, both times reaching the live box): each session is green against the
+code it can see, and the break appears only where the two meet. On
+2026-08-10 the scanner side added `_pairs(spec, strategy)` against a `run()`
+that by then held a LIST of books, so EVERY backtest died with
+`UnboundLocalError` before fetching a bar; and storing a setup's `tools` made
+every seed differ from its bundle on every startup, wiping the user's tool
+assignment on each deploy. So: **merge the other branch into yours FIRST,
+run the whole suite on the merged tree, and only then push.** `run_all.py`
+now includes the scanner side's pytest parts for exactly this reason, and
+`logic_audit33` pins both bugs.
+
 - `qp/` — verified primitives library (frozen but extendable WITH tests).
 - `chart/` — strategy engine (`strategy.py::evaluate`), seeds
   (`seeds/scalps.json`), backtest (`backtest.py`), screener client, alerts,
-  UI (`static/index.html`), tests (`tests/run_all.py`, 34 parts incl. a
+  UI (`static/index.html`), tests (`tests/run_all.py`, 37 parts incl. a
   node-based UI runtime check, must be ALL GREEN before every commit).
 - `SCALPS_SPEC.md` — THE derivation document: per-scalp logic from the PDF,
   mechanization map, provenance of every number, validation log. Update it
@@ -30,6 +42,8 @@ lacks the other's work.
 
 ## Operating loop (the user drives the server; sessions cannot reach it)
 
+0. `git merge origin/claude/multi-tool-screeners` into `claude/read-j5hgnf`
+   BEFORE testing — the other tool's changes reach `chart/` too.
 1. Assistant edits code → suite green → commit + push to `claude/read-j5hgnf`.
 2. User deploys BOTH tools from the shared branch:
    `git checkout claude/multi-tool-screeners && git reset --hard
@@ -176,7 +190,13 @@ row there + a `logic_audit30` case.
    genuinely running. Options: (a) leave as-is and document, (b) NaN before
    the session's first bar for evaluation while keeping the drawn line, (c)
    split into `day_open` (display) and a causal variant.
-10. `volume.rel_volume` computes from as little as ONE prior session — the
+10. `backtest.run()` raises IndexError on `cov['by_source'][0]` if `pairs`
+    is ever empty (`'symbols' not in by_src` lets an EMPTY dict into the
+    branch). NOT reachable today — every `_pairs` path either raises or
+    returns a non-empty list, and `_dates` raises on an empty range — so it
+    was left alone rather than "fixed". Guard it the moment a universe kind
+    can legitimately return zero pairs.
+11. `volume.rel_volume` computes from as little as ONE prior session — the
     docstring says it needs `length`. A backtest `min_rvol` filter therefore
     accepts a value built on a 1-day baseline as "verified". Not changed
     (tightening it would silently drop pairs from past runs); decide whether

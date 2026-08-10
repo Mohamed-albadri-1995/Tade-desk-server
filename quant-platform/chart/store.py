@@ -244,6 +244,16 @@ def seed_strategies() -> int:
                 continue
             stored = {k: v for k, v in cur.items()
                       if k not in ('id', 'updated_at', 'created_at')}
+            # WHICH TOOLS run a setup is decided in the UI, not in the bundle:
+            # the seed files carry no `tools`, while every stored row reports at
+            # least [] (see _row_to_strategy). Comparing those two directly made
+            # EVERY seed differ on EVERY startup — a perpetual "refresh" that
+            # also overwrote the assignment made on the alerts page, so a setup
+            # assigned to T2 came back unassigned after each deploy and its
+            # tools-universe backtest then failed with "not assigned to any
+            # tool yet". The stored assignment wins; the bundle's only seeds a
+            # row that does not exist yet (the insert path above).
+            payload['tools'] = cur.get('tools') or []
             if stored != payload:                  # bundle changed → refresh in place
                 payload['id'] = cur['id']
                 save_strategy(payload); changed += 1

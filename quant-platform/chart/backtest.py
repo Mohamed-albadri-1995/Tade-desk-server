@@ -520,7 +520,21 @@ def run(spec: dict, progress_cb=None) -> dict:
     # a backtest without them lies). Fractional cost per SIDE in basis points
     # (spread + slippage + commission); a round trip pays it twice.
     cost = float(spec.get('cost_bps', 0.0) or 0.0) / 10000.0
-    pairs = _pairs(spec, strategy)
+    # WHICH tools' picks the run is measured on is a property of the RUN, not
+    # of one book: `strategies` can hold a long book and a short book, and both
+    # are evaluated on every pair. Passing only the first book's assignment
+    # would silently deny the second its own universe, so the tool lists are
+    # unioned, order preserved (the first book's tools lead). `_pairs` still
+    # lets spec.universe.tools override, and still raises when nothing is
+    # assigned. Before this, `run()` passed a name that no longer existed after
+    # the multi-book refactor — every 'tools' run died with UnboundLocalError.
+    _tools, _seen = [], set()
+    for st in strategies:
+        for t in (st.get('tools') or []):
+            if t not in _seen:
+                _seen.add(t)
+                _tools.append(t)
+    pairs = _pairs(spec, {'tools': _tools})
 
     closed, opens, errors = [], [], []
     # COVERAGE accounting — "1 trade" is uninterpretable unless the run also
