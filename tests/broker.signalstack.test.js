@@ -460,3 +460,81 @@ describe('the order-processed callback', () => {
     expect(broker.committed(DAY)).toBe(before);
   });
 });
+
+// ── how many trades a day ─────────────────────────────────────────────────
+//
+// A cap on the DAY, which a per-order size limit cannot be. A strategy
+// misfiring, a second one assigned by mistake, or simply a morning with more
+// signals than usual all produce correctly-sized orders that together are not a
+// day anybody chose.
+
+describe('the day’s trade caps', () => {
+  test('the account cap stops the next order and says which limit it was', async () => {
+    armed();
+    broker.save({ maxTradesPerDay: 2 });
+    expect((await place({ symbol: 'A' })).sent).toBe(true);
+    expect((await place({ symbol: 'B' })).sent).toBe(true);
+
+    const third = await place({ symbol: 'C' });
+    expect(third.sent).toBe(false);
+    expect(third.skipped).toMatch(/account/);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('a setup cap stops that setup while others keep going', async () => {
+    armed();
+    expect((await place({ symbol: 'A', setupId: 'SCALP', maxPerDay: 1 })).sent).toBe(true);
+
+    const second = await place({ symbol: 'B', setupId: 'SCALP', maxPerDay: 1 });
+    expect(second.sent).toBe(false);
+    expect(second.skipped).toMatch(/this setup/);
+
+    // A different setup is untouched — that is the point of it being per setup.
+    expect((await place({ symbol: 'C', setupId: 'VWAP', maxPerDay: 1 })).sent).toBe(true);
+  });
+
+  /* Only orders that went out count. Spending the allowance on a refusal would
+   * silence a setup for a trade that never happened. */
+  test('an order that was refused does not use up the day', async () => {
+    armed();
+    broker.save({ maxTradesPerDay: 1 });
+    global.fetch = jest.fn(async () => rejected('TradeThePool: Symbol not found'));
+    expect((await place({ symbol: 'A' })).sent).toBe(false);
+    expect(broker.tradesToday(DAY)).toBe(0);
+
+    global.fetch = jest.fn(async (url, opts) => {
+      sent.push({ url, body: JSON.parse(opts.body) }); return filled();
+    });
+    expect((await place({ symbol: 'B' })).sent).toBe(true);
+  });
+
+  /* Counted from the ledger, so a deploy between the two picks cannot hand the
+   * allowance back — which is exactly when it would be handed back. */
+  test('the count survives a restart', async () => {
+    armed();
+    broker.save({ maxTradesPerDay: 1 });
+    await place({ symbol: 'A' });
+
+    jest.resetModules();
+    const again = require('../src/broker/signalstack');
+    expect(again.tradesToday(DAY)).toBe(1);
+    expect((await again.placeOrder({
+      symbol: 'B', signal: 'LONG', quantity: 10, price: 10, date: DAY,
+    })).sent).toBe(false);
+  });
+
+  test("yesterday's trades do not count against today", async () => {
+    armed();
+    broker.save({ maxTradesPerDay: 1 });
+    await place({ symbol: 'A', date: '2026-08-07' });
+    expect(broker.tradesToday(DAY)).toBe(0);
+    expect((await place({ symbol: 'B' })).sent).toBe(true);
+  });
+
+  test('no cap set means no cap', async () => {
+    armed();
+    for (const symbol of ['A', 'B', 'C', 'D', 'E']) {
+      expect((await place({ symbol })).sent).toBe(true);
+    }
+  });
+});

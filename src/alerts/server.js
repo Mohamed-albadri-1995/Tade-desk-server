@@ -74,6 +74,7 @@ app.get('/api/setups', async (req, res) => {
         // Whether THIS setup places orders — separate from the broker being
         // armed, which is permission for the box rather than for a strategy.
         autoTrade: s.autoTrade === true,
+        maxTradesPerDay: s.maxTradesPerDay || null,
       })),
       fields: Object.entries(universe.FIELDS).map(([k, v]) => ({ value: k, label: v.label, kind: v.kind })),
       operators: universe.OPERATORS,

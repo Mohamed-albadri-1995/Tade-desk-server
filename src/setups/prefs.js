@@ -68,6 +68,16 @@ function settingsFor(setupId) {
      * see what it does. A strategy earns this one backtest at a time.
      */
     autoTrade: e.autoTrade === true,
+    /*
+     * The most orders THIS setup may place in a session.
+     *
+     * Separate from the account's cap, because they answer different questions:
+     * "how much am I willing to trade at all" and "how much of that is this one
+     * idea allowed". A setup that ranks top 2 normally places two, so a cap of
+     * one is how a strategy is trialled with real money without giving it the
+     * day.
+     */
+    maxTradesPerDay: e.maxTradesPerDay || null,
   };
 }
 
@@ -77,7 +87,8 @@ function saveSettings(setupId, patch) {
   state.setups = state.setups || {};
   const cur = state.setups[setupId] || {};
   const next = { ...cur };
-  for (const k of ['universe', 'topN', 'tf', 'feed', 'targetR', 'fill', 'caution']) {
+  for (const k of ['universe', 'topN', 'tf', 'feed', 'targetR', 'fill', 'caution',
+                   'maxTradesPerDay']) {
     if (!(k in patch)) continue;
     const v = patch[k];
     if (v === null || v === '' || v === undefined) delete next[k];

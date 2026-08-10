@@ -95,6 +95,16 @@ function settings() {
     // sizes by risk, and a very tight stop produces a very large position; this
     // is the line past which no single name is worth that concentration.
     maxOrderValue: num(s.maxOrderValue),
+    /*
+     * The most orders this box will send in one session, whatever fires.
+     *
+     * A cap on the DAY rather than on any one order, and the guard that a
+     * per-order size limit cannot be: a strategy misfiring, a second strategy
+     * assigned by mistake, or simply a morning with more signals than usual all
+     * produce correctly-sized orders that together are not a day anyone chose.
+     * Counted from the ledger, so a restart does not reset it.
+     */
+    maxTradesPerDay: num(s.maxTradesPerDay),
     // Shorting is a separate permission at most prop firms, and sending a sell
     // that the account cannot take is a rejected order at the worst moment.
     allowShort: s.allowShort !== false,
@@ -144,7 +154,7 @@ function save(patch = {}) {
     next[key] = url;
   }
 
-  for (const key of ['buyingPower', 'maxOrderValue']) {
+  for (const key of ['buyingPower', 'maxOrderValue', 'maxTradesPerDay']) {
     if (!(key in patch)) continue;
     const v = patch[key];
     if (v === '' || v === null) { delete next[key]; continue; }
@@ -220,6 +230,17 @@ function committed(date) {
   return orders(date)
     .filter(o => o.sent)
     .reduce((sum, o) => sum + (o.quantity * o.price || 0), 0);
+}
+
+/**
+ * How many orders actually went out today — all of them, or one setup's.
+ *
+ * Only SENT ones. A refusal placed no trade, and counting it would spend the
+ * day's allowance on something that never happened.
+ */
+function tradesToday(date, setupId = null) {
+  return orders(date).filter(o => o.sent && o.kind !== 'callback'
+    && (!setupId || o.setupId === setupId)).length;
 }
 
 function remaining(date, cfg = settings()) {
@@ -365,10 +386,14 @@ function isBuyingPowerRejection(res) {
  * not being able to tell which it was.
  */
 async function placeOrder({ symbol, signal, quantity, price, stop = null,
-                            target = null, date, source = null,
-                            cfg = settings() }) {
+                            target = null, date, source = null, setupId = null,
+                            maxPerDay = null, cfg = settings() }) {
   const base = {
     at: Date.now(), date, symbol, signal, price, stop, target, source,
+    // Recorded so the per-setup cap can be counted from the ledger rather than
+    // from anything held in memory — a restart at 10:00 must not hand a setup
+    // its whole allowance back.
+    setupId,
     asked: Math.floor(Number(quantity) || 0),
   };
 
@@ -396,6 +421,26 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
   }
   if (!cfg.webhookUrl) {
     const out = { ...base, sent: false, error: 'no webhook URL configured' };
+    record(out); return out;
+  }
+
+  /*
+   * The two caps, checked before anything is sized or sent.
+   *
+   * The day's cap for the account and the day's cap for this strategy are
+   * different questions — "how much am I willing to trade at all" and "how much
+   * of that is this one idea allowed" — so hitting either says WHICH, or the
+   * message sends you looking in the wrong settings.
+   */
+  if (cfg.maxTradesPerDay && tradesToday(date) >= cfg.maxTradesPerDay) {
+    const out = { ...base, sent: false,
+      skipped: `the day's limit of ${cfg.maxTradesPerDay} order(s) for the account `
+        + 'is already used' };
+    record(out); return out;
+  }
+  if (maxPerDay && setupId && tradesToday(date, setupId) >= maxPerDay) {
+    const out = { ...base, sent: false,
+      skipped: `this setup's limit of ${maxPerDay} order(s) a day is already used` };
     record(out); return out;
   }
 
@@ -663,7 +708,7 @@ function reconciled(date = null) {
 module.exports = {
   FILE, LEDGER, HOOK_RE,
   settings, publicSettings, save, mask,
-  orders, committed, remaining, fitQuantity, actionFor, placeOrder, test,
+  orders, committed, remaining, tradesToday, fitQuantity, actionFor, placeOrder, test,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled,
 };

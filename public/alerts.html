@@ -136,6 +136,8 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   border-radius:6px; padding:7px 9px; color:var(--text); font-family:inherit; font-size:13px;
   width:130px; }
 .risk-hint { flex-basis:100%; line-height:1.55; }
+/* The share count is the answer; everything beside it is the working. */
+.calc-big { font-size:16px; color:var(--accent); }
 /* The callback URL has to be readable character by character to be checked
    against what was pasted into SignalStack, and it wraps on a phone. */
 .cburl { display:inline-block; font-size:10.5px; color:var(--blue);
@@ -243,6 +245,27 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
     <b>Leave these blank and alerts arrive without a share count.</b></div>
 </div>
 
+<!-- The calculator. For the trade a setup did not signal — the one seen on a
+     chart at 11:20 — and for checking one it did before acting on it. It uses
+     the SERVER's sizing, the same code the automatic order obeys, so it cannot
+     give a different answer from the one that would be sent. -->
+<div class="sec"><span>Calculator</span><span class="note">entry · stop · target → shares</span></div>
+<div class="risk">
+  <label>Side
+    <select id="cl-side"><option value="LONG">long</option><option value="SHORT">short</option></select>
+  </label>
+  <label>Entry <input id="cl-entry" type="number" step="0.01" placeholder="29.05"></label>
+  <label>Stop <input id="cl-stop" type="number" step="0.01" placeholder="27.68"></label>
+  <label>Target <span class="note">optional</span>
+    <input id="cl-target" type="number" step="0.01" placeholder="31.79">
+  </label>
+  <button class="btn primary" onclick="calcSize()">Work it out</button>
+  <div class="note risk-hint" id="cl-out">
+    Uses the account size and risk per trade above. Leave the target blank and
+    it shows where 2R would be.
+  </div>
+</div>
+
 <!-- Live orders. Deliberately below position size, because the share count it
      sends is the one computed there — and deliberately two switches, because
      "configured" and "sending real orders" should not be the same tap. -->
@@ -262,6 +285,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   </label>
   <label>Max per order $
     <input id="bk-max" type="number" min="0" step="100" placeholder="optional">
+  </label>
+  <label>Max trades / day
+    <input id="bk-maxtrades" type="number" min="1" step="1" placeholder="e.g. 4">
   </label>
   <label>Shorts
     <select id="bk-short"><option value="1">allowed</option><option value="0">no</option></select>
@@ -656,6 +682,7 @@ async function loadSetups() {
         <div class="st-meta">
           ${s.universeScanAt ? `extra scan ${esc(s.universeScanAt)} · ` : ''}
           feed: ${esc(s.liveFeed || 'default')} · top ${esc(s.topN || 2)}
+          ${s.maxTradesPerDay ? ` · max ${esc(s.maxTradesPerDay)} order(s)/day` : ''}
           <button class="lnk" onclick="editSetup(${i})">edit filter</button>
         </div>
         <div class="st-edit" id="st-edit-${i}" style="display:none"></div>
@@ -807,6 +834,13 @@ function editSetup(i) {
       <label class="note">take top
         <input id="st-top-${i}" type="number" min="1" max="10" value="${esc(s.topN || 2)}" style="width:60px">
       </label>
+      <!-- How many of those may become real orders. A setup that ranks top 2
+           normally places two, so a cap of 1 is how a strategy is trialled with
+           real money without being given the whole day. -->
+      <label class="note">max orders/day
+        <input id="st-max-${i}" type="number" min="1" max="20" placeholder="no limit"
+               value="${esc(s.maxTradesPerDay || '')}" style="width:80px">
+      </label>
       <button class="btn primary" onclick="saveSetup(${i})">Save</button>
       <span class="note" id="st-msg-${i}"></span>
     </div>`;
@@ -843,6 +877,7 @@ async function saveSetup(i) {
       ? { logic: document.getElementById(`st-logic-${i}`).value, rules }
       : null,
     topN: Number(document.getElementById(`st-top-${i}`).value) || 2,
+    maxTradesPerDay: Number(document.getElementById(`st-max-${i}`).value) || null,
   };
   try {
     const r = await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {
@@ -1011,6 +1046,42 @@ async function loadFires() {
   }
 }
 
+/* ── the calculator ──
+ *
+ * Every number comes back from the server. Working the share count out here
+ * would be a second implementation of the one rule that decides how much money
+ * is at stake, and the two would disagree the first time either the cap or the
+ * rounding changed — with the page's answer being the one a person acted on.
+ */
+async function calcSize() {
+  const out = document.getElementById('cl-out');
+  const v = id => document.getElementById(id).value;
+  try {
+    const d = await (await fetch('/api/alerts/size', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        side: v('cl-side'), entry: v('cl-entry'),
+        stop: v('cl-stop'), target: v('cl-target') || null,
+      }),
+    })).json();
+    if (!d.ok) throw new Error(d.error);
+
+    const sz = d.size;
+    const money = n => `$${Number(n).toFixed(2)}`;
+    out.innerHTML = `
+      <b class="calc-big">${sz && sz.shares > 0 ? `${sz.shares} shares` : 'no size'}</b>
+      ${sz && sz.shares > 0
+        ? ` · ${money(sz.positionValue)} position · risks ${money(sz.riskDollars)} if stopped`
+        : ` — ${esc((sz && sz.reason) || 'set account size and risk per trade above')}`}
+      <br>${money(d.riskPerShare)} a share (${d.riskPct.toFixed(2)}% of price)
+      ${d.rr ? ` · reward:risk <b>${d.rr.toFixed(2)}R</b>` : ''}
+      ${!d.target ? ` · 2R would be <b>${money(d.twoRTarget)}</b>` : ''}
+      ${sz && sz.capped ? `<br><span class="warn">${esc(sz.capped)}</span>` : ''}`;
+  } catch (e) {
+    out.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
+  }
+}
+
 /* ── live orders ──
  *
  * Two switches, not one. `enabled` means configured; `armed` means real orders
@@ -1031,6 +1102,7 @@ async function loadBroker() {
       b.hasTestWebhook ? `saved · ${b.testWebhookUrl}` : '…/hook/TEST…';
     if (b.buyingPower) document.getElementById('bk-power').value = b.buyingPower;
     if (b.maxOrderValue) document.getElementById('bk-max').value = b.maxOrderValue;
+    if (b.maxTradesPerDay) document.getElementById('bk-maxtrades').value = b.maxTradesPerDay;
     document.getElementById('bk-short').value = b.allowShort ? '1' : '0';
     document.getElementById('bk-bracket').value = b.bracket ? '1' : '0';
 
@@ -1038,8 +1110,10 @@ async function loadBroker() {
     arm.textContent = b.armed ? 'ARMED — disarm' : 'Arm';
     arm.className = 'btn' + (b.armed ? ' on' : '');
     const st = document.getElementById('broker-state');
+    const used = (d.orders || []).filter(o => o.sent).length;
     st.textContent = b.armed
-      ? `armed · $${(d.remaining ?? 0).toFixed(0)} of $${b.buyingPower} left today`
+      ? `armed · $${(d.remaining ?? 0).toFixed(0)} of $${b.buyingPower} left`
+        + `${b.maxTradesPerDay ? ` · ${used}/${b.maxTradesPerDay} trades used` : ` · ${used} trades`}`
       : (b.hasWebhook ? 'configured, not armed' : 'off');
     st.className = 'note' + (b.armed ? ' live' : '');
 
@@ -1089,6 +1163,7 @@ async function saveBroker(patch) {
     testWebhookUrl: v('bk-test-url') || undefined,
     buyingPower: v('bk-power') || undefined,
     maxOrderValue: v('bk-max') || undefined,
+    maxTradesPerDay: v('bk-maxtrades') || undefined,
     allowShort: document.getElementById('bk-short').value === '1',
     bracket: document.getElementById('bk-bracket').value === '1',
     enabled: true,

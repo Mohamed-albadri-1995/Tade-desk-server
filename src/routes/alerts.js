@@ -90,6 +90,72 @@ router.get('/history', (req, res) => {
 });
 
 /*
+ * The calculator: entry, stop and target in, shares and the plan out.
+ *
+ * For the trade a setup did not signal — the one seen on a chart at 11:20 — and
+ * for checking what a setup DID signal before acting on it.
+ *
+ * Computed HERE rather than in the page, using the same risk.sizeFor the live
+ * path uses. A second implementation in JavaScript on the phone would be a
+ * second answer to "how many shares", and the two would disagree the first time
+ * either the cap or the rounding changed. One engine, the same rule the
+ * automatic order obeys.
+ */
+router.post('/size', express.json(), (req, res) => {
+  const num = v => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const entry = num(req.body?.entry);
+  const stop = num(req.body?.stop);
+  const target = num(req.body?.target);
+  const side = String(req.body?.side || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG';
+
+  if (!(entry > 0)) return res.status(400).json({ ok: false, error: 'entry must be a price' });
+  if (!(stop > 0)) return res.status(400).json({ ok: false, error: 'stop must be a price' });
+
+  // The direction is implied by where the stop is, and disagreeing with it is
+  // the mistake worth catching: a "long" whose stop is above the entry is
+  // either the wrong stop or the wrong side, and sizing it would produce a
+  // confident number for a trade that cannot be placed.
+  const implied = stop < entry ? 'LONG' : 'SHORT';
+  if (implied !== side) {
+    return res.status(400).json({
+      ok: false,
+      error: `a ${side.toLowerCase()} has its stop ${side === 'LONG' ? 'below' : 'above'} `
+        + `the entry — with the stop at ${stop} and the entry at ${entry} this is a `
+        + `${implied.toLowerCase()}`,
+    });
+  }
+
+  const riskPerShare = Math.abs(entry - stop);
+  const risk = require('../setups/risk');
+  const cfg = risk.settings();
+  const size = risk.sizeFor({ entry, riskPerShare }, cfg);
+
+  // R is the only way to compare two trades whose stops are different distances
+  // away, and it is the number the setup itself is measured in.
+  const reward = target ? Math.abs(target - entry) : null;
+  const rr = reward && riskPerShare ? reward / riskPerShare : null;
+
+  res.json({
+    ok: true,
+    side,
+    entry,
+    stop,
+    target: target || null,
+    riskPerShare,
+    riskPct: (riskPerShare / entry) * 100,
+    rr,
+    // 2R is what the setups target, so a manual trade can be judged against the
+    // same bar rather than by feel.
+    twoRTarget: side === 'LONG' ? entry + 2 * riskPerShare : entry - 2 * riskPerShare,
+    size,
+    account: cfg,
+  });
+});
+
+/*
  * Position sizing: account size and what you risk per trade.
  *
  * Lives with the alerts rather than in a screener's settings because it is a

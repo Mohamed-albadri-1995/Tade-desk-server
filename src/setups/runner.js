@@ -246,6 +246,10 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
           target: pick.plan.target,
           date: day,
           source: `${setup.id} (${config.toolId})`,
+          // Both caps are enforced in the broker, against the ledger, so a
+          // restart between the two picks cannot hand the allowance back.
+          setupId: setup.id,
+          maxPerDay: setup.maxTradesPerDay || null,
         });
       } catch (err) {
         // A broker that cannot be reached must not stop the alert. The alert is
