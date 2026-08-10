@@ -1,0 +1,188 @@
+// T2 10:00 VWAP-Extension setup — setup_spec.md v1.0
+//
+// WHAT THIS CAN AND CANNOT DO, because the difference matters before you rely
+// on it.
+//
+// A Pine script sees ONE symbol. The setup's final step is a ranking across the
+// whole card list — take the two most extended of everything that qualified —
+// and no indicator can do that, because no indicator can see the other names.
+//
+// So this does the per-symbol half exactly: the direction test, the
+// invalidation test, the extension, and the stop and target. What it gives you
+// on each chart is a number and a verdict:
+//
+//     QUALIFIES · LONG · 4.95% from VWAP
+//
+// The ranking is then yours: flip through the watchlist at 10:00, note the
+// extension on each name that qualifies, and take the two highest. The
+// alertcondition below fires per symbol, so with the alert set on the whole
+// watchlist you get told which names qualified and can rank the handful that
+// did rather than checking forty.
+//
+// The server-side version does the ranking itself and messages you the top two.
+// This is the second opinion — the one that draws the VWAP and the stop on the
+// chart you are about to trade from.
+//
+// TIMEFRAME: 1 minute. The spec is defined on 1-minute bars and every window in
+// it (the ten-bar slope, the 09:40 and 09:50 cutoffs) is counted in them. On
+// any other timeframe the numbers are not this setup's numbers.
+
+//@version=5
+indicator("T2 10:00 VWAP Extension", overlay=true, max_labels_count=200)
+
+// ── parameters ───────────────────────────────────────────────────────────────
+// Defaults are the spec's. Only DECISION_TIME and the stop were tested; the
+// rest were never swept, which is worth knowing before turning any of them.
+decisionHour   = input.int(10,   "Decision hour (ET)",      minval=0, maxval=23)
+decisionMinute = input.int(0,    "Decision minute",         minval=0, maxval=59)
+rangePosLong   = input.float(55, "Long: min range position",  minval=0, maxval=100)
+rangePosShort  = input.float(45, "Short: max range position", minval=0, maxval=100)
+slopeLookback  = input.int(10,   "VWAP slope lookback (bars)", minval=1)
+invalLongCut   = input.int(40,   "Long invalidation cutoff (minute of 09:xx)", minval=30, maxval=59)
+invalShortCut  = input.int(50,   "Short invalidation cutoff (minute of 09:xx)", minval=30, maxval=59)
+targetR        = input.float(2.0,"Target (R)", minval=0.1, step=0.1)
+minBars        = input.int(10,   "Minimum morning bars", minval=1)
+
+// ── session bookkeeping ──────────────────────────────────────────────────────
+// Everything is anchored to the regular session in New York, so the script
+// behaves the same wherever the chart's timezone is set.
+et      = "America/New_York"
+etHour  = hour(time, et)
+etMin   = minute(time, et)
+minOfDay = etHour * 60 + etMin
+
+sessionStart = 9 * 60 + 30
+decisionMin  = decisionHour * 60 + decisionMinute
+
+inMorning   = minOfDay >= sessionStart and minOfDay < decisionMin
+isFirstBar  = inMorning and not inMorning[1]
+isDecision  = inMorning and not (minOfDay + 1 < decisionMin)   // the last morning bar
+
+// ── session VWAP, anchored at 09:30, HLC/3 ───────────────────────────────────
+// Rebuilt rather than using ta.vwap so the anchor is unmistakably 09:30 and the
+// accumulation is unmistakably regular-session only — the same definition the
+// server uses, and the level the stop is placed at.
+var float cumPV = na
+var float cumV  = na
+if isFirstBar
+    cumPV := 0.0
+    cumV  := 0.0
+if inMorning or minOfDay >= sessionStart
+    typical = (high + low + close) / 3.0
+    cumPV := nz(cumPV) + typical * nz(volume)
+    cumV  := nz(cumV) + nz(volume)
+sessionVwap = cumV > 0 ? cumPV / cumV : na
+
+// ── the morning window ───────────────────────────────────────────────────────
+var float mornHigh = na
+var float mornLow  = na
+var int   mornBars = 0
+var float earlyLowLong  = na      // lowest low up to the long cutoff
+var float lateLowLong   = na      // lowest low after it
+var float earlyHighShort = na
+var float lateHighShort  = na
+
+if isFirstBar
+    mornHigh := high
+    mornLow  := low
+    mornBars := 1
+    earlyLowLong   := low
+    lateLowLong    := na
+    earlyHighShort := high
+    lateHighShort  := na
+else if inMorning
+    mornHigh := math.max(nz(mornHigh, high), high)
+    mornLow  := math.min(nz(mornLow, low), low)
+    mornBars := nz(mornBars) + 1
+    // The two sub-windows the invalidation test compares. Split by clock, as
+    // the spec specifies, not by bar count.
+    if etMin <= invalLongCut
+        earlyLowLong := math.min(nz(earlyLowLong, low), low)
+    else
+        lateLowLong  := math.min(nz(lateLowLong, low), low)
+    if etMin <= invalShortCut
+        earlyHighShort := math.max(nz(earlyHighShort, high), high)
+    else
+        lateHighShort  := math.max(nz(lateHighShort, high), high)
+
+// ── the tests, evaluated on the decision bar ─────────────────────────────────
+rangePos = mornHigh == mornLow ? 50.0 : (close - mornLow) / (mornHigh - mornLow) * 100.0
+// By index, exactly as the spec says: ten BARS back, which on a symbol with
+// gaps in its tape is more than ten minutes.
+vwapSlope = sessionVwap - sessionVwap[slopeLookback]
+
+enoughBars = mornBars >= minBars
+isLong  = enoughBars and close > sessionVwap and vwapSlope > 0 and rangePos >= rangePosLong
+isShort = enoughBars and close < sessionVwap and vwapSlope < 0 and rangePos <= rangePosShort
+
+// An empty sub-window passes: with no bars there is no evidence of
+// invalidation, and rejecting on absence would drop every thin name.
+longInvalidated  = not na(lateLowLong)   and not na(earlyLowLong)   and lateLowLong  < earlyLowLong
+shortInvalidated = not na(lateHighShort) and not na(earlyHighShort) and lateHighShort > earlyHighShort
+
+qualifiesLong  = isLong  and not longInvalidated
+qualifiesShort = isShort and not shortInvalidated
+qualifies      = qualifiesLong or qualifiesShort
+
+// Always positive for a valid signal: distance from VWAP, on the side the
+// signal is taken from, as a percentage of price. THIS is the ranking number.
+extension = qualifiesLong  ? (close / sessionVwap - 1) * 100 :
+            qualifiesShort ? (sessionVwap / close - 1) * 100 : na
+
+// The stop is the VWAP AS IT WAS on the decision bar and does not move. Not a
+// trailing VWAP — that is a different and untested setup.
+var float frozenStop   = na
+var float frozenEntry  = na
+var float frozenTarget = na
+var string frozenSide  = na
+var float frozenExt    = na
+
+if isDecision and qualifies
+    frozenStop  := sessionVwap
+    frozenEntry := close                    // the server enters at the next open
+    risk = math.abs(frozenEntry - frozenStop)
+    frozenTarget := qualifiesLong ? frozenEntry + targetR * risk
+                                  : frozenEntry - targetR * risk
+    frozenSide := qualifiesLong ? "LONG" : "SHORT"
+    frozenExt  := extension
+if isFirstBar
+    frozenStop   := na
+    frozenEntry  := na
+    frozenTarget := na
+    frozenSide   := na
+    frozenExt    := na
+
+// ── drawing ──────────────────────────────────────────────────────────────────
+plot(inMorning or minOfDay >= sessionStart ? sessionVwap : na, "Session VWAP",
+     color=color.new(color.orange, 0), linewidth=2)
+plot(frozenStop,   "Stop (VWAP frozen at decision)", color=color.new(color.red, 0),
+     style=plot.style_linebr, linewidth=2)
+plot(frozenTarget, "Target (2R)", color=color.new(color.green, 0),
+     style=plot.style_linebr, linewidth=2)
+
+// The verdict, once, on the decision bar. The extension is the number to write
+// down — it is what the two names are chosen by.
+if isDecision
+    txt = qualifies
+         ? frozenSide + "  " + str.tostring(extension, "#.##") + "% from VWAP" +
+           "\nstop " + str.tostring(frozenStop, format.mintick) +
+           "  target " + str.tostring(frozenTarget, format.mintick)
+         : not enoughBars ? "skipped — only " + str.tostring(mornBars) + " bars"
+         : longInvalidated or shortInvalidated ? "invalidated in the morning"
+         : "no signal"
+    label.new(bar_index, qualifies and qualifiesShort ? high : low, txt,
+              style = qualifiesShort ? label.style_label_down : label.style_label_up,
+              color = qualifies ? (qualifiesLong ? color.new(color.green, 20)
+                                                 : color.new(color.red, 20))
+                                : color.new(color.gray, 55),
+              textcolor = color.white, size = size.small)
+
+// ── alerts ───────────────────────────────────────────────────────────────────
+// Set these on the whole watchlist. Each fires only for the symbol it is on and
+// only on the decision bar, so at 10:00 you get a short list of names that
+// qualified — and you rank those by the extension in the message rather than
+// opening forty charts.
+alertcondition(isDecision and qualifiesLong,  title="T2 10:00 — LONG qualifies",
+     message="{{ticker}} LONG qualifies at 10:00 — rank by extension shown on chart")
+alertcondition(isDecision and qualifiesShort, title="T2 10:00 — SHORT qualifies",
+     message="{{ticker}} SHORT qualifies at 10:00 — rank by extension shown on chart")

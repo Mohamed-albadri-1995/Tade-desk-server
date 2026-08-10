@@ -4,7 +4,9 @@ Reads R4A and R4B CSV files, generates 96 analysis tables + metadata.
 Run this offline to retrain the scoring model.
 """
 
+import glob
 import os
+import shutil
 import pickle
 import warnings
 import numpy as np
@@ -20,8 +22,15 @@ IDENTIFIER_COLS = ['ticker', 'date', 'capturedAt']
 
 CATEGORICAL_COLS = [
     'sector', 'industry', 'regime', 'regimeLabel', 'secBias',
-    'themes', 'catalyst', 'screenerKeys', 'longTerm', 'midTerm',
+    'themes', 'catalyst', 'canslim', 'shortlistedElsewhere', 'screenerKeys', 'longTerm', 'midTerm',
     'shortTerm', 'broadResolved', 'inShortlist', 'bias',
+    # relational signals (Side B): price vs each level, MA stack,
+    # month-range quarter, pre-market band. Unit-free, so they compare
+    # across a $1 stock and a $99 one -- unlike the raw price columns.
+    'vsEma9', 'vsEma13', 'vsEma20', 'vsEma50',
+    'vsSma5', 'vsVwap', 'vsPrevClose', 'vsOpen',
+    'vsPmHigh', 'vsPmLow', 'maStack', 'monthQuarter',
+    'pmAdrBand', 'aboveAllMas', 'belowAllMas',
 ]
 
 NUMERIC_COLS = [
@@ -30,6 +39,12 @@ NUMERIC_COLS = [
     'atr', 'adrPct', 'dayHigh', 'dayLow', 'monthHigh', 'monthLow',
     'monthRangePos', 'mcap', 'floatShares', 'shortFloat', 'pmHigh',
     'pmLow', 'pmRange', 'pmAdrRatio', 'secScore',
+    # when the card was found, in minutes from the bell (negative = pre-market)
+    'foundMinsFromOpen',
+    # percent distance to each level -- keeps the magnitude the flag drops
+    'distEma9', 'distEma13', 'distEma20', 'distEma50',
+    'distSma5', 'distVwap', 'distPrevClose', 'distOpen',
+    'distPmHigh', 'distPmLow', 'maStackScore', 'dayRangePos',
 ]
 
 ALL_FEATURES = IDENTIFIER_COLS + CATEGORICAL_COLS + NUMERIC_COLS
@@ -48,6 +63,14 @@ BASES = [
 
 ALPHA = 0.5
 K_CONFIDENCE = 5
+
+# How many buckets each factor is cut into. Every bucket's score is a lookup of
+# what its trades historically did, so the bucket has to hold enough of them to
+# mean anything. At 10 buckets a 145-row table gives ~14 trades each and a
+# confidence of n/(n+5) = 0.74; at 5 it gives ~29 and 0.85. Fewer, sturdier
+# buckets beat finer ranking the data cannot support. Override with
+# SCORER_N_BUCKETS if a table ever grows large enough to split further.
+N_BUCKETS = int(os.environ.get('SCORER_N_BUCKETS', '5'))
 
 
 # ─────────────────────────────────────────────────────────
@@ -70,6 +93,7 @@ class FactorAnalysisProcessor:
 
     def run(self):
         os.makedirs(self.output_root, exist_ok=True)
+        self._written = set()          # (base_id, folder) actually produced this run
         for base in BASES:
             df_base = self.df_a if base['file'] == 'r4a' else self.df_b
             target = base['target']
@@ -82,7 +106,38 @@ class FactorAnalysisProcessor:
                 print(f"[Processor] Processing {base_id} sub_{regime_val} …")
                 self._process_table(df_base.copy(), target, base_id, 'sub', regime_val)
 
+        self._prune_stale_tables()
         print("[Processor] Done.")
+
+    def _prune_stale_tables(self):
+        """Delete table folders this run did not produce.
+
+        A retrain overwrites the tables it regenerates but used to leave every
+        other folder in place, so a regime that no longer appears in the data —
+        or a table that can no longer be built because its rows were cleared —
+        stayed on disk and the scorer kept routing cards to it. That is what
+        made a retrain still return the previous analysis.
+
+        Runs only after every base has been processed, so a training failure
+        leaves the existing model untouched rather than deleting it. Only the
+        B1..B6 trees are touched; anything else under output_root (the setups
+        tree lives here) is left alone.
+        """
+        removed = []
+        for base in BASES:
+            base_dir = os.path.join(self.output_root, base['id'])
+            if not os.path.isdir(base_dir):
+                continue
+            for folder in os.listdir(base_dir):
+                path = os.path.join(base_dir, folder)
+                if not os.path.isdir(path):
+                    continue
+                if (base['id'], folder) not in self._written:
+                    shutil.rmtree(path, ignore_errors=True)
+                    removed.append(f"{base['id']}/{folder}")
+        if removed:
+            print(f"[Processor] Removed {len(removed)} stale table(s) from earlier runs: "
+                  + ', '.join(sorted(removed)))
 
     def _resolve_target(self, df: pd.DataFrame, base: dict) -> pd.Series:
         target = base['target']
@@ -197,11 +252,11 @@ class FactorAnalysisProcessor:
 
             # Create deciles
             try:
-                bucket_labels, bin_edges = pd.qcut(factor_scores, q=10, labels=False,
+                bucket_labels, bin_edges = pd.qcut(factor_scores, q=N_BUCKETS, labels=False,
                                                    duplicates='drop', retbins=True)
             except Exception:
                 try:
-                    bucket_labels, bin_edges = pd.cut(factor_scores, bins=10, labels=False,
+                    bucket_labels, bin_edges = pd.cut(factor_scores, bins=N_BUCKETS, labels=False,
                                                       retbins=True, duplicates='drop')
                 except Exception:
                     bucket_labels = pd.Series([0] * len(factor_scores), index=X_final.index)
@@ -287,6 +342,14 @@ class FactorAnalysisProcessor:
         # Factor importance CSV
         fi_df.to_csv(os.path.join(out_dir, 'factor_importance.csv'), index=False)
 
+        # Clear factor CSVs from any earlier run before writing this one's.
+        # k is data-dependent, so a retrain that keeps fewer factors used to
+        # leave the surplus files behind (e.g. factor_8_buckets.csv sitting in
+        # a k=7 table). The scorer ignores them, but exports and inspection
+        # tools read the directory and reported factors the model never uses.
+        for stale in glob.glob(os.path.join(out_dir, 'factor_*_buckets.csv')):
+            os.remove(stale)
+
         # Bucket CSVs
         for j, bdf in factor_bucket_dfs.items():
             bdf.to_csv(os.path.join(out_dir, f'factor_{j}_buckets.csv'), index=False)
@@ -307,6 +370,11 @@ class FactorAnalysisProcessor:
         }
         with open(os.path.join(out_dir, 'metadata.pkl'), 'wb') as f:
             pickle.dump(metadata, f)
+
+        # mark this table as produced by the current run, so the prune step
+        # can tell it apart from a leftover of an earlier one
+        if hasattr(self, '_written'):
+            self._written.add((base_id, folder_name))
 
         print(f"  [OK] {base_id}/{folder_name}: {len(df)} samples, k={k} factors")
 

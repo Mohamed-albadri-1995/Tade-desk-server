@@ -4,8 +4,30 @@ const yahooClient  = require('../yahoo/client');
 const alpacaClient = require('../alpaca/client');
 const { syncFromWarehouse } = require('../training/trainingData');
 
-const ENTRY_TIME_A = '09:37';
-const ENTRY_TIME_B = '09:40';
+// The two entry times this tool measures outcomes from. They follow the tool's
+// own session — see captureAt in tools.config.json — because measuring a
+// mid-morning setup from a 09:37 entry answers a question nobody asked. A and B
+// keep their names: the scorer picks a base by "entry A or entry B", not by the
+// clock, so the model bases mean the same thing whatever the times are.
+const { captureAt } = require('../config');
+const ENTRY_TIME_A = captureAt.entryA;
+const ENTRY_TIME_B = captureAt.entryB;
+
+// The 09:30-09:35 opening range. Recorded for every card whether or not this
+// tool trades it: the bars are already in hand, and the one day-trading setup
+// with published evidence behind it triggers off these two levels. A month of
+// data collected without them cannot be asked the question afterwards.
+const OR_FROM = '09:30';
+const OR_TO   = '09:35';
+
+function openingRange(bars) {
+  const inRange = bars.filter(b => b.etTime >= OR_FROM && b.etTime < OR_TO);
+  if (!inRange.length) return { orHigh: null, orLow: null };
+  return {
+    orHigh: Math.max(...inRange.map(b => b.h)),
+    orLow:  Math.min(...inRange.map(b => b.l)),
+  };
+}
 
 // Batch tickers into chunks to stay within Alpaca query-string limits
 function chunk(arr, size) {
@@ -104,12 +126,12 @@ async function captureR3(date) {
   let noEntryB = 0;
 
   const insertR3A = db.prepare(`
-    INSERT OR REPLACE INTO r3a (date, ticker, entry_price_a, hh_a, ll_a, atr14, up_r_a, down_r_a, captured_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO r3a (date, ticker, entry_price_a, hh_a, ll_a, atr14, up_r_a, down_r_a, or_high, or_low, captured_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertR3B = db.prepare(`
-    INSERT OR REPLACE INTO r3b (date, ticker, entry_price_b, hh_b, ll_b, atr14, up_r_b, down_r_b, captured_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO r3b (date, ticker, entry_price_b, hh_b, ll_b, atr14, up_r_b, down_r_b, or_high, or_low, captured_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const writeAll = db.transaction((tickers) => {
@@ -117,8 +139,9 @@ async function captureR3(date) {
       const bars = intradayMap[ticker] || [];
       const dailyBars = dailyMap[ticker] || [];
       const atr14 = alpacaClient.computeATR14(dailyBars);
+      const { orHigh, orLow } = openingRange(bars);
 
-      // R3A — Target Entry at 09:37
+      // R3A — Target Entry (entry A)
       const barA = bars.find(b => b.etTime === ENTRY_TIME_A);
       if (barA) {
         const entryA = barA.o;
@@ -127,13 +150,13 @@ async function captureR3(date) {
         const llA = barsFromA.length ? Math.min(...barsFromA.map(b => b.l)) : null;
         const upRA = (atr14 && hhA !== null) ? (hhA - entryA) / atr14 : null;
         const downRA = (atr14 && llA !== null) ? (entryA - llA) / atr14 : null;
-        insertR3A.run(today, ticker, entryA, hhA, llA, atr14, upRA, downRA, capturedAt);
+        insertR3A.run(today, ticker, entryA, hhA, llA, atr14, upRA, downRA, orHigh, orLow, capturedAt);
         r3aWritten++;
       } else {
         noEntryA++;
       }
 
-      // R3B — Alternative Entry at 09:40
+      // R3B — Alternative Entry (entry B)
       const barB = bars.find(b => b.etTime === ENTRY_TIME_B);
       if (barB) {
         const entryB = barB.o;
@@ -142,7 +165,7 @@ async function captureR3(date) {
         const llB = barsFromB.length ? Math.min(...barsFromB.map(b => b.l)) : null;
         const upRB = (atr14 && hhB !== null) ? (hhB - entryB) / atr14 : null;
         const downRB = (atr14 && llB !== null) ? (entryB - llB) / atr14 : null;
-        insertR3B.run(today, ticker, entryB, hhB, llB, atr14, upRB, downRB, capturedAt);
+        insertR3B.run(today, ticker, entryB, hhB, llB, atr14, upRB, downRB, orHigh, orLow, capturedAt);
         r3bWritten++;
       } else {
         noEntryB++;
@@ -152,8 +175,8 @@ async function captureR3(date) {
 
   writeAll(tickers);
 
-  if (noEntryA > 0) console.warn('[SideH] R3A: missing 09:37 bar for', noEntryA, 'ticker(s)');
-  if (noEntryB > 0) console.warn('[SideH] R3B: missing 09:40 bar for', noEntryB, 'ticker(s)');
+  if (noEntryA > 0) console.warn(`[SideH] R3A: missing ${ENTRY_TIME_A} bar for`, noEntryA, 'ticker(s)');
+  if (noEntryB > 0) console.warn(`[SideH] R3B: missing ${ENTRY_TIME_B} bar for`, noEntryB, 'ticker(s)');
 
   // Push today's joined R4A/R4B rows into the persistent training tables so
   // they survive the daily auto-train rewrite and accumulate across days.

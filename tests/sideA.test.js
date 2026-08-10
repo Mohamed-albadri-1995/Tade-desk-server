@@ -31,12 +31,25 @@ describe('Side A — TV Response Mapping', () => {
       premarket_low: 151,
     };
     const merged = { ...defaults, ...overrides };
-    return { d: COMMON_COLUMNS.map(col => merged[col] ?? null) };
+    // TradingView returns the symbol in `s`, and that is what mapTVRow reads —
+    // deliberately, so a change to the ticker-view column's shape cannot leave
+    // every row without a ticker. The fixture has to carry it or it is not
+    // testing the response the scanner actually receives.
+    return { s: merged.s ?? 'NASDAQ:AAPL', d: COMMON_COLUMNS.map(col => merged[col] ?? null) };
   }
 
   test('strips exchange prefix from ticker', () => {
     const row = mapTVRow(makeRaw());
     expect(row.ticker).toBe('AAPL');
+  });
+
+  test('a symbol with no exchange prefix is used as-is', () => {
+    expect(mapTVRow(makeRaw({ s: 'AAPL' })).ticker).toBe('AAPL');
+  });
+
+  test('a row with no symbol yields no ticker, so it can be filtered out', () => {
+    // runScreener drops these rather than storing a nameless card.
+    expect(mapTVRow({ d: COMMON_COLUMNS.map(() => null) }).ticker).toBe('');
   });
 
   test('maps close to stock.price', () => {
@@ -109,10 +122,12 @@ describe('Side A — Scanner Merge Logic', () => {
   });
 
   test('duplicate tickers get merged screenerKeys', () => {
+    // Keys are the screeners' display names, exactly as runAllScanners emits
+    // them from the stored definitions.
     const results = {
-      trend: [makeRow('AAPL')],
-      premarket: [makeRow('AAPL')],
-      bigmoves: [makeRow('AAPL')],
+      'Trend': [makeRow('AAPL')],
+      'Pre-Mkt': [makeRow('AAPL')],
+      'Big Move': [makeRow('AAPL')],
     };
     const merged = mergeScannersIntoR0(results);
     expect(merged.length).toBe(1);

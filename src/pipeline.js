@@ -12,8 +12,31 @@ const { refreshStaleInR0 } = require('./sideG/staleFetch');
 const { toETDate } = require('./utils/time');
 const { scoreAllRows } = require('./sideE/score');
 
+const config = require('./config');
+
+// The tool whose screeners define CANSLIM membership. Everything else reads.
+const CANSLIM_TOOL = 'T8';
+
+// The screener that decides WHO is a growth stock, as opposed to which of them
+// did something today. Membership has to come from the slow half or it stops
+// meaning anything: a company is not a growth company on Tuesday and an
+// ordinary one on Wednesday because it happened not to print a new high.
+const CANSLIM_UNIVERSE = 'canslim-universe';
+
+/*
+ * Which side of each rule every stock was on, last pass.
+ *
+ * Module state rather than the database: it is worthless after a restart by
+ * design. A remembered side from before a restart would be compared against a
+ * price fetched now, and the gap between them could be an hour — which would
+ * report a crossing that may never have happened. Losing it costs one missed
+ * alert per stock; keeping it would invent them.
+ */
+const alertPrev = {};
+
 const scanStatus = {
   lastRun: null,
+  lastRefresh: null,
   lastRowCount: 0,
   running: false,
   error: null,
@@ -72,14 +95,19 @@ async function runFullScan() {
     if (hasPreviousDay) {
       console.log('[Pipeline] Day boundary detected — flushing r0');
       r0.clearAll();
+      // …and the alert memory with it. Yesterday's close against this
+      // morning's pre-market price is a gap, not a crossing.
+      for (const k of Object.keys(alertPrev)) delete alertPrev[k];
     }
 
     // Side A: TradingView Scanners (fatal)
     let merged;
+    let labelResults = {};
     await stageWrap(report, 'sideA', async () => {
-      const scannerResults = await runAllScanners();
-      merged = mergeScannersIntoR0(scannerResults);
-      return { rowCount: merged.length };
+      const { candidates, labels } = await runAllScanners();
+      labelResults = labels;
+      merged = mergeScannersIntoR0(candidates);
+      return { rowCount: merged.length, labelLists: Object.keys(labels).length };
     })();
 
     // Side B: Internal Calculations (fatal)
@@ -87,6 +115,66 @@ async function runFullScan() {
     await stageWrap(report, 'sideB', async () => {
       withDerived = applyDerivedFields(merged);
       return { rowCount: withDerived.length };
+    })();
+
+    // CANSLIM cross-tag (non-fatal). The tool that runs the CANSLIM screeners
+    // publishes its matches; every tool reads that list and tags any of its own
+    // candidates that appear on it. A label only — nothing here changes which
+    // stocks were found, so one tool still cannot influence another's results.
+    await stageWrapSoft(report, 'canslim', async () => {
+      const canslim = require('./sideA/canslim');
+      if (config.toolId === CANSLIM_TOOL) {
+        // From the universe screener alone. Reading it off the cards instead —
+        // which is what this did — meant a name only joined on a day it broke
+        // out on volume, so the list tracked breakouts and called them growth.
+        const store = require('./sideA/screenerStore');
+        const universe = store.list({ enabledOnly: true })
+          .find(s => s.key === CANSLIM_UNIVERSE);
+        const matched = universe
+          ? (labelResults[universe.name] || []).map(r => r.ticker)
+          : [];
+        // No universe screener, or it did not run in this scan: leave the list
+        // exactly as it was. Recording an empty scan would expire every member
+        // ninety days later on the strength of one skipped run.
+        if (!matched.length) {
+          const held = canslim.currentMembers().size;
+          canslim.tagRows(withDerived);
+          return { published: 0, members: held, skipped: universe ? 'not scanned' : 'no universe screener' };
+        }
+        const res = canslim.recordMembers(matched);
+        canslim.tagRows(withDerived);
+        return { published: matched.length, members: res.total, expired: res.expired };
+      }
+      const { tagged, memberCount } = canslim.tagRows(withDerived);
+      return { tagged, memberCount };
+    })();
+
+    /*
+     * Alerts (non-fatal).
+     *
+     * After Side B, because the rules compare price against levels that Side B
+     * derives, and BEFORE scoring, because an alert is about what the tape did
+     * and must not wait on a model that is allowed to be down.
+     *
+     * Evaluated on the merged rows for THIS tool only — a rule scoped to T2 is
+     * not this tool's business. The previous side per (rule, ticker) lives in
+     * module state and is cleared at the day boundary along with r0, so a
+     * crossing is never measured against yesterday.
+     */
+    await stageWrapSoft(report, 'alerts', async () => {
+      const engine = require('./alerts/engine');
+      const alertStore = require('./alerts/store');
+      const rules = alertStore.listRules();
+      if (!rules.length) return { rules: 0, fired: 0 };
+      const fires = engine.evaluate({
+        rules, rows: withDerived, toolId: config.toolId, prev: alertPrev, date: today,
+      });
+      if (fires.length) {
+        alertStore.publishFires(fires, today);
+        console.log(`[Alerts] ${fires.length} fired: `
+          + fires.map(f => `${f.ticker} ${f.rule}`).join(', '));
+      }
+      return { rules: rules.length, fired: fires.length, watched: Object.keys(alertPrev).length };
     })();
 
     // Side D: Market Context (non-fatal)
@@ -139,7 +227,9 @@ async function runFullScan() {
     await stageWrapSoft(report, 'sideC', async () => {
       const liveRows = r0.getAll().filter(r => r.liveNow);
       const results = await Promise.allSettled(
-        liveRows.map(row => fetchNewsForTicker(row.ticker).then(({ news, catalyst }) => {
+        // tvSymbol is the exchange-qualified form (NASDAQ:AAPL) TradingView's
+        // headline endpoint requires; a bare ticker gets a 400 back.
+        liveRows.map(row => fetchNewsForTicker(row.ticker, row.stock && row.stock.tvSymbol).then(({ news, catalyst }) => {
           r0.updateNews(row.ticker, news, combineCatalyst(catalyst, row.stock));
         }))
       );
@@ -150,7 +240,14 @@ async function runFullScan() {
     // Side F: Restore inShortlist flags from DB (non-fatal)
     await stageWrapSoft(report, 'sideF', async () => {
       syncShortlistToR0();
-      return {};
+      // Then mark anything ANY tool has shortlisted. A name three tools picked
+      // independently is a different proposition from one that appeared on a
+      // single list, and that is worth seeing on the card rather than by
+      // opening nine tabs. A view only — inShortlist, which the model reads,
+      // stays this tool's own decision.
+      const globalShortlist = require('./sideF/globalShortlist');
+      const { tagged, memberCount } = globalShortlist.tagRows(r0.getAll(), today);
+      return { globalTagged: tagged, globalMembers: memberCount };
     })();
 
     // r0 summary
@@ -192,6 +289,36 @@ async function runFullScan() {
   }
 }
 
+/**
+ * Re-quote every card on screen without looking for new ones.
+ *
+ * Run windows separate two things that used to be one. Discovery is what a
+ * window gates: after 13:00 a morning screener should stop ADDING candidates.
+ * Refresh is not gated by anything — a card found at 09:40 is still on screen
+ * at 15:00, still being watched, and its price, VWAP, distance to each moving
+ * average and every relational tag have to keep up with the tape.
+ *
+ * Deliberately narrow: quotes and everything derived from them. No scanners, no
+ * news, no re-scoring. That keeps it cheap enough to run every few minutes (one
+ * batched TradingView call for the whole registry), and it keeps the score a
+ * card was given at discovery from drifting underneath the trader.
+ */
+async function runRefreshOnly() {
+  if (scanStatus.running) return { refreshed: 0, skipped: 'scan in progress' };
+  scanStatus.running = true;
+  try {
+    const { refreshAllInR0 } = require('./sideG/staleFetch');
+    const result = await refreshAllInR0();
+    scanStatus.lastRefresh = Date.now();
+    return result;
+  } catch (err) {
+    console.error('[Pipeline] Refresh error:', err.message);
+    return { refreshed: 0, error: err.message };
+  } finally {
+    scanStatus.running = false;
+  }
+}
+
 function getScanStatus() {
   return {
     lastRun: scanStatus.lastRun,
@@ -199,7 +326,8 @@ function getScanStatus() {
     running: scanStatus.running,
     error: scanStatus.error,
     lastReport: scanStatus.lastReport,
+    lastRefresh: scanStatus.lastRefresh,
   };
 }
 
-module.exports = { runFullScan, getScanStatus };
+module.exports = { runFullScan, runRefreshOnly, getScanStatus };

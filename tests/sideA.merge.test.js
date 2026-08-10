@@ -15,25 +15,25 @@ describe('Side A — mergeScannersIntoR0', () => {
 
   // ─── screenerKeys ─────────────────────────────────────────────────────────
   describe('screenerKeys assignment', () => {
-    test('trend scanner → screenerKey "Trend"', () => {
-      const result = mergeScannersIntoR0({ trend: [makeRow('AAPL')] });
+    test('a screener\'s name becomes the card\'s screenerKey', () => {
+      const result = mergeScannersIntoR0({ 'Trend': [makeRow('AAPL')] });
       expect(result[0].screenerKeys).toContain('Trend');
     });
 
-    test('premarket scanner → screenerKey "Pre-Mkt"', () => {
-      const result = mergeScannersIntoR0({ premarket: [makeRow('AAPL')] });
+    test('names with punctuation survive intact', () => {
+      const result = mergeScannersIntoR0({ 'Pre-Mkt': [makeRow('AAPL')] });
       expect(result[0].screenerKeys).toContain('Pre-Mkt');
     });
 
-    test('bigmoves scanner → screenerKey "Big Move"', () => {
-      const result = mergeScannersIntoR0({ bigmoves: [makeRow('AAPL')] });
+    test('names with spaces survive intact', () => {
+      const result = mergeScannersIntoR0({ 'Big Move': [makeRow('AAPL')] });
       expect(result[0].screenerKeys).toContain('Big Move');
     });
 
-    test('same ticker in trend + bigmoves → screenerKeys union, no duplicate', () => {
+    test('a ticker matching two screeners is ONE row tagged with both', () => {
       const result = mergeScannersIntoR0({
-        trend: [makeRow('AAPL')],
-        bigmoves: [makeRow('AAPL')],
+        'Trend': [makeRow('AAPL')],
+        'Big Move': [makeRow('AAPL')],
       });
       expect(result).toHaveLength(1);
       expect(result[0].screenerKeys).toContain('Trend');
@@ -41,11 +41,11 @@ describe('Side A — mergeScannersIntoR0', () => {
       expect(result[0].screenerKeys).toHaveLength(2);
     });
 
-    test('same ticker in all three → screenerKeys has all three labels', () => {
+    test('a ticker matching three screeners keeps all three tags', () => {
       const result = mergeScannersIntoR0({
-        trend: [makeRow('AAPL')],
-        premarket: [makeRow('AAPL')],
-        bigmoves: [makeRow('AAPL')],
+        'Trend': [makeRow('AAPL')],
+        'Pre-Mkt': [makeRow('AAPL')],
+        'Big Move': [makeRow('AAPL')],
       });
       expect(result[0].screenerKeys).toEqual(expect.arrayContaining(['Trend', 'Pre-Mkt', 'Big Move']));
       expect(result[0].screenerKeys).toHaveLength(3);
@@ -104,11 +104,11 @@ describe('Side A — mergeScannersIntoR0', () => {
     });
 
     test('all scanners empty → empty output', () => {
-      expect(mergeScannersIntoR0({ trend: [], premarket: [], bigmoves: [] })).toEqual([]);
+      expect(mergeScannersIntoR0({ 'Trend': [], premarket: [], bigmoves: [] })).toEqual([]);
     });
 
     test('only one scanner has results', () => {
-      const result = mergeScannersIntoR0({ trend: [makeRow('AAPL')], premarket: [], bigmoves: [] });
+      const result = mergeScannersIntoR0({ 'Trend': [makeRow('AAPL')], premarket: [], bigmoves: [] });
       expect(result).toHaveLength(1);
     });
   });
@@ -116,7 +116,7 @@ describe('Side A — mergeScannersIntoR0', () => {
   // ─── output shape ────────────────────────────────────────────────────────
   describe('output shape', () => {
     test('each row has ticker, stock, screenerKeys', () => {
-      const result = mergeScannersIntoR0({ trend: [makeRow('AAPL')] });
+      const result = mergeScannersIntoR0({ 'Trend': [makeRow('AAPL')] });
       expect(result[0]).toHaveProperty('ticker');
       expect(result[0]).toHaveProperty('stock');
       expect(result[0]).toHaveProperty('screenerKeys');

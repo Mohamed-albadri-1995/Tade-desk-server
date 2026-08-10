@@ -202,4 +202,9 @@ module.exports = {
   fetchAccount,
   fetchAccountEquity,
   getAccountBaseUrl,
+  // Exported because a caller computing VWAP has to know which feed produced
+  // the volume. IEX is a few percent of the consolidated tape, so a VWAP built
+  // from it is not the VWAP anyone else is looking at — and in the T2 setup the
+  // VWAP is the stop, so that is a difference with money on it.
+  getFeed,
 };

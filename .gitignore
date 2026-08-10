@@ -1,4 +1,19 @@
 node_modules/
+__pycache__/
+*.pyc
 /data/
 !quant-platform/qp/data/
 !quant-platform/data/
+.venv/
+
+# API keys, shared across the nine tools. Secrets — see src/sharedKeys.js.
+# /data/ is already ignored; this is belt-and-braces in case that ever changes,
+# because a key committed to a public repo is a key that has been published.
+keys.json
+**/keys.json
+
+# The VAPID private key that signs every push. /data/ is already ignored; this
+# is the same belt-and-braces, and for the same reason: anyone holding it could
+# send notifications to every subscribed phone as if they were this desk.
+push-keys.json
+**/push-keys.json

@@ -15,7 +15,7 @@ const fs = require('fs');
 const db = require('../db');
 const { getRegisterData } = require('../warehouse/registers');
 
-const TMP_DIR = path.join(__dirname, '..', '..', 'tmp');
+const TMP_DIR = require('../config').tmpDir;
 
 const VALID_REGISTERS = ['R4A', 'R4B'];
 const TABLE_BY_REGISTER = { R4A: 'r4a_train', R4B: 'r4b_train' };

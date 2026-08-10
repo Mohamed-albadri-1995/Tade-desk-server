@@ -16,8 +16,15 @@ IDENTIFIER_COLS = ['ticker', 'date', 'capturedAt']
 
 CATEGORICAL_COLS = [
     'sector', 'industry', 'regime', 'regimeLabel', 'secBias',
-    'themes', 'catalyst', 'screenerKeys', 'longTerm', 'midTerm',
+    'themes', 'catalyst', 'canslim', 'shortlistedElsewhere', 'screenerKeys', 'longTerm', 'midTerm',
     'shortTerm', 'broadResolved', 'inShortlist', 'bias',
+    # relational signals (Side B): price vs each level, MA stack,
+    # month-range quarter, pre-market band. Unit-free, so they compare
+    # across a $1 stock and a $99 one -- unlike the raw price columns.
+    'vsEma9', 'vsEma13', 'vsEma20', 'vsEma50',
+    'vsSma5', 'vsVwap', 'vsPrevClose', 'vsOpen',
+    'vsPmHigh', 'vsPmLow', 'maStack', 'monthQuarter',
+    'pmAdrBand', 'aboveAllMas', 'belowAllMas',
 ]
 
 NUMERIC_COLS = [
@@ -26,11 +33,17 @@ NUMERIC_COLS = [
     'atr', 'adrPct', 'dayHigh', 'dayLow', 'monthHigh', 'monthLow',
     'monthRangePos', 'mcap', 'floatShares', 'shortFloat', 'pmHigh',
     'pmLow', 'pmRange', 'pmAdrRatio', 'secScore',
+    # when the card was found, in minutes from the bell (negative = pre-market)
+    'foundMinsFromOpen',
+    # percent distance to each level -- keeps the magnitude the flag drops
+    'distEma9', 'distEma13', 'distEma20', 'distEma50',
+    'distSma5', 'distVwap', 'distPrevClose', 'distOpen',
+    'distPmHigh', 'distPmLow', 'maStackScore', 'dayRangePos',
 ]
 
 DEFAULT_ENTRY_TIME    = '9:40'
 FALLBACK_ENTRY_TIME   = '9:37'
-REGIME_SAMPLE_THRESHOLD = 10
+REGIME_SAMPLE_THRESHOLD = 150
 
 BIAS_MAPPING = {
     'Long':      'upR',

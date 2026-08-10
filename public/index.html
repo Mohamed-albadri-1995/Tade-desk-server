@@ -11,9 +11,15 @@
   --bg3: #1a1e28;
   --bg4: #212535;
   --border: #2a2f3f;
-  --text: #e2e6f0;
-  --text2: #8b92a5;
-  --text3: #555d70;
+  /* Measured against --bg, not chosen by eye. The old --text3 was #555d70,
+     which is 2.9:1 — under the 4.5:1 minimum for body text and the most-used
+     colour on the page, so labels, section titles and the low/high numbers
+     under every range bar were the least readable things on the card. On a
+     phone in daylight that is not a subtlety, it is the difference between a
+     card you can read and one you cannot. */
+  --text: #e2e6f0;      /* 15.3:1 */
+  --text2: #a8b0c2;     /*  8.8:1 */
+  --text3: #868ea1;     /*  5.8:1 — was 2.9:1 */
   --accent: #3b82f6;
   --green: #22c55e;
   --red: #ef4444;
@@ -24,17 +30,136 @@
   --bull: #22c55e;
   --bear: #ef4444;
   --neutral: #8b92a5;
+
+  /* ── THE COLOUR LANGUAGE ────────────────────────────────────────────────
+     One meaning per colour, everywhere on the card, so that reading it stops
+     being a lookup and becomes a reflex. The names below are the meanings —
+     use these, never a raw hex, anywhere the colour is saying something. If a
+     new thing needs a colour, it belongs to one of these six categories or it
+     does not get a colour.
+
+       m-up / m-down   DIRECTION. Price relative to something: above/below a
+                       moving average, up/down on the day. Nothing else is ever
+                       green or red — a good score is not "up".
+       m-size-0..3     MAGNITUDE. How big, never whether that is good. One hue
+                       at four intensities: absent, present, notable, extreme.
+                       Shared by PM/ADR, RVOL, float, sector heat, so the same
+                       brightness means the same "how much" wherever it appears.
+       m-model         THE MODEL'S OPINION. The score, and only the score.
+       m-other         SOMEONE ELSE'S OPINION. Another tool's shortlist, the
+                       CANSLIM list — corroboration from outside this tool.
+       m-mine          YOUR OWN MARK. The shortlist star. Nothing else.
+       m-none          NO CLAIM. Missing data, below a threshold, switched off.
+       m-chrome        FURNITURE. Links, borders, bar fills. Carries no meaning
+                       and must never be used where something is being said.
+     ──────────────────────────────────────────────────────────────────────── */
+  --m-up: #4ade80;
+  --m-down: #f87171;
+  /* size-0 recedes by being grey rather than by being dim — hue carries the
+     ramp, so it can stay legible. It was 2.3:1, which is not "recessive", it
+     is invisible. */
+  --m-size-0: #868ea1;
+  --m-size-1: #67c9e8;
+  --m-size-2: #22d3ee;
+  --m-size-3: #a5f3fc;
+  --m-model: #fb923c;
+  --m-other: #c084fc;
+  --m-mine: #eab308;
+  --m-none: #868ea1;
+  --m-chrome: #3b82f6;
 }
+
+/* ── SUNLIGHT ───────────────────────────────────────────────────────────────
+   A dark theme outdoors is a mirror. This is not a light theme — a white page
+   in the sun is its own problem, and the whole colour language above is built
+   for a dark background — it is the same theme pushed to the contrast the
+   screen can actually deliver: true black, which an OLED renders as off
+   pixels, against near-white text. Every meaning keeps its hue so nothing has
+   to be relearned; only the separation changes.
+   Toggled from the header, remembered in localStorage. */
+body.sunlight {
+  --bg: #000000;
+  --bg2: #0a0c11;
+  --bg3: #12151d;
+  --bg4: #1c2029;
+  --border: #454d61;      /* 1.4:1 → 4.4:1, so panels have visible edges */
+  --text: #ffffff;        /* 21:1 */
+  --text2: #ccd3e0;       /* 14:1 */
+  --text3: #aab2c4;       /* 10:1 — was the worst offender */
+  --m-up: #5cf08f;
+  --m-down: #ff8a8a;
+  --m-size-0: #9aa2b5;
+  --m-size-1: #7fd8f2;
+  --m-size-2: #35e0f8;
+  --m-size-3: #bdf7ff;
+  --m-model: #ffa552;
+  --m-other: #d3a3ff;
+  --m-mine: #ffd633;
+  --m-none: #aab2c4;
+  --m-chrome: #6aa5ff;
+}
+/* Thin text is the first thing to disappear in glare, whatever its colour. */
+body.sunlight .price-label, body.sunlight .section-title, body.sunlight .rb-name,
+body.sunlight .range-labels, body.sunlight .news-item, body.sunlight .lg-v,
+body.sunlight .card-port, body.sunlight .rb-ath-gap { font-weight: 600; }
+body.sunlight .sig, body.sunlight .badge { font-weight: 700; }
+
+/* Magnitude, as a set of classes, so one ramp serves every "how much" number
+   on the card and the brightness means the same thing each time. */
+.mag-0 { color: var(--m-size-0); }
+.mag-1 { color: var(--m-size-1); }
+.mag-2 { color: var(--m-size-2); }
+.mag-3 { color: var(--m-size-3); font-weight: 700; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; min-height: 100vh; }
 
 /* ── HEADER ── */
-.header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); }
+/* Wraps rather than overflowing: on a phone the buttons plus the check badge
+   are wider than the screen, and the badge is the thing you came to read. */
+.header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .header-logo { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 0.05em; }
+/* ── tool switcher ── */
+.tool-switch { position: relative; }
+.tool-btn { display:flex; align-items:center; gap:7px; background:transparent; border:1px solid transparent;
+  border-radius:6px; padding:5px 9px; cursor:pointer; font:700 16px/1 inherit; color:var(--accent);
+  letter-spacing:.04em; }
+.tool-btn:hover { border-color:#2a2f3f; background:var(--bg2); }
+.tool-btn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.tool-bolt { font-size:14px; }
+.tool-caret { font-size:10px; color:var(--text3); }
+.tool-menu { display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:200;
+  min-width:250px; background:var(--bg2); border:1px solid #2a2f3f; border-radius:8px;
+  padding:5px; box-shadow:0 10px 30px rgba(0,0,0,.5); }
+.tool-menu.open { display:block; }
+.tool-menu-head { font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text3);
+  padding:6px 9px 4px; }
+.tool-item { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:5px;
+  text-decoration:none; color:var(--text); font-size:12.5px; cursor:pointer; }
+.tool-item:hover { background:var(--bg3); }
+.tool-item.current { background:var(--bg3); }
+.tool-item .swatch { width:8px; height:8px; border-radius:2px; flex:none; }
+.tool-item .tname { font-weight:600; }
+.tool-item .tid { font-size:10px; color:var(--text3); margin-left:auto; }
+.tool-item .tcheck { color:var(--accent); font-size:11px; }
+.tool-menu-foot { border-top:1px solid #2a2f3f; margin-top:5px; padding-top:5px; }
 .header-status { font-size: 11px; color: var(--text3); margin-left: auto; }
+/* ── "check now" vs "come back later" ──
+   Nine tools, and each is useful for a couple of hours a day. Green means the
+   list in front of you is worth reading right now; grey means it will be, at
+   the stated time, and what is on screen is history. */
+.check-badge { margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  border-radius: 5px; padding: 4px 10px; border: 1px solid var(--border);
+  color: var(--text3); background: var(--bg3); white-space: nowrap; }
+.check-badge.now { color: #052e16; background: var(--green); border-color: var(--green); }
+.check-badge + .header-status { margin-left: 12px; }
 .scan-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit; transition: opacity .15s; }
 .scan-btn:hover { opacity: .85; }
 .scan-btn:disabled { opacity: .5; cursor: not-allowed; }
+.sun-btn { background: none; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text3); font-size: 14px; line-height: 1; padding: 5px 9px; cursor: pointer;
+  font-family: inherit; }
+.sun-btn:hover { color: var(--text2); }
+.sun-btn.on { color: var(--m-mine); border-color: var(--m-mine); }
 
 /* ── TABS ── */
 .tabs { display: flex; gap: 2px; padding: 10px 20px 0; background: var(--bg2); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; flex-shrink: 0; }
@@ -58,7 +183,13 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .row-count { color: var(--text3); font-size: 11px; margin-left: auto; }
 
 /* ── CARDS GRID ── */
-.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+/* min(360px, 100%) rather than a bare 360px: a grid track has no obligation to
+   fit its container, so on a viewport narrower than the minimum every card is
+   wider than the screen and the page scrolls sideways. The min() makes the
+   track give way instead. The 600px media query below handles the ordinary
+   phone; this handles the narrow ones it does not reach, and desktop-mode
+   browsing where the media query never fires at all. */
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr)); gap: 14px; }
 
 /* ── CARD ── */
 .card {
@@ -80,16 +211,53 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   background: var(--bg3);
   border-bottom: 1px solid var(--border);
 }
+/*
+ * The left half must be allowed to shrink, and this one line is the whole bug.
+ *
+ * A flex item will not go narrower than its content unless told to, so on a
+ * phone the ticker line stayed at its full width and pushed the score column
+ * off the right-hand edge of the card. .card has overflow:hidden, so that did
+ * not clip harmlessly — the score, the register link and the star were simply
+ * deleted, with nothing on screen to suggest they had ever been there.
+ *
+ * min-width:0 makes this block yield instead. Its own contents wrap (see
+ * .card-idline) and the score column keeps its place at the top right, which is
+ * why the header itself does NOT wrap: letting it wrap does prevent the
+ * clipping, but drops the score onto a line of its own and leaves a band of
+ * empty card above it.
+ */
+.card-head-left { flex: 1 1 auto; min-width: 0; }
+/* Ticker, TV, alert, price, change, Live — six things on one line, which fits
+   on a desktop column and does not on a phone. Wrapping is what keeps them all
+   readable instead of trimming the last two off. */
+.card-idline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+/* Two words with a middot between them, on a card that may be 150px wide. */
+.card-sector { font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
 .card-ticker { font-size: 18px; font-weight: 700; color: #fff; cursor: pointer; }
 .card-ticker:hover { color: var(--accent); text-decoration: underline; }
+/* Out to TradingView itself. Deliberately quiet and small: the ticker beside it
+   is the primary action, this is the one you take when the glance turned into
+   something worth planning. */
+.tv-link { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-decoration: none;
+  color: var(--text3); border: 1px solid var(--border); border-radius: 4px;
+  padding: 2px 6px; white-space: nowrap; }
+.tv-link:hover { color: var(--accent); border-color: var(--accent); }
+/* Amber, matching the alerts app itself — the two are one feature and should
+   not look like two. */
+.alert-link:hover { color: var(--amber, #fbbf24); border-color: var(--amber, #fbbf24); }
+.card-price { font-size: 15px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums; }
 .card-change { font-size: 13px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
 .card-change.pos { color: var(--green); background: #22c55e15; }
 .card-change.neg { color: var(--red); background: #ef444415; }
 .card-right { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+/* Score is the MODEL speaking, so it is one colour at three strengths rather
+   than green/amber/red. A green 80 used to read as "up 80", which is not what
+   the number says — green belongs to price direction and nothing else. */
 .card-score { font-size: 20px; font-weight: 700; color: #fff; }
-.score-high { color: var(--green); }
-.score-mid { color: var(--orange); }
-.score-low { color: var(--text2); }
+.score-high { color: var(--m-model); }
+.score-mid  { color: var(--m-model); opacity: .72; }
+.score-low  { color: var(--m-none); }
 .star-btn { background: none; border: none; cursor: pointer; font-size: 18px; padding: 0; line-height: 1; }
 .live-dot { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--green); }
 .live-dot::before { content: '●'; font-size: 8px; }
@@ -103,8 +271,170 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .badge-trend { background: #3b82f620; color: #60a5fa; border: 1px solid #3b82f640; }
 .badge-premarket { background: #a78bfa20; color: #c4b5fd; border: 1px solid #a78bfa40; }
 .badge-bigmove { background: #f9731620; color: #fb923c; border: 1px solid #f9731640; }
-.badge-hot { background: #f9731630; color: #fb923c; border: 1px solid #f9731660; }
+/* screener badge: colour comes from the screener's name, set inline */
+/* "Another tool shortlisted this" and "this is on the CANSLIM list" are the
+   same kind of statement — someone other than this tool vouching for the name —
+   so they share one colour. It used to be yellow, which is the colour of YOUR
+   star, and the two claims are not the same: one is your decision, the other is
+   a machine's. */
+.badge-also { background:#c084fc1f; color:var(--m-other); border:1px solid #c084fc55;
+  text-transform:none; letter-spacing:0; }
+.badge-canslim { background:#c084fc1f; color:#d8b4fe; border:1px solid #c084fc55;
+  text-transform:none; letter-spacing:0; }
+.badge-canslim b { font-weight:700; opacity:.8; }
+/* Everything agreeing. Uses the card's own up/down colours rather than a new
+   one — the point is that this badge is those tags, summarised, so introducing
+   a third colour would break the one-meaning-per-colour rule the rest of the
+   card follows. */
+.badge-align { font-weight: 700; letter-spacing: .04em; }
+.badge-align.bull { background: var(--m-up-bg, #22c55e1f); color: var(--m-up, #4ade80);
+  border: 1px solid var(--m-up, #4ade80); }
+.badge-align.bear { background: var(--m-down-bg, #ef44441f); color: var(--m-down, #f87171);
+  border: 1px solid var(--m-down, #f87171); }
+.badge-scr { background: #ffffff08; border: 1px solid var(--border); color: var(--text2);
+  text-transform: none; letter-spacing: 0; }
+/* First sighting on this tool. Leads the badge row because it is the question
+   asked first: could I have had this? Not on the colour ramp — the time is a
+   fact, and early is not the same as good. */
+.first-seen { font-size:10px; font-weight:600; padding:2px 7px; border-radius:4px;
+  background:#ffffff08; border:1px solid var(--border); color:var(--text2);
+  letter-spacing:0; white-space:nowrap; }
+.first-seen b { font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
+.first-seen.fs-pre   { border-color:#a78bfa44; }
+.first-seen.fs-early { border-color:#4ade8044; }
+.first-seen.fs-late  { border-color:var(--border); opacity:.9; }
+.badge-scr b { font-weight: 700; opacity: .85; margin-left: 2px; font-variant-numeric: tabular-nums; }
+/* a screener that matched earlier today but is not matching right now */
+.badge-past { opacity: .55; border-style: dashed !important; }
+/* Sector heat is a HOW MUCH, not a verdict and not the model's opinion, so it
+   joins the magnitude ramp rather than borrowing the score's orange. */
+.badge-hot { background: #22d3ee1f; color: var(--m-size-2); border: 1px solid #22d3ee66; }
 .badge-catalyst { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+/* ── screener builder ── */
+.sb-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px;
+           flex-wrap:wrap; margin-bottom:14px; }
+.sb-title { font-size:18px; font-weight:700; letter-spacing:-.01em; }
+.sb-tool { font-size:11px; color:var(--text3); font-weight:500; margin-left:6px; }
+.sb-sub { font-size:12px; color:var(--text2); max-width:60ch; margin-top:4px; line-height:1.5; }
+.sb-btn { font:600 12px/1 inherit; padding:7px 12px; border-radius:5px; cursor:pointer;
+          border:1px solid #444; background:var(--bg3); color:var(--text1); }
+.sb-btn:hover { border-color:var(--accent); }
+.sb-primary { background:var(--accent); border-color:var(--accent); color:#08111f; }
+.sb-danger { color:#f87171; border-color:#f8717155; }
+.sb-list { display:flex; flex-direction:column; gap:8px; }
+.sb-card { background:var(--bg2); border:1px solid #2a2f3d; border-radius:7px; padding:11px 13px; }
+.sb-card-top { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+.sb-name { font-weight:700; font-size:14px; }
+.sb-key { font:11px ui-monospace,Menlo,monospace; color:var(--text3); margin-left:6px; }
+.sb-off { opacity:.5; }
+.sb-pill { font:10px ui-monospace,Menlo,monospace; padding:2px 6px; border-radius:3px;
+           border:1px solid #3a4152; color:var(--text2); }
+.sb-pill.sb-when { color:#fbbf24; border-color:#fbbf2455; }
+.sb-rules { margin-top:8px; display:flex; flex-wrap:wrap; gap:4px; }
+/* ── daily schedule strip ── */
+.sch { background:var(--bg2); border:1px solid #2a2f3d; border-radius:7px; padding:12px 14px; margin-bottom:12px; }
+.sch-title { font-weight:700; font-size:13px; margin-bottom:2px; }
+.sch-sub { font-size:11.5px; color:var(--text2); line-height:1.55; margin-bottom:11px; max-width:70ch; }
+.sch-grid { position:relative; }
+.sch-row { display:flex; align-items:center; gap:9px; margin-bottom:5px; }
+.sch-name { width:132px; flex:none; font-size:11.5px; font-weight:600; text-align:right;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sch-track { position:relative; flex:1; height:17px; background:var(--bg3); border-radius:3px; overflow:hidden; }
+.sch-bar { position:absolute; top:0; bottom:0; border-radius:3px; opacity:.75; }
+.sch-when { width:124px; flex:none; font:10.5px ui-monospace,Menlo,monospace; color:var(--text3);
+  white-space:nowrap; }
+.sch-axis { display:flex; align-items:center; gap:9px; margin-top:2px; }
+.sch-ticks { position:relative; flex:1; height:15px; }
+.sch-tick { position:absolute; top:0; font:9.5px ui-monospace,Menlo,monospace; color:var(--text3);
+  transform:translateX(-50%); white-space:nowrap; }
+.sch-open { position:absolute; top:0; bottom:0; width:1px; background:#4ade8088; z-index:2; }
+.sch-now  { position:absolute; top:0; bottom:0; width:2px; background:#f87171; z-index:3; }
+.sch-capture { margin-top:11px; padding:9px 11px; border-radius:5px; background:var(--bg3);
+  border-left:3px solid #fbbf24; font-size:11.5px; color:var(--text2); line-height:1.6; max-width:78ch; }
+.sch-capture b { color:var(--text); }
+.sb-mirror { margin-top:9px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.sb-mirror select { background:var(--bg3); border:1px solid #333a4a; color:var(--text);
+  font:11.5px inherit; padding:4px 7px; border-radius:4px; }
+.sb-mirror-note { font-size:11px; color:var(--text3); }
+.sch-why, .sb-why { margin-top:8px; font-size:11.5px; color:var(--text2); line-height:1.6; max-width:78ch; }
+.sb-why { padding-top:8px; border-top:1px solid #242938; }
+.sch-why-k, .sb-why-k { display:block; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:#fbbf24; margin-bottom:3px; }
+/* ── screener scorecard ── */
+.sc-wrap { background:var(--bg2); border:1px solid #2a2f3d; border-radius:8px; padding:14px 16px; margin-bottom:16px; }
+.sc-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:12px; }
+.sc-title { font-size:15px; font-weight:700; }
+.sc-sub { font-size:11.5px; color:var(--text2); line-height:1.6; max-width:80ch; margin-top:3px; }
+.sc-empty { font-size:12px; color:var(--text3); padding:10px 0; }
+.sc-scroll { overflow-x:auto; }
+.sc-tbl { width:100%; border-collapse:collapse; font-size:12px; min-width:640px; }
+.sc-tbl th { text-align:right; font-size:9.5px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--text3); font-weight:600; padding:6px 8px; border-bottom:1px solid #2a2f3d; white-space:nowrap; }
+.sc-tbl th:first-child, .sc-tbl td:first-child { text-align:left; }
+.sc-tbl td { padding:8px; border-bottom:1px solid #1e2233; text-align:right;
+  font-variant-numeric:tabular-nums; white-space:nowrap; }
+.sc-tbl tr:last-child td { border-bottom:none; }
+.sc-name { font-weight:600; }
+.sc-thin td { opacity:.5; }
+.sc-v { font-size:10px; font-weight:700; padding:2px 7px; border-radius:3px; letter-spacing:.04em; }
+.sc-keep  { background:#22c55e22; color:#4ade80; border:1px solid #22c55e44; }
+.sc-watch { background:#eab30822; color:#facc15; border:1px solid #eab30844; }
+.sc-drop  { background:#ef444422; color:#f87171; border:1px solid #ef444444; }
+.sc-none  { background:var(--bg3); color:var(--text3); border:1px solid #2a2f3d; }
+.floor-rules { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.floor-rule { font:11.5px ui-monospace,Menlo,monospace; background:#22d3ee14; color:#67e8f9;
+  border:1px solid #22d3ee3d; border-radius:4px; padding:4px 9px; }
+.sc-base code { font-size:11px; background:var(--bg3); padding:1px 5px; border-radius:3px; color:var(--text2); }
+.sc-base { font-size:11.5px; color:var(--text3); margin-top:10px; line-height:1.6; }
+.sc-base b { color:var(--text2); }
+.sch-legend { font-size:11px; color:var(--text3); margin-top:9px; line-height:1.6; }
+.sb-rule { font:11px ui-monospace,Menlo,monospace; background:var(--bg3); border:1px solid #333a4a;
+           border-radius:4px; padding:2px 7px; color:var(--text2); }
+/* Shared rules, in the same list but visibly not this screener's own — same
+   cyan as the floor block above, so the two read as one thing. */
+.sb-rule.is-floor { background:#22d3ee14; border-color:#22d3ee3d; color:#67e8f9; }
+.sb-rule.is-floor::before { content:'+ '; opacity:.65; }
+.sb-editor { background:var(--bg2); border:1px solid var(--accent); border-radius:7px;
+             padding:14px; margin-top:12px; }
+.sb-row { display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:6px; margin-bottom:6px;
+          align-items:center; }
+.sb-row select, .sb-row input, .sb-field input, .sb-field select {
+  background:var(--bg3); border:1px solid #3a4152; color:var(--text1); border-radius:4px;
+  padding:6px 8px; font:12px inherit; width:100%; }
+.sb-row select:focus, .sb-row input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+.sb-x { background:none; border:none; color:#f87171; cursor:pointer; font-size:16px; padding:0 6px; }
+.sb-field { margin-bottom:10px; }
+.sb-label { display:block; font-size:11px; color:var(--text3); text-transform:uppercase;
+            letter-spacing:.08em; margin-bottom:4px; }
+.sb-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;
+              border-top:1px solid #2a2f3d; padding-top:12px; }
+.sb-result { margin-top:10px; font:12px ui-monospace,Menlo,monospace; color:var(--text2);
+             background:var(--bg3); border-radius:5px; padding:9px 11px; line-height:1.6; }
+.sb-result.err { color:#f87171; }
+.sb-result.ok { color:#4ade80; }
+.sb-vtype { display:flex; gap:4px; margin-bottom:4px; }
+.sb-vtype button { font:10px inherit; padding:3px 7px; border-radius:3px; cursor:pointer;
+                   border:1px solid #3a4152; background:var(--bg3); color:var(--text3); }
+.sb-vtype button.on { background:var(--accent); color:#08111f; border-color:var(--accent); }
+
+.sig-row { display:flex; flex-wrap:wrap; gap:3px; padding:0 12px 6px; }
+.sig { font-size:9px; font-weight:700; letter-spacing:.02em; padding:1px 5px; border-radius:3px;
+       border:1px solid; white-space:nowrap; font-family:ui-monospace,Menlo,monospace; }
+.sig-up  { color:#4ade80; border-color:#4ade8040; background:#4ade8015; }
+.sig-dn  { color:#f87171; border-color:#f8717140; background:#f8717115; }
+.sig-mid { color:var(--text3); border-color:#444; background:#1a1d2e; }
+.sig-hot { color:#fb923c; border-color:#fb923c40; background:#fb923c15; }
+/* PM/ADR — one hue, five intensities, threshold at 1.00×. Deliberately NOT
+   red/green: the ratio says how big the pre-market range is, not whether that
+   is good, and a green badge would be answering a question the number never
+   asked. Below the threshold it recedes; above it, it gets louder the further
+   past 1 it goes. */
+.pmadr-a  { color:var(--m-size-0); border-color:#2a2f3f; background:#151822; }
+.pmadr-b  { color:#5f6779; border-color:#333a4c; background:#171b26; }
+.pmadr-1  { color:var(--m-size-1); border-color:#22d3ee33; background:#22d3ee10; }
+.pmadr-2  { color:var(--m-size-2); border-color:#22d3ee66; background:#22d3ee1f; }
+.pmadr-3  { color:var(--m-size-3); border-color:#22d3ee; background:#22d3ee33;
+            box-shadow:0 0 7px #22d3ee55; }
 .bias-btn { display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;border:1px solid;cursor:pointer;background:transparent;transition:opacity .15s; }
 .bias-btn:hover { opacity:.8; }
 .bias-btn.bias-auto { color:var(--text3);border-color:#444;background:#1a1d2e; }
@@ -152,10 +482,73 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .range-bar-fill { position: absolute; left: 0; top: 0; height: 100%; background: var(--accent); border-radius: 2px; }
 .range-bar-marker { position: absolute; top: -3px; width: 2px; height: 10px; background: #fff; border-radius: 1px; }
 .range-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text3); margin-top: 2px; }
+/* Several bars in one block. The name and the percentage sit on one line above
+   each bar so the low/high pair underneath stays readable without repeating a
+   heading three times. */
+.rb { margin-bottom: 9px; }
+.rb:last-child { margin-bottom: 0; }
+.rb-head { display:flex; justify-content:space-between; align-items:baseline; }
+.rb-name { font-size:10px; color:var(--text2); font-weight:600; letter-spacing:.04em; }
+.rb-pct  { font-size:10px; color:var(--text); font-weight:700; }
+/* All-time gets a row, not a bar — see the comment where athRow is built. */
+.rb-ath { display:flex; align-items:baseline; gap:8px; margin-top:9px;
+          padding-top:8px; border-top:1px dashed #262b3b; }
+.rb-ath-label { font-size:10px; color:var(--text2); font-weight:600; letter-spacing:.04em; }
+.rb-ath-val { font-size:11px; font-weight:700; }
+.rb-ath-gap { font-size:10px; color:var(--text3); margin-left:auto; }
+.rb-ath-gap.at-high { color:#a5f3fc; font-weight:700; }
+/* A window whose history crosses a share consolidation. Not an error and not a
+   result — a measurement that cannot be made, said out loud. */
+/* "= month" beside a shorter window's name. Chrome-coloured on purpose: it is
+   a note about the data, not a reading of the stock, and the colour language
+   on this card is reserved for readings. */
+.rb-echo { font-size: 10px; font-weight: 700; letter-spacing: .03em; margin-left: 7px;
+  color: var(--text3); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
+.rb-split { font-size:10px; color:var(--text3); font-style:italic; margin-top:8px;
+  padding-top:7px; border-top:1px dashed #262b3b; line-height:1.5; }
+/* The top Volume & Float block butts against the header, so it needs its own
+   separator rather than borrowing card-body's. */
+.vf-top { background: var(--bg2); border-bottom: 1px solid var(--border); }
+/* The fold. Chrome, not meaning — it is a control, so it takes no colour from
+   the language above. */
+.card-more { width:100%; background:none; border:none; border-top:1px solid #1e2233;
+  color:var(--text3); font-family:inherit; font-size:10px; font-weight:700;
+  letter-spacing:.08em; text-transform:uppercase; padding:8px 14px; text-align:left;
+  cursor:pointer; }
+.card-more:hover { color:var(--text2); background:#ffffff05; }
+.card-more[aria-expanded="true"] { border-bottom:1px solid #1e2233; }
+
+/* In-card chart */
+.card-chart { height: 190px; border-radius: 6px; overflow: hidden;
+  background: var(--bg); border: 1px solid #1e2233; }
+.cchart-idle { height:100%; display:flex; align-items:center; justify-content:center;
+  font-size:10px; color:var(--text3); text-align:center; padding:0 12px; }
+.chart-expand { float:right; cursor:pointer; color:var(--m-chrome); font-size:10px;
+  text-transform:none; letter-spacing:0; font-weight:600; }
+.chart-expand:hover { text-decoration:underline; }
+
+/* Colour legend */
+.legend { margin: 0 0 10px; border:1px solid var(--border); border-radius:8px;
+  background: var(--bg2); }
+.legend summary { cursor:pointer; padding:8px 12px; font-size:11px; font-weight:700;
+  letter-spacing:.06em; text-transform:uppercase; color:var(--text3); }
+.legend summary:hover { color:var(--text2); }
+.legend-grid { padding: 4px 12px 12px; display:flex; flex-direction:column; gap:7px; }
+.lg-row { display:flex; align-items:flex-start; gap:9px; }
+.lg-sw { width:12px; height:12px; border-radius:3px; flex:0 0 12px; margin-top:2px; }
+.lg-ramp { background:linear-gradient(90deg,var(--m-size-0),var(--m-size-1),var(--m-size-2),var(--m-size-3)); }
+.lg-k { font-size:11px; font-weight:700; color:var(--text2); flex:0 0 46px; }
+.lg-v { font-size:11px; color:var(--text3); line-height:1.5; }
 
 /* themes */
 .themes-row { display: flex; gap: 5px; flex-wrap: wrap; }
-.theme-tag { font-size: 10px; padding: 2px 7px; background: #22d3ee15; border: 1px solid #22d3ee30; color: var(--cyan); border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+/* A theme is a category, not a quantity. It was wearing cyan, which in the
+   colour language means "how much" — so "AI" was claiming to be a large
+   number. Neutral, like the screener badges, for the same reason: identity
+   does not get to borrow a meaning. */
+.theme-tag { font-size: 10px; padding: 2px 7px; background: #ffffff08;
+  border: 1px solid var(--border); color: var(--text2); border-radius: 4px;
+  font-weight: 600; text-transform: uppercase; }
 
 /* sector */
 .sector-line { font-size: 11px; color: var(--text2); }
@@ -166,10 +559,35 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .news-item { padding: 4px 0; border-bottom: 1px solid #1e2233; font-size: 11px; color: var(--text2); display: flex; gap: 6px; align-items: flex-start; }
 .news-item:last-child { border-bottom: none; }
 .news-src { font-size: 9px; font-weight: 700; color: var(--text3); min-width: 40px; padding-top: 1px; }
-.news-headline { line-height: 1.4; }
+.news-headline { line-height: 1.4; flex: 1; }
+/* A headline that goes somewhere. Chrome-blue on hover only — the link is
+   navigation, and navigation carries no meaning in the colour language. */
+.news-link { color: inherit; text-decoration: none; cursor: pointer;
+  border-bottom: 1px solid transparent; }
+.news-link:hover { color: var(--text); border-bottom-color: var(--m-chrome); }
+/* Age sits at the end of the row, right-aligned, so a column of them can be
+   scanned without reading the headlines. */
+.news-age { font-size: 10px; font-weight: 700; white-space: nowrap; padding-top: 1px;
+  font-variant-numeric: tabular-nums; }
+.na-fresh { color: var(--m-size-3); }   /* under 6h — this is today's reason */
+.na-today { color: var(--m-size-1); }
+.na-old   { color: var(--m-none); }     /* yesterday or older — context */
 .load-news-btn { background: var(--bg4); border: 1px solid var(--border); border-radius: 5px; padding: 5px 12px; color: var(--text2); font-size: 11px; cursor: pointer; font-family: inherit; margin-top: 6px; width: 100%; }
 .load-news-btn:hover { border-color: var(--accent); color: var(--accent); }
 .news-fetched { font-size: 10px; color: var(--text3); margin-top: 4px; }
+/* A source that is not answering is a fact about the tool, not about the
+   stock, so it is marked rather than left to look like silence. */
+.news-src-warn { font-size: 10px; color: var(--m-model); background: #fb923c12;
+  border: 1px solid #fb923c33; border-radius: 4px; padding: 4px 7px; margin-bottom: 6px;
+  line-height: 1.5; }
+.news-none { font-size: 11px; color: var(--text3); padding: 2px 0; line-height:1.6; }
+.news-aged { font-size: 10px; color: var(--text3); font-style: italic; margin-top: 5px; }
+/* The tape restated. Neutral because it is not a claim about what happens
+   next — see catalystBadgeHTML. */
+.badge-tape { background:#ffffff08; color:var(--text2); border:1px solid var(--border);
+  text-transform:none; letter-spacing:0; }
+/* Bias with nothing behind it says so. */
+.bias-noread { opacity:.75; font-style:italic; }
 
 /* ── MARKET TAB ── */
 .market-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 16px; }
@@ -253,9 +671,23 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .job-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 10px; }
 .job-card.disabled { opacity: 0.5; }
 .job-card-info { flex: 1; min-width: 0; }
-.job-card-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The name is the whole point of the row — wrap it rather than cut it off.
+   "Discovery — Pre-…" and "Discovery — Open…" are the same to a reader. */
+.job-card-name { font-size: 13px; font-weight: 600; line-height: 1.35; }
+.job-when { font-size: 12px; color: var(--text2); margin-top: 3px; line-height: 1.45; }
+.job-next { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.job-next b { color: var(--accent); font-variant-numeric: tabular-nums; }
 .job-card-cron { font-family: monospace; font-size: 11px; color: #aaa; margin-top: 2px; }
-.job-card-meta { font-size: 11px; color: #aaa; margin-top: 3px; }
+.job-card-meta { font-size: 11px; color: #aaa; margin-top: 4px; }
+.job-cron-raw { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: #4a5062;
+  margin-left: 6px; white-space: nowrap; }
+/* the card stacks on a phone, where the buttons would otherwise squeeze the text */
+.job-card { align-items: flex-start; }
+@media (max-width: 560px) {
+  .job-card { flex-direction: column; }
+  .job-card-actions { width: 100%; }
+  .job-card-actions .job-toggle { flex: 1; }
+}
 .job-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .sched-day-btn { padding: 5px 9px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg3); color: var(--text3); font-size: 12px; cursor: pointer; }
 .sched-day-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
@@ -310,7 +742,11 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .page-info { font-size: 11px; color: var(--text3); }
 
 /* ── EMPTY / LOADING ── */
-.empty { color: var(--text3); font-size: 13px; padding: 40px; text-align: center; }
+.empty { color: var(--text3); font-size: 13px; padding: 40px; text-align: center; line-height: 1.7; }
+.clear-filters { display:block; margin:14px auto 0; background:none; border:1px solid var(--border);
+  color:var(--text2); font-family:inherit; font-size:11px; border-radius:6px;
+  padding:6px 12px; cursor:pointer; }
+.clear-filters:hover { border-color:var(--m-chrome); color:var(--text); }
 .loading { color: var(--text3); font-size: 13px; padding: 20px; text-align: center; }
 
 /* ── CHART MODAL ── */
@@ -424,6 +860,21 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .feature-val { min-width:40px; text-align:right; font-size:11px; font-weight:600; color:var(--text3); }
 
 /* ── TABLE INSPECTOR MODAL ── */
+.card-overlay { display:none; position:fixed; inset:0; z-index:400; background:#000000cc;
+  padding:24px 14px; overflow-y:auto; }
+.card-overlay.open { display:block; }
+.card-modal { max-width:560px; margin:0 auto; background:var(--bg2); border:1px solid var(--border);
+  border-radius:10px; overflow:hidden; }
+.card-modal-head { display:flex; justify-content:space-between; align-items:center; gap:12px;
+  padding:12px 14px; border-bottom:1px solid var(--border); background:var(--bg3); }
+.card-modal-title { font-size:16px; font-weight:700; letter-spacing:.02em; }
+.card-modal-sub { font-size:11px; color:var(--text3); margin-left:8px; }
+.card-modal-body { padding:12px; }
+.card-modal-body .card { margin:0; }
+.card-modal-msg { font-size:12.5px; color:var(--text2); line-height:1.7; padding:14px 4px; }
+.sl-card { cursor:pointer; }
+.sl-card:hover { border-color:var(--accent); }
+.sl-open-hint { font-size:10px; color:var(--text3); margin-top:6px; }
 .ti-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.8); z-index:2000; align-items:flex-start; justify-content:center; padding:20px; overflow-y:auto; }
 .ti-overlay.open { display:flex; }
 .ti-modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:100%; max-width:900px; margin:auto; overflow:hidden; }
@@ -457,8 +908,19 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 <body>
 
 <div class="header">
-  <div class="header-logo">⚡ TRADE DESK</div>
+  <div class="tool-switch">
+    <button class="tool-btn" id="tool-btn" onclick="toggleToolMenu(event)" aria-haspopup="true" aria-expanded="false">
+      <span class="tool-bolt">⚡</span><span id="tool-label">TRADE DESK</span><span class="tool-caret">▾</span>
+    </button>
+    <div class="tool-menu" id="tool-menu" role="menu"></div>
+  </div>
   <button class="scan-btn" id="scan-btn" onclick="runScan()">▶ Run Scan</button>
+  <button class="sun-btn" id="sun-btn" onclick="toggleSunlight()"
+          title="high contrast, for reading the screen outdoors">☀</button>
+  <!-- When this tool is worth OPENING, as opposed to when it runs. Kept in the
+       header rather than the Screeners tab because it answers a question you
+       have on arrival, not one you go looking for. -->
+  <div class="check-badge" id="check-badge" hidden></div>
   <div class="header-status" id="header-status">—</div>
 </div>
 
@@ -468,6 +930,7 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   <div class="tab" onclick="switchTab('shortlist',this)">Shortlist</div>
   <div class="tab" onclick="switchTab('warehouse',this)">Warehouse</div>
   <div class="tab" onclick="switchTab('analysis',this)">Analysis</div>
+  <div class="tab" onclick="switchTab('builder',this);loadBuilder()">Screeners</div>
   <div class="tab" onclick="switchTab('settings',this);loadSettings();loadBackupStatus()">Settings</div>
   <div class="tab" onclick="switchTab('monitor',this);loadMonitor()">Monitor</div>
 </div>
@@ -478,20 +941,76 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   <div class="tab-pane active" id="tab-screener">
     <div class="screener-bar">
       <input id="search-input" placeholder="Filter ticker or sector…" oninput="renderCards()">
+      <!-- filled from this tool's own screeners; see loadScreenerNames() -->
       <select class="filter-select" id="screener-filter" onchange="renderCards()">
         <option value="all">All Scanners</option>
-        <option value="trend">Trend</option>
-        <option value="premarket">Pre-Market</option>
-        <option value="bigmoves">Big Moves</option>
+      </select>
+      <!-- "Not checked yet" is a real answer, not a tidy-up: Side C only
+           fetches news for live rows and is allowed to fail, so a stock can
+           genuinely never have been asked. Lumping those in with "no news"
+           would filter on a fact nobody established. -->
+      <select class="filter-select" id="news-filter" onchange="renderCards()"
+              title="news is fetched for live rows each run — a stale row may never have been asked">
+        <option value="all">News: any</option>
+        <option value="has">Has news</option>
+        <option value="none">No news</option>
+        <option value="unchecked">Not checked yet</option>
+      </select>
+      <select class="filter-select" id="catalyst-filter" onchange="renderCards()"
+              title="a catalyst is a classified reason to move, read off the headlines">
+        <option value="all">Catalyst: any</option>
+        <option value="has">Has catalyst</option>
+        <option value="major">⚡ Major only</option>
+        <option value="none">No catalyst</option>
+      </select>
+      <!-- Everything pointing the same way at once. See alignment() for what
+           counts and, more importantly, what does not. -->
+      <select class="filter-select" id="align-filter" onchange="renderCards()"
+              title="every level, the MA stack and the catalyst all agreeing on one direction">
+        <option value="all">Aligned: any</option>
+        <option value="bull">▲ Fully bullish</option>
+        <option value="bear">▼ Fully bearish</option>
+        <option value="either">Either direction</option>
       </select>
       <select class="filter-select" id="sort-select" onchange="renderCards()">
         <option value="score">Sort: Score ↓</option>
         <option value="change">Sort: Change ↓</option>
         <option value="rvol">Sort: RVOL ↓</option>
         <option value="live">Sort: Live First</option>
+        <option value="newest">Sort: Newest found ↓</option>
       </select>
       <span class="row-count" id="row-count">0 stocks</span>
     </div>
+
+    <!-- The colour language, written down where the cards are.
+         The point of a fixed legend is that you stop needing it: every colour
+         means one thing on every card, so after a few weeks the card is read
+         rather than decoded. It is collapsed because it is a reference, not a
+         feature. -->
+    <details class="legend">
+      <summary>What the colours mean</summary>
+      <div class="legend-grid">
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-up)"></span>
+          <span class="lg-k">green</span><span class="lg-v">direction — above / up. Nothing else is ever green.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-down)"></span>
+          <span class="lg-k">red</span><span class="lg-v">direction — below / down.</span></div>
+        <div class="lg-row"><span class="lg-sw lg-ramp"></span>
+          <span class="lg-k">cyan</span><span class="lg-v">how much. Four brightnesses: unremarkable → notable → extreme.
+            Same ramp for RVOL, float, market cap, short %, PM/ADR and sector heat.
+            Bright means big, never good.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-model)"></span>
+          <span class="lg-k">orange</span><span class="lg-v">the model's opinion — the score, and only the score.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-other)"></span>
+          <span class="lg-k">violet</span><span class="lg-v">someone else's opinion — another tool's shortlist, the CANSLIM list.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-mine)"></span>
+          <span class="lg-k">yellow</span><span class="lg-v">your own mark — the star you put there.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-none)"></span>
+          <span class="lg-k">grey</span><span class="lg-v">no claim — missing, below threshold, or switched off.</span></div>
+        <div class="lg-row"><span class="lg-sw" style="background:var(--m-chrome)"></span>
+          <span class="lg-k">blue</span><span class="lg-v">furniture — links, borders, bar fills. Says nothing.</span></div>
+      </div>
+    </details>
+
     <div class="cards-grid" id="cards-grid">
       <div class="empty">Run a scan or wait for scheduled data.</div>
     </div>
@@ -578,6 +1097,24 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
       <div class="an-header">
         <h2>Scoring Engine</h2>
         <button class="an-btn" onclick="anCheckStatus()">&#8635; Refresh Status</button>
+      </div>
+
+      <!-- Which screeners find movers -->
+      <div class="sc-wrap">
+        <div class="sc-head">
+          <div>
+            <div class="sc-title">Screener scorecard</div>
+            <div class="sc-sub">Which screeners find stocks that <b>move</b>. There is no stop,
+              target or exit here — it measures how far each card ran after the entry time, in ATR.
+              That is the only thing a screener is responsible for; whether a move is tradable is a
+              question about setups, and comes after you know which screeners are worth keeping.</div>
+          </div>
+          <select class="filter-select" id="sc-entry" onchange="loadScreenerReport()">
+            <option value="B">Entry B</option>
+            <option value="A">Entry A</option>
+          </select>
+        </div>
+        <div id="sc-body"><div class="sc-empty">Loading…</div></div>
       </div>
 
       <!-- Service Status -->
@@ -697,6 +1234,23 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   </div>
 
   <!-- ═══════════════ SETTINGS TAB ═══════════════ -->
+  <!-- ═══════════════ SCREENER BUILDER TAB ═══════════════ -->
+  <div class="tab-pane" id="tab-builder">
+    <div class="sb-head">
+      <div>
+        <div class="sb-title">Screeners <span id="sb-tool" class="sb-tool"></span></div>
+        <div class="sb-sub">Build filters the same way you would in TradingView. Every rule is
+          <b>field · condition · value</b>, and the value can be a number or another field —
+          so "price above the 20-day EMA" or "5MA above 9MA" are both expressible.</div>
+      </div>
+      <button class="sb-btn sb-primary" onclick="sbNew()">+ New screener</button>
+    </div>
+    <div id="sb-floor"></div>
+    <div id="sb-schedule"></div>
+    <div id="sb-list" class="sb-list"></div>
+    <div id="sb-editor" class="sb-editor" style="display:none"></div>
+  </div>
+
   <div class="tab-pane" id="tab-settings">
     <div class="settings-wrap">
 
@@ -733,6 +1287,43 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <button class="settings-save-btn" onclick="saveSettings(['hotImmediateThreshold','hotSustainedThreshold','hotSustainedSessions','hotFloorThreshold','coolOffDays'], this)">Save Hot Sector</button>
         <button class="settings-reset-btn" onclick="resetHotState(this)">Reset Hot State</button>
         <span class="settings-msg" id="msg-hot"></span>
+      </div>
+
+      <!-- Tradability floor -->
+      <!-- These four are added to EVERY screener at scan time, so they are the
+           only rules that are true of the whole tool. They were described on
+           the Screeners tab but had no fields anywhere, which made "change them
+           in Settings" an instruction that could not be followed. -->
+      <div class="settings-section">
+        <div class="settings-section-title">Tradability floor — every screener, every tool</div>
+        <div class="settings-hint" style="margin:-4px 0 12px">
+          Not a strategy, a precondition: too cheap, too thin, or too little daily range and the
+          setup does not matter. Set any one to <b>0</b> to switch that leg off.
+        </div>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label>Minimum price ($)</label>
+            <div class="settings-hint">Below this the spread eats the trade</div>
+            <input type="number" class="settings-input" id="s-minPrice" min="0" max="10000" step="0.5">
+          </div>
+          <div class="settings-field">
+            <label>Minimum average volume (shares/day)</label>
+            <div class="settings-hint">10-day average — can you get out of the position?</div>
+            <input type="number" class="settings-input" id="s-minAvgVolume" min="0" max="100000000" step="100000">
+          </div>
+          <div class="settings-field">
+            <label>Minimum ADR ($)</label>
+            <div class="settings-hint">ATR(14) in dollars — is there room to pay for the risk?</div>
+            <input type="number" class="settings-input" id="s-minAtr" min="0" max="100" step="0.25">
+          </div>
+          <div class="settings-field">
+            <label>Minimum ADR (% of price)</label>
+            <div class="settings-hint">Range relative to the stock — a $2 ADR on a $200 stock is nothing</div>
+            <input type="number" class="settings-input" id="s-minAtrPct" min="0" max="100" step="0.5">
+          </div>
+        </div>
+        <button class="settings-save-btn" onclick="saveSettings(['minPrice','minAvgVolume','minAtr','minAtrPct'], this)">Save Floor</button>
+        <span class="settings-msg" id="msg-floor"></span>
       </div>
 
       <!-- Sector Bias Thresholds -->
@@ -778,9 +1369,14 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <div class="settings-section-title">API Keys</div>
         <div class="settings-grid">
           <div class="settings-field">
-            <label>Finnhub API Key</label>
-            <div class="settings-hint" id="finnhub-status">Loading…</div>
-            <input type="password" class="settings-input" id="s-finnhubApiKey" placeholder="Paste new key to update" autocomplete="off">
+            <label>News sources</label>
+            <!-- No key to enter. TradingView's headline feed and the SEC's
+                 filing search are both public, and Yahoo's search endpoint
+                 needs no credential. Finnhub used to live here; it never
+                 returned an item in 23 days and what it does return is mostly
+                 listings rather than company news, so it was removed rather
+                 than fixed. -->
+            <div class="settings-hint">TradingView · Yahoo · SEC EDGAR — all public, no key needed.</div>
           </div>
           <div class="settings-field">
             <label>GitHub Backup Token</label>
@@ -789,12 +1385,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
-          <button class="settings-save-btn" onclick="saveSettings(['finnhubApiKey','githubBackupToken'], this)">Save API Keys</button>
-          <button class="settings-reset-btn" onclick="testKey('finnhub','test-finnhub')">Test Finnhub</button>
+          <button class="settings-save-btn" onclick="saveSettings(['githubBackupToken'], this)">Save API Keys</button>
           <button class="settings-reset-btn" onclick="testKey('github','test-github')">Test GitHub</button>
         </div>
         <span class="settings-msg" id="msg-api"></span>
-        <div id="test-finnhub" class="settings-test-result"></div>
         <div id="test-github" class="settings-test-result"></div>
       </div>
 
@@ -920,6 +1514,20 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 
 </div>
 
+<!-- Full card, opened from a shortlist row or from ?ticker= -->
+<div class="card-overlay" id="card-overlay" onclick="if(event.target===this)closeCardModal()">
+  <div class="card-modal">
+    <div class="card-modal-head">
+      <div>
+        <span class="card-modal-title" id="card-modal-title">—</span>
+        <span class="card-modal-sub" id="card-modal-sub"></span>
+      </div>
+      <button class="ti-close" onclick="closeCardModal()">✕ Close</button>
+    </div>
+    <div class="card-modal-body" id="card-modal-body"></div>
+  </div>
+</div>
+
 <!-- Table Inspector Modal -->
 <div class="ti-overlay" id="ti-overlay" onclick="if(event.target===this)closeTI()">
   <div class="ti-modal">
@@ -975,7 +1583,7 @@ function switchTab(name, el) {
   if (name === 'market') loadMarket();
   if (name === 'shortlist') loadShortlist();
   if (name === 'warehouse') loadWarehouseDates();
-  if (name === 'analysis') anCheckStatus();
+  if (name === 'analysis') { anCheckStatus(); loadScreenerReport(); }
 }
 
 // ═══════════════════════════════════════════════════
@@ -1086,9 +1694,32 @@ function anExportCSV(register) {
 }
 
 
+// Sunlight mode. Applied before first paint further down the file, so the page
+// does not flash the dark palette on load when it is already switched on.
+function toggleSunlight() {
+  const on = document.body.classList.toggle('sunlight');
+  try { localStorage.setItem('sunlight', on ? '1' : '0'); } catch { /* private mode */ }
+  const b = document.getElementById('sun-btn');
+  if (b) { b.classList.toggle('on', on); b.title = on ? 'back to normal contrast' : 'high contrast, for reading the screen outdoors'; }
+}
+
 function toggleScoreBreakdown(ticker) {
   const el = document.getElementById('sb-' + ticker);
   if (el) el.classList.toggle('open');
+}
+
+// The detail half of the card. Closed on load, because the top of the card is
+// meant to be readable in one glance and twenty cards of market context is not
+// a glance. State is not remembered between renders on purpose: the card
+// re-renders every refresh, and a card that reopened itself mid-scroll would
+// move the page under your thumb.
+function toggleCardMore(ticker, btn) {
+  const el = document.getElementById('more-' + ticker);
+  if (!el) return;
+  const open = el.hidden;
+  el.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  btn.textContent = open ? '▴ Hide details' : '▾ Details';
 }
 
 let _modelInfoCache = null;
@@ -1343,9 +1974,10 @@ async function anUploadCSV(register) {
 const MSG_IDS = {
   hotImmediateThreshold: 'msg-hot', hotSustainedThreshold: 'msg-hot',
   hotSustainedSessions: 'msg-hot', hotFloorThreshold: 'msg-hot', coolOffDays: 'msg-hot',
+  minPrice: 'msg-floor', minAvgVolume: 'msg-floor', minAtr: 'msg-floor', minAtrPct: 'msg-floor',
   sectorBullishThreshold: 'msg-bias', sectorBearishThreshold: 'msg-bias',
   shortlistMinScore: 'msg-shortlist', shortlistTopN: 'msg-shortlist',
-  finnhubApiKey: 'msg-api', githubBackupToken: 'msg-api',
+  githubBackupToken: 'msg-api',
   aiApiKey: 'msg-ai', aiModel: 'msg-ai',
   scorerEntryTime: 'msg-scorer',
   regimeSampleThreshold: 'msg-scorer',
@@ -1411,7 +2043,13 @@ const AI_PROVIDERS = {
 };
 
 function onAiProviderChange() {
-  const provider = document.getElementById('s-aiProvider').value;
+  // The AI section is optional and is not on every build of this page. Without
+  // this guard the throw lands inside loadSettings' loop and every field after
+  // it stays blank — which is how the tradability floor could read as unset
+  // while every scan was applying it.
+  const sel = document.getElementById('s-aiProvider');
+  if (!sel) return;
+  const provider = sel.value;
   const cfg = AI_PROVIDERS[provider];
   document.getElementById('ai-key-hint').textContent = cfg.keyHint;
   document.getElementById('s-aiApiKey').placeholder = cfg.keyPlaceholder;
@@ -1458,11 +2096,7 @@ async function loadSettings() {
     for (const [key, val] of Object.entries(settings)) {
       const el = document.getElementById('s-' + key);
       if (!el) continue;
-      if (key === 'finnhubApiKey') {
-        document.getElementById('finnhub-status').textContent =
-          val === 'set' ? 'Key is set on server' : 'No key set — news fetch disabled';
-        el.placeholder = val === 'set' ? 'Paste new key to replace' : 'Paste key here';
-      } else if (key === 'githubBackupToken') {
+else if (key === 'githubBackupToken') {
         document.getElementById('github-token-status').textContent =
           val === 'set' ? 'Token is set — auto-backup enabled' : 'No token — backup disabled';
         el.placeholder = val === 'set' ? 'Paste new token to replace' : 'Paste GitHub PAT here';
@@ -1496,7 +2130,7 @@ async function saveSettings(keys, btn) {
     const el = document.getElementById('s-' + key);
     if (!el) continue;
     const v = el.value.trim();
-    if (['finnhubApiKey','githubBackupToken','aiApiKey'].includes(key) && v === '') continue; // skip if left blank
+    if (['githubBackupToken','aiApiKey'].includes(key) && v === '') continue; // skip if left blank
     body[key] = el.type === 'number' ? Number(v) : v;
   }
   if (Object.keys(body).length === 0) return;
@@ -1515,11 +2149,6 @@ async function saveSettings(keys, btn) {
     if (data.ok) {
       msgEl.textContent = 'Saved';
       msgEl.style.color = 'var(--green)';
-      if (body.finnhubApiKey) {
-        document.getElementById('finnhub-status').textContent = 'Key is set on server';
-        document.getElementById('s-finnhubApiKey').value = '';
-        document.getElementById('s-finnhubApiKey').placeholder = 'Paste new key to replace';
-      }
       if (body.githubBackupToken) {
         document.getElementById('github-token-status').textContent = 'Token is set — auto-backup enabled';
         document.getElementById('s-githubBackupToken').value = '';
@@ -1683,6 +2312,104 @@ async function loadMonitor() {
   }
 }
 
+// ── reading a schedule ─────────────────────────────────────────────────────
+// The jobs list printed raw cron ("*/30 4-8 * * 1-5"), which answers the
+// question "when does this run?" only if you already know cron. Every job is
+// turned into a sentence, and — the thing actually being asked — the next time
+// it will fire.
+function cronField(f, v) {
+  if (f === '*') return true;
+  return String(f).split(',').some(part => {
+    if (part.includes('/')) {
+      const [range, stepRaw] = part.split('/');
+      const step = Number(stepRaw);
+      if (range === '*') return v % step === 0;
+      const [lo, hi] = range.split('-').map(Number);
+      return v >= lo && v <= (hi ?? lo) && (v - lo) % step === 0;
+    }
+    if (part.includes('-')) {
+      const [lo, hi] = part.split('-').map(Number);
+      return v >= lo && v <= hi;
+    }
+    return Number(part) === v;
+  });
+}
+
+const ET_PARTS = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'America/New_York', hour12: false,
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', weekday: 'short',
+});
+const DOW_NUM = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+function etParts(date) {
+  const p = {};
+  for (const { type, value } of ET_PARTS.formatToParts(date)) p[type] = value;
+  return {
+    min: +p.minute, hour: +p.hour, dom: +p.day, mon: +p.month,
+    dow: DOW_NUM[p.weekday], label: `${p.weekday} ${p.hour}:${p.minute}`,
+    hh: p.hour, mm: p.minute, weekday: p.weekday,
+  };
+}
+
+// Everything runs on a cron minute, so stepping a minute at a time is exact.
+// Eight days covers any weekly pattern including a long weekend.
+function nextCronRun(expr, from = new Date()) {
+  const parts = String(expr).trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const d = new Date(from.getTime() + 60000 - (from.getTime() % 60000));
+  for (let i = 0; i < 60 * 24 * 8; i++) {
+    const p = etParts(d);
+    if (cronField(parts[0], p.min) && cronField(parts[1], p.hour) &&
+        cronField(parts[2], p.dom) && cronField(parts[3], p.mon) &&
+        cronField(parts[4], p.dow)) {
+      const today = etParts(from);
+      const when = p.dom === today.dom ? 'today' : p.weekday;
+      return { at: new Date(d), text: `${when} ${p.hh}:${p.mm}` };
+    }
+    d.setTime(d.getTime() + 60000);
+  }
+  return null;
+}
+
+const pad2 = n => String(n).padStart(2, '0');
+
+function cronToWords(expr) {
+  const p = String(expr).trim().split(/\s+/);
+  if (p.length !== 5) return expr;
+  const [mi, ho, , , dw] = p;
+
+  const days = dw === '1-5' ? 'Mon–Fri' : dw === '*' ? 'every day' : `day ${dw}`;
+
+  // hour span, for the "every N minutes between X and Y" shapes
+  const hourSpan = () => {
+    if (ho === '*') return { lo: 0, hi: 23 };
+    if (ho.includes('-')) { const [a, b] = ho.split('-').map(Number); return { lo: a, hi: b }; }
+    if (!isNaN(ho)) return { lo: +ho, hi: +ho };
+    return null;
+  };
+
+  if (mi.startsWith('*/')) {
+    const step = mi.slice(2);
+    const s = hourSpan();
+    if (s) return `Every ${step} min, ${pad2(s.lo)}:00–${pad2(s.hi)}:59 · ${days}`;
+    return `Every ${step} min · ${days}`;
+  }
+
+  const mins = mi.split(',');
+  const hours = ho.split(',');
+  if (mins.length === 1 && hours.length === 1 && !ho.includes('-')) {
+    return `${pad2(+ho)}:${pad2(+mi)} · ${days}`;
+  }
+  if (hours.length === 1 && !ho.includes('-')) {
+    const times = mins.map(m => `${pad2(+ho)}:${pad2(+m)}`);
+    return times.length <= 3
+      ? `${times.join(', ')} · ${days}`
+      : `${times.length}× between ${times[0]} and ${times[times.length - 1]} · ${days}`;
+  }
+  return `${expr} · ${days}`;
+}
+
 function renderMonitorJobs() {
   const container = document.getElementById('monitor-jobs-cards');
   if (!monitorJobs.length) {
@@ -1690,20 +2417,25 @@ function renderMonitorJobs() {
     return;
   }
   container.innerHTML = monitorJobs.map(j => {
-    const lastRun = j.lastRunAt ? new Date(j.lastRunAt).toLocaleTimeString() : 'Never';
+    const lastRun = j.lastRunAt ? fmtET24(j.lastRunAt) + ' ET' : 'never';
     const statusDot = j.lastStatus === 'ok'
-      ? '<span style="color:var(--green)">● OK</span>'
+      ? '<span style="color:var(--green)">● ran OK</span>'
       : j.lastStatus === 'error'
-        ? '<span style="color:var(--red)">● Error</span>'
-        : '<span style="color:#555">● Not run</span>';
-    const dur = j.lastDuration != null ? ' · ' + (j.lastDuration/1000).toFixed(1) + 's' : '';
+        ? '<span style="color:var(--red)">● failed</span>'
+        : '<span style="color:#555">● not run yet</span>';
+    const dur = j.lastDuration != null ? ' in ' + (j.lastDuration/1000).toFixed(1) + 's' : '';
     const toggleClass = j.enabled ? 'on' : 'off';
     const toggleLabel = j.enabled ? 'ON' : 'OFF';
+    const next = j.enabled ? nextCronRun(j.schedule) : null;
     return `<div class="job-card${j.enabled ? '' : ' disabled'}">
       <div class="job-card-info">
         <div class="job-card-name">${esc(j.name)}</div>
-        <div class="job-card-cron">${esc(j.schedule)}</div>
-        <div class="job-card-meta">${statusDot}${dur} · Last: ${lastRun}</div>
+        <div class="job-when">${esc(cronToWords(j.schedule))}</div>
+        <div class="job-next">${j.enabled
+          ? (next ? `Next run <b>${esc(next.text)}</b> ET` : 'Next run —')
+          : 'Turned off — will not run'}</div>
+        <div class="job-card-meta">${statusDot}${dur} · last ${lastRun}
+          <span class="job-cron-raw" title="the raw cron expression">${esc(j.schedule)}</span></div>
         ${j.lastError ? `<div style="color:var(--red);font-size:11px;margin-top:2px">${esc(j.lastError)}</div>` : ''}
       </div>
       <div class="job-card-actions">
@@ -1896,26 +2628,166 @@ async function loadRegistry() {
   } catch(e) { /* silently fail */ }
 }
 
+// ── this tool's screeners, for the filter list and the card badges ──
+// The dropdown used to be three hardcoded options copied from the original
+// tool, so every other tool offered filters for screeners it does not have and
+// none for the ones it does. The list is now whatever this tool actually runs.
+let SCREENERS = [];
+
+async function loadScreenerNames() {
+  try {
+    const d = await (await fetch('/api/screeners')).json();
+    SCREENERS = d.screeners || [];
+  } catch { SCREENERS = []; }
+  const sel = document.getElementById('screener-filter');
+  const keep = sel.value;
+  sel.innerHTML = '<option value="all">All Scanners</option>' +
+    SCREENERS.map(s => `<option value="${esc(s.name)}">${esc(s.name)}${
+      s.enabled ? '' : ' (off)'}</option>`).join('');
+  // A screener the trader has just deleted must not leave the list filtered to
+  // nothing with no obvious way back.
+  sel.value = [...sel.options].some(o => o.value === keep) ? keep : 'all';
+}
+
+// Screeners have no colour of their own, so one is assigned by position in the
+// tool's list. Position rather than a hash of the name: hashing collided — two
+// screeners in the same tool drew the same colour, which is precisely when the
+// colour needs to tell them apart. The list is ordered by name server-side, so
+// a screener keeps its colour across reloads.
+const SCR_COLORS = ['#4a9eff', '#a78bfa', '#fb923c', '#34d399', '#f472b6', '#facc15', '#22d3ee', '#f87171'];
+function screenerColor(name) {
+  const i = SCREENERS.findIndex(s => s.name === name);
+  if (i >= 0) return SCR_COLORS[i % SCR_COLORS.length];
+  // A screener that has since been deleted still has cards on screen; give it a
+  // stable colour rather than none.
+  let h = 0;
+  for (let k = 0; k < name.length; k++) h = (h * 31 + name.charCodeAt(k)) >>> 0;
+  return SCR_COLORS[h % SCR_COLORS.length];
+}
+
+function screenerDef(name) {
+  return SCREENERS.find(s => s.name === name) || null;
+}
+
+// Every screener that has matched this stock today, with the time of its first
+// match — accumulated in r0, so an afternoon sighting stays distinguishable
+// from a morning one even after the morning screener stops running.
+function seenList(row) {
+  const seen = row.seenAt || {};
+  const names = Object.keys(seen);
+  // A row scanned before this was added has no seenAt: fall back to the keys it
+  // carries, timed at the row's own first sighting, rather than showing nothing.
+  if (!names.length) {
+    return (row.screenerKeys || []).map(n => ({ name: n, at: row.firstSeen || null }));
+  }
+  return names.map(n => ({ name: n, at: seen[n] })).sort((a, b) => (a.at || 0) - (b.at || 0));
+}
+
+/* Does this row have news, and do we actually know?
+ *
+ * Three states, not two. Side C fetches news for every LIVE row each pipeline,
+ * so a row that has gone stale — or one from a run where the news stage failed,
+ * it is a soft stage — was never asked. Folding "we asked and there was
+ * nothing" together with "we never asked" into a single "no news" would filter
+ * out stocks on a fact that was never established, which is the kind of wrong
+ * answer that looks like a right one.
+ */
+function newsState(row) {
+  const n = row.news;
+  if (!n) return 'unchecked';
+  // `finnhub` is read for cards frozen before it was replaced by TradingView —
+  // an old card should still report what it actually had.
+  const count = (n.tradingview || []).length + (n.alpaca || []).length + (n.yahoo || []).length
+              + (n.edgar || []).length + (n.google || []).length
+              + (n.finnhub || []).length;
+  return count > 0 ? 'has' : 'none';
+}
+
+/*
+ * "Everything agrees."
+ *
+ * A card carries ten level flags, a moving-average stack and a catalyst, and
+ * the case worth finding is the one where none of them disagrees: price above
+ * every average and every reference level, the stack in order, and a story
+ * pointing the same way. Reading that off twelve tags one at a time is exactly
+ * the work the trader described doing by eye.
+ *
+ * TWO THINGS ARE DELIBERATELY NOT REQUIRED, and they are the reason this is a
+ * function rather than "all flags green".
+ *
+ * The pre-market extreme on the far side. A bullish card need not be above the
+ * pre-market HIGH — that is a level the stock may simply not have reached yet,
+ * and demanding it would throw away the setups that are still setting up. Its
+ * mirror applies to a bearish card and the pre-market low. Note the near side
+ * is still required: a bull must hold above the pre-market LOW, because losing
+ * it is a disagreement rather than an absence.
+ *
+ * The position in the monthly range. Q4 on a bull and Q2 on a bear both appear
+ * in the trader's own examples of a fully aligned card, so the quarter is not
+ * evidence either way here — it says where the stock has been, not what every
+ * signal is currently saying.
+ *
+ * A missing flag is not agreement. Anything null fails the check, so a card
+ * with half its levels unresolved never counts as aligned; "we could not tell"
+ * and "everything lines up" must not look the same.
+ */
+const ALIGN_BULL = ['vsEma9', 'vsEma13', 'vsEma20', 'vsEma50', 'vsSma5',
+                    'vsVwap', 'vsPrevClose', 'vsOpen', 'vsPmLow'];
+const ALIGN_BEAR = ['vsEma9', 'vsEma13', 'vsEma20', 'vsEma50', 'vsSma5',
+                    'vsVwap', 'vsPrevClose', 'vsOpen', 'vsPmHigh'];
+
+function alignment(row) {
+  const sig = row.signals || {};
+  const cat = row.catalyst;
+  const sent = cat && cat.sentiment;
+
+  const allAre = (keys, want) => keys.every(k => sig[k] === want);
+
+  if (allAre(ALIGN_BULL, 'above') && sig.maStack === 'bull' && sent === 'bull') return 'bull';
+  if (allAre(ALIGN_BEAR, 'below') && sig.maStack === 'bear' && sent === 'bear') return 'bear';
+  return null;
+}
+
 function getFilteredSorted() {
   const query = document.getElementById('search-input').value.toLowerCase();
   const filter = document.getElementById('screener-filter').value;
   const sort = document.getElementById('sort-select').value;
+  const newsF = (document.getElementById('news-filter') || {}).value || 'all';
+  const catF = (document.getElementById('catalyst-filter') || {}).value || 'all';
+  const alignF = (document.getElementById('align-filter') || {}).value || 'all';
 
   let rows = r0Data.filter(row => {
     if (query && !row.ticker.toLowerCase().includes(query) && !(row.stock?.sector||'').toLowerCase().includes(query)) return false;
-    if (filter !== 'all') {
-      const keys = (row.screenerKeys||[]).map(k => k.toLowerCase());
-      if (filter === 'trend' && !keys.some(k => k.includes('trend'))) return false;
-      if (filter === 'premarket' && !keys.some(k => k.includes('pre'))) return false;
-      if (filter === 'bigmoves' && !keys.some(k => k.includes('big'))) return false;
+    // Match the screener by name. Filtering used to guess from substrings
+    // ("pre", "big"), which quietly matched the wrong screener as soon as a
+    // tool had two whose names shared a word.
+    if (filter !== 'all' && !seenList(row).some(s => s.name === filter)) return false;
+
+    if (newsF !== 'all' && newsState(row) !== newsF) return false;
+
+    if (catF !== 'all') {
+      const c = row.catalyst;
+      if (catF === 'has' && !c) return false;
+      if (catF === 'none' && c) return false;
+      // Tier 1 is the "⚡ major" band the card marks with a bolt — an earnings
+      // release or an FDA decision, not a routine analyst note.
+      if (catF === 'major' && !(c && c.tier === 1)) return false;
+    }
+
+    if (alignF !== 'all') {
+      const a = alignment(row);
+      if (alignF === 'either' ? !a : a !== alignF) return false;
     }
     return true;
   });
+
+  const foundAt = r => Math.max(r.firstSeen || 0, ...seenList(r).map(s => s.at || 0));
 
   rows.sort((a, b) => {
     if (sort === 'score') return (b._score||0) - (a._score||0);
     if (sort === 'change') return (b.stock?.change||0) - (a.stock?.change||0);
     if (sort === 'rvol') return (b.stock?.rvol||0) - (a.stock?.rvol||0);
+    if (sort === 'newest') return foundAt(b) - foundAt(a);
     if (sort === 'live') {
       if (b.liveNow && !a.liveNow) return 1;
       if (a.liveNow && !b.liveNow) return -1;
@@ -1926,15 +2798,133 @@ function getFilteredSorted() {
   return rows;
 }
 
+// Which filters are narrowing the list right now, in words.
+function activeFilters() {
+  const on = [];
+  const val = (id) => (document.getElementById(id) || {}).value;
+  const text = (id) => { const el = document.getElementById(id); return el && el.selectedOptions[0] ? el.selectedOptions[0].textContent : ''; };
+  if ((document.getElementById('search-input') || {}).value) on.push(`"${document.getElementById('search-input').value}"`);
+  if (val('screener-filter') && val('screener-filter') !== 'all') on.push(text('screener-filter'));
+  if (val('news-filter') && val('news-filter') !== 'all') on.push(text('news-filter'));
+  if (val('catalyst-filter') && val('catalyst-filter') !== 'all') on.push(text('catalyst-filter'));
+  if (val('align-filter') && val('align-filter') !== 'all') on.push(text('align-filter'));
+  return on;
+}
+
+function clearFilters() {
+  const s = document.getElementById('search-input'); if (s) s.value = '';
+  for (const id of ['screener-filter', 'news-filter', 'catalyst-filter', 'align-filter']) {
+    const el = document.getElementById(id); if (el) el.value = 'all';
+  }
+  renderCards();
+}
+
 function renderCards() {
   const rows = getFilteredSorted();
-  document.getElementById('row-count').textContent = rows.length + ' stocks';
+  const on = activeFilters();
+  // "0 stocks" after a scan and "0 stocks because four filters are on" are
+  // different situations, and the count alone cannot tell them apart.
+  document.getElementById('row-count').textContent = on.length
+    ? `${rows.length} of ${r0Data.length}`
+    : `${rows.length} stocks`;
   const grid = document.getElementById('cards-grid');
   if (!rows.length) {
-    grid.innerHTML = '<div class="empty">No stocks match. Run a scan during market hours.</div>';
+    grid.innerHTML = on.length
+      ? `<div class="empty">Nothing matches ${on.map(esc).join(' + ')}.<br>
+           ${r0Data.length} stock(s) are loaded.
+           <button class="clear-filters" onclick="clearFilters()">Clear filters</button></div>`
+      : '<div class="empty">No stocks match. Run a scan during market hours.</div>';
     return;
   }
   grid.innerHTML = rows.map(buildCard).join('');
+  observeCharts();   // the nodes just changed, so the observer must be reattached
+}
+
+// Relational signal tags — price vs each level, MA stack, range quarter.
+// Green = above, red = below, grey = neutral fact — see the colour language in
+// :root. The % distance rides in the tooltip because 0.1% above and 40% above
+// read very differently.
+const SIG_LEVELS = [
+  ['vsEma9','distEma9','9MA'], ['vsEma13','distEma13','13MA'],
+  ['vsEma20','distEma20','20MA'], ['vsEma50','distEma50','50MA'],
+  ['vsSma5','distSma5','5MA'], ['vsVwap','distVwap','VWAP'],
+  ['vsPrevClose','distPrevClose','PDC'], ['vsOpen','distOpen','OPEN'],
+  ['vsPmHigh','distPmHigh','PMH'], ['vsPmLow','distPmLow','PML'],
+];
+/* News timestamps.
+ *
+ * Finnhub and Yahoo send unix seconds, EDGAR sends a date string — the same
+ * normalisation the backend does in src/sideC/news.js, repeated here because
+ * the card reads the raw source arrays rather than the merged list.
+ */
+function newsMs(dt) {
+  if (typeof dt === 'number' && isFinite(dt) && dt > 0) return dt < 1e12 ? dt * 1000 : dt;
+  if (typeof dt === 'string') { const p = Date.parse(dt); if (isFinite(p)) return p; }
+  return null;
+}
+
+// Age, not a clock time. "2h ago" answers the question being asked — is this
+// why it is moving — where "09:14" makes you do the subtraction yourself. The
+// exact timestamp is in the tooltip for when it matters.
+function newsAge(ms) {
+  const mins = Math.round((Date.now() - ms) / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const h = Math.round(mins / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.round(h / 24);
+  return `${d}d`;
+}
+
+// Fresh news is the news that explains today. Anything past a day is context.
+function newsAgeClass(ms) {
+  const h = (Date.now() - ms) / 3600000;
+  return h < 6 ? 'na-fresh' : h < 24 ? 'na-today' : 'na-old';
+}
+
+// The PM/ADR ramp. Below 1.00× the badge recedes; above it, each step is the
+// same hue turned up. Keyed by the band strings pmBand() emits in
+// src/sideB/relations.js — change them there and this must follow.
+const PMADR_CLASS = {
+  '<0.5': 'pmadr-a', '0.5-1': 'pmadr-b', '1-2': 'pmadr-1',
+  '2-3': 'pmadr-2', '3+': 'pmadr-3',
+};
+
+function buildSignalTags(sig, s) {
+  if (!sig || !Object.keys(sig).length) return '';
+  const t = [];
+  for (const [sideKey, distKey, label] of SIG_LEVELS) {
+    const side = sig[sideKey];
+    if (!side) continue;
+    const d = sig[distKey];
+    const arrow = side === 'above' ? '▲' : '▼';
+    const cls = side === 'above' ? 'sig-up' : 'sig-dn';
+    const tip = d == null ? label : `${label} ${d >= 0 ? '+' : ''}${d.toFixed(2)}%`;
+    t.push(`<span class="sig ${cls}" title="${tip}">${arrow}${label}</span>`);
+  }
+  if (sig.maStack) {
+    const cls = sig.maStack === 'bull' ? 'sig-up' : sig.maStack === 'bear' ? 'sig-dn' : 'sig-mid';
+    const txt = sig.maStack === 'bull' ? '9&gt;13&gt;20&gt;50'
+              : sig.maStack === 'bear' ? '9&lt;13&lt;20&lt;50' : 'MA mixed';
+    t.push(`<span class="sig ${cls}" title="moving-average stack (${sig.maStackScore}/3 in order)">${txt}</span>`);
+  }
+  if (sig.monthQuarter) {
+    const cls = sig.monthQuarter === 'Q1' ? 'sig-dn' : sig.monthQuarter === 'Q4' ? 'sig-up' : 'sig-mid';
+    t.push(`<span class="sig ${cls}" title="quarter of the 1-month range (Q1 = bottom)">${sig.monthQuarter} range</span>`);
+  }
+  if (sig.pmAdrBand) {
+    // 1.0 is the threshold — pre-market has covered a whole normal day's range.
+    // Past it is not automatically good and not automatically bad, so red/green
+    // would be putting a verdict on a number that does not carry one. One hue,
+    // five steps: dim below the threshold because there is nothing to look at,
+    // and progressively louder above it. Loud means big, not good.
+    // (>=2 is the band that historically won 52% vs 10% below it — which is a
+    // reason to look, not a reason to colour it green.)
+    const cls = PMADR_CLASS[sig.pmAdrBand] || 'sig-mid';
+    const ratio = s && s.pmAdrRatio != null ? `${s.pmAdrRatio.toFixed(2)}×` : null;
+    t.push(`<span class="sig ${cls}" title="pre-market range vs a normal day's range — band ${sig.pmAdrBand}, threshold 1.00×">PM/ADR ${sig.pmAdrBand}${ratio ? ` · ${ratio}` : ''}</span>`);
+  }
+  return t.length ? `<div class="sig-row">${t.join('')}</div>` : '';
 }
 
 // Catalyst badge: icon encodes importance (⚡ major / ● notable / · minor),
@@ -1953,9 +2943,21 @@ function catalystBadgeHTML(c) {
   // Old-format catalysts (pre-v2 rows restored from checkpoint) have no tier
   // — render them the way the old UI did (⚡) rather than as minor.
   const tier = c.tier || 1;
-  const icon = c.source === 'technical' ? '📈' : tier === 1 ? '⚡' : tier === 2 ? '●' : '·';
+  const tech = c.source === 'technical';
+  const icon = tech ? '📈' : tier === 1 ? '⚡' : tier === 2 ? '●' : '·';
   const dim = c.stale ? 'opacity:0.55;' : '';
   const extra = c.others && c.others.length ? ` <span style="opacity:0.7">+${c.others.length}</span>` : '';
+  /*
+   * A technical catalyst is a description of what the tape just did, and on a
+   * screener that filtered for exactly that, it is the filter read back. Over
+   * 23 days 30 of them were "Gap Up" — on gap screeners, where every stock
+   * gapped. It no longer sets bias (see sideC/bias.js), and it should not look
+   * like the ones that do: neutral, and labelled as the tape rather than as a
+   * reason.
+   */
+  if (tech) {
+    return `<span class="badge badge-tape" title="${catalystTitle(c)} — this is the tape, not a story: it describes the move rather than explaining it, and does not set bias">${icon} ${c.label}${extra}</span>`;
+  }
   return `<span class="badge badge-catalyst" title="${catalystTitle(c)}" style="${dim}background:${c.color}20;color:${c.color};border:1px solid ${c.color}40">${icon} ${c.label}${extra}</span>`;
 }
 
@@ -1969,16 +2971,112 @@ function buildCard(row) {
   const changeSign = change >= 0 ? '+' : '';
   const scoreClass = score >= 70 ? 'score-high' : score >= 40 ? 'score-mid' : 'score-low';
   const starIcon = row.inShortlist ? '★' : '☆';
-  const starStyle = row.inShortlist ? 'color:#eab308' : 'color:var(--text3)';
+  // Yellow is reserved for this — your own mark, nothing else on the card.
+  const starStyle = row.inShortlist ? 'color:var(--m-mine)' : 'color:var(--m-none)';
 
-  // Screener badges
-  const badgeMap = { trend:'badge-trend', premarket:'badge-premarket', bigmoves:'badge-bigmove' };
-  const badgeLabels = { trend:'Trend', premarket:'Pre-Mkt', bigmoves:'Big Move' };
-  const badges = (row.screenerKeys||[]).map(k =>
-    `<span class="badge ${badgeMap[k]||'badge-trend'}">${badgeLabels[k]||k}</span>`
-  ).join('');
+  /* When this stock first appeared anywhere on this tool.
+   *
+   * The per-screener badges carry a time each, which answers "when did THIS
+   * screener find it" — useful, and not the question asked when you are looking
+   * at a list at 14:00 wondering whether you could have had this at the open.
+   * The earliest sighting across every screener is one number and it is the one
+   * that decides whether a trade was ever available.
+   *
+   * Minutes from the bell rather than a clock time on its own, because "09:36"
+   * needs the open subtracted from it and "+6m" does not. Negative is
+   * pre-market, which is a different kind of sighting and reads as one.
+   */
+  const firstSeenAt = (() => {
+    const times = seenList(row).map(s => s.at).filter(Boolean);
+    if (row.firstSeen) times.push(row.firstSeen);
+    return times.length ? Math.min(...times) : null;
+  })();
+  const firstSeenHTML = firstSeenAt ? (() => {
+    const m = minsFromOpen(firstSeenAt);
+    const rel = m == null ? '' : m < 0 ? `${-m}m before open` : m === 0 ? 'at the open' : `+${m}m`;
+    const cls = m == null ? '' : m < 0 ? 'fs-pre' : m <= 30 ? 'fs-early' : 'fs-late';
+    return `<span class="first-seen ${cls}"
+      title="first seen on this tool at ${fmtET24(firstSeenAt)} ET${
+        m == null ? '' : m < 0 ? ', in the pre-market' : `, ${m} minute(s) after the open`
+      } — the earliest any screener here matched it">
+      first seen <b>${fmtET24(firstSeenAt)}</b>${rel ? ` · ${rel}` : ''}</span>`;
+  })() : '';
+
+  // Screener badges — one per screener that has matched today, each stamped
+  // with the time IT found the stock. Without the time, a candidate a screener
+  // first threw up at 15:00 is indistinguishable from one that has been on the
+  // list since the pre-market, which is the difference between a trade you
+  // could have taken and one you could not.
+  const seen = seenList(row);
+  const nowMatching = new Set(row.screenerKeys || []);
+  const badges = seen.map(s => {
+    const def = screenerDef(s.name);
+    const col = screenerColor(s.name);
+    const win = def && def.runFrom ? ` · runs ${def.runFrom}–${def.runTo} ET` : ' · runs all day';
+    const live = nowMatching.has(s.name);
+    const tip = `${s.name}: first matched ${s.at ? fmtET24(s.at) : 'unknown'} ET${win}${
+      live ? '' : ' · not matching now'}`;
+    // The screener's colour is an IDENTITY, not a claim — it says which
+    // screener, not whether that is good. Identity used to be the badge's text
+    // colour, which meant a screener whose hash landed on yellow was saying
+    // "you starred this" and one landing on green was saying "above". So the
+    // hue moved to a stripe down the left edge: still tells the screeners
+    // apart, no longer speaks the language the rest of the card speaks.
+    return `<span class="badge badge-scr${live ? '' : ' badge-past'}"
+      style="border-left:3px solid ${col}" title="${esc(tip)}">${esc(s.name)}${
+      s.at ? ` <b>${fmtET24(s.at)}</b>` : ''}</span>`;
+  }).join('');
   const hotBadge = ctx.secHot ? '<span class="badge badge-hot">🔥 HOT</span>' : '';
+  // A CANSLIM name showing up in an unrelated screener is worth knowing at the
+  // moment it appears, not at the end of the month. The days count is the point
+  // of it — how long the name has held its place on that list.
+  // Shortlisted by another tool. Not the same claim as this tool's own star —
+  // that stays exactly where it was — so it reads as extra information rather
+  // than overwriting a decision.
+  const alsoTools = (row.shortlistedBy || []).filter(t => t !== (TOOL_SELF && TOOL_SELF.tool));
+  const alsoBadge = alsoTools.length
+    ? `<span class="badge badge-also" title="Also on the shortlist of: ${esc(alsoTools.join(', '))}">★ also ${esc(alsoTools.join(' '))}</span>`
+    : '';
+  const canslimBadge = row.canslim === 'yes'
+    ? `<span class="badge badge-canslim" title="On the CANSLIM list${
+        row.canslimDays != null ? ` for ${row.canslimDays} day(s)` : ''}">★ CANSLIM${
+        row.canslimDays != null ? ` <b>${row.canslimDays}d</b>` : ''}</span>`
+    : '';
+  const signalTags = buildSignalTags(row.signals, s);
   const catalystBadge = catalyst ? catalystBadgeHTML(catalyst) : '';
+
+  // The one badge that says something none of the others do: not "this is
+  // strong" but "nothing here disagrees". Placed with the catalyst because it
+  // depends on one, and because the pair is the whole claim.
+  const align = alignment(row);
+  const alignBadge = align
+    ? `<span class="badge badge-align ${align}" title="Every level, the moving-average stack and the catalyst point ${
+        align === 'bull' ? 'up' : 'down'
+      }. The pre-market ${align === 'bull' ? 'high' : 'low'} and the monthly-range quarter are not part of this.">${
+        align === 'bull' ? '▲▲ ALL BULL' : '▼▼ ALL BEAR'}</span>`
+    : '';
+
+  // Volume & Float, on the magnitude ramp.
+  //
+  // These four numbers were all the same white, which made the block a wall of
+  // digits you had to read one at a time — and it now sits at the top of the
+  // card, where it is meant to answer "is this tradable at all" at a glance.
+  // Each is a HOW MUCH, so each gets the same four-step ramp used by PM/ADR:
+  // dim when it is unremarkable, bright when it is the reason to look. The
+  // thresholds are where the number starts changing how the stock behaves, not
+  // where it starts being good — a 3M float is not a buy, it is a warning that
+  // it will move like one.
+  const magClass = (v, t1, t2, t3, invert) => {
+    if (v == null) return 'mag-0';
+    const rank = invert
+      ? (v <= t3 ? 3 : v <= t2 ? 2 : v <= t1 ? 1 : 0)
+      : (v >= t3 ? 3 : v >= t2 ? 2 : v >= t1 ? 1 : 0);
+    return `mag-${rank}`;
+  };
+  const magRvol  = magClass(s.rvol, 1.5, 3, 5);
+  const magFloat = magClass(s.floatShares, 50e6, 20e6, 10e6, true);   // smaller is louder
+  const magShort = magClass(s.shortFloat, 5, 10, 20);
+  const magCap   = magClass(s.mcap, 2e9, 300e6, 50e6, true);          // smaller is louder
 
   // Regime display
   const regimeInfo = getRegimeDisplay(ctx.regime);
@@ -2002,38 +3100,209 @@ function buildCard(row) {
     `<span class="ema-item"><span class="ema-name">EMA${e.n}</span> <span class="ema-val ${price>=e.v?'ema-above':'ema-below'}">${fmt(e.v)}</span></span>`
   ).join('');
 
-  // Month range bar
-  const mpos = s.monthRangePos != null ? s.monthRangePos : null;
-  const rangeBar = mpos != null ? `
-    <div class="range-bar-wrap">
-      <div class="range-bar-fill" style="width:${clamp(mpos,0,100)}%"></div>
-      <div class="range-bar-marker" style="left:calc(${clamp(mpos,0,100)}% - 1px)"></div>
-    </div>
-    <div class="range-labels"><span>L ${fmt(s.monthLow)}</span><span>${mpos.toFixed(0)}% into range</span><span>H ${fmt(s.monthHigh)}</span></div>
-  ` : '';
+  // Range bars — one per timeframe, stacked.
+  //
+  // A single month bar said where the stock sat over 20 sessions and nothing
+  // about whether that was also the top of the year. Several bars answer the
+  // question the one bar was being asked to answer on its own: 91% of the month
+  // and 40% of the year is a different stock from 91% of both.
+  //
+  // Each bar carries its own low and high, because they are different numbers
+  // and a shared axis would be a lie.
+  /*
+   * Reverse splits break the wider windows.
+   *
+   * TradingView's historical highs are not split-adjusted, so a stock that has
+   * done a 1-for-100 carries pre-split prices in its quarter, year and
+   * all-time figures. PAVS came through with a year high of $148,800 against a
+   * $3.76 low — a 39,000× range — and its own news feed carrying the reverse
+   * split that caused it. INLF the same, with a quarter high of $958.
+   *
+   * Left alone this is worse than missing data. The bar reads 0%, which says
+   * the stock is sitting on its 52-week low: a maximum-oversold signal,
+   * arrived at by arithmetic on two prices that were never the same currency.
+   *
+   * The windows nest — a week is inside a month is inside a quarter — so a
+   * legitimate high can only grow as the window widens, and it grows by market
+   * moves. A tenfold jump between two adjacent windows is not a market move,
+   * it is a split boundary, and every window from there out is contaminated.
+   * Those are dropped and said so, rather than drawn.
+   */
+  const SPLIT_JUMP = 10;
+  const rawBars = [
+    { label: 'Week',    low: s.weekLow,      high: s.weekHigh,      pos: s.weekRangePos },
+    { label: 'Month',   low: s.monthLow,     high: s.monthHigh,     pos: s.monthRangePos },
+    { label: 'Quarter', low: s.quarterLow,   high: s.quarterHigh,   pos: s.quarterRangePos },
+    { label: 'Year',    low: s.yearLow,      high: s.yearHigh,      pos: s.yearRangePos },
+  ].filter(b => b.pos != null && b.low != null && b.high != null);
+
+  let splitFrom = null;
+  for (let i = 1; i < rawBars.length; i++) {
+    if (rawBars[i].high > rawBars[i - 1].high * SPLIT_JUMP) { splitFrom = i; break; }
+  }
+  const usableBars = splitFrom == null ? rawBars : rawBars.slice(0, splitFrom);
+  const splitNote = splitFrom == null ? '' : `
+    <div class="rb-split" title="${esc(rawBars[splitFrom].label)} high $${fmt(rawBars[splitFrom].high)} against ${esc(rawBars[splitFrom - 1].label)} high $${fmt(rawBars[splitFrom - 1].high)} — prices from before a share consolidation, not a move">
+      ${rawBars.slice(splitFrom).map(b => b.label).join(', ')} not shown — the history crosses a reverse split
+    </div>`;
+
+  /*
+   * Two identical bars are information, not a fault.
+   *
+   * A card came in with Week and Month reading L 72.98 H 80.17 on both, and the
+   * natural conclusion was that the weekly column was broken. It was not — the
+   * probe (scripts/probe-week-range.js) showed High.5D differing from the month
+   * on seven of eight stocks, and that stock was a fresh earnings reaction on
+   * 3.7x volume. It had genuinely made the month's high AND its low inside five
+   * days, which is what a big earnings move does.
+   *
+   * That is worth knowing and the card was not saying it. Repeating the same
+   * two numbers with no explanation reads as a bug however correct it is, and a
+   * reader who decides one bar is broken has no reason to trust the others. So
+   * the equality is labelled: the whole month happened this week.
+   */
+  const sameAsWider = (b, i) => {
+    const wider = usableBars[i + 1];
+    return wider && b.low === wider.low && b.high === wider.high;
+  };
+
+  const rangeBars = usableBars.map((b, i) => {
+    const p = clamp(b.pos, 0, 100);
+    const echo = sameAsWider(b, i) ? usableBars[i + 1].label : null;
+    return `
+    <div class="rb">
+      <div class="rb-head"><span class="rb-name">${b.label}</span>${
+        echo ? `<span class="rb-echo" title="Both the high and the low of the ${
+          echo.toLowerCase()} window were set inside this shorter one — the whole ${
+          echo.toLowerCase()}'s range happened here. Common right after an earnings move.">= ${
+          esc(echo.toLowerCase())}</span>` : ''
+      }<span class="rb-pct">${b.pos.toFixed(0)}%</span></div>
+      <div class="range-bar-wrap">
+        <div class="range-bar-fill" style="width:${p}%"></div>
+        <div class="range-bar-marker" style="left:calc(${p}% - 1px)"></div>
+      </div>
+      <div class="range-labels"><span>L ${fmt(b.low)}</span><span></span><span>H ${fmt(b.high)}</span></div>
+    </div>`;
+  }).join('');
+
+  // All-time deliberately gets a distance, not a bar.
+  //
+  // `Low.All` does exist — this was checked, not assumed — and for AAPL it
+  // comes back as $0.049, the split-adjusted price from 1980. A bar drawn from
+  // there would put every stock that has ever gone up somewhere north of 85%,
+  // which discriminates between nothing and would sit next to three real bars
+  // looking like it meant something. The distance under the record is the one
+  // claim a single all-time number actually supports.
+  //   → if you are here to "add the missing all-time low", read the above.
+  //
+  // The same split problem reaches this number and hits it hardest, because it
+  // looks the furthest back: PAVS came through with an all-time high of
+  // $14,640,000 and the card dutifully reported "100% below". A distance that
+  // rounds to 100% for every stock that has ever consolidated its shares is
+  // not a distance, and it sat in the position where a real one would.
+  const widest = usableBars.length ? usableBars[usableBars.length - 1].high : null;
+  const athSplit = s.allTimeHigh != null && widest != null && s.allTimeHigh > widest * SPLIT_JUMP;
+  const athPct = (s.allTimeHigh && price && !athSplit) ? ((price / s.allTimeHigh) - 1) * 100 : null;
+  const athRow = athPct != null ? `
+    <div class="rb-ath" title="the all-time high has no matching low, so this is a distance rather than a position in a range">
+      <span class="rb-ath-label">All-time high</span>
+      <span class="rb-ath-val">${fmt(s.allTimeHigh)}</span>
+      <span class="rb-ath-gap ${athPct >= -0.01 ? 'at-high' : ''}">${
+        athPct >= -0.01 ? 'at the high' : `${Math.abs(athPct).toFixed(0)}% below`}</span>
+    </div>` : (athSplit ? `
+    <div class="rb-ath" title="all-time high $${fmt(s.allTimeHigh)} is a pre-consolidation price — the distance from it would be arithmetic on two different share counts">
+      <span class="rb-ath-label">All-time high</span>
+      <span class="rb-ath-gap">not comparable — pre-split price</span>
+    </div>` : '');
+
+  const rangeBar = (rangeBars || splitNote || athRow) ? rangeBars + splitNote + athRow : '';
 
   // Move
   const dayRange = s.dayHigh && s.dayLow ? (s.dayHigh - s.dayLow) : null;
   const moveATR = dayRange && s.atr ? (dayRange / s.atr).toFixed(2) + '× ATR' : '—';
 
-  // News items (combine all sources, max 5)
+  // News items (combine all sources, max 5).
+  //
+  // Every source already carries a timestamp and the card was dropping it,
+  // which left five headlines that could each be twenty minutes or six days
+  // old with no way to tell them apart. That is the difference between the
+  // reason a stock is moving right now and a story it already digested, and
+  // the whole point of the news block is telling those apart. Sorted newest
+  // first for the same reason.
   let newsItems = [];
   if (news) {
-    const finnhub = (news.finnhub||[]).slice(0,2).map(n => ({ src:'FH', h: n.headline||n.summary||'' }));
-    const yahoo = (news.yahoo||[]).slice(0,2).map(n => ({ src:'YH', h: n.title||n.headline||'' }));
-    const edgar = (news.edgar||[]).slice(0,2).map(n => ({ src:'SEC', h: n.title||n.headline||'' }));
-    newsItems = [...finnhub, ...yahoo, ...edgar].slice(0,5);
+    const pick = (arr, src, hKeys) => (arr || []).slice(0, 3).map(n => ({
+      src,
+      h: hKeys.map(k => n[k]).find(Boolean) || '',
+      at: newsMs(n.datetime),
+      url: n.url || null,
+      provider: n.provider || null,
+    }));
+    newsItems = [
+      ...pick(news.tradingview, 'TV', ['headline', 'summary']),
+      ...pick(news.alpaca, 'BZ', ['headline', 'summary']),
+      ...pick(news.finnhub, 'FH', ['headline', 'summary']),
+      // Only present when the tagged sources came thin — see fetchGoogleNews.
+      ...pick(news.google, 'GN', ['headline', 'summary']),
+      ...pick(news.yahoo, 'YH', ['title', 'headline']),
+      ...pick(news.edgar, 'SEC', ['title', 'headline']),
+    ].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 5);
   }
-  const newsHTML = newsItems.length ? `
-    <ul class="news-list">${newsItems.map(n =>
-      `<li class="news-item"><span class="news-src">${n.src}</span><span class="news-headline">${esc(n.h)}</span></li>`
-    ).join('')}</ul>
-    ${news.fetchedAt ? `<div class="news-fetched">Fetched ${fmtTime(news.fetchedAt)} ET</div>` : ''}
-  ` : `<button class="load-news-btn" onclick="loadNews('${row.ticker}',this)">Load News</button>`;
+  // Which sources actually answered.
+  //
+  // "No news" used to mean any of: a quiet stock, a missing API key, or the SEC
+  // refusing the request. Those need opposite responses and the card showed the
+  // same blank either way — for 23 days two of the three sources returned
+  // nothing at all and the card never said so.
+  const srcNote = (() => {
+    const s = news && news.sources;
+    if (!s) return '';
+    // 'not-needed' is Google saying it was never asked because the tagged
+    // sources answered — that is the system working, not a fault.
+    const broken = Object.entries(s).filter(([, v]) => v.status && v.status !== 'ok' && v.status !== 'not-needed');
+    if (!broken.length) return '';
+    return `<div class="news-src-warn" title="${esc(broken.map(([k, v]) => `${k}: ${v.detail || v.status}`).join(' · '))}">
+      ⚠ ${broken.map(([k]) => k).join(', ')} not answering — the list below is what the rest found</div>`;
+  })();
 
-  // Themes
+  // "Nothing recent" and "nothing at all" are different, and the second is the
+  // one that should worry you on a stock that has moved 200%.
+  const agedNote = (news && news.agedOut)
+    ? `<div class="news-aged">${news.agedOut} older ${news.agedOut === 1 ? 'story' : 'stories'} not shown — past three weeks it is history, not the reason</div>`
+    : '';
+
+  const newsHTML = newsItems.length ? `
+    ${srcNote}
+    <ul class="news-list">${newsItems.map(n =>
+      `<li class="news-item"><span class="news-src">${n.src}</span>${
+        // A headline is a summary of something. If the source told us where
+        // that something is, the headline is the way to it — reading the story
+        // was otherwise a matter of retyping it into a search engine.
+        n.url
+          ? `<a class="news-headline news-link" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer"
+               onclick="event.stopPropagation()" title="${esc(n.provider || 'open the full story')} — opens in a new tab">${esc(n.h)}</a>`
+          : `<span class="news-headline">${esc(n.h)}</span>`
+      }${
+        n.at ? `<span class="news-age ${newsAgeClass(n.at)}" title="${new Date(n.at).toLocaleString('en-US',{timeZone:'America/New_York'})} ET">${newsAge(n.at)}</span>` : ''
+      }</li>`
+    ).join('')}</ul>
+    ${agedNote}
+    ${news.fetchedAt ? `<div class="news-fetched">Fetched ${fmtTime(news.fetchedAt)} ET</div>` : ''}
+  ` : (news && news.fetchedAt
+    ? `${srcNote}<div class="news-none">Checked ${fmtTime(news.fetchedAt)} ET — ${
+        news.agedOut ? `nothing in the last three weeks. ${news.agedOut} older ${
+          news.agedOut === 1 ? 'story' : 'stories'} exist, none of them today's reason.`
+        : 'nothing found.'}</div>`
+    : `<button class="load-news-btn" onclick="loadNews('${row.ticker}',this)">Load News</button>`);
+
+  // Themes — which market stories this stock belongs to.
+  //
+  // These were rendered as bare tags in a section with no heading, so a stock
+  // in the AI theme opened its details on the word "AI" floating alone above
+  // Market Context, reading as a stray control rather than a fact about the
+  // stock. Every other block on the card is labelled; this one is now too.
   const themesHTML = (ctx.themes||[]).length
-    ? `<div class="themes-row">${ctx.themes.map(t => `<span class="theme-tag">${t}</span>`).join('')}</div>`
+    ? `<div class="themes-row">${ctx.themes.map(t => `<span class="theme-tag">${esc(t)}</span>`).join('')}</div>`
     : '';
 
   // Sector bias display
@@ -2046,6 +3315,9 @@ function buildCard(row) {
   const bias = row.bias || 'auto';
   const biasLabels = { auto: '⊙ AUTO', long: '▲ LONG', short: '▼ SHORT' };
   // Auto-computed: derive from context when bias='auto'
+  // Mirrors contextBias() in src/sideC/bias.js — including the null. This runs
+  // only for a row that has not been through Side C yet; if it ends in a
+  // default the card shows a direction the server would not have given it.
   function computeAutoBias(ctx) {
     const short = ctx.shortTerm;
     const sec = ctx.secBias;
@@ -2055,26 +3327,49 @@ function buildCard(row) {
     if (sec === 'BEARISH' && short !== 'BULLISH') return 'short';
     if (short === 'BULLISH' || sec === 'BULLISH') return 'long';
     if (lt === 'BEARISH') return 'short';
-    return 'long';
+    if (lt === 'BULLISH') return 'long';
+    return null;
   }
   // Prefer the server-resolved auto bias (catalyst-aware); fall back to the
   // local context-only derivation when the row hasn't been through Side C yet.
-  const autoBiasResult = bias === 'auto' ? (row.autoBias?.bias || computeAutoBias(ctx)) : null;
+  // `autoBias` may exist with bias:null — "asked, nothing to say" — which is
+  // not the same as "not asked yet", so the presence of the object decides
+  // whether to fall back rather than the truthiness of the direction.
+  const autoBiasResult = bias === 'auto'
+    ? (row.autoBias ? row.autoBias.bias : computeAutoBias(ctx))
+    : null;
   const autoBiasSrc = bias === 'auto' && row.autoBias?.source === 'catalyst' ? ' ⚡' : '';
   const autoBiasTitle = row.autoBias?.reason ? ` title="auto: ${esc(row.autoBias.reason)}"` : '';
-  const autoLabel = autoBiasResult ? ` <span class="bias-auto-label"${autoBiasTitle}>(${autoBiasResult}${autoBiasSrc})</span>` : '';
+  // No direction is a result, not a blank. Saying so beats an empty bracket,
+  // and beats the "(long)" this used to print when nothing pointed anywhere.
+  const autoLabel = bias !== 'auto' ? ''
+    : autoBiasResult
+      ? ` <span class="bias-auto-label"${autoBiasTitle}>(${autoBiasResult}${autoBiasSrc})</span>`
+      : ` <span class="bias-auto-label bias-noread"${autoBiasTitle || ' title="nothing in the catalyst or the tape points either way"'}>(no read)</span>`;
   const biasHTML = `<button class="bias-btn bias-${bias}" onclick="cycleBias('${row.ticker}',this)">${biasLabels[bias]}${autoLabel}</button>`;
 
   return `
 <div class="card${row.inShortlist?' in-shortlist':''}${!row.liveNow?' stale':''}" id="card-${row.ticker}">
   <div class="card-header">
-    <div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+    <div class="card-head-left">
+      <div class="card-idline">
         <span class="card-ticker" onclick="openChart('${row.ticker}')">${row.ticker}</span>
+        <a class="tv-link" href="${tvUrl(s.tvSymbol || row.ticker)}" target="_blank" rel="noopener"
+           title="Open ${esc(s.tvSymbol || row.ticker)} on TradingView"
+           onclick="event.stopPropagation()">TV&nbsp;↗</a>
+        ${alertUrl(row.ticker) ? `<a class="tv-link alert-link" href="${alertUrl(row.ticker)}"
+           title="Create an alert for ${esc(row.ticker)}"
+           onclick="event.stopPropagation()">⚠&nbsp;alert</a>` : ''}
+        <!-- The price itself. It used to live in the Price block, which is now
+             folded away, and a card that says +434% without saying of what is
+             not a card you can act on: the same move is a different trade at
+             $3 and at $300. Plain text on purpose — the number is a fact, not
+             a claim, and the colour language is for claims. -->
+        <span class="card-price">$${fmt(s.price)}</span>
         <span class="card-change ${change>=0?'pos':'neg'}">${changeSign}${change.toFixed(2)}%</span>
         ${row.liveNow ? '<span class="live-dot">Live</span>' : '<span class="stale-dot">Stale</span>'}
       </div>
-      <div style="font-size:11px;color:var(--text2)">${esc(s.sector||'')} · ${esc(s.industry||'')}</div>
+      <div class="card-sector">${esc(s.sector||'')} · ${esc(s.industry||'')}</div>
     </div>
     <div class="card-right">
       <div onclick="${score != null ? `toggleScoreBreakdown('${row.ticker}')` : ''}" style="cursor:${score != null ? 'pointer' : 'default'};text-align:right">
@@ -2093,14 +3388,71 @@ function buildCard(row) {
     </div>
   </div>
 
-  <div class="card-badges">
-    ${badges}${hotBadge}${catalystBadge}
+  <!-- VOLUME & FLOAT — first thing under the name.
+       Whether a stock is tradable at all is decided by float, cap and RVOL,
+       and that decision comes before anything the badges say. It was at the
+       bottom of the card, which put it after every reason to be interested and
+       before none of them. -->
+  <div class="card-section vf-top">
+    <div class="section-title">Volume &amp; Float</div>
+    <div class="price-grid">
+      <div class="price-row"><span class="price-label">RVOL</span><span class="price-val ${magRvol}" title="volume against a normal day — 1.5× notable, 5× extreme">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
+      <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val ${magCap}" title="smaller moves further — under $300M is notable, under $50M is extreme">${fmtMcap(s.mcap)}</span></div>
+      <div class="price-row"><span class="price-label">Float</span><span class="price-val ${magFloat}" title="shares actually available — under 20M is notable, under 10M is extreme">${fmtShares(s.floatShares)}</span></div>
+      <div class="price-row"><span class="price-label">Short %</span><span class="price-val ${magShort}" title="${
+        s.shortFloat != null
+          ? 'short interest as a share of float — 10% notable, 20% extreme'
+          : 'TradingView’s scanner does not serve short interest on any name — seven column names were probed against seven stocks including GME and every one came back empty. This is not missing data for this stock, it is a field the source does not provide.'
+        }">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : 'n/a'}</span></div>
+    </div>
   </div>
+
+  <div class="card-badges">
+    ${firstSeenHTML}${alsoBadge}${canslimBadge}${badges}${hotBadge}${alignBadge}${catalystBadge}
+  </div>
+  ${signalTags}
 
   <div class="card-body">
 
+    <!-- RANGE — straight after the MA tags, because both answer "where is this
+         thing sitting", one against its moving averages and one against its
+         own history. -->
+    ${rangeBar ? `<div class="card-section">
+      <div class="section-title">Range</div>
+      ${rangeBar}
+    </div>` : ''}
+
+    <!-- NEWS — why the stock is moving belongs next to how much it is moving,
+         not eight sections below it. -->
+    <div class="card-section">
+      <div class="section-title">News ${catalyst ? '· ' + (catalyst.tier === 1 ? '⚡ ' : '') + catalyst.label + (catalyst.others && catalyst.others.length ? ' <span style="opacity:0.6;font-weight:400">+ ' + catalyst.others.map(o => o.label).join(', ') + '</span>' : '') : ''}</div>
+      <div id="news-${row.ticker}">${newsHTML}</div>
+    </div>
+
+    <!-- CHART — shown rather than hidden behind a click, but mounted only when
+         the card is actually on screen. See mountChart(). -->
+    <div class="card-section">
+      <div class="section-title">Chart
+        <span class="chart-expand" onclick="openChart('${row.ticker}')" title="open the full chart">⤢ full</span>
+      </div>
+      <div class="card-chart" id="cchart-${row.ticker}"
+           data-sym="${esc(s.tvSymbol || row.ticker)}" data-tkr="${esc(row.ticker)}">
+        <div class="cchart-idle">chart loads when this card is on screen</div>
+      </div>
+    </div>
+
+    <!-- Everything above this line is the card. Everything below it is the
+         detail behind the card, folded away by default: it is worth having and
+         it is not worth scrolling past twenty times a morning. -->
+    <button class="card-more" onclick="toggleCardMore('${row.ticker}',this)"
+            aria-expanded="false">▾ Details</button>
+    <div class="card-more-body" id="more-${row.ticker}" hidden>
+
     <!-- THEMES -->
-    ${themesHTML ? `<div class="card-section">${themesHTML}</div>` : ''}
+    ${themesHTML ? `<div class="card-section">
+      <div class="section-title">Themes</div>
+      ${themesHTML}
+    </div>` : ''}
 
     <!-- MARKET CONTEXT -->
     <div class="card-section">
@@ -2129,23 +3481,6 @@ function buildCard(row) {
     <!-- EMAs -->
     ${emas ? `<div class="card-section"><div class="section-title">EMAs</div><div class="ema-row">${emas}</div></div>` : ''}
 
-    <!-- MONTH RANGE -->
-    <div class="card-section">
-      <div class="section-title">1-Month Range</div>
-      ${rangeBar}
-    </div>
-
-    <!-- VOLUME & FLOAT -->
-    <div class="card-section">
-      <div class="section-title">Volume & Float</div>
-      <div class="price-grid">
-        <div class="price-row"><span class="price-label">RVOL</span><span class="price-val">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
-        <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val">${fmtMcap(s.mcap)}</span></div>
-        <div class="price-row"><span class="price-label">Float</span><span class="price-val">${fmtShares(s.floatShares)}</span></div>
-        <div class="price-row"><span class="price-label">Short %</span><span class="price-val">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : '—'}</span></div>
-      </div>
-    </div>
-
     <!-- ATR & MOVE -->
     <div class="card-section">
       <div class="section-title">ATR & Move</div>
@@ -2168,12 +3503,7 @@ function buildCard(row) {
       </div>
     </div>
 
-    <!-- NEWS -->
-    <div class="card-section">
-      <div class="section-title">News ${catalyst ? '· ' + (catalyst.tier === 1 ? '⚡ ' : '') + catalyst.label + (catalyst.others && catalyst.others.length ? ' <span style="opacity:0.6;font-weight:400">+ ' + catalyst.others.map(o => o.label).join(', ') + '</span>' : '') : ''}</div>
-      <div id="news-${row.ticker}">${newsHTML}</div>
-    </div>
-
+    </div><!-- /card-more-body -->
   </div>
 
   ${(() => {
@@ -2222,7 +3552,7 @@ async function loadNews(ticker, btn) {
     // re-render just the news section
     let items = [];
     if (d.news) {
-      const fh = (d.news.finnhub||[]).slice(0,2).map(n => ({ src:'FH', h: n.headline||n.summary||'' }));
+      const fh = (d.news.tradingview||[]).slice(0,2).map(n => ({ src:'TV', h: n.headline||n.summary||'' }));
       const yh = (d.news.yahoo||[]).slice(0,2).map(n => ({ src:'YH', h: n.title||n.headline||'' }));
       const eg = (d.news.edgar||[]).slice(0,2).map(n => ({ src:'SEC', h: n.title||n.headline||'' }));
       items = [...fh, ...yh, ...eg].slice(0,5);
@@ -2431,7 +3761,8 @@ function renderShortlistDate(entry) {
   }
   grid.innerHTML = items.map(item => {
     const chg = item.change || 0;
-    return `<div class="sl-card">
+    return `<div class="sl-card" onclick="openCard('${item.ticker}','${currentSLDate}')"
+        title="Open the full card">
       <div class="sl-ticker">${item.ticker}</div>
       <div class="sl-meta">
         <div class="sl-row"><span class="sl-key">Score</span><span class="sl-val">${item.score != null ? item.score : '—'}</span></div>
@@ -2441,7 +3772,9 @@ function renderShortlistDate(entry) {
         <div class="sl-row"><span class="sl-key">Method</span><span class="sl-val ${item.method==='auto'?'method-auto':'method-manual'}">${item.method}</span></div>
         <div class="sl-row"><span class="sl-key">Added</span><span class="sl-val" style="font-size:10px;color:var(--text2)">${fmtTime(item.addedAt)}</span></div>
       </div>
-      <button class="sl-remove-btn" onclick="removeSL('${item.ticker}')">✕ Remove</button>
+      <div class="sl-open-hint">tap for the full card</div>
+      <button class="sl-remove-btn"
+        onclick="event.stopPropagation();removeSL('${item.ticker}')">✕ Remove</button>
     </div>`;
   }).join('');
 }
@@ -2516,12 +3849,12 @@ async function loadWarehouse() {
 }
 
 const WH_COLS = {
-  r0: ['ticker','date','liveNow','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','lastUpdated'],
-  r1: ['ticker','date','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','capturedAt'],
+  r0: ['ticker','date','liveNow','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','canslim','shortlistedElsewhere','foundMinsFromOpen','lastUpdated'],
+  r1: ['ticker','date','inShortlist','_score','bias','price','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','canslim','shortlistedElsewhere','foundMinsFromOpen','capturedAt'],
   r3a: ['date','ticker','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
   r3b: ['date','ticker','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
-  r4a: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
-  r4b: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','catalyst','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
+  r4a: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','canslim','shortlistedElsewhere','foundMinsFromOpen','entryPriceA','hhA','llA','atr14','upR_A','downR_A','capturedAt'],
+  r4b: ['date','ticker','_score','inShortlist','bias','price936','prevClose','open','change','gapPct','vwap','sma5','ema9','ema13','ema20','ema50','rvol','atr','adrPct','dayHigh','dayLow','monthHigh','monthLow','monthRangePos','mcap','floatShares','shortFloat','pmHigh','pmLow','pmRange','pmAdrRatio','sector','industry','screenerKeys','regime','regimeLabel','longTerm','midTerm','shortTerm','broadResolved','secBias','secScore','secHot','themes','vsEma9','vsEma13','vsEma20','vsEma50','vsSma5','vsVwap','vsPrevClose','vsOpen','vsPmHigh','vsPmLow','maStack','maStackScore','monthQuarter','pmAdrBand','aboveAllMas','belowAllMas','dayRangePos','distEma9','distEma13','distEma20','distEma50','distSma5','distVwap','distPrevClose','distOpen','distPmHigh','distPmLow','catalyst','canslim','shortlistedElsewhere','foundMinsFromOpen','entryPriceB','hhB','llB','atr14','upR_B','downR_B','capturedAt'],
   shortlist: ['date','ticker','tvSymbol','addedAt','method','price','change','sector','score','exported','exportedAt'],
 };
 
@@ -2681,6 +4014,29 @@ function fmtTime(ts) {
   const d = new Date(ts);
   return d.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', timeZone:'America/New_York' });
 }
+// 24-hour Eastern. Run windows are written "04:00–09:30", so the time a
+// screener found a stock is written the same way — a badge reading "15:04"
+// sits against its window without the reader converting anything.
+function fmtET24(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York',
+  });
+}
+// Minutes from the opening bell, in New York, negative before it.
+// Read off the same ET clock fmtET24 prints, so the two can never disagree —
+// computing this from the browser's own timezone would put a phone in Riyadh
+// seven hours out and the card would confidently say so.
+function minsFromOpen(ts) {
+  if (!ts) return null;
+  const hhmm = new Date(ts).toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York',
+  });
+  const [h, m] = hhmm.split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return (h * 60 + m) - (9 * 60 + 30);
+}
+
 function fmtMcap(v) {
   if (v == null) return '—';
   if (v >= 1e9) return '$' + (v/1e9).toFixed(2) + 'B';
@@ -2712,6 +4068,134 @@ const INDEX_TV_SYMBOL = {
 };
 
 let tvWidget = null;
+
+/* ── In-card charts ─────────────────────────────────────────────────────────
+ *
+ * A chart on every card, without a chart on every card.
+ *
+ * The screener routinely shows 25 to 100 stocks and each TradingView widget is
+ * an iframe with its own socket and its own memory. Building them all on render
+ * would take a phone out at the knees, and most would be for cards that are
+ * never scrolled to. So a card declares where its chart goes and nothing is
+ * built until the card is actually on screen.
+ *
+ * Widgets are also torn down on the way out, with a small number kept alive, or
+ * a long scroll would leave sixty live iframes behind it — the same problem
+ * arriving slowly instead of all at once.
+ */
+const CHART_MAX_LIVE = 4;          // roughly two screens' worth on a phone
+const _liveCharts = [];            // ticker order, oldest first
+let _chartObserver = null;
+
+function mountChart(el) {
+  const tkr = el.dataset.tkr;
+  if (el.dataset.mounted === '1') return;
+  // tv.js is a remote script; if it has not loaded, say so rather than leaving
+  // an empty box that looks like a broken card.
+  if (typeof TradingView === 'undefined' || !TradingView.widget) {
+    el.innerHTML = '<div class="cchart-idle">chart unavailable — TradingView did not load</div>';
+    return;
+  }
+  el.dataset.mounted = '1';
+  el.innerHTML = '';
+  new TradingView.widget({
+    autosize: true,
+    symbol: el.dataset.sym,
+    interval: 'D',
+    timezone: 'America/New_York',
+    theme: 'dark',
+    style: '1',
+    locale: 'en',
+    toolbar_bg: '#13161e',
+    enable_publishing: false,
+    hide_top_toolbar: true,     // the card is not the place to draw on
+    hide_legend: true,
+    save_image: false,
+    container_id: el.id,
+    overrides: {
+      'paneProperties.background': '#0d0f14',
+      'paneProperties.backgroundType': 'solid',
+    },
+  });
+
+  _liveCharts.push(tkr);
+  while (_liveCharts.length > CHART_MAX_LIVE) unmountChart(_liveCharts.shift());
+}
+
+function unmountChart(tkr) {
+  const el = document.getElementById('cchart-' + tkr);
+  if (!el) return;
+  el.dataset.mounted = '';
+  el.innerHTML = '<div class="cchart-idle">chart loads when this card is on screen</div>';
+}
+
+// Called after every render, since renderCards() replaces the nodes the
+// observer was watching.
+function observeCharts() {
+  if (!('IntersectionObserver' in window)) return;   // then no charts, not a crash
+  if (_chartObserver) _chartObserver.disconnect();
+  _liveCharts.length = 0;
+  _chartObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) mountChart(e.target);
+  }, { rootMargin: '200px 0px' });   // start just before it is needed
+  document.querySelectorAll('.card-chart').forEach(el => _chartObserver.observe(el));
+}
+
+/*
+ * A link out to TradingView proper.
+ *
+ * The ticker itself already opens the embedded chart, which is the right thing
+ * for a glance — it stays inside the tool and keeps the card beside it. But the
+ * embedded widget cannot draw levels, cannot save a layout, and is not where a
+ * trade actually gets planned. So the ticker keeps its job and this is a
+ * separate, smaller target next to it.
+ *
+ * The exchange-qualified symbol is used when Side A supplied it (NASDAQ:AAPL).
+ * Falling back to the bare ticker is not the same thing: TradingView resolves
+ * a bare symbol to whichever listing it prefers, which for a dual-listed name
+ * is not necessarily the one being screened.
+ */
+function tvUrl(sym) {
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(sym)}`;
+}
+
+/*
+ * "Alert me on this one" — from the card, not from a form.
+ *
+ * Typing a ticker into a rule builder is the step where the wrong stock gets
+ * watched: the name is already on screen, and retyping it is both work and a
+ * chance to be wrong. So the card links to the alerts app carrying the ticker,
+ * and the rule opens already scoped to it.
+ *
+ * The port comes from the registry rather than being written here, so moving
+ * the app is one edit to tools.config.json.
+ */
+let ALERTS_APP = null;
+fetch('/api/tools').then(r => r.json())
+  .then(d => { ALERTS_APP = (d.apps || []).find(a => a.id === 'ALERTS') || null; renderCards(); })
+  .catch(() => {});
+
+/*
+ * The ⚠ alert link on a card.
+ *
+ * Built from the app's own declared address when it has one, and only from this
+ * page's protocol and host when it does not. That distinction is the whole
+ * point: the alerts app has to be reached over https, because a browser refuses
+ * Notification.requestPermission() to a page on a plain http origin — and this
+ * page is still http. Composing the link from location.protocol therefore sends
+ * every card straight back to the origin where notifications cannot be granted,
+ * with a working certificate sitting unused beside it.
+ *
+ * The address comes from /api/tools, which reads data/app-urls.json. See
+ * src/config.js; it is written by deploy/setup-https.sh or scripts/set-app-url.js.
+ */
+function alertUrl(ticker) {
+  if (!ALERTS_APP) return null;
+  const base = ALERTS_APP.url
+    ? ALERTS_APP.url.replace(/\/$/, '')
+    : `${location.protocol}//${location.hostname}:${ALERTS_APP.port}`;
+  return `${base}/?ticker=${encodeURIComponent(ticker)}`;
+}
 
 function openChart(sym) {
   const tvSym = INDEX_TV_SYMBOL[sym] || sym;
@@ -2757,7 +4241,636 @@ function closeChartBtn() {
 // ═══════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════
-loadRegistry();
+// Screener names first: the filter list and the card badges are built from
+// them, so loading the registry first would render one pass of unlabelled
+// badges before correcting itself.
+loadScreenerNames().then(loadRegistry);
+
+// ── when to open this tool ─────────────────────────────────────────────────
+// Answered by the server, not here: the window comes from this tool's own
+// screeners and "now" is measured on the market's clock. A phone in another
+// timezone would otherwise be told to check T7 at midnight.
+async function loadCheckWindow() {
+  const el = document.getElementById('check-badge');
+  if (!el) return;
+  try {
+    const h = await (await fetch('/health')).json();
+    const c = h && h.check;
+    if (!c) { el.hidden = true; return; }
+    el.hidden = false;
+    el.classList.toggle('now', !!c.now);
+    el.textContent = c.now ? `● CHECK NOW · until ${c.to} ET` : `check ${c.from}–${c.to} ET`;
+    el.title = (c.screeners || []).map(s => `${s.name}: ${s.from}–${s.to}`).join('\n');
+  } catch { el.hidden = true; }
+}
+loadCheckWindow();
+setInterval(loadCheckWindow, 60000);
+
+// ═══════════════ SCREENER SCORECARD ═══════════════
+// The question is "which screeners find stocks that move", so every column is
+// about the move: how far it ran, how often it ran far enough, and on how many
+// separate days. Consistency is the one that decides: a screener whose good
+// moves all landed on two wild days is not something you can plan around.
+async function loadScreenerReport() {
+  const el = document.getElementById('sc-body');
+  const entry = document.getElementById('sc-entry').value;
+  try {
+    const d = await (await fetch(`/api/analysis/screener-report?entry=${entry}`)).json();
+    if (!d.ok) { el.innerHTML = `<div class="sc-empty">${esc(d.error || 'no data')}</div>`; return; }
+    if (!d.screeners.length) {
+      el.innerHTML = `<div class="sc-empty">No captured days yet. This fills in after the first
+        end-of-day capture — one row per card, per day.</div>`;
+      return;
+    }
+    const vcls = { keep: 'sc-keep', watch: 'sc-watch', drop: 'sc-drop' };
+    const rows = d.screeners.map(s => `
+      <tr class="${s.thin ? 'sc-thin' : ''}">
+        <td class="sc-name">${esc(s.name)}</td>
+        <td>${s.cards}</td>
+        <td>${s.days}</td>
+        <td>${s.medUpR ?? '—'}</td>
+        <td>${s.avgUpR ?? '—'}</td>
+        <td>${s.avgDownR ?? '—'}</td>
+        <td>${s.goodPct ?? '—'}%</td>
+        <td>${s.bigPct ?? '—'}%</td>
+        <td>${s.consistency ?? '—'}%</td>
+        <td><span class="sc-v ${vcls[s.verdict] || 'sc-none'}">${esc(s.verdict)}</span></td>
+      </tr>`).join('');
+    el.innerHTML = `<div class="sc-scroll"><table class="sc-tbl">
+      <tr>
+        <th>Screener</th><th>Cards</th><th>Days</th>
+        <th title="half its cards did better than this">Median R</th>
+        <th>Avg R</th>
+        <th title="how far it went against you first, on average">Avg −R</th>
+        <th title="share of cards that ran ${d.goodR}R or more">≥${d.goodR}R</th>
+        <th title="share of cards that ran ${d.bigR}R or more">≥${d.bigR}R</th>
+        <th title="share of days it produced at least one ${d.goodR}R move">Days hit</th>
+        <th>Verdict</th>
+      </tr>${rows}</table></div>
+      <div class="sc-base">
+        ${d.baseline ? `<b>Tool baseline:</b> ${d.baseline.cards} cards over ${d.baseline.days} days,
+          avg ${d.baseline.avgUpR}R, ${d.baseline.goodPct}% reached ${d.goodR}R.
+          A screener only earns its place by beating this — comparing across tools compares
+          universes, not screeners.<br>` : ''}
+        <b>Verdict</b> is blunt on purpose: <i>keep</i> = ${d.goodR}R at least 35% of the time on at
+        least half its days. <i>drop</i> = neither. Anything under ${d.minCards} cards or
+        ${d.minDays} days is greyed out and left unjudged — too little to mean anything.
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="sc-empty">Could not load: ${esc(e.message)}</div>`;
+  }
+}
+
+// ═══════════════ FULL CARD, ON DEMAND ═══════════════
+// The shortlist stores a summary — score, price, change — which is enough to
+// list and not enough to decide anything. The card itself already exists, live
+// in r0 for today and frozen in r1 for any earlier date, so this fetches
+// whichever applies and renders it with buildCard: the same function the
+// screener uses, so what opens here is the real card rather than a second
+// version of it that can drift.
+async function openCard(ticker, date) {
+  const overlay = document.getElementById('card-overlay');
+  const body = document.getElementById('card-modal-body');
+  document.getElementById('card-modal-title').textContent = ticker;
+  document.getElementById('card-modal-sub').textContent = date ? date : '';
+  body.innerHTML = '<div class="card-modal-msg">Loading…</div>';
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  try {
+    const url = `/api/card/${encodeURIComponent(ticker)}` + (date ? `?date=${encodeURIComponent(date)}` : '');
+    const d = await (await fetch(url)).json();
+    if (!d.ok) {
+      body.innerHTML = `<div class="card-modal-msg">${esc(d.error || 'Not found')}${
+        d.lastSeen ? `<br><br><a href="#" onclick="openCard('${esc(ticker)}','${esc(d.lastSeen)}');return false;"
+          style="color:var(--accent)">Open the ${esc(d.lastSeen)} card instead</a>` : ''}</div>`;
+      return;
+    }
+    document.getElementById('card-modal-sub').textContent = d.source === 'live'
+      ? 'live — still updating'
+      : `frozen ${d.date}${d.capturedAt ? ' at ' + fmtET24(d.capturedAt) : ''}`;
+    body.innerHTML = buildCard(d.card);
+  } catch (e) {
+    body.innerHTML = `<div class="card-modal-msg">Could not load: ${esc(e.message)}</div>`;
+  }
+}
+
+function closeCardModal() {
+  document.getElementById('card-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeCardModal();
+});
+
+// Deep link: /scanner?ticker=AAPL[&date=YYYY-MM-DD]. This is what the unified
+// shortlist on the landing page links to — it cannot render a card itself, so
+// it hands off to the tool that owns the data.
+(function openCardFromUrl() {
+  const q = new URLSearchParams(location.search);
+  const t = q.get('ticker');
+  if (!t) return;
+  // Wait for the registry, so a live card has its row to render.
+  setTimeout(() => openCard(t.toUpperCase(), q.get('date') || null), 700);
+})();
+
+// ═══════════════ SCREENER BUILDER ═══════════════
+// Filters are TradingView's own { left, operation, right } shape, so a rule
+// built here matches one built in their screener field for field. `right` is
+// either a literal or another column name — that is what lets a rule compare
+// two series ("5MA above 9MA") rather than only a series to a number.
+let SB_META = null;      // { fields, operations }
+let SB_LIST = [];
+let SB_EDIT = null;      // the screener being edited (null = none)
+
+async function loadBuilder() {
+  try {
+    if (!SB_META) {
+      const m = await (await fetch('/api/screeners/meta')).json();
+      SB_META = m;
+      document.getElementById('sb-tool').textContent = `· ${m.tool.name} (${m.tool.id})`;
+    }
+    const d = await (await fetch('/api/screeners')).json();
+    SB_LIST = d.screeners || [];
+    // Refresh first, then render: editing a screener renames what the cards and
+    // the filter list show, and the schedule takes each screener's colour from
+    // this same list.
+    await loadScreenerNames();
+    sbRenderList();
+  } catch (e) {
+    document.getElementById('sb-list').innerHTML =
+      `<div class="sb-result err">Could not load screeners: ${esc(e.message)}</div>`;
+  }
+}
+
+// TradingView appends a timeframe to a column with "|": EMA9|1 is the daily
+// EMA9, close|1W the weekly close. Rendered in words so a rule reads as a
+// sentence rather than "EMA 9 1".
+const SB_TF = { '1': 'daily', '1W': 'weekly', '1M': 'monthly', '5': '5m', '15': '15m',
+                '30': '30m', '60': '1h', '120': '2h', '240': '4h' };
+function sbFieldLabel(v) {
+  const parts = String(v).split('|');
+  const base = parts[0];
+  const f = SB_META.fields.find(x => x.value === v) || SB_META.fields.find(x => x.value === base);
+  const label = f ? f.label : base;
+  if (parts.length < 2) return label;
+  return `${label} (${SB_TF[parts[1]] || parts[1]})`;
+}
+function sbOpLabel(v) {
+  const o = SB_META.operations.find(x => x.value === v);
+  return o ? o.label : v;
+}
+function sbRuleText(f) {
+  const right = Array.isArray(f.right) ? f.right.join(' … ') : f.right;
+  const rightIsField = typeof f.right === 'string' && isNaN(f.right);
+  return `${sbFieldLabel(f.left)} ${sbOpLabel(f.operation)} ${rightIsField ? sbFieldLabel(right) : right}`;
+}
+
+// ── daily schedule ─────────────────────────────────────────────────────────
+// A screener with a run window only fires inside it, which is the whole point
+// of the windows — but it also means a stock can turn up hours after you have
+// stopped taking that kind of trade. Drawing the day makes the question "when
+// could I actually have seen this?" answerable at a glance instead of by
+// reading times off each screener in turn.
+const SCH_FROM = 4 * 60, SCH_TO = 20 * 60;   // 04:00–20:00 ET
+const hhmmToMin = s => { const [h, m] = String(s).split(':').map(Number); return h * 60 + m; };
+const schPct = min => ((Math.max(SCH_FROM, Math.min(SCH_TO, min)) - SCH_FROM) / (SCH_TO - SCH_FROM)) * 100;
+
+function etNowMinutes() {
+  const p = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date());
+  const h = +p.find(x => x.type === 'hour').value;
+  const m = +p.find(x => x.type === 'minute').value;
+  return h * 60 + m;
+}
+
+function sbRenderSchedule() {
+  const el = document.getElementById('sb-schedule');
+  if (!el) return;
+  if (!SB_LIST.length) { el.innerHTML = ''; return; }
+
+  const now = etNowMinutes();
+  const nowIn = now >= SCH_FROM && now <= SCH_TO;
+  const ticks = [4, 6, 8, 9.5, 11, 13, 15, 16, 18, 20];
+  const cap = SB_META && SB_META.tool && SB_META.tool.captureAt;
+
+  const rows = SB_LIST.map(s => {
+    const col = screenerColor(s.name);
+    const from = s.runFrom ? hhmmToMin(s.runFrom) : SCH_FROM;
+    const to = s.runTo ? hhmmToMin(s.runTo) : SCH_TO;
+    const live = s.enabled && now >= from && now < to;
+    const when = s.runFrom ? `${s.runFrom}–${s.runTo}` : 'all day';
+    return `<div class="sch-row" ${s.enabled ? '' : 'style="opacity:.45"'}>
+      <div class="sch-name" title="${esc(s.name)}" style="color:${col}">${esc(s.name)}</div>
+      <div class="sch-track">
+        <div class="sch-bar" style="left:${schPct(from)}%;width:${schPct(to) - schPct(from)}%;background:${col}"></div>
+        <div class="sch-open" style="left:${schPct(570)}%"></div>
+        ${nowIn ? `<div class="sch-now" style="left:${schPct(now)}%"></div>` : ''}
+      </div>
+      <div class="sch-when">${when}${s.enabled ? (live ? ' · now' : '') : ' · off'}</div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `<div class="sch">
+    <div class="sch-title">When each screener runs</div>
+    <div class="sch-sub">A screener only looks for stocks inside its own window. Outside it the
+      screener is asleep — it finds nothing new, though stocks it already found stay on screen and
+      keep updating all day. Every card badge is stamped with the time that screener first matched
+      the stock, so a candidate found in the afternoon never reads as one that was there in the
+      morning.</div>
+    <div class="sch-grid">
+      ${rows}
+      <div class="sch-axis">
+        <div class="sch-name"></div>
+        <div class="sch-ticks">${ticks.map(t => {
+          const m = Math.round(t * 60);
+          const lbl = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+          return `<span class="sch-tick" style="left:${schPct(m)}%">${lbl}</span>`;
+        }).join('')}</div>
+        <div class="sch-when"></div>
+      </div>
+    </div>
+    ${cap ? `<div class="sch-capture">
+      <b>Learning moment — ${esc(cap.r1)} ET.</b> Once a day this tool takes a photo of every card
+      on screen at ${esc(cap.r1)}, then measures how far each one ran from ${esc(cap.entryA)} and
+      ${esc(cap.entryB)}. Photo plus result is one training row — the only thing the score model
+      ever learns from. A stock found after ${esc(cap.r1)} still shows here and can be traded, but
+      it is not in the photo, so it teaches the model nothing.
+      ${cap.why ? `<div class="sch-why"><span class="sch-why-k">Why ${esc(cap.r1)} for this tool</span>
+        ${esc(cap.why)}</div>` : ''}
+    </div>` : ''}
+    <div class="sch-legend">
+      <span style="color:#4ade80">│</span> 09:30 market open
+      ${nowIn ? ' &nbsp;·&nbsp; <span style="color:#f87171">│</span> now' : ''}
+      &nbsp;·&nbsp; times are Eastern
+    </div>
+  </div>`;
+}
+
+// Only the screeners this tool ships with carry a stated reason. One the trader
+// built has none, which is right — they chose its window themselves.
+function sbWindowNote(s) {
+  return (SB_META && SB_META.windowNotes && SB_META.windowNotes[s.key]) || null;
+}
+
+// The floor is invisible in every screener's rule list because it is not in any
+// of them — it is added to all of them at scan time. Stating it here is what
+// stops a result count that looks low from being a mystery.
+function sbRenderFloor() {
+  const el = document.getElementById('sb-floor');
+  const f = SB_META && SB_META.floor;
+  if (!el || !f) return;
+  el.innerHTML = `<div class="sc-wrap" style="margin-bottom:12px">
+    <div class="sc-title">Tradability floor — applies to every screener</div>
+    <div class="sc-sub">Not a strategy, a precondition. A stock too thin to get out of, or with too
+      little daily range to pay for the risk, is not a candidate whatever a screener thinks of it.
+      These three run on top of every screener below, including any you build.</div>
+    <div class="floor-rules">${f.rules.map(r => `<span class="floor-rule">${esc(r)}</span>`).join('')}</div>
+    <div class="sc-base">Change them in <b>Settings</b> — <code>minAvgVolume</code>,
+      <code>minAtr</code>, <code>minAtrPct</code>. Set one to 0 to switch that leg off.</div>
+  </div>`;
+}
+
+/*
+ * The floor, shown inside every screener's rule list.
+ *
+ * It is stated once at the top of this tab, but that is not where anyone looks
+ * when they are asking what a particular screener does. A screener whose card
+ * lists six rules while the scan sends ten is a card you cannot reason from —
+ * you would work out why a name is missing by checking six rules it passes.
+ *
+ * Marked as shared rather than merged in silently: these are not this
+ * screener's rules and editing them here would change all of them.
+ */
+function sbFloorCount() {
+  const f = SB_META && SB_META.floor;
+  return f && f.rules ? f.rules.length : 0;
+}
+
+function sbFloorRules() {
+  const f = SB_META && SB_META.floor;
+  if (!f || !f.rules) return '';
+  return f.rules.map(r =>
+    `<span class="sb-rule is-floor" title="Applies to every screener on this tool — change it in Settings">${esc(r)}</span>`
+  ).join('');
+}
+
+function sbRenderList() {
+  sbRenderFloor();
+  sbRenderSchedule();
+  const el = document.getElementById('sb-list');
+  if (!SB_LIST.length) {
+    el.innerHTML = `<div class="sb-result">No screeners yet. Click <b>+ New screener</b> to build one.</div>`;
+    return;
+  }
+  el.innerHTML = SB_LIST.map(s => `
+    <div class="sb-card ${s.enabled ? '' : 'sb-off'}">
+      <div class="sb-card-top">
+        <div>
+          <span class="sb-name">${esc(s.name)}</span><span class="sb-key">${esc(s.key)}</span>
+          ${s.enabled ? '' : '<span class="sb-pill">disabled</span>'}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="sb-pill">${s.filters.length} rules${!s.labelOnly && sbFloorCount() ? ` + ${sbFloorCount()} floor` : ''}</span>
+          ${s.labelOnly ? '<span class="sb-pill sb-when">list only</span>' : ''}
+          <span class="sb-pill">top ${s.limit}</span>
+          ${s.runFrom
+            ? `<span class="sb-pill sb-when">runs ${s.runFrom}–${s.runTo} ET</span>`
+            : `<span class="sb-pill">runs all day</span>`}
+          <button class="sb-btn" onclick="sbEdit(${s.id})">Edit</button>
+          <button class="sb-btn" onclick="sbMirror(${s.id})" title="Create the opposite-facing twin">Mirror</button>
+          <button class="sb-btn" onclick="sbToggle(${s.id},${s.enabled ? 0 : 1})">${s.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="sb-btn sb-danger" onclick="sbDelete(${s.id})">Delete</button>
+        </div>
+      </div>
+      <div class="sb-rules">${s.filters.map(f => `<span class="sb-rule">${esc(sbRuleText(f))}</span>`).join('')
+        + (s.labelOnly ? '' : sbFloorRules())}</div>
+      ${s.labelOnly ? `<div class="sb-why">
+        <span class="sb-why-k">List only</span>
+        Maintains a list; it does not produce cards. Its matches never enter the day's registers,
+        and the tradability floor does not apply — membership is about the company, not about
+        whether it could be day-traded today.</div>` : ''}
+      <div class="sb-mirror">
+        <span class="sb-why-k">Mirror of</span>
+        <select onchange="sbSetMirror(${s.id}, this.value)">
+          <option value="">— not a mirror —</option>
+          ${SB_LIST.filter(o => o.id !== s.id).map(o =>
+            `<option value="${esc(o.name)}" ${o.name === s.mirrorOf ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}
+        </select>
+        <span class="sb-mirror-note">Pairs the two in the directional comparison. Recorded, so
+          renaming either one does not break it.</span>
+      </div>
+      ${sbWindowNote(s) ? `<div class="sb-why">
+        <span class="sb-why-k">${s.runFrom ? `Why ${esc(s.runFrom)}–${esc(s.runTo)}` : 'Why no window'}</span>
+        ${esc(sbWindowNote(s))}</div>` : ''}
+    </div>`).join('');
+}
+
+async function sbSetMirror(id, name) {
+  // Empty string clears the link, which is why it is sent as null rather than
+  // left out — an omitted field means "unchanged" to the update endpoint.
+  await fetch(`/api/screeners/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mirrorOf: name || null }),
+  });
+  loadBuilder();
+}
+
+function sbNew() {
+  SB_EDIT = { id: null, name: '', enabled: true, limit: 50, runFrom: null, runTo: null,
+              filters: [{ left: 'close', operation: 'egreater', right: 1 }],
+              sort: { sortBy: 'change', sortOrder: 'desc' } };
+  sbRenderEditor();
+}
+function sbEdit(id) {
+  const s = SB_LIST.find(x => x.id === id);
+  if (!s) return;
+  SB_EDIT = JSON.parse(JSON.stringify(s));
+  sbRenderEditor();
+}
+function sbClose() {
+  SB_EDIT = null;
+  document.getElementById('sb-editor').style.display = 'none';
+}
+
+function sbRenderEditor() {
+  const e = SB_EDIT, box = document.getElementById('sb-editor');
+  const fieldOpts = v => SB_META.fields.map(f =>
+    `<option value="${f.value}" ${f.value === String(v).split('|')[0] ? 'selected' : ''}>${esc(f.label)}</option>`).join('');
+  const opOpts = v => SB_META.operations.map(o =>
+    `<option value="${o.value}" ${o.value === v ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+
+  const rows = e.filters.map((f, i) => {
+    const rightIsField = typeof f.right === 'string' && isNaN(f.right);
+    return `
+    <div class="sb-row">
+      <select onchange="sbSet(${i},'left',this.value)">${fieldOpts(f.left)}</select>
+      <select onchange="sbSet(${i},'operation',this.value)">${opOpts(f.operation)}</select>
+      <div>
+        <div class="sb-vtype">
+          <button class="${rightIsField ? '' : 'on'}" onclick="sbRightType(${i},'number')">number</button>
+          <button class="${rightIsField ? 'on' : ''}" onclick="sbRightType(${i},'field')">field</button>
+        </div>
+        ${rightIsField
+          ? `<select onchange="sbSet(${i},'right',this.value)">${fieldOpts(f.right)}</select>`
+          : `<input type="text" value="${esc(String(f.right))}" onchange="sbSet(${i},'right',this.value)">`}
+      </div>
+      <button class="sb-x" title="remove rule" onclick="sbDelRule(${i})">×</button>
+    </div>`;
+  }).join('');
+
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div class="sb-field">
+      <label class="sb-label">Name</label>
+      <input type="text" value="${esc(e.name)}" placeholder="e.g. MA Stack Breakout"
+             onchange="SB_EDIT.name=this.value">
+    </div>
+    <label class="sb-label">Rules — a stock must match all of them</label>
+    ${rows}
+    <button class="sb-btn" onclick="sbAddRule()">+ Add rule</button>
+    ${sbFloorCount() && !e.labelOnly ? `<div class="sb-rules" style="margin-top:10px">
+      <span class="sb-why-k" style="align-self:center">Always added</span>${sbFloorRules()}</div>
+      <div class="sb-mirror-note">Every screener on this tool gets these on top of its own rules —
+        no need to repeat them here. Change them in Settings → Tradability floor.</div>` : ''}
+    <div class="sb-row" style="margin-top:12px;grid-template-columns:1fr 1fr 1fr auto">
+      <div><label class="sb-label">Sort by</label>
+        <select onchange="SB_EDIT.sort.sortBy=this.value">${fieldOpts(e.sort.sortBy)}</select></div>
+      <div><label class="sb-label">Direction</label>
+        <select onchange="SB_EDIT.sort.sortOrder=this.value">
+          <option value="desc" ${e.sort.sortOrder === 'desc' ? 'selected' : ''}>High to low</option>
+          <option value="asc" ${e.sort.sortOrder === 'asc' ? 'selected' : ''}>Low to high</option>
+        </select></div>
+      <div><label class="sb-label">Max results</label>
+        <input type="number" min="1" max="200" value="${e.limit}" onchange="SB_EDIT.limit=parseInt(this.value)||50"></div>
+      <div></div>
+    </div>
+    <div class="sb-row" style="grid-template-columns:1fr 1fr 2fr auto">
+      <div><label class="sb-label">Runs from (ET)</label>
+        <input type="time" value="${e.runFrom || ''}" onchange="SB_EDIT.runFrom=this.value||null"></div>
+      <div><label class="sb-label">Runs until (ET)</label>
+        <input type="time" value="${e.runTo || ''}" onchange="SB_EDIT.runTo=this.value||null"></div>
+      <div style="font-size:11px;color:var(--text3);align-self:end;padding-bottom:7px;line-height:1.5">
+        Leave both empty to run all day. A pre-market screener left running after
+        the open fills its own data with the wrong session.</div>
+      <div></div>
+    </div>
+    <div class="sb-actions">
+      <button class="sb-btn" onclick="sbTest()">Test on TradingView</button>
+      <button class="sb-btn sb-primary" onclick="sbSave()">${e.id ? 'Save changes' : 'Create screener'}</button>
+      <button class="sb-btn" onclick="sbClose()">Cancel</button>
+    </div>
+    <div id="sb-result"></div>`;
+}
+
+function sbSet(i, key, val) {
+  if (key === 'right' && !isNaN(val) && val.trim() !== '') val = parseFloat(val);
+  SB_EDIT.filters[i][key] = val;
+  if (key === 'left') sbRenderEditor();
+}
+// Switching a rule's value between a literal and another column is the whole
+// point of the builder — "close above 20" vs "close above EMA20".
+function sbRightType(i, type) {
+  SB_EDIT.filters[i].right = type === 'field' ? 'EMA9' : 0;
+  sbRenderEditor();
+}
+function sbAddRule() {
+  SB_EDIT.filters.push({ left: 'close', operation: 'egreater', right: 1 });
+  sbRenderEditor();
+}
+function sbDelRule(i) {
+  SB_EDIT.filters.splice(i, 1);
+  if (!SB_EDIT.filters.length) SB_EDIT.filters.push({ left: 'close', operation: 'egreater', right: 1 });
+  sbRenderEditor();
+}
+
+async function sbTest() {
+  const box = document.getElementById('sb-result');
+  box.className = 'sb-result'; box.textContent = 'Running on TradingView…';
+  try {
+    const r = await fetch('/api/screeners/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(SB_EDIT) });
+    const d = await r.json();
+    if (!d.ok) { box.className = 'sb-result err'; box.textContent = d.error; return; }
+    box.className = 'sb-result ok';
+    const names = d.sample.map(x => `${x.ticker} ${x.change != null ? (x.change > 0 ? '+' : '') + x.change.toFixed(1) + '%' : ''}`).join('   ');
+    box.innerHTML = `${d.count} match${d.count === 1 ? '' : 'es'} · ${d.ms}ms` +
+      (d.count ? `<br>${esc(names)}` : '<br>Nothing matched — the rules may be too tight.');
+  } catch (e) {
+    box.className = 'sb-result err'; box.textContent = e.message;
+  }
+}
+
+async function sbSave() {
+  const box = document.getElementById('sb-result');
+  const isNew = !SB_EDIT.id;
+  try {
+    const r = await fetch(isNew ? '/api/screeners' : `/api/screeners/${SB_EDIT.id}`, {
+      method: isNew ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(SB_EDIT) });
+    const d = await r.json();
+    if (!d.ok) { box.className = 'sb-result err'; box.textContent = d.error; return; }
+    sbClose(); await loadBuilder();
+  } catch (e) {
+    box.className = 'sb-result err'; box.textContent = e.message;
+  }
+}
+
+// A mirror is the same structural setup facing the other way: directional
+// rules flip, quality guards ("price above $1", "volume above 2M") stay put —
+// inverting those would select illiquid junk rather than the bearish twin.
+async function sbMirror(id) {
+  const s = SB_LIST.find(x => x.id === id);
+  if (!s) return;
+  if (!confirm(`Create the mirror of "${s.name}"?\n\nDirectional rules flip; ` +
+               `price and volume guards stay as they are.`)) return;
+  const r = await fetch(`/api/screeners/${id}/mirror`, { method: 'POST' });
+  const d = await r.json();
+  if (!d.ok) { alert(d.error); return; }
+  await loadBuilder();
+  sbEdit(d.screener.id);   // open it so the pair can be checked and tuned
+}
+
+async function sbToggle(id, enabled) {
+  await fetch(`/api/screeners/${id}`, { method: 'PUT',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !!enabled }) });
+  loadBuilder();
+}
+async function sbDelete(id) {
+  const s = SB_LIST.find(x => x.id === id);
+  if (!confirm(`Delete "${s ? s.name : 'this screener'}"? Stocks already captured keep their tag.`)) return;
+  await fetch(`/api/screeners/${id}`, { method: 'DELETE' });
+  loadBuilder();
+}
+
+
+// ═══════════════ TOOL SWITCHER ═══════════════
+// The header names the tool this instance IS, and opens a list of the others so
+// you can move between them without going back to the landing page. Tools live
+// on separate ports, so switching is a navigation, not a state change.
+let TOOL_SELF = null, TOOL_LIST = [];
+
+async function initToolSwitcher() {
+  try {
+    const [me, all] = await Promise.all([
+      fetch('/health').then(r => r.json()),
+      fetch('/api/tools').then(r => r.json()),
+    ]);
+    TOOL_SELF = me;
+    TOOL_LIST = all.tools || [];
+    const entry = TOOL_LIST.find(t => t.id === me.tool);
+    const name = (entry && entry.name) || me.name || 'Trade Desk';
+    document.getElementById('tool-label').textContent = name.toUpperCase();
+    if (entry && entry.accent) {
+      document.querySelector('.tool-btn').style.color = entry.accent;
+    }
+    document.title = `${name} · Trade Desk`;
+    renderToolMenu();
+  } catch {
+    document.getElementById('tool-label').textContent = 'TRADE DESK';
+  }
+}
+
+function renderToolMenu() {
+  const here = TOOL_SELF && TOOL_SELF.tool;
+  const items = TOOL_LIST.map(t => {
+    const current = t.id === here;
+    const href = current ? '#' : `${location.protocol}//${location.hostname}:${t.port}/scanner`;
+    return `<a class="tool-item ${current ? 'current' : ''}" role="menuitem"
+      ${current ? 'aria-current="true"' : `href="${href}"`}>
+      <span class="swatch" style="background:${t.accent || 'var(--accent)'}"></span>
+      <span class="tname">${esc(t.name)}</span>
+      <span class="tid">${t.id}</span>
+      ${current ? '<span class="tcheck">●</span>' : ''}
+    </a>`;
+  }).join('');
+  document.getElementById('tool-menu').innerHTML =
+    `<div class="tool-menu-head">Switch tool</div>${items}
+     <div class="tool-menu-foot">
+       <a class="tool-item" href="${location.protocol}//${location.hostname}:3000/">
+         <span class="swatch" style="background:var(--text3)"></span>
+         <span class="tname">All tools</span>
+       </a>
+     </div>`;
+}
+
+function toggleToolMenu(ev) {
+  ev.stopPropagation();
+  const m = document.getElementById('tool-menu');
+  const open = m.classList.toggle('open');
+  document.getElementById('tool-btn').setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+document.addEventListener('click', () => {
+  const m = document.getElementById('tool-menu');
+  if (m && m.classList.contains('open')) {
+    m.classList.remove('open');
+    document.getElementById('tool-btn').setAttribute('aria-expanded', 'false');
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const m = document.getElementById('tool-menu');
+    if (m) m.classList.remove('open');
+  }
+});
+initToolSwitcher();
+
+// Sunlight is ON unless it has been explicitly switched off. This tool is read
+// on a phone, outdoors, at the open — that is the normal case, not the
+// exception, so it is the default and the darker palette is the opt-out.
+// Runs at the end of the script, before the first data arrives, so the page
+// comes up readable rather than flashing the low-contrast palette first.
+(function restoreSunlight() {
+  let on = true;
+  try { on = localStorage.getItem('sunlight') !== '0'; } catch { /* private mode */ }
+  if (!on) return;
+  document.body.classList.add('sunlight');
+  const b = document.getElementById('sun-btn');
+  if (b) { b.classList.add('on'); b.title = 'back to normal contrast'; }
+})();
+
 </script>
 </body>
 </html>

@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const path = require('path');
 const axios = require('axios');
 const db = require('./db');
-const { runFullScan } = require('./pipeline');
+const { runFullScan, runRefreshOnly } = require('./pipeline');
 const { runAutoRule } = require('./sideF/shortlist');
 const { captureR1, captureR2 } = require('./warehouse/registers');
 const { captureR3 } = require('./sideH/capture');
@@ -11,7 +11,7 @@ const training = require('./training/trainingData');
 const r0 = require('./r0/registry');
 const { toETDate } = require('./utils/time');
 
-const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
+const SCORER_URL = require('./config').scorerUrl;
 
 async function autoTrainScorer() {
   const today = toETDate(Date.now());
@@ -170,20 +170,113 @@ function getJobRegistry() {
   }));
 }
 
+const pad = n => String(n).padStart(2, '0');
+
 function startScheduler() {
   console.log('[Scheduler] Starting...');
 
-  registerJob('Full Scan 7–9 AM ET', '*/30 7-8 * * 1-5', 'America/New_York', () => runFullScan());
-  registerJob('Full Scan 9–10 AM ET', '*/5 9 * * 1-5', 'America/New_York', () => runFullScan());
-  registerJob('Full Scan Off-Hours', '0 10,13,16 * * 1-5', 'America/New_York', () => runFullScan());
-  registerJob('Shortlist Auto-Rule 9:35 AM', '35 9 * * 1-5', 'America/New_York', () => runAutoRule());
-  registerJob('R1 Capture 9:36 AM', '36 9 * * 1-5', 'America/New_York', () => captureR1());
+  // ── discovery ──
+  // A screener only runs inside its own window, so these say how OFTEN the tool
+  // looks, not what it looks for; a scan that lands when every screener is
+  // asleep finds nothing new and costs one quote call. That is what lets the
+  // cadence be the same for every tool while the schedule differs per tool.
+  //
+  // The 09:00–10:00 five-minute cadence is load-bearing and should not be
+  // thinned: r1 freezes at 09:36, and only what is in r0 by then ever reaches
+  // the model. Everything discovered later is a live-trading candidate that no
+  // amount of scanning will put into training.
+  registerJob('Discovery — Pre-Market (04:00–09:00)', '*/30 4-8 * * 1-5', 'America/New_York', () => runFullScan());
+  registerJob('Discovery — Open (09:00–10:00)', '*/5 9 * * 1-5', 'America/New_York', () => runFullScan());
+  registerJob('Discovery — Session (10:00–16:00)', '*/15 10-15 * * 1-5', 'America/New_York', () => runFullScan());
+  registerJob('Discovery — Close (16:00)', '0 16 * * 1-5', 'America/New_York', () => runFullScan());
+
+  // ── refresh ──
+  // Quotes only, for every card already on screen. Independent of the windows
+  // on purpose: a screener going to sleep must stop finding new candidates
+  // without freezing the ones it already found. Before this, a card discovered
+  // at 09:40 kept its 09:40 prices until the next scan — which, after 10:00,
+  // could be three hours later.
+  registerJob('Refresh — Live Card Data (04:00–16:00)', '*/5 4-16 * * 1-5', 'America/New_York', () => runRefreshOnly());
+  // ── capture ──
+  // r1 is the only snapshot the model ever learns from, so it has to land while
+  // this tool's screeners are actually finding things. A tool whose first
+  // screener wakes at 10:00 froze an empty register every day at 09:36.
+  const cap = require('./config').captureAt;
+  const [r1H, r1M] = cap.r1.split(':').map(Number);
+  const ruleMin = r1M === 0 ? 59 : r1M - 1;          // one minute before r1
+  const ruleHour = r1M === 0 ? r1H - 1 : r1H;
+  registerJob(`Shortlist Auto-Rule ${pad(ruleHour)}:${pad(ruleMin)}`,
+    `${ruleMin} ${ruleHour} * * 1-5`, 'America/New_York', () => runAutoRule());
+  registerJob(`R1 Capture ${cap.r1}`,
+    `${r1M} ${r1H} * * 1-5`, 'America/New_York', () => captureR1());
   registerJob('R2 Snapshot 9:26–9:56 AM', '26,31,36,41,46,51,56 9 * * 1-5', 'America/New_York', () => captureR2());
   registerJob('R2 Snapshot 10:01 AM', '1 10 * * 1-5', 'America/New_York', () => captureR2());
   registerJob('R3 EOD Capture 4:05 PM', '5 16 * * 1-5', 'America/New_York', () => captureR3());
   registerJob('Scorer Auto-Train 4:20 PM', '20 16 * * 1-5', 'America/New_York', () => autoTrainScorer());
   registerJob('Daily Backup 5:30 PM', '30 17 * * 1-5', 'America/New_York', () => pushBackup());
   registerJob('Midnight r0 Flush', '0 0 * * *', 'America/New_York', () => { r0.clearAll(); });
+
+  /*
+   * ── setups ──
+   *
+   * ONE job, every minute, rather than two jobs per setup registered at boot.
+   *
+   * A setup's definition lives in qp: its tools, and its decision time, which
+   * is the entry window of the strategy itself. Registering cron jobs at
+   * startup would freeze that — a strategy built in qp at eleven o'clock would
+   * not run until the tools were restarted, one deleted there would keep
+   * firing, and a decision time edited there would be ignored. The whole point
+   * of reading the catalog live is lost the moment the schedule is a snapshot.
+   *
+   * So the tick asks. Every minute of the session it reads which setups this
+   * tool owns and whether any is due now. That is a file read and one call to
+   * a service on the same box, once a minute, against a decision worth being
+   * right about.
+   *
+   * The universe scan two minutes earlier exists because the ordinary discovery
+   * cadence can leave the card list five minutes old at the one moment it is
+   * read — and a name that appeared in those five minutes is exactly the kind a
+   * setup is looking for.
+   */
+  registerJob('Setup Tick (every minute, 04:00–16:00)',
+    '* 4-16 * * 1-5', 'America/New_York', async () => {
+      const now = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(new Date());
+      const catalog = require('./setups/catalog');
+      const { runDue } = require('./setups/runner');
+      let due = [];
+      try {
+        due = await catalog.forTool(require('./config').toolId);
+      } catch (err) {
+        console.warn('[Setups] could not read the catalog:', err.message);
+        return;
+      }
+      // Freshen the card list for anything deciding shortly.
+      if (due.some(s => s.universeScanAt === now && s.enabled !== false)) {
+        console.log(`[Setups] ${now} — pre-decision scan`);
+        await runFullScan();
+      }
+      const firing = due.filter(s => s.decisionTime === now && s.enabled !== false);
+      if (firing.length) {
+        console.log(`[Setups] ${now} — ${firing.length} setup(s) due`);
+        await runDue(now);
+      }
+    });
+
+  // Job identity comes from the name, so renaming a job leaves its old row
+  // behind holding a schedule nothing reads any more. Harmless until someone
+  // opens the table to work out why a change had no effect.
+  try {
+    const live = new Set(jobRegistry.map(j => j.jobId));
+    const orphans = db.prepare('SELECT job_id FROM scheduler_jobs').all()
+      .map(r => r.job_id).filter(id => !live.has(id));
+    if (orphans.length) {
+      const del = db.prepare('DELETE FROM scheduler_jobs WHERE job_id = ?');
+      for (const id of orphans) del.run(id);
+      console.log(`[Scheduler] Pruned ${orphans.length} job(s) no longer registered:`, orphans.join(', '));
+    }
+  } catch (e) { console.warn('[Scheduler] Could not prune old jobs:', e.message); }
 
   console.log('[Scheduler] All jobs registered:', jobRegistry.length);
 }

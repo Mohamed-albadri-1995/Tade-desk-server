@@ -5,10 +5,15 @@ const fs = require('fs');
 const multer = require('multer');
 const training = require('../training/trainingData');
 
-const SCORER_URL = process.env.SCORER_URL || 'http://127.0.0.1:3001';
+const config = require('../config');
+
+const SCORER_URL = config.scorerUrl;
 const router = express.Router();
 
-const TMP_DIR = path.join(__dirname, '..', '..', 'tmp');
+const TMP_DIR = config.tmpDir;
+// The model tree this tool reads. Per-tool, so two tools never display or
+// train over each other's tables.
+const OUTPUTS_DIR = config.modelOutputRoot;
 const upload = multer({ dest: TMP_DIR });
 const R4A_CSV = path.join(TMP_DIR, 'r4a.csv');
 const R4B_CSV = path.join(TMP_DIR, 'r4b.csv');
@@ -56,7 +61,24 @@ router.post('/train', async (req, res) => {
       { r4a: r4aPath, r4b: r4bPath },
       { timeout: 180000 }
     );
-    res.json({ ...resp.data, r4aCount, r4bCount });
+
+    // The scorer reports which process answered and where it wrote. If that is
+    // not the outputs directory this server reads, an orphaned scorer is
+    // holding port 3001 and training is landing somewhere we never display —
+    // which otherwise looks exactly like a retrain that changed nothing.
+    const warnings = [];
+    const wroteTo = resp.data?.output_root;
+    if (wroteTo && path.resolve(wroteTo) !== path.resolve(OUTPUTS_DIR)) {
+      warnings.push(
+        `Training wrote to ${wroteTo}, but this server reads ${OUTPUTS_DIR}. ` +
+        'Another scorer process is likely holding port 3001 — check `lsof -i:3001`.'
+      );
+    }
+    if (resp.data?.reloaded_processor) {
+      warnings.push('Scorer was running outdated training code and reloaded it before training.');
+    }
+
+    res.json({ ...resp.data, r4aCount, r4bCount, ...(warnings.length ? { warnings } : {}) });
   } catch (err) {
     const msg = err.response?.data?.error || err.message;
     res.status(500).json({ ok: false, error: msg });
@@ -111,6 +133,18 @@ router.post('/upload-csv', upload.single('file'), (req, res) => {
   }
 });
 
+// GET /api/analysis/screener-report?entry=A|B — which screeners find movers.
+// Not a trade report: it measures the move each card made, which is the only
+// thing a screener is responsible for.
+router.get('/screener-report', (req, res) => {
+  try {
+    const { buildScreenerReport } = require('../analysis/screenerReport');
+    res.json(buildScreenerReport({ entry: req.query.entry === 'A' ? 'A' : 'B' }));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /api/analysis/training-summary — accumulated training data overview
 router.get('/training-summary', (req, res) => {
   try {
@@ -156,7 +190,6 @@ router.delete('/training-data', (req, res) => {
 
 // GET /api/analysis/table-data?base=B4&table=main
 // Returns factor_importance + all factor bucket CSVs for a given base/table
-const OUTPUTS_DIR = path.join(__dirname, '..', 'scoring', 'outputs');
 const VALID_BASES = ['B1','B2','B3','B4','B5','B6'];
 
 router.get('/table-data', (req, res) => {

@@ -187,6 +187,59 @@ async function restoreBackup(backupDate) {
   return { restoredFrom: filePath, exportedAt };
 }
 
+/**
+ * Merge specific dates out of a backup into the live DB, without deleting
+ * anything.
+ *
+ * restoreBackup()/importDb() replace whole tables, so pulling an old snapshot
+ * to recover a few pruned days would wipe every day captured since. This
+ * inserts only the requested dates and uses INSERT OR IGNORE throughout, so a
+ * row that already exists is never overwritten and unrelated dates are
+ * untouched.
+ *
+ * Used to recover days that were trimmed out of r1_frozen but whose rows were
+ * still part of the model's training set.
+ *
+ * @param {string} backupDate  which backups/<date>.json to read
+ * @param {string[]} dates     the dates to merge in
+ */
+async function mergeDatesFromBackup(backupDate, dates) {
+  const token = getGithubToken();
+  if (!token) throw new Error('No GitHub backup token configured. Add it in Settings.');
+  if (!Array.isArray(dates) || !dates.length) throw new Error('No dates given');
+
+  const wanted = new Set(dates);
+  const backup = JSON.parse(await fetchFile(token, `backups/${backupDate}.json`));
+  if (!backup.tables) throw new Error('Invalid backup format: missing tables');
+  const { r1_frozen = [], r3a = [], r3b = [] } = backup.tables;
+
+  const added = { r1_frozen: 0, r3a: 0, r3b: 0 };
+  db.transaction(() => {
+    const insR1 = db.prepare(
+      'INSERT OR IGNORE INTO r1_frozen (date, ticker, data, captured_at) VALUES (?, ?, ?, ?)');
+    for (const r of r1_frozen) {
+      if (!wanted.has(r.date)) continue;
+      added.r1_frozen += insR1.run(r.date, r.ticker, r.data, r.captured_at).changes;
+    }
+    const insA = db.prepare(
+      'INSERT OR IGNORE INTO r3a (date, ticker, entry_price_a, hh_a, ll_a, atr14, up_r_a, down_r_a, captured_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const r of r3a) {
+      if (!wanted.has(r.date)) continue;
+      added.r3a += insA.run(r.date, r.ticker, r.entry_price_a, r.hh_a, r.ll_a, r.atr14,
+        r.up_r_a, r.down_r_a, r.captured_at).changes;
+    }
+    const insB = db.prepare(
+      'INSERT OR IGNORE INTO r3b (date, ticker, entry_price_b, hh_b, ll_b, atr14, up_r_b, down_r_b, captured_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const r of r3b) {
+      if (!wanted.has(r.date)) continue;
+      added.r3b += insB.run(r.date, r.ticker, r.entry_price_b, r.hh_b, r.ll_b, r.atr14,
+        r.up_r_b, r.down_r_b, r.captured_at).changes;
+    }
+  })();
+
+  return { backupDate, dates, added };
+}
+
 // ─── Status ───────────────────────────────────────────────────────────────────
 
 function getBackupStatus() {
@@ -199,4 +252,4 @@ function getBackupStatus() {
   };
 }
 
-module.exports = { pushBackup, restoreBackup, getBackupStatus, exportDb };
+module.exports = { pushBackup, restoreBackup, mergeDatesFromBackup, getBackupStatus, exportDb };

@@ -12,6 +12,25 @@ function getRow(ticker) {
   return store.get(ticker) || null;
 }
 
+/**
+ * Record when each screener first matched this ticker.
+ *
+ * `firstSeen` alone says when the stock entered the tool, which is not the same
+ * question. A stock can arrive at 08:00 from a pre-market screener and only
+ * match the after-open one at 15:00 — and a trader who stops opening momentum
+ * positions at 10:00 needs to see that the second sighting is an afternoon
+ * candidate, not something that was on the list all morning. Times are stamped
+ * once per screener and never moved, so the card can state the truth about when
+ * each match actually became available.
+ */
+function stampSeen(seenAt, keys, now) {
+  const next = { ...(seenAt || {}) };
+  for (const key of keys || []) {
+    if (!next[key]) next[key] = now;
+  }
+  return next;
+}
+
 function upsertRows(rows) {
   const now = Date.now();
   for (const row of rows) {
@@ -22,6 +41,7 @@ function upsertRows(rows) {
         ...row,
         id: existing.id,
         firstSeen: existing.firstSeen,
+        seenAt: stampSeen(existing.seenAt, row.screenerKeys || existing.screenerKeys, now),
         lastUpdated: now,
         liveNow: true,
         date: toETDate(now),
@@ -31,6 +51,7 @@ function upsertRows(rows) {
       store.set(row.ticker, {
         id: uuidv4(),
         firstSeen: now,
+        seenAt: stampSeen(null, row.screenerKeys, now),
         lastUpdated: now,
         liveNow: true,
         date: toETDate(now),
@@ -38,6 +59,7 @@ function upsertRows(rows) {
         bias: 'auto',
         news: null,
         catalyst: null,
+        signals: {},
         score_at_entry: null,
         score_model_ts: null,
         _score: null,

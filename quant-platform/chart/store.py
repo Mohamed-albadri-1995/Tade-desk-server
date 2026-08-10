@@ -74,6 +74,10 @@ def _db() -> sqlite3.Connection:
 
 def _row_to_strategy(row: sqlite3.Row) -> dict:
     obj = json.loads(row['data'])
+    # Setups saved before tools existed have no key at all. Defaulting here
+    # rather than at each call site means a reader never has to distinguish
+    # "old setup" from "assigned to nothing" — they are the same thing.
+    obj.setdefault('tools', [])
     obj['id'] = row['id']
     obj['name'] = row['name']
     obj['updated_at'] = row['updated_at']
@@ -93,6 +97,49 @@ def get_strategy(sid: int) -> dict | None:
     return _row_to_strategy(row) if row else None
 
 
+def normalise_tools(raw) -> list:
+    """The scanning tools a setup belongs to — ['T1', 'T2'] — cleaned.
+
+    A setup carries its tools rather than each tool listing its setups, so a
+    setup used by three tools is ONE object. The alternative was three copies
+    that drift apart the first time one is edited.
+
+    Validated against the live source list rather than a hardcoded T1..T9: the
+    sources come from tools.config.json, so a tenth tool works the day it is
+    added and a typo is rejected the moment it is typed. An unknown id raises —
+    silently dropping it would produce a setup that backtests against a smaller
+    universe than the one written down, and the result would look fine.
+
+    An EMPTY list is legal and means "not assigned yet". That is a real state:
+    a setup is usually built and backtested before anyone decides which tools it
+    belongs to, and refusing to save one would put the decision before the
+    evidence.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raw = [x for x in raw.replace(',', ' ').split() if x]
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError('tools must be a list of tool ids, e.g. ["T1","T2"]')
+
+    from chart import screener as sc
+    known = {str(x.get('id', '')).upper(): str(x.get('id')) for x in (sc.sources() or [])}
+
+    out = []
+    for item in raw:
+        tid = str(item or '').strip().upper()
+        if not tid:
+            continue
+        if tid not in known:
+            raise ValueError(
+                f'unknown tool {tid!r} — configured tools are '
+                f'{", ".join(sorted(known.values())) or "(none)"}')
+        real = known[tid]
+        if real not in out:            # order kept, first mention wins
+            out.append(real)
+    return out
+
+
 def save_strategy(obj: dict) -> dict:
     """Insert or update. `obj` is the full strategy JSON; if it carries an
     `id`, that row is updated, else a new row is created. Returns the saved
@@ -100,6 +147,10 @@ def save_strategy(obj: dict) -> dict:
     name = (obj.get('name') or 'Untitled strategy').strip()[:120]
     sid = obj.get('id')
     payload = dict(obj)
+    # Normalised on the way IN, so every reader — backtest, alerts, the UI —
+    # sees the same cleaned list and none of them has to defend against 't1 '
+    # or a duplicate. Raises on an unknown id; the route reports it.
+    payload['tools'] = normalise_tools(obj.get('tools'))
     # strip store metadata so a load→edit→save cycle doesn't embed stale
     # copies of it inside the strategy document itself
     for meta in ('id', 'updated_at', 'created_at'):
@@ -121,6 +172,26 @@ def save_strategy(obj: dict) -> dict:
             db.commit()
             sid = cur.lastrowid
     return get_strategy(sid)
+
+
+def set_tools(sid: int, raw) -> dict | None:
+    """Assign a strategy's tools, and touch nothing else about it.
+
+    Saving means writing the whole document back, which is right for the
+    builder and wrong for assignment: another process would have to round-trip
+    every rule to change one field, and a bug in that round trip rewrites the
+    logic that was backtested without saying so. This reads the stored
+    document, replaces one key and writes it back.
+
+    Returns None when there is no such strategy — a missing one must be
+    reported, not created, or a typo in an id silently produces a second
+    strategy that nothing runs. Raises on an unknown tool id, same as saving.
+    """
+    s = get_strategy(sid)
+    if not s:
+        return None
+    s['tools'] = normalise_tools(raw)
+    return save_strategy(s)
 
 
 def delete_strategy(sid: int) -> bool:

@@ -15,9 +15,22 @@ function getRegimeSampleThreshold() {
 }
 
 const { resolveAutoBias } = require('../sideC/bias');
+const {
+  computeRelations, RELATION_FLAGS, RELATION_BOOLS, RELATION_NUMERICS,
+} = require('../sideB/relations');
 
 // Maps r0 bias field → LiveScorer bias string. Manual bias wins, then a
 // fresh directional catalyst, then trend/sector context (see sideC/bias.js).
+//
+// resolveAutoBias can now answer null — no directional evidence — and the card
+// shows that honestly rather than inventing a direction. The scorer cannot:
+// it has to choose a lookup table, and there are only two. Long is the choice
+// for "unknown", because it is what the table was built from — the screeners
+// hunt strength and the long side is where nearly all the training rows are.
+//
+// This is a different question from the one the card answers. The card says
+// "which way should I trade this", and "I don't know" is a real answer there.
+// This says "which table do I read the score from", where it is not.
 function resolveCardBias(row) {
   return resolveAutoBias(row).bias === 'short' ? 'Short' : 'Long';
 }
@@ -27,6 +40,12 @@ function buildCard(row) {
   const s   = row.stock   || {};
   const ctx = row.context || {};
   const cat = row.catalyst || {};
+  // Relational signals (price vs each MA/VWAP/prev close, MA stack, range
+  // quarter …). Recomputed if absent so a row restored from an old checkpoint
+  // still scores with them.
+  const sig = (row.signals && Object.keys(row.signals).length)
+    ? row.signals
+    : computeRelations(s);
   // Normalize bias to its resolved value so 'auto' that resolves to long
   // and explicit 'long' encode identically in the PCA feature matrix.
   const resolvedBias = resolveCardBias(row); // 'Long' | 'Short' | 'Undefined'
@@ -77,6 +96,10 @@ function buildCard(row) {
     pmRange:       s.pmRange,
     pmAdrRatio:    s.pmAdrRatio,
     secScore:      ctx.secScore,
+    // relational signals: flags + booleans are categorical, distances numeric
+    ...Object.fromEntries(RELATION_FLAGS.map(k => [k, sig[k] ?? null])),
+    ...Object.fromEntries(RELATION_BOOLS.map(k => [k, sig[k] ? 'true' : 'false'])),
+    ...Object.fromEntries(RELATION_NUMERICS.map(k => [k, sig[k] ?? null])),
   };
 }
 

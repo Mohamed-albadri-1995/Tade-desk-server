@@ -90,19 +90,47 @@ async function fetchTickerDaily(ticker, beforeDate) {
     .filter(b => b.c !== null && toETDate(new Date(b.t).getTime()) < beforeDate);
 }
 
-// Fetch intraday 1-min bars for multiple tickers sequentially.
-// Returns { TICKER: [{t, o, h, l, c, v, etTime}] }
-async function fetchIntradayBars(tickers, date) {
+/**
+ * Fetch intraday 1-min bars for multiple tickers.
+ *
+ * Sequential by default, which is what the end-of-day capture wants: it has all
+ * evening, and one request at a time is the gentlest thing to point at a free
+ * endpoint from an AWS address that Yahoo already rate-limits.
+ *
+ * `concurrency` is for the one caller that cannot wait. The 10:00 setup has to
+ * turn forty tickers into a ranked list while the 10:00 bar is still forming —
+ * at 150ms plus a round trip each, sequential takes fifteen to twenty-five
+ * seconds, and the spec measures a four-cent difference in fill flipping a full
+ * 2R outcome. Running a few at a time turns that into two or three seconds.
+ *
+ * Deliberately a parameter rather than a new default. Nothing else here is in a
+ * hurry, and raising the request rate for everything to serve one caller is how
+ * a working integration starts getting blocked.
+ *
+ * Returns { TICKER: [{t, o, h, l, c, v, etTime}] }
+ */
+async function fetchIntradayBars(tickers, date, { concurrency = 1 } = {}) {
   const out = {};
-  for (const ticker of tickers) {
-    try {
-      out[ticker] = await fetchTickerIntraday(ticker, date);
-    } catch (e) {
-      console.warn(`[Yahoo] Intraday fetch failed for ${ticker}: ${e.message}`);
-      out[ticker] = [];
+  const queue = [...tickers];
+
+  async function worker() {
+    while (queue.length) {
+      const ticker = queue.shift();
+      try {
+        out[ticker] = await fetchTickerIntraday(ticker, date);
+      } catch (e) {
+        console.warn(`[Yahoo] Intraday fetch failed for ${ticker}: ${e.message}`);
+        out[ticker] = [];
+      }
+      // Still paced, just in several lanes. A burst of forty at once is what
+      // gets an address blocked; a few in flight with a gap between each is not
+      // meaningfully different from what a browser does.
+      if (queue.length) await sleep(DELAY_MS);
     }
-    await sleep(DELAY_MS);
   }
+
+  const lanes = Math.max(1, Math.min(concurrency, tickers.length));
+  await Promise.all(Array.from({ length: lanes }, worker));
   return out;
 }
 

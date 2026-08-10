@@ -3,8 +3,15 @@ const r0 = require('../r0/registry');
 const { toETDate } = require('../utils/time');
 
 function getSetting(key) {
+  // A row that exists but holds a blank or non-numeric value used to come back
+  // as NaN, and `NaN ?? default` is NaN — the ?? only catches null and
+  // undefined. Every `score >= minScore` comparison against NaN is false, so
+  // the auto rule would find nothing eligible and shortlist nobody, silently
+  // and every day. Anything that is not a real number is treated as absent so
+  // the caller's default actually applies.
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
-  return row ? parseFloat(row.value) : null;
+  const n = row ? parseFloat(row.value) : NaN;
+  return Number.isFinite(n) ? n : null;
 }
 
 function getShortlistEntry(date) {
@@ -28,6 +35,16 @@ function saveShortlistEntry(entry) {
     entry.exported ? 1 : 0,
     entry.exportedAt || null
   );
+
+  // Every write to this tool's shortlist goes through here — the auto rule, a
+  // manual toggle, an export — so this one line is what keeps the unified list
+  // across all tools current without any of them opting in. Non-fatal: a tool
+  // that cannot publish still has its own shortlist.
+  try {
+    require('./globalShortlist').publish(entry.date, entry.items);
+  } catch (err) {
+    console.warn('[Shortlist] could not publish to the unified list:', err.message);
+  }
 }
 
 function runAutoRule({ force = false } = {}) {
@@ -126,6 +143,20 @@ function syncShortlistToR0() {
   if (!entry) return;
   for (const item of entry.items) {
     r0.setInShortlist(item.ticker, true);
+  }
+
+  // And re-assert this tool's entry on the unified list. saveShortlistEntry
+  // publishes on a change, which is enough right up until a publish is missed —
+  // a tool upgraded mid-session, a write that failed, a shortlist last touched
+  // before the shared file existed. In every one of those the tool is absent
+  // from the unified list for the rest of the day and nothing triggers a retry,
+  // because nothing about its own shortlist has changed. This runs each scan
+  // and writes only when the file disagrees, so a missed publish repairs itself
+  // rather than needing to be noticed.
+  try {
+    require('./globalShortlist').republish(today, entry.items);
+  } catch (err) {
+    console.warn('[Shortlist] could not re-publish to the unified list:', err.message);
   }
 }
 

@@ -163,6 +163,14 @@
         <input id="stratName" placeholder="strategy name" size="16">
         <label style="color:var(--text2)">Side
           <select id="stratSide"><option value="long">Long</option><option value="short">Short</option></select></label>
+        <!-- Which scanning tools this setup belongs to. The setup carries the
+             list rather than each tool carrying a list of setups, so a setup
+             used by three tools is one object instead of three that drift
+             apart. Empty is legal and means "not assigned yet" — a setup is
+             normally built and backtested before that is decided. -->
+        <label style="color:var(--text2)" title="Which scanning tools run this setup, e.g. T1 T2. Leave empty until you have decided. A backtest with universe 'setup tools' uses exactly this list.">Tools
+          <input id="stratTools" placeholder="T1 T2" size="8"
+                 style="text-transform:uppercase"></label>
         <label style="color:var(--text2)" title="Stop loss — long: below entry / short: above entry. @line: trail an indicator (value = % beyond it)">SL <select id="slType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option><option value="prim">@ line</option></select><input id="slVal" type="number" step="any" style="width:52px" placeholder="1.5"></label><span id="slAnchor"></span>
         <label style="color:var(--text2)" title="Take profit — long: above entry / short: below entry. @line: an indicator level (value = % before it)">TP <select id="tpType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option><option value="prim">@ line</option></select><input id="tpVal" type="number" step="any" style="width:52px" placeholder="1.5"></label><span id="tpAnchor"></span>
         <select id="stratLoad" title="load a saved strategy"><option value="">— saved —</option></select>
@@ -880,6 +888,7 @@ function groupBox(grp, parent){
 function renderStrat(){
   document.getElementById('stratName').value=STRAT.name||'';
   document.getElementById('stratSide').value=STRAT.side||'long';
+  document.getElementById('stratTools').value=(STRAT.tools||[]).join(' ');
   const risk=STRAT.risk||{};
   document.getElementById('slType').value=(risk.sl&&risk.sl.type)||''; document.getElementById('slVal').value=(risk.sl&&risk.sl.value!=null)?risk.sl.value:'';
   document.getElementById('tpType').value=(risk.tp&&risk.tp.type)||''; document.getElementById('tpVal').value=(risk.tp&&risk.tp.value!=null)?risk.tp.value:'';
@@ -943,6 +952,10 @@ function drawStratSeries(series){
   updateLegend();
 }
 function readStratHeader(){ STRAT.name=document.getElementById('stratName').value; STRAT.side=document.getElementById('stratSide').value;
+  // Sent as typed; the server validates against the configured tools and
+  // rejects an unknown id. Doing it there rather than here means one rule
+  // rather than two that can disagree, and the API is safe on its own.
+  STRAT.tools=(document.getElementById('stratTools').value||'').split(/[\s,]+/).filter(Boolean);
   const rd=(t,v,old)=>{ const vv=parseFloat(document.getElementById(v).value); const out={type:document.getElementById(t).value, value:Number.isFinite(vv)?vv:null};
     if(out.type==='prim') out.anchor=(old&&old.anchor)||{kind:'primitive',key:'ma.ema',source:'close',params:{length:9}};   // keep the edited anchor
     return out; };
@@ -1217,7 +1230,9 @@ async function btRun(){
   }catch(e){ document.getElementById('btStat').textContent='error: '+e.message; }
 }
 function loadStrategyById(id){ const s=SAVED.find(x=>String(x.id)===String(id)); if(!s)return; STRAT=JSON.parse(JSON.stringify(s)); STRAT.entry=STRAT.entry||{logic:'AND',rules:[]}; STRAT.exit=STRAT.exit||{logic:'AND',rules:[]}; STRAT.risk=STRAT.risk||{sl:{type:'',value:null},tp:{type:'',value:null}}; SIGMARKERS=[]; clearStratLines(); refreshMarkers(); renderStrat(); }
-async function saveStrategy(){ readStratHeader(); if(!STRAT.name)STRAT.name='Untitled'; const j=await (await fetch('/api/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(STRAT)})).json(); if(j.ok){ STRAT.id=j.strategy.id; await loadStrategies(); document.getElementById('stratStat').textContent='saved ✓'; } else document.getElementById('stratStat').textContent='save error'; }
+async function saveStrategy(){ readStratHeader(); if(!STRAT.name)STRAT.name='Untitled'; const j=await (await fetch('/api/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(STRAT)})).json(); if(j.ok){ STRAT.id=j.strategy.id; await loadStrategies(); document.getElementById('stratStat').textContent='saved ✓'; } else document.getElementById('stratStat').textContent=j.error||'save error'; }
+// The server rejects an unknown tool id by name. Showing "save error" instead
+// of that reason turns a typo into a hunt.
 async function delStrategy(){ if(STRAT.id){ await fetch('/api/strategies/'+STRAT.id,{method:'DELETE'}); } STRAT=blankStrat(); seedTemplate(); await loadStrategies(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; }
 // how Evaluate simulates fills/session rules. Default = pure preview (close
 // fill, no rules). Tapping a backtest trade row switches this to THAT run's

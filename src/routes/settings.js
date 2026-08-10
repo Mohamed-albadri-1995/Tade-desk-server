@@ -17,6 +17,12 @@ const SETTING_RULES = {
   shortlistTopN:          { type: 'int', min: 1,    max: 50  },
   scorerEntryTime:        { type: 'str', maxLen: 10 },
   regimeSampleThreshold:  { type: 'int', min: 1,    max: 500 },
+  // Tradability floor. Zero disables an individual leg; the upper bounds stop a
+  // typo (an extra zero on volume) from silently emptying every screener.
+  minPrice:               { type: 'float', min: 0, max: 10000 },
+  minAvgVolume:           { type: 'int',   min: 0, max: 100000000 },
+  minAtr:                 { type: 'float', min: 0, max: 100 },
+  minAtrPct:              { type: 'float', min: 0, max: 100 },
   finnhubApiKey:          { type: 'str', maxLen: 100 },
   githubBackupToken:      { type: 'str', maxLen: 200 },
   alpacaApiKey:           { type: 'str', maxLen: 100 },
@@ -77,7 +83,11 @@ router.get('/:key', (req, res, next) => {
 // GET /api/settings
 router.get('/', (req, res) => {
   const rows = db.prepare('SELECT key, value FROM settings').all();
-  const out = {};
+  // The floor is enforced whether or not anyone ever saved it, so report the
+  // values actually in force. Without this the fields render blank on a fresh
+  // tool and read as "no floor" while every scan is applying one.
+  const out = { ...require('../sideA/tradable').thresholds() };
+  for (const k of Object.keys(out)) out[k] = String(out[k]);
   for (const { key, value } of rows) {
     if (!SETTING_RULES[key]) continue; // skip unknown keys
     if (MASKED_KEYS.has(key)) {

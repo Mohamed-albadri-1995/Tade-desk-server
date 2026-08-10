@@ -113,6 +113,12 @@
     "git_sha": "5d9dfaa",
     "notes": ""
   },
+  "levels.prev_day_close": {
+    "approved_at": "2026-08-07T19:37:29+00:00",
+    "approved_by": "badri",
+    "git_sha": "a87917a",
+    "notes": "approved in bulk on the trader's instruction (\"all are ok\"), not individually eyeball-verified against TradingView like the first 64 \u2014 recorded so the difference stays visible"
+  },
   "levels.prev_day_high": {
     "approved_at": "2026-07-08T11:38:02+00:00",
     "approved_by": "badri",
@@ -161,6 +167,12 @@
     "git_sha": "b158e77",
     "notes": ""
   },
+  "levels.today_vol_max": {
+    "approved_at": "2026-08-07T19:37:29+00:00",
+    "approved_by": "badri",
+    "git_sha": "a87917a",
+    "notes": "approved in bulk on the trader's instruction (\"all are ok\"), not individually eyeball-verified against TradingView like the first 64 \u2014 recorded so the difference stays visible"
+  },
   "levels.weekly_high": {
     "approved_at": "2026-07-06T13:55:55+00:00",
     "approved_by": "badri",
@@ -178,6 +190,18 @@
     "approved_by": "badri",
     "git_sha": "b158e77",
     "notes": ""
+  },
+  "levels.window_high": {
+    "approved_at": "2026-08-07T19:37:29+00:00",
+    "approved_by": "badri",
+    "git_sha": "a87917a",
+    "notes": "approved in bulk on the trader's instruction (\"all are ok\"), not individually eyeball-verified against TradingView like the first 64 \u2014 recorded so the difference stays visible"
+  },
+  "levels.window_low": {
+    "approved_at": "2026-08-07T19:37:29+00:00",
+    "approved_by": "badri",
+    "git_sha": "a87917a",
+    "notes": "approved in bulk on the trader's instruction (\"all are ok\"), not individually eyeball-verified against TradingView like the first 64 \u2014 recorded so the difference stays visible"
   },
   "levels.yearly_open": {
     "approved_at": "2026-07-08T18:40:00+00:00",
@@ -251,6 +275,12 @@
     "git_sha": "5d9dfaa",
     "notes": ""
   },
+  "trend.slope": {
+    "approved_at": "2026-08-07T19:37:29+00:00",
+    "approved_by": "badri",
+    "git_sha": "a87917a",
+    "notes": "approved in bulk on the trader's instruction (\"all are ok\"), not individually eyeball-verified against TradingView like the first 64 \u2014 recorded so the difference stays visible"
+  },
   "volatility.atr": {
     "approved_at": "2026-07-08T18:58:35+00:00",
     "approved_by": "badri",
@@ -286,6 +316,18 @@
     "approved_by": "badri",
     "git_sha": "9df096a",
     "notes": ""
+  },
+  "volume.avg_volume": {
+    "approved_at": "2026-08-07T19:37:29+00:00",
+    "approved_by": "badri",
+    "git_sha": "a87917a",
+    "notes": "approved in bulk on the trader's instruction (\"all are ok\"), not individually eyeball-verified against TradingView like the first 64 \u2014 recorded so the difference stays visible"
+  },
+  "volume.rel_volume": {
+    "approved_at": "2026-08-07T19:37:29+00:00",
+    "approved_by": "badri",
+    "git_sha": "a87917a",
+    "notes": "approved in bulk on the trader's instruction (\"all are ok\"), not individually eyeball-verified against TradingView like the first 64 \u2014 recorded so the difference stays visible"
   },
   "vwap.anchored": {
     "approved_at": "2026-07-08T18:35:41+00:00",

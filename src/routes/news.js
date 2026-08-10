@@ -9,8 +9,9 @@ const router = express.Router();
 router.get('/:ticker', async (req, res) => {
   const ticker = req.params.ticker.toUpperCase();
   try {
-    const { news, catalyst } = await fetchNewsForTicker(ticker);
-    const combined = combineCatalyst(catalyst, r0.getRow(ticker)?.stock);
+    const stock = r0.getRow(ticker)?.stock;
+    const { news, catalyst } = await fetchNewsForTicker(ticker, stock && stock.tvSymbol);
+    const combined = combineCatalyst(catalyst, stock);
     r0.updateNews(ticker, news, combined);
     res.json({ ticker, news, catalyst: combined });
   } catch (err) {

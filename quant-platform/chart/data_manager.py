@@ -13,9 +13,14 @@ import math
 
 import pandas as pd
 
-from tools.data import alpaca, polygon, hybrid
+from tools.data import alpaca, polygon, hybrid, yahoo
 
-LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid}
+LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid,
+           # The only feed here that can serve a decision taken DURING the
+           # session: polygon is a day behind on the free plan and alpaca's free
+           # tier is IEX. Consolidated tape, and measured against polygon on the
+           # same morning the two agree on VWAP to within 0.06%.
+           'yahoo': yahoo}
 
 # RTH minutes per trading day (09:30-16:00). Used to translate an indicator's
 # bar-lookback into how many calendar days of history to fetch.
@@ -31,6 +36,9 @@ def feed_ok(feed: str) -> bool:
         return bool(os.environ.get('POLYGON_API_KEY'))
     if feed == 'hybrid':
         return feed_ok('alpaca') and feed_ok('polygon')
+    # No key to check — which is the point of having it as the live fallback.
+    if feed == 'yahoo':
+        return True
     return False
 
 
