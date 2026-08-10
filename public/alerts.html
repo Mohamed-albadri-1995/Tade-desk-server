@@ -49,6 +49,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .lnk { font-size:10px; font-weight:700; text-decoration:none; color:var(--text3);
   border:1px solid var(--border); border-radius:4px; padding:2px 6px; white-space:nowrap; }
 .lnk:hover { color:var(--blue); border-color:var(--blue); }
+/* The ticker IS the link to its card — it is the obvious thing to press and it
+   used to do nothing. Underlined on hover only, so a list of fires does not
+   read as a wall of links. */
+.tlink { color:inherit; text-decoration:none; }
+.tlink:hover, .tlink:active { color:var(--blue); text-decoration:underline; }
 
 /* ── setups, the definitions ──
    NOT .setup: a FIRED setup alert below already carries that class, and an
@@ -97,6 +102,28 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 /* The same row of tools on a setup that is already running, so adding a second
    tool or moving it to the right one is a tap rather than a trip elsewhere. */
 .st-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:9px; }
+
+/* ── the record ──
+   Denser than the live feed on purpose: it is read a screen at a time, looking
+   for a pattern across a session, not glanced at while a trade is placed. */
+.sec select { background:var(--bg3); border:1px solid var(--border); border-radius:5px;
+  padding:4px 8px; color:var(--text); font:11px inherit; text-transform:none;
+  letter-spacing:0; }
+.hist { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; background:var(--bg2);
+  border:1px solid var(--border); border-left:3px solid var(--text3);
+  border-radius:6px; padding:8px 11px; margin-top:6px; }
+.hist.lvl-trade { border-left-color:var(--accent); }
+.hist.lvl-warn { border-left-color:#fb923c; }
+.hist.lvl-error { border-left-color:var(--red); }
+/* The exact second leads the row. It is the column you scan when the question
+   is "did this fire on time", which is the usual reason for opening this. */
+.h-at { font:700 12px ui-monospace,Menlo,monospace; color:var(--accent); }
+.h-t { font-weight:700; font-size:13px; }
+.h-rule { font-size:11px; color:var(--text2); }
+.h-bar { font-size:10px; color:var(--text3); border:1px solid var(--border);
+  border-radius:3px; padding:1px 5px; }
+.h-detail { flex-basis:100%; font-size:11.5px; color:var(--text2); line-height:1.5;
+  overflow-wrap:anywhere; }
 
 /* ── position sizing ── */
 .risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
@@ -228,6 +255,17 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <div class="sec"><span>Fired today</span><span class="note" id="fire-count"></span></div>
 <div id="fires"><div class="empty">Loading…</div></div>
 
+<!-- The permanent record. "Fired today" is a feed: capped, and cleared each
+     morning so the first alert does not arrive under yesterday's close. That is
+     right for reading on a phone and useless for "what did this setup signal
+     last Tuesday, and at what second" — which is the question that decides
+     whether a setup is worth keeping. Nothing here is ever trimmed. -->
+<div class="sec">
+  <span>Signal history</span>
+  <select id="hist-date" onchange="loadHistory()"></select>
+</div>
+<div id="history"><div class="empty">Pick a session.</div></div>
+
 <div class="sec">
   <span>Rules</span>
   <button class="btn primary" onclick="toggleForm()">+ New rule</button>
@@ -278,8 +316,42 @@ const cardUrl = (f) => {
     encodeURIComponent(f.ticker)}&date=${encodeURIComponent(f.date || '')}` : null;
 };
 const tvUrl = t => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t)}`;
+
+/*
+ * The ticker itself opens the card.
+ *
+ * It was already the biggest, boldest thing on the row and the obvious thing to
+ * press, and pressing it did nothing — the card was behind a small "card" link
+ * at the far end. On a phone that is the difference between one thumb and two
+ * taps at the moment a trade is being placed. The small link stays for anyone
+ * who has learned it.
+ *
+ * Falls back to plain text when the tool is unknown, rather than a dead link:
+ * a link that goes nowhere is worse than no link when you are in a hurry.
+ */
+function tickerLink(f, cls = 't') {
+  if (!f.ticker) return '';
+  const url = cardUrl(f);
+  return url
+    ? `<a class="${cls} tlink" href="${url}" title="Open ${esc(f.ticker)}'s card">${esc(f.ticker)}</a>`
+    : `<span class="${cls}">${esc(f.ticker)}</span>`;
+}
 const ago = ms => { const m = Math.floor((Date.now() - ms) / 60000);
   return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm ago'; };
+
+/*
+ * The exact moment, to the second, in market time.
+ *
+ * "5m ago" is the right thing while it is happening and the wrong thing
+ * afterwards: a setup is supposed to fire within seconds of a fixed minute, and
+ * whether it did — 10:00:07 or 10:00:52 — is the difference between a healthy
+ * morning and a feed that was late. That question cannot be asked of "5m ago",
+ * so the exact time rides alongside it everywhere.
+ */
+const clockET = ms => (ms ? new Date(ms).toLocaleTimeString('en-GB', {
+  timeZone: 'America/New_York', hour12: false,
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+}) : '');
 
 /* ── the noise ──────────────────────────────────────────────────────────────
  * Three ways to be told, and they do not degrade to nothing.
@@ -811,9 +883,10 @@ async function loadFires() {
         return `<div class="fire setup lvl-${esc(f.level || 'info')}${fresh}">
           <div class="su-head">
             <span class="su-tag">${st ? esc(st.signal) : esc((f.level || 'info').toUpperCase())}</span>
-            ${f.ticker ? `<span class="t">${esc(f.ticker)}</span>` : ''}
+            ${tickerLink(f)}
             <span class="tool">${esc(f.rule || '')}</span>
-            <span class="when">${ago(f.at || 0)}</span>
+            <span class="when" title="${esc(clockET(f.at))} ET">${
+              esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
           </div>
           <div class="su-detail">${esc(f.detail || '')}</div>
           ${st && st.size ? `<div class="su-size">${
@@ -834,16 +907,69 @@ async function loadFires() {
       }
       const card = cardUrl(f);
       return `<div class="fire${fresh}">
-        <span class="t">${esc(f.ticker)}</span>
+        ${tickerLink(f)}
         <span class="tool">${esc(f.toolId || '')}</span>
         <span class="what">${esc(f.rule || '')}${f.price != null ? ` @ ${esc(f.price)}` : ''}</span>
-        <span class="when">${ago(f.at || 0)}</span>
+        <span class="when" title="${esc(clockET(f.at))} ET">${
+          esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
         ${card ? `<a class="lnk" href="${card}">card</a>` : ''}
         <a class="lnk" href="${tvUrl(f.ticker)}" target="_blank" rel="noopener">TV ↗</a>
       </div>`;
     }).join('');
   } catch {
     out.innerHTML = '<div class="empty">Could not read the fires.</div>';
+  }
+}
+
+/* ── the record ──
+ *
+ * Every fire, kept for good, with the wall-clock second it happened. The point
+ * is not nostalgia: a setup is supposed to fire within seconds of a fixed
+ * minute, and whether it did is the first thing to check when a fill looks
+ * wrong. The decision BAR is shown beside it where there is one, because the
+ * gap between them is the whole diagnosis — 10:00:07 off a 09:59 bar is a
+ * healthy morning, 10:00:52 is a feed that was late.
+ */
+let HIST_DATES = [];
+async function loadHistory(date) {
+  const out = document.getElementById('history');
+  const picker = document.getElementById('hist-date');
+  if (!out) return;
+  const want = date || picker.value || '';
+  try {
+    const d = await (await fetch(`/api/alerts/history${want ? `?date=${encodeURIComponent(want)}` : ''}`)).json();
+    if (!d.ok) throw new Error(d.error || 'could not read');
+
+    // Rebuilt only when it actually changes, so choosing a day does not reset
+    // the control under the thumb that chose it.
+    const dates = d.dates || [];
+    if (dates.join() !== HIST_DATES.join()) {
+      HIST_DATES = dates;
+      picker.innerHTML = dates.length
+        ? dates.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('')
+        : '<option value="">no sessions yet</option>';
+    }
+    if (want) picker.value = want;
+
+    const fires = d.fires || [];
+    if (!fires.length) {
+      out.innerHTML = `<div class="empty">Nothing recorded${
+        want ? ` for ${esc(want)}` : ''}. The record starts from the first fire
+        after this was deployed — it cannot recover days that were never kept.</div>`;
+      return;
+    }
+    out.innerHTML = fires.map(f => `<div class="hist lvl-${esc(f.level || 'info')}">
+      <span class="h-at" title="exact time the alert was published">${esc(clockET(f.at))}</span>
+      ${tickerLink(f, 'h-t')}
+      <span class="tool">${esc(f.toolId || '')}</span>
+      <span class="h-rule">${esc(f.rule || '')}</span>
+      ${f.setup && f.setup.decisionAt
+        ? `<span class="h-bar" title="the bar the decision was taken on">bar ${esc(f.setup.decisionAt)}</span>`
+        : ''}
+      <div class="h-detail">${esc(f.detail || '')}</div>
+    </div>`).join('');
+  } catch (e) {
+    out.innerHTML = `<div class="empty">Could not read the history: ${esc(e.message)}</div>`;
   }
 }
 
@@ -1003,6 +1129,7 @@ loadFires();
 loadRules();
 loadRisk();
 loadSetups();
+loadHistory();
 loadUnassigned();
 // A card's "add alert" button links here with the ticker, so the rule opens
 // already scoped to the stock that was on screen.

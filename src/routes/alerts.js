@@ -61,6 +61,35 @@ router.get('/fires', (req, res) => {
 });
 
 /*
+ * The permanent record, as opposed to today's feed.
+ *
+ * `/fires` is reset every morning and capped — right for a phone, useless for
+ * "what did this setup signal last Tuesday, and at what second". This reads the
+ * archive, which is never trimmed.
+ *
+ * Without a date it returns the current month, so the page can offer the days
+ * that actually exist rather than a calendar of mostly-empty ones.
+ */
+router.get('/history', (req, res) => {
+  const date = req.query.date || null;
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+  }
+  const month = req.query.month || (date ? date.slice(0, 7) : toETDate(Date.now()).slice(0, 7));
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ ok: false, error: 'month must be YYYY-MM' });
+  }
+  const limit = Math.min(2000, Math.max(1, parseInt(req.query.limit, 10) || 500));
+  res.json({
+    ok: true,
+    date,
+    month,
+    dates: store.historyDates(),
+    fires: store.history({ date, month, limit }),
+  });
+});
+
+/*
  * Position sizing: account size and what you risk per trade.
  *
  * Lives with the alerts rather than in a screener's settings because it is a
