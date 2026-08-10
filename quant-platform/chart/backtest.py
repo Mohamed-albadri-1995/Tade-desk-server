@@ -404,6 +404,10 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         # CSV automatically as ctx_* columns.
         _c = t.setdefault('ctx', {})
         _c['acct_shares'] = round(shares, 2)
+        # the stop PRICE, not just the dollars at risk: the trade journal has
+        # to show the level the position was actually working against, and the
+        # store keeps no stop column (ctx is the only per-trade JSON persisted)
+        _c['acct_stop'] = round(float(stop), 4)
         _c['acct_risk_usd'] = round(shares * per_share_risk, 2)
         _c['acct_pnl_usd'] = round(net, 2)
         _c['acct_fees_usd'] = round(fee, 2)

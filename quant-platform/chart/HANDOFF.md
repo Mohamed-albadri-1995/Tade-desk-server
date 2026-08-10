@@ -34,7 +34,7 @@ now includes the scanner side's pytest parts for exactly this reason, and
 - `qp/` — verified primitives library (frozen but extendable WITH tests).
 - `chart/` — strategy engine (`strategy.py::evaluate`), seeds
   (`seeds/scalps.json`), backtest (`backtest.py`), screener client, alerts,
-  UI (`static/index.html`), tests (`tests/run_all.py`, 37 parts incl. a
+  UI (`static/index.html`), tests (`tests/run_all.py`, 39 parts incl. a
   node-based UI runtime check, must be ALL GREEN before every commit).
 - `SCALPS_SPEC.md` — THE derivation document: per-scalp logic from the PDF,
   mechanization map, provenance of every number, validation log. Update it

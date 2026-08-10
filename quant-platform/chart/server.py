@@ -366,78 +366,279 @@ def backtest_report(bid: int):
                     f"NO bars on feed '{cov.get('feed')}' — the universe was only "
                     f"PARTIALLY evaluated (alpaca/IEX carries no data for many small "
                     f"caps; rerun on polygon)")
-    _drop = lambda t: (f"{(t.get('ctx') or {}).get('drop_pct'):.2f}%"
-                       if (t.get('ctx') or {}).get('drop_pct') is not None else '—')
-    def _acct_cells(t):
-        c = t.get('ctx') or {}
-        sh, pl = c.get('acct_shares'), c.get('acct_pnl_usd')
-        if sh is None or pl is None:
-            note = c.get('acct_note') or '—'
-            return f"<td colspan='4' class='muted'>{note}</td>"
-        return (f"<td>{sh:,.0f}</td><td>${c.get('acct_notional_usd', 0):,.0f}</td>"
-                f"<td class='{'up' if pl > 0 else 'dn'}'>{'+' if pl >= 0 else ''}"
-                f"${pl:,.2f}</td>"
-                f"<td>{c.get('acct_r_multiple') if c.get('acct_r_multiple') is not None else '—'}</td>")
-    _has_acct = bool((s or {}).get('account'))
-    rows = ''.join(
-        f"<tr><td>{t['date']}</td><td><b>{t['symbol']}</b></td><td>{t['side']}</td>"
-        f"<td>{t['entry']:.2f}→{('%.2f' % t['exit']) if t.get('exit') is not None else 'open'}</td>"
-        f"<td class='{'up' if (t.get('ret') or 0) > 0 else 'dn'}'>"
-        f"{(t['ret'] * 100):+.2f}%</td>"
-        + (_acct_cells(t) if _has_acct else '')
-        + f"<td>{_drop(t)}</td><td>{t['reason']}</td></tr>"
-        for t in (g.get('trades') or []))
-    _acct_hdr = ('<th>shares</th><th>position</th><th>P&amp;L</th><th>R</th>'
-                 if _has_acct else '')
+    from chart import report as rpt
+    trades = g.get('trades') or []
+    st = rpt.compute(trades, s, spec)
+    U = st.get('unit', '$')
+    warn += st.get('warnings') or []
+
+    def _f(v, dp=2, sign=False, dash='—'):
+        if v is None:
+            return dash
+        return f"{v:+,.{dp}f}" if sign else f"{v:,.{dp}f}"
+
+    def _u(v, sign=True):
+        """A money/percent figure in the report's own basis."""
+        if v is None:
+            return '—'
+        return (f"{'+' if v >= 0 else '-'}${abs(v):,.2f}" if U == '$'
+                else f"{v:+,.2f}%")
+
+    def _cls(v):
+        return 'up' if (v or 0) > 0 else ('dn' if (v or 0) < 0 else '')
+
+    def _kpi(val, label, cls=''):
+        return (f'<div class="kpi"><b class="{cls}">{val}</b>'
+                f'<span>{label}</span></div>')
+
+    def _tbl(head, body, cls=''):
+        h = ''.join(f'<th>{x}</th>' for x in head)
+        return (f'<div class="wrap"><table class="{cls}"><tr>{h}</tr>{body}</table></div>')
+
+    def _grp_rows(d, label_of=lambda k: k, limit=None):
+        items = list(d.items())[:limit] if limit else list(d.items())
+        return ''.join(
+            f"<tr><td>{label_of(k)}</td><td>{e['n']}</td>"
+            f"<td>{e['win_rate_pct']}%</td>"
+            f"<td class='{_cls(e['net'])}'>{_u(e['net'])}</td>"
+            f"<td class='{_cls(e['avg'])}'>{_u(e['avg'])}</td></tr>"
+            for k, e in items)
+
+    # ── 1. EXECUTIVE SUMMARY ──────────────────────────────────────────────
+    acct = s.get('account') or {}
+    if acct:
+        head_val = f"{'+' if acct.get('net_pnl_usd', 0) >= 0 else '-'}${abs(acct.get('net_pnl_usd') or 0):,.2f}"
+        head_sub = (f"${acct['account_equity_start']:,.0f} → "
+                    f"${(acct.get('equity_end') or 0):,.2f} "
+                    f"({(acct.get('return_pct') or 0):+.2f}%) · "
+                    f"net of ${(acct.get('fees_usd') or 0):,.2f} commissions")
+        head_cls = _cls(acct.get('net_pnl_usd'))
+    else:
+        head_val = f"{st.get('net_profit', 0):+,.2f}%"
+        head_sub = ('sum of per-unit percentage moves — set account $ and risk % '
+                    'for a dollar result')
+        head_cls = _cls(st.get('net_profit'))
+
+    kpis = (
+        _kpi(head_val, head_sub, head_cls)
+        + _kpi(st.get('n_trades', 0), f"trades taken ({s.get('open_trades', 0)} still open at close)")
+        + _kpi(f"{st.get('win_rate_pct', 0)}%", f"win rate — {st.get('wins',0)}W / {st.get('losses',0)}L / {st.get('breakeven',0)}BE")
+        + _kpi(_f(st.get('profit_factor')), 'profit factor — won per unit lost (&gt;1.5 is healthy)')
+        + _kpi(_u(st.get('expectancy')), 'expectancy — what one average trade returns')
+        + _kpi(f"{st.get('max_dd_pct','—')}%", f"max drawdown ({_u(-abs(st.get('max_dd_abs') or 0))} peak-to-trough)")
+        + _kpi(_f(st.get('recovery_factor')), 'recovery factor — net profit ÷ max drawdown')
+        + _kpi(_f(st.get('sharpe')), 'Sharpe (daily, annualised ×√252, flat days counted)')
+    )
+
+    # ── 2. PERFORMANCE ────────────────────────────────────────────────────
+    perf = _tbl(['metric', 'value', 'what it means'], ''.join(f"<tr><td>{a}</td><td class='{c}'>{b}</td><td class='muted'>{d}</td></tr>" for a, b, c, d in [
+        ('Net profit', _u(st.get('net_profit')), _cls(st.get('net_profit')), 'everything below is after commissions'),
+        ('Gross profit', _u(st.get('gross_profit')), 'up', 'sum of the winners only'),
+        ('Gross loss', _u(st.get('gross_loss')), 'dn', 'sum of the losers only'),
+        ('Profit factor', _f(st.get('profit_factor')), '', 'gross profit ÷ gross loss. Below 1.0 the strategy loses money'),
+        ('Expectancy / trade', _u(st.get('expectancy')), _cls(st.get('expectancy')), 'net ÷ number of trades'),
+        ('Average win', _u(st.get('avg_win')), 'up', ''),
+        ('Average loss', _u(st.get('avg_loss')), 'dn', ''),
+        ('Payoff ratio', _f(st.get('payoff_ratio')), '', 'avg win ÷ avg loss. With a 50% win rate you need &gt;1.0'),
+        ('Largest win', _u(st.get('largest_win')), 'up', ''),
+        ('Largest loss', _u(st.get('largest_loss')), 'dn', 'if this dwarfs the average loss, one trade is carrying the risk'),
+        ('Best / worst day', f"{_u(st.get('best_day'))} / {_u(st.get('worst_day'))}", '', ''),
+        ('CAGR (annualised)', (f"{st['cagr_pct']:+.2f}%" if st.get('cagr_pct') is not None else '—'), _cls(st.get('cagr_pct')), 'extrapolated from this window — not a forecast'),
+    ]))
+
+    # ── 3. RISK ───────────────────────────────────────────────────────────
+    risk_tbl = _tbl(['metric', 'value', 'what it means'], ''.join(f"<tr><td>{a}</td><td>{b}</td><td class='muted'>{d}</td></tr>" for a, b, d in [
+        ('Max drawdown', f"{st.get('max_dd_pct','—')}% ({_u(-abs(st.get('max_dd_abs') or 0))})", 'deepest peak-to-trough fall of the closed-trade equity'),
+        ('Drawdown length', f"{st.get('max_dd_trades','—')} trades", 'longest stretch spent below a prior equity peak'),
+        ('Recovery factor', _f(st.get('recovery_factor')), 'net profit ÷ max drawdown — profit earned per unit of pain'),
+        ('Sharpe', _f(st.get('sharpe')), 'return ÷ volatility of DAILY results, annualised'),
+        ('Sortino', _f(st.get('sortino')), 'same, but only downside volatility is penalised'),
+        ('Calmar', _f(st.get('calmar')), 'CAGR ÷ max drawdown'),
+        ('Daily volatility', (f"{st['daily_vol_pct']}%" if st.get('daily_vol_pct') is not None else '—'), 'standard deviation of daily returns'),
+        ('Max consecutive losses', str(st.get('max_consec_losses', '—')), 'the streak the account has to survive'),
+        ('Max consecutive wins', str(st.get('max_consec_wins', '—')), ''),
+        ('Winning / losing days', f"{st.get('winning_days',0)} / {st.get('losing_days',0)} of {st.get('sessions',0)} sessions", 'sessions with no trade count as flat'),
+        ('Exposure', (f"{st['exposure_pct']}%" if st.get('exposure_pct') is not None else '—'), 'position-minutes ÷ available RTH minutes — capital idle the rest of the time'),
+        ('Most positions at once', str(acct.get('max_concurrent_positions', '—')), 'they share one balance'),
+    ]))
+
+    # ── 4. TRADE ANALYSIS ─────────────────────────────────────────────────
+    _h = st.get('hold') or {}
+    hold_tbl = _tbl(['metric', 'value'], ''.join(f"<tr><td>{a}</td><td>{b}</td></tr>" for a, b in [
+        ('Average hold', f"{_h.get('avg_min','—')} min"),
+        ('Average hold — winners', f"{_h.get('avg_win_min','—')} min"),
+        ('Average hold — losers', f"{_h.get('avg_loss_min','—')} min"),
+        ('Shortest / longest', f"{_h.get('min_min','—')} / {_h.get('max_min','—')} min"),
+        ('Total time in market', f"{_h.get('total_position_min','—')} position-minutes"),
+    ]))
+    _r = st.get('r') or {}
+    r_tbl = ''
+    if _r:
+        bars = ''.join(
+            f"<tr><td>{b['label']}</td><td>{b['n']}</td><td>{b['pct']}%</td>"
+            f"<td><span style='display:inline-block;height:9px;background:"
+            f"{'#ef5350' if b['label'].startswith('≤') or b['label'].startswith('-') else '#22c55e'};"
+            f"width:{max(2, int(b['pct'] * 2))}px'></span></td></tr>"
+            for b in _r['buckets'])
+        r_tbl = (f"<h3>R-multiple distribution</h3><div class='muted' style='font-size:11.5px'>"
+                 f"R = profit ÷ the dollars risked on that trade. Total <b>{_r['total']}R</b> "
+                 f"over {_r['n']} trades · average <b>{_r['avg']}R</b> · "
+                 f"best {_r['best']}R · worst {_r['worst']}R. A stop that holds pins the "
+                 f"worst bucket at -1R; anything below it means slippage through the stop.</div>"
+                 + _tbl(['bucket', 'trades', 'share', ''], bars))
+
+    # ── 5. BREAKDOWNS ─────────────────────────────────────────────────────
+    cuts = (f"<h3>By side</h3>"
+            + _tbl(['side', 'trades', 'win rate', 'net', 'avg'], _grp_rows(st.get('by_side') or {}))
+            + f"<h3>By exit reason</h3>"
+            + _tbl(['exit', 'trades', 'win rate', 'net', 'avg'], _grp_rows(st.get('by_reason') or {}))
+            + f"<h3>By session</h3>"
+            + _tbl(['date', 'trades', 'win rate', 'net', 'avg'], _grp_rows(st.get('by_day') or {}))
+            + f"<h3>By symbol</h3>"
+            + _tbl(['symbol', 'trades', 'win rate', 'net', 'avg'], _grp_rows(st.get('by_symbol') or {})))
+
+    # ── 6. THE JOURNAL ────────────────────────────────────────────────────
+    jrows = rpt.journal(trades, s)
+    _money = lambda v: ('—' if v is None else f"${v:,.2f}")
+    _plain = lambda v: ('—' if v is None else (f"{v:,.2f}" if isinstance(v, float) else str(v)))
+    jbody = ''.join(
+        "<tr>"
+        f"<td>{j['n']}</td><td>{j['date']}</td><td><b>{j['symbol']}</b></td>"
+        f"<td>{j['side']}</td>"
+        f"<td>{j['entry_time']}</td><td>{_plain(j['entry_price'])}</td>"
+        f"<td>{_plain(j['stop_price'])}</td><td>{_plain(j['risk_per_share'])}</td>"
+        f"<td>{j['exit_time']}</td><td>{_plain(j['exit_price'])}</td>"
+        f"<td>{j['exit_reason']}</td><td>{_plain(j['hold_min'])}</td>"
+        f"<td>{_plain(j['shares'])}</td><td>{_money(j['position_usd'])}</td>"
+        f"<td>{_money(j['risk_usd'])}</td><td>{_money(j['gross_usd'])}</td>"
+        f"<td>{_money(j['fees_usd'])}</td>"
+        f"<td class='{_cls(j['net_usd'])}'><b>{_money(j['net_usd'])}</b></td>"
+        f"<td class='{_cls(j['r_multiple'])}'>{_plain(j['r_multiple'])}</td>"
+        f"<td class='{_cls(j['return_pct'])}'>{_plain(j['return_pct'])}%</td>"
+        f"<td>{_money(j['equity_before'])}</td><td>{_money(j['equity_after'])}</td>"
+        f"<td>{_money(j['open_notional_usd'])}</td>"
+        f"<td>{_plain(j['rvol_day'])}</td><td>{_plain(j['reg_score'])}</td>"
+        f"<td>{_plain(j['reg_gap_pct'])}</td><td>{_plain(j['reg_sector'])}</td>"
+        f"<td>{_plain(j['source'])}</td><td class='muted'>{j['note'] or ''}</td>"
+        "</tr>"
+        for j in jrows)
+    jhead = ['#', 'date', 'symbol', 'side', 'entry', 'entry $', 'stop $',
+             'risk/sh', 'exit', 'exit $', 'why', 'held min', 'shares',
+             'position $', 'risk $', 'gross $', 'fees $', 'net $', 'R',
+             'move %', 'equity before', 'equity after', 'exposure $',
+             'rvol', 'score', 'gap %', 'sector', 'tool', 'note']
+    fee_rule = (jrows[0]['_fee_rule'] if jrows else 'none')
+
     m = (lambda k, d='—': s.get(k) if s.get(k) is not None else d)
     html = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Backtest #{bid} — {g.get('name', '')}</title><style>
-body{{background:#0e1116;color:#e2e8f0;font-family:-apple-system,'Segoe UI',sans-serif;margin:0;padding:14px}}
-h2{{margin:0 0 4px}} .muted{{color:#64748b;font-size:12px}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:12px 0}}
+<title>Backtest #{bid} — {s.get('strategy_name') or g.get('name', '')}</title><style>
+body{{background:#0e1116;color:#e2e8f0;font-family:-apple-system,'Segoe UI',sans-serif;margin:0;padding:14px;-webkit-text-size-adjust:100%}}
+h2{{margin:0 0 4px;font-size:19px}} h3{{margin:20px 0 4px;font-size:14px;color:#94a3b8;
+  border-bottom:1px solid #1e2632;padding-bottom:4px;text-transform:uppercase;letter-spacing:.06em}}
+.muted{{color:#64748b;font-size:12px}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:8px;margin:12px 0}}
 .kpi{{background:#151a24;border:1px solid #1e2632;border-radius:8px;padding:10px}}
-.kpi b{{font-size:19px;display:block}} .kpi span{{color:#94a3b8;font-size:11px}}
-table{{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}}
-td,th{{padding:6px 6px;border-bottom:1px solid #1e2632;text-align:left;white-space:nowrap}}
-.up{{color:#22c55e}} .dn{{color:#ef5350}} .warn{{color:#f5a623;font-size:12px;margin:8px 0}}
-.defs{{color:#64748b;font-size:11px;line-height:1.6;margin-top:14px}}
-.wrap{{overflow-x:auto}}</style></head><body>
+.kpi b{{font-size:18px;display:block;line-height:1.3}} .kpi span{{color:#94a3b8;font-size:11px}}
+.kpi:first-child{{grid-column:1/-1;border-color:#3b82f6}}
+.kpi:first-child b{{font-size:27px}}
+table{{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}}
+td,th{{padding:5px 7px;border-bottom:1px solid #1e2632;text-align:left;white-space:nowrap}}
+th{{color:#64748b;font-weight:600;font-size:11px;text-transform:uppercase;position:sticky;top:0;background:#0e1116}}
+tr:hover td{{background:#151a24}}
+.up{{color:#22c55e}} .dn{{color:#ef5350}}
+.warn{{color:#f5a623;font-size:12px;margin:6px 0;line-height:1.5}}
+.defs{{color:#64748b;font-size:11.5px;line-height:1.7;margin-top:18px}}
+.wrap{{overflow-x:auto;-webkit-overflow-scrolling:touch}}
+a.btn{{display:inline-block;background:#1c2431;color:#e2e8f0;border:1px solid #1e2632;
+  border-radius:4px;padding:6px 11px;text-decoration:none;font-size:12px;margin:6px 6px 0 0}}
+</style></head><body>
+
 <h2>Backtest #{bid} — {s.get('strategy_name') or g.get('name', '')}</h2>
-<div class="muted">strategy: <b>{s.get('strategy_name') or '—'}</b> ({s.get('strategy_side') or spec.get('side') or 'long'}) ·
-{spec.get('start')} → {spec.get('end')} · {cov.get('tf') or spec.get('tf')} ·
-feed: {cov.get('feed') or spec.get('feed') or '?'} · {uni_txt} ·
-fill: {spec.get('fill', 'close')} · cost: {spec.get('cost_bps', 0)} bps/side ·
-rules: {('RTH entries + EOD 15:50 close' if (spec.get('rules') or {}).get('eod_close') else 'none')} · status: {g.get('status')}</div>
-{('<div class="warn">⚠ ' + ' · '.join(warn) + '</div>') if warn else ''}
+<div class="muted">
+{spec.get('start')} → {spec.get('end')} · {st.get('sessions', 0)} sessions ·
+{cov.get('tf') or spec.get('tf')} bars · feed <b>{cov.get('feed') or spec.get('feed') or '?'}</b> ·
+fill <b>{spec.get('fill', 'close')}</b> · {uni_txt}<br>
+side: {s.get('strategy_side') or spec.get('side') or 'long'} ·
+slippage/spread modelled: {spec.get('cost_bps', 0)} bps per side ·
+commissions: {fee_rule} ·
+{('RTH entries + forced 15:50 close' if (spec.get('rules') or {}).get('eod_close') else 'no session rules')} ·
+status {g.get('status')}</div>
+<a class="btn" href="/api/backtest/{bid}/journal.csv">⤓ journal CSV</a>
+<a class="btn" href="/api/backtest/{bid}/stats.json">⤓ statistics JSON</a>
+
+{('<div class="warn">' + '<br>'.join('⚠ ' + w for w in warn) + '</div>') if warn else ''}
 {('<div class="warn">⚠ ' + str(s.get('errors')) + ' day·symbol pairs skipped (no data / feed error):<br>'
   + '<br>'.join('· ' + str(x)[:120] for x in (s.get('error_samples') or [])[:5]) + '</div>')
  if s.get('errors') else ''}
-<div class="grid">
-<div class="kpi"><b>{m('trades')}</b><span>closed trades ({m('open_trades', 0)} open)</span></div>
-<div class="kpi"><b>{m('win_rate')}%</b><span>win rate (closed trades with return &gt; 0)</span></div>
-<div class="kpi"><b>{m('total_return_pct')}%</b><span>total return (sum of per-trade %, unit size)</span></div>
-<div class="kpi"><b>{m('avg_return_pct')}%</b><span>average per trade</span></div>
-<div class="kpi"><b>{m('sharpe')}</b><span>Sharpe (daily returns ×√252, flat days included)</span></div>
-<div class="kpi"><b>{m('max_drawdown_pct')}%</b><span>max drawdown depth</span></div>
-<div class="kpi"><b>{m('max_dd_days')}</b><span>max drawdown duration (days below prior peak)</span></div>
-<div class="kpi"><b>{m('pairs')}</b><span>day·symbol pairs in the universe ({m('errors', 0)} errors)</span></div>
-{(f'''<div class="kpi"><b>{cov.get('evaluated')}/{cov.get('pairs')}</b><span>pairs with data ({cov.get('no_data', 0)} returned no bars)</span></div>
-<div class="kpi"><b>{cov.get('signals_on_day', 0)}</b><span>entry signals on {cov.get('signal_pairs', 0)} pairs → {cov.get('traded_pairs', 0)} traded</span></div>''') if cov else ''}
-{(f'''<div class="kpi"><b>{cov.get('scaleout_legs')}</b><span>scale-out partials banked across {cov.get('scaleout_trades', 0)} trades (returns are size-weighted)</span></div>''') if cov and cov.get('scaleout_legs') else ''}
-</div>
-{_account_html(s)}
-{_ttp_html(s)}
-<div class="wrap"><table><tr><th>date</th><th>sym</th><th>side</th><th>entry→exit</th><th>ret</th>{_acct_hdr}<th>drop%</th><th>why</th></tr>
-{rows}</table></div>
-<div class="defs"><b>How to read this honestly:</b><br>
-· Every trade uses the exact strategy JSON + verified qp math the chart draws — no re-implementation.<br>
-· Only trades ENTERED on each evaluated day count (no warm-up leakage, no look-ahead).<br>
-· Register universes are frozen as-of each morning → no survivorship bias. Symbol lists carry whatever bias you typed.<br>
-· 'open' rows were still holding at the day window's end — excluded from win rate.<br>
-· {'Returns are per-unit-position %; the ACCOUNT block above is the real-money view — shares sized from the stop, equity compounded in trade order, positions capped at the cash balance.' if _has_acct else 'Returns are per-unit-position %; position sizing/compounding belongs to the trading tool.'}</div>
+
+<h3>Result</h3>
+<div class="grid">{kpis}</div>
+
+<h3>Performance</h3>{perf}
+<h3>Risk</h3>{risk_tbl}
+<h3>Holding time</h3>{hold_tbl}
+{r_tbl}
+{cuts}
+
+<h3>Trade journal — every trade, every field</h3>
+<div class="muted" style="font-size:11.5px">Entry and exit times are ET.
+&quot;exposure $&quot; is the total position value open across the account the moment
+this trade was added, which is what the leverage cap is measured against.</div>
+{_tbl(jhead, jbody, 'journal')}
+
+<div class="defs"><b>How to read this honestly</b><br>
+· Every trade came from the exact strategy JSON and the same verified qp math the chart draws — the report re-reads stored rows, it does not re-simulate.<br>
+· Only trades ENTERED on each evaluated session count. No warm-up leakage, no look-ahead.<br>
+· Register universes are frozen each morning, so there is no survivorship bias. A typed symbol list carries whatever bias you typed.<br>
+· Trades still open at the window's end are excluded from every statistic above.<br>
+· {'Dollar figures size each position from the STOP (equity x risk% ÷ per-share risk), compound in trade order, and share one capital pool capped at ' + str(acct.get('max_leverage', 1)) + 'x the balance.' if acct else 'Percent figures are per-unit-position; set account $ and risk % for real-money sizing.'}<br>
+· Commissions are charged per ORDER, so a scale-out pays one entry fee plus one per leg. Spread and slippage are only modelled if you set cost bps.<br>
+· Profit factor, Sharpe, Sortino and Calmar are standard definitions; each is spelled out in the tables above rather than assumed.</div>
 </body></html>"""
     return HTMLResponse(html)
+
+
+@app.get('/api/backtest/{bid}/journal.csv')
+def backtest_journal_csv(bid: int):
+    """The per-trade journal as a spreadsheet — one row per trade, every field
+    the report shows. Separate from /csv (which exports the raw trade rows plus
+    whatever register columns rode along): this one is the trading journal,
+    with derived fields (stop price, per-share risk, gross vs net, hold time,
+    equity before/after) already computed so nothing has to be re-derived in
+    Excel, where a wrong formula would go unnoticed."""
+    import csv
+    import io
+    from fastapi.responses import Response
+    from chart import report as rpt
+    g = store.get_backtest(bid)
+    if not g:
+        return Response('backtest not found', status_code=404, media_type='text/plain')
+    rows = rpt.journal(g.get('trades') or [], g.get('summary') or {})
+    keys = [k for k, _ in rpt.JOURNAL_COLUMNS]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([lbl for _, lbl in rpt.JOURNAL_COLUMNS])
+    for r in rows:
+        w.writerow([('' if r.get(k) is None else r.get(k)) for k in keys])
+    return Response(buf.getvalue(), media_type='text/csv',
+                    headers={'Content-Disposition':
+                             f'attachment; filename="journal_backtest_{bid}.csv"'})
+
+
+@app.get('/api/backtest/{bid}/stats.json')
+def backtest_stats(bid: int):
+    """Every computed statistic as JSON — so the numbers in the report can be
+    checked, charted or diffed against another run without scraping HTML."""
+    g = store.get_backtest(bid)
+    if not g:
+        return {'ok': False, 'error': 'backtest not found'}
+    from chart import report as rpt
+    return {'ok': True, 'id': bid,
+            'spec': g.get('spec') or {},
+            'stats': rpt.compute(g.get('trades') or [], g.get('summary') or {},
+                                 g.get('spec') or {}),
+            'journal': rpt.journal(g.get('trades') or [], g.get('summary') or {})}
 
 
 @app.delete('/api/backtest/{bid}')

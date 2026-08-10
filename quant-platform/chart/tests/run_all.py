@@ -46,6 +46,8 @@ PARTS = [
     ('logic_audit31.py',    'OR + session VWAP 09:35 setup: timing, gates, 2R half, VWAP trail'),
     ('logic_audit32.py',    'T2 10:00 VWAP-extension: direction, invalidation, stop-first, per-day rank'),
     ('logic_audit33.py',    'cross-tool integration: run() reaches _pairs, tool assignment survives'),
+    ('logic_audit34.py',    'professional report: metrics vs hand arithmetic, journal, exports'),
+    ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They
     # are in the SAME gate on purpose: both live failures of 2026-08-10 came
