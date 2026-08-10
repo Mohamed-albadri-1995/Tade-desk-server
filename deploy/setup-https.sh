@@ -196,6 +196,12 @@ if curl -fsS --max-time 20 "https://$DOMAIN/health" >/dev/null 2>&1; then
   echo
   echo "  Open it on the phone and tap 🔔 Notifications — it should now ASK"
   echo "  rather than refuse. That is the whole point of this."
+  echo
+  echo "  Then tap 'test' beside it and CLOSE the page. The notification should"
+  echo "  still arrive: that is background delivery, and it is the only part"
+  echo "  that cannot be checked by looking at the page."
+  echo "  On an iPhone: Share -> Add to Home Screen FIRST, and open it from"
+  echo "  there. Safari does not deliver background push to a normal tab."
 else
   echo
   echo "  Not answering yet. A first certificate can take up to a minute."

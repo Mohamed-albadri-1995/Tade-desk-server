@@ -181,11 +181,62 @@ app.get('/api/tools', (req, res) => {
   }
 });
 
+/*
+ * Push: notifications that arrive with the page closed.
+ *
+ * Everything else on that page needs an open tab. A setup fires at a fixed
+ * minute and the trade is taken on sight, so "only while you are looking" is
+ * not a delivery mechanism — it is the failure this closes. See push.js.
+ */
+const push = require('./push');
+
+// The key a browser needs to create a subscription. Public by definition; the
+// private half never leaves the box.
+app.get('/api/push/key', (req, res) => {
+  try {
+    res.json({ ok: true, publicKey: push.publicKey() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/push/subscribe', express.json(), (req, res) => {
+  try {
+    const count = push.subscribe(req.body?.subscription, req.body?.label);
+    res.json({ ok: true, subscribers: count });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/push/unsubscribe', express.json(), (req, res) => {
+  res.json({ ok: true, removed: push.unsubscribe(req.body?.endpoint) });
+});
+
+/*
+ * Send one now.
+ *
+ * Not a nicety. A subscription can look perfect on this side and still be dead
+ * — the browser retired it, the phone's battery settings hold it, the keypair
+ * changed — and every one of those failures is invisible until the morning it
+ * matters. This is how you find out on a Sunday instead of at 10:00:02.
+ */
+app.post('/api/push/test', express.json(), async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await push.notifyAll()) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/health', (req, res) => {
   const store = require('./store');
   res.json({
     ok: true, app: 'ALERTS', name: 'Alerts', ts: Date.now(),
     rules: store.listRules().length,
+    // Carried so "why did my phone stay quiet" has an answer that does not
+    // need a login: zero here is the whole explanation.
+    pushSubscribers: push.list().length,
   });
 });
 
@@ -199,6 +250,9 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`[Alerts] service on port ${PORT}`);
     console.log(`[Alerts]   rules=${require('./store').RULES_FILE}`);
+    // Started with the server, not on demand: the whole point is that it is
+    // running when nobody has the page open.
+    require('./watcher').start();
   });
 }
 

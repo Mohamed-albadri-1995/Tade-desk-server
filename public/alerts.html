@@ -171,6 +171,10 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <div class="noise">
   <button class="btn" id="snd" onclick="toggleSound()">🔊 Sound: off</button>
   <button class="btn" id="ntf" onclick="askNotify()">🔔 Notifications</button>
+  <!-- Background delivery is the one thing here that cannot be verified by
+       looking at the page, because the test is whether it arrives when the page
+       is CLOSED. So it gets a button rather than a promise. -->
+  <button class="lnk" id="ntf-test" onclick="testPush()">test</button>
   <span class="note" id="noise-note"></span>
   <span class="note" id="next-decision"></span>
 </div>
@@ -320,13 +324,95 @@ async function askNotify() {
   if (!('Notification' in window)) { note('This browser has no notification support. Sound still works.', true); return; }
   try {
     const p = await Notification.requestPermission();
-    if (p === 'granted') { new Notification('Trade Desk alerts are on'); }
-    else note('The browser refused notifications. On a plain http:// address most browsers '
-      + 'block them entirely — sound and the on-screen list still work.', true);
+    if (p !== 'granted') {
+      note('The browser refused notifications. On a plain http:// address most browsers '
+        + 'block them entirely — sound and the on-screen list still work.', true);
+      paintNoise();
+      return;
+    }
+    // Permission alone only covers an OPEN tab. Subscribing is what makes the
+    // alert arrive with the page closed, and it is the same tap.
+    const sub = await subscribePush();
+    note(sub
+      ? 'Alerts will arrive even with this page closed. Use “test” below to prove it.'
+      : 'Notifications are on, but only while this page is open — this browser '
+        + 'would not subscribe for background delivery. On an iPhone, add this page '
+        + 'to the Home Screen first, then tap the bell again.', !sub);
   } catch {
     note('Notifications are blocked on this address (they need https). Sound still works.', true);
   }
   paintNoise();
+}
+
+/*
+ * Background delivery: a service worker plus a push subscription.
+ *
+ * The tab being open is what everything else here depends on — the poll, the
+ * sound, the banner. A setup fires at a fixed minute and the trade is taken on
+ * sight, so a phone in a pocket has to be reached. This is the only mechanism a
+ * website has for that.
+ *
+ * Returns false rather than throwing on every path that cannot get there, so
+ * the caller can say which of the several reasons it was.
+ */
+let PUSH_READY = false;
+async function subscribePush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  if (!window.isSecureContext) return false;
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+
+    // Reuse the existing one. Subscribing again returns the same endpoint, but
+    // asking first avoids a round trip and keeps the server list stable.
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const { publicKey } = await (await fetch('/api/push/key')).json();
+      if (!publicKey) return false;
+      sub = await reg.pushManager.subscribe({
+        // Required by Chrome: every push must result in something the user
+        // sees. The worker obeys it — see public/sw.js.
+        userVisibleOnly: true,
+        applicationServerKey: publicKey,
+      });
+    }
+    const r = await (await fetch('/api/push/subscribe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON(), label: navigator.platform || null }),
+    })).json();
+    PUSH_READY = !!r.ok;
+    return PUSH_READY;
+  } catch {
+    return false;
+  }
+}
+
+/*
+ * Prove it, rather than promise it.
+ *
+ * A subscription can be perfect on this side and still dead: the browser
+ * retired it, the phone's battery settings hold it, the page was never added to
+ * the Home Screen on iOS. Every one of those is invisible until the morning it
+ * matters, so there is a button that finds out on a Sunday.
+ */
+async function testPush() {
+  if (Notification.permission !== 'granted') { await askNotify(); return; }
+  if (!PUSH_READY) await subscribePush();
+  try {
+    const d = await (await fetch('/api/push/test', { method: 'POST' })).json();
+    if (!d.subscribers) {
+      note('No device is subscribed yet — tap the bell first.', true);
+    } else if (d.sent) {
+      note(`Sent to ${d.sent} device(s). Close this page: it should still arrive. `
+        + 'If nothing appears within a few seconds, check the browser\'s battery '
+        + 'or background settings for this site.', false);
+    } else {
+      note(`The push service refused all ${d.subscribers} device(s). Tap the bell `
+        + 'again to re-subscribe.', true);
+    }
+  } catch (e) {
+    note(`Could not send a test: ${e.message}`, true);
+  }
 }
 
 function note(msg, warn) {
@@ -903,6 +989,16 @@ async function delRule(id) {
 }
 
 paintNoise();
+/*
+ * Subscribe on load when permission was already given.
+ *
+ * Without this, a phone that allowed notifications before background delivery
+ * existed would keep saying "Notifications: on" and keep being unreachable with
+ * the page closed — the worst state, because it looks like the working one.
+ * Silent: no permission prompt is involved, and nothing needs saying when it
+ * simply works.
+ */
+if (('Notification' in window) && Notification.permission === 'granted') subscribePush();
 loadFires();
 loadRules();
 loadRisk();
