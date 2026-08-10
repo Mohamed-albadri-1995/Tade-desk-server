@@ -343,11 +343,31 @@ def backtest_report(bid: int):
         warn.append("fill = close (optimistic; use 'next open' for live-honest fills)")
     cov = s.get('coverage') or {}
     if cov.get('entry_drops'):
-        _dl = ', '.join(f'{k}={v}' for k, v in sorted(cov['entry_drops'].items(),
-                                                      key=lambda kv: -kv[1]))
-        warn.append(f"signals that did NOT become trades — {_dl} "
-                    f"(outside_window = broke outside the setup's time window; "
-                    f"unpriceable_stop = stop level not formed yet)")
+        # These are BAR-LEVEL events, not lost opportunities, and printing them
+        # in one list invited exactly the wrong reading: a setup whose window is
+        # a single minute shows outside_window in the millions, because the
+        # entry expression is true on most bars of most days and the clock
+        # refuses all of them. That is the time gate WORKING. Split into the
+        # gate doing its job and the drops that actually cost a trade, so the
+        # second list is small enough to act on.
+        _d = dict(cov['entry_drops'])
+        _clock = {k: _d.pop(k) for k in ('outside_window', 'rth_session',
+                                         'eod_bar', 'last_bar') if k in _d}
+        if _d:
+            _dl = ', '.join(f'{k}={v}' for k, v in sorted(_d.items(),
+                                                          key=lambda kv: -kv[1]))
+            warn.append(f"signals INSIDE the window that still did not trade — "
+                        f"{_dl} (daily_cap = the per-day attempt limit; "
+                        f"cooldown = too soon after the last exit; "
+                        f"unpriceable_stop = the stop level had not formed yet)")
+        if _clock:
+            _cl = ', '.join(f'{k}={v:,}' for k, v in sorted(_clock.items(),
+                                                            key=lambda kv: -kv[1]))
+            warn.append(f"bars where the entry condition was true but the CLOCK "
+                        f"refused it — {_cl}. This is the time window doing its "
+                        f"job, counted per BAR across the whole evaluated "
+                        f"history, not trades you missed. For a one-minute "
+                        f"window a number in the millions is normal.")
     if cov.get('rvol_min'):
         warn.append(f"In-Play filter: qp rvol ≥ {cov['rvol_min']} at {cov.get('rvol_at')} ET — "
                     f"excluded {cov.get('rvol_below', 0)} below + "
@@ -497,6 +517,35 @@ def backtest_report(bid: int):
             + f"<h3>By symbol</h3>"
             + _tbl(['symbol', 'trades', 'win rate', 'net', 'avg'], _grp_rows(st.get('by_symbol') or {})))
 
+    # ── 5b. PROP-FIRM RULES, and which trades they touched ────────────────
+    pf = rpt.prop_firm_detail(trades, s)
+    pf_html = ''
+    if pf:
+        wrows = ''.join(
+            f"<tr><td>{w['date']}</td><td><b>{w['symbol']}</b></td>"
+            f"<td>{w['side']}</td><td>${w['entry']:.2f}</td>"
+            f"<td class='dn'>${w['per_share']:.4f}/share</td>"
+            f"<td class='muted'>below the ${pf['min_profit_ps']} minimum — "
+            f"the profit is real, it just earns no credit toward the target</td></tr>"
+            for w in pf['wasted'])
+        pf_html = (
+            f"<h3>Prop-firm rules — flat {pf['shares']:.0f} shares</h3>"
+            f"<div class='muted' style='font-size:11.5px'>A SEPARATE simulation "
+            f"from the account block above: it ignores your balance and trades "
+            f"the same {pf['shares']:.0f} shares every time.<br>"
+            f"Net <b>${pf['net_pnl_usd']:,.2f}</b> after ${pf['fees_usd']:,.2f} "
+            f"commissions · of which <b>${pf['counted_pnl_usd']:,.2f}</b> counts "
+            f"toward the profit target "
+            f"(${pf['wasted_credit_lost']:,.2f} earned but not credited).</div>"
+            + (f"<div style='margin-top:6px'><b>Wins that earned no credit "
+               f"({len(pf['wasted'])})</b></div>"
+               + _tbl(['date', 'symbol', 'side', 'entry', 'per share', 'why'], wrows)
+               if pf['wasted'] else
+               "<div class='muted' style='margin-top:6px'>Every win cleared the "
+               "minimum — no credit was lost.</div>")
+            + "<div class='warn' style='margin-top:6px'>NOT modelled: "
+            + '; '.join(pf['not_modelled']) + "</div>")
+
     # ── 6. THE JOURNAL ────────────────────────────────────────────────────
     jrows = rpt.journal(trades, s)
     _money = lambda v: ('—' if v is None else f"${v:,.2f}")
@@ -580,6 +629,7 @@ status {g.get('status')}</div>
 <h3>Holding time</h3>{hold_tbl}
 {r_tbl}
 {cuts}
+{pf_html}
 
 <h3>Trade journal — every trade, every field</h3>
 <div class="muted" style="font-size:11.5px">Entry and exit times are ET.

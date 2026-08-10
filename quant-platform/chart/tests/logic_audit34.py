@@ -228,6 +228,58 @@ finally:
 
 print()
 print("=" * 64)
+print("PART E — the two counts that read as the wrong set")
+print("=" * 64)
+# (1) WHICH trade the prop-firm minimum cost, by name. "1 win below $0.10/share
+# wasted" left the reader to find it; on a $1.93 stock a healthy +2.70% is five
+# cents a share, which is exactly the case that bit run #231 (KPTI).
+TTP_SUM = {**SUMMARY, 'ttp': {'shares': 100, 'min_profit_ps': 0.10,
+                              'net_pnl_usd': 442.59, 'counted_pnl_usd': 439.63,
+                              'fees_usd': 26.25}}
+cheap = {'date': '2026-08-03', 'symbol': 'KPTI', 'side': 'long',
+         'entry_ts': ts('2026-08-03', '09:35'), 'exit_ts': ts('2026-08-03', '10:00'),
+         'entry': 1.93, 'exit': 1.982, 'ret': 0.027, 'reason': 'exit', 'ctx': {}}
+pf = rpt.prop_firm_detail(trades + [cheap], TTP_SUM)
+ok('the wasted win is named, not just counted',
+   [w['symbol'] for w in pf['wasted']] == ['KPTI'], str(pf['wasted']))
+ok('...with the per-share number that decided it (~$0.052)',
+   abs(pf['wasted'][0]['per_share'] - 0.052) < 0.001, str(pf['wasted'][0]))
+ok('the uncredited amount is stated', pf['wasted_credit_lost'] == 2.96,
+   str(pf['wasted_credit_lost']))
+ok('a $50 stock making the same PERCENT is not wasted (the rule is per share)',
+   not any(w['symbol'] == 'AAA' for w in pf['wasted']))
+ok('what the simulation does NOT model is stated, including hold time',
+   any('holding time' in x for x in pf['not_modelled']))
+
+# (2) drop counts. A one-minute window refuses the entry condition on almost
+# every bar; printing that beside the actionable drops made a working time gate
+# look like 1.36 million lost trades.
+import chart.server as srv
+_saved2 = store.get_backtest
+store.get_backtest = lambda bid, with_trades=True: {
+    'id': 2, 'name': 'T', 'status': 'done',
+    'spec': {'start': '2026-08-03', 'end': '2026-08-10', 'tf': '1m',
+             'feed': 'polygon', 'fill': 'next_open',
+             'universe': {'kind': 'register', 'register': 'R1'}},
+    'summary': {**SUMMARY, 'coverage': {'entry_drops': {
+        'outside_window': 1361916, 'rth_session': 46720, 'eod_bar': 4254,
+        'last_bar': 5, 'daily_cap': 3, 'cooldown': 1}}},
+    'trades': trades}
+try:
+    pg = srv.backtest_report(2).body.decode()
+    ok('clock refusals are separated from the drops that cost a trade',
+       'signals INSIDE the window that still did not trade' in pg
+       and 'daily_cap=3' in pg)
+    ok('...and the million-scale number is explained as normal, not a loss',
+       'the time window doing its job' in pg
+       and 'a number in the millions is normal' in pg)
+    ok('the two are not printed in one undifferentiated list',
+       'outside_window=1361916,' not in pg)
+finally:
+    store.get_backtest = _saved2
+
+print()
+print("=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)
 sys.exit(1 if FAIL else 0)

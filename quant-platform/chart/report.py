@@ -343,6 +343,55 @@ JOURNAL_COLUMNS = [
 ]
 
 
+def prop_firm_detail(trades: list, summary: dict) -> dict | None:
+    """WHICH trades the prop-firm min-profit rule actually cost, by name.
+
+    The TTP block reports "1 win below $0.10/share wasted" and stops there,
+    which leaves the reader to work out which trade it was — on a low-priced
+    stock a healthy-looking +2.7% can be five cents a share. Named here, with
+    the per-share number that decided it, so the rule can be argued with.
+
+    The per-share figure is the trade's AVERAGE across every fill, matching
+    `backtest._ttp_block`: a scale-out is one position and the rule is tested
+    on the position, not on each leg.
+    """
+    ttp = (summary or {}).get('ttp')
+    if not ttp:
+        return None
+    from chart.backtest import _fills
+    shares = float(ttp.get('shares') or 100)
+    mps = float(ttp.get('min_profit_ps') or 0)
+    rows = []
+    for t in trades or []:
+        fills = _fills(t, t.get('reason') != 'open')
+        realized = sum(fr for fr, _ in fills)
+        if realized <= 1e-9:
+            continue
+        gross_ps = sum(fr * pps for fr, pps in fills) / realized
+        rows.append({
+            'date': t.get('date'), 'symbol': t.get('symbol'),
+            'side': t.get('side'), 'entry': t.get('entry'),
+            'per_share': round(gross_ps, 4),
+            'wasted': 0 < gross_ps < mps,
+        })
+    wasted = [r for r in rows if r['wasted']]
+    return {
+        'shares': shares, 'min_profit_ps': mps,
+        'net_pnl_usd': ttp.get('net_pnl_usd'),
+        'counted_pnl_usd': ttp.get('counted_pnl_usd'),
+        'fees_usd': ttp.get('fees_usd'),
+        'wasted': wasted,
+        'wasted_credit_lost': round(
+            (ttp.get('net_pnl_usd') or 0) - (ttp.get('counted_pnl_usd') or 0), 2),
+        # Stated because its absence is invisible: the tool models the fee
+        # schedule and the min-profit rule. It does NOT model any minimum
+        # HOLDING TIME. If the firm requires one, these results assume it away.
+        'not_modelled': ['minimum holding time (no such rule is applied)',
+                         'daily loss limit / trailing drawdown',
+                         'spread and slippage unless cost bps is set'],
+    }
+
+
 def journal(trades: list, summary: dict) -> list:
     """The journal rows, in the order the trades were taken."""
     acct = (summary or {}).get('account') or {}

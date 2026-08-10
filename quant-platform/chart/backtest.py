@@ -728,6 +728,20 @@ def run(spec: dict, progress_cb=None) -> dict:
         cov['rank_per_day'] = {'metric': metric, 'top_n': top_n,
                                'kept': len(keep), 'dropped_by_rank': dropped}
 
+    # Counters that describe THE TRADES have to describe the trades that
+    # SURVIVED. They are tallied inside the per-pair loop, which runs before
+    # ranking, so a ranked run reported "45 scale-out partials across 45
+    # trades" next to a trade list holding 14 — the reader is left to work out
+    # which number is about which set. Recomputed here, after every filter.
+    _legs = sum(len(t.get('legs') or []) for t in closed + opens)
+    _n_scaled = sum(1 for t in closed + opens if t.get('legs'))
+    if _legs:
+        cov['scaleout_legs'] = _legs
+        cov['scaleout_trades'] = _n_scaled
+    else:
+        cov.pop('scaleout_legs', None)
+        cov.pop('scaleout_trades', None)
+
     per_day: dict = {}
     for d, _, _ in pairs:
         per_day[d] = per_day.get(d, 0) + 1
