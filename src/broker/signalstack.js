@@ -311,6 +311,59 @@ function fitQuantity({ quantity, price, date = null, cfg = settings() }) {
   };
 }
 
+/**
+ * Split a position across a strategy's scale-out legs, in whole shares.
+ *
+ * SignalStack places one bracket per order and has no notion of scaling out, so
+ * a strategy that banks a third at 1R and a third at 2R becomes THREE orders:
+ * each takes its share of the size and carries its own take_profit_price, and
+ * they share the stop. That is also how it would be done by hand.
+ *
+ * The remainder goes to the LAST leg — the runner if there is one, otherwise
+ * the final target. Rounding 40 shares into thirds gives 13, 13, 13 and loses
+ * one; giving the odd share to the part that rides furthest is the choice that
+ * matches the intent, and losing it silently is the one that does not.
+ *
+ * A leg whose target has no price — one anchored to an indicator, which is
+ * wherever that line sits on the bar — cannot be a resting order. It is folded
+ * into the runner and reported, rather than sent without a target.
+ */
+function splitLegs(quantity, plan) {
+  const total = Math.floor(Number(quantity) || 0);
+  const legs = (plan && Array.isArray(plan.legs)) ? plan.legs : [];
+  if (total < 1) return { parts: [], unplaceable: [] };
+
+  const placeable = legs.filter(l => Number(l.price) > 0);
+  const unplaceable = legs.filter(l => !(Number(l.price) > 0));
+  // Everything the legs do not book rides the stop, plus anything whose target
+  // could not be priced.
+  const runnerFraction = Math.max(0, Number((plan && plan.runner) || 0))
+    + unplaceable.reduce((n, l) => n + Number(l.fraction || 0), 0);
+
+  const parts = [];
+  let used = 0;
+  for (const leg of placeable) {
+    const qty = Math.floor(total * Number(leg.fraction || 0));
+    if (qty < 1) continue;              // a leg too small to be a whole share
+    parts.push({ quantity: qty, target: Number(leg.price),
+                 rMultiple: leg.r_multiple, fraction: leg.fraction });
+    used += qty;
+  }
+
+  const left = total - used;
+  if (left > 0) {
+    if (runnerFraction > 0 || !parts.length) {
+      // The runner: no target, rides the stop.
+      parts.push({ quantity: left, target: null, rMultiple: null, runner: true });
+    } else {
+      // No runner — the odd shares join the furthest target rather than being
+      // dropped, which would quietly place fewer shares than were sized.
+      parts[parts.length - 1].quantity += left;
+    }
+  }
+  return { parts, unplaceable };
+}
+
 /** LONG opens with a buy, SHORT with a sell. The bridge takes no other verbs. */
 function actionFor(signal) {
   const s = String(signal || '').toUpperCase();
@@ -399,7 +452,8 @@ function isBuyingPowerRejection(res) {
  * is the exact JSON that would go on the wire.
  */
 function planOrder({ symbol, signal, quantity, price, stop = null, target = null,
-                     date, setupId = null, maxPerDay = null, cfg = settings() }) {
+                     date, setupId = null, maxPerDay = null, plan = null,
+                     cfg = settings() }) {
   if (!cfg.enabled) return { blocked: 'off', reason: 'orders are switched off' };
 
   const action = actionFor(signal);
@@ -450,7 +504,43 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
   if (cfg.bracket && Number(stop) > 0) body.stop_loss_price = Number(stop);
   if (cfg.bracket && Number(target) > 0) body.take_profit_price = Number(target);
 
-  return { body, action, fit };
+  /*
+   * A TRAILING stop, when the strategy's is one and it can be said as a
+   * distance. SignalStack documents stop_loss_price_distance and
+   * stop_loss_price_percent for exactly this, so a strategy tested with a 1.5%
+   * trail is placed with a 1.5% trail rather than with a fixed stop that only
+   * looks similar on the first bar.
+   *
+   * A stop anchored to an INDICATOR is not sent as a trail at all — it is
+   * wherever that line sits on each bar, no broker can follow it, and a
+   * plausible-looking distance would put the stop somewhere the backtest never
+   * had one. It goes out as the frozen level with a warning attached.
+   */
+  const trail = plan && plan.trail;
+  if (cfg.bracket && trail && Number(trail.value) > 0) {
+    if (trail.kind === 'pct') body.stop_loss_price_percent = Number(trail.value);
+    else body.stop_loss_price_distance = Number(trail.value);
+    delete body.stop_loss_price;
+  }
+
+  /*
+   * The scale-out. One order per leg, each with its own target, all sharing the
+   * stop — SignalStack places one bracket per order and has no scale-out of its
+   * own, so this is what a tested "third at 1R, third at 2R, let the rest run"
+   * has to become.
+   */
+  const split = splitLegs(fit.quantity, plan);
+  const orders = (plan && plan.legs && plan.legs.length > 1)
+    ? split.parts.map(part => {
+      const b = { ...body, quantity: part.quantity };
+      if (part.target && cfg.bracket) b.take_profit_price = Number(part.target.toFixed(4));
+      else delete b.take_profit_price;
+      return b;
+    })
+    : [body];
+
+  return { body: orders[0], orders, action, fit,
+           legs: split.parts, unplaceable: split.unplaceable };
 }
 
 /**
@@ -482,7 +572,8 @@ function previewOrder(args) {
 
 async function placeOrder({ symbol, signal, quantity, price, stop = null,
                             target = null, date, source = null, setupId = null,
-                            maxPerDay = null, cfg = settings() }) {
+                            maxPerDay = null, plan: exitPlan = null,
+                            cfg = settings() }) {
   const base = {
     at: Date.now(), date, symbol, signal, price, stop, target, source,
     // Recorded so the per-setup cap can be counted from the ledger rather than
@@ -493,7 +584,7 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
   };
 
   const plan = planOrder({ symbol, signal, quantity, price, stop, target, date,
-                           setupId, maxPerDay, cfg });
+                           setupId, maxPerDay, plan: exitPlan, cfg });
 
   if (!cfg.armed) {
     // Not armed is the normal, safe state, and it still says what it WOULD have
@@ -515,6 +606,59 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
   }
 
   const { body: planned, action, fit } = plan;
+
+  /*
+   * A SCALE-OUT goes out as several orders, and counts as ONE trade.
+   *
+   * Several because SignalStack places one bracket per order and has no
+   * scale-out of its own; one trade because the day's caps are about how many
+   * POSITIONS were taken, and letting a three-leg strategy spend three of them
+   * would make a cap of four mean "one and a bit trades".
+   *
+   * No halve-and-retry here, unlike the single-order path. Halving one leg of a
+   * tested scale-out does not make it smaller, it makes it a different shape —
+   * so a refusal stops the rest and is reported with exactly what did go in.
+   */
+  if (plan.orders && plan.orders.length > 1) {
+    const results = [];
+    for (const body of plan.orders) {
+      if (!Number.isInteger(body.quantity) || body.quantity < 1) continue;
+      let r;
+      try {
+        r = await post(cfg.webhookUrl, body);
+      } catch (err) {
+        results.push({ quantity: body.quantity, sent: false, error: err.message });
+        break;                        // see the note above about retries
+      }
+      results.push({ quantity: body.quantity, target: body.take_profit_price || null,
+                     sent: r.ok, status: r.status, orderId: r.orderId,
+                     fillPrice: r.fillPrice, message: r.message });
+      if (!r.ok) break;
+    }
+    const done = results.filter(r => r.sent);
+    const out = {
+      ...base,
+      action,
+      quantity: done.reduce((n, r) => n + r.quantity, 0),
+      bracket: cfg.bracket,
+      scaleOut: results.length,
+      legs: results,
+      // The first leg's id, so a callback about it finds this row. The others
+      // are on the legs, and reconciliation reads both.
+      orderId: (done[0] || {}).orderId || null,
+      fillPrice: (done[0] || {}).fillPrice || null,
+      status: (done[0] || {}).status || null,
+      sent: done.length > 0,
+      partial: done.length > 0 && done.length < results.length,
+      unplaceable: (plan.unplaceable || []).length || undefined,
+      reduced: fit.quantity !== fit.asked ? fit.reason : null,
+      error: done.length === results.length ? null
+        : `only ${done.length} of ${plan.orders.length} legs went in — `
+          + `${(results.find(r => !r.sent) || {}).message || 'refused'}`,
+    };
+    record(out);
+    return out;
+  }
 
   /*
    * Send, and reduce once if the BROKER — not this side's tally — says the
@@ -752,7 +896,7 @@ function reconciled(date = null) {
 module.exports = {
   FILE, LEDGER, HOOK_RE,
   settings, publicSettings, save, mask,
-  orders, committed, remaining, tradesToday, fitQuantity, actionFor,
+  orders, committed, remaining, tradesToday, fitQuantity, actionFor, splitLegs,
   planOrder, previewOrder, placeOrder, test,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled,

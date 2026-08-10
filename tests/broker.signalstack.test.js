@@ -621,3 +621,117 @@ describe('previewing the real order', () => {
     expect(sent[0].body).toEqual(p.body);
   });
 });
+
+// ── scale-out and trailing stops ──────────────────────────────────────────
+//
+// A strategy that banks a third at 1R, a third at 2R and lets the rest run is
+// not "a 2R trade, roughly". It is a different trade, and sending it as one
+// bracket at 2R would place something the backtest never measured. SignalStack
+// has one bracket per order and no scale-out, so the tested shape has to become
+// several orders — and count as ONE trade, since the caps are about positions.
+
+const PLAN = {
+  legs: [
+    { fraction: 0.5, r_multiple: 1, price: 30.42, anchored: false },
+    { fraction: 0.25, r_multiple: 2, price: 31.79, anchored: false },
+  ],
+  runner: 0.25, stop_kind: 'fixed', trail: null, stop_anchored: false,
+};
+
+describe('scale-out legs', () => {
+  test('the position is split, in whole shares, with the odd share riding furthest', () => {
+    expect(broker.splitLegs(7, {
+      legs: [{ fraction: 0.34, price: 1 }, { fraction: 0.33, price: 2 },
+             { fraction: 0.33, price: 3 }],
+      runner: 0,
+    }).parts.map(p => p.quantity)).toEqual([2, 2, 3]);
+  });
+
+  test('one order per leg, each with its own target and the same stop', async () => {
+    armed();
+    await place({ quantity: 40, plan: PLAN });
+    expect(sent.map(s => s.body.quantity)).toEqual([20, 10, 10]);
+    expect(sent.map(s => s.body.take_profit_price)).toEqual([30.42, 31.79, undefined]);
+    // The runner has no target and rides the stop.
+    expect(sent.every(s => s.body.stop_loss_price === 27.68)).toBe(true);
+  });
+
+  /* The caps are about how many POSITIONS were taken. A three-leg strategy
+   * spending three of them would make a cap of four mean "one and a bit". */
+  test('a scale-out is one trade against the day’s caps', async () => {
+    armed();
+    broker.save({ maxTradesPerDay: 2 });
+    await place({ symbol: 'A', quantity: 40, plan: PLAN });
+    expect(broker.tradesToday(DAY)).toBe(1);
+    expect((await place({ symbol: 'B', quantity: 40, plan: PLAN })).sent).toBe(true);
+    expect((await place({ symbol: 'C', quantity: 40, plan: PLAN })).sent).toBe(false);
+  });
+
+  test('a refused leg stops the rest and reports what did go in', async () => {
+    armed();
+    let n = 0;
+    global.fetch = jest.fn(async (url, opts) => {
+      sent.push({ url, body: JSON.parse(opts.body) });
+      n += 1;
+      return n < 2 ? filled() : rejected('TradeThePool: rejected');
+    });
+    const out = await place({ quantity: 40, plan: PLAN });
+    expect(sent).toHaveLength(2);          // stopped, did not send the third
+    expect(out.partial).toBe(true);
+    expect(out.quantity).toBe(20);         // only what actually went in
+    expect(out.error).toMatch(/only 1 of 3 legs/);
+  });
+
+  /* A leg whose target follows an indicator has no price at the decision. It
+   * cannot rest at a broker, so it joins the runner rather than being sent
+   * without a target — which would be an unbounded position nobody asked for. */
+  test('a target that cannot be priced folds into the runner', () => {
+    const split = broker.splitLegs(40, {
+      legs: [{ fraction: 0.5, price: 30.42 }, { fraction: 0.5, price: null, anchored: true }],
+      runner: 0,
+    });
+    expect(split.parts.map(p => p.quantity)).toEqual([20, 20]);
+    expect(split.parts[1].runner).toBe(true);
+    expect(split.unplaceable).toHaveLength(1);
+  });
+
+  test('no legs means one order, exactly as before', async () => {
+    armed();
+    await place({ quantity: 40, plan: { legs: [{ fraction: 1, price: 31.79 }], runner: 0 } });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body.quantity).toBe(40);
+  });
+});
+
+describe('a trailing stop', () => {
+  test('a percent trail is sent as one, not as a fixed level', async () => {
+    armed();
+    await place({ plan: { legs: [{ fraction: 1, price: 31.79 }], runner: 0,
+                          trail: { kind: 'pct', value: 1.5 } } });
+    expect(sent[0].body.stop_loss_price_percent).toBe(1.5);
+    // The fixed level is REMOVED — sending both would be two stops.
+    expect(sent[0].body.stop_loss_price).toBeUndefined();
+  });
+
+  test('a points trail is sent as a distance', async () => {
+    armed();
+    await place({ plan: { legs: [{ fraction: 1, price: 31.79 }], runner: 0,
+                          trail: { kind: 'points', value: 0.5 } } });
+    expect(sent[0].body.stop_loss_price_distance).toBe(0.5);
+  });
+
+  /*
+   * A stop anchored to an indicator is wherever that line sits on each bar. No
+   * broker-side trail can follow it, and inventing a distance would put the
+   * stop somewhere the backtest never had one — so the frozen level goes out
+   * and the alert says it will not follow.
+   */
+  test('an indicator-anchored stop is sent as the frozen level, never as a guessed distance', async () => {
+    armed();
+    await place({ plan: { legs: [{ fraction: 1, price: 31.79 }], runner: 0,
+                          trail: null, stop_anchored: true } });
+    expect(sent[0].body.stop_loss_price).toBe(27.68);
+    expect(sent[0].body.stop_loss_price_percent).toBeUndefined();
+    expect(sent[0].body.stop_loss_price_distance).toBeUndefined();
+  });
+});
