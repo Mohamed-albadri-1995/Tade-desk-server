@@ -265,3 +265,74 @@ def test_a_run_reports_which_fill_it_used():
     from chart import decide as dec
     assert dec.decide([], [], '2026-08-06')['fill'] == 'close'
     assert dec.decide([], [], '2026-08-06', fill='next_open')['fill'] == 'next_open'
+
+
+# ── the strategy's own exit, not an invented one ───────────────────────────
+#
+# Every pick used to be given a single target at target_r × risk, whatever the
+# strategy said. For a strategy whose risk block carries scale-out targets —
+# take a third at 1R, a third at 2R, let the rest run — that is not a smaller
+# approximation of the tested trade. It is a different trade, and the live
+# order would not have matched the backtest that justified it.
+
+from chart.decide import exit_plan                            # noqa: E402
+
+
+def test_a_strategy_with_no_targets_keeps_the_single_r_target():
+    p = exit_plan({}, 'long', 100.0, 98.0, 2.0)
+    assert len(p['legs']) == 1
+    assert p['legs'][0] == {'fraction': 1.0, 'r_multiple': 2.0,
+                            'price': 104.0, 'anchored': False}
+    assert p['runner'] == 0.0
+
+
+def test_scale_out_legs_are_priced_from_their_r_multiples():
+    p = exit_plan({'risk': {'targets': [
+        {'fraction': 0.5, 'r_multiple': 1},
+        {'fraction': 0.25, 'r_multiple': 2},
+    ]}}, 'long', 100.0, 98.0)
+    assert [l['price'] for l in p['legs']] == [102.0, 104.0]
+    # What the legs do not book rides the stop — the runner is not a rounding
+    # error, it is the part of the tested trade that has no target at all.
+    assert p['runner'] == 0.25
+
+
+def test_a_short_prices_its_legs_the_other_way():
+    p = exit_plan({'risk': {'targets': [{'fraction': 1.0, 'r_multiple': 2}]}},
+                  'short', 100.0, 102.0)
+    assert p['legs'][0]['price'] == 96.0
+
+
+def test_a_frozen_stop_is_fixed_and_a_percent_stop_trails():
+    assert exit_plan({'risk': {'sl': {'type': 'pct', 'value': 1.5, 'freeze': True}}},
+                     'long', 100.0, 98.0)['stop_kind'] == 'fixed'
+    p = exit_plan({'risk': {'sl': {'type': 'pct', 'value': 1.5}}}, 'long', 100.0, 98.0)
+    assert p['stop_kind'] == 'trailing'
+    assert p['trail'] == {'kind': 'pct', 'value': 1.5}
+
+
+def test_an_indicator_anchored_stop_reports_no_distance():
+    # It is wherever that line sits on the bar. A number here would be a
+    # plausible-looking distance that puts the stop where the backtest never
+    # had one, so the caller is told there isn't one instead.
+    p = exit_plan({'risk': {'sl': {'type': 'prim'}}}, 'long', 100.0, 98.0)
+    assert p['stop_anchored'] is True
+    assert p['trail'] is None
+
+
+def test_a_leg_with_an_anchored_target_has_no_price_and_says_so():
+    p = exit_plan({'risk': {'targets': [
+        {'fraction': 0.5, 'tp': {'type': 'prim', 'key': 'ema'}},
+    ]}}, 'long', 100.0, 98.0)
+    assert p['legs'][0]['price'] is None
+    assert p['legs'][0]['anchored'] is True
+
+
+def test_a_malformed_leg_is_skipped_rather_than_sized_as_zero():
+    p = exit_plan({'risk': {'targets': [
+        {'fraction': 'nonsense', 'r_multiple': 1},
+        {'fraction': 0, 'r_multiple': 1},
+        {'fraction': 0.5, 'r_multiple': 1},
+    ]}}, 'long', 100.0, 98.0)
+    assert len(p['legs']) == 1
+    assert p['legs'][0]['fraction'] == 0.5

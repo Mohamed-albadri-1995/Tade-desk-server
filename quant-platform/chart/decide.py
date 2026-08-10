@@ -130,6 +130,97 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
     return out
 
 
+def exit_plan(strategy: dict, side: str, entry: float, stop: float,
+              target_r: float = 2.0) -> dict:
+    """How this strategy actually gets out — its legs and its stop behaviour.
+
+    THIS EXISTS BECAUSE THE SCREENER WAS INVENTING ONE. Every pick used to be
+    given a single target at `target_r` times the risk, whatever the strategy
+    said. For a strategy whose risk block carries scale-out `targets` — take a
+    third at 1R, a third at 2R, let the rest run — that is not a smaller
+    approximation of the tested trade, it is a different trade, and the live
+    order would not have matched the backtest that justified it.
+
+    Returns
+        legs        [{fraction, r_multiple, price}] in the order they are hit.
+                    A strategy with no targets gets one leg at target_r for the
+                    whole position, which is what it always effectively had.
+        runner      the fraction left after every leg, riding the stop.
+        stop_kind   'fixed'    the stop never moves (risk.sl.freeze)
+                    'trailing' the stop follows a line, bar by bar
+        trail       how it follows, when that can be said as a distance:
+                    {'kind': 'pct'|'points', 'value': x}. None for a stop
+                    anchored to an indicator — see the note below.
+
+    A trail anchored to a PRIMITIVE (the 9 EMA, session VWAP) has no fixed
+    distance: it is wherever that line is on the bar. No broker-side trailing
+    stop can follow it, so this reports None rather than a number that would
+    look right and be wrong, and the caller has to say so out loud.
+    """
+    risk_block = (strategy or {}).get('risk') or {}
+    per_share = abs(entry - stop)
+    sign = 1.0 if str(side).lower() == 'long' else -1.0
+
+    legs = []
+    for t in (risk_block.get('targets') or []):
+        if not isinstance(t, dict):
+            continue
+        try:
+            fraction = float(t.get('fraction'))
+        except (TypeError, ValueError):
+            continue
+        if fraction <= 0:
+            continue
+        rm = t.get('r_multiple')
+        tp = t.get('tp') if isinstance(t.get('tp'), dict) else None
+        price = None
+        r_mult = None
+        if rm not in (None, '', 0):
+            r_mult = float(rm)
+            price = entry + sign * r_mult * per_share
+        elif tp and tp.get('type') == 'pct' and tp.get('value') not in (None, ''):
+            price = entry * (1.0 + sign * float(tp['value']) / 100.0)
+            r_mult = (abs(price - entry) / per_share) if per_share else None
+        elif tp and tp.get('type') == 'points' and tp.get('value') not in (None, ''):
+            price = entry + sign * float(tp['value'])
+            r_mult = (abs(price - entry) / per_share) if per_share else None
+        # A prim-anchored leg target trails per bar and has no price at the
+        # decision. Reported with price None so the caller can see the leg
+        # exists and refuse to place a resting order for it.
+        legs.append({'fraction': fraction,
+                     'r_multiple': None if r_mult is None else round(r_mult, 4),
+                     'price': None if price is None else round(price, 4),
+                     'anchored': bool(tp and tp.get('type') == 'prim')})
+
+    booked = sum(l['fraction'] for l in legs)
+    if not legs:
+        legs = [{'fraction': 1.0, 'r_multiple': target_r,
+                 'price': round(entry + sign * target_r * per_share, 4),
+                 'anchored': False}]
+        booked = 1.0
+
+    sl = risk_block.get('sl') or {}
+    frozen = bool(sl.get('freeze'))
+    kind = sl.get('type')
+    trail = None
+    if not frozen and kind == 'pct' and sl.get('value') not in (None, ''):
+        trail = {'kind': 'pct', 'value': float(sl['value'])}
+    elif not frozen and kind == 'points' and sl.get('value') not in (None, ''):
+        trail = {'kind': 'points', 'value': float(sl['value'])}
+
+    return {
+        'legs': legs,
+        'runner': round(max(0.0, 1.0 - booked), 6),
+        'stop_kind': 'fixed' if (frozen or not kind) else 'trailing',
+        'trail': trail,
+        # True when the stop follows an indicator line. No broker-side trailing
+        # stop can reproduce that, and pretending otherwise puts a stop
+        # somewhere the backtest never had one.
+        'stop_anchored': (not frozen) and kind == 'prim',
+        'breakeven_after_leg': bool(risk_block.get('breakeven_after_target')),
+    }
+
+
 def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
            feed: str = 'yahoo', top_n: int = 2, target_r: float = 2.0,
            days: int = 2, workers: int = _WORKERS, fill: str = 'close') -> dict:
@@ -173,13 +264,19 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
         c['rank'] = i + 1
 
     picks = signalled[:top_n] if top_n else signalled
+    by_name = {s.get('name'): s for s in strategies}
     for p in picks:
         risk = abs(float(p['entry']) - float(p['stop']))
         p['risk'] = risk
         p['risk_pct'] = (risk / float(p['entry']) * 100.0) if p['entry'] else None
-        p['target'] = (float(p['entry']) + target_r * risk if p['side'] == 'long'
-                       else float(p['entry']) - target_r * risk)
-        p['target_r'] = target_r
+        plan = exit_plan(by_name.get(p.get('strategy')) or {},
+                         p['side'], float(p['entry']), float(p['stop']), target_r)
+        p['exit_plan'] = plan
+        # The FIRST target stays on `target` under its old name, because that is
+        # what the alert text and the single-bracket path already read. A
+        # strategy with legs has more than one, and they are in exit_plan.
+        p['target'] = plan['legs'][0]['price'] if plan['legs'] else None
+        p['target_r'] = plan['legs'][0].get('r_multiple') if plan['legs'] else None
 
     return {
         'ok': True,

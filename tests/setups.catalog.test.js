@@ -171,3 +171,50 @@ test('an out-of-range window is refused rather than turned into a nonsense minut
   expect(catalog.hhmm(null)).toBeNull();
   expect(catalog.hhmm('nope')).toBeNull();
 });
+
+/*
+ * Which setups may place real orders.
+ *
+ * Two switches guard an order: the broker being armed — permission for the box
+ * — and this one, permission for a strategy. One switch would have meant that
+ * arming to trade something backtested for months also armed the scalp assigned
+ * to a tool five minutes ago to see what it does.
+ */
+describe('permission to place orders', () => {
+  test('a setup does not trade until it is told to', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    expect((await catalog.list())[0].autoTrade).toBe(false);
+  });
+
+  test('it is granted per setup, and only by saying so', async () => {
+    qp.strategies.mockResolvedValue([
+      T2_LONG,
+      { name: 'Fashionably Late Scalp', side: 'long', tools: ['T2'], risk: { window_start: 1000 } },
+    ]);
+    const prefs = require('../src/setups/prefs');
+    const list = await catalog.list();
+    const t2 = list.find(s => s.name.startsWith('T2'));
+    prefs.saveSettings(t2.id, { autoTrade: true });
+
+    const after = await catalog.list();
+    expect(after.find(s => s.name.startsWith('T2')).autoTrade).toBe(true);
+    // The other one is untouched — that is the whole point of it being per setup.
+    expect(after.find(s => s.name.startsWith('Fashionably')).autoTrade).toBe(false);
+  });
+
+  /* Only an actual boolean true. A truthy string arriving from a form must not
+   * be what turns a setup into one that spends money. */
+  test('anything short of true is false', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const prefs = require('../src/setups/prefs');
+    const id = (await catalog.list())[0].id;
+    for (const v of ['true', 1, 'yes', {}]) {
+      prefs.saveSettings(id, { autoTrade: v });
+      expect((await catalog.list())[0].autoTrade).toBe(false);
+    }
+    prefs.saveSettings(id, { autoTrade: true });
+    expect((await catalog.list())[0].autoTrade).toBe(true);
+    prefs.saveSettings(id, { autoTrade: false });
+    expect((await catalog.list())[0].autoTrade).toBe(false);
+  });
+});

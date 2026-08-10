@@ -25,6 +25,7 @@ const qp = require('./qpClient');
 const risk = require('./risk');
 const universeFilter = require('./universe');
 const prefs = require('./prefs');
+const broker = require('../broker/signalstack');
 const alertStore = require('../alerts/store');
 
 /** The minute before the decision — the last bar that must have closed. */
@@ -58,6 +59,57 @@ function describePick(pick, size) {
   return `${side} ${qty}${pick.ticker} — now ~${p.entry.toFixed(2)}, `
     + `stop ${p.stop.toFixed(2)} (VWAP, fixed), target ${p.target.toFixed(2)} `
     + `· risk ${p.riskPct.toFixed(2)}% · ${pick.extension.toFixed(2)}% from VWAP`;
+}
+
+/**
+ * What the broker did, in the same sentence as the trade.
+ *
+ * Appended to the detail line rather than added below it, because the detail
+ * line is what a notification shows on a locked phone — and "did it actually go
+ * in" is the second thing anyone wants to know there. Silence would read as
+ * "yes": an alert that looks identical whether or not an order was placed is
+ * the one failure this must not have.
+ */
+function orderLine(o) {
+  if (!o) return '';
+  if (o.skipped) return ` · ORDER: not sent (${o.skipped})`;
+  if (!o.sent) return ` · ORDER FAILED — ${o.error || 'refused'}. Place it by hand.`;
+  const filled = o.status === 'filled';
+  return ` · ORDER ${filled ? 'FILLED' : String(o.status || 'accepted').toUpperCase()}`
+    + ` ${o.quantity}${o.fillPrice ? ` @ ${o.fillPrice}` : ''}`
+    // A scale-out is several orders and one position. Said plainly, because
+    // three confirmations at the broker for one signal is otherwise alarming.
+    + `${o.scaleOut > 1 ? ` in ${o.scaleOut} legs` : ''}`
+    + `${o.bracket ? ' with stop+target' : ' — STOP NOT SENT, place it'}`
+    + `${o.partial ? ' — PARTIAL: ' + (o.error || 'some legs did not go in') : ''}`
+    + `${o.reduced ? ` (${o.reduced})` : ''}`;
+}
+
+/*
+ * The part of the strategy's exit that a broker cannot be handed.
+ *
+ * A stop that follows an indicator — the 9 EMA, session VWAP — is wherever that
+ * line sits on each bar. No broker-side trailing stop can follow it, so what
+ * goes out is the frozen level and the trade needs managing by hand. Saying so
+ * on the alert is the difference between knowing that and finding out.
+ */
+function unmanagedLine(plan) {
+  if (!plan) return '';
+  const notes = [];
+  if (plan.stop_anchored) {
+    notes.push('the stop trails an indicator — sent as a fixed level, so it will '
+      + 'NOT follow. Manage it yourself');
+  }
+  if (plan.breakeven_after_leg) {
+    notes.push('moves to breakeven after the first leg — the broker will not do '
+      + 'that, move it yourself');
+  }
+  const anchored = (plan.legs || []).filter(l => l && l.anchored).length;
+  if (anchored) {
+    notes.push(`${anchored} target(s) follow an indicator and cannot rest at the `
+      + 'broker — that part rides the stop');
+  }
+  return notes.length ? ` · NOTE: ${notes.join('; ')}.` : '';
 }
 
 /**
@@ -149,6 +201,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       signal: String(p.side || '').toUpperCase(),
       extension: p.metric,
       decisionAt: p.entry_at,
+      exitPlan: p.exit_plan || null,
       decisionVwap: p.stop,        // the stop IS the session VWAP, frozen
       decisionClose: p.entry,
       rangePosition: null,         // qp asserts it in the rules; it is not returned
@@ -181,6 +234,70 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
   // settings even if they are edited while this is executing.
   const riskCfg = risk.settings();
 
+  /*
+   * The orders, placed before the alerts are published.
+   *
+   * That order matters. The entry is taken at market on sight, so the seconds
+   * between the decision and the order are the difference between the price
+   * that was ranked and the price that is paid — and publishing first would
+   * spend them formatting text. The alert then CARRIES what the broker did, so
+   * one message answers "what fired" and "did it go in".
+   *
+   * Sequential rather than parallel: the second order is sized against what the
+   * first one actually committed, and firing both at once would size both
+   * against the full buying power and overspend it by design.
+   */
+  const orders = {};
+  /*
+   * TWO switches have to be on, and they mean different things.
+   *
+   *   the broker is ARMED   this box may place orders at all — one decision for
+   *                         the account, made on the alerts page
+   *   the setup AUTO-TRADES  this particular strategy may place them
+   *
+   * One switch would have meant that arming to trade a strategy you have
+   * backtested for months also arms the scalp you assigned to a tool five
+   * minutes ago to see what it does. The strategy earns it separately, and the
+   * default for a strategy that has never said so is no.
+   */
+  if (!dryRun && setup.autoTrade === true) {
+    for (const pick of out.picks) {
+      const size = risk.sizeFor(
+        { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
+      if (!size || !(size.shares > 0)) continue;
+      try {
+        orders[pick.ticker] = await broker.placeOrder({
+          symbol: pick.ticker,
+          signal: pick.signal,
+          quantity: size.shares,
+          price: pick.plan.entry,
+          // The stop is the frozen VWAP and the target is 2R — both decided at
+          // this same instant, so they go with the entry as a bracket rather
+          // than being left for whoever reaches their phone first.
+          stop: pick.plan.stop,
+          target: pick.plan.target,
+          date: day,
+          source: `${setup.id} (${config.toolId})`,
+          // Both caps are enforced in the broker, against the ledger, so a
+          // restart between the two picks cannot hand the allowance back.
+          setupId: setup.id,
+          maxPerDay: setup.maxTradesPerDay || null,
+          // The strategy's OWN exit plan — its scale-out legs and whether its
+          // stop trails — straight from qp. Without it every trade was given a
+          // single 2R target whatever the strategy said, which for a
+          // scale-out strategy is not a smaller version of the tested trade,
+          // it is a different one.
+          plan: pick.exitPlan || null,
+        });
+      } catch (err) {
+        // A broker that cannot be reached must not stop the alert. The alert is
+        // the thing you can still act on by hand; losing it because the
+        // automatic path failed would turn a degraded morning into a blind one.
+        orders[pick.ticker] = { sent: false, error: err.message };
+      }
+    }
+  }
+
   const fires = out.picks.map(pick => {
     const size = risk.sizeFor(
       { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
@@ -193,7 +310,8 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     at: Date.now(),
     kind: 'setup',
     level: 'trade',
-    detail: describePick(pick, size),
+    detail: describePick(pick, size) + orderLine(orders[pick.ticker])
+      + unmanagedLine(pick.exitPlan),
     price: pick.plan.entry,
     // Everything the card cannot show but the trade needs. Kept on the fire so
     // the record of what was signalled survives the day it was signalled.
@@ -208,6 +326,14 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       decisionVwap: pick.decisionVwap,
       decisionClose: pick.decisionClose,
       rangePosition: pick.rangePosition,
+      // Kept on the fire so the record shows the exit the strategy asked for,
+      // not just the one leg that fitted in the alert text.
+      exitPlan: pick.exitPlan,
+      // What the broker did with it, on the alert itself. One message answers
+      // both "what fired" and "did it go in" — two messages, or a state you
+      // have to go and look up, is how a rejected order becomes a position
+      // somebody believes they are holding.
+      order: orders[pick.ticker] || null,
       // Which minute the decision was actually taken on. Normally 09:59; when
       // the feed had not published it inside the deadline it is the last bar
       // that existed, and that changes both the close and the VWAP slightly.
@@ -345,4 +471,6 @@ async function runDue(decisionTime, opts = {}) {
   return out;
 }
 
-module.exports = { runSetup, runDue, universe, describePick, lastWantedBar };
+module.exports = {
+  runSetup, runDue, universe, describePick, lastWantedBar, orderLine, unmanagedLine,
+};

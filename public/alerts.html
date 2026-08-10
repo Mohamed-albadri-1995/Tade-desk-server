@@ -49,6 +49,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .lnk { font-size:10px; font-weight:700; text-decoration:none; color:var(--text3);
   border:1px solid var(--border); border-radius:4px; padding:2px 6px; white-space:nowrap; }
 .lnk:hover { color:var(--blue); border-color:var(--blue); }
+/* The ticker IS the link to its card — it is the obvious thing to press and it
+   used to do nothing. Underlined on hover only, so a list of fires does not
+   read as a wall of links. */
+.tlink { color:inherit; text-decoration:none; }
+.tlink:hover, .tlink:active { color:var(--blue); text-decoration:underline; }
 
 /* ── setups, the definitions ──
    NOT .setup: a FIRED setup alert below already carries that class, and an
@@ -91,12 +96,37 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   border-radius:5px; padding:5px 9px; background:var(--bg3); color:var(--text3);
   cursor:pointer; user-select:none; }
 .ua-tool.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+/* Red, and the only red control on the page. This is the one that spends
+   money, and it should not look like the tool pickers beside it. */
+.ua-tool.live { background:var(--red); border-color:var(--red); color:#fff; }
 .ua-blocked { font-size:10.5px; color:var(--text3); }
 .ua-label { font-size:10.5px; color:var(--text3); text-transform:uppercase;
   letter-spacing:.05em; }
 /* The same row of tools on a setup that is already running, so adding a second
    tool or moving it to the right one is a tap rather than a trip elsewhere. */
 .st-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:9px; }
+
+/* ── the record ──
+   Denser than the live feed on purpose: it is read a screen at a time, looking
+   for a pattern across a session, not glanced at while a trade is placed. */
+.sec select { background:var(--bg3); border:1px solid var(--border); border-radius:5px;
+  padding:4px 8px; color:var(--text); font:11px inherit; text-transform:none;
+  letter-spacing:0; }
+.hist { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; background:var(--bg2);
+  border:1px solid var(--border); border-left:3px solid var(--text3);
+  border-radius:6px; padding:8px 11px; margin-top:6px; }
+.hist.lvl-trade { border-left-color:var(--accent); }
+.hist.lvl-warn { border-left-color:#fb923c; }
+.hist.lvl-error { border-left-color:var(--red); }
+/* The exact second leads the row. It is the column you scan when the question
+   is "did this fire on time", which is the usual reason for opening this. */
+.h-at { font:700 12px ui-monospace,Menlo,monospace; color:var(--accent); }
+.h-t { font-weight:700; font-size:13px; }
+.h-rule { font-size:11px; color:var(--text2); }
+.h-bar { font-size:10px; color:var(--text3); border:1px solid var(--border);
+  border-radius:3px; padding:1px 5px; }
+.h-detail { flex-basis:100%; font-size:11.5px; color:var(--text2); line-height:1.5;
+  overflow-wrap:anywhere; }
 
 /* ── position sizing ── */
 .risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
@@ -106,6 +136,13 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   border-radius:6px; padding:7px 9px; color:var(--text); font-family:inherit; font-size:13px;
   width:130px; }
 .risk-hint { flex-basis:100%; line-height:1.55; }
+/* The share count is the answer; everything beside it is the working. */
+.calc-big { font-size:16px; color:var(--accent); }
+/* The callback URL has to be readable character by character to be checked
+   against what was pasted into SignalStack, and it wraps on a phone. */
+.cburl { display:inline-block; font-size:10.5px; color:var(--blue);
+  background:var(--bg3); border:1px solid var(--border); border-radius:4px;
+  padding:3px 6px; margin:3px 0; overflow-wrap:anywhere; }
 .note.live { color:var(--amber, #fbbf24); font-weight:700; }
 
 /* ── setup fires ──
@@ -208,6 +245,82 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
     <b>Leave these blank and alerts arrive without a share count.</b></div>
 </div>
 
+<!-- The calculator. For the trade a setup did not signal — the one seen on a
+     chart at 11:20 — and for checking one it did before acting on it. It uses
+     the SERVER's sizing, the same code the automatic order obeys, so it cannot
+     give a different answer from the one that would be sent. -->
+<div class="sec"><span>Calculator</span><span class="note">entry · stop · target → shares</span></div>
+<div class="risk">
+  <label>Side
+    <select id="cl-side"><option value="LONG">long</option><option value="SHORT">short</option></select>
+  </label>
+  <label>Entry <input id="cl-entry" type="number" step="0.01" placeholder="29.05"></label>
+  <label>Stop <input id="cl-stop" type="number" step="0.01" placeholder="27.68"></label>
+  <label>Target <span class="note">optional</span>
+    <input id="cl-target" type="number" step="0.01" placeholder="31.79">
+  </label>
+  <label>Symbol <span class="note">to send</span>
+    <input id="cl-symbol" placeholder="LIFE" style="width:90px; text-transform:uppercase">
+  </label>
+  <button class="btn primary" onclick="calcSize()">Work it out</button>
+  <!-- The order this would actually become, which is not the same number as the
+       one above: buying power already spent, the per-order ceiling and the day's
+       caps all sit between them. -->
+  <button class="btn" onclick="calcSize(true)">Show the real order</button>
+  <button class="btn" id="cl-send" onclick="sendManual()">Send it</button>
+  <div class="note risk-hint" id="cl-out">
+    Uses the account size and risk per trade above. Leave the target blank and
+    it shows where 2R would be.
+  </div>
+</div>
+
+<!-- Live orders. Deliberately below position size, because the share count it
+     sends is the one computed there — and deliberately two switches, because
+     "configured" and "sending real orders" should not be the same tap. -->
+<div class="sec">
+  <span>Live orders</span>
+  <span class="note" id="broker-state">off</span>
+</div>
+<div class="risk" id="broker">
+  <label>SignalStack hook
+    <input id="bk-url" placeholder="https://app.signalstack.com/hook/…" style="width:230px">
+  </label>
+  <label>Test hook <span class="note">optional</span>
+    <input id="bk-test-url" placeholder="…/hook/TEST…" style="width:200px">
+  </label>
+  <label>Buying power $
+    <input id="bk-power" type="number" min="0" step="100" placeholder="e.g. 20000">
+  </label>
+  <label>Max per order $
+    <input id="bk-max" type="number" min="0" step="100" placeholder="optional">
+  </label>
+  <label>Max trades / day
+    <input id="bk-maxtrades" type="number" min="1" step="1" placeholder="e.g. 4">
+  </label>
+  <label>Shorts
+    <select id="bk-short"><option value="1">allowed</option><option value="0">no</option></select>
+  </label>
+  <label>Stop + target
+    <select id="bk-bracket"><option value="1">send with order</option><option value="0">entry only</option></select>
+  </label>
+  <button class="btn primary" onclick="saveBroker()">Save</button>
+  <button class="btn" id="bk-arm" onclick="toggleArm()">Arm</button>
+  <button class="btn" onclick="testBroker()">Send 1 test share</button>
+  <div class="note risk-hint" id="bk-note">
+    Orders are <b>off</b> until you save a hook and press Arm. Quantity is always
+    whole shares, and is reduced to fit the buying power left rather than sent to
+    be rejected. <b>The buying power above is a number you enter</b> — SignalStack
+    cannot be asked for it, so this side keeps its own tally and the broker's own
+    refusal is the real backstop.
+  </div>
+  <!-- The callback URL. SignalStack posts here when an order is PROCESSED,
+       which is the half its reply to us cannot give: filled at another price,
+       partly filled, rejected a second later. Shown whole because it has to be
+       copied, and only over https because it is a credential. -->
+  <div class="note risk-hint" id="bk-callback"></div>
+  <div class="note risk-hint" id="bk-orders"></div>
+</div>
+
 <!-- Setups get their own list for the same reason rules do. Before this they
      existed only in the moment they fired: you could not see which setups there
      were, when they would run, or switch one off. With more than one that stops
@@ -227,6 +340,17 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 
 <div class="sec"><span>Fired today</span><span class="note" id="fire-count"></span></div>
 <div id="fires"><div class="empty">Loading…</div></div>
+
+<!-- The permanent record. "Fired today" is a feed: capped, and cleared each
+     morning so the first alert does not arrive under yesterday's close. That is
+     right for reading on a phone and useless for "what did this setup signal
+     last Tuesday, and at what second" — which is the question that decides
+     whether a setup is worth keeping. Nothing here is ever trimmed. -->
+<div class="sec">
+  <span>Signal history</span>
+  <select id="hist-date" onchange="loadHistory()"></select>
+</div>
+<div id="history"><div class="empty">Pick a session.</div></div>
 
 <div class="sec">
   <span>Rules</span>
@@ -278,8 +402,42 @@ const cardUrl = (f) => {
     encodeURIComponent(f.ticker)}&date=${encodeURIComponent(f.date || '')}` : null;
 };
 const tvUrl = t => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t)}`;
+
+/*
+ * The ticker itself opens the card.
+ *
+ * It was already the biggest, boldest thing on the row and the obvious thing to
+ * press, and pressing it did nothing — the card was behind a small "card" link
+ * at the far end. On a phone that is the difference between one thumb and two
+ * taps at the moment a trade is being placed. The small link stays for anyone
+ * who has learned it.
+ *
+ * Falls back to plain text when the tool is unknown, rather than a dead link:
+ * a link that goes nowhere is worse than no link when you are in a hurry.
+ */
+function tickerLink(f, cls = 't') {
+  if (!f.ticker) return '';
+  const url = cardUrl(f);
+  return url
+    ? `<a class="${cls} tlink" href="${url}" title="Open ${esc(f.ticker)}'s card">${esc(f.ticker)}</a>`
+    : `<span class="${cls}">${esc(f.ticker)}</span>`;
+}
 const ago = ms => { const m = Math.floor((Date.now() - ms) / 60000);
   return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm ago'; };
+
+/*
+ * The exact moment, to the second, in market time.
+ *
+ * "5m ago" is the right thing while it is happening and the wrong thing
+ * afterwards: a setup is supposed to fire within seconds of a fixed minute, and
+ * whether it did — 10:00:07 or 10:00:52 — is the difference between a healthy
+ * morning and a feed that was late. That question cannot be asked of "5m ago",
+ * so the exact time rides alongside it everywhere.
+ */
+const clockET = ms => (ms ? new Date(ms).toLocaleTimeString('en-GB', {
+  timeZone: 'America/New_York', hour12: false,
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+}) : '');
 
 /* ── the noise ──────────────────────────────────────────────────────────────
  * Three ways to be told, and they do not degrade to nothing.
@@ -512,6 +670,15 @@ async function loadSetups() {
              could be assigned once and never changed made adding a second tool,
              or moving it to the right one, a trip back to the chart tool — the
              same dead end the picker below was built to remove. -->
+        <!-- Orders, per setup. Separate from arming the broker, which is
+             permission for the box: one switch would mean that arming to trade
+             a strategy you have backtested for months also arms the scalp you
+             assigned five minutes ago to see what it does. -->
+        <div class="st-tools">
+          <span class="ua-label">orders</span>
+          <span class="ua-tool${s.autoTrade ? ' live' : ''}"
+                onclick="toggleAutoTrade(${i})">${s.autoTrade ? 'SENDS REAL ORDERS' : 'alert only'}</span>
+        </div>
         <div class="st-tools">
           <span class="ua-label">runs on</span>
           <div class="ua-tools">${TOOL_IDS.map(t => `<span
@@ -523,6 +690,7 @@ async function loadSetups() {
         <div class="st-meta">
           ${s.universeScanAt ? `extra scan ${esc(s.universeScanAt)} · ` : ''}
           feed: ${esc(s.liveFeed || 'default')} · top ${esc(s.topN || 2)}
+          ${s.maxTradesPerDay ? ` · max ${esc(s.maxTradesPerDay)} order(s)/day` : ''}
           <button class="lnk" onclick="editSetup(${i})">edit filter</button>
         </div>
         <div class="st-edit" id="st-edit-${i}" style="display:none"></div>
@@ -674,6 +842,13 @@ function editSetup(i) {
       <label class="note">take top
         <input id="st-top-${i}" type="number" min="1" max="10" value="${esc(s.topN || 2)}" style="width:60px">
       </label>
+      <!-- How many of those may become real orders. A setup that ranks top 2
+           normally places two, so a cap of 1 is how a strategy is trialled with
+           real money without being given the whole day. -->
+      <label class="note">max orders/day
+        <input id="st-max-${i}" type="number" min="1" max="20" placeholder="no limit"
+               value="${esc(s.maxTradesPerDay || '')}" style="width:80px">
+      </label>
       <button class="btn primary" onclick="saveSetup(${i})">Save</button>
       <span class="note" id="st-msg-${i}"></span>
     </div>`;
@@ -710,6 +885,7 @@ async function saveSetup(i) {
       ? { logic: document.getElementById(`st-logic-${i}`).value, rules }
       : null,
     topN: Number(document.getElementById(`st-top-${i}`).value) || 2,
+    maxTradesPerDay: Number(document.getElementById(`st-max-${i}`).value) || null,
   };
   try {
     const r = await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {
@@ -722,6 +898,35 @@ async function saveSetup(i) {
   } catch (e) {
     msg.textContent = e.message;
   }
+}
+
+/*
+ * Let this one strategy place orders.
+ *
+ * Asks before turning on and never before turning off, and says what it depends
+ * on: this switch alone sends nothing unless the broker is also armed, and the
+ * broker being armed sends nothing for a setup that has not been given this.
+ * Both have to be true, which is the point of there being two.
+ */
+async function toggleAutoTrade(i) {
+  const s = SETUPS[i];
+  if (!s) return;
+  const next = !s.autoTrade;
+  if (next && !confirm(`Let "${s.name}" place REAL orders?\n\n`
+    + `Every time it fires at ${s.decisionTime} it will send an order sized by `
+    + 'your risk settings, with the stop and target attached.\n\n'
+    + 'It still needs the broker to be Armed above — both switches, or nothing '
+    + 'is sent.')) return;
+  try {
+    const r = await (await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoTrade: next }),
+    })).json();
+    if (!r.ok) throw new Error(r.error || 'could not save');
+  } catch (e) {
+    alert(`Could not change it: ${e.message}`);
+  }
+  loadSetups();
 }
 
 async function toggleSetup(id, enabled) {
@@ -811,9 +1016,10 @@ async function loadFires() {
         return `<div class="fire setup lvl-${esc(f.level || 'info')}${fresh}">
           <div class="su-head">
             <span class="su-tag">${st ? esc(st.signal) : esc((f.level || 'info').toUpperCase())}</span>
-            ${f.ticker ? `<span class="t">${esc(f.ticker)}</span>` : ''}
+            ${tickerLink(f)}
             <span class="tool">${esc(f.rule || '')}</span>
-            <span class="when">${ago(f.at || 0)}</span>
+            <span class="when" title="${esc(clockET(f.at))} ET">${
+              esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
           </div>
           <div class="su-detail">${esc(f.detail || '')}</div>
           ${st && st.size ? `<div class="su-size">${
@@ -834,16 +1040,331 @@ async function loadFires() {
       }
       const card = cardUrl(f);
       return `<div class="fire${fresh}">
-        <span class="t">${esc(f.ticker)}</span>
+        ${tickerLink(f)}
         <span class="tool">${esc(f.toolId || '')}</span>
         <span class="what">${esc(f.rule || '')}${f.price != null ? ` @ ${esc(f.price)}` : ''}</span>
-        <span class="when">${ago(f.at || 0)}</span>
+        <span class="when" title="${esc(clockET(f.at))} ET">${
+          esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
         ${card ? `<a class="lnk" href="${card}">card</a>` : ''}
         <a class="lnk" href="${tvUrl(f.ticker)}" target="_blank" rel="noopener">TV ↗</a>
       </div>`;
     }).join('');
   } catch {
     out.innerHTML = '<div class="empty">Could not read the fires.</div>';
+  }
+}
+
+/* ── the calculator ──
+ *
+ * Every number comes back from the server. Working the share count out here
+ * would be a second implementation of the one rule that decides how much money
+ * is at stake, and the two would disagree the first time either the cap or the
+ * rounding changed — with the page's answer being the one a person acted on.
+ */
+async function calcSize(withOrder) {
+  const out = document.getElementById('cl-out');
+  const v = id => document.getElementById(id).value;
+  if (withOrder) return previewOrder();
+  try {
+    const d = await (await fetch('/api/alerts/size', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        side: v('cl-side'), entry: v('cl-entry'),
+        stop: v('cl-stop'), target: v('cl-target') || null,
+      }),
+    })).json();
+    if (!d.ok) throw new Error(d.error);
+
+    const sz = d.size;
+    const money = n => `$${Number(n).toFixed(2)}`;
+    out.innerHTML = `
+      <b class="calc-big">${sz && sz.shares > 0 ? `${sz.shares} shares` : 'no size'}</b>
+      ${sz && sz.shares > 0
+        ? ` · ${money(sz.positionValue)} position · risks ${money(sz.riskDollars)} if stopped`
+        : ` — ${esc((sz && sz.reason) || 'set account size and risk per trade above')}`}
+      <br>${money(d.riskPerShare)} a share (${d.riskPct.toFixed(2)}% of price)
+      ${d.rr ? ` · reward:risk <b>${d.rr.toFixed(2)}R</b>` : ''}
+      ${!d.target ? ` · 2R would be <b>${money(d.twoRTarget)}</b>` : ''}
+      ${sz && sz.capped ? `<br><span class="warn">${esc(sz.capped)}</span>` : ''}`;
+  } catch (e) {
+    out.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
+  }
+}
+
+/*
+ * What would actually be sent.
+ *
+ * The number above answers "how many shares does my risk allow". This one
+ * answers "how many would leave the box", and they are different questions:
+ * buying power already spent today, the per-order ceiling, the account's and
+ * the setup's daily caps, and whole-share flooring all sit between them.
+ *
+ * It comes from the server, from the same function the 10:00 order uses. A
+ * preview computed separately would eventually be wrong, and a wrong preview is
+ * worse than none because it is believed.
+ */
+async function previewOrder() {
+  const out = document.getElementById('cl-out');
+  const v = id => document.getElementById(id).value;
+  try {
+    const d = await (await fetch('/api/broker/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        symbol: v('cl-symbol') || 'SYMBOL', side: v('cl-side'),
+        entry: v('cl-entry'), stop: v('cl-stop'), target: v('cl-target') || null,
+      }),
+    })).json();
+    if (!d.ok) throw new Error(d.error);
+    const p = d.preview;
+
+    const capline = [
+      p.remaining !== null ? `$${p.remaining.toFixed(0)} buying power left` : null,
+      p.maxTradesPerDay ? `${p.tradesUsed}/${p.maxTradesPerDay} trades used`
+                        : `${p.tradesUsed} trade(s) today`,
+    ].filter(Boolean).join(' · ');
+
+    out.innerHTML = p.body
+      ? `<b class="calc-big">${p.body.quantity} shares would be sent</b>`
+        + (p.asked !== p.body.quantity
+            ? ` <span class="warn">— risk allows ${p.asked}, ${esc(p.reason || 'capped')}</span>`
+            : ' · the full size your risk allows')
+        + `<br><code class="cburl">${esc(JSON.stringify(p.body))}</code>`
+        + `<br>${esc(capline)}`
+        + (p.bracket ? '' : ' · <span class="warn">no stop attached — place it yourself</span>')
+        + (p.armed ? '' : '<br><span class="warn">The broker is not armed, so nothing '
+            + 'would leave the box. These are the numbers it would use.</span>')
+      : `<b class="warn">Nothing would be sent — ${esc(p.reason || 'blocked')}.</b>`
+        + `<br>${esc(capline)}`;
+  } catch (e) {
+    out.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
+  }
+}
+
+/*
+ * Place it by hand, through every guard the automatic path uses.
+ *
+ * Not a shortcut around the safeguards: the same planOrder decides it, so the
+ * buying power, both caps, the whole-share rule and the bracket apply exactly
+ * as they would at 10:00.
+ */
+async function sendManual() {
+  const out = document.getElementById('cl-out');
+  const v = id => document.getElementById(id).value;
+  const symbol = (v('cl-symbol') || '').trim().toUpperCase();
+  if (!symbol) { out.innerHTML = '<b class="warn">Enter the symbol first.</b>'; return; }
+  if (!confirm(`Send a REAL ${v('cl-side').toLowerCase()} order for ${symbol}?\n\n`
+    + `Entry ~${v('cl-entry')}, stop ${v('cl-stop')}`
+    + `${v('cl-target') ? `, target ${v('cl-target')}` : ''}.\n\n`
+    + 'Sized by your risk settings and capped the same way a setup would be.')) return;
+  try {
+    const d = await (await fetch('/api/broker/order', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        symbol, side: v('cl-side'), entry: v('cl-entry'),
+        stop: v('cl-stop'), target: v('cl-target') || null,
+      }),
+    })).json();
+    if (!d.ok) throw new Error(d.error);
+    const o = d.order;
+    out.innerHTML = o.sent
+      ? `<b class="calc-big">${esc(String(o.status || 'sent').toUpperCase())} `
+        + `${esc(o.quantity)} ${esc(symbol)}</b>`
+        + `${o.fillPrice ? ` @ ${esc(o.fillPrice)}` : ''}`
+        + `${o.reduced ? `<br><span class="warn">${esc(o.reduced)}</span>` : ''}`
+      : `<b class="warn">Not sent — ${esc(o.skipped || o.error || 'refused')}</b>`;
+    loadBroker();
+  } catch (e) {
+    out.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
+  }
+}
+
+/* ── live orders ──
+ *
+ * Two switches, not one. `enabled` means configured; `armed` means real orders
+ * leave the box. They are separate because the dangerous one must not be the
+ * tap you make while setting the safe one up, and because a bad morning has to
+ * be stoppable without deleting the configuration.
+ */
+let BROKER = null;
+async function loadBroker() {
+  try {
+    const d = await (await fetch('/api/broker')).json();
+    if (!d.ok) return;
+    BROKER = d;
+    const b = d.broker;
+    document.getElementById('bk-url').placeholder =
+      b.hasWebhook ? `saved · ${b.webhookUrl}` : 'https://app.signalstack.com/hook/…';
+    document.getElementById('bk-test-url').placeholder =
+      b.hasTestWebhook ? `saved · ${b.testWebhookUrl}` : '…/hook/TEST…';
+    if (b.buyingPower) document.getElementById('bk-power').value = b.buyingPower;
+    if (b.maxOrderValue) document.getElementById('bk-max').value = b.maxOrderValue;
+    if (b.maxTradesPerDay) document.getElementById('bk-maxtrades').value = b.maxTradesPerDay;
+    document.getElementById('bk-short').value = b.allowShort ? '1' : '0';
+    document.getElementById('bk-bracket').value = b.bracket ? '1' : '0';
+
+    const arm = document.getElementById('bk-arm');
+    arm.textContent = b.armed ? 'ARMED — disarm' : 'Arm';
+    arm.className = 'btn' + (b.armed ? ' on' : '');
+    const st = document.getElementById('broker-state');
+    const used = (d.orders || []).filter(o => o.sent).length;
+    st.textContent = b.armed
+      ? `armed · $${(d.remaining ?? 0).toFixed(0)} of $${b.buyingPower} left`
+        + `${b.maxTradesPerDay ? ` · ${used}/${b.maxTradesPerDay} trades used` : ` · ${used} trades`}`
+      : (b.hasWebhook ? 'configured, not armed' : 'off');
+    st.className = 'note' + (b.armed ? ' live' : '');
+
+    const cb = document.getElementById('bk-callback');
+    cb.innerHTML = d.callbackUrl
+      ? `<b>Order confirmations:</b> paste this into SignalStack →
+         Notifications → <i>Call webhook</i>, so a rejection that arrives after
+         the alert is not silent.<br><code class="cburl">${esc(d.callbackUrl)}</code>
+         <button class="lnk" onclick="copyCallback('${esc(d.callbackUrl)}')">copy</button>`
+      : `<b>Order confirmations:</b> open this page over <b>https</b> to get the
+         callback URL — SignalStack needs a public address, and this is a
+         credential that should not be read off an http page.`;
+
+    // The day's orders, because "did it go in" must be answerable without
+    // opening the broker on a second device.
+    const rows = (d.orders || []).slice(0, 12);
+    document.getElementById('bk-orders').innerHTML = rows.length
+      ? `<b>Today:</b> ${rows.map(o => `${esc(clockET(o.at))} ${esc(o.action || '')} `
+          + `${esc(o.quantity ?? o.asked ?? 0)} ${esc(o.symbol)} — `
+          + (o.sent
+              ? `${esc(o.finalStatus || o.status || 'sent')}`
+                + `${o.finalPrice || o.fillPrice ? ` @ ${esc(o.finalPrice || o.fillPrice)}` : ''}`
+                // An order nobody confirmed is not the same as one that filled,
+                // and the difference has to be visible without doing arithmetic.
+                + (o.confirmed ? ' ✓' : ' <span class="note">(unconfirmed)</span>')
+              : `<span class="warn">${esc(o.skipped || o.error || 'not sent')}</span>`)
+          + (o.reduced ? ` (${esc(o.reduced)})` : '')).join('<br>')}`
+      : '';
+  } catch { /* the panel simply stays as it was */ }
+}
+
+async function copyCallback(url) {
+  try {
+    await navigator.clipboard.writeText(url);
+    document.getElementById('bk-note').textContent = 'Callback URL copied.';
+  } catch {
+    // Clipboard access is refused often enough on a phone that a failure has to
+    // leave the URL selectable rather than leaving nothing.
+    prompt('Copy this into SignalStack → Notifications → Call webhook:', url);
+  }
+}
+
+async function saveBroker(patch) {
+  const v = id => document.getElementById(id).value.trim();
+  const body = patch || {
+    webhookUrl: v('bk-url') || undefined,
+    testWebhookUrl: v('bk-test-url') || undefined,
+    buyingPower: v('bk-power') || undefined,
+    maxOrderValue: v('bk-max') || undefined,
+    maxTradesPerDay: v('bk-maxtrades') || undefined,
+    allowShort: document.getElementById('bk-short').value === '1',
+    bracket: document.getElementById('bk-bracket').value === '1',
+    enabled: true,
+  };
+  try {
+    const r = await (await fetch('/api/broker', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })).json();
+    if (!r.ok) throw new Error(r.error || 'could not save');
+    // Cleared once saved: the URL is a credential and leaving it on screen is
+    // the same mistake as printing it.
+    document.getElementById('bk-url').value = '';
+    document.getElementById('bk-test-url').value = '';
+    await loadBroker();
+    return true;
+  } catch (e) {
+    document.getElementById('bk-note').innerHTML = `<b class="warn">${esc(e.message)}</b>`;
+    return false;
+  }
+}
+
+/* Arming is the tap that starts spending money, so it asks once and says
+ * exactly what will happen. Disarming never asks. */
+async function toggleArm() {
+  const armed = BROKER && BROKER.broker.armed;
+  if (!armed) {
+    const p = BROKER && BROKER.broker.buyingPower;
+    if (!confirm('Arm live orders?\n\nEvery setup that fires will send a REAL order '
+      + `to Trade The Pool, sized by your risk settings and capped at $${p || '—'} `
+      + 'of buying power.\n\nThe stop and target go with it. Nothing else is sent.')) return;
+  }
+  await saveBroker({ armed: !armed, enabled: true });
+}
+
+async function testBroker() {
+  const note = document.getElementById('bk-note');
+  note.textContent = 'sending 1 share…';
+  try {
+    const d = await (await fetch('/api/broker/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: 'AAPL' }),
+    })).json();
+    if (!d.ok) throw new Error(d.error);
+    const r = d.result;
+    note.innerHTML = r.sent
+      ? `Sent to the <b>${esc(r.hook)}</b> hook: ${esc(r.status || 'accepted')}`
+        + `${r.orderId ? ` · order ${esc(r.orderId)}` : ''}`
+        + `${r.fillPrice ? ` · filled @ ${esc(r.fillPrice)}` : ''}`
+      : `<b class="warn">Refused (${esc(r.httpStatus)}): ${esc(r.message || 'no message')}</b>`;
+    loadBroker();
+  } catch (e) {
+    note.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
+  }
+}
+
+/* ── the record ──
+ *
+ * Every fire, kept for good, with the wall-clock second it happened. The point
+ * is not nostalgia: a setup is supposed to fire within seconds of a fixed
+ * minute, and whether it did is the first thing to check when a fill looks
+ * wrong. The decision BAR is shown beside it where there is one, because the
+ * gap between them is the whole diagnosis — 10:00:07 off a 09:59 bar is a
+ * healthy morning, 10:00:52 is a feed that was late.
+ */
+let HIST_DATES = [];
+async function loadHistory(date) {
+  const out = document.getElementById('history');
+  const picker = document.getElementById('hist-date');
+  if (!out) return;
+  const want = date || picker.value || '';
+  try {
+    const d = await (await fetch(`/api/alerts/history${want ? `?date=${encodeURIComponent(want)}` : ''}`)).json();
+    if (!d.ok) throw new Error(d.error || 'could not read');
+
+    // Rebuilt only when it actually changes, so choosing a day does not reset
+    // the control under the thumb that chose it.
+    const dates = d.dates || [];
+    if (dates.join() !== HIST_DATES.join()) {
+      HIST_DATES = dates;
+      picker.innerHTML = dates.length
+        ? dates.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('')
+        : '<option value="">no sessions yet</option>';
+    }
+    if (want) picker.value = want;
+
+    const fires = d.fires || [];
+    if (!fires.length) {
+      out.innerHTML = `<div class="empty">Nothing recorded${
+        want ? ` for ${esc(want)}` : ''}. The record starts from the first fire
+        after this was deployed — it cannot recover days that were never kept.</div>`;
+      return;
+    }
+    out.innerHTML = fires.map(f => `<div class="hist lvl-${esc(f.level || 'info')}">
+      <span class="h-at" title="exact time the alert was published">${esc(clockET(f.at))}</span>
+      ${tickerLink(f, 'h-t')}
+      <span class="tool">${esc(f.toolId || '')}</span>
+      <span class="h-rule">${esc(f.rule || '')}</span>
+      ${f.setup && f.setup.decisionAt
+        ? `<span class="h-bar" title="the bar the decision was taken on">bar ${esc(f.setup.decisionAt)}</span>`
+        : ''}
+      <div class="h-detail">${esc(f.detail || '')}</div>
+    </div>`).join('');
+  } catch (e) {
+    out.innerHTML = `<div class="empty">Could not read the history: ${esc(e.message)}</div>`;
   }
 }
 
@@ -1003,6 +1524,8 @@ loadFires();
 loadRules();
 loadRisk();
 loadSetups();
+loadHistory();
+loadBroker();
 loadUnassigned();
 // A card's "add alert" button links here with the ticker, so the rule opens
 // already scoped to the stock that was on screen.

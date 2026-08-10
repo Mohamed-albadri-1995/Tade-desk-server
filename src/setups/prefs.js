@@ -58,6 +58,26 @@ function settingsFor(setupId) {
     targetR: e.targetR || null,
     fill: e.fill || null,
     caution: e.caution || null,
+    /*
+     * Does THIS setup send real orders?
+     *
+     * Separate from the broker being armed, and off unless it is explicitly
+     * true. Arming is one switch for the account — "this box may place orders
+     * at all" — and without a second switch per setup it would also mean every
+     * setup that exists, including one assigned to a tool five minutes ago to
+     * see what it does. A strategy earns this one backtest at a time.
+     */
+    autoTrade: e.autoTrade === true,
+    /*
+     * The most orders THIS setup may place in a session.
+     *
+     * Separate from the account's cap, because they answer different questions:
+     * "how much am I willing to trade at all" and "how much of that is this one
+     * idea allowed". A setup that ranks top 2 normally places two, so a cap of
+     * one is how a strategy is trialled with real money without giving it the
+     * day.
+     */
+    maxTradesPerDay: e.maxTradesPerDay || null,
   };
 }
 
@@ -67,12 +87,16 @@ function saveSettings(setupId, patch) {
   state.setups = state.setups || {};
   const cur = state.setups[setupId] || {};
   const next = { ...cur };
-  for (const k of ['universe', 'topN', 'tf', 'feed', 'targetR', 'fill', 'caution']) {
+  for (const k of ['universe', 'topN', 'tf', 'feed', 'targetR', 'fill', 'caution',
+                   'maxTradesPerDay']) {
     if (!(k in patch)) continue;
     const v = patch[k];
     if (v === null || v === '' || v === undefined) delete next[k];
     else next[k] = v;
   }
+  // Only ever true by being said so. A truthy string or a stray 1 must not be
+  // what turns a setup into one that spends money.
+  if ('autoTrade' in patch) next.autoTrade = patch.autoTrade === true;
   if (next.universe) {
     const errors = require('./universe').validate(next.universe);
     if (errors.length) throw new Error(errors.join('; '));
