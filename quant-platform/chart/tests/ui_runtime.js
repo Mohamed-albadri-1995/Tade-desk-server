@@ -180,6 +180,52 @@ ok('the register picker is filled from /api/screener/sources, not hardcoded',
    /fillRegPicker\(document\.getElementById\('regReg'\)/.test(html));
 ok('the old hardcoded "R1 (all)" label is gone', !/R1 \(all\)/.test(html));
 
+// ── THE MONEY: one run reports three different P&L numbers ────────────────
+// +43.956% (percent moves added up), $527.86 (flat 100 shares, prop firm) and
+// $9,118.85 (the real account). They differ by more than 10x, and the panel
+// used to print all three with nothing saying which one answers "what did I
+// make" — reported from a phone as "is it 500 or 9000 or what exactly".
+const SUM = {
+  trades: 14, win_rate: 64.3, total_return_pct: 43.956, avg_return_pct: 3.14,
+  sharpe: 14.26, max_drawdown_pct: 5.227, max_dd_days: 2, pairs: 199,
+  exits_by: { SL: 5, exit: 5, eod: 4 }, errors: 0, open_trades: 0,
+  ttp: { shares: 100, net_pnl_usd: 527.86, fees_usd: 27.75,
+         counted_pnl_usd: 524.9, min_profit_ps: 0.1, wins_below_min: 1 },
+  account: { account_equity_start: 100000, risk_pct: 0.5, max_leverage: 2,
+             equity_end: 109118.85, net_pnl_usd: 9118.85, return_pct: 9.12,
+             fees_usd: 61.15, trades_sized: 14, win_rate_pct: 64.3,
+             avg_pnl_usd: 651.35, max_drawdown_pct: 0.99,
+             unsized_no_stop: 0, size_capped_by_leverage: 1,
+             skipped_no_capital: 0, max_concurrent_positions: 2,
+             fee_per_share: 0.005, fee_min_per_order: 0.75 },
+};
+let H = '';
+try { ctx.btRenderCore({ summary: SUM, trades: [] }, ''); H = els.btSummary.innerHTML; }
+catch (e) { ok('btRenderCore() renders a finished run', false, e.message); }
+ok('btRenderCore() renders a finished run', H.length > 0);
+ok('the account P&L is stated in plain dollars, with its sign',
+   H.includes('+$9,118.85'), H.slice(0, 200));
+ok('...and the balance it moves between',
+   H.includes('$100,000.00') && H.includes('$109,118.85'));
+ok('FEES are shown against that number (they were computed but never printed)',
+   /net of \$61\.15 fees/.test(H) && H.includes('$0.005/share') && H.includes('min $0.75/order'));
+ok('the sizing rule is spelled out, not left to be inferred',
+   /\(equity × 0\.5%\) ÷ \(entry − stop\)/.test(H) && /2× equity/.test(H));
+ok('the leverage cap that bit one trade is reported',
+   /1 sized down to the cash available/.test(H));
+ok('the percent total is labelled as NOT an account return',
+   /NOT an account return/.test(H) && /43\.956%/.test(H));
+ok('the prop-firm number says it is a flat share count',
+   /flat 100 sh every trade/.test(H) && H.includes('$527.86'));
+ok('the money leads — the account block is printed before the % edge',
+   H.indexOf('+$9,118.85') < H.indexOf('unsized edge'));
+// and with no account set, say what is missing rather than showing nothing
+const NOACCT = Object.assign({}, SUM); delete NOACCT.account;
+ctx.btRenderCore({ summary: NOACCT, trades: [] }, '');
+const H2 = els.btSummary.innerHTML;
+ok('with no account $, the panel says how to get a dollar figure',
+   /no dollar P&L/.test(H2) && !/YOUR ACCOUNT/.test(H2));
+
 console.log('\n' + '='.repeat(64));
 console.log('RESULT  PASS=' + PASS + '  FAIL=' + FAIL);
 console.log('='.repeat(64));

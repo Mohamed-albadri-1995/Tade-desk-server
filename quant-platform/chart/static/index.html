@@ -1106,25 +1106,69 @@ function btRenderCore(g,extra){
   const s=g.summary;
   if(!s){ sum.innerHTML=''; tbl.innerHTML=''; return; }
   const by=s.exits_by?Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' '):'';
-  let html = s.trades
-    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}% total · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+` · ${s.pairs} pairs`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span id="btErrTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="tap to see which day·symbol pairs failed and why">⚠ ${s.errors} errors</span>`:'')
+  // A run reports THREE different P&L numbers and they differ by more than
+  // 10x: a sum of percent moves, a flat-share prop-firm total, and the real
+  // account's dollars. Shown side by side with nothing saying which answers
+  // "what did I make", the panel was unreadable — so the money now leads,
+  // alone, with the assumptions it rests on printed next to it, and the other
+  // two are labelled as the different questions they answer.
+  const _usd=v=>(Number(v)<0?'-$':'$')+Math.abs(Number(v)||0)
+    .toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  const _usdS=v=>(Number(v)>=0?'+':'')+_usd(v);
+  const _ac=s.account;
+  let html='';
+  if(_ac){
+    const good=_ac.net_pnl_usd>=0;
+    html+=`<div style="border:1px solid var(--blue);border-radius:6px;padding:8px 9px;margin:0 0 7px">`
+      +`<div style="color:var(--text3);font-size:10px;letter-spacing:.04em">YOUR ACCOUNT — `
+        +`${_usd(_ac.account_equity_start)} · risking ${_ac.risk_pct}% per trade`
+        +(_ac.max_leverage>1?` · up to ${_ac.max_leverage}x`:` · cash only`)+`</div>`
+      +`<div style="font-size:21px;font-weight:700;line-height:1.25;color:${good?'var(--accent)':'var(--red)'}">`
+        +`${_usdS(_ac.net_pnl_usd)}`
+        +`<span style="font-size:13px;font-weight:600"> (${_ac.return_pct>=0?'+':''}${_ac.return_pct}%)</span></div>`
+      +`<div style="font-size:11px;color:var(--text2)">${_usd(_ac.account_equity_start)} → `
+        +`<b style="color:var(--text)">${_usd(_ac.equity_end)}</b>`
+        +` · <b>net of ${_usd(_ac.fees_usd)} fees</b>`
+        +(_ac.fee_per_share||_ac.fee_min_per_order
+          ?` (${_ac.fee_per_share?'$'+_ac.fee_per_share+'/share':''}`
+           +(_ac.fee_per_share&&_ac.fee_min_per_order?', ':'')
+           +(_ac.fee_min_per_order?'min $'+_ac.fee_min_per_order+'/order':'')+`)`:'')+`</div>`
+      +`<div style="font-size:11px;color:var(--text2);margin-top:2px">`
+        +`${_ac.trades_sized} of ${s.trades} trades sized`
+        +(_ac.win_rate_pct!=null?` · ${_ac.win_rate_pct}% won`:'')
+        +(_ac.avg_pnl_usd!=null?` · avg ${_usdS(_ac.avg_pnl_usd)}/trade`:'')
+        +` · worst drawdown ${_ac.max_drawdown_pct}%`
+        +(_ac.max_concurrent_positions?` · up to ${_ac.max_concurrent_positions} positions at once`:'')+`</div>`
+      +`<div style="font-size:10px;color:var(--text3);margin-top:3px">position size = `
+        +`(equity × ${_ac.risk_pct}%) ÷ (entry − stop), compounding in trade order`
+        +(_ac.max_leverage>1?`, capped at ${_ac.max_leverage}× equity across all open positions`:'')+`</div>`
+      +((_ac.unsized_no_stop||_ac.size_capped_by_leverage||_ac.skipped_no_capital)
+        ?`<div style="font-size:10px;color:var(--draft);margin-top:3px">`
+          +[_ac.unsized_no_stop?`⚠ ${_ac.unsized_no_stop} had no usable stop — excluded`:'',
+            _ac.size_capped_by_leverage?`⚠ ${_ac.size_capped_by_leverage} sized down to the cash available`:'',
+            _ac.skipped_no_capital?`⚠ ${_ac.skipped_no_capital} skipped — no buying power left`:''
+           ].filter(Boolean).join(' · ')+`</div>`:'')
+      // ALWAYS the whole run: size compounds in trade order and shares one
+      // capital pool, so dropping trades changes the equity path and the
+      // buying power of everything after them.
+      +(BT_FILTERS.length?`<div style="font-size:10px;color:var(--draft);margin-top:3px">`
+        +`⚠ <b>whole run</b> — filters not applied here, because `
+        +`sizing compounds and shares one balance across every trade</div>`:'')
+      +`</div>`;
+  } else if(s.trades){
+    html+=`<div style="font-size:11px;color:var(--draft);margin-bottom:5px">`
+      +`no dollar P&L — fill in <b>account $</b> and <b>risk %</b> to size these trades `
+      +`against a real balance</div>`;
+  }
+  html += s.trades
+    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+` · ${s.pairs} pairs`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span id="btErrTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="tap to see which day·symbol pairs failed and why">⚠ ${s.errors} errors</span>`:'')
+      // Named for what it is. Read as an account return it is wildly wrong:
+      // it adds up percentage MOVES of trades that were never the same size.
+      +`<br><span class="muted" style="font-size:10px">unsized edge: `
+      +`${s.total_return_pct>=0?'+':''}${s.total_return_pct}% = the ${s.trades} trades' % moves added up — a strategy score, NOT an account return</span>`
     : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
-  if(s.ttp){ html+=`<br><span style="color:var(--draft)">TTP @ ${s.ttp.shares} sh: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counted $${s.ttp.counted_pnl_usd} · ${s.ttp.wins_below_min} wins < $${s.ttp.min_profit_ps}/sh wasted`
+  if(s.ttp){ html+=`<br><span style="color:var(--draft);font-size:11px">prop firm — flat ${s.ttp.shares} sh every trade: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counts $${s.ttp.counted_pnl_usd} toward target · ${s.ttp.wins_below_min} win(s) under $${s.ttp.min_profit_ps}/sh wasted`
     +(s.ttp._whole_run?` · <b>whole run</b> — filters not applied (this run scales out; per-leg fills are not stored per trade)`:'')+`</span>`; }
-  // REAL ACCOUNT: risk-based sizing (only when account $ + risk % were set).
-  // ALWAYS the whole run: position size compounds in trade order and shares
-  // one capital pool, so dropping trades changes the equity path and the
-  // buying power of everything after them — a "filtered account P&L" is not
-  // the sum of the filtered trades. Say so instead of showing a number that
-  // silently answers a different question.
-  const _ac=BT_LAST&&BT_LAST.summary&&BT_LAST.summary.account;
-  if(_ac){ html+=`<br><span style="color:var(--blue)">ACCOUNT $${_ac.account_equity_start.toLocaleString()} @ ${_ac.risk_pct}% risk: `
-    +`<b>$${_ac.equity_end.toLocaleString()}</b> (${_ac.return_pct>=0?'+':''}${_ac.return_pct}%) · net $${_ac.net_pnl_usd.toLocaleString()} · maxDD ${_ac.max_drawdown_pct}% · ${_ac.trades_sized} sized`
-    +(_ac.unsized_no_stop?` · ⚠ ${_ac.unsized_no_stop} no-stop excluded`:'')
-    +(_ac.size_capped_by_leverage?` · ⚠ ${_ac.size_capped_by_leverage} capped at balance`:'')
-    +(_ac.skipped_no_capital?` · ⚠ ${_ac.skipped_no_capital} skipped, no buying power`:'')
-    +(_ac.max_concurrent_positions?` · max ${_ac.max_concurrent_positions} positions at once`:'')
-    +(BT_FILTERS.length?` · <b>whole run</b> — filters not applied (sizing compounds and shares one balance across every trade)`:'')+`</span>`; }
   const cov=s.coverage;
   if(cov){
     let c=`coverage: <b>${cov.evaluated}/${cov.pairs}</b> pairs had data (${cov.tf}·${cov.feed})`;

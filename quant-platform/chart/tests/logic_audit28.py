@@ -288,7 +288,8 @@ _html = (_pl.Path(S.__file__).resolve().parent / 'static' / 'index.html').read_t
 # path and the buying power of every later trade — the account block is a
 # whole-run quantity and was being printed under a filter as if it followed.
 ok("the account line is labelled 'whole run' when a filter is active",
-   "BT_FILTERS.length?` · <b>whole run</b> — filters not applied" in _html)
+   "BT_FILTERS.length?" in _html
+   and "⚠ <b>whole run</b> — filters not applied here" in _html)
 ok("...and explains WHY (compounding + shared balance)",
    'sizing compounds and shares one balance across every trade' in _html)
 # (2) the client TTP mirror is exact for single-exit runs but prices a trade
