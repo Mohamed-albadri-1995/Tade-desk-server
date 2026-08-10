@@ -385,6 +385,101 @@ function isBuyingPowerRejection(res) {
  * both facts about the morning, and the one thing that must never happen is
  * not being able to tell which it was.
  */
+/**
+ * Decide the order without sending it.
+ *
+ * EVERY gate lives here and nowhere else, so what a preview shows and what
+ * actually leaves the box cannot be two different answers. That was the real
+ * risk: the risk calculator says 18 shares, the buying power left says 12, the
+ * day's cap says none at all — and a preview that reproduced any of that
+ * separately would eventually reproduce it wrongly, which is worse than having
+ * no preview, because it would be believed.
+ *
+ * Returns either `{ blocked, reason }` or `{ body, action, fit }`, where `body`
+ * is the exact JSON that would go on the wire.
+ */
+function planOrder({ symbol, signal, quantity, price, stop = null, target = null,
+                     date, setupId = null, maxPerDay = null, cfg = settings() }) {
+  if (!cfg.enabled) return { blocked: 'off', reason: 'orders are switched off' };
+
+  const action = actionFor(signal);
+  if (!action) {
+    return { blocked: 'side', reason: `cannot turn ${signal} into buy or sell` };
+  }
+  if (action === 'sell' && !cfg.allowShort) {
+    return { blocked: 'short', reason: 'shorting is switched off' };
+  }
+  if (!cfg.webhookUrl) {
+    return { blocked: 'unconfigured', reason: 'no webhook URL configured' };
+  }
+
+  /*
+   * The two caps. The day's cap for the account and the day's cap for this
+   * strategy are different questions — "how much am I willing to trade at all"
+   * and "how much of that is this one idea allowed" — so hitting either says
+   * WHICH, or the message sends you looking in the wrong settings.
+   */
+  if (cfg.maxTradesPerDay && tradesToday(date) >= cfg.maxTradesPerDay) {
+    return { blocked: 'account-cap',
+      reason: `the day's limit of ${cfg.maxTradesPerDay} order(s) for the account is already used` };
+  }
+  if (maxPerDay && setupId && tradesToday(date, setupId) >= maxPerDay) {
+    return { blocked: 'setup-cap',
+      reason: `this setup's limit of ${maxPerDay} order(s) a day is already used` };
+  }
+
+  const fit = fitQuantity({ quantity, price, date, cfg });
+  if (fit.quantity < 1) {
+    return { blocked: 'size', reason: fit.reason || 'nothing fits', fit };
+  }
+
+  /*
+   * The body. quantity_type 'fixed' is the documented default and is sent
+   * explicitly: the alternative is 'cash', where the same number means dollars,
+   * and a default that changed underneath would turn 40 shares into $40 of
+   * stock.
+   */
+  const body = {
+    symbol: String(symbol).toUpperCase(),
+    action,
+    quantity: fit.quantity,
+    quantity_type: 'fixed',
+  };
+  // The stop is the risk model; the target is what makes it 2R. Both are
+  // decided at the same instant as the entry, so they travel with it.
+  if (cfg.bracket && Number(stop) > 0) body.stop_loss_price = Number(stop);
+  if (cfg.bracket && Number(target) > 0) body.take_profit_price = Number(target);
+
+  return { body, action, fit };
+}
+
+/**
+ * What would be sent, right now, and why it is not what was asked for.
+ *
+ * The same function the live path uses, stopped one step early. Nothing is
+ * recorded and nothing leaves the box.
+ */
+function previewOrder(args) {
+  const cfg = args.cfg || settings();
+  const plan = planOrder({ ...args, cfg });
+  const asked = Math.floor(Number(args.quantity) || 0);
+  return {
+    asked,
+    // Armed is reported but does NOT block the preview: the whole point is to
+    // see the real numbers before arming.
+    armed: cfg.armed,
+    blocked: plan.blocked || null,
+    reason: plan.reason || (plan.fit && plan.fit.reason) || null,
+    quantity: plan.body ? plan.body.quantity : ((plan.fit && plan.fit.quantity) || 0),
+    body: plan.body || null,
+    bracket: !!(plan.body && (plan.body.stop_loss_price || plan.body.take_profit_price)),
+    remaining: remaining(args.date, cfg),
+    tradesUsed: tradesToday(args.date),
+    maxTradesPerDay: cfg.maxTradesPerDay,
+    setupTradesUsed: args.setupId ? tradesToday(args.date, args.setupId) : null,
+  };
+}
+
 async function placeOrder({ symbol, signal, quantity, price, stop = null,
                             target = null, date, source = null, setupId = null,
                             maxPerDay = null, cfg = settings() }) {
@@ -397,80 +492,29 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
     asked: Math.floor(Number(quantity) || 0),
   };
 
-  if (!cfg.enabled) return { ...base, sent: false, skipped: 'orders are switched off' };
+  const plan = planOrder({ symbol, signal, quantity, price, stop, target, date,
+                           setupId, maxPerDay, cfg });
+
   if (!cfg.armed) {
-    const fit = fitQuantity({ quantity, price, date, cfg });
-    // Not armed is the normal, safe state, and it still says what it WOULD
-    // have done — that is what makes arming it later a decision rather than a
-    // leap.
-    const out = { ...base, quantity: fit.quantity, sent: false,
-      skipped: 'not armed — this is what would have been sent',
-      would: { symbol, quantity: fit.quantity, action: actionFor(signal) } };
+    // Not armed is the normal, safe state, and it still says what it WOULD have
+    // done — that is what makes arming it later a decision rather than a leap.
+    const out = { ...base, quantity: plan.body ? plan.body.quantity : 0, sent: false,
+      skipped: plan.blocked
+        ? `not armed, and also: ${plan.reason}`
+        : 'not armed — this is what would have been sent',
+      would: plan.body || null };
     record(out);
     return out;
   }
 
-  const action = actionFor(signal);
-  if (!action) {
-    const out = { ...base, sent: false, error: `cannot turn ${signal} into buy or sell` };
-    record(out); return out;
-  }
-  if (action === 'sell' && !cfg.allowShort) {
-    const out = { ...base, sent: false, skipped: 'shorting is switched off' };
-    record(out); return out;
-  }
-  if (!cfg.webhookUrl) {
-    const out = { ...base, sent: false, error: 'no webhook URL configured' };
+  if (plan.blocked) {
+    const out = { ...base, quantity: (plan.fit && plan.fit.quantity) || 0, sent: false,
+      [plan.blocked === 'side' || plan.blocked === 'unconfigured' ? 'error' : 'skipped']:
+        plan.reason };
     record(out); return out;
   }
 
-  /*
-   * The two caps, checked before anything is sized or sent.
-   *
-   * The day's cap for the account and the day's cap for this strategy are
-   * different questions — "how much am I willing to trade at all" and "how much
-   * of that is this one idea allowed" — so hitting either says WHICH, or the
-   * message sends you looking in the wrong settings.
-   */
-  if (cfg.maxTradesPerDay && tradesToday(date) >= cfg.maxTradesPerDay) {
-    const out = { ...base, sent: false,
-      skipped: `the day's limit of ${cfg.maxTradesPerDay} order(s) for the account `
-        + 'is already used' };
-    record(out); return out;
-  }
-  if (maxPerDay && setupId && tradesToday(date, setupId) >= maxPerDay) {
-    const out = { ...base, sent: false,
-      skipped: `this setup's limit of ${maxPerDay} order(s) a day is already used` };
-    record(out); return out;
-  }
-
-  const fit = fitQuantity({ quantity, price, date, cfg });
-  if (fit.quantity < 1) {
-    const out = { ...base, quantity: 0, sent: false,
-      skipped: `no order: ${fit.reason}` };
-    record(out); return out;
-  }
-
-  /*
-   * The body. Built in one place so what goes on the wire can be read here.
-   *
-   * quantity_type 'fixed' is the documented default and is sent explicitly:
-   * the alternative is 'cash', where the same number means dollars, and a
-   * default that changes underneath would turn 40 shares into $40 of stock.
-   */
-  const order = qty => {
-    const b = {
-      symbol: String(symbol).toUpperCase(),
-      action,
-      quantity: qty,
-      quantity_type: 'fixed',
-    };
-    // The stop is the risk model; the target is what makes it 2R. Both are
-    // decided at the same instant as the entry, so they travel with it.
-    if (cfg.bracket && Number(stop) > 0) b.stop_loss_price = Number(stop);
-    if (cfg.bracket && Number(target) > 0) b.take_profit_price = Number(target);
-    return b;
-  };
+  const { body: planned, action, fit } = plan;
 
   /*
    * Send, and reduce once if the BROKER — not this side's tally — says the
@@ -483,11 +527,11 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
    * the busiest second of the morning.
    */
   const attempts = [];
-  let qty = fit.quantity;
+  let qty = planned.quantity;
   let res = null;
 
   for (let i = 0; i < 3 && qty >= 1; i += 1) {
-    const body = order(qty);
+    const body = { ...planned, quantity: qty };
     // The assertion, immediately before the wire. Every path above floors, so
     // this can only fire if one of them is ever changed.
     if (!Number.isInteger(body.quantity) || body.quantity < 1) {
@@ -708,7 +752,8 @@ function reconciled(date = null) {
 module.exports = {
   FILE, LEDGER, HOOK_RE,
   settings, publicSettings, save, mask,
-  orders, committed, remaining, tradesToday, fitQuantity, actionFor, placeOrder, test,
+  orders, committed, remaining, tradesToday, fitQuantity, actionFor,
+  planOrder, previewOrder, placeOrder, test,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled,
 };

@@ -77,9 +77,12 @@ test('nothing is sent until it is configured AND armed', async () => {
   const dry = await place();
   expect(dry.sent).toBe(false);
   expect(dry.skipped).toMatch(/not armed/);
-  // …and it still says what it WOULD have sent, which is what makes arming a
-  // decision rather than a leap.
-  expect(dry.would).toEqual({ symbol: 'LIFE', quantity: 40, action: 'buy' });
+  // …and it still says what it WOULD have sent — the whole body, byte for byte,
+  // which is what makes arming it later a decision rather than a leap.
+  expect(dry.would).toEqual({
+    symbol: 'LIFE', action: 'buy', quantity: 40, quantity_type: 'fixed',
+    stop_loss_price: 27.68, take_profit_price: 31.79,
+  });
   expect(global.fetch).not.toHaveBeenCalled();
 
   armed();
@@ -536,5 +539,85 @@ describe('the day’s trade caps', () => {
     for (const symbol of ['A', 'B', 'C', 'D', 'E']) {
       expect((await place({ symbol })).sent).toBe(true);
     }
+  });
+});
+
+// ── the preview ───────────────────────────────────────────────────────────
+//
+// The risk calculator answers "how many shares does my risk allow". That is
+// NOT the number that leaves the box: buying power already spent, the
+// per-order ceiling, both daily caps and whole-share flooring sit between them.
+// Reading the first and believing it is the second is the mistake this exists
+// to prevent — so the preview must be the same code, not a second copy.
+
+describe('previewing the real order', () => {
+  test('it shows the exact body that would go on the wire', async () => {
+    armed();
+    const p = broker.previewOrder({
+      symbol: 'life', signal: 'LONG', quantity: 40, price: 29.05,
+      stop: 27.68, target: 31.79, date: DAY,
+    });
+    expect(p.body).toEqual({
+      symbol: 'LIFE', action: 'buy', quantity: 40, quantity_type: 'fixed',
+      stop_loss_price: 27.68, take_profit_price: 31.79,
+    });
+    // …and it is what actually gets sent.
+    await place();
+    expect(sent[0].body).toEqual(p.body);
+  });
+
+  test('it sends nothing and records nothing', () => {
+    armed();
+    const before = broker.orders().length;
+    broker.previewOrder({ symbol: 'LIFE', signal: 'LONG', quantity: 40,
+                          price: 29.05, stop: 27.68, date: DAY });
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(broker.orders()).toHaveLength(before);
+  });
+
+  /* The whole point: the preview shows the SMALLER number, and why. */
+  test('it reports the reduced quantity and the reason', () => {
+    armed();
+    broker.save({ buyingPower: 500 });
+    const p = broker.previewOrder({ symbol: 'LIFE', signal: 'LONG', quantity: 40,
+                                    price: 29.05, stop: 27.68, date: DAY });
+    expect(p.asked).toBe(40);
+    expect(p.body.quantity).toBe(17);
+    expect(p.reason).toMatch(/buying power/);
+  });
+
+  test('a blocked order previews as blocked, naming the cap', async () => {
+    armed();
+    broker.save({ maxTradesPerDay: 1 });
+    await place({ symbol: 'A' });
+    const p = broker.previewOrder({ symbol: 'B', signal: 'LONG', quantity: 10,
+                                    price: 10, stop: 9, date: DAY });
+    expect(p.body).toBeNull();
+    expect(p.blocked).toBe('account-cap');
+    expect(p.reason).toMatch(/account/);
+  });
+
+  /*
+   * Previewing must work BEFORE arming — that is when it is most wanted, and
+   * refusing then would mean the only way to see the real numbers is to turn on
+   * the thing that spends money.
+   */
+  test('it works unarmed, and says so', () => {
+    broker.save({ webhookUrl: HOOK, buyingPower: 10000, enabled: true });
+    const p = broker.previewOrder({ symbol: 'LIFE', signal: 'LONG', quantity: 40,
+                                    price: 29.05, stop: 27.68, date: DAY });
+    expect(p.armed).toBe(false);
+    expect(p.body.quantity).toBe(40);
+  });
+
+  /* One decision path. If these two ever disagree, the preview is a lie. */
+  test('the preview and the order agree, cap for cap', async () => {
+    armed();
+    broker.save({ buyingPower: 900, maxOrderValue: 700 });
+    const p = broker.previewOrder({ symbol: 'LIFE', signal: 'LONG', quantity: 40,
+                                    price: 29.05, stop: 27.68, target: 31.79, date: DAY });
+    const o = await place();
+    expect(o.quantity).toBe(p.body.quantity);
+    expect(sent[0].body).toEqual(p.body);
   });
 });

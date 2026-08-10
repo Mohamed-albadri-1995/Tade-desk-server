@@ -219,6 +219,103 @@ app.post('/api/broker', express.json(), (req, res) => {
 });
 
 /*
+ * The order that would actually be sent — the JSON, and why it is not what the
+ * risk calculator said.
+ *
+ * The calculator answers "how many shares does my risk allow". That is not the
+ * same number as the one that leaves this box: buying power already spent, the
+ * per-order ceiling, the day's caps and whole-share flooring all sit between
+ * them, and any of them can make it smaller or zero. Reading the first number
+ * and believing it is the second is the mistake this exists to prevent.
+ *
+ * It calls the SAME function the live path calls, stopped one step short of the
+ * network. A preview that recomputed any of it separately would eventually
+ * recompute it wrongly — and being wrong here is worse than having no preview,
+ * because a preview is believed.
+ */
+app.post('/api/broker/preview', express.json(), (req, res) => {
+  try {
+    const { toETDate } = require('../utils/time');
+    const risk = require('../setups/risk');
+    const b = req.body || {};
+    const entry = Number(b.entry);
+    const stop = Number(b.stop);
+    if (!(entry > 0) || !(stop > 0)) {
+      return res.status(400).json({ ok: false, error: 'entry and stop must be prices' });
+    }
+    const side = String(b.side || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG';
+    const riskPerShare = Math.abs(entry - stop);
+
+    // The share count comes from the same risk.sizeFor the setups use, so the
+    // chain here is identical to the one a fire goes through.
+    const size = risk.sizeFor({ entry, riskPerShare });
+    const preview = broker.previewOrder({
+      symbol: String(b.symbol || '').toUpperCase(),
+      signal: side,
+      quantity: size ? size.shares : 0,
+      price: entry,
+      stop,
+      target: Number(b.target) > 0 ? Number(b.target) : null,
+      date: toETDate(Date.now()),
+      setupId: b.setupId || null,
+    });
+    res.json({ ok: true, side, entry, stop, riskPerShare, size, preview });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+/*
+ * Place one by hand, through every guard the automatic path uses.
+ *
+ * For the trade the setups did not signal. It is not a shortcut around the
+ * safeguards — it is the same planOrder, so the buying power, the caps, the
+ * whole-share rule and the bracket all apply exactly as they would at 10:00.
+ * Refused unless armed, because a manual order is still a real one.
+ */
+app.post('/api/broker/order', express.json(), async (req, res) => {
+  try {
+    const { toETDate } = require('../utils/time');
+    const risk = require('../setups/risk');
+    const b = req.body || {};
+    const entry = Number(b.entry);
+    const stop = Number(b.stop);
+    const symbol = String(b.symbol || '').trim().toUpperCase();
+    if (!symbol) return res.status(400).json({ ok: false, error: 'a symbol is required' });
+    if (!(entry > 0) || !(stop > 0)) {
+      return res.status(400).json({ ok: false, error: 'entry and stop must be prices' });
+    }
+    const side = String(b.side || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG';
+    // The same check the calculator makes: a long stopping above its entry is
+    // either the wrong stop or the wrong side, and either way not an order.
+    if ((side === 'LONG') !== (stop < entry)) {
+      return res.status(400).json({
+        ok: false,
+        error: `a ${side.toLowerCase()} cannot have its stop at ${stop} with the entry at ${entry}`,
+      });
+    }
+    if (!broker.settings().armed) {
+      return res.status(400).json({ ok: false, error: 'the broker is not armed' });
+    }
+
+    const size = risk.sizeFor({ entry, riskPerShare: Math.abs(entry - stop) });
+    if (!size || !(size.shares > 0)) {
+      return res.status(400).json({
+        ok: false,
+        error: (size && size.reason) || 'set account size and risk per trade first',
+      });
+    }
+    res.json({ ok: true, order: await broker.placeOrder({
+      symbol, signal: side, quantity: size.shares, price: entry,
+      stop, target: Number(b.target) > 0 ? Number(b.target) : null,
+      date: toETDate(Date.now()), source: 'placed by hand', setupId: 'manual',
+    }) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+/*
  * Send one share, to the test hook when one is configured.
  *
  * The only way to learn that a URL is wrong, an account is disconnected or a
