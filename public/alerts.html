@@ -133,6 +133,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   border-radius:6px; padding:7px 9px; color:var(--text); font-family:inherit; font-size:13px;
   width:130px; }
 .risk-hint { flex-basis:100%; line-height:1.55; }
+/* The callback URL has to be readable character by character to be checked
+   against what was pasted into SignalStack, and it wraps on a phone. */
+.cburl { display:inline-block; font-size:10.5px; color:var(--blue);
+  background:var(--bg3); border:1px solid var(--border); border-radius:4px;
+  padding:3px 6px; margin:3px 0; overflow-wrap:anywhere; }
 .note.live { color:var(--amber, #fbbf24); font-weight:700; }
 
 /* ── setup fires ──
@@ -271,6 +276,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
     cannot be asked for it, so this side keeps its own tally and the broker's own
     refusal is the real backstop.
   </div>
+  <!-- The callback URL. SignalStack posts here when an order is PROCESSED,
+       which is the half its reply to us cannot give: filled at another price,
+       partly filled, rejected a second later. Shown whole because it has to be
+       copied, and only over https because it is a credential. -->
+  <div class="note risk-hint" id="bk-callback"></div>
   <div class="note risk-hint" id="bk-orders"></div>
 </div>
 
@@ -992,17 +1002,43 @@ async function loadBroker() {
       : (b.hasWebhook ? 'configured, not armed' : 'off');
     st.className = 'note' + (b.armed ? ' live' : '');
 
+    const cb = document.getElementById('bk-callback');
+    cb.innerHTML = d.callbackUrl
+      ? `<b>Order confirmations:</b> paste this into SignalStack →
+         Notifications → <i>Call webhook</i>, so a rejection that arrives after
+         the alert is not silent.<br><code class="cburl">${esc(d.callbackUrl)}</code>
+         <button class="lnk" onclick="copyCallback('${esc(d.callbackUrl)}')">copy</button>`
+      : `<b>Order confirmations:</b> open this page over <b>https</b> to get the
+         callback URL — SignalStack needs a public address, and this is a
+         credential that should not be read off an http page.`;
+
     // The day's orders, because "did it go in" must be answerable without
     // opening the broker on a second device.
     const rows = (d.orders || []).slice(0, 12);
     document.getElementById('bk-orders').innerHTML = rows.length
       ? `<b>Today:</b> ${rows.map(o => `${esc(clockET(o.at))} ${esc(o.action || '')} `
           + `${esc(o.quantity ?? o.asked ?? 0)} ${esc(o.symbol)} — `
-          + (o.sent ? `${esc(o.status || 'sent')}${o.fillPrice ? ` @ ${esc(o.fillPrice)}` : ''}`
-                    : `<span class="warn">${esc(o.skipped || o.error || 'not sent')}</span>`)
+          + (o.sent
+              ? `${esc(o.finalStatus || o.status || 'sent')}`
+                + `${o.finalPrice || o.fillPrice ? ` @ ${esc(o.finalPrice || o.fillPrice)}` : ''}`
+                // An order nobody confirmed is not the same as one that filled,
+                // and the difference has to be visible without doing arithmetic.
+                + (o.confirmed ? ' ✓' : ' <span class="note">(unconfirmed)</span>')
+              : `<span class="warn">${esc(o.skipped || o.error || 'not sent')}</span>`)
           + (o.reduced ? ` (${esc(o.reduced)})` : '')).join('<br>')}`
       : '';
   } catch { /* the panel simply stays as it was */ }
+}
+
+async function copyCallback(url) {
+  try {
+    await navigator.clipboard.writeText(url);
+    document.getElementById('bk-note').textContent = 'Callback URL copied.';
+  } catch {
+    // Clipboard access is refused often enough on a phone that a failure has to
+    // leave the URL selectable rather than leaving nothing.
+    prompt('Copy this into SignalStack → Notifications → Call webhook:', url);
+  }
 }
 
 async function saveBroker(patch) {

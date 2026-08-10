@@ -355,3 +355,108 @@ test('a test needs no arming — that is the point of it', async () => {
   broker.save({ webhookUrl: HOOK, enabled: true });
   expect((await broker.test({})).sent).toBe(true);
 });
+
+// ── what became of the order ──────────────────────────────────────────────
+//
+// SignalStack's reply to our POST says what was true in that instant — usually
+// 'accepted'. Filled at another price, partly filled, rejected by the broker a
+// second later: that arrives on the notification callback or nowhere. Without
+// it the ledger records intentions and calls them outcomes.
+
+describe('the order-processed callback', () => {
+  test('the token is stable, and long enough not to be guessed', () => {
+    const t = broker.callbackToken();
+    expect(t.length).toBeGreaterThanOrEqual(32);
+    expect(broker.callbackToken()).toBe(t);
+    expect(broker.tokenMatches(t)).toBe(true);
+  });
+
+  test('a wrong token never matches, whatever its length', () => {
+    expect(broker.tokenMatches('')).toBe(false);
+    expect(broker.tokenMatches('nope')).toBe(false);
+    expect(broker.tokenMatches(`${broker.callbackToken()}x`)).toBe(false);
+    expect(broker.tokenMatches(broker.callbackToken().slice(0, -1))).toBe(false);
+  });
+
+  test('the URL carries the token and the documented path', () => {
+    const url = broker.callbackUrl('https://desk.example/');
+    expect(url).toBe(`https://desk.example/api/broker/callback/${broker.callbackToken()}`);
+  });
+
+  test('a callback updates what is known about its order', async () => {
+    armed();
+    const placed = await place();
+    expect(placed.orderId).toBe('ID12345');
+
+    broker.receiveCallback({ id: 'ID12345', status: 'filled', price: 29.14 });
+    const [row] = broker.reconciled(DAY);
+    expect(row).toMatchObject({ confirmed: true, finalStatus: 'filled', finalPrice: 29.14 });
+  });
+
+  /* The immediate reply is not a confirmation, and the two must not read the
+   * same: "accepted, never heard from again" is information. */
+  test('an order nobody confirmed is marked unconfirmed', async () => {
+    armed();
+    global.fetch = jest.fn(async () => ({
+      ok: true, status: 201, text: async () => JSON.stringify({ id: 'ID9', status: 'accepted' }),
+    }));
+    await place();
+    expect(broker.reconciled(DAY)[0]).toMatchObject({ confirmed: false, finalStatus: null });
+  });
+
+  /* The case this exists for: the alert said the order went in, and it did not. */
+  test('a rejection arriving later is recognised as bad news', () => {
+    const e = broker.receiveCallback({ id: 'ID1', status: 'rejected',
+      message: 'TradeThePool: insufficient buying power' });
+    expect(broker.callbackIsBadNews(e)).toBe(true);
+    expect(broker.callbackIsBadNews(
+      broker.receiveCallback({ id: 'ID2', status: 'filled', price: 10 }))).toBe(false);
+  });
+
+  /*
+   * The shape of this body is not documented in what we have, so an
+   * unrecognised one must be stored rather than dropped — an unread callback
+   * cannot be allowed to look like an order that simply went quiet.
+   */
+  test('an unrecognised body is still recorded whole', () => {
+    const e = broker.receiveCallback({ something: 'unexpected', nested: { a: 1 } });
+    expect(e.raw).toEqual({ something: 'unexpected', nested: { a: 1 } });
+    expect(e.matched).toBe(false);
+    expect(broker.orders().some(o => o.kind === 'callback')).toBe(true);
+  });
+
+  test('the field names are read by their several plausible spellings', () => {
+    const e = broker.receiveCallback({ order_id: 'ID7', state: 'filled', fill_price: '31.5' });
+    expect(e).toMatchObject({ orderId: 'ID7', status: 'filled', fillPrice: 31.5 });
+  });
+
+  /* Orders can be placed elsewhere on the same account. That is a real event
+   * worth seeing, not an error worth hiding. */
+  test('a callback for an order this side never placed is kept, not discarded', () => {
+    const e = broker.receiveCallback({ id: 'PLACED-BY-HAND', status: 'filled', symbol: 'TSLA' });
+    expect(e.matched).toBe(false);
+    expect(e.symbol).toBe('TSLA');
+  });
+
+  /* The ledger is append-only on purpose: what was believed at 10:00:03 stays
+   * readable next to what turned out to be true at 10:00:09. */
+  test('a callback appends rather than rewriting the order', async () => {
+    armed();
+    await place();
+    broker.receiveCallback({ id: 'ID12345', status: 'filled', price: 29.14 });
+    const all = broker.orders();
+    expect(all).toHaveLength(2);
+    expect(all[0].kind).toBeUndefined();
+    expect(all[0].fillPrice).toBe(100);       // what the reply said at the time
+    expect(all[1].kind).toBe('callback');
+  });
+
+  test('a callback does not count against the buying power tally', async () => {
+    armed();
+    broker.save({ buyingPower: 2000 });
+    await place({ quantity: 10, price: 29.05 });
+    const before = broker.committed(DAY);
+    broker.receiveCallback({ id: 'ID12345', status: 'filled', price: 29.14 });
+    expect(broker.committed(DAY)).toBe(before);
+  });
+});

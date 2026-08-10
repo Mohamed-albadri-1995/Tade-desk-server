@@ -527,8 +527,143 @@ async function test({ symbol = 'AAPL', useTestHook = true } = {}) {
   return { ...out, requestBody: body };
 }
 
+// ── what happens to the order afterwards ───────────────────────────────────
+
+/*
+ * SignalStack can call a URL when an order is PROCESSED, and that is the half
+ * the reply to the POST cannot give.
+ *
+ * The immediate reply says what was known in that instant: usually 'accepted',
+ * sometimes 'filled'. What happened next — filled at a different price, partly
+ * filled, rejected by the broker a second later, cancelled — arrives here or
+ * nowhere. Without it the ledger records intentions and calls them outcomes.
+ *
+ * THE URL IS THE CREDENTIAL. SignalStack sends a POST to a plain URL with no
+ * key of its own, so the only thing standing between this endpoint and anyone
+ * on the internet is that the URL is unguessable. Hence a random token in the
+ * path, generated once, kept in the same gitignored file as the hook.
+ *
+ * THE PAYLOAD SHAPE IS NOT PINNED. The documented ORDER response is
+ * {id, status, price}; the notification's own body is not documented in what we
+ * have. So the fields are read by the several names they plausibly carry, the
+ * RAW body is always stored, and an unrecognised shape is recorded rather than
+ * dropped — an unread callback must never look like an order that went quiet.
+ */
+function callbackToken() {
+  const s = read();
+  if (s.callbackToken) return s.callbackToken;
+  const token = require('crypto').randomBytes(24).toString('base64url');
+  write({ ...s, callbackToken: token, updatedAt: Date.now() });
+  return token;
+}
+
+/** The URL to paste into SignalStack's "Call webhook" box. */
+function callbackUrl(origin) {
+  return `${String(origin || '').replace(/\/$/, '')}/api/broker/callback/${callbackToken()}`;
+}
+
+/** Constant-time, so a wrong token cannot be found one character at a time. */
+function tokenMatches(given) {
+  const crypto = require('crypto');
+  const a = Buffer.from(String(given || ''));
+  const b = Buffer.from(callbackToken());
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+const pick = (obj, names) => {
+  for (const n of names) {
+    if (obj && obj[n] !== undefined && obj[n] !== null && obj[n] !== '') return obj[n];
+  }
+  return null;
+};
+
+/**
+ * Record what SignalStack says became of an order.
+ *
+ * Appended rather than merged into the original line: the ledger is append-only
+ * on purpose, so what was believed at 10:00:03 stays readable next to what
+ * turned out to be true at 10:00:09. Rewriting history is how the record stops
+ * being evidence.
+ *
+ * Returns what it made of it, including `matched: false` when the id belongs to
+ * no order this side placed — which is a real event worth seeing rather than an
+ * error worth hiding, since orders can be placed elsewhere on the same account.
+ */
+function receiveCallback(payload) {
+  const p = (payload && typeof payload === 'object') ? payload : {};
+  const orderId = pick(p, ['id', 'order_id', 'orderId', 'client_id', 'clientId']);
+  const status = pick(p, ['status', 'order_status', 'state']);
+  const priceRaw = pick(p, ['price', 'fill_price', 'filled_avg_price', 'average_price']);
+  const price = Number.isFinite(Number(priceRaw)) ? Number(priceRaw) : null;
+
+  const mine = orderId
+    ? orders().find(o => o.orderId && String(o.orderId) === String(orderId))
+    : null;
+
+  const entry = {
+    at: Date.now(),
+    kind: 'callback',
+    date: mine ? mine.date : null,
+    orderId: orderId ? String(orderId) : null,
+    symbol: pick(p, ['symbol', 'ticker']) || (mine ? mine.symbol : null),
+    status: status ? String(status) : null,
+    statusDescription: pick(p, ['status_description', 'statusDescription']),
+    message: pick(p, ['message', 'error']),
+    fillPrice: price,
+    quantity: Number(pick(p, ['quantity', 'qty', 'filled_qty'])) || null,
+    matched: !!mine,
+    // Always kept whole. The shape is not documented, so the only safe reading
+    // of a field this does not know about is "store it and look later".
+    raw: p,
+  };
+  record(entry);
+  return entry;
+}
+
+/*
+ * Which of it is bad news.
+ *
+ * A processed order that filled is a confirmation and does not need to buzz a
+ * phone — the alert already did that. A rejection, a cancellation or an error
+ * arriving AFTER the alert said the order went in is the case this exists for:
+ * it is the only thing that can turn a position you believe you hold into one
+ * you do not.
+ */
+const BAD_STATUS = /reject|cancel|error|fail|expired/i;
+
+function callbackIsBadNews(entry) {
+  if (!entry) return false;
+  return BAD_STATUS.test(`${entry.status || ''} ${entry.message || ''}`);
+}
+
+/** Orders with whatever the callbacks later said about them. */
+function reconciled(date = null) {
+  // Read whole, then split: a callback can arrive after midnight ET for an
+  // order placed before it, and filtering by date first would orphan it.
+  const all = orders();
+  const placed = all.filter(o => o.kind !== 'callback' && (!date || o.date === date));
+  const backs = all.filter(o => o.kind === 'callback');
+  return placed.map(o => {
+    const later = backs
+      .filter(c => c.orderId && o.orderId && c.orderId === String(o.orderId))
+      .sort((a, b) => (a.at || 0) - (b.at || 0));
+    const last = later[later.length - 1] || null;
+    return {
+      ...o,
+      // The final word when there is one, and visibly the immediate reply when
+      // there is not — "accepted, never heard from again" is information.
+      finalStatus: last ? last.status : null,
+      finalPrice: last && last.fillPrice != null ? last.fillPrice : null,
+      confirmed: !!last,
+      callbacks: later.length,
+    };
+  });
+}
+
 module.exports = {
   FILE, LEDGER, HOOK_RE,
   settings, publicSettings, save, mask,
   orders, committed, remaining, fitQuantity, actionFor, placeOrder, test,
+  callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
+  reconciled,
 };

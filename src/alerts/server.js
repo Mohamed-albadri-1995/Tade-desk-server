@@ -190,7 +190,19 @@ app.get('/api/broker', (req, res) => {
     // This side's own tally, labelled as an estimate everywhere it appears.
     committedToday: broker.committed(day),
     remaining: broker.remaining(day, cfg),
-    orders: broker.orders(day).sort((a, b) => (b.at || 0) - (a.at || 0)),
+    // With whatever SignalStack later said became of each one, so "accepted,
+    // never heard from again" is visible rather than read as "filled".
+    orders: broker.reconciled(day).sort((a, b) => (b.at || 0) - (a.at || 0)),
+    /*
+     * The URL to paste into SignalStack's "Call webhook" box, built from the
+     * address this page was actually loaded from — the box needs a public URL,
+     * and the one in the browser is the only one this process can be sure
+     * reaches it. Shown whole because it has to be copied; it is a credential,
+     * so it is shown only over a secure origin.
+     */
+    callbackUrl: req.secure || req.get('x-forwarded-proto') === 'https'
+      ? broker.callbackUrl(`https://${req.get('host')}`)
+      : null,
   });
 });
 
@@ -209,6 +221,61 @@ app.post('/api/broker', express.json(), (req, res) => {
  * symbol is unsupported is to send something. Finding that out at 10:00:02 with
  * a real position on the line is not a plan.
  */
+/*
+ * SignalStack calling US, when an order has been processed.
+ *
+ * This is the half the reply to the POST cannot give. That reply says what was
+ * true in the instant — usually 'accepted'. Filled at a different price, partly
+ * filled, rejected by the broker a second later: that arrives here or nowhere,
+ * and without it the ledger records intentions and calls them outcomes.
+ *
+ * THE TOKEN IN THE PATH IS THE ONLY LOCK. SignalStack posts to a plain URL and
+ * sends no key of its own, so the URL has to be unguessable — hence a random
+ * token, compared in constant time, and a 404 rather than a 403 on a miss so
+ * the endpoint does not confirm its own existence to a scanner.
+ *
+ * It always answers 200 to a valid token, even when it cannot make sense of the
+ * body. A sender that gets an error will retry or disable the notification, and
+ * the raw body is stored either way — an unread callback must never look like
+ * an order that simply went quiet.
+ */
+app.post('/api/broker/callback/:token', express.json({ limit: '64kb' }), async (req, res) => {
+  if (!broker.tokenMatches(req.params.token)) {
+    return res.status(404).json({ ok: false });
+  }
+  try {
+    const entry = broker.receiveCallback(req.body);
+    console.log(`[Broker] callback: ${entry.symbol || '?'} ${entry.status || 'unknown'}`
+      + `${entry.fillPrice ? ` @ ${entry.fillPrice}` : ''}`
+      + `${entry.matched ? '' : ' (no matching order on this side)'}`);
+
+    /*
+     * Wake the phone only for bad news. A fill confirms what the alert already
+     * said and does not need a second buzz; a rejection arriving after the
+     * alert said the order went in is the one thing that can turn a position
+     * you believe you hold into one you do not.
+     */
+    if (broker.callbackIsBadNews(entry)) {
+      const store = require('./store');
+      const { toETDate } = require('../utils/time');
+      const day = entry.date || toETDate(Date.now());
+      store.publishFires([{
+        ruleId: 'broker', rule: 'Broker', ticker: entry.symbol || null,
+        toolId: 'ALERTS', date: day, at: Date.now(),
+        kind: 'broker', level: 'error',
+        detail: `Order ${entry.status || 'problem'} at the broker`
+          + `${entry.symbol ? ` for ${entry.symbol}` : ''}`
+          + `${entry.message ? ` — ${entry.message}` : ''}`
+          + '. You may NOT have the position the alert said you did.',
+      }], day);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Broker] callback failed:', err.message);
+    res.json({ ok: true });            // see the note above
+  }
+});
+
 app.post('/api/broker/test', express.json(), async (req, res) => {
   try {
     res.json({ ok: true, result: await broker.test({

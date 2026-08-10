@@ -21,7 +21,15 @@ const fs = require('fs');
 // switch a live setup's universe on the deployment box.
 const PREFS = path.join(os.tmpdir(), `setup-prefs-assign-${process.pid}.json`);
 process.env.SETUP_PREFS_FILE = PREFS;
-afterAll(() => { try { fs.unlinkSync(PREFS); } catch { /* absent */ } });
+// Its own broker files too — the callback tests write a token and a ledger, and
+// neither belongs in the real ones on the deployment box.
+process.env.BROKER_FILE = path.join(os.tmpdir(), `broker-assign-${process.pid}.json`);
+process.env.BROKER_LEDGER = path.join(os.tmpdir(), `broker-assign-${process.pid}.jsonl`);
+afterAll(() => {
+  for (const f of [PREFS, process.env.BROKER_FILE, process.env.BROKER_LEDGER]) {
+    try { fs.unlinkSync(f); } catch { /* absent */ }
+  }
+});
 
 const request = require('supertest');
 
@@ -155,5 +163,38 @@ describe('the match mode comes back with the filter', () => {
   test('no filter reads as AND rather than as nothing', async () => {
     qp.strategies.mockResolvedValue([{ ...S, name: 'Untouched', id: 10 }]);
     expect((await request(app).get('/api/setups')).body.setups[0].universeLogic).toBe('AND');
+  });
+});
+
+/*
+ * The public callback endpoint.
+ *
+ * SignalStack posts here with no key of its own, so the token in the path is
+ * the only lock on it. A miss must not confirm the endpoint exists, and a body
+ * this cannot parse must not make the sender retry or disable the notification.
+ */
+describe('the broker callback endpoint', () => {
+  const broker = require('../src/broker/signalstack');
+
+  test('a wrong token is a 404, not a 403', async () => {
+    await request(app).post('/api/broker/callback/wrong').send({ id: 'X' }).expect(404);
+  });
+
+  test('the right token records the callback', async () => {
+    const before = broker.orders().length;
+    await request(app)
+      .post(`/api/broker/callback/${broker.callbackToken()}`)
+      .send({ id: 'ID1', status: 'filled', price: 12.5 })
+      .expect(200);
+    expect(broker.orders().length).toBe(before + 1);
+  });
+
+  test('a body it cannot make sense of still answers 200 and is kept', async () => {
+    const before = broker.orders().length;
+    await request(app)
+      .post(`/api/broker/callback/${broker.callbackToken()}`)
+      .send({ totally: 'unexpected' })
+      .expect(200);
+    expect(broker.orders().length).toBe(before + 1);
   });
 });
