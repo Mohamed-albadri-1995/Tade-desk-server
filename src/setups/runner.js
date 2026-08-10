@@ -216,7 +216,19 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
    * against the full buying power and overspend it by design.
    */
   const orders = {};
-  if (!dryRun) {
+  /*
+   * TWO switches have to be on, and they mean different things.
+   *
+   *   the broker is ARMED   this box may place orders at all — one decision for
+   *                         the account, made on the alerts page
+   *   the setup AUTO-TRADES  this particular strategy may place them
+   *
+   * One switch would have meant that arming to trade a strategy you have
+   * backtested for months also arms the scalp you assigned to a tool five
+   * minutes ago to see what it does. The strategy earns it separately, and the
+   * default for a strategy that has never said so is no.
+   */
+  if (!dryRun && setup.autoTrade === true) {
     for (const pick of out.picks) {
       const size = risk.sizeFor(
         { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);

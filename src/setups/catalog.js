@@ -130,6 +130,9 @@ async function list() {
     return {
       ...g,
       enabled: prefs.isEnabled(g.id),
+      // Off unless said otherwise. See the note in prefs: arming the broker is
+      // permission for the box, not for every strategy in it.
+      autoTrade: p.autoTrade === true,
       universe: p.universe || null,
       rank: { metric: 'vwap_extension', topN: p.topN || 2 },
       tf: p.tf || '1m',

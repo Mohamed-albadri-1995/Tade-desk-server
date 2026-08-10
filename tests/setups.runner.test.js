@@ -366,3 +366,84 @@ describe('the card-field filter', () => {
       expect.objectContaining({ fill: 'next_open' }));
   });
 });
+
+/*
+ * Nothing is ordered for a setup that was not given permission.
+ *
+ * The broker being armed is permission for the BOX; this is permission for a
+ * STRATEGY. Both, or nothing — because one switch would mean that arming to
+ * trade something backtested for months also arms the scalp assigned to a tool
+ * five minutes ago to see what it does.
+ */
+describe('which setups place orders', () => {
+  const brokerMod = require('../src/broker/signalstack');
+  const risk = require('../src/setups/risk');
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    // An account, so there is a share count to order. Without one the setup
+    // publishes the plan with no size and orders nothing — which is right, and
+    // is not what these three are about.
+    jest.spyOn(risk, 'settings').mockReturnValue({
+      accountSize: 5000, riskPerTrade: 25, maxPositionPct: 100, updatedAt: 1 });
+  });
+
+  test('a setup without permission places nothing, however armed the broker is', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder');
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+    await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' }, {});
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  /* No account settings means no share count, and no share count means there is
+   * nothing to order — a size invented at that point would be the worst kind. */
+  test('a setup with permission but no account settings orders nothing', async () => {
+    risk.settings.mockReturnValue({
+      accountSize: null, riskPerTrade: null, maxPositionPct: 100, updatedAt: null });
+    const spy = jest.spyOn(brokerMod, 'placeOrder');
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+    await runner.runSetup(
+      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00', autoTrade: true }, {});
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  test('a setup with permission places one', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled', quantity: 2, bracket: true });
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+    const out = await runner.runSetup(
+      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00', autoTrade: true }, {});
+    expect(spy).toHaveBeenCalled();
+    // The stop and the target travel with the entry — they were decided at the
+    // same instant, and an entry without its stop has no defined loss.
+    expect(spy.mock.calls[0][0]).toMatchObject({ symbol: 'AAA', stop: 9, target: 12 });
+    // …and what the broker did is on the alert itself, not somewhere to look up.
+    expect(out.fires[0].detail).toMatch(/ORDER FILLED/);
+  });
+
+  /* A preview must never reach a broker. It is used to look at past dates. */
+  test('a dry run never places an order', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder');
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+    await runner.runSetup(
+      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00', autoTrade: true },
+      { dryRun: true });
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

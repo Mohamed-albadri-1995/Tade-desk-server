@@ -96,6 +96,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   border-radius:5px; padding:5px 9px; background:var(--bg3); color:var(--text3);
   cursor:pointer; user-select:none; }
 .ua-tool.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+/* Red, and the only red control on the page. This is the one that spends
+   money, and it should not look like the tool pickers beside it. */
+.ua-tool.live { background:var(--red); border-color:var(--red); color:#fff; }
 .ua-blocked { font-size:10.5px; color:var(--text3); }
 .ua-label { font-size:10.5px; color:var(--text3); text-transform:uppercase;
   letter-spacing:.05em; }
@@ -633,6 +636,15 @@ async function loadSetups() {
              could be assigned once and never changed made adding a second tool,
              or moving it to the right one, a trip back to the chart tool — the
              same dead end the picker below was built to remove. -->
+        <!-- Orders, per setup. Separate from arming the broker, which is
+             permission for the box: one switch would mean that arming to trade
+             a strategy you have backtested for months also arms the scalp you
+             assigned five minutes ago to see what it does. -->
+        <div class="st-tools">
+          <span class="ua-label">orders</span>
+          <span class="ua-tool${s.autoTrade ? ' live' : ''}"
+                onclick="toggleAutoTrade(${i})">${s.autoTrade ? 'SENDS REAL ORDERS' : 'alert only'}</span>
+        </div>
         <div class="st-tools">
           <span class="ua-label">runs on</span>
           <div class="ua-tools">${TOOL_IDS.map(t => `<span
@@ -843,6 +855,35 @@ async function saveSetup(i) {
   } catch (e) {
     msg.textContent = e.message;
   }
+}
+
+/*
+ * Let this one strategy place orders.
+ *
+ * Asks before turning on and never before turning off, and says what it depends
+ * on: this switch alone sends nothing unless the broker is also armed, and the
+ * broker being armed sends nothing for a setup that has not been given this.
+ * Both have to be true, which is the point of there being two.
+ */
+async function toggleAutoTrade(i) {
+  const s = SETUPS[i];
+  if (!s) return;
+  const next = !s.autoTrade;
+  if (next && !confirm(`Let "${s.name}" place REAL orders?\n\n`
+    + `Every time it fires at ${s.decisionTime} it will send an order sized by `
+    + 'your risk settings, with the stop and target attached.\n\n'
+    + 'It still needs the broker to be Armed above — both switches, or nothing '
+    + 'is sent.')) return;
+  try {
+    const r = await (await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoTrade: next }),
+    })).json();
+    if (!r.ok) throw new Error(r.error || 'could not save');
+  } catch (e) {
+    alert(`Could not change it: ${e.message}`);
+  }
+  loadSetups();
 }
 
 async function toggleSetup(id, enabled) {

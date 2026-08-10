@@ -58,6 +58,16 @@ function settingsFor(setupId) {
     targetR: e.targetR || null,
     fill: e.fill || null,
     caution: e.caution || null,
+    /*
+     * Does THIS setup send real orders?
+     *
+     * Separate from the broker being armed, and off unless it is explicitly
+     * true. Arming is one switch for the account — "this box may place orders
+     * at all" — and without a second switch per setup it would also mean every
+     * setup that exists, including one assigned to a tool five minutes ago to
+     * see what it does. A strategy earns this one backtest at a time.
+     */
+    autoTrade: e.autoTrade === true,
   };
 }
 
@@ -73,6 +83,9 @@ function saveSettings(setupId, patch) {
     if (v === null || v === '' || v === undefined) delete next[k];
     else next[k] = v;
   }
+  // Only ever true by being said so. A truthy string or a stray 1 must not be
+  // what turns a setup into one that spends money.
+  if ('autoTrade' in patch) next.autoTrade = patch.autoTrade === true;
   if (next.universe) {
     const errors = require('./universe').validate(next.universe);
     if (errors.length) throw new Error(errors.join('; '));

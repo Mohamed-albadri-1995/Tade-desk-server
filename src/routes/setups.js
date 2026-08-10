@@ -40,6 +40,9 @@ router.get('/', async (req, res) => {
       // into an AND one — a different filter, quietly.
       universeLogic: (s.universe && s.universe.logic) || 'AND',
       enabled: s.enabled,
+      // Whether THIS setup places orders — separate from the broker being
+      // armed, which is permission for the box rather than for a strategy.
+      autoTrade: s.autoTrade === true,
       mine: (s.tools || []).includes(config.toolId),
     })),
   });
