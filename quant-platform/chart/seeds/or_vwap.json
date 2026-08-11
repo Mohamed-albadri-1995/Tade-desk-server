@@ -229,7 +229,8 @@
       ],
       "window_start": 935,
       "window_end": 935,
-      "max_entries_per_day": 1
+      "max_entries_per_day": 1,
+      "min_target_usd": 0.1
     }
   },
   {
@@ -462,7 +463,8 @@
       ],
       "window_start": 935,
       "window_end": 935,
-      "max_entries_per_day": 1
+      "max_entries_per_day": 1,
+      "min_target_usd": 0.1
     }
   }
 ]

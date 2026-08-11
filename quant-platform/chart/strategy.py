@@ -720,7 +720,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  exit_group: dict | None = None, fill: str = 'close',
                  entry_ok=None, eod_close=None, max_per_day=None,
                  cooldown_bars=None, min_hold_bars=None, entry_mode='edge',
-                 max_stop_pct=None, win_start=None, win_end=None,
+                 max_stop_pct=None, min_target_usd=None,
+                 win_start=None, win_end=None,
                  exit_scope: str | None = None, diag: dict | None = None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
@@ -750,6 +751,14 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     touch, but at the OPEN when the bar GAPS through it (opens already beyond
     the level) — a market order can't fill at a price the tape skipped, so the
     gap slippage is charged (what the funded account really pays).
+
+    SIZE GATES (`risk`, both optional, both drop the signal BEFORE it opens):
+      max_stop_pct    — refuse an entry whose stop is further than N% away.
+      min_target_usd  — refuse an entry whose NEAREST profit target is less
+                        than $X from the fill. Guards the other end of the same
+                        problem: a stop so tight the trade cannot pay for its
+                        own spread, and whose implied position size (risk$ /
+                        stop$) consumes the account's whole buying power.
 
     SESSION RULES (prop-firm style, e.g. Trade The Pool):
       entry_ok  — boolean mask of bars where OPENING a position is allowed
@@ -944,21 +953,14 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     if abs(ep - e_sl) / ep * 100.0 > float(max_stop_pct):
                         _drop('stop_too_far')
                         continue
-                in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
-                entered_run = True        # this true-run has now been taken
-                sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
-                sl_at_entry = sl_eff
-                # frozen anchors: capture the signal-bar level as a FIXED
-                # scalar; the per-bar trailing array is ignored for this trade.
-                if sl_frozen and e_sl is not None and e_sl == e_sl:
-                    sl = float(e_sl)
-                if tp_frozen and e_tp is not None and e_tp == e_tp:
-                    tp = float(e_tp)
-                if max_per_day:
-                    day_count[et_day[ej]] = day_count.get(et_day[ej], 0) + 1
                 # arm scale-out legs for THIS trade. Each leg resolves to a
                 # FIXED level (R-multiple or fixed distance) or a per-bar ARRAY
                 # (prim-anchored). R-multiple legs need a priceable stop.
+                #
+                # ARMED BEFORE the position is opened, because `min_target_usd`
+                # below needs the target prices to decide whether this signal
+                # is worth taking at all — and a check that runs after `in_pos`
+                # would have to unwind an entry (and its daily-cap tally).
                 remaining = 1.0; realized = 0.0; legs = []
                 tgt_fr = []; tgt_fixed = []; tgt_arrs = []; tgt_done = []
                 rdist = ((ep - e_sl) if side == 'long' else (e_sl - ep)) \
@@ -997,6 +999,60 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     if lvl is not None or arr is not None:
                         tgt_fr.append(t['fraction']); tgt_fixed.append(lvl)
                         tgt_arrs.append(arr); tgt_done.append(False)
+                # MIN MOVE: refuse a signal whose nearest profit target is only
+                # cents away. A 2R target on a $0.04 stop is $0.08 — inside the
+                # spread on most names, and the position that $0.04 stop implies
+                # is enormous (risk% / stop = shares), so one such trade eats the
+                # whole account's buying power and every later signal that day is
+                # dropped for lack of capital, by ARRIVAL ORDER rather than by
+                # quality. Backtest #236: 117 signals, 18 sized, 97 skipped
+                # "no buying power left" — and the skipped set held ADEA +13.7%,
+                # SEDG +8.6%, LIFE +8.0%. Cutting the un-tradeable signal at the
+                # source is what frees the day's capital for the rest.
+                #
+                # Measured to the NEAREST target, not the furthest: that is the
+                # first money the trade can bank, and the one the spread eats.
+                if min_target_usd:
+                    near = None
+                    for _lvl, _arr in zip(tgt_fixed, tgt_arrs):
+                        v = _lvl
+                        if v is None and _arr is not None:
+                            # not yet frozen: the signal bar's value is the best
+                            # estimate available at the decision moment, which is
+                            # also all a live trader would have.
+                            av = _arr[j]
+                            v = float(av) if av == av else None
+                        if v is None:
+                            continue
+                        d = abs(v - ep)
+                        near = d if near is None else min(near, d)
+                    if e_tp is not None and e_tp == e_tp:
+                        d = abs(float(e_tp) - ep)
+                        near = d if near is None else min(near, d)
+                    if near is None:
+                        # No priced target at all — an exit-RULE strategy. The
+                        # gate has nothing to measure and must not invent a
+                        # target to measure against, so the signal is KEPT and
+                        # counted separately. A filter that silently deleted
+                        # every rule-exit strategy would be worse than no filter.
+                        if diag is not None:
+                            diag['target_unpriced_kept'] = \
+                                diag.get('target_unpriced_kept', 0) + 1
+                    elif near < float(min_target_usd):
+                        _drop('target_too_close')
+                        continue
+                in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
+                entered_run = True        # this true-run has now been taken
+                sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
+                sl_at_entry = sl_eff
+                # frozen anchors: capture the signal-bar level as a FIXED
+                # scalar; the per-bar trailing array is ignored for this trade.
+                if sl_frozen and e_sl is not None and e_sl == e_sl:
+                    sl = float(e_sl)
+                if tp_frozen and e_tp is not None and e_tp == e_tp:
+                    tp = float(e_tp)
+                if max_per_day:
+                    day_count[et_day[ej]] = day_count.get(et_day[ej], 0) + 1
                 if exit_group is not None:
                     # exit rules reference the Trade operand → evaluate the
                     # exit condition FOR THIS TRADE (its own entry price/bar)
@@ -1452,6 +1508,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         cooldown_bars=cooldown, min_hold_bars=min_hold,
         entry_mode=(_risk.get('entry_mode') or 'edge'),
         max_stop_pct=_risk.get('max_stop_pct'),
+        min_target_usd=_risk.get('min_target_usd'),
         win_start=_risk.get('window_start'), win_end=_risk.get('window_end'),
         exit_scope=(exit_group or {}).get('scope'), diag=_entry_drops)
 
