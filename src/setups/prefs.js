@@ -88,6 +88,17 @@ function settingsFor(setupId) {
      */
     riskPerTrade: e.riskPerTrade || null,
     maxPositionPct: e.maxPositionPct || null,
+    /*
+     * HOW the day's signals are ranked against each other, and there is no
+     * default on purpose.
+     *
+     * An assumed metric turned a backtest of OR+VWAP 09:35 into "the two widest
+     * opening ranges per day" and threw away 103 of 117 signals on a criterion
+     * its spec never mentions. Unset here means unset: every signal is taken,
+     * which is the only answer that invents no preference.
+     */
+    rankMetric: e.rankMetric || null,
+    rankDirection: e.rankDirection || null,
   };
 }
 
@@ -98,7 +109,8 @@ function saveSettings(setupId, patch) {
   const cur = state.setups[setupId] || {};
   const next = { ...cur };
   for (const k of ['universe', 'topN', 'tf', 'feed', 'targetR', 'fill', 'caution',
-                   'maxTradesPerDay', 'riskPerTrade', 'maxPositionPct']) {
+                   'maxTradesPerDay', 'riskPerTrade', 'maxPositionPct',
+                   'rankMetric', 'rankDirection']) {
     if (!(k in patch)) continue;
     const v = patch[k];
     if (v === null || v === '' || v === undefined) delete next[k];

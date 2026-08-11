@@ -32,7 +32,9 @@ router.get('/', async (req, res) => {
       describe: s.describe,
       caution: s.caution,
       liveFeed: s.liveFeed || null,
-      topN: (s.rank || {}).topN || 2,
+      topN: (s.rank || {}).topN || 0,
+      rankMetric: (s.rank || {}).metric || null,
+      rankDirection: (s.rank || {}).direction || null,
       universe: require('../setups/universe').describe(s.universe),
       universeRules: (s.universe && s.universe.rules) || [],
       // Sent back so the editor reopens on what was saved. Without it the

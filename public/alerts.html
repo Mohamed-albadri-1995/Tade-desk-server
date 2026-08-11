@@ -731,7 +731,11 @@ async function loadSetups() {
         ${s.universe ? `<div class="st-gate">Only cards where ${esc(s.universe)}</div>` : ''}
         <div class="st-meta">
           ${s.universeScanAt ? `extra scan ${esc(s.universeScanAt)} · ` : ''}
-          feed: ${esc(s.liveFeed || 'default')} · top ${esc(s.topN || 2)}
+          feed: ${esc(s.liveFeed || 'default')} · ${
+            s.rankMetric
+              ? `ranked by ${esc(s.rankMetric)}${s.rankDirection ? ` (${esc(s.rankDirection)})` : ''}`
+                + `${s.topN ? `, top ${esc(s.topN)}` : ', all'}`
+              : 'not ranked — all signals'}
           ${s.maxTradesPerDay ? ` · max ${esc(s.maxTradesPerDay)} order(s)/day` : ''}
           ${s.riskPerTrade ? ` · risks $${esc(s.riskPerTrade)}/trade (this setup)` : ''}
           <button class="lnk" onclick="editSetup(${i})">edit filter</button>
@@ -882,8 +886,19 @@ function editSetup(i) {
           <option value="OR"${s.universeLogic === 'OR' ? ' selected' : ''}>any</option>
         </select>
       </label>
+      <!-- The metric comes FIRST, because it decides what "top" means. Blank
+           is a real answer and the honest one: no ranking, every signal taken.
+           An assumed metric turned a 117-signal backtest into 14. -->
+      <label class="note">rank by
+        <select id="st-metric-${i}">
+          <option value=""${s.rankMetric ? '' : ' selected'}>nothing — take all</option>
+          ${['vwap_extension', 'tight_stop', 'reg_score', 'rvol'].map(m =>
+            `<option value="${m}"${s.rankMetric === m ? ' selected' : ''}>${m}</option>`).join('')}
+        </select>
+      </label>
       <label class="note">take top
-        <input id="st-top-${i}" type="number" min="1" max="10" value="${esc(s.topN || 2)}" style="width:60px">
+        <input id="st-top-${i}" type="number" min="1" max="20" placeholder="all"
+               value="${esc(s.topN || '')}" style="width:60px">
       </label>
       <!-- How many of those may become real orders. A setup that ranks top 2
            normally places two, so a cap of 1 is how a strategy is trialled with
@@ -934,7 +949,8 @@ async function saveSetup(i) {
     universe: rules.length
       ? { logic: document.getElementById(`st-logic-${i}`).value, rules }
       : null,
-    topN: Number(document.getElementById(`st-top-${i}`).value) || 2,
+    topN: Number(document.getElementById(`st-top-${i}`).value) || null,
+    rankMetric: document.getElementById(`st-metric-${i}`).value || null,
     maxTradesPerDay: Number(document.getElementById(`st-max-${i}`).value) || null,
     riskPerTrade: Number(document.getElementById(`st-risk-${i}`).value) || null,
   };

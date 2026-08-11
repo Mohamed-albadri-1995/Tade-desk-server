@@ -63,7 +63,9 @@ app.get('/api/setups', async (req, res) => {
         decisionTime: s.decisionTime, universeScanAt: s.universeScanAt || null,
         describe: s.describe, caution: s.caution, liveFeed: s.liveFeed || null,
         sides: s.sides, strategies: s.strategies, strategyIds: s.strategyIds,
-        topN: (s.rank || {}).topN || 2,
+        topN: (s.rank || {}).topN || 0,
+        rankMetric: (s.rank || {}).metric || null,
+        rankDirection: (s.rank || {}).direction || null,
         universe: universe.describe(s.universe),
         universeRules: (s.universe && s.universe.rules) || [],
         // Sent back so the editor reopens on what was saved. Without it the

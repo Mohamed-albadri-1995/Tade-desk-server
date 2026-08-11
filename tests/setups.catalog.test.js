@@ -158,10 +158,47 @@ test('defaults stand when nothing has been set', async () => {
   qp.strategies.mockResolvedValue([T2_LONG]);
   const s = (await catalog.list())[0];
   expect(s.enabled).toBe(true);
-  expect(s.rank.topN).toBe(2);
   expect(s.tf).toBe('1m');
   expect(s.feed).toBe('yahoo');
   expect(s.universe).toBeNull();
+});
+
+/*
+ * THERE IS NO DEFAULT RANKING, and that is the point.
+ *
+ * This used to read `{ metric: 'vwap_extension', topN: 2 }` for every setup
+ * that had ever existed. An assumed metric turned a backtest of OR+VWAP 09:35
+ * into "the two widest opening ranges per day" and discarded 103 of 117
+ * signals on a criterion its spec never mentions — and the live path was doing
+ * the same thing to the same strategy, with money behind it.
+ */
+describe('ranking is never assumed', () => {
+  test('unset means no metric and no cut — every signal is taken', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const s = (await catalog.list())[0];
+    expect(s.rank.metric).toBeNull();
+    expect(s.rank.topN).toBe(0);
+    expect(s.describe.join(' ')).toMatch(/Not ranked/);
+  });
+
+  test('named, it is carried through with its direction', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const id = (await catalog.list())[0].id;
+    require('../src/setups/prefs').saveSettings(id,
+      { rankMetric: 'tight_stop', rankDirection: 'asc', topN: 2 });
+    const s = await catalog.get(id);
+    expect(s.rank).toEqual({ metric: 'tight_stop', direction: 'asc', topN: 2 });
+    expect(s.describe.join(' ')).toMatch(/Ranked by tight_stop \(asc\), top 2/);
+  });
+
+  /* A top-N without a metric is "take 2 of an unordered list" — which two
+   * being an accident of evaluation order. */
+  test('a cut without a metric still names no metric', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const id = (await catalog.list())[0].id;
+    require('../src/setups/prefs').saveSettings(id, { topN: 2 });
+    expect((await catalog.get(id)).rank.metric).toBeNull();
+  });
 });
 
 test('an out-of-range window is refused rather than turned into a nonsense minute', async () => {

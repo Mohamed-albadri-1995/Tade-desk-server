@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 
 from chart import strategy as strat
-from chart.backtest import rank_metric
+from chart.backtest import rank_metric, RANK_METRICS
 
 _ET = 'America/New_York'
 
@@ -234,7 +234,9 @@ def exit_plan(strategy: dict, side: str, entry: float, stop: float,
 
 
 def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
-           feed: str = 'yahoo', top_n: int = 2, target_r: float = 2.0,
+           feed: str = 'yahoo', top_n: int = 0, target_r: float = 2.0,
+           metric: str | None = None, direction: str | None = None,
+           ctx: dict | None = None,
            days: int = 2, workers: int = _WORKERS, fill: str = 'close') -> dict:
     """Run the strategies over the universe and return the ranked picks.
 
@@ -260,22 +262,55 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
                 for row in rows:
                     (errors if row.get('error') else candidates).append(row)
 
-    signalled = []
-    for c in candidates:
-        m = rank_metric(c.get('side'), c.get('entry'), c.get('stop'))
-        c['metric'] = None if m is None else round(m, 6)
-        # A signal with no usable stop cannot be sized or ranked. Kept as a
-        # candidate so it is visible, never taken.
-        if m is not None:
-            signalled.append(c)
+    # ── ranking ────────────────────────────────────────────────────────────
+    #
+    # THE SAME CONTRACT THE BACKTEST USES, and for the same reason: an unnamed
+    # metric used to fall through to extension-from-VWAP, which turned OR+VWAP
+    # 09:35 into "the two widest opening ranges" and discarded 103 of 117
+    # signals on a criterion its spec never mentions. A live run doing that
+    # silently is the same error with money behind it.
+    #
+    # No metric named → nothing is ranked and every signal is taken. That is the
+    # only default that invents no preference.
+    scored, unscorable = [], []
+    if metric:
+        if metric not in RANK_METRICS:
+            return {'ok': False,
+                    'error': f'unknown rank metric {metric!r} — known: '
+                             + ', '.join(sorted(RANK_METRICS))}
+        score_of, default_dir = RANK_METRICS[metric]
+        d = str(direction or default_dir).lower()
+        if d not in ('asc', 'desc'):
+            return {'ok': False,
+                    'error': f"rank direction must be 'asc' or 'desc', got {direction!r}"}
+    else:
+        score_of, d = None, None
 
-    # Strongest first; ties broken by symbol so a run is reproducible. The same
-    # ordering backtest.py applies, for the same reason.
-    signalled.sort(key=lambda c: (-c['metric'], c['symbol']))
-    for i, c in enumerate(signalled):
+    for c in candidates:
+        if score_of is None:
+            c['metric'] = None
+            scored.append(c)
+            continue
+        # The card the screener froze for this symbol, so reg_score and rvol
+        # rank on the same numbers the register shows.
+        c['ctx'] = (ctx or {}).get(c.get('symbol')) or {}
+        m = score_of(c)
+        c['metric'] = None if m is None else round(float(m), 6)
+        # UNSCORABLE IS NOT WEAKEST. A signal the metric cannot read — no stop,
+        # no score on the card — is unusable, and sorting it to the bottom would
+        # quietly make it the last pick on a thin day.
+        (scored if m is not None else unscorable).append(c)
+
+    if score_of is not None:
+        # Ties broken by symbol so a run is reproducible, exactly as the
+        # backtest orders them.
+        scored.sort(key=lambda c: ((c['metric'] if d == 'asc' else -c['metric']),
+                                   c['symbol']))
+    for i, c in enumerate(scored):
         c['rank'] = i + 1
 
-    picks = signalled[:top_n] if top_n else signalled
+    signalled = scored
+    picks = scored[:top_n] if top_n else scored
     by_name = {s.get('name'): s for s in strategies}
     for p in picks:
         risk = abs(float(p['entry']) - float(p['stop']))
@@ -308,6 +343,13 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
         # against the spec's 129.56, which is the 10:00 bar's own range.
         'fill': fill,
         'universe': len(symbols),
+        # What the ranking was, in the answer. A run that took the top 2 is not
+        # interpretable without knowing top 2 of what, by which number.
+        'rank': ({'metric': metric, 'direction': d, 'top_n': top_n}
+                 if metric else {'metric': None, 'top_n': top_n or 0}),
+        'dropped_unscorable': [
+            {'symbol': c.get('symbol'), 'strategy': c.get('strategy')}
+            for c in unscorable],
         'picks': picks,
         'candidates': candidates,
         'errors': errors,

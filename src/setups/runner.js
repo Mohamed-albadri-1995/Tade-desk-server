@@ -188,7 +188,15 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     date: day,
     tf: setup.tf || '1m',
     feed: setup.feed || 'yahoo',
-    topN: (setup.rank && setup.rank.topN) || 2,
+    topN: (setup.rank && setup.rank.topN) || 0,
+    metric: (setup.rank && setup.rank.metric) || null,
+    direction: (setup.rank && setup.rank.direction) || null,
+    // The cards this tool froze, so reg_score and rvol rank on the numbers the
+    // register actually shows rather than on anything recomputed.
+    ctx: Object.fromEntries(universeRows()
+      .filter(r => list.includes(String(r.ticker).toUpperCase()))
+      .map(r => [String(r.ticker).toUpperCase(),
+        { score: r._score, rvol_day: (r.stock || {}).rvol }])),
     targetR: setup.targetR || 2.0,
     fill: setup.fill || 'close',
   });
@@ -432,6 +440,38 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       detail: `Ranked across mixed feeds (${data.used.join(' + ')}) — no single feed `
         + 'covered the list. Extensions from different tapes are not directly '
         + 'comparable, so the choice of the top 2 is less reliable than usual.',
+    });
+  }
+
+  /*
+   * WHAT THE RANKING WAS, and who it removed.
+   *
+   * "2 picks from 12" is not interpretable without it: top 2 of what, by which
+   * number. A run that ranked and one that took everything look identical
+   * otherwise, and that difference is the whole of backtest #231.
+   */
+  const rank = decided.rank || {};
+  if (rank.metric) {
+    fires.push({
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
+      date: day, at: Date.now(), kind: 'setup', level: 'info',
+      detail: `Ranked by ${rank.metric} (${rank.direction})`
+        + `${rank.top_n ? `, kept top ${rank.top_n}` : ', all kept'}`
+        + ` of ${out.counts.signalled} signal(s).`,
+    });
+  }
+  /*
+   * Unscorable is not weakest. A signal the metric could not read is unusable,
+   * and it was excluded from the ranking rather than sorted to the bottom —
+   * which is a different thing from being the last pick on a thin day.
+   */
+  if ((decided.dropped_unscorable || []).length) {
+    fires.push({
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
+      date: day, at: Date.now(), kind: 'setup', level: 'warn',
+      detail: `${decided.dropped_unscorable.length} signal(s) could not be scored `
+        + `by ${rank.metric} and were left out of the ranking entirely: `
+        + `${decided.dropped_unscorable.map(d => d.symbol).join(', ')}.`,
     });
   }
 

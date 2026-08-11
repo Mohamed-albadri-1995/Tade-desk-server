@@ -883,7 +883,12 @@ def setup_decide(payload: dict = Body(...)):
             date=str(payload.get('date') or ''),
             tf=payload.get('tf', '1m'),
             feed=payload.get('feed', 'yahoo'),
-            top_n=int(payload.get('top_n') or 2),
+            # 0 = take every signal. NOT 2: a silent top-2 is the same error
+            # as a silent metric, one layer down.
+            top_n=int(payload.get('top_n') or 0),
+            metric=payload.get('metric') or None,
+            direction=payload.get('direction') or None,
+            ctx=payload.get('ctx') or None,
             target_r=float(payload.get('target_r') or 2.0),
             days=int(payload.get('days') or 2),
             # 'close' fills at the signal bar's close; 'next_open' at the

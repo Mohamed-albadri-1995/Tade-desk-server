@@ -147,9 +147,76 @@ def test_parallel_evaluation_cannot_change_the_picks(monkeypatch):
 
     monkeypatch.setattr(dec, 'evaluate_symbol', fake)
     for _ in range(5):                          # repeated: a race shows up once
+        # The metric is NAMED. It used to be assumed, which is what turned a
+        # spec's "take the signals" into "take the two most extended".
         out = dec.decide([{'name': 'X'}], ['CCC', 'AAA', 'BBB'],
-                         '2026-08-10', workers=3)
+                         '2026-08-10', workers=3,
+                         metric='vwap_extension', top_n=2)
         assert [p['symbol'] for p in out['picks']] == ['AAA', 'BBB']
+
+
+def _one(entry=10.0, stop=9.0):
+    def fake(strategies, sym, date, tf, feed, days=2, fill='close'):
+        st = None if sym == 'NOSTOP' else stop
+        return [{'symbol': sym, 'strategy': 'X', 'side': 'long',
+                 'entry': entry, 'stop': st, 'entry_at': '10:00', 'entry_ts': 0}]
+    return fake
+
+
+def test_naming_no_metric_takes_every_signal(monkeypatch):
+    # The only default that invents no preference. A live run that silently
+    # ranked would be backtest #231 with money behind it: 103 of 117 signals
+    # discarded on a criterion the spec never mentioned.
+    from chart import decide as dec
+    monkeypatch.setattr(dec, 'evaluate_symbol', _one())
+    out = dec.decide([{'name': 'X'}], ['AAA', 'BBB', 'CCC'], '2026-08-10')
+    assert len(out['picks']) == 3
+    assert out['rank']['metric'] is None
+
+
+def test_the_direction_reverses_the_picks(monkeypatch):
+    from chart import decide as dec
+    prices = {'AAA': 9.0, 'BBB': 9.5, 'CCC': 9.8}
+
+    def fake(strategies, sym, date, tf, feed, days=2, fill='close'):
+        return [{'symbol': sym, 'strategy': 'X', 'side': 'long', 'entry': 10.0,
+                 'stop': prices[sym], 'entry_at': '10:00', 'entry_ts': 0}]
+
+    monkeypatch.setattr(dec, 'evaluate_symbol', fake)
+    wide = dec.decide([{'name': 'X'}], ['AAA', 'BBB', 'CCC'], '2026-08-10',
+                      metric='vwap_extension', top_n=2)
+    tight = dec.decide([{'name': 'X'}], ['AAA', 'BBB', 'CCC'], '2026-08-10',
+                       metric='tight_stop', top_n=2)
+    # Opposite sets. That is the size of what was happening silently.
+    assert [p['symbol'] for p in wide['picks']] == ['AAA', 'BBB']
+    assert [p['symbol'] for p in tight['picks']] == ['CCC', 'BBB']
+
+
+def test_an_unknown_metric_is_refused_rather_than_guessed():
+    from chart import decide as dec
+    out = dec.decide([], [], '2026-08-10', metric='nonsense')
+    assert out['ok'] is False
+    assert 'unknown rank metric' in out['error']
+
+
+def test_an_unscorable_signal_is_reported_not_ranked_last(monkeypatch):
+    # Sorting it to the bottom would quietly make it the last pick on a thin
+    # day — a trade taken on a number that could not be computed.
+    from chart import decide as dec
+    monkeypatch.setattr(dec, 'evaluate_symbol', _one())
+    out = dec.decide([{'name': 'X'}], ['AAA', 'NOSTOP', 'CCC'], '2026-08-10',
+                     metric='vwap_extension', top_n=5)
+    assert [p['symbol'] for p in out['picks']] == ['AAA', 'CCC']
+    assert [d['symbol'] for d in out['dropped_unscorable']] == ['NOSTOP']
+
+
+def test_the_card_is_what_reg_score_ranks_on(monkeypatch):
+    from chart import decide as dec
+    monkeypatch.setattr(dec, 'evaluate_symbol', _one())
+    out = dec.decide([{'name': 'X'}], ['AAA', 'BBB'], '2026-08-10',
+                     metric='reg_score', top_n=1,
+                     ctx={'AAA': {'score': 40}, 'BBB': {'score': 90}})
+    assert [p['symbol'] for p in out['picks']] == ['BBB']
 
 
 def test_a_run_reports_how_long_it_took():

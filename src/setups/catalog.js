@@ -215,7 +215,21 @@ async function list() {
       riskPerTrade: p.riskPerTrade || null,
       maxPositionPct: p.maxPositionPct || null,
       universe: p.universe || null,
-      rank: { metric: 'vwap_extension', topN: p.topN || 2 },
+      /*
+       * NO METRIC AND NO TOP-N UNLESS SAID.
+       *
+       * This used to read `{ metric: 'vwap_extension', topN: 2 }` for every
+       * setup that had ever existed — a preference nobody chose, applied to
+       * strategies whose edge is the opposite of it. A tight-stop setup ranked
+       * by extension is ranked precisely against itself.
+       *
+       * Unset now means every signal is taken. That is more alerts on some
+       * mornings and it is the honest answer: the alternative is a filter
+       * running under a name that does not mention filtering.
+       */
+      rank: { metric: p.rankMetric || null,
+              direction: p.rankDirection || null,
+              topN: p.topN || 0 },
       tf: p.tf || '1m',
       feed: p.feed || 'yahoo',
       targetR: p.targetR || 2.0,
@@ -226,7 +240,10 @@ async function list() {
       describe: [
         `At ${g.decisionTime} ET, on the card list of ${g.tools.join(', ')}.`,
         `Decided by the qp strategy "${g.name}" (${g.sides.join(' and ') || 'long'}).`,
-        `Ranked by distance from VWAP, top ${p.topN || 2}.`,
+        p.rankMetric
+          ? `Ranked by ${p.rankMetric}${p.rankDirection ? ` (${p.rankDirection})` : ''}`
+            + `${p.topN ? `, top ${p.topN}.` : ', all taken.'}`
+          : 'Not ranked — every signal is taken.',
       ],
     };
   });
