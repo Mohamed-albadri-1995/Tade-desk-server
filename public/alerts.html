@@ -71,6 +71,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
    what the setup DOES, it is which stocks it is allowed to look at, and reading
    the two as one thing is how "2 of 40" gets mistaken for "2 of 12". */
 .st-gate { font-size:11px; color:var(--blue); margin-top:7px; }
+/* Readiness. Blocking is red because the setup will fire and take nothing —
+   the failure that looks exactly like a quiet market. */
+.st-block { font-size:11.5px; color:var(--red); font-weight:700; margin-top:7px;
+  line-height:1.5; }
+.st-warn { font-size:11px; color:var(--accent); margin-top:6px; line-height:1.55; }
 ".st-meta { font-size:10.5px; color:var(--text3); margin-top:7px; }
 .st-meta .lnk { margin-left:8px; }
 .st-edit { margin-top:10px; border-top:1px dashed var(--border); padding-top:10px; }
@@ -696,12 +701,21 @@ async function loadSetups() {
             class="ua-tool${(s.tools || []).includes(t) ? ' on' : ''}"
             onclick="setSetupTool(${i}, '${esc(t)}')">${esc(t)}</span>`).join('')}</div>
         </div>
+        <!-- Whether it can produce a clean alert and a clean order, said here
+             rather than discovered on the morning it matters. A blocking issue
+             means the setup will fire and take nothing, silently. -->
+        ${s.readiness && !s.readiness.ok
+          ? `<div class="st-block">⛔ Will not trade: ${
+              s.readiness.blocking.map(esc).join('; ')}</div>` : ''}
+        ${s.readiness && s.readiness.warnings.length
+          ? `<div class="st-warn">⚠ ${s.readiness.warnings.map(esc).join('<br>⚠ ')}</div>` : ''}
         <ul class="st-rules">${(s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
         ${s.universe ? `<div class="st-gate">Only cards where ${esc(s.universe)}</div>` : ''}
         <div class="st-meta">
           ${s.universeScanAt ? `extra scan ${esc(s.universeScanAt)} · ` : ''}
           feed: ${esc(s.liveFeed || 'default')} · top ${esc(s.topN || 2)}
           ${s.maxTradesPerDay ? ` · max ${esc(s.maxTradesPerDay)} order(s)/day` : ''}
+          ${s.riskPerTrade ? ` · risks $${esc(s.riskPerTrade)}/trade (this setup)` : ''}
           <button class="lnk" onclick="editSetup(${i})">edit filter</button>
         </div>
         <div class="st-edit" id="st-edit-${i}" style="display:none"></div>
@@ -860,6 +874,13 @@ function editSetup(i) {
         <input id="st-max-${i}" type="number" min="1" max="20" placeholder="no limit"
                value="${esc(s.maxTradesPerDay || '')}" style="width:80px">
       </label>
+      <!-- Setup-level risk. The account says what a trade may lose; this says
+           what THIS strategy may, which is a smaller number while it is young.
+           Blank means the account's. -->
+      <label class="note">risk $/trade
+        <input id="st-risk-${i}" type="number" min="1" step="1" placeholder="account"
+               value="${esc(s.riskPerTrade || '')}" style="width:80px">
+      </label>
       <button class="btn primary" onclick="saveSetup(${i})">Save</button>
       <span class="note" id="st-msg-${i}"></span>
     </div>`;
@@ -897,6 +918,7 @@ async function saveSetup(i) {
       : null,
     topN: Number(document.getElementById(`st-top-${i}`).value) || 2,
     maxTradesPerDay: Number(document.getElementById(`st-max-${i}`).value) || null,
+    riskPerTrade: Number(document.getElementById(`st-risk-${i}`).value) || null,
   };
   try {
     const r = await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {

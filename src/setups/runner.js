@@ -230,9 +230,23 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     waitedMs: 0, attempts: 1,
   };
 
-  // Read once for the whole run, so both picks are sized against the same
-  // settings even if they are edited while this is executing.
-  const riskCfg = risk.settings();
+  /*
+   * TWO LAYERS OF RISK, and the setup's wins where it says anything.
+   *
+   * The account answers "what may a trade lose". The setup answers "what may
+   * THIS strategy lose", which is a smaller number while a strategy is young —
+   * and having to edit the account figure before and after each morning is how
+   * it ends up wrong on the morning nobody remembers.
+   *
+   * Read once for the whole run, so both picks are sized against the same
+   * numbers even if they are edited while this is executing.
+   */
+  const account = risk.settings();
+  const riskCfg = {
+    ...account,
+    ...(setup.riskPerTrade ? { riskPerTrade: setup.riskPerTrade } : {}),
+    ...(setup.maxPositionPct ? { maxPositionPct: setup.maxPositionPct } : {}),
+  };
 
   /*
    * The orders, placed before the alerts are published.
@@ -348,6 +362,11 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       // null when account size and risk per trade have not been set. An
       // invented size is worse than none: it looks like a decision.
       size,
+      // Which risk figure produced this size. An alert that says "18 shares"
+      // and an account set to $25 do not add up when the setup is capped at
+      // $10, and the arithmetic is the first thing anyone checks.
+      riskUsed: riskCfg.riskPerTrade || null,
+      riskFrom: setup.riskPerTrade ? 'setup' : 'account',
     },
     };
   });

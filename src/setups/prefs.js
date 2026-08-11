@@ -78,6 +78,16 @@ function settingsFor(setupId) {
      * day.
      */
     maxTradesPerDay: e.maxTradesPerDay || null,
+    /*
+     * Setup-level risk, overriding the account's for this setup alone.
+     *
+     * The account figure answers "what may a trade lose". This answers "what
+     * may THIS strategy lose", which is a smaller number while a strategy is
+     * young. Absent means the account's, so nothing has to be set for the
+     * normal case.
+     */
+    riskPerTrade: e.riskPerTrade || null,
+    maxPositionPct: e.maxPositionPct || null,
   };
 }
 
@@ -88,7 +98,7 @@ function saveSettings(setupId, patch) {
   const cur = state.setups[setupId] || {};
   const next = { ...cur };
   for (const k of ['universe', 'topN', 'tf', 'feed', 'targetR', 'fill', 'caution',
-                   'maxTradesPerDay']) {
+                   'maxTradesPerDay', 'riskPerTrade', 'maxPositionPct']) {
     if (!(k in patch)) continue;
     const v = patch[k];
     if (v === null || v === '' || v === undefined) delete next[k];

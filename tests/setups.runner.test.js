@@ -447,3 +447,48 @@ describe('which setups place orders', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * Two layers of risk, and the setup's wins where it says anything.
+ *
+ * Having to edit the account figure before and after each morning is how it
+ * ends up wrong on the morning nobody remembers.
+ */
+describe('setup-level risk overrides the account', () => {
+  const risk = require('../src/setups/risk');
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    jest.spyOn(risk, 'settings').mockReturnValue({
+      accountSize: 5000, riskPerTrade: 100, maxPositionPct: 100, updatedAt: 1 });
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+  });
+
+  test("without one, the account's figure sizes it", async () => {
+    await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' },
+      { date: DATE });
+    const f = store.recentFires(DATE)[0];
+    expect(f.setup.size.shares).toBe(100);        // 100 / 1
+    expect(f.setup.riskFrom).toBe('account');
+  });
+
+  test('with one, the setup risks less and says so', async () => {
+    await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00',
+      riskPerTrade: 10 }, { date: DATE });
+    const f = store.recentFires(DATE)[0];
+    expect(f.setup.size.shares).toBe(10);         // 10 / 1
+    expect(f.setup.riskUsed).toBe(10);
+    expect(f.setup.riskFrom).toBe('setup');
+  });
+
+  test('a setup position cap applies too', async () => {
+    await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00',
+      maxPositionPct: 1 }, { date: DATE });
+    // 1% of a 5,000 account is 50, at 10 a share = 5.
+    expect(store.recentFires(DATE)[0].setup.size.shares).toBe(5);
+  });
+});

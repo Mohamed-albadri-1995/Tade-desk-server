@@ -72,6 +72,82 @@ function baseName(name) {
 }
 
 /**
+ * Can this strategy produce a clean alert and a clean order?
+ *
+ * A strategy is developed and tested in qp; it becomes usable here the moment
+ * it has a clear entry and a clear exit. "Clear" is not a matter of taste —
+ * each of these is a specific thing that goes wrong, and most of them go wrong
+ * SILENTLY:
+ *
+ *   no stop        the ranking metric is the distance from entry to stop, so a
+ *                  signal without one cannot be ranked OR sized. It is dropped
+ *                  without a word, and the setup looks like it simply never
+ *                  triggers.
+ *
+ *   trailing stop  a stop that follows an indicator is wherever that line sits
+ *   on a line      on the bar. No broker-side trail can follow it, so what goes
+ *                  out is a frozen level — a different trade from the tested one
+ *                  unless someone manages it by hand.
+ *
+ *   target on      the same problem at the other end: it cannot rest at a
+ *   a line         broker, so that fraction has no target at all.
+ *
+ *   a runner       deliberate and fine, but it relies on the end-of-session
+ *                  close to ever come out. Worth saying once, here, rather than
+ *                  being discovered at 15:51.
+ *
+ * Reported per setup so the answer is visible BEFORE the morning it matters.
+ */
+function readiness(strategies) {
+  const blocking = [];
+  const warnings = [];
+
+  for (const s of strategies) {
+    const risk = s.risk || {};
+    const sl = risk.sl || null;
+    const label = strategies.length > 1 ? `${s.side || s.name}: ` : '';
+
+    const entryRules = ((s.entry || {}).rules || []).length;
+    if (!entryRules) blocking.push(`${label}no entry rules`);
+
+    if (!sl || (sl.type === undefined && sl.anchor === undefined)) {
+      blocking.push(`${label}no stop — signals cannot be ranked or sized, `
+        + 'and are dropped without a word');
+    } else if (sl.type === 'prim' && !sl.freeze) {
+      warnings.push(`${label}the stop follows an indicator — it will be sent as a `
+        + 'fixed level and will not trail');
+    }
+
+    const targets = risk.targets || [];
+    const anchored = targets.filter(t => t && t.tp && t.tp.type === 'prim').length;
+    if (anchored) {
+      warnings.push(`${label}${anchored} target(s) follow an indicator and cannot `
+        + 'rest at the broker');
+    }
+    if (risk.breakeven_after_target) {
+      warnings.push(`${label}moves to breakeven after a leg — the broker will not`);
+    }
+
+    const booked = targets.reduce((n, t) => n + (Number(t && t.fraction) || 0), 0);
+    if (targets.length && booked < 0.999) {
+      warnings.push(`${label}${Math.round((1 - booked) * 100)}% of the position has `
+        + 'no target — it rides the stop until the end-of-session close');
+    }
+    if (!targets.length) {
+      // Not a fault: the screener supplies a target at target_r when the
+      // strategy names none. Said so it is never a surprise.
+      warnings.push(`${label}no targets in the strategy — the screener uses 2R`);
+    }
+  }
+
+  return {
+    ok: blocking.length === 0,
+    blocking: [...new Set(blocking)],
+    warnings: [...new Set(warnings)],
+  };
+}
+
+/**
  * Every setup available to run, built from qp's strategies.
  *
  * Returns [] when qp is unreachable rather than throwing — the list is read to
@@ -115,6 +191,9 @@ async function list() {
         // short are one setup, and assigning half of a pair gives one that
         // ranks half its signals while looking perfectly correct.
         strategyIds: [],
+        // The raw qp rows, kept only to answer "is this tradeable" — never to
+        // re-implement any part of the strategy on this side.
+        raw: [],
       });
     }
     const g = groups.get(key);
@@ -122,18 +201,33 @@ async function list() {
     if (s.side && !g.sides.includes(s.side)) g.sides.push(s.side);
     g.strategies.push(s.name);
     if (s.id !== undefined && s.id !== null) g.strategyIds.push(s.id);
+    g.raw.push(s);
   }
 
   // The parts qp cannot hold, merged on top.
   return [...groups.values()].map(g => {
     const p = prefs.settingsFor(g.id);
+    const { raw, ...rest } = g;
     return {
-      ...g,
+      ...rest,
+      // Whether it can produce a clean alert and a clean order, said before the
+      // morning rather than discovered during it.
+      readiness: readiness(raw),
       enabled: prefs.isEnabled(g.id),
       // Off unless said otherwise. See the note in prefs: arming the broker is
       // permission for the box, not for every strategy in it.
       autoTrade: p.autoTrade === true,
       maxTradesPerDay: p.maxTradesPerDay || null,
+      /*
+       * SETUP-level risk, which is a different thing from account-level risk.
+       *
+       * The account says what a trade may lose. A setup may say less: a
+       * strategy with four sessions behind it should not be sized like one with
+       * four hundred, and having to edit the account figure before and after
+       * each morning is how it ends up wrong. Absent means "use the account's".
+       */
+      riskPerTrade: p.riskPerTrade || null,
+      maxPositionPct: p.maxPositionPct || null,
       universe: p.universe || null,
       rank: { metric: 'vwap_extension', topN: p.topN || 2 },
       tf: p.tf || '1m',
@@ -161,4 +255,4 @@ async function get(id) {
   return (await list()).find(s => s.id === id) || null;
 }
 
-module.exports = { list, forTool, get, hhmm, baseName, minutesBefore };
+module.exports = { list, forTool, get, hhmm, baseName, minutesBefore, readiness };

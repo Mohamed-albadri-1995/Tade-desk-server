@@ -44,6 +44,10 @@ router.get('/', async (req, res) => {
       // armed, which is permission for the box rather than for a strategy.
       autoTrade: s.autoTrade === true,
       maxTradesPerDay: s.maxTradesPerDay || null,
+      riskPerTrade: s.riskPerTrade || null,
+      maxPositionPct: s.maxPositionPct || null,
+      // Whether it can produce a clean alert and a clean order at all.
+      readiness: s.readiness || null,
       mine: (s.tools || []).includes(config.toolId),
     })),
   });

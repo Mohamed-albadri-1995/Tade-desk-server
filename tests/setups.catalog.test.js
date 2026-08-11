@@ -218,3 +218,111 @@ describe('permission to place orders', () => {
     expect((await catalog.list())[0].autoTrade).toBe(false);
   });
 });
+
+/*
+ * Whether a strategy can produce a clean alert and a clean order.
+ *
+ * The flow is: build and test in qp, then use it here — "as long as it has a
+ * clear entry and clear exits". That has to be CHECKED rather than assumed,
+ * because the failure is silent: a strategy with no stop cannot be ranked or
+ * sized, so its signals are dropped without a word and the setup looks exactly
+ * like one that simply never triggers.
+ */
+describe('readiness', () => {
+  const withRisk = risk => ({ name: 'S', side: 'long', tools: ['T2'],
+    entry: { rules: [{ left: 'a' }] }, risk: { window_start: 1000, ...risk } });
+
+  test('a strategy with an entry, a stop and a target is ready', () => {
+    const r = catalog.readiness([withRisk({
+      sl: { type: 'pct', value: 1, freeze: true },
+      targets: [{ fraction: 1, r_multiple: 2 }],
+    })]);
+    expect(r.ok).toBe(true);
+    expect(r.blocking).toEqual([]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  /* The silent one. Without a stop there is no ranking metric and no size. */
+  test('no stop is blocking, and says why it would look like nothing happening', () => {
+    const r = catalog.readiness([withRisk({})]);
+    expect(r.ok).toBe(false);
+    expect(r.blocking.join()).toMatch(/no stop/);
+    expect(r.blocking.join()).toMatch(/without a word/);
+  });
+
+  test('no entry rules is blocking', () => {
+    const r = catalog.readiness([{ name: 'S', risk: { sl: { type: 'pct', freeze: true } } }]);
+    expect(r.blocking.join()).toMatch(/no entry rules/);
+  });
+
+  /* Warnings are things that WILL trade but not as tested. */
+  test('an indicator-following stop warns rather than blocks', () => {
+    const r = catalog.readiness([withRisk({ sl: { type: 'prim' },
+      targets: [{ fraction: 1, r_multiple: 2 }] })]);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.join()).toMatch(/will not trail/);
+  });
+
+  test('a frozen indicator stop is fine — it is a fixed level', () => {
+    const r = catalog.readiness([withRisk({ sl: { type: 'prim', freeze: true },
+      targets: [{ fraction: 1, r_multiple: 2 }] })]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  /* The 09:35 opening-range strategy: half at 2R, half riding the stop. */
+  test('a runner is called out, because it relies on the end-of-session close', () => {
+    const r = catalog.readiness([withRisk({ sl: { type: 'prim', freeze: true },
+      targets: [{ fraction: 0.5, r_multiple: 2 }] })]);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.join()).toMatch(/50% of the position has no target/);
+  });
+
+  test('a target that follows an indicator is called out', () => {
+    const r = catalog.readiness([withRisk({ sl: { type: 'pct', freeze: true },
+      targets: [{ fraction: 1, tp: { type: 'prim' } }] })]);
+    expect(r.warnings.join()).toMatch(/cannot rest at the broker/);
+  });
+
+  test('no targets at all is stated, not silently replaced', () => {
+    const r = catalog.readiness([withRisk({ sl: { type: 'pct', freeze: true } })]);
+    expect(r.warnings.join()).toMatch(/screener uses 2R/);
+  });
+
+  /* A long and a short are one setup; a fault in either is a fault in it. */
+  test('the side is named when only one half is at fault', () => {
+    const r = catalog.readiness([
+      { ...withRisk({ sl: { type: 'pct', freeze: true }, targets: [{ fraction: 1, r_multiple: 2 }] }), side: 'long' },
+      { ...withRisk({ targets: [{ fraction: 1, r_multiple: 2 }] }), side: 'short' },
+    ]);
+    expect(r.ok).toBe(false);
+    expect(r.blocking.join()).toMatch(/^short: no stop/);
+  });
+
+  test('it reaches the setup list', async () => {
+    qp.strategies.mockResolvedValue([{ ...T2_LONG, entry: { rules: [{ left: 'a' }] } }]);
+    const s = (await catalog.list())[0];
+    expect(s.readiness.ok).toBe(false);          // the fixture has no stop
+    expect(s.readiness.blocking.join()).toMatch(/no stop/);
+  });
+});
+
+/*
+ * Setup-level risk, which is a different question from account-level risk.
+ * The account says what a trade may lose; this says what THIS strategy may,
+ * which is a smaller number while a strategy is young.
+ */
+describe('setup-level risk', () => {
+  test('absent means the account decides', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    expect((await catalog.list())[0].riskPerTrade).toBeNull();
+  });
+
+  test('set, it is carried on the setup', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const id = (await catalog.list())[0].id;
+    require('../src/setups/prefs').saveSettings(id, { riskPerTrade: 10, maxPositionPct: 30 });
+    const s = await catalog.get(id);
+    expect(s.riskPerTrade).toBe(10);
+    expect(s.maxPositionPct).toBe(30);
+  });
+});
