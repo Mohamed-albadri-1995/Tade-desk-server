@@ -76,6 +76,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .st-block { font-size:11.5px; color:var(--red); font-weight:700; margin-top:7px;
   line-height:1.5; }
 .st-warn { font-size:11px; color:var(--accent); margin-top:6px; line-height:1.55; }
+.st-shape { font-size:11px; color:var(--text2); margin-top:7px;
+  border:1px solid var(--border); border-radius:4px; padding:3px 7px;
+  display:inline-block; }
 ".st-meta { font-size:10.5px; color:var(--text3); margin-top:7px; }
 .st-meta .lnk { margin-left:8px; }
 .st-edit { margin-top:10px; border-top:1px dashed var(--border); padding-top:10px; }
@@ -704,6 +707,10 @@ async function loadSetups() {
         <!-- Whether it can produce a clean alert and a clean order, said here
              rather than discovered on the morning it matters. A blocking issue
              means the setup will fire and take nothing, silently. -->
+        <!-- The exit shape, declared by the strategy: how many parts the
+             position is cut into and what happens to each. -->
+        ${s.readiness && s.readiness.shape
+          ? `<div class="st-shape">exit: ${esc(s.readiness.shape)}</div>` : ''}
         ${s.readiness && !s.readiness.ok
           ? `<div class="st-block">⛔ Will not trade: ${
               s.readiness.blocking.map(esc).join('; ')}</div>` : ''}

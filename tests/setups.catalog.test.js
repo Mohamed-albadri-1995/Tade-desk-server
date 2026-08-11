@@ -229,80 +229,74 @@ describe('permission to place orders', () => {
  * like one that simply never triggers.
  */
 describe('readiness', () => {
-  const withRisk = risk => ({ name: 'S', side: 'long', tools: ['T2'],
-    entry: { rules: [{ left: 'a' }] }, risk: { window_start: 1000, ...risk } });
-
-  test('a strategy with an entry, a stop and a target is ready', () => {
-    const r = catalog.readiness([withRisk({
-      sl: { type: 'pct', value: 1, freeze: true },
-      targets: [{ fraction: 1, r_multiple: 2 }],
-    })]);
-    expect(r.ok).toBe(true);
-    expect(r.blocking).toEqual([]);
-    expect(r.warnings).toEqual([]);
+  /* What qp reports on a strategy. This side reads it — it does not re-derive
+   * it, which is the entire point of there being a protocol. */
+  const proto = (over = {}) => ({
+    version: 1, shape: '1 SL / 1 TP', ok: true, errors: [], warnings: [], ...over,
+  });
+  const strat = (exitProtocol, over = {}) => ({
+    name: 'S', side: 'long', tools: ['T2'], risk: { window_start: 1000 },
+    entry: { rules: [{ left: 'a' }] }, exit_protocol: exitProtocol, ...over,
   });
 
-  /* The silent one. Without a stop there is no ranking metric and no size. */
-  test('no stop is blocking, and says why it would look like nothing happening', () => {
-    const r = catalog.readiness([withRisk({})]);
+  test('a clean protocol is ready, and its shape is carried', () => {
+    const r = catalog.readiness([strat(proto())]);
+    expect(r.ok).toBe(true);
+    expect(r.shape).toBe('1 SL / 1 TP');
+    expect(r.blocking).toEqual([]);
+  });
+
+  test("qp's errors block, and its warnings warn", () => {
+    const r = catalog.readiness([strat(proto({
+      ok: false,
+      errors: ['leg 1 has no stop — it cannot be sized or ranked'],
+      warnings: ['50% is a runner with no target'],
+    }))]);
     expect(r.ok).toBe(false);
     expect(r.blocking.join()).toMatch(/no stop/);
-    expect(r.blocking.join()).toMatch(/without a word/);
+    expect(r.warnings.join()).toMatch(/runner/);
   });
 
-  test('no entry rules is blocking', () => {
-    const r = catalog.readiness([{ name: 'S', risk: { sl: { type: 'pct', freeze: true } } }]);
+  /* The one thing qp cannot see: whether there is anything to enter on. */
+  test('no entry rules is blocking, and that check is this side’s', () => {
+    const r = catalog.readiness([strat(proto(), { entry: { rules: [] } })]);
     expect(r.blocking.join()).toMatch(/no entry rules/);
   });
 
-  /* Warnings are things that WILL trade but not as tested. */
-  test('an indicator-following stop warns rather than blocks', () => {
-    const r = catalog.readiness([withRisk({ sl: { type: 'prim' },
-      targets: [{ fraction: 1, r_multiple: 2 }] })]);
-    expect(r.ok).toBe(true);
-    expect(r.warnings.join()).toMatch(/will not trail/);
+  /*
+   * A platform too old to report a protocol must not be filled in for. Guessing
+   * the exit again is exactly what the protocol exists to stop, and a guess
+   * does not fail — it places a real order of the wrong size.
+   */
+  test('a missing protocol blocks rather than being inferred', () => {
+    const r = catalog.readiness([strat(undefined)]);
+    expect(r.ok).toBe(false);
+    expect(r.blocking.join()).toMatch(/did not report an exit protocol/);
   });
 
-  test('a frozen indicator stop is fine — it is a fixed level', () => {
-    const r = catalog.readiness([withRisk({ sl: { type: 'prim', freeze: true },
-      targets: [{ fraction: 1, r_multiple: 2 }] })]);
-    expect(r.warnings).toEqual([]);
-  });
-
-  /* The 09:35 opening-range strategy: half at 2R, half riding the stop. */
-  test('a runner is called out, because it relies on the end-of-session close', () => {
-    const r = catalog.readiness([withRisk({ sl: { type: 'prim', freeze: true },
-      targets: [{ fraction: 0.5, r_multiple: 2 }] })]);
-    expect(r.ok).toBe(true);
-    expect(r.warnings.join()).toMatch(/50% of the position has no target/);
-  });
-
-  test('a target that follows an indicator is called out', () => {
-    const r = catalog.readiness([withRisk({ sl: { type: 'pct', freeze: true },
-      targets: [{ fraction: 1, tp: { type: 'prim' } }] })]);
-    expect(r.warnings.join()).toMatch(/cannot rest at the broker/);
-  });
-
-  test('no targets at all is stated, not silently replaced', () => {
-    const r = catalog.readiness([withRisk({ sl: { type: 'pct', freeze: true } })]);
-    expect(r.warnings.join()).toMatch(/screener uses 2R/);
-  });
-
-  /* A long and a short are one setup; a fault in either is a fault in it. */
-  test('the side is named when only one half is at fault', () => {
+  test('a fault is attributed to the side it belongs to', () => {
     const r = catalog.readiness([
-      { ...withRisk({ sl: { type: 'pct', freeze: true }, targets: [{ fraction: 1, r_multiple: 2 }] }), side: 'long' },
-      { ...withRisk({ targets: [{ fraction: 1, r_multiple: 2 }] }), side: 'short' },
+      { ...strat(proto()), side: 'long' },
+      { ...strat(proto({ ok: false, errors: ['leg 1 has no stop'] })), side: 'short' },
     ]);
     expect(r.ok).toBe(false);
-    expect(r.blocking.join()).toMatch(/^short: no stop/);
+    expect(r.blocking.join()).toMatch(/^short: leg 1 has no stop/);
+  });
+
+  test('two shapes are both reported when the sides differ', () => {
+    const r = catalog.readiness([
+      { ...strat(proto({ shape: '1 SL / 1 TP' })), side: 'long' },
+      { ...strat(proto({ shape: '2 SL / 2 TP' })), side: 'short' },
+    ]);
+    expect(r.shape).toBe('1 SL / 1 TP · 2 SL / 2 TP');
   });
 
   test('it reaches the setup list', async () => {
-    qp.strategies.mockResolvedValue([{ ...T2_LONG, entry: { rules: [{ left: 'a' }] } }]);
+    qp.strategies.mockResolvedValue([{ ...T2_LONG, entry: { rules: [{ left: 'a' }] },
+      exit_protocol: proto({ shape: '1 SL / 1 TP + runner (50%)' }) }]);
     const s = (await catalog.list())[0];
-    expect(s.readiness.ok).toBe(false);          // the fixture has no stop
-    expect(s.readiness.blocking.join()).toMatch(/no stop/);
+    expect(s.readiness.ok).toBe(true);
+    expect(s.readiness.shape).toBe('1 SL / 1 TP + runner (50%)');
   });
 });
 

@@ -74,74 +74,47 @@ function baseName(name) {
 /**
  * Can this strategy produce a clean alert and a clean order?
  *
- * A strategy is developed and tested in qp; it becomes usable here the moment
- * it has a clear entry and a clear exit. "Clear" is not a matter of taste —
- * each of these is a specific thing that goes wrong, and most of them go wrong
- * SILENTLY:
+ * NOTHING IS INFERRED HERE ANY MORE. qp reports an exit protocol on every
+ * strategy — how many parts the position is cut into, where each part's stop
+ * and target are, what is left for a human — and this reads it. That is the
+ * point of the protocol: the exit is decided once, next to the engine that
+ * executes it, rather than guessed separately by everything downstream. A guess
+ * that is right for some strategies and wrong for others does not fail; it
+ * places a real order of the wrong size with the wrong stop.
  *
- *   no stop        the ranking metric is the distance from entry to stop, so a
- *                  signal without one cannot be ranked OR sized. It is dropped
- *                  without a word, and the setup looks like it simply never
- *                  triggers.
- *
- *   trailing stop  a stop that follows an indicator is wherever that line sits
- *   on a line      on the bar. No broker-side trail can follow it, so what goes
- *                  out is a frozen level — a different trade from the tested one
- *                  unless someone manages it by hand.
- *
- *   target on      the same problem at the other end: it cannot rest at a
- *   a line         broker, so that fraction has no target at all.
- *
- *   a runner       deliberate and fine, but it relies on the end-of-session
- *                  close to ever come out. Worth saying once, here, rather than
- *                  being discovered at 15:51.
- *
- * Reported per setup so the answer is visible BEFORE the morning it matters.
+ * What is added on this side is only what qp cannot know: whether the strategy
+ * has entry rules at all, and which SIDE a fault belongs to when a long and a
+ * short are one setup.
  */
 function readiness(strategies) {
   const blocking = [];
   const warnings = [];
+  const shapes = [];
 
   for (const s of strategies) {
-    const risk = s.risk || {};
-    const sl = risk.sl || null;
     const label = strategies.length > 1 ? `${s.side || s.name}: ` : '';
+    const p = s.exit_protocol;
 
-    const entryRules = ((s.entry || {}).rules || []).length;
-    if (!entryRules) blocking.push(`${label}no entry rules`);
-
-    if (!sl || (sl.type === undefined && sl.anchor === undefined)) {
-      blocking.push(`${label}no stop — signals cannot be ranked or sized, `
-        + 'and are dropped without a word');
-    } else if (sl.type === 'prim' && !sl.freeze) {
-      warnings.push(`${label}the stop follows an indicator — it will be sent as a `
-        + 'fixed level and will not trail');
-    }
-
-    const targets = risk.targets || [];
-    const anchored = targets.filter(t => t && t.tp && t.tp.type === 'prim').length;
-    if (anchored) {
-      warnings.push(`${label}${anchored} target(s) follow an indicator and cannot `
-        + 'rest at the broker');
-    }
-    if (risk.breakeven_after_target) {
-      warnings.push(`${label}moves to breakeven after a leg — the broker will not`);
+    if (!p || !p.version) {
+      // qp not reporting one at all means the platform is older than the
+      // protocol. Blocking, because the alternative is this side inferring the
+      // exit again — which is what the protocol exists to stop.
+      blocking.push(`${label}the chart tool did not report an exit protocol — `
+        + 'restart it, or the exit would have to be guessed');
+      continue;
     }
 
-    const booked = targets.reduce((n, t) => n + (Number(t && t.fraction) || 0), 0);
-    if (targets.length && booked < 0.999) {
-      warnings.push(`${label}${Math.round((1 - booked) * 100)}% of the position has `
-        + 'no target — it rides the stop until the end-of-session close');
-    }
-    if (!targets.length) {
-      // Not a fault: the screener supplies a target at target_r when the
-      // strategy names none. Said so it is never a surprise.
-      warnings.push(`${label}no targets in the strategy — the screener uses 2R`);
-    }
+    if (!((s.entry || {}).rules || []).length) blocking.push(`${label}no entry rules`);
+    for (const e of p.errors || []) blocking.push(`${label}${e}`);
+    for (const w of p.warnings || []) warnings.push(`${label}${w}`);
+    if (p.shape) shapes.push(p.shape);
   }
 
   return {
     ok: blocking.length === 0,
+    // The shape, for a person: "1 SL / 1 TP", "2 SL / 2 TP + runner (25%)".
+    // One string when the long and short agree, which they normally do.
+    shape: [...new Set(shapes)].join(' · ') || null,
     blocking: [...new Set(blocking)],
     warnings: [...new Set(warnings)],
   };

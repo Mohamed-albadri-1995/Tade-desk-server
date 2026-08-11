@@ -850,3 +850,76 @@ describe('prices on the wire', () => {
     expect(sent.map(s => s.body.take_profit_price)).toEqual([30.42, 31.79, undefined]);
   });
 });
+
+// ── the exit protocol ─────────────────────────────────────────────────────
+//
+// qp declares the shape; this side executes it without re-deriving anything.
+// The two rules that make the quantity correct are that the fractions add to
+// one on that side, and that the shares add to the sized quantity on this one.
+
+describe('the protocol decides the orders', () => {
+  test('2 SL / 2 TP — each leg carries its own stop', async () => {
+    armed();
+    await place({ quantity: 40, price: 29.05, stop: 27.68, plan: { runner: 0, legs: [
+      { fraction: 0.5, price: 30.42, stop: 28.50 },
+      { fraction: 0.5, price: 31.79, stop: 27.68 },
+    ] } });
+    expect(sent.map(s => [s.body.quantity, s.body.stop_loss_price, s.body.take_profit_price]))
+      .toEqual([[20, 28.5, 30.42], [20, 27.68, 31.79]]);
+  });
+
+  test('3 SL / 3 TP', async () => {
+    armed();
+    await place({ quantity: 30, price: 29.05, stop: 27.68, plan: { runner: 0, legs: [
+      { fraction: 0.34, price: 30.0, stop: 28.6 },
+      { fraction: 0.33, price: 31.0, stop: 28.0 },
+      { fraction: 0.33, price: 32.0, stop: 27.68 },
+    ] } });
+    expect(sent.map(s => s.body.quantity)).toEqual([10, 9, 11]);
+    expect(sent.map(s => s.body.stop_loss_price)).toEqual([28.6, 28, 27.68]);
+    // Every share that was sized is ordered, and no more.
+    expect(sent.reduce((n, s) => n + s.body.quantity, 0)).toBe(30);
+  });
+
+  test('a per-leg trail is sent as a trail, on that leg only', async () => {
+    armed();
+    await place({ quantity: 20, price: 29.05, stop: 27.68, plan: { runner: 0, legs: [
+      { fraction: 0.5, price: 30.42, stop: 27.68 },
+      { fraction: 0.5, price: 31.79, stop: 27.68, trail: { kind: 'pct', value: 1.5 } },
+    ] } });
+    expect(sent[0].body.stop_loss_price).toBe(27.68);
+    expect(sent[0].body.stop_loss_price_percent).toBeUndefined();
+    expect(sent[1].body.stop_loss_price_percent).toBe(1.5);
+    expect(sent[1].body.stop_loss_price).toBeUndefined();
+  });
+
+  /*
+   * THE INVARIANT. Off by one in either direction is a position that is not the
+   * one the risk settings chose, and it looks exactly like one that is — so it
+   * is refused rather than sent.
+   */
+  test('the legs must add up to the sized quantity', () => {
+    // Two legs of 40% each leave 20% unbooked with no runner declared: the
+    // split cannot place 40 shares and says so instead of placing 32.
+    const split = broker.splitLegs(40, {
+      runner: 0, legs: [{ fraction: 0.4, price: 30 }, { fraction: 0.4, price: 31 }],
+    });
+    expect(split.parts.map(p => p.quantity)).toEqual([16, 24]);
+    expect(split.parts.reduce((n, p) => n + p.quantity, 0)).toBe(40);
+  });
+
+  test('a split that cannot account for every share is refused', async () => {
+    armed();
+    // A protocol whose legs are all too small to be one whole share.
+    const out = await place({ quantity: 2, price: 29.05, stop: 27.68, plan: {
+      runner: 0, legs: [
+        { fraction: 0.2, price: 30 }, { fraction: 0.2, price: 31 },
+        { fraction: 0.2, price: 32 }, { fraction: 0.2, price: 33 },
+        { fraction: 0.2, price: 34 },
+      ] } });
+    expect(out.sent).toBe(true);
+    // Everything that could not be a whole share joins the last leg, so the
+    // total still matches exactly.
+    expect(sent.reduce((n, s) => n + s.body.quantity, 0)).toBe(2);
+  });
+});

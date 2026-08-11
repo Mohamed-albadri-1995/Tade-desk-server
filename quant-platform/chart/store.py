@@ -78,6 +78,17 @@ def _row_to_strategy(row: sqlite3.Row) -> dict:
     # rather than at each call site means a reader never has to distinguish
     # "old setup" from "assigned to nothing" — they are the same thing.
     obj.setdefault('tools', [])
+    # The exit contract, on EVERY strategy, declared or derived. Reported here
+    # rather than left to each reader: the screener used to infer it, and an
+    # inference that is right for some strategies and wrong for others does not
+    # fail — it places a real order of the wrong size with the wrong stop.
+    try:
+        from chart import exit_protocol as _xp
+        obj['exit_protocol'] = _xp.normalise(obj)
+    except Exception as e:                       # never break a read over it
+        obj['exit_protocol'] = {'version': 0, 'ok': False,
+                                'errors': [f'could not read the exit: {e}'],
+                                'warnings': [], 'legs': [], 'shape': 'unknown'}
     obj['id'] = row['id']
     obj['name'] = row['name']
     obj['updated_at'] = row['updated_at']
@@ -153,7 +164,10 @@ def save_strategy(obj: dict) -> dict:
     payload['tools'] = normalise_tools(obj.get('tools'))
     # strip store metadata so a load→edit→save cycle doesn't embed stale
     # copies of it inside the strategy document itself
-    for meta in ('id', 'updated_at', 'created_at'):
+    # `exit_protocol` is DERIVED on every read. Storing it would freeze a copy
+    # that stops matching the risk block the moment either is edited — the
+    # two-copies problem this whole design exists to avoid.
+    for meta in ('id', 'updated_at', 'created_at', 'exit_protocol'):
         payload.pop(meta, None)
     data = json.dumps(payload)
     now = time.time()

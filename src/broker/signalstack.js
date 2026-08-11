@@ -369,7 +369,12 @@ function splitLegs(quantity, plan) {
     const qty = Math.floor(total * Number(leg.fraction || 0));
     if (qty < 1) continue;              // a leg too small to be a whole share
     parts.push({ quantity: qty, target: Number(leg.price),
-                 rMultiple: leg.r_multiple, fraction: leg.fraction });
+                 rMultiple: leg.r_multiple, fraction: leg.fraction,
+                 // PER LEG. The protocol lets two parts have their stops in
+                 // different places — "2 SL / 2 TP" — so the stop travels with
+                 // the leg rather than being assumed shared.
+                 stop: leg.stop != null ? Number(leg.stop) : null,
+                 trail: leg.trail || null });
     used += qty;
   }
 
@@ -383,6 +388,20 @@ function splitLegs(quantity, plan) {
       // dropped, which would quietly place fewer shares than were sized.
       parts[parts.length - 1].quantity += left;
     }
+  }
+  /*
+   * THE INVARIANT. Every share that was sized is ordered, and no more.
+   *
+   * This is the whole point of the protocol: the fractions add to one on the
+   * qp side, and the shares add to the sized quantity here. Off by one in
+   * either direction is a position that is not the one the risk settings
+   * chose, and it looks exactly like one that is.
+   */
+  const placed = parts.reduce((n, p) => n + p.quantity, 0);
+  if (placed !== total) {
+    return { parts: [], unplaceable,
+      error: `split ${total} shares into ${placed} — refusing to send a `
+        + 'position that is not the one that was sized' };
   }
   return { parts, unplaceable };
 }
@@ -653,12 +672,25 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
    * has to become.
    */
   const split = splitLegs(fit.quantity, plan);
+  if (split.error) return { blocked: 'split', reason: split.error };
+
   const orders = (plan && plan.legs && plan.legs.length > 1)
     ? split.parts.map(part => {
       const b = { ...body, quantity: part.quantity };
       if (part.target && cfg.bracket) b.take_profit_price = tick(part.target);
       // The runner has no target and must not inherit the previous leg's.
       else delete b.take_profit_price;
+      // This leg's own stop, when the protocol gave it one.
+      if (cfg.bracket && Number(part.stop) > 0) {
+        b.stop_loss_price = stopTick(part.stop, action);
+        delete b.stop_loss_price_percent;
+        delete b.stop_loss_price_distance;
+      }
+      if (cfg.bracket && part.trail && Number(part.trail.value) > 0) {
+        if (part.trail.kind === 'pct') b.stop_loss_price_percent = tick(part.trail.value);
+        else b.stop_loss_price_distance = tick(part.trail.value);
+        delete b.stop_loss_price;
+      }
       return b;
     })
     : [body];
