@@ -48,3 +48,28 @@ test('an unreadable file leaves everything on rather than everything off', () =>
   fs.writeFileSync(FILE, '{ not json');
   expect(prefs.isEnabled('T2-VWAP-EXT')).toBe(true);
 });
+
+/*
+ * A count without a metric is a trap, not a preference.
+ *
+ * It takes n of an unordered list — the first n in card order — and looks
+ * exactly like a working ranking. This is precisely the state T2 was left in
+ * the moment the assumed metric was removed: topN 2, rankMetric null.
+ */
+test('a top-N without a metric is refused where it is typed', () => {
+  expect(() => prefs.saveSettings('S', { topN: 2 }))
+    .toThrow(/rank by before setting a count/);
+  expect(() => prefs.saveSettings('S', { topN: 2, rankMetric: 'vwap_extension' }))
+    .not.toThrow();
+});
+
+test('a metric alone is fine — that is "rank everything, take it all"', () => {
+  expect(() => prefs.saveSettings('S2', { rankMetric: 'tight_stop' })).not.toThrow();
+});
+
+/* Clearing the metric while a count is still set must not slip through. */
+test('removing the metric from a setup that has a count is refused', () => {
+  prefs.saveSettings('S3', { topN: 3, rankMetric: 'rvol' });
+  expect(() => prefs.saveSettings('S3', { rankMetric: null }))
+    .toThrow(/rank by before setting a count/);
+});

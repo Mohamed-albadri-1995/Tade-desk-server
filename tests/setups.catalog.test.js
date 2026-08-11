@@ -143,6 +143,7 @@ test('screener-side preferences are merged onto the qp definition', async () => 
   prefs.setEnabled(id, false);
   prefs.saveSettings(id, {
     topN: 3,
+    rankMetric: 'vwap_extension',
     universe: { rules: [{ left: 'score', operator: 'egreater', right: 70 }] },
   });
 
@@ -191,13 +192,28 @@ describe('ranking is never assumed', () => {
     expect(s.describe.join(' ')).toMatch(/Ranked by tight_stop \(asc\), top 2/);
   });
 
-  /* A top-N without a metric is "take 2 of an unordered list" — which two
-   * being an accident of evaluation order. */
-  test('a cut without a metric still names no metric', async () => {
+  /*
+   * A count without a metric is refused where it is typed — but a file written
+   * BEFORE that rule existed can still hold one, and T2 does: the moment the
+   * assumed metric was removed it was left with topN 2 and no metric. Reading
+   * must stay tolerant and report it honestly; qp then ignores the cut and says
+   * so, rather than taking the first two in card order.
+   */
+  test('a cut without a metric is refused when saved', async () => {
     qp.strategies.mockResolvedValue([T2_LONG]);
     const id = (await catalog.list())[0].id;
-    require('../src/setups/prefs').saveSettings(id, { topN: 2 });
-    expect((await catalog.get(id)).rank.metric).toBeNull();
+    expect(() => require('../src/setups/prefs').saveSettings(id, { topN: 2 }))
+      .toThrow(/rank by before setting a count/);
+  });
+
+  test('a file already in that state is reported, not repaired or hidden', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const id = (await catalog.list())[0].id;
+    // Written directly, as a pre-rule file would be.
+    fs.writeFileSync(FILE, JSON.stringify({ setups: { [id]: { topN: 2 } } }));
+    const s = await catalog.get(id);
+    expect(s.rank.metric).toBeNull();
+    expect(s.rank.topN).toBe(2);
   });
 });
 

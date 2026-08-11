@@ -896,7 +896,7 @@ function editSetup(i) {
             `<option value="${m}"${s.rankMetric === m ? ' selected' : ''}>${m}</option>`).join('')}
         </select>
       </label>
-      <label class="note">take top
+      <label class="note">take top <span class="note">needs a metric</span>
         <input id="st-top-${i}" type="number" min="1" max="20" placeholder="all"
                value="${esc(s.topN || '')}" style="width:60px">
       </label>

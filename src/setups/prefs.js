@@ -119,6 +119,15 @@ function saveSettings(setupId, patch) {
   // Only ever true by being said so. A truthy string or a stray 1 must not be
   // what turns a setup into one that spends money.
   if ('autoTrade' in patch) next.autoTrade = patch.autoTrade === true;
+  /*
+   * A count without a metric is not a preference, it is a trap: it takes n of
+   * an unordered list and looks exactly like a ranking. Refused where it is
+   * typed, so it never reaches a morning.
+   */
+  if (next.topN && !next.rankMetric) {
+    throw new Error('choose what to rank by before setting a count — '
+      + '"top 2" of an unranked list is the first 2 in card order, not the best 2');
+  }
   if (next.universe) {
     const errors = require('./universe').validate(next.universe);
     if (errors.length) throw new Error(errors.join('; '));

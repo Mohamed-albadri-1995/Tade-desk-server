@@ -451,6 +451,21 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
    * otherwise, and that difference is the whole of backtest #231.
    */
   const rank = decided.rank || {};
+  /*
+   * A cut that was asked for and could not be honoured. "Take the top 2" with
+   * no metric named is two of an unordered list — indistinguishable from a
+   * working ranking, which is why it is dropped rather than obeyed, and why
+   * dropping it has to be said.
+   */
+  if (rank.ignored_top_n) {
+    fires.push({
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
+      date: day, at: Date.now(), kind: 'setup', level: 'warn',
+      detail: `"Take top ${rank.ignored_top_n}" was IGNORED — no ranking metric is `
+        + 'set, so there is no top. Every signal is here. Pick a metric in '
+        + 'edit filter, or clear the count.',
+    });
+  }
   if (rank.metric) {
     fires.push({
       ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,

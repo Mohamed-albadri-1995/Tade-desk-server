@@ -286,6 +286,19 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
     else:
         score_of, d = None, None
 
+    # A CUT WITHOUT A METRIC IS NOT A CUT.
+    #
+    # top_n with no metric took the first n candidates in whatever order the
+    # card list happened to be in — "the top 2" chosen by nothing, and
+    # indistinguishable from a working ranking. It is IGNORED rather than
+    # honoured, and said out loud: every signal is reported, and the caller is
+    # told the cut was dropped. Silently taking two of an unordered list is the
+    # failure; refusing to answer at all would be a second one.
+    ignored_top_n = None
+    if top_n and not metric:
+        ignored_top_n = top_n
+        top_n = 0
+
     for c in candidates:
         if score_of is None:
             c['metric'] = None
@@ -346,7 +359,8 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
         # What the ranking was, in the answer. A run that took the top 2 is not
         # interpretable without knowing top 2 of what, by which number.
         'rank': ({'metric': metric, 'direction': d, 'top_n': top_n}
-                 if metric else {'metric': None, 'top_n': top_n or 0}),
+                 if metric else {'metric': None, 'top_n': 0,
+                                 'ignored_top_n': ignored_top_n}),
         'dropped_unscorable': [
             {'symbol': c.get('symbol'), 'strategy': c.get('strategy')}
             for c in unscorable],

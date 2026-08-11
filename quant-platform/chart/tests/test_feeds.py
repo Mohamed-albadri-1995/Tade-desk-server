@@ -539,3 +539,28 @@ def test_the_three_real_seeds_that_exit_on_a_rule_are_flagged():
             if not xp.normalise(s)['order_ok']:
                 flagged.append(s['name'])
     assert set(flagged) == {'Fashionably Late Scalp', 'PM Breakout (2m)', 'PML breakout'}
+
+
+def test_a_cut_without_a_metric_is_ignored_and_reported(monkeypatch):
+    """"Take the top 2" with no metric took the first two in card order.
+
+    That is a cut chosen by nothing, and it is indistinguishable from a working
+    ranking — which is exactly how T2 was configured after the metric stopped
+    being assumed. It is dropped rather than obeyed, and the drop is reported.
+    """
+    from chart import decide as dec
+    monkeypatch.setattr(dec, 'evaluate_symbol', _one())
+    out = dec.decide([{'name': 'X'}], ['AAA', 'BBB', 'CCC', 'DDD'], '2026-08-10',
+                     top_n=2)
+    assert [p['symbol'] for p in out['picks']] == ['AAA', 'BBB', 'CCC', 'DDD']
+    assert out['rank']['ignored_top_n'] == 2
+    assert out['rank']['top_n'] == 0
+
+
+def test_a_cut_WITH_a_metric_is_honoured(monkeypatch):
+    from chart import decide as dec
+    monkeypatch.setattr(dec, 'evaluate_symbol', _one())
+    out = dec.decide([{'name': 'X'}], ['AAA', 'BBB'], '2026-08-10',
+                     metric='vwap_extension', top_n=1)
+    assert len(out['picks']) == 1
+    assert out['rank'].get('ignored_top_n') is None
