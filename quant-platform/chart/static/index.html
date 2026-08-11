@@ -247,7 +247,14 @@
              the session VWAP); for anything else it silently means "trade the
              widest stop" and reshapes the strategy. Backtest #231 lost 103 of
              117 signals of the 09:35 setup to it. Now it must be chosen. -->
-        <select id="btRankMetric" style="flex:1" title="How the day's signals are scored against each other. Only used when top N is set.">
+        <select id="btRankMetric" style="flex:1" title="How the day's signals are scored against each other. 'nothing' takes every signal and ignores the count beside it.">
+          <!-- FIRST, and the honest default. A run with no ranking is the only
+               one that can be used to ASK which ranking is right — a ranked
+               run's trades are already that metric's picks, so comparing
+               orderings on them compares orderings of an ordering. The count
+               beside this already produced an unranked run when left blank,
+               but nothing said so, and it is not a thing to have to know. -->
+          <option value="">rank by: nothing — take every signal</option>
           <option value="vwap_extension">rank by: VWAP extension (T2)</option>
           <option value="tight_stop">rank by: tightest stop</option>
           <option value="reg_score">rank by: register score</option>
@@ -1294,7 +1301,11 @@ async function btRun(){
     rank_per_day:(function(){ const n=parseInt(document.getElementById('btTopN').value,10);
       // the metric travels WITH the request — the server has no default and
       // rejects a rank block without one, on purpose
-      const m=document.getElementById('btRankMetric').value||'vwap_extension';
+      const m=document.getElementById('btRankMetric').value;
+      // NO METRIC MEANS NO RANKING, whatever the count says. "Top 2" of an
+      // unordered list is the first two in evaluation order, which looks
+      // exactly like a ranking and is not one.
+      if(!m) return null;
       return (Number.isFinite(n)&&n>0)?{metric:m,top_n:n}:null; })(),
     account_equity:parseFloat(document.getElementById('btEquity').value)||0,
     risk_pct:parseFloat(document.getElementById('btRiskPct').value)||0,
