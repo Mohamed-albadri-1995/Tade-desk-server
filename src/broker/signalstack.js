@@ -118,6 +118,21 @@ function settings() {
      * both numbers to place by hand.
      */
     bracket: s.bracket !== false,
+    /*
+     * FLATTEN EVERYTHING AT THIS MINUTE, ET.
+     *
+     * A strategy can leave part of a position with no exit rule the broker can
+     * hold. "Take half at 2R and let the rest run" sends a runner with a stop
+     * and no target: the backtest closes it at the end of the session, and the
+     * broker does not — it sits there overnight, in an account that is not
+     * allowed to hold overnight.
+     *
+     * So the box closes what it opened. 15:50 by default, ten minutes before
+     * the bell, which is the same cutoff the backtests use.
+     */
+    flatten: s.flatten !== false,
+    flattenAt: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s.flattenAt || ''))
+      ? String(s.flattenAt) : '15:50',
     // Reduce and retry when the BROKER says the order overbuys the account.
     // Bounded, and only for that answer — see placeOrder.
     retryOnBuyingPower: s.retryOnBuyingPower !== false,
@@ -164,6 +179,14 @@ function save(patch = {}) {
   }
 
   if ('allowShort' in patch) next.allowShort = patch.allowShort !== false;
+  if ('flatten' in patch) next.flatten = patch.flatten !== false;
+  if ('flattenAt' in patch) {
+    const v = String(patch.flattenAt || '').trim();
+    if (!v) delete next.flattenAt;
+    else if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) {
+      throw new Error('flattenAt must look like 15:50');
+    } else next.flattenAt = v;
+  }
   if ('bracket' in patch) next.bracket = patch.bracket !== false;
   if ('retryOnBuyingPower' in patch) {
     next.retryOnBuyingPower = patch.retryOnBuyingPower !== false;
@@ -851,6 +874,69 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
   return out;
 }
 
+// ── closing what was opened ────────────────────────────────────────────────
+
+/**
+ * Which symbols this box has an open position in, by its own reckoning.
+ *
+ * From the ledger: everything it sent today, minus everything it has already
+ * closed today. It cannot see a position closed by its own stop or target, or
+ * one closed by hand — so this OVER-reports, deliberately. Sending `close` for
+ * a symbol that is already flat is a no-op at the broker; missing one that is
+ * still open is an overnight position in an account that may not hold one.
+ */
+function openSymbols(date) {
+  const rows = orders(date);
+  const opened = [];
+  const closed = new Set();
+  for (const o of rows) {
+    if (o.kind === 'callback') continue;
+    if (o.kind === 'flatten') { if (o.sent) closed.add(o.symbol); continue; }
+    if (o.sent && o.symbol && !opened.includes(o.symbol)) opened.push(o.symbol);
+  }
+  return opened.filter(sym => !closed.has(sym));
+}
+
+/**
+ * Close a whole position. `close` takes no quantity — see the docs.
+ *
+ * The whole symbol, not a leg: at the cutoff what matters is being flat, and
+ * closing leg by leg would leave a resting target able to fill against a
+ * position that no longer exists.
+ */
+async function closePosition(symbol, date, cfg = settings()) {
+  const base = { at: Date.now(), date, symbol, kind: 'flatten', action: 'close',
+                 source: 'end of session' };
+  if (!cfg.armed || !cfg.webhookUrl) {
+    const out = { ...base, sent: false, skipped: 'not armed' };
+    record(out); return out;
+  }
+  const body = { symbol: String(symbol).toUpperCase(), action: 'close' };
+  let res;
+  try {
+    res = await post(cfg.webhookUrl, body);
+  } catch (err) {
+    // Not retried, for the same reason an entry is not: it may have arrived.
+    const out = { ...base, sent: false,
+      error: `could not reach SignalStack: ${err.message} — CHECK THE BROKER, `
+        + 'this position may still be open' };
+    record(out); return out;
+  }
+  const out = { ...base, sent: res.ok, status: res.status, httpStatus: res.httpStatus,
+                orderId: res.orderId, message: res.message,
+                error: res.ok ? null : `${res.status || res.httpStatus}: ${res.message || 'refused'}` };
+  record(out);
+  return out;
+}
+
+/** Close everything opened today. Returns one result per symbol. */
+async function flattenAll(date, cfg = settings()) {
+  const symbols = openSymbols(date);
+  const out = [];
+  for (const sym of symbols) out.push(await closePosition(sym, date, cfg));
+  return out;
+}
+
 /**
  * Send a one-share test, to the test hook when there is one.
  *
@@ -1016,6 +1102,7 @@ module.exports = {
   orders, committed, remaining, tradesToday, fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,
+  openSymbols, closePosition, flattenAll,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled,
 };

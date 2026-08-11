@@ -301,6 +301,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <label>Max trades / day
     <input id="bk-maxtrades" type="number" min="1" step="1" placeholder="e.g. 4">
   </label>
+  <!-- A runner has a stop and no target. The backtest closes it at the end of
+       the session; a broker does not, and the account cannot hold overnight. -->
+  <label>Close all at
+    <input id="bk-flatten" placeholder="15:50" style="width:80px">
+  </label>
   <label>Shorts
     <select id="bk-short"><option value="1">allowed</option><option value="0">no</option></select>
   </label>
@@ -1206,6 +1211,7 @@ async function loadBroker() {
     if (b.buyingPower) document.getElementById('bk-power').value = b.buyingPower;
     if (b.maxOrderValue) document.getElementById('bk-max').value = b.maxOrderValue;
     if (b.maxTradesPerDay) document.getElementById('bk-maxtrades').value = b.maxTradesPerDay;
+    document.getElementById('bk-flatten').value = b.flatten ? (b.flattenAt || '') : '';
     document.getElementById('bk-short').value = b.allowShort ? '1' : '0';
     document.getElementById('bk-bracket').value = b.bracket ? '1' : '0';
 
@@ -1217,9 +1223,11 @@ async function loadBroker() {
     arm.className = 'btn' + (b.armed ? ' live' : '');
     const st = document.getElementById('broker-state');
     const used = (d.orders || []).filter(o => o.sent).length;
+    const open = (d.openSymbols || []);
     st.textContent = b.armed
       ? `armed · $${(d.remaining ?? 0).toFixed(0)} of $${b.buyingPower} left`
         + `${b.maxTradesPerDay ? ` · ${used}/${b.maxTradesPerDay} trades used` : ` · ${used} trades`}`
+        + `${open.length ? ` · open: ${open.join(', ')} (closing ${b.flattenAt})` : ''}`
       : (b.hasWebhook ? 'configured, not armed' : 'off');
     st.className = 'note' + (b.armed ? ' live' : '');
 
@@ -1280,6 +1288,10 @@ async function saveBroker(patch) {
     buyingPower: v('bk-power') || undefined,
     maxOrderValue: v('bk-max') || undefined,
     maxTradesPerDay: v('bk-maxtrades') || undefined,
+    // Blank means do not close anything — a real choice, and a dangerous one,
+    // so it is the empty box rather than a default.
+    flatten: !!v('bk-flatten'),
+    flattenAt: v('bk-flatten') || undefined,
     allowShort: document.getElementById('bk-short').value === '1',
     bracket: document.getElementById('bk-bracket').value === '1',
     enabled: true,
