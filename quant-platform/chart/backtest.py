@@ -501,7 +501,28 @@ def _account_block(closed: list, spec: dict) -> dict | None:
             unsized += 1
             t.setdefault('ctx', {})['acct_note'] = 'no stop — not sized'
             continue
-        shares = (equity * risk_pct / 100.0) / per_share_risk
+        # WHOLE SHARES, because that is what the broker fills. The screener
+        # floors the count before it sends an order (src/setups/risk.js) and
+        # the bridge REFUSES a fractional quantity outright, so a fraction here
+        # is a position the live system would never take. Floored, never
+        # rounded: rounding up would risk more than the trade was sized for.
+        # Only ever makes the simulation smaller, never larger.
+        #
+        # Floored AFTER EACH CAP rather than once at the end, because "under
+        # one share" has three different causes and the report has to name the
+        # right one. A single check at the bottom can only guess: backtest #238
+        # told 67 trades "one share risks $0.19, more than the 0.5% of equity
+        # this trade may lose" — arithmetic nonsense ($0.19 against a $499
+        # budget) for trades whose real problem was that the account was
+        # already full. A wrong diagnosis sends you to change the wrong knob.
+        shares = math.floor((equity * risk_pct / 100.0) / per_share_risk)
+        if shares < 1:
+            unsized += 1
+            t.setdefault('ctx', {})['acct_note'] = (
+                f'one share risks ${per_share_risk:,.2f}, more than the '
+                f'{risk_pct}% of equity ({equity * risk_pct / 100.0:,.0f}) '
+                f'this trade may lose')
+            continue
         # PER-TRADE CAP, applied BEFORE the portfolio one. Order matters: cap
         # this trade first, then measure what is left for the rest of the day.
         # Reversed, the first name would still swallow the balance and the cap
@@ -511,40 +532,32 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         # configured account size. Same rule; the sim just knows what the
         # balance actually is at that moment.
         if max_pos_pct:
-            cap_sh = (equity * max_pos_pct / 100.0) / entry
+            cap_sh = math.floor((equity * max_pos_pct / 100.0) / entry)
             if shares > cap_sh:
                 shares = cap_sh
                 pos_capped += 1
+            if shares < 1:
+                unsized += 1
+                t.setdefault('ctx', {})['acct_note'] = (
+                    f'one share costs ${entry:,.2f} — more than the '
+                    f'{max_pos_pct}% of equity one position may hold')
+                continue
         # buying power LEFT after the positions already open (portfolio-wide)
         room = equity * lev - open_notional
-        if room <= 0:
+        max_sh = math.floor(room / entry) if room > 0 else 0
+        if max_sh < 1:
+            # Not "no stop" and not a risk-budget problem: the balance is
+            # committed to positions still open. This is the count that says
+            # the day ran out of money, and it is the one to watch.
             no_capital += 1
-            t.setdefault('ctx', {})['acct_note'] = 'no buying power left — skipped'
+            t.setdefault('ctx', {})['acct_note'] = (
+                f'no buying power left — ${max(0.0, room):,.0f} free will not '
+                f'buy one share at ${entry:,.2f}')
             continue
-        max_sh = room / entry
         if shares > max_sh:
             shares = max_sh
             capped += 1
-        # WHOLE SHARES, because that is what the broker fills. The screener
-        # floors the count before it sends an order (src/setups/risk.js) and
-        # the bridge REFUSES a fractional quantity outright, so a fraction here
-        # is a position the live system would never take. Floored, never
-        # rounded: rounding up would risk more than the trade was sized for.
-        #
-        # Only ever makes the simulation smaller, never larger.
-        shares = math.floor(shares)
-        if shares < 1:
-            unsized += 1
-            # WHY it came out under one share — the two causes need different
-            # answers. Too small a risk budget for the stop is a settings
-            # problem; a cap biting that hard means the name is too expensive
-            # for the slice this account gives one position.
-            t.setdefault('ctx', {})['acct_note'] = (
-                f'one share costs ${entry:,.2f} — more than the position cap '
-                f'allows' if max_pos_pct and entry > equity * max_pos_pct / 100.0
-                else f'one share risks ${per_share_risk:.2f}, more than the '
-                     f'{risk_pct}% of equity this trade may lose')
-            continue
+        shares = float(shares)
         # gross P&L over every fill (legs + runner), fees per ORDER
         gross = 0.0
         fee = order_fee(shares)                  # the entry order

@@ -67,7 +67,30 @@ def test_a_share_too_expensive_for_the_cap_says_so():
     t = trade(entry=1_500.0, stop=1_499.0, exit_px=1_500.0)
     out = _account_block([t], spec(max_position_pct=1))     # 1% = $1,000
     assert out['trades_sized'] == 0
-    assert 'more than the position cap allows' in t['ctx']['acct_note']
+    assert 'one position may hold' in t['ctx']['acct_note']
+
+
+def test_a_full_account_says_no_buying_power_not_no_risk_budget():
+    """The three causes of "under one share" must not be confused.
+
+    Backtest #238 told 67 trades "one share risks $0.19, more than the 0.5% of
+    equity this trade may lose" — arithmetic nonsense against a $499 budget.
+    Their real problem was that earlier positions had committed the balance.
+    A wrong diagnosis sends you to change the wrong setting, so each cause is
+    pinned to its own counter and its own sentence.
+    """
+    # $500 risk / $0.50 stop = 1,000 shares x $100 = the whole $100k balance
+    big = trade(entry=100.0, stop=99.50, exit_px=100.0)
+    late = trade(entry=100.0, stop=99.90, exit_px=100.0)     # arrives after it
+    late['entry_ts'] = 2                                     # still open at t=2
+    out = _account_block([big, late], spec(max_position_pct=100))
+
+    assert out['trades_sized'] == 1
+    assert out['skipped_no_capital'] == 1     # NOT unsized_no_stop
+    assert out['unsized_no_stop'] == 0
+    note = late['ctx']['acct_note']
+    assert 'no buying power left' in note
+    assert 'risks' not in note                # never blames the risk budget
 
 
 def test_fees_and_pnl_use_the_floored_count():
