@@ -218,3 +218,105 @@ describe('permission to place orders', () => {
     expect((await catalog.list())[0].autoTrade).toBe(false);
   });
 });
+
+/*
+ * Whether a strategy can produce a clean alert and a clean order.
+ *
+ * The flow is: build and test in qp, then use it here — "as long as it has a
+ * clear entry and clear exits". That has to be CHECKED rather than assumed,
+ * because the failure is silent: a strategy with no stop cannot be ranked or
+ * sized, so its signals are dropped without a word and the setup looks exactly
+ * like one that simply never triggers.
+ */
+describe('readiness', () => {
+  /* What qp reports on a strategy. This side reads it — it does not re-derive
+   * it, which is the entire point of there being a protocol. */
+  const proto = (over = {}) => ({
+    version: 1, shape: '1 SL / 1 TP', ok: true, errors: [], warnings: [], ...over,
+  });
+  const strat = (exitProtocol, over = {}) => ({
+    name: 'S', side: 'long', tools: ['T2'], risk: { window_start: 1000 },
+    entry: { rules: [{ left: 'a' }] }, exit_protocol: exitProtocol, ...over,
+  });
+
+  test('a clean protocol is ready, and its shape is carried', () => {
+    const r = catalog.readiness([strat(proto())]);
+    expect(r.ok).toBe(true);
+    expect(r.shape).toBe('1 SL / 1 TP');
+    expect(r.blocking).toEqual([]);
+  });
+
+  test("qp's errors block, and its warnings warn", () => {
+    const r = catalog.readiness([strat(proto({
+      ok: false,
+      errors: ['leg 1 has no stop — it cannot be sized or ranked'],
+      warnings: ['50% is a runner with no target'],
+    }))]);
+    expect(r.ok).toBe(false);
+    expect(r.blocking.join()).toMatch(/no stop/);
+    expect(r.warnings.join()).toMatch(/runner/);
+  });
+
+  /* The one thing qp cannot see: whether there is anything to enter on. */
+  test('no entry rules is blocking, and that check is this side’s', () => {
+    const r = catalog.readiness([strat(proto(), { entry: { rules: [] } })]);
+    expect(r.blocking.join()).toMatch(/no entry rules/);
+  });
+
+  /*
+   * A platform too old to report a protocol must not be filled in for. Guessing
+   * the exit again is exactly what the protocol exists to stop, and a guess
+   * does not fail — it places a real order of the wrong size.
+   */
+  test('a missing protocol blocks rather than being inferred', () => {
+    const r = catalog.readiness([strat(undefined)]);
+    expect(r.ok).toBe(false);
+    expect(r.blocking.join()).toMatch(/did not report an exit protocol/);
+  });
+
+  test('a fault is attributed to the side it belongs to', () => {
+    const r = catalog.readiness([
+      { ...strat(proto()), side: 'long' },
+      { ...strat(proto({ ok: false, errors: ['leg 1 has no stop'] })), side: 'short' },
+    ]);
+    expect(r.ok).toBe(false);
+    expect(r.blocking.join()).toMatch(/^short: leg 1 has no stop/);
+  });
+
+  test('two shapes are both reported when the sides differ', () => {
+    const r = catalog.readiness([
+      { ...strat(proto({ shape: '1 SL / 1 TP' })), side: 'long' },
+      { ...strat(proto({ shape: '2 SL / 2 TP' })), side: 'short' },
+    ]);
+    expect(r.shape).toBe('1 SL / 1 TP · 2 SL / 2 TP');
+  });
+
+  test('it reaches the setup list', async () => {
+    qp.strategies.mockResolvedValue([{ ...T2_LONG, entry: { rules: [{ left: 'a' }] },
+      exit_protocol: proto({ shape: '1 SL / 1 TP + runner (50%)' }) }]);
+    const s = (await catalog.list())[0];
+    expect(s.readiness.ok).toBe(true);
+    expect(s.readiness.shape).toBe('1 SL / 1 TP + runner (50%)');
+  });
+});
+
+/*
+ * Setup-level risk, which is a different question from account-level risk.
+ * The account says what a trade may lose; this says what THIS strategy may,
+ * which is a smaller number while a strategy is young.
+ */
+describe('setup-level risk', () => {
+  test('absent means the account decides', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    expect((await catalog.list())[0].riskPerTrade).toBeNull();
+  });
+
+  test('set, it is carried on the setup', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const id = (await catalog.list())[0].id;
+    require('../src/setups/prefs').saveSettings(id, { riskPerTrade: 10, maxPositionPct: 30 });
+    const s = await catalog.get(id);
+    expect(s.riskPerTrade).toBe(10);
+    expect(s.maxPositionPct).toBe(30);
+  });
+});

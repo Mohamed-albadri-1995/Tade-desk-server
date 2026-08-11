@@ -281,9 +281,91 @@ from chart.decide import exit_plan                            # noqa: E402
 def test_a_strategy_with_no_targets_keeps_the_single_r_target():
     p = exit_plan({}, 'long', 100.0, 98.0, 2.0)
     assert len(p['legs']) == 1
-    assert p['legs'][0] == {'fraction': 1.0, 'r_multiple': 2.0,
-                            'price': 104.0, 'anchored': False}
+    leg = p['legs'][0]
+    assert leg['fraction'] == 1.0
+    assert leg['r_multiple'] == 2.0
+    assert leg['price'] == 104.0
+    assert leg['anchored'] is False
+    # Every leg now carries its OWN stop, so "2 SL / 2 TP" is a shape the
+    # protocol can express rather than one that silently comes out with one.
+    assert leg['stop'] == 98.0
     assert p['runner'] == 0.0
+    assert p['shape'] == '1 SL / 1 TP'
+
+
+def test_the_protocol_travels_with_the_plan():
+    # The screener must not have to re-derive any of this: what is wrong with a
+    # strategy has to arrive with the prices, not be worked out again.
+    p = exit_plan({'risk': {'sl': {'type': 'pct', 'value': 1, 'freeze': True},
+                            'targets': [{'fraction': 0.5, 'r_multiple': 2}]}},
+                  'long', 100.0, 98.0)
+    assert p['protocol'] == 1
+    assert p['shape'] == '1 SL / 1 TP + runner (50%)'
+    assert p['ok'] is True
+    assert p['runner'] == 0.5
+    assert p['runner_manage'] == 'eod'
+
+
+def test_a_declared_plan_can_give_each_leg_its_own_stop():
+    from chart import exit_protocol as xp
+    proto = xp.normalise({'risk': {'sl': {'type': 'pct', 'value': 1, 'freeze': True}},
+                          'exit_plan': {'legs': [
+                              {'fraction': 0.5, 'r_multiple': 1,
+                               'sl': {'type': 'points', 'value': 0.5, 'freeze': True}},
+                              {'fraction': 0.5, 'r_multiple': 2}],
+                              'runner': {'fraction': 0.0}}})
+    assert proto['ok'] is True
+    assert proto['shape'] == '2 SL / 2 TP'
+    # The second leg falls back to the strategy's stop, EXPLICITLY.
+    assert proto['legs'][1]['sl'] == {'type': 'pct', 'value': 1, 'freeze': True}
+
+
+def test_the_parts_must_add_up_to_exactly_one():
+    from chart import exit_protocol as xp
+    short = xp.normalise({'risk': {'sl': {'type': 'pct', 'freeze': True}},
+                          'exit_plan': {'legs': [{'fraction': 0.4, 'r_multiple': 1},
+                                                 {'fraction': 0.4, 'r_multiple': 2}],
+                                        'runner': {'fraction': 0.1}}})
+    assert short['ok'] is False
+    # 90% of a correct size looks exactly like a correct size, so this has to
+    # be an error rather than a rounding note.
+    assert 'never be ordered' in short['errors'][0]
+
+    over = xp.normalise({'risk': {'sl': {'type': 'pct', 'freeze': True}},
+                         'exit_plan': {'legs': [{'fraction': 0.8, 'r_multiple': 1},
+                                                {'fraction': 0.8, 'r_multiple': 2}],
+                                       'runner': {'fraction': 0.0}}})
+    assert over['ok'] is False
+    assert 'more than the position' in over['errors'][0]
+
+
+def test_a_manual_runner_is_declared_and_flagged():
+    from chart import exit_protocol as xp
+    p = xp.normalise({'risk': {'sl': {'type': 'pct', 'freeze': True}},
+                      'exit_plan': {'legs': [{'fraction': 0.7, 'r_multiple': 2}],
+                                    'runner': {'fraction': 0.3, 'manage': 'manual'}}})
+    assert p['ok'] is True
+    assert 'manual' in p['shape']
+    assert 'BY HAND' in ' '.join(p['warnings'])
+
+
+def test_a_leg_with_no_stop_is_an_error_not_a_warning():
+    from chart import exit_protocol as xp
+    p = xp.normalise({'risk': {'targets': [{'fraction': 1.0, 'r_multiple': 2}]}})
+    assert p['ok'] is False
+    assert 'no stop' in p['errors'][0]
+
+
+def test_the_declared_key_is_not_the_exit_RULES_group():
+    # qp has always used `exit` for {logic, rules}. Reading that as a protocol
+    # found no legs and quietly replaced a real two-part exit with a one-part
+    # default — it happened once, while this was being written.
+    from chart import exit_protocol as xp
+    p = xp.normalise({'exit': {'logic': 'AND', 'rules': []},
+                      'risk': {'sl': {'type': 'pct', 'freeze': True},
+                               'targets': [{'fraction': 0.5, 'r_multiple': 2}]}})
+    assert p['runner']['fraction'] == 0.5
+    assert p['derived'] is True
 
 
 def test_scale_out_legs_are_priced_from_their_r_multiples():

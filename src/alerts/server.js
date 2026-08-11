@@ -75,6 +75,10 @@ app.get('/api/setups', async (req, res) => {
         // armed, which is permission for the box rather than for a strategy.
         autoTrade: s.autoTrade === true,
         maxTradesPerDay: s.maxTradesPerDay || null,
+        riskPerTrade: s.riskPerTrade || null,
+        maxPositionPct: s.maxPositionPct || null,
+        // Whether it can produce a clean alert and a clean order at all.
+        readiness: s.readiness || null,
       })),
       fields: Object.entries(universe.FIELDS).map(([k, v]) => ({ value: k, label: v.label, kind: v.kind })),
       operators: universe.OPERATORS,
@@ -193,6 +197,9 @@ app.get('/api/broker', (req, res) => {
     broker: broker.publicSettings(),
     // This side's own tally, labelled as an estimate everywhere it appears.
     committedToday: broker.committed(day),
+    // What the box believes it still has open, so "will anything be left at the
+    // bell" is answerable before the bell.
+    openSymbols: broker.openSymbols(day),
     remaining: broker.remaining(day, cfg),
     // With whatever SignalStack later said became of each one, so "accepted,
     // never heard from again" is visible rather than read as "filled".
@@ -470,6 +477,9 @@ if (require.main === module) {
     // Started with the server, not on demand: the whole point is that it is
     // running when nobody has the page open.
     require('./watcher').start();
+    // Closing what was opened is not optional in an account that cannot hold
+    // overnight, so it starts with the server rather than on demand.
+    require('./flattener').start();
   });
 }
 

@@ -157,67 +157,72 @@ def exit_plan(strategy: dict, side: str, entry: float, stop: float,
     stop can follow it, so this reports None rather than a number that would
     look right and be wrong, and the caller has to say so out loud.
     """
-    risk_block = (strategy or {}).get('risk') or {}
+    from chart import exit_protocol as xp
+    proto = (strategy or {}).get('exit_protocol') or xp.normalise(strategy or {})
     per_share = abs(entry - stop)
     sign = 1.0 if str(side).lower() == 'long' else -1.0
 
+    def _trail_of(sl):
+        if not isinstance(sl, dict) or sl.get('freeze'):
+            return None
+        if sl.get('type') in ('pct', 'points') and sl.get('value') not in (None, ''):
+            return {'kind': sl['type'], 'value': float(sl['value'])}
+        return None
+
     legs = []
-    for t in (risk_block.get('targets') or []):
-        if not isinstance(t, dict):
-            continue
-        try:
-            fraction = float(t.get('fraction'))
-        except (TypeError, ValueError):
-            continue
-        if fraction <= 0:
-            continue
-        rm = t.get('r_multiple')
-        tp = t.get('tp') if isinstance(t.get('tp'), dict) else None
+    for leg in proto.get('legs') or []:
+        rm = leg.get('r_multiple')
+        tp = leg.get('tp') if isinstance(leg.get('tp'), dict) else None
+        kind = leg.get('tp_kind')
         price = None
         r_mult = None
-        if rm not in (None, '', 0):
+        if kind == 'r_multiple' and rm not in (None, ''):
             r_mult = float(rm)
             price = entry + sign * r_mult * per_share
-        elif tp and tp.get('type') == 'pct' and tp.get('value') not in (None, ''):
+        elif kind == 'default_r':
+            r_mult = float(target_r)
+            price = entry + sign * r_mult * per_share
+        elif kind == 'pct' and tp and tp.get('value') not in (None, ''):
             price = entry * (1.0 + sign * float(tp['value']) / 100.0)
             r_mult = (abs(price - entry) / per_share) if per_share else None
-        elif tp and tp.get('type') == 'points' and tp.get('value') not in (None, ''):
+        elif kind == 'points' and tp and tp.get('value') not in (None, ''):
             price = entry + sign * float(tp['value'])
             r_mult = (abs(price - entry) / per_share) if per_share else None
-        # A prim-anchored leg target trails per bar and has no price at the
-        # decision. Reported with price None so the caller can see the leg
-        # exists and refuse to place a resting order for it.
-        legs.append({'fraction': fraction,
-                     'r_multiple': None if r_mult is None else round(r_mult, 4),
-                     'price': None if price is None else round(price, 4),
-                     'anchored': bool(tp and tp.get('type') == 'prim')})
+        # An anchored target trails per bar and has no price at the decision.
+        # Carried with price None so the caller sees the leg exists and refuses
+        # to place a resting order for it.
+        sl = leg.get('sl')
+        legs.append({
+            'fraction': leg.get('fraction'),
+            'r_multiple': None if r_mult is None else round(r_mult, 4),
+            'price': None if price is None else round(price, 4),
+            'anchored': kind == 'anchored',
+            # PER LEG, because "2 SL / 2 TP" is a shape the protocol can now
+            # express: two parts whose stops are in different places.
+            'stop': round(float(stop), 4),
+            'stop_kind': leg.get('sl_kind'),
+            'trail': _trail_of(sl),
+        })
 
-    booked = sum(l['fraction'] for l in legs)
-    if not legs:
-        legs = [{'fraction': 1.0, 'r_multiple': target_r,
-                 'price': round(entry + sign * target_r * per_share, 4),
-                 'anchored': False}]
-        booked = 1.0
-
-    sl = risk_block.get('sl') or {}
-    frozen = bool(sl.get('freeze'))
-    kind = sl.get('type')
-    trail = None
-    if not frozen and kind == 'pct' and sl.get('value') not in (None, ''):
-        trail = {'kind': 'pct', 'value': float(sl['value'])}
-    elif not frozen and kind == 'points' and sl.get('value') not in (None, ''):
-        trail = {'kind': 'points', 'value': float(sl['value'])}
-
+    runner = proto.get('runner') or {}
+    first_sl = (proto.get('legs') or [{}])[0].get('sl')
     return {
+        'protocol': proto.get('version'),
+        'shape': proto.get('shape'),
+        'ok': proto.get('ok', True),
+        'errors': proto.get('errors') or [],
+        'warnings': proto.get('warnings') or [],
         'legs': legs,
-        'runner': round(max(0.0, 1.0 - booked), 6),
-        'stop_kind': 'fixed' if (frozen or not kind) else 'trailing',
-        'trail': trail,
+        'runner': float(runner.get('fraction') or 0.0),
+        'runner_manage': runner.get('manage') or 'eod',
+        'stop_kind': (proto.get('legs') or [{}])[0].get('sl_kind') or 'none',
+        'trail': _trail_of(first_sl),
         # True when the stop follows an indicator line. No broker-side trailing
         # stop can reproduce that, and pretending otherwise puts a stop
         # somewhere the backtest never had one.
-        'stop_anchored': (not frozen) and kind == 'prim',
-        'breakeven_after_leg': bool(risk_block.get('breakeven_after_target')),
+        'stop_anchored': any(l.get('sl_kind') == 'anchored' for l in (proto.get('legs') or [])),
+        'breakeven_after_leg': bool(((strategy or {}).get('risk') or {})
+                                    .get('breakeven_after_target')),
     }
 
 

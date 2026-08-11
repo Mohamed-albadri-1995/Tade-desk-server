@@ -72,6 +72,55 @@ function baseName(name) {
 }
 
 /**
+ * Can this strategy produce a clean alert and a clean order?
+ *
+ * NOTHING IS INFERRED HERE ANY MORE. qp reports an exit protocol on every
+ * strategy — how many parts the position is cut into, where each part's stop
+ * and target are, what is left for a human — and this reads it. That is the
+ * point of the protocol: the exit is decided once, next to the engine that
+ * executes it, rather than guessed separately by everything downstream. A guess
+ * that is right for some strategies and wrong for others does not fail; it
+ * places a real order of the wrong size with the wrong stop.
+ *
+ * What is added on this side is only what qp cannot know: whether the strategy
+ * has entry rules at all, and which SIDE a fault belongs to when a long and a
+ * short are one setup.
+ */
+function readiness(strategies) {
+  const blocking = [];
+  const warnings = [];
+  const shapes = [];
+
+  for (const s of strategies) {
+    const label = strategies.length > 1 ? `${s.side || s.name}: ` : '';
+    const p = s.exit_protocol;
+
+    if (!p || !p.version) {
+      // qp not reporting one at all means the platform is older than the
+      // protocol. Blocking, because the alternative is this side inferring the
+      // exit again — which is what the protocol exists to stop.
+      blocking.push(`${label}the chart tool did not report an exit protocol — `
+        + 'restart it, or the exit would have to be guessed');
+      continue;
+    }
+
+    if (!((s.entry || {}).rules || []).length) blocking.push(`${label}no entry rules`);
+    for (const e of p.errors || []) blocking.push(`${label}${e}`);
+    for (const w of p.warnings || []) warnings.push(`${label}${w}`);
+    if (p.shape) shapes.push(p.shape);
+  }
+
+  return {
+    ok: blocking.length === 0,
+    // The shape, for a person: "1 SL / 1 TP", "2 SL / 2 TP + runner (25%)".
+    // One string when the long and short agree, which they normally do.
+    shape: [...new Set(shapes)].join(' · ') || null,
+    blocking: [...new Set(blocking)],
+    warnings: [...new Set(warnings)],
+  };
+}
+
+/**
  * Every setup available to run, built from qp's strategies.
  *
  * Returns [] when qp is unreachable rather than throwing — the list is read to
@@ -115,6 +164,9 @@ async function list() {
         // short are one setup, and assigning half of a pair gives one that
         // ranks half its signals while looking perfectly correct.
         strategyIds: [],
+        // The raw qp rows, kept only to answer "is this tradeable" — never to
+        // re-implement any part of the strategy on this side.
+        raw: [],
       });
     }
     const g = groups.get(key);
@@ -122,18 +174,33 @@ async function list() {
     if (s.side && !g.sides.includes(s.side)) g.sides.push(s.side);
     g.strategies.push(s.name);
     if (s.id !== undefined && s.id !== null) g.strategyIds.push(s.id);
+    g.raw.push(s);
   }
 
   // The parts qp cannot hold, merged on top.
   return [...groups.values()].map(g => {
     const p = prefs.settingsFor(g.id);
+    const { raw, ...rest } = g;
     return {
-      ...g,
+      ...rest,
+      // Whether it can produce a clean alert and a clean order, said before the
+      // morning rather than discovered during it.
+      readiness: readiness(raw),
       enabled: prefs.isEnabled(g.id),
       // Off unless said otherwise. See the note in prefs: arming the broker is
       // permission for the box, not for every strategy in it.
       autoTrade: p.autoTrade === true,
       maxTradesPerDay: p.maxTradesPerDay || null,
+      /*
+       * SETUP-level risk, which is a different thing from account-level risk.
+       *
+       * The account says what a trade may lose. A setup may say less: a
+       * strategy with four sessions behind it should not be sized like one with
+       * four hundred, and having to edit the account figure before and after
+       * each morning is how it ends up wrong. Absent means "use the account's".
+       */
+      riskPerTrade: p.riskPerTrade || null,
+      maxPositionPct: p.maxPositionPct || null,
       universe: p.universe || null,
       rank: { metric: 'vwap_extension', topN: p.topN || 2 },
       tf: p.tf || '1m',
@@ -161,4 +228,4 @@ async function get(id) {
   return (await list()).find(s => s.id === id) || null;
 }
 
-module.exports = { list, forTool, get, hhmm, baseName, minutesBefore };
+module.exports = { list, forTool, get, hhmm, baseName, minutesBefore, readiness };

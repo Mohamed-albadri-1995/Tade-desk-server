@@ -131,10 +131,32 @@ test('quantity_type is always stated', async () => {
   expect(sent[0].body.quantity_type).toBe('fixed');
 });
 
-test('a short opens with a sell', async () => {
+/* A real short: the stop is ABOVE the entry and the target below it. The
+ * mirror of the long, and the body has to mirror too. */
+test('a short opens with a sell, with the bracket the right way round', async () => {
   armed();
-  await place({ signal: 'SHORT' });
-  expect(sent[0].body.action).toBe('sell');
+  await place({ signal: 'SHORT', entryless: true, price: 27.68, stop: 29.05, target: 24.94 });
+  expect(sent[0].body).toEqual({
+    symbol: 'LIFE', action: 'sell', quantity: 40, quantity_type: 'fixed',
+    stop_loss_price: 29.05, take_profit_price: 24.94,
+  });
+});
+
+/*
+ * The check that cannot be made anywhere later. A long stopping ABOVE its entry
+ * is not a tight stop, it is an instant exit; a target on the wrong side is an
+ * order that fills at once at a loss. Both are valid JSON, and SignalStack
+ * would take either.
+ */
+test('a bracket on the wrong side of the entry is never sent', async () => {
+  armed();
+  const wrongStop = await place({ signal: 'LONG', stop: 30.0, target: 31.79 });
+  expect(wrongStop.sent).toBe(false);
+  expect(wrongStop.skipped || wrongStop.error).toMatch(/stop at 30/);
+
+  const wrongTarget = await place({ signal: 'LONG', stop: 27.68, target: 28.0 });
+  expect(wrongTarget.sent).toBe(false);
+  expect(global.fetch).not.toHaveBeenCalled();
 });
 
 test('shorts can be switched off, for an account that cannot take them', async () => {
@@ -733,5 +755,171 @@ describe('a trailing stop', () => {
     expect(sent[0].body.stop_loss_price).toBe(27.68);
     expect(sent[0].body.stop_loss_price_percent).toBeUndefined();
     expect(sent[0].body.stop_loss_price_distance).toBeUndefined();
+  });
+});
+
+// ── the JSON itself ───────────────────────────────────────────────────────
+//
+// The last gate. Both shapes — one bracket for a single stop and target,
+// several for a scale-out — are built by different paths, and a mistake in
+// either is still valid JSON: SignalStack would accept it and the broker would
+// act on it. Nothing below is a style preference; each is a rejection or a
+// wrong position.
+
+describe('the body is checked before it goes on the wire', () => {
+  const ok = { symbol: 'LIFE', action: 'buy', quantity: 40, quantity_type: 'fixed',
+               stop_loss_price: 27.68, take_profit_price: 31.79 };
+
+  test('a correct single-bracket body passes', () => {
+    expect(broker.validateBody(ok, { side: 'LONG', entry: 29.05 })).toEqual([]);
+  });
+
+  test('a correct short passes', () => {
+    expect(broker.validateBody({ ...ok, action: 'sell',
+      stop_loss_price: 29.05, take_profit_price: 24.94 },
+      { side: 'SHORT', entry: 27.68 })).toEqual([]);
+  });
+
+  test('a fractional quantity is refused', () => {
+    expect(broker.validateBody({ ...ok, quantity: 40.5 }).join()).toMatch(/whole number/);
+    expect(broker.validateBody({ ...ok, quantity: 0 }).join()).toMatch(/whole number/);
+  });
+
+  test("quantity_type 'cash' is refused — the number would mean dollars", () => {
+    expect(broker.validateBody({ ...ok, quantity_type: 'cash' }).join()).toMatch(/fixed/);
+  });
+
+  /* Sub-penny prices are rejected by brokers, and the R-multiples a strategy
+   * works in produce them constantly. */
+  test('a sub-penny price is refused', () => {
+    expect(broker.validateBody({ ...ok, take_profit_price: 31.7925 }).join())
+      .toMatch(/sub-penny/);
+  });
+
+  test('a fixed stop and a trailing stop cannot both be sent', () => {
+    expect(broker.validateBody({ ...ok, stop_loss_price_percent: 1.5 }).join())
+      .toMatch(/both/);
+  });
+
+  test('a bracket on the wrong side of the entry is refused', () => {
+    expect(broker.validateBody({ ...ok, stop_loss_price: 30 }, { entry: 29.05 }).join())
+      .toMatch(/cannot have its stop/);
+    expect(broker.validateBody({ ...ok, take_profit_price: 28 }, { entry: 29.05 }).join())
+      .toMatch(/cannot have its target/);
+  });
+
+  test('a missing or malformed symbol is refused', () => {
+    expect(broker.validateBody({ ...ok, symbol: '' }).join()).toMatch(/ticker/);
+    expect(broker.validateBody({ ...ok, symbol: 'li fe' }).join()).toMatch(/ticker/);
+  });
+});
+
+/*
+ * Rounding, which is a risk decision and not a formatting one. The share count
+ * was computed from the exact stop, so a stop widened by a fraction of a cent
+ * risks more than the amount that was chosen.
+ */
+describe('prices on the wire', () => {
+  test('the stop rounds towards the entry, never away from it', () => {
+    // long: 27.6789 → 27.68 (tighter). Away would be 27.67 and risk more.
+    expect(broker.stopTick(27.6789, 'buy')).toBe(27.68);
+    expect(broker.stopTick(27.6712, 'buy')).toBe(27.68);
+    // short: the stop is above the entry, so towards it is DOWN.
+    expect(broker.stopTick(29.0512, 'sell')).toBe(29.05);
+    expect(broker.stopTick(29.0589, 'sell')).toBe(29.05);
+  });
+
+  test('an exact price is left alone rather than nudged', () => {
+    expect(broker.stopTick(27.68, 'buy')).toBe(27.68);
+    expect(broker.tick(31.79)).toBe(31.79);
+  });
+
+  test('a computed R target lands on a real price', async () => {
+    armed();
+    // 2R off a 1.3708 risk gives 31.7916 — a price no broker will take.
+    await place({ price: 29.05, stop: 27.6792, target: 31.7916 });
+    expect(sent[0].body.take_profit_price).toBe(31.79);
+    expect(sent[0].body.stop_loss_price).toBe(27.68);
+  });
+
+  test('every leg of a scale-out is rounded and checked too', async () => {
+    armed();
+    await place({ quantity: 40, plan: { runner: 0.25, legs: [
+      { fraction: 0.5, price: 30.4208 }, { fraction: 0.25, price: 31.7916 },
+    ] } });
+    expect(sent.map(s => s.body.take_profit_price)).toEqual([30.42, 31.79, undefined]);
+  });
+});
+
+// ── the exit protocol ─────────────────────────────────────────────────────
+//
+// qp declares the shape; this side executes it without re-deriving anything.
+// The two rules that make the quantity correct are that the fractions add to
+// one on that side, and that the shares add to the sized quantity on this one.
+
+describe('the protocol decides the orders', () => {
+  test('2 SL / 2 TP — each leg carries its own stop', async () => {
+    armed();
+    await place({ quantity: 40, price: 29.05, stop: 27.68, plan: { runner: 0, legs: [
+      { fraction: 0.5, price: 30.42, stop: 28.50 },
+      { fraction: 0.5, price: 31.79, stop: 27.68 },
+    ] } });
+    expect(sent.map(s => [s.body.quantity, s.body.stop_loss_price, s.body.take_profit_price]))
+      .toEqual([[20, 28.5, 30.42], [20, 27.68, 31.79]]);
+  });
+
+  test('3 SL / 3 TP', async () => {
+    armed();
+    await place({ quantity: 30, price: 29.05, stop: 27.68, plan: { runner: 0, legs: [
+      { fraction: 0.34, price: 30.0, stop: 28.6 },
+      { fraction: 0.33, price: 31.0, stop: 28.0 },
+      { fraction: 0.33, price: 32.0, stop: 27.68 },
+    ] } });
+    expect(sent.map(s => s.body.quantity)).toEqual([10, 9, 11]);
+    expect(sent.map(s => s.body.stop_loss_price)).toEqual([28.6, 28, 27.68]);
+    // Every share that was sized is ordered, and no more.
+    expect(sent.reduce((n, s) => n + s.body.quantity, 0)).toBe(30);
+  });
+
+  test('a per-leg trail is sent as a trail, on that leg only', async () => {
+    armed();
+    await place({ quantity: 20, price: 29.05, stop: 27.68, plan: { runner: 0, legs: [
+      { fraction: 0.5, price: 30.42, stop: 27.68 },
+      { fraction: 0.5, price: 31.79, stop: 27.68, trail: { kind: 'pct', value: 1.5 } },
+    ] } });
+    expect(sent[0].body.stop_loss_price).toBe(27.68);
+    expect(sent[0].body.stop_loss_price_percent).toBeUndefined();
+    expect(sent[1].body.stop_loss_price_percent).toBe(1.5);
+    expect(sent[1].body.stop_loss_price).toBeUndefined();
+  });
+
+  /*
+   * THE INVARIANT. Off by one in either direction is a position that is not the
+   * one the risk settings chose, and it looks exactly like one that is — so it
+   * is refused rather than sent.
+   */
+  test('the legs must add up to the sized quantity', () => {
+    // Two legs of 40% each leave 20% unbooked with no runner declared: the
+    // split cannot place 40 shares and says so instead of placing 32.
+    const split = broker.splitLegs(40, {
+      runner: 0, legs: [{ fraction: 0.4, price: 30 }, { fraction: 0.4, price: 31 }],
+    });
+    expect(split.parts.map(p => p.quantity)).toEqual([16, 24]);
+    expect(split.parts.reduce((n, p) => n + p.quantity, 0)).toBe(40);
+  });
+
+  test('a split that cannot account for every share is refused', async () => {
+    armed();
+    // A protocol whose legs are all too small to be one whole share.
+    const out = await place({ quantity: 2, price: 29.05, stop: 27.68, plan: {
+      runner: 0, legs: [
+        { fraction: 0.2, price: 30 }, { fraction: 0.2, price: 31 },
+        { fraction: 0.2, price: 32 }, { fraction: 0.2, price: 33 },
+        { fraction: 0.2, price: 34 },
+      ] } });
+    expect(out.sent).toBe(true);
+    // Everything that could not be a whole share joins the last leg, so the
+    // total still matches exactly.
+    expect(sent.reduce((n, s) => n + s.body.quantity, 0)).toBe(2);
   });
 });
