@@ -55,6 +55,35 @@ def api(host, path, payload=None, timeout=60):
         return json.loads(r.read().decode())
 
 
+def wait_for_server(host, seconds=90):
+    """Block until qp answers, instead of dying on the first refused connection.
+
+    This script is almost always run right after `systemctl restart qp-chart`,
+    and the service takes a few seconds to bind its port. A run that dies there
+    dies AFTER being launched with nohup, so the failure is silent until you
+    come back an hour later to an empty file — which is exactly how the first
+    attempt at this sweep was lost. Waiting costs seconds; not waiting costs
+    the whole run.
+    """
+    deadline = time.time() + seconds
+    first = True
+    while True:
+        try:
+            api(host, '/api/backtests', timeout=5)
+            if not first:
+                print('  qp is up.')
+            return
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            if time.time() >= deadline:
+                raise SystemExit(
+                    f'qp never answered on {host} within {seconds}s ({e}). '
+                    f'Check: systemctl status qp-chart')
+            if first:
+                print(f'waiting for qp on {host} to come up...')
+                first = False
+            time.sleep(2)
+
+
 def run_one(host, spec, name, poll=5.0):
     """Start a backtest and block until it finishes. Returns its summary."""
     spec = dict(spec)
@@ -135,6 +164,7 @@ def main(argv=None):
     ap.add_argument('--host', default='localhost:8765')
     a = ap.parse_args(argv)
 
+    wait_for_server(a.host)
     base = api(a.host, f'/api/backtest/{a.baseline}?trades=0').get('backtest')
     if not base:
         raise SystemExit(f'no backtest #{a.baseline}')
