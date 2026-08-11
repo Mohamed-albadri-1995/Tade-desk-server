@@ -1,0 +1,8 @@
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14
+
+# Charting platform (chart/server.py) — Phase 1 real-time chart
+fastapi>=0.110
+uvicorn[standard]>=0.29
+websockets>=12

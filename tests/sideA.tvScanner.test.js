@@ -1,0 +1,282 @@
+const { mapTVRow, COMMON_COLUMNS } = require('../src/sideA/tvScanner');
+
+// Build a minimal but complete raw TV row
+function buildRawRow(overrides = {}) {
+  // d array must match COMMON_COLUMNS index order
+  const d = new Array(COMMON_COLUMNS.length).fill(null);
+  const idx = {};
+  COMMON_COLUMNS.forEach((col, i) => { idx[col] = i; });
+
+  // Defaults
+  d[idx['ticker-view']]                   = 'AMEX:TEST';
+  d[idx['open']]                          = 10;
+  d[idx['close']]                         = 12;
+  d[idx['change']]                        = 5;
+  d[idx['relative_volume_10d_calc']]      = 3.1;
+  d[idx['relative_volume_intraday|5']]    = 5.2;
+  d[idx['market_cap_basic']]             = 1e8;
+  d[idx['sector']]                        = 'Technology';
+  d[idx['industry']]                      = 'Semiconductors';
+  d[idx['change_from_open']]              = 0.5;
+  d[idx['VWAP']]                          = 11;
+  d[idx['High.1M']]                       = 15;
+  d[idx['Low.1M']]                        = 8;
+  d[idx['high']]                          = 12.5;
+  d[idx['low']]                           = 9.5;
+  d[idx['ATR']]                           = 2;
+  d[idx['short_percentage_of_float']]     = 4.5;
+  d[idx['float_shares_outstanding']]      = 5e6;
+  d[idx['EMA9']]                          = 11.5;
+  d[idx['EMA13']]                         = 11.2;
+  d[idx['EMA20']]                         = 10.8;
+  d[idx['EMA50']]                         = 10.2;
+  d[idx['SMA5']]                          = 11.8;
+  d[idx['premarket_high']]               = 13;
+  d[idx['premarket_low']]                = 11;
+  d[idx['High.5D']]                       = 13;
+  d[idx['Low.5D']]                        = 10;
+  d[idx['High.3M']]                       = 18;
+  d[idx['Low.3M']]                        = 6;
+  d[idx['price_52_week_high']]            = 24;
+  d[idx['price_52_week_low']]             = 3;
+  d[idx['High.All']]                      = 40;
+
+  const base = { s: 'AMEX:TEST', d };
+  Object.assign(base, overrides.root || {});
+  for (const [col, val] of Object.entries(overrides.d || {})) {
+    if (idx[col] !== undefined) d[idx[col]] = val;
+  }
+  return base;
+}
+
+describe('Side A — mapTVRow', () => {
+
+  // ─── Ticker extraction ────────────────────────────────────────────────────
+  describe('ticker extraction from rawTV.s', () => {
+    test('strips exchange prefix: NASDAQ:AAPL → AAPL', () => {
+      const row = buildRawRow({ root: { s: 'NASDAQ:AAPL' } });
+      expect(mapTVRow(row).ticker).toBe('AAPL');
+    });
+
+    test('no prefix: AAPL → AAPL', () => {
+      const row = buildRawRow({ root: { s: 'AAPL' } });
+      expect(mapTVRow(row).ticker).toBe('AAPL');
+    });
+
+    test('NYSE prefix: NYSE:XYZ → XYZ', () => {
+      const row = buildRawRow({ root: { s: 'NYSE:XYZ' } });
+      expect(mapTVRow(row).ticker).toBe('XYZ');
+    });
+
+    test('ticker-view column is object (TV API change) — still extracts from rawTV.s', () => {
+      const row = buildRawRow({
+        root: { s: 'NYSE:XYZ' },
+        d: { 'ticker-view': { name: 'XYZ', type: 'stock', description: 'Some Company' } },
+      });
+      expect(mapTVRow(row).ticker).toBe('XYZ');
+    });
+
+    test('empty s field → ticker is empty string (filtered out by runScanner)', () => {
+      const row = buildRawRow({ root: { s: '' } });
+      expect(mapTVRow(row).ticker).toBe('');
+    });
+  });
+
+  // ─── rvol resolution ─────────────────────────────────────────────────────
+  describe('rvol resolution (spec §3.8)', () => {
+    test('intraday > 0: uses intraday', () => {
+      const row = buildRawRow({ d: { 'relative_volume_intraday|5': 5.2, 'relative_volume_10d_calc': 3.1 } });
+      expect(mapTVRow(row).stock.rvol).toBe(5.2);
+    });
+
+    test('intraday = 0: falls back to tenDay', () => {
+      const row = buildRawRow({ d: { 'relative_volume_intraday|5': 0, 'relative_volume_10d_calc': 3.1 } });
+      expect(mapTVRow(row).stock.rvol).toBe(3.1);
+    });
+
+    test('intraday = null: falls back to tenDay', () => {
+      const row = buildRawRow({ d: { 'relative_volume_intraday|5': null, 'relative_volume_10d_calc': 3.1 } });
+      expect(mapTVRow(row).stock.rvol).toBe(3.1);
+    });
+
+    test('both null: rvol = null', () => {
+      const row = buildRawRow({ d: { 'relative_volume_intraday|5': null, 'relative_volume_10d_calc': null } });
+      expect(mapTVRow(row).stock.rvol).toBeNull();
+    });
+
+    test('intraday present and > 0 wins even if tenDay is higher', () => {
+      const row = buildRawRow({ d: { 'relative_volume_intraday|5': 2, 'relative_volume_10d_calc': 10 } });
+      expect(mapTVRow(row).stock.rvol).toBe(2);
+    });
+  });
+
+  // ─── Safe extractors ─────────────────────────────────────────────────────
+  describe('safe extractors — num() and str()', () => {
+    test('number field returns number', () => {
+      const row = buildRawRow({ d: { 'close': 99.5 } });
+      expect(mapTVRow(row).stock.price).toBe(99.5);
+    });
+
+    test('number field is null → returns null (not NaN)', () => {
+      const row = buildRawRow({ d: { 'close': null } });
+      expect(mapTVRow(row).stock.price).toBeNull();
+    });
+
+    test('number field is unexpected object → returns null', () => {
+      const row = buildRawRow({ d: { 'ATR': { value: 5 } } });
+      expect(mapTVRow(row).stock.atr).toBeNull();
+    });
+
+    test('string field returns string', () => {
+      const row = buildRawRow({ d: { 'sector': 'Energy' } });
+      expect(mapTVRow(row).stock.sector).toBe('Energy');
+    });
+
+    test('string field is null → returns null', () => {
+      const row = buildRawRow({ d: { 'sector': null } });
+      expect(mapTVRow(row).stock.sector).toBeNull();
+    });
+
+    test('string field is object with .name → returns .name', () => {
+      const row = buildRawRow({ d: { 'sector': { name: 'Technology', id: 5 } } });
+      expect(mapTVRow(row).stock.sector).toBe('Technology');
+    });
+  });
+
+  // ─── Full field mapping ───────────────────────────────────────────────────
+  describe('complete stock field mapping', () => {
+    test('all expected fields are present in output', () => {
+      const row = buildRawRow();
+      const { stock } = mapTVRow(row);
+      const expected = ['tvSymbol','price','open','change','vwap','ema9','ema13','ema20','ema50',
+        'sma5','monthHigh','monthLow','dayHigh','dayLow','atr','mcap','floatShares','shortFloat',
+        'sector','industry','pmHigh','pmLow','rvol',
+        'weekHigh','weekLow','quarterHigh','quarterLow','yearHigh','yearLow','allTimeHigh'];
+      for (const field of expected) {
+        expect(stock).toHaveProperty(field);
+      }
+    });
+
+    test('tvSymbol stores full symbol with exchange prefix', () => {
+      const row = buildRawRow({ root: { s: 'NYSE:TSLA' } });
+      expect(mapTVRow(row).stock.tvSymbol).toBe('NYSE:TSLA');
+    });
+
+    test('values match input', () => {
+      const row = buildRawRow();
+      const { stock } = mapTVRow(row);
+      expect(stock.price).toBe(12);
+      expect(stock.open).toBe(10);
+      expect(stock.change).toBe(5);
+      expect(stock.sector).toBe('Technology');
+      expect(stock.pmHigh).toBe(13);
+      expect(stock.pmLow).toBe(11);
+    });
+
+    // The wider ranges feed the card's range bars. Each pair has to come back
+    // on the right field: TradingView answers by position in COMMON_COLUMNS,
+    // so a column inserted in the wrong place silently shifts every field
+    // after it and the year bar would quietly be drawing the quarter.
+    test('the wider range columns map to their own fields', () => {
+      const { stock } = mapTVRow(buildRawRow());
+      expect(stock.weekHigh).toBe(13);
+      expect(stock.weekLow).toBe(10);
+      expect(stock.monthHigh).toBe(15);
+      expect(stock.monthLow).toBe(8);
+      expect(stock.quarterHigh).toBe(18);
+      expect(stock.quarterLow).toBe(6);
+      expect(stock.yearHigh).toBe(24);
+      expect(stock.yearLow).toBe(3);
+      expect(stock.allTimeHigh).toBe(40);
+    });
+
+    test('a missing wider range comes back null, not zero', () => {
+      const row = buildRawRow({ d: { 'High.3M': null, 'Low.3M': null, 'High.All': null } });
+      const { stock } = mapTVRow(row);
+      expect(stock.quarterHigh).toBeNull();
+      expect(stock.quarterLow).toBeNull();
+      expect(stock.allTimeHigh).toBeNull();
+      // and the ones that are present are unaffected
+      expect(stock.yearHigh).toBe(24);
+    });
+  });
+
+});
+
+/*
+ * A column TradingView accepts while serving something else.
+ *
+ * `ignore_unknown_fields: true` makes a misspelled name vanish, and
+ * columnsAligned catches that because the response gets shorter. This is the
+ * other failure and it is the worse one: it produces confident numbers instead
+ * of a blank. It reached a card as a weekly range bar reading exactly the same
+ * low and high as the monthly bar beneath it.
+ */
+describe('nested range windows have to actually differ', () => {
+  const tv = require('../src/sideA/tvScanner');
+  const spy = () => jest.spyOn(console, 'error').mockImplementation(() => {});
+
+  const rows = (n, fn) => Array.from({ length: n }, (_, i) => ({ ticker: `T${i}`, stock: fn(i) }));
+  const nested = i => ({
+    weekHigh: 100 + i, weekLow: 90 - i,
+    monthHigh: 110 + i, monthLow: 80 - i,
+    quarterHigh: 120 + i, quarterLow: 70 - i,
+  });
+  const weekEqualsMonth = i => ({
+    weekHigh: 110 + i, weekLow: 80 - i,
+    monthHigh: 110 + i, monthLow: 80 - i,
+    quarterHigh: 120 + i, quarterLow: 70 - i,
+  });
+
+  beforeEach(() => tv._resetWindowWarning());
+  afterEach(() => jest.restoreAllMocks());
+
+  test('properly nested windows say nothing', () => {
+    const err = spy();
+    tv.checkWindowsDiffer(rows(40, nested), 'Trend');
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  test('a week identical to the month on every row is reported', () => {
+    const err = spy();
+    tv.checkWindowsDiffer(rows(40, weekEqualsMonth), 'Trend');
+    expect(err).toHaveBeenCalled();
+    expect(err.mock.calls[0][0]).toMatch(/week range is identical to the month range/);
+    expect(err.mock.calls[0][0]).toMatch(/probe-week-range/);
+  });
+
+  test('one stock at its monthly high is not evidence of anything', () => {
+    // This is the case the check must not fire on: a five-day high equal to the
+    // one-month high simply means the month's high was made this week, which is
+    // ordinary and true of any stock breaking out.
+    const err = spy();
+    const mixed = rows(40, i => (i === 3 ? weekEqualsMonth(i) : nested(i)));
+    tv.checkWindowsDiffer(mixed, 'Trend');
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  test('a small result set is not judged at all', () => {
+    // Five stocks all at their monthly highs is a market condition, not a bug.
+    const err = spy();
+    tv.checkWindowsDiffer(rows(5, weekEqualsMonth), 'Gap + Volume');
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  test('rows missing the fields are not counted as agreement', () => {
+    // Nulls must not be read as "the two windows match" — that would fire the
+    // warning on a provider outage and send someone hunting a column-name bug
+    // that does not exist.
+    const err = spy();
+    tv.checkWindowsDiffer(rows(40, () => ({ weekHigh: null, weekLow: null,
+      monthHigh: null, monthLow: null })), 'Trend');
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  test('it says it once, not on every scan', () => {
+    const err = spy();
+    tv.checkWindowsDiffer(rows(40, weekEqualsMonth), 'Trend');
+    tv.checkWindowsDiffer(rows(40, weekEqualsMonth), 'Trend');
+    tv.checkWindowsDiffer(rows(40, weekEqualsMonth), 'Big Move');
+    expect(err).toHaveBeenCalledTimes(1);
+  });
+});

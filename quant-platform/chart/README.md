@@ -1,0 +1,215 @@
+# qp charting platform — Phases 1–2
+
+A broker-style live candlestick chart backed entirely by the verified `qp`
+library. Every indicator you draw is the *same* verified primitive the
+compare tool approved and the trading tool runs — one source of truth.
+
+**Phase 1** (Core Infrastructure & Real-Time Charting) is the live chart.
+**Phase 2** (Screener Integration & Navigation) wires the chart to the Node
+screener's frozen **R1** and **Shortlist** registers so you can browse every
+stock the scanner flagged on any past date and replay its chart exactly as it
+stood that day. Later phases add the primitive/strategy builders and the
+backtest engine (which reuses the same register bridge, day by day).
+
+## What Phase 1 gives you
+
+- Full-width chart (lightweight-charts), no TradingView panel. Chart types:
+  Candles / Bars / Line / Area / Heikin Ashi. Price scale Linear / Log / %.
+  Fit-view, symbol watermark, live crosshair OHLC + indicator-value legend.
+- Timeframes 1m/5m/15m/30m/1h/1d; session toggle Regular / All-day.
+- Add any of the 60+ qp indicators from the picker — length + source +
+  colour; price overlays draw on the candles, oscillators (RSI, RVOL, ATR)
+  drop into a bottom pane automatically.
+- Step-rendered levels/S-R, verification markers, ET-correct time axis,
+  session background bands.
+- **Auto warm-up**: the Data Manager extends the fetch window so every
+  indicator has enough history (no manual data juggling).
+- **Live mode**: a WebSocket re-computes on an interval and pushes the tail,
+  so the newest candle and indicator tips move in real time.
+
+## Run
+
+```sh
+cd ~/Tade-desk-server/quant-platform
+pip install -r requirements.txt      # adds fastapi / uvicorn / websockets
+
+export APCA_API_KEY_ID=...            # or put them in .env (auto-loaded)
+export APCA_API_SECRET_KEY=...
+export POLYGON_API_KEY=...
+
+python3 -m chart.server --host 0.0.0.0 --port 8766
+# or:  uvicorn chart.server:app --host 0.0.0.0 --port 8766
+```
+
+Open `http://<host>:8766`. Requires port 8766 open in the EC2 security group.
+
+### Run it permanently (systemd)
+
+So the chart auto-starts on boot and auto-restarts if it crashes (instead of a
+`nohup` that dies on reboot), install it as a service — one time:
+
+```sh
+cd ~/Tade-desk-server/quant-platform
+bash chart/deploy/install-service.sh            # default port 8765
+# PORT=8766 bash chart/deploy/install-service.sh # to pick a port
+```
+
+After that: `sudo systemctl restart qp-chart` (e.g. after a `git pull`),
+`systemctl status qp-chart`, logs at `~/chart.log` or `journalctl -u qp-chart`.
+The unit sets `MemoryHigh` so on a small host the chart is throttled to swap
+before it can starve the screener.
+
+### Live data note
+
+Polygon's free tier is end-of-day delayed, so **Live** only *moves* on the
+**alpaca** or **hybrid** feed (the UI warns you when Live is on + Polygon).
+Use polygon for deep history / prior-day analysis, alpaca/hybrid for live.
+
+## Screener navigation (Phase 2)
+
+The side panel's **Screener register** browser lists the stocks on the
+scanner's R1 (or Shortlist) register for a chosen date, each as a card with
+score / regime / sector / gap% / rvol. Click a card → the chart loads that
+ticker **as of that register date** (via `asof`), so you review the setup as
+it actually looked that morning. The header **As-of** field does the same by
+hand (blank = live/now); setting it disables Live (a past day isn't live).
+
+The chart reads the registers over the screener's own HTTP API — point it at
+the screener with `SCREENER_URL` (default `http://localhost:3000`, i.e. the
+same box). If the screener is down the browser just shows a note; the chart
+still works.
+
+## Strategy builder (Phase 3)
+
+The **⚡ Strategy** button opens a builder drawer. A strategy is **entry** and
+**exit** rule groups; each rule compares two operands with an operator:
+
+- **operands**: an *Indicator* (any qp primitive + length + source), a *Price*
+  field (close/open/high/low/hl2/hlc3/ohlc4/volume), or a constant *Value*.
+- **operators**: `> < ≥ ≤ = ≠`, `crosses ▲/▼`, `bounces ▲/▼ off`, and
+  `rising` / `falling`.
+- each group is **ALL match** (AND), **ANY match** (OR), or **IN SEQUENCE**
+  (THEN — the conditions must happen *in order*, each within N bars of the
+  previous).
+
+**rising / falling — the slope method.** Not a bar-to-bar comparison (that
+just flips on noise). It fits a least-squares line over `lookback` bars and
+measures the net move as a multiple of the window's *own* volatility
+(`net move ÷ scatter`). A choppy tape has a tiny net move next to its scatter →
+**neither** rising nor falling; only a genuine drift (strength ≥ `min_strength`,
+default 1.5 over 8 bars) counts. Scale-free, so it behaves the same on any
+symbol or timeframe.
+
+**bounces ▲/▼ off `<level>`.** A real bounce, not "near the level": price must
+come *from* the right side, its wick must *touch* within `tol%` of the level,
+and it must *turn back* and close on the original side (support held /
+resistance rejected). `bounce_up` off a 13-EMA = the classic pullback-to-MA
+long trigger.
+
+**Sequence (THEN).** e.g. *close > 13-EMA* **THEN** *close bounces ▲ off
+13-EMA* fires only when price was above the MA, pulled back to it, and bounced —
+in that order, within the window.
+
+### Judge every piece on its own, then compose
+
+The rule is: never trust a piece you haven't *seen*. Two ways to inspect:
+
+1. **Plot the number.** Every computation is a primitive you can add from the
+   top-bar picker and watch, including the ones that used to be hidden inside
+   operators: **`trend.slope`** (the exact number `rising`/`falling` threshold —
+   near 0 in chop, large ± in a trend), **`candle.body_pct` / `upper_wick_pct` /
+   `lower_wick_pct`**, `volume.rel_volume`, `volatility.atr`, etc. Add `slope`,
+   look at it, and you can *see* "big number = steep, small = flat" before you
+   ever pick a threshold.
+2. **🔍 test the condition.** The test button now **draws the actual indicator
+   lines the condition reads** and reports the **left operand's current value**,
+   alongside the fire dots. So `close bounces ▲ off ema(13)` draws the 13-EMA +
+   dots on the real bounces — you confirm with your eyes that a "bounce" is a
+   bounce. `slope > 1.5` draws the slope line + dots where it's above 1.5.
+
+Only once a piece looks right do you wire it into a strategy.
+
+### Advanced composition (for complex, Pine-level strategies)
+
+- **Bar offset** — every operand has a `[n]` box = *n bars ago*. `close > high[1]`
+  (break of the previous bar's high) is `Price close` **>** `Price high [1]`.
+- **Hold (forward-fill)** — an operand modifier `"hold": true` that carries a
+  primitive's last real value forward until it changes (Pine's `fixnan`). Turns
+  a *sparse* primitive — one that's NaN except on a few bars, like
+  `structure.pivot_high`/`pivot_low` (which only print on a confirmation bar) —
+  into a **persistent, fixed level**: a *held* `pivot_high` is the horizontal
+  resistance line at the last swing high. Without it, "retest a level" can't be
+  written, because the level is blank on the retest bar. It's an **engine-side
+  operand transform** (`chart/strategy.py::_hold`, applied before `offset`) — the
+  frozen qp primitive library is **not** touched; `hold` works *on top of* any
+  primitive. Past-only, so no look-ahead. Used by the Second Chance seed:
+  `close cross_above pivot_high(hold)` (break) → `low ≤ pivot_high(hold)`
+  (retest of the same fixed level) → `close > close[1]` (attack).
+- **Time of day** — a `Time` operand returns the ET bar time (minutes since
+  midnight, or `hhmm`), so a session window 9:30–13:00 is two conditions:
+  `Time minutes ≥ 570` **and** `≤ 780`.
+- **Held for N bars** — each condition has a `held for / within N` selector:
+  *held for 3* = true only if it held on all of the last 3 bars (sustained);
+  *within 5* = true if it held on any of the last 5.
+- **AT LEAST k** — a group mode: fires when at least **k** of its conditions
+  match (the "min core / min extra" scoring in the Pine scripts).
+- **🔍 Test a condition** — every row has a test button: it marks *every* bar
+  the single condition holds and reports how often (e.g. "slope of 13-MA is
+  rising 22% of bars, TRUE now"), so you validate a piece before composing.
+- **Nested groups** — `+ group ( )` adds a bracketed sub-group with its own
+  ALL/ANY/≥k/SEQUENCE, so you can build `A and B and (C or D or E) and (F or G)`.
+- **Level lines as operands** — multi-output primitives expose a line picker:
+  floor pivots → `P/R1/R2/R3/S1/S2/S3`, `dynamic_sr` → `sr1…sr6`, Bollinger /
+  σ-bands → `upper/middle/lower`. So "price breaks R1" is
+  `Price close` **crosses ▲** `Indicator floor · R1`.
+- **Stop-loss / take-profit** — set SL and TP in the header (%, ATR×, or points).
+  Evaluate then simulates the exit at whichever hits first (SL / TP / exit rule)
+  and the stat breaks trades down by exit reason.
+- **Strategy indicators plot** — Evaluate draws every indicator the rules
+  reference on the chart, and a **volume** histogram sits under the candles, so
+  you can see exactly what the signals are reading.
+
+**Evaluate** runs the rules over the current chart window and draws **entry
+(green ▲) / exit (red ▼) signal markers** on the candles, shows whether each
+side is TRUE right now, and a quick win-rate/return **preview** (the real
+day-by-day P/L sim is Phase 4). Strategies are saved to a small SQLite store
+and reloaded from the dropdown.
+
+The rules are evaluated with the **exact same qp primitive math the chart
+draws** (shared `compare_server.overlay_arrays`), so a signal is never computed
+from different numbers than what you see — and the same declarative strategy is
+what Phase 4 backtests over the screener's historical register days.
+
+## Endpoints
+
+```
+GET  /                        the chart page
+GET  /api/health              {ok, build, primitives, feeds, default_feed}
+GET  /api/primitives          registry + approval status (the indicator picker)
+GET  /api/chart               candles + indicator series (JSON snapshot)
+                              ?asof=YYYY-MM-DD replays a historical date
+WS   /ws/live                 pushes {type:'tick', bar, tips} on an interval
+GET  /api/screener/health     is the screener reachable
+GET  /api/screener/dates      ?register=R1|Shortlist → available dates
+GET  /api/screener/register   ?register=&date= → ticker cards (score, regime, …)
+GET  /api/strategies          list saved strategies
+POST /api/strategies          create / update a strategy (JSON body)
+DEL  /api/strategies/{id}     delete
+POST /api/strategy/evaluate   {strategy, symbol, tf, days, feed, view, asof}
+                              → entry/exit signals + markers + preview stats
+```
+
+## Architecture
+
+- `chart/server.py` — FastAPI app. Reuses `tools.compare_server.compute_data`
+  (the proven candles + overlay + pane + marker engine) for snapshots and
+  adds the live WebSocket + the screener-register endpoints.
+- `chart/data_manager.py` — wraps the `tools/data` loaders (alpaca / polygon
+  / hybrid), computes required warm-up history per indicator, serves the live
+  tail.
+- `chart/screener.py` — reads the Node screener's frozen R1 / Shortlist
+  registers (stdlib HTTP, `SCREENER_URL`) and maps each row to a compact card.
+- `chart/static/index.html` — the frontend (lightweight-charts, pinned v4.2.3
+  vendored under `chart/static/`).
+
+All indicator math comes from `qp` — nothing is re-implemented here.

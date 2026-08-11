@@ -1,0 +1,195 @@
+const db = require('../db');
+const { toETDate } = require('../utils/time');
+const yahooClient  = require('../yahoo/client');
+const alpacaClient = require('../alpaca/client');
+const { syncFromWarehouse } = require('../training/trainingData');
+
+// The two entry times this tool measures outcomes from. They follow the tool's
+// own session — see captureAt in tools.config.json — because measuring a
+// mid-morning setup from a 09:37 entry answers a question nobody asked. A and B
+// keep their names: the scorer picks a base by "entry A or entry B", not by the
+// clock, so the model bases mean the same thing whatever the times are.
+const { captureAt } = require('../config');
+const ENTRY_TIME_A = captureAt.entryA;
+const ENTRY_TIME_B = captureAt.entryB;
+
+// The 09:30-09:35 opening range. Recorded for every card whether or not this
+// tool trades it: the bars are already in hand, and the one day-trading setup
+// with published evidence behind it triggers off these two levels. A month of
+// data collected without them cannot be asked the question afterwards.
+const OR_FROM = '09:30';
+const OR_TO   = '09:35';
+
+function openingRange(bars) {
+  const inRange = bars.filter(b => b.etTime >= OR_FROM && b.etTime < OR_TO);
+  if (!inRange.length) return { orHigh: null, orLow: null };
+  return {
+    orHigh: Math.max(...inRange.map(b => b.h)),
+    orLow:  Math.min(...inRange.map(b => b.l)),
+  };
+}
+
+// Batch tickers into chunks to stay within Alpaca query-string limits
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// Yahoo has dense per-minute bars (consolidated tape) so exact-minute
+// matches like 09:37 land reliably. From an AWS IP it rate-limits, so
+// we fall back to Alpaca — either per-batch (Yahoo threw) or per-ticker
+// (Yahoo returned data for some, empties for others). Same pattern the
+// historical cache uses.
+async function fetchIntradayWithFallback(tickers, date) {
+  let map = null;
+  try {
+    map = await yahooClient.fetchIntradayBars(tickers, date);
+  } catch (err) {
+    console.warn(`[SideH] Yahoo intraday failed for ${date}, trying Alpaca:`, err.message);
+  }
+  if (!map || Object.values(map).every(b => !b?.length)) {
+    try {
+      map = await alpacaClient.fetchIntradayBars(tickers, date);
+    } catch (err) {
+      console.warn(`[SideH] Alpaca intraday also failed for ${date}:`, err.message);
+      return {};
+    }
+    return map;
+  }
+  const emptyTickers = tickers.filter(t => !map[t]?.length);
+  if (emptyTickers.length) {
+    try {
+      const alpacaMap = await alpacaClient.fetchIntradayBars(emptyTickers, date);
+      for (const [t, bars] of Object.entries(alpacaMap)) {
+        if (bars?.length) map[t] = bars;
+      }
+    } catch { /* keep Yahoo's empties */ }
+  }
+  return map;
+}
+
+async function fetchDailyWithFallback(tickers, date) {
+  try {
+    const map = await yahooClient.fetchDailyBars(tickers, date);
+    if (map && Object.values(map).some(b => b?.length)) return map;
+  } catch (err) {
+    console.warn(`[SideH] Yahoo daily failed for ${date}, trying Alpaca:`, err.message);
+  }
+  try {
+    return await alpacaClient.fetchDailyBars(tickers, date);
+  } catch (err) {
+    console.warn(`[SideH] Alpaca daily also failed for ${date}:`, err.message);
+    return {};
+  }
+}
+
+async function captureR3(date) {
+  const today = date || toETDate(Date.now());
+
+  // Pre-flight: verify R1 ran today
+  const r1Count = db.prepare('SELECT COUNT(*) as n FROM r1_frozen WHERE date = ?').get(today).n;
+  if (r1Count === 0) {
+    console.warn('[SideH] R1 not populated for', today, '— skipping R3 capture');
+    return { skipped: true, reason: 'R1 not populated for today', tickers: 0 };
+  }
+
+  // Read tickers from R1
+  const tickers = db.prepare('SELECT ticker FROM r1_frozen WHERE date = ?')
+    .all(today)
+    .map(r => r.ticker);
+
+  if (tickers.length === 0) {
+    return { skipped: true, reason: 'R1 is empty for today', tickers: 0 };
+  }
+
+  console.log('[SideH] Fetching R3 data for', tickers.length, 'tickers from R1');
+
+  // Fetch intraday 1-min bars (Yahoo first, Alpaca fallback)
+  const intradayMap = {};
+  for (const batch of chunk(tickers, 100)) {
+    const data = await fetchIntradayWithFallback(batch, today);
+    Object.assign(intradayMap, data);
+  }
+
+  // Fetch daily bars excluding today (Yahoo first, Alpaca fallback)
+  const dailyMap = {};
+  for (const batch of chunk(tickers, 100)) {
+    const data = await fetchDailyWithFallback(batch, today);
+    Object.assign(dailyMap, data);
+  }
+
+  const capturedAt = Date.now();
+  let r3aWritten = 0;
+  let r3bWritten = 0;
+  let noEntryA = 0;
+  let noEntryB = 0;
+
+  const insertR3A = db.prepare(`
+    INSERT OR REPLACE INTO r3a (date, ticker, entry_price_a, hh_a, ll_a, atr14, up_r_a, down_r_a, or_high, or_low, captured_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertR3B = db.prepare(`
+    INSERT OR REPLACE INTO r3b (date, ticker, entry_price_b, hh_b, ll_b, atr14, up_r_b, down_r_b, or_high, or_low, captured_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const writeAll = db.transaction((tickers) => {
+    for (const ticker of tickers) {
+      const bars = intradayMap[ticker] || [];
+      const dailyBars = dailyMap[ticker] || [];
+      const atr14 = alpacaClient.computeATR14(dailyBars);
+      const { orHigh, orLow } = openingRange(bars);
+
+      // R3A — Target Entry (entry A)
+      const barA = bars.find(b => b.etTime === ENTRY_TIME_A);
+      if (barA) {
+        const entryA = barA.o;
+        const barsFromA = bars.filter(b => b.etTime >= ENTRY_TIME_A);
+        const hhA = barsFromA.length ? Math.max(...barsFromA.map(b => b.h)) : null;
+        const llA = barsFromA.length ? Math.min(...barsFromA.map(b => b.l)) : null;
+        const upRA = (atr14 && hhA !== null) ? (hhA - entryA) / atr14 : null;
+        const downRA = (atr14 && llA !== null) ? (entryA - llA) / atr14 : null;
+        insertR3A.run(today, ticker, entryA, hhA, llA, atr14, upRA, downRA, orHigh, orLow, capturedAt);
+        r3aWritten++;
+      } else {
+        noEntryA++;
+      }
+
+      // R3B — Alternative Entry (entry B)
+      const barB = bars.find(b => b.etTime === ENTRY_TIME_B);
+      if (barB) {
+        const entryB = barB.o;
+        const barsFromB = bars.filter(b => b.etTime >= ENTRY_TIME_B);
+        const hhB = barsFromB.length ? Math.max(...barsFromB.map(b => b.h)) : null;
+        const llB = barsFromB.length ? Math.min(...barsFromB.map(b => b.l)) : null;
+        const upRB = (atr14 && hhB !== null) ? (hhB - entryB) / atr14 : null;
+        const downRB = (atr14 && llB !== null) ? (entryB - llB) / atr14 : null;
+        insertR3B.run(today, ticker, entryB, hhB, llB, atr14, upRB, downRB, orHigh, orLow, capturedAt);
+        r3bWritten++;
+      } else {
+        noEntryB++;
+      }
+    }
+  });
+
+  writeAll(tickers);
+
+  if (noEntryA > 0) console.warn(`[SideH] R3A: missing ${ENTRY_TIME_A} bar for`, noEntryA, 'ticker(s)');
+  if (noEntryB > 0) console.warn(`[SideH] R3B: missing ${ENTRY_TIME_B} bar for`, noEntryB, 'ticker(s)');
+
+  // Push today's joined R4A/R4B rows into the persistent training tables so
+  // they survive the daily auto-train rewrite and accumulate across days.
+  let trainSync = { r4a: 0, r4b: 0 };
+  try {
+    trainSync = syncFromWarehouse(today);
+    console.log('[SideH] Training data synced — R4A:', trainSync.r4a, 'R4B:', trainSync.r4b);
+  } catch (err) {
+    console.warn('[SideH] Training data sync failed (non-fatal):', err.message);
+  }
+
+  console.log('[SideH] R3 capture complete — R3A:', r3aWritten, 'R3B:', r3bWritten);
+  return { skipped: false, tickers: tickers.length, r3aWritten, r3bWritten, noEntryA, noEntryB, trainSync };
+}
+
+module.exports = { captureR3 };

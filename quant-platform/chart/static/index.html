@@ -1,0 +1,1674 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qp — live charting platform</title>
+<script src="/static/lightweight-charts.js"></script>
+<style>
+  :root { --bg:#0e1116; --panel:#151a24; --border:#1e2632; --text:#e2e8f0; --text2:#94a3b8; --text3:#64748b; --accent:#22c55e; --draft:#f5a623; --red:#ef5350; --blue:#3b82f6; }
+  * { box-sizing:border-box; }
+  html,body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; margin:0; height:100%; }
+  /* MOBILE VIEWPORT HEIGHT. On Android Chrome / iOS Safari `100vh` is the
+     LARGE viewport — the height the page would have if the URL bar were
+     hidden. While the URL bar is showing, the body is ~100px taller than what
+     you can actually see, and `overflow:hidden` means you cannot scroll to
+     the rest. The chart filled that oversized box and lightweight-charts drew
+     its TIME AXIS along the bottom edge — below the fold, invisible, with the
+     volume histogram clipped too.
+     `dvh` is the DYNAMIC viewport height: what is visible right now, shrinking
+     and growing as the URL bar does. 100vh stays first as the fallback for
+     browsers without dvh (a JS fallback in boot() covers those). */
+  body { display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; }
+  header { padding:8px 14px; border-bottom:1px solid var(--border); display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; flex:0 0 auto; }
+  header label { display:flex; gap:5px; align-items:center; color:var(--text2); }
+  header input, header select { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:5px 7px; border-radius:5px; font-size:12px; }
+  header button { border:none; padding:6px 12px; border-radius:5px; font-size:12px; font-weight:600; cursor:pointer; }
+  #compute { background:var(--accent); color:#000; }
+  #liveBtn { background:#1c2431; color:var(--text); border:1px solid var(--border); }
+  #liveBtn.on { background:var(--red); color:#fff; border-color:var(--red); }
+  #addBtn { background:var(--accent); color:#000; }
+  #addPrim { min-width:150px; }
+  #addLen { width:60px; }
+  #sideBtn { background:#1c2431; color:var(--text2); border:1px solid var(--border); }
+  main { flex:1 1 auto; display:flex; min-height:0; position:relative; }
+  /* dismiss + resize affordances for the panels */
+  #sideBackdrop { display:none; position:absolute; inset:0; background:rgba(0,0,0,0.45); z-index:8; }
+  #sideGrip { position:absolute; left:0; top:0; bottom:0; width:10px; cursor:col-resize; z-index:2; touch-action:none; }
+  #sideGrip:hover { background:rgba(59,130,246,0.25); }
+  #sideTop { display:flex; align-items:center; justify-content:space-between; margin:0 0 6px; }
+  #sideTop b { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:.08em; }
+  #sideClose { cursor:pointer; color:var(--text); font-size:22px; line-height:1; padding:2px 10px; border:1px solid var(--border); border-radius:6px; background:#1c2431; }
+  #drawerGrip { position:absolute; top:0; left:0; right:0; height:14px; cursor:row-resize; z-index:7; touch-action:none; }
+  #drawerGrip::before { content:''; position:absolute; left:50%; top:4px; transform:translateX(-50%); width:44px; height:4px; border-radius:3px; background:var(--text3); opacity:.55; }
+  #drawerGrip:hover::before { background:var(--blue); opacity:1; }
+  @media (max-width:820px){ body.side-open #sideBackdrop { display:block; } }
+  #chartWrap { flex:1 1 auto; position:relative; min-width:0; }
+  #chart { width:100%; height:100%; }
+  #side { flex:0 0 260px; border-left:1px solid var(--border); padding:10px 12px; overflow:auto; font-size:12px; background:var(--panel); position:relative; }
+  #side.hide { display:none; }
+  /* ── mobile: header scrolls in one row, side becomes an overlay drawer so the
+        chart is ALWAYS full-width underneath ── */
+  @media (max-width:820px){
+    header { flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; gap:6px; padding:6px 8px; }
+    header::-webkit-scrollbar { height:0; }
+    header label, header button, header strong, header span { flex:0 0 auto; white-space:nowrap; }
+    #side { position:absolute; top:0; right:0; bottom:0; width:80%; max-width:300px; z-index:9; box-shadow:-6px 0 20px rgba(0,0,0,.55); }
+    /* stack Entry/Exit so each rule row gets the FULL phone width — otherwise a
+       ~160px column clips the added controls (level-line picker, extra params)
+       off to the side and they look like they never appeared. */
+    #drawer .dbody { flex-direction:column; }
+  }
+  #side h3 { margin:12px 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text2); }
+  #side h3:first-child { margin-top:0; }
+  #overlayList { display:flex; flex-direction:column; gap:4px; }
+  .ovrow { display:flex; align-items:center; gap:7px; padding:5px 7px; border:1px solid var(--border); border-radius:5px; cursor:pointer; background:#141a24; }
+  .ovrow.sel { border-color:var(--accent); background:#182130; }
+  .ovrow .dot { width:10px; height:10px; border-radius:50%; flex:0 0 auto; }
+  .ovrow .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ovrow .x { color:var(--text3); cursor:pointer; padding:0 3px; }
+  .ovrow .x:hover { color:var(--red); }
+  #paramsGrid { display:grid; grid-template-columns:auto 1fr; gap:6px 10px; align-items:center; }
+  #paramsGrid label { color:var(--text2); }
+  #paramsGrid input { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:4px 8px; border-radius:4px; font-size:12px; width:100%; }
+  #status { color:var(--text3); font-size:11px; }
+  #asof.set { border-color:var(--draft); color:var(--draft); }
+  /* ── screener register browser ── */
+  #regBar { display:flex; gap:6px; margin-bottom:7px; }
+  #regBar select { flex:1; min-width:0; }
+  #regList { display:flex; flex-direction:column; gap:4px; max-height:38vh; overflow:auto; }
+  .card { padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:#141a24; cursor:pointer; }
+  .card:hover { border-color:var(--accent); background:#182130; }
+  .card.on { border-color:var(--draft); background:#1c2330; }
+  .card .top { display:flex; align-items:center; gap:6px; }
+  .card .tk { font-weight:700; color:var(--text); }
+  .card .sc { margin-left:auto; font-weight:700; font-size:11px; padding:1px 6px; border-radius:10px; }
+  .card .meta { color:var(--text3); font-size:10.5px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card .chip { color:var(--text2); }
+  .up { color:var(--accent); } .dn { color:var(--red); }
+  #stratBtn { background:#1c2431; color:var(--text); border:1px solid var(--border); }
+  #stratBtn.on { background:var(--blue); color:#fff; border-color:var(--blue); }
+  /* ── strategy builder drawer ── */
+  #drawer { position:absolute; left:0; right:0; bottom:0; height:42vh; background:var(--panel); border-top:1px solid var(--border); z-index:6; display:none; flex-direction:column; }
+  #drawer.open { display:flex; }
+  /* The drawer is absolutely positioned OVER the bottom of <main>, and
+     lightweight-charts draws its TIME AXIS along the bottom edge of its own
+     canvas — so an open drawer buried the date/time scale completely (it was
+     drawn, just underneath). Reserve the drawer's height as padding on main:
+     absolutely-positioned children still sit against the padding box, so the
+     drawer does not move, while the chart shrinks and its axis stays visible.
+     --drawerH is kept in sync by the resize grip. */
+  body.drawer-open main { padding-bottom: var(--drawerH, 42vh); }
+  #drawer .dhead { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; font-size:12px; }
+  #drawer .dhead input, #drawer .dhead select { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:5px 7px; border-radius:5px; font-size:12px; }
+  #drawer .dbody { flex:1; display:flex; gap:12px; padding:10px 12px; overflow:auto; min-height:0; }
+  .rulecol { flex:1; min-width:0; border:1px solid var(--border); border-radius:7px; padding:8px; background:#141a24; }
+  .rulecol h4 { margin:0 0 7px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text2); display:flex; align-items:center; gap:8px; }
+  .rulecol h4 .en { margin-left:auto; font-weight:600; font-size:10px; padding:1px 6px; border-radius:8px; }
+  .en.t { background:rgba(34,197,94,.18); color:var(--accent); } .en.f { background:#1c2431; color:var(--text3); }
+  .rrow { display:flex; gap:4px; align-items:center; flex-wrap:wrap; padding:5px 0; border-bottom:1px dashed #1e2632; }
+  .rrow select, .rrow input { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:3px 5px; border-radius:4px; font-size:11px; }
+  .rrow .rx { color:var(--text3); cursor:pointer; padding:0 3px; margin-left:auto; }
+  .rrow .rx:hover { color:var(--red); }
+  .opd { display:inline-flex; flex-wrap:wrap; max-width:100%; gap:3px; align-items:center; }
+  .opd .len { width:48px; } .opd .cst { width:64px; }
+  .addrule { margin-top:7px; background:#1c2431; color:var(--text2); border:1px dashed var(--border); padding:4px 10px; border-radius:5px; font-size:11px; cursor:pointer; margin-right:5px; }
+  .subgroup { border:1px solid #26324a; border-radius:6px; padding:5px 7px; margin:5px 0; background:rgba(59,130,246,0.05); }
+  .logicsel { font-size:10px !important; padding:1px 4px !important; }
+  #stratStat { font-size:11px; color:var(--text2); }
+  #banner { position:absolute; top:8px; left:8px; right:8px; background:rgba(245,166,35,.14); color:var(--draft); padding:8px 10px; border-radius:6px; font-size:12px; display:none; z-index:5; }
+  .legend { position:absolute; top:6px; left:10px; font-size:11px; color:var(--text2); z-index:4; pointer-events:none; text-shadow:0 1px 2px #000; }
+  .pill { display:inline-block; width:8px; height:8px; border-radius:2px; vertical-align:middle; margin-right:3px; }
+  .muted { color:var(--text3); }
+</style>
+</head>
+<body>
+<header>
+  <strong style="color:var(--accent)">qp&nbsp;live</strong>
+  <label>Symbol <input id="symbol" value="SPY" size="6"></label>
+  <label>TF <select id="tf"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
+  <label>Type <select id="ctype"><option value="candles">Candles</option><option value="bars">Bars</option><option value="line">Line</option><option value="area">Area</option><option value="heikin">Heikin Ashi</option></select></label>
+  <label>Scale <select id="scaleMode"><option value="0">Linear</option><option value="1">Log</option><option value="2">%</option></select></label>
+  <button id="fitBtn" title="fit all bars to view" style="background:#1c2431;color:var(--text2);border:1px solid var(--border)">⤢ Fit</button>
+  <label>Days <input id="days" type="number" value="5" min="1" max="730" style="width:60px"></label>
+  <label>Feed <select id="feed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
+  <label>Session <select id="view"><option value="all">All-day</option><option value="regular">Regular</option></select></label>
+  <label title="REPLAY cutoff: hide every bar after this date, so a setup is judged as it stood then. Blank = full tape through today. Clicking a register stock does NOT set this — it loads everything and scrolls to that day.">As-of <input id="asof" type="date" style="width:130px"></label>
+  <button id="compute">Compute</button>
+  <button id="liveBtn">▶ Live</button>
+  <button id="stratBtn">⚡ Strategy</button>
+  <button id="sideBtn" title="show / hide the side panel">☰ Panel</button>
+  <button id="printR1Btn" title="Print every ticker in an R1/Shortlist day as charts — your timeframe, your indicators, full extended hours plus the previous day">🖨 Print R1</button>
+  <button id="alertsBtn" title="live signal watcher: today's R1 + Shortlist × every saved setup, browser notification + sound on any entry signal">🔔 Alerts</button>
+  <span style="width:1px;height:20px;background:var(--border)"></span>
+  <label>Add <select id="addPrim"></select></label>
+  <input id="addLen" type="number" placeholder="len" title="length/period">
+  <select id="addSource">
+    <option>close</option><option>open</option><option>high</option><option>low</option>
+    <option>hl2</option><option>hlc3</option><option>ohlc4</option><option>volume</option>
+  </select>
+  <button id="addBtn">+ Add</button>
+  <span id="status"></span>
+  <span id="build" class="muted" style="margin-left:auto"></span>
+</header>
+<main>
+  <div id="chartWrap">
+    <div id="banner"></div>
+    <div class="legend" id="legend"></div>
+    <div id="chart"></div>
+    <div id="drawer">
+      <div id="drawerGrip" title="drag to resize"></div>
+      <div class="dhead">
+        <strong style="color:var(--blue)">⚡ Strategy</strong>
+        <input id="stratName" placeholder="strategy name" size="16">
+        <label style="color:var(--text2)">Side
+          <select id="stratSide"><option value="long">Long</option><option value="short">Short</option></select></label>
+        <!-- Which scanning tools this setup belongs to. The setup carries the
+             list rather than each tool carrying a list of setups, so a setup
+             used by three tools is one object instead of three that drift
+             apart. Empty is legal and means "not assigned yet" — a setup is
+             normally built and backtested before that is decided. -->
+        <label style="color:var(--text2)" title="Which scanning tools run this setup, e.g. T1 T2. Leave empty until you have decided. A backtest with universe 'setup tools' uses exactly this list.">Tools
+          <input id="stratTools" placeholder="T1 T2" size="8"
+                 style="text-transform:uppercase"></label>
+        <label style="color:var(--text2)" title="Stop loss — long: below entry / short: above entry. @line: trail an indicator (value = % beyond it)">SL <select id="slType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option><option value="prim">@ line</option></select><input id="slVal" type="number" step="any" style="width:52px" placeholder="1.5"></label><span id="slAnchor"></span>
+        <label style="color:var(--text2)" title="Take profit — long: above entry / short: below entry. @line: an indicator level (value = % before it)">TP <select id="tpType"><option value="">off</option><option value="pct">%</option><option value="atr">ATR×</option><option value="points">pts</option><option value="prim">@ line</option></select><input id="tpVal" type="number" step="any" style="width:52px" placeholder="1.5"></label><span id="tpAnchor"></span>
+        <select id="stratLoad" title="load a saved strategy"><option value="">— saved —</option></select>
+        <button id="stratSave" style="background:var(--accent);color:#000">Save</button>
+        <button id="stratNew" style="background:#1c2431;color:var(--text);border:1px solid var(--border)">New</button>
+        <button id="stratDel" style="background:#1c2431;color:var(--red);border:1px solid var(--border)">Delete</button>
+        <button id="stratEval" style="background:var(--blue);color:#fff">▶ Evaluate</button>
+        <button id="stratClear" style="background:#1c2431;color:var(--text2);border:1px solid var(--border)">Clear signals</button>
+        <span id="stratStat"></span>
+        <span id="drawerClose" style="margin-left:auto;cursor:pointer;color:var(--text3);font-size:16px">✕</span>
+      </div>
+      <div id="tgtRow" style="padding:4px 8px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px">
+        <span style="color:var(--text2)" title="Scale-out: take a FRACTION of the position off at each target; the runner (rest) rides to your SL / exit rule. R× uses the entry→stop distance as 1R (needs an SL).">Scale-out</span>
+        <span id="tgtList" style="display:flex;flex-wrap:wrap;gap:6px"></span>
+        <button id="tgtAdd" style="background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 7px;cursor:pointer">＋ target</button>
+        <span id="tgtSum" class="muted" style="font-size:10px"></span>
+      </div>
+      <div id="discRow" style="padding:4px 8px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:11px">
+        <span style="color:var(--text2)" title="Discipline: keeps a setup from re-firing into chop. Attempts caps entries per session day; cooldown blocks re-entry for N bars after any exit; min-hold stops the EXIT RULE (not SL/TP) firing in the first N bars.">Discipline</span>
+        <label style="display:inline-flex;gap:3px;align-items:center">attempts/day<input id="discMaxDay" type="number" min="1" step="1" class="len" style="width:46px" placeholder="∞" title="max ENTRY attempts per session day (blank = unlimited)"></label>
+        <label style="display:inline-flex;gap:3px;align-items:center">cooldown<input id="discCooldown" type="number" min="0" step="1" class="len" style="width:46px" placeholder="0" title="bars to block re-entry after any exit (blank/0 = none)"></label>
+        <label style="display:inline-flex;gap:3px;align-items:center">min-hold<input id="discMinHold" type="number" min="0" step="1" class="len" style="width:46px" placeholder="0" title="bars before the EXIT RULE may fire (SL/TP still protect). blank/0 = none"></label>
+        <label style="display:inline-flex;gap:3px;align-items:center">max&nbsp;stop&nbsp;%<input id="discMaxStop" type="number" min="0" step="0.5" class="len" style="width:52px" placeholder="∞" title="refuse an entry whose stop sits further than this % from the entry — no scalp risks 50% because the anchor (e.g. low-of-day) is far away. blank = no cap"></label>
+        <label style="display:inline-flex;gap:3px;align-items:center" title="time-of-day window (ET, hhmm): an entry may only OPEN between these times — the PDF setups are morning/mid-day plays (e.g. 1000–1330). A position already open runs past it; EOD still flattens. blank = all session.">window<input id="discWinStart" type="number" step="1" class="len" style="width:56px" placeholder="1000"><span style="color:var(--text3)">–</span><input id="discWinEnd" type="number" step="1" class="len" style="width:56px" placeholder="1330"></label>
+      </div>
+      <div class="dbody">
+        <div class="rulecol" id="colEntry">
+          <h4>Entry — when <select id="entryLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="ATLEAST">AT LEAST k</option><option value="THEN">IN SEQUENCE</option></select><input id="entryK" class="logicsel" type="number" style="width:44px;display:none" title="minimum conditions that must match" placeholder="k"><input id="entryWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="entryNow">—</span></h4>
+          <div id="entryRules"></div>
+          <button class="addrule" data-g="entry" data-t="rule">+ condition</button>
+          <button class="addrule" data-g="entry" data-t="group">+ group ( )</button>
+        </div>
+        <div class="rulecol" id="colExit">
+          <h4>Exit — when <select id="exitLogic" class="logicsel"><option value="AND">ALL match</option><option value="OR">ANY match</option><option value="ATLEAST">AT LEAST k</option><option value="THEN">IN SEQUENCE</option></select><input id="exitK" class="logicsel" type="number" style="width:44px;display:none" title="minimum conditions that must match" placeholder="k"><input id="exitWindow" class="logicsel" type="number" style="width:52px;display:none" title="each step within N bars of the previous" placeholder="within N"><span class="en f" id="exitNow">—</span></h4>
+          <div id="exitRules"></div>
+          <button class="addrule" data-g="exit" data-t="rule">+ condition</button>
+          <button class="addrule" data-g="exit" data-t="group">+ group ( )</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="sideBackdrop"></div>
+  <div id="side">
+    <div id="sideGrip" title="drag to resize"></div>
+    <div id="sideTop"><b>Panel</b><span id="sideClose" title="close panel">✕</span></div>
+    <h3>Screener register</h3>
+    <div id="regBar">
+      <select id="regReg" title="which scanning tool's register to browse"><option value="R1">R1</option><option value="Shortlist">Shortlist</option></select>
+      <select id="regDate"></select>
+    </div>
+    <div id="srcBar" class="muted" style="font-size:10px;margin:2px 0 4px"></div>
+    <div id="regWarn" class="muted" style="font-size:10px;margin:0 0 4px"></div>
+    <div id="regList"><div class="muted">Loading register…</div></div>
+    <h3>🧪 Backtest</h3>
+    <div id="btBox" style="font-size:11px">
+      <select id="btStrat" style="width:100%"><option value="">— saved strategy —</option></select>
+      <select id="btStrat2" style="width:100%;margin-top:4px" title="Optional SECOND strategy — usually the short book of the same setup. Both are evaluated on every day-symbol pair and their trades are POOLED, so a per-day ranking picks across both sides. Ranking each side in its own run would select different names."><option value="">— second book (optional, e.g. the short side) —</option></select>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <select id="btUni" style="flex:1"><option value="symbols">Symbols</option><option value="R1">Register R1</option><option value="Shortlist">Shortlist</option></select>
+        <select id="btFill" style="flex:1" title="fill model: next open = honest live fills (a signal at a bar's close becomes a market order at the NEXT bar's open — what the funded account actually gets). close = signal bar's own close, optimistic, for eyeballing only."><option value="next_open" selected>fill: next open</option><option value="close">fill: close</option></select>
+      </div>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <select id="btTf" style="flex:1" title="bar timeframe the backtest evaluates on — use the TF you built the strategy on"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select>
+        <select id="btFeed" style="flex:1" title="data feed for the backtest. polygon covers the whole market; alpaca (IEX) has NO data for many small caps — those pairs would be skipped"><option>alpaca</option><option>polygon</option><option>hybrid</option></select>
+      </div>
+      <input id="btSyms" placeholder="symbols: SPY,QQQ" style="width:100%;margin-top:4px">
+      <input id="btCost" type="number" step="any" placeholder="cost bps/side (e.g. 5)" title="transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies)." style="width:100%;margin-top:4px">
+      <input id="btEquity" type="number" step="any" value="100000" placeholder="account $ (e.g. 100000)" title="REAL ACCOUNT sizing: starting equity. Position size per trade = (equity x risk%) / (entry - stop), so every stop-out loses the same % of the account. Equity compounds in trade order. Empty = off." style="width:100%;margin-top:4px">
+      <input id="btRiskPct" type="number" step="any" value="0.5" placeholder="risk % per trade (e.g. 0.5)" title="Percent of CURRENT equity lost if the stop is hit. Requires the strategy to define a stop." style="width:100%;margin-top:4px">
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <input id="btTopN" type="number" step="1" min="0" placeholder="top N per day (blank = take EVERY signal)" title="RANK the day's signals against each other and trade only the strongest N, across the whole universe. Blank/0 = off, take every signal. This is a cross-symbol decision, so it happens in the runner after all symbols are evaluated — a strategy cannot see the other names." style="flex:1">
+        <!-- The metric was hardcoded to VWAP extension whenever top-N was set.
+             That is the right metric for exactly one setup (T2, whose stop IS
+             the session VWAP); for anything else it silently means "trade the
+             widest stop" and reshapes the strategy. Backtest #231 lost 103 of
+             117 signals of the 09:35 setup to it. Now it must be chosen. -->
+        <select id="btRankMetric" style="flex:1" title="How the day's signals are scored against each other. Only used when top N is set.">
+          <option value="vwap_extension">rank by: VWAP extension (T2)</option>
+          <option value="tight_stop">rank by: tightest stop</option>
+          <option value="reg_score">rank by: register score</option>
+          <option value="rvol">rank by: RVOL</option>
+        </select>
+      </div>
+      <input id="btMinRvol" type="number" step="any" placeholder="min RVOL — In Play filter (e.g. 5)" title="SMB In-Play universe filter: skip a day·symbol pair unless its HONEST cumulative RVOL (qp rel_volume: volume so far today vs the average by the same time of day, 20 sessions) is at least this at the strategy's session start. Empty = off. This is NOT the register's ctx_rvol (a one-bar TradingView snapshot at ~09:36)." style="width:100%;margin-top:4px">
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <select id="btPreset" style="flex:1" title="prop-firm preset — fills the fields below; everything stays editable"><option value="">preset: custom</option><option value="ttp">Trade The Pool</option></select>
+        <input id="btShares" type="number" placeholder="shares 100" title="fixed share size for $ P&L and per-share fees" style="flex:1;min-width:0">
+      </div>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <input id="btFee" type="number" step="any" placeholder="$/share" title="commission per share per order (TTP: 0.005)" style="flex:1;min-width:0">
+        <input id="btFeeMin" type="number" step="any" placeholder="min $/order" title="minimum commission per filled order (TTP: 0.75)" style="flex:1;min-width:0">
+        <input id="btMinPs" type="number" step="any" placeholder="min $/sh" title="minimum profit per share for a win to COUNT toward the target (TTP: 0.10) — losses always count" style="flex:1;min-width:0">
+      </div>
+      <label style="display:flex;gap:5px;align-items:center;margin-top:4px;color:var(--text2)"><input type="checkbox" id="btRules"> RTH-only entries + forced 15:50 EOD close (chart keeps all-day data for indicators)</label>
+      <input id="btMaxDay" type="number" min="1" step="1" placeholder="max entries/day OVERRIDE (blank = use the strategy's own cap)" title="Override the strategy's own attempts/day cap for THIS backtest only. Blank = use whatever the strategy defines (its Discipline field). Set a number to force a different cap without editing the strategy." style="width:100%;margin-top:4px">
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <input id="btStart" type="date" style="flex:1;min-width:0" title="start date">
+        <input id="btEnd" type="date" style="flex:1;min-width:0" title="end date">
+        <button id="btRun" style="background:var(--blue);color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer">Run</button>
+      </div>
+      <div id="btStat" class="muted" style="margin-top:5px">— runs on the TF + feed selected above —</div>
+      <div id="btSummary" style="margin-top:4px"></div>
+      <div id="btFilters" style="display:none;margin-top:6px;border-top:1px dashed var(--border);padding-top:6px">
+        <div id="btFRows"></div>
+        <div style="display:flex;gap:4px;margin-top:4px">
+          <select id="btFField" style="flex:2;min-width:0"></select>
+          <select id="btFOp" style="flex:1;min-width:0"><option>=</option><option>≠</option><option>&gt;</option><option>&lt;</option><option>in</option><option>has</option></select>
+          <input id="btFVal" placeholder="value(s)" style="flex:2;min-width:0">
+          <button id="btFAdd" style="background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px">+</button>
+        </div>
+        <div class="muted" style="font-size:10px;margin-top:3px">in = comma list (regime in STRONG_UP,UP) · has = contains · times are ET hhmm (935) · dur_min · dow = Mon…Fri</div>
+        <div style="display:flex;gap:4px;margin-top:5px">
+          <button id="btCsv" style="flex:1;background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px">CSV (filtered)</button>
+          <button id="btReport" style="flex:1;background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px">Report</button>
+        </div>
+      </div>
+      <div id="btTrades" style="max-height:30vh;overflow:auto;margin-top:4px"></div>
+    </div>
+    <h3>Overlays</h3>
+    <div id="overlayList"><div class="muted">Pick an indicator in the top bar → + Add.</div></div>
+    <h3>Selected</h3>
+    <div id="primName" class="muted">—</div>
+    <div id="primDesc" class="muted" style="font-size:11px;margin-top:4px;max-height:120px;overflow:auto">—</div>
+    <h3>Parameters</h3>
+    <div id="paramsGrid"><div class="muted">—</div></div>
+  </div>
+</main>
+<script>
+let CHART=null, PRICE=null, BG=null, VOL=null, LINES=[], PRIMS=[], WS=null, LIVE=false;
+let OVERLAYS=[], SELECTED=null, _nid=1, PRICEBARS=[], STRATLINES=[], LASTSYMTF='';
+let FEEDS={}, REG_ROWS=[], CHARTTYPE='candles';
+const feedHas=n=>!!FEEDS[n];
+// ── chart-type (candles/bar/line/area/Heikin Ashi) ──
+function _ha(bars){ const out=[]; let p=null; for(const b of bars){ const c=(b.open+b.high+b.low+b.close)/4; const o=p?(p.open+p.close)/2:(b.open+b.close)/2; const x={time:b.time,open:o,high:Math.max(b.high,o,c),low:Math.min(b.low,o,c),close:c}; out.push(x); p=x; } return out; }
+function priceData(){ if(CHARTTYPE==='line'||CHARTTYPE==='area')return PRICEBARS.map(b=>({time:b.time,value:b.close})); if(CHARTTYPE==='heikin')return _ha(PRICEBARS); return PRICEBARS; }
+function makePriceSeries(){
+  if(PRICE){ try{CHART.removeSeries(PRICE);}catch(_){} PRICE=null; }
+  const up='#22c55e',dn='#ef5350';
+  if(CHARTTYPE==='line') PRICE=addLine({color:'#3b82f6',lineWidth:2,priceLineVisible:true,lastValueVisible:true});
+  else if(CHARTTYPE==='area') PRICE=addArea({lineColor:'#3b82f6',topColor:'rgba(59,130,246,0.28)',bottomColor:'rgba(59,130,246,0.02)',lineWidth:2,priceLineVisible:true,lastValueVisible:true});
+  else if(CHARTTYPE==='bars') PRICE=addBars({upColor:up,downColor:dn,thinBars:false});
+  else PRICE=addCandles({upColor:up,downColor:dn,wickUpColor:up,wickDownColor:dn,borderVisible:false});  // candles / heikin
+}
+function setChartType(t){ CHARTTYPE=t; localStorage.setItem('qpc_ctype',t); makePriceSeries(); PRICE.setData(priceData()); refreshMarkers(); }
+let DAYMARKERS=[], SIGMARKERS=[];   // price-series markers: day labels + strategy signals
+function refreshMarkers(){ if(PRICE){ try{
+  let ms=[...DAYMARKERS,...SIGMARKERS];
+  // a marker whose time the price series doesn't cover gets snapped onto the
+  // nearest bar by the library — several of those stack into a phantom ladder
+  if(PRICEBARS.length){ const t0=PRICEBARS[0].time, t1=PRICEBARS[PRICEBARS.length-1].time; ms=ms.filter(m=>m.time>=t0&&m.time<=t1); }
+  PRICE.setMarkers(ms.sort((a,b)=>a.time-b.time)); }catch(_){} } }
+const PALETTE=['#3b82f6','#f5a623','#a855f7','#ec4899','#06b6d4','#eab308','#14b8a6','#f97316','#e879f9','#84cc16'];
+
+// ── chart-library helpers (v4/v5 feature-detect) ──
+function addCandles(o){ return typeof CHART.addCandlestickSeries==='function'?CHART.addCandlestickSeries(o):CHART.addSeries(LightweightCharts.CandlestickSeries,o); }
+function addLine(o){ return typeof CHART.addLineSeries==='function'?CHART.addLineSeries(o):CHART.addSeries(LightweightCharts.LineSeries,o); }
+function addHist(o){ return typeof CHART.addHistogramSeries==='function'?CHART.addHistogramSeries(o):CHART.addSeries(LightweightCharts.HistogramSeries,o); }
+function addBars(o){ return typeof CHART.addBarSeries==='function'?CHART.addBarSeries(o):CHART.addSeries(LightweightCharts.BarSeries,o); }
+function addArea(o){ return typeof CHART.addAreaSeries==='function'?CHART.addAreaSeries(o):CHART.addSeries(LightweightCharts.AreaSeries,o); }
+// ET formatters — axis reads America/New_York regardless of the viewer's tz
+const _ET_HM=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false});
+const _ET_MD=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric'});
+const _ET_FULL=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+
+function banner(m){ const b=document.getElementById('banner'); if(!m){b.style.display='none';return;} b.textContent='⚠ '+m; b.style.display='block'; }
+
+function initChart(){
+  const el=document.getElementById('chart');
+  CHART=LightweightCharts.createChart(el,{
+    layout:{background:{color:'#0e1116'},textColor:'#94a3b8',attributionLogo:false},
+    grid:{vertLines:{color:'#141c27'},horzLines:{color:'#141c27'}},
+    timeScale:{timeVisible:true,secondsVisible:false,borderColor:'#1e2632',
+      tickMarkFormatter:(t,tt)=> tt<3?_ET_MD.format(new Date(t*1000)):_ET_HM.format(new Date(t*1000))},
+    localization:{timeFormatter:(t)=>_ET_FULL.format(new Date(t*1000))+' ET'},
+    rightPriceScale:{borderColor:'#1e2632',scaleMargins:{top:0.08,bottom:0.08}},
+    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+    watermark:{visible:true,color:'rgba(148,163,184,0.10)',text:'',fontSize:44,horzAlign:'center',vertAlign:'center'},
+  });
+  BG=addHist({priceScaleId:'sessbg',priceLineVisible:false,lastValueVisible:false,base:0});
+  CHART.priceScale('sessbg').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
+  // volume histogram — a STANDARD part of the chart (own band, bottom 20%)
+  VOL=addHist({priceScaleId:'vol',priceLineVisible:false,lastValueVisible:false});
+  CHART.priceScale('vol').applyOptions({scaleMargins:{top:0.80,bottom:0},visible:false});
+  CHARTTYPE=localStorage.getItem('qpc_ctype')||'candles';
+  makePriceSeries();
+  new ResizeObserver(()=>CHART.applyOptions({width:el.clientWidth,height:el.clientHeight})).observe(el);
+  CHART.subscribeCrosshairMove(updateLegend);
+}
+
+async function loadPrimitives(){
+  const r=await fetch('/api/primitives'); PRIMS=await r.json();
+  const sel=document.getElementById('addPrim'); const keep=sel.value; sel.innerHTML='';
+  const groups={}; for(const p of PRIMS)(groups[p.group]||=[]).push(p);
+  for(const g of Object.keys(groups).sort()){
+    const og=document.createElement('optgroup'); og.label=g;
+    for(const p of groups[g]){ const o=document.createElement('option'); o.value=p.key; o.textContent=(p.approved?'✅ ':'🚧 ')+p.name; og.appendChild(o); }
+    sel.appendChild(og);
+  }
+  if(keep&&PRIMS.some(p=>p.key===keep))sel.value=keep;
+  sel.onchange=syncLen; syncLen();
+}
+function primMeta(k){ return PRIMS.find(p=>p.key===k); }
+function currentOverlay(){ return OVERLAYS.find(o=>o.id===SELECTED); }
+function lenParam(m){ if(!m||!m.params)return null; const n=m.params.map(p=>p.name); for(const c of['length','period','len','pivot_period'])if(n.includes(c))return c; return null; }
+function syncLen(){
+  const m=primMeta(document.getElementById('addPrim').value); const el=document.getElementById('addLen'); const lp=lenParam(m);
+  if(lp){ const d=m.params.find(p=>p.name===lp); el.disabled=false; el.placeholder=d&&d.default!=null?String(d.default):'len'; }
+  else { el.disabled=true; el.placeholder='—'; el.value=''; }
+}
+
+function addOverlay(){
+  const key=document.getElementById('addPrim').value, source=document.getElementById('addSource').value;
+  const m=primMeta(key); if(!m)return;
+  const params={}; for(const p of m.params)params[p.name]=p.default;
+  const lp=lenParam(m), lv=parseInt(document.getElementById('addLen').value,10);
+  if(lp&&Number.isFinite(lv)&&lv>0)params[lp]=lv;
+  const id='o'+(_nid++), color=PALETTE[OVERLAYS.length%PALETTE.length];
+  OVERLAYS.push({id,key,source,params,color}); persist(); renderOverlays(); selectOverlay(id); loadChart();
+}
+function removeOverlay(id){ OVERLAYS=OVERLAYS.filter(o=>o.id!==id); if(SELECTED===id)SELECTED=OVERLAYS.length?OVERLAYS[OVERLAYS.length-1].id:null; persist(); renderOverlays(); renderSelected(); loadChart(); }
+function selectOverlay(id){ SELECTED=id; persist(); renderOverlays(); renderSelected(); }
+function persist(){ localStorage.setItem('qpc_ov',JSON.stringify(OVERLAYS)); localStorage.setItem('qpc_sel',SELECTED||''); }
+
+function renderOverlays(){
+  const box=document.getElementById('overlayList'); box.innerHTML='';
+  if(!OVERLAYS.length){ box.innerHTML='<div class="muted">Pick an indicator in the top bar → + Add.</div>'; return; }
+  for(const o of OVERLAYS){
+    const m=primMeta(o.key), args=Object.entries(o.params).map(([k,v])=>k+'='+v).join(',');
+    const row=document.createElement('div'); row.className='ovrow'+(o.id===SELECTED?' sel':'');
+    row.innerHTML=`<span class="dot" style="background:${o.color}"></span><span class="nm">${m?m.name:o.key}${args?'('+args+')':''} <span class="muted">${o.source}</span></span><span class="x" title="remove">✕</span>`;
+    row.onclick=e=>{ if(e.target.classList.contains('x'))removeOverlay(o.id); else selectOverlay(o.id); };
+    box.appendChild(row);
+  }
+}
+function readParams(){ const out={}; for(const el of document.querySelectorAll('#paramsGrid input')){ let v=el.value; if(el.dataset.kind==='int')v=parseInt(v,10); else if(el.dataset.kind==='float')v=parseFloat(v); else if(el.dataset.kind==='bool')v=el.checked; out[el.dataset.name]=v; } return out; }
+function renderSelected(){
+  const o=currentOverlay(), grid=document.getElementById('paramsGrid');
+  const nm=document.getElementById('primName'), ds=document.getElementById('primDesc'); grid.innerHTML='';
+  if(!o){ nm.textContent='—'; ds.textContent='—'; grid.innerHTML='<div class="muted">—</div>'; return; }
+  const m=primMeta(o.key); nm.textContent=m.name+' ('+m.key+')'; nm.className=''; ds.textContent=m.description||'—';
+  if(!m.params.length){ grid.innerHTML='<div class="muted" style="grid-column:1/-1">(no parameters)</div>'; return; }
+  for(const p of m.params){
+    const l=document.createElement('label'); l.textContent=p.name; grid.appendChild(l);
+    const i=document.createElement('input'); i.dataset.name=p.name; i.dataset.kind=p.kind;
+    if(p.kind==='bool'){ i.type='checkbox'; i.checked=o.params[p.name]===true; }
+    else { i.value=o.params[p.name]??p.default??''; i.type=(p.kind==='int'||p.kind==='float')?'number':'text'; if(p.kind==='float')i.step='any'; }
+    i.onchange=()=>{ o.params=readParams(); persist(); renderOverlays(); loadChart(); };
+    grid.appendChild(i);
+  }
+}
+
+// ── draw a full snapshot: candles + session bands + overlays (panes/steps/markers) ──
+function clearStratLines(){ for(const l of STRATLINES){ try{CHART.removeSeries(l);}catch(_){} } STRATLINES=[]; }
+function drawSnapshot(j){
+  PRICEBARS=j.bars||[]; PRICE.setData(priceData());
+  try{ CHART.applyOptions({watermark:{text:(document.getElementById('symbol').value||'').toUpperCase()}}); }catch(_){}
+  // NEW SYMBOL / TF → the old zoom is meaningless (a $700 range on a $1 stock).
+  // Dragging the price axis puts the scale in MANUAL mode permanently, so we
+  // must explicitly restore auto-scale + fit when the instrument changes.
+  const symtf=(document.getElementById('symbol').value||'').toUpperCase()+'|'+document.getElementById('tf').value;
+  if(symtf!==LASTSYMTF){
+    LASTSYMTF=symtf;
+    try{CHART.priceScale('right').applyOptions({autoScale:true});}catch(_){}
+    try{CHART.priceScale('osc').applyOptions({autoScale:true});}catch(_){}
+    try{CHART.timeScale().fitContent();}catch(_){}
+  }
+  clearStratLines(); SIGMARKERS=[];      // strategy lines/signals are ephemeral — redrawn on Evaluate
+  if(BG){ BG.setData((j.bars||[]).map(b=>({time:b.time,value:1,
+    color:b.sess==='pre'?'rgba(59,130,246,0.12)':b.sess==='post'?'rgba(168,85,247,0.14)':'rgba(0,0,0,0)'}))); }
+  if(VOL){ VOL.setData((j.bars||[]).map(b=>({time:b.time,value:b.volume,
+    color:b.close>=b.open?'rgba(34,197,94,0.55)':'rgba(239,83,80,0.55)'}))); }
+  const tf=document.getElementById('tf').value;
+  if(tf!=='1d'&&j.day_starts&&j.day_starts.length){
+    DAYMARKERS=j.day_starts.map(d=>({time:d.time,position:'belowBar',color:'#64748b',shape:'square',size:1,text:d.label}));
+  } else DAYMARKERS=[];
+  refreshMarkers();
+  for(const l of LINES){ try{CHART.removeSeries(l);}catch(_){} } LINES=[];
+  let pLo=Infinity,pHi=-Infinity; for(const b of (j.bars||[])){ if(b.low<pLo)pLo=b.low; if(b.high>pHi)pHi=b.high; }
+  const span=(pHi-pLo)||1; let usedOsc=false; const leg=[];
+  for(const s of (j.series||[])){
+    if(s.error){ leg.push(`<span style="color:var(--draft)">${s.name}: ${s.error}</span>`); continue; }
+    const vals=s.values||[]; if(!vals.length){ leg.push(`<span style="color:var(--draft)">${s.name}: 0 pts (raise Days/lower length)</span>`); continue; }
+    let sLo=Infinity,sHi=-Infinity; for(const v of vals){ if(v.value<sLo)sLo=v.value; if(v.value>sHi)sHi=v.value; }
+    const onPrice=(sHi>=pLo-0.5*span)&&(sLo<=pHi+0.5*span); const scaleId=onPrice?'right':'osc'; if(!onPrice)usedOsc=true;
+    const lt=s.step?1:0;
+    // price-scale overlays (MAs, VWAPs, LEVELS) must NOT expand the candles'
+    // scale — otherwise a far level (R3, monthly, prev-year) compresses the
+    // candles. Candles alone drive the price scale; overlays draw where they are.
+    const line=addLine({color:s.color,lineWidth:s.step?2:3,priceLineVisible:false,title:s.name,lineStyle:s.style||0,lineType:lt,lastValueVisible:true,priceScaleId:scaleId,...(onPrice?{autoscaleInfoProvider:()=>null}:{})});
+    line.setData(vals);
+    if(s.markers&&s.markers.length&&typeof line.setMarkers==='function'){ try{line.setMarkers(s.markers);}catch(_){} }
+    line._ov={name:s.name,color:s.color}; line._last=vals.length?vals[vals.length-1].value:null; LINES.push(line);
+  }
+  if(usedOsc){
+    try{CHART.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.34}});}catch(_){}
+    try{CHART.priceScale('osc').applyOptions({scaleMargins:{top:0.72,bottom:0.02},visible:true,borderColor:'#1e2632'});}catch(_){}
+  } else { try{CHART.priceScale('right').applyOptions({scaleMargins:{top:0.08,bottom:0.08}});}catch(_){} }
+  document.getElementById('status').dataset.ovErr = leg.length ? leg.join(' · ') : '';
+  updateLegend();
+}
+function _fmtN(v){ if(v==null||v!==v)return '—'; const a=Math.abs(v); return a>=1000?Math.round(v).toLocaleString():(a>=1?v.toFixed(2):v.toFixed(4)); }
+function updateLegend(param){
+  const leg=document.getElementById('legend'); if(!leg||!PRICE)return;
+  const has=param&&param.time&&param.seriesData;
+  let o,h,l,c,vol;
+  if(has){ const pd=param.seriesData.get(PRICE); if(pd){ if(pd.close!=null){o=pd.open;h=pd.high;l=pd.low;c=pd.close;} else if(pd.value!=null){c=pd.value;} } const vd=param.seriesData.get(VOL); if(vd)vol=vd.value; }
+  else if(PRICEBARS.length){ const bb=PRICEBARS[PRICEBARS.length-1]; o=bb.open;h=bb.high;l=bb.low;c=bb.close;vol=bb.volume; }
+  const sym=(document.getElementById('symbol').value||'').toUpperCase();
+  let html='';
+  if(c!=null&&o!=null){ const up=c>=o; html+=`<b>${sym}</b> <span style="color:${up?'var(--accent)':'var(--red)'}">O ${_fmtN(o)}  H ${_fmtN(h)}  L ${_fmtN(l)}  C ${_fmtN(c)}</span>`; if(vol!=null)html+=`  <span class="muted">V ${_fmtN(vol)}</span>`; }
+  else if(c!=null){ html+=`<b>${sym}</b> <span style="color:var(--text)">${_fmtN(c)}</span>`; if(vol!=null)html+=`  <span class="muted">V ${_fmtN(vol)}</span>`; }
+  for(const ln of [...LINES,...STRATLINES]){ if(!ln._ov)continue; let v=ln._last; if(has){ const d=param.seriesData.get(ln); v=d?d.value:undefined; } if(v!=null&&v===v) html+=`  <span style="color:${ln._ov.color||'#94a3b8'}"><span class="pill" style="background:${ln._ov.color||'#94a3b8'}"></span>${ln._ov.name} ${_fmtN(v)}</span>`; }
+  leg.innerHTML=html;
+}
+
+async function loadChart(){
+  if(!PRICE)return;
+  const symbol=document.getElementById('symbol').value.trim().toUpperCase()||'SPY';
+  const tf=document.getElementById('tf').value, days=document.getElementById('days').value;
+  const feed=document.getElementById('feed').value, view=document.getElementById('view').value;
+  const asof=document.getElementById('asof').value||'';
+  syncAsofUI();
+  ['symbol','tf','days','feed','view'].forEach(k=>localStorage.setItem('qpc_'+k,document.getElementById(k).value));
+  document.getElementById('status').textContent='loading…';
+  const qs=new URLSearchParams({symbol,tf,days,feed,view,overlays:JSON.stringify(OVERLAYS)});
+  if(asof)qs.set('asof',asof);
+  try{
+    const j=await (await fetch('/api/chart?'+qs)).json();
+    if(!j.ok){ document.getElementById('status').textContent='error: '+(j.error||'').slice(0,120); return; }
+    drawSnapshot(j);
+    banner(j.warn||'');
+    // scroll to the register day (set by pickStock) — the data runs to today,
+    // we just land on that session. Say so if it could not be found, rather
+    // than silently leaving the view somewhere else.
+    let jtag='';
+    if(JUMP_DATE){
+      jtag=jumpToDate(JUMP_DATE)
+        ? ` · <span style="color:var(--blue)">jumped to ${JUMP_DATE}</span>`
+        : ` · <span style="color:var(--draft)">⚠ no bars on ${JUMP_DATE} in this window</span>`;
+      JUMP_DATE=null;
+    }
+    const tag=asof?` · as of ${asof}`:'';
+    const ovErr=document.getElementById('status').dataset.ovErr;
+    document.getElementById('status').innerHTML=`${symbol} · ${j.first} → ${j.last} · ${(j.bars||[]).length} bars · ${OVERLAYS.length} overlay(s)${tag}${jtag}`+(ovErr?` · <span style="color:var(--draft)">⚠ ${ovErr}</span>`:'');
+    renderRegister();           // keep the register highlight on the loaded symbol
+    if(LIVE&&!asof) startLive();       // re-subscribe with the new params (live only)
+  }catch(e){ document.getElementById('status').textContent='error: '+e.message; }
+}
+
+// ── live streaming ──
+function stopLive(){ if(WS){ try{WS.close();}catch(_){} WS=null; } }
+function startLive(){
+  stopLive();
+  const proto=location.protocol==='https:'?'wss':'ws';
+  WS=new WebSocket(`${proto}://${location.host}/ws/live`);
+  WS.onopen=()=>{ WS.send(JSON.stringify({
+    symbol:document.getElementById('symbol').value.trim().toUpperCase()||'SPY',
+    tf:document.getElementById('tf').value, days:Number(document.getElementById('days').value),
+    feed:document.getElementById('feed').value, view:document.getElementById('view').value,
+    overlays:OVERLAYS, interval:20 })); };
+  WS.onmessage=ev=>{
+    const m=JSON.parse(ev.data);
+    if(m.type==='error'){ document.getElementById('status').textContent='live: '+(m.error||'').slice(0,100); return; }
+    if(m.type!=='tick'||!m.bar)return;
+    try{ if(CHARTTYPE==='line'||CHARTTYPE==='area')PRICE.update({time:m.bar.time,value:m.bar.close}); else if(CHARTTYPE!=='heikin')PRICE.update(m.bar); }catch(_){}
+    try{ if(VOL&&m.bar.volume!=null)VOL.update({time:m.bar.time,value:m.bar.volume,color:m.bar.close>=m.bar.open?'rgba(34,197,94,0.55)':'rgba(239,83,80,0.55)'}); }catch(_){}
+    // move each overlay line's last tip
+    for(const t of (m.tips||[])){ const ln=LINES.find(l=>l._ov&&l._ov.name===t.name); if(ln){ try{ln.update({time:t.time,value:t.value});}catch(_){} } }
+    const now=new Date(); document.getElementById('status').textContent=`live · last bar ${_ET_HM.format(new Date(m.bar.time*1000))} ET · updated ${now.toLocaleTimeString()}`;
+    if(m.new_bar){ /* a fresh bar arrived; snapshot stays consistent on next Compute */ }
+  };
+  WS.onclose=()=>{ if(LIVE){ /* auto-reconnect after a beat */ setTimeout(()=>{ if(LIVE)startLive(); },3000); } };
+}
+function toggleLive(){
+  // Live means "now" — clear any As-of replay first.
+  if(!LIVE&&document.getElementById('asof').value){ document.getElementById('asof').value=''; syncAsofUI(); loadChart(); }
+  LIVE=!LIVE; const b=document.getElementById('liveBtn');
+  b.classList.toggle('on',LIVE); b.textContent=LIVE?'⏸ Live':'▶ Live';
+  if(LIVE){ const f=document.getElementById('feed').value; if(f==='polygon')banner('Polygon free tier is end-of-day delayed — switch Feed to alpaca or hybrid for live bar movement.'); startLive(); }
+  else { banner(''); stopLive(); loadChart(); }
+}
+
+async function initHealth(){
+  try{ const h=await (await fetch('/api/health',{cache:'no-store'})).json();
+    // STALE-SHELL DETECTOR. The server hashes the index.html it serves; this
+    // page hashes itself. If they differ, the browser is running a CACHED
+    // copy from before the last deploy — which looks exactly like a missing
+    // feature, and cost a round trip of "where did my scanners go?".
+    let mine='';
+    try{
+      const txt=await (await fetch(location.pathname||'/',{cache:'reload'})).text();
+      const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(txt));
+      mine=[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,8);
+    }catch(_){}
+    const stale = mine && h.ui && mine!==h.ui;
+    document.getElementById('build').textContent='build '+(h.build||'?')
+      +(stale?' · STALE PAGE':'');
+    if(stale){
+      document.getElementById('build').style.color='#f59e0b';
+      banner('You are viewing a CACHED page from before the last deploy — new '
+            +'controls will be missing. Pull down to refresh, or close this tab '
+            +'and reopen '+location.host+'. (page '+mine+' vs server '+h.ui+')');
+    }
+    FEEDS=h.feeds||{};
+    for(const id of ['feed','btFeed']){
+      const sel=document.getElementById(id);
+      for(const o of sel.options){ const ok=h.feeds&&h.feeds[o.value]; o.textContent=o.value+(ok?'':' (no key)'); }
+    }
+    const sel=document.getElementById('feed');
+    if(!localStorage.getItem('qpc_feed')&&h.default_feed)sel.value=h.default_feed;
+    // a persisted selection whose key is GONE would silently return no data —
+    // fall back to the feed the server says is actually configured
+    if(h.default_feed&&FEEDS[sel.value]===false)sel.value=h.default_feed;
+    // backtests default to the server's preferred feed (full-market coverage),
+    // NOT the chart's current pick — thin feeds silently shrink the universe
+    if(h.default_feed)document.getElementById('btFeed').value=h.default_feed;
+  }catch(_){}
+}
+
+// ── Phase 2: screener register navigation ──
+function syncAsofUI(){
+  const asof=document.getElementById('asof').value;
+  document.getElementById('asof').classList.toggle('set',!!asof);
+  const lb=document.getElementById('liveBtn');
+  lb.disabled=!!asof; lb.style.opacity=asof?.5:1;
+  lb.title=asof?'Live is off while As-of is set (a past date). Clear As-of to go live.':'';
+}
+/* ── scanning tools (multi-source) ────────────────────────────────────────
+   Several scanning tools run side by side, each freezing its OWN R1 and
+   Shortlist. The source rides on the register string — 'R1' (default tool),
+   's3:R1' (one tool), '*:R1' (all of them merged) — so every picker is just
+   a list of those strings and nothing downstream had to change. */
+let REG_OPTIONS=[];
+function fillRegPicker(sel, opts, keep){
+  const cur = keep!==undefined ? keep : sel.value;
+  sel.innerHTML='';
+  for(const o of opts){ const e=document.createElement('option');
+    e.value=o.value; e.textContent=o.label; sel.appendChild(e); }
+  if(cur && opts.some(o=>o.value===cur)) sel.value=cur;
+}
+async function loadSources(){
+  try{
+    const j=await (await fetch('/api/screener/sources')).json();
+    REG_OPTIONS=j.options||[];
+    if(REG_OPTIONS.length){
+      fillRegPicker(document.getElementById('regReg'), REG_OPTIONS,
+                    REG_OPTIONS.length>1?REG_OPTIONS[0].value:'R1');
+      // backtest universe keeps "Symbols" first, then every register option
+      const bu=document.getElementById('btUni');
+      fillRegPicker(bu, [{value:'symbols',label:'Symbols'},
+        ...REG_OPTIONS.map(o=>({value:o.value,label:'Register '+o.label}))], 'symbols');
+    }
+    // one line saying which tools answered — a dead scanner must be visible,
+    // not mistaken for "no candidates today"
+    const bar=document.getElementById('srcBar'); const ss=j.sources||[];
+    // each tool in its OWN accent (straight from tools.config.json) so a tool
+    // is recognisable here, on its own landing page and on the register cards
+    if(bar) bar.innerHTML = ss.map(s=>
+      '<span title="'+s.url+(s.capture_r1?' · R1 frozen '+s.capture_r1:'')
+      +(s.ok?'':' — '+((s.error||'')+'').slice(0,120))+'" style="margin-right:8px;color:'
+      +(s.ok?(s.color||'#22c55e'):'#ef4444')+'">'+(s.ok?'●':'○')+' '+s.name
+      +(s.ok?' ('+(s.r1_dates||0)+'d)':' down')+'</span>').join('');
+    return ss;
+  }catch(e){ return []; }
+}
+async function loadRegDates(){
+  const reg=document.getElementById('regReg').value, sel=document.getElementById('regDate');
+  try{
+    const j=await (await fetch('/api/screener/dates?register='+encodeURIComponent(reg))).json();
+    const dates=j.dates||[]; sel.innerHTML='';
+    if(!dates.length){ sel.innerHTML='<option value="">latest</option>'; }
+    else for(const d of dates){ const o=document.createElement('option'); o.value=d; o.textContent=d; sel.appendChild(o); }
+  }catch(_){ sel.innerHTML='<option value="">latest</option>'; }
+  loadRegister();
+}
+async function loadRegister(){
+  const reg=document.getElementById('regReg').value, date=document.getElementById('regDate').value;
+  const box=document.getElementById('regList'); box.innerHTML='<div class="muted">Loading…</div>';
+  try{
+    const qs=new URLSearchParams({register:reg}); if(date)qs.set('date',date);
+    const j=await (await fetch('/api/screener/register?'+qs)).json();
+    const warn=document.getElementById('regWarn');
+    if(!j.ok){ REG_ROWS=[]; if(warn)warn.innerHTML=''; box.innerHTML='<div class="muted">No scanning tool answered for '+reg+' — start it, or check chart/screener_sources.json.<br><span style="color:var(--text3)">'+((j.error||'')+'').slice(0,140)+'</span></div>'; return; }
+    // a PARTIAL answer (some tools down) must be visible — a thinner universe
+    // otherwise looks exactly like a quiet day. Its own element, because
+    // renderRegister() rebuilds regList from scratch.
+    if(warn) warn.innerHTML=(j.sources_failed&&j.sources_failed.length)
+      ? '<span style="color:#f59e0b">⚠ '+j.sources_failed.length+' scanning tool(s) did not answer — this list is INCOMPLETE: '
+        +(j.sources_failed.join('; ')+'').slice(0,120)+'</span>' : '';
+    REG_ROWS=j.rows||[];
+    renderRegister();
+  }catch(e){ REG_ROWS=[]; box.innerHTML='<div class="muted">error: '+e.message+'</div>'; }
+}
+function scoreColor(s){ if(typeof s!=='number')return{bg:'#1c2431',fg:'#94a3b8'};
+  if(s>=70)return{bg:'rgba(34,197,94,.18)',fg:'#22c55e'};
+  if(s>=45)return{bg:'rgba(245,166,35,.18)',fg:'#f5a623'};
+  return{bg:'rgba(239,83,80,.16)',fg:'#ef5350'}; }
+function fmtPct(v){ return (typeof v==='number')?(v>=0?'+':'')+v.toFixed(1)+'%':'—'; }
+function renderRegister(){
+  const box=document.getElementById('regList');
+  if(!REG_ROWS.length){ box.innerHTML='<div class="muted">No stocks on this register/date.</div>'; return; }
+  const curSym=(document.getElementById('symbol').value||'').trim().toUpperCase();
+  box.innerHTML='';
+  for(const c of REG_ROWS){
+    const sc=scoreColor(c.score);
+    const el=document.createElement('div'); el.className='card'+(c.ticker===curSym?' on':'');
+    const chg=(typeof c.change==='number')?`<span class="${c.change>=0?'up':'dn'}" style="font-size:11px">${fmtPct(c.change)}</span>`:'';
+    const meta=[c.regime,c.sector,c.secBias&&('sec '+c.secBias)].filter(Boolean).join(' · ');
+    // WHICH scanning tool found it — and when more than one did, say so:
+    // independent scanners agreeing is a signal worth seeing on the card.
+    const src=c.source_count>1 ? '<b style="color:#22c55e">'+c.source_count+'× '+c.sources+'</b>'
+                               : (c.source_name||c.source||'');
+    const meta2=[c.gapPct!=null?'gap '+fmtPct(c.gapPct):null, c.rvol!=null?'rvol '+Number(c.rvol).toFixed(1):null, c.method?('★'+c.method):null, src||null].filter(Boolean).join(' · ');
+    el.innerHTML=`<div class="top"><span class="tk">${c.ticker}</span>${chg}<span class="sc" style="background:${sc.bg};color:${sc.fg}">${typeof c.score==='number'?Math.round(c.score):'—'}</span></div>`
+      +`<div class="meta">${meta||'—'}</div>`+(meta2?`<div class="meta">${meta2}</div>`:'');
+    el.onclick=()=>pickStock(c);
+    box.appendChild(el);
+  }
+}
+/* Clicking a register stock NAVIGATES to that day — it does not truncate the
+   chart at it. As-of is a REPLAY cutoff (hide everything after date D, for
+   evaluating a setup as it stood); reviewing a register name is the opposite
+   job: you want the whole tape THROUGH TODAY and to land on that session, so
+   you can see what happened next. So: clear as-of, widen the window far
+   enough back to contain the date, load, then scroll to it.
+   As-of is still there and still honest — set it by hand for a true replay. */
+let JUMP_DATE=null;                 // 'YYYY-MM-DD' to scroll to after loading
+const _ET_YMD=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',
+  year:'numeric',month:'2-digit',day:'2-digit'});
+function jumpToDate(d){
+  if(!d||!PRICEBARS.length||!CHART)return false;
+  const hit=[];
+  for(let i=0;i<PRICEBARS.length;i++)
+    if(_ET_YMD.format(new Date(PRICEBARS[i].time*1000))===d)hit.push(i);
+  if(!hit.length)return false;        // that session is not in the loaded data
+  const pad=Math.max(10,Math.round(hit.length*0.35));   // a little context either side
+  const a=PRICEBARS[Math.max(0,hit[0]-pad)].time;
+  const b=PRICEBARS[Math.min(PRICEBARS.length-1,hit[hit.length-1]+pad)].time;
+  try{ CHART.timeScale().setVisibleRange({from:a,to:b}); return true; }catch(_){ return false; }
+}
+function pickStock(c){
+  document.getElementById('symbol').value=c.ticker;
+  const date=document.getElementById('regDate').value||c.date||'';
+  document.getElementById('asof').value='';        // navigate, don't truncate
+  if(date&&feedHas('polygon'))document.getElementById('feed').value='polygon';  // deep history
+  if(date){
+    // the window must reach BACK to that date and forward to now, or there
+    // would be nothing to scroll to. Never shrink the user's own setting.
+    const back=Math.ceil((Date.now()-Date.parse(date+'T00:00:00Z'))/86400000)+5;
+    const cur=Number(document.getElementById('days').value)||5;
+    if(back>cur)document.getElementById('days').value=Math.min(back,400);
+    JUMP_DATE=date;
+  }
+  syncAsofUI(); renderRegister(); loadChart();
+}
+
+// ── Phase 3: strategy builder ──
+const OPS=[['gt','>'],['lt','<'],['ge','≥'],['le','≤'],['gt_pct','above by ≥%'],['lt_pct','below by ≥%'],['cross_above','crosses ▲'],['cross_below','crosses ▼'],['bounce_up','bounces ▲ off'],['bounce_down','bounces ▼ off'],['rising','rising'],['falling','falling'],['eq','='],['neq','≠']];
+const UNARY=new Set(['rising','falling']);
+const BOUNCE=new Set(['bounce_up','bounce_down']);
+const PCT=new Set(['gt_pct','lt_pct']);
+const PFIELDS=['close','open','high','low','hl2','hlc3','ohlc4','volume'];
+let STRAT=blankStrat(), SAVED=[];
+function blankStrat(){ return {id:null,name:'',side:'long',risk:{sl:{type:'',value:null},tp:{type:'',value:null}},entry:{logic:'AND',window:10,k:1,rules:[]},exit:{logic:'AND',window:10,k:1,rules:[]}}; }
+function blankGroup(){ return {logic:'OR',window:10,k:1,rules:[]}; }
+function isGroup(n){ return n && Array.isArray(n.rules); }
+function blankOperand(kind){ if(kind==='const')return {kind:'const',value:0}; if(kind==='price')return {kind:'price',field:'close'}; if(kind==='time')return {kind:'time',field:'minutes'}; if(kind==='trade')return {kind:'trade',field:'pnl_pct'}; if(kind==='expr')return {kind:'expr',op:'sub',a:blankOperand('price'),b:blankOperand('const')}; return {kind:'primitive',key:(PRIMS[0]&&PRIMS[0].key)||'ma.ema',source:'close',params:{}}; }
+const EXPR_OPS=[['add','+'],['sub','−'],['mul','×'],['div','÷']];
+// Primitives whose NUMBER of output lines is driven by a param (not fixed).
+// dynamic_sr returns sr1..sr{max_levels}, so the line picker must track that
+// param — otherwise you'd pick a line the primitive never emits (→ error) or
+// miss lines beyond the static default.
+const OUT_COUNT_PARAM={'levels.dynamic_sr':'max_levels'};
+function effectiveOutputs(op, m){
+  if(!m||!m.outputs)return [];
+  if(op.key==='levels.dynamic_sr'){
+    let ml=parseInt(op.params&&op.params.max_levels,10); if(!Number.isFinite(ml))ml=6;
+    ml=Math.max(1,Math.min(10,ml));
+    return Array.from({length:ml},(_,i)=>'sr'+(i+1));
+  }
+  return m.outputs;
+}
+function seedTemplate(){ // a readable EMA-cross default so the builder isn't blank
+  const ema=()=>({kind:'primitive',key:'ma.ema',source:'close',params:{length:9}});
+  STRAT.entry.rules=[{left:{kind:'price',field:'close'},op:'cross_above',right:ema()}];
+  STRAT.exit.rules=[{left:{kind:'price',field:'close'},op:'cross_below',right:ema()}];
+}
+function blankRule(){ return {left:blankOperand('price'),op:'gt',right:blankOperand('primitive')}; }
+function primSelect(val){ const sel=document.createElement('select'); const groups={}; for(const p of PRIMS)(groups[p.group]||=[]).push(p); for(const g of Object.keys(groups).sort()){ const og=document.createElement('optgroup'); og.label=g; for(const p of groups[g]){ const o=document.createElement('option'); o.value=p.key; o.textContent=p.name; og.appendChild(o);} sel.appendChild(og);} if(val)sel.value=val; return sel; }
+function operandEl(op, onStruct, allowConst){
+  const box=document.createElement('span'); box.className='opd';
+  const kindSel=document.createElement('select');
+  const kinds=[['primitive','Indicator'],['price','Price'],['time','Time'],['trade','Trade'],['expr','Expr ()']]; if(allowConst)kinds.push(['const','Value']);
+  for(const [v,l] of kinds){ const o=document.createElement('option'); o.value=v; o.textContent=l; kindSel.appendChild(o);} kindSel.value=op.kind;
+  kindSel.onchange=()=>{ const repl=blankOperand(kindSel.value); for(const k of Object.keys(op))delete op[k]; Object.assign(op,repl); onStruct(); };
+  box.appendChild(kindSel);
+  let canOffset=false;
+  if(op.kind==='expr'){
+    if(!op.a)op.a=blankOperand('price'); if(!op.b)op.b=blankOperand('const'); if(!op.op)op.op='sub';
+    const l=document.createElement('span'); l.textContent='('; l.style.color='var(--text3)'; box.appendChild(l);
+    box.appendChild(operandEl(op.a, onStruct, true));
+    const os=document.createElement('select'); for(const [v,s] of EXPR_OPS){const o=document.createElement('option');o.value=v;o.textContent=s;os.appendChild(o);} os.value=op.op; os.onchange=()=>op.op=os.value; box.appendChild(os);
+    box.appendChild(operandEl(op.b, onStruct, true));
+    const r=document.createElement('span'); r.textContent=')'; r.style.color='var(--text3)'; box.appendChild(r); canOffset=true;
+  } else if(op.kind==='primitive'){
+    const ps=primSelect(op.key); ps.onchange=()=>{op.key=ps.value; op.params={}; delete op.sub; onStruct();}; box.appendChild(ps);
+    const m=primMeta(op.key); op.params=op.params||{};
+    // ALL params of the primitive (length, mult, window start/end, strength…)
+    for(const p of (m&&m.params||[])){
+      if(p.kind==='bool'){ const cb=document.createElement('input'); cb.type='checkbox'; cb.title=p.name; cb.checked=op.params[p.name]!=null?!!op.params[p.name]:!!p.default; cb.onchange=()=>op.params[p.name]=cb.checked; box.appendChild(document.createTextNode(p.name.slice(0,4))); box.appendChild(cb); }
+      else if(p.kind==='int'||p.kind==='float'){ const li=document.createElement('input'); li.type='number'; li.className='len'; li.title=p.name; li.placeholder=p.name+(p.default!=null?(' '+p.default):''); if(p.kind==='float')li.step='any'; if(op.params[p.name]!=null)li.value=op.params[p.name]; const govern=(OUT_COUNT_PARAM[op.key]===p.name); li.onchange=()=>{const v=(p.kind==='float')?parseFloat(li.value):parseInt(li.value,10); if(Number.isFinite(v))op.params[p.name]=v; else delete op.params[p.name]; if(govern)onStruct();}; box.appendChild(li); }
+      else { const ti=document.createElement('input'); ti.className='len'; ti.style.width='58px'; ti.title=p.name; ti.placeholder=p.name; if(op.params[p.name]!=null)ti.value=op.params[p.name]; ti.onchange=()=>{ if(ti.value)op.params[p.name]=ti.value; else delete op.params[p.name]; }; box.appendChild(ti); }
+    }
+    // multi-output primitives (floor P/R1/S1…, dynamic_sr sr1…, BB middle/upper/lower) → pick the line
+    const outs=effectiveOutputs(op, m);
+    if(outs.length>1){ if(!op.sub||outs.indexOf(op.sub)<0)op.sub=outs[0]; const os=document.createElement('select'); os.title='which output line'; for(const o of outs){const opt=document.createElement('option');opt.value=o;opt.textContent=o;os.appendChild(opt);} os.value=op.sub; os.onchange=()=>op.sub=os.value; box.appendChild(os); }
+    else if(op.sub){ delete op.sub; }
+    // input source only matters for source-input primitives (MAs, RSI…); bars-
+    // input ones (VWAPs, pivots, candle*) ignore it — don't show a dead control.
+    if(m&&m.inputs&&m.inputs.indexOf('source')>=0){ const src=document.createElement('select'); src.title='input source'; for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;src.appendChild(o);} src.value=op.source||'close'; src.onchange=()=>op.source=src.value; box.appendChild(src); }
+    canOffset=true;
+  } else if(op.kind==='price'){
+    const fs=document.createElement('select'); for(const f of PFIELDS){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'close'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs); canOffset=true;
+  } else if(op.kind==='time'){
+    const fs=document.createElement('select'); for(const f of ['minutes','hhmm','hour','minute']){const o=document.createElement('option');o.value=f;o.textContent=f;fs.appendChild(o);} fs.value=op.field||'minutes'; fs.title='ET time-of-day (minutes since midnight, hhmm=930, …)'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs);
+  } else if(op.kind==='trade'){
+    const fs=document.createElement('select'); for(const [v,l] of [['pnl_pct','P&L %'],['bars','bars in trade'],['entry','entry price']]){const o=document.createElement('option');o.value=v;o.textContent=l;fs.appendChild(o);} fs.value=op.field||'pnl_pct'; fs.title='the OPEN position — exit rules only; each trade sees its own entry'; fs.onchange=()=>op.field=fs.value; box.appendChild(fs);
+  } else { const ci=document.createElement('input'); ci.type='number'; ci.step='any'; ci.className='cst'; ci.value=op.value??0; ci.onchange=()=>op.value=parseFloat(ci.value); box.appendChild(ci); }
+  if(canOffset){ const off=document.createElement('input'); off.type='number'; off.className='len'; off.style.width='40px'; off.title='bars ago (e.g. 1 = previous bar)'; off.placeholder='[0]'; if(op.offset)off.value=op.offset; off.onchange=()=>{const v=parseInt(off.value,10); if(Number.isFinite(v)&&v>0)op.offset=v; else delete op.offset;}; box.appendChild(off); }
+  // HOLD (forward-fill): carry this operand's last real value forward. Turns a
+  // sparse primitive (pivot_high/low — NaN except on a confirmation bar) into a
+  // PERSISTENT level line. Only meaningful for primitives/expr (price is never
+  // NaN); shown there so you can build "break/retest a level".
+  if(op.kind==='primitive'||op.kind==='expr'){
+    const hl=document.createElement('span'); hl.textContent='⇢hold'; hl.style.cssText='color:var(--text3);font-size:10px;cursor:help';
+    hl.title='HOLD: carry the last real value forward (fixnan). A sparse pivot_high becomes a horizontal resistance line held until the next swing high. Needed to break/retest a fixed level.';
+    const hb=document.createElement('input'); hb.type='checkbox'; hb.style.margin='0 0 0 2px'; hb.title=hl.title; hb.checked=!!op.hold;
+    hb.onchange=()=>{ if(hb.checked)op.hold=true; else delete op.hold; onStruct(); };
+    box.appendChild(hl); box.appendChild(hb);
+  }
+  return box;
+}
+function labeled(txt,el){ const s=document.createElement('span'); s.className='opd'; const l=document.createElement('span'); l.style.cssText='color:var(--text3);font-size:10px'; l.textContent=txt; s.appendChild(l); s.appendChild(el); return s; }
+function opParamInput(rule,key,def){ rule.op_params=rule.op_params||{}; const i=document.createElement('input'); i.type='number'; i.step='any'; i.className='len'; i.placeholder=String(def); if(rule.op_params[key]!=null)i.value=rule.op_params[key]; i.onchange=()=>{const v=parseFloat(i.value); if(Number.isFinite(v))rule.op_params[key]=v; else delete rule.op_params[key];}; return i; }
+function holdControl(rule){
+  const wrap=document.createElement('span'); wrap.className='opd';
+  const sel=document.createElement('select'); sel.className='logicsel'; sel.title='sustained: require the condition to hold';
+  for(const [v,l] of [['','hold —'],['for','held for'],['within','within']]){const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);}
+  const cur=rule.for_bars?'for':(rule.within_bars?'within':''); sel.value=cur;
+  const nIn=document.createElement('input'); nIn.type='number'; nIn.className='len'; nIn.style.width='40px'; nIn.placeholder='N bars'; nIn.value=rule.for_bars||rule.within_bars||''; nIn.style.display=cur?'':'none';
+  const apply=()=>{ delete rule.for_bars; delete rule.within_bars; const m=sel.value; nIn.style.display=m?'':'none'; const v=parseInt(nIn.value,10); if(m&&Number.isFinite(v)&&v>1){ if(m==='for')rule.for_bars=v; else rule.within_bars=v; } };
+  sel.onchange=apply; nIn.onchange=apply; wrap.appendChild(sel); wrap.appendChild(nIn); return wrap;
+}
+function ruleRowEl(group, rule){
+  const row=document.createElement('div'); row.className='rrow';
+  const leftEl=operandEl(rule.left, renderStrat, false);
+  if(BOUNCE.has(rule.op)){ leftEl.style.opacity='.4'; leftEl.title='ignored — a bounce reads the PRICE BAR itself (wick touch + close back); only the level on the right matters'; }
+  row.appendChild(leftEl);
+  const opSel=document.createElement('select'); for(const [v,l] of OPS){const o=document.createElement('option');o.value=v;o.textContent=l;opSel.appendChild(o);} opSel.value=rule.op; opSel.onchange=()=>{rule.op=opSel.value; renderStrat();}; row.appendChild(opSel);
+  if(UNARY.has(rule.op)){
+    row.appendChild(labeled('over', opParamInput(rule,'lookback',12)));
+    const mp=opParamInput(rule,'min_pct',0); mp.title='minimum NET move over the lookback, as % of the start value: 0 = any move in the direction counts; 0.2 = must have risen/fallen at least 0.2% over the window'; row.appendChild(labeled('bars · net≥%', mp));
+    const cn=opParamInput(rule,'consistency',0.75); cn.title='how one-way the move must be: fraction of the window’s bar-to-bar changes pointing in the direction. 0.75 = 9 of 12 moves up (for rising). Flat bars don’t count against it. 0 = direction only; 1 = strictly one-way.'; row.appendChild(labeled('cons≥', cn));
+  } else if(BOUNCE.has(rule.op)){
+    row.appendChild(operandEl(rule.right, renderStrat, true));
+    row.appendChild(labeled('tol%', opParamInput(rule,'tol_pct',0.15)));
+    const cp=opParamInput(rule,'close_pos',0.6); cp.title='how decisively it must close away from the level: 0.6 = close in the top 60% of the bar’s range (bottom for bounce ▼) — rejects doji touches'; row.appendChild(labeled('pos≥', cp));
+    const wi=opParamInput(rule,'within',1); wi.title='touch → confirmation window: 1 = same candle must touch AND turn; 3 = a weak candle may tap the level and a strong one confirm up to 2 bars later (no close through the level in between). Most real bounces need 2-3.'; row.appendChild(labeled('win', wi));
+  } else if(PCT.has(rule.op)){
+    row.appendChild(operandEl(rule.right, renderStrat, true));
+    row.appendChild(labeled('%', opParamInput(rule,'pct',1)));
+  } else {
+    row.appendChild(operandEl(rule.right, renderStrat, true));
+  }
+  row.appendChild(holdControl(rule));
+  const so=document.createElement('input'); so.type='number'; so.className='len'; so.style.width='42px'; so.placeholder='ago 0';
+  so.title='SIGNAL shift: this condition was true N bars AGO — moves the whole signal right on the chart (works for bounce too). Operand [n] boxes shift a value; this shifts the rule’s result.';
+  if(rule.offset)so.value=rule.offset; so.onchange=()=>{const v=parseInt(so.value,10); if(Number.isFinite(v)&&v>0)rule.offset=v; else delete rule.offset;};
+  row.appendChild(labeled('ago', so));
+  const t=document.createElement('span'); t.className='rx'; t.textContent='🔍'; t.title='test this condition — mark every bar it holds'; t.style.marginLeft='auto'; t.onclick=()=>testRule(rule); row.appendChild(t);
+  const x=document.createElement('span'); x.className='rx'; x.textContent='✕'; x.title='remove'; x.onclick=()=>{group.rules=group.rules.filter(r=>r!==rule); renderStrat();}; row.appendChild(x);
+  return row;
+}
+async function testRule(rule){
+  readStratHeader();
+  const body={ node:rule, symbol:document.getElementById('symbol').value.trim().toUpperCase()||'SPY', tf:document.getElementById('tf').value, days:Number(document.getElementById('days').value), feed:document.getElementById('feed').value, view:document.getElementById('view').value, asof:document.getElementById('asof').value||'' };
+  document.getElementById('stratStat').textContent='testing…';
+  try{
+    const j=await (await fetch('/api/strategy/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!j.ok){ document.getElementById('stratStat').textContent='test error: '+(j.error||'').slice(0,160); return; }
+    SIGMARKERS=j.markers||[]; refreshMarkers();
+    drawStratSeries(j.series);        // draw the actual indicator lines this condition reads
+    const val=(j.left_now!=null)?` · now <b>${j.left_now}</b>${j.right_now!=null?' vs '+j.right_now:''}`:'';
+    document.getElementById('stratStat').innerHTML=`🔍 true on <b>${j.true}</b>/${j.bars} bars (${j.pct}%)${val} · ${j.now?'<span class="up">TRUE now</span>':'<span class="muted">idle</span>'}`;
+  }catch(e){ document.getElementById('stratStat').textContent='test error: '+e.message; }
+}
+function logicControl(grp){
+  const wrap=document.createElement('span'); wrap.className='opd';
+  const sel=document.createElement('select'); sel.className='logicsel';
+  for(const [v,l] of [['AND','ALL match'],['OR','ANY match'],['ATLEAST','AT LEAST k'],['THEN','IN SEQUENCE']]){const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);}
+  sel.value=grp.logic||'OR';
+  const kIn=document.createElement('input'); kIn.type='number'; kIn.className='len'; kIn.style.width='38px'; kIn.placeholder='k'; kIn.value=grp.k!=null?grp.k:1;
+  const wIn=document.createElement('input'); wIn.type='number'; wIn.className='len'; wIn.style.width='50px'; wIn.placeholder='within N'; wIn.value=grp.window!=null?grp.window:10;
+  const upd=()=>{ kIn.style.display=sel.value==='ATLEAST'?'':'none'; wIn.style.display=sel.value==='THEN'?'':'none'; };
+  sel.onchange=()=>{ grp.logic=sel.value; upd(); }; kIn.onchange=()=>{ const v=parseInt(kIn.value,10); grp.k=Number.isFinite(v)?v:1; }; wIn.onchange=()=>{ const v=parseInt(wIn.value,10); grp.window=Number.isFinite(v)?v:10; };
+  upd(); wrap.appendChild(sel); wrap.appendChild(kIn); wrap.appendChild(wIn); return wrap;
+}
+function renderGroupChildren(grp, container){
+  container.innerHTML='';
+  if(!grp.rules.length){ const d=document.createElement('div'); d.className='muted'; d.style.fontSize='11px'; d.textContent='no conditions — + condition / + group'; container.appendChild(d); return; }
+  for(const child of grp.rules){ container.appendChild(isGroup(child)?groupBox(child,grp):ruleRowEl(grp,child)); }
+}
+function groupBox(grp, parent){
+  const box=document.createElement('div'); box.className='subgroup';
+  const head=document.createElement('div'); head.className='rrow'; head.style.cssText='border-bottom:none;padding:0 0 4px';
+  const lbl=document.createElement('span'); lbl.style.cssText='color:var(--blue);font-size:12px;font-weight:700'; lbl.textContent='('; head.appendChild(lbl);
+  head.appendChild(logicControl(grp));
+  const rm=document.createElement('span'); rm.className='rx'; rm.textContent='✕ group'; rm.title='remove group'; rm.style.marginLeft='auto'; rm.onclick=()=>{ parent.rules=parent.rules.filter(r=>r!==grp); renderStrat(); }; head.appendChild(rm);
+  box.appendChild(head);
+  const body=document.createElement('div'); renderGroupChildren(grp, body); box.appendChild(body);
+  const foot=document.createElement('div');
+  const ac=document.createElement('button'); ac.className='addrule'; ac.textContent='+ condition'; ac.onclick=()=>{ grp.rules.push(blankRule()); renderStrat(); };
+  const ag=document.createElement('button'); ag.className='addrule'; ag.textContent='+ group'; ag.onclick=()=>{ grp.rules.push(blankGroup()); renderStrat(); };
+  const cl=document.createElement('span'); cl.style.cssText='color:var(--blue);font-size:12px;font-weight:700;margin-left:5px'; cl.textContent=')';
+  foot.appendChild(ac); foot.appendChild(ag); foot.appendChild(cl); box.appendChild(foot);
+  return box;
+}
+function renderStrat(){
+  document.getElementById('stratName').value=STRAT.name||'';
+  document.getElementById('stratSide').value=STRAT.side||'long';
+  document.getElementById('stratTools').value=(STRAT.tools||[]).join(' ');
+  const risk=STRAT.risk||{};
+  document.getElementById('slType').value=(risk.sl&&risk.sl.type)||''; document.getElementById('slVal').value=(risk.sl&&risk.sl.value!=null)?risk.sl.value:'';
+  document.getElementById('tpType').value=(risk.tp&&risk.tp.type)||''; document.getElementById('tpVal').value=(risk.tp&&risk.tp.value!=null)?risk.tp.value:'';
+  // anchored SL/TP (@ line): show an operand editor for the line it trails;
+  // the value box becomes "% beyond the line" (long shifts down, short up).
+  for(const [rk,box,vid] of [['sl','slAnchor','slVal'],['tp','tpAnchor','tpVal']]){
+    const host=document.getElementById(box); host.innerHTML='';
+    const spec=risk[rk]; const isPrim=spec&&spec.type==='prim';
+    document.getElementById(vid).placeholder=isPrim?'% beyond':'1.5';
+    if(isPrim){ spec.anchor=spec.anchor||{kind:'primitive',key:'ma.ema',source:'close',params:{length:9}}; host.appendChild(operandEl(spec.anchor, renderStrat, false)); }
+  }
+  for(const g of ['entry','exit']){
+    const grp=STRAT[g]; document.getElementById(g+'Logic').value=grp.logic||'AND';
+    const win=document.getElementById(g+'Window'); win.style.display=(grp.logic==='THEN')?'':'none'; win.value=grp.window!=null?grp.window:10;
+    const kIn=document.getElementById(g+'K'); kIn.style.display=(grp.logic==='ATLEAST')?'':'none'; kIn.value=grp.k!=null?grp.k:1;
+    renderGroupChildren(grp, document.getElementById(g+'Rules'));
+  }
+  document.getElementById('discMaxDay').value=risk.max_entries_per_day!=null?risk.max_entries_per_day:'';
+  document.getElementById('discCooldown').value=risk.cooldown_bars!=null?risk.cooldown_bars:'';
+  document.getElementById('discMinHold').value=risk.min_hold_bars!=null?risk.min_hold_bars:'';
+  document.getElementById('discMaxStop').value=risk.max_stop_pct!=null?risk.max_stop_pct:'';
+  document.getElementById('discWinStart').value=risk.window_start!=null?risk.window_start:'';
+  document.getElementById('discWinEnd').value=risk.window_end!=null?risk.window_end:'';
+  renderTargets();
+}
+// ── scale-out targets editor ──
+function renderTargets(){
+  const host=document.getElementById('tgtList'); if(!host)return; host.innerHTML='';
+  const risk=STRAT.risk||(STRAT.risk={}); const tgts=risk.targets||(risk.targets=[]);
+  const TYPES=[['r','R×'],['pct','%'],['atr','ATR×'],['points','pts']];
+  tgts.forEach((t,i)=>{
+    const row=document.createElement('span'); row.style.cssText='display:inline-flex;gap:3px;align-items:center;background:#151a24;border:1px solid var(--border);border-radius:5px;padding:2px 4px';
+    const fr=document.createElement('input'); fr.type='number'; fr.step='any'; fr.className='len'; fr.style.width='42px'; fr.placeholder='frac'; fr.title='fraction of the position to take off (0.33 = a third)'; fr.value=t.fraction!=null?t.fraction:'';
+    fr.onchange=()=>{ const v=parseFloat(fr.value); t.fraction=Number.isFinite(v)?v:null; renderTargets(); };
+    const cur=t.r_multiple!=null?'r':((t.tp&&t.tp.type)||'r');
+    const ty=document.createElement('select'); for(const [v,l] of TYPES){const o=document.createElement('option');o.value=v;o.textContent=l;ty.appendChild(o);} ty.value=cur;
+    const val=document.createElement('input'); val.type='number'; val.step='any'; val.className='len'; val.style.width='44px'; val.title='R× uses entry→stop as 1R; %/ATR×/pts are distance from entry';
+    val.value=(cur==='r'?t.r_multiple:(t.tp&&t.tp.value))??'';
+    const writeVal=()=>{ const v=parseFloat(val.value); const tp=ty.value;
+      if(tp==='r'){ t.r_multiple=Number.isFinite(v)?v:null; delete t.tp; }
+      else { delete t.r_multiple; t.tp={type:tp, value:Number.isFinite(v)?v:null}; } };
+    ty.onchange=()=>{ writeVal(); renderTargets(); }; val.onchange=writeVal;
+    const del=document.createElement('span'); del.textContent='✕'; del.style.cssText='cursor:pointer;color:var(--text3)'; del.onclick=()=>{ tgts.splice(i,1); renderTargets(); };
+    row.append(fr,ty,val,del); host.appendChild(row);
+  });
+  const sum=tgts.reduce((a,t)=>a+(parseFloat(t.fraction)||0),0);
+  const runner=Math.max(0,1-sum);
+  document.getElementById('tgtSum').textContent = tgts.length? `= ${(sum*100).toFixed(0)}% scaled, ${(runner*100).toFixed(0)}% runner`+(sum>1?' ⚠ >100%':'') : '';
+}
+function drawStratSeries(series){
+  clearStratLines();
+  let pLo=Infinity,pHi=-Infinity; for(const b of PRICEBARS){ if(b.low<pLo)pLo=b.low; if(b.high>pHi)pHi=b.high; } const span=(pHi-pLo)||1; let usedOsc=false;
+  for(const s of (series||[])){ const vals=s.values||[]; if(!vals.length)continue;
+    let sLo=Infinity,sHi=-Infinity; for(const v of vals){ if(v.value<sLo)sLo=v.value; if(v.value>sHi)sHi=v.value; }
+    const onPrice=(sHi>=pLo-0.5*span)&&(sLo<=pHi+0.5*span); if(!onPrice)usedOsc=true;
+    const ln=addLine({color:s.color,lineWidth:2,priceLineVisible:false,title:s.name,lineStyle:s.style||0,lineType:s.step?1:0,lastValueVisible:true,priceScaleId:onPrice?'right':'osc',...(onPrice?{autoscaleInfoProvider:()=>null}:{})});
+    ln.setData(vals); if(s.markers&&s.markers.length&&typeof ln.setMarkers==='function'){try{ln.setMarkers(s.markers);}catch(_){}}
+    ln._ov={name:s.name,color:s.color}; ln._last=vals.length?vals[vals.length-1].value:null; STRATLINES.push(ln);
+  }
+  if(usedOsc){ try{CHART.priceScale('right').applyOptions({scaleMargins:{top:0.05,bottom:0.34}});}catch(_){} try{CHART.priceScale('osc').applyOptions({scaleMargins:{top:0.72,bottom:0.02},visible:true,borderColor:'#1e2632'});}catch(_){} }
+  updateLegend();
+}
+function readStratHeader(){ STRAT.name=document.getElementById('stratName').value; STRAT.side=document.getElementById('stratSide').value;
+  // Sent as typed; the server validates against the configured tools and
+  // rejects an unknown id. Doing it there rather than here means one rule
+  // rather than two that can disagree, and the API is safe on its own.
+  STRAT.tools=(document.getElementById('stratTools').value||'').split(/[\s,]+/).filter(Boolean);
+  const rd=(t,v,old)=>{ const vv=parseFloat(document.getElementById(v).value); const out={type:document.getElementById(t).value, value:Number.isFinite(vv)?vv:null};
+    if(out.type==='prim') out.anchor=(old&&old.anchor)||{kind:'primitive',key:'ma.ema',source:'close',params:{length:9}};   // keep the edited anchor
+    return out; };
+  const oldR=STRAT.risk||{};
+  const risk={...oldR};                                   // keep entry_mode + any other keys
+  risk.sl=rd('slType','slVal',oldR.sl); risk.tp=rd('tpType','tpVal',oldR.tp);
+  if(oldR.targets&&oldR.targets.length) risk.targets=oldR.targets; else delete risk.targets;  // scale-out legs edited in place
+  const iv=id=>{ const v=parseInt(document.getElementById(id).value,10); return Number.isFinite(v)?v:null; };
+  for(const [id,key] of [['discMaxDay','max_entries_per_day'],['discCooldown','cooldown_bars'],['discMinHold','min_hold_bars']]){
+    const v=iv(id); if(v!=null) risk[key]=v; else delete risk[key]; }
+  const ms=parseFloat(document.getElementById('discMaxStop').value);
+  if(Number.isFinite(ms)) risk.max_stop_pct=ms; else delete risk.max_stop_pct;
+  for(const [id,key] of [['discWinStart','window_start'],['discWinEnd','window_end']]){
+    const v=parseInt(document.getElementById(id).value,10); if(Number.isFinite(v)) risk[key]=v; else delete risk[key]; }
+  STRAT.risk=risk;
+  for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; const k=parseInt(document.getElementById(g+'K').value,10); STRAT[g].k=Number.isFinite(k)?k:1; } }
+async function loadStrategies(){
+  try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
+  const sel=document.getElementById('stratLoad'); sel.innerHTML='<option value="">— saved —</option>';
+  for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);} if(STRAT.id)sel.value=STRAT.id;
+  const bsel=document.getElementById('btStrat'); if(bsel){ const keep=bsel.value; bsel.innerHTML='<option value="">— saved strategy —</option>'; for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; bsel.appendChild(o);} if(keep)bsel.value=keep; }
+  // the optional SECOND book gets the same list (see the tooltip on the select)
+  const bsel2=document.getElementById('btStrat2'); if(bsel2){ const keep2=bsel2.value; bsel2.innerHTML='<option value="">— second book (optional, e.g. the short side) —</option>'; for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; bsel2.appendChild(o);} if(keep2)bsel2.value=keep2; }
+}
+
+// ── Phase 4: backtest panel ──
+let BT_POLL=null, BT_LAST=null, BT_FILTERS=[];
+const _ET_DOW=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short'});
+function btDerive(t){ // per-trade derived fields for filtering (all ET)
+  const e=new Date(t.entry_ts*1000);
+  const [eh,em]=_ET_HM.format(e).split(':').map(Number);
+  const o={...(t.ctx||{}), symbol:t.symbol, side:t.side, reason:t.reason, date:t.date,
+    ret_pct:t.ret!=null?t.ret*100:null, entry_price:t.entry,
+    pnl_ps:t.exit!=null?(t.side==='short'?-1:1)*(t.exit-t.entry):null,
+    entry_hhmm:eh*100+em, dow:_ET_DOW.format(e)};
+  if(t.exit_ts){ const x=new Date(t.exit_ts*1000); const [xh,xm]=_ET_HM.format(x).split(':').map(Number);
+    o.exit_hhmm=xh*100+xm; o.dur_min=Math.round((t.exit_ts-t.entry_ts)/60); }
+  return o;
+}
+function btMatch(t,f){ // one filter {field,op,val} against one trade
+  const v=btDerive(t)[f.field];
+  if(v==null)return false;
+  const num=parseFloat(f.val), isN=Number.isFinite(num)&&Number.isFinite(parseFloat(v));
+  const sv=String(v).toLowerCase(), fv=String(f.val).toLowerCase();
+  switch(f.op){
+    case '=': return isN?parseFloat(v)===num:sv===fv;
+    case '≠': return isN?parseFloat(v)!==num:sv!==fv;
+    case '>': return isN&&parseFloat(v)>num;
+    case '<': return isN&&parseFloat(v)<num;
+    case 'in': return fv.split(',').map(x=>x.trim()).filter(Boolean).includes(sv);
+    case 'has': return sv.includes(fv);
+  } return false;
+}
+function btApplyFilters(trades){ return (trades||[]).filter(t=>BT_FILTERS.every(f=>btMatch(t,f))); }
+function btTtp(closed,opens,base){ // mirror of backtest._ttp_block for filtered subsets
+  if(!base)return null;
+  const shares=base.shares||100, fps=base.fee_per_share||0, fmin=base.fee_min_per_order||0, mps=base.min_profit_ps!=null?base.min_profit_ps:0.10;
+  const fee=(fps||fmin)?Math.max(fps*shares,fmin):0;
+  let fees=0,net=0,counted=0,below=0;
+  for(const t of closed){ const sgn=t.side==='short'?-1:1; const pps=sgn*(t.exit-t.entry);
+    const f=fee*2, n=shares*pps-f; fees+=f; net+=n;
+    if(pps>0&&pps<mps)below++; else counted+=n; }
+  fees+=fee*opens.length;
+  const r2=x=>Math.round(100*x)/100;
+  return {shares,fee_per_share:fps,fee_min_per_order:fmin,min_profit_ps:mps,
+          fees_usd:r2(fees),net_pnl_usd:r2(net),counted_pnl_usd:r2(counted),wins_below_min:below};
+}
+function btMetrics(trades,dates){ // client-side mirror of the server summary math
+  const closed=trades.filter(t=>t.reason!=='open'), opens=trades.filter(t=>t.reason==='open');
+  const s={trades:closed.length, open_trades:opens.length, pairs:(dates||[]).length};
+  if(!closed.length)return s;
+  const rets=closed.map(t=>t.ret); const wins=rets.filter(r=>r>0).length;
+  s.wins=wins; s.win_rate=Math.round(1000*wins/closed.length)/10;
+  s.avg_return_pct=Math.round(100000*rets.reduce((a,b)=>a+b,0)/rets.length)/1000;
+  s.total_return_pct=Math.round(100000*rets.reduce((a,b)=>a+b,0))/1000;
+  s.exits_by={}; for(const t of closed)s.exits_by[t.reason]=(s.exits_by[t.reason]||0)+1;
+  const seq=[...closed].sort((a,b)=>a.exit_ts-b.exit_ts);
+  let cum=0,peak=0,dd=0; s.equity_curve=[];
+  for(const t of seq){ cum+=t.ret; peak=Math.max(peak,cum); dd=Math.max(dd,peak-cum);
+    s.equity_curve.push({time:t.exit_ts,value:Math.round(100000*cum)/1000}); }
+  s.max_drawdown_pct=Math.round(100000*dd)/1000;
+  if(dates&&dates.length){
+    const daily={}; for(const d of dates)daily[d]=0;
+    for(const t of closed)daily[t.date]=(daily[t.date]||0)+t.ret;
+    const vals=Object.keys(daily).sort().map(d=>daily[d]); const n=vals.length;
+    const mean=vals.reduce((a,b)=>a+b,0)/n;
+    const sd=n>1?Math.sqrt(vals.reduce((a,v)=>a+(v-mean)*(v-mean),0)/(n-1)):0;
+    s.sharpe=sd>1e-12?Math.round(100*mean/sd*Math.sqrt(252))/100:null;
+    let c=0,p=0,run=0,worst=0;
+    for(const v of vals){ c+=v; if(c>=p-1e-12){p=c;run=0;} else {run++; worst=Math.max(worst,run);} }
+    s.max_dd_days=worst;
+  }
+  return s;
+}
+function btFieldOptions(trades){
+  const keys=new Set(['symbol','side','reason','date','ret_pct','entry_price','entry_hhmm','exit_hhmm','dur_min','dow']);
+  for(const t of trades||[])for(const k of Object.keys(t.ctx||{}))keys.add(k);
+  const sel=document.getElementById('btFField'); sel.innerHTML='';
+  for(const k of [...keys].sort()){const o=document.createElement('option');o.value=k;o.textContent=k;sel.appendChild(o);}
+}
+function btRenderFilters(){
+  const box=document.getElementById('btFRows'); box.innerHTML='';
+  BT_FILTERS.forEach((f,i)=>{ const d=document.createElement('div'); d.className='muted'; d.style.cssText='display:flex;gap:4px;align-items:center;font-size:11px';
+    d.innerHTML=`<span style="color:var(--text)">${f.field} ${f.op} ${f.val}</span>`;
+    const x=document.createElement('span'); x.className='rx'; x.textContent='✕'; x.style.marginLeft='auto';
+    x.onclick=()=>{BT_FILTERS.splice(i,1); btRefresh();}; d.appendChild(x); box.appendChild(d); });
+}
+function btRefresh(){ if(!BT_LAST)return;
+  const ft=btApplyFilters(BT_LAST.trades||[]);
+  const s=btMetrics(ft, (BT_LAST.summary&&BT_LAST.summary.dates)||[]);
+  s.cost_bps_per_side=BT_LAST.summary&&BT_LAST.summary.cost_bps_per_side;
+  // TTP for the FILTERED subset. btTtp is an exact mirror of the server for a
+  // single-exit run, but it prices a trade as one fill (entry→exit): a
+  // SCALE-OUT run banks partials at leg prices and pays a commission per leg,
+  // and `legs` are not persisted per trade — so the mirror would quietly
+  // report a different number than the run itself. Fall back to the server's
+  // whole-run block and label it rather than compute a wrong one.
+  const _sc=(BT_LAST.summary&&BT_LAST.summary.coverage&&BT_LAST.summary.coverage.scaleout_trades)||0;
+  if(BT_LAST.summary&&BT_LAST.summary.ttp){
+    s.ttp = _sc ? {...BT_LAST.summary.ttp, _whole_run:true}
+                : btTtp(ft.filter(t=>t.reason!=='open'&&t.exit!=null), ft.filter(t=>t.reason==='open'), BT_LAST.summary.ttp);
+  }
+  s.errors=0;
+  btRenderFilters();
+  btRenderCore({summary:s, trades:ft}, BT_FILTERS.length?` · filtered ${ft.length}/${(BT_LAST.trades||[]).length}`:'');
+}
+function btCsvExport(){ if(!BT_LAST)return;
+  const ft=btApplyFilters(BT_LAST.trades||[]);
+  const keys=new Set(); for(const t of ft)for(const k of Object.keys(t.ctx||{}))keys.add(k);
+  const ck=[...keys].sort();
+  const head=['date','symbol','side','entry_ts','exit_ts','entry','exit','ret_pct','reason',...ck.map(k=>'ctx_'+k)];
+  const esc=v=>{v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const lines=[head.join(',')];
+  for(const t of ft){ lines.push([t.date,t.symbol,t.side,t.entry_ts,t.exit_ts??'',t.entry,t.exit??'',
+    t.ret!=null?(t.ret*100).toFixed(4):'',t.reason,...ck.map(k=>(t.ctx||{})[k]??'')].map(esc).join(',')); }
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='backtest_'+(BT_LAST.id||'x')+(BT_FILTERS.length?'_filtered':'')+'.csv'; a.click();
+}
+function btRender(g){
+  BT_LAST=g; BT_FILTERS=[];
+  document.getElementById('btFilters').style.display='';
+  btFieldOptions(g.trades); btRenderFilters();
+  btRenderCore(g,'');
+}
+function btRenderCore(g,extra){
+  const sum=document.getElementById('btSummary'), tbl=document.getElementById('btTrades');
+  const s=g.summary;
+  if(!s){ sum.innerHTML=''; tbl.innerHTML=''; return; }
+  const by=s.exits_by?Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' '):'';
+  // A run reports THREE different P&L numbers and they differ by more than
+  // 10x: a sum of percent moves, a flat-share prop-firm total, and the real
+  // account's dollars. Shown side by side with nothing saying which answers
+  // "what did I make", the panel was unreadable — so the money now leads,
+  // alone, with the assumptions it rests on printed next to it, and the other
+  // two are labelled as the different questions they answer.
+  const _usd=v=>(Number(v)<0?'-$':'$')+Math.abs(Number(v)||0)
+    .toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  const _usdS=v=>(Number(v)>=0?'+':'')+_usd(v);
+  const _ac=s.account;
+  let html='';
+  if(_ac){
+    const good=_ac.net_pnl_usd>=0;
+    html+=`<div style="border:1px solid var(--blue);border-radius:6px;padding:8px 9px;margin:0 0 7px">`
+      +`<div style="color:var(--text3);font-size:10px;letter-spacing:.04em">YOUR ACCOUNT — `
+        +`${_usd(_ac.account_equity_start)} · risking ${_ac.risk_pct}% per trade`
+        +(_ac.max_leverage>1?` · up to ${_ac.max_leverage}x`:` · cash only`)+`</div>`
+      +`<div style="font-size:21px;font-weight:700;line-height:1.25;color:${good?'var(--accent)':'var(--red)'}">`
+        +`${_usdS(_ac.net_pnl_usd)}`
+        +`<span style="font-size:13px;font-weight:600"> (${_ac.return_pct>=0?'+':''}${_ac.return_pct}%)</span></div>`
+      +`<div style="font-size:11px;color:var(--text2)">${_usd(_ac.account_equity_start)} → `
+        +`<b style="color:var(--text)">${_usd(_ac.equity_end)}</b>`
+        +` · <b>net of ${_usd(_ac.fees_usd)} fees</b>`
+        +(_ac.fee_per_share||_ac.fee_min_per_order
+          ?` (${_ac.fee_per_share?'$'+_ac.fee_per_share+'/share':''}`
+           +(_ac.fee_per_share&&_ac.fee_min_per_order?', ':'')
+           +(_ac.fee_min_per_order?'min $'+_ac.fee_min_per_order+'/order':'')+`)`:'')+`</div>`
+      +`<div style="font-size:11px;color:var(--text2);margin-top:2px">`
+        +`${_ac.trades_sized} of ${s.trades} trades sized`
+        +(_ac.win_rate_pct!=null?` · ${_ac.win_rate_pct}% won`:'')
+        +(_ac.avg_pnl_usd!=null?` · avg ${_usdS(_ac.avg_pnl_usd)}/trade`:'')
+        +` · worst drawdown ${_ac.max_drawdown_pct}%`
+        +(_ac.max_concurrent_positions?` · up to ${_ac.max_concurrent_positions} positions at once`:'')+`</div>`
+      // The prop firm's per-share minimum, at THIS size. Reported next to the
+      // money because the flat-100-share line understates it by the size ratio.
+      +(_ac.min_profit_ps!=null&&_ac.no_credit_wins
+        ?`<div style="font-size:11px;color:var(--draft);margin-top:2px">`
+          +`${_usd(_ac.counted_pnl_usd)} of that counts toward a prop target — `
+          +`${_ac.no_credit_wins} win(s) worth ${_usd(_ac.no_credit_pnl_usd)} `
+          +`earned under $${_ac.min_profit_ps}/share and get no credit `
+          +`(the money is still yours)</div>`
+        :(_ac.min_profit_ps!=null
+          ?`<div style="font-size:11px;color:var(--text2);margin-top:2px">`
+            +`every win cleared the $${_ac.min_profit_ps}/share minimum — full `
+            +`credit toward a prop target</div>`:''))
+      +`<div style="font-size:10px;color:var(--text3);margin-top:3px">position size = `
+        +`(equity × ${_ac.risk_pct}%) ÷ (entry − stop), compounding in trade order`
+        +(_ac.max_leverage>1?`, capped at ${_ac.max_leverage}× equity across all open positions`:'')+`</div>`
+      +((_ac.unsized_no_stop||_ac.size_capped_by_leverage||_ac.skipped_no_capital)
+        ?`<div style="font-size:10px;color:var(--draft);margin-top:3px">`
+          +[_ac.unsized_no_stop?`⚠ ${_ac.unsized_no_stop} had no usable stop — excluded`:'',
+            _ac.size_capped_by_leverage?`⚠ ${_ac.size_capped_by_leverage} sized down to the cash available`:'',
+            _ac.skipped_no_capital?`⚠ ${_ac.skipped_no_capital} skipped — no buying power left`:''
+           ].filter(Boolean).join(' · ')+`</div>`:'')
+      // ALWAYS the whole run: size compounds in trade order and shares one
+      // capital pool, so dropping trades changes the equity path and the
+      // buying power of everything after them.
+      +(BT_FILTERS.length?`<div style="font-size:10px;color:var(--draft);margin-top:3px">`
+        +`⚠ <b>whole run</b> — filters not applied here, because `
+        +`sizing compounds and shares one balance across every trade</div>`:'')
+      +`</div>`;
+  } else if(s.trades){
+    html+=`<div style="font-size:11px;color:var(--draft);margin-bottom:5px">`
+      +`no dollar P&L — fill in <b>account $</b> and <b>risk %</b> to size these trades `
+      +`against a real balance</div>`;
+  }
+  html += s.trades
+    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+` · ${s.pairs} pairs`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span id="btErrTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="tap to see which day·symbol pairs failed and why">⚠ ${s.errors} errors</span>`:'')
+      // Named for what it is. Read as an account return it is wildly wrong:
+      // it adds up percentage MOVES of trades that were never the same size.
+      +`<br><span class="muted" style="font-size:10px">unsized edge: `
+      +`${s.total_return_pct>=0?'+':''}${s.total_return_pct}% = the ${s.trades} trades' % moves added up — a strategy score, NOT an account return</span>`
+    : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
+  if(s.ttp){ html+=`<br><span style="color:var(--draft);font-size:11px">prop firm — flat ${s.ttp.shares} sh every trade: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counts $${s.ttp.counted_pnl_usd} toward target · ${s.ttp.wins_below_min} win(s) under $${s.ttp.min_profit_ps}/sh wasted`
+    +(s.ttp._whole_run?` · <b>whole run</b> — filters not applied (this run scales out; per-leg fills are not stored per trade)`:'')+`</span>`; }
+  const cov=s.coverage;
+  if(cov){
+    let c=`coverage: <b>${cov.evaluated}/${cov.pairs}</b> pairs had data (${cov.tf}·${cov.feed})`;
+    if(cov.no_data)c+=` · <span id="btNdTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="the feed returned ZERO bars for these — they were never evaluated. Small caps often have no alpaca (IEX) data; use polygon.">${cov.no_data} no-data</span>`;
+    c+=` · signals on ${cov.signal_pairs} pairs (${cov.signals_on_day})·traded ${cov.traded_pairs}`;
+    // name the METRIC. "ranked: kept top 2/day" without it hid the fact that
+    // 103 of 117 signals were dropped on a criterion the setup never specified.
+    if(cov.rank_per_day)c+=` · <b>ranked by ${cov.rank_per_day.metric}`
+      +`${cov.rank_per_day.direction?' ('+cov.rank_per_day.direction+')':''}</b>: kept top `
+      +`${cov.rank_per_day.top_n}/day (${cov.rank_per_day.kept} kept, `
+      +`${cov.rank_per_day.dropped_by_rank} dropped`
+      +`${cov.rank_per_day.dropped_unscorable?', of which '+cov.rank_per_day.dropped_unscorable+' had no score':''})`;
+    if(cov.bars_median!=null)c+=` · ~${cov.bars_median} bars/pair`;
+    html+=`<br><span class="muted" style="font-size:10px">${c}</span>`;
+    // PER SCANNING TOOL — which screener supplied the universe, and how much
+    // of it. Without this a run that is 92% one tool reads as a seven-way test.
+    if(cov.by_source&&cov.by_source.length){
+      const rows=cov.by_source.map(s=>`<span style="margin-right:10px;white-space:nowrap">`
+        +`<b>${s.name}</b> ${s.pairs} pairs (${s.pct_of_pairs}%) · ${s.days}d · `
+        +`${s.trades} trades · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%</span>`).join('');
+      html+=`<br><span class="muted" style="font-size:10px">by scanning tool: ${rows}</span>`;
+      if(cov.source_imbalance)
+        html+=`<br><span style="font-size:10px;color:var(--draft)">⚠ ${cov.source_imbalance}</span>`;
+    }
+  }
+  if(extra)html+=`<span class="muted">${extra}</span>`;
+  sum.innerHTML=html;   // ONE write — appending after wiring would destroy the tap handlers
+  const wireTgl=(id,label,items,total)=>{ const t=document.getElementById(id); if(!t||!items.length)return;
+    t.onclick=()=>{ let d=document.getElementById(id+'List');
+      if(d){ d.remove(); return; }
+      d=document.createElement('div'); d.id=id+'List'; d.className='muted';
+      d.style.cssText='font-size:10px;margin-top:3px;white-space:normal;color:var(--draft)';
+      d.innerHTML=label+'<br>'+items.map(x=>'· '+String(x).slice(0,120)).join('<br>')+((total||0)>items.length?`<br>… +${total-items.length} more (see /api/backtest/{id})`:'');
+      sum.appendChild(d); }; };
+  wireTgl('btErrTgl','failed pairs (evaluation errors):',(BT_LAST&&BT_LAST.summary&&BT_LAST.summary.error_samples)||s.error_samples||[],s.errors);
+  if(cov)wireTgl('btNdTgl','pairs with NO bars from the feed (not evaluated — try polygon):',cov.no_data_samples||[],cov.no_data);
+  // equity curve → oscillator pane (values are %, far from price range)
+  if(s.equity_curve&&s.equity_curve.length){ drawStratSeries([{name:'equity %',color:'#22c55e',step:false,style:0,values:s.equity_curve}]); }
+  const rows=(g.trades||[]);
+  tbl.innerHTML='';
+  for(const t of rows){
+    const d=document.createElement('div'); d.className='card'; d.style.padding='4px 6px';
+    const cls=(t.ret||0)>0?'up':'dn';
+    // real-account detail (present when account $ + risk % were set)
+    const _c=t.ctx||{}, _sh=_c.acct_shares, _pl=_c.acct_pnl_usd;
+    // A win under the prop firm's per-share minimum is money you KEEP that
+    // earns no credit toward the target. It is invisible in a percent column —
+    // +2.70% on a $1.93 stock is five cents a share — so it is called out on
+    // the trade itself, where the decision to take that trade gets made.
+    const _nc = _c.acct_no_credit
+      ? `<br><span style="font-size:11px;color:var(--draft)">⚠ DOES NOT COUNT`
+        + ` — $${(_c.acct_pnl_per_share||0).toFixed(3)}/share is under the minimum`
+        + ` (you keep the $${Math.round(_pl||0).toLocaleString()}, it earns no credit)</span>`
+      : '';
+    const _acct = (_sh!=null&&_pl!=null)
+      ? `<br><span class="muted" style="font-size:11px">${Math.round(_sh).toLocaleString()} sh · $${Math.round(_c.acct_notional_usd||0).toLocaleString()} pos · risk $${Math.round(_c.acct_risk_usd||0)} · <b style="color:${_pl>=0?'#22c55e':'#ef5350'}">${_pl>=0?'+':''}$${_pl.toLocaleString()}</b>${_c.acct_r_multiple!=null?` · ${_c.acct_r_multiple}R`:''}</span>${_nc}`
+      : (_c.acct_note?`<br><span class="muted" style="font-size:11px">⚠ ${_c.acct_note}</span>`:'');
+    d.innerHTML=`<span class="tk">${t.symbol}</span> <span class="muted">${t.date}</span> <span class="${cls}" style="float:right">${t.ret!=null?((t.ret*100).toFixed(2)+'%'):'—'} ${t.reason}</span>${_acct}`;
+    d.title=`${t.side} ${t.entry} → ${t.exit??'(open)'}`;
+    d.onclick=async()=>{ // REPLAY the backtest's exact settings on this trade's chart:
+      const spec=(g&&g.spec)||{};
+      document.getElementById('symbol').value=t.symbol; document.getElementById('asof').value=t.date;
+      if(spec.tf)document.getElementById('tf').value=spec.tf;
+      if(spec.feed)document.getElementById('feed').value=spec.feed;
+      if(spec.strategy_id)loadStrategyById(spec.strategy_id);
+      EVALMODE={fill:spec.fill||'close', rules:spec.rules||null, label:'backtest #'+(g.id||'')+' replay'};
+      if(LIVE)toggleLive(); syncAsofUI(); await loadChart(); evalStrategy(); };
+    tbl.appendChild(d);
+  }
+}
+async function btPoll(id){
+  try{
+    const j=await (await fetch('/api/backtest/'+id)).json();
+    if(!j.ok||!j.backtest){ document.getElementById('btStat').textContent='backtest not found'; clearInterval(BT_POLL); return; }
+    const g=j.backtest;
+    if(g.status==='running'){ document.getElementById('btStat').textContent=`running… ${(100*(g.progress||0)).toFixed(0)}%`; return; }
+    clearInterval(BT_POLL); BT_POLL=null;
+    if(g.status==='error'){ document.getElementById('btStat').textContent='error: '+(g.error||'').slice(0,160); return; }
+    document.getElementById('btStat').textContent=`done ✓ (#${g.id})`;
+    btRender(g);
+  }catch(e){ document.getElementById('btStat').textContent='poll error: '+e.message; }
+}
+async function btRun(){
+  const sid=document.getElementById('btStrat').value;
+  if(!sid){ document.getElementById('btStat').textContent='pick a saved strategy first (build + Save in ⚡ Strategy)'; return; }
+  const uni=document.getElementById('btUni').value;
+  const spec={ name:'bt '+new Date().toISOString().slice(0,16),
+    strategy_id:parseInt(sid,10),
+    strategy_ids:(function(){ const b=document.getElementById('btStrat2').value;
+      return b?[parseInt(sid,10),parseInt(b,10)]:null; })(),
+    universe: uni==='symbols'
+      ? {kind:'symbols', symbols:(document.getElementById('btSyms').value||'').split(',').map(s=>s.trim()).filter(Boolean)}
+      : {kind:'register', register:uni},
+    start:document.getElementById('btStart').value, end:document.getElementById('btEnd').value,
+    tf:document.getElementById('btTf').value, feed:document.getElementById('btFeed').value,
+    view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0,
+    min_rvol:(document.getElementById('btMinRvol').value!==''?parseFloat(document.getElementById('btMinRvol').value):null),
+    rank_per_day:(function(){ const n=parseInt(document.getElementById('btTopN').value,10);
+      // the metric travels WITH the request — the server has no default and
+      // rejects a rank block without one, on purpose
+      const m=document.getElementById('btRankMetric').value||'vwap_extension';
+      return (Number.isFinite(n)&&n>0)?{metric:m,top_n:n}:null; })(),
+    account_equity:parseFloat(document.getElementById('btEquity').value)||0,
+    risk_pct:parseFloat(document.getElementById('btRiskPct').value)||0,
+    shares:parseFloat(document.getElementById('btShares').value)||100,
+    fee_per_share:parseFloat(document.getElementById('btFee').value)||0,
+    fee_min:parseFloat(document.getElementById('btFeeMin').value)||0,
+    min_profit_ps:(document.getElementById('btMinPs').value!==''?parseFloat(document.getElementById('btMinPs').value):null),
+    rules:(function(){ const md=parseInt(document.getElementById('btMaxDay').value,10);
+      const on=document.getElementById('btRules').checked; const cap=Number.isFinite(md)&&md>0;
+      if(!on&&!cap)return null;
+      const r={}; if(on){r.rth_entries=true;r.eod_close=true;} if(cap)r.max_entries_per_day=md; return r; })() };
+  document.getElementById('btStat').textContent='starting…';
+  document.getElementById('btSummary').innerHTML=''; document.getElementById('btTrades').innerHTML='';
+  try{
+    const j=await (await fetch('/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(spec)})).json();
+    if(!j.ok){ document.getElementById('btStat').textContent='error: '+(j.error||'').slice(0,160); return; }
+    if(BT_POLL)clearInterval(BT_POLL);
+    BT_POLL=setInterval(()=>btPoll(j.id),2000); btPoll(j.id);
+  }catch(e){ document.getElementById('btStat').textContent='error: '+e.message; }
+}
+function loadStrategyById(id){ const s=SAVED.find(x=>String(x.id)===String(id)); if(!s)return; STRAT=JSON.parse(JSON.stringify(s)); STRAT.entry=STRAT.entry||{logic:'AND',rules:[]}; STRAT.exit=STRAT.exit||{logic:'AND',rules:[]}; STRAT.risk=STRAT.risk||{sl:{type:'',value:null},tp:{type:'',value:null}}; SIGMARKERS=[]; clearStratLines(); refreshMarkers(); renderStrat(); }
+async function saveStrategy(){ readStratHeader(); if(!STRAT.name)STRAT.name='Untitled'; const j=await (await fetch('/api/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(STRAT)})).json(); if(j.ok){ STRAT.id=j.strategy.id; await loadStrategies(); document.getElementById('stratStat').textContent='saved ✓'; } else document.getElementById('stratStat').textContent=j.error||'save error'; }
+// The server rejects an unknown tool id by name. Showing "save error" instead
+// of that reason turns a typo into a hunt.
+async function delStrategy(){ if(STRAT.id){ await fetch('/api/strategies/'+STRAT.id,{method:'DELETE'}); } STRAT=blankStrat(); seedTemplate(); await loadStrategies(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; }
+// how Evaluate simulates fills/session rules. Default = pure preview (close
+// fill, no rules). Tapping a backtest trade row switches this to THAT run's
+// settings so the chart shows the exact trade the backtest took — a preview
+// under different settings showing a different result is not a bug.
+let EVALMODE={fill:'close', rules:null, label:''};
+async function evalStrategy(){
+  readStratHeader();
+  const body={ strategy:STRAT, symbol:document.getElementById('symbol').value.trim().toUpperCase()||'SPY', tf:document.getElementById('tf').value, days:Number(document.getElementById('days').value), feed:document.getElementById('feed').value, view:document.getElementById('view').value, asof:document.getElementById('asof').value||'', fill:EVALMODE.fill, rules:EVALMODE.rules };
+  document.getElementById('stratStat').textContent='evaluating…';
+  try{
+    const j=await (await fetch('/api/strategy/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!j.ok){ document.getElementById('stratStat').textContent='error: '+(j.error||'').slice(0,160); return; }
+    SIGMARKERS=j.markers||[]; refreshMarkers();
+    drawStratSeries(j.series);        // draw the exact indicators the rules use
+    const en=document.getElementById('entryNow'), ex=document.getElementById('exitNow');
+    en.textContent=j.entry_now?'TRUE now':'idle'; en.className='en '+(j.entry_now?'t':'f');
+    ex.textContent=j.exit_now?'TRUE now':'idle'; ex.className='en '+(j.exit_now?'t':'f');
+    const s=j.stats;
+    const by=s&&s.exits_by?' ['+Object.entries(s.exits_by).map(([k,v])=>k+':'+v).join(' ')+']':'';
+    const op=j.open_trade?` · <span style="color:var(--blue)">1 OPEN (${j.open_trade.ret_pct>=0?'+':''}${j.open_trade.ret_pct}%)</span>`:'';
+    const mode=(EVALMODE.fill!=='close'||EVALMODE.rules)
+      ? `(${EVALMODE.label||'replay'}: ${EVALMODE.fill==='next_open'?'next-open':'close'} fill · ${EVALMODE.rules?'session rules ON':'no rules'})`
+      : '(preview: close fill · no session rules — tap a backtest trade to replay its settings)';
+    document.getElementById('stratStat').innerHTML=`${(j.entries||[]).length} entry signals · ${(s?s.trades:0)} trades${op} · ${j.bars} bars`+(s?` · <b>${s.win_rate}%</b> win · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%${by}`:(j.open_trade||j.exit_now===undefined?'':' · add an exit or SL/TP to close trades'))+` <span class="muted">${mode}</span>`;
+  }catch(e){ document.getElementById('stratStat').textContent='error: '+e.message; }
+}
+// top-level: toggleDrawer and the resize grips all need it (it used to be a
+// const inside the load handler, invisible to anything declared outside it)
+function _resizeChart(){ if(CHART){ const el=document.getElementById('chart'); CHART.applyOptions({width:el.clientWidth,height:el.clientHeight}); } }
+/* Fallback for browsers without `dvh` (see the body CSS note): pin the body to
+   the height actually visible. window.innerHeight excludes the URL bar and
+   changes as it hides, so re-apply on resize / orientation change. Skipped
+   entirely where dvh works, leaving the CSS in charge on modern browsers. */
+function _syncViewportHeight(){
+  try{ if(window.CSS&&CSS.supports&&CSS.supports('height','100dvh'))return; }catch(_){}
+  const h=(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+  if(h)document.body.style.height=h+'px';
+  _resizeChart();
+}
+function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open);
+  // reserve the drawer's height on <main> so it never covers the chart's time
+  // axis (see the #drawer CSS note)
+  document.body.classList.toggle('drawer-open',open);
+  if(open) document.documentElement.style.setProperty('--drawerH', (d.getBoundingClientRect().height||window.innerHeight*0.42)+'px');
+  document.getElementById('stratBtn').classList.toggle('on',open);
+  setTimeout(_resizeChart,50); }
+function restore(){
+  ['symbol','tf','days','feed','view'].forEach(k=>{ const v=localStorage.getItem('qpc_'+k); if(v)document.getElementById(k).value=v; });
+  try{ const a=JSON.parse(localStorage.getItem('qpc_ov')||'[]'); if(Array.isArray(a)&&a.length){ OVERLAYS=a; _nid=Math.max(...a.map(o=>parseInt((o.id||'o0').slice(1))||0))+1; SELECTED=localStorage.getItem('qpc_sel')||a[0].id; } }catch(_){}
+}
+
+window.addEventListener('load',async()=>{
+  restore(); await initHealth(); await loadPrimitives();
+  renderOverlays(); renderSelected();
+  if(typeof LightweightCharts==='undefined'){ banner('Chart library did not load (/static/lightweight-charts.js).'); return; }
+  try{ initChart(); }catch(e){ banner('Chart init failed: '+e.message); return; }
+  _syncViewportHeight();
+  window.addEventListener('resize', _syncViewportHeight);
+  window.addEventListener('orientationchange', ()=>setTimeout(_syncViewportHeight,150));
+  if(window.visualViewport)window.visualViewport.addEventListener('resize', _syncViewportHeight);
+  loadChart();
+  await loadSources();          // must fill the register pickers FIRST
+  loadRegDates();
+  // strategy builder
+  seedTemplate(); renderStrat(); loadStrategies();
+  document.getElementById('compute').onclick=loadChart;
+  document.getElementById('addBtn').onclick=addOverlay;
+  document.getElementById('liveBtn').onclick=toggleLive;
+  // pro chart controls
+  document.getElementById('ctype').value=CHARTTYPE;
+  document.getElementById('ctype').addEventListener('change',e=>setChartType(e.target.value));
+  document.getElementById('scaleMode').value=localStorage.getItem('qpc_scale')||'0';
+  const applyScale=()=>{ const m=parseInt(document.getElementById('scaleMode').value,10)||0; localStorage.setItem('qpc_scale',m); try{CHART.priceScale('right').applyOptions({mode:m});}catch(_){} };
+  document.getElementById('scaleMode').addEventListener('change',applyScale); applyScale();
+  document.getElementById('fitBtn').onclick=()=>{ try{CHART.priceScale('right').applyOptions({autoScale:true});}catch(_){} try{CHART.priceScale('osc').applyOptions({autoScale:true});}catch(_){} try{CHART.timeScale().fitContent();}catch(_){} };
+  const closeSide=()=>{ document.getElementById('side').classList.add('hide'); document.body.classList.remove('side-open'); setTimeout(_resizeChart,60); };
+  const openSide=()=>{ document.getElementById('side').classList.remove('hide'); document.body.classList.add('side-open'); setTimeout(_resizeChart,60); };
+  document.getElementById('sideBtn').onclick=()=>{ document.getElementById('side').classList.contains('hide')?openSide():closeSide(); };
+  document.getElementById('sideClose').onclick=closeSide;
+  document.getElementById('sideBackdrop').onclick=closeSide;
+  if(window.innerWidth<820) document.getElementById('side').classList.add('hide');   // phones: chart full-width, panel on demand
+  // drag-to-resize panels (touch + mouse): side panel width, strategy drawer height
+  function _resizable(gripId, getStart, apply){
+    const g=document.getElementById(gripId); if(!g)return;
+    let on=false,sx=0,sy=0,st=0;
+    const down=e=>{ on=true; const p=e.touches?e.touches[0]:e; sx=p.clientX; sy=p.clientY; st=getStart(); document.body.style.userSelect='none'; if(e.cancelable)e.preventDefault(); };
+    const move=e=>{ if(!on)return; const p=e.touches?e.touches[0]:e; apply(st,p.clientX-sx,p.clientY-sy); if(e.cancelable)e.preventDefault(); };
+    const up=()=>{ if(on){ on=false; document.body.style.userSelect=''; _resizeChart(); } };
+    g.addEventListener('mousedown',down); g.addEventListener('touchstart',down,{passive:false});
+    window.addEventListener('mousemove',move); window.addEventListener('touchmove',move,{passive:false});
+    window.addEventListener('mouseup',up); window.addEventListener('touchend',up);
+  }
+  _resizable('sideGrip', ()=>document.getElementById('side').getBoundingClientRect().width, (st,dx)=>{ const w=Math.max(180,Math.min(window.innerWidth*0.92, st-dx)); const s=document.getElementById('side'); s.style.flexBasis=w+'px'; s.style.width=w+'px'; s.style.maxWidth='none'; _resizeChart(); });
+  _resizable('drawerGrip', ()=>document.getElementById('drawer').getBoundingClientRect().height, (st,dx,dy)=>{ const h=Math.max(110,Math.min(window.innerHeight*0.85, st-dy)); document.getElementById('drawer').style.height=h+'px'; document.documentElement.style.setProperty('--drawerH', h+'px'); _resizeChart(); });
+  document.getElementById('stratBtn').onclick=toggleDrawer;
+  document.getElementById('drawerClose').onclick=toggleDrawer;
+  document.getElementById('stratEval').onclick=evalStrategy;
+  document.getElementById('tgtAdd').onclick=()=>{ STRAT.risk=STRAT.risk||{}; (STRAT.risk.targets=STRAT.risk.targets||[]).push({fraction:0.5,r_multiple:1}); renderTargets(); };
+  document.getElementById('stratSave').onclick=saveStrategy;
+  document.getElementById('stratDel').onclick=delStrategy;
+  document.getElementById('stratNew').onclick=()=>{ STRAT=blankStrat(); seedTemplate(); renderStrat(); SIGMARKERS=[]; refreshMarkers(); document.getElementById('stratStat').textContent=''; };
+  document.getElementById('stratLoad').addEventListener('change',e=>loadStrategyById(e.target.value));
+  for(const id of ['slType','tpType']) document.getElementById(id).addEventListener('change',()=>{ readStratHeader(); renderStrat(); });
+  document.getElementById('stratClear').onclick=()=>{ SIGMARKERS=[]; refreshMarkers(); clearStratLines(); EVALMODE={fill:'close',rules:null,label:''}; document.getElementById('stratStat').textContent=''; };
+  document.querySelectorAll('#colEntry>.addrule, #colExit>.addrule').forEach(b=>b.onclick=()=>{ STRAT[b.dataset.g].rules.push(b.dataset.t==='group'?blankGroup():blankRule()); renderStrat(); });
+  for(const g of ['entry','exit']){
+    document.getElementById(g+'Logic').addEventListener('change',e=>{ STRAT[g].logic=e.target.value; renderStrat(); });
+    document.getElementById(g+'Window').addEventListener('change',e=>{ const w=parseInt(e.target.value,10); STRAT[g].window=Number.isFinite(w)?w:10; });
+    document.getElementById(g+'K').addEventListener('change',e=>{ const k=parseInt(e.target.value,10); STRAT[g].k=Number.isFinite(k)?k:1; });
+  }
+  document.getElementById('btRun').onclick=btRun;
+  // start the backtest TF on whatever the chart is on (the TF the strategy
+  // was built against) — but it's its own visible control from here on
+  document.getElementById('btTf').value=document.getElementById('tf').value;
+  document.getElementById('btFAdd').onclick=()=>{ const f={field:document.getElementById('btFField').value, op:document.getElementById('btFOp').value, val:document.getElementById('btFVal').value.trim()}; if(f.field&&f.val!=='')BT_FILTERS.push(f); document.getElementById('btFVal').value=''; btRefresh(); };
+  document.getElementById('btCsv').onclick=btCsvExport;
+  document.getElementById('btPreset').addEventListener('change',e=>{ if(e.target.value==='ttp'){ document.getElementById('btFee').value='0.005'; document.getElementById('btFeeMin').value='0.75'; document.getElementById('btMinPs').value='0.10'; document.getElementById('btShares').value=document.getElementById('btShares').value||'100'; document.getElementById('btRules').checked=true; document.getElementById('btFill').value='next_open'; } });
+  document.getElementById('btReport').onclick=()=>{ if(BT_LAST&&BT_LAST.id)window.open('/api/backtest/'+BT_LAST.id+'/report','_blank'); };
+  document.getElementById('btUni').addEventListener('change',e=>{ document.getElementById('btSyms').style.display=e.target.value==='symbols'?'':'none'; });
+  document.getElementById('regReg').addEventListener('change',loadRegDates);
+  document.getElementById('regDate').addEventListener('change',loadRegister);
+  document.getElementById('asof').addEventListener('change',()=>{ syncAsofUI(); loadChart(); });
+  for(const id of ['symbol','tf','days','feed','view'])
+    document.getElementById(id).addEventListener('change',()=>{ if(LIVE&&id!=='days')startLive(); loadChart(); });
+  syncAsofUI();
+});
+/* ── 🔔 live signal alerts ─────────────────────────────────────────────
+   Toggle starts/stops the server watcher (R1 + Shortlist × every saved
+   setup). The page polls /api/alerts/recent every 20 s; each new alert =
+   an audible beep + a browser Notification + a row in a floating log. */
+let AL_ON=false, AL_LAST=Math.floor(Date.now()/1000), AL_TIMER=null;
+const alBtn=document.getElementById('alertsBtn');
+function alBeep(){try{const c=new (window.AudioContext||window.webkitAudioContext)();
+  const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);
+  o.frequency.value=880;g.gain.setValueAtTime(0.25,c.currentTime);
+  o.start();o.frequency.setValueAtTime(1320,c.currentTime+0.15);o.stop(c.currentTime+0.35);}catch(e){}}
+function alLog(a){let d=document.getElementById('alLog');
+  if(!d){d=document.createElement('div');d.id='alLog';
+    d.style.cssText='position:fixed;bottom:8px;right:8px;z-index:99;background:#0f172acc;'
+      +'border:1px solid #334155;border-radius:8px;padding:6px 10px;font-size:12px;'
+      +'max-width:340px;max-height:180px;overflow-y:auto;color:#e2e8f0';
+    document.body.appendChild(d);}
+  const row=document.createElement('div');
+  row.textContent=`⚡ ${a.strategy} · ${a.symbol} ${a.side||''} · ${a.bar}`;
+  d.prepend(row); while(d.children.length>12)d.removeChild(d.lastChild);}
+async function alPoll(){ if(!AL_ON)return;
+  try{const r=await fetch('api/alerts/recent?since_ts='+AL_LAST); const j=await r.json();
+    (j.alerts||[]).forEach(a=>{ AL_LAST=Math.max(AL_LAST,a.ts); alBeep(); alLog(a);
+      if(window.Notification&&Notification.permission==='granted')
+        new Notification('⚡ '+a.strategy,{body:a.symbol+' '+(a.side||'')+' — signal at '+a.bar,
+                         tag:a.strategy+'|'+a.symbol});});
+  }catch(e){} }
+alBtn.onclick=async()=>{
+  if(!AL_ON){
+    if(window.Notification&&Notification.permission==='default')
+      try{await Notification.requestPermission();}catch(e){}
+    try{await fetch('api/alerts/start',{method:'POST'});}catch(e){}
+    AL_ON=true; alBtn.style.color='var(--blue)'; alBtn.textContent='🔔 Alerts ON';
+    AL_TIMER=setInterval(alPoll,20000); alPoll();
+  }else{
+    try{await fetch('api/alerts/stop',{method:'POST'});}catch(e){}
+    AL_ON=false; alBtn.style.color=''; alBtn.textContent='🔔 Alerts';
+    if(AL_TIMER)clearInterval(AL_TIMER);
+  }};
+/* ── 🖨 Print R1 ────────────────────────────────────────────────────────
+   Opens a print sheet: one chart per ticker in the chosen register day,
+   on the chosen timeframe, with the indicators currently on the chart. */
+document.getElementById('printR1Btn').onclick = async () => {
+  let box = document.getElementById('prBox');
+  if (box) { box.remove(); return; }
+  box = document.createElement('div');
+  box.id = 'prBox';
+  box.style.cssText = 'position:fixed;top:56px;right:10px;z-index:120;background:#0f172a;'
+    + 'border:1px solid #334155;border-radius:10px;padding:12px;width:300px;'
+    + 'color:#e2e8f0;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.5)';
+  const ovNames = (OVERLAYS||[]).map(o=>o.key).join(', ') || 'none — add some with + Add';
+  box.innerHTML = `
+    <div style="font-weight:600;margin-bottom:8px">🖨 Print register day</div>
+    <label style="display:block;margin-bottom:6px">Register
+      <select id="prReg" style="width:100%"><option value="R1">R1</option><option value="Shortlist">Shortlist</option></select></label>
+    <label style="display:block;margin-bottom:6px">From
+      <select id="prFrom" style="width:100%"><option>loading…</option></select></label>
+    <label style="display:block;margin-bottom:6px">To
+      <select id="prTo" style="width:100%"><option>loading…</option></select></label>
+    <label style="display:block;margin-bottom:6px">Timeframe
+      <select id="prTf" style="width:100%">
+        <option>1m</option><option>2m</option><option selected>5m</option>
+        <option>15m</option><option>30m</option><option>1h</option></select></label>
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <label style="flex:1">Days before
+        <input id="prDays" type="number" value="1" min="0" max="10" style="width:100%"></label>
+      <label style="flex:1">Days after
+        <input id="prAfter" type="number" value="0" min="0" max="10" style="width:100%"></label>
+    </div>
+    <label style="display:block;margin-bottom:6px">Charts per row
+      <input id="prCols" type="number" value="1" min="1" max="3" style="width:100%"></label>
+    <div style="color:#94a3b8;font-size:11px;margin:6px 0 10px">
+      indicators: ${ovNames}<br>window: 04:00–20:00 ET incl. pre/post · the register day is highlighted</div>
+    <button id="prGo" style="width:100%;background:#2563eb;color:#fff;border:0;
+      padding:7px;border-radius:6px;cursor:pointer">Open print sheet</button>
+    <button id="prCsv" style="width:100%;margin-top:6px;background:#059669;color:#fff;border:0;
+      padding:7px;border-radius:6px;cursor:pointer">⬇ Bars CSV</button>
+    <button id="prCards" style="width:100%;margin-top:6px;background:#7c3aed;color:#fff;border:0;
+      padding:7px;border-radius:6px;cursor:pointer">⬇ Register cards CSV</button>
+    <div style="color:#94a3b8;font-size:11px;margin-top:5px">bars = the same bars and indicator
+      values as the sheet, one row per bar · cards = every column the screener froze for each
+      ticker (score, rvol, gap, ATR, regime, sector, catalyst…), one row per ticker. Cards are
+      instant; bars take a while over a long range.</div>
+    <hr style="border:0;border-top:1px solid #334155;margin:12px 0 10px">
+    <div style="font-weight:600;margin-bottom:4px">📋 …or print YOUR OWN list</div>
+    <div style="color:#94a3b8;font-size:11px;margin-bottom:5px">Paste ticker + date pairs —
+      one per line, a pasted table, extra columns are ignored. Same window, indicators and
+      shading as above.</div>
+    <textarea id="prPairs" rows="5" placeholder="WLDS,2026-07-24&#10;UPC,2026-06-29&#10;JEM,2026-07-01"
+      style="width:100%;background:#0b1220;color:#e2e8f0;border:1px solid #334155;
+             border-radius:6px;padding:6px;font:11px ui-monospace,Menlo,monospace"></textarea>
+    <div id="prParsed" style="color:#94a3b8;font-size:11px;margin:4px 0 6px">—</div>
+    <button id="prListGo" style="width:100%;background:#2563eb;color:#fff;border:0;
+      padding:7px;border-radius:6px;cursor:pointer">Open sheet for my list</button>
+    <button id="prListCsv" style="width:100%;margin-top:6px;background:#059669;color:#fff;border:0;
+      padding:7px;border-radius:6px;cursor:pointer">⬇ Bars CSV for my list</button>`;
+  document.body.appendChild(box);
+
+  const regSel = document.getElementById('prReg');
+  if (REG_OPTIONS.length) fillRegPicker(regSel, REG_OPTIONS,
+                                        REG_OPTIONS.length>1?REG_OPTIONS[0].value:'R1');
+  const fromSel = document.getElementById('prFrom');
+  const toSel = document.getElementById('prTo');
+  const loadDates = async () => {
+    fromSel.innerHTML = toSel.innerHTML = '<option>loading…</option>';
+    try {
+      const r = await fetch('api/screener/dates?register=' + regSel.value);
+      const j = await r.json();
+      const ds = (j.dates || []).slice().sort();            // oldest → newest
+      if (!ds.length) { fromSel.innerHTML = toSel.innerHTML =
+          '<option value="">no frozen days</option>'; return; }
+      const opts = ds.map(d=>`<option>${d}</option>`).join('');
+      fromSel.innerHTML = opts; toSel.innerHTML = opts;
+      // default to the LATEST day on both ends (one day, as before)
+      fromSel.value = ds[ds.length-1]; toSel.value = ds[ds.length-1];
+    } catch (e) { fromSel.innerHTML = toSel.innerHTML =
+        '<option value="">failed to load</option>'; }
+  };
+  regSel.onchange = loadDates;
+  await loadDates();
+
+  // ONE query string for both outputs, so the CSV can never describe a
+  // different window than the sheet the user just looked at.
+  const prQuery = () => {
+    let a = fromSel.value, b = toSel.value;
+    if (!a || !b) return null;
+    if (a > b) { const t = a; a = b; b = t; }     // tolerate reversed picks
+    return new URLSearchParams({
+      start: a, end: b, register: regSel.value,
+      tf: document.getElementById('prTf').value,
+      feed: document.getElementById('feed').value,
+      days_before: document.getElementById('prDays').value || '0',
+      days_after: document.getElementById('prAfter').value || '0',
+      cols: document.getElementById('prCols').value || '1',
+      overlays: JSON.stringify(OVERLAYS || []),
+    });
+  };
+  document.getElementById('prGo').onclick = () => {
+    const qs = prQuery();
+    if (qs) window.open('api/r1/print?' + qs.toString(), '_blank');
+  };
+  // ── print MY OWN list of (ticker, date) pairs ──────────────────────────
+  const prPairs = document.getElementById('prPairs');
+  const prParsed = document.getElementById('prParsed');
+  const prListBody = () => ({
+    pairs: prPairs.value,
+    tf: document.getElementById('prTf').value,
+    feed: document.getElementById('feed').value,
+    days_before: parseInt(document.getElementById('prDays').value || '1', 10),
+    days_after: parseInt(document.getElementById('prAfter').value || '1', 10),
+    cols: parseInt(document.getElementById('prCols').value || '1', 10),
+    register: regSel.value,
+    overlays: OVERLAYS || [],
+  });
+  // show what the paste WILL be read as, before anything is fetched
+  let prTimer = null;
+  prPairs.oninput = () => {
+    clearTimeout(prTimer);
+    prTimer = setTimeout(async () => {
+      if (!prPairs.value.trim()) { prParsed.textContent = '—'; return; }
+      try {
+        const r = await fetch('api/pairs/parse', {method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({pairs: prPairs.value})});
+        const j = await r.json();
+        prParsed.innerHTML = j.count
+          ? `<span style="color:#22c55e">${j.count} pairs:</span> `
+            + j.pairs.map(p=>p.ticker+' '+p.date).join(' · ')
+          : '<span style="color:#f59e0b">no TICKER + YYYY-MM-DD pairs found</span>';
+      } catch (e) { prParsed.textContent = 'parse failed'; }
+    }, 300);
+  };
+  // GET, so the sheet is a real page (its /static assets and Print button
+  // work exactly like the register sheet) and the CSV downloads by header.
+  const prListQs = () => {
+    const b = prListBody();
+    if (!b.pairs.trim()) return null;
+    return new URLSearchParams({
+      pairs: b.pairs, tf: b.tf, feed: b.feed, register: b.register,
+      days_before: String(b.days_before), days_after: String(b.days_after),
+      cols: String(b.cols), overlays: JSON.stringify(b.overlays),
+    });
+  };
+  document.getElementById('prListGo').onclick = () => {
+    const qs = prListQs();
+    if (qs) window.open('api/pairs/print?' + qs.toString(), '_blank');
+  };
+  document.getElementById('prListCsv').onclick = (ev) => {
+    const qs = prListQs();
+    if (!qs) return;
+    const b = ev.target, was = b.textContent;
+    b.textContent = 'building…'; b.disabled = true;
+    const f = document.createElement('iframe');
+    f.style.display = 'none'; f.src = 'api/pairs/csv?' + qs.toString();
+    document.body.appendChild(f);
+    setTimeout(() => { b.textContent = was; b.disabled = false; }, 4000);
+  };
+
+  document.getElementById('prCards').onclick = () => {
+    const qs = prQuery();
+    if (!qs) return;
+    // cards need no bar data, so this returns immediately even over a month
+    const c = new URLSearchParams({start: qs.get('start'), end: qs.get('end'),
+                                   register: qs.get('register')});
+    const f = document.createElement('iframe');
+    f.style.display = 'none'; f.src = 'api/r1/cards.csv?' + c.toString();
+    document.body.appendChild(f);
+  };
+  document.getElementById('prCsv').onclick = (ev) => {
+    const qs = prQuery();
+    if (!qs) return;
+    // a whole range over many tickers takes a while to fetch — say so, since
+    // a download gives no progress of its own.
+    const b = ev.target, was = b.textContent;
+    b.textContent = 'building… (this can take a minute)'; b.disabled = true;
+    // navigating to the URL lets the browser stream it straight to disk; the
+    // Content-Disposition header names the file.
+    const f = document.createElement('iframe');
+    f.style.display = 'none';
+    f.src = 'api/r1/csv?' + qs.toString();
+    document.body.appendChild(f);
+    setTimeout(() => { b.textContent = was; b.disabled = false; }, 4000);
+  };
+};
+</script>
+</body>
+</html>

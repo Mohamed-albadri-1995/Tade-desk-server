@@ -1,0 +1,35 @@
+{
+  "name": "tade-desk-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "start:scorer": "python3 src/scoring/server.py",
+    "test": "jest tests/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:41729/git/Mohamed-albadri-1995/Tade-desk-server"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.18.1",
+    "better-sqlite3": "^12.11.1",
+    "express": "^5.2.1",
+    "multer": "^2.2.0",
+    "node-cron": "^4.5.0",
+    "node-fetch": "^3.3.2",
+    "uuid": "^14.0.1"
+  },
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "supertest": "^7.2.2"
+  },
+  "allowScripts": {
+    "better-sqlite3": true,
+    "node-gyp": true
+  }
+}

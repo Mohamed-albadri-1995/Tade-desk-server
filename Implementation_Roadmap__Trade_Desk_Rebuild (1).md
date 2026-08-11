@@ -1,226 +1,403 @@
 # Implementation Roadmap: Trade Desk Rebuild
 
-This document outlines a phased implementation and testing strategy for the Trade Desk Rebuild project, based on the comprehensive specification. The goal is to guide the code agent through a structured development process, ensuring each component is built correctly and validated thoroughly before proceeding to the next stage. This approach minimizes integration issues and ensures strict adherence to the specification.
+This document tracks what has been built, what changed from the original spec, and what is pending.
 
-## Guiding Principles for Implementation
+---
 
-*   **Specification as Authority**: The code agent MUST strictly adhere to the `Specification for Claude - Market Tab` document. Any deviation is considered a defect.
-*   **Server-Side Logic**: All business logic, calculations, and state management MUST reside on the server, as per `AR-1 Server as Source of Truth`.
-*   **Exact Reproduction**: Formulas, thresholds, and classifications MUST be implemented exactly as specified (`IR-1`, `IR-2`). No hidden logic or assumptions are permitted (`IR-3`).
-*   **Test-Driven Development**: Each stage includes specific validation and testing steps. Implementation for a stage is considered complete only when all tests pass (`ACCEPTANCE TEST REQUIREMENT`).
+## Guiding Principles
 
-## Implementation Stages
+- **Server as source of truth** — all business logic on the server
+- **Exact reproduction** — formulas and thresholds match spec exactly
+- **No hidden logic** — all deviations documented here
 
-### Stage 1: Core r0 Data Ingestion & Basic Calculations (Side A & B)
+---
 
-**Scope**: This stage focuses on establishing the foundation of the `r0` data. It covers fetching raw data from TradingView and performing initial server-side calculations to enrich the `r0` object.
+## Session Change Log
 
-**Specification Sections Covered**:
-*   Part 2, Section 0: Server vs Browser Split (relevant server-side components)
-*   Part 2, Section 1: r0 — Complete Field List & Source Responsibility (fields populated by Side A & B)
-*   Part 2, Section 3: Side A — TradingView Scanner (Complete Details)
-*   Part 2, Section 4: Side B — Internal Calculations (Complete)
+### Session 1 — Core pipeline (Sides A, B, D, C, E, F)
 
-**Implementation Tasks**:
-1.  **TradingView API Integration**: Implement the logic to make `POST` requests to the TradingView scanner endpoint (`Part 2, Section 3.1`).
-2.  **Scanner Filters & Columns**: Implement the common base filter (`Part 2, Section 3.3`) and common columns (`Part 2, Section 3.2`) for all scanners.
-3.  **Individual Scanners**: Implement the filters and sorting for `Trend`, `Premarket`, and `Big Moves` scanners (`Part 2, Sections 3.4, 3.5, 3.6`).
-4.  **TV Response Mapping**: Develop the mapping logic from TradingView's raw response to the internal `stock` object fields in `r0` (`Part 2, Section 3.7`).
-5.  **rvol Resolution**: Implement the `rvol` resolution logic (`Part 2, Section 3.8`) to correctly populate `stock.rvol`.
-6.  **Scanner Merge Logic**: Implement the logic to merge results from all three scanners into a single set of `r0` rows, handling `screenerKeys` and keeping the best available `stock.*` values (`Part 2, Section 3.9`).
-7.  **Internal Calculations (Side B)**: Implement all derived `stock.*` fields based on the specified formulas (`Part 2, Section 4`).
+#### Side A — TradingView Scanner
 
-**Validation & Testing (Stage 1)**:
-*   **What to Test**:
-    *   Successful API calls to TradingView.
-    *   Correct parsing and mapping of raw TV data to `r0.stock.*` fields.
-    *   Accurate `rvol` resolution based on `intraday_rvol` and `tenDay_rvol`.
-    *   Correct merging of scanner results, including `screenerKeys` and `stock.*` field prioritization.
-    *   Precise calculation of all `Side B` derived fields (e.g., `stock.prevClose`, `stock.gapPct`, `stock.pmRange`, `stock.adrPct`, `stock.monthRangePos`, `stock.pmAdrRatio`).
-*   **How to Test (Agent)**:
-    *   Create mock TradingView API responses to simulate various scenarios (e.g., missing `intraday_rvol`).
-    *   Write unit tests for each calculation in `Side B` using known inputs and expected outputs (as per `ACCEPTANCE TEST REQUIREMENT`).
-    *   Verify the structure and content of `r0` objects after Side A and Side B processing.
-*   **How to Test (User)**:
-    *   Inspect sample `r0` data (e.g., via a debug endpoint) to confirm correct population of `stock.*` fields and derived values.
+| What Changed | Spec Said | What We Did | Reason |
+|---|---|---|---|
+| `ignore_unknown_fields` | `false` | `true` | TV returns unexpected fields; `false` caused silent failures |
+| Ticker extraction | `d[0]` (ticker-view column) | `rawTV.s` (symbol field) | TV changed `ticker-view` column format mid-session |
+| Common base filter | 3 OR-branches | 4 OR-branches (added `fund` type) | Missing `fund` excluded valid stocks |
+| Resilience layer | Not in spec | Added `validateTVStructure()`, `COLUMN_EXPECTED_TYPES`, safe extractors | Detects future TV API format changes |
 
-### Stage 2: Market Context Engine (Side D)
+#### Side D — Market Context
 
-**Scope**: This stage implements the Market Tab's core logic for determining market regime, sector biases, and themes, and integrating these into the `r0` object.
+| What Changed | Spec Said | What We Did | Reason |
+|---|---|---|---|
+| Sector taxonomy | GICS names only | Added Morningstar taxonomy to mapping | TV returns Morningstar names; sectors were always NEUTRAL without this |
+| `context.regime` | Store label string | Store slug (e.g. `STRONG_UP`) | Slug is stable for programmatic use |
+| `context.regimeLabel` | Not in spec | Added as separate field | Human-readable label for UI display |
 
-**Specification Sections Covered**:
-*   Part 2, Section 1: r0 — Complete Field List & Source Responsibility (fields populated by Side D)
-*   Part 2, Section 6: Side D — Market Context (Complete)
-*   Part 3: Regime Matrix, Sector Bias, and Themes Engine
-*   Part 4, Section 1: Market Snapshot Object Schema
-*   Part 4, Section 3: Integration Requirements (specifically Sector Mapping and Theme Registry Lookup)
+#### Side E — Scoring Engine
 
-**Implementation Tasks**:
-1.  **Data Fetching**: Implement fetching of index data (SPY, QQQ, etc.) and 15 sector ETFs (`Part 2, Section 6.1`).
-2.  **Short-Term Market Bias**: Implement `computeMarketBiasDetail()` and its associated signals and classification logic (`Part 3, Section 2`).
-3.  **Mid-Term Market Stage**: Implement `computeMarketStage()` and its signals and classification logic (`Part 3, Section 3`).
-4.  **Bollinger Position**: Implement `BB%` calculation and classification (`Part 3, Section 4`).
-5.  **Long-Term Market Bias**: Implement `computeLongTermBias()` and its classification logic (`Part 3, Section 5`).
-6.  **Final Regime Classification**: Implement `computeRegime()` using the `REGIME_MATRIX` and Bollinger position adjustments (`Part 3, Section 6`).
-7.  **Sector Short-Term Bias Engine**: Implement `sectorShortTermBias()` including relative strength, trend structure conditions, ADX filter, and score calculation (`Part 3, Section 2`).
-8.  **Hot Sector Engine**: Implement the state machine for `Hot Sector` determination (Immediate Entry, Sustained Entry, Hold Rule, Cool-Off Rule) (`Part 3, Section 3`).
-9.  **Themes Engine**: Implement `themesForTicker()` using `EE_TICKER_TO_THEMES` and `classifyByIndustry()` with `EE_INDUSTRY_TO_THEME` (`Part 3, Section 5`).
-10. **Market Context Merge Logic**: Implement the logic to merge all computed market context data into `r0` rows, including sector matching using the provided mapping table (`Part 2, Section 6.3` and `Part 4, Section 3.2`).
-11. **Market Snapshot API**: Implement the `/api/market/snapshot` endpoint to return the `Market Snapshot Object` (`Part 4, Section 2`).
+| What Changed | Spec Said | What We Did | Reason |
+|---|---|---|---|
+| Score display | Show `_score` | Show `—` (blank) | Scoring engine disconnected — will be designed after analysis report review |
 
-**Validation & Testing (Stage 2)**:
-*   **What to Test**:
-    *   Correct calculation and classification of Short-Term Bias, Mid-Term Stage, Bollinger Position, and Long-Term Bias.
-    *   Accurate final regime classification based on the `REGIME_MATRIX` and Bollinger adjustments.
-    *   Precise sector bias and score calculations, including relative strength and ADX interpretation.
-    *   Correct `Hot Sector` status transitions based on the state machine logic.
-    *   Accurate theme resolution for various tickers and industries.
-    *   Correct population of all `context.*` fields in `r0`.
-    *   The `/api/market/snapshot` endpoint returns a valid `Market Snapshot Object` with correct data and schema, including the `slot` derived from `capturedAt`.
-*   **How to Test (Agent)**:
-    *   Create mock data for index and sector ETF inputs to test all possible classification paths (e.g., all `BULLISH`, all `BEARISH`, `PULLBACK`, `REBOUND` scenarios).
-    *   Write unit tests for each market context calculation and classification function.
-    *   Verify `r0` contents after `Side D` processing.
-    *   Automated API tests for `/api/market/snapshot` endpoint.
-*   **How to Test (User)**:
-    *   Manually call `/api/market/snapshot` and inspect the returned JSON for correctness and schema compliance.
-    *   Inspect sample `r0` data to verify `context.*` fields are populated as expected.
+#### Settings System (new — not in original spec)
 
-### Stage 3: Scoring & News/Catalyst (Side E & C)
+Runtime control panel for thresholds and API keys. All keys stored in `settings` DB table, read per-request.
 
-**Scope**: This stage integrates the scoring engine and the news/catalyst fetching mechanisms, populating the remaining `r0` fields.
+**Keys added:**
 
-**Specification Sections Covered**:
-*   Part 2, Section 1: r0 — Complete Field List & Source Responsibility (fields populated by Side C & E)
-*   Part 2, Section 5: Side C — News & Catalyst (Complete)
-*   Part 2, Section 7: Side E — Scoring Engine (Complete)
+| Key | Default | Description |
+|---|---|---|
+| `hotImmediateThreshold` | 60 | Score to enter HOT instantly |
+| `hotSustainedThreshold` | 40 | Score to sustain toward HOT |
+| `hotSustainedSessions` | 3 | Consecutive sessions needed for sustained HOT |
+| `hotFloorThreshold` | 20 | Score floor to remain HOT |
+| `coolOffDays` | 2 | Sessions below floor before losing HOT |
+| `sectorBullishThreshold` | 20 | Score above = BULLISH |
+| `sectorBearishThreshold` | -20 | Score below = BEARISH |
+| `shortlistMinScore` | 70 | Min score for auto-shortlist |
+| `shortlistTopN` | 5 | Max picks for auto-shortlist |
+| `finnhubApiKey` | `''` | Finnhub news key (masked in API) |
+| `githubBackupToken` | `''` | GitHub PAT for backup (masked) |
+| `alpacaApiKey` | `''` | Alpaca key for R3 capture (masked) |
+| `alpacaApiSecret` | `''` | Alpaca secret (masked) |
 
-**Implementation Tasks**:
-1.  **News Fetching**: Implement parallel fetching from Finnhub, Yahoo, and SEC EDGAR (`Part 2, Section 5.1`).
-2.  **Catalyst Classification**: Implement the logic to classify catalysts based on patterns, assigning `label`, `color`, and `sentiment` (`Part 2, Section 5.2`).
-3.  **News/Catalyst to r0**: Implement writing fetched news and classified catalyst data to `r0` (`Part 2, Section 5.3`).
-4.  **Scoring Engine Input**: Ensure the scoring engine receives the full `r0` row and the current scoring model (`Part 2, Section 7.1`).
-5.  **Scoring Logic**: Implement the actual scoring logic (details not provided in spec, assumed to be an external model or separate spec, but the integration point is clear). This task focuses on correctly invoking the scoring model and receiving its output.
-6.  **Scoring to r0**: Implement writing the `_score` to `r0` (`Part 2, Section 1`).
+#### Frontend Fixes
 
-**Validation & Testing (Stage 3)**:
-*   **What to Test**:
-    *   Successful fetching of news from all sources (mock external APIs if necessary).
-    *   Correct catalyst classification for various news patterns.
-    *   Accurate population of `news` and `catalyst` objects in `r0`.
-    *   The scoring engine receives the correct `r0` input.
-    *   The `_score` field in `r0` is populated after scoring.
-*   **How to Test (Agent)**:
-    *   Create mock external API responses for news sources.
-    *   Write unit tests for catalyst classification logic.
-    *   Verify `r0` contents after `Side C` and `Side E` processing.
-*   **How to Test (User)**:
-    *   Inspect sample `r0` data to verify `news` and `catalyst` fields are populated correctly.
-    *   Verify `_score` values in `r0` for a set of test cases.
+| Fix | Root Cause |
+|---|---|
+| Frontend showed 0 stocks | API returns `{count, rows}` but frontend assigned whole object |
+| Screener filter never matched | Filter checked `keys.includes('trend')` but keys are capitalized (`'Trend'`) |
+| Market tab not refreshing after scan | `runScan()` only called `loadRegistry()`; needed `loadMarket()` too |
+| Card showed regime slug not label | Card used `ctx.regime` (slug); fixed to use `ctx.regimeLabel` |
 
-### Stage 4: Shortlist Registry & Logic (Side F)
+---
 
-**Scope**: This stage implements the server-side Shortlist Registry, including the auto-shortlisting rule and manual override mechanisms.
+### Session 2 — Data Warehouse, Scheduler, Side G, Pipeline Monitor
 
-**Specification Sections Covered**:
-*   Part 2, Section 0: Server vs Browser Split (Shortlist Auto-Rule, Shortlist Registry, Shortlist Toggle)
-*   Part 2, Section 1: r0 — Complete Field List & Source Responsibility (`inShortlist` field)
-*   Part 2, Section 8: Side F — Shortlist Registry (Complete)
-*   Part 2, Section 9: API Endpoints (relevant shortlist APIs)
+- **Side G** (stale ticker refresh): fetches fresh TV quotes for non-live rows after each scan using symbol mode
+- **Pipeline monitor**: full `PipelineReport` with per-stage timings, row counts, errors
+- **Scheduler browser controls**: card-based job list, modal editor with day toggles + hour/minute inputs + live cron preview
+- **Data Warehouse tab**: R1, R2, R3A, R3B, R4A, R4B viewer with date picker
+- **R3 EOD capture** (Side H): Alpaca 1-min bars → entry price + HH/LL + ATR14 + R-values at 4:05 PM
 
-**Implementation Tasks**:
-1.  **Shortlist Registry Schema**: Implement the database schema for the Shortlist Registry, including `date`, `items` (with `ticker`, `addedAt`, `method`, `score`, `price`, `change`, `sector`), `exported`, and `exportedAt` (`Part 2, Section 8.1`).
-2.  **Auto Rule Logic**: Implement the daily auto-shortlisting rule, including fetching `r0` rows, filtering by `_score >= 70`, sorting, taking the top 5, capturing `r0` data, and saving to the database (`Part 2, Section 8.2`).
-3.  **Manual Override Logic**: Implement the logic for toggling shortlist status, including creating/updating today's entry, adding/removing tickers, and capturing `r0` data (`Part 2, Section 8.3`).
-4.  **Manual Override Rules**: Ensure all manual override rules are strictly enforced (`Part 2, Section 8.4`).
-5.  **`inShortlist` Field**: Implement updating the `inShortlist` boolean field in `r0` when a stock is added or removed from the shortlist.
-6.  **Shortlist APIs**: Implement the API endpoints for toggling, retrieving today's shortlist, retrieving all shortlists, and exporting (`Part 2, Section 9`).
+---
 
-**Validation & Testing (Stage 4)**:
-*   **What to Test**:
-    *   The auto-shortlist rule correctly identifies and stores the top 5 stocks based on `_score`.
-    *   Captured `score`, `price`, `change`, and `sector` values in the Shortlist Registry match the `r0` state at the time of shortlisting.
-    *   Manual toggling correctly adds/removes tickers and updates `inShortlist` in `r0`.
-    *   Manual override rules (e.g., manual additions persist) are correctly applied.
-    *   Shortlist API endpoints return correct data and adhere to the schema.
-*   **How to Test (Agent)**:
-    *   Simulate `r0` states to test auto-shortlisting under various conditions (e.g., no eligible stocks, fewer than 5 eligible stocks).
-    *   Write unit tests for manual override logic, covering add, remove, and rule enforcement.
-    *   Automated API tests for all `/api/shortlist/*` endpoints.
-    *   Direct database inspection to verify Shortlist Registry entries.
-*   **How to Test (User)**:
-    *   Manually trigger the auto-shortlist rule (if a debug API is available) and inspect the resulting shortlist.
-    *   Use the Shortlist Tab UI (if available, otherwise API calls) to manually add/remove stocks and verify persistence.
-    *   Call shortlist API endpoints to confirm data.
+### Session 3 — Side E Analysis Engine
 
-### Stage 5: Data Warehouse Integration & APIs (Part 5)
+#### What was built
 
-**Scope**: This stage focuses on implementing the Data Warehouse, including its various registers and the APIs to access them.
+- `src/sideE/train.js` — feature importance engine (38 features, weighted variance formula)
+- `src/sideE/score.js` — scoring module (built but disconnected from pipeline)
+- `src/sideE/insights.js` — rule-based + AI-generated insights
+- `src/routes/analysis.js` — Analysis API (`/api/analysis/*`)
+- Analysis tab UI — model config, train button, factor importance list, bucket analysis, insights panel
 
-**Specification Sections Covered**:
-*   Part 5: Data Warehouse Tab (Register Management & Storage)
+#### Key design decisions
 
-**Implementation Tasks**:
-1.  **Data Warehouse Architecture**: Set up the database structure for all registers (R0, R1, R2, R3A, R3B, R4A, R4B, Shortlist) as described in the architecture diagram (`Part 5, Section 1`).
-2.  **Register Population**: Implement the mechanisms to populate each register:
-    *   **R0**: Continuously updated from the live `r0` data.
-    *   **R1 (Frozen Screener)**: Capture `r0` data at 9:36 AM ET, setting `capturedAt` to `r0.lastUpdated` (`Part 5, Section 3, R1`).
-    *   **R2 (Market Snapshots)**: Store `Market Snapshot Objects` from the Market Tab, deriving `slot` from `capturedAt` (`Part 5, Section 3, R2`).
-    *   **R3A/R3B (EOD Outcome)**: Integrate with Yahoo Finance to fetch EOD outcomes and store them (`Part 5, Section 3, R3A/R3B`).
-    *   **R4A/R4B (Merged)**: Implement logic to merge R1 with R3A/R3B data (`Part 5, Section 3, R4A/R4B`).
-    *   **Shortlist**: Integrate with the existing Shortlist Registry to populate this view (`Part 5, Section 3, Shortlist Register`).
-3.  **Data Warehouse APIs**: Implement all specified API endpoints for the Data Warehouse (`Part 5, Section 1, API Layer`):
-    *   `GET /api/warehouse/:register/:date`
-    *   `GET /api/warehouse/:register/latest`
-    *   `GET /api/warehouse/available-dates`
-    *   `GET /api/warehouse/export/:register/:date`
-    *   `GET /api/warehouse/export/all`
-    *   `POST /api/warehouse/import`
-    *   `POST /api/warehouse/collect`
+- Scoring was **disconnected from the pipeline** pending the PCA scoring engine redesign.
+- Walk-forward backtest was **removed entirely** by user request.
+- Regime labels: simplified to 7, then **restored to full 15** by user request.
 
-**Validation & Testing (Stage 5)**:
-*   **What to Test**:
-    *   Each register (R0-R4B, Shortlist) is correctly populated with data adhering to its schema.
-    *   R1 captures `r0` data at the precise time and `capturedAt` is correctly set.
-    *   R2 correctly stores Market Snapshots and derives the `slot` field.
-    *   R3A/R3B successfully fetch and store EOD data.
-    *   R4A/R4B correctly merge data from R1 and R3A/R3B.
-    *   All Data Warehouse API endpoints function correctly, returning expected data for various registers and dates.
-*   **How to Test (Agent)**:
-    *   Write integration tests to verify data flow from source systems (r0, Market Tab, Yahoo Finance mocks) into the respective registers.
-    *   Automated API tests for all `/api/warehouse/*` endpoints, covering different `register` and `date` parameters.
-    *   Direct database queries to inspect the contents of each register.
-*   **How to Test (User)**:
-    *   Use the Data Warehouse Tab UI (if available, otherwise API calls) to browse registers, select dates, and verify data accuracy.
-    *   Test export/import functionalities.
+#### Settings keys added
 
-### Stage 6: Scheduler & End-to-End Flow
+| Key | Default | Description |
+|---|---|---|
+| `analysisEntryType` | `A` | Entry type for R4A training (A = 9:37, B = 9:40) |
+| `analysisDirectionalBias` | `Up` | Directional filter |
+| `analysisSuccessThreshold` | `1.5` | Win condition R-multiple |
+| `analysisTrainingWindow` | `90` | Training window in days |
+| `aiApiKey` | `''` | AI provider key (masked) |
+| `aiModel` | `anthropic/claude-haiku-4-5` | AI model ID |
 
-**Scope**: This final stage integrates all components with the central scheduler to ensure automated, timely execution of the entire Trade Desk pipeline.
+---
 
-**Specification Sections Covered**:
-*   Part 2, Section 10: Scheduler (Complete)
-*   Overall system architecture and data flow.
+### Session 5 — PCA Scoring Engine (Phase 2 Complete) + Shortlist Fix
 
-**Implementation Tasks**:
-1.  **Scheduler Implementation**: Implement the server-side scheduler to trigger the full scan pipeline and the Shortlist Auto-Rule according to the defined schedules (`Part 2, Section 10.1` and `10.2`).
-2.  **Full Scan Pipe Orchestration**: Ensure the full scan pipeline (TV → r0 → Market Context → Scoring → News) runs in the correct sequence and all components are properly chained.
-3.  **Error Handling & Logging**: Implement robust error handling and comprehensive logging across all modules to facilitate debugging and monitoring.
+#### Scoring Engine — Full PCA Factor Analysis Model
 
-**Validation & Testing (Stage 6)**:
-*   **What to Test**:
-    *   The full scan pipeline executes automatically at the specified frequencies (7:00 AM – 9:00 AM ET every 30 minutes, 9:00 AM – 10:00 AM ET every 5 minutes, etc.).
-    *   The Shortlist Auto-Rule runs precisely at 9:35 AM ET daily.
-    *   All `r0` fields are updated correctly after a full scan cycle.
-    *   The Shortlist Registry is updated correctly after the auto-rule runs.
-    *   No data inconsistencies or errors occur during automated runs.
-*   **How to Test (Agent)**:
-    *   Configure the scheduler with short intervals for testing purposes (e.g., run every minute) and monitor system behavior.
-    *   Automated end-to-end tests that simulate a full day's operation, verifying all outputs.
-    *   Review logs for errors or unexpected behavior.
-*   **How to Test (User)**:
-    *   Observe the system over a full market day (or simulated day) to confirm all scheduled tasks execute as expected.
-    *   Verify the freshness of data in the Screener Tab and Data Warehouse registers at various points throughout the day.
-    *   Check system logs for any critical errors or warnings.
+Replaced the disconnected placeholder with a production-ready two-process architecture:
 
-This roadmap provides a clear, actionable plan for implementing the Trade Desk Rebuild, with built-in validation to ensure the final product meets all specified requirements. The code agent should follow these stages sequentially, performing the specified tests at each step.
+**Architecture:**
+- **Process 1** — Node.js (`trade-desk`): runs the pipeline, builds card dicts, calls Flask
+- **Process 2** — Python Flask (`scorer`): loads trained PCA models, scores cards, returns `_score`
+- Flask runs at `127.0.0.1:3001`, Node calls `/score` endpoint per ticker (parallel via `Promise.all`)
+
+**Files changed/added:**
+- `src/scoring/processor.py` — `FactorAnalysisProcessor`: trains PCA model from R4A/R4B CSVs
+- `src/scoring/scorer.py` — `LiveScorer`: loads trained model outputs, scores live card dicts
+- `src/scoring/server.py` — Flask app: `/score`, `/train`, `/health`, `/model-info` endpoints
+- `src/sideE/score.js` — `buildCard()`, `resolveCardBias()`, `scoreAllRows()` — Node side
+- `scripts/verify_irdm_score.py` — manual score verification script with hardcoded IRDM card data
+
+**Settings keys added:**
+| Key | Default | Description |
+|---|---|---|
+| `scorerEntryTime` | `9:40` | Entry time for base selection (9:37 or 9:40) |
+
+#### Bug Fixes
+
+**1. `_score` circular feedback in PCA**
+
+| What | Detail |
+|---|---|
+| Bug | `_score` was in `NUMERIC_COLS` in both `processor.py` and `scorer.py`. Model was trained on its own previous output — circular feedback. |
+| Fix | Removed `_score` from `NUMERIC_COLS` in `processor.py`, `scorer.py`, and removed `_score: row._score` from `buildCard()` in `score.js`. |
+
+**2. Auto bias mismatch (UI vs scorer)**
+
+| What | Detail |
+|---|---|
+| Bug | When context was neutral (no clear long/short signal), scorer returned `'Undefined'` → selected B6 (max direction) model. UI displayed `AUTO (long)`. Mismatch caused confusing score swings when bias was changed. |
+| Fix | `resolveCardBias()` in `score.js` now always returns `'Long'` or `'Short'`, never `'Undefined'`. Priority chain: bearish signals → Short, bullish signals → Long, neutral → Long (default). `computeAutoBias()` in `public/index.html` updated to match identical logic. |
+
+**3. Shortlist auto-rule blocked by existing manual entry**
+
+| What | Detail |
+|---|---|
+| Bug | Auto-rule guard was `if (existing) return null` — blocked re-run if ANY entry existed today (including manual stars added before 9:35 AM). Rule never fired if user had starred anything. |
+| Fix | Guard now checks `if (existing && existing.items.some(i => i.method === 'auto'))` — only blocks if an auto entry already exists. Manual trigger (`force: true`) always re-runs and merges auto picks with existing manual picks. |
+
+#### Score Verification
+
+Manually verified IRDM scores against PCA math using `scripts/verify_irdm_score.py`:
+- B4 (LONG bias, 9:40 entry): computed 12.54 → rounds to **13** ✅
+- B5 (SHORT bias, 9:40 entry): computed 11.70 → rounds to **12** ✅
+
+#### Bias Resolution Logic (Final)
+
+```
+Priority chain (highest to lowest):
+
+1. shortTerm=BEARISH  AND  secBias=BEARISH    → Short
+2. shortTerm=BEARISH  AND  secBias≠BULLISH    → Short
+3. secBias=BEARISH    AND  shortTerm≠BULLISH  → Short
+4. shortTerm=BULLISH  OR   secBias=BULLISH    → Long
+5. longTerm=BEARISH                           → Short
+6. (all neutral)                              → Long  ← default
+```
+
+#### Base Selection Table (Final)
+
+| Bias | Entry Time | Base | Target |
+|---|---|---|---|
+| Long | 9:40 | B4 | upR_B (long moves from 9:40 entry) |
+| Short | 9:40 | B5 | downR_B (short moves from 9:40 entry) |
+| Long | 9:37 | B1 | upR_A (long moves from 9:37 entry) |
+| Short | 9:37 | B2 | downR_A (short moves from 9:37 entry) |
+
+---
+
+### Session 4 — AI Provider Support + UI Polish
+
+#### API key live test buttons
+
+Added `GET /api/settings/test/:service` endpoint with real round-trip tests:
+
+| Service | What it tests | Shows |
+|---|---|---|
+| `finnhub` | Fetches SPY quote | SPY current price |
+| `github` | Fetches `/user` | GitHub username |
+| `alpaca` | Fetches `/v2/account` | Account number + status |
+| `ai` | Sends "Reply with exactly: OK" | Provider + model + reply |
+
+#### Multi-provider AI support
+
+Auto-detects provider from key prefix — no separate field stored:
+
+| Key prefix | Provider | API endpoint |
+|---|---|---|
+| `sk-ant-` | Anthropic (Claude) | `api.anthropic.com/v1/messages` |
+| `AIza` | Google Gemini | `generativelanguage.googleapis.com/v1beta/models/...` |
+| anything else | OpenRouter | `openrouter.ai/api/v1/chat/completions` |
+
+#### Settings UI — AI Provider dropdown
+
+- Provider selector switches key placeholder, hint text, and model preset list
+- Model presets per provider: 4 options each (Claude, Gemini, OpenRouter)
+- Free-text model ID input alongside preset dropdown
+- Provider auto-detected from stored model ID on settings load
+
+#### Scheduler UI redesign
+
+- Jobs rendered as cards (name, cron, status, last run)
+- Edit opens a modal with day-of-week toggles, hour + minute inputs, live cron preview + human description
+- Tap outside modal to dismiss
+
+---
+
+## Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Side A — TradingView Scanner | ✅ Complete | |
+| Side B — Derived Calculations | ✅ Complete | |
+| Side C — News & Catalyst | ✅ Complete | Finnhub + Yahoo + SEC EDGAR |
+| Side D — Market Context | ✅ Complete | 15 regime labels, Morningstar sector mapping |
+| Side E — Analysis Report | ✅ Complete | Feature importance, bucket analysis, AI insights |
+| Side E — PCA Scoring Engine | ✅ Complete | Flask service, 6 bases, live scoring every scan |
+| Side F — Shortlist | ✅ Complete | Auto-rule fixed; force flag; merges with manual picks |
+| Side G — Stale Ticker Refresh | ✅ Complete | |
+| Side H — R3 EOD Capture | ✅ Complete | Alpaca-based, 4:05 PM |
+| Settings System | ✅ Complete | All keys, validation, masking, live test buttons |
+| AI Insights | ✅ Complete | OpenRouter, Anthropic, Gemini |
+| Backup / Restore | ✅ Complete | GitHub push/restore |
+| Monitor Tab | ✅ Complete | Pipeline report + scheduler job history + modal editor |
+| Data Warehouse | ✅ Complete | R1–R4B viewer |
+
+---
+
+## Full Development Roadmap
+
+### Phase 1 — Test & Debug (current) ✅ / 🔄
+
+Goal: validate all existing systems work correctly end-to-end on live market days.
+
+- [ ] Run full scan on a live market day, verify all pipeline stages pass
+- [ ] Confirm R1 captured at 9:36 AM with correct fields
+- [ ] Confirm R2 market snapshots captured every 5 min through 10 AM
+- [ ] Confirm R3 EOD capture fires at 4:05 PM with correct entry prices and R-values
+- [ ] Run `POST /api/analysis/train` — verify model trains on R4A data
+- [ ] View Analysis tab — verify factor importance list, bucket table, AI insights render
+- [ ] Test all settings API test buttons (Finnhub, GitHub, Alpaca, AI)
+- [ ] Test scheduler modal editor — edit a cron, save, verify job reschedules
+
+---
+
+### Phase 2 — Scoring Engine ✅ Complete
+
+Goal: build a proper scoring model that assigns a 0–100 score to each r0 row based on historical factor performance.
+
+**Architecture:** Two-process system — Node.js pipeline calls Python Flask scorer at `127.0.0.1:3001`.
+
+**Tasks:**
+- [x] Review Analysis report — identify top factors and meaningful bucket boundaries
+- [x] Define scoring formula — PCA factor analysis with decile bucket win rates
+- [x] Update `src/sideE/score.js` with final formula and bias resolution
+- [x] Connect scoring to pipeline — `_score` live on every scan
+- [x] Expose `_score` on Screener cards — score badge visible
+- [x] Add `_score` to r0 field docs in SYSTEM_FLOW.md
+- [x] Fix `_score` circular feedback — removed from PCA feature set
+- [x] Fix auto bias mismatch — `resolveCardBias()` never returns Undefined
+- [x] Fix shortlist auto-rule — force flag, merge with manual picks
+- [x] Verify scores mathematically — IRDM B4=13, B5=12 confirmed ✅
+
+---
+
+### Phase 3 — Setup Detection & Live Alerts
+
+Goal: define specific trading setups as rules, scan shortlisted stocks for matches in real time, push notifications when a match is found.
+
+**Concept:**
+A "setup" is a named checklist of conditions (price action, indicator alignment, market context, sector conditions). The tool scans all shortlisted stocks after each pipeline run and fires an alert if any stock satisfies a setup's criteria.
+
+**Tasks:**
+- [ ] Define setup schema: `{ id, name, conditions[], minScore, requireHotSector, requireRegime[] }`
+- [ ] Build `src/sideI/setups.js` — setup registry + match engine
+- [ ] Run setup scan after Side F in pipeline — check all shortlisted rows
+- [ ] Store matches in DB table `setup_alerts (date, ticker, setupId, matchedAt, conditions_snapshot)`
+- [ ] Build UI panel in Screener tab — "Live Alerts" section showing today's setup matches
+- [ ] Push notification (browser push API or webhook) when new match detected
+- [ ] Settings: enable/disable individual setups, configure notification target
+
+---
+
+### Phase 4 — Dynamic Position Sizing Engine
+
+Goal: generate a recommended position size for each trade based on market conditions, setup quality, and historical performance of this setup in similar conditions.
+
+**Sizing inputs:**
+- **Market regime** — weight multiplier: STRONG_UP → 1.0×, CORRECTION → 0.5×, STRONG_DOWN → 0×
+- **Setup quality grade** (A+/A/B/C/D) — maps to size tier
+- **Historical win rate of this setup in current regime** — from analysis model
+- **Account risk parameters** — max risk per trade as % of account (from settings)
+
+**Tasks:**
+- [ ] Define regime multiplier table (user-configurable in Settings)
+- [ ] Define grade → base size mapping (% of max risk)
+- [ ] Build `src/sideJ/sizing.js` — `computeSize(setup, regime, grade, account)` → `{ shares, dollarRisk, rationale }`
+- [ ] Expose sizing recommendation in setup alert cards and trade execution panel
+- [ ] Settings: account size, max risk per trade %, regime multipliers
+
+---
+
+### Phase 5 — Broker Integration & Trade Execution
+
+Goal: connect to Alpaca paper/live trading API to send orders directly from the tool.
+
+**Tasks:**
+- [ ] Extend `src/alpaca/client.js` with order functions: `submitOrder`, `getPositions`, `getOrders`, `cancelOrder`
+- [ ] Build `src/routes/trading.js` — order management endpoints
+- [ ] Build Trade Execution panel in UI: setup summary + sizing recommendation + confirm button
+- [ ] Show open positions and today's orders in a Positions tab or Screener sidebar
+- [ ] Enforce pre-trade checklist before order is submitted (setup conditions, regime filter, score gate)
+- [ ] Settings: toggle paper vs live trading, hard max position size limit
+
+---
+
+### Phase 6 — Trade Journal & Data Collection
+
+Goal: capture rich context at entry and exit for every trade — market conditions, setup alignment, checklist state — to build a proprietary trade dataset.
+
+**Entry snapshot (captured on order fill):**
+- Timestamp, ticker, entry price, shares, dollar risk
+- Setup ID, grade, score at entry
+- Market regime, sector bias, sector HOT status
+- Entry checklist: which conditions were met vs missed
+- r0 row snapshot: full stock fields at moment of entry
+
+**Exit snapshot (captured on position close):**
+- Exit timestamp, exit price, P&L in $ and R-multiples
+- Market regime at exit, sector bias at exit
+- Exit checklist: conditions met at exit (trend still intact? volume confirm? etc.)
+- Duration, time of day, day of week
+
+**Tasks:**
+- [ ] Define `trades` DB table schema capturing all above fields
+- [ ] Build `src/sideK/journal.js` — `recordEntry(orderId, snapshot)`, `recordExit(orderId, snapshot)`
+- [ ] Hook into Alpaca order fill webhooks (or poll order status)
+- [ ] Build Journal tab in UI — filterable trade log, P&L summary, win rate by setup/regime/grade
+- [ ] Export trades to CSV
+
+---
+
+### Phase 7 — Setup Grading Engine (A+/A/B/C/D)
+
+Goal: automatically classify each trade's setup quality based on the collected journal data. The grade reflects how well the trade aligned with the model's ideal conditions.
+
+**Grading inputs (post-trade):**
+- How many entry checklist conditions were met (% alignment)
+- Score at entry vs threshold (how far above the gate)
+- Market regime alignment (was regime favorable for this setup?)
+- Sector conditions (HOT, BULLISH)
+- Historical win rate of this exact setup + regime combination
+
+**Grade thresholds (starting point — to be tuned from data):**
+
+| Grade | Criteria |
+|---|---|
+| A+ | ≥90% checklist alignment, score ≥85, regime LONG-biased, sector HOT |
+| A  | ≥80% alignment, score ≥70, regime LONG-biased |
+| B  | ≥70% alignment, score ≥60 |
+| C  | ≥60% alignment, score ≥50, some conditions missed |
+| D  | <60% alignment or score <50 — taken outside ideal conditions |
+
+**Tasks:**
+- [ ] Build `src/sideK/grading.js` — `gradeSetup(entrySnapshot)` → `{ grade, score, breakdown }`
+- [ ] Store grade in `trades` table on entry
+- [ ] Re-grade past trades when scoring model is updated (backfill job)
+- [ ] Show grade badge on journal entries and position cards
+- [ ] Feed grade distribution back into sizing engine (Phase 4)
+
+---
+
+## Dependency Graph
+
+```
+Phase 1 (test/debug)
+    └── Phase 2 (scoring engine)
+            ├── Phase 3 (setup detection) — needs score gate
+            ├── Phase 4 (sizing) — needs setup + regime
+            └── Phase 5 (broker) — needs sizing + setups
+                    └── Phase 6 (journal) — needs trade fills
+                            └── Phase 7 (grading) — needs journal data
+```
