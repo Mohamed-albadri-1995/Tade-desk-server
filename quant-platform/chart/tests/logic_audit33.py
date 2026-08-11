@@ -162,6 +162,25 @@ try:
         ok('...the id was kept', got['id'] == sid)
         ok('...and the assignment is still there', got['tools'] == ['T2'])
         ok('...and it is idempotent again', store.seed_strategies() == 0)
+
+        # THE STRUCTURAL GUARD. This bug has now landed twice, from two
+        # different fields (`tools`, then `exit_protocol`), and both times the
+        # cause was the same: a read DERIVES a key, seed_strategies COMPARES
+        # it, and every seed differs forever. Rather than wait for the third,
+        # assert that store.DERIVED_KEYS actually covers what a read injects —
+        # so the next derived field fails here instead of on the box.
+        authored = {'name': 'Shape Probe', 'side': 'long',
+                    'entry': {'logic': 'AND', 'rules': []},
+                    'risk': {'sl': {'type': 'pct', 'value': 1}, 'targets': []}}
+        saved = store.save_strategy(dict(authored))
+        read_back = store.get_strategy(saved['id'])
+        injected = set(read_back) - set(authored) - {'tools'}
+        ok('every key a READ adds is declared in store.DERIVED_KEYS',
+           injected <= set(store.DERIVED_KEYS),
+           f'undeclared: {sorted(injected - set(store.DERIVED_KEYS))}')
+        ok('...and DERIVED_KEYS is what save_strategy strips, not a second list',
+           set(store.DERIVED_KEYS) == {'id', 'created_at', 'updated_at',
+                                       'exit_protocol'})
     finally:
         store.normalise_tools = _norm_saved
 finally:

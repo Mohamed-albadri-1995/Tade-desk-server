@@ -72,6 +72,23 @@ def _db() -> sqlite3.Connection:
     return _conn
 
 
+# Keys that _row_to_strategy ADDS to a stored row and that an AUTHORED
+# document (a seed file, a Save from the UI) does not contain.
+#
+# This tuple is the single place that knowledge lives, because forgetting it
+# has now broken the same thing twice. Anything derived on read but compared
+# on write makes `seed_strategies` see every seed as changed on every startup:
+# a perpetual rewrite that also resets whatever the user had set. `tools` did
+# it first; `exit_protocol` did it again the moment it was added.
+#
+# ADD A DERIVED FIELD → ADD IT HERE, in the same edit. logic_audit33 asserts
+# that this tuple covers everything a read actually injects, so a future field
+# that skips this line fails the suite instead of the box.
+# `name` is deliberately NOT here: a read restates it from the row column, but
+# it is genuinely part of the authored document and round-trips unchanged.
+DERIVED_KEYS = ('id', 'created_at', 'updated_at', 'exit_protocol')
+
+
 def _row_to_strategy(row: sqlite3.Row) -> dict:
     obj = json.loads(row['data'])
     # Setups saved before tools existed have no key at all. Defaulting here
@@ -167,7 +184,7 @@ def save_strategy(obj: dict) -> dict:
     # `exit_protocol` is DERIVED on every read. Storing it would freeze a copy
     # that stops matching the risk block the moment either is edited — the
     # two-copies problem this whole design exists to avoid.
-    for meta in ('id', 'updated_at', 'created_at', 'exit_protocol'):
+    for meta in DERIVED_KEYS:
         payload.pop(meta, None)
     data = json.dumps(payload)
     now = time.time()
@@ -256,8 +273,8 @@ def seed_strategies() -> int:
             # canonical scalps, which must track the bundle.
             if obj.get('_keep_user_edits'):
                 continue
-            stored = {k: v for k, v in cur.items()
-                      if k not in ('id', 'updated_at', 'created_at')}
+            # compare the AUTHORED document only — never a field a read derived
+            stored = {k: v for k, v in cur.items() if k not in DERIVED_KEYS}
             # WHICH TOOLS run a setup is decided in the UI, not in the bundle:
             # the seed files carry no `tools`, while every stored row reports at
             # least [] (see _row_to_strategy). Comparing those two directly made

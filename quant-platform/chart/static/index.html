@@ -1221,8 +1221,17 @@ function btRenderCore(g,extra){
     const cls=(t.ret||0)>0?'up':'dn';
     // real-account detail (present when account $ + risk % were set)
     const _c=t.ctx||{}, _sh=_c.acct_shares, _pl=_c.acct_pnl_usd;
+    // A win under the prop firm's per-share minimum is money you KEEP that
+    // earns no credit toward the target. It is invisible in a percent column —
+    // +2.70% on a $1.93 stock is five cents a share — so it is called out on
+    // the trade itself, where the decision to take that trade gets made.
+    const _nc = _c.acct_no_credit
+      ? `<br><span style="font-size:11px;color:var(--draft)">⚠ DOES NOT COUNT`
+        + ` — $${(_c.acct_pnl_per_share||0).toFixed(3)}/share is under the minimum`
+        + ` (you keep the $${Math.round(_pl||0).toLocaleString()}, it earns no credit)</span>`
+      : '';
     const _acct = (_sh!=null&&_pl!=null)
-      ? `<br><span class="muted" style="font-size:11px">${Math.round(_sh).toLocaleString()} sh · $${Math.round(_c.acct_notional_usd||0).toLocaleString()} pos · risk $${Math.round(_c.acct_risk_usd||0)} · <b style="color:${_pl>=0?'#22c55e':'#ef5350'}">${_pl>=0?'+':''}$${_pl.toLocaleString()}</b>${_c.acct_r_multiple!=null?` · ${_c.acct_r_multiple}R`:''}</span>`
+      ? `<br><span class="muted" style="font-size:11px">${Math.round(_sh).toLocaleString()} sh · $${Math.round(_c.acct_notional_usd||0).toLocaleString()} pos · risk $${Math.round(_c.acct_risk_usd||0)} · <b style="color:${_pl>=0?'#22c55e':'#ef5350'}">${_pl>=0?'+':''}$${_pl.toLocaleString()}</b>${_c.acct_r_multiple!=null?` · ${_c.acct_r_multiple}R`:''}</span>${_nc}`
       : (_c.acct_note?`<br><span class="muted" style="font-size:11px">⚠ ${_c.acct_note}</span>`:'');
     d.innerHTML=`<span class="tk">${t.symbol}</span> <span class="muted">${t.date}</span> <span class="${cls}" style="float:right">${t.ret!=null?((t.ret*100).toFixed(2)+'%'):'—'} ${t.reason}</span>${_acct}`;
     d.title=`${t.side} ${t.entry} → ${t.exit??'(open)'}`;

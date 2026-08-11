@@ -448,6 +448,16 @@ def backtest_report(bid: int):
         + _kpi(f"{st.get('max_dd_pct','—')}%", f"max drawdown ({_u(-abs(st.get('max_dd_abs') or 0))} peak-to-trough)")
         + _kpi(_f(st.get('recovery_factor')), 'recovery factor — net profit ÷ max drawdown')
         + _kpi(_f(st.get('sharpe')), 'Sharpe (daily, annualised ×√252, flat days counted)')
+        # Placed among the headline numbers on purpose: a reader who stops at
+        # the KPIs must not walk away thinking every dollar counted.
+        + ((_kpi(f"${abs(acct.get('no_credit_pnl_usd') or 0):,.2f}",
+                 f"PROFIT THAT WILL NOT COUNT — {acct.get('no_credit_wins')} win(s) "
+                 f"under ${acct.get('min_profit_ps')}/share. Yours to keep; no "
+                 f"credit toward a funded target", 'dn')
+            if acct.get('no_credit_wins') else
+            _kpi('$0.00', f"profit that will not count — every win cleared "
+                          f"${acct.get('min_profit_ps')}/share", 'up'))
+           if acct.get('min_profit_ps') is not None else '')
     )
 
     # ── 2. PERFORMANCE ────────────────────────────────────────────────────
@@ -599,6 +609,9 @@ def backtest_report(bid: int):
         f"<td class='{_cls(j['return_pct'])}'>{_plain(j['return_pct'])}%</td>"
         f"<td>{_money(j['equity_before'])}</td><td>{_money(j['equity_after'])}</td>"
         f"<td>{_money(j['open_notional_usd'])}</td>"
+        f"<td>{_plain(j['pnl_per_share'])}</td>"
+        f"<td class='{'dn' if j['counts_toward_target'].startswith('NO') else ''}'>"
+        f"{j['counts_toward_target']}</td>"
         f"<td>{_plain(j['rvol_day'])}</td><td>{_plain(j['reg_score'])}</td>"
         f"<td>{_plain(j['reg_gap_pct'])}</td><td>{_plain(j['reg_sector'])}</td>"
         f"<td>{_plain(j['source'])}</td><td class='muted'>{j['note'] or ''}</td>"
@@ -608,6 +621,7 @@ def backtest_report(bid: int):
              'risk/sh', 'exit', 'exit $', 'why', 'held min', 'shares',
              'position $', 'risk $', 'gross $', 'fees $', 'net $', 'R',
              'move %', 'equity before', 'equity after', 'exposure $',
+             '$/share', 'counts?',
              'rvol', 'score', 'gap %', 'sector', 'tool', 'note']
     fee_rule = (jrows[0]['_fee_rule'] if jrows else 'none')
 

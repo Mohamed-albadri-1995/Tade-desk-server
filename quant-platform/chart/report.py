@@ -338,6 +338,7 @@ JOURNAL_COLUMNS = [
     ('equity_before', 'equity before'), ('equity_after', 'equity after'),
     ('open_notional_usd', 'exposure at entry $'),
     ('scale_out_legs', 'legs'),
+    ('pnl_per_share', '$/share'), ('counts_toward_target', 'counts?'),
     ('rvol_day', 'rvol'), ('reg_score', 'score'), ('reg_gap_pct', 'gap %'),
     ('reg_sector', 'sector'), ('source', 'tool'), ('note', 'note'),
 ]
@@ -427,6 +428,12 @@ def journal(trades: list, summary: dict) -> list:
             'risk_usd': c.get('acct_risk_usd'),
             'gross_usd': gross, 'fees_usd': fee, 'net_usd': net,
             'r_multiple': c.get('acct_r_multiple'),
+            # The prop-firm minimum is per SHARE, so this is the number that
+            # decides whether the profit counts — and it is invisible in a
+            # percent column: +2.70% on a $1.93 stock is five cents.
+            'pnl_per_share': c.get('acct_pnl_per_share'),
+            'counts_toward_target': ('NO — under the minimum'
+                                     if c.get('acct_no_credit') else 'yes'),
             'return_pct': (round(float(t['ret']) * 100.0, 3)
                            if t.get('ret') is not None else None),
             'equity_before': eq_b, 'equity_after': eq_a,

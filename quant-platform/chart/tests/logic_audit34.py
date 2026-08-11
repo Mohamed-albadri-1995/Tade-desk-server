@@ -326,6 +326,41 @@ a2 = bt._account_block([KPTI, FAT], {k: v for k, v in SPEC.items()
 ok('with no min-profit rule the fields are None, not a misleading 0',
    a2['min_profit_ps'] is None and a2['counted_pnl_usd'] is None)
 
+# The uncounted profit must be visible everywhere the trade is, not only in a
+# summary the reader may not scroll to.
+J2 = rpt.journal([KPTI, FAT], {'account': {**SPEC, 'account_equity_start': 100000,
+                               'fee_per_share': 0.005, 'fee_min_per_order': 0.75}})
+ok('the journal carries the per-share number that decides it',
+   J2[0]['pnl_per_share'] is not None, str(J2[0]['pnl_per_share']))
+ok('the journal says outright whether a trade counts',
+   J2[0]['counts_toward_target'].startswith('NO')
+   and J2[1]['counts_toward_target'] == 'yes',
+   f"{J2[0]['counts_toward_target']} / {J2[1]['counts_toward_target']}")
+ok('both columns are exported in the CSV', 
+   ('pnl_per_share', '$/share') in rpt.JOURNAL_COLUMNS
+   and ('counts_toward_target', 'counts?') in rpt.JOURNAL_COLUMNS)
+_saved3 = store.get_backtest
+store.get_backtest = lambda bid, with_trades=True: {
+    'id': 3, 'name': 'T', 'status': 'done',
+    'spec': {'start': '2026-08-03', 'end': '2026-08-05', 'tf': '1m',
+             'feed': 'polygon', 'fill': 'next_open',
+             'universe': {'kind': 'register', 'register': 'R1'}},
+    'summary': {'dates': ['2026-08-03', '2026-08-04'], 'open_trades': 0,
+                'account': a},
+    'trades': [KPTI, FAT]}
+try:
+    pg3 = srv.backtest_report(3).body.decode()
+    ok('the report shouts it in the headline KPIs',
+       'PROFIT THAT WILL NOT COUNT' in pg3)
+    ok('...names the trade that caused it', 'KPTI' in pg3)
+    ok('...and states the money is still yours',
+       'money does not change' in pg3 or 'still\n' in pg3 or 'is still' in pg3)
+    csv3 = srv.backtest_journal_csv(3).body.decode()
+    ok('the CSV carries the counts? column', '$/share,counts?' in csv3)
+    ok('...with the failing trade marked', 'NO — under the minimum' in csv3)
+finally:
+    store.get_backtest = _saved3
+
 print()
 print("=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
