@@ -94,6 +94,64 @@ def _num(v):
         return None
 
 
+def select_by_rank(closed: list, metric, direction, top_n: int = 0):
+    """Keep the best `top_n` trades per day by `metric`. Returns (kept, info).
+
+    EXTRACTED so the backtest and anything asking "which metric should this
+    strategy rank by" run the SAME selection. A comparison built on a second
+    implementation would be comparing two things, neither of which is what runs.
+
+    No silent default: an unnamed metric raises and an unknown one raises.
+    Ranking by the wrong metric silently reshapes the strategy —
+    vwap_extension means "widest stop" for anything but a VWAP-anchored stop.
+    """
+    if not metric:
+        raise ValueError(
+            'rank_per_day needs an explicit metric — one of '
+            + ', '.join(sorted(RANK_METRICS))
+            + '. There is no default: ranking by the wrong metric silently '
+              'reshapes the strategy (vwap_extension means "widest stop" '
+              'for anything but a VWAP-anchored stop).')
+    metric = str(metric)
+    if metric not in RANK_METRICS:
+        raise ValueError(f'unknown rank metric {metric!r} — known: '
+                         + ', '.join(sorted(RANK_METRICS)))
+    score_of, default_dir = RANK_METRICS[metric]
+    direction = str(direction or default_dir).lower()
+    if direction not in ('asc', 'desc'):
+        raise ValueError(f"rank direction must be 'asc' or 'desc', got {direction!r}")
+    sgn = -1.0 if direction == 'desc' else 1.0
+
+    by_date: dict = {}
+    for t in closed:
+        sc = score_of(t)
+        t.setdefault('ctx', {})['rank_metric'] = (
+            round(sc, 6) if sc is not None else None)
+        by_date.setdefault(t['date'], []).append(t)
+
+    keep, dropped, unscored = [], 0, 0
+    for d, rows in by_date.items():
+        # best first for the chosen direction; ties broken by ticker so a run
+        # is reproducible. Unscorable rows sort last either way and are dropped
+        # explicitly, never treated as merely weakest.
+        rows.sort(key=lambda t: (
+            (sgn * t['ctx']['rank_metric']) if t['ctx'].get('rank_metric') is not None
+            else float('inf'), t['symbol']))
+        for i, t in enumerate(rows):
+            t['ctx']['rank_in_day'] = i + 1
+            if t['ctx'].get('rank_metric') is None:
+                dropped += 1
+                unscored += 1
+            elif top_n and i >= top_n:
+                dropped += 1
+            else:
+                keep.append(t)
+
+    return keep, {'metric': metric, 'direction': direction, 'top_n': top_n,
+                  'kept': len(keep), 'dropped_by_rank': dropped,
+                  'dropped_unscorable': unscored}
+
+
 def _et_date(ts_s: int) -> str:
     return pd.Timestamp(int(ts_s), unit='s', tz='UTC').tz_convert(cs._ET).strftime('%Y-%m-%d')
 
@@ -776,58 +834,9 @@ def run(spec: dict, progress_cb=None) -> dict:
     # spec ranks on, computed from fields already on the trade.
     rank = spec.get('rank_per_day') or None
     if rank and closed:
-        top_n = int(rank.get('top_n') or 0)
-        # NO silent default. An unnamed metric used to fall through to
-        # vwap_extension, which is correct for T2 and wrong for every other
-        # setup — see RANK_METRICS. An unknown name raises rather than guesses.
-        metric = rank.get('metric')
-        direction = rank.get('direction')
-        if not metric:
-            raise ValueError(
-                'rank_per_day needs an explicit metric — one of '
-                + ', '.join(sorted(RANK_METRICS))
-                + '. There is no default: ranking by the wrong metric silently '
-                  'reshapes the strategy (vwap_extension means "widest stop" '
-                  'for anything but a VWAP-anchored stop).')
-        metric = str(metric)
-        if metric not in RANK_METRICS:
-            raise ValueError(f'unknown rank metric {metric!r} — known: '
-                             + ', '.join(sorted(RANK_METRICS)))
-        score_of, default_dir = RANK_METRICS[metric]
-        direction = str(direction or default_dir).lower()
-        if direction not in ('asc', 'desc'):
-            raise ValueError(f"rank direction must be 'asc' or 'desc', got {direction!r}")
-        sgn = -1.0 if direction == 'desc' else 1.0
-
-        by_date: dict = {}
-        for t in closed:
-            sc = score_of(t)
-            t.setdefault('ctx', {})['rank_metric'] = (
-                round(sc, 6) if sc is not None else None)
-            by_date.setdefault(t['date'], []).append(t)
-        keep, dropped, unscored = [], 0, 0
-        for d, rows in by_date.items():
-            # best first for the chosen direction; ties broken by ticker so a
-            # run is reproducible (the spec's morning-volume tie-break is not
-            # on the trade row). Unscorable rows sort last either way and are
-            # dropped explicitly, never treated as merely weakest.
-            rows.sort(key=lambda t: (
-                (sgn * t['ctx']['rank_metric']) if t['ctx'].get('rank_metric') is not None
-                else float('inf'), t['symbol']))
-            for i, t in enumerate(rows):
-                t['ctx']['rank_in_day'] = i + 1
-                if t['ctx'].get('rank_metric') is None:
-                    dropped += 1
-                    unscored += 1
-                elif top_n and i >= top_n:
-                    dropped += 1
-                else:
-                    keep.append(t)
-        closed = keep
-        cov['rank_per_day'] = {'metric': metric, 'direction': direction,
-                               'top_n': top_n, 'kept': len(keep),
-                               'dropped_by_rank': dropped,
-                               'dropped_unscorable': unscored}
+        closed, cov['rank_per_day'] = select_by_rank(
+            closed, rank.get('metric'), rank.get('direction'),
+            int(rank.get('top_n') or 0))
 
     # Counters that describe THE TRADES have to describe the trades that
     # SURVIVED. They are tallied inside the per-pair loop, which runs before
