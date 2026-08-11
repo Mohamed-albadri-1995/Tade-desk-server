@@ -418,3 +418,57 @@ def test_a_malformed_leg_is_skipped_rather_than_sized_as_zero():
     ]}}, 'long', 100.0, 98.0)
     assert len(p['legs']) == 1
     assert p['legs'][0]['fraction'] == 0.5
+
+
+# ── a rule exit is not a 2R exit ───────────────────────────────────────────
+#
+# Three seeds have no targets and leave on a CONDITION — a VWAP cross, an SMA
+# cross. Substituting a 2R bracket does not approximate those strategies, it
+# replaces them: the backtested win rate comes from the rule exit, so a live
+# order at 2R would be a different strategy wearing the same name and carrying
+# the same evidence. Fashionably Late is validated at 75%; that number is not
+# about a 2R target.
+
+def test_a_strategy_that_exits_on_a_rule_gets_no_invented_target():
+    from chart import exit_protocol as xp
+    p = xp.normalise({
+        'risk': {'sl': {'type': 'pct', 'value': 1, 'freeze': True}},
+        'exit': {'logic': 'AND', 'rules': [{'left': 'close', 'op': 'cross_above'}]},
+    })
+    assert p['legs'][0]['tp_kind'] == 'rule'
+    # It ALERTS correctly — entry and stop are both known at the decision.
+    assert p['ok'] is True
+    # It must not be auto-traded.
+    assert p['order_ok'] is False
+    assert 'no broker can watch' in ' '.join(p['order_errors'])
+
+
+def test_a_strategy_with_no_exit_rules_still_gets_the_default_target():
+    # Nothing takes it out but the stop, so the screener's R is a stated
+    # convention rather than a substitution for something that exists.
+    from chart import exit_protocol as xp
+    p = xp.normalise({'risk': {'sl': {'type': 'pct', 'value': 1, 'freeze': True}},
+                      'exit': {'logic': 'AND', 'rules': []}})
+    assert p['legs'][0]['tp_kind'] == 'default_r'
+    assert p['order_ok'] is True
+
+
+def test_the_rule_leg_is_priced_at_nothing():
+    p = exit_plan({'risk': {'sl': {'type': 'pct', 'freeze': True}},
+                   'exit': {'rules': [{'op': 'cross_above'}]}},
+                  'long', 100.0, 98.0)
+    assert p['legs'][0]['price'] is None
+    assert p['order_ok'] is False
+
+
+def test_the_three_real_seeds_that_exit_on_a_rule_are_flagged():
+    import json
+    import pathlib
+    from chart import exit_protocol as xp
+    seeds = pathlib.Path(__file__).resolve().parents[1] / 'seeds'
+    flagged = []
+    for f in sorted(seeds.glob('*.json')):
+        for s in json.loads(f.read_text()):
+            if not xp.normalise(s)['order_ok']:
+                flagged.append(s['name'])
+    assert set(flagged) == {'Fashionably Late Scalp', 'PM Breakout (2m)', 'PML breakout'}

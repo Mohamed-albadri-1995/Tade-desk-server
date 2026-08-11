@@ -163,13 +163,26 @@ def normalise(strategy: dict) -> dict:
 
     booked = sum(l['fraction'] for l in legs)
 
-    # A strategy with no targets at all is one part, taken at the screener's
-    # default R. Made explicit here so it is a declared one-leg protocol rather
-    # than an absence that each reader fills in for itself.
     if not legs and runner_fraction in (None, 0):
+        # A strategy with no targets exits one of two ways, and they are NOT
+        # interchangeable.
+        #
+        #   it has exit RULES     it leaves on a condition — a VWAP cross, an
+        #                         SMA cross. That is the strategy. Substituting
+        #                         a 2R bracket does not approximate it, it
+        #                         replaces it: the backtested win rate comes
+        #                         from the rule exit, and a live order at 2R
+        #                         would be a different strategy wearing the same
+        #                         name and the same evidence.
+        #
+        #   it has none           nothing takes it out but the stop, so the
+        #                         screener's default R is a stated convention
+        #                         rather than a substitution.
+        has_exit_rules = bool(((s.get('exit') or {}).get('rules')) or [])
         legs = [{
             'fraction': 1.0, 'sl': shared_sl, 'sl_kind': _sl_kind(shared_sl),
-            'tp': None, 'r_multiple': None, 'tp_kind': 'default_r',
+            'tp': None, 'r_multiple': None,
+            'tp_kind': 'rule' if has_exit_rules else 'default_r',
         }]
         booked = 1.0
 
@@ -217,6 +230,12 @@ def validate(protocol: dict) -> dict:
     """
     errors: list = []
     warnings: list = []
+    # A THIRD list, because "cannot be alerted" and "cannot be ordered" are
+    # different failures. A rule-exit strategy alerts perfectly — the entry and
+    # the stop are known at the decision — and cannot be handed to a broker,
+    # because no broker watches for a VWAP cross. Collapsing the two would
+    # either stop a good alert or send a wrong order.
+    order_errors: list = []
     legs = protocol.get('legs') or []
     runner = protocol.get('runner') or {}
     r_fraction = _num(runner.get('fraction')) or 0.0
@@ -244,6 +263,12 @@ def validate(protocol: dict) -> dict:
             errors.append(f'leg {i} has no target and is not the runner')
         elif leg.get('tp_kind') == 'default_r':
             warnings.append('no target in the strategy — the screener supplies 2R')
+        elif leg.get('tp_kind') == 'rule':
+            order_errors.append(
+                'this strategy exits on a RULE, not at a price — no broker can '
+                'watch for that. It alerts correctly; it must not be auto-traded '
+                'unless you give it a target, or the order would be a different '
+                'strategy from the one that was tested')
 
     if r_fraction > 0:
         if runner.get('manage') == 'manual':
@@ -253,4 +278,11 @@ def validate(protocol: dict) -> dict:
             warnings.append(f'{int(round(r_fraction * 100))}% is a runner with no '
                             'target — it rides the stop until the end-of-session close')
 
-    return {'ok': not errors, 'errors': errors, 'warnings': warnings}
+    return {
+        'ok': not errors,
+        'errors': errors,
+        # Can it be alerted? Can it be ordered? Two questions, two answers.
+        'order_ok': not errors and not order_errors,
+        'order_errors': order_errors,
+        'warnings': warnings,
+    }

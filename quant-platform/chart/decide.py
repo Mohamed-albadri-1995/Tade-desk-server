@@ -182,6 +182,10 @@ def exit_plan(strategy: dict, side: str, entry: float, stop: float,
         elif kind == 'default_r':
             r_mult = float(target_r)
             price = entry + sign * r_mult * per_share
+        elif kind == 'rule':
+            # No price at all. The strategy leaves on a condition, and putting a
+            # number here would be inventing a target the backtest never used.
+            price = None
         elif kind == 'pct' and tp and tp.get('value') not in (None, ''):
             price = entry * (1.0 + sign * float(tp['value']) / 100.0)
             r_mult = (abs(price - entry) / per_share) if per_share else None
@@ -196,7 +200,7 @@ def exit_plan(strategy: dict, side: str, entry: float, stop: float,
             'fraction': leg.get('fraction'),
             'r_multiple': None if r_mult is None else round(r_mult, 4),
             'price': None if price is None else round(price, 4),
-            'anchored': kind == 'anchored',
+            'anchored': kind in ('anchored', 'rule'),
             # PER LEG, because "2 SL / 2 TP" is a shape the protocol can now
             # express: two parts whose stops are in different places.
             'stop': round(float(stop), 4),
@@ -211,6 +215,9 @@ def exit_plan(strategy: dict, side: str, entry: float, stop: float,
         'shape': proto.get('shape'),
         'ok': proto.get('ok', True),
         'errors': proto.get('errors') or [],
+        # Alertable and orderable are different questions — see exit_protocol.
+        'order_ok': proto.get('order_ok', True),
+        'order_errors': proto.get('order_errors') or [],
         'warnings': proto.get('warnings') or [],
         'legs': legs,
         'runner': float(runner.get('fraction') or 0.0),

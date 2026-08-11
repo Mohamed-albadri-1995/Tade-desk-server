@@ -274,7 +274,20 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
    * minutes ago to see what it does. The strategy earns it separately, and the
    * default for a strategy that has never said so is no.
    */
-  if (!dryRun && setup.autoTrade === true) {
+  /*
+   * …and the strategy must be ORDERABLE, which is not the same as valid.
+   *
+   * A rule-exit strategy alerts correctly and cannot be sent to a broker: no
+   * broker watches for a VWAP cross, and giving it a price target instead would
+   * place a different strategy from the one that was backtested — under the
+   * same name, with the same evidence behind it. It alerts; it does not trade.
+   */
+  const orderable = !setup.readiness || setup.readiness.orderOk !== false;
+  if (!dryRun && setup.autoTrade === true && !orderable) {
+    console.log(`[Setups] ${setup.id}: alert only — `
+      + `${(setup.readiness.orderBlocking || []).join('; ')}`);
+  }
+  if (!dryRun && setup.autoTrade === true && orderable) {
     for (const pick of out.picks) {
       const size = risk.sizeFor(
         { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
@@ -325,6 +338,9 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     kind: 'setup',
     level: 'trade',
     detail: describePick(pick, size) + orderLine(orders[pick.ticker])
+      + (setup.autoTrade === true && !orderable
+        ? ' · ALERT ONLY — ' + (setup.readiness.orderBlocking || []).join('; ')
+        : '')
       + unmanagedLine(pick.exitPlan),
     price: pick.plan.entry,
     // Everything the card cannot show but the trade needs. Kept on the fire so

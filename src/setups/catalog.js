@@ -88,6 +88,7 @@ function baseName(name) {
  */
 function readiness(strategies) {
   const blocking = [];
+  const orderBlocking = [];
   const warnings = [];
   const shapes = [];
 
@@ -106,12 +107,24 @@ function readiness(strategies) {
 
     if (!((s.entry || {}).rules || []).length) blocking.push(`${label}no entry rules`);
     for (const e of p.errors || []) blocking.push(`${label}${e}`);
+    for (const e of p.order_errors || []) orderBlocking.push(`${label}${e}`);
     for (const w of p.warnings || []) warnings.push(`${label}${w}`);
     if (p.shape) shapes.push(p.shape);
   }
 
   return {
     ok: blocking.length === 0,
+    /*
+     * Alertable and orderable are different questions.
+     *
+     * A strategy that exits on a rule — a VWAP cross, an SMA cross — alerts
+     * perfectly: its entry and its stop are both known at the decision. It
+     * cannot be handed to a broker, because no broker watches for a cross, and
+     * substituting a price target would place a different strategy from the one
+     * the evidence describes. So it alerts and does not trade.
+     */
+    orderOk: blocking.length === 0 && orderBlocking.length === 0,
+    orderBlocking: [...new Set(orderBlocking)],
     // The shape, for a person: "1 SL / 1 TP", "2 SL / 2 TP + runner (25%)".
     // One string when the long and short agree, which they normally do.
     shape: [...new Set(shapes)].join(' · ') || null,

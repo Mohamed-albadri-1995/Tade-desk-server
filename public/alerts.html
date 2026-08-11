@@ -76,6 +76,10 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .st-block { font-size:11.5px; color:var(--red); font-weight:700; margin-top:7px;
   line-height:1.5; }
 .st-warn { font-size:11px; color:var(--accent); margin-top:6px; line-height:1.55; }
+/* Blue, not red: this is a working setup that will alert correctly. It is
+   only the ORDER that cannot be sent. */
+.st-alertonly { font-size:11.5px; color:var(--blue); font-weight:700;
+  margin-top:7px; line-height:1.5; }
 .st-shape { font-size:11px; color:var(--text2); margin-top:7px;
   border:1px solid var(--border); border-radius:4px; padding:3px 7px;
   display:inline-block; }
@@ -714,6 +718,13 @@ async function loadSetups() {
         ${s.readiness && !s.readiness.ok
           ? `<div class="st-block">⛔ Will not trade: ${
               s.readiness.blocking.map(esc).join('; ')}</div>` : ''}
+        <!-- Alertable and orderable are different questions. A rule-exit
+             strategy alerts perfectly and must never be auto-traded: no broker
+             watches for a VWAP cross, and a price target in its place would be
+             a different strategy under the same name. -->
+        ${s.readiness && s.readiness.ok && s.readiness.orderOk === false
+          ? `<div class="st-alertonly">📣 Alerts only — will not place orders: ${
+              (s.readiness.orderBlocking || []).map(esc).join('; ')}</div>` : ''}
         ${s.readiness && s.readiness.warnings.length
           ? `<div class="st-warn">⚠ ${s.readiness.warnings.map(esc).join('<br>⚠ ')}</div>` : ''}
         <ul class="st-rules">${(s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
@@ -952,6 +963,13 @@ async function toggleAutoTrade(i) {
   const s = SETUPS[i];
   if (!s) return;
   const next = !s.autoTrade;
+  if (next && s.readiness && s.readiness.orderOk === false) {
+    alert(`"${s.name}" cannot place orders:\n\n`
+      + `${(s.readiness.orderBlocking || []).join('\n')}\n\n`
+      + 'It will keep alerting. Give it a price target in the chart tool if you '
+      + 'want it traded automatically.');
+    return;
+  }
   if (next && !confirm(`Let "${s.name}" place REAL orders?\n\n`
     + `Every time it fires at ${s.decisionTime} it will send an order sized by `
     + 'your risk settings, with the stop and target attached.\n\n'

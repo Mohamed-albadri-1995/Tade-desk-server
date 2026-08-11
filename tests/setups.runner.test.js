@@ -492,3 +492,67 @@ describe('setup-level risk overrides the account', () => {
     expect(store.recentFires(DATE)[0].setup.size.shares).toBe(5);
   });
 });
+
+/*
+ * A strategy that exits on a RULE alerts and does not trade.
+ *
+ * No broker watches for a VWAP cross. Substituting a price target would place a
+ * different strategy from the one that was backtested — under the same name,
+ * carrying the same evidence. Fashionably Late is validated at 75%, and that
+ * number comes from its VWAP-cross exit.
+ */
+describe('a rule-exit strategy is alert-only', () => {
+  const brokerMod = require('../src/broker/signalstack');
+  const risk = require('../src/setups/risk');
+
+  const RULE_EXIT = {
+    id: 'S', name: 'Fashionably Late Scalp', tools: ['T2'], decisionTime: '10:00',
+    autoTrade: true,
+    readiness: { ok: true, orderOk: false,
+      orderBlocking: ['this strategy exits on a RULE, not at a price'] },
+  };
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    jest.spyOn(risk, 'settings').mockReturnValue({
+      accountSize: 5000, riskPerTrade: 25, maxPositionPct: 100, updatedAt: 1 });
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+  });
+
+  test('no order is placed even with orders switched on', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder');
+    await runner.runSetup(RULE_EXIT, { date: DATE });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  /* The alert still arrives, in full, and says why nothing was ordered. */
+  test('the alert still fires and says it is alert-only', async () => {
+    await runner.runSetup(RULE_EXIT, { date: DATE });
+    const f = store.recentFires(DATE)[0];
+    expect(f.detail).toMatch(/^BUY 25 AAA/);
+    expect(f.detail).toMatch(/ALERT ONLY/);
+    expect(f.detail).toMatch(/exits on a RULE/);
+  });
+
+  test('a strategy that CAN be ordered still is', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled', quantity: 25 });
+    await runner.runSetup({ ...RULE_EXIT,
+      readiness: { ok: true, orderOk: true, orderBlocking: [] } }, { date: DATE });
+    expect(spy).toHaveBeenCalled();
+  });
+
+  /* A setup with no readiness at all — an older payload — must not be blocked
+   * by this, or a deploy ordering mismatch would silence every setup. */
+  test('a setup with no readiness is treated as orderable', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled', quantity: 25 });
+    await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'],
+      decisionTime: '10:00', autoTrade: true }, { date: DATE });
+    expect(spy).toHaveBeenCalled();
+  });
+});
