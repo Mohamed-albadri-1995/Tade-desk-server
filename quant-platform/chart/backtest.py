@@ -339,6 +339,16 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     # while the TTP block (which reads `fee_min`) charges it.
     fmin = float(spec.get('fee_min', spec.get('fee_min_per_order', 0)) or 0)
     order_fee = (lambda sz: max(fps * sz, fmin)) if (fps or fmin) else (lambda sz: 0.0)
+    # the prop firm's min-profit-per-share rule, applied at THIS account's size
+    try:
+        mps = spec.get('min_profit_ps')
+        mps = None if mps is None else float(mps)
+        if mps is not None and mps <= 0:
+            mps = None
+    except (TypeError, ValueError):
+        mps = None
+    counted_usd = wasted_usd = 0.0
+    wasted_n = 0
 
     rows = sorted(closed, key=lambda t: (t.get('entry_ts') or 0))
     # (exit_ts, pnl, notional) of positions entered but not yet closed at the
@@ -416,6 +426,26 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         _c['acct_r_multiple'] = (round(gross / (shares * per_share_risk), 2)
                                  if per_share_risk > 0 else None)
         _c['acct_open_notional_usd'] = round(open_notional + shares * entry, 2)
+        # PROP-FIRM MIN-PROFIT, AT THE ACCOUNT'S OWN SIZE. The rule is per
+        # SHARE, so whether a win clears it does not depend on size at all —
+        # but the money it costs you does. The TTP block tests it at a flat 100
+        # shares, where a wasted win looks like $3; the same trade at the
+        # account's real 9,000 shares withholds several hundred dollars of
+        # credit. Reporting only the 100-share version understates the rule by
+        # the size ratio, which on a $100k account is two orders of magnitude.
+        #
+        # It does NOT change net P&L — the money is yours either way. What it
+        # changes is how much counts toward a funded account's profit target.
+        if mps is not None:
+            realized = sum(fr for fr, _ in _fills(t, True))
+            avg_pps = (gross / (shares * realized)) if realized > 1e-9 else 0.0
+            _c['acct_pnl_per_share'] = round(avg_pps, 4)
+            if 0 < avg_pps < mps:
+                wasted_n += 1
+                wasted_usd += net
+                _c['acct_no_credit'] = True
+            else:
+                counted_usd += net
         pending.append((t.get('exit_ts') or et_in, net, shares * entry))
         max_concurrent = max(max_concurrent, len(pending))
         # equity curve marked when the trade closes (peak/DD on realized)
@@ -444,6 +474,12 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         'fee_per_share': fps,
         'fee_min_per_order': fmin,
         'equity_curve': curve[-400:],
+        # None when no min-profit rule was set: absent and zero mean different
+        # things, and a reader must not have to tell them apart from a 0.
+        'min_profit_ps': mps,
+        'counted_pnl_usd': (round(counted_usd, 2) if mps is not None else None),
+        'no_credit_pnl_usd': (round(wasted_usd, 2) if mps is not None else None),
+        'no_credit_wins': (wasted_n if mps is not None else None),
     }
 
 

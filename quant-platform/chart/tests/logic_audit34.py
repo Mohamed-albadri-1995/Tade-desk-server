@@ -280,6 +280,54 @@ finally:
 
 print()
 print("=" * 64)
+print("PART F — the prop-firm minimum at the ACCOUNT's size, not a flat 100")
+print("=" * 64)
+# Run #231's KPTI: a long at $1.93 that made +2.70%. That is $0.052 a share, so
+# it fails the $0.10 minimum at ANY size — the rule is per share. At the flat
+# 100 shares the TTP block uses, the credit lost reads $2.96. The account
+# actually held 9,162 shares of it. Reporting only the 100-share number
+# understates what the rule costs by the size ratio.
+import chart.backtest as bt
+KPTI = {'date': '2026-08-03', 'symbol': 'KPTI', 'side': 'long',
+        'entry_ts': ts('2026-08-03', '09:35'), 'exit_ts': ts('2026-08-03', '10:00'),
+        'entry': 1.93, 'exit': 1.982, 'ret': 0.02694, 'stop': 1.8875,
+        'reason': 'exit', 'ctx': {}}
+FAT = {'date': '2026-08-04', 'symbol': 'ADEA', 'side': 'long',
+       'entry_ts': ts('2026-08-04', '09:35'), 'exit_ts': ts('2026-08-04', '15:50'),
+       'entry': 25.82, 'exit': 29.36, 'ret': 0.13710, 'stop': 25.0,
+       'reason': 'eod', 'ctx': {}}
+SPEC = {'account_equity': 100000, 'risk_pct': 0.5, 'max_leverage': 1,
+        'fee_per_share': 0.005, 'fee_min': 0.75, 'min_profit_ps': 0.10}
+a = bt._account_block([KPTI, FAT], SPEC)
+ok('the min-profit rule is applied to the sized account',
+   a.get('min_profit_ps') == 0.10, str(a.get('min_profit_ps')))
+ok('the cheap-stock win is flagged as earning no credit',
+   a['no_credit_wins'] == 1, str(a['no_credit_wins']))
+ok('...and it is the $1.93 one, by per-share P&L under $0.10',
+   0 < (KPTI['ctx'].get('acct_pnl_per_share') or 0) < 0.10,
+   str(KPTI['ctx'].get('acct_pnl_per_share')))
+ok('the $25.82 win keeps full credit', not FAT['ctx'].get('acct_no_credit'))
+ok('counted + no-credit = net P&L (nothing is lost or double counted)',
+   abs((a['counted_pnl_usd'] + a['no_credit_pnl_usd']) - a['net_pnl_usd']) < 0.02,
+   f"{a['counted_pnl_usd']} + {a['no_credit_pnl_usd']} vs {a['net_pnl_usd']}")
+# THE POINT: the withheld amount scales with size, the pass/fail does not.
+ttp100 = bt._ttp_block([KPTI, FAT], [], {**SPEC, 'shares': 100})
+lost100 = round(ttp100['net_pnl_usd'] - ttp100['counted_pnl_usd'], 2)
+ok('at a flat 100 shares the same rule withholds only a few dollars',
+   lost100 < 10, str(lost100))
+ok('at the ACCOUNT size it withholds far more — the number that matters',
+   abs(a['no_credit_pnl_usd']) > 10 * abs(lost100),
+   f"account {a['no_credit_pnl_usd']} vs flat-100 {lost100}")
+ok('net P&L itself is NOT reduced by the rule (the money is still yours)',
+   abs(a['net_pnl_usd'] - (KPTI['ctx']['acct_pnl_usd'] + FAT['ctx']['acct_pnl_usd'])) < 0.02)
+# with no rule set, the fields are absent rather than zero
+a2 = bt._account_block([KPTI, FAT], {k: v for k, v in SPEC.items()
+                                     if k != 'min_profit_ps'})
+ok('with no min-profit rule the fields are None, not a misleading 0',
+   a2['min_profit_ps'] is None and a2['counted_pnl_usd'] is None)
+
+print()
+print("=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)
 sys.exit(1 if FAIL else 0)

@@ -1139,6 +1139,18 @@ function btRenderCore(g,extra){
         +(_ac.avg_pnl_usd!=null?` · avg ${_usdS(_ac.avg_pnl_usd)}/trade`:'')
         +` · worst drawdown ${_ac.max_drawdown_pct}%`
         +(_ac.max_concurrent_positions?` · up to ${_ac.max_concurrent_positions} positions at once`:'')+`</div>`
+      // The prop firm's per-share minimum, at THIS size. Reported next to the
+      // money because the flat-100-share line understates it by the size ratio.
+      +(_ac.min_profit_ps!=null&&_ac.no_credit_wins
+        ?`<div style="font-size:11px;color:var(--draft);margin-top:2px">`
+          +`${_usd(_ac.counted_pnl_usd)} of that counts toward a prop target — `
+          +`${_ac.no_credit_wins} win(s) worth ${_usd(_ac.no_credit_pnl_usd)} `
+          +`earned under $${_ac.min_profit_ps}/share and get no credit `
+          +`(the money is still yours)</div>`
+        :(_ac.min_profit_ps!=null
+          ?`<div style="font-size:11px;color:var(--text2);margin-top:2px">`
+            +`every win cleared the $${_ac.min_profit_ps}/share minimum — full `
+            +`credit toward a prop target</div>`:''))
       +`<div style="font-size:10px;color:var(--text3);margin-top:3px">position size = `
         +`(equity × ${_ac.risk_pct}%) ÷ (entry − stop), compounding in trade order`
         +(_ac.max_leverage>1?`, capped at ${_ac.max_leverage}× equity across all open positions`:'')+`</div>`

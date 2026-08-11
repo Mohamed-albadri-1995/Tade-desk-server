@@ -518,8 +518,41 @@ def backtest_report(bid: int):
             + _tbl(['symbol', 'trades', 'win rate', 'net', 'avg'], _grp_rows(st.get('by_symbol') or {})))
 
     # ── 5b. PROP-FIRM RULES, and which trades they touched ────────────────
-    pf = rpt.prop_firm_detail(trades, s)
     pf_html = ''
+    # FIRST at the account's own size, because that is the number that is
+    # actually at stake. The rule is per share, so the same trades fail it at
+    # any size — but the credit withheld scales with the position, and only
+    # the flat-100-share view was ever reported.
+    if acct and acct.get('min_profit_ps') is not None:
+        _lost = acct.get('no_credit_pnl_usd') or 0.0
+        _cnt = acct.get('counted_pnl_usd') or 0.0
+        _nw = acct.get('no_credit_wins') or 0
+        _rows_nc = ''.join(
+            f"<tr><td>{t['date']}</td><td><b>{t['symbol']}</b></td>"
+            f"<td>{t['side']}</td>"
+            f"<td>{(t.get('ctx') or {}).get('acct_shares', 0):,.0f}</td>"
+            f"<td class='dn'>${(t.get('ctx') or {}).get('acct_pnl_per_share', 0):.4f}/share</td>"
+            f"<td class='up'>+${(t.get('ctx') or {}).get('acct_pnl_usd', 0):,.2f}</td>"
+            f"<td class='muted'>kept, but earns no credit</td></tr>"
+            for t in trades if (t.get('ctx') or {}).get('acct_no_credit'))
+        pf_html += (
+            f"<h3>Prop-firm minimum, at YOUR size</h3>"
+            f"<div class='muted' style='font-size:11.5px'>The ${acct['min_profit_ps']}"
+            f"/share rule applied to the same position sizes the account block "
+            f"above used — not to a flat 100 shares. Your P&amp;L does not "
+            f"change: <b>${(acct.get('net_pnl_usd') or 0):,.2f}</b> is still "
+            f"yours. What changes is how much counts toward a funded account's "
+            f"profit target.</div>"
+            + _tbl(['toward the target', 'earned but not credited', 'wins affected'],
+                   f"<tr><td class='up'><b>${_cnt:,.2f}</b></td>"
+                   f"<td class='dn'><b>${_lost:,.2f}</b></td><td>{_nw}</td></tr>")
+            + (f"<div style='margin-top:6px'><b>Wins earning no credit</b></div>"
+               + _tbl(['date', 'symbol', 'side', 'shares', 'per share', 'P&L', 'note'],
+                      _rows_nc) if _nw else
+               "<div class='muted' style='margin-top:6px'>Every win cleared the "
+               "minimum at this size.</div>"))
+
+    pf = rpt.prop_firm_detail(trades, s)
     if pf:
         wrows = ''.join(
             f"<tr><td>{w['date']}</td><td><b>{w['symbol']}</b></td>"
@@ -528,8 +561,8 @@ def backtest_report(bid: int):
             f"<td class='muted'>below the ${pf['min_profit_ps']} minimum — "
             f"the profit is real, it just earns no credit toward the target</td></tr>"
             for w in pf['wasted'])
-        pf_html = (
-            f"<h3>Prop-firm rules — flat {pf['shares']:.0f} shares</h3>"
+        pf_html += (
+            f"<h3>Prop-firm rules — the flat {pf['shares']:.0f}-share view</h3>"
             f"<div class='muted' style='font-size:11.5px'>A SEPARATE simulation "
             f"from the account block above: it ignores your balance and trades "
             f"the same {pf['shares']:.0f} shares every time.<br>"
