@@ -315,7 +315,27 @@ def _main(argv=None):
             closed = closed.get('trades') or closed.get('closed') or []
     elif a.backtest:
         from chart import store
-        closed = store.backtest_trades(a.backtest)
+        run = store.get_backtest(a.backtest, with_trades=True)
+        if not run:
+            ap.error(f'no backtest {a.backtest}')
+        # THE RUN MUST NOT HAVE BEEN RANKED.
+        #
+        # A ranked run's trades are already the subset that metric chose, so
+        # every row below would be a ranking of a ranking — and the metric used
+        # upstream would come out ahead of the others for that reason alone.
+        # There is no way to see this in the output, which is why it is refused
+        # here rather than warned about.
+        used = (run.get('spec') or {}).get('rank_per_day') or {}
+        if used.get('metric'):
+            ap.error(
+                f"backtest {a.backtest} was itself ranked by "
+                f"{used['metric']} ({used.get('direction') or 'default'}), so its "
+                'trades are already that metric\'s picks — comparing rankings on '
+                'them would compare rankings of a ranking, and the metric used '
+                'here would win for that reason alone.\n\n'
+                'Re-run it in the chart tool with the rank box set to NONE and '
+                'the count blank, then sweep that run.')
+        closed = run.get('trades') or []
     else:
         ap.error('give --backtest or --trades')
 

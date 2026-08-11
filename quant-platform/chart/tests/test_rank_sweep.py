@@ -143,3 +143,37 @@ def test_variants_do_not_read_each_other_s_leftovers():
     trades = make(days=10, ret_of=lambda k: 1.0)
     rs.sweep(trades, top_n=2)
     assert all('rank_metric' not in (t.get('ctx') or {}) for t in trades)
+
+
+# ── the run this is allowed to read ───────────────────────────────────────
+
+def test_a_ranked_run_is_refused_as_a_source(monkeypatch, capsys):
+    """A ranked run's trades are already that metric's picks.
+
+    Sweeping them compares rankings OF a ranking, and the metric used upstream
+    comes out ahead for that reason alone. Nothing in the output would show it,
+    which is why this is a refusal and not a warning.
+    """
+    import pytest
+    from chart import store
+
+    monkeypatch.setattr(store, 'get_backtest', lambda i, with_trades=True: {
+        'id': i, 'spec': {'rank_per_day': {'metric': 'vwap_extension',
+                                           'direction': 'desc', 'top_n': 2}},
+        'trades': [],
+    })
+    with pytest.raises(SystemExit):
+        rs._main(['--backtest', '1'])
+    err = capsys.readouterr().err
+    assert 'was itself ranked' in err
+    assert 'rank box set to NONE' in err
+
+
+def test_an_unranked_run_is_accepted(monkeypatch, capsys):
+    from chart import store
+    trades = make(days=12, ret_of=lambda k: 1.0)
+    monkeypatch.setattr(store, 'get_backtest', lambda i, with_trades=True: {
+        'id': i, 'spec': {'start': '2026-07-01'}, 'trades': trades,
+    })
+    assert rs._main(['--backtest', '1']) == 0
+    assert 'RANKING SWEEP' in capsys.readouterr().out
