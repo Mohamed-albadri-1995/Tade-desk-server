@@ -56,6 +56,44 @@ def rank_metric(side: str, entry, stop) -> float | None:
     return ((e / s - 1.0) if side == 'long' else (s / e - 1.0)) * 100.0
 
 
+# ── the ranking contract, shared with the live decide path ────────────────
+# One name per way of scoring a day's candidates against each other. Kept in
+# ONE table because backtest and live must rank identically or a validated
+# result describes trades the box will never take.
+#
+# There is deliberately NO default. `vwap_extension` was the implicit one, and
+# it is right for exactly one setup: T2, whose stop IS the session VWAP, so
+# distance-to-stop is distance-from-VWAP. Applied to anything else it means
+# "trade the widest stop", which is a rule nobody wrote down — it reshaped
+# backtest #231 (OR + VWAP 09:35) into "the two widest opening ranges per day"
+# and threw away 103 of 117 signals on a criterion the spec never mentions.
+#
+# So: a strategy that does not NAME a metric is not ranked. Taking every
+# signal is the honest default, because it is the only one that does not
+# invent a preference.
+RANK_METRICS = {
+    # distance from entry to the stop, in percent. For a VWAP-anchored stop
+    # this is extension from VWAP (T2's spec). Descending = most extended.
+    'vwap_extension': (lambda t: rank_metric(t['side'], t['entry'], t.get('stop')),
+                       'desc'),
+    # the same number, ascending — for setups whose edge is a TIGHT stop, where
+    # the T2 ordering picks precisely against you.
+    'tight_stop': (lambda t: rank_metric(t['side'], t['entry'], t.get('stop')),
+                   'asc'),
+    # the register's own conviction score, when the screener supplied one
+    'reg_score': (lambda t: _num((t.get('ctx') or {}).get('score')), 'desc'),
+    # honest cumulative RVOL measured at the strategy's window start
+    'rvol': (lambda t: _num((t.get('ctx') or {}).get('rvol_day')), 'desc'),
+}
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _et_date(ts_s: int) -> str:
     return pd.Timestamp(int(ts_s), unit='s', tz='UTC').tz_convert(cs._ET).strftime('%Y-%m-%d')
 
@@ -739,30 +777,57 @@ def run(spec: dict, progress_cb=None) -> dict:
     rank = spec.get('rank_per_day') or None
     if rank and closed:
         top_n = int(rank.get('top_n') or 0)
-        metric = str(rank.get('metric') or 'vwap_extension')
+        # NO silent default. An unnamed metric used to fall through to
+        # vwap_extension, which is correct for T2 and wrong for every other
+        # setup — see RANK_METRICS. An unknown name raises rather than guesses.
+        metric = rank.get('metric')
+        direction = rank.get('direction')
+        if not metric:
+            raise ValueError(
+                'rank_per_day needs an explicit metric — one of '
+                + ', '.join(sorted(RANK_METRICS))
+                + '. There is no default: ranking by the wrong metric silently '
+                  'reshapes the strategy (vwap_extension means "widest stop" '
+                  'for anything but a VWAP-anchored stop).')
+        metric = str(metric)
+        if metric not in RANK_METRICS:
+            raise ValueError(f'unknown rank metric {metric!r} — known: '
+                             + ', '.join(sorted(RANK_METRICS)))
+        score_of, default_dir = RANK_METRICS[metric]
+        direction = str(direction or default_dir).lower()
+        if direction not in ('asc', 'desc'):
+            raise ValueError(f"rank direction must be 'asc' or 'desc', got {direction!r}")
+        sgn = -1.0 if direction == 'desc' else 1.0
 
         by_date: dict = {}
         for t in closed:
-            sc = rank_metric(t['side'], t['entry'], t.get('stop'))
+            sc = score_of(t)
             t.setdefault('ctx', {})['rank_metric'] = (
                 round(sc, 6) if sc is not None else None)
             by_date.setdefault(t['date'], []).append(t)
-        keep, dropped = [], 0
+        keep, dropped, unscored = [], 0, 0
         for d, rows in by_date.items():
-            # strongest first; ties broken by ticker so a run is reproducible
-            # (the spec's morning-volume tie-break is not on the trade row)
-            rows.sort(key=lambda t: (-(t['ctx'].get('rank_metric') if
-                                       t['ctx'].get('rank_metric') is not None else -1e9),
-                                     t['symbol']))
+            # best first for the chosen direction; ties broken by ticker so a
+            # run is reproducible (the spec's morning-volume tie-break is not
+            # on the trade row). Unscorable rows sort last either way and are
+            # dropped explicitly, never treated as merely weakest.
+            rows.sort(key=lambda t: (
+                (sgn * t['ctx']['rank_metric']) if t['ctx'].get('rank_metric') is not None
+                else float('inf'), t['symbol']))
             for i, t in enumerate(rows):
                 t['ctx']['rank_in_day'] = i + 1
-                if t['ctx'].get('rank_metric') is None or (top_n and i >= top_n):
+                if t['ctx'].get('rank_metric') is None:
+                    dropped += 1
+                    unscored += 1
+                elif top_n and i >= top_n:
                     dropped += 1
                 else:
                     keep.append(t)
         closed = keep
-        cov['rank_per_day'] = {'metric': metric, 'top_n': top_n,
-                               'kept': len(keep), 'dropped_by_rank': dropped}
+        cov['rank_per_day'] = {'metric': metric, 'direction': direction,
+                               'top_n': top_n, 'kept': len(keep),
+                               'dropped_by_rank': dropped,
+                               'dropped_unscorable': unscored}
 
     # Counters that describe THE TRADES have to describe the trades that
     # SURVIVED. They are tallied inside the per-pair loop, which runs before

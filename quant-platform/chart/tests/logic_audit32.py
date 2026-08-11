@@ -339,6 +339,65 @@ ok("a pair is counted ONCE even though two books evaluated it",
 ok("extension ranks correctly across sides (5.0 > 4.0 > 1.0 > 0.5)",
    round(sorted(t['ctx']['rank_metric'] for t in out2['trades'])[-1], 6) == 5.0)
 
+print()
+print("=" * 64)
+print("PART G — the rank metric must be CHOSEN, never defaulted")
+print("=" * 64)
+# vwap_extension is right for T2, whose stop IS the session VWAP. Applied to
+# any other setup it means "trade the widest stop" — a rule nobody wrote. It
+# silently reshaped backtest #231 (OR + VWAP 09:35), dropping 103 of 117
+# signals on a criterion absent from that spec. An unnamed metric is now an
+# error, not a default.
+_saved_p = bt._pairs, bt._resolve_strategies, bt.strat.evaluate
+_syms = ('AAA', 'BBB', 'CCC')
+bt._pairs = lambda spec, strategy=None: [('2026-08-03', x, {}) for x in _syms]
+bt._resolve_strategies = lambda spec: [{'name': 'X', 'side': 'long',
+                                        'entry': {'logic': 'AND', 'rules': []},
+                                        'risk': {'sl': {'type': 'pct', 'value': 1}}}]
+# stops chosen so the two metrics disagree completely
+_mk = {'AAA': (10.0, 9.0), 'BBB': (10.0, 9.8), 'CCC': (10.0, 9.5)}
+_t0 = int(pd.Timestamp('2026-08-03 09:35', tz=ET).timestamp())
+
+
+def _fake_eval(strategy, sym, tf, days, **kw):
+    e, st_ = _mk[sym]
+    return {'ok': True, 'bars': 10, 'entries': [], 'open_trade': None,
+            'trades': [{'entry_ts': _t0, 'exit_ts': _t0 + 1500, 'entry': e,
+                        'exit': e, 'stop': st_, 'ret': 0.0,
+                        'reason': 'exit', 'legs': []}]}
+
+
+bt.strat.evaluate = _fake_eval
+BASE = {'strategy': {}, 'tf': '1m', 'feed': 'polygon',
+        'universe': {'kind': 'symbols', 'symbols': list(_syms)},
+        'start': '2026-08-03', 'end': '2026-08-03'}
+try:
+    try:
+        bt.run({**BASE, 'rank_per_day': {'top_n': 2}})
+        ok('a rank block with no metric is REFUSED', False, 'it ran')
+    except ValueError as e:
+        ok('a rank block with no metric is REFUSED', 'explicit metric' in str(e), str(e)[:60])
+    try:
+        bt.run({**BASE, 'rank_per_day': {'metric': 'made_up', 'top_n': 2}})
+        ok('an unknown metric is refused, not silently ignored', False)
+    except ValueError as e:
+        ok('an unknown metric is refused, not silently ignored',
+           'unknown rank metric' in str(e))
+    o1 = bt.run({**BASE, 'rank_per_day': {'metric': 'vwap_extension', 'top_n': 2}})
+    k1 = sorted(t['symbol'] for t in o1['trades'])
+    ok('vwap_extension keeps the WIDEST stops (AAA, CCC)', k1 == ['AAA', 'CCC'], str(k1))
+    o2 = bt.run({**BASE, 'rank_per_day': {'metric': 'tight_stop', 'top_n': 2}})
+    k2 = sorted(t['symbol'] for t in o2['trades'])
+    ok('tight_stop keeps the TIGHTEST (BBB, CCC) — the opposite pick',
+       k2 == ['BBB', 'CCC'], str(k2))
+    ok('...so the metric genuinely changes which trades are taken', k1 != k2)
+    cov1 = o1['summary']['coverage']['rank_per_day']
+    ok('the run REPORTS which metric ranked it, and in which direction',
+       cov1['metric'] == 'vwap_extension' and cov1['direction'] == 'desc', str(cov1))
+    ok('with no rank block, every signal is taken', len(bt.run(BASE)['trades']) == 3)
+finally:
+    bt._pairs, bt._resolve_strategies, bt.strat.evaluate = _saved_p
+
 print("\n" + "=" * 64)
 print(f"RESULT  PASS={PASS}  FAIL={FAIL}")
 print("=" * 64)
