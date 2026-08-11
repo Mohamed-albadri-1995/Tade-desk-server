@@ -300,6 +300,11 @@ def _account_html(s: dict) -> str:
                  f"CAPITAL cap (the position, PLUS whatever was already open, "
                  f"would exceed {a['max_leverage']}x the balance) — they risked "
                  f"LESS than {a['risk_pct']}%</div>")
+    if a.get('size_capped_by_position'):
+        warn += (f"<div class=\"warn\">⚠ {a['size_capped_by_position']} trades hit the "
+                 f"PER-TRADE cap ({a['max_position_pct']}% of equity in one name) — "
+                 f"they risked LESS than {a['risk_pct']}%. This is the cap that "
+                 f"leaves room for the rest of the day.</div>")
     if a.get('skipped_no_capital'):
         warn += (f"<div class=\"warn\">⚠ {a['skipped_no_capital']} trades SKIPPED — no "
                  f"buying power left: earlier positions were still open and had "

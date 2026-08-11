@@ -23,6 +23,7 @@ reported as the fraction of pairs completed.
 
 from __future__ import annotations
 
+import math
 import traceback
 
 import pandas as pd
@@ -396,6 +397,14 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     - Equity COMPOUNDS in trade order: each trade is sized on the equity that
       existed when it was entered (P&L of everything that closed before it),
       so a losing streak shrinks size the way a real account does.
+    - PER-TRADE CAP (`max_position_pct`): no single position may exceed N% of
+      equity, the same rule the screener applies live before it sends an order
+      (`maxPositionPct`). This is the one that decides how many names the day
+      can afford. Without it a tight stop buys the whole account — ALNY's
+      $0.63 stop took $99,966 of a $100k balance in backtest #237 — and the
+      93 signals behind it were skipped for lack of capital, in ARRIVAL ORDER
+      rather than by quality. Applied BEFORE the portfolio cap, and counted in
+      `size_capped_by_position`. Absent = no cap, so old runs are unchanged.
     - CAPITAL CAP, PORTFOLIO-WIDE: you cannot buy more stock than you have
       money for — and that budget is shared by every position open at the same
       time. Buying power at an entry is `max_leverage` x equity MINUS the
@@ -429,6 +438,19 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     if risk_pct <= 0:
         return None
     lev = float(spec.get('max_leverage', 1) or 1)   # 1.0 = cash, no margin
+    # PER-TRADE position cap, the same setting the screener applies live
+    # (`maxPositionPct` in src/setups/risk.js). Without it a tight stop buys a
+    # position the size of the whole account — ALNY took $99,966 of a $100k
+    # balance on one trade in backtest #237 — and every later signal that day
+    # is skipped for lack of capital, by ARRIVAL ORDER rather than by quality.
+    # The leverage cap alone cannot express this: it is portfolio-wide, so it
+    # is silent until the account is already full.
+    try:
+        max_pos_pct = float(spec.get('max_position_pct') or 0)
+    except (TypeError, ValueError):
+        max_pos_pct = 0.0
+    if max_pos_pct <= 0:
+        max_pos_pct = 0.0               # absent = no per-trade cap (unchanged)
     fps = float(spec.get('fee_per_share', 0) or 0)
     # the panel posts `fee_min`; `fee_min_per_order` is the block's own output
     # name. Accept BOTH or the per-order minimum silently reads as $0 here
@@ -455,7 +477,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     peak = equity0
     maxdd = 0.0
     fees_tot = pnl_tot = 0.0
-    unsized = capped = no_capital = 0
+    unsized = capped = no_capital = pos_capped = 0
     max_concurrent = 0
     wins = 0
     sized_n = 0
@@ -480,6 +502,19 @@ def _account_block(closed: list, spec: dict) -> dict | None:
             t.setdefault('ctx', {})['acct_note'] = 'no stop — not sized'
             continue
         shares = (equity * risk_pct / 100.0) / per_share_risk
+        # PER-TRADE CAP, applied BEFORE the portfolio one. Order matters: cap
+        # this trade first, then measure what is left for the rest of the day.
+        # Reversed, the first name would still swallow the balance and the cap
+        # would only ever bind on trades that had already been squeezed.
+        #
+        # Measured against LIVE equity, while the screener measures against the
+        # configured account size. Same rule; the sim just knows what the
+        # balance actually is at that moment.
+        if max_pos_pct:
+            cap_sh = (equity * max_pos_pct / 100.0) / entry
+            if shares > cap_sh:
+                shares = cap_sh
+                pos_capped += 1
         # buying power LEFT after the positions already open (portfolio-wide)
         room = equity * lev - open_notional
         if room <= 0:
@@ -490,8 +525,25 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         if shares > max_sh:
             shares = max_sh
             capped += 1
-        if shares <= 0:
+        # WHOLE SHARES, because that is what the broker fills. The screener
+        # floors the count before it sends an order (src/setups/risk.js) and
+        # the bridge REFUSES a fractional quantity outright, so a fraction here
+        # is a position the live system would never take. Floored, never
+        # rounded: rounding up would risk more than the trade was sized for.
+        #
+        # Only ever makes the simulation smaller, never larger.
+        shares = math.floor(shares)
+        if shares < 1:
             unsized += 1
+            # WHY it came out under one share — the two causes need different
+            # answers. Too small a risk budget for the stop is a settings
+            # problem; a cap biting that hard means the name is too expensive
+            # for the slice this account gives one position.
+            t.setdefault('ctx', {})['acct_note'] = (
+                f'one share costs ${entry:,.2f} — more than the position cap '
+                f'allows' if max_pos_pct and entry > equity * max_pos_pct / 100.0
+                else f'one share risks ${per_share_risk:.2f}, more than the '
+                     f'{risk_pct}% of equity this trade may lose')
             continue
         # gross P&L over every fill (legs + runner), fees per ORDER
         gross = 0.0
@@ -555,6 +607,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         'account_equity_start': round(equity0, 2),
         'risk_pct': risk_pct,
         'max_leverage': lev,
+        'max_position_pct': max_pos_pct or None,
         'equity_end': round(equity, 2),
         'net_pnl_usd': round(pnl_tot, 2),
         'return_pct': round((equity / equity0 - 1.0) * 100.0, 2),
@@ -565,6 +618,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         'max_drawdown_pct': round(100.0 * maxdd, 2),
         'unsized_no_stop': unsized,
         'size_capped_by_leverage': capped,
+        'size_capped_by_position': pos_capped,
         'skipped_no_capital': no_capital,
         'max_concurrent_positions': max_concurrent,
         'fee_per_share': fps,

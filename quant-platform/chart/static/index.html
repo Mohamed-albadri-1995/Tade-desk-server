@@ -241,6 +241,7 @@
       <input id="btCost" type="number" step="any" placeholder="cost bps/side (e.g. 5)" title="transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies)." style="width:100%;margin-top:4px">
       <input id="btEquity" type="number" step="any" value="100000" placeholder="account $ (e.g. 100000)" title="REAL ACCOUNT sizing: starting equity. Position size per trade = (equity x risk%) / (entry - stop), so every stop-out loses the same % of the account. Equity compounds in trade order. Empty = off." style="width:100%;margin-top:4px">
       <input id="btRiskPct" type="number" step="any" value="0.5" placeholder="risk % per trade (e.g. 0.5)" title="Percent of CURRENT equity lost if the stop is hit. Requires the strategy to define a stop." style="width:100%;margin-top:4px">
+      <input id="btMaxPos" type="number" step="any" placeholder="max position % of equity (e.g. 25)" title="PER-TRADE cap — the same maxPositionPct the screener applies live before it sends an order. Without it a tight stop buys the whole account and every later signal that day is skipped for lack of capital, in arrival order rather than by quality. Empty = no cap." style="width:100%;margin-top:4px">
       <div style="display:flex;gap:4px;margin-top:4px">
         <input id="btTopN" type="number" step="1" min="0" placeholder="top N per day (blank = take EVERY signal)" title="RANK the day's signals against each other and trade only the strongest N, across the whole universe. Blank/0 = off, take every signal. This is a cross-symbol decision, so it happens in the runner after all symbols are evaluated — a strategy cannot see the other names." style="flex:1">
         <!-- The metric was hardcoded to VWAP extension whenever top-N was set.
@@ -1146,7 +1147,8 @@ function btRenderCore(g,extra){
     html+=`<div style="border:1px solid var(--blue);border-radius:6px;padding:8px 9px;margin:0 0 7px">`
       +`<div style="color:var(--text3);font-size:10px;letter-spacing:.04em">YOUR ACCOUNT — `
         +`${_usd(_ac.account_equity_start)} · risking ${_ac.risk_pct}% per trade`
-        +(_ac.max_leverage>1?` · up to ${_ac.max_leverage}x`:` · cash only`)+`</div>`
+        +(_ac.max_leverage>1?` · up to ${_ac.max_leverage}x`:` · cash only`)
+        +(_ac.max_position_pct?` · max ${_ac.max_position_pct}% of equity per position`:'')+`</div>`
       +`<div style="font-size:21px;font-weight:700;line-height:1.25;color:${good?'var(--accent)':'var(--red)'}">`
         +`${_usdS(_ac.net_pnl_usd)}`
         +`<span style="font-size:13px;font-weight:600"> (${_ac.return_pct>=0?'+':''}${_ac.return_pct}%)</span></div>`
@@ -1178,10 +1180,11 @@ function btRenderCore(g,extra){
       +`<div style="font-size:10px;color:var(--text3);margin-top:3px">position size = `
         +`(equity × ${_ac.risk_pct}%) ÷ (entry − stop), compounding in trade order`
         +(_ac.max_leverage>1?`, capped at ${_ac.max_leverage}× equity across all open positions`:'')+`</div>`
-      +((_ac.unsized_no_stop||_ac.size_capped_by_leverage||_ac.skipped_no_capital)
+      +((_ac.unsized_no_stop||_ac.size_capped_by_leverage||_ac.size_capped_by_position||_ac.skipped_no_capital)
         ?`<div style="font-size:10px;color:var(--draft);margin-top:3px">`
           +[_ac.unsized_no_stop?`⚠ ${_ac.unsized_no_stop} had no usable stop — excluded`:'',
             _ac.size_capped_by_leverage?`⚠ ${_ac.size_capped_by_leverage} sized down to the cash available`:'',
+            _ac.size_capped_by_position?`⚠ ${_ac.size_capped_by_position} sized down to the ${_ac.max_position_pct}% per-position cap`:'',
             _ac.skipped_no_capital?`⚠ ${_ac.skipped_no_capital} skipped — no buying power left`:''
            ].filter(Boolean).join(' · ')+`</div>`:'')
       // ALWAYS the whole run: size compounds in trade order and shares one
@@ -1313,6 +1316,7 @@ async function btRun(){
       return (Number.isFinite(n)&&n>0)?{metric:m,top_n:n}:null; })(),
     account_equity:parseFloat(document.getElementById('btEquity').value)||0,
     risk_pct:parseFloat(document.getElementById('btRiskPct').value)||0,
+    max_position_pct:parseFloat(document.getElementById('btMaxPos').value)||0,
     shares:parseFloat(document.getElementById('btShares').value)||100,
     fee_per_share:parseFloat(document.getElementById('btFee').value)||0,
     fee_min:parseFloat(document.getElementById('btFeeMin').value)||0,
