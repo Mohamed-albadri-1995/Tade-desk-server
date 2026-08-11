@@ -12,7 +12,8 @@ reason the backtest calls evaluate() instead of reimplementing it: a
 comparison whose runs differ in some second, unnoticed way is not a comparison.
 
     python3 chart/tests/tools_rank_compare.py 239            (from quant-platform/)
-    python3 chart/tests/tools_rank_compare.py 239 --top 4 6
+    python3 chart/tests/tools_rank_compare.py 239 --top 2 4 6 8
+    python3 chart/tests/tools_rank_compare.py 239 --top 4 --cap keep
     python3 chart/tests/tools_rank_compare.py 239 --host localhost:8765
 
 Ranking happens BEFORE sizing, which is the point of asking at all: the top N
@@ -73,7 +74,27 @@ def run_one(host, spec, name, poll=5.0):
         time.sleep(poll)
 
 
-def row(bid, label, top_n, s):
+def cap_for(top_n, mode, spec_cap):
+    """The per-position cap that lets ALL `top_n` names actually be funded.
+
+    Without this the comparison measures two things at once. The account holds
+    about 100/cap positions, so asking for the top 8 at a 25% cap funds four of
+    them and starves the rest in arrival order — and a run where half the picks
+    never happened cannot say whether the picking was any good. Dividing the
+    same capital into N slices keeps the ONLY difference between runs the
+    number of names taken.
+
+    Exact 100/N rather than a rounded-down figure: whole-share flooring already
+    leaves each position a little under its slice, so N of them fit.
+    """
+    if mode == 'keep' or not top_n:
+        return spec_cap
+    if mode != 'auto':
+        return float(mode)
+    return round(100.0 / top_n, 4)
+
+
+def row(bid, label, top_n, cap, s):
     """One line of the table, read straight off the stored summary.
 
     Only fields the account block actually reports — profit factor and average
@@ -87,7 +108,7 @@ def row(bid, label, top_n, s):
     # arrived reports no ranking, and is the baseline again under a new name.
     applied = 'yes' if rk else ('—' if top_n is None else 'NO — never applied')
     return {
-        'id': bid, 'rank': label, 'top_n': top_n or '',
+        'id': bid, 'rank': label, 'top_n': top_n or '', 'cap%': cap or '',
         'signals': s.get('trades'),            # survived ranking
         'sized': a.get('trades_sized'),        # the account could afford
         'net$': a.get('net_pnl_usd'),
@@ -106,6 +127,11 @@ def main(argv=None):
     ap.add_argument('baseline', type=int, help='backtest id to copy the spec from')
     ap.add_argument('--top', type=int, nargs='+', default=[4],
                     help='how many per day to keep (default 4)')
+    ap.add_argument('--cap', default='auto',
+                    help="per-position cap: 'auto' (100/N, so every pick gets "
+                         "funded and the runs differ only in how many names "
+                         "they take), 'keep' (whatever the baseline used), or "
+                         "a number to pin one cap across all of them")
     ap.add_argument('--host', default='localhost:8765')
     a = ap.parse_args(argv)
 
@@ -114,7 +140,9 @@ def main(argv=None):
         raise SystemExit(f'no backtest #{a.baseline}')
     spec = base['spec']
     print(f'copying the spec of #{a.baseline} — {spec.get("start")} → {spec.get("end")}, '
-          f'risk {spec.get("risk_pct")}%, max position {spec.get("max_position_pct")}%\n')
+          f'risk {spec.get("risk_pct")}%, max position {spec.get("max_position_pct")}%')
+    print('cap per position: ' + ('100/N, so all N picks get funded'
+                                  if a.cap == 'auto' else str(a.cap)) + '\n')
 
     rows = []
     for label, metric in VARIANTS:
@@ -122,21 +150,28 @@ def main(argv=None):
         for n in tops:
             s = dict(spec)
             s['rank_per_day'] = {'metric': metric, 'top_n': n} if metric else None
-            name = f'rank {label}' + (f' top{n}' if n else '')
+            cap = cap_for(n, a.cap, spec.get('max_position_pct'))
+            if cap:
+                s['max_position_pct'] = cap
+            name = f'rank {label}' + (f' top{n} cap{cap}%' if n else '')
             bid, summary = run_one(a.host, s, name)
-            rows.append(row(bid, label, n, summary))
+            rows.append(row(bid, label, n, cap, summary))
             print(' ' * 60, end='\r')
             print(f'  #{bid} {name}: done')
 
-    cols = ['id', 'rank', 'top_n', 'signals', 'sized', 'net$', 'ret%', 'win%',
+    cols = ['id', 'rank', 'top_n', 'cap%', 'signals', 'sized', 'net$', 'ret%', 'win%',
             'avg$', 'maxdd%', 'starved', 'applied']
     w = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in cols}
     print('\n' + '  '.join(c.ljust(w[c]) for c in cols))
     print('  '.join('-' * w[c] for c in cols))
     for r in rows:
         print('  '.join(str(r[c]).ljust(w[c]) for c in cols))
-    print('\ntrades first: under 40 per variant, differences here are direction, '
-          'not evidence. "starved" is how many signals the balance could not fund.')
+    print('\nread avg$, not net$: taking more names raises the total by '
+          'arithmetic, so only the average says whether the extra names were '
+          'worth adding. A real ranking makes it fall in ORDER as top_n grows.')
+    print('trades first: under 40 per variant, differences here are direction, '
+          'not evidence. "starved" should be 0 — anything else means the run '
+          'measured the ranking AND the account running dry, mixed together.')
 
 
 if __name__ == '__main__':
