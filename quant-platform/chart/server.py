@@ -315,13 +315,17 @@ def _account_html(s: dict) -> str:
                    'neither': ('warn', 'NEITHER LINE REACHED')}[ch['result']]
         where = (f" on {ch['hit_on']} ({ch['hit_symbol']})"
                  if ch.get('hit_on') else '')
-        warn += (f"<div class=\"{verdict[0]}\">CHALLENGE {verdict[1]}: "
-                 f"+{ch['target_pct']}% target vs {ch['max_dd_pct']}% max "
-                 f"drawdown {'from the starting balance' if ch['basis'] == 'start' else 'from the peak'}"
-                 f"{where}. Best profit +{ch['peak_profit_pct']}%; worst "
-                 f"drawdown {ch['worst_case_dd_pct']}% counting open risk "
-                 f"({ch['closed_dd_pct']}% on closed trades alone). "
-                 f"NOT modelled: {ch['not_modelled']}.</div>")
+        warn += (f"<div class=\"{verdict[0]}\"><b>CHALLENGE {verdict[1]}</b> "
+                 f"+{ch['target_pct']}% vs -{ch['max_dd_pct']}%{where} · "
+                 f"best +{ch['peak_profit_pct']}% · worst -{ch['worst_case_dd_pct']}% "
+                 f"(closed -{ch['closed_dd_pct']}%)"
+                 f"<details class=\"why\"><summary>why</summary><div>"
+                 f"Drawdown measured {'from the starting balance' if ch['basis'] == 'start' else 'from the highest balance reached'}, "
+                 f"on the worst case: at every moment every position still open "
+                 f"is assumed to stop out at once. The closed figure ignores "
+                 f"open positions and is the optimistic one. "
+                 f"Not modelled: {ch['not_modelled']}."
+                 f"</div></details></div>")
     if not a.get('trades_sized'):
         warn += ("<div class=\"warn\">⚠ NO trade could be sized — the account numbers "
                  "below are the starting balance, unchanged.</div>")
@@ -342,6 +346,30 @@ def _account_html(s: dict) -> str:
 
 
 @app.get('/api/backtest/{bid}/report')
+def _warn_html(warn: list) -> str:
+    """Warnings as one scannable line each, with the reasoning folded away.
+
+    Every one of these was added because something was misread once, so none of
+    them may be deleted. But a wall of prose above the numbers gets skipped
+    wholesale, which loses the warning just as completely — and the run that
+    matters is the one where a reader is hunting for a figure, not reading.
+
+    So: the FACT is always on screen, one line, no essay. The "why" is a tap.
+    Entries may be a bare string (nothing to explain) or (fact, why).
+    """
+    if not warn:
+        return ''
+    out = []
+    for w in warn:
+        fact, why = w if isinstance(w, (tuple, list)) else (w, None)
+        line = f'⚠ {fact}'
+        if why:
+            line += (f'<details class="why"><summary>why</summary>'
+                     f'<div>{why}</div></details>')
+        out.append(line)
+    return '<div class="warn">' + '<br>'.join(out) + '</div>'
+
+
 def backtest_report(bid: int):
     """Self-contained phone-readable HTML report: clear metric definitions,
     bias disclosure (fill model, costs, universe), and the trade list."""
@@ -354,11 +382,17 @@ def backtest_report(bid: int):
     uni = spec.get('universe') or {}
     uni_txt = (', '.join(uni.get('symbols') or []) if uni.get('kind') == 'symbols'
                else f"register {uni.get('register', 'R1')} (frozen per day — survivorship-bias-free)")
+    # (fact, why) — the FACT is always on screen, the explanation folds away.
+    # Every line here earned its place by having been got wrong once, but a wall
+    # of prose above the numbers is read by nobody, which loses the warning too.
     warn = []
     if not spec.get('cost_bps'):
-        warn.append('costs = 0 bps (frictionless — real results will be worse)')
+        warn.append(('costs 0 bps — spread and slippage not modelled', None))
     if spec.get('fill', 'close') == 'close':
-        warn.append("fill = close (optimistic; use 'next open' for live-honest fills)")
+        warn.append(("fill = close",
+                     "Optimistic by about one spread. 'next open' is the "
+                     "live-honest fill: a signal at a bar's close becomes a "
+                     "market order filled at the next bar's open."))
     cov = s.get('coverage') or {}
     if cov.get('entry_drops'):
         # These are BAR-LEVEL events, not lost opportunities, and printing them
@@ -374,36 +408,41 @@ def backtest_report(bid: int):
         if _d:
             _dl = ', '.join(f'{k}={v}' for k, v in sorted(_d.items(),
                                                           key=lambda kv: -kv[1]))
-            warn.append(f"signals INSIDE the window that still did not trade — "
-                        f"{_dl} (daily_cap = the per-day attempt limit; "
-                        f"cooldown = too soon after the last exit; "
-                        f"unpriceable_stop = the stop level had not formed yet)")
+            warn.append((f"signals in-window that did not trade — {_dl}",
+                         "daily_cap = the per-day attempt limit. cooldown = too "
+                         "soon after the last exit. unpriceable_stop = the stop "
+                         "level had not formed yet. target_too_close = the "
+                         "nearest profit target was under the strategy's "
+                         "min_target_usd. target_unpriced_kept = an exit-RULE "
+                         "strategy with no priced target, kept rather than "
+                         "guessed at."))
         if _clock:
             _cl = ', '.join(f'{k}={v:,}' for k, v in sorted(_clock.items(),
                                                             key=lambda kv: -kv[1]))
-            warn.append(f"bars where the entry condition was true but the CLOCK "
-                        f"refused it — {_cl}. This is the time window doing its "
-                        f"job, counted per BAR across the whole evaluated "
-                        f"history, not trades you missed. For a one-minute "
-                        f"window a number in the millions is normal.")
+            warn.append((f"bars refused by the clock — {_cl}",
+                         "The time window doing its job. Counted per BAR across "
+                         "the whole evaluated history, not trades you missed — "
+                         "for a one-minute window, millions is normal."))
     if cov.get('rvol_min'):
-        warn.append(f"In-Play filter: qp rvol ≥ {cov['rvol_min']} at {cov.get('rvol_at')} ET — "
-                    f"excluded {cov.get('rvol_below', 0)} below + "
-                    f"{cov.get('rvol_unknown', 0)} unverifiable "
-                    f"(honest cumulative RVOL, not the register's 5-min snapshot)")
+        warn.append((f"In-Play filter rvol ≥ {cov['rvol_min']} at {cov.get('rvol_at')} ET — "
+                     f"excluded {cov.get('rvol_below', 0)} below + "
+                     f"{cov.get('rvol_unknown', 0)} unverifiable",
+                     "Honest cumulative RVOL (volume so far today vs the average "
+                     "by this time of day), not the register's one-bar 5-minute "
+                     "snapshot."))
     if cov.get('by_source'):
         _bs = ' · '.join(
             f"{b['name']}: {b['pairs']} pairs ({b['pct_of_pairs']}%) over {b['days']}d, "
             f"{b['trades']} trades, {b['total_return_pct']:+.2f}%"
             for b in cov['by_source'])
-        warn.append('universe by scanning tool — ' + _bs)
+        warn.append(('universe by scanning tool — ' + _bs, None))
     if cov.get('source_imbalance'):
-        warn.append(cov['source_imbalance'])
+        warn.append((cov['source_imbalance'], None))
     if cov.get('no_data'):
-        warn.append(f"{cov['no_data']} of {cov.get('pairs')} day·symbol pairs returned "
-                    f"NO bars on feed '{cov.get('feed')}' — the universe was only "
-                    f"PARTIALLY evaluated (alpaca/IEX carries no data for many small "
-                    f"caps; rerun on polygon)")
+        warn.append((f"{cov['no_data']} of {cov.get('pairs')} pairs returned NO bars "
+                     f"on feed '{cov.get('feed')}' — universe only PARTIALLY evaluated",
+                     "alpaca/IEX carries no data for many small caps. Rerun on "
+                     "polygon."))
     from chart import report as rpt
     trades = g.get('trades') or []
     st = rpt.compute(trades, s, spec)
@@ -565,12 +604,11 @@ def backtest_report(bid: int):
             for t in trades if (t.get('ctx') or {}).get('acct_no_credit'))
         pf_html += (
             f"<h3>Prop-firm minimum, at YOUR size</h3>"
-            f"<div class='muted' style='font-size:11.5px'>The ${acct['min_profit_ps']}"
-            f"/share rule applied to the same position sizes the account block "
-            f"above used — not to a flat 100 shares. Your P&amp;L does not "
-            f"change: <b>${(acct.get('net_pnl_usd') or 0):,.2f}</b> is still "
-            f"yours. What changes is how much counts toward a funded account's "
-            f"profit target.</div>"
+            f"<details class='defs'><summary>what this is</summary>"
+            f"The ${acct['min_profit_ps']}/share rule at the account block's own "
+            f"position sizes, not a flat 100 shares. Your P&amp;L does not change "
+            f"— ${(acct.get('net_pnl_usd') or 0):,.2f} is still yours. What "
+            f"changes is how much counts toward a funded target.</details>"
             + _tbl(['toward the target', 'earned but not credited', 'wins affected'],
                    f"<tr><td class='up'><b>${_cnt:,.2f}</b></td>"
                    f"<td class='dn'><b>${_lost:,.2f}</b></td><td>{_nw}</td></tr>")
@@ -663,6 +701,12 @@ tr:hover td{{background:#151a24}}
 .up{{color:#22c55e}} .dn{{color:#ef5350}}
 .warn{{color:#f5a623;font-size:12px;margin:6px 0;line-height:1.5}}
 .defs{{color:#64748b;font-size:11.5px;line-height:1.7;margin-top:18px}}
+details.defs summary,details.why summary{{cursor:pointer;color:#475569;font-size:11px;
+  list-style:none;padding:2px 0}}
+details.why{{display:inline}}
+details.why summary{{display:inline;text-decoration:underline dotted;margin-left:6px}}
+details.why[open] > div{{color:#64748b;font-size:11px;line-height:1.5;
+  margin:2px 0 6px 14px;white-space:normal}}
 .wrap{{overflow-x:auto;-webkit-overflow-scrolling:touch}}
 a.btn{{display:inline-block;background:#1c2431;color:#e2e8f0;border:1px solid #1e2632;
   border-radius:4px;padding:6px 11px;text-decoration:none;font-size:12px;margin:6px 6px 0 0}}
@@ -681,7 +725,7 @@ status {g.get('status')}</div>
 <a class="btn" href="/api/backtest/{bid}/journal.csv">⤓ journal CSV</a>
 <a class="btn" href="/api/backtest/{bid}/stats.json">⤓ statistics JSON</a>
 
-{('<div class="warn">' + '<br>'.join('⚠ ' + w for w in warn) + '</div>') if warn else ''}
+{_warn_html(warn)}
 {('<div class="warn">⚠ ' + str(s.get('errors')) + ' day·symbol pairs skipped (no data / feed error):<br>'
   + '<br>'.join('· ' + str(x)[:120] for x in (s.get('error_samples') or [])[:5]) + '</div>')
  if s.get('errors') else ''}
@@ -697,19 +741,19 @@ status {g.get('status')}</div>
 {pf_html}
 
 <h3>Trade journal — every trade, every field</h3>
-<div class="muted" style="font-size:11.5px">Entry and exit times are ET.
+<details class="defs"><summary>column notes</summary>Times are ET.
 &quot;exposure $&quot; is the total position value open across the account the moment
-this trade was added, which is what the leverage cap is measured against.</div>
+this trade was added — what the leverage cap is measured against.</details>
 {_tbl(jhead, jbody, 'journal')}
 
-<div class="defs"><b>How to read this honestly</b><br>
+<details class="defs"><summary>How these numbers are produced</summary>
 · Every trade came from the exact strategy JSON and the same verified qp math the chart draws — the report re-reads stored rows, it does not re-simulate.<br>
 · Only trades ENTERED on each evaluated session count. No warm-up leakage, no look-ahead.<br>
 · Register universes are frozen each morning, so there is no survivorship bias. A typed symbol list carries whatever bias you typed.<br>
 · Trades still open at the window's end are excluded from every statistic above.<br>
 · {'Dollar figures size each position from the STOP (equity x risk% ÷ per-share risk), compound in trade order, and share one capital pool capped at ' + str(acct.get('max_leverage', 1)) + 'x the balance.' if acct else 'Percent figures are per-unit-position; set account $ and risk % for real-money sizing.'}<br>
 · Commissions are charged per ORDER, so a scale-out pays one entry fee plus one per leg. Spread and slippage are only modelled if you set cost bps.<br>
-· Profit factor, Sharpe, Sortino and Calmar are standard definitions; each is spelled out in the tables above rather than assumed.</div>
+· Profit factor, Sharpe, Sortino and Calmar are standard definitions; each is spelled out in the tables above rather than assumed.</details>
 </body></html>"""
     return HTMLResponse(html)
 

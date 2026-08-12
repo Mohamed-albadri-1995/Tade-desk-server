@@ -145,7 +145,7 @@ def compute(trades: list, summary: dict, spec: dict) -> dict:
     out: dict = {'basis': basis, 'unit': unit, 'n_trades': len(vals),
                  'warnings': [], 'excluded_unsized': len(rows) - len(vals)}
     if not vals:
-        out['warnings'].append('no trade produced a result in this basis')
+        out['warnings'].append(('no trade produced a result in this basis', None))
         return out
 
     wins = [v for v in vals if v > 0]
@@ -271,23 +271,28 @@ def compute(trades: list, summary: dict, spec: dict) -> dict:
             100.0 * sum(mins) / (len(sessions) * 390.0), 2)   # 390 RTH minutes
 
     # ── sample adequacy, stated rather than implied ───────────────────────
+    # (fact, why): the fact stays on screen, the reasoning folds away. Written
+    # as pairs so a reader scanning for numbers is not made to read an essay,
+    # while the reason a number is untrustworthy is still one tap away.
     if len(vals) < _MIN_TRADES:
         out['warnings'].append(
-            f'{len(vals)} trades — below {_MIN_TRADES}, so win rate, profit '
-            f'factor and every ratio below carry an error bar wider than the '
-            f'numbers themselves. Treat as a smoke test, not evidence.')
+            (f'{len(vals)} trades — below {_MIN_TRADES}',
+             'Win rate, profit factor and every ratio below carry an error bar '
+             'wider than the numbers themselves. A smoke test, not evidence.'))
     if len(sessions) < _MIN_SESSIONS:
         out['warnings'].append(
-            f'{len(sessions)} sessions — Sharpe, Sortino, CAGR and Calmar are '
-            f'annualised from this window. They are arithmetic, not forecasts.')
+            (f'{len(sessions)} sessions — Sharpe, Sortino, CAGR and Calmar are '
+             f'annualised from this window',
+             'Annualising 8 sessions is arithmetic, not a forecast.'))
     if out.get('excluded_unsized'):
         out['warnings'].append(
-            f"{out['excluded_unsized']} trades had no result in this basis and "
-            f"are excluded from every number above.")
+            (f"{out['excluded_unsized']} trades excluded — no result in this basis",
+             'They had no stop to size from, or the account could not fund '
+             'them. Excluded from every number above.'))
     if not spec.get('cost_bps'):
         out['warnings'].append(
-            'cost_bps = 0 — commissions are charged, but spread and slippage '
-            'are NOT modelled. On 1-minute momentum names that is optimistic.')
+            ('cost_bps = 0 — commissions charged, spread and slippage not',
+             'On 1-minute momentum names that is optimistic.'))
     return out
 
 
