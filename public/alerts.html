@@ -1510,7 +1510,6 @@ async function testBroker() {
  * healthy morning, 10:00:52 is a feed that was late.
  */
 let HIST_DATES = [];
-async function loadHistory(date) {
 /*
  * Review, then send. Two taps, and the first one shows the EXACT body.
  *
@@ -1709,6 +1708,8 @@ function histNumbers(f) {
     ? `<div class="h-nums">${parts.join('')}${send}</div>` : '';
 }
 
+
+async function loadHistory(date) {
   const out = document.getElementById('history');
   const picker = document.getElementById('hist-date');
   if (!out) return;
