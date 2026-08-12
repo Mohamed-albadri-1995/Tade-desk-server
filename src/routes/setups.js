@@ -50,6 +50,8 @@ router.get('/', async (req, res) => {
       maxPositionPct: s.maxPositionPct || null,
       // Whether it can produce a clean alert and a clean order at all.
       readiness: s.readiness || null,
+      // Empty unless a long/short pair failed to become one setup.
+      pairing: s.pairing || [],
       mine: (s.tools || []).includes(config.toolId),
     })),
   });

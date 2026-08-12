@@ -727,6 +727,8 @@ async function loadSetups() {
               (s.readiness.orderBlocking || []).map(esc).join('; ')}</div>` : ''}
         ${s.readiness && s.readiness.warnings.length
           ? `<div class="st-warn">⚠ ${s.readiness.warnings.map(esc).join('<br>⚠ ')}</div>` : ''}
+        ${(s.pairing || []).length
+          ? `<div class="st-warn">⚠ ${s.pairing.map(esc).join('<br>⚠ ')}</div>` : ''}
         <ul class="st-rules">${(s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
         ${s.universe ? `<div class="st-gate">Only cards where ${esc(s.universe)}</div>` : ''}
         <div class="st-meta">

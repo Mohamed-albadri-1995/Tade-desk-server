@@ -81,6 +81,8 @@ app.get('/api/setups', async (req, res) => {
         maxPositionPct: s.maxPositionPct || null,
         // Whether it can produce a clean alert and a clean order at all.
         readiness: s.readiness || null,
+        // Empty unless a long/short pair failed to become one setup.
+        pairing: s.pairing || [],
       })),
       fields: Object.entries(universe.FIELDS).map(([k, v]) => ({ value: k, label: v.label, kind: v.kind })),
       operators: universe.OPERATORS,

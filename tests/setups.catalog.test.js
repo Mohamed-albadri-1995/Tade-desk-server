@@ -373,3 +373,65 @@ describe('setup-level risk', () => {
     expect(s.maxPositionPct).toBe(30);
   });
 });
+
+/*
+ * PAIRING — when a long and a short fail to become one setup.
+ *
+ * Two strategies merge only when their names differ by a trailing
+ * "(Long)"/"(Short)" AND their entry windows match. Both halves are easy to
+ * break by accident and breaking either is SILENT: the page lists two setups
+ * where one was meant, each ranked on its own, so "top 2" quietly becomes the
+ * best two longs and the best two shorts. The setup id is `name@time`, so a
+ * split also strands journal tags and saved preferences on an id nothing else
+ * knows about.
+ *
+ * These pin the NOTICE, not a correction. Renaming someone's strategy to fit a
+ * regex would be a worse surprise than the one being reported.
+ */
+describe('pairing notes', () => {
+  const win = (start) => ({ window_start: start });
+  const strat = (name, side, start) => ({
+    name, side, tools: ['T2'], risk: win(start),
+  });
+  const withStrategies = async (rows) => {
+    qp.strategies.mockResolvedValue(rows);
+    return catalog.list();
+  };
+
+  test('a properly named pair produces one setup and no note', async () => {
+    const list = await withStrategies([
+      strat('OR + VWAP 09:35 (Long)', 'long', 935),
+      strat('OR + VWAP 09:35 (Short)', 'short', 935),
+    ]);
+    expect(list).toHaveLength(1);
+    expect(list[0].sides.sort()).toEqual(['long', 'short']);
+    expect(list[0].pairing).toEqual([]);
+  });
+
+  test('the same name at two windows splits, and says so', async () => {
+    // the accident: the short was built by copying the long and the window
+    // was nudged by a minute
+    const list = await withStrategies([
+      strat('OR + VWAP 09:35 (Long)', 'long', 935),
+      strat('OR + VWAP 09:35 (Short)', 'short', 936),
+    ]);
+    expect(list).toHaveLength(2);
+    expect(list[0].pairing.join(' ')).toMatch(/different entry window/);
+    expect(list[1].pairing.join(' ')).toMatch(/different entry window/);
+  });
+
+  test('long/short without brackets is not stripped, and says so', async () => {
+    const list = await withStrategies([
+      strat('Fade the Open Long', 'long', 1000),
+      strat('Fade the Open Short', 'short', 1000),
+    ]);
+    expect(list).toHaveLength(2);
+    expect(list[0].pairing.join(' ')).toMatch(/without brackets/);
+  });
+
+  test('a genuinely one-sided setup is not accused of anything', async () => {
+    const list = await withStrategies([strat('PML breakout', 'long', 935)]);
+    expect(list).toHaveLength(1);
+    expect(list[0].pairing).toEqual([]);
+  });
+});

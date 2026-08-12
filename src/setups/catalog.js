@@ -67,6 +67,45 @@ function minutesBefore(time, mins) {
  * day rather than the best two signals. Grouped by the name with any trailing
  * "(Long)" / "(Short)" removed, which is how the platform's own seeds are named.
  */
+/*
+ * WHY A PAIR SOMETIMES FAILS TO PAIR, said out loud instead of discovered.
+ *
+ * Two strategies become one setup only when their names differ by a trailing
+ * "(Long)"/"(Short)" AND their entry windows are identical. Both halves are
+ * easy to break by accident, and breaking either is SILENT: the alerts page
+ * simply lists two setups where one was meant, each ranked on its own, so
+ * "top 2" quietly becomes the best two longs and the best two shorts.
+ *
+ * Worse, the setup id is `name@time`. A pair that splits gets ids nothing else
+ * knows about — journal trades tagged with the old one show a raw string, and
+ * saved preferences stay attached to a setup that no longer exists.
+ *
+ * So each group carries a note when something about it looks unpaired:
+ *   - the same name decided at two different times (a nudged window)
+ *   - a name ending in Long/Short WITHOUT the brackets, which is not stripped
+ * Both are observations, never corrections. Renaming someone's strategy to fit
+ * a regex would be a worse surprise than the one being reported.
+ */
+function pairingNote(g, groups) {
+  const notes = [];
+  const twins = [...groups.values()].filter(
+    o => o !== g && o.name === g.name);
+  if (twins.length) {
+    notes.push(`also decided at ${twins.map(o => o.decisionTime).join(', ')} — `
+      + 'same name, different entry window, so these are separate setups '
+      + 'ranked separately. Match the windows to make them one.');
+  }
+  for (const r of g.raw || []) {
+    if (/\b(long|short)\b\s*$/i.test(baseName(r.name || ''))) {
+      notes.push(`"${r.name}" ends in long/short without brackets — only a `
+        + 'trailing "(Long)" or "(Short)" is stripped, so it will not pair '
+        + 'with its other side.');
+    }
+  }
+  return notes;
+}
+
+
 function baseName(name) {
   return String(name || '').replace(/\s*\((long|short)\)\s*$/i, '').trim();
 }
@@ -194,8 +233,11 @@ async function list() {
   return [...groups.values()].map(g => {
     const p = prefs.settingsFor(g.id);
     const { raw, ...rest } = g;
+    const pairing = pairingNote(g, groups);
     return {
       ...rest,
+      // Empty when nothing looks wrong, so a card can simply not show it.
+      pairing,
       // Whether it can produce a clean alert and a clean order, said before the
       // morning rather than discovered during it.
       readiness: readiness(raw),
