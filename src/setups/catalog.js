@@ -51,10 +51,15 @@ function hhmm(windowStart) {
 }
 
 /** The scan that freshens the card list, shortly before the decision. */
+/*
+ * `mins` minutes before `time`. A NEGATIVE count reads as after, which is how
+ * the run minute is derived from the decision minute: a setup decides on the
+ * 09:35 bar and runs at 09:36, once that bar has closed.
+ */
 function minutesBefore(time, mins) {
   const [h, m] = String(time).split(':').map(Number);
   const t = h * 60 + m - mins;
-  if (!Number.isFinite(t) || t < 0) return null;
+  if (!Number.isFinite(t) || t < 0 || t >= 24 * 60) return null;
   return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
 }
 
@@ -280,7 +285,9 @@ async function list() {
       caution: p.caution
         || 'Backtest it in qp before trusting it live. Trade small until the sample grows.',
       describe: [
-        `At ${g.decisionTime} ET, on the card list of ${g.tools.join(', ')}.`,
+        `Decided on the ${g.decisionTime} ET bar, run at `
+          + `${minutesBefore(g.decisionTime, -1)} once that bar has closed, `
+          + `on the card list of ${g.tools.join(', ')}.`,
         `Decided by the qp strategy "${g.name}" (${g.sides.join(' and ') || 'long'}).`,
         p.rankMetric
           ? `Ranked by ${p.rankMetric}${p.rankDirection ? ` (${p.rankDirection})` : ''}`

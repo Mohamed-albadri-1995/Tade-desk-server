@@ -289,10 +289,36 @@ function startScheduler() {
         console.log(`[Setups] ${now} — pre-decision scan`);
         await runFullScan();
       }
-      const firing = due.filter(s => s.decisionTime === now && s.enabled !== false);
+      /*
+       * A SETUP RUNS ONE MINUTE AFTER THE BAR IT DECIDES ON.
+       *
+       * The bar labelled 09:35 is not finished until 09:36:00. This tick used
+       * to fire when the clock READ 09:35, so the work happened partway through
+       * that minute — the first live session decided at 09:35:24, on a bar
+       * that was 40% formed. Every number in it was provisional: the close was
+       * the last print so far, the session VWAP was short a third of its
+       * minute, and the entry condition was tested against both.
+       *
+       * The backtest uses the COMPLETED 09:35 bar and fills at the 09:36 open.
+       * So the two were not evaluating the same thing, and a signal that
+       * qualified at 09:35:24 need not have qualified at 09:35:59 — which is
+       * the version that was measured, ranked and believed.
+       *
+       * Firing at 09:36 asks qp for the same 09:35 bar, now whole. The strategy
+       * is unchanged: its window_start still says 09:35, and that is still the
+       * bar every decision is taken on. Only the moment of asking moved, from
+       * inside the bar to just after it.
+       *
+       * If the feed has not published that bar yet, qp falls back to the last
+       * one that exists and the alert records which — that is what the lag
+       * column is for, and it is now the only way this can go wrong.
+       */
+      const decidedOn = catalog.minutesBefore(now, 1);
+      const firing = due.filter(s => s.decisionTime === decidedOn && s.enabled !== false);
       if (firing.length) {
-        console.log(`[Setups] ${now} — ${firing.length} setup(s) due`);
-        await runDue(now);
+        console.log(`[Setups] ${now} — ${firing.length} setup(s) due `
+          + `for the ${decidedOn} bar`);
+        await runDue(decidedOn);
       }
     });
 

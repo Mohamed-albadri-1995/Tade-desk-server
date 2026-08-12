@@ -435,3 +435,43 @@ describe('pairing notes', () => {
     expect(list[0].pairing).toEqual([]);
   });
 });
+
+/*
+ * WHEN A SETUP RUNS, versus the bar it decides on.
+ *
+ * The first live session decided at 09:35:24 — partway through the 09:35 bar,
+ * which does not close until 09:36:00. Every number in that decision was
+ * provisional: the close was the last print so far, the session VWAP was short
+ * a third of its minute, and the entry condition was tested against both. The
+ * backtest uses the COMPLETED 09:35 bar, so the two were not evaluating the
+ * same thing, and a signal that qualified at 09:35:24 need not have qualified
+ * at 09:35:59 — which is the version that was measured and believed.
+ *
+ * The decision minute is unchanged and still names the bar. Only the moment of
+ * asking moved, to just after that bar closes.
+ */
+describe('a setup runs after the bar it decides on', () => {
+  test('the run minute is one after the decision minute', () => {
+    expect(catalog.minutesBefore('09:35', -1)).toBe('09:36');
+    expect(catalog.minutesBefore('10:00', -1)).toBe('10:01');
+    expect(catalog.minutesBefore('15:59', -1)).toBe('16:00');
+  });
+
+  test('it does not wrap past midnight', () => {
+    // A run minute that wrapped to 00:00 would fire a morning setup at night.
+    expect(catalog.minutesBefore('23:59', -1)).toBeNull();
+  });
+
+  test('minutes BEFORE still work — the pre-decision scan depends on them', () => {
+    expect(catalog.minutesBefore('09:35', 2)).toBe('09:33');
+    expect(catalog.minutesBefore('00:01', 2)).toBeNull();
+  });
+
+  test('the description says both the bar and the run minute', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const [s] = await catalog.list();
+    const line = s.describe.join(' ');
+    expect(line).toMatch(/10:00 ET bar/);
+    expect(line).toMatch(/run at 10:01/);
+  });
+});
