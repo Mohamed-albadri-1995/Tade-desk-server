@@ -1675,8 +1675,12 @@ function histNumbers(f) {
   if (lag !== null) {
     // 90 seconds is the line: the bar has closed, one fetch and one evaluation
     // is seconds, so a minute and a half means something waited.
-    parts.push(`<span class="h-n${lag > 90 ? ' h-slow' : ''}"><b>lag</b> `
-      + `${lag < 0 ? '0' : lag}s${lag > 90 ? ' SLOW' : ''}</span>`);
+    // Negative is not fast. The 09:35 bar closes at 09:36:00, so a decision
+    // published before that was taken on a bar still forming — a different
+    // price from the one the backtest used, and the only lag that changes the
+    // trade rather than merely delaying it.
+    parts.push(`<span class="h-n${lag > 90 || lag < 0 ? ' h-slow' : ''}"><b>lag</b> `
+      + `${lag}s${lag > 90 ? ' SLOW' : (lag < 0 ? ' EARLY' : '')}</span>`);
   }
   // What the broker did, when it did anything. An alert-only week should show
   // this empty on every row — if it does not, something placed an order.

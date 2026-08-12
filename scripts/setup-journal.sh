@@ -27,7 +27,8 @@ const [repo, arg] = process.argv.slice(2);
 const dir = path.join(repo, 'data', 'history');
 
 const et = (ms) => new Date(ms).toLocaleString('en-US', {
-  timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
+  timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit',
+  second: '2-digit', hour12: false });
 const etDate = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
 function readAll() {
@@ -156,7 +157,17 @@ for (const { f, n: times } of shown) {
   if (t.source) more.push(`feed ${t.source}`);
   if (t.riskFrom) more.push(`risk from ${t.riskFrom}`);
   const lag = feedLag(f);
-  if (lag !== null) more.push(`lag ${lag < 0 ? 0 : lag}s${lag > 90 ? ' SLOW' : ''}`);
+  /*
+   * A NEGATIVE lag is not a fast one, and showing it as 0 hid the only case
+   * that changes the price a decision was made on. The bar labelled 09:35
+   * closes at 09:36:00; a decision published before that was taken on a bar
+   * still forming, which is not the bar the backtest used.
+   */
+  if (lag !== null) {
+    more.push(lag < 0
+      ? `lag ${lag}s EARLY — decided before the ${t.decisionAt} bar closed`
+      : `lag ${lag}s${lag > 90 ? ' SLOW' : ''}`);
+  }
   if (more.length) console.log(`   ${more.join(' · ')}`);
   if (t.size && t.size.capped) console.log(`   CAPPED: ${t.size.capped}`);
   if (t.feedWarning) console.log(`   WARNING: ${t.feedWarning}`);
