@@ -1,13 +1,44 @@
 const https = require('https');
 const db = require('../db');
+const config = require('../config');
+const sharedKeys = require('../sharedKeys');
 
 const BACKUP_REPO = 'Mohamed-albadri-1995/trade-desk-data';
 const BACKUP_BRANCH = 'fresh';
 const BACKUP_VERSION = '1';
 
+/*
+ * One token for nine tools.
+ *
+ * This used to read only THIS tool's settings row, so backing up meant pasting
+ * the same token into nine screens on a phone — and in practice that meant one
+ * tool backed up and eight did not, silently, because a tool with no token
+ * throws inside a cron job nobody watches.
+ *
+ * sharedKeys resolves the tool's own setting first (a tool given a specific
+ * token keeps using it), then data/keys.json, then the environment. Same order
+ * as every other credential here.
+ */
 function getGithubToken() {
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'githubBackupToken'").get();
-  return (row && row.value) ? row.value : (process.env.GITHUB_BACKUP_TOKEN || '');
+  return sharedKeys.getKey('githubBackupToken', 'GITHUB_BACKUP_TOKEN');
+}
+
+/*
+ * WHERE THIS TOOL'S BACKUP LIVES, and why it is not one flat folder.
+ *
+ * Every tool exports the same table names from its own database. Written to
+ * `backups/<date>.json` they would all be the SAME path, so nine tools sharing
+ * one token would overwrite each other all evening and the file would hold
+ * whichever finished last — with nothing to show it had happened. That failure
+ * did not exist while only T1 had a token; sharing the token is precisely what
+ * would have created it.
+ *
+ * T1 keeps the flat path it has always used, so its existing history stays
+ * exactly where it is and stays restorable.
+ */
+function backupDir() {
+  const id = String(config.toolId || 'T1').toUpperCase();
+  return id === 'T1' ? 'backups' : `backups/${id}`;
 }
 
 // ─── GitHub API helpers ───────────────────────────────────────────────────────
@@ -165,8 +196,8 @@ async function pushBackup() {
 
   // Push sequentially, NOT in parallel: both files commit to the same branch,
   // and two concurrent Contents-API commits race on the branch HEAD → 409.
-  await pushFile(token, `backups/${date}.json`, payload, msg);
-  await pushFile(token, 'backups/latest.json', payload, msg);
+  await pushFile(token, `${backupDir()}/${date}.json`, payload, msg);
+  await pushFile(token, `${backupDir()}/latest.json`, payload, msg);
 
   // Record last backup time in settings
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('lastBackupAt', ts);
@@ -180,7 +211,9 @@ async function restoreBackup(backupDate) {
   const token = getGithubToken();
   if (!token) throw new Error('No GitHub backup token configured. Add it in Settings.');
 
-  const filePath = backupDate ? `backups/${backupDate}.json` : 'backups/latest.json';
+  const filePath = backupDate
+    ? `${backupDir()}/${backupDate}.json`
+    : `${backupDir()}/latest.json`;
   const jsonStr = await fetchFile(token, filePath);
   const exportedAt = importDb(jsonStr);
 
@@ -252,4 +285,5 @@ function getBackupStatus() {
   };
 }
 
-module.exports = { pushBackup, restoreBackup, mergeDatesFromBackup, getBackupStatus, exportDb };
+module.exports = { pushBackup, restoreBackup, mergeDatesFromBackup, getBackupStatus,
+                   exportDb, backupDir, getGithubToken };
