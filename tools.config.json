@@ -148,6 +148,14 @@
       "isSelf": true
     },
     {
+      "id": "JOURNAL",
+      "name": "Journal",
+      "port": 3100,
+      "path": "/",
+      "accent": "#34d399",
+      "desc": "Every trade after the fact: entry and exit, R-multiple, MAE/MFE, notes, and per-setup expectancy. Imports fills from TradingView, Trade The Pool and DXtrade."
+    },
+    {
       "id": "ALERTS",
       "name": "Alerts",
       "port": 3090,
