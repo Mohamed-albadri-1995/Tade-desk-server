@@ -83,7 +83,14 @@ require('./src/trading/db');             // schema only — no broker code
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+/*
+ * `index: false` matters. public/ still holds the old app's index.html — the
+ * screener SPA — and express.static serves an index file for "/" BEFORE any
+ * route declared after it gets a look. Left on, port 3100 opens the screener
+ * and the journal is unreachable at the address the landing page links to.
+ * Static assets (popup.js, css) still serve; only the automatic index does not.
+ */
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 // the journal proper: trades, imports, notes, fees, metrics, calendar
 app.use('/api/journal', require('./src/routes/journal'));
