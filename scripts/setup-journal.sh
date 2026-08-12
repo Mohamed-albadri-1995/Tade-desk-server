@@ -49,21 +49,54 @@ if (!all.length) {
   process.exit(0);
 }
 
+/*
+ * FEED LAG — how late the data was, from what is already on the record.
+ *
+ * `decisionAt` is the bar the decision used. The bar labelled 09:35 closes at
+ * 09:36:00 ET, so the gap to publication is the whole round trip: fetch,
+ * evaluate, rank, size, publish. It is the number to look at first when a live
+ * fill disagrees with a backtest, and it was being recorded all along without
+ * anything ever subtracting the two.
+ *
+ * null rather than a guess when either half is missing — an invented lag would
+ * be believed.
+ */
+function feedLag(f) {
+  const bar = f.setup && f.setup.decisionAt;
+  if (!bar || !f.at) return null;
+  const m = String(bar).match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit',
+    second: '2-digit', hour12: false,
+  }).formatToParts(new Date(f.at)).reduce((o, x) => (o[x.type] = x.value, o), {});
+  const pub = Number(parts.hour) * 3600 + Number(parts.minute) * 60 + Number(parts.second);
+  const close = (Number(m[1]) * 60 + Number(m[2]) + 1) * 60;
+  const lag = pub - close;
+  return (lag < -300 || lag > 4 * 3600) ? null : lag;
+}
+
 const days = [...new Set(all.map(f => etDate(f.at)))].sort();
 const n = (v, d = 2) => (v === null || v === undefined || v === '' ? '—' : Number(v).toFixed(d));
 
 if (arg === '--week') {
-  console.log('session     signals  setups fired                     orders');
-  console.log('----------  -------  -------------------------------  ------');
+  console.log('session     signals  worst lag  setups fired            orders');
+  console.log('----------  -------  ---------  ----------------------  ------');
   for (const d of days.slice(-7)) {
     const f = all.filter(x => etDate(x.at) === d);
     const setups = [...new Set(f.filter(x => x.setup).map(x => x.rule || '?'))];
     const orders = f.filter(x => x.setup && x.setup.order).length;
+    // The WORST lag of the day, not the average: one late bar is what moves a
+    // fill away from the backtest, and averaging hides it behind the good ones.
+    const lags = f.map(feedLag).filter(x => x !== null);
+    const worst = lags.length ? Math.max(...lags) : null;
     console.log(`${d}  ${String(f.length).padStart(7)}  `
-      + `${setups.join(', ').slice(0, 31).padEnd(31)}  `
+      + `${(worst === null ? '—' : `${worst}s${worst > 90 ? ' !' : ''}`).padStart(9)}  `
+      + `${setups.join(', ').slice(0, 22).padEnd(22)}  `
       + `${orders ? String(orders) + ' ← REAL' : '0'}`);
   }
   console.log('\nORDER count must be 0 during an alert-only week.');
+  console.log('Lag is bar close → alert published. Over 90s, something waited.');
   process.exit(0);
 }
 
@@ -122,6 +155,8 @@ for (const { f, n: times } of shown) {
   if (t.exitPlan && t.exitPlan.shape) more.push(`exit ${t.exitPlan.shape}`);
   if (t.source) more.push(`feed ${t.source}`);
   if (t.riskFrom) more.push(`risk from ${t.riskFrom}`);
+  const lag = feedLag(f);
+  if (lag !== null) more.push(`lag ${lag < 0 ? 0 : lag}s${lag > 90 ? ' SLOW' : ''}`);
   if (more.length) console.log(`   ${more.join(' · ')}`);
   if (t.size && t.size.capped) console.log(`   CAPPED: ${t.size.capped}`);
   if (t.feedWarning) console.log(`   WARNING: ${t.feedWarning}`);

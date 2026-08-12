@@ -316,10 +316,22 @@ app.post('/api/broker/order', express.json(), async (req, res) => {
         error: (size && size.reason) || 'set account size and risk per trade first',
       });
     }
+    /*
+     * WHERE IT CAME FROM, when the caller says.
+     *
+     * A hand-sent order that came off an alert is not the same event as one
+     * typed into the calculator, and the difference matters twice: the per-setup
+     * daily cap only counts orders it can attribute, and a week from now the
+     * only question about this trade will be which setup produced it. Defaults
+     * unchanged, so the calculator behaves exactly as before.
+     */
+    const setupId = String(b.setupId || '').trim() || 'manual';
+    const source = String(b.source || '').trim()
+      || (setupId === 'manual' ? 'placed by hand' : 'reviewed, then sent by hand');
     res.json({ ok: true, order: await broker.placeOrder({
       symbol, signal: side, quantity: size.shares, price: entry,
       stop, target: Number(b.target) > 0 ? Number(b.target) : null,
-      date: toETDate(Date.now()), source: 'placed by hand', setupId: 'manual',
+      date: toETDate(Date.now()), source, setupId,
     }) });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });

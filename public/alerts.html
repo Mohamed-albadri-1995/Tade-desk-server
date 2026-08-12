@@ -141,6 +141,14 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .h-nums { flex-basis:100%; margin-top:3px; display:flex; flex-wrap:wrap;
   gap:4px 10px; font-size:11px; color:var(--text2) }
 .h-n b { color:#64748b; font-weight:600 }
+.h-slow { color:#f5a623 }
+.h-send { font-size:11px; padding:2px 8px; background:#1c2431; color:#e2e8f0;
+  border:1px solid #334155; border-radius:5px }
+#order-review { margin:8px 0; padding:10px; border:1px solid var(--line);
+  border-radius:8px; background:var(--panel) }
+.or-head { font-size:12px; color:var(--text2); margin-bottom:6px }
+.or-json { font-size:11px; line-height:1.45; overflow-x:auto; background:#0e1116;
+  padding:8px; border-radius:6px; margin:0 0 8px }
 .h-detail { flex-basis:100%; font-size:11.5px; color:var(--text2); line-height:1.5;
   overflow-wrap:anywhere; }
 
@@ -389,6 +397,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <span>Signal history</span>
   <select id="hist-date" onchange="loadHistory()"></select>
 </div>
+<div id="order-review" style="display:none"></div>
 <div id="history"><div class="empty">Pick a session.</div></div>
 
 <div class="sec">
@@ -1461,6 +1470,107 @@ async function testBroker() {
 let HIST_DATES = [];
 async function loadHistory(date) {
 /*
+ * Review, then send. Two taps, and the first one shows the EXACT body.
+ *
+ * previewOrder and placeOrder share planOrder, so the JSON shown here is the
+ * JSON that goes out — not a rendering of it, and not a second formatting of
+ * the same numbers that could drift from the first. If the preview is refused,
+ * the send is refused for the same reason and the reason is shown instead.
+ */
+async function reviewOrder(plan) {
+  const box = document.getElementById('order-review');
+  if (!box) return;
+  box.style.display = 'block';
+  box.innerHTML = '<div class="note">checking…</div>';
+  try {
+    const r = await (await fetch('/api/broker/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(plan),
+    })).json();
+    if (!r.ok) throw new Error(r.error || 'refused');
+    const p = r.preview || {};
+    // previewOrder reports a refusal as `blocked` + `reason`, and returns no
+    // body when there is nothing sendable. Reading the wrong field would have
+    // shown a Send button on an order the broker had already refused.
+    const stop = p.blocked || !p.body;
+    box.innerHTML = `
+      <div class="or-head">${esc(plan.symbol)} ${esc(plan.side)} — `
+        + (stop ? 'NOT sendable' : 'this is exactly what would be sent') + `</div>`
+      + (p.body
+        ? `<pre class="or-json">${esc(JSON.stringify(p.body, null, 2))}</pre>` : '')
+      + `<div class="note">${p.armed ? 'broker armed' : 'BROKER NOT ARMED — sending will be refused'}`
+        + (p.remaining != null ? ` · $${Number(p.remaining).toFixed(0)} buying power left` : '')
+        + (p.maxTradesPerDay ? ` · ${p.tradesUsed}/${p.maxTradesPerDay} orders used today` : '')
+        + (p.asked && p.quantity && p.asked !== p.quantity
+            ? ` · trimmed ${p.asked} → ${p.quantity} shares` : '')
+        + `</div>`
+      + (stop
+        ? `<div class="warn">refused: ${esc(String(p.reason || p.blocked || 'no order to send'))}</div>`
+        : `<button class="btn live" id="or-go">Send it</button>`)
+      + `<button class="btn" onclick="document.getElementById('order-review').style.display='none'">Cancel</button>`;
+    if (!stop) {
+      document.getElementById('or-go').onclick = async () => {
+        const btn = document.getElementById('or-go');
+        btn.disabled = true; btn.textContent = 'sending…';
+        try {
+          const s = await (await fetch('/api/broker/order', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(plan),
+          })).json();
+          box.innerHTML = s.ok
+            ? `<div class="or-head">SENT</div><pre class="or-json">${
+                esc(JSON.stringify(s.order, null, 2))}</pre>`
+            : `<div class="warn">not sent: ${esc(s.error || 'refused')}</div>`;
+          loadHistory();
+        } catch (e) {
+          box.innerHTML = `<div class="warn">not sent: ${esc(e.message)}</div>`;
+        }
+      };
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="warn">could not price it: ${esc(e.message)}</div>`;
+  }
+}
+
+/*
+ * FEED LAG — how late the data was, from what is already on the record.
+ *
+ * A setup wakes at a fixed minute, asks for that minute's bar, and decides. Two
+ * things can go wrong and they look identical from the outside: the bar arrives
+ * late, or the bar never arrives and qp decides on the last one that existed.
+ * Both are feed delay; only the second changes the price the decision was made
+ * on, and neither was visible anywhere.
+ *
+ * `decisionAt` is the bar. `at` is when the alert was published. The bar labelled
+ * 09:35 closes at 09:36:00 ET, so the gap between that and publication is the
+ * whole round trip — fetch, evaluate, rank, size, publish. It is the number to
+ * watch when a live fill disagrees with a backtest.
+ *
+ * Returns null rather than a guess when either half is missing: an invented lag
+ * would be worse than no lag, because it would be believed.
+ */
+function feedLag(f) {
+  const bar = f.setup && f.setup.decisionAt;
+  if (!bar || !f.at) return null;
+  const m = String(bar).match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  // Rebuild the bar's CLOSE in ET on the alert's own date. Done by formatting
+  // the alert time in ET and re-reading it, so a phone in any timezone and a
+  // server in UTC agree — the alternative is arithmetic on a local Date, which
+  // is right in New York and wrong everywhere else.
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(new Date(f.at)).reduce((o, p) => (o[p.type] = p.value, o), {});
+  const pubSec = Number(parts.hour) * 3600 + Number(parts.minute) * 60 + Number(parts.second);
+  const closeSec = (Number(m[1]) * 60 + Number(m[2]) + 1) * 60;   // bar closes a minute later
+  const lag = pubSec - closeSec;
+  // Across midnight, or a clock that disagrees with itself — not a measurement.
+  if (lag < -300 || lag > 4 * 3600) return null;
+  return lag;
+}
+
+/*
  * THE NUMBERS, on the record row.
  *
  * The fire already carries entry, stop, target, share count and what the
@@ -1486,6 +1596,14 @@ function histNumbers(f) {
   if (t.size && t.size.riskDollars != null) parts.push(bit('risk $', n(t.size.riskDollars)));
   if (t.extension != null) parts.push(bit('extension', n(t.extension) + '%'));
   if (t.exitPlan && t.exitPlan.shape) parts.push(bit('exit', t.exitPlan.shape));
+  if (t.source) parts.push(bit('feed', t.source));
+  const lag = feedLag(f);
+  if (lag !== null) {
+    // 90 seconds is the line: the bar has closed, one fetch and one evaluation
+    // is seconds, so a minute and a half means something waited.
+    parts.push(`<span class="h-n${lag > 90 ? ' h-slow' : ''}"><b>lag</b> `
+      + `${lag < 0 ? '0' : lag}s${lag > 90 ? ' SLOW' : ''}</span>`);
+  }
   // What the broker did, when it did anything. An alert-only week should show
   // this empty on every row — if it does not, something placed an order.
   if (t.order) {
@@ -1493,7 +1611,27 @@ function histNumbers(f) {
       + (t.order.quantity ? ` ${t.order.quantity}sh` : '')));
   }
   if (t.size && t.size.capped) parts.push(bit('capped', t.size.capped));
-  return parts.length ? `<div class="h-nums">${parts.join('')}</div>` : '';
+  /*
+   * SEND THIS ONE, BY HAND.
+   *
+   * The point of an alert-only week is to look at each signal and decide. That
+   * is only half a decision if saying yes then means retyping four numbers into
+   * a calculator, where a fat finger becomes a different trade than the one
+   * reviewed. This carries the stored plan — the entry, stop and target the
+   * setup actually decided — into the same preview-then-send path the automatic
+   * order uses, so what goes out is what was on screen.
+   *
+   * Preview first, always. Nothing is sent by one tap.
+   */
+  const send = (t.entry != null && t.stop != null && f.ticker && !t.order)
+    ? `<button class="h-send" onclick='reviewOrder(${JSON.stringify({
+        symbol: f.ticker, side: (t.signal || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG',
+        entry: t.entry, stop: t.stop, target: t.target || null,
+        setupId: f.setupId || f.rule || 'manual',
+      }).replace(/'/g, '&apos;')})'>review order…</button>`
+    : '';
+  return (parts.length || send)
+    ? `<div class="h-nums">${parts.join('')}${send}</div>` : '';
 }
 
   const out = document.getElementById('history');
