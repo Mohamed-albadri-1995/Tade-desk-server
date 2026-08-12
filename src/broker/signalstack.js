@@ -70,6 +70,177 @@ function mask(url) {
 }
 
 /*
+ * WHERE AN ORDER GOES.
+ *
+ * There was one hook, so "the broker" and "the account" were the same thing and
+ * neither needed naming. With two — a prop-firm account and an Alpaca account —
+ * they come apart in every direction that matters: different hooks, different
+ * balances, different day counts, and a body that is not quite the same shape.
+ * A setup may want one, the other, both, or neither.
+ *
+ * A DESTINATION is one account reached through one hook. Everything that is a
+ * property of the account lives on it — the hook, the buying power, the daily
+ * cap, the per-order ceiling. Everything that is a property of the BOX stays
+ * account-wide: armed, shorting allowed, brackets, the flatten time. Arming is
+ * still one decision, because "may this machine place orders at all" is not a
+ * question you want to answer twice.
+ *
+ * `dialect` is what the body looks like on arrival. SignalStack normalises most
+ * of it, but not all: Alpaca accepts `class` and `duration` and Trade The Pool
+ * does not, and sending a field a broker does not know is a rejected order at
+ * the one moment nobody is watching.
+ */
+const DIALECTS = {
+  /*
+   * Trade The Pool — what this has always sent, unchanged. Named so the
+   * default is a choice rather than an accident.
+   */
+  ttp: {
+    label: 'Trade The Pool',
+    body: (b) => b,
+  },
+  /*
+   * Alpaca. `class` says which market — SignalStack's docs require it for cash
+   * and percent-of-equity orders and accept it always, and being explicit costs
+   * nothing while guessing costs an order. `duration: day` matches what the
+   * strategies assume: everything is flattened at 15:50, so an order that
+   * survived the session would be a position nothing here is managing.
+   */
+  alpaca: {
+    label: 'Alpaca',
+    body: (b) => ({ ...b, class: 'stock', duration: 'day' }),
+  },
+};
+
+/** The id used for a hook configured before destinations existed. */
+const LEGACY_ID = 'ttp';
+
+/*
+ * The stored destinations, with the old single-hook shape read as one.
+ *
+ * Migration by READING rather than by rewriting the file: a broker config that
+ * silently changed shape on first load would be a bad thing to discover halfway
+ * through a morning, and this way an older build still reads it too.
+ */
+function destinations(s = read()) {
+  const num = v => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const rows = Array.isArray(s.destinations) ? s.destinations : [];
+  const out = rows
+    .filter(d => d && d.id)
+    .map(d => ({
+      id: String(d.id),
+      name: String(d.name || DIALECTS[d.dialect] && DIALECTS[d.dialect].label || d.id),
+      dialect: DIALECTS[d.dialect] ? d.dialect : 'ttp',
+      webhookUrl: d.webhookUrl || null,
+      testWebhookUrl: d.testWebhookUrl || null,
+      buyingPower: num(d.buyingPower),
+      maxOrderValue: num(d.maxOrderValue),
+      maxTradesPerDay: num(d.maxTradesPerDay),
+      enabled: d.enabled !== false,
+    }));
+  if (out.length) return out;
+  // Nothing migrated yet: the single hook, if there is one, IS a destination.
+  if (!s.webhookUrl && !s.testWebhookUrl) return [];
+  return [{
+    id: LEGACY_ID,
+    name: DIALECTS.ttp.label,
+    dialect: 'ttp',
+    webhookUrl: s.webhookUrl || null,
+    testWebhookUrl: s.testWebhookUrl || null,
+    buyingPower: num(s.buyingPower),
+    maxOrderValue: num(s.maxOrderValue),
+    maxTradesPerDay: num(s.maxTradesPerDay),
+    enabled: true,
+  }];
+}
+
+/*
+ * One destination as a cfg — the same shape planOrder, previewOrder and
+ * placeOrder already take.
+ *
+ * This is why two brokers did not become two code paths. Every guard, every
+ * cap, every validation runs exactly as it did; it just runs against this
+ * account's hook and this account's balance.
+ */
+function destinationCfg(id, s = read()) {
+  const base = settings(s);
+  const d = destinations(s).find(x => x.id === id);
+  if (!d) return null;
+  return {
+    ...base,
+    destinationId: d.id,
+    destinationName: d.name,
+    dialect: d.dialect,
+    webhookUrl: d.webhookUrl,
+    testWebhookUrl: d.testWebhookUrl,
+    buyingPower: d.buyingPower,
+    maxOrderValue: d.maxOrderValue,
+    maxTradesPerDay: d.maxTradesPerDay,
+    enabled: base.enabled && d.enabled,
+  };
+}
+
+/*
+ * WHERE A SETUP'S ORDERS GO — and no guessing when there is a choice.
+ *
+ * A setup names its destinations by id. This turns that list into cfgs, or
+ * says why it cannot, and the saying-why is the point: an order that goes to
+ * the wrong account is worse than an order that does not go, and an order sent
+ * nowhere while the alert reads "ORDER ACCEPTED" is worse than both.
+ *
+ * Named ids are honoured exactly. An id that does not exist is an ERROR, never
+ * a silent omission — a setup routed to a broker that was deleted last week
+ * would otherwise go on alerting as if it were trading.
+ *
+ * An EMPTY list means "not said". With one account configured there is nothing
+ * to decide and it is used. With two, there is no such thing as the obvious
+ * one, so nothing is sent and the alert says which two it was choosing between.
+ * This is the same rule as the ranking metric: unset means unset.
+ */
+function route(ids = [], s = read()) {
+  const all = destinations(s);
+  const live = all.filter(d => d.enabled && d.webhookUrl);
+  const named = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
+
+  if (!named.length) {
+    if (!live.length) {
+      return { cfgs: [], error: all.length
+        ? 'no broker is switched on — every destination is disabled or has no hook'
+        : 'no broker is configured' };
+    }
+    if (live.length > 1) {
+      return { cfgs: [], error: 'this setup does not say which broker to use, and '
+        + `there are ${live.length} to choose from (${live.map(d => d.name).join(', ')}). `
+        + 'Pick its brokers on the Setups tab' };
+    }
+    return { cfgs: [destinationCfg(live[0].id, s)], error: null };
+  }
+
+  const missing = named.filter(id => !all.some(d => d.id === id));
+  if (missing.length) {
+    return { cfgs: [], error: `this setup is routed to ${missing.join(', ')}, `
+      + `which ${missing.length > 1 ? 'are' : 'is'} not configured` };
+  }
+  const off = named.filter(id => !live.some(d => d.id === id));
+  if (off.length) {
+    return { cfgs: [], error: `${off.join(', ')} ${off.length > 1 ? 'are' : 'is'} `
+      + 'switched off or has no hook' };
+  }
+  // Deduplicated, because the same account twice is the same trade twice.
+  const seen = new Set();
+  const cfgs = [];
+  for (const id of named) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    cfgs.push(destinationCfg(id, s));
+  }
+  return { cfgs, error: null };
+}
+
+/*
  * Everything off by default, and `armed` separate from `enabled`.
  *
  * enabled means "this is configured"; armed means "send real orders". They are
@@ -77,8 +248,8 @@ function mask(url) {
  * setting the safe one up, and because a bad morning should be stoppable
  * without deleting the configuration.
  */
-function settings() {
-  const s = read();
+function settings(pre = null) {
+  const s = pre || read();
   const num = v => {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? n : null;
@@ -86,6 +257,9 @@ function settings() {
   return {
     enabled: s.enabled === true,
     armed: s.armed === true,
+    // Where orders can go. Read through the migration, so a config written
+    // before destinations existed reports its single hook as one of them.
+    destinations: destinations(s),
     webhookUrl: s.webhookUrl || null,
     testWebhookUrl: s.testWebhookUrl || null,
     // What the broker says you can buy with. Entered, not read — see the note
@@ -149,6 +323,22 @@ function publicSettings() {
     testWebhookUrl: mask(s.testWebhookUrl),
     hasWebhook: !!s.webhookUrl,
     hasTestWebhook: !!s.testWebhookUrl,
+    /*
+     * EVERY hook masked, including the ones inside destinations.
+     *
+     * Adding destinations to settings() put the raw URLs back on this object,
+     * and this function is what the page reads. A hook IS the ability to place
+     * orders in the account behind it; on screen it can be photographed, and in
+     * a chat window it has been published. The existing test caught it, which
+     * is the only reason this line exists rather than a leak.
+     */
+    destinations: (s.destinations || []).map(d => ({
+      ...d,
+      webhookUrl: mask(d.webhookUrl),
+      testWebhookUrl: mask(d.testWebhookUrl),
+      hasWebhook: !!d.webhookUrl,
+      hasTestWebhook: !!d.testWebhookUrl,
+    })),
   };
 }
 
@@ -178,6 +368,77 @@ function save(patch = {}) {
     next[key] = n;
   }
 
+  /*
+   * The destinations, replaced whole rather than merged.
+   *
+   * A partial update would make "remove the second broker" impossible to
+   * express — the absence of a key reads as "leave it alone" everywhere else in
+   * this function, and here it has to be able to mean "it is gone". The caller
+   * sends the list it wants.
+   *
+   * Every hook is checked, for the same reason the single one was: a typo does
+   * not fail loudly, it fails by placing no order and looking like a quiet
+   * morning. An unknown dialect is refused rather than defaulted — sending
+   * Alpaca's fields to a broker that rejects them is an order lost at the one
+   * moment nobody is watching.
+   */
+  if ('destinations' in patch) {
+    const rows = Array.isArray(patch.destinations) ? patch.destinations : [];
+    const seen = new Set();
+    /*
+     * What is already stored, by id — so a hook can survive a save that does
+     * not mention it.
+     *
+     * The page never sees a hook; publicSettings masks it, deliberately, since
+     * a hook IS the ability to place orders in the account behind it. That
+     * makes an edit of anything ELSE on a destination — its buying power, its
+     * daily cap, its name — a form that cannot send the hook back. Without
+     * this, raising a balance would silently disconnect the account.
+     *
+     * Omitted means keep. An explicit empty string still means clear, so
+     * removing a hook is possible and is a thing you have to actually do.
+     */
+    const stored = new Map(destinations().map(d => [d.id, d]));
+    next.destinations = rows.map((d, i) => {
+      const id = String((d && d.id) || '').trim().toLowerCase();
+      if (!/^[a-z0-9_-]{2,20}$/.test(id)) {
+        throw new Error(`destination ${i + 1} needs a short id (letters, digits, - or _)`);
+      }
+      if (seen.has(id)) throw new Error(`two destinations share the id "${id}"`);
+      seen.add(id);
+      if (!DIALECTS[d.dialect]) {
+        throw new Error(`destination "${id}": unknown broker type "${d.dialect}" — `
+          + `one of ${Object.keys(DIALECTS).join(', ')}`);
+      }
+      const out = { id, dialect: d.dialect, name: String(d.name || '').trim() || id,
+                    enabled: d.enabled !== false };
+      const was = stored.get(id);
+      for (const key of ['webhookUrl', 'testWebhookUrl']) {
+        const v = d[key];
+        if (v === undefined) {
+          if (was && was[key]) out[key] = was[key];   // not mentioned — keep it
+          continue;
+        }
+        if (v === '' || v === null) continue;          // said to be gone
+        const url = String(v).trim();
+        if (!HOOK_RE.test(url)) {
+          throw new Error(`destination "${id}": that is not a SignalStack hook URL`);
+        }
+        out[key] = url;
+      }
+      for (const key of ['buyingPower', 'maxOrderValue', 'maxTradesPerDay']) {
+        const v = d[key];
+        if (v === '' || v === null || v === undefined) continue;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) {
+          throw new Error(`destination "${id}": ${key} must be a positive number`);
+        }
+        out[key] = n;
+      }
+      return out;
+    });
+  }
+
   if ('allowShort' in patch) next.allowShort = patch.allowShort !== false;
   if ('flatten' in patch) next.flatten = patch.flatten !== false;
   if ('flattenAt' in patch) {
@@ -193,14 +454,29 @@ function save(patch = {}) {
   }
   if ('enabled' in patch) next.enabled = patch.enabled === true;
   if ('armed' in patch) {
-    // Arming without somewhere to send to would be a switch that reads "live"
-    // and does nothing — the worst state for this particular switch.
-    if (patch.armed === true && !next.webhookUrl) {
-      throw new Error('set the webhook URL before arming');
-    }
-    if (patch.armed === true && !next.buyingPower) {
-      throw new Error('set the buying power before arming — without it there is '
-        + 'nothing to size against and an order could be any size');
+    /*
+     * Arming without somewhere to send to would be a switch that reads "live"
+     * and does nothing — the worst state for this particular switch.
+     *
+     * Asked of the DESTINATIONS rather than the old single hook, because with
+     * two accounts "the webhook URL" is not a thing that exists. One live
+     * destination is enough to arm; the ones that are not ready are named, so
+     * arming with Alpaca half-configured tells you which half.
+     */
+    if (patch.armed === true) {
+      const live = destinations(next).filter(d => d.enabled && d.webhookUrl);
+      if (!live.length) {
+        throw new Error('set a webhook URL on at least one broker before arming');
+      }
+      const broke = live.filter(d => !d.buyingPower).map(d => d.name);
+      if (broke.length === live.length) {
+        throw new Error('set the buying power before arming — without it there is '
+          + 'nothing to size against and an order could be any size');
+      }
+      if (broke.length) {
+        throw new Error(`${broke.join(', ')} has no buying power set — either give `
+          + 'it one or switch it off, or a setup routed there will place nothing');
+      }
     }
     next.armed = patch.armed === true;
   }
@@ -249,9 +525,22 @@ function orders(date = null) {
  * Only SENT orders count. A rejected signal committed nothing, and counting it
  * would shrink the next order for a trade that never happened.
  */
-function committed(date) {
+/*
+ * What has been spent today — on ONE destination.
+ *
+ * Two accounts must not share a balance. Before destinations there was one, so
+ * one total was the whole truth; with two, a shared figure would let a $5,000
+ * Alpaca order eat the prop-firm account's buying power, and the second broker
+ * would refuse a trade it could easily afford.
+ *
+ * Entries written before destinations existed carry no id and belong to the
+ * hook that was configured then — read as the legacy one, so today's count does
+ * not restart mid-session on the day this ships.
+ */
+function committed(date, destination = null) {
   return orders(date)
     .filter(o => o.sent)
+    .filter(o => !destination || (o.destination || LEGACY_ID) === destination)
     .reduce((sum, o) => sum + (o.quantity * o.price || 0), 0);
 }
 
@@ -261,14 +550,16 @@ function committed(date) {
  * Only SENT ones. A refusal placed no trade, and counting it would spend the
  * day's allowance on something that never happened.
  */
-function tradesToday(date, setupId = null) {
+function tradesToday(date, setupId = null, destination = null) {
   return orders(date).filter(o => o.sent && o.kind !== 'callback'
-    && (!setupId || o.setupId === setupId)).length;
+    && (!setupId || o.setupId === setupId)
+    && (!destination || (o.destination || LEGACY_ID) === destination)).length;
 }
 
 function remaining(date, cfg = settings()) {
   if (!cfg.buyingPower) return null;
-  return Math.max(0, cfg.buyingPower - committed(date));
+  // This destination's balance, spent by this destination's orders.
+  return Math.max(0, cfg.buyingPower - committed(date, cfg.destinationId || null));
 }
 
 // ── sizing the order ───────────────────────────────────────────────────────
@@ -615,7 +906,8 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
    * and "how much of that is this one idea allowed" — so hitting either says
    * WHICH, or the message sends you looking in the wrong settings.
    */
-  if (cfg.maxTradesPerDay && tradesToday(date) >= cfg.maxTradesPerDay) {
+  if (cfg.maxTradesPerDay
+      && tradesToday(date, null, cfg.destinationId || null) >= cfg.maxTradesPerDay) {
     return { blocked: 'account-cap',
       reason: `the day's limit of ${cfg.maxTradesPerDay} order(s) for the account is already used` };
   }
@@ -674,6 +966,7 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
   const split = splitLegs(fit.quantity, plan);
   if (split.error) return { blocked: 'split', reason: split.error };
 
+  const shape = (DIALECTS[cfg.dialect] || DIALECTS.ttp).body;
   const orders = (plan && plan.legs && plan.legs.length > 1)
     ? split.parts.map(part => {
       const b = { ...body, quantity: part.quantity };
@@ -711,7 +1004,18 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
     }
   }
 
-  return { body: orders[0], orders, action, fit,
+  /*
+   * The broker's own dialect, applied LAST — after validation, never before.
+   *
+   * validateBody was written against the canonical fields and is the guard that
+   * stops an order going out on the wrong side of its stop. Shaping first would
+   * hand it a body it was not written for and quietly weaken it; shaping after
+   * means every destination is checked identically and only then translated.
+   * A dialect may add fields. It may not change what was checked.
+   */
+  const shaped = orders.map(b => shape(b));
+
+  return { body: shaped[0], orders: shaped, action, fit,
            legs: split.parts, unplaceable: split.unplaceable };
 }
 
@@ -736,9 +1040,12 @@ function previewOrder(args) {
     body: plan.body || null,
     bracket: !!(plan.body && (plan.body.stop_loss_price || plan.body.take_profit_price)),
     remaining: remaining(args.date, cfg),
-    tradesUsed: tradesToday(args.date),
+    tradesUsed: tradesToday(args.date, null, cfg.destinationId || null),
     maxTradesPerDay: cfg.maxTradesPerDay,
-    setupTradesUsed: args.setupId ? tradesToday(args.date, args.setupId) : null,
+    setupTradesUsed: args.setupId
+      ? tradesToday(args.date, args.setupId, cfg.destinationId || null) : null,
+    destination: cfg.destinationId || null,
+    destinationName: cfg.destinationName || null,
   };
 }
 
@@ -752,6 +1059,10 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
     // from anything held in memory — a restart at 10:00 must not hand a setup
     // its whole allowance back.
     setupId,
+    // WHICH account this went to. The buying power and the daily cap are read
+    // back from these lines, so an order that did not say where it went would
+    // be spent out of every account at once.
+    destination: cfg.destinationId || null,
     asked: Math.floor(Number(quantity) || 0),
   };
 
@@ -976,18 +1287,30 @@ async function flattenAll(date, cfg = settings()) {
  * symbol is unsupported is to send something. Doing that for the first time at
  * 10:00:02 with a real position is not a plan.
  */
-async function test({ symbol = 'AAPL', useTestHook = true } = {}) {
-  const cfg = settings();
+async function test({ symbol = 'AAPL', useTestHook = true, destination = null } = {}) {
+  /*
+   * One share, at ONE named account.
+   *
+   * The whole point of this button is to find out that a URL is wrong, an
+   * account is disconnected or a symbol is unsupported — before 09:36. With
+   * two accounts that has to be asked of each of them separately, and a test
+   * that silently only ever checked the first would leave the second one
+   * untested while looking like it had passed.
+   */
+  const cfg = destination ? destinationCfg(destination) : (route([]).cfgs[0] || settings());
+  if (!cfg) throw new Error(`no broker called ${destination}`);
   const url = (useTestHook && cfg.testWebhookUrl) || cfg.webhookUrl;
   if (!url) throw new Error('no webhook URL configured');
-  const body = {
+  const shape = (DIALECTS[cfg.dialect] || DIALECTS.ttp).body;
+  const body = shape({
     symbol: String(symbol).toUpperCase(), action: 'buy',
     quantity: 1, quantity_type: 'fixed',
-  };
+  });
   const res = await post(url, body);
   const out = {
     at: Date.now(), date: null, symbol: body.symbol, quantity: 1, action: 'buy',
     source: 'manual test', hook: useTestHook && cfg.testWebhookUrl ? 'test' : 'live',
+    destination: cfg.destinationId || null, broker: cfg.destinationName || null,
     sent: res.ok, status: res.status, httpStatus: res.httpStatus,
     orderId: res.orderId, fillPrice: res.fillPrice, message: res.message,
   };
@@ -1131,6 +1454,8 @@ function reconciled(date = null) {
 module.exports = {
   FILE, LEDGER, HOOK_RE,
   settings, publicSettings, save, mask,
+  // Where orders can go, and one of them as a cfg the order path already takes.
+  destinations, destinationCfg, route, DIALECTS, LEGACY_ID,
   orders, committed, remaining, tradesToday, fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,

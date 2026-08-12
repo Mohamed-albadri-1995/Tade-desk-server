@@ -250,6 +250,10 @@ async function list() {
       // Off unless said otherwise. See the note in prefs: arming the broker is
       // permission for the box, not for every strategy in it.
       autoTrade: p.autoTrade === true,
+      // The accounts this setup's orders go to, by destination id. Empty means
+      // unsaid rather than none — broker.route decides what that means, and
+      // refuses when there is more than one account to choose between.
+      brokers: p.brokers || [],
       maxTradesPerDay: p.maxTradesPerDay || null,
       /*
        * SETUP-level risk, which is a different thing from account-level risk.

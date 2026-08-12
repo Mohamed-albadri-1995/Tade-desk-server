@@ -76,6 +76,10 @@ app.get('/api/setups', async (req, res) => {
         // Whether THIS setup places orders — separate from the broker being
         // armed, which is permission for the box rather than for a strategy.
         autoTrade: s.autoTrade === true,
+        // WHERE its orders go. Separate from autoTrade because a setup can be
+        // routed to an account and still be sent by hand — which is what a
+        // strategy on trial looks like.
+        brokers: s.brokers || [],
         maxTradesPerDay: s.maxTradesPerDay || null,
         riskPerTrade: s.riskPerTrade || null,
         maxPositionPct: s.maxPositionPct || null,
@@ -230,6 +234,43 @@ app.post('/api/broker', express.json(), (req, res) => {
 });
 
 /*
+ * WHICH ACCOUNT a hand-sent order goes to.
+ *
+ * One rule for the preview and the send, so the two cannot disagree — which
+ * would mean reviewing an order against one balance and placing it against
+ * another. Three ways in, in order of how explicit they are:
+ *
+ *   the page named one         it is used, if it exists and is live
+ *   the fire came from a setup that setup's brokers decide, exactly as they
+ *                              would at 09:36
+ *   neither                    broker.route's rule: the only live one, or a
+ *                              refusal naming the choice to be made
+ *
+ * `choices` always goes back so the page can offer the picker without having
+ * to know which destinations are switched on.
+ */
+function destinationFor(b = {}) {
+  const choices = broker.destinations()
+    .filter(d => d.enabled && d.webhookUrl)
+    .map(d => ({ id: d.id, name: d.name, dialect: d.dialect }));
+  const named = String(b.destination || '').trim();
+  if (named) {
+    const cfg = broker.destinationCfg(named);
+    if (!cfg) return { cfg: null, error: `no broker called ${named}`, choices };
+    if (!cfg.enabled || !cfg.webhookUrl) {
+      return { cfg: null, error: `${cfg.destinationName} is switched off`, choices };
+    }
+    return { cfg, error: null, choices };
+  }
+  const setupId = String(b.setupId || '').trim();
+  const wanted = setupId && setupId !== 'manual'
+    ? (require('../setups/prefs').settingsFor(setupId).brokers || [])
+    : [];
+  const r = broker.route(wanted);
+  return { cfg: r.cfgs[0] || null, error: r.error, choices };
+}
+
+/*
  * The order that would actually be sent — the JSON, and why it is not what the
  * risk calculator said.
  *
@@ -260,6 +301,16 @@ app.post('/api/broker/preview', express.json(), (req, res) => {
     // The share count comes from the same risk.sizeFor the setups use, so the
     // chain here is identical to the one a fire goes through.
     const size = risk.sizeFor({ entry, riskPerShare });
+    /*
+     * WHICH account this would go to.
+     *
+     * Named outright when the page says so, and otherwise resolved the same
+     * way an automatic order is — so a preview and the 09:36 order that follows
+     * it cannot land in different accounts. `destinations` goes back with it
+     * because the page has to offer the choice, and it is the server that knows
+     * which ones are live.
+     */
+    const cfg = destinationFor(b);
     const preview = broker.previewOrder({
       symbol: String(b.symbol || '').toUpperCase(),
       signal: side,
@@ -269,8 +320,17 @@ app.post('/api/broker/preview', express.json(), (req, res) => {
       target: Number(b.target) > 0 ? Number(b.target) : null,
       date: toETDate(Date.now()),
       setupId: b.setupId || null,
+      ...(cfg.cfg ? { cfg: cfg.cfg } : {}),
     });
-    res.json({ ok: true, side, entry, stop, riskPerShare, size, preview });
+    if (cfg.error) {
+      return res.json({ ok: true, side, entry, stop, riskPerShare, size,
+        preview: { blocked: 'no-destination', reason: cfg.error },
+        destinations: cfg.choices });
+    }
+    preview.destination = cfg.cfg.destinationId;
+    preview.destinationName = cfg.cfg.destinationName;
+    res.json({ ok: true, side, entry, stop, riskPerShare, size, preview,
+      destinations: cfg.choices });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });
   }
@@ -328,11 +388,19 @@ app.post('/api/broker/order', express.json(), async (req, res) => {
     const setupId = String(b.setupId || '').trim() || 'manual';
     const source = String(b.source || '').trim()
       || (setupId === 'manual' ? 'placed by hand' : 'reviewed, then sent by hand');
-    res.json({ ok: true, order: await broker.placeOrder({
-      symbol, signal: side, quantity: size.shares, price: entry,
-      stop, target: Number(b.target) > 0 ? Number(b.target) : null,
-      date: toETDate(Date.now()), source, setupId,
-    }) });
+    // Resolved by the same helper the preview used, so what was reviewed and
+    // what is sent go to the same account.
+    const dest = destinationFor(b);
+    if (dest.error) return res.status(400).json({ ok: false, error: dest.error });
+    res.json({ ok: true, order: {
+      ...await broker.placeOrder({
+        symbol, signal: side, quantity: size.shares, price: entry,
+        stop, target: Number(b.target) > 0 ? Number(b.target) : null,
+        date: toETDate(Date.now()), source, setupId, cfg: dest.cfg,
+      }),
+      destination: dest.cfg.destinationId,
+      broker: dest.cfg.destinationName,
+    } });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });
   }
@@ -405,6 +473,10 @@ app.post('/api/broker/test', express.json(), async (req, res) => {
     res.json({ ok: true, result: await broker.test({
       symbol: req.body?.symbol || 'AAPL',
       useTestHook: req.body?.useTestHook !== false,
+      // Each account has to be testable on its own: a hook that is wrong is
+      // wrong per account, and a test that only ever reached the first one
+      // would leave the second untested while looking like it had passed.
+      destination: req.body?.destination || null,
     }) });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });

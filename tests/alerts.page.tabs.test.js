@@ -96,3 +96,59 @@ test('a sent order refreshes both lists', () => {
   expect(after).toContain('loadHistory()');
   expect(after).toContain('loadFires()');
 });
+
+/*
+ * The broker settings, after two accounts became possible.
+ *
+ * The old page had one hook and one balance in fixed inputs, so "which
+ * account" was not a question it could ask. These pin the parts of the new
+ * shape that would fail silently: a hook printed in full is a credential
+ * published, and a setup card that cannot draw its accounts is a routing
+ * control that does not exist.
+ */
+
+test('the single-hook inputs are gone, and nothing still reads them', () => {
+  for (const id of ['bk-url', 'bk-test-url', 'bk-power', 'bk-max', 'bk-maxtrades']) {
+    expect(html).not.toContain(`id="${id}"`);
+    expect(script).not.toContain(`'${id}'`);
+  }
+  expect(markup).toContain('id="bk-dests"');
+});
+
+test('an account row never prints a hook, only what the server masked', () => {
+  // publicSettings masks it; the page must not have a path that would show the
+  // real one even if it arrived. The only hook value rendered is the masked
+  // `webhookUrl` the server sends, and it goes into a PLACEHOLDER.
+  const at = script.indexOf('function paintDests(');
+  expect(at).toBeGreaterThan(-1);
+  const body = script.slice(at, script.indexOf('\n}\n', at));
+  expect(body).toContain('placeholder="${d.hasWebhook');
+  // …and the input itself is never given a value
+  expect(body).not.toMatch(/class="d-hook"[^>]*value=/);
+});
+
+test('the accounts are loaded before the setup cards that draw them', () => {
+  // A setup card shows which accounts it sends to, so it cannot paint those
+  // chips until it knows what accounts exist. The other direction is handled
+  // by paintAlgoState, which either loader may call last.
+  expect(script).toContain('loadBroker().then(loadSetups)');
+  expect(script).toContain('function paintAlgoState()');
+});
+
+test('every routing control is a top-level function', () => {
+  // Same invariant as alerts.page.globals: an inline onclick resolves on
+  // window and nowhere else. These are all called from generated markup.
+  const re = /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm;
+  const top = new Set([...script.matchAll(re)].map(m => m[1]));
+  for (const n of ['paintDests', 'readDests', 'saveDests', 'addDest', 'toggleDest',
+                   'removeDest', 'brokerChips', 'toggleSetupBroker']) {
+    expect({ name: n, top: top.has(n) }).toEqual({ name: n, top: true });
+  }
+});
+
+test('the review carries the account through to the send', () => {
+  // Previewing against one balance and sending against another would be a
+  // reviewed order and an unreviewed one wearing its numbers.
+  expect(script).toContain('async function reviewOrder(plan, destination)');
+  expect(script).toContain("if (destination) plan = { ...plan, destination };");
+});

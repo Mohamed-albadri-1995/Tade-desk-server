@@ -70,6 +70,22 @@ function describePick(pick, size) {
  * "yes": an alert that looks identical whether or not an order was placed is
  * the one failure this must not have.
  */
+/*
+ * One line per account, because two accounts is two outcomes.
+ *
+ * With a single broker this reads exactly as it always did. With two, the
+ * interesting case is the one where they DISAGREE — accepted at one and short
+ * of buying power at the other — and a single summary would have to pick which
+ * of the two to tell you about.
+ */
+function orderLines(list) {
+  if (!list) return '';
+  const rows = Array.isArray(list) ? list : [list];
+  if (rows.length === 1 && !rows[0].broker) return orderLine(rows[0]);
+  return rows.map(o => ` · ${o.broker || o.destination || 'broker'}:`
+    + orderLine(o).replace(/^ · /, ' ')).join('');
+}
+
 function orderLine(o) {
   if (!o) return '';
   if (o.skipped) return ` · ORDER: not sent (${o.skipped})`;
@@ -295,40 +311,67 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     console.log(`[Setups] ${setup.id}: alert only — `
       + `${(setup.readiness.orderBlocking || []).join('; ')}`);
   }
-  if (!dryRun && setup.autoTrade === true && orderable) {
+  /*
+   * WHERE the orders go, resolved once for the whole run.
+   *
+   * A setup can name more than one account, and then the same signal is the
+   * same trade in each of them — sized independently, because each has its own
+   * balance and its own daily count. It can also name one the account no longer
+   * has, and broker.route refuses rather than guessing; that refusal goes onto
+   * the alert, because a setup that silently stopped trading looks exactly like
+   * a setup having a quiet week.
+   */
+  let routing = { cfgs: [], error: null };
+  if (setup.autoTrade === true && orderable) {
+    routing = broker.route(setup.brokers || []);
+    if (routing.error && !dryRun) {
+      console.log(`[Setups] ${setup.id}: no order placed — ${routing.error}`);
+    }
+  }
+  if (!dryRun && setup.autoTrade === true && orderable && routing.cfgs.length) {
     for (const pick of out.picks) {
       const size = risk.sizeFor(
         { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
       if (!size || !(size.shares > 0)) continue;
-      try {
-        orders[pick.ticker] = await broker.placeOrder({
-          symbol: pick.ticker,
-          signal: pick.signal,
-          quantity: size.shares,
-          price: pick.plan.entry,
-          // The stop is the frozen VWAP and the target is 2R — both decided at
-          // this same instant, so they go with the entry as a bracket rather
-          // than being left for whoever reaches their phone first.
-          stop: pick.plan.stop,
-          target: pick.plan.target,
-          date: day,
-          source: `${setup.id} (${config.toolId})`,
-          // Both caps are enforced in the broker, against the ledger, so a
-          // restart between the two picks cannot hand the allowance back.
-          setupId: setup.id,
-          maxPerDay: setup.maxTradesPerDay || null,
-          // The strategy's OWN exit plan — its scale-out legs and whether its
-          // stop trails — straight from qp. Without it every trade was given a
-          // single 2R target whatever the strategy said, which for a
-          // scale-out strategy is not a smaller version of the tested trade,
-          // it is a different one.
-          plan: pick.exitPlan || null,
-        });
-      } catch (err) {
-        // A broker that cannot be reached must not stop the alert. The alert is
-        // the thing you can still act on by hand; losing it because the
-        // automatic path failed would turn a degraded morning into a blind one.
-        orders[pick.ticker] = { sent: false, error: err.message };
+      // One account at a time, and one pick at a time: each order is sized
+      // against what the previous one actually committed in THAT account, and
+      // firing them together would size every one against the full balance.
+      for (const cfg of routing.cfgs) {
+        let result;
+        try {
+          result = await broker.placeOrder({
+            symbol: pick.ticker,
+            signal: pick.signal,
+            quantity: size.shares,
+            price: pick.plan.entry,
+            // The stop is the frozen VWAP and the target is 2R — both decided at
+            // this same instant, so they go with the entry as a bracket rather
+            // than being left for whoever reaches their phone first.
+            stop: pick.plan.stop,
+            target: pick.plan.target,
+            date: day,
+            source: `${setup.id} (${config.toolId})`,
+            // Both caps are enforced in the broker, against the ledger, so a
+            // restart between the two picks cannot hand the allowance back.
+            setupId: setup.id,
+            maxPerDay: setup.maxTradesPerDay || null,
+            // The strategy's OWN exit plan — its scale-out legs and whether its
+            // stop trails — straight from qp. Without it every trade was given a
+            // single 2R target whatever the strategy said, which for a
+            // scale-out strategy is not a smaller version of the tested trade,
+            // it is a different one.
+            plan: pick.exitPlan || null,
+            cfg,
+          });
+        } catch (err) {
+          // A broker that cannot be reached must not stop the alert, and with
+          // two accounts it must not stop the OTHER one either. The alert is
+          // the thing you can still act on by hand; losing it because the
+          // automatic path failed would turn a degraded morning into a blind one.
+          result = { sent: false, error: err.message };
+        }
+        result = { ...result, destination: cfg.destinationId, broker: cfg.destinationName };
+        (orders[pick.ticker] = orders[pick.ticker] || []).push(result);
       }
     }
   }
@@ -345,10 +388,13 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     at: Date.now(),
     kind: 'setup',
     level: 'trade',
-    detail: describePick(pick, size) + orderLine(orders[pick.ticker])
+    detail: describePick(pick, size) + orderLines(orders[pick.ticker])
       + (setup.autoTrade === true && !orderable
         ? ' · ALERT ONLY — ' + (setup.readiness.orderBlocking || []).join('; ')
         : '')
+      // A setup set to trade that could not be routed said nothing at all, and
+      // a silent non-order is indistinguishable from a quiet week.
+      + (routing.error ? ` · NO ORDER — ${routing.error}` : '')
       + unmanagedLine(pick.exitPlan),
     price: pick.plan.entry,
     // Everything the card cannot show but the trade needs. Kept on the fire so
@@ -371,7 +417,16 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
       // both "what fired" and "did it go in" — two messages, or a state you
       // have to go and look up, is how a rejected order becomes a position
       // somebody believes they are holding.
-      order: orders[pick.ticker] || null,
+      /*
+       * `order` is the first account's result and `orders` is all of them.
+       *
+       * Kept both because `order` is on every record ever written and the
+       * history page reads it — an object that became an array would rewrite
+       * the past as much as the present. With one destination they say the
+       * same thing, which is the case that has existed until now.
+       */
+      order: (orders[pick.ticker] || [])[0] || null,
+      orders: orders[pick.ticker] || null,
       // Which minute the decision was actually taken on. Normally 09:59; when
       // the feed had not published it inside the deadline it is the last bar
       // that existed, and that changes both the close and the VWAP slightly.

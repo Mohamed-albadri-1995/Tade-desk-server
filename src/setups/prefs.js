@@ -69,6 +69,28 @@ function settingsFor(setupId) {
      */
     autoTrade: e.autoTrade === true,
     /*
+     * WHICH accounts this setup's orders go to, by destination id.
+     *
+     * autoTrade says WHETHER orders are placed without being asked; this says
+     * WHERE they go, and the two are deliberately separate because the four
+     * things worth expressing need both:
+     *
+     *   auto to two accounts    autoTrade true,  brokers ['ttp', 'alpaca']
+     *   auto to one             autoTrade true,  brokers ['alpaca']
+     *   alert only              autoTrade false, brokers []
+     *   by hand, to one account autoTrade false, brokers ['alpaca']
+     *
+     * The last is the one that needed the split. A setup being trialled should
+     * be looked at before it is bought, but when it IS bought there is nothing
+     * to think about — it goes to the account that strategy belongs in, and
+     * choosing again at 09:36 is how it goes to the wrong one.
+     *
+     * Empty means unsaid rather than none: with a single account configured
+     * there is nothing to decide, and with two, broker.route refuses instead of
+     * picking. See the note there.
+     */
+    brokers: Array.isArray(e.brokers) ? e.brokers.map(String) : [],
+    /*
      * The most orders THIS setup may place in a session.
      *
      * Separate from the account's cap, because they answer different questions:
@@ -119,6 +141,28 @@ function saveSettings(setupId, patch) {
   // Only ever true by being said so. A truthy string or a stray 1 must not be
   // what turns a setup into one that spends money.
   if ('autoTrade' in patch) next.autoTrade = patch.autoTrade === true;
+  /*
+   * Routing, checked against the destinations that actually exist.
+   *
+   * A typo here is not a validation nicety: 'alpca' would store cleanly, read
+   * back as a real preference, and then either send nowhere or — worse, if the
+   * unknown id were merely dropped — fall through to whatever the default was.
+   * Refused where it is typed, like the ranking count above.
+   */
+  if ('brokers' in patch) {
+    const want = Array.isArray(patch.brokers) ? patch.brokers.map(String).filter(Boolean) : [];
+    if (!want.length) delete next.brokers;
+    else {
+      const known = require('../broker/signalstack').destinations().map(d => d.id);
+      const bad = want.filter(id => !known.includes(id));
+      if (bad.length) {
+        throw new Error(`no broker called ${bad.join(', ')}`
+          + (known.length ? ` — configured: ${known.join(', ')}`
+                          : ' — no brokers are configured yet'));
+      }
+      next.brokers = [...new Set(want)];
+    }
+  }
   /*
    * A count without a metric is not a preference, it is a trap: it takes n of
    * an unordered list and looks exactly like a ranking. Refused where it is

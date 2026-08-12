@@ -173,6 +173,28 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .h-detail { flex-basis:100%; font-size:11.5px; color:var(--text2); line-height:1.5;
   overflow-wrap:anywhere; }
 
+/* ── the accounts orders can go to ── */
+.dest { background:var(--bg2); border:1px solid var(--border); border-radius:8px;
+  padding:11px 12px; margin-bottom:8px; display:flex; flex-wrap:wrap; gap:9px;
+  align-items:flex-end }
+/* An account that cannot receive anything must not look like one that can. */
+.dest.off { opacity:.55; border-style:dashed }
+.dest label { display:flex; flex-direction:column; gap:4px; font-size:11px; color:var(--text3) }
+.dest input, .dest select { background:var(--bg3); border:1px solid var(--border);
+  border-radius:6px; padding:6px 8px; color:var(--text); font-family:inherit;
+  font-size:12.5px; width:120px }
+.dest .d-head { flex-basis:100%; display:flex; gap:8px; align-items:center;
+  font-size:12.5px; font-weight:600 }
+.dest .d-id { font-weight:400; font-size:11px; color:var(--text3) }
+.dest .d-foot { flex-basis:100%; font-size:11px; color:var(--text3); line-height:1.5 }
+/* The hook is the credential. Shown masked, never in full, and blank means
+   "leave the stored one alone" rather than "delete it". */
+.dest .d-hook { width:100%; max-width:320px }
+/* Which accounts a setup sends to, on the setup card. */
+.bchip { font-size:10.5px; padding:2px 7px; border-radius:99px; border:1px solid var(--border);
+  background:var(--bg3); color:var(--text3); font-family:inherit }
+.bchip.on { background:var(--accent); border-color:var(--accent); color:#0b1220 }
+
 /* ── position sizing ── */
 .risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
   border:1px solid var(--border); border-radius:8px; padding:12px 13px; }
@@ -371,22 +393,15 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <span>Algo trading</span>
   <span class="note" id="broker-state">off</span>
 </div>
+<!-- THE ACCOUNTS.
+     One hook was one account, so neither needed a name. A prop-firm account
+     and an Alpaca account come apart in every direction that matters — a
+     different hook, a different balance, a different daily count and a body
+     that is not quite the same shape — so each is its own row, and a setup
+     names the ones it sends to. Everything below this list is account-wide:
+     it is about this BOX, not about one broker. -->
+<div id="bk-dests"><div class="empty">Loading…</div></div>
 <div class="risk" id="broker">
-  <label>SignalStack hook
-    <input id="bk-url" placeholder="https://app.signalstack.com/hook/…" style="width:230px">
-  </label>
-  <label>Test hook <span class="note">optional</span>
-    <input id="bk-test-url" placeholder="…/hook/TEST…" style="width:200px">
-  </label>
-  <label>Buying power $
-    <input id="bk-power" type="number" min="0" step="100" placeholder="e.g. 20000">
-  </label>
-  <label>Max per order $
-    <input id="bk-max" type="number" min="0" step="100" placeholder="optional — see note" title="A DOLLAR ceiling on any single order, checked by the broker at send time. Different from 'Max position' above, which is a PERCENT of account size and decides the share count the alert shows. This one only trims what goes out — set it lower than Max position implies and the alert will say one number while a smaller one is sent. Blank is normal: Max position already does this job.">
-  </label>
-  <label>Max trades / day
-    <input id="bk-maxtrades" type="number" min="1" step="1" placeholder="e.g. 4">
-  </label>
   <!-- A runner has a stop and no target. The backtest closes it at the end of
        the session; a broker does not, and the account cannot hold overnight. -->
   <label>Close all at
@@ -400,15 +415,16 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   </label>
   <button class="btn primary" onclick="saveBroker()">Save</button>
   <button class="btn" id="bk-arm" onclick="toggleArm()">Algo trading: OFF</button>
-  <button class="btn" onclick="testBroker()">Send 1 test share</button>
+
   <div class="note risk-hint" id="bk-note">
     With this <b>ON</b>, a setup that fires opens a <b>real position by itself</b> —
     entry, stop and target — with no tap from you. It needs two things to be true:
     this switch, and <b>orders</b> on the setup itself. Either one off means alert
-    only. Quantity is always whole shares and is reduced to fit the buying power
-    left rather than sent to be rejected. <b>The buying power above is a number
-    you enter</b> — SignalStack cannot be asked for it, so this side keeps its own
-    tally and the broker's own refusal is the real backstop.
+    only, and a setup also has to name <b>which account</b> it sends to. Quantity
+    is always whole shares and is reduced to fit the buying power left rather
+    than sent to be rejected. <b>Each account's buying power is a number you
+    enter</b> — SignalStack cannot be asked for it, so this side keeps its own
+    tally per account and the broker's own refusal is the real backstop.
   </div>
   <!-- The callback URL. SignalStack posts here when an order is PROCESSED,
        which is the half its reply to us cannot give: filled at another price,
@@ -802,6 +818,19 @@ async function loadSetups() {
           <span class="ua-tool${s.autoTrade ? ' live' : ''}"
                 onclick="toggleAutoTrade(${i})">${s.autoTrade ? 'SENDS REAL ORDERS' : 'alert only'}</span>
         </div>
+        <!-- WHERE its orders go, which is a different question from whether
+             they go by themselves. Both together are what let a setup be sent
+             to two accounts, to one, to none, or by hand to one in particular:
+
+               auto to two     SENDS REAL ORDERS  +  ttp, alpaca lit
+               auto to one     SENDS REAL ORDERS  +  alpaca lit
+               alert only      alert only         +  nothing lit
+               by hand to one  alert only         +  alpaca lit
+
+             The last is the one that needed this: a setup on trial should be
+             looked at before it is bought, and when it IS bought there should
+             be nothing left to decide. -->
+        ${brokerChips(s, i)}
         <div class="st-tools">
           <span class="ua-label">runs on</span>
           <div class="ua-tools">${TOOL_IDS.map(t => `<span
@@ -846,6 +875,8 @@ async function loadSetups() {
         ${s.caution ? `<div class="su-caution">${esc(s.caution)}</div>` : ''}
       </div>`;
     }).join('');
+    // Both halves are in hand now, whichever fetch landed first.
+    paintAlgoState();
   } catch {
     out.innerHTML = '<div class="empty">Could not read the setups.</div>';
   }
@@ -1067,6 +1098,62 @@ async function saveSetup(i) {
   } catch (e) {
     msg.textContent = e.message;
   }
+}
+
+/*
+ * WHICH ACCOUNTS this setup sends to.
+ *
+ * One chip per configured account, lit when this setup names it. With no
+ * accounts configured there is nothing to draw and the row is left out rather
+ * than shown empty — an empty row of chips reads as "none selected", which is
+ * a different and wrong statement.
+ *
+ * Nothing is preselected. An unlit row on a setup with one account still works
+ * (see broker.route: with one account there is nothing to decide) and the
+ * moment a second one exists it stops working and says so, which is the
+ * behaviour that keeps an order out of the wrong book.
+ */
+function brokerChips(s, i) {
+  const all = ((BROKER && BROKER.broker && BROKER.broker.destinations) || [])
+    .filter(d => d.enabled !== false);
+  if (all.length < 1) return '';
+  const mine = s.brokers || [];
+  return `<div class="st-tools">
+    <span class="ua-label">sends to</span>
+    <div class="ua-tools">${all.map(d => `<button
+      class="bchip${mine.includes(d.id) ? ' on' : ''}"
+      onclick="toggleSetupBroker(${i}, '${esc(d.id)}')">${esc(d.name || d.id)}</button>`).join('')}
+    </div>
+  </div>`
+    // Only a problem for a setup that is supposed to be trading. An alert-only
+    // setup with no account named is not broken, it is alert-only — and the
+    // review box offers the choice when one is actually sent by hand.
+    + (s.autoTrade && all.length > 1 && !mine.length
+      ? `<div class="st-block">⛔ Pick an account — with ${all.length} configured, `
+        + 'this setup is set to trade and will place nothing until it says which.</div>' : '');
+}
+
+async function toggleSetupBroker(i, id) {
+  const s = SETUPS[i];
+  if (!s) return;
+  const cur = s.brokers || [];
+  const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
+  // Only worth a confirmation when it would widen where money goes, and only
+  // for a setup that is already sending by itself.
+  if (s.autoTrade && next.length > cur.length
+    && !confirm(`Also send "${s.name}" to ${id}?\n\n`
+      + 'Every time it fires it will place the same order in BOTH accounts, '
+      + 'each sized against its own balance.')) return;
+  try {
+    const r = await (await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brokers: next }),
+    })).json();
+    if (!r.ok) throw new Error(r.error || 'could not save');
+  } catch (e) {
+    alert(`Could not change it: ${e.message}`);
+  }
+  await loadSetups();
 }
 
 /*
@@ -1391,13 +1478,7 @@ async function loadBroker() {
     if (!d.ok) return;
     BROKER = d;
     const b = d.broker;
-    document.getElementById('bk-url').placeholder =
-      b.hasWebhook ? `saved · ${b.webhookUrl}` : 'https://app.signalstack.com/hook/…';
-    document.getElementById('bk-test-url').placeholder =
-      b.hasTestWebhook ? `saved · ${b.testWebhookUrl}` : '…/hook/TEST…';
-    if (b.buyingPower) document.getElementById('bk-power').value = b.buyingPower;
-    if (b.maxOrderValue) document.getElementById('bk-max').value = b.maxOrderValue;
-    if (b.maxTradesPerDay) document.getElementById('bk-maxtrades').value = b.maxTradesPerDay;
+    paintDests(b.destinations || []);
     document.getElementById('bk-flatten').value = b.flatten ? (b.flattenAt || '') : '';
     document.getElementById('bk-short').value = b.allowShort ? '1' : '0';
     document.getElementById('bk-bracket').value = b.bracket ? '1' : '0';
@@ -1411,22 +1492,19 @@ async function loadBroker() {
     const st = document.getElementById('broker-state');
     const used = (d.orders || []).filter(o => o.sent).length;
     const open = (d.openSymbols || []);
+    // With more than one account, "$X of $Y left" is a number for the first
+    // account presented as a number for the box. Say how many accounts instead
+    // and let each row carry its own balance.
+    const live = (b.destinations || []).filter(x => x.enabled && x.hasWebhook);
     st.textContent = b.armed
-      ? `armed · $${(d.remaining ?? 0).toFixed(0)} of $${b.buyingPower} left`
+      ? `armed · ${live.length} account${live.length === 1 ? '' : 's'}`
+        + (live.length === 1 ? ` · $${(d.remaining ?? 0).toFixed(0)} left` : '')
         + `${b.maxTradesPerDay ? ` · ${used}/${b.maxTradesPerDay} trades used` : ` · ${used} trades`}`
         + `${open.length ? ` · open: ${open.join(', ')} (closing ${b.flattenAt})` : ''}`
-      : (b.hasWebhook ? 'configured, not armed' : 'off');
+      : (live.length ? 'configured, not armed' : 'off');
     st.className = 'note' + (b.armed ? ' live' : '');
 
-    const algo = document.getElementById('algo-state');
-    if (algo) {
-      const live = (SETUPS || []).filter(x => x.autoTrade).length;
-      algo.textContent = b.armed
-        ? (live ? `⚡ ALGO TRADING ON — ${live} setup(s) will open real positions`
-                : '⚡ algo trading on, but no setup has orders enabled')
-        : '';
-      algo.className = 'note' + (b.armed && live ? ' live' : '');
-    }
+    paintAlgoState();
 
     const cb = document.getElementById('bk-callback');
     cb.innerHTML = d.callbackUrl
@@ -1467,14 +1545,162 @@ async function copyCallback(url) {
   }
 }
 
+/*
+ * The loudest thing on the page when it is on.
+ *
+ * Its own function because it needs BOTH halves — the broker's armed state and
+ * the setups that would use it — and the two arrive from different fetches in
+ * whichever order the network decides. Painted from whatever is in hand each
+ * time either lands, so a page that loaded the broker first is not left saying
+ * "no setup has orders enabled" for the rest of the morning.
+ */
+function paintAlgoState() {
+  const algo = document.getElementById('algo-state');
+  if (!algo) return;
+  const b = (BROKER && BROKER.broker) || {};
+  const live = (SETUPS || []).filter(x => x.autoTrade).length;
+  algo.textContent = b.armed
+    ? (live ? `⚡ ALGO TRADING ON — ${live} setup(s) will open real positions`
+            : '⚡ algo trading on, but no setup has orders enabled')
+    : '';
+  algo.className = 'note' + (b.armed && live ? ' live' : '');
+}
+
+/*
+ * THE ACCOUNTS, one row each.
+ *
+ * Every field is per-account because every one of them differs: the hook says
+ * which broker, the balance says how much it can spend, the daily cap says how
+ * often, and the type decides the shape of the JSON. Two accounts sharing any
+ * of those would be a way to lose money quietly.
+ *
+ * The hook is shown MASKED and its box starts empty. Blank means "keep the one
+ * that is stored" — otherwise editing a buying power would silently unplug the
+ * broker, and the next morning would alert normally and trade nothing.
+ */
+function paintDests(list) {
+  const out = document.getElementById('bk-dests');
+  if (!out) return;
+  const row = (d, i) => `<div class="dest${d.enabled === false ? ' off' : ''}" data-i="${i}">
+    <div class="d-head">
+      <span>${esc(d.name || d.id)}</span>
+      <span class="d-id">${esc(d.id)} · ${esc(d.dialect)}</span>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn" onclick="toggleDest('${esc(d.id)}')">${
+        d.enabled === false ? 'Switch on' : 'Switch off'}</button>
+      <button class="btn" onclick="testBroker('${esc(d.id)}')">Test 1 share</button>
+      <button class="btn" onclick="removeDest('${esc(d.id)}')">Remove</button>
+    </div>
+    <label>Name
+      <input class="d-name" value="${esc(d.name || '')}" placeholder="Alpaca">
+    </label>
+    <label>Buying power $
+      <input class="d-power" type="number" min="0" step="100"
+        value="${d.buyingPower || ''}" placeholder="e.g. 20000">
+    </label>
+    <label title="A DOLLAR ceiling on any single order, checked at send time. Different from 'Max position' above, which is a PERCENT of account size and decides the share count the alert shows. This one only trims what goes out. Blank is normal.">Max per order $
+      <input class="d-max" type="number" min="0" step="100"
+        value="${d.maxOrderValue || ''}" placeholder="optional">
+    </label>
+    <label>Max trades / day
+      <input class="d-maxtrades" type="number" min="1" step="1"
+        value="${d.maxTradesPerDay || ''}" placeholder="e.g. 4">
+    </label>
+    <label>SignalStack hook
+      <input class="d-hook" placeholder="${d.hasWebhook
+        ? `saved · ${esc(d.webhookUrl)} — blank keeps it`
+        : 'https://app.signalstack.com/hook/…'}">
+    </label>
+    <label>Test hook <span class="note">optional</span>
+      <input class="d-testhook" placeholder="${d.hasTestWebhook
+        ? `saved · ${esc(d.testWebhookUrl)}` : '…/hook/TEST…'}">
+    </label>
+    <div class="d-foot">${d.hasWebhook
+      ? 'A setup sends here only if it names this account on the Setups tab.'
+      : '<b class="warn">No hook — nothing can be sent here.</b>'}</div>
+  </div>`;
+  out.innerHTML = list.map(row).join('')
+    + `<div class="note risk-hint">
+         <button class="btn" onclick="addDest()">+ Add an account</button>
+         <button class="btn primary" onclick="saveDests()">Save accounts</button>
+         Each account is a separate SignalStack hook with its own balance and its
+         own daily count. <b>Trade The Pool</b> and <b>Alpaca</b> take slightly
+         different JSON, which is what the type on each row decides.
+       </div>`;
+}
+
+/** Read the rows back off the page — blank hook means keep the stored one. */
+function readDests() {
+  const known = ((BROKER && BROKER.broker && BROKER.broker.destinations) || []);
+  return [...document.querySelectorAll('#bk-dests .dest')].map(el => {
+    const i = Number(el.getAttribute('data-i'));
+    const src = known[i] || {};
+    const f = (cls) => (el.querySelector('.' + cls) || {}).value || '';
+    const d = {
+      id: src.id, dialect: src.dialect, enabled: src.enabled !== false,
+      name: f('d-name').trim() || src.id,
+    };
+    for (const [cls, key] of [['d-power', 'buyingPower'], ['d-max', 'maxOrderValue'],
+                              ['d-maxtrades', 'maxTradesPerDay']]) {
+      const v = f(cls).trim();
+      // '' clears the number; the hooks below are the ones where blank keeps.
+      d[key] = v === '' ? null : v;
+    }
+    for (const [cls, key] of [['d-hook', 'webhookUrl'], ['d-testhook', 'testWebhookUrl']]) {
+      const v = f(cls).trim();
+      if (v) d[key] = v;          // omitted entirely = keep what is stored
+    }
+    return d;
+  });
+}
+
+async function saveDests(list) {
+  const ok = await saveBroker({ destinations: list || readDests(), enabled: true });
+  if (ok) document.getElementById('bk-note').textContent = 'Accounts saved.';
+}
+
+/*
+ * A new account, added to the page rather than saved straight away.
+ *
+ * The id is what setups store, so it is asked for once and never editable
+ * afterwards: renaming it would leave every setup routed to a broker that no
+ * longer answers to that name. The display name is the thing that can change.
+ */
+function addDest() {
+  const dialect = prompt('Broker type — ttp (Trade The Pool) or alpaca:', 'alpaca');
+  if (!dialect) return;
+  const id = (prompt('A short id for it. This is what setups will store, and it '
+    + 'cannot be changed later:', dialect) || '').trim().toLowerCase();
+  if (!id) return;
+  const cur = ((BROKER && BROKER.broker && BROKER.broker.destinations) || []);
+  if (cur.some(d => d.id === id)) return alert(`There is already an account called ${id}.`);
+  const hook = (prompt('Its SignalStack hook URL:') || '').trim();
+  if (!hook) return;
+  saveDests([...readDests(), { id, dialect: dialect.trim().toLowerCase(),
+                               name: id, webhookUrl: hook, enabled: true }]);
+}
+
+async function toggleDest(id) {
+  const rows = readDests().map(d => d.id === id ? { ...d, enabled: !d.enabled } : d);
+  await saveDests(rows);
+}
+
+async function removeDest(id) {
+  /*
+   * Removing an account does not un-route the setups that named it.
+   *
+   * That is deliberate: broker.route refuses loudly for a setup pointing at a
+   * destination that is gone, which is the right failure. Quietly rewriting
+   * those setups to send somewhere else would be the wrong one.
+   */
+  if (!confirm(`Remove ${id}? Any setup routed to it will place no orders until `
+    + 'you point it somewhere else.')) return;
+  await saveDests(readDests().filter(d => d.id !== id));
+}
+
 async function saveBroker(patch) {
   const v = id => document.getElementById(id).value.trim();
   const body = patch || {
-    webhookUrl: v('bk-url') || undefined,
-    testWebhookUrl: v('bk-test-url') || undefined,
-    buyingPower: v('bk-power') || undefined,
-    maxOrderValue: v('bk-max') || undefined,
-    maxTradesPerDay: v('bk-maxtrades') || undefined,
     // Blank means do not close anything — a real choice, and a dangerous one,
     // so it is the empty box rather than a default.
     flatten: !!v('bk-flatten'),
@@ -1489,10 +1715,6 @@ async function saveBroker(patch) {
       body: JSON.stringify(body),
     })).json();
     if (!r.ok) throw new Error(r.error || 'could not save');
-    // Cleared once saved: the URL is a credential and leaving it on screen is
-    // the same mistake as printing it.
-    document.getElementById('bk-url').value = '';
-    document.getElementById('bk-test-url').value = '';
     await loadBroker();
     return true;
   } catch (e) {
@@ -1520,21 +1742,31 @@ async function toggleArm() {
   await saveBroker({ armed: !armed, enabled: true });
 }
 
-async function testBroker() {
+async function testBroker(destination) {
+  /*
+   * One share, at ONE account.
+   *
+   * The only way to learn that a hook is wrong, an account is disconnected or a
+   * symbol is unsupported is to send something — and every one of those is true
+   * per account. A single button that always reached the first one would leave
+   * the second untested while reading as a pass.
+   */
   const note = document.getElementById('bk-note');
-  note.textContent = 'sending 1 share…';
+  note.textContent = `sending 1 share${destination ? ` to ${destination}` : ''}…`;
   try {
     const d = await (await fetch('/api/broker/test', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbol: 'AAPL' }),
+      body: JSON.stringify({ symbol: 'AAPL', destination: destination || null }),
     })).json();
     if (!d.ok) throw new Error(d.error);
     const r = d.result;
     note.innerHTML = r.sent
-      ? `Sent to the <b>${esc(r.hook)}</b> hook: ${esc(r.status || 'accepted')}`
+      ? `Sent to <b>${esc(r.broker || 'the broker')}</b> (${esc(r.hook)} hook): `
+        + `${esc(r.status || 'accepted')}`
         + `${r.orderId ? ` · order ${esc(r.orderId)}` : ''}`
         + `${r.fillPrice ? ` · filled @ ${esc(r.fillPrice)}` : ''}`
-      : `<b class="warn">Refused (${esc(r.httpStatus)}): ${esc(r.message || 'no message')}</b>`;
+      : `<b class="warn">${esc(r.broker || 'Broker')} refused (${esc(r.httpStatus)}): `
+        + `${esc(r.message || 'no message')}</b>`;
     loadBroker();
   } catch (e) {
     note.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
@@ -1622,9 +1854,12 @@ function closeReview() {
   }
 }
 
-async function reviewOrder(plan) {
+async function reviewOrder(plan, destination) {
   const box = reviewBox();
   box.innerHTML = '<div class="note">checking…</div>';
+  // The account travels with the plan from here on, so the preview and the send
+  // that follows it cannot land in different books.
+  if (destination) plan = { ...plan, destination };
   try {
     const r = await (await fetch('/api/broker/preview', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1636,9 +1871,27 @@ async function reviewOrder(plan) {
     // body when there is nothing sendable. Reading the wrong field would have
     // shown a Send button on an order the broker had already refused.
     const stop = p.blocked || !p.body;
+    /*
+     * WHICH ACCOUNT, above the JSON rather than beside it.
+     *
+     * The body itself does not say — SignalStack decides that from the hook it
+     * arrived on — so with two accounts configured the most important fact
+     * about this order is one the order cannot show. The picker re-runs the
+     * preview, because the balance, the day's count and the trimmed quantity
+     * are all per-account: choosing a different one and leaving the old
+     * numbers on screen would be reviewing the wrong trade.
+     */
+    const dests = r.destinations || [];
+    const chosen = plan.destination || p.destination || null;
+    const where = dests.length > 1
+      ? `<div class="note">to: ${dests.map(d => `<button class="bchip${
+          d.id === chosen ? ' on' : ''}" onclick='reviewOrder(${JSON.stringify(plan)
+            .replace(/'/g, "&apos;")}, "${esc(d.id)}")'>${esc(d.name)}</button>`).join(' ')}</div>`
+      : (p.destinationName ? `<div class="note">to: <b>${esc(p.destinationName)}</b></div>` : '');
     box.innerHTML = `
       <div class="or-head">${esc(plan.symbol)} ${esc(plan.side)} — `
         + (stop ? 'NOT sendable' : 'this is exactly what would be sent') + `</div>`
+      + where
       + (p.body
         ? `<pre class="or-json">${esc(JSON.stringify(p.body, null, 2))}</pre>` : '')
       + `<div class="note">${p.armed ? 'broker armed' : 'BROKER NOT ARMED — sending will be refused'}`
@@ -1758,9 +2011,13 @@ function histNumbers(f) {
   }
   // What the broker did, when it did anything. An alert-only week should show
   // this empty on every row — if it does not, something placed an order.
-  if (t.order) {
-    parts.push(bit('ORDER', (t.order.status || 'sent')
-      + (t.order.quantity ? ` ${t.order.quantity}sh` : '')));
+  // One entry per account. With two of them the interesting case is that they
+  // DISAGREE — filled at one, out of buying power at the other — and a single
+  // line would have to pick which of the two to show.
+  for (const o of (t.orders && t.orders.length ? t.orders : (t.order ? [t.order] : []))) {
+    parts.push(bit(o.broker ? `ORDER · ${o.broker}` : 'ORDER',
+      (o.sent === false ? (o.error || o.skipped || 'not sent') : (o.status || 'sent'))
+      + (o.quantity ? ` ${o.quantity}sh` : '')));
   }
   if (t.size && t.size.capped) parts.push(bit('capped', t.size.capped));
   /*
@@ -1779,7 +2036,10 @@ function histNumbers(f) {
     ? `<button class="h-send" onclick='reviewOrder(${JSON.stringify({
         symbol: f.ticker, side: (t.signal || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG',
         entry: t.entry, stop: t.stop, target: t.target || null,
-        setupId: f.setupId || f.rule || 'manual',
+        // The setup's ID, not its name. The server reads it twice: to charge
+        // this order against the setup's own daily cap, and to route it to the
+        // accounts that setup names — and neither lookup can find a name.
+        setupId: f.setupId || f.ruleId || 'manual',
       }).replace(/'/g, '&apos;')})'>review order…</button>`
     : '';
   return (parts.length || send)
@@ -1999,7 +2259,15 @@ loadRisk();
 // The broker banner counts the setups that will trade, so the setups have to be
 // in hand before it is drawn — otherwise it reads "0 setups" for a second on
 // every load, which is the reassuring answer and the wrong one.
-loadSetups().then(loadBroker);
+/*
+ * The broker FIRST, then the setups.
+ *
+ * A setup card shows which accounts it sends to, and it can only draw those
+ * chips once it knows what accounts exist. The other direction — the armed
+ * banner counting setups — no longer needs an order, because paintAlgoState is
+ * called by whichever of the two finishes last.
+ */
+loadBroker().then(loadSetups);
 loadHistory();
 loadUnassigned();
 // A card's "add alert" button links here with the ticker, so the rule opens

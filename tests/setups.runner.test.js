@@ -386,6 +386,17 @@ describe('which setups place orders', () => {
     // is not what these three are about.
     jest.spyOn(risk, 'settings').mockReturnValue({
       accountSize: 5000, riskPerTrade: 25, maxPositionPct: 100, updatedAt: 1 });
+    /*
+     * A broker to route to.
+     *
+     * These tests are about PERMISSION — whether a setup may place an order at
+     * all — and permission now has a second half: an account to place it in.
+     * With none configured, broker.route refuses before placeOrder is reached,
+     * which is correct and is not what is being measured here. Routing has its
+     * own tests.
+     */
+    jest.spyOn(brokerMod, 'route').mockReturnValue({
+      cfgs: [{ destinationId: 'ttp', destinationName: 'Trade The Pool' }], error: null });
   });
 
   test('a setup without permission places nothing, however armed the broker is', async () => {
@@ -521,6 +532,17 @@ describe('a rule-exit strategy is alert-only', () => {
       picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
                 risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
     });
+    /*
+     * A broker to route to.
+     *
+     * These tests are about PERMISSION — whether a setup may place an order at
+     * all — and permission now has a second half: an account to place it in.
+     * With none configured, broker.route refuses before placeOrder is reached,
+     * which is correct and is not what is being measured here. Routing has its
+     * own tests.
+     */
+    jest.spyOn(brokerMod, 'route').mockReturnValue({
+      cfgs: [{ destinationId: 'ttp', destinationName: 'Trade The Pool' }], error: null });
   });
 
   test('no order is placed even with orders switched on', async () => {
@@ -554,5 +576,97 @@ describe('a rule-exit strategy is alert-only', () => {
     await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'],
       decisionTime: '10:00', autoTrade: true }, { date: DATE });
     expect(spy).toHaveBeenCalled();
+  });
+});
+
+/*
+ * ONE SIGNAL, TWO ACCOUNTS.
+ *
+ * A setup routed to a prop-firm account and to Alpaca is the same trade in
+ * both, and the interesting cases are all about them being SEPARATE: separate
+ * sizing, separate outcomes, and separate failures. The one that would cost
+ * real money is a broker being unreachable and taking the other account's
+ * order down with it — which is exactly what a single try/catch around the
+ * loop would have done.
+ */
+describe('a setup routed to two accounts', () => {
+  const brokerMod = require('../src/broker/signalstack');
+  const risk = require('../src/setups/risk');
+  const TWO = [
+    { destinationId: 'ttp', destinationName: 'Trade The Pool' },
+    { destinationId: 'alpaca', destinationName: 'Alpaca' },
+  ];
+  const SET = { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00',
+                autoTrade: true, brokers: ['ttp', 'alpaca'] };
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    jest.spyOn(risk, 'settings').mockReturnValue({
+      accountSize: 5000, riskPerTrade: 25, maxPositionPct: 100, updatedAt: 1 });
+    jest.spyOn(brokerMod, 'route').mockReturnValue({ cfgs: TWO, error: null });
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+  });
+
+  test('both get an order, each against its own cfg', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled', quantity: 25 });
+    await runner.runSetup(SET, {});
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy.mock.calls.map(c => c[0].cfg.destinationId)).toEqual(['ttp', 'alpaca']);
+    // Same trade, not two different ones.
+    expect(spy.mock.calls[0][0]).toMatchObject({ symbol: 'AAA', stop: 9, target: 12 });
+    expect(spy.mock.calls[1][0]).toMatchObject({ symbol: 'AAA', stop: 9, target: 12 });
+  });
+
+  test('the alert names what happened at each', async () => {
+    jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValueOnce({ sent: true, status: 'filled', quantity: 25, bracket: true })
+      .mockResolvedValueOnce({ sent: false, error: 'insufficient buying power' });
+    const out = await runner.runSetup(SET, {});
+    const d = out.fires[0].detail;
+    expect(d).toMatch(/Trade The Pool: ORDER FILLED 25/);
+    expect(d).toMatch(/Alpaca: ORDER FAILED — insufficient buying power/);
+  });
+
+  test('one broker being unreachable does not stop the other', async () => {
+    jest.spyOn(brokerMod, 'placeOrder')
+      .mockRejectedValueOnce(new Error('ETIMEDOUT'))
+      .mockResolvedValueOnce({ sent: true, status: 'accepted', quantity: 25 });
+    const out = await runner.runSetup(SET, {});
+    const rows = out.fires[0].setup.orders;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ sent: false, error: 'ETIMEDOUT', destination: 'ttp' });
+    expect(rows[1]).toMatchObject({ sent: true, destination: 'alpaca' });
+  });
+
+  test('the record keeps both, and `order` still means the first', async () => {
+    // Every fire ever written has an `order` object and the history page reads
+    // it. Turning that field into an array would rewrite the past.
+    jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled', quantity: 25 });
+    const out = await runner.runSetup(SET, {});
+    const t = out.fires[0].setup;
+    expect(t.order.destination).toBe('ttp');
+    expect(t.orders.map(o => o.destination)).toEqual(['ttp', 'alpaca']);
+  });
+
+  test('a setup that cannot be routed says so on the alert', async () => {
+    // The failure this replaces: a setup marked auto-trade quietly placing
+    // nothing, which from a phone is indistinguishable from a quiet morning.
+    brokerMod.route.mockReturnValue({ cfgs: [], error: 'no broker is configured' });
+    const spy = jest.spyOn(brokerMod, 'placeOrder');
+    const out = await runner.runSetup(SET, {});
+    expect(spy).not.toHaveBeenCalled();
+    expect(out.fires[0].detail).toMatch(/NO ORDER — no broker is configured/);
+  });
+
+  test('a dry run asks no broker anything', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder');
+    await runner.runSetup(SET, { dryRun: true });
+    expect(spy).not.toHaveBeenCalled();
   });
 });
