@@ -99,7 +99,14 @@ def run_one(host, spec, name, poll=5.0):
             return bid, (g.get('summary') or {})
         if status == 'error':
             raise SystemExit(f'{name} failed: {g.get("error")}')
-        print(f'  #{bid} {name}: {g.get("progress", 0)}%   ', end='\r', flush=True)
+        # A carriage return overwrites a line on a terminal. Redirected to a
+        # file — which is how this is always run, because a 17-backtest sweep
+        # outlives an SSH session — it appends every single update instead, and
+        # the run that matters ends up as megabytes of counter with the table
+        # buried at the bottom. So the live counter is for a TTY only; a file
+        # gets one line per finished backtest, which is all it can use.
+        if sys.stdout.isatty():
+            print(f'  #{bid} {name}: {g.get("progress", 0)}%   ', end='\r', flush=True)
         time.sleep(poll)
 
 
@@ -207,8 +214,9 @@ def main(argv=None):
             name = f'rank {label}' + (f' top{n} cap{cap}%' if n else '')
             bid, summary = run_one(a.host, s, name)
             rows.append(row(bid, label, n, cap, summary))
-            print(' ' * 60, end='\r')
-            print(f'  #{bid} {name}: done')
+            if sys.stdout.isatty():
+                print(' ' * 60, end='\r')
+            print(f'  #{bid} {name}: done', flush=True)
 
     cols = ['id', 'rank', 'top_n', 'cap%', 'signals', 'sized', 'net$', 'ret%', 'win%',
             'avg$', 'maxdd%', 'wcDD%', 'first', 'starved', 'applied']
