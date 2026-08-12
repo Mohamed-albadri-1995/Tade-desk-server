@@ -27,6 +27,7 @@ a direction to test further, not a result.
 
 import argparse
 import json
+import math
 import sys
 import time
 import urllib.error
@@ -120,14 +121,17 @@ def cap_for(top_n, mode, spec_cap):
     same capital into N slices keeps the ONLY difference between runs the
     number of names taken.
 
-    Exact 100/N rather than a rounded-down figure: whole-share flooring already
-    leaves each position a little under its slice, so N of them fit.
+    100/N rounded DOWN to the cent, never up. round(100/6, 4) is 16.6667, and
+    six of those is 100.0002% of the account — the sixth position does not fit,
+    so a run asking for the top 6 quietly funds five and a half of them. The
+    same figure typed into the live panel promised six positions and delivered
+    five. Floored, 16.66 x 6 = 99.96 and all six fit.
     """
     if mode == 'keep' or not top_n:
         return spec_cap
     if mode != 'auto':
         return float(mode)
-    return round(100.0 / top_n, 4)
+    return math.floor(10000.0 / top_n) / 100.0
 
 
 def row(bid, label, top_n, cap, s):

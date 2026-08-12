@@ -251,15 +251,19 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
       <!-- Labelled by how many positions the cap allows, because that is the
            decision being made. "25%" is a number; "4 positions at once" is the
            thing that determines whether the day's 6th signal gets bought and
-           whether six concurrent stops can breach a 3% drawdown limit. The
-           values are 100/N so a setup ranked top N can fund all N. -->
+           whether six concurrent stops can breach a 3% drawdown limit.
+
+           Values are 100/N rounded DOWN to the cent, never up: 16.67 x 6 is
+           100.02% of the account, so the sixth position does not fit and the
+           label promises one more name than the buying power can pay for.
+           16.66 x 6 = 99.96 and all six fit. -->
       <option value="100">100% — 1 position</option>
       <option value="50">50% — 2 positions</option>
-      <option value="33">33% — 3 positions</option>
+      <option value="33.33">33.33% — 3 positions</option>
       <option value="25">25% — 4 positions</option>
       <option value="20">20% — 5 positions</option>
-      <option value="16.67">16.67% — 6 positions</option>
-      <option value="14.29">14.29% — 7 positions</option>
+      <option value="16.66">16.66% — 6 positions</option>
+      <option value="14.28">14.28% — 7 positions</option>
       <option value="12.5">12.5% — 8 positions</option>
     </select>
   </label>
