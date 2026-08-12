@@ -248,10 +248,19 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   </label>
   <label>Max position
     <select id="mpp">
-      <option value="100">100% of account</option>
-      <option value="50">50%</option>
-      <option value="33">33%</option>
-      <option value="25">25%</option>
+      <!-- Labelled by how many positions the cap allows, because that is the
+           decision being made. "25%" is a number; "4 positions at once" is the
+           thing that determines whether the day's 6th signal gets bought and
+           whether six concurrent stops can breach a 3% drawdown limit. The
+           values are 100/N so a setup ranked top N can fund all N. -->
+      <option value="100">100% — 1 position</option>
+      <option value="50">50% — 2 positions</option>
+      <option value="33">33% — 3 positions</option>
+      <option value="25">25% — 4 positions</option>
+      <option value="20">20% — 5 positions</option>
+      <option value="16.67">16.67% — 6 positions</option>
+      <option value="14.29">14.29% — 7 positions</option>
+      <option value="12.5">12.5% — 8 positions</option>
     </select>
   </label>
   <button class="btn primary" onclick="saveRisk()">Save</button>
@@ -1039,7 +1048,21 @@ function paintRiskNote(r) {
   // What the setting MEANS, in the units of the thing it controls. "$250" is a
   // number; "$250 per trade, 1.0% of the account" is a decision.
   const pct = r.accountSize ? ` · ${((r.riskPerTrade / r.accountSize) * 100).toFixed(2)}% of the account` : '';
-  el.textContent = `risking $${r.riskPerTrade} per trade${pct}`;
+  /*
+   * How many positions the cap allows, and what they can lose AT ONCE.
+   *
+   * The second number is the one a funded account is judged on and the one
+   * nothing here used to say. Six positions risking 0.5% each is 3% of the
+   * account on the table simultaneously — a 3% max-drawdown rule is breached
+   * by a single bad open, with every stop behaving exactly as designed.
+   */
+  const cap = r.maxPositionPct || 100;
+  const slots = Math.max(1, Math.floor(100 / cap));
+  const atRisk = r.accountSize
+    ? ` · up to ${slots} at once = $${(r.riskPerTrade * slots).toFixed(0)} `
+      + `(${((r.riskPerTrade * slots / r.accountSize) * 100).toFixed(1)}%) exposed together`
+    : ` · up to ${slots} at once`;
+  el.textContent = `risking $${r.riskPerTrade} per trade${pct}${atRisk}`;
 }
 
 async function saveRisk() {
