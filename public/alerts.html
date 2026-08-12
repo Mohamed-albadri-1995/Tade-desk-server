@@ -151,8 +151,22 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .h-slow { color:#f5a623 }
 .h-send { font-size:11px; padding:2px 8px; background:#1c2431; color:#e2e8f0;
   border:1px solid #334155; border-radius:5px }
-#order-review { margin:8px 0; padding:10px; border:1px solid var(--line);
-  border-radius:8px; background:var(--panel) }
+/* The order review FLOATS.
+ *
+ * It used to sit inside the history pane, which was fine while the only place
+ * you could ask for one was the history list. Now "review order…" is on
+ * today's fires too, and a box that renders in a hidden pane is a button that
+ * does nothing — the worst possible outcome for the one control that sends
+ * real money. Fixed to the bottom of the screen, it is the same box wherever
+ * it was opened from, and it is over whatever you were reading rather than
+ * below it. */
+#order-review { position:fixed; left:0; right:0; bottom:0; z-index:60;
+  max-height:78vh; overflow-y:auto; margin:0; padding:12px 13px 16px;
+  border-top:2px solid var(--accent); border-radius:12px 12px 0 0;
+  background:var(--panel); box-shadow:0 -8px 28px rgba(0,0,0,.55) }
+/* Behind it, so a tap outside is a way out and the page beneath is not
+   accidentally clickable while an order is on screen. */
+#order-shade { position:fixed; inset:0; z-index:59; background:rgba(0,0,0,.45) }
 .or-head { font-size:12px; color:var(--text2); margin-bottom:6px }
 .or-json { font-size:11px; line-height:1.45; overflow-x:auto; background:#0e1116;
   padding:8px; border-radius:6px; margin:0 0 8px }
@@ -250,6 +264,12 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      shown a quarter at a time. -->
 <div class="tabs" id="tabs">
   <button class="tb on" data-t="today">Today</button>
+  <!-- HISTORY is its own tab, not the bottom of TODAY.
+       They answer opposite questions. Today is "what do I do in the next few
+       minutes"; history is "was this setup any good last week". Sharing a
+       scroll meant every glance at the morning's fires ended up somewhere in
+       last Tuesday, and the send button lived down there with it. -->
+  <button class="tb" data-t="history">History</button>
   <button class="tb" data-t="setups">Setups</button>
   <button class="tb" data-t="rules">Rules</button>
   <button class="tb" data-t="settings">Settings</button>
@@ -423,20 +443,20 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <div class="pane" data-t="today">
 <div class="sec"><span>Fired today</span><span class="note" id="fire-count"></span></div>
 <div id="fires"><div class="empty">Loading…</div></div>
+</div><!-- /today -->
 
 <!-- The permanent record. "Fired today" is a feed: capped, and cleared each
      morning so the first alert does not arrive under yesterday's close. That is
      right for reading on a phone and useless for "what did this setup signal
      last Tuesday, and at what second" — which is the question that decides
      whether a setup is worth keeping. Nothing here is ever trimmed. -->
+<div class="pane" data-t="history" hidden>
 <div class="sec">
   <span>Signal history</span>
   <select id="hist-date" onchange="loadHistory()"></select>
 </div>
-<div id="order-review" style="display:none"></div>
 <div id="history"><div class="empty">Pick a session.</div></div>
-
-</div><!-- /today -->
+</div><!-- /history -->
 
 <div class="pane" data-t="rules" hidden>
 <div class="sec">
@@ -479,14 +499,29 @@ fetch('/api/tools').then(r => r.json()).then(d => {
   TOOLS = d.tools || [];
   // Back to whichever app serves the landing page, on its own port.
   const scr = (d.apps || []).find(a => a.id === 'SCR');
+  // Same reason as cardUrl: the screener suite serves http on its own port.
   if (scr) document.getElementById('home-link').href =
-    `${location.protocol}//${location.hostname}:${scr.port}/`;
+    `${TOOL_SCHEME}//${location.hostname}:${scr.port}/`;
 }).catch(() => {});
 
 const toolPort = id => (TOOLS.find(t => t.id === id) || {}).port;
+/*
+ * A tool's card page, over HTTP — never over this page's protocol.
+ *
+ * This page is reached over https through duckdns. The nine tools are not:
+ * they listen on 3000-3080 in plain HTTP, and nothing proxies them. Copying
+ * `location.protocol` produced https://…:3010/scanner, which is an https
+ * request to a port that speaks http — a connection that fails rather than a
+ * page that loads, from the one link most likely to be pressed at 09:36.
+ *
+ * A top-level navigation from https to http is allowed (unlike a subresource),
+ * so this works from either. If a tool is ever put behind the proxy, its port
+ * stops being the address and this needs the real one from tools.config.json.
+ */
+const TOOL_SCHEME = 'http:';
 const cardUrl = (f) => {
   const p = toolPort(f.toolId);
-  return p ? `${location.protocol}//${location.hostname}:${p}/scanner?ticker=${
+  return p ? `${TOOL_SCHEME}//${location.hostname}:${p}/scanner?ticker=${
     encodeURIComponent(f.ticker)}&date=${encodeURIComponent(f.date || '')}` : null;
 };
 const tvUrl = t => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t)}`;
@@ -1190,6 +1225,12 @@ async function loadFires() {
             + 'account size and risk per trade above</div>' : ''}
           ${st && st.feedWarning ? `<div class="su-warn">${esc(st.feedWarning)}</div>` : ''}
           ${st && st.caution ? `<div class="su-caution">${esc(st.caution)}</div>` : ''}
+          <!-- The same numbers and the same "review order…" the history rows
+               carry. The manual trade is decided in the ten minutes after the
+               signal, not in the evening — putting the send button only on the
+               permanent record meant scrolling past the whole week to fire
+               this morning's fourth name. -->
+          ${histNumbers(f)}
           ${f.ticker ? `<div class="su-links">
             ${cardUrl(f) ? `<a class="lnk" href="${cardUrl(f)}">card</a>` : ''}
             <a class="lnk" href="${tvUrl(f.ticker)}" target="_blank" rel="noopener">TV ↗</a>
@@ -1551,10 +1592,38 @@ function tabBadge(name, n) {
   b.innerHTML = n ? `${base} <span class="n">(${n})</span>` : base;
 }
 
+/*
+ * The review box, made on demand and attached to the PAGE rather than a pane.
+ *
+ * It was a div inside the history section. That was invisible while it was the
+ * only place a review could be asked for, and became a real bug the moment
+ * "review order…" appeared on today's fires as well: the button would fetch a
+ * preview and render it into a hidden pane, so the tap did nothing at all and
+ * the only clue would be an order that never went out. On document.body it
+ * belongs to no tab.
+ */
+function reviewBox() {
+  let box = document.getElementById('order-review');
+  if (box) return box;
+  const shade = document.createElement('div');
+  shade.id = 'order-shade';
+  shade.onclick = closeReview;
+  box = document.createElement('div');
+  box.id = 'order-review';
+  document.body.appendChild(shade);
+  document.body.appendChild(box);
+  return box;
+}
+
+function closeReview() {
+  for (const id of ['order-review', 'order-shade']) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  }
+}
+
 async function reviewOrder(plan) {
-  const box = document.getElementById('order-review');
-  if (!box) return;
-  box.style.display = 'block';
+  const box = reviewBox();
   box.innerHTML = '<div class="note">checking…</div>';
   try {
     const r = await (await fetch('/api/broker/preview', {
@@ -1581,7 +1650,7 @@ async function reviewOrder(plan) {
       + (stop
         ? `<div class="warn">refused: ${esc(String(p.reason || p.blocked || 'no order to send'))}</div>`
         : `<button class="btn live" id="or-go">Send it</button>`)
-      + `<button class="btn" onclick="document.getElementById('order-review').style.display='none'">Cancel</button>`;
+      + `<button class="btn" onclick="closeReview()">Cancel</button>`;
     if (!stop) {
       document.getElementById('or-go').onclick = async () => {
         const btn = document.getElementById('or-go');
@@ -1591,11 +1660,16 @@ async function reviewOrder(plan) {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(plan),
           })).json();
-          box.innerHTML = s.ok
+          box.innerHTML = (s.ok
             ? `<div class="or-head">SENT</div><pre class="or-json">${
                 esc(JSON.stringify(s.order, null, 2))}</pre>`
-            : `<div class="warn">not sent: ${esc(s.error || 'refused')}</div>`;
+            : `<div class="warn">not sent: ${esc(s.error || 'refused')}</div>`)
+            + `<button class="btn" onclick="closeReview()">Close</button>`;
+          // Both lists, because either one can be the list it was sent from —
+          // and a row that still offers "review order…" on an order already
+          // placed is how the same trade gets sent twice.
           loadHistory();
+          loadFires();
         } catch (e) {
           box.innerHTML = `<div class="warn">not sent: ${esc(e.message)}</div>`;
         }
