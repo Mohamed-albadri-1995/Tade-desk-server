@@ -214,6 +214,38 @@ function startScheduler() {
   registerJob('R3 EOD Capture 4:05 PM', '5 16 * * 1-5', 'America/New_York', () => captureR3());
   registerJob('Scorer Auto-Train 4:20 PM', '20 16 * * 1-5', 'America/New_York', () => autoTrainScorer());
   registerJob('Daily Backup 5:30 PM', '30 17 * * 1-5', 'America/New_York', () => pushBackup());
+  /*
+   * The SETTINGS, once a day, from T1 only.
+   *
+   * pushBackup exports this tool's database. None of the settings clicked in on
+   * the alerts page live in a database — they are JSON files in data/, which no
+   * export has ever covered. They survive a deploy (data/ is gitignored, so
+   * `git reset --hard` cannot touch them) and they survive nothing else: one
+   * dead instance and the risk figures, the rank metric, the top-N and every
+   * alert rule are gone with nothing to say what they were.
+   *
+   * T1 only, because the files are shared — nine tools pushing the same bundle
+   * to the same path would be eight wasted commits and a race on the branch
+   * head.
+   *
+   * Credentials are never in the bundle: see scripts/config-backup.sh, which
+   * names the three files it sends and refuses the push outright if a scan
+   * finds anything that looks like a key or a webhook.
+   */
+  if ((require('./config').toolId || 'T1') === 'T1') {
+    registerJob('Settings Backup 5:35 PM', '35 17 * * 1-5', 'America/New_York',
+      () => new Promise((resolve) => {
+        const { execFile } = require('child_process');
+        const script = require('path').join(__dirname, '..', 'scripts', 'config-backup.sh');
+        execFile('bash', [script], { timeout: 120000 }, (err, out, errOut) => {
+          // Logged, never thrown: a settings backup that fails must not take
+          // the scheduler down with it, and the daily DB backup already ran.
+          if (err) console.warn('[Scheduler] settings backup failed:', (errOut || err.message || '').trim());
+          else console.log('[Scheduler] settings backup:', String(out).trim().split('\n').pop());
+          resolve();
+        });
+      }));
+  }
   registerJob('Midnight r0 Flush', '0 0 * * *', 'America/New_York', () => { r0.clearAll(); });
 
   /*

@@ -286,4 +286,7 @@ function getBackupStatus() {
 }
 
 module.exports = { pushBackup, restoreBackup, mergeDatesFromBackup, getBackupStatus,
-                   exportDb, backupDir, getGithubToken };
+                   exportDb, backupDir, getGithubToken,
+                   // used by scripts/config-backup.sh, which pushes the alerts
+                   // app's JSON settings — files no database export covers
+                   pushFile, fetchFile };
