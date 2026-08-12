@@ -138,6 +138,13 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .h-rule { font-size:11px; color:var(--text2); }
 .h-bar { font-size:10px; color:var(--text3); border:1px solid var(--border);
   border-radius:3px; padding:1px 5px; }
+.tabs { position:sticky; top:0; z-index:20; display:flex; gap:4px; padding:6px 0 8px;
+  background:var(--bg); border-bottom:1px solid var(--line); margin-bottom:10px }
+.tb { flex:1; padding:8px 4px; font-size:12.5px; font-weight:600; border-radius:7px;
+  border:1px solid var(--line); background:var(--panel); color:var(--text2);
+  font-family:inherit }
+.tb.on { background:var(--accent); border-color:var(--accent); color:#0b1220 }
+.tb .n { font-weight:400; opacity:.8 }
 .h-nums { flex-basis:100%; margin-top:3px; display:flex; flex-wrap:wrap;
   gap:4px 10px; font-size:11px; color:var(--text2) }
 .h-n b { color:#64748b; font-weight:600 }
@@ -229,6 +236,26 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <br><b>Setups</b> wake once at a fixed time, pull <b>1-minute bars</b> for the whole card list and
   rank it. They are not watching all day; they answer one question at one moment.</div>
 
+<!-- WHY TABS.
+     Seven sections in one scroll: notifications, position size, calculator,
+     algo trading, setups, today's fires, the permanent record and the rules.
+     Every one of them earned its place, and together they made the page a
+     thing to search rather than read — on a phone, at 09:35, which is the
+     worst possible moment to be scrolling for the thing you opened it for.
+
+     Grouped by WHEN you need them, not by what they are. TODAY is what a
+     trading morning wants and is the default. SETUPS and RULES are what you
+     change between mornings. SETTINGS is what you touch once and then leave
+     alone for weeks. Nothing is removed and no ids change — the same DOM,
+     shown a quarter at a time. -->
+<div class="tabs" id="tabs">
+  <button class="tb on" data-t="today">Today</button>
+  <button class="tb" data-t="setups">Setups</button>
+  <button class="tb" data-t="rules">Rules</button>
+  <button class="tb" data-t="settings">Settings</button>
+</div>
+
+<div class="pane" data-t="today">
 <div class="noise">
   <button class="btn" id="snd" onclick="toggleSound()">🔊 Sound: off</button>
   <button class="btn" id="ntf" onclick="askNotify()">🔔 Notifications</button>
@@ -243,6 +270,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <span class="note" id="algo-state"></span>
 </div>
 
+</div><!-- /today -->
+
+<div class="pane" data-t="settings" hidden>
 <!-- Position sizing. Here rather than in a screener's settings because it is a
      property of the account: the setup runs inside one tool, but the money is
      the same money whichever tool signalled. -->
@@ -332,7 +362,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
     <input id="bk-power" type="number" min="0" step="100" placeholder="e.g. 20000">
   </label>
   <label>Max per order $
-    <input id="bk-max" type="number" min="0" step="100" placeholder="optional">
+    <input id="bk-max" type="number" min="0" step="100" placeholder="optional — see note" title="A DOLLAR ceiling on any single order, checked by the broker at send time. Different from 'Max position' above, which is a PERCENT of account size and decides the share count the alert shows. This one only trims what goes out — set it lower than Max position implies and the alert will say one number while a smaller one is sent. Blank is normal: Max position already does this job.">
   </label>
   <label>Max trades / day
     <input id="bk-maxtrades" type="number" min="1" step="1" placeholder="e.g. 4">
@@ -368,6 +398,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <div class="note risk-hint" id="bk-orders"></div>
 </div>
 
+</div><!-- /settings -->
+
+<div class="pane" data-t="setups" hidden>
 <!-- Setups get their own list for the same reason rules do. Before this they
      existed only in the moment they fired: you could not see which setups there
      were, when they would run, or switch one off. With more than one that stops
@@ -385,6 +418,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      "whose cards should this run on", and this is where those alerts arrive. -->
 <div id="unassigned"></div>
 
+</div><!-- /setups -->
+
+<div class="pane" data-t="today">
 <div class="sec"><span>Fired today</span><span class="note" id="fire-count"></span></div>
 <div id="fires"><div class="empty">Loading…</div></div>
 
@@ -400,12 +436,16 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <div id="order-review" style="display:none"></div>
 <div id="history"><div class="empty">Pick a session.</div></div>
 
+</div><!-- /today -->
+
+<div class="pane" data-t="rules" hidden>
 <div class="sec">
   <span>Rules</span>
   <button class="btn primary" onclick="toggleForm()">+ New rule</button>
 </div>
 <div id="form" class="form" style="display:none"></div>
 <div id="rules"></div>
+</div><!-- /rules -->
 
 </div>
 <script>
@@ -1109,6 +1149,8 @@ async function loadFires() {
     const d = await (await fetch('/api/alerts/fires?limit=60')).json();
     const fires = d.fires || [];
     document.getElementById('fire-count').textContent = fires.length ? `${fires.length} today` : '';
+    // Also on the tab, so a fire is visible from Setups or Settings.
+    tabBadge('today', fires.length);
     if (!fires.length) { out.innerHTML = '<div class="empty">Nothing has fired today.</div>'; return; }
 
     // Only what arrived since the last poll is announced. On the first load
@@ -1477,6 +1519,39 @@ async function loadHistory(date) {
  * the same numbers that could drift from the first. If the preview is refused,
  * the send is refused for the same reason and the reason is shown instead.
  */
+/*
+ * Which quarter of the page is showing.
+ *
+ * Remembered, because the tab you were on is almost always the tab you want
+ * next: a morning is spent on TODAY and an evening on SETUPS, and being
+ * returned to the default on every reload is the kind of small friction that
+ * makes a tool feel like it is arguing with you.
+ *
+ * Nothing is destroyed or rebuilt — the panes are hidden, so every loader,
+ * every timer and every element id keeps working exactly as before whether its
+ * pane is on screen or not. A tab that quietly stopped refreshing would be a
+ * worse bug than the scrolling this replaces.
+ */
+function showTab(name) {
+  const want = name || 'today';
+  document.querySelectorAll('.pane').forEach(p => {
+    p.hidden = p.getAttribute('data-t') !== want;
+  });
+  document.querySelectorAll('.tb').forEach(b => {
+    b.classList.toggle('on', b.getAttribute('data-t') === want);
+  });
+  try { localStorage.setItem('alertsTab', want); } catch { /* private mode */ }
+  window.scrollTo(0, 0);
+}
+
+/* A count on the tab, so "6 fired" is visible from any other tab. */
+function tabBadge(name, n) {
+  const b = document.querySelector(`.tb[data-t="${name}"]`);
+  if (!b) return;
+  const base = b.textContent.replace(/\s*\(\d+\)$/, '').trim();
+  b.innerHTML = n ? `${base} <span class="n">(${n})</span>` : base;
+}
+
 async function reviewOrder(plan) {
   const box = document.getElementById('order-review');
   if (!box) return;
@@ -1828,6 +1903,17 @@ paintNoise();
  * simply works.
  */
 if (('Notification' in window) && Notification.permission === 'granted') subscribePush();
+/*
+ * Tabs, wired before the loaders run: a pane that is hidden still loads, so the
+ * order does not matter for correctness — but a page that paints the default
+ * tab and then jumps to the remembered one looks broken for a frame.
+ */
+document.querySelectorAll('.tb').forEach(b =>
+  b.addEventListener('click', () => showTab(b.getAttribute('data-t'))));
+showTab((() => {
+  try { return localStorage.getItem('alertsTab'); } catch { return null; }
+})());
+
 loadFires();
 loadRules();
 loadRisk();
