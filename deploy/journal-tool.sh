@@ -80,6 +80,44 @@ const express = require('express');
 
 const db = require('./src/db');          // creates data/tradedesk.db
 require('./src/trading/db');             // schema only — no broker code
+require('./src/trading/grading');        // creates trade_cards; requires only db + uuid
+
+/*
+ * Two repairs to the schema this code expects, both additive, both needed
+ * before a trade can be tagged with a setup. Made here because the code that
+ * needs them is on a branch this repo does not own and must not fork.
+ *
+ * 1. trade_cards. PATCH mirrors a closed trade into it for the grading engine.
+ *    The table is created by src/trading/grading.js, which was not loaded — it
+ *    requires nothing but db and uuid, so it is now. Without it every tag
+ *    logged "[Journal] mirror failed: no such table: trade_cards".
+ *
+ * 2. journal_technical_snapshots.id. After assigning a setup, PATCH asks
+ *    `SELECT id FROM journal_technical_snapshots WHERE trade_id = ?` to decide
+ *    whether snapshots exist yet — but that table is keyed by trade_id and has
+ *    no id column at all, so the query throws and the request 500s. The UPDATE
+ *    has already landed by then, so the tag sticks and the error is invisible
+ *    unless you watch the network tab; what is lost silently is the condition
+ *    evaluation that was supposed to follow.
+ *
+ *    Adding the column is the smallest correct repair available from outside:
+ *    the query only ever tests whether a ROW came back, so a column that is
+ *    always NULL answers it exactly as intended.
+ */
+try {
+  // The journal's own tables are created by this require. It has to happen
+  // BEFORE the check below, or PRAGMA reports zero columns for a table that
+  // does not exist yet and the repair silently no-ops — which is exactly what
+  // it did the first time, leaving the 500 in place and looking fixed.
+  require('./src/journal/db');
+  const cols = db.prepare("PRAGMA table_info(journal_technical_snapshots)").all();
+  if (cols.length && !cols.some(c => c.name === 'id')) {
+    db.exec('ALTER TABLE journal_technical_snapshots ADD COLUMN id INTEGER');
+    console.log('[journal] added the missing id column to journal_technical_snapshots');
+  }
+} catch (e) {
+  console.warn('[journal] schema repair skipped:', e.message);
+}
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -96,11 +134,32 @@ app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 app.use('/api/journal', require('./src/routes/journal'));
 
 /*
- * The setup list the page uses to label a trade. Six lines here instead of
- * mounting the trading router, which is the whole reason this launcher exists.
- * Empty is a fine answer — the page already falls back to [].
+ * The setup list the page tags a trade with.
+ *
+ * Read from the LIVE catalogue on the alerts app, not from this database's own
+ * trading_setups table — which is empty here, and would stay empty, because the
+ * screen that fills it belongs to the app this launcher exists to avoid.
+ *
+ * Taking them from the alerts app means a journal trade is tagged with the same
+ * setup, under the same id, that fired the alert and placed the order. Anything
+ * else and per-setup expectancy in the journal would be measuring a different
+ * set of names than the backtests do, while looking identical.
+ *
+ * A short timeout and a fall back to the local table: the journal must open
+ * whether or not the alerts app happens to be up, and an empty list is a
+ * perfectly readable answer (the page already handles it).
  */
-app.get('/api/trading/setups', (req, res) => {
+const ALERTS = process.env.ALERTS_URL || 'http://127.0.0.1:3090';
+app.get('/api/trading/setups', async (req, res) => {
+  try {
+    const r = await fetch(`${ALERTS}/api/setups`, { signal: AbortSignal.timeout(2500) });
+    const d = await r.json();
+    if (d && Array.isArray(d.setups)) {
+      return res.json(d.setups.map(s => ({
+        id: s.id, name: s.name, enabled: s.enabled !== false, config: {},
+      })));
+    }
+  } catch { /* fall through to whatever is stored locally */ }
   try {
     const rows = db.prepare('SELECT * FROM trading_setups ORDER BY name').all();
     res.json(rows.map(r => ({ ...r, config: JSON.parse(r.config || '{}') })));
@@ -158,6 +217,10 @@ curl -sS -o /dev/null -w 'GET /api/journal/trades → %{http_code}\n' \
   "localhost:$PORT/api/journal/trades" || true
 curl -sS -o /dev/null -w 'GET /_patch.js   → %{http_code}\n' \
   "localhost:$PORT/_patch.js" || true
+echo -n 'setups available to tag with: '
+curl -sS "localhost:$PORT/api/trading/setups" \
+  | python3 -c 'import json,sys;d=json.load(sys.stdin);print(len(d));[print("   -",x["name"]) for x in d[:12]]' \
+  2>/dev/null || echo '? (alerts app unreachable)'
 echo -n 'patch injected into / : '
 curl -sS "localhost:$PORT/" | grep -c '_patch.js' || true
 echo
