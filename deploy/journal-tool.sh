@@ -109,8 +109,32 @@ app.get('/api/trading/setups', (req, res) => {
   }
 });
 
-app.get('/', (req, res) =>
-  res.sendFile(path.join(__dirname, 'public', 'journal.html')));
+/*
+ * The page, with this repo's add-ons injected before </body>.
+ *
+ * Injected rather than forked: journal.html is 1,079 lines on a branch with no
+ * shared history, and keeping a second copy of it here would guarantee the two
+ * drift. The original is served exactly as it is, plus one script tag.
+ */
+const fs = require('fs');
+const PATCH = process.env.JOURNAL_PATCH_JS || '';
+app.get('/_patch.js', (req, res) => {
+  if (!PATCH) return res.type('js').send('/* no patch configured */');
+  res.type('js').sendFile(PATCH);
+});
+app.get('/', (req, res) => {
+  const file = path.join(__dirname, 'public', 'journal.html');
+  if (!PATCH) return res.sendFile(file);
+  fs.readFile(file, 'utf8', (err, html) => {
+    if (err) return res.status(500).send(String(err));
+    const tag = '<script src="/_patch.js"></script>';
+    // If </body> is ever missing, append rather than silently drop the tag —
+    // a page that quietly loses the delete fix is the failure being fixed.
+    res.type('html').send(html.includes('</body>')
+      ? html.replace('</body>', tag + '</body>')
+      : html + tag);
+  });
+});
 
 const PORT = process.env.PORT || 3100;
 app.listen(PORT, () => console.log(`[journal] listening on ${PORT}`));
@@ -119,7 +143,10 @@ JS
 # ── run it ─────────────────────────────────────────────────────────────────
 cd "$APP_DIR"
 pm2 delete journal >/dev/null 2>&1 || true
-PORT="$PORT" pm2 start journal-only.js --name journal --time
+# The add-ons live in THIS repo, not in the worktree, so they are versioned
+# with everything else here and the checked-out branch stays pristine.
+PORT="$PORT" JOURNAL_PATCH_JS="$REPO/deploy/journal/patch.js" \
+  pm2 start journal-only.js --name journal --time
 pm2 save >/dev/null
 
 sleep 2
@@ -129,6 +156,10 @@ echo "─── answering? ─────────────────�
 curl -sS -o /dev/null -w 'GET /            → %{http_code}\n' "localhost:$PORT/" || true
 curl -sS -o /dev/null -w 'GET /api/journal/trades → %{http_code}\n' \
   "localhost:$PORT/api/journal/trades" || true
+curl -sS -o /dev/null -w 'GET /_patch.js   → %{http_code}\n' \
+  "localhost:$PORT/_patch.js" || true
+echo -n 'patch injected into / : '
+curl -sS "localhost:$PORT/" | grep -c '_patch.js' || true
 echo
 echo "Landing page tile: already registered in tools.config.json (JOURNAL, port $PORT)."
 echo "Remaining step, in the AWS console: open port $PORT in the security group."

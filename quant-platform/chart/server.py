@@ -1242,8 +1242,40 @@ def parse_pairs(text: str) -> list:
     return out
 
 
+def _parse_trades(trades_json: str) -> dict:
+    """(SYMBOL, date) → the trade to mark on that chart.
+
+    Kept OUT of parse_pairs, which deliberately ignores the columns beside a
+    ticker: the card drawn on a register chart comes from the screener's own
+    frozen row, never from retyped numbers that could disagree with it.
+
+    A trade is a different kind of fact. It is not a claim about what the
+    market did — it is the record of what YOU did, and nothing else holds it.
+    So it arrives explicitly, as JSON, and is drawn exactly as given.
+
+    Each entry: {symbol, date, entry_ts, exit_ts, entry, exit, side}, with
+    timestamps in epoch SECONDS to match the bar times.
+    """
+    import json as _json
+    try:
+        rows = _json.loads(trades_json) if trades_json else []
+    except _json.JSONDecodeError:
+        return {}
+    out = {}
+    for r in (rows if isinstance(rows, list) else []):
+        if not isinstance(r, dict):
+            continue
+        sym = str(r.get('symbol') or '').upper().strip()
+        day = str(r.get('date') or '').strip()
+        if not sym or not _DATE_RE.fullmatch(day):
+            continue
+        out[(sym, day)] = r
+    return out
+
+
 def _build_pair_sheets(pairs_text: str, tf: str, feed: str, overlays: str,
-                       days_before: int, days_after: int, register: str = 'R1'):
+                       days_before: int, days_after: int, register: str = 'R1',
+                       trades_json: str = ''):
     """The same sheet payload as _build_sheets, but for an EXPLICIT list of
     (ticker, date) pairs instead of whole register days — a trade journal, a
     review list, "these 13 names on these 13 days".
@@ -1258,6 +1290,7 @@ def _build_pair_sheets(pairs_text: str, tf: str, feed: str, overlays: str,
         ovs = _json.loads(overlays) if overlays else []
     except _json.JSONDecodeError:
         ovs = []
+    marks = _parse_trades(trades_json)
     pairs = parse_pairs(pairs_text)
     if not pairs:
         return [], [], ovs, '', ('no TICKER + YYYY-MM-DD pairs found — paste '
@@ -1286,6 +1319,13 @@ def _build_pair_sheets(pairs_text: str, tf: str, feed: str, overlays: str,
             pass
         charts = _charts_for_day(d, by_day[d], cards, tf, feed, ovs,
                                  days_before, days_after, errors)
+        # YOUR trade on that chart, when one was supplied. Attached here rather
+        # than inside _charts_for_day because a register sheet has no trades to
+        # attach — the same chart builder serves both.
+        for c in charts:
+            mk = marks.get((str(c.get('symbol') or '').upper(), d))
+            if mk:
+                c['trade'] = mk
         if charts:
             sheets.append({'day': d, 'charts': charts})
     return sheets, errors, ovs, rng, ''
@@ -1499,6 +1539,50 @@ for (const sheet of SHEETS) {{
           ...(s.step ? {{lineType:1}} : {{}})}});
       ln.setData(s.values);
     }}
+    // ── YOUR TRADE on the chart ──────────────────────────────────────────
+    // Drawn three ways because each answers a different question at a glance:
+    // arrows say WHEN, price lines say AT WHAT, and the shaded band says how
+    // long it was held and what the bars did while it was on. Green or red is
+    // taken from the two fills and the side — never from the day's direction,
+    // which is a different thing and is what makes a losing short look like a
+    // winner on a red day.
+    if (c.trade) {{
+      const t = c.trade;
+      const long_ = String(t.side||'long').toLowerCase() !== 'short';
+      const inP = Number(t.entry), outP = Number(t.exit);
+      const won = (isFinite(inP) && isFinite(outP))
+        ? (long_ ? outP > inP : outP < inP) : null;
+      const col = won === null ? '#64748b' : (won ? '#16a34a' : '#dc2626');
+      const t0 = Number(t.entry_ts) || null, t1 = Number(t.exit_ts) || null;
+
+      // shade the held bars — visible under the candles, so the eye lands on
+      // the window that was actually risked
+      if (t0 && t1) {{
+        const held = c.bars.filter(b => b.time >= Math.min(t0,t1)
+                                     && b.time <= Math.max(t0,t1));
+        if (held.length) {{
+          const band = ch.addHistogramSeries({{
+            priceScaleId:'', priceLineVisible:false, lastValueVisible:false,
+            base:0, color:(won===false?'rgba(220,38,38,.10)':'rgba(22,163,74,.10)')}});
+          band.priceScale().applyOptions({{scaleMargins:{{top:0, bottom:0}}}});
+          band.setData(held.map(b => ({{time:b.time, value:1}})));
+        }}
+      }}
+      // the two fills, as price lines that carry their own number
+      if (isFinite(inP)) cs_.createPriceLine({{price:inP, color:'#94a3b8',
+        lineWidth:1, lineStyle:2, axisLabelVisible:true,
+        title:(long_?'BUY ':'SELL ')+inP}});
+      if (isFinite(outP)) cs_.createPriceLine({{price:outP, color:col,
+        lineWidth:1, lineStyle:2, axisLabelVisible:true, title:'EXIT '+outP}});
+      // and the arrows, on the bars they happened on
+      const mk = [];
+      if (t0) mk.push({{time:t0, position:(long_?'belowBar':'aboveBar'),
+        color:'#94a3b8', shape:(long_?'arrowUp':'arrowDown'),
+        text:(long_?'IN':'IN ▼')}});
+      if (t1) mk.push({{time:t1, position:(long_?'aboveBar':'belowBar'),
+        color:col, shape:(long_?'arrowDown':'arrowUp'), text:'OUT'}});
+      if (mk.length) cs_.setMarkers(mk.sort((a,b)=>a.time-b.time));
+    }}
     ch.timeScale().fitContent();
   }}
 }}
@@ -1610,12 +1694,18 @@ def pairs_parse(payload: dict = Body(...)):
 def pairs_print(pairs: str = '', tf: str = '5m', feed: str = 'polygon',
                 overlays: str = '[]', register: str = 'R1',
                 days_before: int = 1, days_after: int = 1,
-                cols: int = 1, height: int = 420):
+                cols: int = 1, height: int = 420, trades: str = '[]'):
     """PRINT SHEET for an explicit LIST of (ticker, date) pairs — a trade
     journal or review list rather than a whole register day.
 
     `pairs` is free text: "WLDS,2026-07-24" per line, a tab-separated table
     with extra columns, or that table pasted vertically — see parse_pairs.
+
+    `trades` is optional JSON: [{symbol, date, entry_ts, exit_ts, entry, exit,
+    side}, ...]. Where one matches a chart, the entry and exit are drawn on it
+    — arrows on the bars, price lines at the two fills, and the held bars
+    shaded. That turns a chart OF a day into a chart of a TRADE, which is what
+    a journal review is actually looking at.
 
     Identical window, indicators, session shading and register-card block as
     /api/r1/print; the only difference is how the tickers were chosen. GET
@@ -1624,7 +1714,7 @@ def pairs_print(pairs: str = '', tf: str = '5m', feed: str = 'polygon',
     string; beyond that, split the list.
     """
     sheets, errors, ovs, rng, bad = _build_pair_sheets(
-        pairs, tf, feed, overlays, days_before, days_after, register)
+        pairs, tf, feed, overlays, days_before, days_after, register, trades)
     if bad:
         return HTMLResponse(f'<h3>{bad}</h3>')
     from urllib.parse import urlencode as _ue
