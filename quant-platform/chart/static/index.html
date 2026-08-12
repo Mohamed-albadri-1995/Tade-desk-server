@@ -241,6 +241,14 @@
       <input id="btCost" type="number" step="any" placeholder="cost bps/side (e.g. 5)" title="transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies)." style="width:100%;margin-top:4px">
       <input id="btEquity" type="number" step="any" value="100000" placeholder="account $ (e.g. 100000)" title="REAL ACCOUNT sizing: starting equity. Position size per trade = (equity x risk%) / (entry - stop), so every stop-out loses the same % of the account. Equity compounds in trade order. Empty = off." style="width:100%;margin-top:4px">
       <input id="btRiskPct" type="number" step="any" value="0.5" placeholder="risk % per trade (e.g. 0.5)" title="Percent of CURRENT equity lost if the stop is hit. Requires the strategy to define a stop." style="width:100%;margin-top:4px">
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <input id="btTarget" type="number" step="any" placeholder="challenge: profit target % (e.g. 6)" title="FUNDED-ACCOUNT RULE: did it reach this profit BEFORE ever touching the max drawdown below? 'Max drawdown 1.5%' never says which came first — a run can finish +9% having been -4% in week one, and the account would have been closed in week one. Blank = no verdict." style="flex:1">
+        <input id="btMaxDD" type="number" step="any" placeholder="max drawdown % (e.g. 3)" title="The line that ends the account. Judged on the WORST CASE: at every moment, every position still open is assumed to stop out at once — the floor the balance could really have touched with the stops it had. A closed-trade curve cannot see a position that swung and came back." style="flex:1">
+        <select id="btDDBasis" style="width:110px" title="'from start' = a static max loss measured against the opening balance. 'from peak' = a trailing drawdown measured against the highest balance reached. Firms use both and they fail at different moments.">
+          <option value="start">from start</option>
+          <option value="peak">from peak</option>
+        </select>
+      </div>
       <input id="btMaxPos" type="number" step="any" placeholder="max position % of equity (e.g. 25)" title="PER-TRADE cap — the same maxPositionPct the screener applies live before it sends an order. Without it a tight stop buys the whole account and every later signal that day is skipped for lack of capital, in arrival order rather than by quality. Empty = no cap." style="width:100%;margin-top:4px">
       <div style="display:flex;gap:4px;margin-top:4px">
         <input id="btTopN" type="number" step="1" min="0" placeholder="top N per day (blank = take EVERY signal)" title="RANK the day's signals against each other and trade only the strongest N, across the whole universe. Blank/0 = off, take every signal. This is a cross-symbol decision, so it happens in the runner after all symbols are evaluated — a strategy cannot see the other names." style="flex:1">
@@ -1317,6 +1325,12 @@ async function btRun(){
     account_equity:parseFloat(document.getElementById('btEquity').value)||0,
     risk_pct:parseFloat(document.getElementById('btRiskPct').value)||0,
     max_position_pct:parseFloat(document.getElementById('btMaxPos').value)||0,
+    // BOTH numbers or no verdict: a target with no limit, or a limit with no
+    // target, cannot answer "which came first" — the only question asked here.
+    challenge:(function(){ const t=parseFloat(document.getElementById('btTarget').value);
+      const d=parseFloat(document.getElementById('btMaxDD').value);
+      return (Number.isFinite(t)&&t>0&&Number.isFinite(d)&&d>0)
+        ?{target_pct:t,max_dd_pct:d,basis:document.getElementById('btDDBasis').value}:null; })(),
     shares:parseFloat(document.getElementById('btShares').value)||100,
     fee_per_share:parseFloat(document.getElementById('btFee').value)||0,
     fee_min:parseFloat(document.getElementById('btFeeMin').value)||0,

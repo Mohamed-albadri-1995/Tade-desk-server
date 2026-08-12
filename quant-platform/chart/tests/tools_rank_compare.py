@@ -133,6 +133,7 @@ def row(bid, label, top_n, cap, s):
     s = s or {}
     a = s.get('account') or {}
     rk = (s.get('coverage') or {}).get('rank_per_day') or {}
+    ch = a.get('challenge') or {}
     # The check that catches the #240 mistake: a run whose rank block never
     # arrived reports no ranking, and is the baseline again under a new name.
     applied = 'yes' if rk else ('—' if top_n is None else 'NO — never applied')
@@ -146,6 +147,10 @@ def row(bid, label, top_n, cap, s):
         'avg$': a.get('avg_pnl_usd'),
         'maxdd%': a.get('max_drawdown_pct'),
         'starved': a.get('skipped_no_capital'),
+        # the funded-account verdict, when the baseline spec asked for one
+        'first': {'target': 'PASS', 'drawdown': 'FAIL',
+                  'neither': 'neither'}.get(ch.get('result'), ''),
+        'wcDD%': ch.get('worst_case_dd_pct', ''),
         'applied': applied,
     }
 
@@ -156,6 +161,14 @@ def main(argv=None):
     ap.add_argument('baseline', type=int, help='backtest id to copy the spec from')
     ap.add_argument('--top', type=int, nargs='+', default=[4],
                     help='how many per day to keep (default 4)')
+    ap.add_argument('--challenge', nargs=2, type=float, metavar=('TARGET', 'MAXDD'),
+                    help='funded-account rule, e.g. --challenge 6 3: did each '
+                         'variant reach +6%% before ever touching -3%%? Judged '
+                         'on the worst case, with open risk counted.')
+    ap.add_argument('--dd-basis', default='start', choices=('start', 'peak'),
+                    help="measure the drawdown from the opening balance "
+                         "(start, a static max loss) or the highest balance "
+                         "reached (peak, a trailing drawdown)")
     ap.add_argument('--cap', default='auto',
                     help="per-position cap: 'auto' (100/N, so every pick gets "
                          "funded and the runs differ only in how many names "
@@ -174,6 +187,14 @@ def main(argv=None):
     print('cap per position: ' + ('100/N, so all N picks get funded'
                                   if a.cap == 'auto' else str(a.cap)) + '\n')
 
+    if a.challenge:
+        spec = dict(spec)
+        spec['challenge'] = {'target_pct': a.challenge[0],
+                             'max_dd_pct': a.challenge[1],
+                             'basis': a.dd_basis}
+        print(f'challenge: reach +{a.challenge[0]}% before touching '
+              f'-{a.challenge[1]}% from the {a.dd_basis}\n')
+
     rows = []
     for label, metric in VARIANTS:
         tops = [None] if metric is None else a.top
@@ -190,7 +211,7 @@ def main(argv=None):
             print(f'  #{bid} {name}: done')
 
     cols = ['id', 'rank', 'top_n', 'cap%', 'signals', 'sized', 'net$', 'ret%', 'win%',
-            'avg$', 'maxdd%', 'starved', 'applied']
+            'avg$', 'maxdd%', 'wcDD%', 'first', 'starved', 'applied']
     w = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in cols}
     print('\n' + '  '.join(c.ljust(w[c]) for c in cols))
     print('  '.join('-' * w[c] for c in cols))

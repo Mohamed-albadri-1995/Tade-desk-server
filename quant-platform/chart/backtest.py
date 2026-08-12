@@ -384,6 +384,107 @@ def _ttp_block(closed: list, opens: list, spec: dict) -> dict | None:
             'wins_below_min': below}
 
 
+def _challenge_block(ledger: list, equity0: float, spec: dict) -> dict | None:
+    """Funded-account rules: did it reach +target% BEFORE it ever hit -limit%?
+
+    "Max drawdown 1.47%" does not answer that. It is the deepest fall anywhere
+    in the run, with no statement of WHEN — a strategy can end +9% having gone
+    -4% in week one, and a funded account would have closed it in week one. The
+    only question a challenge asks is which line was touched first.
+
+    Two honest limits, both reported rather than hidden:
+
+    1) OPEN POSITIONS ARE NOT MARKED TO MARKET. The stored trades hold entry
+       and exit, not the path between, so a position that swung -2% and came
+       back is invisible to a closed-trade curve. This block therefore ALSO
+       walks a worst case: at every moment, assume every position still open
+       stops out at once. That is the floor the account could have touched
+       with the stops it actually had, and it is the number a trailing
+       drawdown rule would have caught. Reported as `worst_case_dd_pct`;
+       `closed_dd_pct` is the optimistic one.
+
+    2) DAILY loss limits and minimum trading days are NOT modelled. A run that
+       passes here can still fail a prop firm on a rule this does not know.
+
+    `basis`: 'start' measures the fall from the opening balance (a static max
+    loss), 'peak' from the highest balance reached (a trailing drawdown).
+    Firms use both and they fail at different moments, so it is asked for
+    rather than assumed.
+    """
+    if not ledger or equity0 <= 0:
+        return None
+    ch = spec.get('challenge') or None
+    if not isinstance(ch, dict):
+        return None
+    try:
+        target_pct = float(ch.get('target_pct') or 0)
+        limit_pct = float(ch.get('max_dd_pct') or 0)
+    except (TypeError, ValueError):
+        return None
+    if target_pct <= 0 or limit_pct <= 0:
+        return None
+    basis = str(ch.get('basis') or 'start').lower()
+    if basis not in ('start', 'peak'):
+        basis = 'start'
+
+    # One timeline of moments where the account's value can change: a position
+    # opening adds risk that could be lost, a position closing books its P&L
+    # and releases that risk. Sorted by time, exits before entries at the same
+    # instant — money already made is available to the next trade, which is
+    # how the sizing loop above treats it too.
+    events = []
+    for t0, t1, net, risk, date, sym in ledger:
+        events.append((t0, 1, risk, 0.0, date, sym))       # open:  risk on
+        events.append((t1, 0, -risk, net, date, sym))      # close: risk off, P&L in
+    events.sort(key=lambda e: (e[0], e[1]))
+
+    equity = equity0            # realized only
+    peak = equity0
+    open_risk = 0.0
+    closed_dd = worst_dd = 0.0
+    peak_profit = 0.0
+    first_hit = None            # 'target' | 'drawdown'
+    hit_on = hit_sym = None
+    for ts, _kind, d_risk, pnl, date, sym in events:
+        equity += pnl
+        open_risk += d_risk
+        open_risk = max(0.0, open_risk)
+        peak = max(peak, equity)
+        ref = equity0 if basis == 'start' else peak
+        # the floor this moment could have touched: every open stop hit at once
+        floor = equity - open_risk
+        dd_closed = max(0.0, (ref - equity) / ref * 100.0)
+        dd_worst = max(0.0, (ref - floor) / ref * 100.0)
+        closed_dd = max(closed_dd, dd_closed)
+        worst_dd = max(worst_dd, dd_worst)
+        peak_profit = max(peak_profit, (equity / equity0 - 1.0) * 100.0)
+        if first_hit is None:
+            # Drawdown is checked FIRST at each moment, and on the worst case.
+            # A run that touched both lines in the same instant failed: the
+            # firm closes the account on the breach whatever happened after.
+            if dd_worst >= limit_pct:
+                first_hit, hit_on, hit_sym = 'drawdown', date, sym
+            elif (equity / equity0 - 1.0) * 100.0 >= target_pct:
+                first_hit, hit_on, hit_sym = 'target', date, sym
+
+    return {
+        'target_pct': target_pct,
+        'max_dd_pct': limit_pct,
+        'basis': basis,
+        'result': first_hit or 'neither',
+        'hit_on': hit_on,
+        'hit_symbol': hit_sym,
+        'peak_profit_pct': round(peak_profit, 2),
+        'closed_dd_pct': round(closed_dd, 2),
+        'worst_case_dd_pct': round(worst_dd, 2),
+        'final_pct': round((equity / equity0 - 1.0) * 100.0, 2),
+        # said out loud, because a pass here is not a pass at a prop firm
+        'not_modelled': 'intraday marks on open positions (worst case assumes '
+                        'every open stop hits at once), daily loss limit, '
+                        'minimum trading days, spread and slippage',
+    }
+
+
 def _account_block(closed: list, spec: dict) -> dict | None:
     """REAL-MONEY accounting: a fixed account risking a fixed % per trade.
 
@@ -466,6 +567,10 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     except (TypeError, ValueError):
         mps = None
     counted_usd = wasted_usd = 0.0
+    # (entry_ts, exit_ts, net, risk_usd, date, symbol) per SIZED trade — the
+    # timeline the challenge block walks. Collected here rather than
+    # recomputed later so both read the same sizing decisions.
+    ledger: list = []
     wasted_n = 0
 
     rows = sorted(closed, key=lambda t: (t.get('entry_ts') or 0))
@@ -607,6 +712,8 @@ def _account_block(closed: list, spec: dict) -> dict | None:
                 _c['acct_no_credit'] = True
             else:
                 counted_usd += net
+        ledger.append((et_in, t.get('exit_ts') or et_in, net,
+                       shares * per_share_risk, t.get('date'), t.get('symbol')))
         pending.append((t.get('exit_ts') or et_in, net, shares * entry))
         max_concurrent = max(max_concurrent, len(pending))
         # equity curve marked when the trade closes (peak/DD on realized)
@@ -616,11 +723,13 @@ def _account_block(closed: list, spec: dict) -> dict | None:
             maxdd = max(maxdd, (peak - realized_now) / peak)
         curve.append(round(realized_now, 2))
     equity += sum(p for _, p, _ in pending)      # settle the tail
+    challenge = _challenge_block(ledger, equity0, spec)
     return {
         'account_equity_start': round(equity0, 2),
         'risk_pct': risk_pct,
         'max_leverage': lev,
         'max_position_pct': max_pos_pct or None,
+        **({'challenge': challenge} if challenge else {}),
         'equity_end': round(equity, 2),
         'net_pnl_usd': round(pnl_tot, 2),
         'return_pct': round((equity / equity0 - 1.0) * 100.0, 2),

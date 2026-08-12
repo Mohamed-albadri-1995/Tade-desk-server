@@ -309,6 +309,19 @@ def _account_html(s: dict) -> str:
         warn += (f"<div class=\"warn\">⚠ {a['skipped_no_capital']} trades SKIPPED — no "
                  f"buying power left: earlier positions were still open and had "
                  f"used the whole balance. A real account could not take these.</div>")
+    ch = a.get('challenge')
+    if ch:
+        verdict = {'target': ('ok', 'PASSED'), 'drawdown': ('warn', 'FAILED'),
+                   'neither': ('warn', 'NEITHER LINE REACHED')}[ch['result']]
+        where = (f" on {ch['hit_on']} ({ch['hit_symbol']})"
+                 if ch.get('hit_on') else '')
+        warn += (f"<div class=\"{verdict[0]}\">CHALLENGE {verdict[1]}: "
+                 f"+{ch['target_pct']}% target vs {ch['max_dd_pct']}% max "
+                 f"drawdown {'from the starting balance' if ch['basis'] == 'start' else 'from the peak'}"
+                 f"{where}. Best profit +{ch['peak_profit_pct']}%; worst "
+                 f"drawdown {ch['worst_case_dd_pct']}% counting open risk "
+                 f"({ch['closed_dd_pct']}% on closed trades alone). "
+                 f"NOT modelled: {ch['not_modelled']}.</div>")
     if not a.get('trades_sized'):
         warn += ("<div class=\"warn\">⚠ NO trade could be sized — the account numbers "
                  "below are the starting balance, unchanged.</div>")
