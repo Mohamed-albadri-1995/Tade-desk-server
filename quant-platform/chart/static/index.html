@@ -5,10 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>qp — live charting platform</title>
 <script src="/static/lightweight-charts.js"></script>
+<link rel="stylesheet" href="/static/desk.css">
 <style>
-  :root { --bg:#0e1116; --panel:#151a24; --border:#1e2632; --text:#e2e8f0; --text2:#94a3b8; --text3:#64748b; --accent:#22c55e; --draft:#f5a623; --red:#ef5350; --blue:#3b82f6; }
+/* ── qp's own shell, on the desk's tokens ────────────────────────────────
+ *
+ * The tokens, the type, the colour language and sunlight mode come from
+ * /static/desk.css — the same file the screener and the alerts page use, so
+ * this tool stops looking like a different application. What is below is only
+ * what is particular to a charting screen.
+ *
+ * THE THREE THINGS THAT WERE WRONG.
+ *
+ * 1. EVERY INPUT'S ONLY LABEL WAS ITS PLACEHOLDER. Twenty numeric fields in a
+ *    column, each explaining itself in grey text that disappears the moment
+ *    you type — and the two with default values, 100000 and 0.5, never showed
+ *    theirs at all. The explanation lived in a `title` tooltip, which does not
+ *    exist on a phone. Labels are above the field now and stay there.
+ *
+ * 2. ON A PHONE THE WHOLE CONTROL SURFACE WAS OFF-SCREEN. The header was one
+ *    horizontally-scrolling row of twelve controls, of which three were
+ *    visible, with nothing to say the rest existed. It is a bottom sheet now:
+ *    the chart keeps the screen, and the controls come up over it in groups.
+ *
+ * 3. THE CHART WAS NOT THE PRODUCT. It shared the width with a 260px wall of
+ *    settings that is read once a week. The panel is dismissible on desktop
+ *    and out of the way entirely on a phone.
+ */
   * { box-sizing:border-box; }
-  html,body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; margin:0; height:100%; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
   /* MOBILE VIEWPORT HEIGHT. On Android Chrome / iOS Safari `100vh` is the
      LARGE viewport — the height the page would have if the URL bar were
      hidden. While the URL bar is showing, the body is ~100px taller than what
@@ -19,11 +44,115 @@
      `dvh` is the DYNAMIC viewport height: what is visible right now, shrinking
      and growing as the URL bar does. 100vh stays first as the fallback for
      browsers without dvh (a JS fallback in boot() covers those). */
-  body { display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; }
-  header { padding:8px 14px; border-bottom:1px solid var(--border); display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; flex:0 0 auto; }
-  header label { display:flex; gap:5px; align-items:center; color:var(--text2); }
-  header input, header select { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:5px 7px; border-radius:5px; font-size:12px; }
-  header button { border:none; padding:6px 12px; border-radius:5px; font-size:12px; font-weight:600; cursor:pointer; }
+  body { display:flex; flex-direction:column; height:100vh; height:100dvh;
+    overflow:hidden; padding:0; font-size:var(--f-sm); }
+  /* ── THE TOP BAR ──
+     What a charting screen needs within reach at all times: which symbol, what
+     timeframe, and is it live. Everything else moved into the sheet, because a
+     row of twelve controls on a 390px phone is three controls and a rumour. */
+  header { padding:var(--s2) var(--s3); border-bottom:1px solid var(--border);
+    display:flex; gap:var(--s2); align-items:center; flex-wrap:wrap;
+    font-size:var(--f-sm); flex:0 0 auto; background:var(--bg2); }
+  header label { display:flex; gap:5px; align-items:center; color:var(--text2);
+    font-size:var(--f-xs); white-space:nowrap; }
+  header input, header select { background:var(--bg3); border:1px solid var(--border);
+    color:var(--text); padding:7px 9px; border-radius:6px; font-size:var(--f-sm);
+    font-family:var(--ui); min-height:32px; }
+  header input:focus, header select:focus { outline:none; border-color:var(--accent); }
+  header button { border:1px solid var(--border); background:var(--bg3); color:var(--text);
+    padding:8px 12px; border-radius:6px; font-size:var(--f-sm); font-weight:600;
+    cursor:pointer; font-family:var(--ui); min-height:32px; white-space:nowrap; }
+  header button:hover { border-color:var(--accent); }
+
+  /* ── A LABELLED FIELD ──
+     The single biggest fault on this page: a placeholder is not a label. It is
+     grey, it is inside the box, and it is gone the moment there is a value —
+     so the two fields that ship with defaults, 100000 and 0.5, never showed
+     what they were at all, and the explanation sat in a `title` tooltip that a
+     phone cannot display. */
+  .fld { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .fld > span { font-size:10.5px; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--text3); display:flex; align-items:center; gap:5px; }
+  .fld input, .fld select { width:100%; background:var(--bg3); border:1px solid var(--border);
+    color:var(--text); padding:8px 10px; border-radius:6px; font-size:var(--f-sm);
+    font-family:var(--ui); min-height:34px; }
+  .fld input:focus, .fld select:focus { outline:none; border-color:var(--accent); }
+  /* Two side by side is the most a 390px screen takes without the label
+     wrapping and the pair losing its alignment. */
+  .frow { display:grid; grid-template-columns:1fr 1fr; gap:var(--s2); margin-bottom:var(--s2); }
+  .frow.one { grid-template-columns:1fr; }
+  .frow.three { grid-template-columns:1fr 1fr 1fr; }
+  .fld .q { color:var(--accent); font-weight:700; cursor:help; }
+
+  /* ── THE "MORE" SURFACE ──
+     A second row on a desktop, where there is width to spare. A bottom sheet on
+     a phone, where the alternative was a horizontal scroll whose end you could
+     not see. Same markup either way — only the CSS moves it. */
+  #hdrMore { flex:0 0 auto; background:var(--bg2); border-bottom:1px solid var(--border);
+    padding:var(--s3); display:none; gap:var(--s4); }
+  body.more-open #hdrMore { display:flex; }
+  #hdrMore .mgrp { flex:1 1 260px; min-width:0; }
+  #hdrMore h5 { margin:0 0 var(--s2); font-size:10.5px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--text2); font-weight:700; }
+  #moreTop { display:none; }
+  .mtools { display:flex; flex-wrap:wrap; gap:var(--s2); }
+  .mtools button { flex:1 1 auto; }
+  #hdrMore button { border:1px solid var(--border); background:var(--bg3); color:var(--text);
+    padding:9px 12px; border-radius:6px; font:600 var(--f-sm)/1 var(--ui); cursor:pointer;
+    min-height:36px; }
+  #hdrMore button:hover { border-color:var(--accent); }
+  #hdrMore button.primary, header button.prim { background:var(--accent); color:#fff;
+    border-color:var(--accent); }
+  #moreBackdrop { display:none; }
+  #moreBtn.on, body.more-open #moreBtn { border-color:var(--accent); color:var(--accent); }
+
+  @media (max-width:820px) {
+    /* THE BOTTOM SHEET. It comes up over the chart, which keeps the screen. */
+    /* `body.more-open #hdrMore { display:flex }` above is more specific than a
+       bare `#hdrMore` in here, so the sheet laid out as a ROW and put three
+       groups side by side on a 390px screen. Matched specificity, not hoped
+       for: a media query does not beat a more specific selector. */
+    #hdrMore, body.more-open #hdrMore { display:block; }
+    #hdrMore { position:fixed; left:0; right:0; bottom:0; z-index:30;
+      max-height:82vh; overflow-y:auto; border-radius:14px 14px 0 0;
+      border-top:2px solid var(--accent); box-shadow:0 -10px 34px rgba(0,0,0,.6);
+      transform:translateY(102%); transition:transform .18s ease-out;
+      padding:var(--s3) var(--s3) var(--s5); }
+    body.more-open #hdrMore { transform:translateY(0); }
+    #hdrMore .mgrp + .mgrp { border-top:1px solid var(--border);
+      padding-top:var(--s3); margin-top:var(--s3); }
+    #moreTop { display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:var(--s3); }
+    #moreTop b { font-size:var(--f-md); }
+    #moreClose { cursor:pointer; font-size:20px; line-height:1; padding:4px 12px;
+      border:1px solid var(--border); border-radius:8px; color:var(--text); }
+    body.more-open #moreBackdrop { display:block; position:fixed; inset:0;
+      background:rgba(0,0,0,.5); z-index:29; }
+    /* The primary row still scrolls, but it is now FIVE controls, all of which
+       are the ones you reach for while looking at a chart. */
+    /* Seven controls still did not fit 390px, so the row scrolled and the last
+       button — the one that opens everything else — was off the edge. The word
+       "Symbol" is not needed above a box containing SPY, and "Compute" and
+       "Panel" are their icons at this width. */
+    header { padding:var(--s2) 6px; gap:5px; }
+    header #status, header #build { display:none; }
+    header > strong { display:none; }
+    header label { gap:0; }
+    header .lbl { display:none; }
+    header #symbol { width:64px; }
+    header #compute { font-size:0; padding:8px 10px; }
+    header #compute::after { content:'▶▶'; font-size:var(--f-sm); }
+    header #liveBtn { font-size:0; padding:8px 10px; }
+    header #liveBtn::after { content:'●'; font-size:14px; }
+    header #sideBtn { font-size:0; padding:8px 10px; }
+    header #sideBtn::after { content:'☰'; font-size:15px; }
+  }
+
+  /* ── A GROUP OF FIELDS ── a heading and a rule, so a wall of twenty inputs
+     becomes four things you can choose between. */
+  .grp { border-top:1px solid var(--border); padding-top:var(--s3); margin-top:var(--s3); }
+  .grp > h4 { margin:0 0 var(--s2); font-size:10.5px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--text2); font-weight:700; }
   #compute { background:var(--accent); color:#000; }
   #liveBtn { background:#1c2431; color:var(--text); border:1px solid var(--border); }
   #liveBtn.on { background:var(--red); color:#fff; border-color:var(--red); }
@@ -123,34 +252,68 @@
 </style>
 </head>
 <body>
+<!-- ── WHAT STAYS WITHIN REACH ──
+     Which symbol, what timeframe, is it live, and the way into everything else.
+     The old header was ONE horizontally-scrolling row of twelve controls: on a
+     390px phone three were visible and nothing said the other nine existed.
+     They are all still here, in #hdrMore — a second row on a desktop, a bottom
+     sheet on a phone. Not one id has changed. -->
 <header>
-  <strong style="color:var(--accent)">qp&nbsp;live</strong>
-  <label>Symbol <input id="symbol" value="SPY" size="6"></label>
-  <label>TF <select id="tf"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
-  <label>Type <select id="ctype"><option value="candles">Candles</option><option value="bars">Bars</option><option value="line">Line</option><option value="area">Area</option><option value="heikin">Heikin Ashi</option></select></label>
-  <label>Scale <select id="scaleMode"><option value="0">Linear</option><option value="1">Log</option><option value="2">%</option></select></label>
-  <button id="fitBtn" title="fit all bars to view" style="background:#1c2431;color:var(--text2);border:1px solid var(--border)">⤢ Fit</button>
-  <label>Days <input id="days" type="number" value="5" min="1" max="730" style="width:60px"></label>
-  <label>Feed <select id="feed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
-  <label>Session <select id="view"><option value="all">All-day</option><option value="regular">Regular</option></select></label>
-  <label title="REPLAY cutoff: hide every bar after this date, so a setup is judged as it stood then. Blank = full tape through today. Clicking a register stock does NOT set this — it loads everything and scrolls to that day.">As-of <input id="asof" type="date" style="width:130px"></label>
-  <button id="compute">Compute</button>
+  <strong style="color:var(--accent)">qp</strong>
+  <label><span class="lbl">Symbol</span> <input id="symbol" value="SPY" size="6"></label>
+  <label><span class="lbl">TF</span> <select id="tf"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
+  <button id="compute" class="prim">Compute</button>
   <button id="liveBtn">▶ Live</button>
-  <button id="stratBtn">⚡ Strategy</button>
   <button id="sideBtn" title="show / hide the side panel">☰ Panel</button>
-  <button id="printR1Btn" title="Print every ticker in an R1/Shortlist day as charts — your timeframe, your indicators, full extended hours plus the previous day">🖨 Print R1</button>
-  <button id="alertsBtn" title="live signal watcher: today's R1 + Shortlist × every saved setup, browser notification + sound on any entry signal">🔔 Alerts</button>
-  <span style="width:1px;height:20px;background:var(--border)"></span>
-  <label>Add <select id="addPrim"></select></label>
-  <input id="addLen" type="number" placeholder="len" title="length/period">
-  <select id="addSource">
-    <option>close</option><option>open</option><option>high</option><option>low</option>
-    <option>hl2</option><option>hlc3</option><option>ohlc4</option><option>volume</option>
-  </select>
-  <button id="addBtn">+ Add</button>
+  <button id="moreBtn" title="chart type, scale, session, indicators, tools"
+          onclick="document.body.classList.toggle('more-open')">⚙ More</button>
   <span id="status"></span>
   <span id="build" class="muted" style="margin-left:auto"></span>
 </header>
+
+<div id="moreBackdrop" onclick="document.body.classList.remove('more-open')"></div>
+<div id="hdrMore">
+  <div id="moreTop"><b>Chart &amp; tools</b>
+    <span id="moreClose" onclick="document.body.classList.remove('more-open')">✕</span></div>
+
+  <div class="mgrp"><h5>Chart</h5>
+    <div class="frow">
+      <label class="fld"><span>Type</span><select id="ctype"><option value="candles">Candles</option><option value="bars">Bars</option><option value="line">Line</option><option value="area">Area</option><option value="heikin">Heikin Ashi</option></select></label>
+      <label class="fld"><span>Scale</span><select id="scaleMode"><option value="0">Linear</option><option value="1">Log</option><option value="2">%</option></select></label>
+    </div>
+    <div class="frow">
+      <label class="fld"><span>Days</span><input id="days" type="number" value="5" min="1" max="730"></label>
+      <label class="fld"><span>Session</span><select id="view"><option value="all">All-day</option><option value="regular">Regular</option></select></label>
+    </div>
+    <div class="frow">
+      <label class="fld"><span>Feed</span><select id="feed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
+      <label class="fld"><span>As-of
+        <b class="q" title="REPLAY cutoff: hide every bar after this date, so a setup is judged as it stood then. Blank = the full tape through today. Clicking a register stock does NOT set this — it loads everything and scrolls to that day.">?</b></span>
+        <input id="asof" type="date"></label>
+    </div>
+    <button id="fitBtn" class="dk-btn" style="width:100%" title="fit all bars to view">⤢ Fit all bars</button>
+  </div>
+
+  <div class="mgrp"><h5>Add an indicator</h5>
+    <div class="frow three">
+      <label class="fld"><span>Indicator</span><select id="addPrim"></select></label>
+      <label class="fld"><span>Length</span><input id="addLen" type="number" placeholder="e.g. 20"></label>
+      <label class="fld"><span>Source</span><select id="addSource">
+        <option>close</option><option>open</option><option>high</option><option>low</option>
+        <option>hl2</option><option>hlc3</option><option>ohlc4</option><option>volume</option>
+      </select></label>
+    </div>
+    <button id="addBtn" class="dk-btn primary" style="width:100%">+ Add to chart</button>
+  </div>
+
+  <div class="mgrp"><h5>Tools</h5>
+    <div class="mtools">
+      <button id="stratBtn">⚡ Strategy</button>
+      <button id="printR1Btn" title="Print every ticker in an R1/Shortlist day as charts — your timeframe, your indicators, full extended hours plus the previous day">🖨 Print R1</button>
+      <button id="alertsBtn" title="live signal watcher: today's R1 + Shortlist × every saved setup, browser notification + sound on any entry signal">🔔 Alerts</button>
+    </div>
+  </div>
+</div>
 <main>
   <div id="chartWrap">
     <div id="banner"></div>
@@ -226,86 +389,170 @@
     <div id="regWarn" class="muted" style="font-size:10px;margin:0 0 4px"></div>
     <div id="regList"><div class="muted">Loading register…</div></div>
     <h3>🧪 Backtest</h3>
-    <div id="btBox" style="font-size:11px">
-      <select id="btStrat" style="width:100%"><option value="">— saved strategy —</option></select>
-      <select id="btStrat2" style="width:100%;margin-top:4px" title="Optional SECOND strategy — usually the short book of the same setup. Both are evaluated on every day-symbol pair and their trades are POOLED, so a per-day ranking picks across both sides. Ranking each side in its own run would select different names."><option value="">— second book (optional, e.g. the short side) —</option></select>
-      <div style="display:flex;gap:4px;margin-top:4px">
-        <select id="btUni" style="flex:1"><option value="symbols">Symbols</option><option value="R1">Register R1</option><option value="Shortlist">Shortlist</option></select>
-        <select id="btFill" style="flex:1" title="fill model: next open = honest live fills (a signal at a bar's close becomes a market order at the NEXT bar's open — what the funded account actually gets). close = signal bar's own close, optimistic, for eyeballing only."><option value="next_open" selected>fill: next open</option><option value="close">fill: close</option></select>
+    <!-- LABELLED AND GROUPED.
+         This was twenty numeric inputs in one column, each labelled only by its
+         own placeholder — grey, inside the box, and gone the moment there was a
+         value. The two that ship with defaults, 100000 and 0.5, never showed
+         theirs at all, and every explanation lived in a `title` tooltip, which
+         a phone has no way to display.
+         Now: a label above each field that stays there, the explanation behind
+         a "?" that is still the tooltip on a mouse, and six groups instead of
+         one wall — so the question becomes "which of these six" rather than
+         "which of these twenty". Every id is unchanged; only the wrapping is. -->
+    <div id="btBox">
+
+      <div class="grp" style="border-top:0;margin-top:0;padding-top:0"><h4>Strategy</h4>
+        <div class="frow one">
+          <label class="fld"><span>Strategy</span>
+            <select id="btStrat"><option value="">— saved strategy —</option></select></label>
+        </div>
+        <div class="frow one">
+          <label class="fld"><span>Second book
+            <b class="q" title="Optional SECOND strategy — usually the short book of the same setup. Both are evaluated on every day-symbol pair and their trades are POOLED, so a per-day ranking picks across both sides. Ranking each side in its own run would select different names.">?</b></span>
+            <select id="btStrat2"><option value="">— none —</option></select></label>
+        </div>
       </div>
-      <div style="display:flex;gap:4px;margin-top:4px">
-        <select id="btTf" style="flex:1" title="bar timeframe the backtest evaluates on — use the TF you built the strategy on"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select>
-        <select id="btFeed" style="flex:1" title="data feed for the backtest. polygon covers the whole market; alpaca (IEX) has NO data for many small caps — those pairs would be skipped"><option>alpaca</option><option>polygon</option><option>hybrid</option></select>
+
+      <div class="grp"><h4>What to test</h4>
+        <div class="frow">
+          <label class="fld"><span>Universe</span>
+            <select id="btUni"><option value="symbols">Symbols</option><option value="R1">Register R1</option><option value="Shortlist">Shortlist</option></select></label>
+          <label class="fld"><span>Fill model
+            <b class="q" title="next open = honest live fills (a signal at a bar's close becomes a market order at the NEXT bar's open — what the funded account actually gets). close = the signal bar's own close: optimistic, for eyeballing only.">?</b></span>
+            <select id="btFill"><option value="next_open" selected>next open</option><option value="close">close</option></select></label>
+        </div>
+        <div class="frow one">
+          <label class="fld"><span>Symbols</span>
+            <input id="btSyms" placeholder="SPY,QQQ"></label>
+        </div>
+        <div class="frow">
+          <label class="fld"><span>Timeframe
+            <b class="q" title="Bar timeframe the backtest evaluates on — use the TF you built the strategy on.">?</b></span>
+            <select id="btTf"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
+          <label class="fld"><span>Feed
+            <b class="q" title="Data feed for the backtest. polygon covers the whole market; alpaca (IEX) has NO data for many small caps — those pairs would be skipped.">?</b></span>
+            <select id="btFeed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
+        </div>
+        <div class="frow">
+          <label class="fld"><span>From</span><input id="btStart" type="date"></label>
+          <label class="fld"><span>To</span><input id="btEnd" type="date"></label>
+        </div>
       </div>
-      <input id="btSyms" placeholder="symbols: SPY,QQQ" style="width:100%;margin-top:4px">
-      <input id="btCost" type="number" step="any" placeholder="cost bps/side (e.g. 5)" title="transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies)." style="width:100%;margin-top:4px">
-      <input id="btEquity" type="number" step="any" value="100000" placeholder="account $ (e.g. 100000)" title="REAL ACCOUNT sizing: starting equity. Position size per trade = (equity x risk%) / (entry - stop), so every stop-out loses the same % of the account. Equity compounds in trade order. Empty = off." style="width:100%;margin-top:4px">
-      <input id="btRiskPct" type="number" step="any" value="0.5" placeholder="risk % per trade (e.g. 0.5)" title="Percent of CURRENT equity lost if the stop is hit. Requires the strategy to define a stop." style="width:100%;margin-top:4px">
-      <div style="display:flex;gap:4px;margin-top:4px">
-        <input id="btTarget" type="number" step="any" placeholder="challenge: profit target % (e.g. 6)" title="FUNDED-ACCOUNT RULE: did it reach this profit BEFORE ever touching the max drawdown below? 'Max drawdown 1.5%' never says which came first — a run can finish +9% having been -4% in week one, and the account would have been closed in week one. Blank = no verdict." style="flex:1">
-        <input id="btMaxDD" type="number" step="any" placeholder="max drawdown % (e.g. 3)" title="The line that ends the account. Judged on the WORST CASE: at every moment, every position still open is assumed to stop out at once — the floor the balance could really have touched with the stops it had. A closed-trade curve cannot see a position that swung and came back." style="flex:1">
-        <select id="btDDBasis" style="width:110px" title="'from start' = a static max loss measured against the opening balance. 'from peak' = a trailing drawdown measured against the highest balance reached. Firms use both and they fail at different moments.">
-          <option value="start">from start</option>
-          <option value="peak">from peak</option>
-        </select>
+
+      <div class="grp"><h4>Money</h4>
+        <div class="frow">
+          <label class="fld"><span>Account $
+            <b class="q" title="Starting equity. Position size per trade = (equity x risk%) / (entry - stop), so every stop-out loses the same % of the account. Equity compounds in trade order. Empty = off.">?</b></span>
+            <input id="btEquity" type="number" step="any" value="100000"></label>
+          <label class="fld"><span>Risk % / trade
+            <b class="q" title="Percent of CURRENT equity lost if the stop is hit. Requires the strategy to define a stop.">?</b></span>
+            <input id="btRiskPct" type="number" step="any" value="0.5"></label>
+        </div>
+        <div class="frow">
+          <label class="fld"><span>Max position %
+            <b class="q" title="PER-TRADE cap — the same maxPositionPct the screener applies live before it sends an order. Without it a tight stop buys the whole account and every later signal that day is skipped for lack of capital, in arrival order rather than by quality. Empty = no cap.">?</b></span>
+            <input id="btMaxPos" type="number" step="any" placeholder="e.g. 25"></label>
+          <label class="fld"><span>Cost bps / side
+            <b class="q" title="Transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies).">?</b></span>
+            <input id="btCost" type="number" step="any" placeholder="e.g. 5"></label>
+        </div>
       </div>
-      <input id="btMaxPos" type="number" step="any" placeholder="max position % of equity (e.g. 25)" title="PER-TRADE cap — the same maxPositionPct the screener applies live before it sends an order. Without it a tight stop buys the whole account and every later signal that day is skipped for lack of capital, in arrival order rather than by quality. Empty = no cap." style="width:100%;margin-top:4px">
-      <div style="display:flex;gap:4px;margin-top:4px">
-        <input id="btTopN" type="number" step="1" min="0" placeholder="top N per day (blank = take EVERY signal)" title="RANK the day's signals against each other and trade only the strongest N, across the whole universe. Blank/0 = off, take every signal. This is a cross-symbol decision, so it happens in the runner after all symbols are evaluated — a strategy cannot see the other names." style="flex:1">
-        <!-- The metric was hardcoded to VWAP extension whenever top-N was set.
-             That is the right metric for exactly one setup (T2, whose stop IS
-             the session VWAP); for anything else it silently means "trade the
-             widest stop" and reshapes the strategy. Backtest #231 lost 103 of
-             117 signals of the 09:35 setup to it. Now it must be chosen. -->
-        <select id="btRankMetric" style="flex:1" title="How the day's signals are scored against each other. 'nothing' takes every signal and ignores the count beside it.">
-          <!-- FIRST, and the honest default. A run with no ranking is the only
-               one that can be used to ASK which ranking is right — a ranked
-               run's trades are already that metric's picks, so comparing
-               orderings on them compares orderings of an ordering. The count
-               beside this already produced an unranked run when left blank,
-               but nothing said so, and it is not a thing to have to know. -->
-          <option value="">rank by: nothing — take every signal</option>
-          <option value="vwap_extension">rank by: VWAP extension (T2)</option>
-          <option value="tight_stop">rank by: tightest stop</option>
-          <option value="reg_score">rank by: register score</option>
-          <option value="rvol">rank by: RVOL</option>
-        </select>
+
+      <div class="grp"><h4>Ranking</h4>
+        <div class="frow one">
+          <!-- The metric was hardcoded to VWAP extension whenever top-N was set.
+               That is the right metric for exactly one setup (T2, whose stop IS
+               the session VWAP); for anything else it silently means "trade the
+               widest stop" and reshapes the strategy. Backtest #231 lost 103 of
+               117 signals of the 09:35 setup to it. Now it must be chosen. -->
+          <label class="fld"><span>Rank by
+            <b class="q" title="How the day's signals are scored against each other. 'nothing' takes every signal and ignores the count beside it.">?</b></span>
+            <select id="btRankMetric">
+              <option value="">nothing — take every signal</option>
+              <option value="vwap_extension">VWAP extension (T2)</option>
+              <option value="tight_stop">tightest stop</option>
+              <option value="reg_score">register score</option>
+              <option value="rvol">RVOL</option>
+            </select></label>
+        </div>
+        <div class="frow">
+          <label class="fld"><span>Top N / day
+            <b class="q" title="RANK the day's signals against each other and trade only the strongest N, across the whole universe. Blank/0 = off, take every signal. This is a cross-symbol decision, so it happens in the runner after all symbols are evaluated — a strategy cannot see the other names.">?</b></span>
+            <input id="btTopN" type="number" step="1" min="0" placeholder="blank = all"></label>
+          <label class="fld"><span>Min RVOL
+            <b class="q" title="SMB In-Play universe filter: skip a day-symbol pair unless its HONEST cumulative RVOL (qp rel_volume: volume so far today vs the average by the same time of day, 20 sessions) is at least this at the strategy's session start. Empty = off. This is NOT the register's ctx_rvol.">?</b></span>
+            <input id="btMinRvol" type="number" step="any" placeholder="e.g. 5"></label>
+        </div>
       </div>
-      <input id="btMinRvol" type="number" step="any" placeholder="min RVOL — In Play filter (e.g. 5)" title="SMB In-Play universe filter: skip a day·symbol pair unless its HONEST cumulative RVOL (qp rel_volume: volume so far today vs the average by the same time of day, 20 sessions) is at least this at the strategy's session start. Empty = off. This is NOT the register's ctx_rvol (a one-bar TradingView snapshot at ~09:36)." style="width:100%;margin-top:4px">
-      <div style="display:flex;gap:4px;margin-top:4px">
-        <select id="btPreset" style="flex:1" title="prop-firm preset — fills the fields below; everything stays editable"><option value="">preset: custom</option><option value="ttp">Trade The Pool</option></select>
-        <input id="btShares" type="number" placeholder="shares 100" title="fixed share size for $ P&L and per-share fees" style="flex:1;min-width:0">
+
+      <div class="grp"><h4>Funded-account rule</h4>
+        <div class="frow three">
+          <label class="fld"><span>Target %
+            <b class="q" title="Did it reach this profit BEFORE ever touching the max drawdown? 'Max drawdown 1.5%' never says which came first — a run can finish +9% having been -4% in week one, and the account would have been closed in week one. Blank = no verdict.">?</b></span>
+            <input id="btTarget" type="number" step="any" placeholder="6"></label>
+          <label class="fld"><span>Max DD %
+            <b class="q" title="The line that ends the account. Judged on the WORST CASE: at every moment, every position still open is assumed to stop out at once — the floor the balance could really have touched with the stops it had. A closed-trade curve cannot see a position that swung and came back.">?</b></span>
+            <input id="btMaxDD" type="number" step="any" placeholder="3"></label>
+          <label class="fld"><span>Measured
+            <b class="q" title="'from start' = a static max loss against the opening balance. 'from peak' = a trailing drawdown against the highest balance reached. Firms use both and they fail at different moments.">?</b></span>
+            <select id="btDDBasis"><option value="start">from start</option><option value="peak">from peak</option></select></label>
+        </div>
       </div>
-      <div style="display:flex;gap:4px;margin-top:4px">
-        <input id="btFee" type="number" step="any" placeholder="$/share" title="commission per share per order (TTP: 0.005)" style="flex:1;min-width:0">
-        <input id="btFeeMin" type="number" step="any" placeholder="min $/order" title="minimum commission per filled order (TTP: 0.75)" style="flex:1;min-width:0">
-        <input id="btMinPs" type="number" step="any" placeholder="min $/sh" title="minimum profit per share for a win to COUNT toward the target (TTP: 0.10) — losses always count" style="flex:1;min-width:0">
+
+      <div class="grp"><h4>Prop-firm costs &amp; caps</h4>
+        <div class="frow">
+          <label class="fld"><span>Preset
+            <b class="q" title="Fills the fields below; everything stays editable.">?</b></span>
+            <select id="btPreset"><option value="">custom</option><option value="ttp">Trade The Pool</option></select></label>
+          <label class="fld"><span>Fixed shares
+            <b class="q" title="Fixed share size for $ P&L and per-share fees.">?</b></span>
+            <input id="btShares" type="number" placeholder="100"></label>
+        </div>
+        <div class="frow three">
+          <label class="fld"><span>$ / share
+            <b class="q" title="Commission per share per order (TTP: 0.005).">?</b></span>
+            <input id="btFee" type="number" step="any" placeholder="0.005"></label>
+          <label class="fld"><span>Min $ / order
+            <b class="q" title="Minimum commission per filled order (TTP: 0.75).">?</b></span>
+            <input id="btFeeMin" type="number" step="any" placeholder="0.75"></label>
+          <label class="fld"><span>Min $ / sh
+            <b class="q" title="Minimum profit per share for a win to COUNT toward the target (TTP: 0.10) — losses always count.">?</b></span>
+            <input id="btMinPs" type="number" step="any" placeholder="0.10"></label>
+        </div>
+        <div class="frow one">
+          <label class="fld"><span>Max entries / day
+            <b class="q" title="Override the strategy's own attempts/day cap for THIS backtest only. Blank = use whatever the strategy defines (its Discipline field).">?</b></span>
+            <input id="btMaxDay" type="number" min="1" step="1" placeholder="blank = the strategy's own cap"></label>
+        </div>
+        <label style="display:flex;gap:7px;align-items:flex-start;color:var(--text2);font-size:var(--f-xs);line-height:1.5">
+          <input type="checkbox" id="btRules" style="margin-top:2px">
+          RTH-only entries + forced 15:50 EOD close <span class="muted">(the chart keeps all-day data for indicators)</span></label>
       </div>
-      <label style="display:flex;gap:5px;align-items:center;margin-top:4px;color:var(--text2)"><input type="checkbox" id="btRules"> RTH-only entries + forced 15:50 EOD close (chart keeps all-day data for indicators)</label>
-      <input id="btMaxDay" type="number" min="1" step="1" placeholder="max entries/day OVERRIDE (blank = use the strategy's own cap)" title="Override the strategy's own attempts/day cap for THIS backtest only. Blank = use whatever the strategy defines (its Discipline field). Set a number to force a different cap without editing the strategy." style="width:100%;margin-top:4px">
-      <div style="display:flex;gap:4px;margin-top:4px">
-        <input id="btStart" type="date" style="flex:1;min-width:0" title="start date">
-        <input id="btEnd" type="date" style="flex:1;min-width:0" title="end date">
-        <button id="btRun" style="background:var(--blue);color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer">Run</button>
+
+      <div class="grp">
+        <button id="btRun" class="dk-btn primary" style="width:100%">Run the backtest</button>
+        <div id="btStat" class="muted" style="margin-top:6px">Runs on the timeframe and feed chosen above.</div>
       </div>
-      <div id="btStat" class="muted" style="margin-top:5px">— runs on the TF + feed selected above —</div>
-      <div id="btSummary" style="margin-top:4px"></div>
-      <div id="btFilters" style="display:none;margin-top:6px;border-top:1px dashed var(--border);padding-top:6px">
+
+      <div id="btSummary" style="margin-top:var(--s2)"></div>
+      <div id="btFilters" style="display:none;margin-top:var(--s3);border-top:1px dashed var(--border);padding-top:var(--s3)">
+        <h4 style="margin:0 0 var(--s2);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2)">Filter the trades</h4>
         <div id="btFRows"></div>
         <div style="display:flex;gap:4px;margin-top:4px">
           <select id="btFField" style="flex:2;min-width:0"></select>
           <select id="btFOp" style="flex:1;min-width:0"><option>=</option><option>≠</option><option>&gt;</option><option>&lt;</option><option>in</option><option>has</option></select>
           <input id="btFVal" placeholder="value(s)" style="flex:2;min-width:0">
-          <button id="btFAdd" style="background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px">+</button>
+          <button id="btFAdd" class="dk-btn">+</button>
         </div>
-        <div class="muted" style="font-size:10px;margin-top:3px">in = comma list (regime in STRONG_UP,UP) · has = contains · times are ET hhmm (935) · dur_min · dow = Mon…Fri</div>
-        <div style="display:flex;gap:4px;margin-top:5px">
-          <button id="btCsv" style="flex:1;background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px">CSV (filtered)</button>
-          <button id="btReport" style="flex:1;background:#1c2431;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px">Report</button>
+        <div class="muted" style="font-size:10px;margin-top:5px">in = comma list (regime in STRONG_UP,UP) · has = contains · times are ET hhmm (935) · dur_min · dow = Mon…Fri</div>
+        <div style="display:flex;gap:6px;margin-top:var(--s2)">
+          <button id="btCsv" class="dk-btn" style="flex:1">CSV (filtered)</button>
+          <button id="btReport" class="dk-btn" style="flex:1">Report</button>
         </div>
       </div>
-      <div id="btTrades" style="max-height:30vh;overflow:auto;margin-top:4px"></div>
+      <div id="btTrades" style="max-height:30vh;overflow:auto;margin-top:var(--s2)"></div>
     </div>
+
     <h3>Overlays</h3>
     <div id="overlayList"><div class="muted">Pick an indicator in the top bar → + Add.</div></div>
     <h3>Selected</h3>
