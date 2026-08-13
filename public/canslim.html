@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CANSLIM · Trade Desk</title>
+<style>
+
+/* ── the design tokens, the same set the alerts page uses ───────────────
+ *
+ * The three panels at the bottom of this page had every problem that page
+ * had, and one of its own: the EXPLANATION was bigger than the thing it
+ * explained. Four lines of centred prose about the shortlist, above a
+ * shortlist rendered in 13px chips. The prose is not the product.
+ *
+ * TYPE. Monospace for tickers, counts and tables — things read against each
+ * other. The system UI face for sentences, which is most of this page.
+ *
+ * ALIGNMENT. Centred paragraphs are read by finding the start of each line in
+ * a different place every time. Headings may centre; prose does not.
+ *
+ * COLOUR MEANS SOMETHING. Blue is "you can act here". Purple is the CANSLIM
+ * list, matching the badge on every tool's cards. Amber is about to expire.
+ * Everything else is grey structure.
+ */
+:root {
+  --bg:#0a0c11; --panel:#141822; --panel2:#1c212d; --panel3:#242a38;
+  --line:#272e3d; --line2:#39415a;
+  --bg2:var(--panel); --bg3:var(--panel2); --border:var(--line);
+  --text:#e9edf6; --text2:#9ba4ba; --text3:#6b748c; --dim:var(--text3);
+  --accent:#5aa7ff; --green:#4ade80; --red:#f87171; --amber:#fbbf24; --violet:#c084fc;
+  --f-xs:11.5px; --f-sm:13px; --f-md:14.5px; --f-lg:17px; --f-xl:21px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+  font-family:var(--ui); font-size:var(--f-sm); line-height:1.5;
+  font-variant-numeric:tabular-nums; -webkit-text-size-adjust:100%;
+  display:flex; flex-direction:column; align-items:center;
+  padding:32px 16px 56px;
+}
+/* Tickers, counts, clocks and tables stay monospace — they are compared. */
+.uni-tkr, .uni-by, .uni-n, .check, .card-port, .nb-clock,
+.cmp-tbl, .tv-fallback, .sc-tag { font-family:var(--mono); }
+
+/* ── the why, folded away ──
+ * Same pattern as the alerts page. The reasoning is worth keeping; printed at
+ * the same weight as the data it is a wall, and a wall does not get read. */
+details.why { margin:var(--s2) 0 0; text-align:left; }
+details.why > summary { list-style:none; cursor:pointer; display:inline-flex;
+  align-items:center; gap:5px; font-size:var(--f-xs); color:var(--text3);
+  border:1px solid var(--line); border-radius:99px; padding:3px 11px; }
+details.why > summary::-webkit-details-marker { display:none; }
+details.why > summary::before { content:'?'; font-weight:700; color:var(--accent); }
+details.why > summary:hover { color:var(--text2); border-color:var(--line2); }
+details.why[open] > summary { margin-bottom:var(--s2); }
+details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1.65;
+  border-left:2px solid var(--line); padding-left:10px; }
+.crumb { align-self:flex-start; font-size:12px; color:var(--text2); text-decoration:none;
+  padding:6px 10px; margin:-34px 0 20px -8px; border-radius:6px; }
+.crumb:hover { color:var(--accent); background:var(--bg2); }
+.logo { font-size:13px; letter-spacing:.28em; color:var(--accent); font-weight:700; }
+.title { font-size:var(--f-xl); font-weight:700; margin:var(--s3) 0 var(--s1);
+  letter-spacing:-.02em; text-align:center; }
+.subtitle { font-size:var(--f-sm); color:var(--text2); margin-bottom:var(--s5);
+  text-align:center; max-width:60ch; }
+
+/* The applications. Bigger than a tool card on purpose — the choice between
+   charting and screening is made before the choice of which screener, and the
+   page should read in that order. */
+.apps { display:flex; flex-wrap:wrap; gap:16px; justify-content:center;
+        width:100%; max-width:1000px; margin:20px 0 8px; }
+.app-card {
+  position:relative; flex:1 1 320px; max-width:480px; background:var(--bg2);
+  border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:12px;
+  padding:22px 24px; text-decoration:none; color:inherit; display:flex;
+  flex-direction:column; gap:9px; transition:border-color .15s, transform .15s;
+}
+.app-card:hover { transform:translateY(-2px); }
+.app-card.is-self { cursor:default; opacity:.82; }
+.app-card.is-self:hover { transform:none; }
+.app-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.app-name { font-size:19px; font-weight:700; letter-spacing:-.01em; }
+.app-desc { font-size:12.5px; color:var(--text2); line-height:1.6; }
+.app-foot { display:flex; align-items:center; gap:8px; margin-top:2px;
+            font-size:11px; color:var(--text3); }
+.app-here { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+            color:var(--text3); border:1px solid var(--border); border-radius:4px; padding:1px 6px; }
+.app-arrow { margin-left:auto; font-size:16px; color:var(--text3); }
+.app-card:hover .app-arrow { color:var(--accent); }
+
+.section-head { font-size:var(--f-xs); font-weight:700; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--text2); margin:var(--s5) 0 var(--s3);
+  text-align:center; width:100%; }
+.section-head::before, .section-head::after { content:'——'; opacity:.4; margin:0 10px; }
+
+.cards { display:flex; flex-wrap:wrap; gap:16px; justify-content:center;
+         width:100%; max-width:1000px; }
+.tool-card {
+  position:relative; width:300px; background:var(--panel); border:1px solid var(--line);
+  border-radius:14px; padding:var(--s4); text-decoration:none; color:inherit;
+  display:flex; flex-direction:column; gap:var(--s2);
+  transition:border-color .15s, transform .15s;
+  border-top:3px solid var(--accent);
+}
+.tool-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+/* The link is now inside the card rather than being the card, so the focus ring
+   has to follow it — otherwise keyboard focus lands on something invisible. */
+.tc-open { text-decoration:none; color:inherit; display:flex; flex-direction:column; gap:8px; }
+.tc-open:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:6px; }
+
+/* ── what it screens for ──
+   Generated from the tool's live screener definitions, so it cannot drift from
+   what the scanner actually runs. Shut by default: nine cards' worth of rules
+   open at once is a wall, and the question here is which tool to open. */
+.screens { font-size:11.5px; }
+.screens > summary { cursor:pointer; list-style:none; color:var(--text2);
+  padding:5px 0; display:flex; align-items:center; gap:6px; }
+.screens > summary::-webkit-details-marker { display:none; }
+.screens > summary::before { content:'▸'; color:var(--accent); font-size:.85em; transition:transform .15s; }
+.screens[open] > summary::before { transform:rotate(90deg); }
+.sc-body { border-left:2px solid var(--border); padding:2px 0 2px 10px;
+  margin:2px 0 4px 3px; display:flex; flex-direction:column; gap:9px; }
+.sc-name { font-size:11px; font-weight:700; color:var(--text);
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.sc-tag { font-size:9.5px; font-weight:600; color:var(--text3); background:var(--bg3);
+  border:1px solid var(--border); border-radius:3px; padding:1px 5px; text-transform:uppercase;
+  letter-spacing:.04em; }
+.sc-when { font-size:10px; font-weight:400; color:var(--text3); }
+/* The rules themselves. overflow-wrap because a rule naming two columns is a
+   long line and a 300px card is not going to grow for it. */
+.sc-rules { margin:3px 0 0; padding-left:16px; color:var(--text2); line-height:1.55;
+  overflow-wrap:anywhere; }
+.sc-rules li { margin:1px 0; }
+.sc-none { list-style:none; padding-left:0; font-style:italic; color:var(--text3); }
+.sc-cadence { font-size:10.5px; color:var(--text3); border-top:1px dashed var(--border);
+  padding-top:6px; }
+.tool-card.t2 { border-top-color:#a78bfa; }
+.tool-card.t3 { border-top-color:#fb923c; }
+.tool-card.down { opacity:.55; border-top-color:var(--text3); }
+
+.card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+.card-name { font-size:var(--f-lg); font-weight:700; letter-spacing:-.01em; }
+.card-port { font-size:var(--f-xs); color:var(--text3); letter-spacing:.04em; }
+.card-desc { font-size:var(--f-xs); color:var(--text2); line-height:1.6; min-height:3.2em; }
+
+.status { display:flex; align-items:center; gap:6px; font-size:10.5px;
+          letter-spacing:.06em; text-transform:uppercase; }
+.dot { width:7px; height:7px; border-radius:50%; background:var(--text3); flex:none; }
+.status.up .dot { background:var(--green); box-shadow:0 0 6px var(--green); }
+.status.up { color:var(--green); }
+.status.down .dot { background:var(--red); }
+.status.down { color:var(--red); }
+.status.wait .dot { background:var(--amber); }
+.status.wait { color:var(--amber); }
+
+.stats { display:flex; gap:10px; flex-wrap:wrap; margin-top:2px; }
+.stat { font-size:10.5px; color:var(--text2); background:var(--bg3);
+        border:1px solid var(--border); border-radius:4px; padding:2px 7px; }
+.arrow { position:absolute; right:18px; bottom:16px; color:var(--accent); font-size:16px; }
+
+/* ── when this tool is worth opening ──
+   Nine tools on one page and only two or three are useful at any given hour.
+   "check 08:00–09:30" is the answer to the question actually being asked here,
+   which is not "is it running" but "should I be looking at it now".
+
+   Sized and coloured to be read at a glance in daylight rather than hunted for.
+   The first version of this was small grey text under the description, which is
+   the same washed-out grey that was already unreadable outdoors — it was on the
+   page and might as well not have been. It now sits directly under the tool
+   name, ahead of the description, because it is the line that decides whether
+   the rest of the card is worth reading at all. */
+.check { font:700 12.5px/1 ui-monospace,Menlo,monospace; letter-spacing:.02em;
+  border-radius:5px; padding:6px 10px; margin:2px 0 4px; align-self:flex-start;
+  border:1px solid #4a5163; color:#c9d1e4; background:#20263a; }
+.check.now { color:#04220f; background:var(--green); border-color:var(--green); }
+.tool-card.asleep { opacity:.82; }
+
+/* The one-line answer, above the nine cards: which of them are live right now.
+   Without it the reader compares nine time ranges against a clock. */
+.now-bar { width:100%; max-width:1000px; margin:2px auto var(--s4); padding:var(--s3) var(--s4);
+  border-radius:12px; text-align:center; font-size:var(--f-md); line-height:1.6;
+  border:1px solid var(--line); background:var(--panel); color:var(--text2); }
+.now-bar.live { border-color:var(--green); background:#4ade8016; color:var(--text); }
+.now-bar b { color:var(--green); }
+.now-bar .nb-clock { font:700 12px ui-monospace,Menlo,monospace; color:var(--text3);
+  display:block; margin-bottom:4px; letter-spacing:.05em; }
+.now-bar .nb-next { color:var(--text2); }
+
+/* Group headings inside the card grid. Full width so the flex row breaks on
+   them, which is what turns a shuffled-looking list into a grouped one. */
+.group-head { width:100%; font-size:11px; font-weight:700; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--text3); margin:10px 0 -4px; padding-left:2px; }
+.group-head:first-child { margin-top:0; }
+
+/* ── THE THREE SHARED PANELS ──
+ *
+ * Shortlist, CANSLIM and the comparison were three centred blocks of prose
+ * running into each other with no edges, the explanation set larger than the
+ * data. They are cards now: a heading, the thing itself, and the reasoning
+ * folded behind a "why".
+ */
+.cmp-wrap { margin-top:var(--s5); width:100%; max-width:1000px; text-align:left;
+  background:var(--panel); border:1px solid var(--line); border-radius:14px;
+  padding:var(--s4); }
+.cmp-btn { font:600 var(--f-sm)/1 var(--ui); padding:11px 18px; border-radius:9px;
+  cursor:pointer; background:var(--accent); color:#04121f; border:none; min-height:38px; }
+.cmp-btn:hover { filter:brightness(1.08); }
+.cmp-btn:disabled { opacity:.5; cursor:default; }
+.cmp-sel { font:600 var(--f-sm)/1 var(--ui); padding:11px 12px; border-radius:9px;
+  margin-left:var(--s2); background:var(--panel2); color:var(--text);
+  border:1px solid var(--line2); cursor:pointer; min-height:38px; }
+.cmp-row { display:flex; flex-wrap:wrap; gap:var(--s2); align-items:center;
+  margin-top:var(--s3); }
+.pair-wrap { margin-top:var(--s5); }
+.pair-title { font-size:13px; font-weight:700; margin-bottom:4px; }
+/* Left-aligned and capped at a readable measure. Centred paragraphs are read
+   by hunting for the start of every line in a different place. */
+.cmp-hint { font-size:var(--f-xs); color:var(--text2); margin-top:var(--s2);
+  line-height:1.65; text-align:left; max-width:72ch; }
+.cmp-hint b { color:var(--text); font-weight:600; }
+/* Shown only when neither clipboard route worked. Monospace and wrapping, so a
+   long list is still something you can select all of on a phone. */
+.tv-fallback { width:100%; margin-top:10px; padding:10px; border-radius:6px;
+  background:var(--bg3); color:var(--text); border:1px solid var(--accent);
+  font:12px/1.6 ui-monospace,Menlo,monospace; resize:vertical; word-break:break-all; }
+/* The panel's name, and the count beside it — which is the part worth seeing
+   before deciding whether to read the rest. */
+.uni-title { font-size:var(--f-lg); font-weight:700; margin-bottom:var(--s1);
+  letter-spacing:-.01em; display:flex; align-items:baseline; gap:var(--s2);
+  flex-wrap:wrap; }
+/* THE DATA, left-aligned and bigger than the prose about it. It was 13px
+   chips centred under four lines of centred explanation — the one arrangement
+   that makes a list of tickers harder to scan than a paragraph. */
+.uni-grid { display:flex; flex-wrap:wrap; gap:var(--s2); justify-content:flex-start;
+  margin-top:var(--s3); }
+
+/* ── THE SHORTLIST ROW ──
+ *
+ * This is the thing the page is for, so it gets the room. It was a 30px pill
+ * with the ticker, a count and three tool ids pressed together — the same
+ * information, made hard to read and impossible to hit accurately.
+ *
+ * One row per name. The ticker is the biggest thing on it and it is the link
+ * to the card; the tools that picked it are their own links underneath,
+ * because their cards differ — same stock, different screeners, different
+ * score. Names more than one tool picked are marked, since independent
+ * agreement is the entire reason these nine lists are merged into one.
+ */
+.sl-list { display:flex; flex-direction:column; gap:var(--s2); margin-top:var(--s3); }
+.sl-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--s2) var(--s3);
+  background:var(--panel2); border:1px solid var(--line); border-left:3px solid var(--line2);
+  border-radius:10px; padding:var(--s3) var(--s4); }
+.sl-row.agreed { border-left-color:var(--amber); background:#fbbf240d; }
+.sl-tkr { font:700 var(--f-lg)/1 var(--mono); letter-spacing:.02em; color:var(--text);
+  text-decoration:none; }
+.sl-tkr:hover { color:var(--accent); }
+.sl-badge { font-size:var(--f-xs); font-weight:700; color:#1c1403; background:var(--amber);
+  border-radius:99px; padding:3px 9px; }
+.sl-tv { margin-left:auto; font:600 var(--f-xs)/1 var(--ui); text-decoration:none;
+  color:var(--text2); background:var(--panel3); border:1px solid var(--line2);
+  border-radius:7px; padding:7px 10px; white-space:nowrap; }
+.sl-tv:hover { color:var(--accent); border-color:var(--accent); }
+.sl-tools { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.sl-lbl { font-size:var(--f-xs); color:var(--text3); margin-right:2px; }
+.sl-tool { font:700 var(--f-xs)/1 var(--mono); text-decoration:none; color:var(--text2);
+  background:var(--panel); border:1px solid var(--line2); border-radius:6px; padding:5px 9px; }
+.sl-tool:hover { color:var(--accent); border-color:var(--accent); }
+.sl-tool.off { opacity:.5; }
+
+/* ── THE SHELF ──
+ * The two lists that are not about today's tape. Doors, not panels: CANSLIM
+ * turns over on the earnings calendar and the comparison is a month-end
+ * question, and neither belongs in the same scroll as "what is shortlisted
+ * right now". */
+.shelf { display:flex; flex-wrap:wrap; gap:var(--s3); width:100%; max-width:1000px;
+  margin-top:var(--s4); }
+.shelf-card { flex:1 1 300px; background:var(--panel); border:1px solid var(--line);
+  border-radius:14px; padding:var(--s4); text-decoration:none; color:inherit;
+  display:flex; flex-direction:column; gap:var(--s2);
+  transition:border-color .15s, transform .15s; }
+.shelf-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+.shelf-name { font-size:var(--f-lg); font-weight:700; letter-spacing:-.01em;
+  display:flex; align-items:baseline; gap:var(--s2); }
+.shelf-n { font:400 var(--f-sm)/1 var(--ui); color:var(--text2); }
+.shelf-n b { color:var(--amber); font-weight:600; }
+.shelf-desc { font-size:var(--f-xs); color:var(--text2); line-height:1.6; }
+.shelf-go { font-size:var(--f-xs); font-weight:600; color:var(--accent); margin-top:auto; }
+.uni-chip { display:flex; align-items:center; gap:var(--s2); background:var(--panel2);
+  border:1px solid var(--line2); border-radius:9px; padding:9px 12px; }
+.uni-chip.multi { border-color:#eab30877; background:#eab30814; }
+/* The CANSLIM panel is a <details>. Its headline has to look like the other
+   panel titles rather than like a browser disclosure widget, so the native
+   marker is replaced with one that sits on the same baseline as the text. */
+.cs-summary { cursor:pointer; list-style:none; display:flex; align-items:baseline;
+  gap:var(--s2); flex-wrap:wrap; min-height:34px; }
+.cs-summary::-webkit-details-marker { display:none; }
+.cs-summary::before { content:'▸'; color:#c084fc; font-size:.8em; transition:transform .15s; }
+#cs-wrap[open] .cs-summary::before { transform:rotate(90deg); }
+/* The count is the reason to open it, so it is legible while shut. Amber only
+   when something is about to drop off — that is the change that turns a badge
+   off on every other tool's cards, which reads as a bug if it is a surprise. */
+.cs-count { font-size:var(--f-sm); font-weight:400; color:var(--text2); }
+.cs-count b { color:#facc15; font-weight:600; }
+
+/* Same purple the CANSLIM badge uses on a card, so the two read as one thing.
+   Scoped to the CANSLIM panel: an unscoped .uni-chip rule here would sit after
+   .uni-chip.multi and recolour the shortlist's chips as a side effect. The
+   amber variant marks a name about to expire — its badge is about to turn off
+   everywhere else. */
+#cs-out .uni-chip { border-color:#c084fc55; background:#c084fc12; }
+#cs-out .uni-chip.cs-soon { border-color:#eab30877; background:#eab30812; }
+/* The days-left pill inherits the shortlist's amber, which on a name with 90
+   days to run reads as a warning about nothing. Neutral by default; amber only
+   where it means something. */
+#cs-out .uni-n { background:#c084fc1c; color:#d8b4fe; border-color:#c084fc44; }
+/* Out to TradingView. Small and quiet on both lists: on a shortlist chip the
+   ticker already opens the card that explains why the name is there, so this
+   sits beside it rather than replacing it. */
+.tv-link { font-size:10px; font-weight:700; letter-spacing:.04em; text-decoration:none;
+  color:var(--text3); border:1px solid var(--border); border-radius:4px;
+  padding:2px 6px; white-space:nowrap; }
+.tv-link:hover { color:var(--accent); border-color:var(--accent); }
+#cs-out .cs-soon .uni-n { background:#eab30822; color:#facc15; border-color:#eab30866; }
+/* The ticker is the thing being read. It was the same size as the sentence
+   above it saying that tickers would appear below. */
+.uni-tkr { font-weight:700; font-size:var(--f-md); letter-spacing:.02em; }
+.uni-by { font-size:10.5px; color:var(--text3); font-family:ui-monospace,Menlo,monospace; }
+.uni-n { font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px;
+  background:#eab30822; color:#facc15; border:1px solid #eab30844; }
+.uni-link { color:inherit; text-decoration:none; border-bottom:1px dotted var(--text3); }
+.uni-link:hover { color:var(--accent); border-bottom-color:var(--accent); }
+.uni-empty { font-size:12px; color:var(--text3); margin-top:14px; }
+.cmp-scroll { overflow-x:auto; margin-top:18px; }
+.cmp-tbl { width:100%; border-collapse:collapse; font-size:12px; min-width:600px; text-align:right; }
+.cmp-tbl th { font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--text3);
+  padding:7px 8px; border-bottom:1px solid var(--border); white-space:nowrap; font-weight:600; }
+.cmp-tbl td { padding:8px; border-bottom:1px solid #1b1f2b; font-variant-numeric:tabular-nums;
+  white-space:nowrap; }
+.cmp-tbl th:first-child, .cmp-tbl td:first-child,
+.cmp-tbl th:nth-child(2), .cmp-tbl td:nth-child(2) { text-align:left; }
+.cmp-tool { color:var(--text3); font-size:11px; }
+.cmp-mark { background:#94a3b81a; }
+.cmp-mark td { border-top:1px solid #94a3b855; border-bottom:1px solid #94a3b855; font-weight:700; }
+.cmp-v { font-size:10px; font-weight:700; padding:2px 7px; border-radius:3px; }
+.cmp-beat { background:#22c55e22; color:#4ade80; border:1px solid #22c55e44; }
+.cmp-same { background:#eab30822; color:#facc15; border:1px solid #eab30844; }
+.cmp-lose { background:#ef444422; color:#f87171; border:1px solid #ef444444; }
+.cmp-none { background:#ffffff0d; color:var(--text3); border:1px solid var(--border); }
+.cmp-foot { font-size:11.5px; color:var(--text3); margin-top:12px; line-height:1.7; text-align:left;
+  max-width:80ch; margin-left:auto; margin-right:auto; }
+.note { margin-top:var(--s5); font-size:var(--f-xs); color:var(--text3);
+        text-align:center; max-width:60ch; line-height:1.7; }
+.version { margin-top:22px; font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
+@media (max-width:580px) {
+  body { padding:32px 14px; }
+  .title { font-size:22px; }
+  .tool-card { width:100%; max-width:340px; }
+}
+
+/* ── one full card per member ──
+ *
+ * On the suite page this list was thirty chips reading "AAPL 41d 68d". Every
+ * fact was there and none of it was legible, and the two numbers that decide
+ * anything — how long it has survived, and when its badge turns off everywhere
+ * else — were a tooltip on a phone, which is to say invisible.
+ *
+ * A card per name. Held and expiring are the headline figures because they are
+ * the two questions; the rest is beneath them at label size.
+ */
+.cs-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr));
+  gap:var(--s3); width:100%; max-width:1000px; }
+.cs-card { background:var(--panel); border:1px solid var(--line);
+  border-left:3px solid var(--violet); border-radius:14px; padding:var(--s4);
+  display:flex; flex-direction:column; gap:var(--s3); }
+/* Amber means the badge is about to turn off on every tool's cards — a change
+   nobody was warned about reads as a bug. Nothing else on this page is amber. */
+.cs-card.soon { border-left-color:var(--amber); background:#fbbf240a; }
+.cs-head { display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap; }
+.cs-tkr { font:700 var(--f-xl)/1 var(--mono); letter-spacing:.02em; color:var(--text);
+  text-decoration:none; }
+.cs-tkr:hover { color:var(--accent); }
+.cs-live { font-size:var(--f-xs); font-weight:700; padding:3px 9px; border-radius:99px;
+  background:#4ade8022; color:var(--green); border:1px solid #4ade8055; }
+.cs-live.stale { background:#ffffff0d; color:var(--text3); border-color:var(--line2); }
+/* The two numbers that answer the two questions, side by side and big. */
+.cs-nums { display:flex; gap:var(--s4); }
+.cs-num { display:flex; flex-direction:column; gap:2px; }
+.cs-v { font:700 var(--f-xl)/1 var(--mono); }
+.cs-v.warn { color:var(--amber); }
+.cs-k { font-size:var(--f-xs); color:var(--text3); }
+.cs-meta { font-size:var(--f-xs); color:var(--text2); line-height:1.6;
+  border-top:1px solid var(--line); padding-top:var(--s2); }
+.cs-acts { display:flex; gap:var(--s2); flex-wrap:wrap; margin-top:auto; }
+.cs-act { font:600 var(--f-xs)/1 var(--ui); text-decoration:none; color:var(--text2);
+  background:var(--panel2); border:1px solid var(--line2); border-radius:8px;
+  padding:9px 12px; }
+.cs-act:hover { color:var(--accent); border-color:var(--accent); }
+/* The count and what it counts, on one line. The hint carries a top margin and
+   a 72ch cap from the shared sheet, both of which broke the pair onto two rows
+   with the number stranded above the words. */
+.bar { display:flex; flex-wrap:wrap; gap:var(--s2); align-items:baseline;
+  width:100%; max-width:1000px; margin-bottom:var(--s4); }
+.bar .big { font:700 var(--f-xl)/1 var(--mono); }
+.bar .cmp-hint { margin-top:0; max-width:none; }
+</style>
+</head>
+<body>
+<a class="crumb" href="/screeners">&larr; Screener Suite</a>
+<div class="logo">CANSLIM</div>
+<div class="title">The growth list</div>
+<div class="subtitle">Who is a growth company, decided once a day on earnings and
+  sales rather than on what the tape did.</div>
+
+<div class="bar" id="cs-bar"></div>
+<div id="cs-grid" class="cs-grid"><div class="cmp-hint">Loading…</div></div>
+
+<div class="cmp-wrap" style="margin-top:var(--s5)">
+  <details class="why"><summary>how a name gets on and off this list</summary>
+    <div class="why-body">T8's Universe screener runs once a day (09:30–09:45 ET,
+      weekdays) and writes whoever clears all six criteria. A name stays for
+      <b>90 days from the last time it qualified</b>, so this list changes with the
+      earnings calendar and not with the market. Every tool tags its own cards from
+      it — <b>it is a label and never a filter</b>, so nothing is excluded for being
+      absent.<br><br><b>Held</b> is how long a name has been on the list since it
+      first qualified; months means it survived an earnings cycle. <b>Expiring</b>
+      counts from the last confirmation, so a long-held name can still be about to
+      drop off — and when it does, its badge turns off on every tool at once.</div>
+  </details>
+</div>
+<script>
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+const tvUrl = t => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t)}`;
+
+async function load() {
+  const grid = document.getElementById('cs-grid');
+  const bar = document.getElementById('cs-bar');
+  try {
+    const d = await (await fetch('/api/canslim')).json();
+    const rows = (d && d.members) || [];
+    if (!rows.length) {
+      bar.innerHTML = '<span class="big">0</span><span class="cmp-hint">on the list</span>';
+      grid.innerHTML = `<div class="cmp-hint">Nobody on the list. Either T8 has not run
+        its Universe screener yet today (09:30–09:45 ET, weekdays), or no stock
+        currently meets all six criteria.</div>`;
+      return;
+    }
+    const soon = rows.filter(r => r.expiresIn <= 14);
+    bar.innerHTML = `<span class="big">${rows.length}</span>`
+      + `<span class="cmp-hint">name${rows.length === 1 ? '' : 's'} on the list`
+      + (soon.length ? ` · <b>${soon.length} expiring within two weeks</b>` : '')
+      + (d.updatedAt ? ` · written ${Math.floor((Date.now() - d.updatedAt) / 60000)} min ago` : '')
+      + '</span>';
+    grid.innerHTML = rows.map(r => `
+      <div class="cs-card${r.expiresIn <= 14 ? ' soon' : ''}">
+        <div class="cs-head">
+          <a class="cs-tkr" href="${tvUrl(r.ticker)}" target="_blank" rel="noopener"
+             >${esc(r.ticker)}</a>
+          <span class="cs-live${r.live ? '' : ' stale'}"
+                title="${r.live ? 'Confirmed on the most recent run'
+                                : 'Not seen on the most recent run'}"
+            >${r.live ? 'confirmed today' : 'not seen today'}</span>
+        </div>
+        <div class="cs-nums">
+          <div class="cs-num"><span class="cs-v">${r.held}<span class="cs-k">d</span></span>
+            <span class="cs-k">held</span></div>
+          <div class="cs-num"><span class="cs-v${r.expiresIn <= 14 ? ' warn' : ''}"
+            >${r.expiresIn}<span class="cs-k">d</span></span>
+            <span class="cs-k">until it drops off</span></div>
+        </div>
+        <div class="cs-meta">Confirmed <b>${r.confirmations}&times;</b> ·
+          last qualified ${r.lastSeenDays === 0 ? 'today' : `${r.lastSeenDays} day(s) ago`}</div>
+        <div class="cs-acts">
+          <a class="cs-act" href="${tvUrl(r.ticker)}" target="_blank" rel="noopener">TradingView &nearr;</a>
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    grid.innerHTML = `<div class="cmp-hint">Could not read the CANSLIM list: ${esc(e.message)}</div>`;
+  }
+}
+load();
+</script>
+</body>
+</html>

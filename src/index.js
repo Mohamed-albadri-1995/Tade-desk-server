@@ -141,6 +141,21 @@ app.get('/screeners', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/screeners.html'));
 });
 
+/*
+ * Level 3 of the suite: the two shared lists that are not about today's tape.
+ *
+ * CANSLIM turns over on the earnings calendar and the comparison is a
+ * month-end question. Both were strips at the bottom of the suite page, under
+ * the thing you actually came for, in a space too small to render either
+ * properly. Each is a page now.
+ */
+app.get('/screeners/canslim', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/canslim.html'));
+});
+app.get('/screeners/compare', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/compare.html'));
+});
+
 // Scanner — serves scanner SPA for all /scanner/* paths
 app.get('/scanner', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
