@@ -30,10 +30,11 @@ const broker = require('../src/broker/signalstack');
 const HOOK_A = 'https://app.signalstack.com/hook/FAKEhookAAAAAAAAAAAAa';
 const HOOK_B = 'https://app.signalstack.com/hook/FAKEhookBBBBBBBBBBBBb';
 
+// One number each: what fraction of the standard account this one is.
 const TTP = { id: 'ttp', name: 'Trade The Pool', dialect: 'ttp', webhookUrl: HOOK_A,
-              scale: 0.5, buyingPower: 5000 };
+              ratio: 0.05, buyingPower: 5000 };
 const ALPACA = { id: 'alpaca', name: 'Alpaca', dialect: 'alpaca', webhookUrl: HOOK_B,
-                 scale: 2, buyingPower: 20000 };
+                 ratio: 0.2, buyingPower: 20000 };
 
 const ids = (list) => list.map(c => c.destinationId);
 const setup = (extra) => broker.save({ enabled: true, destinations: extra });
@@ -155,8 +156,18 @@ describe('saving an account', () => {
     expect(() => setup([{ ...TTP, mode: 'live' }])).toThrow(/mode must be one of/);
   });
 
-  test('a size beyond 10x the standard is a typo, not a multiplier', () => {
-    expect(() => setup([{ ...TTP, scale: 20 }])).toThrow(/between 0.01x and 10x/);
+  test('a ratio outside its bounds is refused at both ends', () => {
+    // Above 10 is a typo that would be a ten-fold position before anything
+    // downstream questioned it. Below 0.0001 every trade floors to zero
+    // shares — an account configured to do nothing while looking configured.
+    expect(() => setup([{ ...TTP, ratio: 20 }])).toThrow(/between 0.0001 and 10/);
+    expect(() => setup([{ ...TTP, ratio: 0 }])).toThrow(/between 0.0001 and 10/);
+  });
+
+  test('a ratio small enough for a real prop account is fine', () => {
+    // $5,000 against a $100,000 standard. The old bound started at 0.25.
+    setup([{ ...TTP, ratio: 0.05 }]);
+    expect(broker.destinations()[0].ratio).toBe(0.05);
   });
 
   test('the setup list is deduplicated — the same trade twice is twice the risk', () => {
@@ -217,7 +228,7 @@ describe('a single hook configured before accounts existed', () => {
     expect(rest).toEqual([]);
     expect(d.mode).toBe('manual');
     expect(d.setups).toEqual([]);
-    expect(d.scale).toBeNull();          // it IS the standard account
+    expect(d.ratio).toBeNull();          // it IS the standard account
   });
 
   test('and it can still be armed', () => {

@@ -325,7 +325,12 @@ app.post('/api/broker/preview', express.json(), (req, res) => {
      * a $5,000 account and a $20,000 one; a preview that showed the desk's
      * number and then sent a different one would be the worst kind of preview.
      */
-    const size = risk.sizeFor({ entry, riskPerShare }, risk.forAccount(cfg.cfg));
+    /*
+     * SIZED AT THE STANDARD, THEN SCALED — the same two steps, in the same
+     * order, as a setup firing at 09:36. A preview that derived the number any
+     * other way would be a preview of a different order.
+     */
+    const size = risk.scaleTo(risk.sizeFor({ entry, riskPerShare }), cfg.cfg);
     const preview = broker.previewOrder({
       symbol: String(b.symbol || '').toUpperCase(),
       signal: side,
@@ -387,13 +392,13 @@ app.post('/api/broker/order', express.json(), async (req, res) => {
     // Resolved before sizing, because the account decides the share count.
     const dest = destinationFor(b);
     if (dest.error) return res.status(400).json({ ok: false, error: dest.error });
-    const size = risk.sizeFor({ entry, riskPerShare: Math.abs(entry - stop) },
-                              risk.forAccount(dest.cfg));
+    const size = risk.scaleTo(
+      risk.sizeFor({ entry, riskPerShare: Math.abs(entry - stop) }), dest.cfg);
     if (!size || !(size.shares > 0)) {
       return res.status(400).json({
         ok: false,
         error: (size && size.reason)
-          || `set an account size and risk per trade for ${dest.cfg.destinationName} first`,
+          || 'set the standard account size and risk per trade first',
       });
     }
     /*

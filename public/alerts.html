@@ -259,6 +259,13 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
   color:var(--text); border:1px solid var(--line2); border-radius:7px;
   cursor:pointer; min-height:30px }
 .h-send:hover { border-color:var(--accent); color:var(--accent) }
+/* An order already worked out and waiting for a thumb. Louder than "review
+   order…", because it is one tap from a real position and the share count on
+   it is the whole decision. */
+.h-ready { font:700 var(--f-xs)/1 var(--ui); padding:9px 13px; background:var(--accent);
+  color:#241a02; border:1px solid var(--accent); border-radius:8px; cursor:pointer;
+  min-height:32px }
+.h-ready:hover { filter:brightness(1.08) }
 /* The order review FLOATS.
  *
  * It used to sit inside the history pane, which was fine while the only place
@@ -284,6 +291,19 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
 .h-detail { flex-basis:100%; font-size:11.5px; color:var(--text2); line-height:1.5;
   overflow-wrap:anywhere; }
 
+/* THE PIPELINE, at the top of the settings tab.
+   The tab was a pile of controls with no order to them, so you could not tell
+   which setting was upstream of the number you were unhappy with. */
+.flow { display:flex; flex-direction:column; gap:var(--s2); background:var(--panel);
+  border:1px solid var(--line); border-radius:12px; padding:var(--s4);
+  margin-bottom:var(--s4); }
+.flow-step { font-size:var(--f-xs); color:var(--text2); line-height:1.6;
+  padding-left:26px; position:relative; }
+.flow-step b:first-child { position:absolute; left:0; top:0; width:19px; height:19px;
+  border-radius:50%; background:var(--panel3); color:var(--accent);
+  font-size:10.5px; display:flex; align-items:center; justify-content:center; }
+.flow-step b { color:var(--text); font-weight:600; }
+
 /* ── the accounts orders can go to ── */
 .dest { background:var(--bg2); border:1px solid var(--border); border-radius:8px;
   padding:11px 12px; margin-bottom:8px; display:flex; flex-wrap:wrap; gap:9px;
@@ -294,9 +314,18 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
 .dest input, .dest select { background:var(--bg3); border:1px solid var(--border);
   border-radius:6px; padding:6px 8px; color:var(--text); font-family:inherit;
   font-size:12.5px; width:120px }
-.dest .d-head { flex-basis:100%; display:flex; gap:8px; align-items:center;
-  font-size:12.5px; font-weight:600 }
-.dest .d-id { font-weight:400; font-size:11px; color:var(--text3) }
+/* Name on its own line, buttons on the next.
+   They were one flex row: a four-word account name beside three buttons at
+   390px squeezed the name into a one-word-per-line column and pushed Remove
+   off the edge of the card. */
+.dest .d-head { flex-basis:100%; display:flex; flex-wrap:wrap; gap:var(--s2);
+  align-items:baseline; font-size:var(--f-md); font-weight:700 }
+.dest .d-head > span:first-child { flex:1 1 100%; }
+.dest .d-id { flex:1 1 100%; font-weight:400; font-size:var(--f-xs);
+  color:var(--text3); font-family:var(--mono) }
+/* The row of buttons wraps as a group rather than each finding its own line. */
+.dest .d-acts { flex:1 1 100%; display:flex; flex-wrap:wrap; gap:var(--s2); }
+.dest .d-acts .btn { flex:1 1 auto; }
 .dest .d-foot { flex-basis:100%; font-size:11px; color:var(--text3); line-height:1.5 }
 /* The hook is the credential. Shown masked, never in full, and blank means
    "leave the stored one alone" rather than "delete it". */
@@ -471,6 +500,22 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
 </div><!-- /today -->
 
 <div class="pane" data-t="settings" hidden>
+<!-- THE PIPELINE, stated once at the top of the tab.
+     Three numbered sections follow it in the same order. The complaint this
+     answers is that the tab was a pile of controls with no order to them: you
+     could not tell what happened before what, so you could not tell which
+     setting was upstream of the number you were unhappy with. -->
+<div class="flow">
+  <div class="flow-step"><b>1</b> A setup fires and the <b>standard account</b>
+    decides the trade — entry, stop, target and share count, once.</div>
+  <div class="flow-step"><b>2</b> The <b>algo switch</b> decides whether anything
+    is sent at all. Off means the alert and nothing else.</div>
+  <div class="flow-step"><b>3</b> Each <b>broker account</b> takes its fraction of
+    that share count and the JSON its broker expects.</div>
+  <div class="flow-step"><b>4</b> An account on <b>auto</b> sends it. One on
+    <b>by hand</b> keeps it ready on the Today tab, one tap away.</div>
+</div>
+
 <!-- ── 1 · THE STANDARD ACCOUNT ──────────────────────────────────────────
      A REFERENCE. Nothing is ever traded against it.
 
@@ -1696,11 +1741,12 @@ function paintDests(list) {
     <div class="d-head">
       <span>${esc(d.name || d.id)}</span>
       <span class="d-id">${esc(d.id)} · ${esc(d.dialect)}</span>
-      <span style="flex:1"></span>
-      <button class="btn" onclick="toggleDest('${esc(d.id)}')">${
-        d.enabled === false ? 'Switch on' : 'Switch off'}</button>
-      <button class="btn" onclick="testBroker('${esc(d.id)}')">Test 1 share</button>
-      <button class="btn" onclick="removeDest('${esc(d.id)}')">Remove</button>
+      <span class="d-acts">
+        <button class="btn" onclick="toggleDest('${esc(d.id)}')">${
+          d.enabled === false ? 'Switch on' : 'Switch off'}</button>
+        <button class="btn" onclick="testBroker('${esc(d.id)}')">Test 1 share</button>
+        <button class="btn" onclick="removeDest('${esc(d.id)}')">Remove</button>
+      </span>
     </div>
 
     <label>Name
@@ -1710,11 +1756,13 @@ function paintDests(list) {
          risk together is what keeps the PERCENTAGE risked identical across
          accounts — carrying the dollar figure across instead is invisible,
          because it is the same number nobody looks at twice. -->
-    <label title="This account's capital as a multiple of the standard account above. 2x doubles both the account size and the risk per trade, so the percentage risked stays the same.">Size
-      <select class="d-scale">${
-        [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4].map(x => `<option value="${x}"${
-          Number(d.scale || 1) === x ? ' selected' : ''}>${x}x the standard</option>`).join('')}
-      </select>
+    <!-- THE ONE NUMBER THAT IS THIS ACCOUNT'S MONEY MANAGEMENT.
+         A $5,000 account against a $100,000 standard is 0.05. The signal is
+         sized once against the standard; this account takes that fraction of
+         the share count, floored. Nothing else about the trade changes. -->
+    <label title="What fraction of the standard account this one is. A $5,000 account against a $100,000 standard is 0.05. The share count is that fraction of the standard's, floored to whole shares.">Size vs standard
+      <input class="d-ratio" type="number" min="0.0001" max="10" step="any"
+        value="${d.ratio || ''}" placeholder="1" inputmode="decimal">
     </label>
     <label title="What this account can spend today. A running tally this side keeps — SignalStack cannot be asked for a balance.">Buying power $
       <input class="d-power" type="number" min="0" step="100"
@@ -1815,22 +1863,26 @@ async function toggleDestSetup(destId, setupId) {
  * head against a stop of $1.37. "0.5x" is the setting; "$5,000 risking $50" is
  * what it means, and the second one is what tells you the setting is wrong.
  */
+/*
+ * What the ratio MEANS, in money and in shares.
+ *
+ * "0.05" is the setting. "$5,000 of the $100,000 standard — a 240-share signal
+ * becomes 12" is what tells you the setting is wrong, and it is the second one
+ * a person can check.
+ */
 function sizeNote(d) {
   const r = RISK || {};
-  const scale = Number(d.scale) > 0 ? Number(d.scale) : 1;
-  const acct = Number(d.accountSize) > 0 ? Number(d.accountSize)
-    : (r.accountSize ? Math.round(r.accountSize * scale * 100) / 100 : null);
-  const risk = Number(d.riskPerTrade) > 0 ? Number(d.riskPerTrade)
-    : (r.riskPerTrade ? Math.round(r.riskPerTrade * scale * 100) / 100 : null);
-  const mpp = Number(d.maxPositionPct) > 0 ? Number(d.maxPositionPct) : r.maxPositionPct;
-  if (!acct || !risk) {
-    return 'the standard account has no size or risk set — this account will '
-      + 'place nothing until it does';
+  const ratio = Number(d.ratio) > 0 ? Number(d.ratio) : 1;
+  if (!r.accountSize || !r.riskPerTrade) {
+    return 'the standard account has no size or risk set — nothing can be sized '
+      + 'until it does';
   }
-  const slots = mpp ? Math.floor(100 / mpp) : null;
-  return `$${acct.toLocaleString()} · risks $${risk} a trade`
-    + ` (${(risk / acct * 100).toFixed(2)}%)`
-    + (mpp && mpp < 100 ? ` · ${mpp}% a position, ${slots} at once` : '');
+  const acct = Math.round(r.accountSize * ratio);
+  const risk = Math.round(r.riskPerTrade * ratio * 100) / 100;
+  // A worked example beats a percentage. 240 is a realistic standard count.
+  const eg = Math.floor(240 * ratio);
+  return `${ratio}× the standard — like a $${acct.toLocaleString()} account, `
+    + `risking $${risk} a trade. A 240-share signal becomes ${eg}.`;
 }
 
 /*
@@ -1856,7 +1908,7 @@ function readDests() {
       name: f('d-name') || el.getAttribute('data-id'),
     };
     for (const [cls, key] of [['d-power', 'buyingPower'],
-                              ['d-maxtrades', 'maxTradesPerDay'], ['d-scale', 'scale']]) {
+                              ['d-maxtrades', 'maxTradesPerDay'], ['d-ratio', 'ratio']]) {
       const v = f(cls);
       d[key] = v === '' ? null : v;
     }
@@ -1964,10 +2016,9 @@ function addDest() {
     <label>Name
       <input id="nd-name" placeholder="Alpaca paper">
     </label>
-    <label title="This account's capital as a multiple of the standard account above.">Size
-      <select id="nd-scale">${[0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4].map(
-        x => `<option value="${x}"${x === 1 ? ' selected' : ''}>${x}x the standard</option>`).join('')}
-      </select>
+    <label title="What fraction of the standard account this one is. A $5,000 account against a $100,000 standard is 0.05.">Size vs standard
+      <input id="nd-ratio" type="number" min="0.0001" max="10" step="any"
+        placeholder="0.05" inputmode="decimal" required>
     </label>
     <label>Buying power $
       <input id="nd-power" type="number" min="0" step="100" placeholder="e.g. 20000" required>
@@ -2009,7 +2060,7 @@ async function createDest(ev) {
   await saveDests([...readDests(), {
     id, dialect: v('nd-dialect'), name: v('nd-name') || id,
     webhookUrl: v('nd-hook'), enabled: true, mode: v('nd-mode') || 'alert',
-    scale: v('nd-scale') || null, buyingPower: v('nd-power') || null,
+    ratio: v('nd-ratio') || null, buyingPower: v('nd-power') || null,
     maxTradesPerDay: v('nd-maxtrades') || null, setups: [],
   }], id);
   return false;
@@ -2479,6 +2530,24 @@ function histNumbers(f) {
    *
    * Preview first, always. Nothing is sent by one tap.
    */
+  /*
+   * ONE BUTTON PER ACCOUNT THAT IS WAITING.
+   *
+   * An account on "by hand" already has its share count — worked out at the
+   * same instant and from the same standard as the automatic ones, and carried
+   * on the alert. So this is a send, not a decision: the number is on the
+   * button, and pressing it opens the review already pointed at that account.
+   */
+  const ready = (t.ready || []).map(r => r.shares > 0
+    ? `<button class="h-ready" onclick='reviewOrder(${JSON.stringify({
+        symbol: f.ticker, side: (t.signal || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG',
+        entry: t.entry, stop: t.stop, target: t.target || null,
+        setupId: f.setupId || f.ruleId || 'manual',
+      }).replace(/'/g, '&apos;')}, "${esc(r.destination)}")'
+      >Send ${r.shares} to ${esc(r.broker || r.destination)}</button>`
+    : `<span class="h-n"><b>${esc(r.broker || r.destination)}</b> ${esc(r.reason || 'no size')}</span>`
+  ).join('');
+
   const send = (t.entry != null && t.stop != null && f.ticker && !t.order)
     ? `<button class="h-send" onclick='reviewOrder(${JSON.stringify({
         symbol: f.ticker, side: (t.signal || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG',
@@ -2489,8 +2558,8 @@ function histNumbers(f) {
         setupId: f.setupId || f.ruleId || 'manual',
       }).replace(/'/g, '&apos;')})'>review order…</button>`
     : '';
-  return (parts.length || send)
-    ? `<div class="h-nums">${parts.join('')}${send}</div>` : '';
+  return (parts.length || send || ready)
+    ? `<div class="h-nums">${parts.join('')}${ready}${ready ? '' : send}</div>` : '';
 }
 
 

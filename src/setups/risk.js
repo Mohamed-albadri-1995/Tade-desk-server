@@ -78,51 +78,83 @@ function save(patch) {
 }
 
 /*
- * THE STANDARD ACCOUNT IS A REFERENCE. NOTHING TRADES AGAINST IT.
+ * THE STANDARD ACCOUNT IS THE ONLY THING SIZING IS DONE AGAINST.
  *
- * `settings()` above describes one hypothetical account: a size, a risk per
+ * `settings()` above describes one hypothetical account — a size, a risk per
  * trade, a position cap. No order is ever placed against it. It exists so that
- * every real account can be described in relation to it — "twice the standard",
- * "half of it" — which is how the relationship is actually held in mind, and
- * which means moving the reference moves every account with it instead of
- * leaving five numbers to be retyped one at a time.
+ * a signal can be worked out ONCE, completely, before anything knows which
+ * broker it is going to.
  *
- * An account resolves in this order, most specific first:
+ * The whole pipeline, in order:
  *
- *   its own accountSize / riskPerTrade / maxPositionPct   an account that is
- *                                                         not a clean multiple
- *   scale x the standard                                  the normal case
- *   the standard itself                                   scale absent
+ *   1  a setup fires and produces a signal
+ *   2  entry, STOP, TARGET and SHARES are computed against the standard
+ *   3  the algo master switch decides whether anything is sent at all
+ *   4  each account scales the SHARE COUNT by its own ratio, and picks the
+ *      JSON shape its broker expects
+ *   5  the account's own mode decides send-now or hold-ready
  *
- * Scale multiplies the size AND the risk together, so the PERCENTAGE risked is
- * identical in a $5,000 account and a $20,000 one. That is the property that
- * makes two accounts one strategy rather than two — and getting it wrong by
- * carrying the dollar figure across is invisible, because it is the same
- * number nobody would look at twice.
+ * Step 2 is finished before step 4 begins, and that is the point. The stop and
+ * the target are properties of the TRADE — where the setup says it is wrong,
+ * and where it says it is done. They do not change because the money came out
+ * of a different account. Only the number of shares does.
  *
- * The position cap is NOT scaled: it is already a percentage, so 25% of a
- * double-sized account is double the money by construction.
+ * An account says what fraction of the standard it is — a $5,000 account
+ * against a $100,000 standard is 0.05 — and that one number is the whole of
+ * its money management. Scaling the share count directly, rather than
+ * re-deriving it from a second account size and a second risk figure, means
+ * one calculation and one rounding for every account: the small account holds
+ * the same trade as the large one, exactly 5% of it.
  */
-function forAccount(dest, base = settings()) {
-  if (!dest) return base;
-  const num = (v) => {
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  };
-  const scale = num(dest.scale) || 1;
-  const accountSize = num(dest.accountSize)
-    || (base.accountSize ? Math.round(base.accountSize * scale * 100) / 100 : null);
-  const riskPerTrade = num(dest.riskPerTrade)
-    || (base.riskPerTrade ? Math.round(base.riskPerTrade * scale * 100) / 100 : null);
+
+/** What fraction of the standard account this one is. 1 when it says nothing. */
+function ratioOf(dest) {
+  if (!dest) return 1;
+  const n = Number(dest.ratio !== undefined && dest.ratio !== null ? dest.ratio : dest.scale);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+/**
+ * The standard trade, resized for one account.
+ *
+ * FLOORED, never rounded. 0.05 of 137 shares is 6.85, and a broker takes 6 —
+ * asking for 7 is asking for 2% more risk than the account agreed to, on every
+ * trade, in the direction that costs money.
+ *
+ * A ratio small enough to floor to zero is a real answer: the account is too
+ * small for this trade at this stop. It comes back as 0 shares with a reason,
+ * so the alert can say so rather than sending nothing and staying quiet.
+ */
+function scaleTo(standard, dest) {
+  if (!standard) return null;
+  const ratio = ratioOf(dest);
+  const name = (dest && (dest.destinationName || dest.name || dest.destinationId || dest.id)) || null;
+  if (!(standard.shares > 0)) return { ...standard, account: name, ratio };
+  const shares = Math.floor(standard.shares * ratio);
+  if (shares < 1) {
+    return {
+      shares: 0, ratio, account: name,
+      standardShares: standard.shares,
+      reason: `${standard.shares} shares at the standard × ${ratio} is `
+        + `${(standard.shares * ratio).toFixed(2)} — under one whole share`,
+    };
+  }
   return {
-    ...base,
-    scale,
-    accountSize,
-    riskPerTrade,
-    maxPositionPct: num(dest.maxPositionPct) || base.maxPositionPct,
-    // Which account these numbers describe, so an alert or a preview can say so
-    // rather than presenting one account's size as everyone's.
-    account: dest.destinationName || dest.name || dest.destinationId || dest.id || null,
+    shares,
+    ratio,
+    account: name,
+    // What the standard said, kept beside what this account gets. "12 of 240"
+    // is the only form in which a share count can be checked at a glance.
+    standardShares: standard.shares,
+    riskDollars: standard.riskDollars != null
+      ? Math.round(standard.riskDollars * (shares / standard.shares) * 100) / 100 : null,
+    positionValue: standard.positionValue != null
+      ? Math.round(standard.positionValue * (shares / standard.shares) * 100) / 100 : null,
+    // The rounding, stated whenever it cost something. Silence would make a
+    // 6.85 → 6 look like the arithmetic simply came out even.
+    floored: Math.abs(standard.shares * ratio - shares) > 1e-9
+      ? `${(standard.shares * ratio).toFixed(2)} floored to ${shares}` : null,
+    capped: standard.capped || null,
   };
 }
 
@@ -170,4 +202,4 @@ function sizeFor({ entry, riskPerShare }, cfg = settings()) {
   };
 }
 
-module.exports = { FILE, settings, save, sizeFor, forAccount };
+module.exports = { FILE, settings, save, sizeFor, scaleTo, ratioOf };

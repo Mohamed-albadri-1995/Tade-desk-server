@@ -690,8 +690,10 @@ describe('sizing when a setup sends to two accounts', () => {
   const risk = require('../src/setups/risk');
   // Described against the STANDARD account, which is what an account row on the
   // Settings tab actually stores: a quarter of it, and all of it.
-  const SMALL = { destinationId: 'ttp', destinationName: 'Trade The Pool', scale: 0.25 };
-  const BIG = { destinationId: 'alpaca', destinationName: 'Alpaca', scale: 1 };
+  // A quarter of the standard, and the whole of it. One number each: that is
+  // the entirety of an account's money management now.
+  const SMALL = { destinationId: 'ttp', destinationName: 'Trade The Pool', ratio: 0.25 };
+  const BIG = { destinationId: 'alpaca', destinationName: 'Alpaca', ratio: 1 };
   const SET = { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00',
                 brokers: ['ttp', 'alpaca'] };
 
@@ -725,7 +727,7 @@ describe('sizing when a setup sends to two accounts', () => {
     const spy = jest.spyOn(brokerMod, 'placeOrder')
       .mockResolvedValue({ sent: true, status: 'filled' });
     brokerMod.autoRoute.mockReturnValue({
-      cfgs: [{ ...SMALL, scale: null, accountSize: 100, riskPerTrade: 0.5 }, BIG], error: null });
+      cfgs: [{ ...SMALL, ratio: 0.001 }, BIG], error: null });
     const out = await runner.runSetup(SET, {});
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0][0].cfg.destinationId).toBe('alpaca');
@@ -740,7 +742,7 @@ describe('sizing when a setup sends to two accounts', () => {
       .toEqual([['ttp', 50], ['alpaca', 200]]);
   });
 
-  test('an account with no scale of its own is the standard account', async () => {
+  test('an account with no ratio of its own is the standard account', async () => {
     // The single-broker case, which must not have changed at all.
     const spy = jest.spyOn(brokerMod, 'placeOrder')
       .mockResolvedValue({ sent: true, status: 'filled' });
@@ -748,5 +750,78 @@ describe('sizing when a setup sends to two accounts', () => {
       cfgs: [{ destinationId: 'ttp', destinationName: 'TTP' }], error: null });
     await runner.runSetup(SET, {});
     expect(spy.mock.calls[0][0].quantity).toBe(200);
+  });
+});
+
+/*
+ * READY, BUT NOT SENT.
+ *
+ * An account on `manual` runs the setup and has agreed to receive orders — it
+ * just wants a thumb on the button. That is not a reason to make it do the
+ * arithmetic again ten minutes later, so the share count is worked out at the
+ * same instant and from the same standard as the automatic ones, and travels
+ * on the alert. Pressing send is then a send, not a re-derivation.
+ */
+describe('an account on manual gets a prepared order', () => {
+  const brokerMod = require('../src/broker/signalstack');
+  const risk = require('../src/setups/risk');
+  const AUTO = { destinationId: 'alpaca', destinationName: 'Alpaca', ratio: 1 };
+  const HAND = { destinationId: 'ttp', destinationName: 'Trade The Pool', ratio: 0.05 };
+  const SET = { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' };
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    // $100,000 risking $1,000. A $1 stop makes the standard trade 1,000 shares.
+    jest.spyOn(risk, 'settings').mockReturnValue({
+      accountSize: 100000, riskPerTrade: 1000, maxPositionPct: 100, updatedAt: 1 });
+    jest.spyOn(brokerMod, 'settings').mockReturnValue({ armed: true, enabled: true });
+    jest.spyOn(brokerMod, 'accountsFor').mockImplementation((id, mode) =>
+      mode === 'manual' ? [HAND] : [AUTO, HAND]);
+    jest.spyOn(brokerMod, 'autoRoute').mockReturnValue({ cfgs: [AUTO], error: null });
+    jest.spyOn(brokerMod, 'placeOrder').mockResolvedValue({ sent: true, status: 'filled' });
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+  });
+
+  test('the auto account is sent, the manual one is prepared', async () => {
+    const out = await runner.runSetup(SET, {});
+    const t = out.fires[0].setup;
+    expect(t.orders.map(o => o.destination)).toEqual(['alpaca']);
+    expect(t.ready.map(r => r.destination)).toEqual(['ttp']);
+  });
+
+  test('its share count is its own fraction of the standard, already worked out', async () => {
+    const out = await runner.runSetup(SET, {});
+    const [r] = out.fires[0].setup.ready;
+    // 1,000 at the standard; this account is 0.05 of it.
+    expect({ standard: r.standardShares, ratio: r.ratio, shares: r.shares })
+      .toEqual({ standard: 1000, ratio: 0.05, shares: 50 });
+  });
+
+  test('nothing is prepared while the box is unarmed', async () => {
+    // A one-tap order offered by an unarmed desk would be the master switch
+    // failing to be a master switch.
+    brokerMod.settings.mockReturnValue({ armed: false, enabled: true });
+    const out = await runner.runSetup(SET, {});
+    expect(out.fires[0].setup.ready).toEqual([]);
+  });
+
+  test('an account too small for one share says so instead of offering a button', async () => {
+    brokerMod.accountsFor.mockImplementation((id, mode) =>
+      mode === 'manual' ? [{ ...HAND, ratio: 0.0004 }] : [AUTO]);
+    const out = await runner.runSetup(SET, {});
+    const [r] = out.fires[0].setup.ready;
+    expect(r.shares).toBe(0);
+    expect(r.reason).toMatch(/under one whole share/);
+  });
+
+  test('a rule-exit strategy prepares nothing — it cannot be ordered at all', async () => {
+    const out = await runner.runSetup({ ...SET,
+      readiness: { ok: true, orderOk: false, orderBlocking: ['exits on a rule'],
+                   blocking: [], warnings: [] } }, {});
+    expect(out.fires[0].setup.ready).toEqual([]);
   });
 });

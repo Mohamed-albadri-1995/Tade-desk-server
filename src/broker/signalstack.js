@@ -160,7 +160,16 @@ function destinations(s = read()) {
        * The absolute fields override the scaled figure when an account is not
        * a clean multiple of anything. Absent everywhere means the standard's.
        */
-      scale: num(d.scale),
+      /*
+       * WHAT FRACTION OF THE STANDARD ACCOUNT THIS ONE IS.
+       *
+       * A $5,000 account against a $100,000 standard is 0.05. That single
+       * number is the whole of this account's money management: the signal is
+       * sized once against the standard, and every account takes its own
+       * fraction of that share count. `scale` is the old name, read so a
+       * config written before this still means what it meant.
+       */
+      ratio: num(d.ratio) || num(d.scale),
       accountSize: num(d.accountSize),
       riskPerTrade: num(d.riskPerTrade),
       maxPositionPct: num(d.maxPositionPct),
@@ -198,7 +207,7 @@ function destinations(s = read()) {
     maxTradesPerDay: num(s.maxTradesPerDay),
     // Nothing of its own: the single account IS the standard, which is what
     // data/risk.json has always described.
-    scale: null,
+    ratio: null,
     accountSize: null,
     riskPerTrade: null,
     maxPositionPct: null,
@@ -243,8 +252,8 @@ function destinationCfg(id, s = read()) {
     buyingPower: d.buyingPower,
     maxOrderValue: d.maxOrderValue,
     maxTradesPerDay: d.maxTradesPerDay,
-    // Carried through so risk.forAccount(cfg) sizes against THIS account.
-    scale: d.scale,
+    // Carried through so risk.scaleTo() can take this account's fraction.
+    ratio: d.ratio,
     accountSize: d.accountSize,
     riskPerTrade: d.riskPerTrade,
     maxPositionPct: d.maxPositionPct,
@@ -527,15 +536,21 @@ function save(patch = {}) {
         }
         out[key] = url;
       }
-      if (d.scale !== undefined && d.scale !== '' && d.scale !== null) {
-        const n = Number(d.scale);
-        // 20x the standard is not a multiplier, it is a typo — and it would be
-        // a twenty-fold position before anything downstream questioned it.
-        if (!Number.isFinite(n) || n <= 0 || n > 10) {
-          throw new Error(`account "${id}": size must be between 0.01x and 10x the standard`);
+      const rawRatio = d.ratio !== undefined ? d.ratio : d.scale;
+      if (rawRatio !== undefined && rawRatio !== '' && rawRatio !== null) {
+        const n = Number(rawRatio);
+        /*
+         * Bounded on both sides. Above 10 is not a multiplier, it is a typo,
+         * and it would be a ten-fold position before anything downstream
+         * questioned it. Below 0.0001 every trade floors to zero shares, which
+         * is an account configured to do nothing while looking configured.
+         */
+        if (!Number.isFinite(n) || n < 0.0001 || n > 10) {
+          throw new Error(`account "${id}": size must be between 0.0001 and 10 `
+            + 'times the standard account');
         }
-        out.scale = n;
-      } else if (d.scale === undefined && was && was.scale) out.scale = was.scale;
+        out.ratio = n;
+      } else if (rawRatio === undefined && was && was.ratio) out.ratio = was.ratio;
       for (const key of ['buyingPower', 'maxOrderValue', 'maxTradesPerDay',
                          'accountSize', 'riskPerTrade', 'maxPositionPct']) {
         const v = d[key];

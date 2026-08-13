@@ -207,7 +207,7 @@ test('no account is configured through a prompt() box', () => {
   expect(script).toContain('Copy this into SignalStack');
 });
 
-test('an account is sized as a multiple of the standard, and says what it may do', () => {
+test('an account is one fraction of the standard, and says what it may do', () => {
   /*
    * Sizing every account off one balance is how a $5,000 account gets an order
    * meant for $20,000 — refused by the broker, at 09:36. And the mode is on the
@@ -217,8 +217,8 @@ test('an account is sized as a multiple of the standard, and says what it may do
    */
   const at = script.indexOf('function paintDests(');
   const body = script.slice(at, script.indexOf('async function toggleDestSetup', at));
-  for (const cls of ['d-scale', 'd-mode', 'd-setups']) expect(body).toContain(cls);
-  expect(script).toContain("['d-scale', 'scale']");
+  for (const cls of ['d-ratio', 'd-mode', 'd-setups']) expect(body).toContain(cls);
+  expect(script).toContain("['d-ratio', 'ratio']");
   expect(body).toContain('FULL AUTO');
 });
 
@@ -282,14 +282,31 @@ test('a mode is a real choice, and full auto is not the quiet one', () => {
   expect(html).toContain('.dest.md-auto');
 });
 
-test('an account shows what its multiplier MEANS in money', () => {
-  // "0.5x" is the setting; "$5,000 risking $50" is what tells you it is wrong.
-  // The arithmetic must mirror risk.forAccount or the row is a second opinion.
+test('an account shows what its ratio MEANS in money and in shares', () => {
+  /*
+   * "0.05" is the setting. "$5,000 of the $100,000 standard — a 240-share
+   * signal becomes 12" is what tells you the setting is wrong, and it is the
+   * one a person can actually check. The arithmetic must mirror risk.scaleTo
+   * or the row is a second opinion about the same number.
+   */
   const at = script.indexOf('function sizeNote(d)');
   const body = script.slice(at, script.indexOf('\n}\n', at));
-  expect(body).toContain('r.accountSize * scale');
-  expect(body).toContain('r.riskPerTrade * scale');
-  expect(body).toContain('risks $');
+  expect(body).toContain('r.accountSize * ratio');
+  expect(body).toContain('r.riskPerTrade * ratio');
+  expect(body).toContain('Math.floor(240 * ratio)');
+});
+
+test('the settings tab states the pipeline before the controls', () => {
+  // The tab was a pile of controls with no order to them, so you could not
+  // tell which setting was upstream of the number you were unhappy with.
+  const pane = markup.slice(markup.indexOf('<div class="pane" data-t="settings"'));
+  expect(pane.indexOf('class="flow"')).toBeLessThan(pane.indexOf('1 · Standard account'));
+  const flow = pane.slice(pane.indexOf('class="flow"'), pane.indexOf('</div>\n\n<!-- ── 1'));
+  expect([...flow.matchAll(/flow-step/g)]).toHaveLength(4);
+  // …in the order the code runs.
+  expect(flow.indexOf('standard account')).toBeLessThan(flow.indexOf('algo switch'));
+  expect(flow.indexOf('algo switch')).toBeLessThan(flow.indexOf('broker account'));
+  expect(flow.indexOf('broker account')).toBeLessThan(flow.indexOf('auto'));
 });
 
 test('a setup an account claims still shows when the catalogue does not list it', () => {

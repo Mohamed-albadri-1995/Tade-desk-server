@@ -334,25 +334,43 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
   // Does ANY account claim this setup? The difference between "you meant this
   // to trade and it did not" and "this desk alerts, as arranged".
   const listedSomewhere = broker.accountsFor(setup.id).length > 0;
+  /*
+   * READY, BUT NOT SENT.
+   *
+   * An account on `manual` runs this setup and has agreed to receive orders —
+   * it just wants a thumb on the button first. That is not a reason to make it
+   * do the arithmetic again ten minutes later: the share count is computed here,
+   * at the same instant and from the same standard as the automatic ones, and
+   * travels on the alert. Pressing send is then a send, not a re-derivation.
+   *
+   * Only when the box is armed. An unarmed desk offering a one-tap order would
+   * be the master switch failing to be a master switch.
+   */
+  const readyFor = (broker.settings().armed && orderable)
+    ? broker.accountsFor(setup.id, 'manual') : [];
   if (!dryRun && orderable && routing.cfgs.length) {
     for (const pick of out.picks) {
+      /*
+       * THE TRADE IS ALREADY DECIDED before this loop begins.
+       *
+       * Entry, stop, target and the share count were worked out once, against
+       * the standard account, at the top of this function. The stop is where
+       * the setup says the trade is wrong and the target is where it says the
+       * trade is done — neither changes because the money came out of a
+       * different account.
+       */
+      const standard = risk.sizeFor(
+        { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
       // One account at a time, and one pick at a time: each order is sized
       // against what the previous one actually committed in THAT account, and
       // firing them together would size every one against the full balance.
       for (const cfg of routing.cfgs) {
         /*
-         * SIZED FOR THIS ACCOUNT, not for the desk.
-         *
-         * The same trade is a different number of shares in a $5,000 prop
-         * account and a $20,000 Alpaca one. Sizing once and sending that count
-         * to both means one is over-ordered and refused while the other is
-         * barely used — and the number on the alert would belong to neither.
-         * An account that states nothing of its own falls back to the desk's,
-         * so a single broker behaves exactly as it always did.
+         * ALL AN ACCOUNT CHANGES IS THE SHARE COUNT — its own fraction of the
+         * standard, floored — and the shape of the JSON, which the dialect
+         * decides inside placeOrder. Nothing else about the trade moves.
          */
-        const size = risk.sizeFor(
-          { entry: pick.plan.entry, riskPerShare: pick.plan.risk },
-          risk.forAccount(cfg, riskCfg));
+        const size = risk.scaleTo(standard, cfg);
         if (!size || !(size.shares > 0)) {
           (orders[pick.ticker] = orders[pick.ticker] || []).push({
             sent: false, destination: cfg.destinationId, broker: cfg.destinationName,
@@ -460,6 +478,25 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
        */
       order: (orders[pick.ticker] || [])[0] || null,
       orders: orders[pick.ticker] || null,
+      /*
+       * The accounts that will send this only when told to, with the share
+       * count already worked out for each. The page turns these into one
+       * button apiece.
+       */
+      ready: readyFor.map(cfg => {
+        const sized = risk.scaleTo(risk.sizeFor(
+          { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg), cfg);
+        return {
+          destination: cfg.destinationId,
+          broker: cfg.destinationName,
+          ratio: sized ? sized.ratio : null,
+          shares: sized ? sized.shares : 0,
+          standardShares: sized ? sized.standardShares : null,
+          // Why it would send nothing, said now rather than on the tap.
+          reason: sized && sized.shares > 0 ? null
+            : ((sized && sized.reason) || 'no size'),
+        };
+      }),
       // Which minute the decision was actually taken on. Normally 09:59; when
       // the feed had not published it inside the deadline it is the last bar
       // that existed, and that changes both the close and the VWAP slightly.
