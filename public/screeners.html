@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Screener Suite · Trade Desk</title>
+<link rel="stylesheet" href="/desk.css">
+<script src="/desk.js"></script>
 <style>
 /* ── the design tokens, the same set the alerts page uses ───────────────
  *
@@ -22,25 +24,7 @@
  * list, matching the badge on every tool's cards. Amber is about to expire.
  * Everything else is grey structure.
  */
-:root {
-  --bg:#0a0c11; --panel:#141822; --panel2:#1c212d; --panel3:#242a38;
-  --line:#272e3d; --line2:#39415a;
-  --bg2:var(--panel); --bg3:var(--panel2); --border:var(--line);
-  --text:#e9edf6; --text2:#9ba4ba; --text3:#6b748c; --dim:var(--text3);
-  --accent:#5aa7ff; --green:#4ade80; --red:#f87171; --amber:#fbbf24; --violet:#c084fc;
-  --f-xs:11.5px; --f-sm:13px; --f-md:14.5px; --f-lg:17px; --f-xl:21px;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --ui:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
-  --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px;
-}
-* { box-sizing:border-box; }
-body {
-  margin:0; min-height:100vh; background:var(--bg); color:var(--text);
-  font-family:var(--ui); font-size:var(--f-sm); line-height:1.5;
-  font-variant-numeric:tabular-nums; -webkit-text-size-adjust:100%;
-  display:flex; flex-direction:column; align-items:center;
-  padding:32px 16px 56px;
-}
+
 /* Tickers, counts, clocks and tables stay monospace — they are compared. */
 .uni-tkr, .uni-by, .uni-n, .check, .card-port, .nb-clock,
 .cmp-tbl, .tv-fallback, .sc-tag { font-family:var(--mono); }
@@ -48,16 +32,6 @@ body {
 /* ── the why, folded away ──
  * Same pattern as the alerts page. The reasoning is worth keeping; printed at
  * the same weight as the data it is a wall, and a wall does not get read. */
-details.why { margin:var(--s2) 0 0; text-align:left; }
-details.why > summary { list-style:none; cursor:pointer; display:inline-flex;
-  align-items:center; gap:5px; font-size:var(--f-xs); color:var(--text3);
-  border:1px solid var(--line); border-radius:99px; padding:3px 11px; }
-details.why > summary::-webkit-details-marker { display:none; }
-details.why > summary::before { content:'?'; font-weight:700; color:var(--accent); }
-details.why > summary:hover { color:var(--text2); border-color:var(--line2); }
-details.why[open] > summary { margin-bottom:var(--s2); }
-details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1.65;
-  border-left:2px solid var(--line); padding-left:10px; }
 .crumb { align-self:flex-start; font-size:12px; color:var(--text2); text-decoration:none;
   padding:6px 10px; margin:-34px 0 20px -8px; border-radius:6px; }
 .crumb:hover { color:var(--accent); background:var(--bg2); }
@@ -372,6 +346,9 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
      itself. The way back has to be on the page: a phone browser's back button
      is not where a person looks for it. -->
 <a class="crumb" href="/">&larr; Trade Desk</a>
+<button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
+        style="position:absolute;top:14px;right:14px"
+        title="high contrast, for reading the screen outdoors">☀</button>
 <div class="logo">SCREENER SUITE</div>
 <div class="title">Which screener?</div>
 
@@ -408,12 +385,15 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
         <b>Download</b> and use Watchlist → ⋮ → <b>Import list…</b> — TradingView has no
         public way to write a watchlist from outside, so the import is the whole route in.</div>
     </details>
-    <details class="why"><summary>how this list is built</summary>
-      <div class="why-body">Anything shortlisted on any tool appears here, by design.
-        Names picked by more than one tool sort to the top: independent agreement is a
-        different proposition from one list's opinion.</div>
-    </details>
   </div>
+  <!-- Outside #uni-tv, which is hidden until there is something to export.
+       "How is this list built" is a question you can have on an empty
+       morning — arguably the morning you are most likely to have it. -->
+  <details class="why"><summary>how this list is built</summary>
+    <div class="why-body">Anything shortlisted on any tool appears here, by design.
+      Names picked by more than one tool sort to the top: independent agreement is a
+      different proposition from one list's opinion.</div>
+  </details>
 </div>
 
 <!-- The two lists that are not about today's tape get their own pages.
@@ -846,6 +826,9 @@ async function loadUnifiedShortlist() {
      * the ways out. Names more than one tool picked come first and are marked,
      * because independent agreement is the whole reason this list is merged.
      */
+    // Anything painted after load folds too — foldWhy on DOMContentLoaded
+    // only ever sees the markup that was in the file.
+    setTimeout(deskFoldWhy, 0);
     out.innerHTML = `<div class="sl-list">${rows.map(r => {
       const url = (tool) => cardUrl(tool, r.ticker, d.date);
       const toolLink = (t) => url(t)

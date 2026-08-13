@@ -114,12 +114,11 @@ test('the server serves all three levels', () => {
  * above a shortlist rendered in 13px chips. The prose is not the product.
  */
 describe('the shared lists read like data', () => {
-  test('the same tokens as the alerts page, not a second palette', () => {
-    const vars = suite.slice(suite.indexOf(':root'), suite.indexOf('* { box-sizing'));
-    for (const v of ['--panel:', '--panel2:', '--line2:', '--f-xs', '--f-lg',
-                     '--s3', '--mono', '--ui']) {
-      expect({ token: v, defined: vars.includes(v) }).toEqual({ token: v, defined: true });
-    }
+  test('the palette is linked, not copied', () => {
+    // Four pages with four private copies of one palette is exactly how they
+    // came apart the first time.
+    expect(suite).toContain('href="/desk.css"');
+    expect(suite).not.toContain(':root {');
   });
 
   test('prose is left-aligned and capped at a readable measure', () => {
@@ -165,9 +164,12 @@ describe('the shared lists read like data', () => {
     }
   });
 
-  test('tickers stay monospace while sentences do not', () => {
-    expect(suite).toMatch(/\.uni-tkr[^{]*\{[^}]*font-family:var\(--mono\)|font-family:var\(--mono\);/);
-    expect(suite).toMatch(/body\s*\{[\s\S]{0,400}font-family:var\(--ui\)/);
+  test('the type face is the screener\'s, from the shared sheet', () => {
+    // The screener is monospace throughout and it is the page that reads best
+    // on this phone. What was wrong was never the face — it was four of them.
+    const desk = read('desk.css');
+    expect(desk).toMatch(/--ui:'SF Mono'/);
+    expect(desk).toMatch(/body \{[^}]*font-family:var\(--ui\)/);
   });
 });
 
@@ -245,10 +247,11 @@ describe('the CANSLIM page', () => {
     expect(canslim).toContain('expiresIn <= 14');
   });
 
-  test('uses the shared token set rather than a third palette', () => {
-    for (const v of ['--panel:', '--f-xl', '--mono', '--violet']) {
-      expect({ token: v, on: canslim.includes(v) }).toEqual({ token: v, on: true });
-    }
+  test('links the shared sheet rather than carrying a third palette', () => {
+    expect(canslim).toContain('href="/desk.css"');
+    expect(canslim).not.toContain(':root {');
+    // …and gets the sunlight toggle every other page has.
+    expect(canslim).toContain('id="sun-btn"');
   });
 });
 

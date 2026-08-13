@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Alerts · Trade Desk</title>
+<link rel="stylesheet" href="/desk.css">
+<script src="/desk.js"></script>
 <style>
 /* ── the design tokens ──────────────────────────────────────────────────
  *
@@ -28,27 +30,7 @@
  * its label — because the number is the thing being read and the label is only
  * there to say which number it is.
  */
-:root {
-  /* surfaces, in the order they stack */
-  --bg:#0a0c11; --panel:#141822; --panel2:#1c212d; --panel3:#242a38;
-  --line:#272e3d; --line2:#39415a;
-  /* kept as aliases so the 200-odd existing rules do not all have to move */
-  --bg2:var(--panel); --bg3:var(--panel2); --border:var(--line);
-  /* ink */
-  --text:#e9edf6; --text2:#9ba4ba; --text3:#6b748c;
-  /* meaning */
-  --accent:#f5b62b; --green:#4ade80; --red:#f87171; --amber:#fb923c; --blue:#5aa7ff;
-  /* type scale */
-  --f-xs:11.5px; --f-sm:13px; --f-md:14.5px; --f-lg:17px; --f-xl:21px;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --ui:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
-  /* spacing, so gaps are chosen from a set rather than invented per rule */
-  --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px;
-}
-* { box-sizing:border-box; }
-body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
-  font-family:var(--ui); font-size:var(--f-sm); line-height:1.5;
-  -webkit-text-size-adjust:100%; padding:20px 14px 72px; }
+
 
 /* NUMBERS STAY MONOSPACE. A share count, a price, a clock time and a block of
    JSON are all things read against each other, and proportional digits make
@@ -119,16 +101,6 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
  * a wall is not read at 09:36. They collapse behind a small "why", open one at
  * a time, and remember nothing: the default is always shut.
  */
-details.why { margin:var(--s2) 0 0; }
-details.why > summary { list-style:none; cursor:pointer; display:inline-flex;
-  align-items:center; gap:5px; font-size:var(--f-xs); color:var(--text3);
-  border:1px solid var(--line); border-radius:99px; padding:2px 10px; }
-details.why > summary::-webkit-details-marker { display:none; }
-details.why > summary::before { content:'?'; font-weight:700; color:var(--accent); }
-details.why > summary:hover { color:var(--text2); border-color:var(--line2); }
-details.why[open] > summary { margin-bottom:var(--s2); }
-details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1.65;
-  border-left:2px solid var(--line); padding-left:10px; }
 
 /* The alert row is the one thing on this page read under time pressure, so it
    gets the most room and the biggest ticker. */
@@ -238,16 +210,19 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
 .h-rule { font-size:11px; color:var(--text2); }
 .h-bar { font-size:10px; color:var(--text3); border:1px solid var(--border);
   border-radius:3px; padding:1px 5px; }
-/* Five tabs on a 390px screen. Scrollable rather than shrunk to fit, so the
-   labels stay words instead of becoming abbreviations. */
-.tabs { position:sticky; top:0; z-index:20; display:flex; gap:var(--s1);
-  padding:var(--s2) 0; background:var(--bg); border-bottom:1px solid var(--line);
-  margin-bottom:var(--s3); overflow-x:auto; scrollbar-width:none }
+/* THE SCREENER'S TABS. Underlines, not filled pills.
+   A filled pill at 390px is a button competing with the buttons below it, and
+   the screener settled this question long before this page existed. */
+.tabs { position:sticky; top:0; z-index:20; display:flex; gap:2px;
+  overflow-x:auto; scrollbar-width:none; background:var(--bg2);
+  border-bottom:1px solid var(--border); margin:0 -14px var(--s4);
+  padding:var(--s2) var(--s3) 0 }
 .tabs::-webkit-scrollbar { display:none }
-.tb { flex:1 0 auto; padding:10px 14px; font-size:var(--f-sm); font-weight:600;
-  border-radius:9px; border:1px solid var(--line); background:var(--panel);
-  color:var(--text2); font-family:var(--ui); white-space:nowrap; min-height:38px }
-.tb.on { background:var(--accent); border-color:var(--accent); color:#241a02 }
+.tb { flex:0 0 auto; padding:10px 16px; font:600 var(--f-sm)/1 var(--ui);
+  cursor:pointer; color:var(--text2); background:none; border:none;
+  border-bottom:2px solid transparent; white-space:nowrap; min-height:38px }
+.tb.on { color:var(--accent); border-bottom-color:var(--accent) }
+.tb:hover:not(.on) { color:var(--text) }
 .tb .n { font-weight:400; opacity:.8 }
 .h-nums { flex-basis:100%; margin-top:3px; display:flex; flex-wrap:wrap;
   gap:4px 10px; font-size:11px; color:var(--text2) }
@@ -441,6 +416,11 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
 <div class="top">
   <h1>⚠ Alerts</h1>
   <a class="home" id="home-link" href="/">← all tools</a>
+  <!-- The screener has treated high contrast as the NORMAL case since someone
+       tried to read a card at a bus stop. Same button, same corner, every
+       page — see desk.js. -->
+  <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
+          title="high contrast, for reading the screen outdoors">☀</button>
 </div>
 <!-- One line, and the reasoning behind a tap. Eight lines of prose above the
      tabs is eight lines between you and this morning's alert. -->
@@ -1084,6 +1064,9 @@ async function loadSetups() {
     }).join('');
     // Both halves are in hand now, whichever fetch landed first.
     paintAlgoState();
+    // Anything painted after load folds too; the DOMContentLoaded pass in
+    // desk.js only ever sees the markup that was in the file.
+    deskFoldWhy();
   } catch {
     out.innerHTML = '<div class="empty">Could not read the setups.</div>';
   }
@@ -1656,6 +1639,7 @@ async function loadBroker() {
     // The day's orders, because "did it go in" must be answerable without
     // opening the broker on a second device.
     const rows = (d.orders || []).slice(0, 12);
+    deskFoldWhy();
     document.getElementById('bk-orders').innerHTML = rows.length
       ? `<b>Today:</b> ${rows.map(o => `${esc(clockET(o.at))} ${esc(o.action || '')} `
           + `${esc(o.quantity ?? o.asked ?? 0)} ${esc(o.symbol)} — `
@@ -2248,48 +2232,6 @@ function reviewBox() {
 }
 
 /*
- * FOLD THE LONG EXPLANATIONS AWAY.
- *
- * Every control on this page carries a paragraph saying why it exists. That
- * reasoning is worth keeping — it is the difference between a setting and a
- * superstition — but printed at the same weight as the data it is a wall, and
- * a wall does not get read at 09:36. Anything past a couple of lines goes
- * behind a small "why" you can tap.
- *
- * Done here rather than by hand in the markup because these paragraphs are
- * written as prose all over a two-thousand-line file, and a rule applied once
- * catches the ones added next month too. Length is the test, so a genuinely
- * short note — "6 fired", "not saved" — is left exactly where it is.
- *
- * Nothing is hidden that a person has to act on: only .risk-hint blocks, which
- * are explanations by construction. Warnings, counts and errors are not
- * touched.
- */
-const WHY_LIMIT = 150;
-
-function foldWhy(root = document) {
-  for (const el of root.querySelectorAll('.risk-hint:not([data-folded])')) {
-    el.setAttribute('data-folded', '1');
-    if (el.textContent.trim().length < WHY_LIMIT) continue;
-    // Buttons and inputs live inside some of these blocks. Those are controls,
-    // not prose, and they stay on screen — only the words fold.
-    const controls = [...el.childNodes].filter(
-      n => n.nodeType === 1 && n.matches('button, input, select, a, code, textarea'));
-    const d = document.createElement('details');
-    d.className = 'why';
-    const sum = document.createElement('summary');
-    sum.textContent = 'why';
-    const body = document.createElement('div');
-    body.className = 'why-body';
-    body.innerHTML = el.innerHTML;
-    for (const c of body.querySelectorAll('button, input, select, textarea')) c.remove();
-    d.append(sum, body);
-    el.innerHTML = '';
-    el.append(...controls, d);
-  }
-}
-
-/*
  * One line, at the top of the screen, for two seconds.
  *
  * Not a note inside a panel: a panel can be scrolled past, and the button that
@@ -2748,8 +2690,6 @@ async function delRule(id) {
 }
 
 paintNoise();
-// The markup's own explanations, folded before anything else paints.
-foldWhy();
 /*
  * Subscribe on load when permission was already given.
  *

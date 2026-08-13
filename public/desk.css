@@ -1,0 +1,221 @@
+/*
+ * THE DESK'S DESIGN SYSTEM — one file, every page.
+ *
+ * This is not a new style. It is the screener's, lifted out of index.html and
+ * made shareable, because the screener is the page that got this right and
+ * everything else quietly invented its own version of it. Four pages had four
+ * palettes, three type scales and two ideas about what a tab looks like, and
+ * the result was an app that felt like four apps.
+ *
+ * What the screener does that the others did not:
+ *
+ *   CONTRAST IS MEASURED, not chosen by eye. Every text colour below carries
+ *   its ratio against the background. The old --text3 was 2.9:1 — under the
+ *   4.5:1 minimum, and the most-used colour on the page, so labels and small
+ *   numbers were the least readable things on screen. On a phone in daylight
+ *   that is not a subtlety.
+ *
+ *   COLOUR IS A LANGUAGE with one meaning per hue, so reading stops being a
+ *   lookup and becomes a reflex. Green and red are DIRECTION and nothing else;
+ *   a good score is not "up". If a new thing needs a colour it belongs to one
+ *   of the named categories or it does not get one.
+ *
+ *   SUNLIGHT MODE. A dark theme outdoors is a mirror. Every page gets the
+ *   toggle, and the meanings keep their hues so nothing has to be relearned.
+ *
+ * Layout tokens (--s1..--s5, --f-xs..--f-xl) are added here because the pages
+ * that came later were built on them; the screener's own rules use raw pixels
+ * and are left exactly as they are.
+ *
+ *   <link rel="stylesheet" href="/desk.css">
+ */
+
+:root {
+  --bg: #0d0f14;
+  --bg2: #13161e;
+  --bg3: #1a1e28;
+  --bg4: #212535;
+  --border: #2a2f3f;
+  /* Measured against --bg, not chosen by eye. The old --text3 was #555d70,
+     which is 2.9:1 — under the 4.5:1 minimum for body text and the most-used
+     colour on the page, so labels, section titles and the low/high numbers
+     under every range bar were the least readable things on the card. On a
+     phone in daylight that is not a subtlety, it is the difference between a
+     card you can read and one you cannot. */
+  --text: #e2e6f0;      /* 15.3:1 */
+  --text2: #a8b0c2;     /*  8.8:1 */
+  --text3: #868ea1;     /*  5.8:1 — was 2.9:1 */
+  --accent: #3b82f6;
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f97316;
+  --yellow: #eab308;
+  --purple: #a78bfa;
+  --cyan: #22d3ee;
+  --bull: #22c55e;
+  --bear: #ef4444;
+  --neutral: #8b92a5;
+
+  /* ── THE COLOUR LANGUAGE ────────────────────────────────────────────────
+     One meaning per colour, everywhere on the card, so that reading it stops
+     being a lookup and becomes a reflex. The names below are the meanings —
+     use these, never a raw hex, anywhere the colour is saying something. If a
+     new thing needs a colour, it belongs to one of these six categories or it
+     does not get a colour.
+
+       m-up / m-down   DIRECTION. Price relative to something: above/below a
+                       moving average, up/down on the day. Nothing else is ever
+                       green or red — a good score is not "up".
+       m-size-0..3     MAGNITUDE. How big, never whether that is good. One hue
+                       at four intensities: absent, present, notable, extreme.
+                       Shared by PM/ADR, RVOL, float, sector heat, so the same
+                       brightness means the same "how much" wherever it appears.
+       m-model         THE MODEL'S OPINION. The score, and only the score.
+       m-other         SOMEONE ELSE'S OPINION. Another tool's shortlist, the
+                       CANSLIM list — corroboration from outside this tool.
+       m-mine          YOUR OWN MARK. The shortlist star. Nothing else.
+       m-none          NO CLAIM. Missing data, below a threshold, switched off.
+       m-chrome        FURNITURE. Links, borders, bar fills. Carries no meaning
+                       and must never be used where something is being said.
+     ──────────────────────────────────────────────────────────────────────── */
+  --m-up: #4ade80;
+  --m-down: #f87171;
+  /* size-0 recedes by being grey rather than by being dim — hue carries the
+     ramp, so it can stay legible. It was 2.3:1, which is not "recessive", it
+     is invisible. */
+  --m-size-0: #868ea1;
+  --m-size-1: #67c9e8;
+  --m-size-2: #22d3ee;
+  --m-size-3: #a5f3fc;
+  --m-model: #fb923c;
+  --m-other: #c084fc;
+  --m-mine: #eab308;
+  --m-none: #868ea1;
+  --m-chrome: #3b82f6;
+}
+
+/* ── SUNLIGHT ───────────────────────────────────────────────────────────────
+   A dark theme outdoors is a mirror. This is not a light theme — a white page
+   in the sun is its own problem, and the whole colour language above is built
+   for a dark background — it is the same theme pushed to the contrast the
+   screen can actually deliver: true black, which an OLED renders as off
+   pixels, against near-white text. Every meaning keeps its hue so nothing has
+   to be relearned; only the separation changes.
+   Toggled from the header, remembered in localStorage. */
+:root.sunlight, body.sunlight {
+  --bg: #000000;
+  --bg2: #0a0c11;
+  --bg3: #12151d;
+  --bg4: #1c2029;
+  --border: #454d61;      /* 1.4:1 → 4.4:1, so panels have visible edges */
+  --text: #ffffff;        /* 21:1 */
+  --text2: #ccd3e0;       /* 14:1 */
+  --text3: #aab2c4;       /* 10:1 — was the worst offender */
+  --m-up: #5cf08f;
+  --m-down: #ff8a8a;
+  --m-size-0: #9aa2b5;
+  --m-size-1: #7fd8f2;
+  --m-size-2: #35e0f8;
+  --m-size-3: #bdf7ff;
+  --m-model: #ffa552;
+  --m-other: #d3a3ff;
+  --m-mine: #ffd633;
+  --m-none: #aab2c4;
+  --m-chrome: #6aa5ff;
+}
+/* Thin text is the first thing to disappear in glare, whatever its colour. */
+body.sunlight .price-label, body.sunlight .section-title, body.sunlight .rb-name,
+body.sunlight .range-labels, body.sunlight .news-item, body.sunlight .lg-v,
+body.sunlight .card-port, body.sunlight .rb-ath-gap { font-weight: 600; }
+body.sunlight .sig, body.sunlight .badge { font-weight: 700; }
+
+/* ── LAYOUT SCALE ──────────────────────────────────────────────────────────
+   Sizes and gaps come from a set rather than being invented per rule. Five
+   steps each is enough for one screen and few enough to hold in mind. */
+:root {
+  --f-xs:11.5px; --f-sm:13px; --f-md:14.5px; --f-lg:17px; --f-xl:21px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px;
+  --mono:'SF Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:'SF Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* Aliases, so the rules written against the later pages' names keep working
+     and there is still only one set of real values. */
+  --panel:var(--bg2); --panel2:var(--bg3); --panel3:var(--bg4);
+  --line:var(--border); --line2:#39415a;
+  --amber:var(--m-mine); --violet:var(--m-other); --blue:var(--accent);
+  --dim:var(--text3);
+}
+:root.sunlight, body.sunlight { --line2:#5b6478; }
+
+* { box-sizing:border-box; }
+/* The gutter is here rather than on each page. Without it text sits against
+   the edge of the glass, which on a phone is where a thumb rests. Pages that
+   need their own layout (the suite centres its column) restate padding in
+   their own sheet, which loads after this one. */
+body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+  font-family:var(--ui); font-size:var(--f-sm); line-height:1.5;
+  font-variant-numeric:tabular-nums; -webkit-text-size-adjust:100%;
+  padding:18px 14px 72px; }
+
+/* ── SURFACES ──────────────────────────────────────────────────────────────
+   Three levels, and the difference between them is visible in daylight: the
+   page, a panel on it, a control on the panel. */
+.dk-panel { background:var(--bg2); border:1px solid var(--border); border-radius:10px;
+  padding:var(--s4); }
+
+/* ── TABS ── the screener's, which are underlines rather than filled pills.
+   A filled pill at 390px is a button competing with the buttons below it. */
+.dk-tabs { display:flex; gap:2px; overflow-x:auto; scrollbar-width:none;
+  border-bottom:1px solid var(--border); background:var(--bg2);
+  margin:0 -14px var(--s4); padding:var(--s2) var(--s3) 0; position:sticky; top:0; z-index:20; }
+.dk-tabs::-webkit-scrollbar { display:none; }
+.dk-tab { padding:10px 16px; font:600 var(--f-sm)/1 var(--ui); cursor:pointer;
+  color:var(--text2); background:none; border:none; border-bottom:2px solid transparent;
+  white-space:nowrap; flex:0 0 auto; min-height:38px; }
+.dk-tab.on { color:var(--accent); border-bottom-color:var(--accent); }
+.dk-tab:hover:not(.on) { color:var(--text); }
+
+/* ── CONTROLS ──────────────────────────────────────────────────────────────
+   34px minimum, because this is a phone and the alternative is missing. */
+.dk-btn { font:600 var(--f-sm)/1 var(--ui); padding:9px 14px; border-radius:6px;
+  cursor:pointer; background:var(--bg3); color:var(--text);
+  border:1px solid var(--border); min-height:34px; }
+.dk-btn:hover { border-color:var(--accent); }
+.dk-btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+.dk-btn.danger { background:var(--red); color:#fff; border-color:var(--red); font-weight:700; }
+.dk-in { background:var(--bg3); border:1px solid var(--border); border-radius:6px;
+  padding:8px 10px; color:var(--text); font-family:var(--ui); font-size:var(--f-md); }
+.dk-in:focus { outline:none; border-color:var(--accent); }
+
+/* ── SECTION HEADING ──
+   On its own line, with its status note beneath. They were one flex row, and a
+   three-word heading beside a fifteen-word note turned both into narrow
+   columns of wrapped capitals. */
+.dk-sec { margin:var(--s5) 0 var(--s2); padding-bottom:var(--s2);
+  border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap;
+  align-items:baseline; gap:var(--s1) var(--s3); }
+.dk-sec > span:first-child { flex:1 0 100%; font-size:var(--f-xs); font-weight:700;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--text); }
+
+/* ── THE WHY, folded away ──
+   Every control on these pages carries a paragraph saying why it exists. That
+   reasoning is worth keeping — it is the difference between a setting and a
+   superstition — but at the same weight as the data it is a wall, and a wall
+   is not read at 09:36. */
+details.why { margin:var(--s2) 0 0; text-align:left; }
+details.why > summary { list-style:none; cursor:pointer; display:inline-flex;
+  align-items:center; gap:5px; font-size:var(--f-xs); color:var(--text3);
+  border:1px solid var(--border); border-radius:99px; padding:3px 11px; }
+details.why > summary::-webkit-details-marker { display:none; }
+details.why > summary::before { content:'?'; font-weight:700; color:var(--accent); }
+details.why > summary:hover { color:var(--text2); border-color:var(--text3); }
+details.why[open] > summary { margin-bottom:var(--s2); }
+details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1.65;
+  border-left:2px solid var(--border); padding-left:10px; max-width:72ch; }
+
+/* ── SUNLIGHT TOGGLE ── the screener's button, so it is the same control on
+   every page and in the same corner. */
+.dk-sun { background:none; border:1px solid var(--border); border-radius:6px;
+  color:var(--text3); font-size:14px; line-height:1; padding:7px 10px; cursor:pointer;
+  font-family:inherit; min-height:32px; }
+.dk-sun:hover { color:var(--text2); }
+.dk-sun.on { color:var(--m-mine); border-color:var(--m-mine); }

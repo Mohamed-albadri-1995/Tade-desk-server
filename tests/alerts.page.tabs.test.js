@@ -25,8 +25,10 @@ const path = require('path');
 
 const html = fs.readFileSync(
   path.join(__dirname, '..', 'public', 'alerts.html'), 'utf8');
-const script = (html.match(/<script[^>]*>([\s\S]*?)<\/script>/) || [])[1] || '';
-const markup = html.slice(0, html.indexOf('<script'));
+/* The INLINE script, not the first <script> tag — the head now links
+   /desk.js, and matching that gave an empty string and eleven silent passes. */
+const script = (html.match(/<script>([\s\S]*?)<\/script>/) || [])[1] || '';
+const markup = html.slice(0, html.indexOf('<script>'));
 
 /** The pane a given id is written inside, or null if it is in no pane. */
 function paneOf(id) {
@@ -359,46 +361,68 @@ test('arming names the accounts that will trade by themselves', () => {
  * adds a rule in a hurry.
  */
 
-test('prose is a UI face and numbers are monospace', () => {
-  // The whole page was monospace, including nine-tenths of it that is prose.
-  // Monospace is for things compared column-wise: prices, counts, times, JSON.
-  expect(html).toMatch(/body\s*{[^}]*font-family:var\(--ui\)/);
-  expect(html).toMatch(/--ui:system-ui/);
-  expect(html).toMatch(/\.h-n[^{]*{\s*font-family:var\(--mono\)|font-family:var\(--mono\);?\s*}/);
-  expect(html).toContain('font-variant-numeric:tabular-nums');
+/*
+ * THE DESIGN SYSTEM LIVES IN ONE FILE.
+ *
+ * Four pages had four palettes, three type scales and two ideas about what a
+ * tab looks like, and the result was an app that felt like four apps. The
+ * screener is the page that got this right — measured contrast, a colour
+ * language with one meaning per hue, a sunlight mode — so its system was
+ * lifted into public/desk.css and the other pages link it.
+ *
+ * What is checked here is that they link it and do NOT keep a private copy,
+ * because a private copy is exactly how they came apart the first time.
+ */
+const desk = fs.readFileSync(path.join(__dirname, '..', 'public', 'desk.css'), 'utf8');
+
+test('the page links the shared system and defines no palette of its own', () => {
+  expect(html).toContain('href="/desk.css"');
+  expect(html).toContain('src="/desk.js"');
+  expect(html).not.toContain(':root {');
 });
 
-test('there are real surfaces to stack things on', () => {
-  // Three greys eight points apart is one grey on a phone in daylight.
-  const vars = html.slice(html.indexOf(':root'), html.indexOf('* { box-sizing'));
-  for (const v of ['--bg:', '--panel:', '--panel2:', '--panel3:', '--line:', '--line2:']) {
-    expect({ token: v, defined: vars.includes(v) }).toEqual({ token: v, defined: true });
-  }
+test('the system carries the screener\'s measured contrast, not a new palette', () => {
+  // Every text colour in the screener carries its ratio against the
+  // background. --text3 was 2.9:1 once — under the 4.5:1 minimum, and the
+  // most-used colour on the page.
+  expect(desk).toMatch(/--text3:\s*#868ea1/);
+  expect(desk).toContain('5.8:1');
+  expect(desk).toContain('--m-up');
+  expect(desk).toContain('--m-model');
+});
+
+test('sunlight mode reaches every page, and is the default', () => {
+  // A dark theme outdoors is a mirror. The screener has treated high contrast
+  // as the normal case for a while; the other pages had no way out at all.
+  expect(desk).toContain('body.sunlight');
+  expect(html).toContain('id="sun-btn"');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'desk.js'), 'utf8');
+  expect(js).toContain("localStorage.getItem('sunlight') !== '0'");
 });
 
 test('sizes and gaps come from a scale, not from guesses', () => {
-  const vars = html.slice(html.indexOf(':root'), html.indexOf('* { box-sizing'));
   for (const v of ['--f-xs', '--f-sm', '--f-md', '--f-lg', '--f-xl',
                    '--s1', '--s2', '--s3', '--s4', '--s5']) {
-    expect({ token: v, defined: vars.includes(v) }).toEqual({ token: v, defined: true });
+    expect({ token: v, defined: desk.includes(v) }).toEqual({ token: v, defined: true });
   }
 });
 
-test('long explanations fold behind a why', () => {
-  /*
-   * Every control carries a paragraph saying why it exists. That reasoning is
-   * worth keeping — it is the difference between a setting and a superstition
-   * — but at the same weight as the data it is a wall, and a wall is not read
-   * at 09:36.
-   */
-  expect(script).toContain('function foldWhy(');
-  expect(script).toContain('const WHY_LIMIT');
-  expect(html).toContain('details.why');
+test('long explanations fold behind a why, from the shared script', () => {
+  const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'desk.js'), 'utf8');
+  expect(js).toContain('function deskFoldWhy(');
+  expect(js).toContain('DESK_WHY_LIMIT');
+  expect(desk).toContain('details.why');
   // Only explanations. Warnings, counts and errors are never folded.
-  const at = script.indexOf('function foldWhy(');
-  const body = script.slice(at, script.indexOf('\n}\n', at));
-  expect(body).toContain('.risk-hint');
-  expect(body).not.toContain('.warn');
+  expect(js).toContain('.risk-hint');
+  expect(js).not.toContain('.warn');
+});
+
+test('the tabs are the screener\'s underlines, not filled pills', () => {
+  // A filled pill at 390px is a button competing with the buttons below it.
+  const at = html.indexOf('.tb {');
+  const rule = html.slice(at, html.indexOf('}', at));
+  expect(rule).toContain('border-bottom:2px solid transparent');
+  expect(rule).toContain('background:none');
 });
 
 test('a heading and its status note do not share a line', () => {

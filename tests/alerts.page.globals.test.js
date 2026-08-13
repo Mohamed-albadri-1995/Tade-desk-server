@@ -28,7 +28,9 @@ const path = require('path');
 
 const PAGE = path.join(__dirname, '..', 'public', 'alerts.html');
 const html = fs.readFileSync(PAGE, 'utf8');
-const script = (html.match(/<script[^>]*>([\s\S]*?)<\/script>/) || [])[1] || '';
+/* The INLINE script, not the first <script> tag — the head now links
+   /desk.js, and matching that gave an empty string and eleven silent passes. */
+const script = (html.match(/<script>([\s\S]*?)<\/script>/) || [])[1] || '';
 
 /** Names called from an inline handler — onclick, onchange, oninput. */
 function inlineHandlerNames() {
@@ -45,20 +47,32 @@ function inlineHandlerNames() {
   return [...names].sort();
 }
 
-/** Names declared at column 0 of the page's script — i.e. on window. */
+/*
+ * Names declared at column 0 — i.e. on window.
+ *
+ * Both files: the page's own inline block, and /desk.js, which the head links
+ * and which carries the handlers every page shares (the sunlight toggle). A
+ * check that read only the inline block would report those as missing and be
+ * wrong; one that read only desk.js would miss the page's own.
+ */
+const shared = fs.readFileSync(path.join(__dirname, '..', 'public', 'desk.js'), 'utf8');
+
 function topLevelNames() {
   const names = new Set();
-  const re = /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm;
-  let m;
-  while ((m = re.exec(script))) names.add(m[1]);
-  const re2 = /^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\(|function)/gm;
-  while ((m = re2.exec(script))) names.add(m[1]);
+  for (const src of [script, shared]) {
+    let m;
+    const re = /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm;
+    while ((m = re.exec(src))) names.add(m[1]);
+    const re2 = /^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\(|function)/gm;
+    while ((m = re2.exec(src))) names.add(m[1]);
+  }
   return names;
 }
 
-test('the page has exactly one script block', () => {
+test('the page has exactly one INLINE script block', () => {
   // The check below reads one block. Two would make it silently partial.
-  expect((html.match(/<script[^>]*>/g) || []).length).toBe(1);
+  // The head also links /desk.js — a src tag, with no body to read.
+  expect((html.match(/<script>/g) || []).length).toBe(1);
   expect(script.length).toBeGreaterThan(1000);
 });
 
