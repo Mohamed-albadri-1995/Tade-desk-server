@@ -670,3 +670,74 @@ describe('a setup routed to two accounts', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * TWO ACCOUNTS, TWO SHARE COUNTS.
+ *
+ * The failure this replaces: one size computed from the desk's balance and the
+ * same count sent to both books. A $5,000 prop account handed a size meant for
+ * $20,000 has the order refused; a $20,000 account handed the small one is
+ * barely used. Neither is the trade that was backtested.
+ */
+describe('sizing when a setup sends to two accounts', () => {
+  const brokerMod = require('../src/broker/signalstack');
+  const risk = require('../src/setups/risk');
+  const SMALL = { destinationId: 'ttp', destinationName: 'Trade The Pool', accountSize: 5000 };
+  const BIG = { destinationId: 'alpaca', destinationName: 'Alpaca', accountSize: 20000 };
+  const SET = { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00',
+                autoTrade: true, brokers: ['ttp', 'alpaca'] };
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    // The desk: $20,000 risking $200, no position cap in the way.
+    jest.spyOn(risk, 'settings').mockReturnValue({
+      accountSize: 20000, riskPerTrade: 200, maxPositionPct: 100, updatedAt: 1 });
+    jest.spyOn(brokerMod, 'route').mockReturnValue({ cfgs: [SMALL, BIG], error: null });
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+  });
+
+  test('each account gets its own share count', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled' });
+    await runner.runSetup(SET, {});
+    const sent = spy.mock.calls.map(c => [c[0].cfg.destinationId, c[0].quantity]);
+    // $1 of risk a share. The big account risks the desk's $200 → 200 shares;
+    // the small one is a quarter of it, so a quarter of the risk → 50.
+    expect(sent).toEqual([['ttp', 50], ['alpaca', 200]]);
+  });
+
+  test('an account too small for one share is skipped, and says so', async () => {
+    // Not silence: an account that placed nothing has to be distinguishable
+    // from one that placed something, on the alert itself.
+    const spy = jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled' });
+    brokerMod.route.mockReturnValue({
+      cfgs: [{ ...SMALL, accountSize: 100, riskPerTrade: 0.5 }, BIG], error: null });
+    const out = await runner.runSetup(SET, {});
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0].cfg.destinationId).toBe('alpaca');
+    expect(out.fires[0].detail).toMatch(/Trade The Pool: ORDER: not sent/);
+  });
+
+  test('what each account was sized for is kept on the record', async () => {
+    jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled', quantity: 7 });
+    const out = await runner.runSetup(SET, {});
+    expect(out.fires[0].setup.orders.map(o => [o.destination, o.sizedFor]))
+      .toEqual([['ttp', 50], ['alpaca', 200]]);
+  });
+
+  test('an account with no capital of its own still uses the desk figure', async () => {
+    // The single-broker case, which must not have changed at all.
+    const spy = jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled' });
+    brokerMod.route.mockReturnValue({
+      cfgs: [{ destinationId: 'ttp', destinationName: 'TTP' }], error: null });
+    await runner.runSetup(SET, {});
+    expect(spy.mock.calls[0][0].quantity).toBe(200);
+  });
+});

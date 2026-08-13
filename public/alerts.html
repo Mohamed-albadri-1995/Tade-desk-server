@@ -168,6 +168,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
    accidentally clickable while an order is on screen. */
 #order-shade { position:fixed; inset:0; z-index:59; background:rgba(0,0,0,.45) }
 .or-head { font-size:12px; color:var(--text2); margin-bottom:6px }
+/* Which account, made the biggest thing in the box. It is the one fact the
+   order body cannot carry, and the one that cannot be corrected afterwards. */
+.or-dest { font-size:15px; color:var(--accent); margin:2px 0 8px }
 .or-json { font-size:11px; line-height:1.45; overflow-x:auto; background:#0e1116;
   padding:8px; border-radius:6px; margin:0 0 8px }
 .h-detail { flex-basis:100%; font-size:11.5px; color:var(--text2); line-height:1.5;
@@ -493,6 +496,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
  * disagree with them about what "crossed" means.
  */
 let META = null, TOOLS = [], SEEN = new Set(), FIRST_LOAD = true;
+// The desk-wide Position size. Each broker account may override any of it,
+// and the account rows show these as the placeholder for what is left blank.
+let RISK = {};
 
 /* Rule names are typed by hand and setup detail is assembled from ticker
    symbols, both of which land in innerHTML below. Escaped on the way in. */
@@ -1208,10 +1214,14 @@ async function loadRisk() {
   try {
     const d = await (await fetch('/api/alerts/risk')).json();
     const r = d.risk || {};
+    RISK = r;
     if (r.accountSize) document.getElementById('acct').value = r.accountSize;
     if (r.riskPerTrade) document.getElementById('rpt').value = r.riskPerTrade;
     if (r.maxPositionPct) document.getElementById('mpp').value = String(r.maxPositionPct);
     paintRiskNote(r);
+    // The account rows quote these as their fallbacks, so they have to be
+    // redrawn when the desk figure changes underneath them.
+    if (BROKER && BROKER.broker) paintDests(BROKER.broker.destinations || []);
   } catch { /* the panel is still usable — saving is what matters */ }
 }
 
@@ -1257,7 +1267,10 @@ async function saveRisk() {
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'could not save');
+    RISK = d.risk || {};
     paintRiskNote(d.risk);
+    // Same reason as in loadRisk: the account rows quote these as fallbacks.
+    if (BROKER && BROKER.broker) paintDests(BROKER.broker.destinations || []);
   } catch (e) {
     el.className = 'note';
     el.textContent = `not saved — ${e.message}`;
@@ -1581,11 +1594,12 @@ function paintAlgoState() {
 function paintDests(list) {
   const out = document.getElementById('bk-dests');
   if (!out) return;
-  const row = (d, i) => `<div class="dest${d.enabled === false ? ' off' : ''}" data-i="${i}">
+  const row = (d) => `<div class="dest${d.enabled === false ? ' off' : ''}"
+    data-id="${esc(d.id)}" data-dialect="${esc(d.dialect)}" data-off="${d.enabled === false ? 1 : 0}">
     <div class="d-head">
       <span>${esc(d.name || d.id)}</span>
       <span class="d-id">${esc(d.id)} · ${esc(d.dialect)}</span>
-      <span class="spacer" style="flex:1"></span>
+      <span style="flex:1"></span>
       <button class="btn" onclick="toggleDest('${esc(d.id)}')">${
         d.enabled === false ? 'Switch on' : 'Switch off'}</button>
       <button class="btn" onclick="testBroker('${esc(d.id)}')">Test 1 share</button>
@@ -1594,11 +1608,28 @@ function paintDests(list) {
     <label>Name
       <input class="d-name" value="${esc(d.name || '')}" placeholder="Alpaca">
     </label>
-    <label>Buying power $
+    <!-- THIS ACCOUNT'S CAPITAL. The share count comes from these three, and
+         they are per account because the same trade is a different number of
+         shares in a $5,000 prop account and a $20,000 Alpaca one. Blank means
+         "use the desk's Position size above", so one account needs none of
+         this filled in. -->
+    <label title="What this account IS. The share count is derived from it. Blank uses the desk-wide Account size above.">Account size $
+      <input class="d-acct" type="number" min="0" step="100"
+        value="${d.accountSize || ''}" placeholder="${esc(deskHint('accountSize'))}">
+    </label>
+    <label title="What one trade may lose in THIS account. Blank scales the desk-wide figure by this account's size, so the percentage risked stays the same.">Risk / trade $
+      <input class="d-risk" type="number" min="0" step="10"
+        value="${d.riskPerTrade || ''}" placeholder="${esc(deskHint('riskPerTrade'))}">
+    </label>
+    <label title="The largest one position may be, as a percent of THIS account. It decides how many positions fit at once: 25% is four, 16.66% is six.">Max position %
+      <input class="d-mpp" type="number" min="1" max="100" step="0.01"
+        value="${d.maxPositionPct || ''}" placeholder="${esc(deskHint('maxPositionPct'))}">
+    </label>
+    <label title="What is left to spend today. A running tally this side keeps, not a balance it can ask the broker for.">Buying power $
       <input class="d-power" type="number" min="0" step="100"
         value="${d.buyingPower || ''}" placeholder="e.g. 20000">
     </label>
-    <label title="A DOLLAR ceiling on any single order, checked at send time. Different from 'Max position' above, which is a PERCENT of account size and decides the share count the alert shows. This one only trims what goes out. Blank is normal.">Max per order $
+    <label title="A DOLLAR ceiling on any single order, checked at send time. Blank is normal — Max position already does this job.">Max per order $
       <input class="d-max" type="number" min="0" step="100"
         value="${d.maxOrderValue || ''}" placeholder="optional">
     </label>
@@ -1616,38 +1647,73 @@ function paintDests(list) {
         ? `saved · ${esc(d.testWebhookUrl)}` : '…/hook/TEST…'}">
     </label>
     <div class="d-foot">${d.hasWebhook
-      ? 'A setup sends here only if it names this account on the Setups tab.'
+      ? `${esc(sizeNote(d))} · A setup sends here only if it names this account on the Setups tab.`
       : '<b class="warn">No hook — nothing can be sent here.</b>'}</div>
   </div>`;
   out.innerHTML = list.map(row).join('')
+    + `<div id="dest-new"></div>`
     + `<div class="note risk-hint">
          <button class="btn" onclick="addDest()">+ Add an account</button>
          <button class="btn primary" onclick="saveDests()">Save accounts</button>
-         Each account is a separate SignalStack hook with its own balance and its
-         own daily count. <b>Trade The Pool</b> and <b>Alpaca</b> take slightly
-         different JSON, which is what the type on each row decides.
+         <span id="bk-dest-note"></span>
+         <br>Each account is a separate SignalStack hook with its own capital and
+         its own daily count. <b>Trade The Pool</b> and <b>Alpaca</b> take
+         slightly different JSON, which is what the type on each row decides.
        </div>`;
 }
 
-/** Read the rows back off the page — blank hook means keep the stored one. */
+/** What the desk-wide Position size says, shown as the placeholder for blanks. */
+function deskHint(key) {
+  const r = (RISK || {});
+  const v = r[key];
+  return v ? `desk: ${key === 'maxPositionPct' ? v + '%' : '$' + v}` : 'not set';
+}
+
+/** The share count this account would actually produce, in words. */
+function sizeNote(d) {
+  const r = (RISK || {});
+  const acct = d.accountSize || r.accountSize;
+  const risk = d.riskPerTrade
+    || (d.accountSize && r.accountSize && r.riskPerTrade
+        ? Math.round(r.riskPerTrade * (d.accountSize / r.accountSize) * 100) / 100
+        : r.riskPerTrade);
+  const mpp = d.maxPositionPct || r.maxPositionPct;
+  if (!acct || !risk) return 'no account size or risk set — this account will place nothing';
+  const slots = mpp ? Math.floor(100 / mpp) : null;
+  return `sizes on $${acct} risking $${risk} a trade`
+    + (mpp ? ` · max ${mpp}% a position (${slots} at once)` : '');
+}
+
+/*
+ * Read the rows back off the page.
+ *
+ * Blank hook means keep the stored one — the page never sees a hook, so a form
+ * that changes a balance cannot send it back, and without this, editing one
+ * would silently unplug the broker. Blank NUMBERS mean the opposite: cleared,
+ * so they fall back to the desk's.
+ */
 function readDests() {
-  const known = ((BROKER && BROKER.broker && BROKER.broker.destinations) || []);
-  return [...document.querySelectorAll('#bk-dests .dest')].map(el => {
-    const i = Number(el.getAttribute('data-i'));
-    const src = known[i] || {};
-    const f = (cls) => (el.querySelector('.' + cls) || {}).value || '';
+  /*
+   * SAVED ROWS ONLY. The add form is styled with the same class so it lines up
+   * with them, and reading it here made every "+ Add an account" save fail:
+   * the form has no data-id, so it arrived as a destination with no id and the
+   * whole save was rejected — leaving the button looking like it did nothing.
+   */
+  return [...document.querySelectorAll('#bk-dests .dest:not(.dest-form)')].map(el => {
+    const f = (cls) => ((el.querySelector('.' + cls) || {}).value || '').trim();
     const d = {
-      id: src.id, dialect: src.dialect, enabled: src.enabled !== false,
-      name: f('d-name').trim() || src.id,
+      id: el.getAttribute('data-id'), dialect: el.getAttribute('data-dialect'),
+      enabled: el.getAttribute('data-off') !== '1',
+      name: f('d-name') || el.getAttribute('data-id'),
     };
     for (const [cls, key] of [['d-power', 'buyingPower'], ['d-max', 'maxOrderValue'],
-                              ['d-maxtrades', 'maxTradesPerDay']]) {
-      const v = f(cls).trim();
-      // '' clears the number; the hooks below are the ones where blank keeps.
+                              ['d-maxtrades', 'maxTradesPerDay'], ['d-acct', 'accountSize'],
+                              ['d-risk', 'riskPerTrade'], ['d-mpp', 'maxPositionPct']]) {
+      const v = f(cls);
       d[key] = v === '' ? null : v;
     }
     for (const [cls, key] of [['d-hook', 'webhookUrl'], ['d-testhook', 'testWebhookUrl']]) {
-      const v = f(cls).trim();
+      const v = f(cls);
       if (v) d[key] = v;          // omitted entirely = keep what is stored
     }
     return d;
@@ -1655,29 +1721,91 @@ function readDests() {
 }
 
 async function saveDests(list) {
-  const ok = await saveBroker({ destinations: list || readDests(), enabled: true });
-  if (ok) document.getElementById('bk-note').textContent = 'Accounts saved.';
+  const note = document.getElementById('bk-dest-note');
+  const rows = list || readDests();
+  if (note) note.textContent = 'saving…';
+  const ok = await saveBroker({ destinations: rows, enabled: true });
+  if (note && ok) note.innerHTML = `<b>Saved ${rows.length} account(s).</b>`;
 }
 
 /*
- * A new account, added to the page rather than saved straight away.
+ * A NEW ACCOUNT, as a form on the page.
  *
- * The id is what setups store, so it is asked for once and never editable
- * afterwards: renaming it would leave every setup routed to a broker that no
- * longer answers to that name. The display name is the thing that can change.
+ * This used to be three browser prompts in a row. On a phone a prompt is easy
+ * to dismiss by accident, and dismissing any one of the three made the whole
+ * thing return silently — you pressed the button, answered some of it, and
+ * nothing appeared, with no way to tell whether it had saved. A form is
+ * visible, correctable, and saves once.
+ *
+ * The id cannot be changed afterwards: it is what setups store, so renaming it
+ * would leave every setup routed to an account that no longer answers.
  */
 function addDest() {
-  const dialect = prompt('Broker type — ttp (Trade The Pool) or alpaca:', 'alpaca');
-  if (!dialect) return;
-  const id = (prompt('A short id for it. This is what setups will store, and it '
-    + 'cannot be changed later:', dialect) || '').trim().toLowerCase();
-  if (!id) return;
+  const box = document.getElementById('dest-new');
+  if (!box || box.querySelector('form')) return;
+  box.innerHTML = `<form class="dest dest-form" onsubmit="return createDest(event)">
+    <div class="d-head"><span>New account</span></div>
+    <label>Broker
+      <select id="nd-dialect">
+        <option value="alpaca">Alpaca</option>
+        <option value="ttp">Trade The Pool</option>
+      </select>
+    </label>
+    <label title="What setups will store. Letters, digits, - and _ only. It cannot be changed later.">Short id
+      <input id="nd-id" placeholder="alpaca" required>
+    </label>
+    <label>Name
+      <input id="nd-name" placeholder="Alpaca paper">
+    </label>
+    <label>Account size $
+      <input id="nd-acct" type="number" min="0" step="100" placeholder="e.g. 20000">
+    </label>
+    <label>Risk / trade $
+      <input id="nd-risk" type="number" min="0" step="10" placeholder="e.g. 200">
+    </label>
+    <label>Max position %
+      <input id="nd-mpp" type="number" min="1" max="100" step="0.01" placeholder="e.g. 16.66">
+    </label>
+    <label>Buying power $
+      <input id="nd-power" type="number" min="0" step="100" placeholder="e.g. 20000">
+    </label>
+    <label>Max trades / day
+      <input id="nd-maxtrades" type="number" min="1" step="1" placeholder="e.g. 4">
+    </label>
+    <label class="d-hook">SignalStack hook
+      <input id="nd-hook" placeholder="https://app.signalstack.com/hook/…" required>
+    </label>
+    <button class="btn primary" type="submit">Add it</button>
+    <button class="btn" type="button" onclick="document.getElementById('dest-new').innerHTML=''">Cancel</button>
+    <div class="d-foot" id="nd-note">Nothing is sent to this account until a setup
+      names it on the Setups tab.</div>
+  </form>`;
+  document.getElementById('nd-id').focus();
+}
+
+async function createDest(ev) {
+  ev.preventDefault();
+  const v = id => document.getElementById(id).value.trim();
+  const note = document.getElementById('nd-note');
+  const id = v('nd-id').toLowerCase();
   const cur = ((BROKER && BROKER.broker && BROKER.broker.destinations) || []);
-  if (cur.some(d => d.id === id)) return alert(`There is already an account called ${id}.`);
-  const hook = (prompt('Its SignalStack hook URL:') || '').trim();
-  if (!hook) return;
-  saveDests([...readDests(), { id, dialect: dialect.trim().toLowerCase(),
-                               name: id, webhookUrl: hook, enabled: true }]);
+  if (cur.some(d => d.id === id)) {
+    note.innerHTML = `<b class="warn">There is already an account called ${esc(id)}.</b>`;
+    return false;
+  }
+  note.textContent = 'saving…';
+  // readDests() reads the EXISTING rows; the new one is appended so the save
+  // replaces the list with old + new rather than with new alone.
+  const ok = await saveBroker({ enabled: true, destinations: [...readDests(), {
+    id, dialect: v('nd-dialect') || document.getElementById('nd-dialect').value,
+    name: v('nd-name') || id, webhookUrl: v('nd-hook'), enabled: true,
+    accountSize: v('nd-acct') || null, riskPerTrade: v('nd-risk') || null,
+    maxPositionPct: v('nd-mpp') || null, buyingPower: v('nd-power') || null,
+    maxTradesPerDay: v('nd-maxtrades') || null,
+  }] });
+  // On success loadBroker has already repainted, which removes this form.
+  if (!ok && note) note.innerHTML = '<b class="warn">Not saved — see the message below.</b>';
+  return false;
 }
 
 async function toggleDest(id) {
@@ -1881,13 +2009,32 @@ async function reviewOrder(plan, destination) {
      * are all per-account: choosing a different one and leaving the old
      * numbers on screen would be reviewing the wrong trade.
      */
+    /*
+     * WHICH ACCOUNT — the first line, not a footnote.
+     *
+     * The body itself does not say: SignalStack decides that from the hook it
+     * arrived on. So with two accounts configured, the single most important
+     * fact about this order is the one thing the order cannot show, and
+     * "which book did that go into" is not a question to be answering after
+     * the fact. It is stated above the JSON, it is repeated on the Send
+     * button, and the share count beside it is THIS account's — a preview
+     * showing the desk's number and sending a different one would be worse
+     * than no preview.
+     */
     const dests = r.destinations || [];
     const chosen = plan.destination || p.destination || null;
-    const where = dests.length > 1
-      ? `<div class="note">to: ${dests.map(d => `<button class="bchip${
-          d.id === chosen ? ' on' : ''}" onclick='reviewOrder(${JSON.stringify(plan)
-            .replace(/'/g, "&apos;")}, "${esc(d.id)}")'>${esc(d.name)}</button>`).join(' ')}</div>`
-      : (p.destinationName ? `<div class="note">to: <b>${esc(p.destinationName)}</b></div>` : '');
+    const name = p.destinationName
+      || (dests.find(d => d.id === chosen) || {}).name || null;
+    const where = `<div class="or-dest">${name
+      ? `→ <b>${esc(name)}</b>${r.size && r.size.shares
+          ? ` · ${r.size.shares} shares · $${Number(r.size.positionValue || 0).toFixed(0)}`
+            + ` · risks $${Number(r.size.riskDollars || 0).toFixed(0)}` : ''}`
+      : '<b class="warn">no account chosen</b>'}</div>`
+      + (dests.length > 1
+        ? `<div class="note">send instead to: ${dests.filter(d => d.id !== chosen)
+            .map(d => `<button class="bchip" onclick='reviewOrder(${JSON.stringify(plan)
+              .replace(/'/g, "&apos;")}, "${esc(d.id)}")'>${esc(d.name)}</button>`).join(' ')}</div>`
+        : '');
     box.innerHTML = `
       <div class="or-head">${esc(plan.symbol)} ${esc(plan.side)} — `
         + (stop ? 'NOT sendable' : 'this is exactly what would be sent') + `</div>`
@@ -1902,7 +2049,7 @@ async function reviewOrder(plan, destination) {
         + `</div>`
       + (stop
         ? `<div class="warn">refused: ${esc(String(p.reason || p.blocked || 'no order to send'))}</div>`
-        : `<button class="btn live" id="or-go">Send it</button>`)
+        : `<button class="btn live" id="or-go">Send${name ? ` to ${esc(name)}` : ' it'}</button>`)
       + `<button class="btn" onclick="closeReview()">Cancel</button>`;
     if (!stop) {
       document.getElementById('or-go').onclick = async () => {
@@ -1914,7 +2061,8 @@ async function reviewOrder(plan, destination) {
             body: JSON.stringify(plan),
           })).json();
           box.innerHTML = (s.ok
-            ? `<div class="or-head">SENT</div><pre class="or-json">${
+            ? `<div class="or-head">SENT${s.order && s.order.broker
+                ? ` → ${esc(s.order.broker)}` : ''}</div><pre class="or-json">${
                 esc(JSON.stringify(s.order, null, 2))}</pre>`
             : `<div class="warn">not sent: ${esc(s.error || 'refused')}</div>`)
             + `<button class="btn" onclick="closeReview()">Close</button>`;

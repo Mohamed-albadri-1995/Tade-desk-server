@@ -139,6 +139,21 @@ function destinations(s = read()) {
       buyingPower: num(d.buyingPower),
       maxOrderValue: num(d.maxOrderValue),
       maxTradesPerDay: num(d.maxTradesPerDay),
+      /*
+       * THIS ACCOUNT'S CAPITAL, which is not the desk's.
+       *
+       * buyingPower is what is left to spend today; accountSize is what the
+       * account IS, and it is what the share count is derived from. They were
+       * the same number while there was one broker. A $5,000 prop account and
+       * a $20,000 Alpaca account sized against one figure means one of them is
+       * over-ordered and refused and the other is barely used.
+       *
+       * null means "use the desk's" — see risk.forAccount. One account
+       * configured therefore behaves exactly as it did before any of this.
+       */
+      accountSize: num(d.accountSize),
+      riskPerTrade: num(d.riskPerTrade),
+      maxPositionPct: num(d.maxPositionPct),
       enabled: d.enabled !== false,
     }));
   if (out.length) return out;
@@ -153,6 +168,11 @@ function destinations(s = read()) {
     buyingPower: num(s.buyingPower),
     maxOrderValue: num(s.maxOrderValue),
     maxTradesPerDay: num(s.maxTradesPerDay),
+    // Nothing of its own: the single account IS the desk, which is what the
+    // desk-wide risk settings have always described.
+    accountSize: null,
+    riskPerTrade: null,
+    maxPositionPct: null,
     enabled: true,
   }];
 }
@@ -179,6 +199,10 @@ function destinationCfg(id, s = read()) {
     buyingPower: d.buyingPower,
     maxOrderValue: d.maxOrderValue,
     maxTradesPerDay: d.maxTradesPerDay,
+    // Carried through so risk.forAccount(cfg) sizes against THIS account.
+    accountSize: d.accountSize,
+    riskPerTrade: d.riskPerTrade,
+    maxPositionPct: d.maxPositionPct,
     enabled: base.enabled && d.enabled,
   };
 }
@@ -426,7 +450,8 @@ function save(patch = {}) {
         }
         out[key] = url;
       }
-      for (const key of ['buyingPower', 'maxOrderValue', 'maxTradesPerDay']) {
+      for (const key of ['buyingPower', 'maxOrderValue', 'maxTradesPerDay',
+                         'accountSize', 'riskPerTrade', 'maxPositionPct']) {
         const v = d[key];
         if (v === '' || v === null || v === undefined) continue;
         const n = Number(v);
@@ -434,6 +459,14 @@ function save(patch = {}) {
           throw new Error(`destination "${id}": ${key} must be a positive number`);
         }
         out[key] = n;
+      }
+      // Caught here rather than at 09:36, where it would come back as a broker
+      // rejection with no explanation attached.
+      if (out.riskPerTrade && out.accountSize && out.riskPerTrade > out.accountSize) {
+        throw new Error(`destination "${id}": risk per trade cannot exceed the account size`);
+      }
+      if (out.maxPositionPct && out.maxPositionPct > 100) {
+        throw new Error(`destination "${id}": max position cannot be more than 100% of the account`);
       }
       return out;
     });

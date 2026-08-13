@@ -298,9 +298,6 @@ app.post('/api/broker/preview', express.json(), (req, res) => {
     const side = String(b.side || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG';
     const riskPerShare = Math.abs(entry - stop);
 
-    // The share count comes from the same risk.sizeFor the setups use, so the
-    // chain here is identical to the one a fire goes through.
-    const size = risk.sizeFor({ entry, riskPerShare });
     /*
      * WHICH account this would go to.
      *
@@ -311,6 +308,14 @@ app.post('/api/broker/preview', express.json(), (req, res) => {
      * which ones are live.
      */
     const cfg = destinationFor(b);
+    /*
+     * The share count comes from the same risk.sizeFor the setups use, so the
+     * chain here is identical to the one a fire goes through — and it is sized
+     * FOR THE CHOSEN ACCOUNT. The same trade is a different number of shares in
+     * a $5,000 account and a $20,000 one; a preview that showed the desk's
+     * number and then sent a different one would be the worst kind of preview.
+     */
+    const size = risk.sizeFor({ entry, riskPerShare }, risk.forAccount(cfg.cfg));
     const preview = broker.previewOrder({
       symbol: String(b.symbol || '').toUpperCase(),
       signal: side,
@@ -369,11 +374,16 @@ app.post('/api/broker/order', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'the broker is not armed' });
     }
 
-    const size = risk.sizeFor({ entry, riskPerShare: Math.abs(entry - stop) });
+    // Resolved before sizing, because the account decides the share count.
+    const dest = destinationFor(b);
+    if (dest.error) return res.status(400).json({ ok: false, error: dest.error });
+    const size = risk.sizeFor({ entry, riskPerShare: Math.abs(entry - stop) },
+                              risk.forAccount(dest.cfg));
     if (!size || !(size.shares > 0)) {
       return res.status(400).json({
         ok: false,
-        error: (size && size.reason) || 'set account size and risk per trade first',
+        error: (size && size.reason)
+          || `set an account size and risk per trade for ${dest.cfg.destinationName} first`,
       });
     }
     /*
@@ -388,10 +398,6 @@ app.post('/api/broker/order', express.json(), async (req, res) => {
     const setupId = String(b.setupId || '').trim() || 'manual';
     const source = String(b.source || '').trim()
       || (setupId === 'manual' ? 'placed by hand' : 'reviewed, then sent by hand');
-    // Resolved by the same helper the preview used, so what was reviewed and
-    // what is sent go to the same account.
-    const dest = destinationFor(b);
-    if (dest.error) return res.status(400).json({ ok: false, error: dest.error });
     res.json({ ok: true, order: {
       ...await broker.placeOrder({
         symbol, signal: side, quantity: size.shares, price: entry,

@@ -330,13 +330,30 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
   }
   if (!dryRun && setup.autoTrade === true && orderable && routing.cfgs.length) {
     for (const pick of out.picks) {
-      const size = risk.sizeFor(
-        { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
-      if (!size || !(size.shares > 0)) continue;
       // One account at a time, and one pick at a time: each order is sized
       // against what the previous one actually committed in THAT account, and
       // firing them together would size every one against the full balance.
       for (const cfg of routing.cfgs) {
+        /*
+         * SIZED FOR THIS ACCOUNT, not for the desk.
+         *
+         * The same trade is a different number of shares in a $5,000 prop
+         * account and a $20,000 Alpaca one. Sizing once and sending that count
+         * to both means one is over-ordered and refused while the other is
+         * barely used — and the number on the alert would belong to neither.
+         * An account that states nothing of its own falls back to the desk's,
+         * so a single broker behaves exactly as it always did.
+         */
+        const size = risk.sizeFor(
+          { entry: pick.plan.entry, riskPerShare: pick.plan.risk },
+          risk.forAccount(cfg, riskCfg));
+        if (!size || !(size.shares > 0)) {
+          (orders[pick.ticker] = orders[pick.ticker] || []).push({
+            sent: false, destination: cfg.destinationId, broker: cfg.destinationName,
+            skipped: (size && size.reason) || 'no size for this account',
+          });
+          continue;
+        }
         let result;
         try {
           result = await broker.placeOrder({
@@ -370,7 +387,10 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
           // automatic path failed would turn a degraded morning into a blind one.
           result = { sent: false, error: err.message };
         }
-        result = { ...result, destination: cfg.destinationId, broker: cfg.destinationName };
+        // The share count this account was sized for, beside what the broker
+        // did with it — "40 asked, 12 sent" is only readable with both.
+        result = { ...result, destination: cfg.destinationId, broker: cfg.destinationName,
+                   sizedFor: size.shares };
         (orders[pick.ticker] = orders[pick.ticker] || []).push(result);
       }
     }

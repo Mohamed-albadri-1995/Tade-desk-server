@@ -90,7 +90,7 @@ test("today's fires carry the numbers and the send button", () => {
 test('a sent order refreshes both lists', () => {
   // Whichever list it was sent from has to stop offering "review order…" for
   // it, or the same trade goes out twice.
-  const at = script.indexOf('<div class="or-head">SENT</div>');
+  const at = script.indexOf('<div class="or-head">SENT');
   expect(at).toBeGreaterThan(-1);
   const after = script.slice(at, at + 700);
   expect(after).toContain('loadHistory()');
@@ -151,4 +151,69 @@ test('the review carries the account through to the send', () => {
   // reviewed order and an unreviewed one wearing its numbers.
   expect(script).toContain('async function reviewOrder(plan, destination)');
   expect(script).toContain("if (destination) plan = { ...plan, destination };");
+});
+
+/*
+ * The bug that made "+ Add an account" do nothing.
+ *
+ * The add form is styled with `.dest` so it lines up with the saved rows. That
+ * made readDests() pick it up as a row — a destination with no data-id — and
+ * the server rejected the whole save for having an unnamed destination. From
+ * the outside: you filled the form, pressed the button, and nothing appeared.
+ *
+ * The pair of facts below is what keeps them apart, and neither is safe to
+ * change without the other.
+ */
+test('the add form is excluded from the rows that get saved', () => {
+  expect(script).toContain("'#bk-dests .dest:not(.dest-form)'");
+  expect(script).toContain('class="dest dest-form"');
+});
+
+test('a saved row carries the identity readDests needs', () => {
+  // It used to read a positional data-i index into the last fetched list, which
+  // broke the moment a row was added or removed between paint and save.
+  const at = script.indexOf('function paintDests(');
+  const body = script.slice(at, script.indexOf('function deskHint', at));
+  for (const attr of ['data-id=', 'data-dialect=', 'data-off=']) {
+    expect(body).toContain(attr);
+  }
+  expect(script).not.toContain("el.getAttribute('data-i')");
+});
+
+test('no account is configured through a prompt() box', () => {
+  /*
+   * Adding an account was three prompts in a row. On a phone a prompt is easy
+   * to dismiss by accident and dismissing any one of them returned silently,
+   * so the button read as broken. Anything that needs several answers is a
+   * form now.
+   *
+   * Two prompt-family calls stay and both are fine: confirm() before spending
+   * money, which is exactly what it is for, and one prompt() in copyCallback
+   * that shows the callback URL as selectable text when the clipboard is
+   * refused — it collects nothing.
+   */
+  const from = script.indexOf('function paintDests(');
+  const to = script.indexOf('async function saveBroker(');
+  expect(from).toBeGreaterThan(-1);
+  expect(to).toBeGreaterThan(from);
+  expect(script.slice(from, to)).not.toMatch(/(^|[^.\w])prompt\s*\(/m);
+  // …and the only one left in the whole page is that clipboard fallback.
+  expect([...script.matchAll(/(^|[^.\w])prompt\s*\(/gm)]).toHaveLength(1);
+  expect(script).toContain('Copy this into SignalStack');
+});
+
+test('each account has its own capital, not just its own hook', () => {
+  // Sizing every account off one balance is how a $5,000 account gets an order
+  // meant for $20,000 — refused by the broker, at 09:36.
+  const at = script.indexOf('function paintDests(');
+  const body = script.slice(at, script.indexOf('function deskHint', at));
+  for (const cls of ['d-acct', 'd-risk', 'd-mpp']) expect(body).toContain(cls);
+  expect(script).toContain("['d-acct', 'accountSize']");
+});
+
+test('the review says which account, and so does the send button', () => {
+  // The order body cannot carry it — SignalStack decides the account from the
+  // hook it arrived on — so it is the one fact that has to be on the screen.
+  expect(script).toContain('class="or-dest"');
+  expect(script).toContain('Send${name ? ` to ${esc(name)}` : \' it\'}');
 });

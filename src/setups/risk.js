@@ -77,6 +77,49 @@ function save(patch) {
   return settings();
 }
 
+/*
+ * THE SAME TRADE IS A DIFFERENT NUMBER OF SHARES IN A DIFFERENT ACCOUNT.
+ *
+ * The settings above are the desk's: one account size, one risk per trade, one
+ * position cap. That was the whole truth while there was one broker. It stopped
+ * being true the moment a $5,000 prop-firm account and a $20,000 Alpaca account
+ * were both live — sizing both against one balance means the small one is
+ * over-ordered and refused, or the large one is under-used, and either way the
+ * number on the alert belongs to neither.
+ *
+ * So a destination may carry its own accountSize, riskPerTrade and
+ * maxPositionPct, and this merges them over the desk's. Field by field rather
+ * than all-or-nothing: two accounts of different sizes often risk the same
+ * percentage, and having to restate a figure that has not changed is how the
+ * two drift apart.
+ *
+ * Absent everywhere means the desk's, so one account behaves exactly as it did.
+ */
+function forAccount(dest, base = settings()) {
+  if (!dest) return base;
+  const num = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const accountSize = num(dest.accountSize) || base.accountSize;
+  const riskPerTrade = num(dest.riskPerTrade)
+    // A risk per trade sized for a $20,000 account, applied to a $5,000 one, is
+    // four times the intended risk. When the account says its own size but not
+    // its own risk, the desk's PERCENTAGE is what carries over, not its dollars.
+    || (accountSize && base.accountSize && base.riskPerTrade
+        ? Math.round(base.riskPerTrade * (accountSize / base.accountSize) * 100) / 100
+        : base.riskPerTrade);
+  return {
+    ...base,
+    accountSize,
+    riskPerTrade,
+    maxPositionPct: num(dest.maxPositionPct) || base.maxPositionPct,
+    // Which account these numbers describe, so an alert or a preview can say so
+    // rather than presenting one account's size as the desk's.
+    account: dest.destinationName || dest.name || dest.destinationId || dest.id || null,
+  };
+}
+
 /**
  * Shares for one trade, and why it is that many.
  *
@@ -121,4 +164,4 @@ function sizeFor({ entry, riskPerShare }, cfg = settings()) {
   };
 }
 
-module.exports = { FILE, settings, save, sizeFor };
+module.exports = { FILE, settings, save, sizeFor, forAccount };
