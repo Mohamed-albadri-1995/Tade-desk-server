@@ -286,7 +286,13 @@
       <label class="fld"><span>Session</span><select id="view"><option value="all">All-day</option><option value="regular">Regular</option></select></label>
     </div>
     <div class="frow">
-      <label class="fld"><span>Feed</span><select id="feed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
+      <label class="fld"><span>Feed</span><select id="feed"><!-- yahoo has been a working feed in chart/data_manager.py all along; it was
+                 simply never listed here. The server's default_feed IS yahoo, so this
+                 select was being set to a value it had no option for — which renders
+                 BLANK and posts an empty string, and the page's own error read
+                 "unknown feed '' (have: [alpaca, hybrid, polygon, yahoo])". The list
+                 that names the feeds was the one place that did not know about one. -->
+              <option>yahoo</option><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
       <label class="fld"><span>As-of
         <b class="q" title="REPLAY cutoff: hide every bar after this date, so a setup is judged as it stood then. Blank = the full tape through today. Clicking a register stock does NOT set this — it loads everything and scrolls to that day.">?</b></span>
         <input id="asof" type="date"></label>
@@ -431,7 +437,13 @@
             <select id="btTf"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
           <label class="fld"><span>Feed
             <b class="q" title="Data feed for the backtest. polygon covers the whole market; alpaca (IEX) has NO data for many small caps — those pairs would be skipped.">?</b></span>
-            <select id="btFeed"><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
+            <select id="btFeed"><!-- yahoo has been a working feed in chart/data_manager.py all along; it was
+                 simply never listed here. The server's default_feed IS yahoo, so this
+                 select was being set to a value it had no option for — which renders
+                 BLANK and posts an empty string, and the page's own error read
+                 "unknown feed '' (have: [alpaca, hybrid, polygon, yahoo])". The list
+                 that names the feeds was the one place that did not know about one. -->
+              <option>yahoo</option><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
         </div>
         <div class="frow">
           <label class="fld"><span>From</span><input id="btStart" type="date"></label>

@@ -88,16 +88,33 @@ _load_dotenv()
 
 def _feed_status() -> dict:
     """Which feeds have credentials configured, and the preferred default.
+
     Polygon is preferred when available — deeper history + premarket.
-    'hybrid' (Polygon history + Alpaca live gap-fill) needs both."""
+    'hybrid' (Polygon history + Alpaca live gap-fill) needs both.
+
+    YAHOO NEEDS NO KEY, which is why it was missing here and why that mattered.
+    chart/data_manager.py has carried it as a real feed all along; this
+    function, the one place that says which feeds EXIST, simply never
+    mentioned it. On a box with no keys the answer was therefore "alpaca,
+    polygon, hybrid — all false, default alpaca": three feeds that cannot
+    work, and a default pointing at one of them. The page set its dropdown to
+    a value it had no option for, which renders blank and posts an empty
+    string, and the error read `unknown feed ''` while listing yahoo among the
+    ones it knew. The feed was never the problem; the inventory was.
+
+    So yahoo is always available, and it is the default when nothing else is
+    configured — a chart with delayed data beats a chart with none.
+    """
     has_alpaca  = bool(os.environ.get('APCA_API_KEY_ID') and os.environ.get('APCA_API_SECRET_KEY'))
     has_polygon = bool(os.environ.get('POLYGON_API_KEY'))
     have = {
+        # No credential to check — if the process has a network it has yahoo.
+        'yahoo':   True,
         'alpaca':  has_alpaca,
         'polygon': has_polygon,
         'hybrid':  has_alpaca and has_polygon,
     }
-    default = 'polygon' if has_polygon else 'alpaca'
+    default = 'polygon' if has_polygon else ('alpaca' if has_alpaca else 'yahoo')
     return {'feeds': have, 'default_feed': default}
 
 
