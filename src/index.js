@@ -128,6 +128,19 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/home.html'));
 });
 
+/*
+ * Level 2: which of the nine, and the lists they share.
+ *
+ * The landing page used to be this page as well — apps, nine tool cards, the
+ * shared shortlist, the CANSLIM list and a comparison table, in one scroll.
+ * The first question of the day is "which program", and everything below the
+ * answer was noise against it. Three levels now: / names the programs,
+ * /screeners names the screeners, and a tool is the screener itself.
+ */
+app.get('/screeners', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/screeners.html'));
+});
+
 // Scanner — serves scanner SPA for all /scanner/* paths
 app.get('/scanner', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));

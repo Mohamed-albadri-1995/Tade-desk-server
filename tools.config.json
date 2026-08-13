@@ -144,8 +144,9 @@
       "port": 3000,
       "path": "/",
       "accent": "#4a9eff",
-      "desc": "Nine screeners running side by side, each collecting its own history so they can be compared at the end of the month.",
-      "isSelf": true
+      "desc": "Nine screeners side by side, each keeping its own history \u2014 plus the shortlist and the CANSLIM list that all of them read.",
+      "isSelf": true,
+      "suitePath": "/screeners"
     },
     {
       "id": "JOURNAL",
