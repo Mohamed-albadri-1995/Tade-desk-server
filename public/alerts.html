@@ -246,9 +246,10 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .sec select { background:var(--bg3); border:1px solid var(--border); border-radius:5px;
   padding:4px 8px; color:var(--text); font:11px inherit; text-transform:none;
   letter-spacing:0; }
-.hist { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; background:var(--bg2);
-  border:1px solid var(--border); border-left:3px solid var(--text3);
-  border-radius:6px; padding:8px 11px; margin-top:6px; }
+/* A record is a fire that has stopped being urgent — the same card, with less
+   air around it, because a week of them is a list. */
+.hist { margin-top:var(--s2) }
+.hist .fire { margin-top:0 }
 .hist.lvl-trade { border-left-color:var(--accent); }
 .hist.lvl-warn { border-left-color:#fb923c; }
 .hist.lvl-error { border-left-color:var(--red); }
@@ -2634,98 +2635,14 @@ function feedLag(f) {
 }
 
 /*
- * THE NUMBERS, on the record row.
+ * histNumbers() lived here and is gone.
  *
- * The fire already carries entry, stop, target, share count and what the
- * broker did with it — publishFires has stored all of it since the setup
- * runner existed. The row showed a sentence and threw the rest away, which is
- * fine for a notification and useless for a review: "was 09:35 right this
- * week" is a question about levels and sizes, and going back for them means
- * reading a .jsonl file over SSH.
- *
- * Absent stays absent. A dash is a fact; a zero would be a claim.
+ * It built a run of nine key-value pairs under every history row, beside a
+ * sentence that already carried four of them. Both tabs render setupFire()
+ * now, which is the same zones and each fact once. Removed rather than left
+ * unused: an unreferenced renderer for the most important object on the page
+ * is an invitation to call it again.
  */
-function histNumbers(f) {
-  const t = f.setup;
-  if (!t) return '';
-  const n = (v, d = 2) => (v === null || v === undefined || v === '' ? '—' : Number(v).toFixed(d));
-  const bit = (label, v) => `<span class="h-n"><b>${label}</b> ${esc(String(v))}</span>`;
-  const parts = [];
-  if (t.entry != null) parts.push(bit('entry', n(t.entry)));
-  if (t.stop != null) parts.push(bit('stop', n(t.stop)));
-  if (t.target != null) parts.push(bit('target', n(t.target)));
-  if (t.size && t.size.shares) parts.push(bit('shares', t.size.shares));
-  if (t.risk != null) parts.push(bit('risk/sh', n(t.risk)));
-  if (t.size && t.size.riskDollars != null) parts.push(bit('risk $', n(t.size.riskDollars)));
-  if (t.extension != null) parts.push(bit('extension', n(t.extension) + '%'));
-  if (t.exitPlan && t.exitPlan.shape) parts.push(bit('exit', t.exitPlan.shape));
-  if (t.source) parts.push(bit('feed', t.source));
-  const lag = feedLag(f);
-  if (lag !== null) {
-    // 90 seconds is the line: the bar has closed, one fetch and one evaluation
-    // is seconds, so a minute and a half means something waited.
-    // Negative is not fast. The 09:35 bar closes at 09:36:00, so a decision
-    // published before that was taken on a bar still forming — a different
-    // price from the one the backtest used, and the only lag that changes the
-    // trade rather than merely delaying it.
-    parts.push(`<span class="h-n${lag > 90 || lag < 0 ? ' h-slow' : ''}"><b>lag</b> `
-      + `${lag}s${lag > 90 ? ' SLOW' : (lag < 0 ? ' EARLY' : '')}</span>`);
-  }
-  // What the broker did, when it did anything. An alert-only week should show
-  // this empty on every row — if it does not, something placed an order.
-  // One entry per account. With two of them the interesting case is that they
-  // DISAGREE — filled at one, out of buying power at the other — and a single
-  // line would have to pick which of the two to show.
-  for (const o of (t.orders && t.orders.length ? t.orders : (t.order ? [t.order] : []))) {
-    parts.push(bit(o.broker ? `ORDER · ${o.broker}` : 'ORDER',
-      (o.sent === false ? (o.error || o.skipped || 'not sent') : (o.status || 'sent'))
-      + (o.quantity ? ` ${o.quantity}sh` : '')));
-  }
-  if (t.size && t.size.capped) parts.push(bit('capped', t.size.capped));
-  /*
-   * SEND THIS ONE, BY HAND.
-   *
-   * The point of an alert-only week is to look at each signal and decide. That
-   * is only half a decision if saying yes then means retyping four numbers into
-   * a calculator, where a fat finger becomes a different trade than the one
-   * reviewed. This carries the stored plan — the entry, stop and target the
-   * setup actually decided — into the same preview-then-send path the automatic
-   * order uses, so what goes out is what was on screen.
-   *
-   * Preview first, always. Nothing is sent by one tap.
-   */
-  /*
-   * ONE BUTTON PER ACCOUNT THAT IS WAITING.
-   *
-   * An account on "by hand" already has its share count — worked out at the
-   * same instant and from the same standard as the automatic ones, and carried
-   * on the alert. So this is a send, not a decision: the number is on the
-   * button, and pressing it opens the review already pointed at that account.
-   */
-  const ready = (t.ready || []).map(r => r.shares > 0
-    ? `<button class="h-ready" onclick='reviewOrder(${JSON.stringify({
-        symbol: f.ticker, side: (t.signal || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG',
-        entry: t.entry, stop: t.stop, target: t.target || null,
-        setupId: f.setupId || f.ruleId || 'manual',
-      }).replace(/'/g, '&apos;')}, "${esc(r.destination)}")'
-      >Send ${r.shares} to ${esc(r.broker || r.destination)}</button>`
-    : `<span class="h-n"><b>${esc(r.broker || r.destination)}</b> ${esc(r.reason || 'no size')}</span>`
-  ).join('');
-
-  const send = (t.entry != null && t.stop != null && f.ticker && !t.order)
-    ? `<button class="h-send" onclick='reviewOrder(${JSON.stringify({
-        symbol: f.ticker, side: (t.signal || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG',
-        entry: t.entry, stop: t.stop, target: t.target || null,
-        // The setup's ID, not its name. The server reads it twice: to charge
-        // this order against the setup's own daily cap, and to route it to the
-        // accounts that setup names — and neither lookup can find a name.
-        setupId: f.setupId || f.ruleId || 'manual',
-      }).replace(/'/g, '&apos;')})'>review order…</button>`
-    : '';
-  return (parts.length || send || ready)
-    ? `<div class="h-nums">${parts.join('')}${ready}${ready ? '' : send}</div>` : '';
-}
-
 
 async function loadHistory(date) {
   const out = document.getElementById('history');
@@ -2754,17 +2671,19 @@ async function loadHistory(date) {
         after this was deployed — it cannot recover days that were never kept.</div>`;
       return;
     }
-    out.innerHTML = fires.map(f => `<div class="hist lvl-${esc(f.level || 'info')}">
-      <span class="h-at" title="exact time the alert was published">${esc(clockET(f.at))}</span>
-      ${tickerLink(f, 'h-t')}
-      <span class="tool">${esc(f.toolId || '')}</span>
-      <span class="h-rule">${esc(f.rule || '')}</span>
-      ${f.setup && f.setup.decisionAt
-        ? `<span class="h-bar" title="the bar the decision was taken on">bar ${esc(f.setup.decisionAt)}</span>`
-        : ''}
-      <div class="h-detail">${esc(f.detail || '')}</div>
-      ${histNumbers(f)}
-    </div>`).join('');
+    /*
+     * THE SAME CARD AS TODAY.
+     *
+     * History had the fault Today was just rid of — the detail sentence AND a
+     * run of key-value pairs saying the same thing underneath it. Two
+     * renderers for one record also means the levels can start disagreeing:
+     * fix a rounding on one and the other keeps the old one.
+     *
+     * A record is a fire that has stopped being urgent, not a different kind
+     * of object, so it gets the same zones. `.hist` keeps the tighter spacing —
+     * a week of these is a list, and a list wants less air than an alert.
+     */
+    out.innerHTML = fires.map(f => `<div class="hist">${setupFire(f, '')}</div>`).join('');
   } catch (e) {
     out.innerHTML = `<div class="empty">Could not read the history: ${esc(e.message)}</div>`;
   }
