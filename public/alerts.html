@@ -1750,6 +1750,41 @@ async function saveDests(list, focusId) {
   toast('saving…');
   const ok = await saveBroker({ destinations: rows, enabled: true });
   if (!ok) return false;
+  /*
+   * DID THE SERVER ACTUALLY KEEP IT?
+   *
+   * This page is a static file — express.static re-reads it from disk on every
+   * request — while the API is code loaded into a running Node process at
+   * startup. So `git pull` updates the page instantly and the server not at
+   * all, and until it is restarted the two are different versions of this app.
+   *
+   * A server older than broker accounts ignores the `destinations` key
+   * entirely and still answers 200. The save "succeeds", nothing is stored,
+   * the list comes back empty, and pressing Add reads as a dead button — which
+   * is exactly the report this was chased through twice.
+   *
+   * So the save is not believed on its status code. It is believed when the
+   * account comes back.
+   */
+  const back = ((BROKER && BROKER.broker && BROKER.broker.destinations) || []);
+  const lost = rows.filter(r => !back.some(d => d.id === r.id)).map(r => r.id);
+  if (lost.length) {
+    toast(`The server did not store ${lost.join(', ')} — it is running older `
+      + 'code than this page. Restart the alerts app: bash deploy-tools.sh', 'bad');
+    return false;
+  }
+  // Same trick for the fields the rebuild added. A server one version behind
+  // saves the account but drops its mode and size, which is a silent
+  // half-configured account — worse than a refusal.
+  const partial = rows.filter(r => {
+    const d = back.find(x => x.id === r.id);
+    return d && r.mode && d.mode === undefined;
+  }).map(r => r.id);
+  if (partial.length) {
+    toast(`${partial.join(', ')} saved WITHOUT its mode or size — the server is `
+      + 'older than this page. Restart it: bash deploy-tools.sh', 'bad');
+    return false;
+  }
   toast(`Saved — ${rows.length} account${rows.length === 1 ? '' : 's'}.`);
   // Put the row that was just written in front of the eyes that saved it. The
   // list renders ABOVE the buttons, so on a phone a new account otherwise
