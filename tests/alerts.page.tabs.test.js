@@ -76,17 +76,70 @@ test('a review can be closed from the markup that offers it', () => {
   expect(script).not.toMatch(/order-review'\)\.style\.display\s*=\s*'none'/);
 });
 
-test("today's fires carry the numbers and the send button", () => {
+test("today's fires can be sent from where they are read", () => {
   /*
    * The point of an alert-only week is to look at each signal and decide, in
-   * the ten minutes after it fires. histNumbers is what renders the levels and
-   * the "review order…" button, and it was called only from loadHistory — so
-   * firing this morning's fourth name meant scrolling past the whole week.
+   * the ten minutes after it fires — so the send has to be on the card, not
+   * only on the permanent record where it used to live.
    */
   const at = script.indexOf('async function loadFires()');
   expect(at).toBeGreaterThan(-1);
   const body = script.slice(at, script.indexOf('\n}', script.indexOf('catch', at)));
-  expect(body).toContain('histNumbers(f)');
+  expect(body).toContain('setupFire(f, fresh)');
+  const card = script.slice(script.indexOf('function setupFire('),
+                            script.indexOf('function orderChips('));
+  expect(card).toContain('readyButtons(f, t)');
+});
+
+/*
+ * THE ALERT CARD: four zones, every fact once.
+ *
+ * It was a paragraph followed by a run of key-value pairs, and the two said
+ * the same thing — entry, stop, target and the share count appeared in the
+ * sentence AND again underneath. Nine pairs wrapped wherever the width ran
+ * out, so "lag -31s EARLY" sat beside the send button, and the line that
+ * mattered most (the stop does not trail) was a clause in mid-sentence.
+ */
+describe('the alert card', () => {
+  const card = script.slice(script.indexOf('function setupFire('),
+                            script.indexOf('function orderChips('));
+
+  test('levels are three fixed columns, not a sentence', () => {
+    // The eye lands in the same place on every card instead of reading prose
+    // to find the stop.
+    for (const k of ['entry', 'stop', 'target', 'risk/sh']) expect(card).toContain(`>${k}<`);
+    expect(card).toContain('class="lv"');
+    expect(html).toMatch(/\.lv \{[^}]*display:grid/);
+  });
+
+  test('the sentence is not printed beside the numbers it repeats', () => {
+    /*
+     * f.detail stays on the fire because a push notification shows it on a
+     * locked phone, where there is no card and no zones. Rendering it here as
+     * well is exactly the duplication this replaced — so it appears only on
+     * the no-trade branch, where the sentence IS the content.
+     */
+    const withTrade = card.slice(card.indexOf('const n = (v, d = 2)'));
+    expect(withTrade).not.toContain('esc(f.detail');
+    expect(card).toContain('esc(f.detail || \'\')');   // the "nothing qualified" branch
+  });
+
+  test('warnings are their own block, not a clause', () => {
+    expect(card).toContain('class="su-warns"');
+    expect(card).toContain("(f.detail || '').match(/NOTE: (.+?)$/)");
+  });
+
+  test('actions sit in a row of their own', () => {
+    // They used to be inline with the numbers and read as another field.
+    expect(card).toContain('class="su-acts"');
+    const acts = card.slice(card.indexOf('class="su-acts"'));
+    expect(acts.slice(0, 400)).not.toContain('lv-v');
+  });
+
+  test('the diagnostics fold — they are read after the fact', () => {
+    expect(card).toContain('<details class="why"><summary>detail</summary>');
+    for (const k of ['extension', 'feed', 'lag', 'bar']) expect(card).toContain(`'${k}'`);
+  });
 });
 
 test('a sent order refreshes both lists', () => {
@@ -442,4 +495,83 @@ test('every control states its own background', () => {
   expect(html.slice(at, html.indexOf('}', at))).toContain('background:');
   const at2 = html.indexOf('.h-send {');
   expect(html.slice(at2, html.indexOf('}', at2))).toContain('background:');
+});
+
+/*
+ * THE SETUP CARD: said once, and folded when it is not urgent.
+ *
+ * It was a wall. A setup is usually a long AND a short, and readiness reports
+ * each side, so the same warning printed twice — "short: leg 1 stop follows an
+ * indicator…" then "long: leg 1 stop follows an indicator…" — and again for
+ * the runner. Four lines carrying two facts, full width, one colour, reading
+ * as a paragraph. Meanwhile "ranked by vwap_extension, top 6" appeared as a
+ * bullet AND in the meta line underneath.
+ */
+describe('the setup card', () => {
+  const warn = script.slice(script.indexOf('function setupWarnings(s)'),
+                            script.indexOf('\n}\n', script.indexOf('function setupWarnings(s)')));
+
+  test('the same warning on both sides is printed once, unprefixed', () => {
+    expect(warn).toContain('/^(short|long):\\s*(.+)$/i');
+    // Both sides, or neither named → the fact is about the setup, so no prefix.
+    expect(warn).toContain('sides.size === 0 || sides.size === 2');
+    // …and the prefix comes back only when the two sides genuinely differ,
+    // which is the case actually worth seeing.
+    expect(warn).toContain('${[...sides][0]} only:');
+  });
+
+  test('two warnings show and the rest fold', () => {
+    // A setup with six warnings has a problem a longer card does not help with.
+    expect(warn).toContain('lines.slice(0, 2)');
+    expect(warn).toContain('lines.slice(2)');
+  });
+
+  test('what the setup IS folds; how it is DEPLOYED does not', () => {
+    /*
+     * The bullets are read once, on the day it is set up. The meta line is the
+     * deployment and changes. Ranking belongs to the deployment — it used to be
+     * printed in both.
+     */
+    const at = script.indexOf('out.innerHTML = SETUPS.map');
+    const card = script.slice(at, script.indexOf('paintAlgoState();', at));
+    expect(card).toContain('<summary>what this setup does</summary>');
+    expect(card).toContain("['ranked by'");
+    // the bullets no longer sit open above the meta line
+    expect(card).not.toMatch(/<ul class="st-rules">\$\{\(s\.describe/);
+  });
+
+  test('the deployment facts are labelled values, not a run-on line', () => {
+    const at = script.indexOf('out.innerHTML = SETUPS.map');
+    const card = script.slice(at, script.indexOf('paintAlgoState();', at));
+    for (const k of ['ranked by', 'feed', 'extra scan', 'max/day']) {
+      expect(card).toContain(`'${k}'`);
+    }
+    expect(card).toContain('class="dg-i"');
+  });
+
+  test('"orders" is a state with the fix behind a tap, not a sentence', () => {
+    // It was a status, an instruction and a location in one grey sentence.
+    const at = script.indexOf('function accountChips(');
+    const body = script.slice(at, script.indexOf('\n}\n', at));
+    expect(body).toContain('<span class="bchip">alert only</span>');
+    expect(body).toContain('<summary>how to trade it</summary>');
+  });
+});
+
+test('no stylesheet rule is silently dropped by a bad selector', () => {
+  /*
+   * This is here because it happened. A stray quote left by a bad edit sat in
+   * front of `.st-meta`, and a browser drops a rule with an invalid selector
+   * without a word. The symptom was every value on the setup card running into
+   * the next — "top 6feed yahooextra scan" — which reads like a
+   * template-string bug and is not one.
+   */
+  const css = html.slice(html.indexOf('<style>') + 7, html.indexOf('</style>'));
+  const bad = css.split('\n')
+    .map((l, i) => [i + 1, l])
+    // A line starting with a quote is never a valid selector. Comment bodies
+    // legitimately do, so those are skipped.
+    .filter(([, l]) => /^\s*"/.test(l) && !/^\s*"[^"]*"[.,;]?\s*(rather|than|\*\/)/.test(l))
+    .filter(([, l]) => !l.includes('*/'));
+  expect(bad).toEqual([]);
 });

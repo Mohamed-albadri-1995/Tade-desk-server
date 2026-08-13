@@ -102,6 +102,46 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
  * a time, and remember nothing: the default is always shut.
  */
 
+/* ── THE ALERT CARD ZONES ──
+ *
+ * LEVELS as a grid, so entry / stop / target land in the same place on every
+ * card. Four columns on a phone, because four numbers of five characters fit
+ * and a wrapped level column is worse than a small one. */
+.lv { display:grid; grid-template-columns:repeat(4, 1fr); gap:var(--s2);
+  flex-basis:100%; background:var(--bg3); border:1px solid var(--border);
+  border-radius:8px; padding:var(--s3) var(--s2); margin:var(--s2) 0 }
+.lv-c { display:flex; flex-direction:column; align-items:center; gap:2px; min-width:0 }
+.lv-k { font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--text3) }
+.lv-v { font:700 var(--f-lg)/1.1 var(--mono); color:var(--text) }
+/* The two levels that are decisions rather than observations. Red is where the
+   trade is wrong, green is where it is done — the same meaning these colours
+   carry on a screener card. */
+.lv-v.stop { color:var(--m-down) } .lv-v.tgt { color:var(--m-up) }
+.lv-v.sm { font-size:var(--f-md); color:var(--text2) }
+
+/* WARNINGS, one line each, all in one colour, as a block. Four of them used to
+   read as a paragraph because they were full-width prose. */
+.su-warns { flex-basis:100%; display:flex; flex-direction:column; gap:var(--s1);
+  margin:var(--s2) 0 }
+.su-w { font-size:var(--f-xs); line-height:1.5; color:var(--m-model);
+  border-left:2px solid var(--m-model); padding-left:9px }
+.su-w::before { content:'⚠ ' }
+
+/* ACTIONS, on their own row and never mixed with data. */
+.su-acts { flex-basis:100%; display:flex; flex-wrap:wrap; gap:var(--s2);
+  align-items:center; margin-top:var(--s2) }
+/* What already went out, one chip per account. */
+.oc { font:600 var(--f-xs)/1 var(--ui); padding:6px 9px; border-radius:6px;
+  border:1px solid var(--border); white-space:nowrap }
+.oc.ok { color:var(--m-up); border-color:#22c55e55; background:#22c55e14 }
+.oc.bad { color:var(--m-down); border-color:#ef444455; background:#ef444414 }
+/* The folded diagnostics. */
+.dg { display:flex; flex-wrap:wrap; gap:4px 14px }
+.dg-i { font-size:var(--f-xs); font-family:var(--mono); color:var(--text2) }
+.dg-i b { color:var(--text3); font-weight:600 }
+.su-tag.sell { background:#ef444422; color:var(--m-down); border-color:#ef444466 }
+.su-tag.buy { background:#22c55e22; color:var(--m-up); border-color:#22c55e66 }
+
 /* The alert row is the one thing on this page read under time pressure, so it
    gets the most room and the biggest ticker. */
 .fire { display:flex; align-items:center; gap:var(--s2) var(--s3); flex-wrap:wrap;
@@ -155,8 +195,17 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .st-shape { font-size:11px; color:var(--text2); margin-top:7px;
   border:1px solid var(--border); border-radius:4px; padding:3px 7px;
   display:inline-block; }
-".st-meta { font-size:10.5px; color:var(--text3); margin-top:7px; }
-.st-meta .lnk { margin-left:8px; }
+/* The deployment facts, as labelled values on one wrapping row rather than a
+   run-on line of separators. Same .dg-i chips the alert card's diagnostics
+   use, so a label-and-value looks the same wherever it appears.
+
+   NOTE: this rule was dead for a while — a stray quote left by a bad edit sat
+   in front of the selector, and an invalid selector makes a browser drop the
+   whole rule silently. The symptom was "top 6feed yahooextra scan", every
+   value run into the next, which reads as a template-string bug and is not. */
+.st-meta { display:flex; flex-wrap:wrap; gap:4px 14px; align-items:baseline;
+  margin-top:var(--s2); font-size:var(--f-xs); color:var(--text2); }
+.st-meta .lnk { margin-left:auto; }
 .st-edit { margin-top:10px; border-top:1px dashed var(--border); padding-top:10px; }
 .st-rule { display:flex; gap:6px; align-items:center; margin-top:6px; flex-wrap:wrap; }
 .st-rule select, .st-rule input { background:var(--bg3); border:1px solid var(--border);
@@ -1041,21 +1090,31 @@ async function loadSetups() {
         ${s.readiness && s.readiness.ok && s.readiness.orderOk === false
           ? `<div class="st-alertonly">📣 Alerts only — will not place orders: ${
               (s.readiness.orderBlocking || []).map(esc).join('; ')}</div>` : ''}
-        ${s.readiness && s.readiness.warnings.length
-          ? `<div class="st-warn">⚠ ${s.readiness.warnings.map(esc).join('<br>⚠ ')}</div>` : ''}
-        ${(s.pairing || []).length
-          ? `<div class="st-warn">⚠ ${s.pairing.map(esc).join('<br>⚠ ')}</div>` : ''}
-        <ul class="st-rules">${(s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
+        ${setupWarnings(s)}
+        <!-- What the setup IS, folded. Three sentences you read once, on the
+             day it is set up — not every time you open the tab to switch it
+             off. The card used to be at its longest on the day you knew it
+             best. -->
+        ${(s.describe || []).length ? `<details class="why">
+          <summary>what this setup does</summary>
+          <div class="why-body"><ul class="st-rules">${
+            (s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul></div>
+        </details>` : ''}
         ${s.universe ? `<div class="st-gate">Only cards where ${esc(s.universe)}</div>` : ''}
+        <!-- HOW IT IS DEPLOYED, as labelled values rather than a run-on
+             line. The bullets above say what the strategy IS; this says how it
+             is set up here, and ranking belongs to this half — it used to be
+             printed in both. -->
         <div class="st-meta">
-          ${s.universeScanAt ? `extra scan ${esc(s.universeScanAt)} · ` : ''}
-          feed: ${esc(s.liveFeed || 'default')} · ${
-            s.rankMetric
-              ? `ranked by ${esc(s.rankMetric)}${s.rankDirection ? ` (${esc(s.rankDirection)})` : ''}`
-                + `${s.topN ? `, top ${esc(s.topN)}` : ', all'}`
-              : 'not ranked — all signals'}
-          ${s.maxTradesPerDay ? ` · max ${esc(s.maxTradesPerDay)} order(s)/day` : ''}
-          ${s.riskPerTrade ? ` · risks $${esc(s.riskPerTrade)}/trade (this setup)` : ''}
+          ${[
+            ['ranked by', s.rankMetric
+              ? `${esc(s.rankMetric)}${s.topN ? `, top ${esc(s.topN)}` : ', all'}`
+              : 'nothing — all signals'],
+            ['feed', esc(s.liveFeed || 'default')],
+            ...(s.universeScanAt ? [['extra scan', esc(s.universeScanAt)]] : []),
+            ...(s.maxTradesPerDay ? [['max/day', `${esc(s.maxTradesPerDay)} order(s)`]] : []),
+            ...(s.riskPerTrade ? [['risk', `$${esc(s.riskPerTrade)}/trade`]] : []),
+          ].map(([k, v]) => `<span class="dg-i"><b>${k}</b> ${v}</span>`).join('')}
           <button class="lnk" onclick="editSetup(${i})">edit filter</button>
         </div>
         <div class="st-edit" id="st-edit-${i}" style="display:none"></div>
@@ -1291,6 +1350,45 @@ async function saveSetup(i) {
 }
 
 /*
+ * WARNINGS, SAID ONCE.
+ *
+ * A setup is usually a long and a short — two qp strategies, one card — and
+ * readiness reports each side separately. When they are the same strategy
+ * pointed both ways, they produce the SAME warning twice: "short: leg 1 stop
+ * follows an indicator…" and "long: leg 1 stop follows an indicator…", then
+ * the same pair again for the runner. Four lines carrying two facts, in one
+ * colour, full width — which reads as a paragraph.
+ *
+ * So the side prefix is stripped, identical warnings collapse, and the prefix
+ * comes back ONLY when the two sides genuinely differ — which is the case
+ * actually worth seeing.
+ *
+ * Two are shown; the rest fold. A setup with six warnings has a problem that a
+ * longer card does not help with.
+ */
+function setupWarnings(s) {
+  const raw = [...(((s.readiness || {}).warnings) || []), ...(s.pairing || [])];
+  if (!raw.length) return '';
+  const bySide = new Map();
+  for (const w of raw) {
+    const m = /^(short|long):\s*(.+)$/i.exec(w);
+    const body = m ? m[2] : w;
+    const side = m ? m[1].toLowerCase() : null;
+    if (!bySide.has(body)) bySide.set(body, new Set());
+    if (side) bySide.get(body).add(side);
+  }
+  const lines = [...bySide.entries()].map(([body, sides]) =>
+    // Both sides, or neither named: the fact is about the setup, so no prefix.
+    (sides.size === 0 || sides.size === 2) ? body : `${[...sides][0]} only: ${body}`);
+  const head = lines.slice(0, 2);
+  const rest = lines.slice(2);
+  return `<div class="su-warns">${head.map(w => `<div class="su-w">${esc(w)}</div>`).join('')}
+    ${rest.length ? `<details class="why"><summary>${rest.length} more</summary>
+      <div class="why-body">${rest.map(w => `<div class="su-w">${esc(w)}</div>`).join('')}</div>
+    </details>` : ''}</div>`;
+}
+
+/*
  * WHICH ACCOUNTS RUN THIS SETUP — shown here, decided on the Settings tab.
  *
  * Read-only on purpose. An account lists its setups and declares its mode;
@@ -1301,9 +1399,15 @@ async function saveSetup(i) {
 function accountChips(s) {
   const mine = s.accounts || [];
   if (!mine.length) {
+    // A state, then the fix behind a tap. It was a status, an instruction and
+    // a location in one grey sentence.
     return `<div class="st-tools"><span class="ua-label">orders</span>
-      <span class="note">alert only — no broker account runs it
-      (add it to one under Settings → Broker accounts)</span></div>`;
+      <div class="ua-tools"><span class="bchip">alert only</span>
+        <details class="why"><summary>how to trade it</summary>
+          <div class="why-body">No broker account runs this setup. Add it to one
+            under <b>Settings → Broker accounts</b>: tap the setup's name on the
+            account that should run it, and set that account's mode.</div>
+        </details></div></div>`;
   }
   const word = { alert: 'alert only', manual: 'by hand', auto: 'FULL AUTO' };
   return `<div class="st-tools">
@@ -1419,39 +1523,7 @@ async function loadFires() {
       // qualified, bars missing, it crashed) are kept deliberately plain: they
       // exist so that silence never has to be interpreted, not to be read
       // closely.
-      if (f.kind === 'setup') {
-        const st = f.setup;
-        return `<div class="fire setup lvl-${esc(f.level || 'info')}${fresh}">
-          <div class="su-head">
-            <span class="su-tag">${st ? esc(st.signal) : esc((f.level || 'info').toUpperCase())}</span>
-            ${tickerLink(f)}
-            <span class="tool">${esc(f.rule || '')}</span>
-            <span class="when" title="${esc(clockET(f.at))} ET">${
-              esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
-          </div>
-          <div class="su-detail">${esc(f.detail || '')}</div>
-          ${st && st.size ? `<div class="su-size">${
-            st.size.shares > 0
-              ? `${st.size.shares} shares · $${st.size.positionValue.toFixed(0)} position · `
-                + `risks $${st.size.riskDollars.toFixed(0)} if stopped`
-              : esc(st.size.reason || 'no size')
-          }${st.size.capped ? ` — ${esc(st.size.capped)}` : ''}</div>` : ''}
-          ${st && st.size === null ? '<div class="su-size dim">no share count — set '
-            + 'account size and risk per trade above</div>' : ''}
-          ${st && st.feedWarning ? `<div class="su-warn">${esc(st.feedWarning)}</div>` : ''}
-          ${st && st.caution ? `<div class="su-caution">${esc(st.caution)}</div>` : ''}
-          <!-- The same numbers and the same "review order…" the history rows
-               carry. The manual trade is decided in the ten minutes after the
-               signal, not in the evening — putting the send button only on the
-               permanent record meant scrolling past the whole week to fire
-               this morning's fourth name. -->
-          ${histNumbers(f)}
-          ${f.ticker ? `<div class="su-links">
-            ${cardUrl(f) ? `<a class="lnk" href="${cardUrl(f)}">card</a>` : ''}
-            <a class="lnk" href="${tvUrl(f.ticker)}" target="_blank" rel="noopener">TV ↗</a>
-          </div>` : ''}
-        </div>`;
-      }
+      if (f.kind === 'setup') return setupFire(f, fresh);
       const card = cardUrl(f);
       return `<div class="fire${fresh}">
         ${tickerLink(f)}
@@ -1466,6 +1538,156 @@ async function loadFires() {
   } catch {
     out.innerHTML = '<div class="empty">Could not read the fires.</div>';
   }
+}
+
+/*
+ * THE ALERT CARD — four zones, in the order the questions get asked.
+ *
+ * It used to be a paragraph followed by a run of key-value pairs, and the two
+ * said the same thing: entry, stop, target and the share count appeared in the
+ * sentence AND again underneath it. Nine pairs then wrapped wherever the width
+ * ran out, so "lag -31s EARLY" ended up sitting beside the send button, and
+ * the one line that mattered most — the stop does not trail, manage it
+ * yourself — was a clause in the middle of the sentence.
+ *
+ *   DO        side, ticker, shares. The largest thing on the card.
+ *   LEVELS    entry / stop / target, three fixed columns. Not prose.
+ *   MONEY     what it costs and what it risks.
+ *   WRONG?    warnings, as their own block, in the warning colour.
+ *   ACTIONS   a row of their own, never mixed with data.
+ *   DETAIL    everything diagnostic, folded.
+ *
+ * Every fact appears exactly ONCE, in the zone that owns it. Prose is kept for
+ * the things that are genuinely sentences — a warning, a caution — and
+ * everything else is a label and a value.
+ *
+ * `f.detail` is deliberately NOT rendered here for a setup fire. It is the
+ * same string a push notification shows on a locked phone, where there is no
+ * card and no zones, so it stays a readable sentence; printing it here as well
+ * is exactly the duplication this replaces.
+ */
+function setupFire(f, fresh) {
+  const t = f.setup;
+  if (!t) {
+    // "Nothing qualified", "bars missing", "it crashed" — a real answer with no
+    // trade in it. The sentence IS the content, so it is shown plainly.
+    return `<div class="fire setup lvl-${esc(f.level || 'info')}${fresh}">
+      <div class="su-head">
+        <span class="su-tag">${esc((f.level || 'info').toUpperCase())}</span>
+        ${tickerLink(f)}<span class="tool">${esc(f.rule || '')}</span>
+        <span class="when">${esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
+      </div>
+      <div class="su-detail">${esc(f.detail || '')}</div></div>`;
+  }
+  const n = (v, d = 2) => (v === null || v === undefined ? '—' : Number(v).toFixed(d));
+  const sz = t.size;
+  const short = String(t.signal || '').toUpperCase() === 'SHORT';
+
+  // ── WRONG? ── every warning this fire carries, one line each, one colour.
+  const warns = [];
+  if (t.feedWarning) warns.push(t.feedWarning);
+  if (sz && sz.capped) warns.push(sz.capped);
+  if (sz && sz.shares === 0 && sz.reason) warns.push(sz.reason);
+  if (sz === null) warns.push('No share count — set the standard account under Settings.');
+  /*
+   * The exit note, pulled out of the middle of the sentence it was buried in.
+   * "The stop trails an indicator and will NOT follow" is the single most
+   * consequential line on this card: it is the difference between a managed
+   * position and one nobody is managing.
+   */
+  const note = (f.detail || '').match(/NOTE: (.+?)$/);
+  if (note) warns.push(note[1].replace(/\.$/, ''));
+
+  // ── DETAIL ── read after the fact, never at 09:36.
+  const diag = [];
+  if (t.extension != null) diag.push(['extension', n(t.extension) + '%']);
+  if (t.riskPct != null) diag.push(['risk %', n(t.riskPct) + '%']);
+  if (t.exitPlan && t.exitPlan.shape) diag.push(['exit', t.exitPlan.shape]);
+  if (t.decisionAt) diag.push(['bar', t.decisionAt]);
+  if (t.source) diag.push(['feed', t.source]);
+  const lag = feedLag(f);
+  if (lag !== null) diag.push(['lag', `${lag}s${lag > 90 ? ' SLOW' : (lag < 0 ? ' EARLY' : '')}`]);
+
+  return `<div class="fire setup lvl-${esc(f.level || 'info')}${fresh}">
+    <div class="su-head">
+      <span class="su-tag ${short ? 'sell' : 'buy'}">${short ? 'SHORT' : 'LONG'}</span>
+      ${tickerLink(f)}
+      <span class="tool">${esc(f.rule || '')}</span>
+      <span class="when" title="${esc(clockET(f.at))} ET">${
+        esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
+    </div>
+
+    <!-- LEVELS. Three fixed columns, so the eye lands in the same place on
+         every card instead of reading a sentence to find the stop. -->
+    <div class="lv">
+      <div class="lv-c"><span class="lv-k">entry</span><span class="lv-v">${n(t.entry)}</span></div>
+      <div class="lv-c"><span class="lv-k">stop</span><span class="lv-v stop">${n(t.stop)}</span></div>
+      <div class="lv-c"><span class="lv-k">target</span><span class="lv-v tgt">${n(t.target)}</span></div>
+      <div class="lv-c"><span class="lv-k">risk/sh</span><span class="lv-v sm">${n(t.risk)}</span></div>
+    </div>
+
+    ${sz && sz.shares > 0 ? `<div class="su-size">
+      <b>${sz.shares} shares</b> · $${Number(sz.positionValue).toFixed(0)} position ·
+      risks <b>$${Number(sz.riskDollars).toFixed(0)}</b> if stopped</div>` : ''}
+
+    ${warns.length ? `<div class="su-warns">${warns.map(w =>
+      `<div class="su-w">${esc(w)}</div>`).join('')}</div>` : ''}
+
+    <!-- ACTIONS, on their own row. They used to sit inline with the numbers and
+         read as another field. -->
+    <div class="su-acts">
+      ${readyButtons(f, t)}
+      ${orderChips(t)}
+      ${cardUrl(f) ? `<a class="lnk" href="${cardUrl(f)}">card</a>` : ''}
+      ${f.ticker ? `<a class="lnk" href="${tvUrl(f.ticker)}" target="_blank" rel="noopener">TV ↗</a>` : ''}
+    </div>
+
+    ${t.caution ? `<div class="su-caution">${esc(t.caution)}</div>` : ''}
+    ${diag.length ? `<details class="why"><summary>detail</summary><div class="why-body">
+      <div class="dg">${diag.map(([k, v]) =>
+        `<span class="dg-i"><b>${esc(k)}</b> ${esc(v)}</span>`).join('')}</div>
+    </div></details>` : ''}
+  </div>`;
+}
+
+/*
+ * WHAT ALREADY WENT OUT — one chip per account, not a sentence.
+ *
+ * With two accounts the interesting case is that they DISAGREE: filled at one,
+ * short of buying power at the other. A summary would have to pick which to
+ * tell you about.
+ */
+function orderChips(t) {
+  const rows = (t.orders && t.orders.length) ? t.orders : (t.order ? [t.order] : []);
+  return rows.map(o => {
+    const good = o.sent && o.status !== 'rejected';
+    return `<span class="oc ${good ? 'ok' : 'bad'}" title="${esc(o.error || o.skipped || '')}"
+      >${esc(o.broker || o.destination || 'broker')} ${
+      good ? `${esc(o.status || 'sent')} ${o.quantity || ''}`
+           : esc((o.skipped || o.error || 'not sent').slice(0, 28))}</span>`;
+  }).join('');
+}
+
+/*
+ * WAITING FOR A THUMB — one button per account on "by hand", with its own
+ * share count already on it. Pressing it is a send, not a decision.
+ */
+function readyButtons(f, t) {
+  const plan = (dest) => JSON.stringify({
+    symbol: f.ticker,
+    side: String(t.signal || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG',
+    entry: t.entry, stop: t.stop, target: t.target || null,
+    setupId: f.setupId || f.ruleId || 'manual',
+  }).replace(/'/g, '&apos;');
+  const ready = (t.ready || []).filter(r => r.shares > 0);
+  if (ready.length) {
+    return ready.map(r => `<button class="h-ready"
+      onclick='reviewOrder(${plan()}, "${esc(r.destination)}")'
+      >Send ${r.shares} to ${esc(r.broker || r.destination)}</button>`).join('');
+  }
+  // No account is waiting, but the trade can still be sent by hand from here.
+  return (t.entry != null && t.stop != null && f.ticker && !t.order)
+    ? `<button class="h-send" onclick='reviewOrder(${plan()})'>review order…</button>` : '';
 }
 
 /* ── the calculator ──
