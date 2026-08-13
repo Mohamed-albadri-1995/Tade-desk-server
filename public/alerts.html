@@ -5,49 +5,149 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Alerts · Trade Desk</title>
 <style>
+/* ── the design tokens ──────────────────────────────────────────────────
+ *
+ * Four complaints, four answers, and they are all one idea: let the page have
+ * a hierarchy instead of one flat surface at one size in one colour.
+ *
+ * ELEVATION. There were three greys eight points apart, which on a phone in
+ * daylight is one grey. Now the page is dark, a panel sits visibly on it, and a
+ * control sits visibly on the panel — so "these fields belong to this account"
+ * is something you see rather than something you work out.
+ *
+ * TYPE. The whole page was monospace, including the prose, and nine-tenths of
+ * it is prose. Monospace is for things you compare column-wise: prices, share
+ * counts, times, JSON. Sentences move to the system UI face, which on this
+ * phone is the one every other app uses and the one it renders best.
+ *
+ * COLOUR MEANS SOMETHING or it is not used. Accent is "you can act here".
+ * Green is good, red is money at risk, amber is caution. Everything else is
+ * structure, in grey. A page where six things are yellow has no yellow.
+ *
+ * SIZE is a scale, not a guess. Five steps, and a value is always bigger than
+ * its label — because the number is the thing being read and the label is only
+ * there to say which number it is.
+ */
 :root {
-  --bg:#0d0f14; --bg2:#13161e; --bg3:#1a1e28; --border:#2a2f3f;
-  --text:#e2e6f0; --text2:#8b92a5; --text3:#5a6175;
-  --accent:#fbbf24; --green:#4ade80; --red:#f87171; --blue:#4a9eff;
+  /* surfaces, in the order they stack */
+  --bg:#0a0c11; --panel:#141822; --panel2:#1c212d; --panel3:#242a38;
+  --line:#272e3d; --line2:#39415a;
+  /* kept as aliases so the 200-odd existing rules do not all have to move */
+  --bg2:var(--panel); --bg3:var(--panel2); --border:var(--line);
+  /* ink */
+  --text:#e9edf6; --text2:#9ba4ba; --text3:#6b748c;
+  /* meaning */
+  --accent:#f5b62b; --green:#4ade80; --red:#f87171; --amber:#fb923c; --blue:#5aa7ff;
+  /* type scale */
+  --f-xs:11.5px; --f-sm:13px; --f-md:14.5px; --f-lg:17px; --f-xl:21px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  /* spacing, so gaps are chosen from a set rather than invented per rule */
+  --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px;
 }
 * { box-sizing:border-box; }
 body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; padding:22px 16px 60px; }
+  font-family:var(--ui); font-size:var(--f-sm); line-height:1.5;
+  -webkit-text-size-adjust:100%; padding:20px 14px 72px; }
+
+/* NUMBERS STAY MONOSPACE. A share count, a price, a clock time and a block of
+   JSON are all things read against each other, and proportional digits make
+   two prices of the same length look different lengths. */
+.h-n, .h-at, .or-json, .cburl, .when, .d-id, .num,
+input[type=number], .risk input, .dest input, .calc-big { font-family:var(--mono); }
+/* Tabular figures everywhere else digits appear in running text, so a column
+   of them lines up without being monospace. */
+body { font-variant-numeric:tabular-nums; }
 .wrap { max-width:900px; margin:0 auto; }
 .top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
 h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .home { font-size:11px; color:var(--text3); text-decoration:none; border:1px solid var(--border);
   border-radius:5px; padding:4px 9px; }
 .home:hover { color:var(--blue); border-color:var(--blue); }
-.sub { font-size:12px; color:var(--text2); line-height:1.7; margin:8px 0 18px; }
-.sub b { color:var(--text); }
+/* The page's own explanation gets the same treatment as every other one: a
+   line you can read at a glance, and the reasoning one tap away. Eight lines
+   of prose above the tabs is eight lines between you and the alert. */
+.sub { font-size:var(--f-xs); color:var(--text2); line-height:1.65; margin:var(--s2) 0 var(--s3); }
+.sub b { color:var(--text); font-weight:600; }
 
 /* The noise controls. Deliberately at the top and stateful: an alerting page
    whose sound is off without saying so is worse than one with no sound. */
-.noise { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 14px;
-  border:1px solid var(--border); border-radius:8px; background:var(--bg2); margin-bottom:8px; }
-.btn { font:600 12px/1 inherit; padding:8px 12px; border-radius:6px; cursor:pointer;
-  background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+.noise { display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap;
+  padding:var(--s3) var(--s4); border:1px solid var(--line); border-radius:12px;
+  background:var(--panel); margin-bottom:var(--s3); }
+/* 34px tall, because this is a phone and the alternative is missing. */
+.btn { font:600 var(--f-sm)/1 var(--ui); padding:10px 14px; border-radius:8px;
+  cursor:pointer; background:var(--panel2); color:var(--text);
+  border:1px solid var(--line2); min-height:34px; }
 .btn:hover { border-color:var(--blue); }
+.btn:active { transform:translateY(1px); }
 .btn.on { background:var(--green); color:#04220f; border-color:var(--green); }
-.btn.primary { background:var(--accent); color:#221701; border-color:var(--accent); }
+.btn.primary { background:var(--accent); color:#241a02; border-color:var(--accent); }
+/* The one colour reserved for spending money. Nothing else on the page is red. */
+.btn.live { background:var(--red); color:#2a0808; border-color:var(--red); font-weight:700; }
 .note { font-size:11px; color:var(--text3); line-height:1.6; }
 .note.warn { color:var(--accent); }
 
-.sec { font-size:11px; font-weight:700; letter-spacing:.13em; text-transform:uppercase;
-  color:var(--text3); margin:26px 0 4px; display:flex; align-items:center; justify-content:space-between; }
+/* A section heading is a rule across the page, not a line of small caps lost
+   in the middle of the scroll. It is the only thing that says where one part
+   of the page stops and the next begins. */
+/* Heading on its own line, its status note under it.
+   These were flex-between on one row, and a heading of three words beside a
+   note of fifteen turned both into narrow columns of wrapped capitals — the
+   most emphasised text on the page and the least readable. */
+.sec { margin:var(--s5) 0 var(--s2); padding-bottom:var(--s2);
+  border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap;
+  align-items:baseline; gap:var(--s1) var(--s3); }
+.sec > span:first-child { font-size:var(--f-xs); font-weight:700; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--text); flex:1 0 100%; }
+/* The note beside a heading is a status, not a heading. Sentence case, normal
+   weight, its own line — it was inheriting the small caps and the tracking. */
+.sec > span:not(:first-child), .sec .note {
+  flex:1 1 100%; font-size:var(--f-xs); font-weight:400; letter-spacing:0;
+  text-transform:none; color:var(--text2); }
+.sec > button { flex:0 0 auto; margin-left:auto; }
+@media (min-width:560px) {
+  .sec > span:first-child { flex:0 0 auto; }
+  .sec > span:not(:first-child), .sec .note { flex:1 1 auto; text-align:right; }
+}
 
-.fire { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--bg2);
-  border:1px solid var(--border); border-left:3px solid var(--text3);
-  border-radius:8px; padding:10px 13px; margin-top:8px; }
+/* ── THE WHY, folded away ──
+ *
+ * Every control on this page carries a paragraph explaining why it exists.
+ * They are worth keeping — that reasoning is the difference between a setting
+ * and a superstition — but at the same weight as the data they are a wall, and
+ * a wall is not read at 09:36. They collapse behind a small "why", open one at
+ * a time, and remember nothing: the default is always shut.
+ */
+details.why { margin:var(--s2) 0 0; }
+details.why > summary { list-style:none; cursor:pointer; display:inline-flex;
+  align-items:center; gap:5px; font-size:var(--f-xs); color:var(--text3);
+  border:1px solid var(--line); border-radius:99px; padding:2px 10px; }
+details.why > summary::-webkit-details-marker { display:none; }
+details.why > summary::before { content:'?'; font-weight:700; color:var(--accent); }
+details.why > summary:hover { color:var(--text2); border-color:var(--line2); }
+details.why[open] > summary { margin-bottom:var(--s2); }
+details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1.65;
+  border-left:2px solid var(--line); padding-left:10px; }
+
+/* The alert row is the one thing on this page read under time pressure, so it
+   gets the most room and the biggest ticker. */
+.fire { display:flex; align-items:center; gap:var(--s2) var(--s3); flex-wrap:wrap;
+  background:var(--panel); border:1px solid var(--line);
+  border-left:3px solid var(--text3); border-radius:12px;
+  padding:var(--s3) var(--s4); margin-top:var(--s2); }
 .fire.fresh { border-left-color:var(--green); background:#4ade800f; }
-.fire .t { font-weight:700; font-size:15px; }
+.fire .t { font-weight:700; font-size:var(--f-lg); letter-spacing:-.01em; }
 .fire .tool { font-size:10px; font-weight:700; color:var(--text3);
   border:1px solid var(--border); border-radius:3px; padding:1px 6px; }
 .fire .what { font-size:12px; color:var(--text2); }
 .fire .when { font:11px ui-monospace,Menlo,monospace; color:var(--text3); margin-left:auto; }
-.lnk { font-size:10px; font-weight:700; text-decoration:none; color:var(--text3);
-  border:1px solid var(--border); border-radius:4px; padding:2px 6px; white-space:nowrap; }
+/* Written for <a>, used on <button> too — and a button with no background
+   declared takes the browser's own light grey, which on a dark page is a white
+   pill nobody designed. Everything is stated. */
+.lnk { font:600 var(--f-xs)/1.4 var(--ui); text-decoration:none; color:var(--text2);
+  background:var(--panel2); border:1px solid var(--line2); border-radius:6px;
+  padding:5px 9px; white-space:nowrap; cursor:pointer; display:inline-block; }
 .lnk:hover { color:var(--blue); border-color:var(--blue); }
 /* The ticker IS the link to its card — it is the obvious thing to press and it
    used to do nothing. Underlined on hover only, so a list of fires does not
@@ -138,19 +238,27 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .h-rule { font-size:11px; color:var(--text2); }
 .h-bar { font-size:10px; color:var(--text3); border:1px solid var(--border);
   border-radius:3px; padding:1px 5px; }
-.tabs { position:sticky; top:0; z-index:20; display:flex; gap:4px; padding:6px 0 8px;
-  background:var(--bg); border-bottom:1px solid var(--line); margin-bottom:10px }
-.tb { flex:1; padding:8px 4px; font-size:12.5px; font-weight:600; border-radius:7px;
-  border:1px solid var(--line); background:var(--panel); color:var(--text2);
-  font-family:inherit }
-.tb.on { background:var(--accent); border-color:var(--accent); color:#0b1220 }
+/* Five tabs on a 390px screen. Scrollable rather than shrunk to fit, so the
+   labels stay words instead of becoming abbreviations. */
+.tabs { position:sticky; top:0; z-index:20; display:flex; gap:var(--s1);
+  padding:var(--s2) 0; background:var(--bg); border-bottom:1px solid var(--line);
+  margin-bottom:var(--s3); overflow-x:auto; scrollbar-width:none }
+.tabs::-webkit-scrollbar { display:none }
+.tb { flex:1 0 auto; padding:10px 14px; font-size:var(--f-sm); font-weight:600;
+  border-radius:9px; border:1px solid var(--line); background:var(--panel);
+  color:var(--text2); font-family:var(--ui); white-space:nowrap; min-height:38px }
+.tb.on { background:var(--accent); border-color:var(--accent); color:#241a02 }
 .tb .n { font-weight:400; opacity:.8 }
 .h-nums { flex-basis:100%; margin-top:3px; display:flex; flex-wrap:wrap;
   gap:4px 10px; font-size:11px; color:var(--text2) }
 .h-n b { color:#64748b; font-weight:600 }
 .h-slow { color:#f5a623 }
-.h-send { font-size:11px; padding:2px 8px; background:#1c2431; color:#e2e8f0;
-  border:1px solid #334155; border-radius:5px }
+/* The button that reviews a real order. Bigger than the numbers beside it,
+   because it is the one thing in that row you press. */
+.h-send { font:600 var(--f-xs)/1 var(--ui); padding:7px 11px; background:var(--panel3);
+  color:var(--text); border:1px solid var(--line2); border-radius:7px;
+  cursor:pointer; min-height:30px }
+.h-send:hover { border-color:var(--accent); color:var(--accent) }
 /* The order review FLOATS.
  *
  * It used to sit inside the history pane, which was fine while the only place
@@ -226,12 +334,22 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .d-setups { flex-basis:100%; display:flex; gap:8px; align-items:flex-start; margin-top:2px }
 
 /* ── position sizing ── */
-.risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
-  border:1px solid var(--border); border-radius:8px; padding:12px 13px; }
-.risk label { display:flex; flex-direction:column; gap:4px; font-size:11px; color:var(--text3); }
-.risk input, .risk select { background:var(--bg3); border:1px solid var(--border);
-  border-radius:6px; padding:7px 9px; color:var(--text); font-family:inherit; font-size:13px;
-  width:130px; }
+/* A PANEL. Fields that belong together sit on one raised surface with room
+   around them, so "these three make one decision" is visible rather than
+   inferred from the order they happen to be in. */
+.risk { display:flex; flex-wrap:wrap; gap:var(--s3) var(--s3); align-items:flex-end;
+  background:var(--panel); border:1px solid var(--line); border-radius:12px;
+  padding:var(--s4); }
+/* Label above, value below, and the value is the bigger of the two — the
+   number is what is being read; the label only says which number it is. */
+.risk label { display:flex; flex-direction:column; gap:5px; font-size:var(--f-xs);
+  color:var(--text2); font-weight:600; }
+.risk input, .risk select { background:var(--panel2); border:1px solid var(--line2);
+  border-radius:8px; padding:9px 11px; color:var(--text); font-family:var(--mono);
+  font-size:var(--f-md); width:140px; }
+.risk input:focus, .risk select:focus { outline:none; border-color:var(--accent);
+  box-shadow:0 0 0 3px #f5b62b22; }
+.risk select { font-family:var(--ui); }
 .risk-hint { flex-basis:100%; line-height:1.55; }
 /* The share count is the answer; everything beside it is the working. */
 .calc-big { font-size:16px; color:var(--accent); }
@@ -295,12 +413,20 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <h1>⚠ Alerts</h1>
   <a class="home" id="home-link" href="/">← all tools</a>
 </div>
-<div class="sub">Two different things arrive here, and they do not have the same resolution.
-  <br><b>Rules</b> are evaluated inside every screener on its own scan, so they need no separate data
-  feed — and <b>see the market roughly every five minutes</b>. A break that happens and fails inside
-  one interval is never seen.
-  <br><b>Setups</b> wake once at a fixed time, pull <b>1-minute bars</b> for the whole card list and
-  rank it. They are not watching all day; they answer one question at one moment.</div>
+<!-- One line, and the reasoning behind a tap. Eight lines of prose above the
+     tabs is eight lines between you and this morning's alert. -->
+<div class="sub">Two kinds of alert arrive here: <b>rules</b> every five minutes,
+  <b>setups</b> once at a fixed minute.
+  <details class="why"><summary>why that matters</summary>
+    <div class="why-body">
+      <b>Rules</b> are evaluated inside every screener on its own scan, so they need no
+      separate data feed — and <b>see the market roughly every five minutes</b>. A break
+      that happens and fails inside one interval is never seen.<br>
+      <b>Setups</b> wake once at a fixed time, pull <b>1-minute bars</b> for the whole card
+      list and rank it. They are not watching all day; they answer one question at one
+      moment.
+    </div>
+  </details></div>
 
 <!-- WHY TABS.
      Seven sections in one scroll: notifications, position size, calculator,
@@ -2071,6 +2197,48 @@ function reviewBox() {
 }
 
 /*
+ * FOLD THE LONG EXPLANATIONS AWAY.
+ *
+ * Every control on this page carries a paragraph saying why it exists. That
+ * reasoning is worth keeping — it is the difference between a setting and a
+ * superstition — but printed at the same weight as the data it is a wall, and
+ * a wall does not get read at 09:36. Anything past a couple of lines goes
+ * behind a small "why" you can tap.
+ *
+ * Done here rather than by hand in the markup because these paragraphs are
+ * written as prose all over a two-thousand-line file, and a rule applied once
+ * catches the ones added next month too. Length is the test, so a genuinely
+ * short note — "6 fired", "not saved" — is left exactly where it is.
+ *
+ * Nothing is hidden that a person has to act on: only .risk-hint blocks, which
+ * are explanations by construction. Warnings, counts and errors are not
+ * touched.
+ */
+const WHY_LIMIT = 150;
+
+function foldWhy(root = document) {
+  for (const el of root.querySelectorAll('.risk-hint:not([data-folded])')) {
+    el.setAttribute('data-folded', '1');
+    if (el.textContent.trim().length < WHY_LIMIT) continue;
+    // Buttons and inputs live inside some of these blocks. Those are controls,
+    // not prose, and they stay on screen — only the words fold.
+    const controls = [...el.childNodes].filter(
+      n => n.nodeType === 1 && n.matches('button, input, select, a, code, textarea'));
+    const d = document.createElement('details');
+    d.className = 'why';
+    const sum = document.createElement('summary');
+    sum.textContent = 'why';
+    const body = document.createElement('div');
+    body.className = 'why-body';
+    body.innerHTML = el.innerHTML;
+    for (const c of body.querySelectorAll('button, input, select, textarea')) c.remove();
+    d.append(sum, body);
+    el.innerHTML = '';
+    el.append(...controls, d);
+  }
+}
+
+/*
  * One line, at the top of the screen, for two seconds.
  *
  * Not a note inside a panel: a panel can be scrolled past, and the button that
@@ -2511,6 +2679,8 @@ async function delRule(id) {
 }
 
 paintNoise();
+// The markup's own explanations, folded before anything else paints.
+foldWhy();
 /*
  * Subscribe on load when permission was already given.
  *

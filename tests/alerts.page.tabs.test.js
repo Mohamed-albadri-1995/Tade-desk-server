@@ -332,3 +332,73 @@ test('arming names the accounts that will trade by themselves', () => {
   expect(body).toContain('BY THEMSELVES');
   expect(body).toContain('buyingPower');
 });
+
+/*
+ * THE LOOK, checked where it can be checked statically.
+ *
+ * Four complaints, and each has one fact in the file that makes it true or
+ * false. Not a substitute for looking at the page — that is what the browser
+ * probe is for — but these are the ones that regress silently when someone
+ * adds a rule in a hurry.
+ */
+
+test('prose is a UI face and numbers are monospace', () => {
+  // The whole page was monospace, including nine-tenths of it that is prose.
+  // Monospace is for things compared column-wise: prices, counts, times, JSON.
+  expect(html).toMatch(/body\s*{[^}]*font-family:var\(--ui\)/);
+  expect(html).toMatch(/--ui:system-ui/);
+  expect(html).toMatch(/\.h-n[^{]*{\s*font-family:var\(--mono\)|font-family:var\(--mono\);?\s*}/);
+  expect(html).toContain('font-variant-numeric:tabular-nums');
+});
+
+test('there are real surfaces to stack things on', () => {
+  // Three greys eight points apart is one grey on a phone in daylight.
+  const vars = html.slice(html.indexOf(':root'), html.indexOf('* { box-sizing'));
+  for (const v of ['--bg:', '--panel:', '--panel2:', '--panel3:', '--line:', '--line2:']) {
+    expect({ token: v, defined: vars.includes(v) }).toEqual({ token: v, defined: true });
+  }
+});
+
+test('sizes and gaps come from a scale, not from guesses', () => {
+  const vars = html.slice(html.indexOf(':root'), html.indexOf('* { box-sizing'));
+  for (const v of ['--f-xs', '--f-sm', '--f-md', '--f-lg', '--f-xl',
+                   '--s1', '--s2', '--s3', '--s4', '--s5']) {
+    expect({ token: v, defined: vars.includes(v) }).toEqual({ token: v, defined: true });
+  }
+});
+
+test('long explanations fold behind a why', () => {
+  /*
+   * Every control carries a paragraph saying why it exists. That reasoning is
+   * worth keeping — it is the difference between a setting and a superstition
+   * — but at the same weight as the data it is a wall, and a wall is not read
+   * at 09:36.
+   */
+  expect(script).toContain('function foldWhy(');
+  expect(script).toContain('const WHY_LIMIT');
+  expect(html).toContain('details.why');
+  // Only explanations. Warnings, counts and errors are never folded.
+  const at = script.indexOf('function foldWhy(');
+  const body = script.slice(at, script.indexOf('\n}\n', at));
+  expect(body).toContain('.risk-hint');
+  expect(body).not.toContain('.warn');
+});
+
+test('a heading and its status note do not share a line', () => {
+  // They were flex-between: a three-word heading beside a fifteen-word note
+  // turned both into narrow columns of wrapped capitals.
+  const at = html.indexOf('.sec {');
+  const rule = html.slice(at, html.indexOf('}', at));
+  expect(rule).toContain('flex-wrap:wrap');
+  expect(html).toMatch(/\.sec > span:first-child \{[^}]*flex:1 0 100%/);
+});
+
+test('every control states its own background', () => {
+  // .lnk was written for <a> and used on <button>. A button with no background
+  // takes the browser's light grey, which on a dark page is a white pill
+  // nobody designed.
+  const at = html.indexOf('.lnk {');
+  expect(html.slice(at, html.indexOf('}', at))).toContain('background:');
+  const at2 = html.indexOf('.h-send {');
+  expect(html.slice(at2, html.indexOf('}', at2))).toContain('background:');
+});
