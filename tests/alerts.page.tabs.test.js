@@ -193,13 +193,17 @@ test('no account is configured through a prompt() box', () => {
    * that shows the callback URL as selectable text when the clipboard is
    * refused — it collects nothing.
    */
-  const from = script.indexOf('function paintDests(');
-  const to = script.indexOf('async function saveBroker(');
+  // Comments in this region DISCUSS prompt() — that is the bug being described
+  // — so the check has to look at code. Stripped crudely; good enough to tell a
+  // call from a sentence about one.
+  const code = script.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const from = code.indexOf('function paintDests(');
+  const to = code.indexOf('async function toggleDest(');
   expect(from).toBeGreaterThan(-1);
   expect(to).toBeGreaterThan(from);
-  expect(script.slice(from, to)).not.toMatch(/(^|[^.\w])prompt\s*\(/m);
+  expect(code.slice(from, to)).not.toMatch(/(^|[^.\w])prompt\s*\(/m);
   // …and the only one left in the whole page is that clipboard fallback.
-  expect([...script.matchAll(/(^|[^.\w])prompt\s*\(/gm)]).toHaveLength(1);
+  expect([...code.matchAll(/(^|[^.\w])prompt\s*\(/gm)]).toHaveLength(1);
   expect(script).toContain('Copy this into SignalStack');
 });
 

@@ -203,6 +203,19 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .bchip .dim { opacity:.6; font-weight:400 }
 /* The picker in the review box: every account, as buttons big enough for a
    thumb, because this is the tap that decides which book a position lands in. */
+/* SAVED / NOT SAVED, where you cannot miss it.
+   Every "I pressed save and saw nothing" in this app has been the same shape:
+   the outcome rendered somewhere below the fold, or above a button at the
+   bottom of a long scroll. A message about money settings has to arrive in
+   front of the eyes that pressed the button, wherever on the page that was. */
+#toast { position:fixed; left:50%; transform:translateX(-50%); top:12px; z-index:80;
+  max-width:92vw; padding:11px 16px; border-radius:10px; font-size:13.5px;
+  font-weight:600; box-shadow:0 6px 24px rgba(0,0,0,.5); pointer-events:none }
+#toast.ok { background:#065f46; color:#d1fae5; border:1px solid #10b981 }
+#toast.bad { background:#7f1d1d; color:#fee2e2; border:1px solid #ef4444 }
+/* The row that was just written, so the eye lands on it. */
+@keyframes flashrow { from { border-color:var(--accent); background:#1e293b } }
+.dest.just-saved { animation:flashrow 1.6s ease-out }
 .or-pick { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 9px }
 .or-pick .bchip { font-size:12.5px; padding:7px 11px }
 /* Mode, on the account row. Full auto is stated in the colour as well as the
@@ -1629,17 +1642,26 @@ function paintDests(list) {
           ? ' — ON FULL AUTO WITH NO SETUPS: it will place nothing.' : '')
       : '<b class="warn">No hook — nothing can be sent here.</b>'}</div>
   </div>`;
-  out.innerHTML = list.map(row).join('')
-    + `<div id="dest-new"></div>`
-    + `<div class="note risk-hint">
+  /*
+   * The controls go ABOVE the list, and the add form directly under them.
+   *
+   * They used to be at the bottom. On a phone that put "+ Add an account" below
+   * a screen of account rows, and the row it created rendered ABOVE the button
+   * that created it — off-screen, with the page not moving. Pressing it looked
+   * exactly like pressing a dead button, which is the report this fixes.
+   */
+  out.innerHTML = `<div class="note risk-hint" style="margin-bottom:10px">
          <button class="btn" onclick="addDest()">+ Add an account</button>
          <button class="btn primary" onclick="saveDests()">Save accounts</button>
-         <span id="bk-dest-note"></span>
          <br>Each account is a separate SignalStack hook with its own capital,
          its own daily count and its own list of setups. <b>Trade The Pool</b>
          and <b>Alpaca</b> take slightly different JSON, which is what the type
          on each row decides.
-       </div>`;
+       </div>`
+    + `<div id="dest-new"></div>`
+    + (list.length ? list.map(row).join('')
+        : `<div class="empty">No broker account yet. Nothing can be sent
+             anywhere until one is added.</div>`);
 }
 
 /** Turn one setup on or off for one account, and save straight away. */
@@ -1723,12 +1745,23 @@ function readDests() {
   });
 }
 
-async function saveDests(list) {
-  const note = document.getElementById('bk-dest-note');
+async function saveDests(list, focusId) {
   const rows = list || readDests();
-  if (note) note.textContent = 'saving…';
+  toast('saving…');
   const ok = await saveBroker({ destinations: rows, enabled: true });
-  if (note && ok) note.innerHTML = `<b>Saved ${rows.length} account(s).</b>`;
+  if (!ok) return false;
+  toast(`Saved — ${rows.length} account${rows.length === 1 ? '' : 's'}.`);
+  // Put the row that was just written in front of the eyes that saved it. The
+  // list renders ABOVE the buttons, so on a phone a new account otherwise
+  // appears off-screen and the tap reads as having done nothing.
+  if (focusId) {
+    const el = document.querySelector(`#bk-dests .dest[data-id="${focusId}"]`);
+    if (el) {
+      el.classList.add('just-saved');
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+  return true;
 }
 
 /*
@@ -1746,8 +1779,18 @@ async function saveDests(list) {
 function addDest() {
   const box = document.getElementById('dest-new');
   if (!box || box.querySelector('form')) return;
+  /*
+   * The SAME fields the saved row shows, in the same words.
+   *
+   * It used to ask for an absolute account size and risk while the row beside
+   * it showed a multiplier — two ways of saying one thing, on one screen, which
+   * is the confusion this whole rebuild was about. Ask for the multiple.
+   *
+   * A form rather than a chain of prompt() boxes: on a phone a prompt is easy
+   * to dismiss by accident, and dismissing any one of them returned silently.
+   */
   box.innerHTML = `<form class="dest dest-form" onsubmit="return createDest(event)">
-    <div class="d-head"><span>New account</span></div>
+    <div class="d-head"><span>New broker account</span></div>
     <label>Broker
       <select id="nd-dialect">
         <option value="alpaca">Alpaca</option>
@@ -1760,54 +1803,54 @@ function addDest() {
     <label>Name
       <input id="nd-name" placeholder="Alpaca paper">
     </label>
-    <label>Account size $
-      <input id="nd-acct" type="number" min="0" step="100" placeholder="e.g. 20000">
-    </label>
-    <label>Risk / trade $
-      <input id="nd-risk" type="number" min="0" step="10" placeholder="e.g. 200">
-    </label>
-    <label>Max position %
-      <input id="nd-mpp" type="number" min="1" max="100" step="0.01" placeholder="e.g. 16.66">
+    <label title="This account's capital as a multiple of the standard account above.">Size
+      <select id="nd-scale">${[0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4].map(
+        x => `<option value="${x}"${x === 1 ? ' selected' : ''}>${x}x the standard</option>`).join('')}
+      </select>
     </label>
     <label>Buying power $
-      <input id="nd-power" type="number" min="0" step="100" placeholder="e.g. 20000">
+      <input id="nd-power" type="number" min="0" step="100" placeholder="e.g. 20000" required>
     </label>
     <label>Max trades / day
       <input id="nd-maxtrades" type="number" min="1" step="1" placeholder="e.g. 4">
+    </label>
+    <label class="d-mode-l">Mode
+      <select id="nd-mode">
+        <option value="alert">Alert only — never sends</option>
+        <option value="manual" selected>By hand — I tap to send</option>
+        <option value="auto">FULL AUTO — sends by itself</option>
+      </select>
     </label>
     <label class="d-hook">SignalStack hook
       <input id="nd-hook" placeholder="https://app.signalstack.com/hook/…" required>
     </label>
     <button class="btn primary" type="submit">Add it</button>
     <button class="btn" type="button" onclick="document.getElementById('dest-new').innerHTML=''">Cancel</button>
-    <div class="d-foot" id="nd-note">Nothing is sent to this account until a setup
-      names it on the Setups tab.</div>
+    <div class="d-foot" id="nd-note">Which setups it runs is chosen on the saved
+      row, once it exists.</div>
   </form>`;
   document.getElementById('nd-id').focus();
 }
 
 async function createDest(ev) {
   ev.preventDefault();
-  const v = id => document.getElementById(id).value.trim();
+  const v = id => (document.getElementById(id) || {}).value?.trim() || '';
   const note = document.getElementById('nd-note');
   const id = v('nd-id').toLowerCase();
   const cur = ((BROKER && BROKER.broker && BROKER.broker.destinations) || []);
   if (cur.some(d => d.id === id)) {
     note.innerHTML = `<b class="warn">There is already an account called ${esc(id)}.</b>`;
+    toast(`There is already an account called ${id}.`, 'bad');
     return false;
   }
-  note.textContent = 'saving…';
   // readDests() reads the EXISTING rows; the new one is appended so the save
   // replaces the list with old + new rather than with new alone.
-  const ok = await saveBroker({ enabled: true, destinations: [...readDests(), {
-    id, dialect: v('nd-dialect') || document.getElementById('nd-dialect').value,
-    name: v('nd-name') || id, webhookUrl: v('nd-hook'), enabled: true,
-    accountSize: v('nd-acct') || null, riskPerTrade: v('nd-risk') || null,
-    maxPositionPct: v('nd-mpp') || null, buyingPower: v('nd-power') || null,
-    maxTradesPerDay: v('nd-maxtrades') || null,
-  }] });
-  // On success loadBroker has already repainted, which removes this form.
-  if (!ok && note) note.innerHTML = '<b class="warn">Not saved — see the message below.</b>';
+  await saveDests([...readDests(), {
+    id, dialect: v('nd-dialect'), name: v('nd-name') || id,
+    webhookUrl: v('nd-hook'), enabled: true, mode: v('nd-mode') || 'alert',
+    scale: v('nd-scale') || null, buyingPower: v('nd-power') || null,
+    maxTradesPerDay: v('nd-maxtrades') || null, setups: [],
+  }], id);
   return false;
 }
 
@@ -1849,6 +1892,9 @@ async function saveBroker(patch) {
     await loadBroker();
     return true;
   } catch (e) {
+    // Both: the toast so it is seen, the panel note so it can be re-read after
+    // the toast has gone.
+    toast(`Not saved — ${e.message}`, 'bad');
     document.getElementById('bk-note').innerHTML = `<b class="warn">${esc(e.message)}</b>`;
     return false;
   }
@@ -1987,6 +2033,27 @@ function reviewBox() {
   document.body.appendChild(shade);
   document.body.appendChild(box);
   return box;
+}
+
+/*
+ * One line, at the top of the screen, for two seconds.
+ *
+ * Not a note inside a panel: a panel can be scrolled past, and the button that
+ * triggers this often IS at the bottom of one. `bad` messages stay up longer
+ * and are not dismissed on their own, because a failed save is something to
+ * read rather than something to notice.
+ */
+function toast(msg, kind = 'ok') {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    document.body.appendChild(el);
+  }
+  el.className = kind;
+  el.textContent = msg;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.remove(), kind === 'bad' ? 7000 : 2600);
 }
 
 function closeReview() {
