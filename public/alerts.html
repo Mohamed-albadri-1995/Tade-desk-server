@@ -1034,8 +1034,11 @@ async function loadSetups() {
   try {
     const d = await (await fetch('/api/setups')).json();
     SETUPS = d.setups || [];
-    DECISIONS = SETUPS.filter(s => s.enabled !== false)
-      .map(s => s.decisionTime).filter(Boolean);
+    // A window, not a minute. A clock setup is a window one minute wide, so
+    // both kinds are the same shape here and nothing downstream has to ask
+    // which it is looking at.
+    DECISIONS = SETUPS.filter(s => s.enabled !== false && s.decisionTime)
+      .map(s => ({ from: s.decisionTime, to: s.windowEnd || s.decisionTime }));
     paintNextDecision();
     SETUP_FIELDS = d.fields || [];
     SETUP_OPS = d.operators || [];
@@ -1054,7 +1057,12 @@ async function loadSetups() {
       return `<div class="setup-def${on ? '' : ' off'}">
         <div class="su-head">
           <span class="t">${esc(s.name)}</span>
-          <span class="su-tag">${esc(s.decisionTime)} ET</span>
+          <!-- A watch setup shows its whole window, because it can fire on any
+               minute inside it. Showing only the opening minute made it look
+               like a clock setup, which is what it is not. -->
+          <span class="su-tag">${s.watch
+            ? `${esc(s.decisionTime)}–${esc(s.windowEnd)} ET`
+            : `${esc(s.decisionTime)} ET`}</span>
           <button class="btn${on ? ' on' : ''}" onclick="toggleSetup('${esc(s.id)}', ${!on})">
             ${on ? 'On' : 'Off'}</button>
         </div>
@@ -2889,16 +2897,39 @@ if (qs.get('ticker')) toggleForm({ ticker: qs.get('ticker').toUpperCase() });
 // switched off is not a decision to watch for, so the two cannot drift apart.
 let DECISIONS = [];
 
-function minutesToNextDecision() {
+function nowMinutesET() {
   const now = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date());
   const [h, m] = now.split(':').map(Number);
-  const nowMin = h * 60 + m;
+  return h * 60 + m;
+}
+function toMinutes(hm) {
+  const [h, m] = String(hm).split(':').map(Number);
+  return h * 60 + m;
+}
+
+/*
+ * Is a watch window open right now?
+ *
+ * A window setup can fire on ANY bar between its two times, so there is no one
+ * minute to be ready for — the whole window is the minute. This is the third
+ * poll state, and it is the one that matters most: it is exactly the case where
+ * the alert cannot be predicted.
+ */
+function decisionWindowOpen() {
+  const nowMin = nowMinutesET();
+  return DECISIONS.some(d => d.to !== d.from
+    && nowMin >= toMinutes(d.from) - 1 && nowMin <= toMinutes(d.to) + 2);
+}
+
+function minutesToNextDecision() {
+  const nowMin = nowMinutesET();
   let best = Infinity;
-  for (const t of DECISIONS) {
-    const [dh, dm] = String(t).split(':').map(Number);
-    const diff = (dh * 60 + dm) - nowMin;
+  for (const d of DECISIONS) {
+    // Inside a window there is nothing to wait for — it is happening.
+    if (nowMin >= toMinutes(d.from) && nowMin <= toMinutes(d.to)) return 0;
+    const diff = toMinutes(d.from) - nowMin;
     if (diff >= -3 && diff < best) best = diff;      // still watching just after
   }
   return best;
@@ -2907,9 +2938,11 @@ function minutesToNextDecision() {
 let pollTimer = null;
 function schedulePoll() {
   const away = minutesToNextDecision();
-  // Two minutes either side of a decision, look every three seconds. The alert
-  // exists to be acted on inside the minute it arrives.
-  const ms = away <= 2 ? 3000 : (away <= 10 ? 15000 : 60000);
+  // Two minutes either side of a decision — or anywhere inside an open watch
+  // window — look every three seconds. The alert exists to be acted on inside
+  // the minute it arrives, and in a window that minute is not knowable ahead.
+  const ms = (away <= 2 || decisionWindowOpen()) ? 3000
+    : (away <= 10 ? 15000 : 60000);
   clearTimeout(pollTimer);
   pollTimer = setTimeout(() => { loadFires(); schedulePoll(); }, ms);
 }
@@ -2932,16 +2965,26 @@ function paintNextDecision() {
     el.textContent = SETUPS.length ? 'every setup is off — nothing will fire' : '';
     return;
   }
+  const times = DECISIONS.map(d => d.from).sort().join(', ');
   const away = minutesToNextDecision();
-  el.className = away <= 2 ? 'note live' : 'note';
+  const open = decisionWindowOpen();
+  el.className = (away <= 2 || open) ? 'note live' : 'note';
+  // A window is its own sentence: nothing is due at a minute, something can
+  // arrive at any minute until it shuts. Naming the shut time is the useful
+  // part — it says how long to stay on this page.
+  const shutting = DECISIONS
+    .filter(d => d.to !== d.from && nowMinutesET() <= toMinutes(d.to))
+    .map(d => d.to).sort()[0];
   // Infinity means every decision today has already run. Saying nothing then
   // reads as "this feature is off"; the useful answer is when the next one is.
-  el.textContent = !Number.isFinite(away)
-      ? `next setup decision ${DECISIONS.slice().sort().join(', ')} ET tomorrow`
+  el.textContent = open && shutting
+      ? `watching — a setup can fire any minute until ${shutting} ET`
+    : !Number.isFinite(away)
+      ? `next setup decision ${times} ET tomorrow`
     : away < 0 ? 'setup decision just ran — watching'
     : away === 0 ? 'setup decision is NOW'
     : away <= 60 ? `next setup decision in ${away} min — keep this page open`
-    : `next setup decision at ${DECISIONS.slice().sort().join(', ')} ET`;
+    : `next setup decision at ${times} ET`;
 }
 setInterval(paintNextDecision, 20000);
 setTimeout(paintNextDecision, 1500);

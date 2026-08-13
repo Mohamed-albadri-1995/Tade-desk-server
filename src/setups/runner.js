@@ -135,8 +135,11 @@ function unmanagedLine(plan) {
  * endpoint uses, so a setup can be inspected on a past date without putting
  * yesterday's trades into today's alert feed.
  */
-async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
+async function runSetup(setup, { date, dryRun = false, tickers = null, bar = null } = {}) {
   const day = date || toETDate(Date.now());
+  // Which bar this run is answering for. The scheduler knows it; a direct call
+  // (preview, a test) does not, and for a clock setup there is only ever one.
+  const decisionBar = bar || setup.decisionTime;
   const started = Date.now();
 
   // A setup names the tools it belongs to — the qp strategy carries them — so a
@@ -306,6 +309,41 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
    * place a different strategy from the one that was backtested — under the
    * same name, with the same evidence behind it. It alerts; it does not trade.
    */
+  /*
+   * ONE ALERT PER NAME, PER SESSION — the latch a watch setup needs.
+   *
+   * A clock setup runs once, so it cannot repeat itself. A WATCH setup runs on
+   * every bar of its window: `PML breakout` is thirty-one runs between 09:40
+   * and 10:10, and a condition that stays true for six of those bars would
+   * alert six times, place six orders, and read as six separate signals.
+   *
+   * qp's own `entry_mode: 'edge'` solves this inside a backtest — one entry per
+   * contiguous true-run — but it cannot help here, because each live run is an
+   * independent question asked of the last bar. qp has no memory of what it
+   * told us a minute ago. This side does: the alert feed already holds every
+   * fire for the session, keyed by setup and ticker.
+   *
+   * So a name this setup has already alerted today is dropped before anything
+   * is sized or sent. A clock setup is unaffected — it never gets a second run
+   * to be stopped on.
+   */
+  const alreadyToday = new Set();
+  if (setup.watch && !dryRun) {
+    for (const f of alertStore.recentFires(day, 500)) {
+      if (f.ruleId === setup.id && f.ticker) alreadyToday.add(String(f.ticker).toUpperCase());
+    }
+    const before = out.picks.length;
+    out.picks = out.picks.filter(p => !alreadyToday.has(String(p.ticker).toUpperCase()));
+    if (before !== out.picks.length) {
+      console.log(`[Setups] ${setup.id}: ${before - out.picks.length} name(s) `
+        + 'already alerted today — the window latch held');
+    }
+    // Nothing NEW on this bar is the normal case for a watch setup: it is
+    // asked thirty-one times and answers once. Publishing "nothing qualified"
+    // every minute would bury the one bar that mattered.
+    if (!out.picks.length && before) return { ok: true, picks: 0, fires: [], latched: before };
+  }
+
   const orderable = !setup.readiness || setup.readiness.orderOk !== false;
   if (!dryRun && !orderable) {
     console.log(`[Setups] ${setup.id}: alert only — `
@@ -539,8 +577,24 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     });
   }
 
-  // Always say something, including "nothing". From a phone, a setup that
-  // published nothing and a setup that never ran look exactly the same.
+  /*
+   * Always say something, including "nothing" — from a phone, a setup that
+   * published nothing and a setup that never ran look exactly the same.
+   *
+   * EXCEPT on the middle bars of a watch window. `PML breakout` is asked
+   * thirty-one times between 09:40 and 10:10 and answers once; thirty-one
+   * "nothing qualified" lines would bury the one that mattered and teach you
+   * to stop reading the feed. It says so ONCE, on the last bar of the window,
+   * which is the moment the answer for the day is final.
+   */
+  const windowShutting = !setup.watch
+    || !decisionBar
+    || decisionBar >= (setup.windowEnd || setup.decisionTime);
+  if (!fires.length && !windowShutting) {
+    console.log(`[Setups] ${setup.id}: nothing on the ${decisionBar} bar `
+      + `(window ${setup.decisionTime}–${setup.windowEnd}, still open)`);
+    return { ok: true, picks: 0, fires: [], quiet: true };
+  }
   if (!fires.length) {
     fires.push({
       ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
@@ -662,7 +716,9 @@ async function runDue(decisionTime, opts = {}) {
   // Read live, so a strategy built in qp this morning runs this morning and one
   // deleted there stops — the whole reason the catalog is not a snapshot.
   const mine = (await catalog.forTool(config.toolId))
-    .filter(s => s.decisionTime === decisionTime)
+    // A clock setup matches its one minute; a watch setup matches any bar in
+    // its window. Same predicate — a clock setup is a one-minute window.
+    .filter(s => catalog.withinWindow(decisionTime, s.decisionTime, s.windowEnd))
     // Switched off from the alerts page. Silently skipped rather than
     // publishing "nothing qualified": you turned it off, and a message every
     // morning saying so is the thing that makes people stop reading the feed.
@@ -670,7 +726,7 @@ async function runDue(decisionTime, opts = {}) {
   const out = [];
   for (const setup of mine) {
     try {
-      out.push(await runSetup(setup, opts));
+      out.push(await runSetup(setup, { ...opts, bar: decisionTime }));
     } catch (err) {
       console.error(`[Setups] ${setup.id} failed:`, err.message);
       // A crash must not be silence either.

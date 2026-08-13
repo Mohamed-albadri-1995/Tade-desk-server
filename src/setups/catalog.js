@@ -63,6 +63,12 @@ function minutesBefore(time, mins) {
   return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
 }
 
+/** Is `hhmm` inside [from, to]? Both ends included; strings compare fine. */
+function withinWindow(hm, from, to) {
+  if (!hm || !from) return false;
+  return hm >= from && hm <= (to || from);
+}
+
 /*
  * A setup is a GROUP of qp strategies sharing a name and a decision.
  *
@@ -204,6 +210,22 @@ async function list() {
     // Nor is one with no entry window: a setup is defined by deciding at a
     // moment, and without one there is nothing to schedule.
     if (!at) continue;
+    /*
+     * THE END OF THE WINDOW, which this side has been throwing away.
+     *
+     * qp has always carried both ends. `window_start == window_end` is a
+     * CLOCK setup — the T2 09:35 and 10:00 ones decide on one bar and that is
+     * the whole idea. But `PML breakout` is 09:40 → 10:10 and `PM Breakout` is
+     * 09:30 → 10:00: the entry may fire on ANY bar in between, whenever the
+     * condition becomes true. qp's engine has always evaluated them that way.
+     *
+     * This catalogue read only window_start and turned it into one
+     * decisionTime, so the scheduler ran those setups once, at 09:41, and
+     * never looked again. Thirty minutes of the strategy simply did not
+     * happen — silently, because a setup that fires once and finds nothing
+     * publishes "nothing qualified" and looks like it worked.
+     */
+    const until = hhmm((s.risk || {}).window_end);
 
     const key = `${baseName(s.name)}@${at}`;
     if (!groups.has(key)) {
@@ -213,6 +235,12 @@ async function list() {
         strategyId: baseName(s.name),
         tools: [],
         decisionTime: at,
+        /*
+         * When the window shuts. Equal to decisionTime for a clock setup, so
+         * everything downstream can treat "one minute" as the degenerate case
+         * of a window rather than as a separate kind of thing.
+         */
+        windowEnd: until || at,
         universeScanAt: minutesBefore(at, 2),
         sides: [],
         strategies: [],
@@ -227,6 +255,12 @@ async function list() {
       });
     }
     const g = groups.get(key);
+    /*
+     * The pair's window is the WIDEST of the two sides. They should be
+     * identical — a long and a short of one setup — and if they are not, the
+     * one that closes earlier would otherwise silently truncate the other.
+     */
+    if (until && (!g.windowEnd || until > g.windowEnd)) g.windowEnd = until;
     for (const t of tools) if (!g.tools.includes(t)) g.tools.push(t);
     if (s.side && !g.sides.includes(s.side)) g.sides.push(s.side);
     g.strategies.push(s.name);
@@ -241,6 +275,19 @@ async function list() {
     const pairing = pairingNote(g, groups);
     return {
       ...rest,
+      /*
+       * A WATCH setup, or a CLOCK one.
+       *
+       * The difference is whether the strategy's entry window is a single
+       * minute. T2 09:35 opens and shuts at 09:35 — one bar, one decision. PML
+       * breakout is 09:40 → 10:10, and its entry fires on whichever bar in
+       * between the condition first becomes true, which is a completely
+       * different thing to schedule.
+       *
+       * Derived rather than stored, so it cannot disagree with the window it
+       * is derived from.
+       */
+      watch: (g.windowEnd || g.decisionTime) !== g.decisionTime,
       // Empty when nothing looks wrong, so a card can simply not show it.
       pairing,
       // Whether it can produce a clean alert and a clean order, said before the
@@ -316,4 +363,5 @@ async function get(id) {
   return (await list()).find(s => s.id === id) || null;
 }
 
-module.exports = { list, forTool, get, hhmm, baseName, minutesBefore, readiness };
+module.exports = { list, forTool, get, hhmm, baseName, minutesBefore,
+                   withinWindow, readiness };

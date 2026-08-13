@@ -107,6 +107,78 @@ test('the decision time is read from the strategy entry window', async () => {
   expect(byName['Opening range'].universeScanAt).toBe('09:33');
 });
 
+/*
+ * The entry window has TWO ends, and qp has always evaluated both.
+ *
+ * `PML breakout` is `window_start: 940, window_end: 1010` and its entry may
+ * become true on any bar in between. This side read only the start, so the
+ * setup ran once at 09:40 and the other thirty minutes of the strategy simply
+ * did not happen — and it did not look broken, because a setup that runs once
+ * and finds nothing publishes "nothing qualified" exactly like one that watched
+ * all morning. That is why `watch` is DERIVED from the two times rather than
+ * stored: a stored flag can disagree with the window; this one cannot.
+ */
+test('a window with two different ends is a watch setup', async () => {
+  qp.strategies.mockResolvedValue([{
+    name: 'PML breakout', side: 'short', tools: ['T2'],
+    risk: { window_start: 940, window_end: 1010 },
+  }]);
+  const [s] = await catalog.list();
+  expect(s.decisionTime).toBe('09:40');
+  expect(s.windowEnd).toBe('10:10');
+  expect(s.watch).toBe(true);
+});
+
+test('a window one minute wide is a clock setup, as before', async () => {
+  qp.strategies.mockResolvedValue([
+    T2_LONG,                                              // no window_end at all
+    { ...T2_LONG, name: 'Same minute', risk: { window_start: 1000, window_end: 1000 } },
+  ]);
+  for (const s of await catalog.list()) {
+    expect(s.watch).toBe(false);
+    expect(s.windowEnd).toBe('10:00');
+  }
+});
+
+/*
+ * A long and a short merge into one setup, and they need not shut at the same
+ * minute. The setup has to stay awake until the LAST of them is done, or the
+ * side with the longer window stops being watched half way through.
+ */
+test('merging a pair keeps the later end of the window', async () => {
+  qp.strategies.mockResolvedValue([
+    { name: 'Pair (Long)', side: 'long', tools: ['T2'], risk: { window_start: 940, window_end: 1010 } },
+    { name: 'Pair (Short)', side: 'short', tools: ['T2'], risk: { window_start: 940, window_end: 1030 } },
+  ]);
+  const [s] = await catalog.list();
+  expect(s.windowEnd).toBe('10:30');
+});
+
+/*
+ * The predicate the scheduler and the runner both use. A clock setup is the
+ * one-minute case, which is why there is only one of these rather than two.
+ */
+describe('withinWindow', () => {
+  test('a watch setup matches every bar from open to close, inclusive', () => {
+    for (const bar of ['09:40', '09:41', '10:09', '10:10']) {
+      expect(catalog.withinWindow(bar, '09:40', '10:10')).toBe(true);
+    }
+  });
+  test('and nothing outside it', () => {
+    expect(catalog.withinWindow('09:39', '09:40', '10:10')).toBe(false);
+    expect(catalog.withinWindow('10:11', '09:40', '10:10')).toBe(false);
+  });
+  test('a clock setup matches its one minute', () => {
+    expect(catalog.withinWindow('10:00', '10:00', '10:00')).toBe(true);
+    expect(catalog.withinWindow('10:01', '10:00', '10:00')).toBe(false);
+    expect(catalog.withinWindow('10:00', '10:00', null)).toBe(true);
+  });
+  test('a missing bar or a setup with no time matches nothing', () => {
+    expect(catalog.withinWindow(null, '10:00', '10:00')).toBe(false);
+    expect(catalog.withinWindow('10:00', null, null)).toBe(false);
+  });
+});
+
 test('two strategies sharing a name but not a minute stay separate setups', async () => {
   qp.strategies.mockResolvedValue([
     T2_LONG, { ...T2_LONG, risk: { window_start: 1030 } },

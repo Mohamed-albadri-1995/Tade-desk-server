@@ -314,10 +314,28 @@ function startScheduler() {
        * column is for, and it is now the only way this can go wrong.
        */
       const decidedOn = catalog.minutesBefore(now, 1);
-      const firing = due.filter(s => s.decisionTime === decidedOn && s.enabled !== false);
+      /*
+       * A CLOCK setup fires on ONE bar. A WATCH setup fires on any bar in its
+       * window.
+       *
+       * qp has always carried both ends of the entry window and has always
+       * evaluated a watch setup that way — `PML breakout` is 09:40 → 10:10 and
+       * its entry may become true on any bar between. This side read only the
+       * start, turned it into a single decision minute, and ran the setup once
+       * at 09:41. Thirty minutes of the strategy did not happen, and nothing
+       * said so: a setup that runs once and finds nothing publishes "nothing
+       * qualified", which is indistinguishable from having looked all along.
+       *
+       * So the filter is now "is the bar we just closed inside this setup's
+       * window", and a clock setup is the case where the window is one minute
+       * wide. `runDue` still receives the bar, so nothing downstream changes.
+       */
+      const firing = due.filter(s => s.enabled !== false
+        && catalog.withinWindow(decidedOn, s.decisionTime, s.windowEnd));
       if (firing.length) {
-        console.log(`[Setups] ${now} — ${firing.length} setup(s) due `
-          + `for the ${decidedOn} bar`);
+        const watching = firing.filter(s => s.watch).length;
+        console.log(`[Setups] ${now} — ${firing.length} setup(s) on the `
+          + `${decidedOn} bar${watching ? ` (${watching} watching a window)` : ''}`);
         await runDue(decidedOn);
       }
     });

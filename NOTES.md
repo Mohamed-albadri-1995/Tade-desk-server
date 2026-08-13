@@ -5,13 +5,47 @@ be picked up without re-deriving the problem.
 
 | # | Item | Kind |
 |---|------|------|
-| 1 | [Setups that fire on an action, not at a time](#1--setups-that-fire-on-an-action-not-at-a-time) | scheduling |
+| 1 | [Setups that fire on an action, not at a time](#1--setups-that-fire-on-an-action-not-at-a-time) | scheduling — **done** |
 | 2 | [The alert card is unorganised](#2--the-alert-card-is-unorganised) | design |
 | 3 | [The setup card is a wall of sentences](#3--the-setup-card-is-a-wall-of-sentences) | design |
 
 ---
 
 ## 1 · Setups that fire on an action, not at a time
+
+### Built — and it was a bug, not a feature
+
+The premise below was wrong in one important way: **qp already had this.** Every
+strategy carries `risk.window_start` AND `risk.window_end`, and qp evaluates the
+entry on any bar between them — `PML breakout` is 09:40 → 10:10, `PM Breakout
+(2m)` is 09:30 → 10:00. This side read only the start.
+
+So those setups were asked once, at the opening minute, and never again. Thirty
+minutes of the strategy did not happen, and nothing looked wrong: a setup that
+runs once and finds nothing publishes "nothing qualified", which reads exactly
+like one that watched all morning and found nothing.
+
+What changed:
+
+- **`catalog`** carries `windowEnd`, and `watch` derived from the two times
+  (derived so it cannot disagree with the window). New `withinWindow(bar, from,
+  to)` — one predicate for both kinds, because a clock setup is a window one
+  minute wide.
+- **`scheduler`** filters on the window instead of an exact-minute match. Still
+  one tick a minute; a watch setup simply matches more of them.
+- **`runner`** latches per (setup, ticker, day): a level that broke at 09:52 is
+  still broken at 09:53, so qp answers the same trade on every remaining bar and
+  only the first becomes an alert. Empty bars mid-window publish nothing; the
+  last bar publishes "nothing qualified" once, because that is when the answer
+  is final.
+- **Alerts page** polls every 3s for the whole window, not just around its
+  opening minute — the third state this note asked for. The setup card shows
+  `09:40–10:10 ET` rather than pretending to be a clock.
+
+Closed bars only, per the open question below — that keeps the live rule and the
+backtest evaluating the same thing.
+
+Left alone: sizing, the standard account, ratios, modes. This was scheduling.
 
 ### Asked
 A setup that decides when something *happens* — a level breaks, price crosses

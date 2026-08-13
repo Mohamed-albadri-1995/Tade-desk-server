@@ -22,7 +22,17 @@ process.env.TOOL_ID = 'T2';
 process.env.TOOL_NAME = 'Momentum';
 
 jest.mock('../src/setups/qpClient');
-jest.mock('../src/setups/catalog');
+/*
+ * The catalogue is mocked so a test can hand the runner exactly the setups it
+ * wants — but `withinWindow` is a pure predicate, not a data source, and an
+ * auto-mocked version returns undefined. That silently filtered EVERY setup
+ * out and three tests failed on "cannot read properties of undefined",
+ * nowhere near the cause. Data is mocked; arithmetic is not.
+ */
+jest.mock('../src/setups/catalog', () => ({
+  ...jest.createMockFromModule('../src/setups/catalog'),
+  withinWindow: jest.requireActual('../src/setups/catalog').withinWindow,
+}));
 jest.mock('../src/r0/registry', () => ({ getTodayRows: jest.fn(() => []) }));
 
 const qp = require('../src/setups/qpClient');
@@ -287,6 +297,96 @@ describe('switching a setup off', () => {
     expect(await runner.runDue('10:00', { date: DATE })).toHaveLength(1);
     expect(store.recentFires(DATE).some(f => f.level === 'trade')).toBe(true);
     prefs.isEnabled.mockRestore();
+  });
+});
+
+/*
+ * A watch setup — one that qp gives a WINDOW rather than a single minute.
+ *
+ * qp has always carried `risk.window_start` AND `risk.window_end`, and evaluates
+ * an entry on any bar between them: `PML breakout` is live from 09:40 to 10:10.
+ * This side used to collapse that to the opening minute, so the setup was asked
+ * once, at 09:40, and never again — and because a setup that finds nothing still
+ * publishes "nothing qualified", it looked like it had run and found nothing all
+ * morning. Silence would have been noticed; a confident wrong answer was not.
+ */
+describe('a setup with a window rather than a minute', () => {
+  const WATCH = {
+    ...SETUP,
+    id: 'T2 09:40 PML breakout@09:40',
+    name: 'T2 09:40 PML breakout',
+    decisionTime: '09:40', windowEnd: '10:10', watch: true,
+  };
+  beforeEach(() => { catalog.forTool.mockResolvedValue([WATCH]); });
+
+  test('runs on every bar in the window, not only the first', async () => {
+    decided([]);
+    for (const bar of ['09:40', '09:52', '10:10']) {
+      expect(await runner.runDue(bar, { date: DATE })).toHaveLength(1);
+    }
+    expect(qp.decide).toHaveBeenCalledTimes(3);
+  });
+
+  test('and not once the window has shut', async () => {
+    decided([]);
+    expect(await runner.runDue('10:11', { date: DATE })).toEqual([]);
+    expect(await runner.runDue('09:39', { date: DATE })).toEqual([]);
+    expect(qp.decide).not.toHaveBeenCalled();
+  });
+
+  /*
+   * Thirty-one bars, thirty-one "nothing qualified" lines, one of which matters.
+   * The empty answer is worth publishing once — on the last bar, when it is
+   * final — and worth suppressing on the bars where the day is still open.
+   */
+  test('an empty bar mid-window publishes nothing', async () => {
+    decided([]);
+    const [out] = await runner.runDue('09:52', { date: DATE });
+    expect(out.quiet).toBe(true);
+    expect(store.recentFires(DATE)).toHaveLength(0);
+  });
+
+  test('an empty LAST bar says so, because now it is the answer', async () => {
+    decided([]);
+    const [out] = await runner.runDue('10:10', { date: DATE });
+    expect(out.quiet).toBeUndefined();
+    expect(store.recentFires(DATE)[0].detail).toMatch(/Nothing qualified/);
+  });
+
+  /*
+   * The latch. A level that broke at 09:52 is still broken at 09:53, so qp
+   * answers the same trade on every remaining bar. One break, one alert.
+   */
+  test('a ticker that already fired today does not fire again', async () => {
+    decided([pick('LIFE')]);
+    const first = await runner.runDue('09:52', { date: DATE });
+    expect(first[0].fires).toHaveLength(1);
+
+    const again = await runner.runDue('09:53', { date: DATE });
+    expect(again[0].latched).toBe(1);
+    expect(store.recentFires(DATE).filter(f => f.ticker === 'LIFE')).toHaveLength(1);
+  });
+
+  test('but a different ticker later in the window still does', async () => {
+    decided([pick('LIFE')]);
+    await runner.runDue('09:52', { date: DATE });
+    decided([pick('LSCC')]);
+    await runner.runDue('09:58', { date: DATE });
+    const tickers = store.recentFires(DATE).filter(f => f.ticker).map(f => f.ticker);
+    expect(tickers.sort()).toEqual(['LIFE', 'LSCC']);
+  });
+
+  /*
+   * A clock setup is a one-minute window, so none of the above may change it:
+   * it still runs on its minute and still says "nothing qualified" when it
+   * finds nothing, because that bar is both its first and its last.
+   */
+  test('a clock setup is unaffected — one bar, and it always answers', async () => {
+    catalog.forTool.mockResolvedValue([SETUP]);
+    decided([]);
+    const [out] = await runner.runDue('10:00', { date: DATE });
+    expect(out.quiet).toBeUndefined();
+    expect(store.recentFires(DATE)[0].detail).toMatch(/Nothing qualified/);
   });
 });
 
