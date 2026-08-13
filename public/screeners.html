@@ -5,24 +5,67 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Screener Suite · Trade Desk</title>
 <style>
+/* ── the design tokens, the same set the alerts page uses ───────────────
+ *
+ * The three panels at the bottom of this page had every problem that page
+ * had, and one of its own: the EXPLANATION was bigger than the thing it
+ * explained. Four lines of centred prose about the shortlist, above a
+ * shortlist rendered in 13px chips. The prose is not the product.
+ *
+ * TYPE. Monospace for tickers, counts and tables — things read against each
+ * other. The system UI face for sentences, which is most of this page.
+ *
+ * ALIGNMENT. Centred paragraphs are read by finding the start of each line in
+ * a different place every time. Headings may centre; prose does not.
+ *
+ * COLOUR MEANS SOMETHING. Blue is "you can act here". Purple is the CANSLIM
+ * list, matching the badge on every tool's cards. Amber is about to expire.
+ * Everything else is grey structure.
+ */
 :root {
-  --bg:#0d0f14; --bg2:#13161e; --bg3:#1a1e28; --border:#2a2f3f;
-  --text:#e2e6f0; --text2:#8b92a5; --text3:#5a6175;
-  --accent:#4a9eff; --green:#4ade80; --red:#f87171; --amber:#fbbf24;
+  --bg:#0a0c11; --panel:#141822; --panel2:#1c212d; --panel3:#242a38;
+  --line:#272e3d; --line2:#39415a;
+  --bg2:var(--panel); --bg3:var(--panel2); --border:var(--line);
+  --text:#e9edf6; --text2:#9ba4ba; --text3:#6b748c; --dim:var(--text3);
+  --accent:#5aa7ff; --green:#4ade80; --red:#f87171; --amber:#fbbf24; --violet:#c084fc;
+  --f-xs:11.5px; --f-sm:13px; --f-md:14.5px; --f-lg:17px; --f-xl:21px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px;
 }
 * { box-sizing:border-box; }
 body {
   margin:0; min-height:100vh; background:var(--bg); color:var(--text);
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-family:var(--ui); font-size:var(--f-sm); line-height:1.5;
+  font-variant-numeric:tabular-nums; -webkit-text-size-adjust:100%;
   display:flex; flex-direction:column; align-items:center;
-  padding:48px 20px 40px;
+  padding:32px 16px 56px;
 }
+/* Tickers, counts, clocks and tables stay monospace — they are compared. */
+.uni-tkr, .uni-by, .uni-n, .check, .card-port, .nb-clock,
+.cmp-tbl, .tv-fallback, .sc-tag { font-family:var(--mono); }
+
+/* ── the why, folded away ──
+ * Same pattern as the alerts page. The reasoning is worth keeping; printed at
+ * the same weight as the data it is a wall, and a wall does not get read. */
+details.why { margin:var(--s2) 0 0; text-align:left; }
+details.why > summary { list-style:none; cursor:pointer; display:inline-flex;
+  align-items:center; gap:5px; font-size:var(--f-xs); color:var(--text3);
+  border:1px solid var(--line); border-radius:99px; padding:3px 11px; }
+details.why > summary::-webkit-details-marker { display:none; }
+details.why > summary::before { content:'?'; font-weight:700; color:var(--accent); }
+details.why > summary:hover { color:var(--text2); border-color:var(--line2); }
+details.why[open] > summary { margin-bottom:var(--s2); }
+details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1.65;
+  border-left:2px solid var(--line); padding-left:10px; }
 .crumb { align-self:flex-start; font-size:12px; color:var(--text2); text-decoration:none;
   padding:6px 10px; margin:-34px 0 20px -8px; border-radius:6px; }
 .crumb:hover { color:var(--accent); background:var(--bg2); }
 .logo { font-size:13px; letter-spacing:.28em; color:var(--accent); font-weight:700; }
-.title { font-size:28px; font-weight:700; margin:14px 0 6px; letter-spacing:-.02em; text-align:center; }
-.subtitle { font-size:13px; color:var(--text2); margin-bottom:32px; text-align:center; }
+.title { font-size:var(--f-xl); font-weight:700; margin:var(--s3) 0 var(--s1);
+  letter-spacing:-.02em; text-align:center; }
+.subtitle { font-size:var(--f-sm); color:var(--text2); margin-bottom:var(--s5);
+  text-align:center; max-width:60ch; }
 
 /* The applications. Bigger than a tool card on purpose — the choice between
    charting and screening is made before the choice of which screener, and the
@@ -48,16 +91,18 @@ body {
 .app-arrow { margin-left:auto; font-size:16px; color:var(--text3); }
 .app-card:hover .app-arrow { color:var(--accent); }
 
-.section-head { font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
-  color:var(--text3); margin:34px 0 10px; text-align:center; width:100%; }
+.section-head { font-size:var(--f-xs); font-weight:700; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--text2); margin:var(--s5) 0 var(--s3);
+  text-align:center; width:100%; }
 .section-head::before, .section-head::after { content:'——'; opacity:.4; margin:0 10px; }
 
 .cards { display:flex; flex-wrap:wrap; gap:16px; justify-content:center;
          width:100%; max-width:1000px; }
 .tool-card {
-  position:relative; width:300px; background:var(--bg2); border:1px solid var(--border);
-  border-radius:10px; padding:20px; text-decoration:none; color:inherit;
-  display:flex; flex-direction:column; gap:8px; transition:border-color .15s, transform .15s;
+  position:relative; width:300px; background:var(--panel); border:1px solid var(--line);
+  border-radius:14px; padding:var(--s4); text-decoration:none; color:inherit;
+  display:flex; flex-direction:column; gap:var(--s2);
+  transition:border-color .15s, transform .15s;
   border-top:3px solid var(--accent);
 }
 .tool-card:hover { border-color:var(--accent); transform:translateY(-2px); }
@@ -97,9 +142,9 @@ body {
 .tool-card.down { opacity:.55; border-top-color:var(--text3); }
 
 .card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
-.card-name { font-size:17px; font-weight:700; letter-spacing:-.01em; }
-.card-port { font-size:10px; color:var(--text3); letter-spacing:.06em; }
-.card-desc { font-size:12px; color:var(--text2); line-height:1.6; min-height:3.2em; }
+.card-name { font-size:var(--f-lg); font-weight:700; letter-spacing:-.01em; }
+.card-port { font-size:var(--f-xs); color:var(--text3); letter-spacing:.04em; }
+.card-desc { font-size:var(--f-xs); color:var(--text2); line-height:1.6; min-height:3.2em; }
 
 .status { display:flex; align-items:center; gap:6px; font-size:10.5px;
           letter-spacing:.06em; text-transform:uppercase; }
@@ -135,9 +180,9 @@ body {
 
 /* The one-line answer, above the nine cards: which of them are live right now.
    Without it the reader compares nine time ranges against a clock. */
-.now-bar { width:100%; max-width:1000px; margin:2px auto 14px; padding:12px 16px;
-  border-radius:9px; text-align:center; font-size:13.5px; line-height:1.6;
-  border:1px solid var(--border); background:var(--bg2); color:var(--text2); }
+.now-bar { width:100%; max-width:1000px; margin:2px auto var(--s4); padding:var(--s3) var(--s4);
+  border-radius:12px; text-align:center; font-size:var(--f-md); line-height:1.6;
+  border:1px solid var(--line); background:var(--panel); color:var(--text2); }
 .now-bar.live { border-color:var(--green); background:#4ade8016; color:var(--text); }
 .now-bar b { color:var(--green); }
 .now-bar .nb-clock { font:700 12px ui-monospace,Menlo,monospace; color:var(--text3);
@@ -150,39 +195,62 @@ body {
   text-transform:uppercase; color:var(--text3); margin:10px 0 -4px; padding-left:2px; }
 .group-head:first-child { margin-top:0; }
 
-/* ── month-end comparison ── */
-.cmp-wrap { margin-top:34px; width:100%; max-width:1000px; text-align:center; }
-.cmp-btn { font:600 13px/1 inherit; padding:10px 20px; border-radius:6px; cursor:pointer;
-  background:var(--accent); color:#08111f; border:none; }
-.cmp-btn:hover { opacity:.9; }
+/* ── THE THREE SHARED PANELS ──
+ *
+ * Shortlist, CANSLIM and the comparison were three centred blocks of prose
+ * running into each other with no edges, the explanation set larger than the
+ * data. They are cards now: a heading, the thing itself, and the reasoning
+ * folded behind a "why".
+ */
+.cmp-wrap { margin-top:var(--s5); width:100%; max-width:1000px; text-align:left;
+  background:var(--panel); border:1px solid var(--line); border-radius:14px;
+  padding:var(--s4); }
+.cmp-btn { font:600 var(--f-sm)/1 var(--ui); padding:11px 18px; border-radius:9px;
+  cursor:pointer; background:var(--accent); color:#04121f; border:none; min-height:38px; }
+.cmp-btn:hover { filter:brightness(1.08); }
 .cmp-btn:disabled { opacity:.5; cursor:default; }
-.cmp-sel { font:600 12px/1 inherit; padding:9px 12px; border-radius:6px; margin-left:8px;
-  background:var(--bg2); color:var(--text); border:1px solid var(--border); cursor:pointer; }
-.pair-wrap { margin-top:26px; }
+.cmp-sel { font:600 var(--f-sm)/1 var(--ui); padding:11px 12px; border-radius:9px;
+  margin-left:var(--s2); background:var(--panel2); color:var(--text);
+  border:1px solid var(--line2); cursor:pointer; min-height:38px; }
+.cmp-row { display:flex; flex-wrap:wrap; gap:var(--s2); align-items:center;
+  margin-top:var(--s3); }
+.pair-wrap { margin-top:var(--s5); }
 .pair-title { font-size:13px; font-weight:700; margin-bottom:4px; }
-.cmp-hint { font-size:11.5px; color:var(--text3); margin-top:8px; line-height:1.6; }
-.cmp-hint b { color:var(--text2); }
+/* Left-aligned and capped at a readable measure. Centred paragraphs are read
+   by hunting for the start of every line in a different place. */
+.cmp-hint { font-size:var(--f-xs); color:var(--text2); margin-top:var(--s2);
+  line-height:1.65; text-align:left; max-width:72ch; }
+.cmp-hint b { color:var(--text); font-weight:600; }
 /* Shown only when neither clipboard route worked. Monospace and wrapping, so a
    long list is still something you can select all of on a phone. */
 .tv-fallback { width:100%; margin-top:10px; padding:10px; border-radius:6px;
   background:var(--bg3); color:var(--text); border:1px solid var(--accent);
   font:12px/1.6 ui-monospace,Menlo,monospace; resize:vertical; word-break:break-all; }
-.uni-title { font-size:15px; font-weight:700; margin-bottom:4px; }
-.uni-grid { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:14px; }
-.uni-chip { display:flex; align-items:center; gap:8px; background:var(--bg2);
-  border:1px solid var(--border); border-radius:7px; padding:8px 12px; }
-.uni-chip.multi { border-color:#eab30877; background:#eab30810; }
+/* The panel's name, and the count beside it — which is the part worth seeing
+   before deciding whether to read the rest. */
+.uni-title { font-size:var(--f-lg); font-weight:700; margin-bottom:var(--s1);
+  letter-spacing:-.01em; display:flex; align-items:baseline; gap:var(--s2);
+  flex-wrap:wrap; }
+/* THE DATA, left-aligned and bigger than the prose about it. It was 13px
+   chips centred under four lines of centred explanation — the one arrangement
+   that makes a list of tickers harder to scan than a paragraph. */
+.uni-grid { display:flex; flex-wrap:wrap; gap:var(--s2); justify-content:flex-start;
+  margin-top:var(--s3); }
+.uni-chip { display:flex; align-items:center; gap:var(--s2); background:var(--panel2);
+  border:1px solid var(--line2); border-radius:9px; padding:9px 12px; }
+.uni-chip.multi { border-color:#eab30877; background:#eab30814; }
 /* The CANSLIM panel is a <details>. Its headline has to look like the other
    panel titles rather than like a browser disclosure widget, so the native
    marker is replaced with one that sits on the same baseline as the text. */
-.cs-summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:8px; }
+.cs-summary { cursor:pointer; list-style:none; display:flex; align-items:baseline;
+  gap:var(--s2); flex-wrap:wrap; min-height:34px; }
 .cs-summary::-webkit-details-marker { display:none; }
 .cs-summary::before { content:'▸'; color:#c084fc; font-size:.8em; transition:transform .15s; }
 #cs-wrap[open] .cs-summary::before { transform:rotate(90deg); }
 /* The count is the reason to open it, so it is legible while shut. Amber only
    when something is about to drop off — that is the change that turns a badge
    off on every other tool's cards, which reads as a bug if it is a surprise. */
-.cs-count { font-size:12px; font-weight:400; color:var(--dim); }
+.cs-count { font-size:var(--f-sm); font-weight:400; color:var(--text2); }
 .cs-count b { color:#facc15; font-weight:600; }
 
 /* Same purple the CANSLIM badge uses on a card, so the two read as one thing.
@@ -204,7 +272,9 @@ body {
   padding:2px 6px; white-space:nowrap; }
 .tv-link:hover { color:var(--accent); border-color:var(--accent); }
 #cs-out .cs-soon .uni-n { background:#eab30822; color:#facc15; border-color:#eab30866; }
-.uni-tkr { font-weight:700; font-size:13px; letter-spacing:.02em; }
+/* The ticker is the thing being read. It was the same size as the sentence
+   above it saying that tickers would appear below. */
+.uni-tkr { font-weight:700; font-size:var(--f-md); letter-spacing:.02em; }
 .uni-by { font-size:10.5px; color:var(--text3); font-family:ui-monospace,Menlo,monospace; }
 .uni-n { font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px;
   background:#eab30822; color:#facc15; border:1px solid #eab30844; }
@@ -229,8 +299,8 @@ body {
 .cmp-none { background:#ffffff0d; color:var(--text3); border:1px solid var(--border); }
 .cmp-foot { font-size:11.5px; color:var(--text3); margin-top:12px; line-height:1.7; text-align:left;
   max-width:80ch; margin-left:auto; margin-right:auto; }
-.note { margin-top:30px; font-size:11px; color:var(--text3); text-align:center;
-        max-width:56ch; line-height:1.7; }
+.note { margin-top:var(--s5); font-size:var(--f-xs); color:var(--text3);
+        text-align:center; max-width:60ch; line-height:1.7; }
 .version { margin-top:22px; font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
 @media (max-width:580px) {
   body { padding:32px 14px; }
@@ -257,11 +327,16 @@ body {
 <div class="cards" id="cards"></div>
 
 <div class="cmp-wrap" id="uni-wrap">
-  <div class="uni-title">Shortlist — every tool</div>
-  <div class="cmp-hint">Anything shortlisted on any tool appears here, by design. Names picked by
-    more than one tool sort to the top: independent agreement is a different proposition from one
-    list's opinion.</div>
-  <div id="uni-out"><div class="cmp-hint" style="margin-top:14px">Loading…</div></div>
+  <!-- Heading, then the LIST, then the reasoning. It used to be heading, four
+       lines of centred prose, and only then the names — the explanation set
+       larger than the thing it explained. -->
+  <div class="uni-title">Shortlist <span class="cs-count">every tool</span></div>
+  <div id="uni-out"><div class="cmp-hint">Loading…</div></div>
+  <details class="why"><summary>how this list is built</summary>
+    <div class="why-body">Anything shortlisted on any tool appears here, by design.
+      Names picked by more than one tool sort to the top: independent agreement is a
+      different proposition from one list's opinion.</div>
+  </details>
   <!-- Hidden until there is something to send. A pair of dead buttons over an
        empty list is worse than no buttons. -->
   <div id="uni-tv" style="display:none">
@@ -271,10 +346,12 @@ body {
          failed. Real and selectable rather than a message about failing. -->
     <textarea id="uni-tv-text" class="tv-fallback" readonly rows="3"
               style="display:none" onclick="this.select()"></textarea>
-    <div class="cmp-hint">Every tool's picks in one list, exchange-qualified.
-      <b>Copy</b> then paste into TradingView's watchlist symbol box, or
-      <b>Download</b> and use Watchlist → ⋮ → <b>Import list…</b> — TradingView has no
-      public way to write a watchlist from outside, so the import is the whole route in.</div>
+    <details class="why"><summary>getting these into TradingView</summary>
+      <div class="why-body">Every tool's picks in one list, exchange-qualified.
+        <b>Copy</b> then paste into TradingView's watchlist symbol box, or
+        <b>Download</b> and use Watchlist → ⋮ → <b>Import list…</b> — TradingView has no
+        public way to write a watchlist from outside, so the import is the whole route in.</div>
+    </details>
   </div>
 </div>
 
@@ -295,21 +372,30 @@ body {
 <details class="cmp-wrap" id="cs-wrap">
   <summary class="uni-title cs-summary">CANSLIM — the growth list
     <span class="cs-count" id="cs-count"></span></summary>
-  <div class="cmp-hint">Who is a growth company, decided once a day on earnings and sales rather
-    than on what the tape did. A name stays for 90 days from the last time it qualified, so this
-    changes with the earnings calendar and not with the market. Every tool tags its own cards
-    from this list — it is a label and never a filter.</div>
-  <div id="cs-out"><div class="cmp-hint" style="margin-top:14px">Loading…</div></div>
+  <div id="cs-out"><div class="cmp-hint">Loading…</div></div>
+  <details class="why"><summary>what qualifies, and for how long</summary>
+    <div class="why-body">Who is a growth company, decided once a day on earnings and
+      sales rather than on what the tape did. A name stays for 90 days from the last
+      time it qualified, so this changes with the earnings calendar and not with the
+      market. Every tool tags its own cards from this list — it is a label and never
+      a filter.</div>
+  </details>
 </details>
 
 <div class="cmp-wrap">
-  <button class="cmp-btn" id="cmp-btn" onclick="loadComparison()">Compare every screener</button>
-  <select class="cmp-sel" id="cmp-entry" onchange="loadComparison()">
-    <option value="B">Entry B</option>
-    <option value="A">Entry A</option>
-  </select>
-  <div class="cmp-hint">Pulls the scorecard from all nine tools and ranks every screener
-    against <b>Stocks in Play</b> — the plain list that does nothing clever.</div>
+  <div class="uni-title">Compare every screener</div>
+  <div class="cmp-row">
+    <button class="cmp-btn" id="cmp-btn" onclick="loadComparison()">Run the comparison</button>
+    <select class="cmp-sel" id="cmp-entry" onchange="loadComparison()">
+      <option value="B">Entry B</option>
+      <option value="A">Entry A</option>
+    </select>
+  </div>
+  <details class="why"><summary>what it compares against</summary>
+    <div class="why-body">Pulls the scorecard from all nine tools and ranks every
+      screener against <b>Stocks in Play</b> — the plain list that does nothing
+      clever. A screener that cannot beat it is not earning its complexity.</div>
+  </details>
   <div id="cmp-out"></div>
 </div>
 

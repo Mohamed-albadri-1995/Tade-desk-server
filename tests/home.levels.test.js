@@ -92,3 +92,66 @@ test('the server serves all three levels', () => {
   expect(server).toContain('home.html');
   expect(server).toContain("app.get('/scanner'");
 });
+
+/*
+ * THE THREE SHARED PANELS, after the design pass.
+ *
+ * Shortlist, CANSLIM and the comparison were three centred blocks of prose
+ * running into each other with no edges — and the explanation was set larger
+ * than the data it explained. Four lines of centred text about the shortlist,
+ * above a shortlist rendered in 13px chips. The prose is not the product.
+ */
+describe('the shared lists read like data', () => {
+  test('the same tokens as the alerts page, not a second palette', () => {
+    const vars = suite.slice(suite.indexOf(':root'), suite.indexOf('* { box-sizing'));
+    for (const v of ['--panel:', '--panel2:', '--line2:', '--f-xs', '--f-lg',
+                     '--s3', '--mono', '--ui']) {
+      expect({ token: v, defined: vars.includes(v) }).toEqual({ token: v, defined: true });
+    }
+  });
+
+  test('prose is left-aligned and capped at a readable measure', () => {
+    // A centred paragraph is read by hunting for the start of each line in a
+    // different place every time. Headings may centre; prose does not.
+    const at = suite.indexOf('.cmp-hint {');
+    const rule = suite.slice(at, suite.indexOf('}', at));
+    expect(rule).toContain('text-align:left');
+    expect(rule).toMatch(/max-width:\d+ch/);
+    // …and the panel that holds it no longer centres everything inside it.
+    const at2 = suite.indexOf('.cmp-wrap {');
+    expect(suite.slice(at2, suite.indexOf('}', at2))).toContain('text-align:left');
+  });
+
+  test('each panel has an edge of its own', () => {
+    const at = suite.indexOf('.cmp-wrap {');
+    const rule = suite.slice(at, suite.indexOf('}', at));
+    expect(rule).toContain('background:var(--panel)');
+    expect(rule).toContain('border:1px solid var(--line)');
+    expect(rule).toContain('border-radius');
+  });
+
+  test('the list comes before the paragraph about the list', () => {
+    // Heading, then the names, then the reasoning — not heading, four lines of
+    // prose, and only then the thing you came for.
+    const panel = suite.slice(suite.indexOf('id="uni-wrap"'), suite.indexOf('id="cs-wrap"'));
+    expect(panel.indexOf('id="uni-out"')).toBeLessThan(panel.indexOf('details class="why"'));
+  });
+
+  test('a ticker is bigger than the sentence describing tickers', () => {
+    const at = suite.indexOf('.uni-tkr {');
+    expect(suite.slice(at, suite.indexOf('}', at))).toContain('font-size:var(--f-md)');
+    const at2 = suite.indexOf('.cmp-hint {');
+    expect(suite.slice(at2, suite.indexOf('}', at2))).toContain('font-size:var(--f-xs)');
+  });
+
+  test('every explanation folds, and none starts open', () => {
+    const opens = [...suite.matchAll(/<details class="why"/g)].length;
+    expect(opens).toBeGreaterThanOrEqual(4);
+    expect(suite).not.toMatch(/<details class="why" open/);
+  });
+
+  test('tickers stay monospace while sentences do not', () => {
+    expect(suite).toMatch(/\.uni-tkr[^{]*\{[^}]*font-family:var\(--mono\)|font-family:var\(--mono\);/);
+    expect(suite).toMatch(/body\s*\{[\s\S]{0,400}font-family:var\(--ui\)/);
+  });
+});
