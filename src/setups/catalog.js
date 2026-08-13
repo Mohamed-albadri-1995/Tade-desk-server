@@ -249,11 +249,16 @@ async function list() {
       enabled: prefs.isEnabled(g.id),
       // Off unless said otherwise. See the note in prefs: arming the broker is
       // permission for the box, not for every strategy in it.
-      autoTrade: p.autoTrade === true,
-      // The accounts this setup's orders go to, by destination id. Empty means
-      // unsaid rather than none — broker.route decides what that means, and
-      // refuses when there is more than one account to choose between.
-      brokers: p.brokers || [],
+      /*
+       * NOTHING ABOUT MONEY LIVES ON A SETUP.
+       *
+       * `autoTrade` and `brokers` used to. They were the wrong object to hang
+       * them on: the same strategy can be one you watch by hand in the prop
+       * account and let run in the paper account, and a flag on the strategy
+       * cannot say that. A broker account now lists the setups it runs and
+       * declares one mode — see broker.accountsFor. The old keys are left in
+       * data/setup-prefs.json and simply ignored.
+       */
       maxTradesPerDay: p.maxTradesPerDay || null,
       /*
        * SETUP-level risk, which is a different thing from account-level risk.

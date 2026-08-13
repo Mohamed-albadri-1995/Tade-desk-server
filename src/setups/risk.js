@@ -78,22 +78,30 @@ function save(patch) {
 }
 
 /*
- * THE SAME TRADE IS A DIFFERENT NUMBER OF SHARES IN A DIFFERENT ACCOUNT.
+ * THE STANDARD ACCOUNT IS A REFERENCE. NOTHING TRADES AGAINST IT.
  *
- * The settings above are the desk's: one account size, one risk per trade, one
- * position cap. That was the whole truth while there was one broker. It stopped
- * being true the moment a $5,000 prop-firm account and a $20,000 Alpaca account
- * were both live — sizing both against one balance means the small one is
- * over-ordered and refused, or the large one is under-used, and either way the
- * number on the alert belongs to neither.
+ * `settings()` above describes one hypothetical account: a size, a risk per
+ * trade, a position cap. No order is ever placed against it. It exists so that
+ * every real account can be described in relation to it — "twice the standard",
+ * "half of it" — which is how the relationship is actually held in mind, and
+ * which means moving the reference moves every account with it instead of
+ * leaving five numbers to be retyped one at a time.
  *
- * So a destination may carry its own accountSize, riskPerTrade and
- * maxPositionPct, and this merges them over the desk's. Field by field rather
- * than all-or-nothing: two accounts of different sizes often risk the same
- * percentage, and having to restate a figure that has not changed is how the
- * two drift apart.
+ * An account resolves in this order, most specific first:
  *
- * Absent everywhere means the desk's, so one account behaves exactly as it did.
+ *   its own accountSize / riskPerTrade / maxPositionPct   an account that is
+ *                                                         not a clean multiple
+ *   scale x the standard                                  the normal case
+ *   the standard itself                                   scale absent
+ *
+ * Scale multiplies the size AND the risk together, so the PERCENTAGE risked is
+ * identical in a $5,000 account and a $20,000 one. That is the property that
+ * makes two accounts one strategy rather than two — and getting it wrong by
+ * carrying the dollar figure across is invisible, because it is the same
+ * number nobody would look at twice.
+ *
+ * The position cap is NOT scaled: it is already a percentage, so 25% of a
+ * double-sized account is double the money by construction.
  */
 function forAccount(dest, base = settings()) {
   if (!dest) return base;
@@ -101,21 +109,19 @@ function forAccount(dest, base = settings()) {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? n : null;
   };
-  const accountSize = num(dest.accountSize) || base.accountSize;
+  const scale = num(dest.scale) || 1;
+  const accountSize = num(dest.accountSize)
+    || (base.accountSize ? Math.round(base.accountSize * scale * 100) / 100 : null);
   const riskPerTrade = num(dest.riskPerTrade)
-    // A risk per trade sized for a $20,000 account, applied to a $5,000 one, is
-    // four times the intended risk. When the account says its own size but not
-    // its own risk, the desk's PERCENTAGE is what carries over, not its dollars.
-    || (accountSize && base.accountSize && base.riskPerTrade
-        ? Math.round(base.riskPerTrade * (accountSize / base.accountSize) * 100) / 100
-        : base.riskPerTrade);
+    || (base.riskPerTrade ? Math.round(base.riskPerTrade * scale * 100) / 100 : null);
   return {
     ...base,
+    scale,
     accountSize,
     riskPerTrade,
     maxPositionPct: num(dest.maxPositionPct) || base.maxPositionPct,
     // Which account these numbers describe, so an alert or a preview can say so
-    // rather than presenting one account's size as the desk's.
+    // rather than presenting one account's size as everyone's.
     account: dest.destinationName || dest.name || dest.destinationId || dest.id || null,
   };
 }

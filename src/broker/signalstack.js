@@ -112,6 +112,9 @@ const DIALECTS = {
   },
 };
 
+/** What an account may do. Ordered least to most dangerous. */
+const MODES = ['alert', 'manual', 'auto'];
+
 /** The id used for a hook configured before destinations existed. */
 const LEGACY_ID = 'ttp';
 
@@ -140,20 +143,45 @@ function destinations(s = read()) {
       maxOrderValue: num(d.maxOrderValue),
       maxTradesPerDay: num(d.maxTradesPerDay),
       /*
-       * THIS ACCOUNT'S CAPITAL, which is not the desk's.
+       * THIS ACCOUNT'S CAPITAL, as a MULTIPLE of the standard account.
        *
-       * buyingPower is what is left to spend today; accountSize is what the
-       * account IS, and it is what the share count is derived from. They were
-       * the same number while there was one broker. A $5,000 prop account and
-       * a $20,000 Alpaca account sized against one figure means one of them is
-       * over-ordered and refused and the other is barely used.
+       * The standard account in data/risk.json is a reference and nothing
+       * more — no order is ever placed against it. Real accounts are described
+       * relative to it: "twice the standard", "half of it". That is how the
+       * relationship is actually held in mind, and it means changing the
+       * reference moves every account with it instead of leaving five numbers
+       * to be re-typed one at a time.
        *
-       * null means "use the desk's" — see risk.forAccount. One account
-       * configured therefore behaves exactly as it did before any of this.
+       * `scale` multiplies the standard's account size AND its risk per trade,
+       * so the percentage risked is identical across accounts of different
+       * sizes — which is the property that makes two accounts one strategy
+       * rather than two.
+       *
+       * The absolute fields override the scaled figure when an account is not
+       * a clean multiple of anything. Absent everywhere means the standard's.
        */
+      scale: num(d.scale),
       accountSize: num(d.accountSize),
       riskPerTrade: num(d.riskPerTrade),
       maxPositionPct: num(d.maxPositionPct),
+      /*
+       * WHAT THIS ACCOUNT IS ALLOWED TO DO — one switch, on the account.
+       *
+       *   alert   nothing is ever sent here; the setup still alerts
+       *   manual  it appears in the send picker, and goes only when tapped
+       *   auto    a setup in its list places an order by itself at 09:36
+       *
+       * This used to be `autoTrade` on the SETUP, which was the wrong object
+       * to hang it on: the same strategy can be one you watch by hand in the
+       * prop account and let run in the paper account, and a flag on the
+       * strategy cannot say that. Nothing about money lives on a setup now.
+       */
+      mode: ['alert', 'manual', 'auto'].includes(d.mode) ? d.mode : 'alert',
+      /*
+       * WHICH SETUPS RUN HERE. The account owns the list, in one direction, so
+       * there is one place to look and one place to change it.
+       */
+      setups: Array.isArray(d.setups) ? d.setups.map(String) : [],
       enabled: d.enabled !== false,
     }));
   if (out.length) return out;
@@ -168,11 +196,27 @@ function destinations(s = read()) {
     buyingPower: num(s.buyingPower),
     maxOrderValue: num(s.maxOrderValue),
     maxTradesPerDay: num(s.maxTradesPerDay),
-    // Nothing of its own: the single account IS the desk, which is what the
-    // desk-wide risk settings have always described.
+    // Nothing of its own: the single account IS the standard, which is what
+    // data/risk.json has always described.
+    scale: null,
     accountSize: null,
     riskPerTrade: null,
     maxPositionPct: null,
+    /*
+     * MANUAL, never auto, and never less than it had.
+     *
+     * A config written before modes existed placed orders when two things were
+     * true: the box was armed and a setup carried autoTrade. That second flag
+     * is gone, so migrating this to 'auto' would hand every setup a permission
+     * only some of them had. 'manual' keeps the hook usable — it is in the send
+     * picker from the first minute — and stops anything firing by itself until
+     * an account says so on the Settings tab.
+     *
+     * The stopping is not silent: a setup an account claims but does not run on
+     * auto says exactly that on the alert.
+     */
+    mode: 'manual',
+    setups: [],
     enabled: true,
   }];
 }
@@ -200,68 +244,85 @@ function destinationCfg(id, s = read()) {
     maxOrderValue: d.maxOrderValue,
     maxTradesPerDay: d.maxTradesPerDay,
     // Carried through so risk.forAccount(cfg) sizes against THIS account.
+    scale: d.scale,
     accountSize: d.accountSize,
     riskPerTrade: d.riskPerTrade,
     maxPositionPct: d.maxPositionPct,
+    mode: d.mode,
+    setups: d.setups,
     enabled: base.enabled && d.enabled,
   };
 }
 
 /*
- * WHERE A SETUP'S ORDERS GO — and no guessing when there is a choice.
+ * WHICH ACCOUNTS RUN THIS SETUP, and in which mode.
  *
- * A setup names its destinations by id. This turns that list into cfgs, or
- * says why it cannot, and the saying-why is the point: an order that goes to
- * the wrong account is worse than an order that does not go, and an order sent
- * nowhere while the alert reads "ORDER ACCEPTED" is worse than both.
+ * One direction only. An account lists the setups it runs and says what it is
+ * allowed to do with them; a setup knows nothing about brokers. The reverse —
+ * a setup naming its brokers while the account named its capital — meant two
+ * places to look for one decision, and they could disagree.
  *
- * Named ids are honoured exactly. An id that does not exist is an ERROR, never
- * a silent omission — a setup routed to a broker that was deleted last week
- * would otherwise go on alerting as if it were trading.
+ *   mode 'auto'    a fire places an order here by itself
+ *   mode 'manual'  it appears in the send picker and waits to be tapped
+ *   mode 'alert'   nothing is ever sent here
  *
- * An EMPTY list means "not said". With one account configured there is nothing
- * to decide and it is used. With two, there is no such thing as the obvious
- * one, so nothing is sent and the alert says which two it was choosing between.
- * This is the same rule as the ranking metric: unset means unset.
+ * `wanted` filters by mode. Called with none, every account that runs the
+ * setup comes back whatever its mode, which is what a picker wants to list.
  */
-function route(ids = [], s = read()) {
+function accountsFor(setupId, wanted = null, s = read()) {
+  const modes = wanted ? [].concat(wanted) : ['alert', 'manual', 'auto'];
+  return destinations(s)
+    .filter(d => d.enabled && d.webhookUrl)
+    .filter(d => modes.includes(d.mode))
+    .filter(d => !setupId || d.setups.includes(String(setupId)))
+    .map(d => destinationCfg(d.id, s));
+}
+
+/*
+ * The accounts a fire should be ordered into, or the reason there are none.
+ *
+ * A reason rather than an empty list, because a setup that quietly stopped
+ * trading looks exactly like a setup having a quiet week — and the reason is
+ * always one of a small number of fixable things, so it is worth naming.
+ */
+function autoRoute(setupId, s = read()) {
+  const cfgs = accountsFor(setupId, 'auto', s);
+  if (cfgs.length) return { cfgs, error: null };
   const all = destinations(s);
+  if (!all.length) return { cfgs: [], error: 'no broker account is configured' };
   const live = all.filter(d => d.enabled && d.webhookUrl);
-  const named = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
+  if (!live.length) {
+    return { cfgs: [], error: 'every broker account is switched off or has no hook' };
+  }
+  const listed = live.filter(d => d.setups.includes(String(setupId)));
+  if (!listed.length) {
+    return { cfgs: [], error: 'no account runs this setup — add it to one on the '
+      + 'Settings tab' };
+  }
+  return { cfgs: [], error: `${listed.map(d => `${d.name} (${d.mode} only)`).join(', ')}`
+    + ' — no account has it on full auto' };
+}
 
-  if (!named.length) {
-    if (!live.length) {
-      return { cfgs: [], error: all.length
-        ? 'no broker is switched on — every destination is disabled or has no hook'
-        : 'no broker is configured' };
-    }
-    if (live.length > 1) {
-      return { cfgs: [], error: 'this setup does not say which broker to use, and '
-        + `there are ${live.length} to choose from (${live.map(d => d.name).join(', ')}). `
-        + 'Pick its brokers on the Setups tab' };
-    }
-    return { cfgs: [destinationCfg(live[0].id, s)], error: null };
+/*
+ * One named account as a cfg, for a hand-sent order.
+ *
+ * Deliberately does NOT check that the account runs this setup: the picker
+ * offers every account, because "send this one somewhere it does not normally
+ * go" is a decision a person is allowed to make with their thumb on the
+ * button. It does check the mode, because an alert-only account said it never
+ * wants orders and that is not a per-tap decision.
+ */
+function manualCfg(id, s = read()) {
+  const d = destinations(s).find(x => x.id === id);
+  if (!d) return { cfg: null, error: `no account called ${id}` };
+  if (!d.enabled || !d.webhookUrl) {
+    return { cfg: null, error: `${d.name} is switched off or has no hook` };
   }
-
-  const missing = named.filter(id => !all.some(d => d.id === id));
-  if (missing.length) {
-    return { cfgs: [], error: `this setup is routed to ${missing.join(', ')}, `
-      + `which ${missing.length > 1 ? 'are' : 'is'} not configured` };
+  if (d.mode === 'alert') {
+    return { cfg: null, error: `${d.name} is set to alert only — change its mode `
+      + 'on the Settings tab if you want to send orders there' };
   }
-  const off = named.filter(id => !live.some(d => d.id === id));
-  if (off.length) {
-    return { cfgs: [], error: `${off.join(', ')} ${off.length > 1 ? 'are' : 'is'} `
-      + 'switched off or has no hook' };
-  }
-  // Deduplicated, because the same account twice is the same trade twice.
-  const seen = new Set();
-  const cfgs = [];
-  for (const id of named) {
-    if (seen.has(id)) continue;
-    seen.add(id);
-    cfgs.push(destinationCfg(id, s));
-  }
-  return { cfgs, error: null };
+  return { cfg: destinationCfg(id, s), error: null };
 }
 
 /*
@@ -430,13 +491,29 @@ function save(patch = {}) {
       }
       if (seen.has(id)) throw new Error(`two destinations share the id "${id}"`);
       seen.add(id);
+      const was = stored.get(id);
       if (!DIALECTS[d.dialect]) {
         throw new Error(`destination "${id}": unknown broker type "${d.dialect}" — `
           + `one of ${Object.keys(DIALECTS).join(', ')}`);
       }
       const out = { id, dialect: d.dialect, name: String(d.name || '').trim() || id,
                     enabled: d.enabled !== false };
-      const was = stored.get(id);
+      /*
+       * The mode is refused rather than defaulted when it is not one of the
+       * three. A typo silently becoming 'auto' would be an account placing
+       * orders nobody asked it to; silently becoming 'alert' would be an
+       * account that looks armed and sends nothing. Neither is acceptable.
+       */
+      if (d.mode !== undefined) {
+        if (!MODES.includes(d.mode)) {
+          throw new Error(`account "${id}": mode must be one of ${MODES.join(', ')}`);
+        }
+        out.mode = d.mode;
+      } else if (was) out.mode = was.mode;
+      if (d.setups !== undefined) {
+        out.setups = [...new Set((Array.isArray(d.setups) ? d.setups : [])
+          .map(x => String(x).trim()).filter(Boolean))];
+      } else if (was) out.setups = was.setups;
       for (const key of ['webhookUrl', 'testWebhookUrl']) {
         const v = d[key];
         if (v === undefined) {
@@ -450,6 +527,15 @@ function save(patch = {}) {
         }
         out[key] = url;
       }
+      if (d.scale !== undefined && d.scale !== '' && d.scale !== null) {
+        const n = Number(d.scale);
+        // 20x the standard is not a multiplier, it is a typo — and it would be
+        // a twenty-fold position before anything downstream questioned it.
+        if (!Number.isFinite(n) || n <= 0 || n > 10) {
+          throw new Error(`account "${id}": size must be between 0.01x and 10x the standard`);
+        }
+        out.scale = n;
+      } else if (d.scale === undefined && was && was.scale) out.scale = was.scale;
       for (const key of ['buyingPower', 'maxOrderValue', 'maxTradesPerDay',
                          'accountSize', 'riskPerTrade', 'maxPositionPct']) {
         const v = d[key];
@@ -499,16 +585,17 @@ function save(patch = {}) {
     if (patch.armed === true) {
       const live = destinations(next).filter(d => d.enabled && d.webhookUrl);
       if (!live.length) {
-        throw new Error('set a webhook URL on at least one broker before arming');
+        throw new Error('add a broker account with a webhook URL before arming');
       }
-      const broke = live.filter(d => !d.buyingPower).map(d => d.name);
-      if (broke.length === live.length) {
-        throw new Error('set the buying power before arming — without it there is '
-          + 'nothing to size against and an order could be any size');
+      const sending = live.filter(d => d.mode !== 'alert');
+      if (!sending.length) {
+        throw new Error('every account is set to alert only — arming would switch '
+          + 'on a machine with nothing to switch on');
       }
+      const broke = sending.filter(d => !d.buyingPower).map(d => d.name);
       if (broke.length) {
         throw new Error(`${broke.join(', ')} has no buying power set — either give `
-          + 'it one or switch it off, or a setup routed there will place nothing');
+          + 'it one or set it to alert only, or an order sent there will be refused');
       }
     }
     next.armed = patch.armed === true;
@@ -1330,8 +1417,18 @@ async function test({ symbol = 'AAPL', useTestHook = true, destination = null } 
    * that silently only ever checked the first would leave the second one
    * untested while looking like it had passed.
    */
-  const cfg = destination ? destinationCfg(destination) : (route([]).cfgs[0] || settings());
-  if (!cfg) throw new Error(`no broker called ${destination}`);
+  // Named, or the only account there is. Never a silent first-of-many: a test
+  // that quietly only ever checked one account leaves the other untested while
+  // reading as a pass.
+  const live = destinations().filter(d => d.enabled && d.webhookUrl);
+  const cfg = destination ? destinationCfg(destination)
+    : (live.length === 1 ? destinationCfg(live[0].id) : null);
+  if (!cfg) {
+    throw new Error(destination ? `no broker called ${destination}`
+      : (live.length ? 'say which account to test — there are '
+          + `${live.length} (${live.map(d => d.name).join(', ')})`
+        : 'no broker account is configured'));
+  }
   const url = (useTestHook && cfg.testWebhookUrl) || cfg.webhookUrl;
   if (!url) throw new Error('no webhook URL configured');
   const shape = (DIALECTS[cfg.dialect] || DIALECTS.ttp).body;
@@ -1488,7 +1585,8 @@ module.exports = {
   FILE, LEDGER, HOOK_RE,
   settings, publicSettings, save, mask,
   // Where orders can go, and one of them as a cfg the order path already takes.
-  destinations, destinationCfg, route, DIALECTS, LEGACY_ID,
+  destinations, destinationCfg, accountsFor, autoRoute, manualCfg,
+  DIALECTS, LEGACY_ID, MODES,
   orders, committed, remaining, tradesToday, fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,

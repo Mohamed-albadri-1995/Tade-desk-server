@@ -73,13 +73,15 @@ app.get('/api/setups', async (req, res) => {
         // filter into an AND one — a different filter, quietly.
         universeLogic: (s.universe && s.universe.logic) || 'AND',
         enabled: s.enabled,
-        // Whether THIS setup places orders — separate from the broker being
-        // armed, which is permission for the box rather than for a strategy.
-        autoTrade: s.autoTrade === true,
-        // WHERE its orders go. Separate from autoTrade because a setup can be
-        // routed to an account and still be sent by hand — which is what a
-        // strategy on trial looks like.
-        brokers: s.brokers || [],
+        /*
+         * WHICH ACCOUNTS RUN IT, read from the accounts rather than stored
+         * here. A setup owns no part of the money decision any more: the
+         * account lists its setups and declares its mode, and this is that
+         * same fact turned round for display. Nothing writes back through it.
+         */
+        accounts: require('../broker/signalstack').accountsFor(s.id).map(c => ({
+          id: c.destinationId, name: c.destinationName, mode: c.mode,
+        })),
         maxTradesPerDay: s.maxTradesPerDay || null,
         riskPerTrade: s.riskPerTrade || null,
         maxPositionPct: s.maxPositionPct || null,
@@ -238,36 +240,44 @@ app.post('/api/broker', express.json(), (req, res) => {
  *
  * One rule for the preview and the send, so the two cannot disagree — which
  * would mean reviewing an order against one balance and placing it against
- * another. Three ways in, in order of how explicit they are:
+ * another. In order of how explicit it is:
  *
- *   the page named one         it is used, if it exists and is live
- *   the fire came from a setup that setup's brokers decide, exactly as they
- *                              would at 09:36
- *   neither                    broker.route's rule: the only live one, or a
- *                              refusal naming the choice to be made
+ *   the page named one       used, unless that account is alert-only
+ *   the fire came from a     the account that runs that setup by hand, when
+ *   setup                    exactly one does
+ *   neither                  the only account that can receive orders at all
  *
- * `choices` always goes back so the page can offer the picker without having
- * to know which destinations are switched on.
+ * `choices` always goes back so the picker can list every account without the
+ * page having to know which ones are switched on.
  */
 function destinationFor(b = {}) {
-  const choices = broker.destinations()
-    .filter(d => d.enabled && d.webhookUrl)
-    .map(d => ({ id: d.id, name: d.name, dialect: d.dialect }));
+  const choices = broker.accountsFor(null, ['manual', 'auto']).map(c => ({
+    id: c.destinationId, name: c.destinationName, dialect: c.dialect, mode: c.mode,
+    // Whether this account normally runs the setup the order came from. The
+    // picker offers all of them either way — sending one somewhere it does not
+    // normally go is a decision a person may make — but it should not look the
+    // same as the account that was set up for it.
+    runsIt: !!(b.setupId && (c.setups || []).includes(String(b.setupId))),
+  }));
   const named = String(b.destination || '').trim();
-  if (named) {
-    const cfg = broker.destinationCfg(named);
-    if (!cfg) return { cfg: null, error: `no broker called ${named}`, choices };
-    if (!cfg.enabled || !cfg.webhookUrl) {
-      return { cfg: null, error: `${cfg.destinationName} is switched off`, choices };
-    }
-    return { cfg, error: null, choices };
-  }
+  if (named) return { ...broker.manualCfg(named), choices };
+
   const setupId = String(b.setupId || '').trim();
-  const wanted = setupId && setupId !== 'manual'
-    ? (require('../setups/prefs').settingsFor(setupId).brokers || [])
-    : [];
-  const r = broker.route(wanted);
-  return { cfg: r.cfgs[0] || null, error: r.error, choices };
+  if (setupId && setupId !== 'manual') {
+    const mine = broker.accountsFor(setupId, ['manual', 'auto']);
+    if (mine.length === 1) return { cfg: mine[0], error: null, choices };
+    if (mine.length > 1) {
+      return { cfg: null, choices, error: `${mine.length} accounts run this setup `
+        + `(${mine.map(c => c.destinationName).join(', ')}) — pick one` };
+    }
+  }
+  if (choices.length === 1) {
+    return { ...broker.manualCfg(choices[0].id), choices };
+  }
+  return { cfg: null, choices, error: choices.length
+    ? `pick an account — there are ${choices.length}`
+    : 'no broker account can receive an order — add one, or take one off '
+      + '"alert only", on the Settings tab' };
 }
 
 /*

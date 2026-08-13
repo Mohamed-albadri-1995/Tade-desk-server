@@ -140,8 +140,9 @@ test('every routing control is a top-level function', () => {
   // window and nowhere else. These are all called from generated markup.
   const re = /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm;
   const top = new Set([...script.matchAll(re)].map(m => m[1]));
-  for (const n of ['paintDests', 'readDests', 'saveDests', 'addDest', 'toggleDest',
-                   'removeDest', 'brokerChips', 'toggleSetupBroker']) {
+  for (const n of ['paintDests', 'readDests', 'saveDests', 'addDest', 'createDest',
+                   'toggleDest', 'removeDest', 'toggleDestSetup', 'accountChips',
+                   'sizeNote', 'testBroker', 'toggleArm']) {
     expect({ name: n, top: top.has(n) }).toEqual({ name: n, top: true });
   }
 });
@@ -202,13 +203,28 @@ test('no account is configured through a prompt() box', () => {
   expect(script).toContain('Copy this into SignalStack');
 });
 
-test('each account has its own capital, not just its own hook', () => {
-  // Sizing every account off one balance is how a $5,000 account gets an order
-  // meant for $20,000 — refused by the broker, at 09:36.
+test('an account is sized as a multiple of the standard, and says what it may do', () => {
+  /*
+   * Sizing every account off one balance is how a $5,000 account gets an order
+   * meant for $20,000 — refused by the broker, at 09:36. And the mode is on the
+   * ACCOUNT, not the setup: the arrangement that matters most is the same
+   * strategy watched by hand in one account and automatic in another, which a
+   * flag on the strategy cannot express at all.
+   */
   const at = script.indexOf('function paintDests(');
-  const body = script.slice(at, script.indexOf('function deskHint', at));
-  for (const cls of ['d-acct', 'd-risk', 'd-mpp']) expect(body).toContain(cls);
-  expect(script).toContain("['d-acct', 'accountSize']");
+  const body = script.slice(at, script.indexOf('async function toggleDestSetup', at));
+  for (const cls of ['d-scale', 'd-mode', 'd-setups']) expect(body).toContain(cls);
+  expect(script).toContain("['d-scale', 'scale']");
+  expect(body).toContain('FULL AUTO');
+});
+
+test('an account owns its setups — the setup card writes nothing back', () => {
+  // One direction. Two objects describing one decision is how they came to
+  // disagree, which is the whole reason for this shape.
+  expect(script).toContain('async function toggleDestSetup(');
+  expect(script).not.toContain('function toggleSetupBroker(');
+  expect(script).not.toContain('function toggleAutoTrade(');
+  expect(script).not.toContain("body: JSON.stringify({ autoTrade: next })");
 });
 
 test('the review says which account, and so does the send button', () => {
@@ -216,4 +232,99 @@ test('the review says which account, and so does the send button', () => {
   // hook it arrived on — so it is the one fact that has to be on the screen.
   expect(script).toContain('class="or-dest"');
   expect(script).toContain('Send${name ? ` to ${esc(name)}` : \' it\'}');
+});
+
+/*
+ * ONE MODEL, THREE LAYERS, IN ORDER.
+ *
+ * The page had two designs stacked on each other: a standard account size at
+ * the top that looked like the account being traded, and broker accounts below
+ * that also had capital — with "which setups" and "auto or not" living on the
+ * SETUP, a third place. Three descriptions of one decision, which is how they
+ * came to disagree.
+ *
+ *   1  the standard account   a reference; nothing trades against it
+ *   2  the broker accounts    hook, size as a multiple, mode, setups
+ *   3  the box                armed, flatten, brackets
+ *
+ * The tests below pin the shape, not the styling: the order of the sections,
+ * that the reference says it is one, and that the setup card cannot write back.
+ */
+
+test('the settings tab is the three layers, in order', () => {
+  const pane = markup.slice(markup.indexOf('<div class="pane" data-t="settings"'));
+  const heads = [...pane.matchAll(/<span>(\d[^<]*)<\/span>/g)].map(m => m[1].trim());
+  expect(heads).toEqual(['1 · Standard account', '1b · Calculator',
+                         '2 · Broker accounts', '3 · This machine']);
+});
+
+test('the standard account says outright that it is a reference', () => {
+  // The screenshot that started this: a $5,000 "Account size" at the top of a
+  // page listing two real accounts, with nothing saying which one trades.
+  const at = markup.indexOf('1 · Standard account');
+  const after = markup.slice(at, at + 700);
+  expect(after).toMatch(/reference only/i);
+  expect(after).toMatch(/no order is ever placed against it/i);
+});
+
+test('a mode is a real choice, and full auto is not the quiet one', () => {
+  const at = script.indexOf('const MODE_LABEL');
+  expect(at).toBeGreaterThan(-1);
+  const body = script.slice(at, at + 400);
+  for (const m of ['alert', 'manual', 'auto']) expect(body).toContain(`${m}:`);
+  expect(body).toContain('FULL AUTO');
+  // …and it is visually distinct, because an account that trades by itself
+  // must never look like one that does not.
+  expect(html).toContain('.dest.md-auto');
+});
+
+test('an account shows what its multiplier MEANS in money', () => {
+  // "0.5x" is the setting; "$5,000 risking $50" is what tells you it is wrong.
+  // The arithmetic must mirror risk.forAccount or the row is a second opinion.
+  const at = script.indexOf('function sizeNote(d)');
+  const body = script.slice(at, script.indexOf('\n}\n', at));
+  expect(body).toContain('r.accountSize * scale');
+  expect(body).toContain('r.riskPerTrade * scale');
+  expect(body).toContain('risks $');
+});
+
+test('a setup an account claims still shows when the catalogue does not list it', () => {
+  // qp down, or a renamed strategy: the row would otherwise show NO setups
+  // while the account still trades the one it has stored.
+  const at = script.indexOf('function paintDests(');
+  const body = script.slice(at, script.indexOf('async function toggleDestSetup', at));
+  expect(body).toContain('not in the catalogue');
+});
+
+test('the send picker lists every account, always', () => {
+  /*
+   * Not conditional on there being more than one, and not filtered to the
+   * accounts that run this setup. The order body cannot say where it went —
+   * SignalStack decides that from the hook — so the account is a question that
+   * can only be answered before the tap.
+   */
+  const at = script.indexOf('const dests = r.destinations || [];');
+  const body = script.slice(at, at + 1200);
+  expect(body).toContain('or-pick');
+  expect(body).toContain('dests.map(');
+  expect(body).toContain('not its setup');
+  expect(body).not.toMatch(/dests\.length > 1/);
+});
+
+test('the calculator sends through the same review, not its own path', () => {
+  // It used to POST straight to the order endpoint — the one path where
+  // "which account" was never asked, which with two accounts is a real order
+  // into whichever one the server happened to resolve.
+  const at = script.indexOf('async function sendManual()');
+  const body = script.slice(at, script.indexOf('\n}\n', at));
+  expect(body).toContain('reviewOrder(');
+  expect(body).not.toContain("fetch('/api/broker/order'");
+});
+
+test('arming names the accounts that will trade by themselves', () => {
+  const at = script.indexOf('async function toggleArm()');
+  const body = script.slice(at, script.indexOf('\n}\n', at));
+  expect(body).toContain("d.mode === 'auto'");
+  expect(body).toContain('BY THEMSELVES');
+  expect(body).toContain('buyingPower');
 });

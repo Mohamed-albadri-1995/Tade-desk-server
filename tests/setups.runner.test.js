@@ -368,12 +368,14 @@ describe('the card-field filter', () => {
 });
 
 /*
- * Nothing is ordered for a setup that was not given permission.
+ * Nothing is ordered unless an ACCOUNT asked for it.
  *
- * The broker being armed is permission for the BOX; this is permission for a
- * STRATEGY. Both, or nothing — because one switch would mean that arming to
- * trade something backtested for months also arms the scalp assigned to a tool
- * five minutes ago to see what it does.
+ * Permission used to be a flag on the setup, which was the wrong object to
+ * hang it on: the same strategy can be one you watch by hand in the prop
+ * account and let run in the paper account, and a flag on the strategy cannot
+ * say that. It is now the account's mode plus the account's setup list, and
+ * broker.autoRoute is what answers the question. Arming stays separate — that
+ * is permission for the BOX, not for an account.
  */
 describe('which setups place orders', () => {
   const brokerMod = require('../src/broker/signalstack');
@@ -395,11 +397,13 @@ describe('which setups place orders', () => {
      * which is correct and is not what is being measured here. Routing has its
      * own tests.
      */
-    jest.spyOn(brokerMod, 'route').mockReturnValue({
+    jest.spyOn(brokerMod, 'accountsFor').mockReturnValue([{ id: 'x' }]);
+    jest.spyOn(brokerMod, 'autoRoute').mockReturnValue({
       cfgs: [{ destinationId: 'ttp', destinationName: 'Trade The Pool' }], error: null });
   });
 
-  test('a setup without permission places nothing, however armed the broker is', async () => {
+  test('a setup no account runs places nothing, however armed the broker is', async () => {
+    brokerMod.autoRoute.mockReturnValue({ cfgs: [], error: 'no account runs this setup' });
     const spy = jest.spyOn(brokerMod, 'placeOrder');
     qp.decide.mockResolvedValue({
       ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
@@ -422,7 +426,7 @@ describe('which setups place orders', () => {
                 risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
     });
     await runner.runSetup(
-      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00', autoTrade: true }, {});
+      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' }, {});
     expect(spy).not.toHaveBeenCalled();
   });
 
@@ -435,7 +439,7 @@ describe('which setups place orders', () => {
                 risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
     });
     const out = await runner.runSetup(
-      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00', autoTrade: true }, {});
+      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' }, {});
     expect(spy).toHaveBeenCalled();
     // The stop and the target travel with the entry — they were decided at the
     // same instant, and an entry without its stop has no defined loss.
@@ -453,7 +457,7 @@ describe('which setups place orders', () => {
                 risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
     });
     await runner.runSetup(
-      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00', autoTrade: true },
+      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' },
       { dryRun: true });
     expect(spy).not.toHaveBeenCalled();
   });
@@ -541,7 +545,8 @@ describe('a rule-exit strategy is alert-only', () => {
      * which is correct and is not what is being measured here. Routing has its
      * own tests.
      */
-    jest.spyOn(brokerMod, 'route').mockReturnValue({
+    jest.spyOn(brokerMod, 'accountsFor').mockReturnValue([{ id: 'x' }]);
+    jest.spyOn(brokerMod, 'autoRoute').mockReturnValue({
       cfgs: [{ destinationId: 'ttp', destinationName: 'Trade The Pool' }], error: null });
   });
 
@@ -574,7 +579,7 @@ describe('a rule-exit strategy is alert-only', () => {
     const spy = jest.spyOn(brokerMod, 'placeOrder')
       .mockResolvedValue({ sent: true, status: 'filled', quantity: 25 });
     await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'],
-      decisionTime: '10:00', autoTrade: true }, { date: DATE });
+      decisionTime: '10:00' }, { date: DATE });
     expect(spy).toHaveBeenCalled();
   });
 });
@@ -597,13 +602,14 @@ describe('a setup routed to two accounts', () => {
     { destinationId: 'alpaca', destinationName: 'Alpaca' },
   ];
   const SET = { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00',
-                autoTrade: true, brokers: ['ttp', 'alpaca'] };
+                brokers: ['ttp', 'alpaca'] };
 
   beforeEach(() => {
     jest.restoreAllMocks();
     jest.spyOn(risk, 'settings').mockReturnValue({
       accountSize: 5000, riskPerTrade: 25, maxPositionPct: 100, updatedAt: 1 });
-    jest.spyOn(brokerMod, 'route').mockReturnValue({ cfgs: TWO, error: null });
+    jest.spyOn(brokerMod, 'accountsFor').mockReturnValue([{ id: 'x' }]);
+    jest.spyOn(brokerMod, 'autoRoute').mockReturnValue({ cfgs: TWO, error: null });
     qp.decide.mockResolvedValue({
       ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
       picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
@@ -657,7 +663,7 @@ describe('a setup routed to two accounts', () => {
   test('a setup that cannot be routed says so on the alert', async () => {
     // The failure this replaces: a setup marked auto-trade quietly placing
     // nothing, which from a phone is indistinguishable from a quiet morning.
-    brokerMod.route.mockReturnValue({ cfgs: [], error: 'no broker is configured' });
+    brokerMod.autoRoute.mockReturnValue({ cfgs: [], error: 'no broker is configured' });
     const spy = jest.spyOn(brokerMod, 'placeOrder');
     const out = await runner.runSetup(SET, {});
     expect(spy).not.toHaveBeenCalled();
@@ -682,17 +688,20 @@ describe('a setup routed to two accounts', () => {
 describe('sizing when a setup sends to two accounts', () => {
   const brokerMod = require('../src/broker/signalstack');
   const risk = require('../src/setups/risk');
-  const SMALL = { destinationId: 'ttp', destinationName: 'Trade The Pool', accountSize: 5000 };
-  const BIG = { destinationId: 'alpaca', destinationName: 'Alpaca', accountSize: 20000 };
+  // Described against the STANDARD account, which is what an account row on the
+  // Settings tab actually stores: a quarter of it, and all of it.
+  const SMALL = { destinationId: 'ttp', destinationName: 'Trade The Pool', scale: 0.25 };
+  const BIG = { destinationId: 'alpaca', destinationName: 'Alpaca', scale: 1 };
   const SET = { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00',
-                autoTrade: true, brokers: ['ttp', 'alpaca'] };
+                brokers: ['ttp', 'alpaca'] };
 
   beforeEach(() => {
     jest.restoreAllMocks();
-    // The desk: $20,000 risking $200, no position cap in the way.
+    // The standard account: $20,000 risking $200, no position cap in the way.
     jest.spyOn(risk, 'settings').mockReturnValue({
       accountSize: 20000, riskPerTrade: 200, maxPositionPct: 100, updatedAt: 1 });
-    jest.spyOn(brokerMod, 'route').mockReturnValue({ cfgs: [SMALL, BIG], error: null });
+    jest.spyOn(brokerMod, 'accountsFor').mockReturnValue([{ id: 'x' }]);
+    jest.spyOn(brokerMod, 'autoRoute').mockReturnValue({ cfgs: [SMALL, BIG], error: null });
     qp.decide.mockResolvedValue({
       ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
       picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
@@ -705,8 +714,8 @@ describe('sizing when a setup sends to two accounts', () => {
       .mockResolvedValue({ sent: true, status: 'filled' });
     await runner.runSetup(SET, {});
     const sent = spy.mock.calls.map(c => [c[0].cfg.destinationId, c[0].quantity]);
-    // $1 of risk a share. The big account risks the desk's $200 → 200 shares;
-    // the small one is a quarter of it, so a quarter of the risk → 50.
+    // $1 of risk a share. The full-size account risks the standard's $200 →
+    // 200 shares; the quarter-size one risks a quarter of it → 50.
     expect(sent).toEqual([['ttp', 50], ['alpaca', 200]]);
   });
 
@@ -715,8 +724,8 @@ describe('sizing when a setup sends to two accounts', () => {
     // from one that placed something, on the alert itself.
     const spy = jest.spyOn(brokerMod, 'placeOrder')
       .mockResolvedValue({ sent: true, status: 'filled' });
-    brokerMod.route.mockReturnValue({
-      cfgs: [{ ...SMALL, accountSize: 100, riskPerTrade: 0.5 }, BIG], error: null });
+    brokerMod.autoRoute.mockReturnValue({
+      cfgs: [{ ...SMALL, scale: null, accountSize: 100, riskPerTrade: 0.5 }, BIG], error: null });
     const out = await runner.runSetup(SET, {});
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0][0].cfg.destinationId).toBe('alpaca');
@@ -731,11 +740,11 @@ describe('sizing when a setup sends to two accounts', () => {
       .toEqual([['ttp', 50], ['alpaca', 200]]);
   });
 
-  test('an account with no capital of its own still uses the desk figure', async () => {
+  test('an account with no scale of its own is the standard account', async () => {
     // The single-broker case, which must not have changed at all.
     const spy = jest.spyOn(brokerMod, 'placeOrder')
       .mockResolvedValue({ sent: true, status: 'filled' });
-    brokerMod.route.mockReturnValue({
+    brokerMod.autoRoute.mockReturnValue({
       cfgs: [{ destinationId: 'ttp', destinationName: 'TTP' }], error: null });
     await runner.runSetup(SET, {});
     expect(spy.mock.calls[0][0].quantity).toBe(200);

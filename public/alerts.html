@@ -197,6 +197,20 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .bchip { font-size:10.5px; padding:2px 7px; border-radius:99px; border:1px solid var(--border);
   background:var(--bg3); color:var(--text3); font-family:inherit }
 .bchip.on { background:var(--accent); border-color:var(--accent); color:#0b1220 }
+/* An account on full auto is the one that opens positions without being asked.
+   It should not look like the others. */
+.bchip.live { background:#7f1d1d; border-color:#b91c1c; color:#fee2e2 }
+.bchip .dim { opacity:.6; font-weight:400 }
+/* The picker in the review box: every account, as buttons big enough for a
+   thumb, because this is the tap that decides which book a position lands in. */
+.or-pick { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 9px }
+.or-pick .bchip { font-size:12.5px; padding:7px 11px }
+/* Mode, on the account row. Full auto is stated in the colour as well as the
+   words — an account that trades by itself must never be quiet about it. */
+.dest .d-mode-l select { width:auto; min-width:170px }
+.dest.md-auto { border-color:#b91c1c }
+.dest.md-auto .d-mode { background:#7f1d1d; color:#fee2e2; border-color:#b91c1c }
+.d-setups { flex-basis:100%; display:flex; gap:8px; align-items:flex-start; margin-top:2px }
 
 /* ── position sizing ── */
 .risk { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--bg2);
@@ -318,12 +332,20 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 </div><!-- /today -->
 
 <div class="pane" data-t="settings" hidden>
-<!-- Position sizing. Here rather than in a screener's settings because it is a
-     property of the account: the setup runs inside one tool, but the money is
-     the same money whichever tool signalled. -->
+<!-- ── 1 · THE STANDARD ACCOUNT ──────────────────────────────────────────
+     A REFERENCE. Nothing is ever traded against it.
+
+     It exists so every real account can be described in relation to it —
+     "twice the standard", "half of it" — which is how the relationship is
+     actually held in mind, and which means changing this one figure moves
+     every account with it instead of leaving five numbers to retype. -->
 <div class="sec">
-  <span>Position size</span>
+  <span>1 · Standard account</span>
   <span class="note" id="risk-note"></span>
+</div>
+<div class="note risk-hint" style="margin-bottom:8px">
+  A <b>reference only</b> — no order is ever placed against it. Broker accounts
+  below are sized as a multiple of it.
 </div>
 <div class="risk">
   <label>Account size
@@ -364,7 +386,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      chart at 11:20 — and for checking one it did before acting on it. It uses
      the SERVER's sizing, the same code the automatic order obeys, so it cannot
      give a different answer from the one that would be sent. -->
-<div class="sec"><span>Calculator</span><span class="note">entry · stop · target → shares</span></div>
+<div class="sec"><span>1b · Calculator</span><span class="note">entry · stop · target → shares</span></div>
 <div class="risk">
   <label>Side
     <select id="cl-side"><option value="LONG">long</option><option value="SHORT">short</option></select>
@@ -382,28 +404,39 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
        one above: buying power already spent, the per-order ceiling and the day's
        caps all sit between them. -->
   <button class="btn" onclick="calcSize(true)">Show the real order</button>
-  <button class="btn" id="cl-send" onclick="sendManual()">Send it</button>
+  <button class="btn" id="cl-send" onclick="sendManual()">Send it…</button>
   <div class="note risk-hint" id="cl-out">
-    Uses the account size and risk per trade above. Leave the target blank and
-    it shows where 2R would be.
+    Worked out against the <b>standard account</b> above. Pressing
+    <b>Send it…</b> asks which broker account to send to and re-prices it for
+    that one — the share count is not the same in a half-size account.
   </div>
 </div>
 
-<!-- Live orders. Deliberately below position size, because the share count it
-     sends is the one computed there — and deliberately two switches, because
-     "configured" and "sending real orders" should not be the same tap. -->
+<!-- ── 2 · THE BROKER ACCOUNTS ───────────────────────────────────────────
+     Everything about real money lives on an account, in one direction:
+
+         hook + broker type       where it goes and what shape the JSON is
+         size, as a multiple      of the standard above
+         mode                     alert only / by hand / full auto
+         setups                   which strategies run here
+
+     A setup knows nothing about brokers. It used to carry a flag saying
+     whether it traded and a list of the brokers it traded at, while the
+     account carried the capital — two objects describing one decision, which
+     is how they came to disagree. The arrow points one way now. -->
 <div class="sec">
-  <span>Algo trading</span>
+  <span>2 · Broker accounts</span>
   <span class="note" id="broker-state">off</span>
 </div>
-<!-- THE ACCOUNTS.
-     One hook was one account, so neither needed a name. A prop-firm account
-     and an Alpaca account come apart in every direction that matters — a
-     different hook, a different balance, a different daily count and a body
-     that is not quite the same shape — so each is its own row, and a setup
-     names the ones it sends to. Everything below this list is account-wide:
-     it is about this BOX, not about one broker. -->
 <div id="bk-dests"><div class="empty">Loading…</div></div>
+<!-- ── 3 · THE BOX ───────────────────────────────────────────────────────
+     What is true of this machine rather than of one account. Arming is here
+     because "may this box place orders at all" is not a question worth
+     answering twice. -->
+<div class="sec">
+  <span>3 · This machine</span>
+  <span class="note">applies to every account</span>
+</div>
 <div class="risk" id="broker">
   <!-- A runner has a stop and no target. The backtest closes it at the end of
        the session; a broker does not, and the account cannot hold overnight. -->
@@ -819,24 +852,8 @@ async function loadSetups() {
              permission for the box: one switch would mean that arming to trade
              a strategy you have backtested for months also arms the scalp you
              assigned five minutes ago to see what it does. -->
-        <div class="st-tools">
-          <span class="ua-label">orders</span>
-          <span class="ua-tool${s.autoTrade ? ' live' : ''}"
-                onclick="toggleAutoTrade(${i})">${s.autoTrade ? 'SENDS REAL ORDERS' : 'alert only'}</span>
-        </div>
-        <!-- WHERE its orders go, which is a different question from whether
-             they go by themselves. Both together are what let a setup be sent
-             to two accounts, to one, to none, or by hand to one in particular:
+        ${accountChips(s)}
 
-               auto to two     SENDS REAL ORDERS  +  ttp, alpaca lit
-               auto to one     SENDS REAL ORDERS  +  alpaca lit
-               alert only      alert only         +  nothing lit
-               by hand to one  alert only         +  alpaca lit
-
-             The last is the one that needed this: a setup on trial should be
-             looked at before it is bought, and when it IS bought there should
-             be nothing left to decide. -->
-        ${brokerChips(s, i)}
         <div class="st-tools">
           <span class="ua-label">runs on</span>
           <div class="ua-tools">${TOOL_IDS.map(t => `<span
@@ -1107,96 +1124,27 @@ async function saveSetup(i) {
 }
 
 /*
- * WHICH ACCOUNTS this setup sends to.
+ * WHICH ACCOUNTS RUN THIS SETUP — shown here, decided on the Settings tab.
  *
- * One chip per configured account, lit when this setup names it. With no
- * accounts configured there is nothing to draw and the row is left out rather
- * than shown empty — an empty row of chips reads as "none selected", which is
- * a different and wrong statement.
- *
- * Nothing is preselected. An unlit row on a setup with one account still works
- * (see broker.route: with one account there is nothing to decide) and the
- * moment a second one exists it stops working and says so, which is the
- * behaviour that keeps an order out of the wrong book.
+ * Read-only on purpose. An account lists its setups and declares its mode;
+ * this is that same fact turned round so a setup card can show it. Making it
+ * editable from both ends is exactly what produced two descriptions of one
+ * decision, which could then disagree.
  */
-function brokerChips(s, i) {
-  const all = ((BROKER && BROKER.broker && BROKER.broker.destinations) || [])
-    .filter(d => d.enabled !== false);
-  if (all.length < 1) return '';
-  const mine = s.brokers || [];
+function accountChips(s) {
+  const mine = s.accounts || [];
+  if (!mine.length) {
+    return `<div class="st-tools"><span class="ua-label">orders</span>
+      <span class="note">alert only — no broker account runs it
+      (add it to one under Settings → Broker accounts)</span></div>`;
+  }
+  const word = { alert: 'alert only', manual: 'by hand', auto: 'FULL AUTO' };
   return `<div class="st-tools">
-    <span class="ua-label">sends to</span>
-    <div class="ua-tools">${all.map(d => `<button
-      class="bchip${mine.includes(d.id) ? ' on' : ''}"
-      onclick="toggleSetupBroker(${i}, '${esc(d.id)}')">${esc(d.name || d.id)}</button>`).join('')}
+    <span class="ua-label">runs in</span>
+    <div class="ua-tools">${mine.map(a => `<span class="bchip${
+      a.mode === 'auto' ? ' live' : ' on'}">${esc(a.name)} · ${esc(word[a.mode] || a.mode)}</span>`).join('')}
     </div>
-  </div>`
-    // Only a problem for a setup that is supposed to be trading. An alert-only
-    // setup with no account named is not broken, it is alert-only — and the
-    // review box offers the choice when one is actually sent by hand.
-    + (s.autoTrade && all.length > 1 && !mine.length
-      ? `<div class="st-block">⛔ Pick an account — with ${all.length} configured, `
-        + 'this setup is set to trade and will place nothing until it says which.</div>' : '');
-}
-
-async function toggleSetupBroker(i, id) {
-  const s = SETUPS[i];
-  if (!s) return;
-  const cur = s.brokers || [];
-  const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
-  // Only worth a confirmation when it would widen where money goes, and only
-  // for a setup that is already sending by itself.
-  if (s.autoTrade && next.length > cur.length
-    && !confirm(`Also send "${s.name}" to ${id}?\n\n`
-      + 'Every time it fires it will place the same order in BOTH accounts, '
-      + 'each sized against its own balance.')) return;
-  try {
-    const r = await (await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ brokers: next }),
-    })).json();
-    if (!r.ok) throw new Error(r.error || 'could not save');
-  } catch (e) {
-    alert(`Could not change it: ${e.message}`);
-  }
-  await loadSetups();
-}
-
-/*
- * Let this one strategy place orders.
- *
- * Asks before turning on and never before turning off, and says what it depends
- * on: this switch alone sends nothing unless the broker is also armed, and the
- * broker being armed sends nothing for a setup that has not been given this.
- * Both have to be true, which is the point of there being two.
- */
-async function toggleAutoTrade(i) {
-  const s = SETUPS[i];
-  if (!s) return;
-  const next = !s.autoTrade;
-  if (next && s.readiness && s.readiness.orderOk === false) {
-    alert(`"${s.name}" cannot place orders:\n\n`
-      + `${(s.readiness.orderBlocking || []).join('\n')}\n\n`
-      + 'It will keep alerting. Give it a price target in the chart tool if you '
-      + 'want it traded automatically.');
-    return;
-  }
-  if (next && !confirm(`Let "${s.name}" place REAL orders?\n\n`
-    + `Every time it fires at ${s.decisionTime} it will send an order sized by `
-    + 'your risk settings, with the stop and target attached.\n\n'
-    + 'It still needs the broker to be Armed above — both switches, or nothing '
-    + 'is sent.')) return;
-  try {
-    const r = await (await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ autoTrade: next }),
-    })).json();
-    if (!r.ok) throw new Error(r.error || 'could not save');
-  } catch (e) {
-    alert(`Could not change it: ${e.message}`);
-  }
-  await loadSetups();
-  loadBroker();                 // the banner counts the setups that will trade
+  </div>`;
 }
 
 async function toggleSetup(id, enabled) {
@@ -1446,35 +1394,27 @@ async function previewOrder() {
  * buying power, both caps, the whole-share rule and the bracket apply exactly
  * as they would at 10:00.
  */
+/*
+ * The calculator's send goes through the SAME review, so it gets the same
+ * picker. It used to post straight to the order endpoint, which with two
+ * accounts would mean a real order into whichever one the server happened to
+ * resolve — the one path where "which account" was never asked.
+ */
 async function sendManual() {
   const out = document.getElementById('cl-out');
   const v = id => document.getElementById(id).value;
   const symbol = (v('cl-symbol') || '').trim().toUpperCase();
   if (!symbol) { out.innerHTML = '<b class="warn">Enter the symbol first.</b>'; return; }
-  if (!confirm(`Send a REAL ${v('cl-side').toLowerCase()} order for ${symbol}?\n\n`
-    + `Entry ~${v('cl-entry')}, stop ${v('cl-stop')}`
-    + `${v('cl-target') ? `, target ${v('cl-target')}` : ''}.\n\n`
-    + 'Sized by your risk settings and capped the same way a setup would be.')) return;
-  try {
-    const d = await (await fetch('/api/broker/order', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        symbol, side: v('cl-side'), entry: v('cl-entry'),
-        stop: v('cl-stop'), target: v('cl-target') || null,
-      }),
-    })).json();
-    if (!d.ok) throw new Error(d.error);
-    const o = d.order;
-    out.innerHTML = o.sent
-      ? `<b class="calc-big">${esc(String(o.status || 'sent').toUpperCase())} `
-        + `${esc(o.quantity)} ${esc(symbol)}</b>`
-        + `${o.fillPrice ? ` @ ${esc(o.fillPrice)}` : ''}`
-        + `${o.reduced ? `<br><span class="warn">${esc(o.reduced)}</span>` : ''}`
-      : `<b class="warn">Not sent — ${esc(o.skipped || o.error || 'refused')}</b>`;
-    loadBroker();
-  } catch (e) {
-    out.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
+  const entry = Number(v('cl-entry')), stop = Number(v('cl-stop'));
+  if (!(entry > 0) || !(stop > 0)) {
+    out.innerHTML = '<b class="warn">Enter an entry and a stop first.</b>'; return;
   }
+  // Straight into the review, which is where the account is chosen and where
+  // the order is priced FOR that account. No second send path.
+  out.innerHTML = 'opening the review…';
+  reviewOrder({ symbol, side: v('cl-side'), entry, stop,
+                target: Number(v('cl-target')) > 0 ? Number(v('cl-target')) : null,
+                setupId: 'manual' });
 }
 
 /* ── live orders ──
@@ -1571,12 +1511,17 @@ function paintAlgoState() {
   const algo = document.getElementById('algo-state');
   if (!algo) return;
   const b = (BROKER && BROKER.broker) || {};
-  const live = (SETUPS || []).filter(x => x.autoTrade).length;
+  // Counted from the ACCOUNTS, which is where the permission lives now: an
+  // account on full auto with at least one setup is what actually opens a
+  // position by itself.
+  const auto = (b.destinations || []).filter(
+    d => d.enabled !== false && d.hasWebhook && d.mode === 'auto' && (d.setups || []).length);
   algo.textContent = b.armed
-    ? (live ? `⚡ ALGO TRADING ON — ${live} setup(s) will open real positions`
-            : '⚡ algo trading on, but no setup has orders enabled')
+    ? (auto.length
+        ? `⚡ ALGO TRADING ON — ${auto.map(d => d.name).join(', ')} will open real positions`
+        : '⚡ algo trading on, but no account is on full auto with a setup')
     : '';
-  algo.className = 'note' + (b.armed && live ? ' live' : '');
+  algo.className = 'note' + (b.armed && auto.length ? ' live' : '');
 }
 
 /*
@@ -1594,7 +1539,20 @@ function paintAlgoState() {
 function paintDests(list) {
   const out = document.getElementById('bk-dests');
   if (!out) return;
-  const row = (d) => `<div class="dest${d.enabled === false ? ' off' : ''}"
+  /*
+   * MODE is the whole permission model, on one control.
+   *
+   * It replaced a flag on the setup, which could not express the arrangement
+   * that matters most: the same strategy watched by hand in the prop account
+   * and left to run in the paper one. Three states, least dangerous first, and
+   * the dangerous one has to be chosen deliberately.
+   */
+  const MODE_LABEL = {
+    alert: 'Alert only — never sends',
+    manual: 'By hand — I tap to send',
+    auto: 'FULL AUTO — sends by itself',
+  };
+  const row = (d) => `<div class="dest${d.enabled === false ? ' off' : ''} md-${esc(d.mode)}"
     data-id="${esc(d.id)}" data-dialect="${esc(d.dialect)}" data-off="${d.enabled === false ? 1 : 0}">
     <div class="d-head">
       <span>${esc(d.name || d.id)}</span>
@@ -1605,49 +1563,70 @@ function paintDests(list) {
       <button class="btn" onclick="testBroker('${esc(d.id)}')">Test 1 share</button>
       <button class="btn" onclick="removeDest('${esc(d.id)}')">Remove</button>
     </div>
+
     <label>Name
       <input class="d-name" value="${esc(d.name || '')}" placeholder="Alpaca">
     </label>
-    <!-- THIS ACCOUNT'S CAPITAL. The share count comes from these three, and
-         they are per account because the same trade is a different number of
-         shares in a $5,000 prop account and a $20,000 Alpaca one. Blank means
-         "use the desk's Position size above", so one account needs none of
-         this filled in. -->
-    <label title="What this account IS. The share count is derived from it. Blank uses the desk-wide Account size above.">Account size $
-      <input class="d-acct" type="number" min="0" step="100"
-        value="${d.accountSize || ''}" placeholder="${esc(deskHint('accountSize'))}">
+    <!-- SIZE, as a multiple of the standard account. Scaling the size and the
+         risk together is what keeps the PERCENTAGE risked identical across
+         accounts — carrying the dollar figure across instead is invisible,
+         because it is the same number nobody looks at twice. -->
+    <label title="This account's capital as a multiple of the standard account above. 2x doubles both the account size and the risk per trade, so the percentage risked stays the same.">Size
+      <select class="d-scale">${
+        [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4].map(x => `<option value="${x}"${
+          Number(d.scale || 1) === x ? ' selected' : ''}>${x}x the standard</option>`).join('')}
+      </select>
     </label>
-    <label title="What one trade may lose in THIS account. Blank scales the desk-wide figure by this account's size, so the percentage risked stays the same.">Risk / trade $
-      <input class="d-risk" type="number" min="0" step="10"
-        value="${d.riskPerTrade || ''}" placeholder="${esc(deskHint('riskPerTrade'))}">
-    </label>
-    <label title="The largest one position may be, as a percent of THIS account. It decides how many positions fit at once: 25% is four, 16.66% is six.">Max position %
-      <input class="d-mpp" type="number" min="1" max="100" step="0.01"
-        value="${d.maxPositionPct || ''}" placeholder="${esc(deskHint('maxPositionPct'))}">
-    </label>
-    <label title="What is left to spend today. A running tally this side keeps, not a balance it can ask the broker for.">Buying power $
+    <label title="What this account can spend today. A running tally this side keeps — SignalStack cannot be asked for a balance.">Buying power $
       <input class="d-power" type="number" min="0" step="100"
         value="${d.buyingPower || ''}" placeholder="e.g. 20000">
-    </label>
-    <label title="A DOLLAR ceiling on any single order, checked at send time. Blank is normal — Max position already does this job.">Max per order $
-      <input class="d-max" type="number" min="0" step="100"
-        value="${d.maxOrderValue || ''}" placeholder="optional">
     </label>
     <label>Max trades / day
       <input class="d-maxtrades" type="number" min="1" step="1"
         value="${d.maxTradesPerDay || ''}" placeholder="e.g. 4">
     </label>
-    <label>SignalStack hook
-      <input class="d-hook" placeholder="${d.hasWebhook
+
+    <!-- WHAT IT MAY DO. One control, three states, on the account. -->
+    <label class="d-mode-l" title="Alert only: nothing is ever sent here. By hand: it appears in the send picker on Today. Full auto: a setup in its list places an order by itself.">Mode
+      <select class="d-mode" onchange="saveDests()">${
+        ['alert', 'manual', 'auto'].map(m => `<option value="${m}"${
+          d.mode === m ? ' selected' : ''}>${MODE_LABEL[m]}</option>`).join('')}
+      </select>
+    </label>
+
+    <label class="d-hook">SignalStack hook
+      <input class="d-hook-i" placeholder="${d.hasWebhook
         ? `saved · ${esc(d.webhookUrl)} — blank keeps it`
         : 'https://app.signalstack.com/hook/…'}">
     </label>
-    <label>Test hook <span class="note">optional</span>
-      <input class="d-testhook" placeholder="${d.hasTestWebhook
-        ? `saved · ${esc(d.testWebhookUrl)}` : '…/hook/TEST…'}">
-    </label>
+
+    <!-- WHICH SETUPS RUN HERE. The account owns the list; the setup does not
+         know it exists. One place to look, one place to change. -->
+    <div class="d-setups">
+      <span class="ua-label">runs</span>
+      <div class="ua-tools">${(() => {
+        /*
+         * Every known setup, plus any this account already claims that the
+         * catalogue does not currently list. That second half matters: if qp
+         * is down or a strategy was renamed, an account would otherwise show
+         * NO setups while still trading the one it has stored — the row would
+         * be quietly lying about what it does at 09:36.
+         */
+        const known = (SETUPS || []).map(x => ({ id: x.id, name: x.name }));
+        const extra = (d.setups || []).filter(id => !known.some(k => k.id === id))
+          .map(id => ({ id, name: id, missing: true }));
+        const all = [...known, ...extra];
+        if (!all.length) return '<span class="note">no setups yet</span>';
+        return all.map(x => `<button class="bchip${
+          (d.setups || []).includes(x.id) ? ' on' : ''}" data-setup="${esc(x.id)}"
+          onclick="toggleDestSetup('${esc(d.id)}', '${esc(x.id)}')"
+          >${esc(x.name)}${x.missing ? ' <span class="dim">(not in the catalogue)</span>' : ''}</button>`).join('');
+      })()}</div>
+    </div>
+
     <div class="d-foot">${d.hasWebhook
-      ? `${esc(sizeNote(d))} · A setup sends here only if it names this account on the Setups tab.`
+      ? esc(sizeNote(d)) + (d.mode === 'auto' && !(d.setups || []).length
+          ? ' — ON FULL AUTO WITH NO SETUPS: it will place nothing.' : '')
       : '<b class="warn">No hook — nothing can be sent here.</b>'}</div>
   </div>`;
   out.innerHTML = list.map(row).join('')
@@ -1656,32 +1635,54 @@ function paintDests(list) {
          <button class="btn" onclick="addDest()">+ Add an account</button>
          <button class="btn primary" onclick="saveDests()">Save accounts</button>
          <span id="bk-dest-note"></span>
-         <br>Each account is a separate SignalStack hook with its own capital and
-         its own daily count. <b>Trade The Pool</b> and <b>Alpaca</b> take
-         slightly different JSON, which is what the type on each row decides.
+         <br>Each account is a separate SignalStack hook with its own capital,
+         its own daily count and its own list of setups. <b>Trade The Pool</b>
+         and <b>Alpaca</b> take slightly different JSON, which is what the type
+         on each row decides.
        </div>`;
 }
 
-/** What the desk-wide Position size says, shown as the placeholder for blanks. */
-function deskHint(key) {
-  const r = (RISK || {});
-  const v = r[key];
-  return v ? `desk: ${key === 'maxPositionPct' ? v + '%' : '$' + v}` : 'not set';
+/** Turn one setup on or off for one account, and save straight away. */
+async function toggleDestSetup(destId, setupId) {
+  const rows = readDests().map(d => {
+    if (d.id !== destId) return d;
+    const cur = d.setups || [];
+    return { ...d, setups: cur.includes(setupId)
+      ? cur.filter(x => x !== setupId) : [...cur, setupId] };
+  });
+  const acct = rows.find(d => d.id === destId);
+  // Only worth a confirmation when it widens what runs by itself.
+  if (acct && acct.mode === 'auto' && (acct.setups || []).includes(setupId)
+    && !confirm(`Let "${setupId}" place REAL orders in ${acct.name} by itself?\n\n`
+      + `Every time it fires it will send an order sized for that account, with `
+      + `the stop and target attached. The box also has to be armed.`)) return;
+  await saveDests(rows);
+  loadSetups();          // the setup cards show which accounts run them
 }
 
-/** The share count this account would actually produce, in words. */
+/*
+ * What this account actually sizes on — the same arithmetic as risk.forAccount.
+ *
+ * Shown on every row because a multiplier is not a number you can hold in your
+ * head against a stop of $1.37. "0.5x" is the setting; "$5,000 risking $50" is
+ * what it means, and the second one is what tells you the setting is wrong.
+ */
 function sizeNote(d) {
-  const r = (RISK || {});
-  const acct = d.accountSize || r.accountSize;
-  const risk = d.riskPerTrade
-    || (d.accountSize && r.accountSize && r.riskPerTrade
-        ? Math.round(r.riskPerTrade * (d.accountSize / r.accountSize) * 100) / 100
-        : r.riskPerTrade);
-  const mpp = d.maxPositionPct || r.maxPositionPct;
-  if (!acct || !risk) return 'no account size or risk set — this account will place nothing';
+  const r = RISK || {};
+  const scale = Number(d.scale) > 0 ? Number(d.scale) : 1;
+  const acct = Number(d.accountSize) > 0 ? Number(d.accountSize)
+    : (r.accountSize ? Math.round(r.accountSize * scale * 100) / 100 : null);
+  const risk = Number(d.riskPerTrade) > 0 ? Number(d.riskPerTrade)
+    : (r.riskPerTrade ? Math.round(r.riskPerTrade * scale * 100) / 100 : null);
+  const mpp = Number(d.maxPositionPct) > 0 ? Number(d.maxPositionPct) : r.maxPositionPct;
+  if (!acct || !risk) {
+    return 'the standard account has no size or risk set — this account will '
+      + 'place nothing until it does';
+  }
   const slots = mpp ? Math.floor(100 / mpp) : null;
-  return `sizes on $${acct} risking $${risk} a trade`
-    + (mpp ? ` · max ${mpp}% a position (${slots} at once)` : '');
+  return `$${acct.toLocaleString()} · risks $${risk} a trade`
+    + ` (${(risk / acct * 100).toFixed(2)}%)`
+    + (mpp && mpp < 100 ? ` · ${mpp}% a position, ${slots} at once` : '');
 }
 
 /*
@@ -1706,16 +1707,18 @@ function readDests() {
       enabled: el.getAttribute('data-off') !== '1',
       name: f('d-name') || el.getAttribute('data-id'),
     };
-    for (const [cls, key] of [['d-power', 'buyingPower'], ['d-max', 'maxOrderValue'],
-                              ['d-maxtrades', 'maxTradesPerDay'], ['d-acct', 'accountSize'],
-                              ['d-risk', 'riskPerTrade'], ['d-mpp', 'maxPositionPct']]) {
+    for (const [cls, key] of [['d-power', 'buyingPower'],
+                              ['d-maxtrades', 'maxTradesPerDay'], ['d-scale', 'scale']]) {
       const v = f(cls);
       d[key] = v === '' ? null : v;
     }
-    for (const [cls, key] of [['d-hook', 'webhookUrl'], ['d-testhook', 'testWebhookUrl']]) {
-      const v = f(cls);
-      if (v) d[key] = v;          // omitted entirely = keep what is stored
-    }
+    d.mode = f('d-mode') || 'alert';
+    // The chips are the truth on screen; the stored list is what they were
+    // painted from, so reading them back is what makes a save idempotent.
+    d.setups = [...el.querySelectorAll('.d-setups .bchip.on')]
+      .map(b => b.getAttribute('data-setup'));
+    const hook = f('d-hook-i');
+    if (hook) d.webhookUrl = hook;   // omitted entirely = keep what is stored
     return d;
   });
 }
@@ -1856,16 +1859,27 @@ async function saveBroker(patch) {
 async function toggleArm() {
   const armed = BROKER && BROKER.broker.armed;
   if (!armed) {
-    const p = BROKER && BROKER.broker.buyingPower;
-    const live = (SETUPS || []).filter(x => x.autoTrade).map(x => x.name);
-    if (!confirm('Turn algo trading ON?\n\nReal positions will be opened '
-      + 'automatically, with no tap from you.\n\n'
-      + (live.length
-          ? `These setups will trade: ${live.join(', ')}.`
-          : 'No setup has "orders" switched on yet, so nothing will trade until '
-            + 'one does.')
-      + `\n\nSized by your risk settings, capped at $${p || '—'} of buying power, `
-      + 'stop and target attached.')) return;
+    /*
+     * Named exactly, from the accounts. "Real positions will be opened" is a
+     * sentence that should never be agreed to in the abstract — the confirm
+     * says which account, which setups, and how much buying power stands
+     * behind it, because those are the three things that decide whether this
+     * is the tap you meant.
+     */
+    const dests = (BROKER && BROKER.broker.destinations) || [];
+    const auto = dests.filter(d => d.enabled !== false && d.hasWebhook
+      && d.mode === 'auto' && (d.setups || []).length);
+    const byHand = dests.filter(d => d.enabled !== false && d.hasWebhook && d.mode === 'manual');
+    if (!confirm('Turn algo trading ON?\n\n'
+      + (auto.length
+          ? 'These accounts will open REAL positions BY THEMSELVES:\n'
+            + auto.map(d => `  • ${d.name} — ${(d.setups || []).join(', ')}`
+                + ` ($${d.buyingPower || '—'} buying power)`).join('\n')
+          : 'No account is on full auto with a setup, so nothing will trade by '
+            + 'itself until one is.')
+      + (byHand.length
+          ? `\n\nBy hand only: ${byHand.map(d => d.name).join(', ')}.` : '')
+      + '\n\nSized for each account, with the stop and target attached.')) return;
   }
   await saveBroker({ armed: !armed, enabled: true });
 }
@@ -2021,6 +2035,19 @@ async function reviewOrder(plan, destination) {
      * showing the desk's number and sending a different one would be worse
      * than no preview.
      */
+    /*
+     * EVERY ACCOUNT, always listed, with this one highlighted.
+     *
+     * Not a footnote and not conditional on there being more than one. The
+     * order body cannot say where it went — SignalStack decides that from the
+     * hook it arrived on — so "which book did that go into" is a question that
+     * can only be answered before the tap, never after it.
+     *
+     * The whole list is offered, including accounts that do not normally run
+     * this setup: sending one somewhere unusual is a decision a person is
+     * allowed to make, in front of a preview showing THAT account's share
+     * count. The ones set up for it are marked, so unusual still looks unusual.
+     */
     const dests = r.destinations || [];
     const chosen = plan.destination || p.destination || null;
     const name = p.destinationName
@@ -2029,12 +2056,14 @@ async function reviewOrder(plan, destination) {
       ? `→ <b>${esc(name)}</b>${r.size && r.size.shares
           ? ` · ${r.size.shares} shares · $${Number(r.size.positionValue || 0).toFixed(0)}`
             + ` · risks $${Number(r.size.riskDollars || 0).toFixed(0)}` : ''}`
-      : '<b class="warn">no account chosen</b>'}</div>`
-      + (dests.length > 1
-        ? `<div class="note">send instead to: ${dests.filter(d => d.id !== chosen)
-            .map(d => `<button class="bchip" onclick='reviewOrder(${JSON.stringify(plan)
-              .replace(/'/g, "&apos;")}, "${esc(d.id)}")'>${esc(d.name)}</button>`).join(' ')}</div>`
-        : '');
+      : '<b class="warn">pick an account</b>'}</div>`
+      + (dests.length
+        ? `<div class="or-pick">${dests.map(d => `<button class="bchip${
+            d.id === chosen ? ' on' : ''}" onclick='reviewOrder(${JSON.stringify(plan)
+              .replace(/'/g, "&apos;")}, "${esc(d.id)}")'>${esc(d.name)}${
+            d.runsIt ? '' : ' <span class="dim">(not its setup)</span>'}</button>`).join('')}</div>`
+        : `<div class="warn">No broker account can receive an order. Add one, or
+             take one off "alert only", under Settings.</div>`);
     box.innerHTML = `
       <div class="or-head">${esc(plan.symbol)} ${esc(plan.side)} — `
         + (stop ? 'NOT sendable' : 'this is exactly what would be sent') + `</div>`

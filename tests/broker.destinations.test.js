@@ -224,12 +224,7 @@ describe('saving destinations', () => {
     expect(broker.destinations()[0].webhookUrl).toBeNull();
   });
 
-  test('arming needs a live destination, and names the one that is not ready', () => {
-    broker.save({ destinations: [TTP_NO_POWER, TWO[1]] });
-    expect(() => broker.save({ armed: true })).toThrow(/Trade The Pool/);
-    broker.save({ destinations: TWO });
-    expect(() => broker.save({ armed: true })).not.toThrow();
-  });
+  // Arming now depends on the account MODES — see broker.accounts.test.js.
 
   test('an id has to be usable as an id', () => {
     expect(() => broker.save({ destinations: [{ ...TWO[0], id: 'a b!' }] }))

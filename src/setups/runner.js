@@ -307,7 +307,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
    * same name, with the same evidence behind it. It alerts; it does not trade.
    */
   const orderable = !setup.readiness || setup.readiness.orderOk !== false;
-  if (!dryRun && setup.autoTrade === true && !orderable) {
+  if (!dryRun && !orderable) {
     console.log(`[Setups] ${setup.id}: alert only — `
       + `${(setup.readiness.orderBlocking || []).join('; ')}`);
   }
@@ -322,13 +322,19 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
    * a setup having a quiet week.
    */
   let routing = { cfgs: [], error: null };
-  if (setup.autoTrade === true && orderable) {
-    routing = broker.route(setup.brokers || []);
-    if (routing.error && !dryRun) {
+  if (orderable) {
+    routing = broker.autoRoute(setup.id);
+    // Only worth reporting when SOMETHING is configured. A desk with no broker
+    // at all is an alert-only desk on purpose, and saying so on every fire
+    // would be noise on the one line a locked phone shows.
+    if (routing.error && !dryRun && broker.destinations().length) {
       console.log(`[Setups] ${setup.id}: no order placed — ${routing.error}`);
     }
   }
-  if (!dryRun && setup.autoTrade === true && orderable && routing.cfgs.length) {
+  // Does ANY account claim this setup? The difference between "you meant this
+  // to trade and it did not" and "this desk alerts, as arranged".
+  const listedSomewhere = broker.accountsFor(setup.id).length > 0;
+  if (!dryRun && orderable && routing.cfgs.length) {
     for (const pick of out.picks) {
       // One account at a time, and one pick at a time: each order is sized
       // against what the previous one actually committed in THAT account, and
@@ -409,12 +415,19 @@ async function runSetup(setup, { date, dryRun = false, tickers = null } = {}) {
     kind: 'setup',
     level: 'trade',
     detail: describePick(pick, size) + orderLines(orders[pick.ticker])
-      + (setup.autoTrade === true && !orderable
+      + (!orderable
         ? ' · ALERT ONLY — ' + (setup.readiness.orderBlocking || []).join('; ')
         : '')
-      // A setup set to trade that could not be routed said nothing at all, and
-      // a silent non-order is indistinguishable from a quiet week.
-      + (routing.error ? ` · NO ORDER — ${routing.error}` : '')
+      /*
+       * A setup an account was supposed to trade, that placed nothing, said
+       * nothing at all — and a silent non-order is indistinguishable from a
+       * quiet week. Only shown when an account actually lists this setup:
+       * "no account runs this setup" on every fire of a deliberately
+       * alert-only desk is noise, and noise on this line is what teaches you
+       * to stop reading it.
+       */
+      + (routing.error && routing.cfgs.length === 0 && listedSomewhere
+        ? ` · NO ORDER — ${routing.error}` : '')
       + unmanagedLine(pick.exitPlan),
     price: pick.plan.entry,
     // Everything the card cannot show but the trade needs. Kept on the fire so
