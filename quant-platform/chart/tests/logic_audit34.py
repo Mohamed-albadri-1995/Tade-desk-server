@@ -159,10 +159,17 @@ ok('one big down day drags Sortino BELOW Sharpe (downside vol dominates)',
    _dsd < _with_red['sharpe'], f"{_dsd} vs {_with_red['sharpe']}")
 ok('exposure = 235 position-min / (6 sessions x 390) = 10.04%',
    st['exposure_pct'] == 10.04, str(st.get('exposure_pct')))
+# A warning is a (fact, why) pair now — the fact stays on screen, the reasoning
+# folds away. `'below 30' in w` against a TUPLE asks whether one of the two
+# elements IS that string, which is never true, so both of these went green on
+# nothing for as long as the pairs have existed. Flattened before searching.
+_warntext = ' | '.join(
+    ' '.join(str(x) for x in (w if isinstance(w, (tuple, list)) else (w,)) if x)
+    for w in st['warnings'])
 ok('a small sample is flagged, not left to be assumed',
-   any('below 30' in w for w in st['warnings']))
+   'below 30' in _warntext, _warntext)
 ok('the missing slippage model is flagged',
-   any('slippage' in w for w in st['warnings']))
+   'slippage' in _warntext, _warntext)
 
 print()
 print("=" * 64)
@@ -267,12 +274,13 @@ store.get_backtest = lambda bid, with_trades=True: {
     'trades': trades}
 try:
     pg = srv.backtest_report(2).body.decode()
+    # Matched on the two facts, not on the exact sentence: the wording was
+    # rewritten when warnings became (fact, why) pairs and these assertions
+    # kept passing against text that no longer existed.
     ok('clock refusals are separated from the drops that cost a trade',
-       'signals INSIDE the window that still did not trade' in pg
-       and 'daily_cap=3' in pg)
+       'signals in-window that did not trade' in pg and 'daily_cap=3' in pg, pg[:0])
     ok('...and the million-scale number is explained as normal, not a loss',
-       'the time window doing its job' in pg
-       and 'a number in the millions is normal' in pg)
+       'time window doing its job' in pg and 'millions is normal' in pg, pg[:0])
     ok('the two are not printed in one undifferentiated list',
        'outside_window=1361916,' not in pg)
 finally:

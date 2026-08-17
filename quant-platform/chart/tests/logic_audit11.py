@@ -89,8 +89,14 @@ chkv('csv ctx value', row[head.index('ctx_regime')], 'STRONG_UP')
 rep = bytes(srv.backtest_report(bid_e).body).decode()
 chkv('report is html with metric definitions',
      ('Sharpe' in rep, 'survivorship' in rep, 'ZZZ' in rep), (True, True, True))
-chkv('report warns on frictionless+close fill',
-     ('frictionless' in rep, 'optimistic' in rep), (True, True))
+# The two bias disclosures, matched on what they SAY rather than on one word.
+# This assertion used to look for 'frictionless' and a lowercase 'optimistic';
+# both warnings were rewritten as (fact, why) pairs — "costs 0 bps" with the
+# reasoning folded away — and the test went on passing on the old wording until
+# it did not, having checked nothing in between.
+chkv('report warns on zero costs and on the close fill',
+     ('costs 0 bps' in rep, 'fill = close' in rep, 'ptimistic' in rep),
+     (True, True, True))
 store.delete_backtest(bid_e)
 
 print(f"\nPASS={PASS} FAIL={FAIL}")

@@ -47,6 +47,7 @@ PARTS = [
     ('logic_audit32.py',    'T2 10:00 VWAP-extension: direction, invalidation, stop-first, per-day rank'),
     ('logic_audit33.py',    'cross-tool integration: run() reaches _pairs, tool assignment survives'),
     ('logic_audit34.py',    'professional report: metrics vs hand arithmetic, journal, exports'),
+    ('logic_audit35.py',    'strategies survive a deploy: DB outside the repo, user edits win, JSON copies'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They

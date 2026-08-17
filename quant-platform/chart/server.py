@@ -46,6 +46,17 @@ _STATIC = Path(__file__).resolve().parent / 'static'
 app = FastAPI(title='qp charting platform')
 app.mount('/static', StaticFiles(directory=str(_STATIC)), name='static')
 
+try:
+    # An EMPTY database means something was lost, not that this is a fresh
+    # install with nothing in it — a fresh install is also empty, and both want
+    # the same thing: put the JSON copies back. Runs BEFORE seeding so the
+    # bundle's insert-if-missing pass finds the restored rows already there.
+    _restored = store.restore_strategies()
+    if _restored:
+        print(f'[store] restored {_restored} strategy(ies) from the JSON copies',
+              flush=True)
+except Exception as e:
+    print(f'[store] could not restore strategies: {e}', flush=True)
 try:                       # bundled seed strategies (the 5 pro scalps) — the
     store.seed_strategies()  # first boot after deploy adds any that are missing
 except Exception:          # never let a seed problem stop the server
@@ -130,7 +141,9 @@ def strategies_list():
 @app.post('/api/strategies')
 def strategies_save(payload: dict = Body(...)):
     try:
-        return {'ok': True, 'strategy': store.save_strategy(payload)}
+        # A human pressed Save. Recorded on the row so the startup seed sync
+        # leaves it alone from now on — see store.seed_strategies.
+        return {'ok': True, 'strategy': store.save_strategy(payload, user_edit=True)}
     except Exception as e:
         return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
 
@@ -345,7 +358,6 @@ def _account_html(s: dict) -> str:
 </div>"""
 
 
-@app.get('/api/backtest/{bid}/report')
 def _warn_html(warn: list) -> str:
     """Warnings as one scannable line each, with the reasoning folded away.
 
@@ -370,6 +382,7 @@ def _warn_html(warn: list) -> str:
     return '<div class="warn">' + '<br>'.join(out) + '</div>'
 
 
+@app.get('/api/backtest/{bid}/report')
 def backtest_report(bid: int):
     """Self-contained phone-readable HTML report: clear metric definitions,
     bias disclosure (fill model, costs, universe), and the trade list."""

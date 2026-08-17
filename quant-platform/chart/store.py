@@ -9,19 +9,88 @@ runs). Stdlib sqlite3, one file next to the chart package. Handlers are sync
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
 import threading
 import time
 from pathlib import Path
 
-_DB = Path(__file__).resolve().parent / 'platform.db'
+
+def _default_db() -> Path:
+    """Where the strategies live.
+
+    OUTSIDE THE REPOSITORY, on purpose.
+
+    This file used to sit at chart/platform.db — inside the working tree of the
+    same git checkout the deploy script hard-resets. It was gitignored, which
+    protects it from `git reset --hard` and from nothing else: one `git clean
+    -fdx`, one re-clone into a fresh directory, one "let me start from a clean
+    checkout" and every strategy built in the browser is gone. A file whose
+    survival depends on nobody ever running a routine git command is not stored,
+    it is parked.
+
+    ~/.qp/platform.db is not in any repository, so no deploy can reach it.
+    QP_DB overrides it (the tests point it at a temp dir).
+    """
+    env = os.environ.get('QP_DB')
+    if env:
+        return Path(env).expanduser()
+    home = Path.home() / '.qp'
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        return home / 'platform.db'
+    except Exception:
+        # A box where $HOME is not writable still has to run. Falling back to
+        # the old location is worse than the new one and better than not
+        # starting at all.
+        return Path(__file__).resolve().parent / 'platform.db'
+
+
+# Resolved ONCE, at import. `_DB` is reassigned by tests to point at a temp
+# file; keeping the original here is what lets the migration below tell "the
+# real box" from "somebody deliberately pointed this elsewhere" without calling
+# back into Path at runtime, which a test may have swapped out from under it.
+_DEFAULT_DB = _default_db()
+_DB = _DEFAULT_DB
+# The pre-move location. Kept so a box upgrading to this version carries its
+# strategies across instead of waking up empty.
+_LEGACY_DB = Path(__file__).resolve().parent / 'platform.db'
 _lock = threading.Lock()
 _conn = None
+
+
+def _migrate_legacy_db() -> str | None:
+    """Move an in-repo platform.db to its new home, once.
+
+    Copied rather than moved, and only when the destination does not exist:
+    the old file is left where it was so a failed upgrade is a nuisance rather
+    than a loss. Returns a line worth logging, or None when there was nothing
+    to do.
+
+    Only ever migrates INTO the default location. A `_DB` pointed somewhere
+    else is a deliberate choice — a test's temp directory, a QP_DB override —
+    and filling it with the box's real strategies would be the opposite of
+    what was asked for.
+    """
+    if _DB != _DEFAULT_DB:
+        return None
+    if _DB == _LEGACY_DB or _DB.exists() or not _LEGACY_DB.exists():
+        return None
+    try:
+        _DB.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(_LEGACY_DB), str(_DB))
+        return f'moved {_LEGACY_DB} -> {_DB} (the old file was left in place)'
+    except Exception as e:
+        return f'could NOT move {_LEGACY_DB} -> {_DB}: {e}'
 
 
 def _db() -> sqlite3.Connection:
     global _conn
     if _conn is None:
+        note = _migrate_legacy_db()
+        if note:
+            print(f'[store] {note}', flush=True)
         _conn = sqlite3.connect(str(_DB), check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.execute("""
@@ -168,10 +237,17 @@ def normalise_tools(raw) -> list:
     return out
 
 
-def save_strategy(obj: dict) -> dict:
+def save_strategy(obj: dict, user_edit: bool = False) -> dict:
     """Insert or update. `obj` is the full strategy JSON; if it carries an
     `id`, that row is updated, else a new row is created. Returns the saved
-    strategy (with id)."""
+    strategy (with id).
+
+    `user_edit=True` means a human pressed Save in the builder, and it is
+    recorded on the row. It is what stops `seed_strategies` from overwriting
+    the change on the next restart — see the note there. Assigning tools and
+    seeding are not user edits: the first must not freeze a maintained
+    strategy against bundle updates, and the second IS the bundle.
+    """
     name = (obj.get('name') or 'Untitled strategy').strip()[:120]
     sid = obj.get('id')
     payload = dict(obj)
@@ -186,6 +262,15 @@ def save_strategy(obj: dict) -> dict:
     # two-copies problem this whole design exists to avoid.
     for meta in DERIVED_KEYS:
         payload.pop(meta, None)
+    # Sticky: once a human has edited this strategy it stays edited, so a
+    # later tools assignment (which is not a user edit) cannot clear the flag
+    # and re-expose it to the seed refresh.
+    if user_edit:
+        payload['_user_edited'] = True
+    elif sid:
+        was = get_strategy(sid)
+        if was and was.get('_user_edited'):
+            payload['_user_edited'] = True
     data = json.dumps(payload)
     now = time.time()
     with _lock:
@@ -202,7 +287,10 @@ def save_strategy(obj: dict) -> dict:
                 (name, data, now, now))
             db.commit()
             sid = cur.lastrowid
-    return get_strategy(sid)
+    saved = get_strategy(sid)
+    if saved:
+        _write_backup(saved)
+    return saved
 
 
 def set_tools(sid: int, raw) -> dict | None:
@@ -226,14 +314,96 @@ def set_tools(sid: int, raw) -> dict | None:
 
 
 def delete_strategy(sid: int) -> bool:
+    s = get_strategy(sid)
     with _lock:
         db = _db()
         cur = db.execute('DELETE FROM strategies WHERE id = ?', (sid,))
         db.commit()
+    if cur.rowcount and s:
+        _drop_backup(s.get('name') or '')
     return cur.rowcount > 0
 
 
-def seed_strategies() -> int:
+# ── the plain-text copy ─────────────────────────────────────────────────────
+#
+# A second, dumber home for the same strategies: one JSON file per strategy in
+# ~/.qp/strategies/. Belt and braces on top of moving the DB out of the repo,
+# because the two fail differently — the database is one binary file that a
+# stray command can remove in full, while these are readable, diffable, and can
+# be copied off the box or mailed to yourself.
+#
+# Written on every save; read back only when the DB has NO strategies at all,
+# which is the "wiped, or a brand-new box" case. Never merged into a database
+# that already has rows: this restores a loss, it does not resurrect something
+# that was deliberately deleted.
+
+def _backup_dir() -> Path | None:
+    env = os.environ.get('QP_STRATEGY_BACKUP')
+    d = Path(env).expanduser() if env else (_DB.parent / 'strategies')
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    except Exception:
+        return None
+
+
+def _backup_name(name: str) -> str:
+    safe = ''.join(c if (c.isalnum() or c in ' -_') else '_' for c in name).strip()
+    return (safe or 'untitled')[:100] + '.json'
+
+
+def _write_backup(obj: dict) -> None:
+    d = _backup_dir()
+    if not d:
+        return
+    try:
+        doc = {k: v for k, v in obj.items() if k not in DERIVED_KEYS}
+        (d / _backup_name(obj.get('name') or '')).write_text(
+            json.dumps(doc, indent=2, sort_keys=True))
+    except Exception:
+        pass                                   # a backup must never break a save
+
+
+def _drop_backup(name: str) -> None:
+    d = _backup_dir()
+    if not d or not name:
+        return
+    try:
+        (d / _backup_name(name)).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def restore_strategies() -> int:
+    """Put the JSON copies back when the database has nothing in it.
+
+    Runs before seeding, so a restored copy is the one that exists by the time
+    the bundle is synced and the bundle's insert-if-missing path finds it
+    already there. Returns how many were restored.
+    """
+    if list_strategies():
+        return 0
+    d = _backup_dir()
+    if not d or not d.is_dir():
+        return 0
+    n = 0
+    for f in sorted(d.glob('*.json')):
+        try:
+            obj = json.loads(f.read_text())
+        except Exception:
+            continue
+        if not (obj.get('name') or '').strip():
+            continue
+        obj.pop('id', None)
+        try:
+            save_strategy(obj)
+            n += 1
+        except Exception:
+            continue
+    return n
+
+
+def seed_strategies(seeds_dir: Path | None = None) -> int:
     """Sync the bundled seed strategies (chart/seeds/*.json) into the DB on
     every startup. These 5 are OUR canonical, maintained strategies: a stored
     copy is REFRESHED to the current bundled definition (same id kept) whenever
@@ -246,7 +416,7 @@ def seed_strategies() -> int:
     edits made in the browser survive a restart. Returns how many were
     inserted/updated.
     """
-    seeds_dir = Path(__file__).resolve().parent / 'seeds'
+    seeds_dir = seeds_dir or (Path(__file__).resolve().parent / 'seeds')
     if not seeds_dir.is_dir():
         return 0
     by_name = {s['name']: s for s in list_strategies()}
@@ -272,6 +442,19 @@ def seed_strategies() -> int:
             # Use it for the user's own strategies; leave it off for OUR
             # canonical scalps, which must track the bundle.
             if obj.get('_keep_user_edits'):
+                continue
+            # THE SAME PROTECTION, EARNED RATHER THAN DECLARED.
+            #
+            # `_keep_user_edits` is set in the bundle, by us, ahead of time —
+            # so it protects the strategies we thought to protect. The seven
+            # scalps carry no such flag, and editing one in the builder was
+            # undone by the next restart: the bundle differed, so the refresh
+            # wrote the bundle back over the edit. From the browser that is
+            # indistinguishable from "my strategy disappeared after a deploy".
+            #
+            # A row a human has saved is now protected whatever the bundle
+            # says. Delete it to get the bundled version back.
+            if cur.get('_user_edited'):
                 continue
             # compare the AUTHORED document only — never a field a read derived
             stored = {k: v for k, v in cur.items() if k not in DERIVED_KEYS}
