@@ -66,6 +66,21 @@ const OPERATORS = [
   { value: 'ne',       label: 'is not',        kinds: ['number', 'text'] },
   { value: 'contains', label: 'contains',      kinds: ['text'] },
   { value: 'has',      label: 'has any of',    kinds: ['text'] },
+  /*
+   * ABSENCE AS A VALUE, not as "cannot tell".
+   *
+   * Every other operator here treats a missing field as unknown, and an
+   * unknown rule DROPS the card. That is right for a gate — a card whose bias
+   * has not been computed has not passed a bias test — and it makes "no news"
+   * impossible to ask for: the cards with no catalyst are exactly the ones
+   * that return unknown, so the filter removed the entire list it was written
+   * to find.
+   *
+   * A setup whose whole premise is an unexplained move ("it went 15% with no
+   * reason, so it should come back") cannot be built without this.
+   */
+  { value: 'empty',    label: 'is empty',      kinds: ['number', 'text'] },
+  { value: 'notempty', label: 'has any value', kinds: ['number', 'text'] },
 ];
 const OP_SET = new Set(OPERATORS.map(o => o.value));
 
@@ -104,7 +119,13 @@ function testRule(rule, row) {
   const field = FIELDS[String(rule?.left || '')];
   if (!field) return null;
   const got = field.path(row);
-  if (got === null || got === undefined || got === '') return null;
+  const missing = (got === null || got === undefined || got === '');
+  // Asked BEFORE the unknown short-circuit, because for these two operators
+  // absence IS the answer rather than the absence of one.
+  const op0 = rule.operator || rule.op;
+  if (op0 === 'empty') return missing;
+  if (op0 === 'notempty') return !missing;
+  if (missing) return null;
 
   if (field.kind === 'number') {
     const l = num(got);

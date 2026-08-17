@@ -6,8 +6,8 @@
  * be measured against anything. It now breaks the 20-day range instead.
  *
  * T6 looked for overbought-with-volume, which is what four other tools already
- * find. It now looks for the opposite: a neglected name that has NOT moved,
- * whose six-month trend is going nowhere, with volume arriving anyway.
+ * find. It now looks for a big quick move with NO news behind it, expected to
+ * correct back — the only mean-reversion setup on the desk.
  *
  * Two things must hold, and neither is obvious:
  *
@@ -82,45 +82,45 @@ describe('T5 — 20-Day Break', () => {
   });
 });
 
-// ── T6 · the quiet base ────────────────────────────────────────────────────
+// ── T6 · the unexplained move ──────────────────────────────────────────────
 
-describe('T6 — Quiet Base', () => {
+/*
+ * A big quick move with NO reason behind it, expected to correct back. The
+ * only mean-reversion setup on the desk; everything else here wants a move to
+ * continue.
+ *
+ * Written the other way round first — as a consolidation screener, with the
+ * 15% move as an EXCLUSION — which is the opposite setup entirely. The move is
+ * the trigger.
+ */
+describe('T6 — Unexplained Move', () => {
   const t6 = byName(PRESETS.T6);
-  const base = t6['Quiet Base'];
-  const mirror = t6['Quiet Base (mirror)'];
+  const base = t6['Unexplained Move'];
+  const mirror = t6['Unexplained Move (mirror)'];
 
-  test('the tool now ships a quiet base and its mirror', () => {
+  test('the tool ships the pair, and keeps the old screener switched off', () => {
     expect(Object.keys(t6).sort())
-      .toEqual(['Overextended (archived)', 'Quiet Base', 'Quiet Base (mirror)']);
+      .toEqual(['Overextended (archived)', 'Unexplained Move', 'Unexplained Move (mirror)']);
   });
 
-  test('no two-hour swing beyond 15% in EITHER direction', () => {
-    expect(filterOn(base, 'change|120')).toEqual([
-      { left: 'change|120', operation: 'less', right: 15 },
-      { left: 'change|120', operation: 'greater', right: -15 },
-    ]);
-  });
-
-  /*
-   * Quiet has no direction, so the band mirrors onto itself — the same two
-   * bounds, written the other way round. That is correct, and it is the reason
-   * the pair needs something else to actually differ.
-   */
-  test('the quiet band is self-mirroring, because quiet has no side', () => {
-    const b = filterOn(base, 'change|120').map(f => `${f.operation} ${f.right}`).sort();
-    const m = filterOn(mirror, 'change|120').map(f => `${f.operation} ${f.right}`).sort();
-    expect(m).toEqual(b);
+  test('THE 15% MOVE IS THE TRIGGER, not something to avoid', () => {
+    expect(filterOn(base, 'change|120'))
+      .toEqual([{ left: 'change|120', operation: 'greater', right: 15 }]);
+    expect(filterOn(mirror, 'change|120'))
+      .toEqual([{ left: 'change|120', operation: 'less', right: -15 }]);
   });
 
   /*
-   * …and this is what differs. Base: six months not rising — accumulation into
-   * weakness. Mirror: six months not falling — distribution into strength.
-   * Without Perf.6M in DIRECTIONAL_FIELDS both said "less than 0" and the pair
-   * was one screener run twice.
+   * The safety layer, and it faces the OPPOSITE way to the move. A stock that
+   * has fallen for six months and falls again today has not done anything
+   * unexplained — it is doing what it has been doing, and buying that dip is
+   * catching a knife. So each side refuses a spike that AGREES with the trend.
    */
-  test('THE PAIR DIFFERS ON THE SIX-MONTH TREND', () => {
+  test('each side refuses a spike that agrees with the six-month trend', () => {
+    // spiked UP -> only worth fading if six months are NOT rising
     expect(filterOn(base, 'Perf.6M'))
       .toEqual([{ left: 'Perf.6M', operation: 'less', right: 0 }]);
+    // dropped -> only worth buying if six months are NOT falling
     expect(filterOn(mirror, 'Perf.6M'))
       .toEqual([{ left: 'Perf.6M', operation: 'greater', right: 0 }]);
   });
@@ -132,34 +132,26 @@ describe('T6 — Quiet Base', () => {
     expect(m.filters[0]).toEqual({ left: 'Perf.6M', operation: 'greater', right: 20 });
   });
 
-  test('still inside its range — breaking out is the other tool\'s job', () => {
-    expect(filterOn(base, 'close'))
-      .toContainEqual({ left: 'close', operation: 'less', right: 'High.1M' });
-    expect(filterOn(mirror, 'close'))
-      .toContainEqual({ left: 'close', operation: 'greater', right: 'Low.1M' });
-  });
-
-  /*
-   * The one thing that IS happening. Everything above says nothing is going on;
-   * without this the screener returns the entire quiet half of the market.
-   */
-  test('volume is arriving anyway — the whole setup', () => {
-    expect(filterOn(base, 'relative_volume_10d_calc'))
-      .toEqual([{ left: 'relative_volume_10d_calc', operation: 'greater', right: 1.5 }]);
-  });
-
-  /*
-   * 3x on a neglected name is not accumulation, it is the news already
-   * breaking — and by then the base is over. The archived screener used 3.
-   */
-  test('the volume floor is lower than the old screener\'s', () => {
-    expect(filterOn(base, 'relative_volume_10d_calc')[0].right)
-      .toBeLessThan(filterOn(t6['Overextended (archived)'], 'relative_volume_10d_calc')[0].right);
+  /* The biggest unexplained move should be at the top of each list, which for
+     the down side means ascending. */
+  test('each side sorts its own strongest candidates first', () => {
+    expect(base.sort).toEqual({ sortBy: 'change|120', sortOrder: 'desc' });
+    expect(mirror.sort).toEqual({ sortBy: 'change|120', sortOrder: 'asc' });
   });
 
   /* `change|120` does not exist until there have been two hours of session. */
   test('it cannot run before 11:30, because its own input does not exist yet', () => {
     expect(base.runFrom).toBe('11:30');
+    expect(mirror.runFrom).toBe('11:30');
+  });
+
+  /*
+   * No RSI, no EMA20, no "already extended" condition. Those describe a move
+   * that has gone far, which is what the archived screener looked for and what
+   * four other tools already find. This one is about a move with no CAUSE.
+   */
+  test('nothing here asks whether the move was large by any other measure', () => {
+    for (const f of base.filters) expect(['RSI', 'EMA20']).not.toContain(f.left);
   });
 
   test('the overextended version is kept, and switched off', () => {
@@ -167,6 +159,48 @@ describe('T6 — Quiet Base', () => {
     expect(old.enabled).toBe(false);
     expect(old.key).toBe('overextended');
     expect(filterOn(old, 'RSI')).toHaveLength(1);
+  });
+});
+
+/*
+ * THE HALF THAT IS NOT IN THE SCREENER.
+ *
+ * TradingView has no news column, so "with no news" is a card filter applied
+ * after the screener — and it could not be written at all until now: every
+ * operator treated a missing field as "cannot tell", and an unknown rule drops
+ * the card. The cards with no catalyst were exactly the ones being dropped, so
+ * the filter removed the whole list it was written to find.
+ */
+describe('no news / with news, as a card filter', () => {
+  const universe = require('../src/setups/universe');
+  const ROWS = [
+    { ticker: 'NEWS', catalyst: 'FDA approval' },
+    { ticker: 'NONE', catalyst: null },
+    { ticker: 'ABSENT' },
+  ];
+  const filter = op => ({ rules: [{ left: 'catalyst', operator: op, right: '' }] });
+
+  test('"is empty" keeps the cards with nothing behind the move — T6', () => {
+    expect(universe.apply(ROWS, filter('empty')).kept.map(r => r.ticker))
+      .toEqual(['NONE', 'ABSENT']);
+  });
+
+  test('"has any value" keeps the ones with a catalyst — T5', () => {
+    expect(universe.apply(ROWS, filter('notempty')).kept.map(r => r.ticker))
+      .toEqual(['NEWS']);
+  });
+
+  test('a missing field is a VALUE to these two, not an unknown', () => {
+    // Any other operator drops all three, which is the behaviour that made
+    // "no news" impossible to ask for.
+    expect(universe.apply(ROWS, { rules: [{ left: 'catalyst', operator: 'eq', right: '' }] })
+      .kept.map(r => r.ticker)).toEqual([]);
+  });
+
+  test('both operators are offered to whoever is building the filter', () => {
+    const ops = universe.OPERATORS.map(o => o.value);
+    expect(ops).toContain('empty');
+    expect(ops).toContain('notempty');
   });
 });
 

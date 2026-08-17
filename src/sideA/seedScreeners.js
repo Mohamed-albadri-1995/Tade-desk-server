@@ -226,45 +226,54 @@ const T6_ARCHIVED = {
 };
 
 /*
- * THE QUIET BASE — a neglected name being accumulated, not one that already ran.
+ * THE UNEXPLAINED MOVE — a big quick move with no reason, expected to come back.
  *
- * Every other screener here looks for something happening. This one looks for
- * something NOT happening, and then for the single tell that contradicts it:
+ * A stock goes 15% in two hours and there is no news, no filing, no catalyst
+ * anywhere. Nothing changed about the company, so the price has no reason to
+ * stay where it is: the trade is the correction back toward where it was. This
+ * is the only mean-reversion setup on the desk; every other tool here is
+ * looking for a move to continue.
  *
- *   nothing has moved      no 2-hour swing beyond 15% in either direction
- *   nobody has cared       six months of trend that is not rising
- *   still inside its range not breaking the month's high — that is T5's job
- *   ...but volume is here  relative volume up on a chart that has gone nowhere
+ * THE MOVE IS THE TRIGGER, NOT THE EXCLUSION. (Written the other way round
+ * first — as a consolidation screener — which is the opposite setup.)
  *
- * The last line is the whole setup. Volume arriving into a flat, unloved chart
- * is what accumulation looks like from the outside; the same volume on a chart
- * that has already run is just a mover, which four other tools already find.
+ * WHY THE SIX-MONTH TREND IS HERE, and it is not a momentum filter: it is a
+ * safety layer, and it faces the OPPOSITE way to the move.
  *
- * THE ±15% BAND IS SELF-MIRRORING, and correctly so — "quiet" has no direction.
- * What flips is `Perf.6M`: the base takes names whose six-month trend is not
- * rising (accumulation into weakness), the mirror takes those whose six-month
- * trend is not falling (distribution into strength). That is the pair, and it
- * only works because Perf.6M was added to DIRECTIONAL_FIELDS — without it the
- * mirror was the same screener twice.
+ *   A stock that has fallen for six months and falls again today has not done
+ *   anything unexplained. It is doing what it has been doing, and there is no
+ *   reason for it to bounce. Buying that dip is catching a knife.
  *
- * `change|120` is the two-hour change. It only exists once there have been two
- * hours, so this cannot run before 11:30 and mean anything.
+ * So each side refuses a spike that agrees with the six-month trend:
  *
- * The relative-volume floor is 1.5, not the 3 the old screener used: 3x on a
- * neglected name is not accumulation, it is the news already breaking, and by
- * then the base is over.
+ *   base    spiked UP 15%   + six months NOT rising   -> short it back down
+ *   mirror  dropped 15%     + six months NOT falling  -> buy it back up
+ *
+ * Both come out of one definition: `change|120` and `Perf.6M` are both
+ * directional, so the mirror flips the sign of each and produces exactly the
+ * other half. That only works because Perf.6M was added to DIRECTIONAL_FIELDS
+ * — without it the twin asked for the same six-month condition as the base and
+ * the pair had no safety layer on one side at all.
+ *
+ * THE "NO NEWS" HALF IS NOT HERE, AND CANNOT BE. TradingView has no news
+ * column; the catalyst is fetched per ticker by this tool's own news pass
+ * afterwards and lands on the card. It is a card filter on the setup —
+ * `catalyst is empty` — and it is not optional garnish: without it this
+ * screener returns every 15% mover, which is mostly news, which is the exact
+ * opposite of the setup. See src/setups/universe.js, and note that the filter
+ * needed a new operator to express absence at all.
+ *
+ * `change|120` is the two-hour change and does not exist before there have
+ * been two hours, so this cannot run before 11:30 and mean anything.
  */
 const T6_BASE = {
-  key: 'quiet-base', name: 'Quiet Base',
+  key: 'unexplained-move', name: 'Unexplained Move',
   checkFrom: '11:30', checkTo: '16:00',
   runFrom: '11:30', runTo: '16:00',
-  sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
+  sort: { sortBy: 'change|120', sortOrder: 'desc' },
   filters: [
-    { left: 'change|120', operation: 'less', right: 15 },
-    { left: 'change|120', operation: 'greater', right: -15 },
+    { left: 'change|120', operation: 'greater', right: 15 },
     { left: 'Perf.6M', operation: 'less', right: 0 },
-    { left: 'close', operation: 'less', right: 'High.1M' },
-    { left: 'relative_volume_10d_calc', operation: 'greater', right: 1.5 },
     { left: 'close', operation: 'egreater', right: 1 },
     { left: 'average_volume_10d_calc', operation: 'greater', right: 500000 },
   ],
@@ -492,7 +501,7 @@ const WINDOW_NOTES = {
   'gap-and-volume': 'Pre-market and the first hour. Built on premarket_change and premarket_volume, which stop moving at the bell — left running all day it would re-report the same names until the close and none of it would be new.',
   'vwap-reclaim': 'The one that stays awake into the afternoon, because a reclaim is a reversal and those come late. Starts at 09:45 rather than the bell: VWAP off the first few prints is not yet a level anything is reclaiming. Stops at 15:30, when a reclaim has no session left to resolve in.',
   '20d-break': 'The whole regular session. A month\u2019s range breaks on flow that arrives at any hour, often late. Pre-market is excluded on purpose \u2014 a 20-day high printed on a handful of thin shares is not a break. The NEWS half of this setup is a card filter (catalyst is not empty), not a screener column: TradingView returns the universe and the catalyst is fetched per ticker afterwards.',
-  'quiet-base': 'From 11:30, because the two-hour change it depends on does not exist before then. Runs to the close: volume arriving into a flat chart is the whole signal and it can arrive at any hour.',
+  'unexplained-move': 'From 11:30, because the two-hour change it depends on does not exist before then, and on to the close \u2014 an unexplained move can happen at any hour and the correction follows it. The NO-NEWS half is a card filter (catalyst is empty), not a screener column, and it is the setup rather than a refinement: without it this returns every 15% mover, which is mostly news.',
   '52w-break': 'The whole regular session. These break on institutional flow, which arrives at any hour and often late in the day. Pre-market is excluded on purpose — a 52-week high printed on a handful of thin shares is not a break.',
   overextended: 'Waits until 10:00. At the open RSI still describes yesterday; extension is something the session builds. Then runs to the close, because a stock can be stretched at any hour and the fade is the trade.',
 

@@ -73,11 +73,11 @@
     },
     {
       "id": "T6",
-      "name": "Quiet Base",
+      "name": "Unexplained Move",
       "port": 3050,
       "scorerPort": 3051,
       "accent": "#facc15",
-      "desc": "Neglected names: no 2-hour swing past 15%, six months of trend going nowhere, still inside the range \u2014 and volume arriving anyway.",
+      "desc": "A 15% move in two hours with no news behind it, expected to correct back. The six-month trend is a safety layer: a spike that agrees with it is not unexplained. Needs a \"catalyst is empty\" filter on the setup.",
       "captureAt": {
         "r1": "10:16",
         "entryA": "10:17",
