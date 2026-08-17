@@ -121,6 +121,29 @@ chkv('a 09:35 entry in a pre-market find is kept', len(out['trades']), 1)
 chkv('nothing removed', (out['summary'].get('coverage') or {}).get('before_scan'), None)
 
 
+# The rule, in the words it was asked for:
+#
+#   "if the stock been found premarket it's ok to trade it during the day
+#    but if the trade was 10 but the scanner find the stock 12 then I can't
+#    trade it in reality because it was not really exist at time"
+#
+# Both halves, spelled out, because the premarket half is the one an
+# over-eager gate would get wrong — a negative offset is EARLIER than the open,
+# not a name that arrived late.
+print("PART B2 — the rule as asked")
+
+out = run(PRE, strat_at(1430))
+chkv('found pre-market, traded in the afternoon: kept', len(out['trades']), 1)
+
+FOUND_AT_NOON = [{'ticker': 'GOOD', '_score': 9, 'foundMinsFromOpen': 150}]   # 12:00
+out = run(FOUND_AT_NOON, strat_at(1000))
+chkv('found at 12:00, entry at 10:00: dropped', len(out['trades']), 0)
+chkv('and counted', (out['summary'].get('coverage') or {}).get('before_scan'), 1)
+
+out = run(FOUND_AT_NOON, strat_at(1330))
+chkv('found at 12:00, entry at 13:30: kept', len(out['trades']), 1)
+
+
 # ── PART C · a missing scan time is not a guess ─────────────────────────────
 print("PART C — a register row with no scan time")
 
