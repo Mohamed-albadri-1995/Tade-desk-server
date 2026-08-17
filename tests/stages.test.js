@@ -187,18 +187,51 @@ describe('stage decides the order', () => {
     expect(bystage(['T3', 'T1', 'T2'])).toEqual(['T2', 'T1', 'T3']);
   });
 
-  test('the landing page ranks by stage INSIDE each time group', () => {
-    // Under the clock rather than over it: a validated tool that is asleep is
-    // still asleep, and promoting it above the ones that are open would answer
-    // a question nobody asked at 09:31.
+  /*
+   * THE STAGE LEADS, and the clock orders things inside it.
+   *
+   * Written the other way round first — time first, stage as a tiebreak —
+   * which is a ranking by time with a label attached, not a ranking by stage.
+   * Reported as "ranking still by time, stages not separated".
+   */
+  test('the landing page ranks by STAGE first, clock second', () => {
     const html = require('fs').readFileSync(
       require('path').join(__dirname, '../public/screeners.html'), 'utf8');
     expect(html).toMatch(/STAGE_RANK = \{ valid: 0, study: 1, collecting: 2 \}/);
     const rankFn = html.indexOf('function byWhenItMatters');
     const body = html.slice(rankFn, html.indexOf('}\n}', rankFn));
-    // the time group is compared BEFORE the stage
-    expect(body.indexOf('if (ra !== rb) return ra - rb;'))
-      .toBeLessThan(body.indexOf('STAGE_RANK[a.stage]'));
+    expect(body.indexOf('STAGE_RANK[a.stage]'))
+      .toBeLessThan(body.indexOf('if (ra !== rb) return ra - rb;'));
+  });
+
+  /*
+   * AND THE SECTIONS ARE REAL, not just an order. A chip is a label; a section
+   * is a place, and the reader has to see at a glance which part of the page
+   * they are in. Every stage is drawn whether or not it has anything in it —
+   * "nothing is validated yet" is a fact about the desk, not a rendering gap,
+   * and it is the fact most worth seeing.
+   */
+  test('every stage is its own section, drawn even when empty', () => {
+    const html = require('fs').readFileSync(
+      require('path').join(__dirname, '../public/screeners.html'), 'utf8');
+    for (const s of ['valid', 'study', 'collecting']) {
+      expect(html).toContain(`${s}:`);            // in STAGE_SECTION
+    }
+    expect(html).toMatch(/for \(const stage of \['valid', 'study', 'collecting', 'unknown'\]\)/);
+    expect(html).toContain('stage-empty');
+    expect(html).toContain('Nothing here yet.');
+    // a full-width heading — the container is flex-wrap, so width does the work
+    expect(html).toMatch(/\.stage-head \{ width: 100%/);
+  });
+
+  test('each section says what its stage MEANS, not just its name', () => {
+    const html = require('fs').readFileSync(
+      require('path').join(__dirname, '../public/screeners.html'), 'utf8');
+    // "under study" is not self-explaining, and the whole point of it is that
+    // it is NOT a verdict.
+    expect(html).toMatch(/not enough to believe/);
+    expect(html).toMatch(/judged good enough to trade from/);
+    expect(html).toMatch(/no question to ask yet/);
   });
 
   test('an unknown stage sorts last, not first', () => {

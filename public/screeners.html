@@ -424,9 +424,33 @@
   its own model. Nothing is shared between them, so what one learns never leaks into another.
 </div>
 <style>
-  .stage-chip { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:9px;
-    border:1px solid currentColor; font-size:9.5px; font-weight:600; letter-spacing:.04em;
-    text-transform:uppercase; vertical-align:middle; white-space:nowrap; }
+  /* ── THE SECTIONS ──
+     Nine cards in one column read as nine equally trustworthy tools, whatever
+     badge is on them. A chip is a label; a SECTION is a place, and the reader
+     has to be able to see at a glance which part of the page they are in.
+     So: a rule across the page, the stage's own colour, and a sentence saying
+     what the stage means — "under study" is not self-explaining, and the whole
+     point of it is that it is NOT a verdict. */
+  /* width:100% — the container is a flex-wrap row, not a grid, so a full-width
+     child is what forces the section onto its own line. `grid-column` here
+     would have been silently ignored and the headings would have sat inline
+     between cards. */
+  .stage-head { width: 100%; margin: 26px 0 4px; padding: 0 0 8px;
+    border-bottom: 2px solid currentColor; display: flex; flex-wrap: wrap;
+    align-items: baseline; gap: 4px 10px; }
+  .stage-head:first-child { margin-top: 4px; }
+  .stage-head b { font-size: 15px; font-weight: 700; letter-spacing: .02em; }
+  .stage-head span { font-size: 11.5px; color: var(--text3); font-weight: 400;
+    letter-spacing: 0; }
+  .stage-head.s-valid      { color: #22c55e; }
+  .stage-head.s-study      { color: #f5a623; }
+  .stage-head.s-collecting { color: #7c8798; }
+  .stage-head.s-unknown    { color: #7c8798; }
+  /* A section with nothing in it still says so — an empty "Validated" is a
+     fact about the desk, not a rendering gap. */
+  .stage-empty { width: 100%; color: var(--text3); font-size: 12px;
+    margin: 2px 0 6px; }
+  .stage-note { color: var(--text3); }
 </style>
 <div class="version">v2.0 · multi-tool</div>
 
@@ -607,21 +631,22 @@ function screensBlock(t, summary) {
  * screener good. The count only separates "too early to look" from "old enough
  * to look"; see src/stages.js.
  */
-const STAGE_CHIP = {
-  valid:      ['validated',  'var(--accent)', 'A verdict somebody made — trusted enough to trade from.'],
-  study:      ['under study', 'var(--draft)', 'Enough frozen days to look at. Not enough to believe.'],
-  collecting: ['collecting',  'var(--text3)', 'Filling the archive. There is no question to ask yet.'],
-};
-function stageChip(t) {
-  const c = STAGE_CHIP[t.stage];
-  if (!c) return '';
-  const [label, colour, why] = c;
-  const days = t.days != null ? ` · ${t.days}d` : '';
-  return `<span class="stage-chip" style="color:${colour};border-color:${colour}"
-    title="${esc(why)}${t.source === 'override' ? ' (set by hand)' : ''}">${label}${days}</span>`;
+/*
+ * The chip is GONE from the card, because the section heading above it now says
+ * the same thing — and a label repeated on every card in a labelled section is
+ * noise that makes the section harder to see, not easier.
+ *
+ * What the section cannot say is kept: how many frozen days this particular
+ * tool has, and whether its stage was set by hand rather than counted.
+ */
+function stageNote(t) {
+  const bits = [];
+  if (t.days != null) bits.push(`${t.days}d`);
+  if (t.source === 'override') bits.push('set by hand');
+  return bits.length ? `<span class="stage-note">${bits.join(' · ')}</span>` : '';
 }
 
-function card(t, state, info, check, summary) {
+function card(t, state, info, check, summary, timeLabel) {
   const cls = (state === 'down' ? 'down' : '')
     + (state === 'up' && check && !check.now ? ' asleep' : '');
   const label = { up:'online', down:'offline', wait:'checking' }[state];
@@ -639,8 +664,9 @@ function card(t, state, info, check, summary) {
       <a class="tc-open" href="${baseFor(t)}/scanner">
         <div class="card-top">
           <div>
-            <div class="card-name">${t.name} ${stageChip(t)}</div>
-            <div class="card-port">${t.id} · PORT ${t.port}</div>
+            <div class="card-name">${t.name}</div>
+            <div class="card-port">${t.id} · PORT ${t.port}${
+              timeLabel ? ` · ${timeLabel}` : ''} ${stageNote(t)}</div>
           </div>
           <div class="status ${state}"><span class="dot"></span>${label}</div>
         </div>
@@ -690,25 +716,23 @@ function byWhenItMatters(states) {
       if (c.now) return 0;                   // open right now
       return c.from > now ? 1 : 2;           // still to come / already closed
     };
-    const ra = rank(ca), rb = rank(cb);
-    if (ra !== rb) return ra - rb;
     /*
-     * WITHIN a group, the STAGE decides — validated above under study above
-     * collecting.
+     * THE STAGE LEADS. The clock decides the order INSIDE it.
      *
-     * The clock answers "which of these could I act on right now" and stops
-     * there: four tools open at 09:30 and it has nothing further to say about
-     * them. But they are not interchangeable. One has been judged and two were
-     * rewritten this week, and a list that leaves that to the chip alone puts a
-     * tool with nine days of data above one with a year for no better reason
-     * than the order it sits in the config file.
+     * Written the other way round first — time first, stage as a tiebreak —
+     * which put a tool with nine days of data next to one with a year whenever
+     * they happened to open at the same minute, and left the stage to the chip
+     * alone. That is not a ranking by stage, it is a ranking by time with a
+     * label attached.
      *
-     * Under the clock rather than over it, deliberately: a validated tool that
-     * is asleep is still asleep, and promoting it above the ones that are open
-     * would answer a question nobody asked at 09:31.
+     * So the list is grouped by how much a tool has earned, and the clock
+     * answers the next question down: within the validated ones, which is open
+     * now; within those, which closes soonest.
      */
     const sa = STAGE_RANK[a.stage] ?? 9, sb = STAGE_RANK[b.stage] ?? 9;
     if (sa !== sb) return sa - sb;
+    const ra = rank(ca), rb = rank(cb);
+    if (ra !== rb) return ra - rb;
     if (ra === 0) return ca.to.localeCompare(cb.to);       // closing soonest first
     if (ra === 3) return 0;                                 // leave as configured
     return ca.from.localeCompare(cb.from);                  // opening soonest first
@@ -727,11 +751,27 @@ const STAGE_RANK = { valid: 0, study: 1, collecting: 2 };
  * it is also where "nothing is open" gets said in the list itself rather than
  * only in the bar above it.
  */
-const GROUP_LABEL = ['Open now', 'Later today', 'Done for today', 'No hours reported'];
+const TIME_LABEL = ['open now', 'later today', 'done for today', 'no hours reported'];
+
+/*
+ * The sections are the STAGES, and each says what it means.
+ *
+ * A heading rather than a chip alone: nine cards in one column read as nine
+ * equally trustworthy tools whatever badge is on them, and the reader has to
+ * infer the rule from the badges before the order helps rather than confuses.
+ * The sentence is there because "under study" is not self-explaining — the
+ * whole point is that it is NOT a verdict.
+ */
+const STAGE_SECTION = {
+  valid:      ['Validated',      'judged good enough to trade from'],
+  study:      ['Under study',    'enough frozen days to look at — not enough to believe'],
+  collecting: ['Collecting data', 'still filling the archive; no question to ask yet'],
+  unknown:    ['Unstaged',       'no stage recorded'],
+};
 
 function render(states) {
   const now = etClock();
-  const groupOf = (t) => {
+  const timeOf = (t) => {
     const c = states[t.id] && states[t.id].check;
     if (!c) return 3;
     if (c.now) return 0;
@@ -739,13 +779,30 @@ function render(states) {
   };
 
   const ordered = TOOLS.slice().sort(byWhenItMatters(states));
-  let last = -1;
   const html = [];
-  for (const t of ordered) {
-    const g = groupOf(t);
-    if (g !== last) { html.push(`<div class="group-head">${GROUP_LABEL[g]}</div>`); last = g; }
-    html.push(card(t, states[t.id].state, states[t.id].info, states[t.id].check,
-                   states[t.id].summary));
+  /*
+   * EVERY section is drawn, in order, whether or not it has anything in it.
+   *
+   * Building headings only when the stage changes means an empty stage simply
+   * vanishes — and "nothing is validated yet" is a fact about the desk, not a
+   * rendering gap. It is also the fact most worth seeing.
+   */
+  for (const stage of ['valid', 'study', 'collecting', 'unknown']) {
+    const mine = ordered.filter(t => (STAGE_SECTION[t.stage] ? t.stage : 'unknown') === stage);
+    if (!mine.length && stage === 'unknown') continue;   // no such thing normally
+    const [title, why] = STAGE_SECTION[stage];
+    html.push(`<div class="stage-head s-${stage}"><b>${title}</b>`
+      + `<span>${mine.length} · ${why}</span></div>`);
+    if (!mine.length) {
+      html.push(`<div class="stage-empty">Nothing here yet.</div>`);
+      continue;
+    }
+    // The clock has not gone away — it decides the order inside the section and
+    // is still said on the card, where it belongs to that one tool.
+    for (const t of mine) {
+      html.push(card(t, states[t.id].state, states[t.id].info, states[t.id].check,
+                     states[t.id].summary, TIME_LABEL[timeOf(t)]));
+    }
   }
   document.getElementById('cards').innerHTML = html.join('');
   renderNowBar(states);
