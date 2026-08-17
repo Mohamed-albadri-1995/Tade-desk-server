@@ -1540,14 +1540,36 @@ function btRenderCore(g,extra){
   }
 
   if(s.trades){
+    /* The two drawdowns are in different UNITS. The account's is a real
+       percentage of peak equity; without an account it is the worst dip of the
+       cumulative sum of percentage MOVES — points of a strategy score, not
+       money — so it is not called the same thing. */
     const dd=_ac?_ac.max_drawdown_pct:s.max_drawdown_pct;
+    const ddLabel=_ac?'worst drawdown':'worst dip (score)';
     html+=`<div class="bt-kpis">`
-      +tile('trades',s.trades)
-      +tile('won',(_ac&&_ac.win_rate_pct!=null?_ac.win_rate_pct:s.win_rate)+'%')
+      /*
+       * TWO WIN RATES, AND THEY ANSWER DIFFERENT QUESTIONS.
+       *
+       *   s.win_rate        of every CLOSED trade, how many moved in your
+       *                     favour. A property of the strategy.
+       *   account.win_rate  of every trade the account could SIZE, how many
+       *                     made money after commission. A property of the
+       *                     account, and always the smaller of the two.
+       *
+       * They can disagree completely: a +0.5% move on one share is a win by
+       * the first and a $1 loss by the second. This panel showed the account's
+       * percentage next to the strategy's trade COUNT, under the bare label
+       * "won" — so "14 trades · 57.1% won" could mean four of the seven that
+       * were sized. The set and the label have to agree, so the tile says
+       * which set it counted.
+       */
+      +(_ac&&_ac.win_rate_pct!=null
+        ? tile('trades sized',_ac.trades_sized)+tile('won after fees',_ac.win_rate_pct+'%')
+        : tile('trades',s.trades)+tile('won',s.win_rate+'%'))
       +tile('avg / trade',_ac&&_ac.avg_pnl_usd!=null?_usdS(_ac.avg_pnl_usd):s.avg_return_pct+'%',
             _ac&&_ac.avg_pnl_usd!=null?(_ac.avg_pnl_usd>=0?'var(--accent)':'var(--red)'):null)
       +tile('Sharpe',s.sharpe!=null?s.sharpe:'—')
-      +tile('worst drawdown',dd+'%','var(--draft)')
+      +tile(ddLabel,dd+'%','var(--draft)')
       +tile('open at end',s.open_trades||0)
       +`</div>`;
   } else {
@@ -1614,6 +1636,16 @@ function btRenderCore(g,extra){
       +`net $${s.ttp.net_pnl_usd} after $${s.ttp.fees_usd} fees · $${s.ttp.counted_pnl_usd} counts toward a target · `
       +`${s.ttp.wins_below_min} win(s) under $${s.ttp.min_profit_ps}/sh earn nothing`
       +(s.ttp._whole_run?` · whole run — filters not applied, this run scales out and per-leg fills are not stored per trade`:'')
+      +`</div>`;
+  }
+  if(_ac&&_ac.win_rate_pct!=null&&s.trades){
+    det+=`<div class="bt-det"><b>The two win rates.</b> `
+      +`<b>${s.win_rate}%</b> of the ${s.trades} closed trades moved in your favour — `
+      +`that is the strategy. <b>${_ac.win_rate_pct}%</b> of the ${_ac.trades_sized} the `
+      +`account could size made money after commission — that is the account, and it is `
+      +`always the smaller of the two.`
+      +(s.trades!==_ac.trades_sized
+        ? ` ${s.trades-_ac.trades_sized} trade(s) could not be sized and are in neither.`:'')
       +`</div>`;
   }
   if(s.trades){
