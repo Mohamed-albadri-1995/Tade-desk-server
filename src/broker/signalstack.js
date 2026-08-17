@@ -1146,7 +1146,31 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
   if (split.error) return { blocked: 'split', reason: split.error };
 
   const shape = (DIALECTS[cfg.dialect] || DIALECTS.ttp).body;
-  const orders = (plan && plan.legs && plan.legs.length > 1)
+  /*
+   * SPLIT WHENEVER THE SPLIT PRODUCED MORE THAN ONE ORDER.
+   *
+   * This asked `plan.legs.length > 1`, which is a guess about the shape rather
+   * than a reading of it, and it was wrong for the commonest shape of all: one
+   * target plus a runner. `OR + VWAP 09:35` takes half off at 2R and lets half
+   * ride the stop — one leg, one runner — so the condition was false and the
+   * WHOLE position went out as a single bracket with the 2R target on it. The
+   * runner was silently removed from the trade: a strategy tested as "half at
+   * 2R, half to the close" was placed as "all at 2R", which is a different
+   * strategy with a different expectancy.
+   *
+   * `splitLegs` already knew — it returns the runner as its own part. Reading
+   * its answer instead of re-deriving one from the leg count means every shape
+   * works the same way, including shapes nobody has built yet.
+   *
+   * The same reasoning covers a SINGLE order: when the strategy declared an
+   * exit plan, that plan is the authority for every order it produces, not
+   * just for the ones that happen to number more than one. A strategy that is
+   * 100% runner — a stop and no target at all — has one part, and reading the
+   * `target` argument instead of the part put a 2R target on a position whose
+   * whole design is that it does not have one.
+   */
+  const orders = (split.parts.length > 1
+                  || (plan && Array.isArray(plan.legs) && split.parts.length))
     ? split.parts.map(part => {
       const b = { ...body, quantity: part.quantity };
       if (part.target && cfg.bracket) b.take_profit_price = tick(part.target);
