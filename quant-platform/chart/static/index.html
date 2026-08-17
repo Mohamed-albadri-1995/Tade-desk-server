@@ -2,7 +2,10 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- viewport-fit=cover so `env(safe-area-inset-*)` reports real numbers. Without
+     it the insets are always 0 and the bottom of the page — which is where the
+     chart's time axis is drawn — sits underneath the phone's gesture bar. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>qp — live charting platform</title>
 <script src="/static/lightweight-charts.js"></script>
 <link rel="stylesheet" href="/static/desk.css">
@@ -44,8 +47,13 @@
      `dvh` is the DYNAMIC viewport height: what is visible right now, shrinking
      and growing as the URL bar does. 100vh stays first as the fallback for
      browsers without dvh (a JS fallback in boot() covers those). */
+  /* `dvh` tracks the URL bar. It does NOT track the gesture bar / home
+     indicator, which is drawn OVER the bottom of the viewport — and the bottom
+     of this viewport is the chart's time axis. Reserving the inset is the
+     second half of the same fix. */
   body { display:flex; flex-direction:column; height:100vh; height:100dvh;
-    overflow:hidden; padding:0; font-size:var(--f-sm); }
+    overflow:hidden; padding:0 0 env(safe-area-inset-bottom, 0px);
+    font-size:var(--f-sm); }
   /* ── THE TOP BAR ──
      What a charting screen needs within reach at all times: which symbol, what
      timeframe, and is it live. Everything else moved into the sheet, because a
@@ -228,7 +236,14 @@
      drawer does not move, while the chart shrinks and its axis stays visible.
      --drawerH is kept in sync by the resize grip. */
   body.drawer-open main { padding-bottom: var(--drawerH, 42vh); }
-  #drawer .dhead { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; font-size:12px; }
+  #drawer .dhead { display:flex; gap:8px; align-items:center; padding:8px 44px 8px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; font-size:12px; }
+  /* Pinned to the drawer, above everything in it, in the one place a close
+     control is always looked for. 34px is a real tap target on a phone. */
+  #drawerClose { position:absolute; top:6px; right:8px; z-index:3;
+    width:34px; height:34px; display:flex; align-items:center; justify-content:center;
+    background:#1c2431; color:var(--text2); border:1px solid var(--border);
+    border-radius:8px; font-size:15px; line-height:1; cursor:pointer; padding:0; }
+  #drawerClose:hover { color:var(--red); border-color:var(--red); }
   #drawer .dhead input, #drawer .dhead select { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:5px 7px; border-radius:5px; font-size:12px; }
   #drawer .dbody { flex:1; display:flex; gap:12px; padding:10px 12px; overflow:auto; min-height:0; }
   .rulecol { flex:1; min-width:0; border:1px solid var(--border); border-radius:7px; padding:8px; background:#141a24; }
@@ -349,8 +364,14 @@
         <button id="stratEval" style="background:var(--blue);color:#fff">▶ Evaluate</button>
         <button id="stratClear" style="background:#1c2431;color:var(--text2);border:1px solid var(--border)">Clear signals</button>
         <span id="stratStat"></span>
-        <span id="drawerClose" style="margin-left:auto;cursor:pointer;color:var(--text3);font-size:16px">✕</span>
       </div>
+      <!-- The close control is PINNED, not part of the wrapping header.
+           It used to be the last item in a fifteen-control flex-wrap row, so on
+           a phone it wrapped somewhere into the middle of a five-line block and
+           the honest report was "there is no way to close this". A control that
+           dismisses a panel must be in the same place every time. -->
+      <button id="drawerClose" type="button" aria-label="close the strategy builder"
+              title="Close (Esc)">✕</button>
       <div id="tgtRow" style="padding:4px 8px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px">
         <span style="color:var(--text2)" title="Scale-out: take a FRACTION of the position off at each target; the runner (rest) rides to your SL / exit rule. R× uses the entry→stop distance as 1R (needs an SL).">Scale-out</span>
         <span id="tgtList" style="display:flex;flex-wrap:wrap;gap:6px"></span>
@@ -616,12 +637,21 @@ function banner(m){ const b=document.getElementById('banner'); if(!m){b.style.di
 function initChart(){
   const el=document.getElementById('chart');
   CHART=LightweightCharts.createChart(el,{
-    layout:{background:{color:'#0e1116'},textColor:'#94a3b8',attributionLogo:false},
+    /* The AXES ARE THE CHART'S LABELS, and they were styled as decoration:
+       #94a3b8 at the default 11px, separated from the plot by a #1e2632 line
+       that is two shades off the background. On a phone in daylight the time
+       axis reads as an empty strip. Brighter text, 12px, and a border that
+       actually draws a line — the numbers on the outside of a chart have to be
+       as readable as the ones inside it. */
+    layout:{background:{color:'#0e1116'},textColor:'#c2ccdb',fontSize:12,
+      attributionLogo:false},
     grid:{vertLines:{color:'#141c27'},horzLines:{color:'#141c27'}},
-    timeScale:{timeVisible:true,secondsVisible:false,borderColor:'#1e2632',
+    timeScale:{timeVisible:true,secondsVisible:false,visible:true,
+      borderVisible:true,borderColor:'#3a4657',
       tickMarkFormatter:(t,tt)=> tt<3?_ET_MD.format(new Date(t*1000)):_ET_HM.format(new Date(t*1000))},
     localization:{timeFormatter:(t)=>_ET_FULL.format(new Date(t*1000))+' ET'},
-    rightPriceScale:{borderColor:'#1e2632',scaleMargins:{top:0.08,bottom:0.08}},
+    rightPriceScale:{borderColor:'#3a4657',borderVisible:true,
+      scaleMargins:{top:0.08,bottom:0.08}},
     crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
     watermark:{visible:true,color:'rgba(148,163,184,0.10)',text:'',fontSize:44,horzAlign:'center',vertAlign:'center'},
   });
@@ -1708,6 +1738,28 @@ window.addEventListener('load',async()=>{
   _resizable('drawerGrip', ()=>document.getElementById('drawer').getBoundingClientRect().height, (st,dx,dy)=>{ const h=Math.max(110,Math.min(window.innerHeight*0.85, st-dy)); document.getElementById('drawer').style.height=h+'px'; document.documentElement.style.setProperty('--drawerH', h+'px'); _resizeChart(); });
   document.getElementById('stratBtn').onclick=toggleDrawer;
   document.getElementById('drawerClose').onclick=toggleDrawer;
+  /*
+   * ONE key that closes whatever is open, outermost first.
+   *
+   * Every panel here opens from a different button and closes a different way —
+   * the drawer by its own ✕, the print box by pressing its toolbar button
+   * again, the mobile sheet by its backdrop. That is three things to remember
+   * and, on a phone, at least one of them was unreachable once open. Escape is
+   * the one answer that is always right on a keyboard, and each panel also
+   * keeps a visible ✕ for the phone.
+   *
+   * Outermost first, so Escape peels one layer at a time instead of dismissing
+   * everything at once.
+   */
+  window.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const pr = document.getElementById('prBox');
+    if (pr) { pr.remove(); return; }
+    if (document.body.classList.contains('more-open')) {
+      document.body.classList.remove('more-open'); return;
+    }
+    if (document.getElementById('drawer').classList.contains('open')) toggleDrawer();
+  });
   document.getElementById('stratEval').onclick=evalStrategy;
   document.getElementById('tgtAdd').onclick=()=>{ STRAT.risk=STRAT.risk||{}; (STRAT.risk.targets=STRAT.risk.targets||[]).push({fraction:0.5,r_multiple:1}); renderTargets(); };
   document.getElementById('stratSave').onclick=saveStrategy;
@@ -1789,7 +1841,16 @@ document.getElementById('printR1Btn').onclick = async () => {
     + 'color:#e2e8f0;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.5)';
   const ovNames = (OVERLAYS||[]).map(o=>o.key).join(', ') || 'none — add some with + Add';
   box.innerHTML = `
-    <div style="font-weight:600;margin-bottom:8px">🖨 Print register day</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="font-weight:600">🖨 Print register day</span>
+      <!-- This panel used to be dismissed ONLY by pressing the toolbar button
+           again — which on a phone lives inside the "more" sheet that closed
+           when the button was tapped, so there was no way back to it. -->
+      <button id="prClose" type="button" aria-label="close" title="Close (Esc)"
+        style="margin-left:auto;width:30px;height:30px;background:#1c2431;color:#94a3b8;
+               border:1px solid #334155;border-radius:7px;font-size:14px;line-height:1;
+               cursor:pointer;padding:0">✕</button>
+    </div>
     <label style="display:block;margin-bottom:6px">Register
       <select id="prReg" style="width:100%"><option value="R1">R1</option><option value="Shortlist">Shortlist</option></select></label>
     <label style="display:block;margin-bottom:6px">From
@@ -1874,6 +1935,7 @@ document.getElementById('printR1Btn').onclick = async () => {
       overlays: JSON.stringify(OVERLAYS || []),
     });
   };
+  document.getElementById('prClose').onclick = () => box.remove();
   document.getElementById('prGo').onclick = () => {
     const qs = prQuery();
     if (qs) window.open('api/r1/print?' + qs.toString(), '_blank');
