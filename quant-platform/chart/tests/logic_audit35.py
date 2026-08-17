@@ -219,6 +219,71 @@ store._conn = None
 os.environ.pop('QP_STRATEGY_BACKUP', None)
 
 
+# ── PART C2 · a strategy of MINE, bundled into the repository ───────────────
+#
+# The database and the JSON copies both live on one box. A strategy that exists
+# only there is one disk away from gone. chart/seeds/*.json is the only copy
+# that is in git — on GitHub, on every clone, and restored automatically on a
+# box that does not have it. tools/seed_from_db.py is how a strategy joins it,
+# and `_keep_user_edits` is what stops the bundle from then overwriting the
+# edits that follow.
+print("PART C2 — a strategy of mine, bundled")
+
+fresh('c2.db', _root / 'c2-backup')
+seeds2 = _root / 'seeds-c2'
+seeds2.mkdir(exist_ok=True)
+
+built = store.save_strategy({'name': 'Test', 'side': 'long', 'tools': [],
+                             'entry': {'logic': 'AND', 'rules': ['v1']},
+                             'risk': {'window_start': 930, 'window_end': 1130}},
+                            user_edit=True)
+
+# What seed_from_db writes: the authored document, plus the restore-only flag.
+seed = {k: v for k, v in built.items()
+        if k not in ('id', 'created_at', 'updated_at', 'exit_protocol',
+                     '_seed', '_user_edited')}
+seed['_keep_user_edits'] = True
+(seeds2 / 'test.json').write_text(json.dumps(seed))
+ok("the exported seed carries the strategy and the restore-only flag",
+   seed['name'] == 'Test' and seed['entry']['rules'] == ['v1']
+   and seed['_keep_user_edits'] is True, seed)
+ok("and none of the fields a READ adds",
+   not any(k in seed for k in ('id', 'exit_protocol', 'updated_at')), sorted(seed))
+
+# The disk dies. New box, empty database, same repository.
+fresh('c2-newbox.db', _root / 'c2-newbox-backup')
+ok("the new box starts with nothing", store.list_strategies() == [])
+store.seed_strategies(seeds2)
+back = store.list_strategies()
+ok("THE STRATEGY COMES BACK FROM THE REPOSITORY",
+   [b['name'] for b in back] == ['Test'] and back[0]['entry']['rules'] == ['v1'],
+   back)
+
+# …and a later edit is not undone by the next deploy.
+store.save_strategy({'id': back[0]['id'], 'name': 'Test', 'side': 'long',
+                     'entry': {'logic': 'AND', 'rules': ['v2 — edited today']}},
+                    user_edit=True)
+store.seed_strategies(seeds2)
+ok("an edit made afterwards survives the sync",
+   store.list_strategies()[0]['entry']['rules'] == ['v2 — edited today'],
+   store.list_strategies()[0])
+
+# A seed naming a tool this box does not have must cost only itself.
+fresh('c2-badtool.db', _root / 'c2-bad-backup')
+seeds3 = _root / 'seeds-c2-bad'
+seeds3.mkdir(exist_ok=True)
+(seeds3 / 'a-bad.json').write_text(json.dumps(
+    {'name': 'Bad tool', 'side': 'long', 'tools': ['T999'],
+     'entry': {'logic': 'AND', 'rules': []}, '_keep_user_edits': True}))
+(seeds3 / 'b-good.json').write_text(json.dumps(
+    {'name': 'Good', 'side': 'long', 'entry': {'logic': 'AND', 'rules': []},
+     '_keep_user_edits': True}))
+store.seed_strategies(seeds3)
+ok("a seed naming an unknown tool is skipped, not fatal…",
+   [s['name'] for s in store.list_strategies()] == ['Good'],
+   [s['name'] for s in store.list_strategies()])
+
+
 # ── PART D · every route is bound to the handler it names ───────────────────
 #
 # `@app.get('/api/backtest/{bid}/report')` had drifted onto `_warn_html`, a

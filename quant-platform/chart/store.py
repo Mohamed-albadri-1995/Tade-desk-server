@@ -434,7 +434,19 @@ def seed_strategies(seeds_dir: Path | None = None) -> int:
             payload['_seed'] = True                # mark as a bundled seed
             cur = by_name.get(name)
             if cur is None:
-                save_strategy(payload); changed += 1
+                # ONE BAD SEED MUST NOT COST THE REST.
+                #
+                # save_strategy raises on an unknown tool id — a seed carrying
+                # `tools: ["T5"]` restored onto a box that has no T5 does — and
+                # this loop had no guard, so the exception left the whole sync
+                # half-done: every seed after it in alphabetical order silently
+                # never arrived. Skipping one and saying so is recoverable;
+                # losing an unknown number of them is not.
+                try:
+                    save_strategy(payload); changed += 1
+                except Exception as e:
+                    print(f'[store] seed {name!r} could not be restored: {e}',
+                          flush=True)
                 continue
             # `_keep_user_edits`: RESTORE-ONLY seed. It is bundled so a fresh
             # box (or a wiped platform.db) gets it back, but once it exists the
