@@ -103,11 +103,31 @@ describe('T6 — Unexplained Move', () => {
       .toEqual(['Overextended (archived)', 'Unexplained Move', 'Unexplained Move (mirror)']);
   });
 
-  test('THE 15% MOVE IS THE TRIGGER, not something to avoid', () => {
-    expect(filterOn(base, 'change|120'))
-      .toEqual([{ left: 'change|120', operation: 'greater', right: 15 }]);
-    expect(filterOn(mirror, 'change|120'))
-      .toEqual([{ left: 'change|120', operation: 'less', right: -15 }]);
+  /*
+   * THE MOVE IS THE TRIGGER, not something to avoid — but what is HERE is only
+   * a net. The rule is a rate: 15% over a rolling two hours, measured in
+   * preR0.js from intraday bars. `change|120` looked like it said that and did
+   * not: it is the change of the current 120-minute CANDLE, so its span swings
+   * from five minutes to two hours with the clock, and a move straddling a
+   * candle boundary is split in half and caught by neither. See
+   * tests/preR0.test.js.
+   */
+  test('THE MOVE IS THE TRIGGER, not something to avoid', () => {
+    expect(filterOn(base, 'change'))
+      .toEqual([{ left: 'change', operation: 'greater', right: 10 }]);
+    expect(filterOn(mirror, 'change'))
+      .toEqual([{ left: 'change', operation: 'less', right: -10 }]);
+  });
+
+  test('...and the net is LOOSER than the rule, so the rule can still bind', () => {
+    const gate = require('../src/sideA/preR0');
+    expect(filterOn(base, 'change')[0].right).toBeLessThan(gate.MOVE_PCT);
+  });
+
+  test('no candle-relative column — its span swings with the clock', () => {
+    for (const def of [base, mirror]) {
+      expect(def.filters.map(f => f.left)).not.toContain('change|120');
+    }
   });
 
   /*
@@ -135,8 +155,8 @@ describe('T6 — Unexplained Move', () => {
   });
 
   test('the screener asks only for the move and the price floor', () => {
-    expect(base.filters.map(f => f.left)).toEqual(['change|120', 'close']);
-    expect(mirror.filters.map(f => f.left)).toEqual(['change|120', 'close']);
+    expect(base.filters.map(f => f.left)).toEqual(['change', 'close']);
+    expect(mirror.filters.map(f => f.left)).toEqual(['change', 'close']);
   });
 
   test('and each side of the trend rule lives on its own gate', () => {
@@ -195,8 +215,8 @@ describe('T6 — Unexplained Move', () => {
   /* The biggest unexplained move should be at the top of each list, which for
      the down side means ascending. */
   test('each side sorts its own strongest candidates first', () => {
-    expect(base.sort).toEqual({ sortBy: 'change|120', sortOrder: 'desc' });
-    expect(mirror.sort).toEqual({ sortBy: 'change|120', sortOrder: 'asc' });
+    expect(base.sort).toEqual({ sortBy: 'change', sortOrder: 'desc' });
+    expect(mirror.sort).toEqual({ sortBy: 'change', sortOrder: 'asc' });
   });
 
   /* `change|120` does not exist until there have been two hours of session. */

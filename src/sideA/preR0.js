@@ -61,6 +61,59 @@ const { toETDate } = require('../utils/time');
 const CLEARLY_TRENDING_PCT = 20;
 const TRADING_DAYS_6M = 126;
 
+/*
+ * THE MOVE IS A RATE, AND `change|120` IS NOT ONE.
+ *
+ * TradingView's `change|120` is the change of the CURRENT 120-minute CANDLE,
+ * and those candles are fixed: 09:30-11:30, 11:30-13:30, 13:30-15:30. So at
+ * 11:35 it covers five minutes, at 13:29 it covers a hundred and nineteen, and
+ * at 13:35 it is back to five. The span swings with the clock, which means the
+ * number is not a rate at all — the same stock passes or fails a 15% test
+ * depending on when the scan happened to run.
+ *
+ * Worse, a move that STRADDLES a boundary is split. A stock that goes +30%
+ * between 11:00 and 12:00 shows about +15% in the 09:30 candle and about +15%
+ * in the 11:30 one, and trips a 15% threshold on neither — the biggest, fastest
+ * moves are the ones most likely to be missed.
+ *
+ * What the setup needs is acceleration: how far it went in the LAST two hours,
+ * a window that ends now and slides. That is not expressible in the scanner, so
+ * it is computed here from intraday bars, exactly like the trend and for the
+ * same reason. The screener is left as a wide net; this is the rule.
+ */
+const MOVE_WINDOW_MIN = 120;
+const MOVE_PCT = 15;
+
+/**
+ * How far the price has travelled over the last `minutes`, as a percent — from
+ * a rolling window that ENDS NOW, not from a fixed candle.
+ *
+ * Null when the window is not covered. A stock with forty minutes of bars has
+ * not made a two-hour move; measuring whatever is there would answer a
+ * different question under the same name, and it is the SHORT windows that
+ * produce the wildest percentages.
+ */
+function moveRatePct(bars, minutes = MOVE_WINDOW_MIN) {
+  const rows = (bars || []).filter(b => Number.isFinite(Number(b.c)));
+  if (rows.length < 2) return null;
+  const last = rows[rows.length - 1];
+  const endMs = new Date(last.t).getTime();
+  const startMs = endMs - minutes * 60 * 1000;
+  // The first bar at or after the window opens. If the earliest bar we hold is
+  // already inside the window, the window is not covered.
+  const first = rows.find(b => new Date(b.t).getTime() >= startMs);
+  if (!first || new Date(rows[0].t).getTime() > startMs) return null;
+  const from = Number(first.c);
+  if (!(from > 0)) return null;
+  return ((Number(last.c) - from) / from) * 100;
+}
+
+/** Does the measured rate satisfy an `up` / `down` rule of `pct`? */
+function movePasses(direction, pct, threshold = MOVE_PCT) {
+  if (pct === null || !direction) return null;
+  return direction === 'up' ? pct >= threshold : pct <= -threshold;
+}
+
 /** What a gated screener requires of its candidates. */
 const MODES = {
   // Keep only the names with NO catalyst — the unexplained ones.
@@ -82,10 +135,10 @@ const MODES = {
  */
 const GATES = {
   // Spiked UP: worth fading only if it was not already climbing.
-  'unexplained-move': { news: 'none', trend: 'not-up' },
+  'unexplained-move': { move: 'up', news: 'none', trend: 'not-up' },
   // Dropped: worth buying only if it was not already falling — a stock six
   // months into a decline that falls again has not done anything unexplained.
-  'unexplained-move-mirror': { news: 'none', trend: 'not-down' },
+  'unexplained-move-mirror': { move: 'down', news: 'none', trend: 'not-down' },
 };
 
 function gateFor(key) {
@@ -129,88 +182,122 @@ function trendPasses(rule, pct) {
 async function apply(candidates, screeners, {
   fetch = fetchNewsForTicker,
   closes = null,
+  intraday = null,
   date = null,
 } = {}) {
   const keyByName = new Map((screeners || []).map(s => [s.name, s.key]));
   const day = date || toETDate(Date.now());
   const out = {};
-  const report = { checked: 0, dropped: 0, failed: 0, noHistory: 0, byScreener: {} };
+  const report = { checked: 0, dropped: 0, failed: 0, noHistory: 0, tooSlow: 0,
+                   byScreener: {} };
 
-  const getCloses = closes || (async (tickers) => {
-    const { fetchClosesBefore } = require('../alpaca/client');
-    return fetchClosesBefore(tickers, day);
-  });
+  const getCloses = closes || (async (tickers) =>
+    require('../alpaca/client').fetchClosesBefore(tickers, day));
+  const getIntraday = intraday || (async (tickers) =>
+    require('../alpaca/client').fetchIntradayBars(tickers, day));
 
   for (const [name, rows] of Object.entries(candidates || {})) {
     const gate = gateFor(keyByName.get(name));
     if (!gate) { out[name] = rows; continue; }
 
-    // One lookup per ticker, not per row: the same name can appear twice, and
-    // a base and its mirror never overlap but a third gated screener could.
-    const wanted = [...new Set(rows.map(r => r.ticker).filter(Boolean))];
+    const why = {};
+    const drop = (ticker, reason, counter) => {
+      why[ticker] = reason; report.dropped++;
+      if (counter) report[counter]++;
+      return false;
+    };
 
-    const news = new Map();
-    await Promise.all(wanted.map(async (ticker) => {
-      const row = rows.find(r => r.ticker === ticker);
-      try {
-        const { catalyst } = await fetch(ticker, row && row.stock && row.stock.tvSymbol);
-        news.set(ticker, { ok: true, catalyst: catalyst || null });
-      } catch (err) {
-        news.set(ticker, { ok: false, catalyst: null, error: err.message });
-      }
-    }));
+    // One lookup per ticker, not per row.
+    let live = [...new Set(rows.map(r => r.ticker).filter(Boolean))];
+    report.checked += rows.length;
 
-    // Six months of closes ENDING YESTERDAY — one request for every ticker.
-    let bars = {};
-    if (gate.trend) {
+    /*
+     * THE MOVE, FIRST — it is the trigger, it drops the most, and every check
+     * after it costs a request per surviving name. The screener's own filter is
+     * a wide net (see the note on the screener); this is the rule.
+     */
+    const rates = new Map();
+    if (gate.move) {
+      let bars = {};
       try {
-        bars = await getCloses(wanted) || {};
+        bars = await getIntraday(live) || {};
       } catch (err) {
-        console.warn(`[pre-r0] could not read history: ${err.message}`);
-        bars = {};
+        console.warn(`[pre-r0] could not read today's bars: ${err.message}`);
       }
+      const passed = [];
+      for (const t of live) {
+        const pct = moveRatePct(bars[t]);
+        const ok = movePasses(gate.move, pct);
+        if (ok === null) { drop(t, `no ${MOVE_WINDOW_MIN}-minute window to measure`, 'tooSlow'); continue; }
+        if (!ok) { drop(t, `only ${pct.toFixed(1)}% over ${MOVE_WINDOW_MIN} minutes`, 'tooSlow'); continue; }
+        rates.set(t, pct);
+        passed.push(t);
+      }
+      live = passed;
     }
 
-    const why = {};
-    const kept = rows.filter((r) => {
-      report.checked++;
-      const n = news.get(r.ticker);
-      /*
-       * A FAILED LOOKUP DROPS THE STOCK, and this is the one place in the
-       * pipeline where that is the right way round. Everywhere else a missing
-       * value means "cannot tell" and the row survives, because losing a
-       * candidate to a flaky API is worse than keeping a doubtful one. Here the
-       * premise is "nothing explains this move" — and "we could not find out"
-       * is not that.
-       */
-      if (!n || !n.ok) { report.failed++; report.dropped++; why[r.ticker] = 'news lookup failed'; return false; }
-      const hasNews = !!n.catalyst;
-      const newsPass = gate.news === 'none' ? !hasNews : hasNews;
-      if (!newsPass) { report.dropped++; why[r.ticker] = hasNews ? 'has a catalyst' : 'no catalyst'; return false; }
+    /*
+     * THE NEWS. A FAILED LOOKUP DROPS THE STOCK, and this is the one place in
+     * the pipeline where that is the right way round: everywhere else a missing
+     * value means "cannot tell" and the row survives, but here the premise is
+     * "nothing explains this move" and "we could not find out" is not that.
+     */
+    {
+      const passed = [];
+      await Promise.all(live.map(async (t) => {
+        const r = rows.find(x => x.ticker === t);
+        try {
+          const { catalyst } = await fetch(t, r && r.stock && r.stock.tvSymbol);
+          const has = !!catalyst;
+          if ((gate.news === 'none') === has) {
+            drop(t, has ? 'has a catalyst' : 'no catalyst');
+          } else {
+            passed.push(t);
+          }
+        } catch (err) {
+          report.failed++;
+          drop(t, 'news lookup failed');
+        }
+      }));
+      live = passed;
+    }
 
-      if (!gate.trend) return true;
-      const pct = trendPct(bars[r.ticker]);
-      const pass = trendPasses(gate.trend, pct);
-      /*
-       * NO HISTORY IS ALSO A DROP, for the same reason. A stock with two months
-       * of closes has no six-month trend, so the safety layer cannot be applied
-       * — and a candidate that skipped the safety layer is not the setup, it is
-       * the setup minus the part that keeps you out of a falling knife.
-       */
-      if (pass === null) {
-        report.noHistory++; report.dropped++;
-        why[r.ticker] = 'not enough history for a six-month trend';
-        return false;
+    // THE TREND, read from closes that stop before the move.
+    const trends = new Map();
+    if (gate.trend && live.length) {
+      let bars = {};
+      try {
+        bars = await getCloses(live) || {};
+      } catch (err) {
+        console.warn(`[pre-r0] could not read history: ${err.message}`);
       }
-      if (!pass) {
-        report.dropped++;
-        why[r.ticker] = `already trending ${pct > 0 ? 'up' : 'down'} `
-          + `${Math.abs(pct).toFixed(0)}% over six months`;
-        return false;
+      const passed = [];
+      for (const t of live) {
+        const pct = trendPct(bars[t]);
+        const ok = trendPasses(gate.trend, pct);
+        // NO HISTORY IS ALSO A DROP: a candidate that skipped the safety layer
+        // is not the setup, it is the setup minus the part that keeps you out
+        // of a falling knife.
+        if (ok === null) { drop(t, 'not enough history for a six-month trend', 'noHistory'); continue; }
+        if (!ok) {
+          drop(t, `already trending ${pct > 0 ? 'up' : 'down'} `
+                  + `${Math.abs(pct).toFixed(0)}% over six months`);
+          continue;
+        }
+        trends.set(t, pct);
+        passed.push(t);
       }
-      // Carried onto the card: the trend is the reason this one qualified, and
-      // it is not recoverable from anything else stored.
-      r.stock = { ...(r.stock || {}), trend6mPct: Math.round(pct * 10) / 10 };
+      live = passed;
+    }
+
+    const survivors = new Set(live);
+    const kept = rows.filter((r) => {
+      if (!survivors.has(r.ticker)) return false;
+      // Carried onto the card: these are WHY it qualified, and neither is
+      // recoverable from anything else stored.
+      r.stock = { ...(r.stock || {}) };
+      if (rates.has(r.ticker)) r.stock.move2hPct = Math.round(rates.get(r.ticker) * 10) / 10;
+      if (trends.has(r.ticker)) r.stock.trend6mPct = Math.round(trends.get(r.ticker) * 10) / 10;
       return true;
     });
 
@@ -222,11 +309,13 @@ async function apply(candidates, screeners, {
     const detail = Object.entries(report.byScreener)
       .map(([n, r]) => `${n}: ${r.out}/${r.in}`).join('; ');
     console.log(`[pre-r0] ${detail}`
+      + (report.tooSlow ? ` — ${report.tooSlow} not fast enough` : '')
       + (report.failed ? ` — ${report.failed} on a failed news lookup` : '')
       + (report.noHistory ? ` — ${report.noHistory} without six months of history` : ''));
   }
   return { candidates: out, report };
 }
 
-module.exports = { apply, gateFor, GATES, MODES, trendPct, trendPasses,
-                   CLEARLY_TRENDING_PCT, TRADING_DAYS_6M };
+module.exports = { apply, gateFor, GATES, MODES,
+                   trendPct, trendPasses, CLEARLY_TRENDING_PCT, TRADING_DAYS_6M,
+                   moveRatePct, movePasses, MOVE_WINDOW_MIN, MOVE_PCT };

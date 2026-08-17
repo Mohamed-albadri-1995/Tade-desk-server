@@ -285,16 +285,37 @@ const T6_ARCHIVED = {
  * tradability floor is exempted for the same reason (see tradable.js); the
  * price floor stays, because a spread on a $0.30 stock eats the whole move.
  *
- * `change|120` is the two-hour change and does not exist before there have
- * been two hours, so this cannot run before 11:30 and mean anything.
+ * THE FILTER HERE IS A WIDE NET, NOT THE RULE — and the difference matters.
+ *
+ * The setup is about ACCELERATION: 15% in two hours, not 15% at some point.
+ * `change|120` looks like it says that and does not. It is the change of the
+ * CURRENT 120-minute CANDLE, and those candles are fixed — 09:30-11:30,
+ * 11:30-13:30, 13:30-15:30 — so at 11:35 it covers five minutes and at 13:29 it
+ * covers a hundred and nineteen. The span swings with the clock, so the same
+ * stock passes or fails depending on when the scan ran. And a move that
+ * STRADDLES a boundary is split: +30% between 11:00 and 12:00 shows as about
+ * +15% in each of two candles and trips a 15% test on neither, which loses
+ * exactly the fastest moves.
+ *
+ * There is no sliding window in the scanner API. So this asks only for a stock
+ * that has moved a lot TODAY — a cheap, always-meaningful net — and the real
+ * measurement, a rolling two hours ending now, is taken in preR0.js from
+ * intraday bars, alongside the news and the trend.
+ *
+ * The net has a known blind spot, stated rather than hidden: a stock that fell
+ * 10% in the morning and rallied 15% since lunch is flat on the day and does
+ * not pass it, though it is the setup. Widening the net costs a bar request per
+ * extra name; 10% is the first cut, not the last word, and it is a form field.
+ *
+ * From 11:30, so that two hours of session exist to measure.
  */
 const T6_BASE = {
   key: 'unexplained-move', name: 'Unexplained Move',
   checkFrom: '11:30', checkTo: '16:00',
   runFrom: '11:30', runTo: '16:00',
-  sort: { sortBy: 'change|120', sortOrder: 'desc' },
+  sort: { sortBy: 'change', sortOrder: 'desc' },
   filters: [
-    { left: 'change|120', operation: 'greater', right: 15 },
+    { left: 'change', operation: 'greater', right: 10 },
     { left: 'close', operation: 'egreater', right: 1 },
   ],
 };
