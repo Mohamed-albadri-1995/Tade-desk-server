@@ -287,11 +287,14 @@ _html = (_pl.Path(S.__file__).resolve().parent / 'static' / 'index.html').read_t
 # order and shares one capital pool, so removing trades changes the equity
 # path and the buying power of every later trade — the account block is a
 # whole-run quantity and was being printed under a filter as if it followed.
+# The wording moved when the panel was rebuilt (money -> figures -> folded
+# detail); the caveat did not. Matched on the two things that must be said:
+# that the money block is the WHOLE run, and why.
 ok("the account line is labelled 'whole run' when a filter is active",
    "BT_FILTERS.length?" in _html
-   and "⚠ <b>whole run</b> — filters not applied here" in _html)
+   and 'the money block is the WHOLE run' in _html)
 ok("...and explains WHY (compounding + shared balance)",
-   'sizing compounds and shares one balance across every trade' in _html)
+   'sizing compounds and shares one balance' in _html)
 # (2) the client TTP mirror is exact for single-exit runs but prices a trade
 # as one fill; a scale-out run banks partials at leg prices and pays a fee per
 # leg, and `legs` are not persisted per trade.

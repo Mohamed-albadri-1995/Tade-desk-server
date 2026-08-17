@@ -292,7 +292,7 @@ ok("...but still reports which tool it was",
    f"{c1.get('by_source')}")
 # and the UI/report actually surface it
 _ui = (pathlib.Path(sc.__file__).resolve().parent / 'static' / 'index.html').read_text()
-ok("the results panel shows the per-tool breakdown", 'by scanning tool:' in _ui)
+ok("the results panel shows the per-tool breakdown", 'By scanning tool.' in _ui)
 ok("the printed report shows it too",
    'universe by scanning tool' in
    (pathlib.Path(sc.__file__).resolve().parent / 'server.py').read_text())

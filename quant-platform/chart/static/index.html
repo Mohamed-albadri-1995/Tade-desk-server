@@ -239,6 +239,31 @@
   #drawer .dhead { display:flex; gap:8px; align-items:center; padding:8px 44px 8px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; font-size:12px; }
   /* Pinned to the drawer, above everything in it, in the one place a close
      control is always looked for. 34px is a real tap target on a phone. */
+  /* ── the backtest result: money, then figures, then everything else ──
+     Three zones in the order the questions are asked. The prose that used to
+     open this panel is behind `details.why` and in the full report. */
+  .bt-money { border:1px solid var(--border); border-left:3px solid var(--blue);
+    border-radius:6px; padding:8px 10px; margin:0 0 8px; background:#141a24; }
+  .bt-money .v { font-size:26px; font-weight:700; line-height:1.15;
+    font-variant-numeric:tabular-nums; }
+  .bt-money .v span { font-size:14px; font-weight:600; margin-left:7px; }
+  .bt-money .s { font-size:11px; color:var(--text2); margin-top:3px; }
+  /* auto-fit, not a fixed three: the side panel is draggable from 180px up, and
+     a hard 3-column grid truncated "+$262.50" to "+$262…" — a money figure with
+     its last digits cut off is worse than one fewer column. */
+  .bt-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(92px,1fr));
+    gap:1px; background:var(--border); border:1px solid var(--border);
+    border-radius:6px; overflow:hidden; }
+  .bt-kpi { background:#141a24; padding:7px 8px; min-width:0; }
+  .bt-kpi b { display:block; font-size:15px; font-weight:700; line-height:1.2;
+    font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; }
+  .bt-kpi span { display:block; font-size:9.5px; letter-spacing:.05em;
+    text-transform:uppercase; color:var(--text3); margin-top:2px; }
+  .bt-flags { margin-top:7px; font-size:11px; line-height:1.5; color:var(--draft); }
+  .bt-flags div { margin-top:2px; }
+  .bt-more { margin-top:8px; }
+  .bt-det { font-size:11px; color:var(--text2); line-height:1.6; margin-top:6px; }
+  .bt-det b { color:var(--text); }
   #drawerClose { position:absolute; top:6px; right:8px; z-index:3;
     width:34px; height:34px; display:flex; align-items:center; justify-content:center;
     background:#1c2431; color:var(--text2); border:1px solid var(--border);
@@ -575,22 +600,29 @@
       </div>
 
       <div id="btSummary" style="margin-top:var(--s2)"></div>
-      <div id="btFilters" style="display:none;margin-top:var(--s3);border-top:1px dashed var(--border);padding-top:var(--s3)">
-        <h4 style="margin:0 0 var(--s2);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2)">Filter the trades</h4>
-        <div id="btFRows"></div>
-        <div style="display:flex;gap:4px;margin-top:4px">
-          <select id="btFField" style="flex:2;min-width:0"></select>
-          <select id="btFOp" style="flex:1;min-width:0"><option>=</option><option>≠</option><option>&gt;</option><option>&lt;</option><option>in</option><option>has</option></select>
-          <input id="btFVal" placeholder="value(s)" style="flex:2;min-width:0">
-          <button id="btFAdd" class="dk-btn">+</button>
-        </div>
-        <div class="muted" style="font-size:10px;margin-top:5px">in = comma list (regime in STRONG_UP,UP) · has = contains · times are ET hhmm (935) · dur_min · dow = Mon…Fri</div>
-        <div style="display:flex;gap:6px;margin-top:var(--s2)">
+      <!-- THE TRADES COME SECOND, immediately under the numbers they add up
+           to. Tap one to load that symbol and day on the chart with the run's
+           own timeframe, feed, fill model and strategy. The filter controls
+           used to sit in this gap: a form nobody needs in the first minute,
+           between the result and the evidence for it. They are folded now. -->
+      <div id="btTrades" style="max-height:38vh;overflow:auto;margin-top:var(--s2)"></div>
+      <div id="btFilters" style="display:none;margin-top:var(--s2)">
+        <div style="display:flex;gap:6px">
           <button id="btCsv" class="dk-btn" style="flex:1">CSV (filtered)</button>
-          <button id="btReport" class="dk-btn" style="flex:1">Report</button>
+          <button id="btReport" class="dk-btn primary" style="flex:1">Full report ↗</button>
         </div>
+        <details class="why" style="margin-top:var(--s2)">
+          <summary>filter the trades</summary>
+          <div id="btFRows"></div>
+          <div style="display:flex;gap:4px;margin-top:4px">
+            <select id="btFField" style="flex:2;min-width:0"></select>
+            <select id="btFOp" style="flex:1;min-width:0"><option>=</option><option>≠</option><option>&gt;</option><option>&lt;</option><option>in</option><option>has</option></select>
+            <input id="btFVal" placeholder="value(s)" style="flex:2;min-width:0">
+            <button id="btFAdd" class="dk-btn">+</button>
+          </div>
+          <div class="muted" style="font-size:10px;margin-top:5px">in = comma list (regime in STRONG_UP,UP) · has = contains · times are ET hhmm (935) · dur_min · dow = Mon…Fri</div>
+        </details>
       </div>
-      <div id="btTrades" style="max-height:30vh;overflow:auto;margin-top:var(--s2)"></div>
     </div>
 
     <h3>Overlays</h3>
@@ -1445,99 +1477,147 @@ function btRenderCore(g,extra){
     .toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
   const _usdS=v=>(Number(v)>=0?'+':'')+_usd(v);
   const _ac=s.account;
+  /*
+   * THREE ZONES, in the order the questions are asked.
+   *
+   *   1  what did I make          — one number, large, alone
+   *   2  is it any good           — six figures, as a grid, no sentences
+   *   3  what did each trade do   — the list below, already tappable
+   *   ·  everything else          — folded, or in the full report
+   *
+   * The panel used to open with a bordered box carrying six lines of prose
+   * about leverage, fee schedules, per-share prop minimums and the sizing
+   * formula, then a run-on paragraph of coverage, then per-tool attribution.
+   * Every one of those facts is worth keeping and none of them is what you
+   * want in the first two seconds after a run finishes. They are all still
+   * here, one tap down, and the whole of it is in the report.
+   */
+  const tile=(label,value,tone)=>`<div class="bt-kpi">`
+    +`<b${tone?` style="color:${tone}"`:''}>${value}</b><span>${label}</span></div>`;
   let html='';
+
   if(_ac){
     const good=_ac.net_pnl_usd>=0;
-    html+=`<div style="border:1px solid var(--blue);border-radius:6px;padding:8px 9px;margin:0 0 7px">`
-      +`<div style="color:var(--text3);font-size:10px;letter-spacing:.04em">YOUR ACCOUNT — `
-        +`${_usd(_ac.account_equity_start)} · risking ${_ac.risk_pct}% per trade`
-        +(_ac.max_leverage>1?` · up to ${_ac.max_leverage}x`:` · cash only`)
-        +(_ac.max_position_pct?` · max ${_ac.max_position_pct}% of equity per position`:'')+`</div>`
-      +`<div style="font-size:21px;font-weight:700;line-height:1.25;color:${good?'var(--accent)':'var(--red)'}">`
-        +`${_usdS(_ac.net_pnl_usd)}`
-        +`<span style="font-size:13px;font-weight:600"> (${_ac.return_pct>=0?'+':''}${_ac.return_pct}%)</span></div>`
-      +`<div style="font-size:11px;color:var(--text2)">${_usd(_ac.account_equity_start)} → `
-        +`<b style="color:var(--text)">${_usd(_ac.equity_end)}</b>`
-        +` · <b>net of ${_usd(_ac.fees_usd)} fees</b>`
-        +(_ac.fee_per_share||_ac.fee_min_per_order
-          ?` (${_ac.fee_per_share?'$'+_ac.fee_per_share+'/share':''}`
-           +(_ac.fee_per_share&&_ac.fee_min_per_order?', ':'')
-           +(_ac.fee_min_per_order?'min $'+_ac.fee_min_per_order+'/order':'')+`)`:'')+`</div>`
-      +`<div style="font-size:11px;color:var(--text2);margin-top:2px">`
-        +`${_ac.trades_sized} of ${s.trades} trades sized`
-        +(_ac.win_rate_pct!=null?` · ${_ac.win_rate_pct}% won`:'')
-        +(_ac.avg_pnl_usd!=null?` · avg ${_usdS(_ac.avg_pnl_usd)}/trade`:'')
-        +` · worst drawdown ${_ac.max_drawdown_pct}%`
-        +(_ac.max_concurrent_positions?` · up to ${_ac.max_concurrent_positions} positions at once`:'')+`</div>`
-      // The prop firm's per-share minimum, at THIS size. Reported next to the
-      // money because the flat-100-share line understates it by the size ratio.
-      +(_ac.min_profit_ps!=null&&_ac.no_credit_wins
-        ?`<div style="font-size:11px;color:var(--draft);margin-top:2px">`
-          +`${_usd(_ac.counted_pnl_usd)} of that counts toward a prop target — `
-          +`${_ac.no_credit_wins} win(s) worth ${_usd(_ac.no_credit_pnl_usd)} `
-          +`earned under $${_ac.min_profit_ps}/share and get no credit `
-          +`(the money is still yours)</div>`
-        :(_ac.min_profit_ps!=null
-          ?`<div style="font-size:11px;color:var(--text2);margin-top:2px">`
-            +`every win cleared the $${_ac.min_profit_ps}/share minimum — full `
-            +`credit toward a prop target</div>`:''))
-      +`<div style="font-size:10px;color:var(--text3);margin-top:3px">position size = `
-        +`(equity × ${_ac.risk_pct}%) ÷ (entry − stop), compounding in trade order`
-        +(_ac.max_leverage>1?`, capped at ${_ac.max_leverage}× equity across all open positions`:'')+`</div>`
-      +((_ac.unsized_no_stop||_ac.size_capped_by_leverage||_ac.size_capped_by_position||_ac.skipped_no_capital)
-        ?`<div style="font-size:10px;color:var(--draft);margin-top:3px">`
-          +[_ac.unsized_no_stop?`⚠ ${_ac.unsized_no_stop} had no usable stop — excluded`:'',
-            _ac.size_capped_by_leverage?`⚠ ${_ac.size_capped_by_leverage} sized down to the cash available`:'',
-            _ac.size_capped_by_position?`⚠ ${_ac.size_capped_by_position} sized down to the ${_ac.max_position_pct}% per-position cap`:'',
-            _ac.skipped_no_capital?`⚠ ${_ac.skipped_no_capital} skipped — no buying power left`:''
-           ].filter(Boolean).join(' · ')+`</div>`:'')
-      // ALWAYS the whole run: size compounds in trade order and shares one
-      // capital pool, so dropping trades changes the equity path and the
-      // buying power of everything after them.
-      +(BT_FILTERS.length?`<div style="font-size:10px;color:var(--draft);margin-top:3px">`
-        +`⚠ <b>whole run</b> — filters not applied here, because `
-        +`sizing compounds and shares one balance across every trade</div>`:'')
-      +`</div>`;
+    html+=`<div class="bt-money">`
+      +`<div class="v" style="color:${good?'var(--accent)':'var(--red)'}">${_usdS(_ac.net_pnl_usd)}`
+        +`<span>${_ac.return_pct>=0?'+':''}${_ac.return_pct}%</span></div>`
+      +`<div class="s">${_usd(_ac.account_equity_start)} → <b>${_usd(_ac.equity_end)}</b>`
+        +` · after ${_usd(_ac.fees_usd)} fees</div></div>`;
   } else if(s.trades){
-    html+=`<div style="font-size:11px;color:var(--draft);margin-bottom:5px">`
-      +`no dollar P&L — fill in <b>account $</b> and <b>risk %</b> to size these trades `
-      +`against a real balance</div>`;
+    html+=`<div class="bt-money"><div class="v" style="color:var(--text2);font-size:15px">no dollar P&L</div>`
+      +`<div class="s">fill in <b>account $</b> and <b>risk %</b> above to size these trades</div></div>`;
   }
-  html += s.trades
-    ? `<b>${s.trades}</b> trades · <b>${s.win_rate}%</b> win · avg ${s.avg_return_pct}%`+(s.sharpe!=null?` · Sharpe ${s.sharpe}`:'')+` · maxDD ${s.max_drawdown_pct}%`+(s.max_dd_days!=null?` (${s.max_dd_days}d)`:'')+(s.cost_bps_per_side?` · cost ${s.cost_bps_per_side}bps`:'')+` · [${by}]`+` · ${s.pairs} pairs`+(s.open_trades?` · ${s.open_trades} open`:'')+(s.errors?` · <span id="btErrTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="tap to see which day·symbol pairs failed and why">⚠ ${s.errors} errors</span>`:'')
-      // Named for what it is. Read as an account return it is wildly wrong:
-      // it adds up percentage MOVES of trades that were never the same size.
-      +`<br><span class="muted" style="font-size:10px">unsized edge: `
-      +`${s.total_return_pct>=0?'+':''}${s.total_return_pct}% = the ${s.trades} trades' % moves added up — a strategy score, NOT an account return</span>`
-    : `no trades (${s.pairs} day·symbol pairs`+(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+')';
-  if(s.ttp){ html+=`<br><span style="color:var(--draft);font-size:11px">prop firm — flat ${s.ttp.shares} sh every trade: net $${s.ttp.net_pnl_usd} (fees $${s.ttp.fees_usd}) · counts $${s.ttp.counted_pnl_usd} toward target · ${s.ttp.wins_below_min} win(s) under $${s.ttp.min_profit_ps}/sh wasted`
-    +(s.ttp._whole_run?` · <b>whole run</b> — filters not applied (this run scales out; per-leg fills are not stored per trade)`:'')+`</span>`; }
+
+  if(s.trades){
+    const dd=_ac?_ac.max_drawdown_pct:s.max_drawdown_pct;
+    html+=`<div class="bt-kpis">`
+      +tile('trades',s.trades)
+      +tile('won',(_ac&&_ac.win_rate_pct!=null?_ac.win_rate_pct:s.win_rate)+'%')
+      +tile('avg / trade',_ac&&_ac.avg_pnl_usd!=null?_usdS(_ac.avg_pnl_usd):s.avg_return_pct+'%',
+            _ac&&_ac.avg_pnl_usd!=null?(_ac.avg_pnl_usd>=0?'var(--accent)':'var(--red)'):null)
+      +tile('Sharpe',s.sharpe!=null?s.sharpe:'—')
+      +tile('worst drawdown',dd+'%','var(--draft)')
+      +tile('open at end',s.open_trades||0)
+      +`</div>`;
+  } else {
+    html+=`<div class="muted" style="font-size:var(--f-xs)">no trades — ${s.pairs} day·symbol pairs evaluated`
+      +(s.errors?`, ⚠ ${s.errors} errors — first: ${(s.error_samples||[])[0]||''}`:'')+`</div>`;
+  }
+
+  /*
+   * THE SHORT LIST OF THINGS THAT ARE WRONG. Not folded, because a number that
+   * should not be trusted must not be readable without its caveat — but one
+   * line each, not a paragraph.
+   */
+  // "1 trades" reads as a typo and makes the whole panel look unproofed.
+  const _pl=(n,one,many)=>`${n} ${Number(n)===1?one:(many||one+'s')}`;
+  const flags=[];
+  if(_ac){
+    if(_ac.unsized_no_stop)flags.push(`${_pl(_ac.unsized_no_stop,'trade')} had no usable stop — excluded`);
+    if(_ac.skipped_no_capital)flags.push(`${_pl(_ac.skipped_no_capital,'trade')} skipped — no buying power left`);
+    if(_ac.size_capped_by_leverage)flags.push(`${_pl(_ac.size_capped_by_leverage,'trade')} sized down to the cash available`);
+    if(_ac.size_capped_by_position)flags.push(`${_pl(_ac.size_capped_by_position,'trade')} sized down to the ${_ac.max_position_pct}% per-position cap`);
+    if(_ac.no_credit_wins)flags.push(`${_pl(_ac.no_credit_wins,'win')} earn no prop credit — under $${_ac.min_profit_ps}/share`);
+  }
   const cov=s.coverage;
-  if(cov){
-    let c=`coverage: <b>${cov.evaluated}/${cov.pairs}</b> pairs had data (${cov.tf}·${cov.feed})`;
-    if(cov.no_data)c+=` · <span id="btNdTgl" style="color:var(--draft);cursor:pointer;text-decoration:underline dotted" title="the feed returned ZERO bars for these — they were never evaluated. Small caps often have no alpaca (IEX) data; use polygon.">${cov.no_data} no-data</span>`;
-    c+=` · signals on ${cov.signal_pairs} pairs (${cov.signals_on_day})·traded ${cov.traded_pairs}`;
-    // name the METRIC. "ranked: kept top 2/day" without it hid the fact that
-    // 103 of 117 signals were dropped on a criterion the setup never specified.
-    if(cov.rank_per_day)c+=` · <b>ranked by ${cov.rank_per_day.metric}`
-      +`${cov.rank_per_day.direction?' ('+cov.rank_per_day.direction+')':''}</b>: kept top `
-      +`${cov.rank_per_day.top_n}/day (${cov.rank_per_day.kept} kept, `
-      +`${cov.rank_per_day.dropped_by_rank} dropped`
-      +`${cov.rank_per_day.dropped_unscorable?', of which '+cov.rank_per_day.dropped_unscorable+' had no score':''})`;
-    if(cov.bars_median!=null)c+=` · ~${cov.bars_median} bars/pair`;
-    html+=`<br><span class="muted" style="font-size:10px">${c}</span>`;
-    // PER SCANNING TOOL — which screener supplied the universe, and how much
-    // of it. Without this a run that is 92% one tool reads as a seven-way test.
-    if(cov.by_source&&cov.by_source.length){
-      const rows=cov.by_source.map(s=>`<span style="margin-right:10px;white-space:nowrap">`
-        +`<b>${s.name}</b> ${s.pairs} pairs (${s.pct_of_pairs}%) · ${s.days}d · `
-        +`${s.trades} trades · ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%</span>`).join('');
-      html+=`<br><span class="muted" style="font-size:10px">by scanning tool: ${rows}</span>`;
-      if(cov.source_imbalance)
-        html+=`<br><span style="font-size:10px;color:var(--draft)">⚠ ${cov.source_imbalance}</span>`;
+  if(cov&&cov.scan_gate===false)flags.push('watchlist gate OFF — includes trades from before the scanner found the stock');
+  if(cov&&cov.before_scan)flags.push(`${_pl(cov.before_scan,'trade')} removed — the scanner had not found the name yet`);
+  if(s.errors)flags.push(`<span id="btErrTgl" style="cursor:pointer;text-decoration:underline dotted">${_pl(s.errors,'pair')} failed to evaluate</span>`);
+  if(cov&&cov.no_data)flags.push(`<span id="btNdTgl" style="cursor:pointer;text-decoration:underline dotted">${_pl(cov.no_data,'pair')} had no bars from ${cov.feed}</span>`);
+  if(cov&&cov.source_imbalance)flags.push(cov.source_imbalance);
+  if(BT_FILTERS.length)flags.push('the money block is the WHOLE run — sizing compounds and shares one balance, so filters cannot apply to it');
+  if(flags.length){
+    html+=`<div class="bt-flags">`+flags.map(f=>`<div>⚠ ${f}</div>`).join('')+`</div>`;
+  }
+
+  /*
+   * EVERYTHING ELSE. Read after the fact, or when a number looks wrong — not
+   * at the moment a run lands. `.why` is the same fold used on the alert cards.
+   */
+  let det='';
+  if(_ac){
+    det+=`<div class="bt-det"><b>How these were sized.</b> `
+      +`${_usd(_ac.account_equity_start)} starting equity, risking ${_ac.risk_pct}% per trade: `
+      +`size = (equity × ${_ac.risk_pct}%) ÷ (entry − stop), compounding in trade order`
+      +(_ac.max_leverage>1?`, capped at ${_ac.max_leverage}× equity across all open positions`:`, cash only`)
+      +(_ac.max_position_pct?`, and at ${_ac.max_position_pct}% of equity per position`:'')+`. `
+      +`${_ac.trades_sized} of ${s.trades} trades were sized`
+      +(_ac.max_concurrent_positions?`, up to ${_ac.max_concurrent_positions} held at once`:'')+`.`
+      +(_ac.fee_per_share||_ac.fee_min_per_order
+        ?` Commission ${_ac.fee_per_share?'$'+_ac.fee_per_share+'/share':''}`
+         +(_ac.fee_per_share&&_ac.fee_min_per_order?', ':'')
+         +(_ac.fee_min_per_order?'min $'+_ac.fee_min_per_order+'/order':'')+`.`:'')
+      +`</div>`;
+    if(_ac.min_profit_ps!=null){
+      det+=`<div class="bt-det"><b>Prop credit.</b> `
+        +(_ac.no_credit_wins
+          ?`${_usd(_ac.counted_pnl_usd)} of the P&L counts toward a target; `
+           +`${_ac.no_credit_wins} win(s) worth ${_usd(_ac.no_credit_pnl_usd)} came in under `
+           +`$${_ac.min_profit_ps}/share and earn no credit. The money is still yours.`
+          :`every win cleared the $${_ac.min_profit_ps}/share minimum — full credit.`)
+        +`</div>`;
     }
   }
-  if(extra)html+=`<span class="muted">${extra}</span>`;
+  if(s.ttp){
+    det+=`<div class="bt-det"><b>Flat ${s.ttp.shares} shares every trade</b> (a different question from the one above): `
+      +`net $${s.ttp.net_pnl_usd} after $${s.ttp.fees_usd} fees · $${s.ttp.counted_pnl_usd} counts toward a target · `
+      +`${s.ttp.wins_below_min} win(s) under $${s.ttp.min_profit_ps}/sh earn nothing`
+      +(s.ttp._whole_run?` · whole run — filters not applied, this run scales out and per-leg fills are not stored per trade`:'')
+      +`</div>`;
+  }
+  if(s.trades){
+    det+=`<div class="bt-det"><b>Unsized edge ${s.total_return_pct>=0?'+':''}${s.total_return_pct}%.</b> `
+      +`The ${s.trades} trades' percentage moves added up. A strategy score, NOT an account return — `
+      +`it adds moves of trades that were never the same size.`
+      +(by?` Exits: ${by}.`:'')
+      +(s.cost_bps_per_side?` Cost ${s.cost_bps_per_side} bps per side.`:'')
+      +`</div>`;
+  }
+  if(cov){
+    let c=`<b>Coverage.</b> ${cov.evaluated} of ${cov.pairs} day·symbol pairs had data on ${cov.tf}·${cov.feed}. `
+      +`Signals on ${cov.signal_pairs} pairs (${cov.signals_on_day} in total), ${cov.traded_pairs} traded.`;
+    if(cov.rank_per_day)c+=` Ranked by <b>${cov.rank_per_day.metric}`
+      +`${cov.rank_per_day.direction?' ('+cov.rank_per_day.direction+')':''}</b>, top `
+      +`${cov.rank_per_day.top_n} a day: ${cov.rank_per_day.kept} kept, `
+      +`${cov.rank_per_day.dropped_by_rank} dropped`
+      +`${cov.rank_per_day.dropped_unscorable?' (of which '+cov.rank_per_day.dropped_unscorable+' had no score)':''}.`;
+    if(cov.bars_median!=null)c+=` ~${cov.bars_median} bars per pair.`;
+    if(cov.before_scan_samples&&cov.before_scan_samples.length)
+      c+=` Removed for arriving before the scan: ${cov.before_scan_samples.slice(0,6).join('; ')}.`;
+    det+=`<div class="bt-det">${c}</div>`;
+    if(cov.by_source&&cov.by_source.length){
+      det+=`<div class="bt-det"><b>By scanning tool.</b> `
+        +cov.by_source.map(x=>`${x.name} ${x.pairs} pairs (${x.pct_of_pairs}%), ${x.days}d, `
+          +`${x.trades} trades, ${x.total_return_pct>=0?'+':''}${x.total_return_pct}%`).join(' · ')
+        +`</div>`;
+    }
+  }
+  if(det){
+    html+=`<details class="why bt-more"><summary>assumptions, coverage and the rest</summary>`
+      +det+`<div class="bt-det muted">The full write-up — every metric defined, the journal, `
+      +`the bias disclosures — is behind <b>Report</b> below.</div></details>`;
+  }
+  if(extra)html+=`<div class="muted" style="font-size:var(--f-xs);margin-top:4px">${extra}</div>`;
   sum.innerHTML=html;   // ONE write — appending after wiring would destroy the tap handlers
   const wireTgl=(id,label,items,total)=>{ const t=document.getElementById(id); if(!t||!items.length)return;
     t.onclick=()=>{ let d=document.getElementById(id+'List');
@@ -1575,7 +1655,14 @@ function btRenderCore(g,extra){
       const spec=(g&&g.spec)||{};
       document.getElementById('symbol').value=t.symbol; document.getElementById('asof').value=t.date;
       if(spec.tf)document.getElementById('tf').value=spec.tf;
-      if(spec.feed)document.getElementById('feed').value=spec.feed;
+      // Setting a <select> to a value it has no <option> for silently blanks
+      // it, and a blank feed goes to the server as `unknown feed ''`. Say the
+      // backtest's feed is missing instead of loading the chart on a different
+      // one and calling it a replay.
+      if(spec.feed){ const fs=document.getElementById('feed');
+        if([...fs.options].some(o=>o.value===spec.feed)) fs.value=spec.feed;
+        else banner(`this run used the ${spec.feed} feed, which is not configured here — `
+          +`the chart is on ${fs.value}, so it is not the same data`); }
       if(spec.strategy_id)loadStrategyById(spec.strategy_id);
       EVALMODE={fill:spec.fill||'close', rules:spec.rules||null, label:'backtest #'+(g.id||'')+' replay'};
       if(LIVE)toggleLive(); syncAsofUI(); await loadChart(); evalStrategy(); };

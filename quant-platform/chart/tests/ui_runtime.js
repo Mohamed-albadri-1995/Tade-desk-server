@@ -207,18 +207,26 @@ ok('the account P&L is stated in plain dollars, with its sign',
    H.includes('+$9,118.85'), H.slice(0, 200));
 ok('...and the balance it moves between',
    H.includes('$100,000.00') && H.includes('$109,118.85'));
+// The result panel was rebuilt into money -> figures -> folded detail, so
+// these match the FACT rather than the old sentence. The fee total belongs
+// next to the money; the fee SCHEDULE is a sizing assumption and folds away.
 ok('FEES are shown against that number (they were computed but never printed)',
-   /net of \$61\.15 fees/.test(H) && H.includes('$0.005/share') && H.includes('min $0.75/order'));
+   /after \$61\.15 fees/.test(H) && H.includes('$0.005/share') && H.includes('min $0.75/order'));
 ok('the sizing rule is spelled out, not left to be inferred',
    /\(equity × 0\.5%\) ÷ \(entry − stop\)/.test(H) && /2× equity/.test(H));
 ok('the leverage cap that bit one trade is reported',
-   /1 sized down to the cash available/.test(H));
+   /1 trade sized down to the cash available/.test(H));
 ok('the percent total is labelled as NOT an account return',
    /NOT an account return/.test(H) && /43\.956%/.test(H));
+// …and it is FOLDED. It is the number most often mistaken for a return, and
+// the fix for that is not a louder caption, it is not being the first thing on
+// screen.
+ok('...and it is behind the fold, not competing with the money',
+   H.indexOf('<details') >= 0 && H.indexOf('<details') < H.search(/[Uu]nsized edge/));
 ok('the prop-firm number says it is a flat share count',
-   /flat 100 sh every trade/.test(H) && H.includes('$527.86'));
+   /[Ff]lat 100 shares every trade/.test(H) && H.includes('$527.86'));
 ok('the money leads — the account block is printed before the % edge',
-   H.indexOf('+$9,118.85') < H.indexOf('unsized edge'));
+   H.indexOf('+$9,118.85') < H.search(/[Uu]nsized edge/));
 // and with no account set, say what is missing rather than showing nothing
 const NOACCT = Object.assign({}, SUM); delete NOACCT.account;
 ctx.btRenderCore({ summary: NOACCT, trades: [] }, '');
