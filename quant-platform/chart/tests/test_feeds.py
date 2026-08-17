@@ -535,7 +535,12 @@ def test_the_three_real_seeds_that_exit_on_a_rule_are_flagged():
     seeds = pathlib.Path(__file__).resolve().parents[1] / 'seeds'
     flagged = []
     for f in sorted(seeds.glob('*.json')):
-        for s in json.loads(f.read_text()):
+        # A seed file may hold one strategy or a list of them — store's loader
+        # accepts both. Iterating a bare dict yields its KEYS, so this loop was
+        # handing normalise() the string '_keep_user_edits' the day the first
+        # single-strategy seed was added.
+        docs = json.loads(f.read_text())
+        for s in (docs if isinstance(docs, list) else [docs]):
             if not xp.normalise(s)['order_ok']:
                 flagged.append(s['name'])
     assert set(flagged) == {'Fashionably Late Scalp', 'PM Breakout (2m)', 'PML breakout'}

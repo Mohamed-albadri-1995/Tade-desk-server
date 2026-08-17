@@ -126,7 +126,12 @@ def main() -> int:
         # not undone by a deploy.
         doc['_keep_user_edits'] = True
         path = Path(args.out) if args.out else SEEDS / f'{_safe(n)}.json'
-        path.write_text(json.dumps(doc, indent=2, sort_keys=True) + '\n')
+        # A LIST, even for one strategy. The loader takes either, but every
+        # bundled seed file is a list and anything reading the directory tends
+        # to assume that — iterating a bare dict yields its keys, silently.
+        # One shape for the whole directory is cheaper than every reader
+        # remembering there are two.
+        path.write_text(json.dumps([doc], indent=2, sort_keys=True) + '\n')
         written.append(path)
         print(f'  wrote {path}   ({n})')
 

@@ -1,113 +1,115 @@
-{
-  "_keep_user_edits": true,
-  "entry": {
-    "k": 1,
-    "logic": "AND",
-    "rules": [
-      {
-        "left": {
-          "field": "close",
-          "kind": "price"
-        },
-        "op": "gt",
-        "right": {
-          "key": "levels.day_open",
-          "kind": "primitive",
-          "params": {},
-          "source": "close"
-        }
-      },
-      {
-        "left": {
-          "field": "close",
-          "kind": "price"
-        },
-        "op": "gt",
-        "right": {
-          "key": "vwap.session",
-          "kind": "primitive",
-          "params": {},
-          "source": "close"
-        }
-      },
-      {
-        "left": {
-          "key": "ma.sma",
-          "kind": "primitive",
-          "params": {
-            "length": 9
+[
+  {
+    "_keep_user_edits": true,
+    "entry": {
+      "k": 1,
+      "logic": "AND",
+      "rules": [
+        {
+          "left": {
+            "field": "close",
+            "kind": "price"
           },
-          "source": "close"
+          "op": "gt",
+          "right": {
+            "key": "levels.day_open",
+            "kind": "primitive",
+            "params": {},
+            "source": "close"
+          }
         },
-        "op": "gt",
-        "right": {
-          "key": "ma.sma",
-          "kind": "primitive",
-          "params": {
-            "length": 13
+        {
+          "left": {
+            "field": "close",
+            "kind": "price"
           },
-          "source": "close"
-        }
-      },
-      {
-        "left": {
-          "key": "ma.sma",
-          "kind": "primitive",
-          "params": {
-            "length": 13
+          "op": "gt",
+          "right": {
+            "key": "vwap.session",
+            "kind": "primitive",
+            "params": {},
+            "source": "close"
+          }
+        },
+        {
+          "left": {
+            "key": "ma.sma",
+            "kind": "primitive",
+            "params": {
+              "length": 9
+            },
+            "source": "close"
           },
-          "source": "close"
+          "op": "gt",
+          "right": {
+            "key": "ma.sma",
+            "kind": "primitive",
+            "params": {
+              "length": 13
+            },
+            "source": "close"
+          }
         },
-        "op": "cross_above",
-        "right": {
-          "key": "vwap.session",
-          "kind": "primitive",
-          "params": {},
-          "source": "close"
+        {
+          "left": {
+            "key": "ma.sma",
+            "kind": "primitive",
+            "params": {
+              "length": 13
+            },
+            "source": "close"
+          },
+          "op": "cross_above",
+          "right": {
+            "key": "vwap.session",
+            "kind": "primitive",
+            "params": {},
+            "source": "close"
+          }
         }
-      }
-    ],
-    "window": 10
-  },
-  "exit": {
-    "k": 1,
-    "logic": "AND",
-    "rules": [],
-    "window": 10
-  },
-  "name": "Test",
-  "risk": {
-    "sl": {
-      "anchor": {
-        "hold": true,
-        "key": "vwap.stdev_bands",
-        "kind": "primitive",
-        "params": {
-          "mult": 0.2
-        },
-        "source": "close",
-        "sub": "lower"
-      },
-      "type": "prim",
-      "value": null
+      ],
+      "window": 10
     },
-    "targets": [
-      {
-        "fraction": 0.1,
-        "r_multiple": 3
-      },
-      {
-        "fraction": 0.8,
-        "r_multiple": 6
-      }
-    ],
-    "tp": {
-      "type": "",
-      "value": null
+    "exit": {
+      "k": 1,
+      "logic": "AND",
+      "rules": [],
+      "window": 10
     },
-    "window_end": 1130,
-    "window_start": 930
-  },
-  "side": "long",
-  "tools": []
-}
+    "name": "Test",
+    "risk": {
+      "sl": {
+        "anchor": {
+          "hold": true,
+          "key": "vwap.stdev_bands",
+          "kind": "primitive",
+          "params": {
+            "mult": 0.2
+          },
+          "source": "close",
+          "sub": "lower"
+        },
+        "type": "prim",
+        "value": null
+      },
+      "targets": [
+        {
+          "fraction": 0.1,
+          "r_multiple": 3
+        },
+        {
+          "fraction": 0.8,
+          "r_multiple": 6
+        }
+      ],
+      "tp": {
+        "type": "",
+        "value": null
+      },
+      "window_end": 1130,
+      "window_start": 930
+    },
+    "side": "long",
+    "tools": []
+  }
+]
