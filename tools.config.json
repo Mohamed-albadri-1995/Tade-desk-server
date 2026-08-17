@@ -59,11 +59,11 @@
     },
     {
       "id": "T5",
-      "name": "52-Week Break",
+      "name": "20-Day Break",
       "port": 3040,
       "scorerPort": 3041,
       "accent": "#f472b6",
-      "desc": "Established names pushing through the 52-week high.",
+      "desc": "A break of the 20-day high, or of the 20-day low. Pair it with a catalyst filter on the setup \u2014 the news half is a card field, not a screener column.",
       "captureAt": {
         "r1": "09:46",
         "entryA": "09:47",
@@ -73,11 +73,11 @@
     },
     {
       "id": "T6",
-      "name": "Overextended",
+      "name": "Quiet Base",
       "port": 3050,
       "scorerPort": 3051,
       "accent": "#facc15",
-      "desc": "RSI stretched with volume \u2014 does momentum continue or snap back?",
+      "desc": "Neglected names: no 2-hour swing past 15%, six months of trend going nowhere, still inside the range \u2014 and volume arriving anyway.",
       "captureAt": {
         "r1": "10:16",
         "entryA": "10:17",

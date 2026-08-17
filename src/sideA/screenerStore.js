@@ -238,7 +238,11 @@ const OPPOSITE_OP = {
 // flips sign as well as operator: "change above 5" mirrors to "change below -5".
 const DIRECTIONAL_FIELDS = new Set([
   'change', 'change_from_open', 'gap', 'premarket_change', 'premarket_gap',
-  'Perf.W', 'Perf.1M', 'Perf.3M', 'Perf.Y',
+  // Perf.6M was missing while its four siblings were here, so a screener using
+  // it mirrored into the SAME condition rather than the opposite one — the
+  // twin of "six-month trend not rising" came out as "six-month trend not
+  // rising", and the pair tested one side twice.
+  'Perf.W', 'Perf.1M', 'Perf.3M', 'Perf.6M', 'Perf.Y',
 ]);
 
 // Some fields come as a high/low pair, and their mirror is the counterpart —
@@ -288,7 +292,11 @@ function mirrorFilter(f) {
   const base = baseField(f.left);
   if (DIRECTIONAL_FIELDS.has(base)) {
     const n = Number(f.right);
-    return { ...f, operation: opposite, right: Number.isFinite(n) ? -n : f.right };
+    // `-0` is what negating a zero threshold gives in JavaScript. It survives
+    // into the stored filter and into anything comparing against it, where it
+    // is a value nobody typed and nobody expects — "Perf.6M greater than -0".
+    return { ...f, operation: opposite,
+      right: Number.isFinite(n) ? (n === 0 ? 0 : -n) : f.right };
   }
 
   if (REFLECTED_FIELDS[base] !== undefined) {

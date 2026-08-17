@@ -141,8 +141,16 @@ const T4_BASE = {
 // which arrives at any hour and often late in the day, so this one gets the
 // whole regular session. Pre-market is excluded on purpose: a 52-week high
 // printed on a handful of thin pre-market shares is not a break.
-const T5_BASE = {
-  key: '52w-break', name: '52-Week Break',
+/*
+ * KEPT, SWITCHED OFF. The 52-week break as it was, so the definition behind
+ * every frozen register day it produced is still readable and it can be turned
+ * back on from the Screeners page. A break through a 52-week high on a
+ * billion-dollar name is a rare event — one frozen day in the whole archive —
+ * and a screener that fires once a month cannot be measured against anything.
+ */
+const T5_ARCHIVED = {
+  key: '52w-break', name: '52-Week Break (archived)',
+  enabled: false,
   checkFrom: '09:45', checkTo: '16:00',
   runFrom: '09:30', runTo: '16:00',
   sort: { sortBy: 'change', sortOrder: 'desc' },
@@ -154,13 +162,57 @@ const T5_BASE = {
   ],
 };
 
+/*
+ * THE 20-DAY BREAK. The same idea at a horizon that actually produces trades.
+ *
+ * `High.1M` is TradingView's one-month high — about 20 trading days — and it is
+ * already what T2 breaks. A month of range is a level people can see and have
+ * traded against; a 52-week high is a level almost nothing reaches on a given
+ * morning, which is why the archived screener above has one day of data.
+ *
+ * The mirror is the SUPPORT break, not "below the 20-day high": FIELD_MIRROR
+ * swaps High.1M for Low.1M, so the pair is "broke the month's high" against
+ * "broke the month's low" and asks whether a break in either direction is
+ * worth taking.
+ *
+ * THE NEWS PART IS NOT HERE, and cannot be. TradingView returns a universe;
+ * the catalyst is fetched per ticker afterwards by this tool's own news pass
+ * and lands on the card. So "with supporting news" is a card-field filter on
+ * the setup — `catalyst is not empty` — applied before qp sees the list. See
+ * src/setups/universe.js. Putting a fake news column in the screener would
+ * return nothing at all.
+ *
+ * The billion-dollar market-cap floor is gone with the 52-week horizon: it was
+ * there to keep 52-week highs meaningful on established names, and at a
+ * 20-day horizon it excludes most of what this desk trades. The tradability
+ * floor still applies.
+ */
+const T5_BASE = {
+  key: '20d-break', name: '20-Day Break',
+  checkFrom: '09:45', checkTo: '16:00',
+  runFrom: '09:30', runTo: '16:00',
+  sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
+  filters: [
+    { left: 'close', operation: 'egreater', right: 'High.1M' },
+    { left: 'relative_volume_10d_calc', operation: 'greater', right: 1.5 },
+    { left: 'close', operation: 'egreater', right: 1 },
+    { left: 'average_volume_10d_calc', operation: 'greater', right: 500000 },
+  ],
+};
+
 // Stretched on RSI with volume. Its mirror is the oversold side, so the pair
 // asks directly whether extremes continue or revert. Extension is something the
 // session BUILDS: at 09:30 RSI still describes yesterday, so the screener holds
 // off until the move has had half an hour to make itself, then stays up to the
 // close — a stock can be stretched at any hour, and the fade is the trade.
-const T6_BASE = {
-  key: 'overextended', name: 'Overextended',
+/*
+ * KEPT, SWITCHED OFF. The overextended screener as it was, so its nine frozen
+ * days stay attributable to the definition that produced them and it can be
+ * turned back on from the Screeners page without retyping it.
+ */
+const T6_ARCHIVED = {
+  key: 'overextended', name: 'Overextended (archived)',
+  enabled: false,
   checkFrom: '10:15', checkTo: '16:00',
   runFrom: '10:00', runTo: '16:00',
   sort: { sortBy: 'change', sortOrder: 'desc' },
@@ -170,6 +222,51 @@ const T6_BASE = {
     { left: 'relative_volume_10d_calc', operation: 'greater', right: 3 },
     { left: 'close', operation: 'egreater', right: 1 },
     { left: 'average_volume_10d_calc', operation: 'greater', right: 1000000 },
+  ],
+};
+
+/*
+ * THE QUIET BASE — a neglected name being accumulated, not one that already ran.
+ *
+ * Every other screener here looks for something happening. This one looks for
+ * something NOT happening, and then for the single tell that contradicts it:
+ *
+ *   nothing has moved      no 2-hour swing beyond 15% in either direction
+ *   nobody has cared       six months of trend that is not rising
+ *   still inside its range not breaking the month's high — that is T5's job
+ *   ...but volume is here  relative volume up on a chart that has gone nowhere
+ *
+ * The last line is the whole setup. Volume arriving into a flat, unloved chart
+ * is what accumulation looks like from the outside; the same volume on a chart
+ * that has already run is just a mover, which four other tools already find.
+ *
+ * THE ±15% BAND IS SELF-MIRRORING, and correctly so — "quiet" has no direction.
+ * What flips is `Perf.6M`: the base takes names whose six-month trend is not
+ * rising (accumulation into weakness), the mirror takes those whose six-month
+ * trend is not falling (distribution into strength). That is the pair, and it
+ * only works because Perf.6M was added to DIRECTIONAL_FIELDS — without it the
+ * mirror was the same screener twice.
+ *
+ * `change|120` is the two-hour change. It only exists once there have been two
+ * hours, so this cannot run before 11:30 and mean anything.
+ *
+ * The relative-volume floor is 1.5, not the 3 the old screener used: 3x on a
+ * neglected name is not accumulation, it is the news already breaking, and by
+ * then the base is over.
+ */
+const T6_BASE = {
+  key: 'quiet-base', name: 'Quiet Base',
+  checkFrom: '11:30', checkTo: '16:00',
+  runFrom: '11:30', runTo: '16:00',
+  sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' },
+  filters: [
+    { left: 'change|120', operation: 'less', right: 15 },
+    { left: 'change|120', operation: 'greater', right: -15 },
+    { left: 'Perf.6M', operation: 'less', right: 0 },
+    { left: 'close', operation: 'less', right: 'High.1M' },
+    { left: 'relative_volume_10d_calc', operation: 'greater', right: 1.5 },
+    { left: 'close', operation: 'egreater', right: 1 },
+    { left: 'average_volume_10d_calc', operation: 'greater', right: 500000 },
   ],
 };
 
@@ -394,6 +491,8 @@ const WINDOW_NOTES = {
   'ma-stack-breakout': 'Regular session only. The daily MA stack barely moves intraday, so what is really being timed is the break — and a break on pre-market liquidity is not a break. Stops at 15:00 because one in the last hour leaves no session to work with.',
   'gap-and-volume': 'Pre-market and the first hour. Built on premarket_change and premarket_volume, which stop moving at the bell — left running all day it would re-report the same names until the close and none of it would be new.',
   'vwap-reclaim': 'The one that stays awake into the afternoon, because a reclaim is a reversal and those come late. Starts at 09:45 rather than the bell: VWAP off the first few prints is not yet a level anything is reclaiming. Stops at 15:30, when a reclaim has no session left to resolve in.',
+  '20d-break': 'The whole regular session. A month\u2019s range breaks on flow that arrives at any hour, often late. Pre-market is excluded on purpose \u2014 a 20-day high printed on a handful of thin shares is not a break. The NEWS half of this setup is a card filter (catalyst is not empty), not a screener column: TradingView returns the universe and the catalyst is fetched per ticker afterwards.',
+  'quiet-base': 'From 11:30, because the two-hour change it depends on does not exist before then. Runs to the close: volume arriving into a flat chart is the whole signal and it can arrive at any hour.',
   '52w-break': 'The whole regular session. These break on institutional flow, which arrives at any hour and often late in the day. Pre-market is excluded on purpose — a 52-week high printed on a handful of thin shares is not a break.',
   overextended: 'Waits until 10:00. At the open RSI still describes yesterday; extension is something the session builds. Then runs to the close, because a stock can be stretched at any hour and the fade is the trade.',
 
@@ -422,8 +521,9 @@ const pair = base => {
 const T2 = pair(T2_BASE);
 const T3 = pair(T3_BASE);
 const T4 = pair(T4_BASE);
-const T5 = pair(T5_BASE);
-const T6 = pair(T6_BASE);
+// The archived definition rides along, switched off, so it is never lost.
+const T5 = [...pair(T5_BASE), T5_ARCHIVED];
+const T6 = [...pair(T6_BASE), T6_ARCHIVED];
 
 // T7 runs the two session-bound screeners. They are NOT mirrored: each is a
 // complete setup for its own session, and the sessions do not overlap, so a
@@ -543,7 +643,12 @@ function repairOversoldMirror() {
     && filters.some(f => f.left === 'close' && f.operation === 'eless' && f.right === 'EMA20');
   if (!broken) return { repaired: 0 };
 
-  const fixed = store.mirrorDefinition(T6_BASE).filters;
+  // T6_ARCHIVED, not T6_BASE. This repairs the OVEREXTENDED mirror, and T6_BASE
+  // is now the quiet base — pointing it at whatever T6 currently ships would
+  // have rewritten a screener called "Overextended (mirror)" with the filters
+  // of an entirely different setup, silently, on any box still carrying the
+  // contradiction. A repair names the thing it repairs.
+  const fixed = store.mirrorDefinition(T6_ARCHIVED).filters;
   db.prepare('UPDATE screeners SET filters = ?, updated_at = ? WHERE id = ?')
     .run(JSON.stringify(fixed), Date.now(), row.id);
   console.log('[Screeners] repaired "overextended-mirror" — it asked for overbought AND below the 20-EMA');
@@ -788,6 +893,7 @@ function seedScreeners() {
     retimeT2Breakout();
     tightenLiquidMovers();
     addCanslimUniverse();
+    installNewScanners();
     return { seeded: 0, reason: 'already has screeners' };
   }
 
@@ -815,6 +921,66 @@ function seedScreeners() {
  * setups the tool trades, and rewriting a screener's filters underneath a month
  * of collected cards would make the history describe rules that were never run.
  */
+/*
+ * REPLACING A TOOL'S SCANNER ON A BOX THAT IS ALREADY RUNNING.
+ *
+ * seedScreeners() returns early the moment the table has anything in it — it
+ * seeds a fresh box and never touches a live one — so a new definition reaches
+ * nobody without a migration. This is that migration, in the same shape as the
+ * repairs above: keyed, idempotent, and it never removes anything.
+ *
+ * The old screener is DISABLED and RENAMED rather than deleted. Its frozen
+ * register days are already stored under its key, and deleting the row would
+ * leave a month of archived candidates with no definition to say what produced
+ * them. Switched off it stops scanning, keeps its history readable, and can be
+ * turned back on from the Screeners page in one click.
+ *
+ * Nothing is created twice: a screener the user has since deleted stays
+ * deleted, because the guard is "does this key exist", not "should it".
+ */
+function replaceScanner(toolId, oldKey, archivedName, newDefs) {
+  if (config.toolId !== toolId) return { changed: 0 };
+  let changed = 0;
+  const old = db.prepare('SELECT id, name, enabled FROM screeners WHERE key = ?').get(oldKey);
+  if (old && old.enabled) {
+    db.prepare('UPDATE screeners SET enabled = 0, name = ?, updated_at = ? WHERE id = ?')
+      .run(archivedName, Date.now(), old.id);
+    console.log(`[Screeners] "${old.name}" switched off and kept as "${archivedName}" `
+      + '— its frozen days stay readable and it can be re-enabled from the page');
+    changed++;
+    // Its mirror goes quiet with it, or the pair is half live.
+    const mir = db.prepare('SELECT id, name FROM screeners WHERE mirror_of = ?').get(old.name);
+    if (mir) {
+      db.prepare('UPDATE screeners SET enabled = 0, mirror_of = ?, updated_at = ? WHERE id = ?')
+        .run(archivedName, Date.now(), mir.id);
+      changed++;
+    }
+  }
+  for (const def of newDefs) {
+    if (def.enabled === false) continue;             // the archived copy itself
+    const key = store.slugify(def.key || def.name);
+    if (db.prepare('SELECT id FROM screeners WHERE key = ?').get(key)) continue;
+    try {
+      store.create(def);
+      console.log(`[Screeners] added "${def.name}"`);
+      changed++;
+    } catch (err) {
+      console.warn(`[Screeners] could not add "${def.name}": ${err.message}`);
+    }
+  }
+  return { changed };
+}
+
+// T5: a 52-week break is a once-a-month event, and a screener that fires once a
+// month cannot be measured against anything — one frozen day in the archive.
+// The same idea at 20 days produces trades. T6: overbought-with-volume is what
+// four other tools already find; the quiet base is the setup nothing else here
+// looks for.
+function installNewScanners() {
+  replaceScanner('T5', '52w-break', '52-Week Break (archived)', T5);
+  replaceScanner('T6', 'overextended', 'Overextended (archived)', T6);
+}
+
 function addCanslimUniverse() {
   if (config.toolId !== 'T8') return;
   const exists = db.prepare('SELECT id FROM screeners WHERE key = ?').get('canslim-universe');

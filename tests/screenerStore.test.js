@@ -434,9 +434,16 @@ describe('mirroring a bounded oscillator', () => {
     expect(m.filters[0].right).toEqual([20, 40]);
   });
 
-  test('the T6 pair really is overbought against oversold', () => {
+  /*
+   * This used to read PRESETS.T6[0] and [1]. T6 now ships the quiet base, and
+   * the overextended screener is kept alongside it, switched off — so the pair
+   * is looked up by NAME. Reading by index would have silently started testing
+   * a different screener and gone on passing on whatever it found there.
+   */
+  test('the overextended pair really is overbought against oversold', () => {
     const { PRESETS } = require('../src/sideA/seedScreeners');
-    const [base, mirror] = PRESETS.T6;
+    const base = PRESETS.T6.find(d => d.name === 'Overextended (archived)');
+    const mirror = store.mirrorDefinition(base);
     const rsi = d => d.filters.find(f => f.left === 'RSI');
     expect(rsi(base)).toEqual({ left: 'RSI', operation: 'greater', right: 70 });
     expect(rsi(mirror)).toEqual({ left: 'RSI', operation: 'less', right: 30 });
