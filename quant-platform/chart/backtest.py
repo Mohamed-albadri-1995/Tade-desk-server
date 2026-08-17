@@ -157,6 +157,45 @@ def _et_date(ts_s: int) -> str:
     return pd.Timestamp(int(ts_s), unit='s', tz='UTC').tz_convert(cs._ET).strftime('%Y-%m-%d')
 
 
+def _et_hm(ts_s: int) -> str:
+    return (pd.Timestamp(int(ts_s), unit='s', tz='UTC')
+            .tz_convert(cs._ET).strftime('%H:%M'))
+
+
+def _scan_time(rctx: dict | None, day: str):
+    """When the scanner first had this name on `day`, as an epoch second.
+
+    THE LOOK-AHEAD NOBODY SEES.
+
+    A register backtest evaluates the frozen list for a day and takes whatever
+    the strategy fires — including a 09:45 entry in a stock the scanner did not
+    surface until 10:00. In the backtest that is a trade. Live it is nothing at
+    all: at 09:45 the name was not on the watchlist, no alert could have fired,
+    and no order could have been placed. Counting it flatters every statistic in
+    the run, and worst in exactly the strategies that trade earliest.
+
+    `foundMinsFromOpen` is minutes from the 09:30 open, stamped by the scanner
+    when a screener first matched the ticker and never moved afterwards
+    (src/r0/registry.js). Negative means pre-market, so a name found at 08:00
+    reads as -90 — those are available from the first bar and gate nothing.
+
+    None when the row predates the field. A missing time must NOT become a
+    guessed 09:30: that would silently pass every trade it was meant to catch,
+    which is the failure mode this whole function exists to remove.
+    """
+    if not rctx:
+        return None
+    mins = rctx.get('foundMinsFromOpen')
+    if mins is None:
+        return None
+    try:
+        mins = float(mins)
+    except (TypeError, ValueError):
+        return None
+    open_et = pd.Timestamp(f'{day} 09:30', tz=cs._ET)
+    return int((open_et + pd.Timedelta(minutes=mins)).timestamp())
+
+
 def _rvol_at(sym: str, day: str, feed: str, view: str, ref_hhmm: int,
              length: int = 20) -> float | None:
     """SMB-style In-Play RVOL for (sym, day), read causally AT `ref_hhmm` ET.
@@ -870,6 +909,19 @@ def run(spec: dict, progress_cb=None) -> dict:
                                     'name': (_rc or {}).get('source_name') or sid})
         e['pairs'] += 1
         e['days'].add(_d)
+    # THE WATCHLIST GATE, ON BY DEFAULT.
+    #
+    # A trade the strategy took before the scanner had found the stock is not a
+    # trade — no alert could have fired and no order could have been placed. It
+    # is on by default because a backtest whose default is the optimistic
+    # reading is a backtest that will be believed and should not be; pass
+    # `scan_gate: false` to see the old, look-ahead numbers deliberately.
+    #
+    # `symbols` universes have no scanner and no scan time, so this is a no-op
+    # there rather than a gate that silently drops everything.
+    scan_gate = spec.get('scan_gate', True) is not False
+    cov['scan_gate'] = bool(scan_gate)
+
     # In-Play universe filter (opt-in): the book's screener precondition
     # "RVOL > 5" measured HONESTLY — qp rel_volume at the strategy's session
     # start, not the register's one-bar TradingView snapshot. A pair below the
@@ -897,6 +949,12 @@ def run(spec: dict, progress_cb=None) -> dict:
     bar_counts = []
     for i, (day, sym, rctx) in enumerate(pairs):
         _src = by_src.get((rctx or {}).get('source') or 'symbols')
+        # WHEN this name became available to trade. Computed once per pair
+        # rather than per strategy: it is a fact about the scanner's day, not
+        # about the rule being tested.
+        _scan_at = _scan_time(rctx, day) if scan_gate else None
+        if scan_gate and rctx and _scan_at is None:
+            cov['scan_time_unknown'] = cov.get('scan_time_unknown', 0) + 1
         if min_rvol is not None:
             try:
                 rv = _rvol_at(sym, day, feed, view, rv_ref)
@@ -947,6 +1005,14 @@ def run(spec: dict, progress_cb=None) -> dict:
                 for t in r.get('trades') or []:
                     if _et_date(t['entry_ts']) != day:      # day-slice honesty
                         continue
+                    # Not on the watchlist yet — see _scan_time.
+                    if scan_gate and _scan_at is not None and t['entry_ts'] < _scan_at:
+                        cov['before_scan'] = cov.get('before_scan', 0) + 1
+                        if len(cov.setdefault('before_scan_samples', [])) < 12:
+                            cov['before_scan_samples'].append(
+                                f'{day} {sym} entry {_et_hm(t["entry_ts"])} '
+                                f'< found {_et_hm(_scan_at)}')
+                        continue
                     took = True
                     nlegs = len(t.get('legs') or [])
                     cov['scaleout_legs'] = cov.get('scaleout_legs', 0) + nlegs
@@ -966,6 +1032,11 @@ def run(spec: dict, progress_cb=None) -> dict:
                                            'strategy': sname},
                                    'legs': t.get('legs') or []})
                 ot = r.get('open_trade')
+                if (ot and _et_date(ot['time']) == day
+                        and scan_gate and _scan_at is not None
+                        and ot['time'] < _scan_at):
+                    cov['before_scan'] = cov.get('before_scan', 0) + 1
+                    ot = None
                 if ot and _et_date(ot['time']) == day:
                     took = True
                     nlegs = len(ot.get('legs') or [])

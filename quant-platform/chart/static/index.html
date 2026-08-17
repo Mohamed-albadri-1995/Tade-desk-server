@@ -560,6 +560,13 @@
         <label style="display:flex;gap:7px;align-items:flex-start;color:var(--text2);font-size:var(--f-xs);line-height:1.5">
           <input type="checkbox" id="btRules" style="margin-top:2px">
           RTH-only entries + forced 15:50 EOD close <span class="muted">(the chart keeps all-day data for indicators)</span></label>
+        <!-- Checked by default. Unchecking it is asking for the optimistic
+             number on purpose, which is a legitimate thing to want and should
+             take a deliberate click. -->
+        <label style="display:flex;gap:7px;align-items:flex-start;color:var(--text2);font-size:var(--f-xs);line-height:1.5;margin-top:6px">
+          <input type="checkbox" id="btScanGate" checked style="margin-top:2px">
+          Only trade after the scanner found the stock
+          <span class="muted">(drops entries from before the name was on the watchlist — live, no alert could have fired)</span></label>
       </div>
 
       <div class="grp">
@@ -1602,6 +1609,9 @@ async function btRun(){
     tf:document.getElementById('btTf').value, feed:document.getElementById('btFeed').value,
     view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0,
     min_rvol:(document.getElementById('btMinRvol').value!==''?parseFloat(document.getElementById('btMinRvol').value):null),
+    // The watchlist gate. Sent explicitly rather than relying on the server's
+    // default, so what the box is showing and what the run did cannot differ.
+    scan_gate:document.getElementById('btScanGate').checked,
     rank_per_day:(function(){ const n=parseInt(document.getElementById('btTopN').value,10);
       // the metric travels WITH the request — the server has no default and
       // rejects a rank block without one, on purpose

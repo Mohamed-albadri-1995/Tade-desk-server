@@ -436,6 +436,29 @@ def backtest_report(bid: int):
                          "The time window doing its job. Counted per BAR across "
                          "the whole evaluated history, not trades you missed — "
                          "for a one-minute window, millions is normal."))
+    # The watchlist gate. Stated whichever way it went: that trades were
+    # removed is the headline, and that the gate was switched OFF is a bigger
+    # one — every number below then includes trades that could not have been
+    # taken.
+    if cov.get('scan_gate') is False:
+        warn.append(('watchlist gate OFF — trades are counted from before the '
+                     'scanner found the stock',
+                     "The strategy's entry could fire at 09:45 in a name the "
+                     'scanner did not surface until 10:00. Live, no alert and '
+                     'no order were possible at 09:45. Every statistic below is '
+                     'flattered, and most in the strategies that trade earliest.'))
+    elif cov.get('before_scan'):
+        _bs = cov['before_scan']
+        warn.append((f'{_bs} trades removed — the scanner had not found the name yet',
+                     'The entry fired before the stock was on the watchlist, so '
+                     'no alert and no order were possible. Examples: '
+                     + '; '.join(cov.get('before_scan_samples') or [])))
+    if cov.get('scan_time_unknown'):
+        warn.append((f"{cov['scan_time_unknown']} pairs have no scan time — not gated",
+                     'Register rows frozen before the scanner started stamping '
+                     'when it first matched a ticker. They are counted as they '
+                     'always were; a guessed 09:30 would pass exactly the trades '
+                     'the gate exists to catch.'))
     if cov.get('rvol_min'):
         warn.append((f"In-Play filter rvol ≥ {cov['rvol_min']} at {cov.get('rvol_at')} ET — "
                      f"excluded {cov.get('rvol_below', 0)} below + "
