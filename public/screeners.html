@@ -423,6 +423,11 @@
   Every tool runs its own screeners, keeps its own registers and shortlist, and trains
   its own model. Nothing is shared between them, so what one learns never leaks into another.
 </div>
+<style>
+  .stage-chip { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:9px;
+    border:1px solid currentColor; font-size:9.5px; font-weight:600; letter-spacing:.04em;
+    text-transform:uppercase; vertical-align:middle; white-space:nowrap; }
+</style>
 <div class="version">v2.0 · multi-tool</div>
 
 <script>
@@ -590,6 +595,32 @@ function screensBlock(t, summary) {
     </details>`;
 }
 
+/*
+ * WHAT STAGE THIS TOOL IS AT, on the card.
+ *
+ * Nine identical cards read as nine equally trustworthy tools. Two are
+ * validated; several have a fortnight of data and no verdict; two were
+ * rewritten this week and have nothing. Without this the newest screener's
+ * candidates look exactly as good as the one measured for a year.
+ *
+ * `validated` is never reached by counting days — time does not make a
+ * screener good. The count only separates "too early to look" from "old enough
+ * to look"; see src/stages.js.
+ */
+const STAGE_CHIP = {
+  valid:      ['validated',  'var(--accent)', 'A verdict somebody made — trusted enough to trade from.'],
+  study:      ['under study', 'var(--draft)', 'Enough frozen days to look at. Not enough to believe.'],
+  collecting: ['collecting',  'var(--text3)', 'Filling the archive. There is no question to ask yet.'],
+};
+function stageChip(t) {
+  const c = STAGE_CHIP[t.stage];
+  if (!c) return '';
+  const [label, colour, why] = c;
+  const days = t.days != null ? ` · ${t.days}d` : '';
+  return `<span class="stage-chip" style="color:${colour};border-color:${colour}"
+    title="${esc(why)}${t.source === 'override' ? ' (set by hand)' : ''}">${label}${days}</span>`;
+}
+
 function card(t, state, info, check, summary) {
   const cls = (state === 'down' ? 'down' : '')
     + (state === 'up' && check && !check.now ? ' asleep' : '');
@@ -608,7 +639,7 @@ function card(t, state, info, check, summary) {
       <a class="tc-open" href="${baseFor(t)}/scanner">
         <div class="card-top">
           <div>
-            <div class="card-name">${t.name}</div>
+            <div class="card-name">${t.name} ${stageChip(t)}</div>
             <div class="card-port">${t.id} · PORT ${t.port}</div>
           </div>
           <div class="status ${state}"><span class="dot"></span>${label}</div>

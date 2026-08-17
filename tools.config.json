@@ -27,7 +27,8 @@
         "entryA": "09:47",
         "entryB": "09:51",
         "why": "A breakout on the opening spike is often just the spike. 09:46 gives the break fifteen minutes to hold above the monthly high before the photo is taken, so the model learns from breaks that survived rather than every stock that touched the level."
-      }
+      },
+      "stage": "valid"
     },
     {
       "id": "T3",
@@ -111,7 +112,8 @@
         "entryA": "09:47",
         "entryB": "09:51",
         "why": "CANSLIM names are position candidates rather than day trades, so the exact minute matters less here than anywhere else. It shares T2's timing \u2014 fifteen minutes past the open, once the first spike has settled \u2014 so the two breakout tools stay directly comparable."
-      }
+      },
+      "stage": "valid"
     },
     {
       "id": "T9",

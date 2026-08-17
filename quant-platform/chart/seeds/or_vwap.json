@@ -1,80 +1,78 @@
 [
   {
-    "name": "OR + VWAP 09:35 (Long)",
-    "side": "long",
     "_keep_user_edits": true,
     "entry": {
       "logic": "AND",
       "rules": [
         {
           "left": {
-            "kind": "price",
-            "field": "close"
+            "field": "close",
+            "kind": "price"
           },
           "op": "gt",
           "right": {
-            "kind": "primitive",
             "key": "vwap.session",
+            "kind": "primitive",
             "source": "close"
           }
         },
         {
           "left": {
-            "kind": "primitive",
             "key": "vwap.session",
+            "kind": "primitive",
             "source": "close"
           },
           "op": "gt",
           "right": {
-            "kind": "primitive",
             "key": "vwap.session",
-            "source": "close",
-            "offset": 3
+            "kind": "primitive",
+            "offset": 3,
+            "source": "close"
           }
         },
         {
           "left": {
-            "kind": "expr",
-            "op": "div",
             "a": {
-              "kind": "expr",
-              "op": "sub",
               "a": {
-                "kind": "price",
-                "field": "close"
+                "field": "close",
+                "kind": "price"
               },
               "b": {
-                "kind": "primitive",
                 "key": "levels.window_low",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
-              }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
+              },
+              "kind": "expr",
+              "op": "sub"
             },
             "b": {
-              "kind": "expr",
-              "op": "sub",
               "a": {
-                "kind": "primitive",
                 "key": "levels.window_high",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
               },
               "b": {
-                "kind": "primitive",
                 "key": "levels.window_low",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
-              }
-            }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
+              },
+              "kind": "expr",
+              "op": "sub"
+            },
+            "kind": "expr",
+            "op": "div"
           },
           "op": "ge",
           "right": {
@@ -84,142 +82,145 @@
         },
         {
           "left": {
-            "kind": "expr",
-            "op": "sub",
             "a": {
-              "kind": "price",
-              "field": "close"
+              "field": "close",
+              "kind": "price"
             },
             "b": {
-              "kind": "expr",
-              "op": "add",
               "a": {
-                "kind": "primitive",
                 "key": "levels.window_low",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
               },
               "b": {
-                "kind": "expr",
-                "op": "div",
                 "a": {
-                  "kind": "expr",
-                  "op": "sub",
                   "a": {
-                    "kind": "primitive",
                     "key": "levels.window_high",
-                    "source": "close",
+                    "kind": "primitive",
                     "params": {
-                      "start": 930,
-                      "end": 935
-                    }
+                      "end": 935,
+                      "start": 930
+                    },
+                    "source": "close"
                   },
                   "b": {
-                    "kind": "primitive",
                     "key": "levels.window_low",
-                    "source": "close",
+                    "kind": "primitive",
                     "params": {
-                      "start": 930,
-                      "end": 935
-                    }
-                  }
+                      "end": 935,
+                      "start": 930
+                    },
+                    "source": "close"
+                  },
+                  "kind": "expr",
+                  "op": "sub"
                 },
                 "b": {
                   "kind": "const",
                   "value": 2
-                }
-              }
-            }
+                },
+                "kind": "expr",
+                "op": "div"
+              },
+              "kind": "expr",
+              "op": "add"
+            },
+            "kind": "expr",
+            "op": "sub"
           },
           "op": "ge",
           "right": {
-            "kind": "expr",
-            "op": "mul",
             "a": {
-              "kind": "primitive",
               "key": "volatility.atr",
-              "source": "close",
+              "kind": "primitive",
               "params": {
                 "length": 14
-              }
+              },
+              "source": "close"
             },
             "b": {
               "kind": "const",
               "value": 0.5
-            }
+            },
+            "kind": "expr",
+            "op": "mul"
           }
         }
       ]
     },
     "exit": {
       "logic": "AND",
-      "scope": "runner",
       "rules": [
         {
           "left": {
-            "kind": "price",
-            "field": "close"
+            "field": "close",
+            "kind": "price"
           },
           "op": "cross_below",
           "right": {
-            "kind": "primitive",
             "key": "vwap.session",
+            "kind": "primitive",
             "source": "close"
           }
         }
-      ]
+      ],
+      "scope": "runner"
     },
+    "name": "OR + VWAP 09:35 (Long)",
     "risk": {
+      "max_entries_per_day": 1,
+      "min_target_usd": 0.1,
       "sl": {
-        "type": "prim",
         "anchor": {
-          "kind": "expr",
-          "op": "add",
           "a": {
-            "kind": "primitive",
             "key": "levels.window_low",
-            "source": "close",
+            "kind": "primitive",
             "params": {
-              "start": 930,
-              "end": 935
-            }
+              "end": 935,
+              "start": 930
+            },
+            "source": "close"
           },
           "b": {
-            "kind": "expr",
-            "op": "div",
             "a": {
-              "kind": "expr",
-              "op": "sub",
               "a": {
-                "kind": "primitive",
                 "key": "levels.window_high",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
               },
               "b": {
-                "kind": "primitive",
                 "key": "levels.window_low",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
-              }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
+              },
+              "kind": "expr",
+              "op": "sub"
             },
             "b": {
               "kind": "const",
               "value": 2
-            }
-          }
+            },
+            "kind": "expr",
+            "op": "div"
+          },
+          "kind": "expr",
+          "op": "add"
         },
-        "value": 0.0,
-        "freeze": true
+        "freeze": true,
+        "type": "prim",
+        "value": 0.0
       },
       "targets": [
         {
@@ -227,88 +228,86 @@
           "r_multiple": 2.0
         }
       ],
-      "window_start": 935,
       "window_end": 935,
-      "max_entries_per_day": 1,
-      "min_target_usd": 0.1
-    }
+      "window_start": 935
+    },
+    "side": "long",
+    "stage": "ready"
   },
   {
-    "name": "OR + VWAP 09:35 (Short)",
-    "side": "short",
     "_keep_user_edits": true,
     "entry": {
       "logic": "AND",
       "rules": [
         {
           "left": {
-            "kind": "price",
-            "field": "close"
+            "field": "close",
+            "kind": "price"
           },
           "op": "lt",
           "right": {
-            "kind": "primitive",
             "key": "vwap.session",
+            "kind": "primitive",
             "source": "close"
           }
         },
         {
           "left": {
-            "kind": "primitive",
             "key": "vwap.session",
+            "kind": "primitive",
             "source": "close"
           },
           "op": "lt",
           "right": {
-            "kind": "primitive",
             "key": "vwap.session",
-            "source": "close",
-            "offset": 3
+            "kind": "primitive",
+            "offset": 3,
+            "source": "close"
           }
         },
         {
           "left": {
-            "kind": "expr",
-            "op": "div",
             "a": {
-              "kind": "expr",
-              "op": "sub",
               "a": {
-                "kind": "price",
-                "field": "close"
+                "field": "close",
+                "kind": "price"
               },
               "b": {
-                "kind": "primitive",
                 "key": "levels.window_low",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
-              }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
+              },
+              "kind": "expr",
+              "op": "sub"
             },
             "b": {
-              "kind": "expr",
-              "op": "sub",
               "a": {
-                "kind": "primitive",
                 "key": "levels.window_high",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
               },
               "b": {
-                "kind": "primitive",
                 "key": "levels.window_low",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
-              }
-            }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
+              },
+              "kind": "expr",
+              "op": "sub"
+            },
+            "kind": "expr",
+            "op": "div"
           },
           "op": "le",
           "right": {
@@ -318,142 +317,145 @@
         },
         {
           "left": {
-            "kind": "expr",
-            "op": "sub",
             "a": {
-              "kind": "expr",
-              "op": "add",
               "a": {
-                "kind": "primitive",
                 "key": "levels.window_low",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
               },
               "b": {
-                "kind": "expr",
-                "op": "div",
                 "a": {
-                  "kind": "expr",
-                  "op": "sub",
                   "a": {
-                    "kind": "primitive",
                     "key": "levels.window_high",
-                    "source": "close",
+                    "kind": "primitive",
                     "params": {
-                      "start": 930,
-                      "end": 935
-                    }
+                      "end": 935,
+                      "start": 930
+                    },
+                    "source": "close"
                   },
                   "b": {
-                    "kind": "primitive",
                     "key": "levels.window_low",
-                    "source": "close",
+                    "kind": "primitive",
                     "params": {
-                      "start": 930,
-                      "end": 935
-                    }
-                  }
+                      "end": 935,
+                      "start": 930
+                    },
+                    "source": "close"
+                  },
+                  "kind": "expr",
+                  "op": "sub"
                 },
                 "b": {
                   "kind": "const",
                   "value": 2
-                }
-              }
+                },
+                "kind": "expr",
+                "op": "div"
+              },
+              "kind": "expr",
+              "op": "add"
             },
             "b": {
-              "kind": "price",
-              "field": "close"
-            }
+              "field": "close",
+              "kind": "price"
+            },
+            "kind": "expr",
+            "op": "sub"
           },
           "op": "ge",
           "right": {
-            "kind": "expr",
-            "op": "mul",
             "a": {
-              "kind": "primitive",
               "key": "volatility.atr",
-              "source": "close",
+              "kind": "primitive",
               "params": {
                 "length": 14
-              }
+              },
+              "source": "close"
             },
             "b": {
               "kind": "const",
               "value": 0.5
-            }
+            },
+            "kind": "expr",
+            "op": "mul"
           }
         }
       ]
     },
     "exit": {
       "logic": "AND",
-      "scope": "runner",
       "rules": [
         {
           "left": {
-            "kind": "price",
-            "field": "close"
+            "field": "close",
+            "kind": "price"
           },
           "op": "cross_above",
           "right": {
-            "kind": "primitive",
             "key": "vwap.session",
+            "kind": "primitive",
             "source": "close"
           }
         }
-      ]
+      ],
+      "scope": "runner"
     },
+    "name": "OR + VWAP 09:35 (Short)",
     "risk": {
+      "max_entries_per_day": 1,
+      "min_target_usd": 0.1,
       "sl": {
-        "type": "prim",
         "anchor": {
-          "kind": "expr",
-          "op": "add",
           "a": {
-            "kind": "primitive",
             "key": "levels.window_low",
-            "source": "close",
+            "kind": "primitive",
             "params": {
-              "start": 930,
-              "end": 935
-            }
+              "end": 935,
+              "start": 930
+            },
+            "source": "close"
           },
           "b": {
-            "kind": "expr",
-            "op": "div",
             "a": {
-              "kind": "expr",
-              "op": "sub",
               "a": {
-                "kind": "primitive",
                 "key": "levels.window_high",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
               },
               "b": {
-                "kind": "primitive",
                 "key": "levels.window_low",
-                "source": "close",
+                "kind": "primitive",
                 "params": {
-                  "start": 930,
-                  "end": 935
-                }
-              }
+                  "end": 935,
+                  "start": 930
+                },
+                "source": "close"
+              },
+              "kind": "expr",
+              "op": "sub"
             },
             "b": {
               "kind": "const",
               "value": 2
-            }
-          }
+            },
+            "kind": "expr",
+            "op": "div"
+          },
+          "kind": "expr",
+          "op": "add"
         },
-        "value": 0.0,
-        "freeze": true
+        "freeze": true,
+        "type": "prim",
+        "value": 0.0
       },
       "targets": [
         {
@@ -461,10 +463,10 @@
           "r_multiple": 2.0
         }
       ],
-      "window_start": 935,
       "window_end": 935,
-      "max_entries_per_day": 1,
-      "min_target_usd": 0.1
-    }
+      "window_start": 935
+    },
+    "side": "short",
+    "stage": "ready"
   }
 ]

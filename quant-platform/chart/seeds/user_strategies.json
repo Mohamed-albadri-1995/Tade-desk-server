@@ -1,186 +1,187 @@
 [
- {
-  "name": "PML breakout",
-  "side": "short",
-  "risk": {
-   "sl": {
-    "type": "prim",
-    "value": null,
-    "anchor": {
-     "kind": "expr",
-     "op": "add",
-     "a": {
-      "kind": "primitive",
-      "key": "levels.pm_low",
-      "source": "close",
-      "params": {}
-     },
-     "b": {
-      "kind": "expr",
-      "op": "mul",
-      "a": {
-       "kind": "const",
-       "value": 0.2
-      },
-      "b": {
-       "kind": "expr",
-       "op": "sub",
-       "a": {
-        "kind": "primitive",
-        "key": "levels.today_high",
-        "source": "close",
-        "params": {}
-       },
-       "b": {
-        "kind": "primitive",
-        "key": "levels.pm_low",
-        "source": "close",
-        "params": {}
-       }
-      }
-     }
-    }
-   },
-   "tp": {
-    "type": "",
-    "value": null
-   },
-   "window_start": 940,
-   "window_end": 1010
-  },
-  "entry": {
-   "logic": "AND",
-   "window": 10,
-   "k": 1,
-   "rules": [
-    {
-     "left": {
-      "kind": "primitive",
-      "key": "levels.today_high",
-      "source": "close",
-      "params": {}
-     },
-     "op": "gt",
-     "right": {
-      "kind": "primitive",
-      "key": "levels.day_open",
-      "source": "close",
-      "params": {}
-     }
-    },
-    {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "cross_below",
-     "right": {
-      "kind": "primitive",
-      "key": "levels.pm_low",
-      "source": "close",
-      "params": {}
-     },
-     "offset": 1
-    },
-    {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "lt",
-     "right": {
-      "kind": "primitive",
-      "key": "levels.pm_low",
-      "source": "close",
-      "params": {}
-     }
-    },
-    {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "lt",
-     "right": {
-      "kind": "primitive",
-      "key": "ma.sma",
-      "source": "close",
-      "params": {
-       "length": 13
-      }
-     }
-    },
-    {
-     "left": {
-      "kind": "price",
-      "field": "open"
-     },
-     "op": "lt",
-     "right": {
-      "kind": "primitive",
-      "key": "ma.sma",
-      "source": "close",
-      "params": {
-       "length": 13
-      }
-     }
-    },
-    {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "lt",
-     "right": {
-      "kind": "primitive",
-      "key": "vwap.session",
-      "source": "close",
-      "params": {}
-     }
-    },
-    {
-     "left": {
-      "kind": "price",
-      "field": "close"
-     },
-     "op": "lt",
-     "right": {
-      "kind": "price",
-      "field": "open"
-     }
-    }
-   ]
-  },
-  "exit": {
-   "logic": "OR",
-   "window": 10,
-   "k": 1,
-   "rules": [
-    {
-     "logic": "AND",
-     "window": 10,
-     "k": 1,
-     "rules": [
-      {
-       "left": {
-        "kind": "price",
-        "field": "close"
-       },
-       "op": "gt",
-       "right": {
-        "kind": "primitive",
-        "key": "ma.sma",
-        "source": "close",
-        "params": {
-         "length": 13
+  {
+    "_keep_user_edits": true,
+    "entry": {
+      "k": 1,
+      "logic": "AND",
+      "rules": [
+        {
+          "left": {
+            "key": "levels.today_high",
+            "kind": "primitive",
+            "params": {},
+            "source": "close"
+          },
+          "op": "gt",
+          "right": {
+            "key": "levels.day_open",
+            "kind": "primitive",
+            "params": {},
+            "source": "close"
+          }
+        },
+        {
+          "left": {
+            "field": "close",
+            "kind": "price"
+          },
+          "offset": 1,
+          "op": "cross_below",
+          "right": {
+            "key": "levels.pm_low",
+            "kind": "primitive",
+            "params": {},
+            "source": "close"
+          }
+        },
+        {
+          "left": {
+            "field": "close",
+            "kind": "price"
+          },
+          "op": "lt",
+          "right": {
+            "key": "levels.pm_low",
+            "kind": "primitive",
+            "params": {},
+            "source": "close"
+          }
+        },
+        {
+          "left": {
+            "field": "close",
+            "kind": "price"
+          },
+          "op": "lt",
+          "right": {
+            "key": "ma.sma",
+            "kind": "primitive",
+            "params": {
+              "length": 13
+            },
+            "source": "close"
+          }
+        },
+        {
+          "left": {
+            "field": "open",
+            "kind": "price"
+          },
+          "op": "lt",
+          "right": {
+            "key": "ma.sma",
+            "kind": "primitive",
+            "params": {
+              "length": 13
+            },
+            "source": "close"
+          }
+        },
+        {
+          "left": {
+            "field": "close",
+            "kind": "price"
+          },
+          "op": "lt",
+          "right": {
+            "key": "vwap.session",
+            "kind": "primitive",
+            "params": {},
+            "source": "close"
+          }
+        },
+        {
+          "left": {
+            "field": "close",
+            "kind": "price"
+          },
+          "op": "lt",
+          "right": {
+            "field": "open",
+            "kind": "price"
+          }
         }
-       },
-       "for_bars": 2
-      }
-     ]
-    }
-   ]
-  },
-  "_keep_user_edits": true
- }
+      ],
+      "window": 10
+    },
+    "exit": {
+      "k": 1,
+      "logic": "OR",
+      "rules": [
+        {
+          "k": 1,
+          "logic": "AND",
+          "rules": [
+            {
+              "for_bars": 2,
+              "left": {
+                "field": "close",
+                "kind": "price"
+              },
+              "op": "gt",
+              "right": {
+                "key": "ma.sma",
+                "kind": "primitive",
+                "params": {
+                  "length": 13
+                },
+                "source": "close"
+              }
+            }
+          ],
+          "window": 10
+        }
+      ],
+      "window": 10
+    },
+    "name": "PML breakout",
+    "risk": {
+      "sl": {
+        "anchor": {
+          "a": {
+            "key": "levels.pm_low",
+            "kind": "primitive",
+            "params": {},
+            "source": "close"
+          },
+          "b": {
+            "a": {
+              "kind": "const",
+              "value": 0.2
+            },
+            "b": {
+              "a": {
+                "key": "levels.today_high",
+                "kind": "primitive",
+                "params": {},
+                "source": "close"
+              },
+              "b": {
+                "key": "levels.pm_low",
+                "kind": "primitive",
+                "params": {},
+                "source": "close"
+              },
+              "kind": "expr",
+              "op": "sub"
+            },
+            "kind": "expr",
+            "op": "mul"
+          },
+          "kind": "expr",
+          "op": "add"
+        },
+        "type": "prim",
+        "value": null
+      },
+      "tp": {
+        "type": "",
+        "value": null
+      },
+      "window_end": 1010,
+      "window_start": 940
+    },
+    "side": "short",
+    "stage": "development"
+  }
 ]

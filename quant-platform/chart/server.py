@@ -61,6 +61,10 @@ try:                       # bundled seed strategies (the 5 pro scalps) — the
     store.seed_strategies()  # first boot after deploy adds any that are missing
 except Exception:          # never let a seed problem stop the server
     pass
+try:
+    store.stamp_ready_stages()
+except Exception as e:
+    print(f'[store] could not stamp stages: {e}', flush=True)
 
 
 @app.get('/', response_class=HTMLResponse)

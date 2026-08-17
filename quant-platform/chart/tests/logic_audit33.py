@@ -174,10 +174,19 @@ try:
                     'risk': {'sl': {'type': 'pct', 'value': 1}, 'targets': []}}
         saved = store.save_strategy(dict(authored))
         read_back = store.get_strategy(saved['id'])
-        injected = set(read_back) - set(authored) - {'tools'}
-        ok('every key a READ adds is declared in store.DERIVED_KEYS',
-           injected <= set(store.DERIVED_KEYS),
-           f'undeclared: {sorted(injected - set(store.DERIVED_KEYS))}')
+        # TWO families, and conflating them is its own bug. DERIVED_KEYS are
+        # computed and stripped on write; DEFAULTED_KEYS are authored, optional,
+        # and filled in on read — stripping one of those would throw away the
+        # answer the user gave. Both must be declared, or seed_strategies
+        # compares against a key the bundle cannot have and rewrites forever.
+        declared = set(store.DERIVED_KEYS) | set(store.DEFAULTED_KEYS)
+        injected = set(read_back) - set(authored)
+        ok('every key a READ adds is declared as derived or as defaulted',
+           injected <= declared, f'undeclared: {sorted(injected - declared)}')
+        ok('...and the two families do not overlap',
+           not (set(store.DERIVED_KEYS) & set(store.DEFAULTED_KEYS)))
+        ok('...and a defaulted key SURVIVES a save, unlike a derived one',
+           store.save_strategy({**authored, 'stage': 'ready'})['stage'] == 'ready')
         ok('...and DERIVED_KEYS is what save_strategy strips, not a second list',
            set(store.DERIVED_KEYS) == {'id', 'created_at', 'updated_at',
                                        'exit_protocol'})

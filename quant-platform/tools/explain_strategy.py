@@ -123,8 +123,10 @@ for name in WANT:
     print('=' * 74)
     print(f'{name}      [{src}]')
     print('=' * 74)
+    stage = d.get('stage') if d.get('stage') in ('ready', 'development') else 'development'
     print(f"side {d.get('side')}   window {hhmm(r.get('window_start'))} → {hhmm(r.get('window_end'))}"
-          f"   tools {d.get('tools') or '(none)'}")
+          f"   tools {d.get('tools') or '(none)'}"
+          f"   [{'READY' if stage == 'ready' else 'under development'}]")
     print(f"exit shape: {p.get('shape')}   alertable={p.get('ok')} orderable={p.get('order_ok')}")
     disc = {k: d.get(k) for k in ('attempts_per_day','cooldown','min_hold','max_stop_pct','min_target_usd') if d.get(k) not in (None,'',0)}
     if disc: print(f"discipline: {disc}")

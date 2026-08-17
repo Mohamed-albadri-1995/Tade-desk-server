@@ -64,9 +64,45 @@ app.use('/api/setups', require('./routes/setups'));
 
 // The tool registry, so the landing page renders whatever is configured
 // rather than a list hardcoded in the page.
-app.get('/api/tools', (req, res) => res.json({
-  ok: true, tools: config.tools, apps: config.apps,
-}));
+app.get('/api/tools', (req, res) => {
+  /*
+   * WITH ITS STAGE. Nine tools on one page all read with the same authority,
+   * and they have not earned it equally: two are validated, several have a
+   * fortnight of data and no verdict, and two were rewritten this week. The
+   * day count is THIS tool's own archive — the landing page is served by one
+   * tool and cannot see the others' databases — so a tool's own page shows a
+   * real count and its neighbours fall back to the recorded verdict.
+   */
+  const stages = require('./stages');
+  let days = {};
+  try {
+    const { getAvailableDates } = require('./warehouse/registers');
+    days = { [config.toolId]: (getAvailableDates('R1') || []).length };
+  } catch { /* a tool that cannot read its own archive still lists */ }
+  const byId = Object.fromEntries(stages.all(days).map(s => [s.id, s]));
+  res.json({
+    ok: true,
+    tools: config.tools.map(t => ({ ...t, ...(byId[t.id] || {}) })),
+    apps: config.apps,
+    stages: stages.STAGES,
+  });
+});
+
+/*
+ * Move a tool between stages, or back to the automatic default.
+ *
+ * `auto` REMOVES the override rather than writing the current answer: "put it
+ * back to whatever the rule says" has to stay expressible, or a reset freezes
+ * the tool at whatever stage it happened to be on that day.
+ */
+app.post('/api/tools/:id/stage', express.json(), (req, res) => {
+  try {
+    const out = require('./stages').setStage(req.params.id, req.body && req.body.stage);
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
 
 // Health — reports which tool answered, so probing the wrong port is obvious.
 // It also carries when this tool is worth OPENING, because the landing page

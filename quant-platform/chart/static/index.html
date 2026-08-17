@@ -372,6 +372,14 @@
         <input id="stratName" placeholder="strategy name" size="16">
         <label style="color:var(--text2)">Side
           <select id="stratSide"><option value="long">Long</option><option value="short">Short</option></select></label>
+        <!-- WHERE THIS STRATEGY IS IN ITS LIFE. Nine saved strategies in one
+             dropdown all read as finished; three of them are. Development is
+             the default and the safe reading — a strategy says it is ready
+             only because somebody said so. -->
+        <label style="color:var(--text2)" title="Ready = finished and trusted to place real orders from. Development = still being worked on. New strategies start in development.">Stage
+          <select id="stratStage">
+            <option value="development">Development</option>
+            <option value="ready">Ready</option></select></label>
         <!-- Which scanning tools this setup belongs to. The setup carries the
              list rather than each tool carrying a list of setups, so a setup
              used by three tools is one object instead of three that drift
@@ -1251,6 +1259,8 @@ function renderStrat(){
   document.getElementById('stratSide').value=STRAT.side||'long';
   document.getElementById('stratTools').value=(STRAT.tools||[]).join(' ');
   const risk=STRAT.risk||{};
+  { const st=document.getElementById('stratStage');
+    if(st) st.value = STRAT.stage === 'ready' ? 'ready' : 'development'; }
   document.getElementById('slType').value=(risk.sl&&risk.sl.type)||''; document.getElementById('slVal').value=(risk.sl&&risk.sl.value!=null)?risk.sl.value:'';
   document.getElementById('tpType').value=(risk.tp&&risk.tp.type)||''; document.getElementById('tpVal').value=(risk.tp&&risk.tp.value!=null)?risk.tp.value:'';
   // anchored SL/TP (@ line): show an operand editor for the line it trails;
@@ -1346,6 +1356,8 @@ function readStratHeader(){ STRAT.name=document.getElementById('stratName').valu
   // rejects an unknown id. Doing it there rather than here means one rule
   // rather than two that can disagree, and the API is safe on its own.
   STRAT.tools=(document.getElementById('stratTools').value||'').split(/[\s,]+/).filter(Boolean);
+  { const st=document.getElementById('stratStage');
+    if(st) STRAT.stage = st.value === 'ready' ? 'ready' : 'development'; }
   const rd=(t,v,old)=>{ const vv=parseFloat(document.getElementById(v).value); const out={type:document.getElementById(t).value, value:Number.isFinite(vv)?vv:null};
     if(out.type==='prim') out.anchor=(old&&old.anchor)||{kind:'primitive',key:'ma.ema',source:'close',params:{length:9}};   // keep the edited anchor
     return out; };
@@ -1366,11 +1378,34 @@ function readStratHeader(){ STRAT.name=document.getElementById('stratName').valu
   for(const g of ['entry','exit']){ STRAT[g].logic=document.getElementById(g+'Logic').value; const w=parseInt(document.getElementById(g+'Window').value,10); STRAT[g].window=Number.isFinite(w)?w:10; const k=parseInt(document.getElementById(g+'K').value,10); STRAT[g].k=Number.isFinite(k)?k:1; } }
 async function loadStrategies(){
   try{ const j=await (await fetch('/api/strategies')).json(); SAVED=j.strategies||[]; }catch(_){ SAVED=[]; }
-  const sel=document.getElementById('stratLoad'); sel.innerHTML='<option value="">— saved —</option>';
-  for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);} if(STRAT.id)sel.value=STRAT.id;
-  const bsel=document.getElementById('btStrat'); if(bsel){ const keep=bsel.value; bsel.innerHTML='<option value="">— saved strategy —</option>'; for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; bsel.appendChild(o);} if(keep)bsel.value=keep; }
+  /*
+   * READY FIRST, then everything under development.
+   *
+   * One flat dropdown of thirteen names reads as thirteen finished strategies.
+   * Three are. The rest are being worked on, and a list that does not say so
+   * invites picking one to trade from — so the ready ones are grouped at the
+   * top and the others are labelled where they are chosen.
+   */
+  const label=x=>x.stage==='ready'?x.name:`${x.name}  ·  dev`;
+  const ordered=[...SAVED].sort((a,b)=>
+    (a.stage==='ready'?0:1)-(b.stage==='ready'?0:1) || a.name.localeCompare(b.name));
+  const fill=(el,placeholder,keep)=>{ if(!el)return;
+    el.innerHTML=`<option value="">${placeholder}</option>`;
+    let group=null, last=null;
+    for(const x of ordered){
+      const g=x.stage==='ready'?'Ready':'Under development';
+      if(g!==last){ group=document.createElement('optgroup'); group.label=g; el.appendChild(group); last=g; }
+      const o=document.createElement('option'); o.value=x.id; o.textContent=label(x);
+      group.appendChild(o);
+    }
+    if(keep)el.value=keep; };
+  fill(document.getElementById('stratLoad'), '— saved —', STRAT.id);
+  fill(document.getElementById('btStrat'), '— saved strategy —',
+       document.getElementById('btStrat') && document.getElementById('btStrat').value);
   // the optional SECOND book gets the same list (see the tooltip on the select)
-  const bsel2=document.getElementById('btStrat2'); if(bsel2){ const keep2=bsel2.value; bsel2.innerHTML='<option value="">— second book (optional, e.g. the short side) —</option>'; for(const s of SAVED){ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; bsel2.appendChild(o);} if(keep2)bsel2.value=keep2; }
+  fill(document.getElementById('btStrat2'),
+       '— second book (optional, e.g. the short side) —',
+       document.getElementById('btStrat2') && document.getElementById('btStrat2').value);
 }
 
 // ── Phase 4: backtest panel ──

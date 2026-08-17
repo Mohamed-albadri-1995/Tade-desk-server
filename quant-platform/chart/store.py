@@ -157,9 +157,33 @@ def _db() -> sqlite3.Connection:
 # it is genuinely part of the authored document and round-trips unchanged.
 DERIVED_KEYS = ('id', 'created_at', 'updated_at', 'exit_protocol')
 
+# The OTHER family, and the distinction is the one that keeps getting missed.
+#
+# DERIVED_KEYS are computed by a read and are never authored — stripping them
+# on write is right. These are AUTHORED but OPTIONAL: a read fills in a default
+# so no caller has to know that absent `tools` means [] or that absent `stage`
+# means development. Stripping them on write would throw the answer away.
+#
+# What they need instead is for `seed_strategies` to carry the STORED value
+# into the comparison. Without that the bundle (which has neither) differs from
+# every stored row (which has both) on every startup — a perpetual rewrite that
+# also resets whichever of them the user set. `tools` did exactly that once;
+# `stage` would have done it again the day it was added.
+DEFAULTED_KEYS = ('tools', 'stage')
+
+
+# Where a strategy is in its life. 'ready' means it is trusted enough to place
+# real orders from; everything else is still being worked on. Absent means
+# development — the safe reading, and the one a strategy starts at.
+STAGES = ('development', 'ready')
+
 
 def _row_to_strategy(row: sqlite3.Row) -> dict:
     obj = json.loads(row['data'])
+    # Stated on every read rather than left absent, so no caller has to know
+    # that a missing field means development. `exit_protocol` is derived the
+    # same way and for the same reason.
+    obj['stage'] = obj.get('stage') if obj.get('stage') in STAGES else 'development'
     # Setups saved before tools existed have no key at all. Defaulting here
     # rather than at each call site means a reader never has to distinguish
     # "old setup" from "assigned to nothing" — they are the same thing.
@@ -403,6 +427,38 @@ def restore_strategies() -> int:
     return n
 
 
+# The three strategies that are finished, named by whoever built them. Stamped
+# once, and only onto a row that has no stage at all: a strategy moved BACK to
+# development on purpose must stay there, so this fills a blank rather than
+# asserting an answer.
+READY_STRATEGIES = ('Test', 'OR + VWAP 09:35 (Long)', 'OR + VWAP 09:35 (Short)',
+                    'T2 10:00 VWAP Extension (Long)', 'T2 10:00 VWAP Extension (Short)')
+
+
+def stamp_ready_stages() -> int:
+    """Mark the finished strategies ready, once, where nothing is recorded yet.
+
+    Everything else stays development, which is what a strategy with no stage
+    has always effectively been — it just had no way to say so.
+    """
+    n = 0
+    for s in list_strategies():
+        if s['name'] not in READY_STRATEGIES:
+            continue
+        raw = json.loads(_db().execute(
+            'SELECT data FROM strategies WHERE id = ?', (s['id'],)).fetchone()['data'])
+        if raw.get('stage'):
+            continue                       # already decided, either way
+        raw['stage'] = 'ready'
+        raw['id'] = s['id']
+        save_strategy(raw)
+        n += 1
+    if n:
+        print(f'[store] marked {n} strategy(ies) ready; everything else is '
+              'development until you say otherwise', flush=True)
+    return n
+
+
 def seed_strategies(seeds_dir: Path | None = None) -> int:
     """Sync the bundled seed strategies (chart/seeds/*.json) into the DB on
     every startup. These 5 are OUR canonical, maintained strategies: a stored
@@ -480,6 +536,12 @@ def seed_strategies(seeds_dir: Path | None = None) -> int:
             # tool yet". The stored assignment wins; the bundle's only seeds a
             # row that does not exist yet (the insert path above).
             payload['tools'] = cur.get('tools') or []
+            # …and the same for every other defaulted key. The stored decision
+            # wins: a strategy moved to `ready` in the builder must not come
+            # back as `development` after a deploy.
+            for k in DEFAULTED_KEYS:
+                if k != 'tools' and k in cur:
+                    payload[k] = cur[k]
             if stored != payload:                  # bundle changed → refresh in place
                 payload['id'] = cur['id']
                 save_strategy(payload); changed += 1
