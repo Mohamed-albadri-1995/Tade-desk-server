@@ -89,7 +89,15 @@ def stopline(sl):
     if not sl or not sl.get('type'): return 'none'
     t = sl['type']; v = sl.get('value')
     if t == 'prim':
-        return f"at the line {sub(sl.get('anchor'))}" + (f", {v}% beyond it" if v else "")
+        # FIXED or MOVING, said out loud. `freeze` reads the line once at the
+        # entry bar; without it the level is re-read every bar and the stop
+        # trails. The anchor's own `hold` is NOT this — it forward-fills a
+        # sparse line and does nothing to one that prints every bar — and
+        # confusing the two is how a stop ends up moving when it was meant to
+        # be frozen.
+        how = 'FIXED at entry' if sl.get('freeze') else 'MOVES with the line, bar by bar'
+        return (f"at the line {sub(sl.get('anchor'))}"
+                + (f", {v}% beyond it" if v else "") + f"  [{how}]")
     return {'pct': f'{v}% from entry', 'atr': f'{v} × ATR', 'points': f'{v} points'}.get(t, f'{t} {v}')
 
 _ap = argparse.ArgumentParser(description=__doc__,
@@ -146,6 +154,13 @@ for name in WANT:
               + (f" {l['r_multiple']}R" if l.get('r_multiple') is not None else '')
               + (f" @ {sub(l['tp'])}" if l.get('tp') else ''))
     if p.get('runner'): print(f"  runner: {p['runner'].get('fraction')*100:g}% managed {p['runner'].get('manage')}")
+    # The mismatch worth shouting about: the backtest trails this stop and the
+    # broker cannot, so the two are testing different trades.
+    _sl = r.get('sl') or {}
+    if _sl.get('type') == 'prim' and not _sl.get('freeze'):
+        print('\n  ⚠⚠ THE STOP MOVES. The backtest re-reads the line every bar; a')
+        print('      broker gets one fixed price. Tick "fix at entry" in the builder')
+        print('      to make the two agree.')
     if p.get('warnings'):
         print('\nWARNINGS:')
         for w in p['warnings']: print(f"  ⚠ {w}")

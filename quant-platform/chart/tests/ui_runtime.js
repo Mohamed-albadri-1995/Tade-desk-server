@@ -164,6 +164,34 @@ catch (e) { ok('_syncViewportHeight() runs', false, e.message); }
 ok('an open drawer reserves its height instead of covering the chart',
    /body\.drawer-open main \{ padding-bottom/.test(html));
 
+// THE AXIS IS MEASURED, NOT ASSUMED.
+//
+// Reported a third time from a phone after two layout fixes that each held on
+// one device. There are too many ways for the last 28 pixels of #chart to fall
+// off a phone — the URL bar returning, a gesture bar drawn over the page, a
+// browser whose 100dvh disagrees with its own innerHeight — to keep guessing
+// which one it is from a screenshot. So the page measures the axis row and
+// shortens the chart by exactly the overflow, whatever caused it.
+ok('the page measures whether the time axis is on screen',
+   /_keepAxisOnScreen/.test(html) && /rows\[rows\.length-1\]\.getBoundingClientRect/.test(html));
+ok('...against the VISIBLE viewport, not the document',
+   /visualViewport && window\.visualViewport\.height\)\s*\n?\s*\|\| window\.innerHeight/.test(html));
+ok('...and only ever shortens, so a correct layout is left alone',
+   /if\(over <= 1\)\{ _axisFix = 0; return; \}/.test(html));
+ok('the correction re-measures itself instead of assuming it worked',
+   /requestAnimationFrame\(_keepAxisOnScreen\)/.test(html));
+ok('it is capped, so it cannot spin',
+   /if\(_axisFix >= 3\) return;/.test(html));
+// The resize observer used to call applyOptions directly and skip the check,
+// which is how a resize could put the axis back under the fold and leave it.
+ok('every chart resize goes through the check',
+   /new ResizeObserver\(\(\)=>_resizeChart\(\)\)/.test(html));
+// _syncViewportHeight returned EARLY where dvh is supported — which is every
+// modern browser — taking the resize handling with it.
+ok('a dvh-capable browser still re-measures on resize',
+   /_axisFix=0;\s*\n?\s*\/\/[^\n]*\n?\s*_resizeChart\(\);/.test(html)
+   || /_axisFix=0;[\s\S]{0,200}_resizeChart\(\);/.test(html));
+
 // STALE SHELL. Mobile Chrome caches the HTML document and a phone has no easy
 // hard-refresh, so after a deploy the browser kept serving the previous page —
 // the multi-source register picker was simply absent, which reads as a broken

@@ -701,7 +701,10 @@ function initChart(){
   CHART.priceScale('vol').applyOptions({scaleMargins:{top:0.80,bottom:0},visible:false});
   CHARTTYPE=localStorage.getItem('qpc_ctype')||'candles';
   makePriceSeries();
-  new ResizeObserver(()=>CHART.applyOptions({width:el.clientWidth,height:el.clientHeight})).observe(el);
+  // Through _resizeChart, not straight to applyOptions: every resize is also
+  // the moment to re-check that the time axis is still on screen, and an
+  // observer that skipped that check was how the axis stayed lost.
+  new ResizeObserver(()=>_resizeChart()).observe(el);
   CHART.subscribeCrosshairMove(updateLegend);
 }
 
@@ -1256,7 +1259,35 @@ function renderStrat(){
     const host=document.getElementById(box); host.innerHTML='';
     const spec=risk[rk]; const isPrim=spec&&spec.type==='prim';
     document.getElementById(vid).placeholder=isPrim?'% beyond':'1.5';
-    if(isPrim){ spec.anchor=spec.anchor||{kind:'primitive',key:'ma.ema',source:'close',params:{length:9}}; host.appendChild(operandEl(spec.anchor, renderStrat, false)); }
+    if(isPrim){ spec.anchor=spec.anchor||{kind:'primitive',key:'ma.ema',source:'close',params:{length:9}}; host.appendChild(operandEl(spec.anchor, renderStrat, false));
+      /*
+       * FIX AT ENTRY — the control that was missing.
+       *
+       * The operand editor already has a `→hold` box, and it is a DIFFERENT
+       * thing: `hold` forward-fills a SPARSE line (a pivot that only prints on
+       * some bars) into a continuous one. On a line that prints every bar —
+       * session VWAP, a stdev band — it does nothing at all.
+       *
+       * `risk.sl.freeze` is what stops the level moving: the anchor is read
+       * ONCE, on the signal bar, and held for the life of the trade. Without
+       * it an anchored stop is a trailing stop, which is a different trade
+       * from the one that was tested and is also un-sendable — no broker
+       * follows an indicator, so the order goes out as whatever the level
+       * happened to be at entry while the backtest kept moving it.
+       *
+       * It was only settable by editing JSON, so a stop built in the browser
+       * trailed and the person who built it had no way to know.
+       */
+      const fz=document.createElement('label');
+      fz.style.cssText='display:inline-flex;gap:3px;align-items:center;color:var(--text2);margin-left:6px;white-space:nowrap';
+      fz.title='Read the line ONCE at the entry bar and keep that price for the '
+        +'whole trade. OFF = the stop follows the line bar by bar, which no broker '
+        +'can do — the order goes out at the entry-bar level while the backtest keeps moving it.';
+      const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!!spec.freeze;
+      cb.onchange=()=>{ if(cb.checked) spec.freeze=true; else delete spec.freeze; renderStrat(); };
+      fz.append(cb, document.createTextNode('fix at entry'));
+      host.appendChild(fz);
+    }
   }
   for(const g of ['entry','exit']){
     const grp=STRAT[g]; document.getElementById(g+'Logic').value=grp.logic||'AND';
@@ -1767,15 +1798,72 @@ async function evalStrategy(){
 }
 // top-level: toggleDrawer and the resize grips all need it (it used to be a
 // const inside the load handler, invisible to anything declared outside it)
-function _resizeChart(){ if(CHART){ const el=document.getElementById('chart'); CHART.applyOptions({width:el.clientWidth,height:el.clientHeight}); } }
+function _resizeChart(){ if(CHART){ const el=document.getElementById('chart'); CHART.applyOptions({width:el.clientWidth,height:el.clientHeight}); _keepAxisOnScreen(); } }
+
+/*
+ * THE TIME AXIS MUST BE ON SCREEN. Measured, not assumed.
+ *
+ * lightweight-charts draws the date/time scale along the bottom edge of its own
+ * canvas, so it is visible exactly when the LAST 28 pixels of #chart are inside
+ * the viewport — and there are many ways for that to stop being true on a
+ * phone: the URL bar returning, a gesture bar drawn over the page, a browser
+ * whose 100dvh disagrees with its own innerHeight, a zoom level that rounds the
+ * wrong way. Reasoning about which one it is from a screenshot is guesswork,
+ * and every fix so far has been a guess that held on one device.
+ *
+ * So this measures. If the axis row ends below the visible area, the chart is
+ * shortened by exactly the overflow and the axis comes back — whatever pushed
+ * it down. Capped at three passes: shrinking changes the layout, which is why
+ * it is re-measured, and a loop that could not converge would spin.
+ *
+ * A pure correction, never a grab: it only ever REDUCES height, and only when
+ * something is genuinely off screen, so on a device where the layout is already
+ * right it does nothing at all.
+ */
+let _axisFix = 0;
+function _keepAxisOnScreen(){
+  const el = document.getElementById('chart');
+  if(!el || !CHART) return;
+  const rows = el.querySelectorAll('table tr');
+  if(!rows.length) return;
+  const axis = rows[rows.length-1].getBoundingClientRect();
+  if(axis.height < 1) return;                       // no axis row drawn yet
+  const visible = (window.visualViewport && window.visualViewport.height)
+                  || window.innerHeight;
+  // +1 so the last row of pixels is inside the fold rather than exactly on it:
+  // sub-pixel layout and a rounded device pixel ratio put the final line of the
+  // date text under the edge often enough to be the whole complaint again.
+  const over = Math.ceil(axis.bottom - visible) + 1;
+  if(over <= 1){ _axisFix = 0; return; }            // already where it belongs
+  if(_axisFix >= 3) return;                         // measured, corrected, stop
+  _axisFix++;
+  const wrap = document.getElementById('chartWrap');
+  const h = Math.max(120, el.clientHeight - over);
+  wrap.style.height = h + 'px';
+  wrap.style.flex = '0 0 auto';
+  CHART.applyOptions({ width: el.clientWidth, height: h });
+  console.warn(`[chart] the time axis was ${over - 1}px below the fold — `
+    + `chart shortened to ${h}px so the dates are readable`);
+  // Shrinking re-lays-out the page, so the answer has to be checked again
+  // rather than assumed. Once more, next frame; _axisFix caps the recursion.
+  requestAnimationFrame(_keepAxisOnScreen);
+}
 /* Fallback for browsers without `dvh` (see the body CSS note): pin the body to
    the height actually visible. window.innerHeight excludes the URL bar and
    changes as it hides, so re-apply on resize / orientation change. Skipped
    entirely where dvh works, leaving the CSS in charge on modern browsers. */
 function _syncViewportHeight(){
-  try{ if(window.CSS&&CSS.supports&&CSS.supports('height','100dvh'))return; }catch(_){}
-  const h=(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
-  if(h)document.body.style.height=h+'px';
+  let dvh=false;
+  try{ dvh=!!(window.CSS&&CSS.supports&&CSS.supports('height','100dvh')); }catch(_){}
+  if(!dvh){
+    const h=(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+    if(h)document.body.style.height=h+'px';
+  }
+  /* The dvh check used to return EARLY, taking the resize with it — so on every
+     modern browser (which is all of them now) nothing re-measured when the URL
+     bar came back. Supporting dvh means the body height is handled; it does not
+     mean the axis is on screen, and that is a separate measurement. */
+  _axisFix=0;                       // a resize is a fresh layout, not a retry
   _resizeChart();
 }
 function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open);
