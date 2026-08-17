@@ -1019,6 +1019,42 @@ def setup_decide(payload: dict = Body(...)):
         return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
 
 
+@app.post('/api/strategy/exit_plan')
+def strategy_exit_plan(payload: dict = Body(...)):
+    """The legs, the runner and the stop behaviour for one strategy at a price.
+
+    The ONLY place this arithmetic lives. The screener has to know how many
+    orders a signal becomes and what goes in each, and re-deriving that on the
+    other side of the wire is how the live orders stop matching the backtest —
+    the same mistake the exit protocol was written to end. So the answer is
+    served, not copied.
+
+    Body: {name | strategy_id, side, entry, stop, target_r}
+    """
+    try:
+        entry = float(payload.get('entry'))
+        stop = float(payload.get('stop'))
+    except (TypeError, ValueError):
+        return JSONResponse({'ok': False, 'error': 'entry and stop are required numbers'},
+                            status_code=200)
+    st = None
+    if payload.get('strategy_id'):
+        st = store.get_strategy(int(payload['strategy_id']))
+    elif payload.get('name'):
+        want = str(payload['name']).strip()
+        st = next((x for x in store.list_strategies() if x.get('name') == want), None)
+    if not st:
+        return JSONResponse({'ok': False, 'error': 'no such strategy',
+                             'have': [x.get('name') for x in store.list_strategies()]},
+                            status_code=200)
+    from chart import decide as _dec
+    side = str(payload.get('side') or st.get('side') or 'long').lower()
+    plan = _dec.exit_plan(st, side, entry, stop,
+                          target_r=float(payload.get('target_r') or 2.0))
+    return {'ok': True, 'name': st.get('name'), 'side': side,
+            'entry': entry, 'stop': stop, 'plan': plan}
+
+
 @app.post('/api/strategy/test')
 def strategy_test(payload: dict = Body(...)):
     """Evaluate a single condition (rule or group) and mark every bar it holds
