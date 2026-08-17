@@ -152,8 +152,47 @@ describe('a run that finds trades', () => {
     decided([pick('LIFE')]);
     const detail = (await runner.runSetup(SETUP, { date: DATE })).fires[0].detail;
     expect(detail).toMatch(/^BUY .*LIFE/);
-    expect(detail).toMatch(/stop [\d.]+ \(VWAP, fixed\)/);
+    // The FACTS, not the wording. "(VWAP, fixed)" was asserted here, and it is
+    // a property of the T2 VWAP-extension strategy rather than of a setup —
+    // pinning it is the same assumption that made describePick throw on the
+    // first setup with a different shape.
+    expect(detail).toMatch(/stop [\d.]+/);
     expect(detail).toMatch(/target [\d.]+/);
+  });
+
+  /*
+   * THE LINE THAT KILLED A LIVE MORNING.
+   *
+   * describePick called .toFixed() on the target and the extension without
+   * checking either. `Test` has its take-profit OFF — its targets are
+   * scale-out legs — so qp returns target: null, and the call threw INSIDE the
+   * runner. The whole run died: every minute of a two-hour window published
+   * "Did not run: Cannot read properties of null (reading 'toFixed')" and no
+   * alert, no order and no pick ever came out of a setup that was working.
+   *
+   * A description is the last thing that should be able to stop a trade.
+   */
+  test('a pick with NO target does not throw — it says so instead', async () => {
+    decided([{ ...pick('LIFE'), target: null, target_r: null, metric: null }]);
+    const out = await runner.runSetup(SETUP, { date: DATE });
+    expect(out.ok).toBe(true);
+    expect(out.fires[0].detail).toMatch(/^BUY .*LIFE/);
+    expect(out.fires[0].detail).toMatch(/no fixed target/);
+  });
+
+  test('a pick with no stop, no risk and no metric still describes itself', async () => {
+    decided([{ symbol: 'LIFE', side: 'long', entry: 29.05, stop: null, metric: null,
+               entry_at: '10:00', rank: 1, risk: null, risk_pct: null,
+               target: null, target_r: null }]);
+    const out = await runner.runSetup(SETUP, { date: DATE });
+    expect(out.ok).toBe(true);
+    expect(String(out.fires[0].detail)).toMatch(/LIFE/);
+  });
+
+  test('the VWAP wording only appears when there IS an extension', async () => {
+    decided([{ ...pick('LIFE'), metric: null }]);
+    const out = await runner.runSetup(SETUP, { date: DATE });
+    expect(out.fires[0].detail).not.toMatch(/from VWAP/);
   });
 
   test('a short reads as SHORT, not BUY', async () => {

@@ -51,14 +51,55 @@ function universe() {
  * things needed to place the trade.
  */
 function describePick(pick, size) {
-  const p = pick.plan;
+  const p = pick.plan || {};
   const side = pick.signal === 'LONG' ? 'BUY' : 'SHORT';
   // The share count leads when it is known, because it is the part you cannot
   // work out in your head while the bar you are entering on is forming.
   const qty = size && size.shares > 0 ? `${size.shares} ` : '';
-  return `${side} ${qty}${pick.ticker} — now ~${p.entry.toFixed(2)}, `
-    + `stop ${p.stop.toFixed(2)} (VWAP, fixed), target ${p.target.toFixed(2)} `
-    + `· risk ${p.riskPct.toFixed(2)}% · ${pick.extension.toFixed(2)}% from VWAP`;
+
+  /*
+   * EVERY FIELD IS OPTIONAL, AND THIS LINE MUST NEVER THROW.
+   *
+   * It was written when there was one setup, and it described that setup: it
+   * called .toFixed() on the target and the extension unconditionally and said
+   * "(VWAP, fixed)" and "% from VWAP" in the text. Both are properties of the
+   * T2 VWAP-extension strategy, not of a setup.
+   *
+   * `Test` is the first setup with a different shape — its take-profit is off,
+   * because its targets are scale-out legs — so `target` is null, and this
+   * threw. It threw INSIDE the runner, so the whole run died and published
+   * "Did not run: Cannot read properties of null" every minute of a two-hour
+   * window: no alert, no order, no picks, for a setup that was working.
+   *
+   * A description is the last thing that should be able to stop a trade. It now
+   * states what exists and stays quiet about what does not.
+   */
+  // Number(null) is 0, NOT NaN — so a null target would print as "target 0.00",
+  // which is worse than throwing: it is a number, on an alert, that nobody
+  // typed and that reads as a real price. Absence is caught BEFORE the
+  // conversion. (The same trap is called out in sideA/tradable.js.)
+  const n = (v, d = 2) => {
+    if (v === null || v === undefined || v === '') return null;
+    const x = Number(v);
+    return Number.isFinite(x) ? x.toFixed(d) : null;
+  };
+  const bits = [];
+  const entry = n(p.entry);
+  if (entry) bits.push(`now ~${entry}`);
+  const stop = n(p.stop);
+  if (stop) bits.push(`stop ${stop}`);
+  const target = n(p.target);
+  // No target is not a missing field — a scale-out carries its targets on its
+  // legs, and a runner has none at all. Say which rather than printing nothing.
+  bits.push(target ? `target ${target}`
+    : (pick.exitPlan && (pick.exitPlan.legs || []).length
+        ? `targets on ${pick.exitPlan.legs.length} leg(s)` : 'no fixed target'));
+  const riskPct = n(p.riskPct);
+  if (riskPct) bits.push(`risk ${riskPct}%`);
+  const ext = n(pick.extension);
+  if (ext) bits.push(`${ext}% from VWAP`);
+
+  return `${side} ${qty}${pick.ticker} — ${bits.join(' · ')}`;
 }
 
 /**
