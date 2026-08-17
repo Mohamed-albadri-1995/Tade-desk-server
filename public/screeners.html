@@ -692,11 +692,31 @@ function byWhenItMatters(states) {
     };
     const ra = rank(ca), rb = rank(cb);
     if (ra !== rb) return ra - rb;
+    /*
+     * WITHIN a group, the STAGE decides — validated above under study above
+     * collecting.
+     *
+     * The clock answers "which of these could I act on right now" and stops
+     * there: four tools open at 09:30 and it has nothing further to say about
+     * them. But they are not interchangeable. One has been judged and two were
+     * rewritten this week, and a list that leaves that to the chip alone puts a
+     * tool with nine days of data above one with a year for no better reason
+     * than the order it sits in the config file.
+     *
+     * Under the clock rather than over it, deliberately: a validated tool that
+     * is asleep is still asleep, and promoting it above the ones that are open
+     * would answer a question nobody asked at 09:31.
+     */
+    const sa = STAGE_RANK[a.stage] ?? 9, sb = STAGE_RANK[b.stage] ?? 9;
+    if (sa !== sb) return sa - sb;
     if (ra === 0) return ca.to.localeCompare(cb.to);       // closing soonest first
     if (ra === 3) return 0;                                 // leave as configured
     return ca.from.localeCompare(cb.from);                  // opening soonest first
   };
 }
+
+/** Most established first. Anything unknown sorts last rather than first. */
+const STAGE_RANK = { valid: 0, study: 1, collecting: 2 };
 
 /*
  * Headings between the groups.

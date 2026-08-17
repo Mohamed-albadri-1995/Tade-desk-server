@@ -241,6 +241,17 @@ async function list() {
          * of a window rather than as a separate kind of thing.
          */
         windowEnd: until || at,
+        /*
+         * READY, or still being worked on. Carried from the qp strategy so the
+         * setups list can put the finished ones first — thirteen setups in one
+         * list all read as thirteen finished setups, and three are.
+         *
+         * A PAIR IS ONLY AS READY AS ITS LESS READY HALF. A long marked ready
+         * whose short is still in development is not a ready setup: the pair
+         * ranks across both books, so half of it being unfinished makes the
+         * whole thing unfinished. Merged below with that rule.
+         */
+        stage: 'ready',
         universeScanAt: minutesBefore(at, 2),
         sides: [],
         strategies: [],
@@ -261,6 +272,8 @@ async function list() {
      * one that closes earlier would otherwise silently truncate the other.
      */
     if (until && (!g.windowEnd || until > g.windowEnd)) g.windowEnd = until;
+    // The less ready half decides — see the note on `stage` above.
+    if (s.stage !== 'ready') g.stage = 'development';
     for (const t of tools) if (!g.tools.includes(t)) g.tools.push(t);
     if (s.side && !g.sides.includes(s.side)) g.sides.push(s.side);
     g.strategies.push(s.name);

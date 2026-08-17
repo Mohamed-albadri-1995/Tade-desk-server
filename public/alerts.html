@@ -1052,9 +1052,31 @@ async function loadSetups() {
         there; it appears here on its own.</div>`;
       return;
     }
-    out.innerHTML = SETUPS.map((s, i) => {
+    /*
+     * READY FIRST, then everything under development.
+     *
+     * Thirteen setups in one list all read as thirteen finished setups; three
+     * are. The list is where a setup gets switched ON, so it is exactly where
+     * the distinction has to be visible — the chip alone is not enough when the
+     * order puts an unfinished one at the top.
+     *
+     * Within each group the decision time still leads, because that is what the
+     * morning is organised around.
+     */
+    const ordered = SETUPS.slice().sort((a, b) =>
+      ((a.stage === 'ready' ? 0 : 1) - (b.stage === 'ready' ? 0 : 1))
+      || String(a.decisionTime || '').localeCompare(String(b.decisionTime || ''))
+      || String(a.name || '').localeCompare(String(b.name || '')));
+    let lastStage = null;
+    out.innerHTML = ordered.map((s, i) => {
       const on = s.enabled !== false;
-      return `<div class="setup-def${on ? '' : ' off'}">
+      const stage = s.stage === 'ready' ? 'ready' : 'dev';
+      // A heading each time the group changes, so the order explains itself
+      // rather than looking like the list has been shuffled.
+      const head = stage !== lastStage
+        ? `<div class="su-group">${(lastStage = stage) === 'ready'
+            ? 'Ready' : 'Under development'}</div>` : '';
+      return head + `<div class="setup-def${on ? '' : ' off'}${stage === 'dev' ? ' dev' : ''}">
         <div class="su-head">
           <span class="t">${esc(s.name)}</span>
           <!-- A watch setup shows its whole window, because it can fire on any

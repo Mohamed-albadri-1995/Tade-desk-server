@@ -532,7 +532,11 @@ describe('the setup card', () => {
      * deployment and changes. Ranking belongs to the deployment — it used to be
      * printed in both.
      */
-    const at = script.indexOf('out.innerHTML = SETUPS.map');
+    // Located by the MARKUP it produces, not by the name of the variable it
+    // maps over: that name changed when the list started ordering by stage,
+    // and pinning it made three tests slice an empty string and fail on a
+    // change that touched none of what they check.
+    const at = script.indexOf('<div class="setup-def');
     const card = script.slice(at, script.indexOf('paintAlgoState();', at));
     expect(card).toContain('<summary>what this setup does</summary>');
     expect(card).toContain("['ranked by'");
@@ -541,7 +545,11 @@ describe('the setup card', () => {
   });
 
   test('the deployment facts are labelled values, not a run-on line', () => {
-    const at = script.indexOf('out.innerHTML = SETUPS.map');
+    // Located by the MARKUP it produces, not by the name of the variable it
+    // maps over: that name changed when the list started ordering by stage,
+    // and pinning it made three tests slice an empty string and fail on a
+    // change that touched none of what they check.
+    const at = script.indexOf('<div class="setup-def');
     const card = script.slice(at, script.indexOf('paintAlgoState();', at));
     for (const k of ['ranked by', 'feed', 'extra scan', 'max/day']) {
       expect(card).toContain(`'${k}'`);

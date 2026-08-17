@@ -167,3 +167,58 @@ describe('every tool at once', () => {
     for (const s of stages.STAGES) expect(stages.LABEL[s]).toBeTruthy();
   });
 });
+
+/*
+ * THE ORDER IS PART OF THE ANSWER.
+ *
+ * A chip on a card says what stage a tool is at; the ORDER says which to read
+ * first, and a list that leaves that to the chip alone puts a tool with nine
+ * days of data above one with a year for no better reason than where it sits
+ * in the config file.
+ */
+describe('stage decides the order', () => {
+  const RANK = { valid: 0, study: 1, collecting: 2 };
+  const bystage = ids => ids
+    .map(id => ({ id, stage: stages.stageOf(id, { T1: 34, T2: 12, T3: 9 }[id] ?? 5).stage }))
+    .sort((a, b) => RANK[a.stage] - RANK[b.stage])
+    .map(t => t.id);
+
+  test('validated first, then under study, then collecting', () => {
+    expect(bystage(['T3', 'T1', 'T2'])).toEqual(['T2', 'T1', 'T3']);
+  });
+
+  test('the landing page ranks by stage INSIDE each time group', () => {
+    // Under the clock rather than over it: a validated tool that is asleep is
+    // still asleep, and promoting it above the ones that are open would answer
+    // a question nobody asked at 09:31.
+    const html = require('fs').readFileSync(
+      require('path').join(__dirname, '../public/screeners.html'), 'utf8');
+    expect(html).toMatch(/STAGE_RANK = \{ valid: 0, study: 1, collecting: 2 \}/);
+    const rankFn = html.indexOf('function byWhenItMatters');
+    const body = html.slice(rankFn, html.indexOf('}\n}', rankFn));
+    // the time group is compared BEFORE the stage
+    expect(body.indexOf('if (ra !== rb) return ra - rb;'))
+      .toBeLessThan(body.indexOf('STAGE_RANK[a.stage]'));
+  });
+
+  test('an unknown stage sorts last, not first', () => {
+    const RANK2 = { valid: 0, study: 1, collecting: 2 };
+    expect(RANK2['something-new'] ?? 9).toBe(9);
+  });
+});
+
+/*
+ * The same idea one level down: a SETUP is only as ready as its less ready
+ * half. A long marked ready whose short is still in development is not a ready
+ * setup — the pair ranks across both books, so half of it being unfinished
+ * makes the whole thing unfinished.
+ */
+describe('a setup pair takes the lower stage of the two', () => {
+  const catalog = require('../src/setups/catalog');
+  test('the merge rule is in the catalog', () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '../src/setups/catalog.js'), 'utf8');
+    expect(src).toMatch(/if \(s\.stage !== 'ready'\) g\.stage = 'development';/);
+    expect(typeof catalog.list).toBe('function');
+  });
+});

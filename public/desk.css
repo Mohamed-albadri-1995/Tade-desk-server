@@ -201,6 +201,14 @@ body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
    reasoning is worth keeping — it is the difference between a setting and a
    superstition — but at the same weight as the data it is a wall, and a wall
    is not read at 09:36. */
+/* Group headings in a list that is ordered by stage — see the setups tab. */
+.su-group { font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--text3); margin:var(--s3) 0 var(--s1); }
+.su-group:first-child { margin-top:0; }
+/* An unfinished setup is dimmer than a finished one, so the difference is
+   visible without reading the heading you scrolled past. */
+.setup-def.dev { opacity:.82; }
+
 details.why { margin:var(--s2) 0 0; text-align:left; }
 details.why > summary { list-style:none; cursor:pointer; display:inline-flex;
   align-items:center; gap:5px; font-size:var(--f-xs); color:var(--text3);
