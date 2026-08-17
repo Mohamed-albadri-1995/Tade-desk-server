@@ -144,6 +144,39 @@ async function fetchDailyBars(tickers, beforeDate) {
   });
 }
 
+/**
+ * Daily closes over a long window, ENDING YESTERDAY.
+ *
+ * The window matters as much as the data. Every trend column TradingView
+ * offers ends at TODAY's price, so a stock that was flat for six months and
+ * spiked 30% this morning reads as "up 30% over six months" — the move under
+ * examination lands inside the measure meant to be independent of it, and the
+ * setup disqualifies itself. Reading the trend requires closes that stop
+ * before the move.
+ *
+ * `days` is calendar days, so ~200 of them covers the ~126 trading days in six
+ * months with room for holidays. Returns `{ TICKER: [{t, c}, ...] }`, oldest
+ * first, and simply omits a ticker the feed has nothing for.
+ */
+async function fetchClosesBefore(tickers, beforeDate, days = 200) {
+  if (!tickers || !tickers.length) return {};
+  const end = new Date(`${beforeDate}T00:00:00-05:00`);
+  end.setDate(end.getDate() - 1);              // yesterday: the move is excluded
+  const start = new Date(end);
+  start.setDate(start.getDate() - days);
+  const fmt = d => d.toISOString().slice(0, 10);
+  const rows = await fetchAllPages(`${BASE}/bars`, {
+    symbols: tickers.join(','),
+    timeframe: '1Day',
+    start: fmt(start),
+    end: fmt(end),
+    limit: 10000,
+    adjustment: 'split',   // a split is not a trend; raw prices would read as one
+    feed: getFeed(),
+  });
+  return rows || {};
+}
+
 // Compute ATR14 from an array of daily bars (at least 15 bars needed for 14 TRs)
 function computeATR14(bars) {
   if (!bars || bars.length < 2) return null;
@@ -262,6 +295,7 @@ async function checkShortable(symbol) {
 
 module.exports = {
   fetchIntradayBars,
+  fetchClosesBefore,
   fetchAsset,
   checkShortable,
   fetchDailyBars,

@@ -122,7 +122,7 @@ async function runFullScan() {
        */
       let gated = candidates;
       try {
-        const newsGate = require('./sideA/newsGate');
+        const newsGate = require('./sideA/preR0');
         const store = require('./sideA/screenerStore');
         const res = await newsGate.apply(candidates, store.list({ enabledOnly: true }));
         gated = res.candidates;

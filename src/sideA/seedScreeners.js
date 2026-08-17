@@ -226,25 +226,6 @@ const T6_ARCHIVED = {
 };
 
 /*
- * "NOT CLEARLY RISING" IS NOT "FLAT".
- *
- * The six-month gate was written as `Perf.6M < 0`, which demands a stock that
- * has actually fallen. That is stricter than the rule: a name up 6% over six
- * months has not gone anywhere, and refusing to short its unexplained spike
- * because it is fractionally positive throws away most of the setup.
- *
- * So the boundary is a BAND, not zero. Inside +/-20% over six months a stock is
- * drifting; outside it, it is going somewhere and a move in that direction is
- * not unexplained. Twenty points over half a year is roughly the market's own
- * drift — a stock that has merely kept up has not established a trend of its
- * own, and one that has doubled plainly has.
- *
- * It is a setting, not a law: the number is editable per screener on the
- * Screeners page, and the mirror takes whatever the base is set to.
- */
-const CLEARLY_TRENDING_6M = 20;
-
-/*
  * THE UNEXPLAINED MOVE — a big quick move with no reason, expected to come back.
  *
  * A stock goes 15% in two hours and there is no news, no filing, no catalyst
@@ -268,7 +249,18 @@ const CLEARLY_TRENDING_6M = 20;
  *   base    spiked UP 15%   + six months not clearly RISING   -> short it back
  *   mirror  dropped 15%     + six months not clearly FALLING  -> buy it back
  *
- * "Not clearly rising" rather than "flat": see CLEARLY_TRENDING_6M.
+ * THE SIX-MONTH HALF IS NOT IN THIS FILTER LIST, and cannot be. Every trend
+ * column TradingView offers ends at TODAY's price, so a stock flat for six
+ * months that spikes 30% this morning has `Perf.6M` of about +30%: the move
+ * being examined lands inside the measure meant to be independent of it, and
+ * the setup disqualifies itself. Slower columns only shrink it — one +30% day
+ * moves EMA50 by 1.18% and EMA120 by 0.50%, leaving a flat stock reading as
+ * rising by two thirds of a percent, which is enough to fail a comparison
+ * between them. There is no "as of yesterday" in the scanner API.
+ *
+ * So the trend is read in sideA/preR0.js from daily closes that stop before the
+ * move, alongside the news test, before anything is recorded. The screener asks
+ * only for the move.
  *
  * Both come out of one definition: `change|120` and `Perf.6M` are both
  * directional, so the mirror flips the sign of each and produces exactly the
@@ -303,7 +295,6 @@ const T6_BASE = {
   sort: { sortBy: 'change|120', sortOrder: 'desc' },
   filters: [
     { left: 'change|120', operation: 'greater', right: 15 },
-    { left: 'Perf.6M', operation: 'less', right: CLEARLY_TRENDING_6M },
     { left: 'close', operation: 'egreater', right: 1 },
   ],
 };

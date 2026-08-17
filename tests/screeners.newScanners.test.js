@@ -116,26 +116,33 @@ describe('T6 — Unexplained Move', () => {
    * unexplained — it is doing what it has been doing, and buying that dip is
    * catching a knife. So each side refuses a spike that AGREES with the trend.
    */
-  test('each side refuses a spike that agrees with the six-month trend', () => {
-    // spiked UP -> only worth fading if six months are NOT clearly rising
-    expect(filterOn(base, 'Perf.6M'))
-      .toEqual([{ left: 'Perf.6M', operation: 'less', right: 20 }]);
-    // dropped -> only worth buying if six months are NOT clearly falling
-    expect(filterOn(mirror, 'Perf.6M'))
-      .toEqual([{ left: 'Perf.6M', operation: 'greater', right: -20 }]);
+  /*
+   * THE SIX-MONTH HALF IS NOT A SCREENER FILTER, and cannot be.
+   *
+   * Every trend column TradingView offers ends at TODAY's price. A stock flat
+   * for six months that spikes 30% this morning has Perf.6M of about +30% — the
+   * move being examined lands inside the measure meant to be independent of it,
+   * and the setup disqualifies itself. It is read in preR0.js instead, from
+   * closes that stop before the move; see tests/preR0.test.js.
+   */
+  test('no trend column here — every one of them includes today', () => {
+    for (const def of [base, mirror]) {
+      const cols = def.filters.map(f => f.left);
+      for (const c of ['Perf.6M', 'Perf.3M', 'Perf.Y', 'EMA50', 'EMA120', 'SMA200']) {
+        expect(cols).not.toContain(c);
+      }
+    }
   });
 
-  /*
-   * "NOT CLEARLY RISING" IS NOT "FLAT", and the difference is most of the
-   * setup. Written as `< 0` first, which demands a stock that has actually
-   * fallen — a name up 6% over six months has gone nowhere, and refusing to
-   * fade its unexplained spike because it is fractionally positive throws away
-   * the bulk of the population.
-   */
-  test('the boundary is a BAND, not zero — drift is allowed on both sides', () => {
-    const band = filterOn(base, 'Perf.6M')[0].right;
-    expect(band).toBeGreaterThan(0);
-    expect(filterOn(mirror, 'Perf.6M')[0].right).toBe(-band);
+  test('the screener asks only for the move and the price floor', () => {
+    expect(base.filters.map(f => f.left)).toEqual(['change|120', 'close']);
+    expect(mirror.filters.map(f => f.left)).toEqual(['change|120', 'close']);
+  });
+
+  test('and each side of the trend rule lives on its own gate', () => {
+    const gate = require('../src/sideA/preR0');
+    expect(gate.gateFor('unexplained-move').trend).toBe('not-up');
+    expect(gate.gateFor('unexplained-move-mirror').trend).toBe('not-down');
   });
 
   /*
