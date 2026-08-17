@@ -13,17 +13,6 @@ BRANCH="${BRANCH:-claude/multi-tool-screeners}"
 ONLY="${1:-}"
 ROOT=~/Tade-desk-server
 
-# Tools come from tools.config.json — the single registry the landing page and
-# the app also read, so adding a tool means editing that file alone.
-mapfile -t TOOLS < <(node -e "
-  const t = require('./tools.config.json').tools;
-  t.forEach(x => console.log([x.id, x.name, x.port, x.scorerPort].join('|')));
-")
-if [ ${#TOOLS[@]} -eq 0 ]; then
-  echo "No tools found in tools.config.json"; exit 1
-fi
-echo "Tools: ${#TOOLS[@]}"
-
 echo "=== Trade Desk — multi-tool deploy ==="
 echo "Branch: $BRANCH"
 [ -n "$ONLY" ] && echo "Only:   $ONLY"
@@ -79,6 +68,22 @@ done
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 echo "  now at: $(git log --oneline -1)"
+
+# THE REGISTRY IS READ AFTER THE PULL, and it used to be read before it.
+#
+# tools.config.json is the single list of what to start: id, name, port and
+# scorer port. Reading it first meant every deploy launched the tools described
+# by the PREVIOUS deploy — so a rename showed the old name, and a port or a new
+# tool would have started the wrong set entirely while the code on disk was
+# current. It looked exactly like a deploy that had not taken.
+mapfile -t TOOLS < <(node -e "
+  const t = require('./tools.config.json').tools;
+  t.forEach(x => console.log([x.id, x.name, x.port, x.scorerPort].join('|')));
+")
+if [ ${#TOOLS[@]} -eq 0 ]; then
+  echo "No tools found in tools.config.json"; exit 1
+fi
+echo "  tools: ${#TOOLS[@]}"
 
 # A neighbour whose files moved is now stale ON DISK while its process still
 # runs the old code from memory. Everything looks fine until the next restart or
