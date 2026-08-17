@@ -359,7 +359,13 @@ async function runScreener(screener) {
   // on today's volatility, which is exactly the bug it exists to fix.
   const tradable = require('./tradable');
   const t = tradable.thresholds();
-  const floor = screener.labelOnly ? [] : tradable.serverFilters(t);
+  // A NEGLECTED-NAME screener keeps the price floor and loses the liquidity
+  // legs — see tradable.serverFilters and the note on the unexplained-move
+  // screener. Keyed by screener key, so the exemption travels with the
+  // definition rather than being a name match that a rename would break.
+  const { NEGLECTED_KEYS } = require('./seedScreeners');
+  const liquidity = !NEGLECTED_KEYS.has(String(screener.key || ''));
+  const floor = screener.labelOnly ? [] : tradable.serverFilters(t, { liquidity });
   const body = buildRequest([...screener.filters, ...floor], screener.sort);
   if (Number.isFinite(screener.limit)) body.range = [0, screener.limit];
   const resp = await axios.post(TV_URL, body, {
@@ -376,7 +382,7 @@ async function runScreener(screener) {
     return { name: screener.name, key: screener.key, rows: mapped, floorDropped: 0, labelOnly: true };
   }
   checkWindowsDiffer(mapped, screener.name);
-  const { kept, dropped } = tradable.applyLocal(mapped, t);
+  const { kept, dropped } = tradable.applyLocal(mapped, t, { liquidity });
   if (dropped) {
     console.log(`[TV Scanner] "${screener.name}": ${dropped} row(s) below ${t.minAtrPct}% ADR`);
   }

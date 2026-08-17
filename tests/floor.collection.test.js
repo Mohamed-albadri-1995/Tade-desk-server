@@ -66,9 +66,17 @@ describe('the floor filters collection, not the view', () => {
     // adding a second door has to be a deliberate edit to this list.
     const src = require('fs').readFileSync(require('path').join(__dirname, '../src/pipeline.js'), 'utf8');
     const merges = src.match(/mergeScannersIntoR0\([^)]*\)/g) || [];
-    expect(merges).toEqual(['mergeScannersIntoR0(candidates)']);
-    // …and `candidates` is the post-floor pile, never the raw response.
+    expect(merges).toHaveLength(1);
+    // …and whatever it is called, it descends from the scanner's post-floor
+    // output rather than from any other source. The argument used to be
+    // `candidates` and is now `gated` — the news gate sits in between, which is
+    // a narrowing of the same pile, not a second door. Pinning the NAME made
+    // this fail for a change that cannot introduce a ticker; what has to hold
+    // is that nothing else feeds the merge.
+    expect(merges[0]).toMatch(/^mergeScannersIntoR0\((candidates|gated)\)$/);
     expect(src).toMatch(/const \{ candidates, labels \} = await runAllScanners\(\)/);
+    // A gate may only ever REMOVE from that pile.
+    expect(src).toMatch(/let gated = candidates;/);
   });
 
   test('label-only screeners feed no tickers into the registry at all', () => {

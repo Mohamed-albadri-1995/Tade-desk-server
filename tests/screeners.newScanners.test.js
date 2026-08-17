@@ -117,12 +117,65 @@ describe('T6 — Unexplained Move', () => {
    * catching a knife. So each side refuses a spike that AGREES with the trend.
    */
   test('each side refuses a spike that agrees with the six-month trend', () => {
-    // spiked UP -> only worth fading if six months are NOT rising
+    // spiked UP -> only worth fading if six months are NOT clearly rising
     expect(filterOn(base, 'Perf.6M'))
-      .toEqual([{ left: 'Perf.6M', operation: 'less', right: 0 }]);
-    // dropped -> only worth buying if six months are NOT falling
+      .toEqual([{ left: 'Perf.6M', operation: 'less', right: 20 }]);
+    // dropped -> only worth buying if six months are NOT clearly falling
     expect(filterOn(mirror, 'Perf.6M'))
-      .toEqual([{ left: 'Perf.6M', operation: 'greater', right: 0 }]);
+      .toEqual([{ left: 'Perf.6M', operation: 'greater', right: -20 }]);
+  });
+
+  /*
+   * "NOT CLEARLY RISING" IS NOT "FLAT", and the difference is most of the
+   * setup. Written as `< 0` first, which demands a stock that has actually
+   * fallen — a name up 6% over six months has gone nowhere, and refusing to
+   * fade its unexplained spike because it is fractionally positive throws away
+   * the bulk of the population.
+   */
+  test('the boundary is a BAND, not zero — drift is allowed on both sides', () => {
+    const band = filterOn(base, 'Perf.6M')[0].right;
+    expect(band).toBeGreaterThan(0);
+    expect(filterOn(mirror, 'Perf.6M')[0].right).toBe(-band);
+  });
+
+  /*
+   * The only screener here with no average-volume floor, and not by oversight:
+   * a stock nobody trades is exactly the population where a 15% move happens
+   * for no reason and then reverses, because there was nobody there to move it.
+   * Requiring the liquidity removes the setup along with the risk.
+   */
+  test('NO average-volume floor — neglected is the point', () => {
+    expect(filterOn(base, 'average_volume_10d_calc')).toEqual([]);
+    expect(filterOn(mirror, 'average_volume_10d_calc')).toEqual([]);
+    // every other screener on these two tools still has one
+    expect(filterOn(byName(PRESETS.T5)['20-Day Break'], 'average_volume_10d_calc'))
+      .toHaveLength(1);
+  });
+
+  test('the price floor stays — a spread on a 30c stock eats the move', () => {
+    expect(filterOn(base, 'close'))
+      .toContainEqual({ left: 'close', operation: 'egreater', right: 1 });
+  });
+
+  /*
+   * …and the same exemption on the tradability floor, or it would be granted
+   * in the screener and taken back by the floor that rides along with it.
+   */
+  test('and it is exempt from the liquidity half of the tradability floor', () => {
+    const { NEGLECTED_KEYS } = require('../src/sideA/seedScreeners');
+    expect(NEGLECTED_KEYS.has('unexplained-move')).toBe(true);
+    expect(NEGLECTED_KEYS.has('unexplained-move-mirror')).toBe(true);
+    const tradable = require('../src/sideA/tradable');
+    const t = { minPrice: 1, minAvgVolume: 1e6, minAtr: 1, minAtrPct: 3 };
+    const cols = f => f.map(x => x.left);
+    expect(cols(tradable.serverFilters(t))).toEqual(
+      ['close', 'average_volume_10d_calc', 'ATR']);
+    expect(cols(tradable.serverFilters(t, { liquidity: false }))).toEqual(['close']);
+    // and the local ATR-percent leg is exempt too, or the server exemption
+    // would simply be undone afterwards
+    const thin = [{ ticker: 'X', stock: { atr: 0.01, price: 10 } }];
+    expect(tradable.applyLocal(thin, t).kept).toHaveLength(0);
+    expect(tradable.applyLocal(thin, t, { liquidity: false }).kept).toHaveLength(1);
   });
 
   test('and Perf.6M is registered as directional, like its four siblings', () => {

@@ -226,6 +226,25 @@ const T6_ARCHIVED = {
 };
 
 /*
+ * "NOT CLEARLY RISING" IS NOT "FLAT".
+ *
+ * The six-month gate was written as `Perf.6M < 0`, which demands a stock that
+ * has actually fallen. That is stricter than the rule: a name up 6% over six
+ * months has not gone anywhere, and refusing to short its unexplained spike
+ * because it is fractionally positive throws away most of the setup.
+ *
+ * So the boundary is a BAND, not zero. Inside +/-20% over six months a stock is
+ * drifting; outside it, it is going somewhere and a move in that direction is
+ * not unexplained. Twenty points over half a year is roughly the market's own
+ * drift — a stock that has merely kept up has not established a trend of its
+ * own, and one that has doubled plainly has.
+ *
+ * It is a setting, not a law: the number is editable per screener on the
+ * Screeners page, and the mirror takes whatever the base is set to.
+ */
+const CLEARLY_TRENDING_6M = 20;
+
+/*
  * THE UNEXPLAINED MOVE — a big quick move with no reason, expected to come back.
  *
  * A stock goes 15% in two hours and there is no news, no filing, no catalyst
@@ -246,8 +265,10 @@ const T6_ARCHIVED = {
  *
  * So each side refuses a spike that agrees with the six-month trend:
  *
- *   base    spiked UP 15%   + six months NOT rising   -> short it back down
- *   mirror  dropped 15%     + six months NOT falling  -> buy it back up
+ *   base    spiked UP 15%   + six months not clearly RISING   -> short it back
+ *   mirror  dropped 15%     + six months not clearly FALLING  -> buy it back
+ *
+ * "Not clearly rising" rather than "flat": see CLEARLY_TRENDING_6M.
  *
  * Both come out of one definition: `change|120` and `Perf.6M` are both
  * directional, so the mirror flips the sign of each and produces exactly the
@@ -263,6 +284,15 @@ const T6_ARCHIVED = {
  * opposite of the setup. See src/setups/universe.js, and note that the filter
  * needed a new operator to express absence at all.
  *
+ * NO AVERAGE-VOLUME FLOOR, and it is the only screener here without one. Every
+ * other tool wants a stock you can get out of, and a million shares a day is
+ * the price of that. This one is hunting NEGLECTED names — a stock nobody
+ * trades is exactly the population where an unexplained 15% move happens and
+ * then reverses, because there was nobody there to move it in the first place.
+ * Requiring the liquidity would remove the setup along with the risk. The
+ * tradability floor is exempted for the same reason (see tradable.js); the
+ * price floor stays, because a spread on a $0.30 stock eats the whole move.
+ *
  * `change|120` is the two-hour change and does not exist before there have
  * been two hours, so this cannot run before 11:30 and mean anything.
  */
@@ -273,9 +303,8 @@ const T6_BASE = {
   sort: { sortBy: 'change|120', sortOrder: 'desc' },
   filters: [
     { left: 'change|120', operation: 'greater', right: 15 },
-    { left: 'Perf.6M', operation: 'less', right: 0 },
+    { left: 'Perf.6M', operation: 'less', right: CLEARLY_TRENDING_6M },
     { left: 'close', operation: 'egreater', right: 1 },
-    { left: 'average_volume_10d_calc', operation: 'greater', right: 500000 },
   ],
 };
 
@@ -1008,5 +1037,8 @@ module.exports = {
   tightenAfterOpenVolume, backfillMirrorLinks, linkMirrorsByFilters, tightenLiquidMovers,
   applyCheckWindows, retimeT2Breakout, addCanslimUniverse,
   WINDOW_NOTES,
+  // Screeners that hunt NEGLECTED names and so keep the price floor but lose
+  // the liquidity legs of the tradability floor — see tradable.serverFilters.
+  NEGLECTED_KEYS: new Set(['unexplained-move', 'unexplained-move-mirror']),
   PRESETS: BY_TOOL, SESSION_SCREENERS,
 };

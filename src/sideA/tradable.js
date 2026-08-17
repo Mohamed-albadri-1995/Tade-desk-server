@@ -56,17 +56,31 @@ function thresholds() {
  * top N by its sort: filtering afterwards would spend those N slots on stocks
  * that were never eligible and hand back a short list.
  */
-function serverFilters(t = thresholds()) {
+/*
+ * `liquidity: false` drops the two legs that ask "could you get out of this" —
+ * average volume and ATR in dollars — and keeps the price floor.
+ *
+ * For ONE screener, and it is not an oversight. The unexplained-move screener
+ * hunts NEGLECTED names: a stock nobody trades is exactly the population where
+ * a 15% move happens for no reason and then reverses, because there was nobody
+ * there to move it in the first place. Requiring a million shares a day removes
+ * the setup along with the risk, so the risk is accepted deliberately and said
+ * out loud on the card rather than screened away.
+ *
+ * The PRICE floor stays either way: a spread on a $0.30 stock eats the whole
+ * move, which is not a liquidity opinion, it is arithmetic.
+ */
+function serverFilters(t = thresholds(), { liquidity = true } = {}) {
   const out = [];
   // Price first: it is the cheapest rule to evaluate and the one that removes
   // the most stocks nobody here would trade at any volume.
   if (t.minPrice > 0) {
     out.push({ left: 'close', operation: 'egreater', right: t.minPrice });
   }
-  if (t.minAvgVolume > 0) {
+  if (liquidity && t.minAvgVolume > 0) {
     out.push({ left: 'average_volume_10d_calc', operation: 'egreater', right: t.minAvgVolume });
   }
-  if (t.minAtr > 0) {
+  if (liquidity && t.minAtr > 0) {
     out.push({ left: 'ATR', operation: 'egreater', right: t.minAtr });
   }
   return out;
@@ -93,7 +107,12 @@ function passesLocal(stock, t = thresholds()) {
 }
 
 /** Apply the local half to a list of mapped rows, reporting what it removed. */
-function applyLocal(rows, t = thresholds()) {
+function applyLocal(rows, t = thresholds(), { liquidity = true } = {}) {
+  // The ATR-percent leg is a liquidity question too — "is there room in the
+  // move" — so a screener exempt from the floor is exempt from this half of it
+  // as well, or the exemption would be undone locally after being granted on
+  // the server.
+  if (!liquidity) return { kept: rows, dropped: 0 };
   const kept = rows.filter(r => passesLocal(r.stock, t));
   return { kept, dropped: rows.length - kept.length };
 }

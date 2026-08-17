@@ -106,8 +106,33 @@ async function runFullScan() {
     await stageWrap(report, 'sideA', async () => {
       const { candidates, labels } = await runAllScanners();
       labelResults = labels;
-      merged = mergeScannersIntoR0(candidates);
-      return { rowCount: merged.length, labelLists: Object.keys(labels).length };
+      /*
+       * THE NEWS GATE, BEFORE THE MERGE.
+       *
+       * The unexplained-move screener's premise is that nothing explains the
+       * move, and TradingView has no news column — so what comes back is every
+       * 15% mover, most of which moved for a reason. Filtering that on the
+       * setup would be too late: the whole unfiltered list would already be in
+       * r0, frozen into R1 the next morning, and in the training data. The full
+       * list must not reach the warehouse, so the test runs here.
+       *
+       * Non-fatal by construction: a gate that throws leaves the candidates
+       * untouched rather than emptying the scan, because a scan that silently
+       * returns nothing looks exactly like a quiet market.
+       */
+      let gated = candidates;
+      try {
+        const newsGate = require('./sideA/newsGate');
+        const store = require('./sideA/screenerStore');
+        const res = await newsGate.apply(candidates, store.list({ enabledOnly: true }));
+        gated = res.candidates;
+        report.newsGate = res.report;
+      } catch (err) {
+        console.warn('[News gate] skipped:', err.message);
+      }
+      merged = mergeScannersIntoR0(gated);
+      return { rowCount: merged.length, labelLists: Object.keys(labels).length,
+               newsGate: report.newsGate || null };
     })();
 
     // Side B: Internal Calculations (fatal)
