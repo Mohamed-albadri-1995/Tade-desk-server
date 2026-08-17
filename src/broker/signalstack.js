@@ -699,6 +699,28 @@ function tradesToday(date, setupId = null, destination = null) {
     && (!destination || (o.destination || LEGACY_ID) === destination)).length;
 }
 
+/**
+ * Has this setup already put THIS NAME on today, in this account?
+ *
+ * The one question that separates a second signal from a repeat of the first.
+ * Read from the ledger rather than from the alert feed or from memory: the
+ * ledger line and the wire request are written by the same call, so it is the
+ * only answer that survives a crash between them, and a restart.
+ *
+ * Sent orders only — a refusal opened nothing, and treating it as a position
+ * would silently retire the name for the rest of the day. Entries only:
+ * callbacks are the broker talking back, and a flatten is the exit.
+ */
+function sentAlready(date, setupId, symbol, destination = null) {
+  if (!setupId || !symbol) return false;
+  const want = String(symbol).toUpperCase();
+  return orders(date).some(o => o.sent
+    && o.kind !== 'callback' && o.kind !== 'flatten'
+    && o.setupId === setupId
+    && String(o.symbol || '').toUpperCase() === want
+    && (!destination || (o.destination || LEGACY_ID) === destination));
+}
+
 function remaining(date, cfg = settings()) {
   if (!cfg.buyingPower) return null;
   // This destination's balance, spent by this destination's orders.
@@ -1093,6 +1115,37 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
   if (maxPerDay && setupId && tradesToday(date, setupId) >= maxPerDay) {
     return { blocked: 'setup-cap',
       reason: `this setup's limit of ${maxPerDay} order(s) a day is already used` };
+  }
+
+  /*
+   * ONE ENTRY PER SETUP, PER NAME, PER DAY — held on the LEDGER.
+   *
+   * There was already a latch for this, in the runner: a watch setup drops any
+   * name it has already alerted on today. It reads the alert feed, so it is
+   * only as good as the alert getting written — and the alert is written AFTER
+   * the order is sent. Anything that threw in between sent an order and left no
+   * latch, so the next bar sent another, and the bar after that another. That
+   * is not hypothetical: describePick() threw on a strategy with no take-profit
+   * and the same name went out again every minute until it was noticed, at the
+   * per-order fee each time.
+   *
+   * So the guard belongs where the ORDER is, not where the alert is. The ledger
+   * line is written by the same call that sends, which makes it the only record
+   * that cannot disagree with what the broker got.
+   *
+   * Per DESTINATION, because two accounts trading one signal is two orders on
+   * purpose — the account cap above is scoped the same way for the same reason.
+   *
+   * A scale-out is unaffected: its legs go out inside ONE placeOrder call,
+   * which passes here once and writes one ledger line.
+   *
+   * Only entries. `close`/flatten carry no setupId and are recorded as
+   * kind:'flatten', so an exit is never mistaken for a repeat of the entry it
+   * is closing.
+   */
+  if (setupId && sentAlready(date, setupId, symbol, cfg.destinationId || null)) {
+    return { blocked: 'repeat',
+      reason: `${String(symbol).toUpperCase()} was already traded by this setup today` };
   }
 
   const fit = fitQuantity({ quantity, price, date, cfg });
@@ -1700,7 +1753,8 @@ module.exports = {
   // Where orders can go, and one of them as a cfg the order path already takes.
   destinations, destinationCfg, accountsFor, autoRoute, manualCfg,
   DIALECTS, LEGACY_ID, MODES,
-  orders, committed, remaining, tradesToday, fitQuantity, actionFor, splitLegs,
+  orders, committed, remaining, tradesToday, sentAlready,
+  fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,
   openSymbols, closePosition, flattenAll,
