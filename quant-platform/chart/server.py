@@ -213,6 +213,24 @@ def backtest_start(payload: dict = Body(...)):
                                         status_code=200)
             bt._pairs(payload)                 # validate spec BEFORE creating a row
             bt._resolve_strategy(payload)
+            # THE RUN KEEPS A COPY OF WHAT IT RAN.
+            #
+            # The spec stored only `strategy_id`. Edit that strategy tomorrow
+            # and the stored run points at a different rule set from the one
+            # that produced its numbers — the record says "strategy 7" and
+            # strategy 7 has moved. Nothing in the run says so, which makes
+            # every archived result unverifiable.
+            #
+            # Freezing the resolved documents fixes that, and has a second
+            # use: it makes every backtest a dated snapshot of the strategy,
+            # so one lost from the database can be read back out of any run
+            # that used it. See tools/recover_strategies.py.
+            try:
+                payload['_strategy_docs'] = [
+                    {k: v for k, v in s.items() if k != 'exit_protocol'}
+                    for s in bt._resolve_strategies(payload)]
+            except Exception:      # a snapshot must never stop a run
+                pass
             bid = store.create_backtest(payload.get('name') or 'Backtest', payload)
             _BT_RUNNING['id'] = bid
         t = threading.Thread(target=bt.run_and_store, args=(bid, payload), daemon=True)
