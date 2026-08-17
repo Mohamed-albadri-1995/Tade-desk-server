@@ -119,6 +119,14 @@ const MODES = ['alert', 'manual', 'auto'];
 const LEGACY_ID = 'ttp';
 
 /*
+ * The smallest reward, as a multiple of the risk, that is allowed out of the
+ * door. See the note in validateBody: this is a floor on arithmetic that has
+ * plainly gone wrong — a target a tenth of the stop distance away — not an
+ * opinion about what a good target is. Every strategy here aims at 1R or more.
+ */
+const MIN_TARGET_R = 0.1;
+
+/*
  * The stored destinations, with the old single-hook shape read as one.
  *
  * Migration by READING rather than by rewriting the file: a broker config that
@@ -927,6 +935,42 @@ function validateBody(body, { side, entry } = {}) {
         errors.push(`a ${body.action} cannot have its target at ${body.take_profit_price} `
           + `with the entry at ${e}`);
       }
+      /*
+       * A TARGET TOO CLOSE TO THE ENTRY.
+       *
+       * The rule above catches a target on the wrong side. It does not catch a
+       * target one cent away on the RIGHT side, and that is what an
+       * indicator-anchored take-profit produces when price has already run to
+       * the line it is anchored to. A real one:
+       *
+       *   NE · buy 119 · stop 44.90 · target 45.21
+       *   -> From Alpaca: take_profit.limit_price must be >= base_price + 0.01
+       *
+       * Rejected by the broker, hours later, by email. Two things are wrong
+       * with it and only one is Alpaca's rule. The cent of clearance is theirs;
+       * the real problem is a trade risking thirty cents to make one, which is
+       * not the strategy that was tested — it is the strategy after the move
+       * already happened.
+       *
+       * So: a cent of clearance for the broker, and a floor relative to the
+       * STOP DISTANCE for the trade. MIN_TARGET_R is a tenth of the risk, which
+       * no strategy here intends and which cannot pay a commission. It is a
+       * floor on obvious breakage, not a view on what a good target is.
+       */
+      const gap = Math.abs(body.take_profit_price - e);
+      if (gap < 0.02) {
+        errors.push(`the target ${body.take_profit_price} is ${gap.toFixed(4)} from the `
+          + `entry ${e} — the broker needs at least a cent of clearance and the `
+          + 'price will have moved past it before the order lands');
+      } else if (isNum(body.stop_loss_price)) {
+        const risk = Math.abs(e - body.stop_loss_price);
+        if (risk > 0 && gap < risk * MIN_TARGET_R) {
+          errors.push(`the target ${body.take_profit_price} is ${(gap / risk).toFixed(2)}R `
+            + `from the entry ${e} (stop ${body.stop_loss_price}) — below the `
+            + `${MIN_TARGET_R}R floor. Risking ${risk.toFixed(2)} to make `
+            + `${gap.toFixed(2)} is not the trade that was tested`);
+        }
+      }
     }
   }
   return errors;
@@ -1224,6 +1268,36 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
   }
 
   const { body: planned, action, fit } = plan;
+
+  /*
+   * ASK ALPACA WHETHER IT WILL SHORT THIS, BEFORE SENDING.
+   *
+   * Alpaca accepts the POST and refuses hours later by email —
+   *
+   *     From Alpaca: asset "STKH" cannot be sold short
+   *
+   * — by which time the alert says sent, no position exists, and the only
+   * record of the failure is in an inbox. Most of what these screeners find is
+   * a small cap with no borrow, so for shorts this is the common case.
+   *
+   * Alpaca only. Trade The Pool is a prop desk that shorts what it lists, and
+   * asking Alpaca about an account it does not hold would answer the wrong
+   * question. An unanswerable check never blocks — see checkShortable.
+   */
+  if (action === 'sell' && cfg.dialect === 'alpaca') {
+    const borrow = await require('../alpaca/client').checkShortable(symbol);
+    if (!borrow.ok) {
+      const out = { ...base, quantity: 0, sent: false, skipped: borrow.reason };
+      record(out); return out;
+    }
+    if (!borrow.checked) {
+      console.warn(`[Broker] could not check whether ${symbol} is shortable `
+        + `(${borrow.reason}) — sending anyway, the broker decides`);
+    } else if (borrow.easyToBorrow === false) {
+      console.warn(`[Broker] ${symbol} is shortable but NOT easy to borrow — `
+        + 'the fill may need a locate');
+    }
+  }
 
   /*
    * A SCALE-OUT goes out as several orders, and counts as ONE trade.

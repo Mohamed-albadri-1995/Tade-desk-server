@@ -195,8 +195,75 @@ async function fetchAccountEquity() {
   }
 }
 
+/*
+ * CAN THIS BE SOLD SHORT?
+ *
+ * Alpaca refuses a short in the most expensive possible way: the order is
+ * accepted by the bridge, POSTed, and comes back later as an email —
+ *
+ *     From Alpaca: asset "STKH" cannot be sold short
+ *
+ * By then the alert has been marked sent, the position does not exist, and the
+ * only record is in an inbox. Most of what these screeners find is a small cap
+ * that is not easy to borrow, so this is the normal case for shorts and not an
+ * edge one.
+ *
+ * `shortable` is whether the broker will take the order at all; `easy_to_borrow`
+ * is whether there is inventory without a locate. Both are reported: refusing on
+ * `shortable` alone is the honest line, and the second is worth saying out loud.
+ *
+ * Cached for the session: a symbol's borrow status does not change inside a
+ * morning, and this sits in the path of a market order at a fixed minute.
+ */
+const _assetCache = new Map();
+
+async function fetchAsset(symbol) {
+  const sym = String(symbol || '').trim().toUpperCase();
+  if (!sym) return null;
+  const hit = _assetCache.get(sym);
+  if (hit && Date.now() - hit.at < 6 * 60 * 60 * 1000) return hit.asset;
+  const url = `${getAccountBaseUrl()}/v2/assets/${encodeURIComponent(sym)}`;
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Alpaca asset ${sym} ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const asset = await res.json();
+  _assetCache.set(sym, { at: Date.now(), asset });
+  return asset;
+}
+
+/**
+ * `{ ok, shortable, easyToBorrow, reason }` — or `{ ok: true, checked: false }`
+ * when the question could not be asked.
+ *
+ * A check that cannot run must NOT block the order. No credentials, a network
+ * blip or a symbol Alpaca does not list would otherwise silently stop every
+ * short on the box, which is a far worse failure than the emails this exists to
+ * prevent. Unknown means send it and let the broker answer.
+ */
+async function checkShortable(symbol) {
+  try {
+    const a = await fetchAsset(symbol);
+    if (!a) return { ok: true, checked: false, reason: 'no answer from Alpaca' };
+    const shortable = a.shortable === true;
+    return {
+      ok: shortable,
+      checked: true,
+      shortable,
+      easyToBorrow: a.easy_to_borrow === true,
+      reason: shortable ? null
+        : `Alpaca will not short ${String(symbol).toUpperCase()} — the asset is not shortable`,
+    };
+  } catch (err) {
+    return { ok: true, checked: false, reason: err.message };
+  }
+}
+
 module.exports = {
   fetchIntradayBars,
+  fetchAsset,
+  checkShortable,
   fetchDailyBars,
   computeATR14,
   fetchAccount,
