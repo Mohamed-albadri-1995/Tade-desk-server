@@ -127,6 +127,19 @@ const LEGACY_ID = 'ttp';
 const MIN_TARGET_R = 0.1;
 
 /*
+ * The smallest position worth taking, in shares.
+ *
+ * Three, because that is the fewest that can be split three ways — the widest
+ * shape anything here runs. Below it an account is not taking a smaller version
+ * of the trade, it is taking a different one with fewer ways out, and the
+ * per-order fee stops being rounding.
+ *
+ * A DEFAULT, not a constant: an account can set its own `minShares`, and 1
+ * switches it off for a desk that really does want single-share fills.
+ */
+const MIN_SHARES = 3;
+
+/*
  * The stored destinations, with the old single-hook shape read as one.
  *
  * Migration by READING rather than by rewriting the file: a broker config that
@@ -150,6 +163,8 @@ function destinations(s = read()) {
       buyingPower: num(d.buyingPower),
       maxOrderValue: num(d.maxOrderValue),
       maxTradesPerDay: num(d.maxTradesPerDay),
+      // The smallest position this account will take. Unset means the desk default.
+      minShares: num(d.minShares),
       /*
        * THIS ACCOUNT'S CAPITAL, as a MULTIPLE of the standard account.
        *
@@ -213,6 +228,7 @@ function destinations(s = read()) {
     buyingPower: num(s.buyingPower),
     maxOrderValue: num(s.maxOrderValue),
     maxTradesPerDay: num(s.maxTradesPerDay),
+    minShares: num(s.minShares),
     // Nothing of its own: the single account IS the standard, which is what
     // data/risk.json has always described.
     ratio: null,
@@ -260,6 +276,8 @@ function destinationCfg(id, s = read()) {
     buyingPower: d.buyingPower,
     maxOrderValue: d.maxOrderValue,
     maxTradesPerDay: d.maxTradesPerDay,
+    // This account's floor, or the desk's when it has none of its own.
+    minShares: d.minShares != null ? d.minShares : base.minShares,
     // Carried through so risk.scaleTo() can take this account's fraction.
     ratio: d.ratio,
     accountSize: d.accountSize,
@@ -381,6 +399,12 @@ function settings(pre = null) {
      * Counted from the ledger, so a restart does not reset it.
      */
     maxTradesPerDay: num(s.maxTradesPerDay),
+    /*
+     * The desk-wide floor on a position, in shares. See MIN_SHARES: under it an
+     * account cannot hold the strategy's shape, so it sits the trade out rather
+     * than placing a different one.
+     */
+    minShares: num(s.minShares) == null ? MIN_SHARES : num(s.minShares),
     // Shorting is a separate permission at most prop firms, and sending a sell
     // that the account cannot take is a rejected order at the worst moment.
     allowShort: s.allowShort !== false,
@@ -461,7 +485,7 @@ function save(patch = {}) {
     next[key] = url;
   }
 
-  for (const key of ['buyingPower', 'maxOrderValue', 'maxTradesPerDay']) {
+  for (const key of ['buyingPower', 'maxOrderValue', 'maxTradesPerDay', 'minShares']) {
     if (!(key in patch)) continue;
     const v = patch[key];
     if (v === '' || v === null) { delete next[key]; continue; }
@@ -560,7 +584,7 @@ function save(patch = {}) {
         out.ratio = n;
       } else if (rawRatio === undefined && was && was.ratio) out.ratio = was.ratio;
       for (const key of ['buyingPower', 'maxOrderValue', 'maxTradesPerDay',
-                         'accountSize', 'riskPerTrade', 'maxPositionPct']) {
+                         'minShares', 'accountSize', 'riskPerTrade', 'maxPositionPct']) {
         const v = d[key];
         if (v === '' || v === null || v === undefined) continue;
         const n = Number(v);
@@ -1220,6 +1244,36 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
   }
 
   /*
+   * A FLOOR ON THE POSITION — under it, this account sits the trade out.
+   *
+   * A position of one or two shares is not a small version of the trade. It is
+   * a different trade:
+   *
+   *   · it cannot scale out. Splitting 1 share across three legs gives one leg
+   *     everything and drops the other two, so the account runs a strategy with
+   *     one way out instead of three — and nothing about it looks wrong
+   *   · the per-order fee is a fixed amount, so on one share it is most of the
+   *     move the strategy is trying to catch
+   *   · a whole-share floor turns 1.4 into 1, which is a 29% sizing error the
+   *     risk settings never asked for
+   *
+   * TTP5k at ratio 0.05 took ONE share of a $238 stock and placed a
+   * single-exit version of a two-leg strategy. That is what this stops.
+   *
+   * Per account, because the sizing is per account: the same signal can be
+   * ninety shares in one and one in the other, and only the second should sit
+   * it out. Checked AFTER fitQuantity, so it counts what would really be sent
+   * rather than what was asked for — a 90-share order cut to 2 by buying power
+   * is exactly the case this exists for.
+   */
+  const floor = cfg.minShares == null ? MIN_SHARES : cfg.minShares;
+  if (floor > 1 && fit.quantity < floor) {
+    return { blocked: 'min-size', fit,
+      reason: `${fit.quantity} share(s) is under this account's minimum of ${floor}`
+        + ' — too small to hold the strategy\'s shape, so nothing was sent' };
+  }
+
+  /*
    * The body. quantity_type 'fixed' is the documented default and is sent
    * explicitly: the alternative is 'cash', where the same number means dollars,
    * and a default that changed underneath would turn 40 shares into $40 of
@@ -1814,7 +1868,7 @@ function reconciled(date = null) {
 }
 
 module.exports = {
-  FILE, LEDGER, HOOK_RE,
+  FILE, LEDGER, HOOK_RE, MIN_SHARES,
   settings, publicSettings, save, mask,
   // Where orders can go, and one of them as a cfg the order path already takes.
   destinations, destinationCfg, accountsFor, autoRoute, manualCfg,

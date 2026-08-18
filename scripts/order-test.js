@@ -185,7 +185,18 @@ async function lastPrice(symbol) {
   if (!r.ok) { say(r.error || 'qp could not price the exit plan'); process.exit(1); }
   const plan = r.plan;
 
-  const floor = smallestWorkingSize(plan);
+  /*
+   * The rehearsal size has to clear BOTH floors.
+   *
+   * The legs need enough shares that none rounds away; the desk needs enough
+   * that it will send at all. `OR + VWAP 09:35` splits 50/50, so two shares
+   * fills every leg — and two is under the three-share minimum, so a rehearsal
+   * sized only from the legs would be refused with "under this account's
+   * minimum" and read as a broken strategy rather than a badly sized test.
+   */
+  const legFloor = smallestWorkingSize(plan);
+  const deskFloor = broker.settings().minShares || 1;
+  const floor = Math.max(legFloor, deskFloor);
   const shares = arg('shares') ? Math.floor(Number(arg('shares'))) : floor;
 
   say('');
@@ -195,7 +206,9 @@ async function lastPrice(symbol) {
   say(`shape       ${plan.legs.length} leg(s)`
     + (plan.runner ? ` + ${Math.round(plan.runner * 100)}% runner` : ' + no runner')
     + `   stop ${plan.stop_kind}`);
-  say(`needs       ${floor} share(s) for every leg to survive the whole-share floor`);
+  say(`needs       ${floor} share(s)`
+    + `   (${legFloor} so no leg rounds away`
+    + (deskFloor > legFloor ? `, ${deskFloor} is the desk's minimum position` : '') + ')');
 
   for (const one of ids) await rehearse(one);
 

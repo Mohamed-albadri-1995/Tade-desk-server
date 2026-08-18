@@ -367,6 +367,127 @@ describe("a setup's daily cap is counted in positions", () => {
   });
 });
 
+// ── the floor on a position ────────────────────────────────────────────────
+/*
+ * Under three shares an account sits the trade out.
+ *
+ * WHY, from a live session: TTP5k is at ratio 0.05, so on a $238 stock it was
+ * sized to ONE share — and one share cannot be split 50/50. splitLegs gave the
+ * whole thing to one part, so the account placed a SINGLE-EXIT version of a
+ * two-leg strategy. Nothing about that looks wrong in the ledger: an order went,
+ * it filled, the shares add up.
+ *
+ * Three because it is the fewest that can be split three ways, which is the
+ * widest shape anything here runs. The other two reasons are arithmetic: the
+ * per-order fee is fixed, so on one share it is most of the move; and flooring
+ * 1.4 to 1 is a 29% sizing error the risk settings never asked for.
+ */
+describe('a position too small to hold the strategy', () => {
+  test('one share is not sent', async () => {
+    const cfg = armed();
+    const out = await broker.placeOrder({ ...entry({ quantity: 1 }), cfg });
+    expect(out.sent).toBe(false);
+    expect(out.skipped).toMatch(/under this account's minimum of 3/);
+    expect(sent).toHaveLength(0);
+  });
+
+  test('two are not sent either', async () => {
+    const cfg = armed();
+    const out = await broker.placeOrder({ ...entry({ quantity: 2 }), cfg });
+    expect(out.sent).toBe(false);
+    expect(sent).toHaveLength(0);
+  });
+
+  test('three are', async () => {
+    const cfg = armed();
+    const out = await broker.placeOrder({ ...entry({ quantity: 3 }), cfg });
+    expect(out.sent).toBe(true);
+    expect(sent[0].body.quantity).toBe(3);
+  });
+
+  /*
+   * PER ACCOUNT, because the sizing is per account. The same signal is ninety
+   * shares in one and one in the other, and only the second sits it out — a
+   * desk-wide rule would stop the account that could hold the trade perfectly
+   * well.
+   */
+  test('the big account still trades what the small one skipped', async () => {
+    armed({ two: true });
+    const small = await broker.placeOrder({ ...entry({ quantity: 1 }),
+      cfg: broker.destinationCfg('alp') });
+    const big = await broker.placeOrder({ ...entry({ quantity: 90 }),
+      cfg: broker.destinationCfg('ttp') });
+    expect(small.sent).toBe(false);
+    expect(big.sent).toBe(true);
+    expect(sent).toHaveLength(1);
+  });
+
+  /*
+   * Checked AFTER the buying-power fit, so it counts what would REALLY be sent.
+   * A 90-share order cut to 2 by a nearly empty account is exactly the case
+   * this exists for — and it is what the whole of yesterday afternoon looked
+   * like once the duplicate entries had drained both accounts.
+   */
+  test('an order CUT to under three by buying power is not sent', async () => {
+    broker.save({
+      destinations: [{ id: 'alp', name: 'Alpaca paper', dialect: 'alpaca', webhookUrl: HOOK,
+        buyingPower: 25, ratio: 1, mode: 'auto', setups: [] }],
+      enabled: true });
+    broker.save({ armed: true, allowShort: true });
+    const out = await broker.placeOrder({ ...entry({ quantity: 90 }),
+      cfg: broker.destinationCfg('alp') });
+    expect(out.sent).toBe(false);
+    expect(out.skipped).toMatch(/under this account's minimum/);
+    expect(sent).toHaveLength(0);
+  });
+
+  test('an account can set its own floor', async () => {
+    broker.save({
+      destinations: [{ id: 'alp', name: 'Alpaca paper', dialect: 'alpaca', webhookUrl: HOOK,
+        buyingPower: 100000, ratio: 1, mode: 'auto', setups: [], minShares: 10 }],
+      enabled: true });
+    broker.save({ armed: true, allowShort: true });
+    const out = await broker.placeOrder({ ...entry({ quantity: 5 }),
+      cfg: broker.destinationCfg('alp') });
+    expect(out.sent).toBe(false);
+    expect(out.skipped).toMatch(/minimum of 10/);
+  });
+
+  /* A floor of 1 is the old behaviour, for a desk that really does want it. */
+  test('a floor of one switches it off', async () => {
+    broker.save({
+      destinations: [{ id: 'alp', name: 'Alpaca paper', dialect: 'alpaca', webhookUrl: HOOK,
+        buyingPower: 100000, ratio: 1, mode: 'auto', setups: [], minShares: 1 }],
+      enabled: true });
+    broker.save({ armed: true, allowShort: true });
+    const out = await broker.placeOrder({ ...entry({ quantity: 1 }),
+      cfg: broker.destinationCfg('alp') });
+    expect(out.sent).toBe(true);
+  });
+
+  /*
+   * A skipped account must not consume the setup's allowance or retire the
+   * name — it took no position, so tomorrow's counters and today's other
+   * account both have to be unaffected.
+   */
+  test('sitting it out spends nothing', async () => {
+    const cfg = armed();
+    await broker.placeOrder({ ...entry({ quantity: 1, maxPerDay: 2 }), cfg });
+    expect(broker.positionsToday(DAY, 'test-strategy')).toBe(0);
+    expect(broker.sentAlready(DAY, 'test-strategy', 'VIK', 'alp')).toBe(false);
+    // ...and the name can still be taken when it IS big enough.
+    const out = await broker.placeOrder({ ...entry({ quantity: 40, maxPerDay: 2 }), cfg });
+    expect(out.sent).toBe(true);
+  });
+
+  test('a preview says the same thing the wire would', () => {
+    const cfg = armed();
+    const plan = broker.planOrder({ ...entry({ quantity: 2 }), cfg });
+    expect(plan.blocked).toBe('min-size');
+    expect(plan.body).toBeUndefined();
+  });
+});
+
 // ── the question on its own ────────────────────────────────────────────────
 
 describe('sentAlready', () => {

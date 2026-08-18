@@ -910,8 +910,16 @@ describe('the protocol decides the orders', () => {
 
   test('a split that cannot account for every share is refused', async () => {
     armed();
-    // A protocol whose legs are all too small to be one whole share.
-    const out = await place({ quantity: 2, price: 29.05, stop: 27.68, plan: {
+    /*
+     * A protocol whose legs are all too small to be one whole share: five legs
+     * of 20% on three shares is 0.6 each, and every one floors away.
+     *
+     * THREE rather than two, which is what this used to be — three is the
+     * desk's minimum position, and below it planOrder now sits the trade out
+     * entirely. That gate is tested where it lives; this test is about the
+     * split arithmetic, and it needs a quantity that reaches the split.
+     */
+    const out = await place({ quantity: 3, price: 29.05, stop: 27.68, plan: {
       runner: 0, legs: [
         { fraction: 0.2, price: 30 }, { fraction: 0.2, price: 31 },
         { fraction: 0.2, price: 32 }, { fraction: 0.2, price: 33 },
@@ -920,6 +928,6 @@ describe('the protocol decides the orders', () => {
     expect(out.sent).toBe(true);
     // Everything that could not be a whole share joins the last leg, so the
     // total still matches exactly.
-    expect(sent.reduce((n, s) => n + s.body.quantity, 0)).toBe(2);
+    expect(sent.reduce((n, s) => n + s.body.quantity, 0)).toBe(3);
   });
 });

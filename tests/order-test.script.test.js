@@ -165,7 +165,7 @@ describe('the default size fills every leg', () => {
     const { out } = await run(['Three Legger', '--entry', '100', '--stop', '99']);
     expect(out).toMatch(/needs\s+10 share\(s\)/);
     expect(out).toMatch(/rehearsing\s+10 share\(s\)/);
-    expect(out).toMatch(/for every leg to survive the whole-share floor/);
+    expect(out).toMatch(/so no leg rounds away/);
     expect(out).toMatch(/=> 3 JSONs/);
   });
 
@@ -176,9 +176,16 @@ describe('the default size fills every leg', () => {
     expect(out).toMatch(/=> 2 JSONs/);       // ...and it really is only two
   });
 
-  test('a single-leg strategy needs only one share', async () => {
+  /*
+   * A single-leg strategy needs one share for its legs — and the DESK will not
+   * send under three, so the rehearsal has to clear both floors. Sized from the
+   * legs alone it would be refused with "under this account's minimum", which
+   * reads as a broken strategy rather than a badly sized test.
+   */
+  test('a single-leg strategy is still rehearsed at the desk minimum', async () => {
     const { out } = await run(['Simple Short', '--entry', '100', '--stop', '101']);
-    expect(out).toMatch(/needs\s+1 share\(s\)/);
+    expect(out).toMatch(/needs\s+3 share\(s\)/);
+    expect(out).toMatch(/1 so no leg rounds away, 3 is the desk's minimum position/);
     expect(out).toMatch(/=> 1 JSON\b/);
   });
 });
