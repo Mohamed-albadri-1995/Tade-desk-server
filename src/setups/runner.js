@@ -130,7 +130,7 @@ function orderLines(list) {
 function orderLine(o) {
   if (!o) return '';
   if (o.skipped) return ` · ORDER: not sent (${o.skipped})`;
-  if (!o.sent) return ` · ORDER FAILED — ${o.error || 'refused'}. Place it by hand.`;
+  if (!o.sent) return ` · ORDER FAILED — ${o.error || 'refused'}${borrowNote(o)}. Place it by hand.`;
   const filled = o.status === 'filled';
   return ` · ORDER ${filled ? 'FILLED' : String(o.status || 'accepted').toUpperCase()}`
     + ` ${o.quantity}${o.fillPrice ? ` @ ${o.fillPrice}` : ''}`
@@ -139,7 +139,30 @@ function orderLine(o) {
     + `${o.scaleOut > 1 ? ` in ${o.scaleOut} legs` : ''}`
     + `${o.bracket ? ' with stop+target' : ' — STOP NOT SENT, place it'}`
     + `${o.partial ? ' — PARTIAL: ' + (o.error || 'some legs did not go in') : ''}`
-    + `${o.reduced ? ` (${o.reduced})` : ''}`;
+    + `${o.reduced ? ` (${o.reduced})` : ''}`
+    + borrowNote(o);
+}
+
+/*
+ * "The borrow check did not run" belongs on the alert, not only in a log.
+ *
+ * A short whose shortability could not be confirmed is still sent — refusing
+ * every short because Alpaca did not answer is a worse failure than the
+ * rejection the check exists to prevent. But then the order that was checked
+ * and the order that was not look identical, and the difference is whether the
+ * rejection arriving by email hours later was foreseeable.
+ *
+ * CAPR is the case: the lookup answered correctly a few hours after the order
+ * it should have stopped, and nothing on the alert distinguished the two.
+ */
+function borrowNote(o) {
+  if (!o) return '';
+  if (o.borrowUnchecked) {
+    return ` — BORROW NOT CHECKED (${o.borrowUnchecked}); if this comes back`
+      + ' "cannot be sold short", that is why';
+  }
+  if (o.hardToBorrow) return ' — shortable but HARD to borrow, the fill may need a locate';
+  return '';
 }
 
 /*
@@ -784,5 +807,5 @@ async function runDue(decisionTime, opts = {}) {
 }
 
 module.exports = {
-  runSetup, runDue, universe, describePick, lastWantedBar, orderLine, unmanagedLine,
+  runSetup, runDue, universe, describePick, lastWantedBar, orderLine, unmanagedLine, borrowNote,
 };

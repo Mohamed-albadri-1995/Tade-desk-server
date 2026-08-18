@@ -35,7 +35,82 @@ function getCredentials() {
   if (creds.alpacaApiKey && creds.alpacaApiSecret) {
     return { key: creds.alpacaApiKey, secret: creds.alpacaApiSecret };
   }
+
+  /*
+   * THE SHARED DATABASE, because credentials belong to an ACCOUNT and not to a
+   * tool.
+   *
+   * Every tool runs in its own process with its own DB_PATH — t2.db, t3.db —
+   * so that nine screeners do not overwrite each other's cards. Keys were
+   * caught up in that split, and they should not have been: there is one Alpaca
+   * account, entered once, on whichever page the person happened to be on.
+   *
+   * The symptom was silent and expensive. checkShortable() treats "could not
+   * ask" as "send it and let the broker decide", which is right — refusing
+   * every short because Alpaca did not answer is a worse failure. But
+   * getCredentials() THROWS when the tool's own database has no keys, and that
+   * throw is caught and turned into exactly that "could not ask". So for every
+   * tool except the one where the keys were typed, the borrow check has never
+   * run at all, and nothing anywhere said so.
+   *
+   * CAPR is what it looks like from outside: sent as a short by T2, refused by
+   * Alpaca with "cannot be sold short", while the same lookup answered
+   * perfectly by hand — because by hand it read the default database.
+   *
+   * Read-only and best-effort: a missing file, a locked file or an older schema
+   * all fall through to the error below, which is the same message as before.
+   */
+  const shared = sharedCredentials();
+  if (shared) return shared;
+
   throw new Error('Alpaca credentials not set — configure an Alpaca broker profile, or add them in Settings > API Keys');
+}
+
+/** The default database's Alpaca keys, opened read-only. Cached, including the miss. */
+let _sharedCreds;
+function sharedCredentials() {
+  if (_sharedCreds !== undefined) return _sharedCreds;
+  _sharedCreds = null;
+  try {
+    const path = require('path');
+    const config = require('../config');
+    const DEFAULT_DB = path.join(__dirname, '..', '..', 'data', 'tradedesk.db');
+    // Already reading it — nothing to fall back to.
+    if (path.resolve(config.dbPath) === path.resolve(DEFAULT_DB)) return _sharedCreds;
+    const Database = require('better-sqlite3');
+    const shared = new Database(DEFAULT_DB, { readonly: true, fileMustExist: true });
+    try {
+      const profile = shared.prepare(`
+        SELECT config FROM trading_brokers
+         WHERE type = 'alpaca' AND enabled = 1
+         ORDER BY is_default DESC, created_at ASC
+         LIMIT 1
+      `).get();
+      if (profile) {
+        let cfg = {};
+        try { cfg = JSON.parse(profile.config || '{}'); } catch { /* ignore */ }
+        if (cfg.key && cfg.secret) _sharedCreds = { key: cfg.key, secret: cfg.secret };
+      }
+      if (!_sharedCreds) {
+        const rs = shared.prepare(
+          "SELECT key, value FROM settings WHERE key IN ('alpacaApiKey','alpacaApiSecret')").all();
+        const c = {};
+        for (const r of rs) c[r.key] = r.value;
+        if (c.alpacaApiKey && c.alpacaApiSecret) {
+          _sharedCreds = { key: c.alpacaApiKey, secret: c.alpacaApiSecret };
+        }
+      }
+    } finally { shared.close(); }
+    if (_sharedCreds) {
+      console.warn('[Alpaca] using the credentials from the shared database — '
+        + `${config.toolId || 'this tool'} has none of its own`);
+    }
+  } catch (err) {
+    // Missing, locked, or an older schema. Nothing to add: the caller's error
+    // already says what to do about it.
+    _sharedCreds = null;
+  }
+  return _sharedCreds;
 }
 
 function authHeaders() {
@@ -277,7 +352,29 @@ async function fetchAsset(symbol) {
  */
 async function checkShortable(symbol) {
   try {
-    const a = await fetchAsset(symbol);
+    /*
+     * ASKED TWICE before giving up.
+     *
+     * This runs at 09:36:1x, in the same second as everything else the box
+     * does, and a check that cannot run does not block the order — it warns and
+     * sends. So a single timed-out request at the busiest moment of the morning
+     * silently removes the protection entirely, and the only trace is a console
+     * line.
+     *
+     * That happened: CAPR went to Alpaca and came back "cannot be sold short",
+     * while the same lookup answered correctly a few hours later. One retry
+     * costs a few hundred milliseconds on the rare path and covers a blip,
+     * which is what this failure looks like.
+     */
+    let a = null;
+    try {
+      a = await fetchAsset(symbol);
+    } catch (first) {
+      await new Promise(r => setTimeout(r, 250));
+      a = await fetchAsset(symbol);            // a second failure throws, below
+      if (a) console.warn(`[Alpaca] asset ${symbol} answered on the second ask `
+        + `(first: ${first.message})`);
+    }
     if (!a) return { ok: true, checked: false, reason: 'no answer from Alpaca' };
     const shortable = a.shortable === true;
     return {

@@ -215,3 +215,76 @@ describe('a target too close to the entry', () => {
     expect(sent[0].body).toMatchObject({ stop_loss_price: 27.68, take_profit_price: 31.79 });
   });
 });
+
+/*
+ * WHEN THE BORROW CHECK ITSELF DOES NOT RUN.
+ *
+ * CAPR, live: sent as a short, refused by Alpaca with "asset cannot be sold
+ * short" — and the very same lookup, run by hand a few hours later, answered
+ * `{ ok: false, checked: true, shortable: false }`. The check was right. It
+ * just did not happen, at 09:36:18, in the same second as everything else the
+ * box does.
+ *
+ * It still must not block: refusing every short because Alpaca did not answer
+ * is a worse failure than the rejection this prevents. So two things changed
+ * instead — ask twice, and carry "did not run" onto the order, because a
+ * protective check that silently did not happen looks exactly like one that
+ * passed.
+ */
+describe('a borrow check that could not run', () => {
+  test('the order still goes — an unanswerable check never blocks', async () => {
+    const cfg = armedAlpaca();
+    alpaca.checkShortable.mockResolvedValue({
+      ok: true, checked: false, reason: 'Alpaca asset CAPR 500: upstream' });
+    const out = await broker.placeOrder({
+      symbol: 'CAPR', signal: 'SHORT', quantity: 40, price: 7.58,
+      stop: 7.89, target: 6.96, date: DAY, cfg });
+    expect(out.sent).toBe(true);
+  });
+
+  /* ...and SAYS SO, on the row the alert is built from. */
+  test('the order carries "not checked", with the reason', async () => {
+    const cfg = armedAlpaca();
+    alpaca.checkShortable.mockResolvedValue({
+      ok: true, checked: false, reason: 'Alpaca asset CAPR 500: upstream' });
+    const out = await broker.placeOrder({
+      symbol: 'CAPR', signal: 'SHORT', quantity: 40, price: 7.58,
+      stop: 7.89, target: 6.96, date: DAY, cfg });
+    expect(out.borrowUnchecked).toMatch(/500: upstream/);
+
+    const { orderLine } = require('../src/setups/runner');
+    expect(orderLine(out)).toMatch(/BORROW NOT CHECKED/);
+    expect(orderLine(out)).toMatch(/cannot be sold short/);
+  });
+
+  test('a check that DID run leaves no note at all', async () => {
+    const cfg = armedAlpaca();
+    const out = await broker.placeOrder({
+      symbol: 'ZTG', signal: 'SHORT', quantity: 40, price: 7.58,
+      stop: 7.89, target: 6.96, date: DAY, cfg });
+    expect(out.borrowUnchecked).toBeNull();
+    expect(require('../src/setups/runner').orderLine(out)).not.toMatch(/BORROW NOT CHECKED/);
+  });
+
+  test('shortable but hard to borrow is said too, and still sends', async () => {
+    const cfg = armedAlpaca();
+    alpaca.checkShortable.mockResolvedValue({
+      ok: true, checked: true, shortable: true, easyToBorrow: false });
+    const out = await broker.placeOrder({
+      symbol: 'ZTG', signal: 'SHORT', quantity: 40, price: 7.58,
+      stop: 7.89, target: 6.96, date: DAY, cfg });
+    expect(out.sent).toBe(true);
+    expect(require('../src/setups/runner').orderLine(out)).toMatch(/HARD to borrow/);
+  });
+
+  /* A long is never asked about borrow, so it never carries the note. */
+  test('a long carries no borrow note', async () => {
+    const cfg = armedAlpaca();
+    alpaca.checkShortable.mockResolvedValue({ ok: true, checked: false, reason: 'x' });
+    const out = await broker.placeOrder({
+      symbol: 'EYPT', signal: 'LONG', quantity: 40, price: 5.39,
+      stop: 5.03, target: 6.10, date: DAY, cfg });
+    expect(out.borrowUnchecked).toBeNull();
+    expect(alpaca.checkShortable).not.toHaveBeenCalled();
+  });
+});

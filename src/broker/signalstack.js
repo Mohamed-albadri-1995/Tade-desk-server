@@ -1466,6 +1466,11 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
 
   const { body: planned, action, fit } = plan;
 
+  // Carried from the borrow check below onto every row this call writes, so a
+  // check that could not run is visible on the alert rather than only in a log.
+  let unchecked = null;
+  let hardToBorrow = false;
+
   /*
    * ASK ALPACA WHETHER IT WILL SHORT THIS, BEFORE SENDING.
    *
@@ -1487,10 +1492,23 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
       const out = { ...base, quantity: 0, sent: false, skipped: borrow.reason };
       record(out); return out;
     }
+    /*
+     * A CHECK THAT DID NOT RUN IS CARRIED ONTO THE ORDER, not just logged.
+     *
+     * It still sends — blocking every short because Alpaca did not answer is a
+     * worse failure than the rejection this prevents. But a protective check
+     * that silently did not happen looks exactly like one that passed, and the
+     * only trace was a console line in a PM2 log nobody reads. It took a live
+     * rejection and an afternoon to work out which of the two had occurred.
+     *
+     * On the row, so the alert and the ledger both say it.
+     */
     if (!borrow.checked) {
+      unchecked = borrow.reason || 'no answer from Alpaca';
       console.warn(`[Broker] could not check whether ${symbol} is shortable `
         + `(${borrow.reason}) — sending anyway, the broker decides`);
     } else if (borrow.easyToBorrow === false) {
+      hardToBorrow = true;
       console.warn(`[Broker] ${symbol} is shortable but NOT easy to borrow — `
         + 'the fill may need a locate');
     }
@@ -1528,6 +1546,8 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
     const out = {
       ...base,
       action,
+      borrowUnchecked: unchecked,
+      hardToBorrow: hardToBorrow || undefined,
       quantity: done.reduce((n, r) => n + r.quantity, 0),
       bracket: cfg.bracket,
       scaleOut: results.length,
@@ -1600,6 +1620,8 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
     // `sent` means SignalStack accepted it. `status` says whether the broker
     // FILLED it or merely accepted it — different mornings, and collapsing them
     // is how an unfilled order becomes an imaginary position.
+    borrowUnchecked: unchecked,
+    hardToBorrow: hardToBorrow || undefined,
     sent: !!(res && res.ok),
     status: res ? res.status : null,
     httpStatus: res ? res.httpStatus : null,
