@@ -163,8 +163,9 @@ describe('the default size fills every leg', () => {
    */
   test('a 10/80/10 strategy defaults to ten shares and three orders', async () => {
     const { out } = await run(['Three Legger', '--entry', '100', '--stop', '99']);
-    expect(out).toMatch(/size\s+10 share\(s\)/);
-    expect(out).toMatch(/the smallest at which no leg rounds to zero/);
+    expect(out).toMatch(/needs\s+10 share\(s\)/);
+    expect(out).toMatch(/rehearsing\s+10 share\(s\)/);
+    expect(out).toMatch(/for every leg to survive the whole-share floor/);
     expect(out).toMatch(/=> 3 JSONs/);
   });
 
@@ -177,7 +178,7 @@ describe('the default size fills every leg', () => {
 
   test('a single-leg strategy needs only one share', async () => {
     const { out } = await run(['Simple Short', '--entry', '100', '--stop', '101']);
-    expect(out).toMatch(/size\s+1 share\(s\)/);
+    expect(out).toMatch(/needs\s+1 share\(s\)/);
     expect(out).toMatch(/=> 1 JSON\b/);
   });
 });

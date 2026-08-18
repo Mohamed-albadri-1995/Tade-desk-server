@@ -242,6 +242,131 @@ describe('what the guard must not block', () => {
   });
 });
 
+// ── the cap counts POSITIONS ───────────────────────────────────────────────
+/*
+ * THE FAULT THIS FOUND, on a live session.
+ *
+ * OR + VWAP took CBRS at 09:36 into both accounts. Forty seconds later BRUN
+ * qualified and was refused, in both, with
+ *
+ *     this setup's limit of 2 order(s) a day is already used
+ *
+ * — because the cap counted LEDGER ROWS and a row is written per account. Two
+ * accounts turned one trade into two of the allowance, so a cap of 2 meant one
+ * trade, and the message pointed at a setting that was not the problem.
+ *
+ * The scale-out half was already right: three legs go out inside one call and
+ * write one row. Counting distinct SYMBOLS makes the cap mean the same thing
+ * however many accounts are wired up and however many ways out a strategy has.
+ */
+describe("a setup's daily cap is counted in positions", () => {
+  const two = () => { armed({ two: true }); return ['alp', 'ttp']; };
+
+  test('one signal into two accounts spends ONE of the allowance', async () => {
+    for (const d of two()) {
+      await broker.placeOrder({ ...entry({ symbol: 'CBRS', maxPerDay: 2 }),
+        cfg: broker.destinationCfg(d) });
+    }
+    expect(broker.positionsToday(DAY, 'test-strategy')).toBe(1);
+    expect(sent).toHaveLength(2);
+  });
+
+  /* The second NAME must still get through — this is the trade that was lost. */
+  test('a second name still trades under a cap of 2', async () => {
+    for (const d of two()) {
+      await broker.placeOrder({ ...entry({ symbol: 'CBRS', maxPerDay: 2 }),
+        cfg: broker.destinationCfg(d) });
+    }
+    sent = [];
+    for (const d of ['alp', 'ttp']) {
+      const out = await broker.placeOrder({ ...entry({ symbol: 'BRUN', maxPerDay: 2 }),
+        cfg: broker.destinationCfg(d) });
+      expect(out.sent).toBe(true);
+    }
+    expect(sent).toHaveLength(2);
+    expect(broker.positionsToday(DAY, 'test-strategy')).toBe(2);
+  });
+
+  /*
+   * THE NEAR-MISS. Counting positions alone reproduced the original bug one
+   * step later: CBRS counted, BRUN counted, and then BRUN'S SECOND ACCOUNT
+   * refused as the "third position" when it is the second half of the second.
+   * The desk would trade every signal in one account and the last one in
+   * neither — which looks like a cap working.
+   */
+  test('the LAST name still reaches its second account when the cap is full', async () => {
+    two();
+    await broker.placeOrder({ ...entry({ symbol: 'CBRS', maxPerDay: 2 }),
+      cfg: broker.destinationCfg('alp') });
+    await broker.placeOrder({ ...entry({ symbol: 'CBRS', maxPerDay: 2 }),
+      cfg: broker.destinationCfg('ttp') });
+    // BRUN fills the cap on its first account...
+    const first = await broker.placeOrder({ ...entry({ symbol: 'BRUN', maxPerDay: 2 }),
+      cfg: broker.destinationCfg('alp') });
+    expect(first.sent).toBe(true);
+    expect(broker.positionsToday(DAY, 'test-strategy')).toBe(2);
+    // ...and its second account must STILL get it. Same trade, not a third one.
+    const second = await broker.placeOrder({ ...entry({ symbol: 'BRUN', maxPerDay: 2 }),
+      cfg: broker.destinationCfg('ttp') });
+    expect(second.sent).toBe(true);
+    expect(second.skipped).toBeFalsy();
+  });
+
+  test('the THIRD name is refused — the cap still means something', async () => {
+    two();
+    for (const sym of ['CBRS', 'BRUN']) {
+      for (const d of ['alp', 'ttp']) {
+        await broker.placeOrder({ ...entry({ symbol: sym, maxPerDay: 2 }),
+          cfg: broker.destinationCfg(d) });
+      }
+    }
+    const out = await broker.placeOrder({ ...entry({ symbol: 'VIK', maxPerDay: 2 }),
+      cfg: broker.destinationCfg('alp') });
+    expect(out.sent).toBe(false);
+    expect(out.skipped).toMatch(/limit of 2 position\(s\) a day/);
+  });
+
+  /*
+   * A three-leg scale-out is one position, not three. Already true before this
+   * change, and pinned here because the two rules now share a counter.
+   */
+  test('a scale-out spends one of the allowance, not one per leg', async () => {
+    const cfg = armed();
+    await broker.placeOrder({
+      ...entry({ symbol: 'CBRS', quantity: 30, maxPerDay: 2 }),
+      plan: { legs: [{ fraction: 0.34, r_multiple: 1, price: 10.5 },
+                     { fraction: 0.33, r_multiple: 2, price: 11 }], runner: 0.33 },
+      cfg });
+    expect(broker.positionsToday(DAY, 'test-strategy')).toBe(1);
+    const out = await broker.placeOrder({ ...entry({ symbol: 'BRUN', maxPerDay: 2 }), cfg });
+    expect(out.sent).toBe(true);
+  });
+
+  /*
+   * A REPEAT is refused as a repeat, not as a cap. The two messages send you to
+   * different settings, and "your daily limit is used" about a name you are
+   * already holding is the wrong one.
+   */
+  test('a repeat says repeat, even when the cap is also full', async () => {
+    const cfg = armed();
+    for (const sym of ['CBRS', 'BRUN']) {
+      await broker.placeOrder({ ...entry({ symbol: sym, maxPerDay: 2 }), cfg });
+    }
+    const out = await broker.placeOrder({ ...entry({ symbol: 'CBRS', maxPerDay: 2 }), cfg });
+    expect(out.sent).toBe(false);
+    expect(out.skipped).toMatch(/already traded by this setup today/);
+    expect(out.skipped).not.toMatch(/limit/);
+  });
+
+  test('a refused order never spends the allowance', async () => {
+    const cfg = armed();
+    global.fetch = jest.fn(async () => ({
+      ok: false, status: 422, text: async () => JSON.stringify({ message: 'no' }) }));
+    await broker.placeOrder({ ...entry({ symbol: 'CBRS', maxPerDay: 1 }), cfg });
+    expect(broker.positionsToday(DAY, 'test-strategy')).toBe(0);
+  });
+});
+
 // ── the question on its own ────────────────────────────────────────────────
 
 describe('sentAlready', () => {

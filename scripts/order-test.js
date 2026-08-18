@@ -128,18 +128,30 @@ async function lastPrice(symbol) {
    * same reasoning as broker.test(), for the same reason.
    */
   const live = broker.destinations().filter(d => d.enabled && d.webhookUrl);
-  const id = arg('account') || (live.length === 1 ? live[0].id : null);
-  if (!id) {
-    say(live.length ? `say which account with --account: ${live.map(d => `${d.id} (${d.name})`).join(', ')}`
-                    : 'no broker account is configured');
+  if (!live.length) { say('no broker account is configured'); process.exit(1); }
+  /*
+   * `--all` rehearses every account, which is what production actually does:
+   * a signal routes to every account that lists the setup, sized separately in
+   * each. Rehearsing one and inferring the other is how a second account stays
+   * untested while reading as a pass — and the sizes are NOT proportional,
+   * because each is floored to whole shares against its own ratio.
+   */
+  const ids = has('all') ? live.map(d => d.id)
+    : (arg('account') ? [arg('account')] : (live.length === 1 ? [live[0].id] : null));
+  if (!ids) {
+    say('There is more than one account, so say which — or --all for every one,');
+    say('which is what a real signal does. Copy one of these:');
+    say('');
+    for (const d of live) {
+      say(`  node scripts/order-test.js ${JSON.stringify(NAME)} --account ${d.id}`
+        + `${SEND ? ' --send' : ''}      # ${d.name}`);
+    }
+    say(`  node scripts/order-test.js ${JSON.stringify(NAME)} --all`
+      + `${SEND ? ' --send' : ''}`.padEnd(SEND ? 7 : 1) + '           # both, as a signal would');
     process.exit(1);
   }
-  let cfg = broker.destinationCfg(id);
-  if (!cfg) { say(`no account called ${id}`); process.exit(1); }
-
-  if (has('test-hook')) {
-    if (!cfg.testWebhookUrl) { say(`${cfg.destinationName} has no test hook configured`); process.exit(1); }
-    cfg = { ...cfg, webhookUrl: cfg.testWebhookUrl };
+  for (const one of ids) {
+    if (!broker.destinationCfg(one)) { say(`no account called ${one}`); process.exit(1); }
   }
 
   // ── the prices ───────────────────────────────────────────────────────────
@@ -176,23 +188,76 @@ async function lastPrice(symbol) {
   const floor = smallestWorkingSize(plan);
   const shares = arg('shares') ? Math.floor(Number(arg('shares'))) : floor;
 
-  // ── say what is about to happen, before it happens ───────────────────────
   say('');
   say(`REHEARSAL   ${found.name}  ·  ${side}  ·  ${symbol}`);
-  say(`account     ${cfg.destinationName} [${id}]  ${cfg.dialect}`
-    + `  hook ${has('test-hook') ? 'TEST' : 'live'}`);
   say(`prices      entry ${entry}   stop ${stop}   risk/share ${Math.abs(entry - stop).toFixed(4)}`
     + `${arg('entry') ? '' : '   (entry from the last bar)'}`);
   say(`shape       ${plan.legs.length} leg(s)`
     + (plan.runner ? ` + ${Math.round(plan.runner * 100)}% runner` : ' + no runner')
     + `   stop ${plan.stop_kind}`);
-  say(`size        ${shares} share(s)`
-    + (arg('shares') ? '' : `   (the smallest at which no leg rounds to zero)`));
-  if (arg('shares') && shares < floor) {
-    say(`            ⚠ BELOW ${floor} — at this size a leg floors to zero and is`);
-    say(`              dropped, so this rehearses a DIFFERENT shape from production.`);
+  say(`needs       ${floor} share(s) for every leg to survive the whole-share floor`);
+
+  for (const one of ids) await rehearse(one);
+
+  /*
+   * ONE ACCOUNT AT A TIME, in full.
+   *
+   * Not a shared preview with per-account footnotes: each account has its own
+   * ratio, its own buying power and its own dialect, so the share count, the
+   * number of bodies and the JSON shape can all differ. TTP5k at ratio 0.05
+   * takes ONE share of a $238 stock, and one share cannot be split 50/50 —
+   * so the account that looks like a smaller copy of the other is in fact
+   * running a strategy with no runner at all.
+   */
+  async function rehearse(accountId) {
+    let cfg = broker.destinationCfg(accountId);
+    if (has('test-hook')) {
+      if (!cfg.testWebhookUrl) { say(`${cfg.destinationName} has no test hook — skipped`); return; }
+      cfg = { ...cfg, webhookUrl: cfg.testWebhookUrl };
+    }
+    say('');
+    say('══════════════════════════════════════════════════════════════════');
+    say(`ACCOUNT     ${cfg.destinationName} [${accountId}]  ${cfg.dialect}`
+      + `  hook ${has('test-hook') ? 'TEST' : 'live'}`);
+
+    /*
+     * TWO DIFFERENT QUESTIONS, kept apart.
+     *
+     *   1. Does the plumbing carry the whole shape into THIS account?
+     *   2. Would a real signal here be big enough to have that shape at all?
+     *
+     * The rehearsal is question 1, so it uses the floor size — anything less
+     * exercises fewer legs than production and passes. Question 2 is answered
+     * beside it, from the real risk settings and this account's ratio, because
+     * an account whose ratio puts every signal under the floor is running a
+     * strategy with fewer ways out than the one that was backtested — and that
+     * is invisible from inside a rehearsal that sized itself.
+     */
+    try {
+      const risk = require('../src/setups/risk');
+      const std = risk.sizeFor({ entry, riskPerShare: Math.abs(entry - stop) }, risk.settings());
+      const real = std && risk.scaleTo(std, cfg);
+      if (real) {
+        say(`a real signal  ${real.shares} share(s) here`
+          + (real.standardShares ? ` (${real.standardShares} at the standard × ${real.ratio})` : '')
+          + (real.reason ? ` — ${real.reason}` : ''));
+        if (real.shares > 0 && real.shares < floor) {
+          say(`               ⚠ UNDER ${floor} — at that size a leg floors to zero, so a`);
+          say('                 real signal in this account has FEWER ways out than the');
+          say('                 strategy that was tested. It is not a smaller copy.');
+        }
+      }
+    } catch { /* risk settings unreadable — the rehearsal still stands */ }
+
+    say(`rehearsing  ${shares} share(s)   (the floor, so every leg is exercised)`);
+    if (arg('shares') && shares < floor) {
+      say(`            ⚠ BELOW ${floor} — a leg floors to zero and is dropped, so this`);
+      say('              rehearses a DIFFERENT shape from production.');
+    }
+    await one_(cfg, accountId, shares);
   }
 
+  async function one_(cfg, accountId, shares) {
   const p = broker.planOrder({
     symbol, signal: side === 'short' ? 'SHORT' : 'LONG',
     quantity: shares, price: entry, stop,
@@ -226,7 +291,7 @@ async function lastPrice(symbol) {
 
   if (!SEND) {
     say('');
-    say('DRY RUN — nothing was sent. Add --send to place it.');
+    say('  DRY RUN — nothing was sent. Add --send to place it.');
     return;
   }
 
@@ -267,4 +332,5 @@ async function lastPrice(symbol) {
   say('');
   say('Then close them by hand, or let the end-of-session flatten do it.');
   say('  node scripts/today.js       to see this in the ledger');
+  }
 })().catch(e => { console.error(scrub(e.stack || e.message)); process.exit(1); });

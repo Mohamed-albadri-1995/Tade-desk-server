@@ -120,14 +120,50 @@ describe('the alert feed', () => {
    * other three faults on the page get missed.
    */
   test('a repeated error is collapsed to one line with a count', () => {
-    fires(Array.from({ length: 46 }, (_, i) => ({
+    fires(Array.from({ length: 46 }, () => ({
       ruleId: 'Test@09:30', ticker: null, level: 'error',
       detail: "Did not run: Cannot read properties of null (reading 'toFixed')",
-      atET: `2026-08-17, 10:${String(46 + (i % 13)).padStart(2, '0')}:00`,
     })));
     const out = run();
     expect(out).toMatch(/46×/);
     expect(out.match(/Did not run/g)).toHaveLength(1);
+  });
+
+  /*
+   * The window is the whole point of collapsing them: 46 copies say there is a
+   * fault, "10:46 to 11:31" says how long it ran and what else to look at in
+   * that stretch. It is read off `at`, because atET is only stamped when a fire
+   * reaches HISTORY and a live fire has not.
+   */
+  test('the collapsed line carries the first and last time', () => {
+    const base = Date.parse('2026-08-17T14:46:00Z');           // 10:46 New York
+    fs.writeFileSync(path.join(DIR, 'alert-fires.json'), JSON.stringify({
+      tools: { T8: { date: DAY, fires: Array.from({ length: 46 }, (_, i) => ({
+        ruleId: 'Test@09:30', ticker: null, toolId: 'T8', date: DAY,
+        at: base + i * 60000, kind: 'setup', level: 'error',
+        detail: 'Did not run: boom' })) } },
+    }));
+    const out = run();
+    expect(out).toMatch(/first 10:46:00\s+last 11:31:00/);
+  });
+
+  /*
+   * One unparseable timestamp must not become the "first" or the "last" and
+   * quietly move the window the reader is being shown.
+   */
+  test('an undated error is counted, not sorted in among the times', () => {
+    const base = Date.parse('2026-08-17T14:46:00Z');
+    fs.writeFileSync(path.join(DIR, 'alert-fires.json'), JSON.stringify({
+      tools: { T8: { date: DAY, fires: [
+        { ruleId: 'R', toolId: 'T8', date: DAY, at: base, level: 'error', detail: 'boom' },
+        { ruleId: 'R', toolId: 'T8', date: DAY, at: base + 60000, level: 'error', detail: 'boom' },
+        { ruleId: 'R', toolId: 'T8', date: DAY, at: NaN, level: 'error', detail: 'boom' },
+      ] } },
+    }));
+    const out = run();
+    expect(out).toMatch(/3×/);
+    expect(out).toMatch(/first 10:46:00\s+last 10:47:00/);
+    expect(out).toMatch(/\+1 with no timestamp/);
   });
 
   /*
@@ -215,7 +251,46 @@ describe('reconciling the two', () => {
     ledger([{ symbol: 'ZZZ', action: 'buy', asked: 5, quantity: 5, sent: true,
               setupId: 'S', destination: 'alp' }]);
     const out = run();
-    expect(out).toMatch(/an order with no alert behind it/);
+    expect(out).toMatch(/order\(s\) with NO alert behind them/);
+  });
+
+  /*
+   * TWO ACCOUNTS ON ONE SIGNAL IS CORRECT, and the first version of this
+   * section did not know it — it compared the day's whole wire count against
+   * "legs × alerts" and so accused every healthy two-account signal of sending
+   * too many. Crying wolf on the one section meant to be worth reading is
+   * worse than not having it.
+   */
+  test('a signal taken in two accounts is not a fault', () => {
+    fires([{ ruleId: 'S', ticker: 'CBRS', level: 'trade', detail: 'BUY 39 CBRS' }]);
+    ledger([
+      { symbol: 'CBRS', action: 'buy', asked: 19, quantity: 19, sent: true,
+        setupId: 'S', destination: 'alpaca50k', scaleOut: 2 },
+      { symbol: 'CBRS', action: 'buy', asked: 19, quantity: 19, sent: true,
+        setupId: 'S', destination: 'ttp5k', scaleOut: 2 },
+    ]);
+    const out = run();
+    expect(out).toMatch(/entries 2 in 2 account\(s\)/);
+    expect(out).not.toMatch(/ENTERED MORE THAN ONCE/);
+    expect(out).not.toMatch(/too many/);
+  });
+
+  /*
+   * THE EXPENSIVE ONE, and the shape it really had: the same name entered six
+   * times in EACH of two accounts, with no alert behind any of them because
+   * the alert is written after the order and kept throwing.
+   */
+  test('the same name entered repeatedly in one account is called out', () => {
+    ledger(Array.from({ length: 6 }, () => ([
+      { symbol: 'VIK', action: 'buy', asked: 84, quantity: 84, sent: true,
+        setupId: 'Test@09:30', destination: 'alpaca50k', scaleOut: 3 },
+      { symbol: 'VIK', action: 'buy', asked: 8, quantity: 8, sent: true,
+        setupId: 'Test@09:30', destination: 'ttp5k', scaleOut: 2 },
+    ])).flat());
+    const out = run();
+    expect(out).toMatch(/ENTERED MORE THAN ONCE/);
+    expect(out).toMatch(/6× in alpaca50k/);
+    expect(out).toMatch(/6× in ttp5k/);
   });
 
   /*

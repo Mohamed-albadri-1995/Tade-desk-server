@@ -700,6 +700,32 @@ function tradesToday(date, setupId = null, destination = null) {
 }
 
 /**
+ * How many distinct NAMES this setup has taken today, across every account.
+ *
+ * The unit the per-setup cap is written in. A position held in two accounts is
+ * one position — it is one idea, taken once, funded twice — and a three-leg
+ * scale-out is one position too. Counting ledger rows instead made the cap
+ * mean "rows", which is a number the person setting it has no way to predict:
+ * it changes when an account is added and when a strategy grows a leg.
+ *
+ * Sent entries only, for the same reason as everywhere else: a refusal took no
+ * position, and counting it would spend the day's allowance on a trade that
+ * never happened.
+ */
+function namesToday(date, setupId) {
+  const names = new Set();
+  if (!setupId) return names;
+  for (const o of orders(date)) {
+    if (!o.sent || o.kind === 'callback' || o.kind === 'flatten') continue;
+    if (o.setupId !== setupId || !o.symbol) continue;
+    names.add(String(o.symbol).toUpperCase());
+  }
+  return names;
+}
+
+function positionsToday(date, setupId) { return namesToday(date, setupId).size; }
+
+/**
  * Has this setup already put THIS NAME on today, in this account?
  *
  * The one question that separates a second signal from a repeat of the first.
@@ -1112,11 +1138,6 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
     return { blocked: 'account-cap',
       reason: `the day's limit of ${cfg.maxTradesPerDay} order(s) for the account is already used` };
   }
-  if (maxPerDay && setupId && tradesToday(date, setupId) >= maxPerDay) {
-    return { blocked: 'setup-cap',
-      reason: `this setup's limit of ${maxPerDay} order(s) a day is already used` };
-  }
-
   /*
    * ONE ENTRY PER SETUP, PER NAME, PER DAY — held on the LEDGER.
    *
@@ -1146,6 +1167,51 @@ function planOrder({ symbol, signal, quantity, price, stop = null, target = null
   if (setupId && sentAlready(date, setupId, symbol, cfg.destinationId || null)) {
     return { blocked: 'repeat',
       reason: `${String(symbol).toUpperCase()} was already traded by this setup today` };
+  }
+
+  /*
+   * THE SETUP'S CAP COUNTS POSITIONS, NOT LEDGER LINES.
+   *
+   * "How many trades is this one idea allowed today" is a question about
+   * POSITIONS. It was answered by counting rows in the ledger, and a row is
+   * written per ACCOUNT — so with two accounts every signal spent two of the
+   * allowance and a cap of 2 meant one trade.
+   *
+   * It cost a real signal. OR + VWAP took CBRS at 09:36 into both accounts,
+   * which used the whole cap, and BRUN forty seconds later was refused with
+   * "this setup's limit of 2 order(s) a day is already used" — a message that
+   * is true about rows and false about trades, and sends you to the wrong
+   * setting to fix it.
+   *
+   * The scale-out half of this was already right: three legs go out inside one
+   * placeOrder call and write one row. The account half was not. Counting
+   * DISTINCT SYMBOLS makes the cap mean the same thing however many accounts
+   * are wired up and however many ways out the strategy has.
+   *
+   * After the repeat guard, deliberately: a second signal on a name this setup
+   * already holds is a repeat, and saying "your daily limit is used" about it
+   * would point at the wrong setting again.
+   */
+  if (maxPerDay && setupId) {
+    const held = namesToday(date, setupId);
+    /*
+     * A name already taken never counts against the cap a second time.
+     *
+     * Without this the fix reproduced the bug it was written for, one step
+     * later: CBRS goes into the first account and is counted, BRUN goes into
+     * the first account and is counted, and then BRUN'S SECOND ACCOUNT is
+     * refused for being the third position — when it is the second half of the
+     * second position. The desk would quietly trade every signal in one account
+     * and the last one in neither.
+     *
+     * Reaching here with the name already held can only be the other account of
+     * a signal in flight: a repeat in the SAME account was stopped by the guard
+     * above, which runs first precisely so this test means what it says.
+     */
+    if (!held.has(String(symbol).toUpperCase()) && held.size >= maxPerDay) {
+      return { blocked: 'setup-cap',
+        reason: `this setup's limit of ${maxPerDay} position(s) a day is already used` };
+    }
   }
 
   const fit = fitQuantity({ quantity, price, date, cfg });
@@ -1753,7 +1819,7 @@ module.exports = {
   // Where orders can go, and one of them as a cfg the order path already takes.
   destinations, destinationCfg, accountsFor, autoRoute, manualCfg,
   DIALECTS, LEGACY_ID, MODES,
-  orders, committed, remaining, tradesToday, sentAlready,
+  orders, committed, remaining, tradesToday, sentAlready, positionsToday,
   fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,

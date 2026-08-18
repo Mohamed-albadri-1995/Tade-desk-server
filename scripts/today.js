@@ -187,16 +187,38 @@ function alerts() {
    * and printing it forty-six times buries the other three.
    */
   if (errors.length) {
+    /*
+     * Timed from `at`, not from `atET`.
+     *
+     * atET is stamped when a fire is written to HISTORY, not when it is
+     * published, so a live fire has only `at` — reading atET alone printed
+     * "first    last" with nothing between them, on exactly the lines you most
+     * want timed.
+     *
+     * Undated ones are counted separately rather than sorted in among the
+     * numbers, where one bad value silently becomes the "first" or the "last"
+     * and quietly moves the window the reader is being shown.
+     */
     const by = {};
     for (const e of errors) {
       const k = `${e.toolId}/${e.ruleId}: ${e.detail}`;
-      (by[k] = by[k] || []).push(e.atET || '');
+      const b = (by[k] = by[k] || { at: [], undated: 0 });
+      const t = Number(e.at);
+      if (Number.isFinite(t) && t > 0) b.at.push(t); else b.undated += 1;
     }
+    const hhmmss = t => new Date(t).toLocaleTimeString('en-GB',
+      { timeZone: 'America/New_York', hour12: false });
     say('');
     say('ERRORS');
-    for (const [k, times] of Object.entries(by).sort((a, b) => b[1].length - a[1].length)) {
-      say(`  ${times.length}×  ${k}`);
-      say(`        first ${times[times.length - 1]}   last ${times[0]}`);
+    const total = b => b.at.length + b.undated;
+    for (const [k, b] of Object.entries(by).sort((x, y) => total(y[1]) - total(x[1]))) {
+      say(`  ${total(b)}×  ${k}`);
+      if (b.at.length) {
+        say(`        first ${hhmmss(Math.min(...b.at))}   last ${hhmmss(Math.max(...b.at))}`
+          + (b.undated ? `   (+${b.undated} with no timestamp)` : ''));
+      } else {
+        say('        no usable timestamps on any of them');
+      }
     }
   }
 
@@ -292,14 +314,32 @@ function reconcile(fires, rows) {
     const k = `${f.ruleId}|${String(f.ticker).toUpperCase()}`;
     signals[k] = (signals[k] || 0) + 1;
   }
+  /*
+   * ONE SIGNAL IS ONE ORDER PER ACCOUNT, NOT ONE ORDER.
+   *
+   * A setup names the accounts that trade it, and the same signal is the same
+   * trade in each of them — sized separately, sent separately, one ledger row
+   * each. The first version of this section compared the whole day's wire
+   * count against "legs × alerts" and so accused every healthy two-account
+   * signal of sending too many. It cried wolf on the one section that is
+   * supposed to be worth reading.
+   *
+   * So the unit is the CALL: one placeOrder per account per signal, each of
+   * which should put `legs` bodies on the wire. Counted per account, because
+   * that is also what makes a genuine duplicate visible — two sent calls for
+   * one name in ONE account is an entry taken twice, whatever the other
+   * account did.
+   */
   const placed = {};
   for (const o of rows) {
     if (!o.setupId || !o.sent || o.kind === 'flatten' || o.kind === 'callback') continue;
     const k = `${o.setupId}|${String(o.symbol || '').toUpperCase()}`;
-    // A scale-out is ONE placeOrder call that puts several orders on the wire.
-    (placed[k] = placed[k] || { calls: 0, wire: 0 });
-    placed[k].calls += 1;
-    placed[k].wire += o.scaleOut || 1;
+    const p = (placed[k] = placed[k] || { calls: 0, wire: 0, byDest: {} });
+    p.calls += 1;
+    // A scale-out is ONE call that puts several bodies on the wire.
+    p.wire += o.scaleOut || 1;
+    const d = o.destination || '-';
+    p.byDest[d] = (p.byDest[d] || 0) + 1;
   }
 
   const keys = [...new Set([...Object.keys(signals), ...Object.keys(placed)])].sort();
@@ -309,33 +349,56 @@ function reconcile(fires, rows) {
   for (const k of keys) {
     const [setupId, sym] = k.split('|');
     const alerted = signals[k] || 0;
-    const p = placed[k] || { calls: 0, wire: 0 };
+    const p = placed[k] || { calls: 0, wire: 0, byDest: {} };
     const want = expectedLegs[setupId] || null;
-    const wantTotal = want ? want * Math.max(1, alerted) : null;
+    const accounts = Object.keys(p.byDest).length;
+    const wantWire = want ? want * p.calls : null;
 
     const notes = [];
+
+    /*
+     * THE EXPENSIVE FAULT, and the one that has actually happened: the same
+     * name entered more than once in the SAME account. Two accounts taking one
+     * signal is correct; one account taking it six times is six positions
+     * where the strategy asked for one.
+     */
+    const dupes = Object.entries(p.byDest).filter(([, n]) => n > 1);
+    if (dupes.length) {
+      notes.push(`ENTERED MORE THAN ONCE — ${dupes.map(([d, n]) => `${n}× in ${d}`).join(', ')}.`
+        + ' One signal is one entry per account.');
+    }
     if (alerted > 1) notes.push(`ALERTED ${alerted}× — should be once a day`);
     if (alerted && !p.calls) notes.push('signalled but NOTHING was sent');
-    if (!alerted && p.calls) notes.push('an order with no alert behind it');
     /*
-     * MORE than expected is the expensive direction and always a fault. FEWER
+     * Orders with no alert behind them is the signature of the crash: the order
+     * goes first, the alert is written after, and anything that throws in
+     * between leaves exactly this.
+     */
+    if (!alerted && p.calls) {
+      notes.push(`${p.calls} order(s) with NO alert behind them — the alert was`
+        + ' written after the order and did not survive. Look in the ERRORS above.');
+    }
+    /*
+     * MORE bodies per call than the strategy has legs is always a fault. FEWER
      * can be legitimate: a leg too small to be a whole share is dropped, and a
      * leg whose target is an indicator rather than a price is folded into the
      * runner. Both are said out loud rather than passed silently, because the
      * innocent explanations and the real one look identical from here.
      */
-    if (want && p.calls && p.wire > wantTotal) {
-      notes.push(`SENT ${p.wire} order(s), expected ${wantTotal}`
-        + ` (${want} per signal × ${Math.max(1, alerted)}) — too many`);
-    } else if (want && p.calls && p.wire < wantTotal) {
-      notes.push(`sent ${p.wire} order(s), expected ${wantTotal} — a leg was dropped.`
-        + ' Either it was under one whole share, or its target had no price'
-        + ' and it was folded into the runner. Check the size.');
+    if (want && p.calls && p.wire > wantWire) {
+      notes.push(`${p.wire} order(s) on the wire from ${p.calls} call(s), expected `
+        + `${wantWire} (${want} per call) — too many`);
+    } else if (want && p.calls && p.wire < wantWire) {
+      notes.push(`${p.wire} order(s) on the wire from ${p.calls} call(s), expected `
+        + `${wantWire} — a leg was dropped. Either it was under one whole share,`
+        + ' or its target had no price and joined the runner. Check the size.');
     }
     if (notes.length) bad += 1;
     say(`  ${notes.length ? '⚠' : '✓'} ${String(sym).padEnd(6)} ${String(setupId).padEnd(26)}`
-      + ` alerts ${alerted}  calls ${p.calls}  orders ${p.wire}`
-      + (want ? `  (expected ${want}/signal)` : '  (expected shape unknown)'));
+      + ` alerts ${alerted}  entries ${p.calls}`
+      + (accounts ? ` in ${accounts} account(s)` : '')
+      + `  orders ${p.wire}`
+      + (want ? `  (${want}/entry)` : '  (shape unknown)'));
     for (const n of notes) say(`        → ${n}`);
   }
   say('');
