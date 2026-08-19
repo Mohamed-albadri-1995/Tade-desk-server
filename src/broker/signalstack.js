@@ -1525,6 +1525,42 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
   }
 
   /*
+   * THE INTENT, WRITTEN BEFORE ANYTHING GOES ON THE WIRE.
+   *
+   * Until now the ledger row was written AFTER the whole call finished, which
+   * left one gap that nothing could close: between the first POST and that
+   * write, an order can exist at the broker with no record of it anywhere on
+   * this side. A crash there — a restart, a reboot, an OOM at 09:35 — and the
+   * position is real and invisible.
+   *
+   * That is not a small gap, because the ledger is also what the repeat guard
+   * reads. `sentAlready` asks the ledger whether this setup has already taken
+   * this name, so a crash mid-send does not merely lose a record: it re-arms
+   * the setup for a name it may already hold, and the next pass takes it again.
+   *
+   * The intent row is inert to everything that counts — it carries no `sent`,
+   * so committed(), tradesToday(), namesToday(), sentAlready(), openSymbols()
+   * and setupBySymbol() all skip it exactly as they skip a refusal. What it
+   * gives is `orphanIntents()`: an intent with no outcome behind it is a call
+   * that started and never finished, which is the one state worth waking
+   * somebody for.
+   */
+  const intentId = `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  base.intentId = intentId;
+  record({
+    ...base,
+    kind: 'intent',
+    action,
+    bracket: cfg.bracket,
+    // What was ABOUT to be sent, leg by leg. After a crash this is the only
+    // description of the position that may now exist at the broker.
+    legs: (plan.orders && plan.orders.length ? plan.orders : [planned])
+      .filter(Boolean)
+      .map(b => ({ quantity: b.quantity, target: b.take_profit_price || null,
+                   stop: b.stop_loss_price || null })),
+  });
+
+  /*
    * A SCALE-OUT goes out as several orders, and counts as ONE trade.
    *
    * Several because SignalStack places one bracket per order and has no
@@ -1945,12 +1981,37 @@ function callbackIsBadNews(entry) {
   return BAD_STATUS.test(`${entry.status || ''} ${entry.message || ''}`);
 }
 
+/**
+ * Calls that started and never finished.
+ *
+ * An intent is written before the first POST and the outcome after the last
+ * one, both carrying the same id. A row that has the first and not the second
+ * means the process died between them — and an order may exist at the broker
+ * that nothing on this side knows about. It is also the state in which the
+ * repeat guard is wrong, because it reads `sent` and there is no `sent` row.
+ *
+ * Almost always empty. When it is not, it is the most important thing in the
+ * day and everything else can wait.
+ */
+function orphanIntents(date = null) {
+  const rows = orders(date);
+  const finished = new Set();
+  for (const o of rows) {
+    if (o.kind === 'intent' || !o.intentId) continue;
+    finished.add(o.intentId);
+  }
+  return rows.filter(o => o.kind === 'intent' && !finished.has(o.intentId));
+}
+
 /** Orders with whatever the callbacks later said about them. */
 function reconciled(date = null) {
   // Read whole, then split: a callback can arrive after midnight ET for an
   // order placed before it, and filtering by date first would orphan it.
   const all = orders();
-  const placed = all.filter(o => o.kind !== 'callback' && (!date || o.date === date));
+  // Intents are not orders. Each one has an outcome row beside it carrying the
+  // same id, and counting both would report every trade twice.
+  const placed = all.filter(o => o.kind !== 'callback' && o.kind !== 'intent'
+                                 && (!date || o.date === date));
   const backs = all.filter(o => o.kind === 'callback');
   return placed.map(o => {
     const later = backs
@@ -1996,7 +2057,7 @@ module.exports = {
   fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,
-  openSymbols, setupBySymbol, closePosition, flattenAll,
+  openSymbols, setupBySymbol, closePosition, flattenAll, orphanIntents,
   slipOf,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled,

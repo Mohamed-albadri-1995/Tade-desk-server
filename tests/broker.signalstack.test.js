@@ -360,7 +360,10 @@ test('every attempt is recorded, including the ones that sent nothing', async ()
   armed({ allowShort: false });
   await place();                       // sent
   await place({ signal: 'SHORT' });    // refused by the short switch
-  const day = broker.orders(DAY);
+  // Intents are not attempts — one is written before the first POST and an
+  // outcome after the last, under the same id. Counting both reports every
+  // order twice.
+  const day = broker.orders(DAY).filter(o => o.kind !== 'intent');
   expect(day).toHaveLength(2);
   expect(day.filter(o => o.sent)).toHaveLength(1);
   // An order that was not placed and one that was are both facts about the
@@ -469,7 +472,7 @@ describe('the order-processed callback', () => {
     armed();
     await place();
     broker.receiveCallback({ id: 'ID12345', status: 'filled', price: 29.14 });
-    const all = broker.orders();
+    const all = broker.orders().filter(o => o.kind !== 'intent');
     expect(all).toHaveLength(2);
     expect(all[0].kind).toBeUndefined();
     expect(all[0].fillPrice).toBe(100);       // what the reply said at the time

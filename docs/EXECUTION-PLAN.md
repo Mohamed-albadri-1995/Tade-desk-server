@@ -499,3 +499,44 @@ tested, and it is the only one currently switched off.
 
 Steps 1 and 3 are small — a validation branch and a subtraction. Step 2 is the
 real work, and nothing in two of the three strategies is faithful without it.
+
+---
+
+## Where each of those stands
+
+**1 — declared, not blocked.** `has_exit_rule` is a warning rather than
+`order_ok: false`. Switching 09:35 off was the wrong fix once the loop below
+existed: the divergence it warned about is the thing the loop closes.
+
+**2 — built.** `src/setups/manager.js` in the alerts process, once a minute,
+every judgement made by `quant-platform/chart/manage.py` out of the same
+functions the simulation uses. It scans every bar since entry, because a cross
+is an EDGE and reading only the newest bar would lose an exit permanently if the
+pass were one minute late. The stop ratchets from the anchor at the entry bar.
+Every pass is now written to `data/history/session-YYYY-MM.jsonl` — see
+`src/setups/sessionLog.js` — so "why did it not close at 10:47" has an answer
+for the first time.
+
+**3 — done.** `slipOf()` signs the difference against the position and it is on
+the alert, on the day report and on the journal card.
+
+**4 — done.** An intent row goes down before the first POST and the outcome
+after the last, under one `intentId`. It closed a window in which an order could
+exist at the broker with nothing on this side recording that it was ever
+attempted — which was not only a lost record: the repeat guard reads the ledger,
+so a crash mid-send re-armed the setup for a name it may already hold.
+`orphanIntents()` finds an intent with no outcome; the manager announces each
+one once, at error level, and the day report leads with them.
+
+**5 — escalated, deliberately not unwound.** A half-placed scale-out now raises
+its own error-level alert naming the legs that went in and the ones that did
+not. It is **not** closed automatically: every leg goes out as its own bracket,
+so what got in carries its own stop and target — it is the wrong SIZE, not an
+open risk — and a certain round trip to undo an uncertain problem is a decision
+about money. The alert says exactly that, so the choice is made knowingly rather
+than by default.
+
+**6 — still open, and it needs a market.** A three-leg placement has never been
+watched arrive at a broker. `scripts/order-test.js` will send one on the paper
+account; until it has been run and the broker's own order list checked, `Test`
+should stay off.

@@ -44,6 +44,13 @@ const store = require('../alerts/store');
 const sessionLog = require('./sessionLog');
 const { toETDate } = require('../utils/time');
 
+/*
+ * Orphaned intents already announced, so a person is told once rather than
+ * once a minute. In memory on purpose: a restart is exactly when it is worth
+ * saying again, because a restart is how one gets created.
+ */
+const announced = new Set();
+
 /** HH:MM in New York — the market's clock, not the machine's. */
 function etNow(at = Date.now()) {
   return new Intl.DateTimeFormat('en-GB', {
@@ -155,6 +162,35 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
   if (!etWeekday(at)) return { ran: false, reason: 'weekend' };
 
   const day = toETDate(at);
+
+  /*
+   * A CALL THAT STARTED AND NEVER FINISHED, said once and said loudly.
+   *
+   * The order path writes an intent before the first POST and an outcome after
+   * the last, both under one id. An intent with no outcome means the process
+   * died between them, and that is the one state where an order can exist at
+   * the broker with nothing on this side knowing about it: no position to
+   * watch, no row for the 15:50 flatten to close, and a repeat guard that reads
+   * `sent` and finds nothing — so the setup is free to take the name again.
+   *
+   * BEFORE the positions are looked at, because an orphan by definition
+   * produces no position to look at. Announced once per id: it needs a person,
+   * and a person who is told every minute stops reading.
+   */
+  for (const o of broker.orphanIntents(day)) {
+    if (announced.has(o.intentId)) continue;
+    announced.add(o.intentId);
+    store.publishFires([{
+      ruleId: o.setupId || 'broker', rule: 'Manager', ticker: o.symbol,
+      toolId: 'ALERTS', date: day, at: Date.now(), kind: 'broker', level: 'error',
+      detail: `${o.symbol}: an order was STARTED AND NEVER FINISHED at `
+        + `${o.destination || 'the broker'} — ${(o.legs || []).map(l => l.quantity).join(' + ')
+           || o.asked} share(s) were about to go out and nothing recorded what became `
+        + 'of them. Check the broker BY HAND: a position may exist that this box '
+        + 'cannot see, will not manage, and will not close at 15:50.',
+    }], day);
+  }
+
   const positions = openPositions(day);
   if (!positions.length) return { ran: true, positions: 0, acted: [] };
 

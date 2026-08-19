@@ -640,6 +640,47 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
   });
 
   /*
+   * A HALF-PLACED SCALE-OUT GETS ITS OWN ALERT, at error level.
+   *
+   * It was already on the trade line — ` — PARTIAL: only 1 of 3 legs went in` —
+   * appended to a message whose level is `trade`. Which means it arrives green,
+   * beside every healthy fill of the morning, and reads as a success with a
+   * footnote. It is not one: the position that exists is a different shape from
+   * the one that was tested, sized for a scale-out it did not get, and which
+   * leg is missing decides whether what is left is the runner or the target.
+   *
+   * A SEPARATE fire, not a changed one. The signal really did fire and the
+   * trade line is still what you act on; this is the second half of the same
+   * fact, at the level that reaches a phone and lands in the ERRORS section.
+   *
+   * Deliberately NOT unwound automatically. Every leg goes out as its own
+   * bracket, so what did get in is protected — it is the wrong SIZE, not an
+   * unprotected position — and closing it costs a certain round trip to undo an
+   * uncertain problem. That is a decision about money and it stays with a
+   * person, which is why this says exactly what to look at.
+   */
+  for (const pick of out.picks) {
+    for (const o of orders[pick.ticker] || []) {
+      if (!o || !o.partial) continue;
+      const went = (o.legs || []).filter(l => l.sent);
+      const missed = (o.legs || []).filter(l => !l.sent);
+      fires.push({
+        ruleId: setup.id, rule: setup.name, ticker: pick.ticker,
+        toolId: config.toolId, date: day, at: Date.now(),
+        kind: 'broker', level: 'error',
+        detail: `${pick.ticker} at ${o.broker || o.destination || 'the broker'} is `
+          + `HALF PLACED: ${went.length} of ${o.legs.length} leg(s) went in `
+          + `(${went.map(l => l.quantity).join(' + ') || '0'} share(s)), `
+          + `${missed.map(l => l.quantity).join(' + ')} did not — `
+          + `${(missed[0] || {}).message || o.error || 'refused'}. `
+          + 'The shares that went in carry their own stop and target, so this is '
+          + 'the wrong SIZE rather than an open risk. Decide whether to fill the '
+          + 'rest by hand or close what is there — it will not be unwound for you.',
+      });
+    }
+  }
+
+  /*
    * What the filter did, when there was one. A gate that silently halves the
    * universe is a gate you cannot audit: two picks out of forty and two out of
    * twelve are different statements about the same morning, and only one of

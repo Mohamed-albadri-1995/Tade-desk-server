@@ -257,7 +257,10 @@ describe('the send switch', () => {
   test('the ledger line carries no setupId, so it locks nothing out', async () => {
     await run(['Three Legger', '--entry', '100', '--stop', '99', '--send'], { wire: true });
     const rows = fs.readFileSync(path.join(DIR, 'orders.jsonl'), 'utf8')
-      .trim().split('\n').map(JSON.parse);
+      .trim().split('\n').map(JSON.parse)
+      // The intent written before the wire is not a second order — see
+      // orphanIntents(). It carries the same fields, including the null setupId.
+      .filter(o => o.kind !== 'intent');
     expect(rows).toHaveLength(1);
     expect(rows[0].setupId).toBeNull();
     expect(rows[0].source).toMatch(/rehearsal/);

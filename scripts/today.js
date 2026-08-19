@@ -261,8 +261,38 @@ function ledger() {
   } catch { say(`no ledger at ${LEDGER}`); return []; }
   if (!rows.length) { say('the ledger has nothing for today — NOTHING was sent'); return []; }
 
+  /*
+   * INTENTS ARE NOT ATTEMPTS. One is written before the first POST and an
+   * outcome after the last, both carrying the same id, so counting both would
+   * report every order twice.
+   */
+  const intents = rows.filter(o => o.kind === 'intent');
+  rows = rows.filter(o => o.kind !== 'intent');
+
   const sent = rows.filter(o => o.sent);
   say(`${rows.length} attempt(s): ${sent.length} sent, ${rows.length - sent.length} not`);
+
+  /*
+   * A CALL THAT STARTED AND NEVER FINISHED — the loudest thing in this file.
+   *
+   * The intent went down, the outcome never did, which means the process died
+   * between the first POST and the record of what became of it. An order may
+   * exist at the broker that nothing here knows about, and the repeat guard —
+   * which reads `sent` — will happily let the setup take the name again.
+   */
+  const orphans = require('../src/broker/signalstack').orphanIntents(DAY);
+  if (orphans.length) {
+    say('');
+    say(`  ⚠⚠ ${orphans.length} ORDER(S) STARTED AND NEVER FINISHED. Check the broker`);
+    say('     BY HAND for each of these before trading the name again:');
+    for (const o of orphans) {
+      say(`      ${o.symbol} ${o.action || o.signal || ''} [${o.destination || '-'}]`
+        + ` ${o.setupId || ''} — was about to send `
+        + `${(o.legs || []).map(l => l.quantity).join(' + ') || o.asked} share(s)`);
+    }
+  } else if (intents.length) {
+    say(`  every one of ${intents.length} order call(s) recorded its own outcome`);
+  }
 
   /*
    * DID THE BROKER EVER CONFIRM, and what did the fill actually cost?
