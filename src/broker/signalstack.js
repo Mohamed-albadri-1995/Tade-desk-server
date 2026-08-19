@@ -972,8 +972,31 @@ function validateBody(body, { side, entry } = {}) {
                    'stop_loss_price_distance', 'stop_loss_price_percent']) {
     if (k in body && !isNum(body[k])) errors.push(`${k} is not a number`);
     if (isNum(body[k]) && body[k] <= 0) errors.push(`${k} must be above zero`);
+    /*
+     * IS THIS A WHOLE NUMBER OF CENTS — asked without using the operation that
+     * destroys the answer.
+     *
+     * It used to be `Math.round(v * 100) !== v * 100`, and multiplying by 100
+     * is exactly where a double loses the fact being tested:
+     *
+     *     324.47 * 100  ===  32447.000000000004
+     *     15.73  * 100  ===  1573
+     *
+     * Both are two-decimal prices; only one of them survived the comparison.
+     * Across every price from 0.01 to 2000.00, NINE PERCENT were wrongly
+     * refused — roughly one order in eleven, chosen by nothing but the binary
+     * representation of the number, and reported as "324.47 is a sub-penny
+     * price", which blames the price rather than the check.
+     *
+     * Found by scripts/order-test.js rehearsing the Test strategy on AAPL,
+     * which is the entire reason that script exists.
+     *
+     * The tolerance is enormous next to the error it absorbs (~1e-9 at these
+     * magnitudes) and tiny next to the thing being caught: a genuine sub-penny
+     * price like 31.7925 is a quarter of a cent out, not a millionth.
+     */
     if (isNum(body[k]) && k.endsWith('_price')
-        && Math.round(body[k] * 100) !== body[k] * 100) {
+        && Math.abs(body[k] * 100 - Math.round(body[k] * 100)) > 1e-6) {
       errors.push(`${k} ${body[k]} is a sub-penny price`);
     }
   }

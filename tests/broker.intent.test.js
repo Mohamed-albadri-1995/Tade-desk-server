@@ -355,3 +355,90 @@ describe('the escalation', () => {
     expect(TODAY).toMatch(/rows = rows\.filter\(o => o\.kind !== 'intent'\)/);
   });
 });
+
+// ── the check that refused one order in eleven ─────────────────────────────
+/*
+ * FOUND BY A REHEARSAL, which is the entire reason scripts/order-test.js
+ * exists. Putting the Test strategy's real order set into the paper account
+ * came back:
+ *
+ *     NOTHING WOULD BE SENT — invalid: refused to send:
+ *     take_profit_price 324.47 is a sub-penny price
+ *
+ * 324.47 has two decimals. The check was
+ *
+ *     Math.round(v * 100) !== v * 100
+ *
+ * and multiplying by 100 is exactly where a double loses the fact being
+ * tested: 324.47 * 100 is 32447.000000000004, while 15.73 * 100 is 1573.
+ * Both are prices; only one survived.
+ *
+ * Across every price from 0.01 to 2000.00, NINE PERCENT were refused — about
+ * one order in eleven, chosen by nothing but the binary representation of the
+ * number, and reported as a fault in the price rather than in the check. WULF
+ * went out earlier the same day only because 15.73 and 14.64 happen to land
+ * exactly.
+ */
+describe('whole cents', () => {
+  const isPenny = v => {
+    const body = { symbol: 'X', action: 'buy', quantity: 1,
+                   quantity_type: 'fixed', take_profit_price: v,
+                   stop_loss_price: 1 };
+    return !(broker.validateBody(body, { side: 'long', entry: 2 }) || [])
+      .some(e => /sub-penny/.test(e));
+  };
+
+  test('the price the rehearsal was refused for is accepted', () => {
+    expect(isPenny(324.47)).toBe(true);
+  });
+
+  /*
+   * EVERY two-decimal price, not a sample. The bug was invisible in any small
+   * set of examples — it depends on the binary representation, so the only
+   * honest test is all of them.
+   */
+  test('no two-decimal price is refused, from 0.01 to 2000.00', () => {
+    const refused = [];
+    for (let c = 1; c <= 200000; c += 1) {
+      const v = c / 100;
+      if (!isPenny(v)) { refused.push(v); if (refused.length > 5) break; }
+    }
+    expect(refused).toEqual([]);
+  });
+
+  /* And the thing it is actually for still gets caught. */
+  test('a genuine sub-penny price is still refused', () => {
+    // 31.7925 is what an R-multiple off a real entry produces, and brokers
+    // reject it — the original reason this check exists.
+    for (const v of [31.7925, 5.125, 12.3456, 0.001]) {
+      expect(isPenny(v)).toBe(false);
+    }
+  });
+
+  /* The tolerance is nowhere near a real fraction of a cent. */
+  test('half a cent out is not "close enough"', () => {
+    expect(isPenny(10.005)).toBe(false);
+  });
+
+  test('the stop is checked the same way', () => {
+    const errs = broker.validateBody(
+      { symbol: 'X', action: 'buy', quantity: 1, quantity_type: 'fixed',
+        stop_loss_price: 31.7925 }, { side: 'long', entry: 40 }) || [];
+    expect(errs.some(e => /sub-penny/.test(e))).toBe(true);
+  });
+
+  /*
+   * tick() is what every price goes through on the way out, so whatever it
+   * produces must pass the check that follows it. That pairing was broken:
+   * tick(324.47) returns the closest double to 324.47, and the check then
+   * refused it.
+   */
+  test('anything tick() produces passes the check that follows it', () => {
+    const bad = [];
+    for (let c = 1; c <= 50000; c += 7) {
+      const v = broker.tick(c / 100 + 0.0004);
+      if (!isPenny(v)) bad.push(v);
+    }
+    expect(bad).toEqual([]);
+  });
+});

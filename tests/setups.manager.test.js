@@ -730,3 +730,50 @@ describe('the deploy keeps qp in step', () => {
     expect(SH).toMatch(/no qp-chart service/);
   });
 });
+
+describe('the deploy re-runs itself when it changes', () => {
+  const SH = fs.readFileSync(
+    path.join(__dirname, '..', 'deploy-tools.sh'), 'utf8');
+
+  /*
+   * THE TRAP, walked into on the deploy that shipped the qp check itself. This
+   * script pulls the repo, and the repo contains this script. `git reset --hard`
+   * replaces the FILE, but bash is part-way through reading the OLD one through
+   * an open handle — so it finishes with the old code and the change appears to
+   * have done nothing. The qp section simply never printed, and the natural
+   * reading of that is "it is broken", not "it is not there yet".
+   *
+   * A deploy script that only takes effect on the NEXT deploy is a trap with no
+   * floor: every fix to it is silently one run late, including this one.
+   */
+  test('it notices when the pull changed it', () => {
+    expect(SH).toMatch(/SELF_BEFORE=\$\(md5sum "\$SELF"/);
+    expect(SH).toMatch(/SELF_AFTER=\$\(md5sum "\$SELF"/);
+    expect(SH).toMatch(/bash is part-way through reading the OLD one/);
+  });
+
+  /* The hash has to be taken BEFORE the pull, or there is nothing to compare. */
+  test('the before-hash is taken before the pull, not after', () => {
+    expect(SH.indexOf('SELF_BEFORE=')).toBeLessThan(SH.indexOf('git fetch origin'));
+  });
+
+  test('and starts again so the new one runs', () => {
+    expect(SH).toMatch(/exec bash "\$SELF" "\$@"/);
+  });
+
+  /*
+   * GUARDED AGAINST LOOPING. The second run finds the file unchanged by its own
+   * pull and falls through; the env var is belt to that brace, in a script
+   * whose job is restarting a live desk.
+   */
+  test('it cannot loop', () => {
+    expect(SH).toMatch(/\[ -z "\$\{DEPLOY_REEXECED:-\}" \]/);
+    expect(SH).toMatch(/export DEPLOY_REEXECED=1/);
+  });
+
+  /* The arguments survive, or `deploy-tools.sh T2` would become a full deploy. */
+  test('the arguments are carried across', () => {
+    const at = SH.indexOf('exec bash "$SELF"');
+    expect(SH.slice(at, at + 40)).toMatch(/"\$@"/);
+  });
+});

@@ -19,6 +19,20 @@ echo "Branch: $BRANCH"
 
 cd "$ROOT"
 
+# WHAT THIS SCRIPT LOOKED LIKE BEFORE IT PULLED ITSELF.
+#
+# THE TRAP, walked into on the deploy that shipped the qp check below: this
+# script pulls the repo, and the repo contains this script. `git reset --hard`
+# replaces the FILE, but bash is part-way through reading the OLD one through an
+# open handle — so it finishes the run with the old code and the change appears
+# to have done nothing. The qp check simply never printed, and the natural
+# reading of that is "it is broken", not "it is not there yet".
+#
+# A deploy script that only takes effect on the NEXT deploy is a trap with no
+# floor: every fix to it is silently one run late, including a fix to this.
+SELF="$ROOT/$(basename "${BASH_SOURCE[0]}")"
+SELF_BEFORE=$(md5sum "$SELF" 2>/dev/null | cut -d' ' -f1)
+
 echo
 echo "[1/6] Pulling latest code..."
 git fetch origin "$BRANCH"
@@ -68,6 +82,26 @@ done
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 echo "  now at: $(git log --oneline -1)"
+
+# ── and if THIS script was one of the files that changed, start again ───────
+#
+# See the note at the top. Re-exec rather than carry on, so the deploy that
+# lands a change to the deploy is the deploy that runs it.
+#
+# Guarded against looping: the second run finds the file unchanged by its own
+# pull and falls straight through. The env var is belt to that brace — a
+# repository that somehow never settles would otherwise re-exec for ever, in a
+# script whose job is restarting a live desk.
+SELF_AFTER=$(md5sum "$SELF" 2>/dev/null | cut -d' ' -f1)
+if [ -n "$SELF_BEFORE" ] && [ "$SELF_AFTER" != "$SELF_BEFORE" ] \
+   && [ -z "${DEPLOY_REEXECED:-}" ]; then
+  echo
+  echo "  this script changed in the pull — restarting it so the NEW one runs"
+  echo "  (bash had the old file open; without this the change lands next time)"
+  echo
+  export DEPLOY_REEXECED=1
+  exec bash "$SELF" "$@"
+fi
 
 # THE REGISTRY IS READ AFTER THE PULL, and it used to be read before it.
 #
