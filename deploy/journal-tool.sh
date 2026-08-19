@@ -169,6 +169,112 @@ app.get('/api/trading/setups', async (req, res) => {
 });
 
 /*
+ * IMPORTING THE ACCOUNT'S OWN TRADES.
+ *
+ * The journal's only ways in were a pasted CSV and typing, so a day the desk
+ * traded automatically produced no journal entry at all — its own status line
+ * read "Alpaca — connected, 3 names filled today" above a page saying
+ * "0 trades".
+ *
+ * A separate endpoint rather than the journal's own POST /trades, for two
+ * reasons that both matter:
+ *
+ *   that route generates its own uuid and hardcodes source='manual'. With no
+ *   stable id, importing the same day twice makes a second copy of every trade
+ *   — and the second import is the normal case, because a day is imported once
+ *   while it is running and again after it closes.
+ *
+ *   'manual' would be a lie, and the difference is worth keeping: a trade taken
+ *   by hand and one taken by the desk are different evidence about a strategy.
+ *
+ * The rows come from the desk, which pairs Alpaca's fills into round trips —
+ * see src/broker/journalTrades.js. Nothing is computed here; this writes what
+ * it is given, under an id derived from the first fill of the trade, so a
+ * re-import updates rather than duplicates.
+ */
+app.post('/api/journal/import-alpaca', (req, res) => {
+  const rows = Array.isArray(req.body && req.body.trades) ? req.body.trades : [];
+  let added = 0; let updated = 0; let skipped = 0;
+  const errors = [];
+
+  const findByExt = db.prepare('SELECT id, status FROM journal_trades WHERE id = ?');
+  for (const t of rows) {
+    try {
+      if (!t || !t.date || !t.ticker || !t.direction || !t.shares || !t.entryPrice) {
+        skipped += 1; continue;
+      }
+      // The desk's extId IS the primary key. Deterministic, so this is
+      // idempotent by construction rather than by a lookup that can miss.
+      const id = String(t.extId || '').slice(0, 200);
+      if (!id) { skipped += 1; continue; }
+
+      const dir = t.direction === 'Short' ? 'Short' : 'Long';
+      const shares = parseInt(t.shares, 10);
+      const entry = parseFloat(t.entryPrice);
+      const exit = t.exitPrice != null ? parseFloat(t.exitPrice) : null;
+      const gross = exit != null
+        ? (dir === 'Long' ? exit - entry : entry - exit) * shares : null;
+      const pct = exit != null && entry
+        ? ((exit - entry) / entry) * 100 * (dir === 'Long' ? 1 : -1) : null;
+      const dur = t.exitTime && t.entryTime
+        ? new Date(`${t.date}T${t.exitTime}`).getTime()
+          - new Date(`${t.date}T${t.entryTime}`).getTime()
+        : null;
+      const status = exit != null ? 'closed' : 'open';
+
+      const was = findByExt.get(id);
+      /*
+       * AN OPEN TRADE BECOMES A CLOSED ONE, and that is the update this exists
+       * for: imported at 11:00 while it was running, imported again after the
+       * bell with its exit. A closed trade is never rewritten — by then a
+       * person may have tagged it, noted it, or corrected a fee.
+       */
+      if (was && was.status === 'closed') { skipped += 1; continue; }
+
+      db.prepare(`
+        INSERT INTO journal_trades
+          (id, date, ticker, direction, setup_id, shares, entry_price, entry_time,
+           exit_price, exit_time, gross_pnl, commission, net_pnl, pct_move,
+           duration_ms, account, status, source, technical_computed, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,'alpaca',0,?)
+        ON CONFLICT(id) DO UPDATE SET
+          exit_price=excluded.exit_price, exit_time=excluded.exit_time,
+          gross_pnl=excluded.gross_pnl, net_pnl=excluded.net_pnl,
+          pct_move=excluded.pct_move, duration_ms=excluded.duration_ms,
+          status=excluded.status,
+          -- Never blank a setup a person chose; only fill one that is empty.
+          setup_id=COALESCE(journal_trades.setup_id, excluded.setup_id)
+      `).run(
+        id, t.date, String(t.ticker).toUpperCase(), dir, t.setupId || null,
+        shares, entry, t.entryTime || '00:00:00',
+        exit, t.exitTime || null,
+        gross != null ? parseFloat(gross.toFixed(2)) : null,
+        gross != null ? parseFloat(gross.toFixed(2)) : null,
+        pct != null ? parseFloat(pct.toFixed(3)) : null,
+        dur, t.account || 'Alpaca', status, Date.now(),
+      );
+      if (was) updated += 1; else added += 1;
+
+      /*
+       * Mirrored into trade_cards so the grading engine learns from an imported
+       * trade exactly as it does from one typed in. Required lazily and
+       * best-effort: it belongs to the app this launcher exists to avoid
+       * booting, and a grading failure must not lose the journal row, which is
+       * the primary record.
+       */
+      if (status === 'closed') {
+        try {
+          require('./src/journal/bridgeToGrading').mirrorTradeToCard(id);
+        } catch (e) { /* same treatment as the routes' own mirror calls */ }
+      }
+    } catch (err) {
+      errors.push(`${(t && t.ticker) || '?'}: ${err.message}`);
+    }
+  }
+  res.json({ ok: true, added, updated, skipped, errors });
+});
+
+/*
  * The page, with this repo's add-ons injected before </body>.
  *
  * Injected rather than forked: journal.html is 1,079 lines on a branch with no

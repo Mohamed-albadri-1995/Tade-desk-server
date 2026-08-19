@@ -276,6 +276,59 @@ app.get('/api/broker/setups', async (req, res) => {
   }
 });
 
+/*
+ * THE ACCOUNT'S OWN TRADES, paired out of its fills, for the journal to import.
+ *
+ * The journal's only ways in were a pasted CSV and typing, so a day the desk
+ * traded automatically produced no journal entry at all. Its status line said
+ * "Alpaca — connected, 3 names filled today" above a page reading "0 trades",
+ * which is the whole problem in one screen.
+ *
+ * A FILL IS NOT A TRADE — Alpaca reports prints, a journal holds round trips —
+ * so the pairing is done here, once, where it can be tested, rather than in the
+ * page. See src/broker/journalTrades.js for what that costs to get right.
+ *
+ * `days` rather than a pair of dates, because the question is always "the last
+ * N sessions" and two dates is two chances to get a boundary wrong. Bounded:
+ * activities are paged and a year of them is not a page.
+ */
+app.get('/api/broker/journal-trades', async (req, res) => {
+  try {
+    const { toETDate } = require('../utils/time');
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 1));
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '')
+      ? req.query.from
+      : toETDate(Date.now() - (days - 1) * 86400000);
+    // 04:00 ET covers the pre-market, so nothing placed early is missed.
+    const after = new Date(`${from}T04:00:00-04:00`).toISOString();
+
+    const alpaca = require('../alpaca/account');
+    const r = await alpaca.fills({ after });
+    if (!r.ok) return res.json({ ok: false, error: r.error, scope: 'alpaca' });
+
+    const { tradesFrom } = require('../broker/journalTrades');
+    const trades = tradesFrom(r.fills);
+
+    /*
+     * WHICH SETUP TOOK IT, joined on while we are here. The journal's setup tag
+     * is what per-setup expectancy is computed from, and a trade imported
+     * untagged is one somebody has to remember about a week later.
+     */
+    const byDate = {};
+    for (const t of trades) {
+      if (!byDate[t.date]) byDate[t.date] = broker.setupBySymbol(t.date);
+      const g = byDate[t.date][t.ticker];
+      if (g && !g.ambiguous) t.setupId = g.setupId;
+    }
+
+    res.json({ ok: true, from, days, scope: 'alpaca',
+               fills: r.fills.length, trades });
+  } catch (err) {
+    // 200 with ok:false — see /api/broker/fills.
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/broker', (req, res) => {
   const { toETDate } = require('../utils/time');
   const day = toETDate(Date.now());

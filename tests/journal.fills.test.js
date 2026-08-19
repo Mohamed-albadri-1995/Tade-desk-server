@@ -132,8 +132,19 @@ describe('what it leaves alone', () => {
      * journal recorded is ever sent back over Alpaca's version of it. The
      * disagreement is the finding, and overwriting either side hides it.
      */
+    /*
+     * The file writes twice now — the setup tag, and the Alpaca import — and
+     * neither touches a price the journal already holds. The tag sends only
+     * `setup_id`. The import sends whole trades, but under ids of the form
+     * `alpaca:<fill id>`, which a hand-entered trade (a uuid) can never
+     * collide with, so it cannot overwrite one. A disagreement between the two
+     * sides is the finding; overwriting either would hide it.
+     */
     const writes = SRC.match(/body: JSON\.stringify\(\{[^}]*\}\)/g) || [];
-    expect(writes).toEqual(['body: JSON.stringify({ setup_id: g.setupId })']);
+    expect(writes.sort()).toEqual([
+      'body: JSON.stringify({ setup_id: g.setupId })',
+      'body: JSON.stringify({ trades: d.trades })',
+    ]);
   });
 
   /*

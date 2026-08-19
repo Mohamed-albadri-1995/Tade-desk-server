@@ -137,6 +137,106 @@
    * It probes TODAY, once per page load, which is the only date whose answer
    * says something about the CONNECTION rather than about history.
    */
+  /* ── the way back to everything else ──────────────────────────────────
+   *
+   * The header's "← Dashboard" is href="/", which on THIS port is the journal
+   * itself. It has always been a link to the page you are already on. The
+   * landing page with the nine tools is on 3000, and the journal was reachable
+   * from it but not the other way round.
+   */
+  var LANDING_PORT = 3000;
+
+  function fixDashboardLink() {
+    var a = document.querySelector('a[href="/"]');
+    if (!a || a.dataset.jnlFixed) return;
+    a.dataset.jnlFixed = '1';
+    a.href = location.protocol + '//' + location.hostname + ':' + LANDING_PORT + '/';
+    a.textContent = '← Trade Desk';
+  }
+
+  /* ── pulling the account's own trades in ──────────────────────────────
+   *
+   * The journal's only ways in were a pasted CSV and typing, so a day the desk
+   * traded automatically produced no journal entry at all — the status line
+   * below said "connected, 3 names filled today" above a page reading
+   * "0 trades".
+   *
+   * The desk pairs Alpaca's fills into round trips; this asks for them and
+   * hands them to the journal. Idempotent at both ends, so pressing it twice
+   * is not two copies of a day.
+   */
+  function importButton() {
+    var host = document.getElementById(CONTAINER);
+    if (!host || !host.parentNode) return;
+    if (document.getElementById('jnl-import-alpaca')) return;
+
+    var wrap = document.createElement('div');
+    wrap.id = 'jnl-import-alpaca';
+    wrap.style.cssText = 'display:flex;align-items:center;gap:8px;margin:0 0 8px';
+
+    var btn = document.createElement('button');
+    btn.textContent = 'Import from Alpaca';
+    btn.style.cssText = 'font-size:11px;padding:4px 10px;background:#0c2a4a;'
+      + 'color:#7dd3fc;border:1px solid #1e3a5f;border-radius:5px;cursor:pointer';
+
+    var days = document.createElement('select');
+    days.style.cssText = 'font-size:11px;padding:3px 6px;background:#0f172a;'
+      + 'color:#94a3b8;border:1px solid #334155;border-radius:5px';
+    [['1', 'today'], ['5', 'last 5 days'], ['30', 'last 30 days'],
+     ['90', 'last 90 days']].forEach(function (o) {
+      var opt = document.createElement('option');
+      opt.value = o[0]; opt.textContent = o[1];
+      days.appendChild(opt);
+    });
+
+    var msg = document.createElement('span');
+    msg.style.cssText = 'font-size:11px;color:#64748b';
+
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      msg.style.color = '#64748b';
+      msg.textContent = 'asking the desk…';
+      fetch(deskUrl('/api/broker/journal-trades?days=' + encodeURIComponent(days.value)))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok) throw new Error((d && d.error) || 'the desk said no');
+          if (!d.trades.length) {
+            msg.textContent = 'no Alpaca trades in that window.';
+            return null;
+          }
+          msg.textContent = 'importing ' + d.trades.length + '…';
+          return fetch('/api/journal/import-alpaca', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trades: d.trades }),
+          }).then(function (r) { return r.json(); });
+        })
+        .then(function (out) {
+          if (!out) return;
+          msg.style.color = '#22c55e';
+          msg.textContent = out.added + ' added, ' + out.updated + ' updated'
+            + (out.skipped ? ', ' + out.skipped + ' already final' : '');
+          /*
+           * The list is rendered from an array loaded at page start, so a new
+           * row is invisible until that is reloaded. loadAll() is the journal's
+           * own reload and rebuilds every tab from the database.
+           */
+          if (typeof window.loadAll === 'function') window.loadAll();
+        })
+        .catch(function (err) {
+          msg.style.color = '#ef4444';
+          msg.textContent = 'could not import: ' + (err && err.message || err);
+        })
+        .finally(function () { btn.disabled = false; });
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(days);
+    wrap.appendChild(msg);
+    // Above the list, like the status line, so the card render cannot wipe it.
+    host.parentNode.insertBefore(wrap, host);
+  }
+
   function statusLine() {
     var el = document.getElementById('jnl-desk-status');
     if (el) return;
@@ -427,6 +527,8 @@
 
     autoTag(host);
     statusLine();
+    importButton();
+    fixDashboardLink();
   }
 
   function start() {
