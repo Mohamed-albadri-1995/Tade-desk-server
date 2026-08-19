@@ -306,6 +306,19 @@ async function fillsFor(date, { timeoutMs = 15000 } = {}) {
       closed: g.bought === g.sold && g.bought > 0,
       realised: (g.bought === g.sold && g.bought > 0)
         ? Math.round((g.proceeds - g.cost) * 100) / 100 : null,
+      /*
+       * ONE SIDE ONLY MEANS THE WINDOW, NOT THE TRADE.
+       *
+       * A position opened yesterday and closed today shows here as sells with
+       * no buys, and the report called it "STILL OPEN — no result yet" — the
+       * exact opposite of what happened. EYPT and VIK both read that way on
+       * 2026-08-19 while Alpaca held neither.
+       *
+       * The fills cannot say what the entry cost, because the entry is outside
+       * the window asked for. That is a limit of the QUESTION and it is now
+       * reported as one rather than as a fact about the position.
+       */
+      halfWindow: (g.bought === 0) !== (g.sold === 0),
     })),
   };
 }

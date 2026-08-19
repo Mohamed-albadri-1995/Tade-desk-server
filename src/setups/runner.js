@@ -401,11 +401,30 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
    * fire for the session, keyed by setup and ticker.
    *
    * So a name this setup has already alerted today is dropped before anything
-   * is sized or sent. A clock setup is unaffected — it never gets a second run
-   * to be stopped on.
+   * is sized or sent.
+   *
+   * IT USED TO BE `setup.watch && !dryRun`, on the reasoning written above that
+   * "a clock setup runs once, so it cannot repeat itself". That is an
+   * assumption about a scheduler, not a property of the world, and on
+   * 2026-08-19 it was wrong:
+   *
+   *     ⚠ THE SAME NAME ALERTED MORE THAN ONCE — the once-a-day latch did not
+   *       hold:  2×  OR + VWAP 09:35@09:35  WULF
+   *
+   * OR + VWAP 09:35 is a CLOCK setup, so the latch was skipped entirely. The
+   * ORDER guard held — `sentAlready` reads the ledger and refused the second
+   * one, so it cost no money — and the alert went out twice anyway: one phone
+   * buzz for a trade that did not happen, on the feed whose whole value is that
+   * every line on it is real.
+   *
+   * A clock setup CAN run twice: a process restarting inside its window, a
+   * scheduler firing on both edges of a minute, a tool deployed at 09:35. So
+   * the latch now applies to every setup, which also makes it agree with the
+   * order guard — one entry per setup per name per day is already the rule
+   * money follows, and the alert should not describe a different desk.
    */
   const alreadyToday = new Set();
-  if (setup.watch && !dryRun) {
+  if (!dryRun) {
     for (const f of alertStore.recentFires(day, 500)) {
       if (f.ruleId === setup.id && f.ticker) alreadyToday.add(String(f.ticker).toUpperCase());
     }

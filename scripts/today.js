@@ -314,7 +314,12 @@ function ledger() {
         say(`  ⚠ ${unconfirmed.length} of ${back.length} sent order(s) were NEVER CONFIRMED`
           + ' by the broker — accepted, then silence:');
         for (const o of unconfirmed.slice(0, 8)) {
-          say(`      ${o.symbol} ${o.quantity} [${o.destination || '-'}] ${o.setupId || o.source || ''}`);
+          // A flatten carries no quantity — `close` takes none, it flattens the
+          // symbol — so printing o.quantity gave "WULF undefined", which reads
+          // as a missing number rather than as an absent one.
+          const qty = o.kind === 'flatten' ? 'whole position'
+            : (Number.isFinite(o.quantity) ? String(o.quantity) : '?');
+          say(`      ${o.symbol} ${qty} [${o.destination || '-'}] ${o.setupId || o.source || ''}`);
         }
       } else {
         say(`  all ${back.length} sent order(s) came back confirmed`);
@@ -435,7 +440,12 @@ async function broker_truth() {
     say(`  ${g.symbol.padEnd(6)} bought ${String(g.bought).padStart(5)} @ ${g.avgBuy ?? '-'}`
       + `   sold ${String(g.sold).padStart(5)} @ ${g.avgSell ?? '-'}`
       + (g.closed ? `   realised ${g.realised >= 0 ? '+' : ''}${g.realised}`
-                  : '   STILL OPEN — no result yet'));
+                  : (g.halfWindow
+                      // Opened before this window, or still running. The fills
+                      // cannot tell which, and saying "STILL OPEN" picked one.
+                      ? '   only one side is in today — the other leg is on'
+                        + ' another date, so no result can be computed here'
+                      : '   STILL OPEN — no result yet')));
   }
 }
 
