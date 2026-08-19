@@ -15,12 +15,30 @@ function getCredentials() {
   // and the one the UI now steers users toward, so it wins when it
   // exists — otherwise a stale settings-based key silently kept
   // shadowing the fresh broker-profile one and producing 401s.
-  const profile = db.prepare(`
-    SELECT config FROM trading_brokers
-     WHERE type = 'alpaca' AND enabled = 1
-     ORDER BY is_default DESC, created_at ASC
-     LIMIT 1
-  `).get();
+  /*
+   * WRAPPED, because a MISSING TABLE is not an error — it is the normal state
+   * of a screener database that has never held a broker profile.
+   *
+   * Unwrapped, `prepare` threw "no such table: trading_brokers" right here and
+   * the shared-database fallback below was never reached. That fallback exists
+   * precisely so a tool with no keys of its own can still ask, and it was
+   * unreachable for exactly the tools that needed it. What that looked like
+   * from outside: a live short went out carrying "BORROW NOT CHECKED (no such
+   * table: trading_brokers)", because an unanswerable check never blocks — so
+   * the one protection against "cannot be sold short" was defeated by a table
+   * that had simply never been created.
+   *
+   * A missing table means "nothing here" and falls through, like an empty one.
+   */
+  let profile = null;
+  try {
+    profile = db.prepare(`
+      SELECT config FROM trading_brokers
+       WHERE type = 'alpaca' AND enabled = 1
+       ORDER BY is_default DESC, created_at ASC
+       LIMIT 1
+    `).get();
+  } catch { /* no such table — this database has never held a broker profile */ }
   if (profile) {
     let cfg = {};
     try { cfg = JSON.parse(profile.config || '{}'); } catch { /* ignore */ }
@@ -28,8 +46,12 @@ function getCredentials() {
       return { key: cfg.key, secret: cfg.secret };
     }
   }
-  // Legacy fallback: settings-based creds.
-  const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('alpacaApiKey','alpacaApiSecret')").all();
+  // Legacy fallback: settings-based creds. Same reasoning — an older database
+  // may have no settings table either, and that is a miss, not a failure.
+  let rows = [];
+  try {
+    rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('alpacaApiKey','alpacaApiSecret')").all();
+  } catch { /* no such table */ }
   const creds = {};
   for (const r of rows) creds[r.key] = r.value;
   if (creds.alpacaApiKey && creds.alpacaApiSecret) {
@@ -80,12 +102,18 @@ function sharedCredentials() {
     const Database = require('better-sqlite3');
     const shared = new Database(DEFAULT_DB, { readonly: true, fileMustExist: true });
     try {
-      const profile = shared.prepare(`
-        SELECT config FROM trading_brokers
-         WHERE type = 'alpaca' AND enabled = 1
-         ORDER BY is_default DESC, created_at ASC
-         LIMIT 1
-      `).get();
+      // Wrapped for the same reason as above: without it, a shared database
+      // with no broker profile skipped the legacy settings rows below as well,
+      // and the whole fallback returned nothing when it had an answer.
+      let profile = null;
+      try {
+        profile = shared.prepare(`
+          SELECT config FROM trading_brokers
+           WHERE type = 'alpaca' AND enabled = 1
+           ORDER BY is_default DESC, created_at ASC
+           LIMIT 1
+        `).get();
+      } catch { /* no such table */ }
       if (profile) {
         let cfg = {};
         try { cfg = JSON.parse(profile.config || '{}'); } catch { /* ignore */ }
