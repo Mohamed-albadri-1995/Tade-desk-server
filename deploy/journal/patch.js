@@ -21,12 +21,89 @@
  * 2. A CHART BUTTON. qp already renders exactly the sheet wanted — the print
  *    view, indicators and all — and now marks entry and exit on it. So the
  *    button is a link, not a second charting stack.
+ *
+ * 3. WHAT THE ACCOUNT ACTUALLY PAID. The journal records what a trade was MEANT
+ *    to be: the price the strategy decided on, typed or imported. Alpaca knows
+ *    what the money did. The two differ by the minute between the decision
+ *    bar's close and the market order, and by whatever the spread took — a gap
+ *    nobody had measured, because nothing had ever put the two numbers next to
+ *    each other.
+ *
+ *    So each card gets one line: the real average fill each way, and the
+ *    realised result once the position is round-tripped. It is shown only when
+ *    Alpaca has a fill for that name on that date, and it never overwrites what
+ *    the journal recorded — a card that disagrees is the interesting one, and
+ *    replacing the number would hide exactly the thing worth seeing.
+ *
+ *    ALPACA ONLY. TTP5k is behind TraderEvolution with no position feed, so a
+ *    card traded there shows nothing rather than showing zero.
  */
 (function () {
   'use strict';
 
   var QP_PORT = 8765;                 // the chart platform, same host
+  var ALERTS_PORT = 3090;             // the desk, which is what talks to Alpaca
   var CONTAINER = 'jnl-cards-container';
+
+  /* ── the real fills, per date ─────────────────────────────────────────
+   * Cached per date because the card list re-renders on every keystroke in
+   * the ticker filter, and a fetch per render would be a request per letter.
+   * A failure is cached too, as an empty map: retrying it on every render
+   * would turn one unreachable desk into a request storm.
+   */
+  var fillsByDate = {};
+
+  function fillsFor(date) {
+    if (fillsByDate[date]) return fillsByDate[date];
+    var url = location.protocol + '//' + location.hostname + ':' + ALERTS_PORT
+      + '/api/broker/fills?date=' + encodeURIComponent(date);
+    fillsByDate[date] = fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var map = {};
+        if (d && d.ok) {
+          (d.symbols || []).forEach(function (g) { map[g.symbol] = g; });
+        }
+        return map;
+      })
+      .catch(function () { return {}; });
+    return fillsByDate[date];
+  }
+
+  function money(n) {
+    return (n >= 0 ? '+' : '') + Number(n).toFixed(2);
+  }
+
+  /* One line, appended to a card, saying what the account really did. */
+  function fillLine(g, t) {
+    var el = document.createElement('div');
+    el.className = 'jnl-fill-line';
+    el.style.cssText = 'font-size:11px;color:#94a3b8;margin-top:4px;'
+      + 'border-top:1px dashed #334155;padding-top:4px';
+
+    var bits = [];
+    if (g.avgBuy != null) bits.push('bought ' + g.bought + ' @ ' + g.avgBuy);
+    if (g.avgSell != null) bits.push('sold ' + g.sold + ' @ ' + g.avgSell);
+    if (g.closed) bits.push('realised ' + money(g.realised));
+    else bits.push('STILL OPEN at Alpaca');
+
+    /*
+     * The comparison, and the reason this exists. Shown only when the journal
+     * has an entry price to compare against — and never as a correction: the
+     * journal's number is what was intended and Alpaca's is what happened, and
+     * both are worth keeping.
+     */
+    var want = Number(t.entryPrice);
+    var got = Number(g.avgBuy != null && t.side !== 'short' ? g.avgBuy : g.avgSell);
+    if (want > 0 && got > 0) {
+      var raw = got - want;
+      var slip = t.side === 'short' ? -raw : raw;      // + is worse, either way
+      bits.push('vs ' + want + ' planned: ' + money(slip));
+    }
+
+    el.textContent = 'Alpaca — ' + bits.join(' · ');
+    return el;
+  }
 
   /* ── the chart link ───────────────────────────────────────────────────
    * Times: the page holds entryTs/exitTs in MILLISECONDS (it builds them with
@@ -125,6 +202,27 @@
         + 'color:#94a3b8;border:1px solid #334155;border-radius:5px;'
         + 'text-decoration:none;line-height:1.6';
       del.parentNode.insertBefore(a, del);
+    });
+
+    /*
+     * The fill line. Added per card and keyed off the card's own date, because
+     * the list can show several days at once and one day's fills say nothing
+     * about another's.
+     */
+    host.querySelectorAll('.jnl-del-btn').forEach(function (del) {
+      var t = findTrade(del.getAttribute('data-id'));
+      if (!t || !t.ticker || !t.date) return;
+      var card = del.closest('.jnl-card') || del.parentNode.parentNode;
+      if (!card || card.querySelector('.jnl-fill-line')) return;
+      card.setAttribute('data-fills-pending', '1');
+      fillsFor(t.date).then(function (map) {
+        var g = map[String(t.ticker).toUpperCase()];
+        // Nothing at Alpaca for that name on that day — a TTP-only trade, or a
+        // day before the account existed. Silence, not a zero.
+        if (!g) return;
+        if (card.querySelector('.jnl-fill-line')) return;
+        card.appendChild(fillLine(g, t));
+      });
     });
   }
 

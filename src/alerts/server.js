@@ -198,6 +198,36 @@ app.post('/api/strategies/:id/tools', express.json(), async (req, res) => {
  */
 const broker = require('../broker/signalstack');
 
+/*
+ * WHAT THE ACCOUNT ACTUALLY PAID, for the journal.
+ *
+ * The journal records what a trade was MEANT to be — the price the decision
+ * used. This is what Alpaca says the money did: every fill, grouped per name,
+ * with the average each way and the realised result once a position is
+ * round-tripped.
+ *
+ * A GET so the journal page can read it cross-port; GETs here already carry
+ * Access-Control-Allow-Origin. Alpaca only — TTP5k is behind TraderEvolution
+ * and has no position feed, and the response says so rather than presenting
+ * half a desk as the whole of it.
+ */
+app.get('/api/broker/fills', async (req, res) => {
+  try {
+    const { toETDate } = require('../utils/time');
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '')
+      ? req.query.date : toETDate(Date.now());
+    const reconcile = require('../broker/reconcile');
+    const out = await reconcile.fillsFor(day);
+    res.json({ ...out, date: day, scope: 'alpaca',
+               unverified: reconcile.alpacaDestinations().length
+                 ? undefined : 'no Alpaca account is configured' });
+  } catch (err) {
+    // 200 with ok:false — a journal page that got a 500 would show nothing and
+    // say nothing, which reads as "no trades" rather than as "could not ask".
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/broker', (req, res) => {
   const { toETDate } = require('../utils/time');
   const day = toETDate(Date.now());
