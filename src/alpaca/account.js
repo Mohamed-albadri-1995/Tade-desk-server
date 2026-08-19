@@ -214,6 +214,19 @@ async function account({ timeoutMs = 10000 } = {}) {
   return {
     ok: true,
     account: {
+      /*
+       * WHICH ACCOUNT THIS IS. Not decoration.
+       *
+       * Two names were reported open in the Alpaca app and the API answered
+       * with two different ones. Either would be alarming; together they mean
+       * the credentials on this box and the screen being read are not
+       * necessarily the same account, and every other number here is about
+       * whichever one the keys point at. So it says which, every time.
+       */
+      number: a.account_number || null,
+      // Paper and live are different accounts with the same shape, and telling
+      // them apart from the numbers alone is not possible.
+      base: getAccountBaseUrl(),
       equity: Number(a.equity),
       cash: Number(a.cash),
       buyingPower: Number(a.buying_power),
