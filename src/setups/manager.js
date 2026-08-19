@@ -41,6 +41,7 @@ const reconcile = require('../broker/reconcile');
 const catalog = require('./catalog');
 const qp = require('./qpClient');
 const store = require('../alerts/store');
+const sessionLog = require('./sessionLog');
 const { toETDate } = require('../utils/time');
 
 /** HH:MM in New York — the market's clock, not the machine's. */
@@ -200,7 +201,11 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
         feed: found.setup.feed || 'yahoo',
       });
 
-      looked.push({ symbol: pos.symbol, setupId: pos.setupId, ...answer, entryExact: exact });
+      // `entry` is the ledger's fill price, not qp's — the session log compares
+      // where the stop got to against what was actually paid, and the answer
+      // does not carry it.
+      looked.push({ symbol: pos.symbol, setupId: pos.setupId, entry: pos.price,
+                    ...answer, entryExact: exact });
 
       /*
        * NOTHING TO MANAGE is the common case and must be cheap and silent.
@@ -297,6 +302,24 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
       console.error(`[Manager] ${pos.symbol}: ${err.message}`);
     }
   }
+
+  /*
+   * WRITE THE PASS DOWN, whatever it concluded.
+   *
+   * Everything this desk SENDS was already recorded — the ledger holds every
+   * order and the broker's reply, the alert history holds every fire. Nothing
+   * recorded what it DECIDED NOT TO DO, and "not yet" is the entire content of
+   * a day for a position that ran from 09:36 to 15:50. So "why did it not close
+   * at 10:47" and "where was the stop at 11:00" had no answer at all after the
+   * fact: those numbers existed for a few milliseconds inside this loop and
+   * were dropped.
+   *
+   * Last, and deliberately so — the log is an observer, and `record` swallows
+   * its own failures, so a full disk cannot cost a close.
+   */
+  sessionLog.record(sessionLog.passOf({
+    at, date: day, positions: looked, held: stillHeld, acted,
+  }));
 
   return { ran: true, positions: positions.length, acted, looked };
 }

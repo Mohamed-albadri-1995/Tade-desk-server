@@ -198,7 +198,17 @@ function history({ date = null, month = null, limit = 500 } = {}) {
 function historyDates(month = null) {
   let files;
   try {
-    files = fs.readdirSync(HISTORY_DIR).filter(f => f.endsWith('.jsonl'));
+    /*
+     * ALERT HISTORY ONLY, by name.
+     *
+     * This directory is no longer the alert feed's alone — the manager's
+     * session log rotates into it by month, one line per pass, and those lines
+     * carry a `date` too. Reading every .jsonl here would put a day in the
+     * picker because a POSITION was watched on it, and choosing that day would
+     * then show an empty feed, which reads as "the alerts were lost".
+     */
+    files = fs.readdirSync(HISTORY_DIR)
+      .filter(f => f.startsWith('alert-history-') && f.endsWith('.jsonl'));
   } catch {
     return [];
   }

@@ -409,6 +409,77 @@ async function broker_truth() {
   }
 }
 
+// ── 4c. how each position was actually managed, minute by minute ───────────
+/*
+ * THE SECTION THAT ANSWERS "WHY DIDN'T IT CLOSE?"
+ *
+ * Everything above is what the desk SENT. This is what it SAW and chose not to
+ * act on, which for a position that ran from 09:36 to 15:50 is the entire day.
+ * Before the session log existed the answer to "where was the trailing stop at
+ * 11:00" was not hard to find — it did not exist anywhere.
+ *
+ * Collapsed to the CHANGES. 390 near-identical lines hide the shape of a day as
+ * thoroughly as no file at all, so a run of passes that all said the same thing
+ * prints once.
+ */
+function managed() {
+  const log = require('../src/setups/sessionLog');
+  rule('HOW EACH POSITION WAS MANAGED');
+
+  const passes = log.read(DAY);
+  if (!passes.length) {
+    say('no manager passes recorded.');
+    say('  Either nothing was open, or the alerts app was not running — those are');
+    say('  different facts and this file cannot tell them apart. Cross-check the');
+    say('  ORDERS section: rows there with nothing here means the manager was down.');
+    return;
+  }
+
+  const first = passes[0].at;
+  const last = passes[passes.length - 1].at;
+  const hhmm = ms => new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit',
+  }).format(new Date(ms));
+  say(`${passes.length} pass(es), ${hhmm(first)} to ${hhmm(last)} ET.`);
+
+  for (const sym of log.symbolsOn(DAY)) {
+    const track = log.trackOf(DAY, sym);
+    if (!track.length) continue;
+    say('');
+    say(`  ${sym}  ${track[0].setupId || '(no setup)'}  ${track[0].side || ''}`
+      + (track[0].entry != null ? ` from ${track[0].entry}` : ''));
+    for (const t of track) {
+      const bits = [];
+      if (t.stop != null) bits.push(`stop ${t.stop}${t.stopMoved ? ' (moved)' : ''}`);
+      if (t.breached) bits.push('BREACHED');
+      if (t.exitNow) {
+        bits.push(`EXIT RULE FIRED${t.exitBarsAgo ? ` ${t.exitBarsAgo} bar(s) earlier` : ''}`);
+      }
+      if (t.wrongSide) bits.push('stop on the WRONG SIDE of entry — not acted on');
+      if (t.error) bits.push(`could not judge: ${t.error}`);
+      if (t.skipped) bits.push(`skipped: ${t.skipped}`);
+      // The loop's own answer to "is the broker still holding this", which is
+      // the one that says whether a close was even needed.
+      if (t.heldAtBroker === null) bits.push('Alpaca not asked');
+      else if (!t.heldAtBroker) bits.push('flat at Alpaca');
+      if (t.managed === false) bits.push('nothing to manage — the broker holds it');
+      say(`    ${hhmm(t.at)}  ${bits.join(' · ') || 'holding'}`);
+    }
+  }
+
+  const acted = [];
+  for (const p of passes) for (const a of p.acted || []) acted.push({ at: p.at, ...a });
+  if (acted.length) {
+    say('');
+    say('  ACTED ON:');
+    for (const a of acted) {
+      say(`    ${hhmm(a.at)}  ${a.symbol} — ${a.why}`
+        + (a.dryRun ? '  (dry run, nothing sent)'
+                    : `  sent ${a.sent}${a.alreadyFlat ? `, ${a.alreadyFlat} already flat` : ''}`));
+    }
+  }
+}
+
 // ── 5. the reconciliation ──────────────────────────────────────────────────
 /*
  * The only section that can find a fault nobody reported.
@@ -524,6 +595,7 @@ function reconcile(fires, rows) {
   const fires = alerts();
   const rows = ledger();
   await broker_truth();
+  managed();
   reconcile(fires, rows);
   console.log('');
 })();
