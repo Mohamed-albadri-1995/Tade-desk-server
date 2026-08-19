@@ -101,6 +101,28 @@ def health():
             **cs._feed_status()}
 
 
+@app.post('/api/settings/default-feed')
+def set_default_feed(payload: dict = Body(...)):
+    """Choose which feed everything defaults to.
+
+    It used to be inferred — polygon whenever a POLYGON_API_KEY existed — and a
+    key being present turned out not to mean the plan behind it includes the
+    data being asked for. Every 1-minute request 403'd while the platform
+    reported polygon as its best feed. Nothing here can test a plan's
+    entitlements without spending a request per startup, so the guess is gone
+    and this is how the answer gets set instead.
+
+    200 with ok:false for a bad feed rather than a 4xx: the caller is a page,
+    and the reason is more useful to it than the status.
+    """
+    try:
+        feed = cs.set_default_feed(str(payload.get('feed') or ''))
+        return JSONResponse({'ok': True, 'default_feed': feed, **cs._feed_status()})
+    except Exception as exc:
+        return JSONResponse({'ok': False, 'error': str(exc), **cs._feed_status()},
+                            status_code=200)
+
+
 @app.get('/api/primitives')
 def primitives():
     return cs.list_primitives()

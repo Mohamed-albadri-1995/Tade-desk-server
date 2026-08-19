@@ -86,11 +86,52 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+_FEED_PREF = Path(__file__).resolve().parents[1] / '.default-feed'
+_VALID_FEEDS = ('yahoo', 'alpaca', 'polygon', 'hybrid')
+
+
+def default_feed_override() -> str:
+    """The default somebody CHOSE, or '' if nobody has.
+
+    A file rather than an env var so it can be changed from a page without a
+    restart, and so the choice survives one.
+    """
+    try:
+        v = _FEED_PREF.read_text(encoding='utf-8').strip().lower()
+        return v if v in _VALID_FEEDS else ''
+    except Exception:
+        return ''
+
+
+def set_default_feed(feed: str) -> str:
+    """Choose the default. Refused unless it is a feed that exists."""
+    v = str(feed or '').strip().lower()
+    if v not in _VALID_FEEDS:
+        raise ValueError(f'unknown feed {v!r} — one of {", ".join(_VALID_FEEDS)}')
+    _FEED_PREF.write_text(v, encoding='utf-8')
+    return v
+
+
 def _feed_status() -> dict:
     """Which feeds have credentials configured, and the preferred default.
 
-    Polygon is preferred when available — deeper history + premarket.
     'hybrid' (Polygon history + Alpaca live gap-fill) needs both.
+
+    POLYGON IS NO LONGER PREFERRED ON SIGHT OF A KEY, and that is a correction
+    paid for in a live session. A key being PRESENT is not evidence that the
+    plan behind it includes the data being asked for:
+
+        Polygon 403: {"status":"NOT_AUTHORIZED","message":"Your plan doesn't
+        include this data timeframe. Please upgrade your plan"}
+
+    Every 1-minute request failed while the inventory reported polygon as the
+    best feed available, so the default pointed at the one feed that could not
+    answer the question this platform exists to answer.
+
+    Nothing here can test a plan's entitlements without spending a request on
+    every startup, so it no longer guesses: yahoo unless somebody has CHOSEN
+    otherwise. Delayed data that arrives beats deeper data that 403s, and the
+    choice is one control away.
 
     YAHOO NEEDS NO KEY, which is why it was missing here and why that mattered.
     chart/data_manager.py has carried it as a real feed all along; this
@@ -114,8 +155,14 @@ def _feed_status() -> dict:
         'polygon': has_polygon,
         'hybrid':  has_alpaca and has_polygon,
     }
-    default = 'polygon' if has_polygon else ('alpaca' if has_alpaca else 'yahoo')
-    return {'feeds': have, 'default_feed': default}
+    # A chosen default wins, and only if that feed is actually configured —
+    # otherwise the page would again point at something that cannot answer.
+    chosen = default_feed_override()
+    default = chosen if (chosen and have.get(chosen)) else 'yahoo'
+    return {'feeds': have, 'default_feed': default,
+            # Which of the two this is, so a page can say "chosen" vs "fallback"
+            # rather than presenting a guess as a decision.
+            'default_chosen': bool(chosen and have.get(chosen))}
 
 
 def _build_id() -> str:

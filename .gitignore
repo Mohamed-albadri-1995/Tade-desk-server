@@ -23,3 +23,6 @@ push-keys.json
 # ignored — this is the same belt-and-braces, for the same reason.
 broker.json
 **/broker.json
+
+# The chosen data feed — a local choice, not code.
+quant-platform/.default-feed

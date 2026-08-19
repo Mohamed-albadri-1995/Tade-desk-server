@@ -590,6 +590,17 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
     </select>
   </label>
   <button class="btn primary" onclick="saveRisk()">Save</button>
+  <!-- WHICH FEED EVERYTHING DEFAULTS TO.
+       It used to be inferred: polygon whenever a POLYGON_API_KEY existed. A key
+       being PRESENT does not mean the plan behind it includes the data being
+       asked for — every 1-minute request came back "your plan doesn't include
+       this data timeframe" while the platform still reported polygon as its
+       best feed. Nothing can test a plan's entitlements without spending a
+       request on every startup, so it is chosen here instead of guessed. -->
+  <label>Data feed
+    <select id="feed" onchange="saveFeed()"></select>
+  </label>
+  <span class="note" id="feed-note"></span>
   <div class="note risk-hint">Shares are worked out from what you lose if the stop is hit,
     not from a fixed dollar amount — risk per share runs from 0.3% to 5% of price across
     these candidates, so a fixed amount would risk fifteen times more on one than another.
@@ -1501,6 +1512,52 @@ async function toggleSetup(id, enabled) {
     });
   } catch { /* the reload below shows whether it took */ }
   loadSetups();
+}
+
+/* ── which feed everything defaults to ── */
+/*
+ * qp owns this, so nothing here keeps a second copy — it is read and written
+ * through the alerts app, which proxies to qp. The page is on 3090 and qp is on
+ * 8765, and adding CORS to a service that can move money in order to fix a
+ * dropdown is the wrong trade.
+ */
+function paintFeed(d) {
+  const sel = document.getElementById('feed');
+  const note = document.getElementById('feed-note');
+  if (!sel) return;
+  if (!d || !d.ok) {
+    sel.innerHTML = '<option>unavailable</option>';
+    note.textContent = (d && d.error) || 'qp did not answer';
+    return;
+  }
+  // Only feeds that are actually configured. Offering one with no credential is
+  // how the default came to point at something that could not answer.
+  const names = Object.keys(d.feeds).filter(k => d.feeds[k]);
+  sel.innerHTML = names.map(n =>
+    `<option value="${esc(n)}"${n === d.defaultFeed ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  note.textContent = d.chosen
+    ? 'chosen'
+    : 'not chosen — falling back to yahoo. Polygon is NOT picked automatically:'
+      + ' a key being present does not mean the plan includes 1-minute data.';
+}
+
+async function loadFeed() {
+  try { paintFeed(await (await fetch('/api/feed')).json()); }
+  catch (e) { paintFeed({ ok: false, error: e.message }); }
+}
+
+async function saveFeed() {
+  const note = document.getElementById('feed-note');
+  note.textContent = 'saving…';
+  try {
+    const r = await fetch('/api/feed', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feed: document.getElementById('feed').value }),
+    });
+    const d = await r.json();
+    paintFeed(d);
+    if (!d.ok) note.textContent = d.error;
+  } catch (e) { note.textContent = e.message; }
 }
 
 /* ── position sizing ── */
@@ -2929,6 +2986,7 @@ showTab((() => {
 loadFires();
 loadRules();
 loadRisk();
+loadFeed();
 // The broker banner counts the setups that will trade, so the setups have to be
 // in hand before it is drawn — otherwise it reads "0 setups" for a second on
 // every load, which is the reassuring answer and the wrong one.

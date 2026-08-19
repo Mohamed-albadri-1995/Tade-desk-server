@@ -139,6 +139,50 @@ app.post('/api/setups/:id/enabled', express.json(), async (req, res) => {
  * So the list is served whole, with what each strategy still needs in order to
  * run, and the assignment happens where the alerts are read.
  */
+/*
+ * WHICH FEED EVERYTHING DEFAULTS TO — read and set, proxied to qp.
+ *
+ * qp owns the answer, so this does not keep a second copy of it. Proxied
+ * rather than called from the browser because the page is served from 3090 and
+ * qp is on 8765: a direct call is cross-origin, and adding CORS to a service
+ * that can move money to fix a dropdown is the wrong trade.
+ *
+ * WHY IT IS A SETTING AT ALL. It used to be inferred — polygon whenever a
+ * POLYGON_API_KEY existed — and a key being present does not mean the plan
+ * behind it includes the data being asked for. Every 1-minute request 403'd
+ * with "your plan doesn't include this data timeframe" while the platform
+ * reported polygon as its best feed, so charts and backtests failed on the one
+ * feed it had chosen for them.
+ */
+app.get('/api/feed', async (req, res) => {
+  try {
+    const qp = require('../setups/qpClient');
+    const r = await fetch(`${qp.baseUrl()}/api/health`, { signal: AbortSignal.timeout(4000) });
+    const d = await r.json();
+    res.json({ ok: true, feeds: d.feeds || {}, defaultFeed: d.default_feed || null,
+               chosen: !!d.default_chosen });
+  } catch (err) {
+    res.json({ ok: false, error: `qp did not answer: ${err.message}` });
+  }
+});
+
+app.post('/api/feed', express.json(), async (req, res) => {
+  try {
+    const qp = require('../setups/qpClient');
+    const r = await fetch(`${qp.baseUrl()}/api/settings/default-feed`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feed: (req.body || {}).feed }),
+      signal: AbortSignal.timeout(5000),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'qp refused it');
+    res.json({ ok: true, feeds: d.feeds || {}, defaultFeed: d.default_feed,
+               chosen: !!d.default_chosen });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/strategies', async (req, res) => {
   try {
     const catalog = require('../setups/catalog');
