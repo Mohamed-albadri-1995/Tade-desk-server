@@ -37,6 +37,7 @@
  */
 
 const broker = require('../broker/signalstack');
+const reconcile = require('../broker/reconcile');
 const catalog = require('./catalog');
 const qp = require('./qpClient');
 const store = require('../alerts/store');
@@ -156,6 +157,29 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
   const positions = openPositions(day);
   if (!positions.length) return { ran: true, positions: 0, acted: [] };
 
+  /*
+   * CLOSING THE LOOP — what does the broker say is actually there?
+   *
+   * The ledger is what we SENT minus what we CLOSED, so it cannot see a stop or
+   * a target that filled and it over-reports by design. Acting on it means
+   * sending a close for a position that ended an hour ago: a per-order fee, and
+   * an "exit" alert for a trade that was already out.
+   *
+   * Alpaca will just say. Asked once per pass, not once per position.
+   *
+   * `null` means the question could NOT be asked, and that is deliberately not
+   * the same as an empty set — "Alpaca says you hold nothing" and "Alpaca did
+   * not answer" are opposite instructions. Unasked, nothing is filtered and the
+   * loop behaves exactly as it did before.
+   */
+  let stillHeld = null;
+  try {
+    stillHeld = await reconcile.flatSymbols();
+  } catch (err) {
+    console.warn(`[Manager] could not verify positions with Alpaca: ${err.message}`);
+  }
+  const verifiable = new Set(reconcile.alpacaDestinations());
+
   const acted = [];
   const looked = [];
 
@@ -219,12 +243,34 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
        * each — and a destination that is already flat ignores it.
        */
       const results = [];
+      let skippedFlat = 0;
       for (const dest of pos.destinations) {
+        /*
+         * PER DESTINATION, because only some of them can be verified. A name
+         * held in both accounts and flat at Alpaca still has to be closed at
+         * Trade The Pool — dropping the whole position would leave the prop
+         * account holding it.
+         */
+        if (stillHeld && verifiable.has(dest) && !stillHeld.has(pos.symbol)) {
+          skippedFlat += 1;
+          continue;
+        }
         const cfg = broker.destinationCfg(dest) || cfgAll;
         results.push(await broker.closePosition(pos.symbol, day, cfg));
       }
       const sent = results.filter(r => r.sent).length;
-      acted.push({ ...pos, why, sent, of: results.length });
+
+      /*
+       * Every account that held it was already flat. Nothing to send, and
+       * nothing to announce as a trade — the position ended when its stop or
+       * target filled, which is a fact the alert feed already carries from the
+       * broker's own callback.
+       */
+      if (!results.length && skippedFlat) {
+        acted.push({ ...pos, why, sent: 0, alreadyFlat: skippedFlat });
+        continue;
+      }
+      acted.push({ ...pos, why, sent, of: results.length, alreadyFlat: skippedFlat });
 
       store.publishFires([{
         ruleId: pos.setupId, rule: 'Manager', ticker: pos.symbol,

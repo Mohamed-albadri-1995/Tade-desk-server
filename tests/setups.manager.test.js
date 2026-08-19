@@ -31,10 +31,15 @@ process.env.DATA_DIR = DIR;
 jest.mock('../src/setups/qpClient', () => ({ manage: jest.fn() }));
 jest.mock('../src/setups/catalog', () => ({ list: jest.fn() }));
 jest.mock('../src/alerts/store', () => ({ publishFires: jest.fn() }));
+jest.mock('../src/broker/reconcile', () => ({
+  flatSymbols: jest.fn(async () => null),
+  alpacaDestinations: jest.fn(() => ['alp']),
+}));
 
 const qp = require('../src/setups/qpClient');
 const catalog = require('../src/setups/catalog');
 const store = require('../src/alerts/store');
+const reconcile = require('../src/broker/reconcile');
 const broker = require('../src/broker/signalstack');
 const manager = require('../src/setups/manager');
 
@@ -74,6 +79,11 @@ beforeEach(() => {
   ]);
   qp.manage.mockReset();
   store.publishFires.mockReset();
+  // Unasked by default — the loop then behaves exactly as it did before Alpaca
+  // was consulted at all.
+  reconcile.flatSymbols.mockReset();
+  reconcile.flatSymbols.mockResolvedValue(null);
+  reconcile.alpacaDestinations.mockReturnValue(['alp']);
 });
 afterAll(() => { fs.rmSync(DIR, { recursive: true, force: true }); });
 
@@ -370,5 +380,80 @@ describe('dry run', () => {
     expect(r.acted[0].dryRun).toBe(true);
     expect(sent).toHaveLength(0);
     expect(store.publishFires).not.toHaveBeenCalled();
+  });
+});
+
+// ── the closed loop ────────────────────────────────────────────────────────
+/*
+ * The ledger is what we SENT minus what we CLOSED. It cannot see a stop or a
+ * target that filled, so it over-reports by design — safe for the 15:50
+ * flatten, wrong here: a close sent for a position that ended an hour ago is a
+ * per-order fee and an "exit" alert for a trade that was already out.
+ *
+ * Alpaca will simply say. These are about believing it exactly as far as it can
+ * be believed, and no further.
+ */
+describe('what the broker says is actually held', () => {
+  test('a position Alpaca is FLAT in is not closed again', async () => {
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({ exit_now: true }));
+    reconcile.flatSymbols.mockResolvedValue(new Set());        // holding nothing
+    const r = await manager.check(AT);
+    expect(sent).toHaveLength(0);
+    expect(r.acted[0].alreadyFlat).toBe(1);
+  });
+
+  test('a position Alpaca still holds IS closed', async () => {
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({ exit_now: true }));
+    reconcile.flatSymbols.mockResolvedValue(new Set(['CBRS']));
+    await manager.check(AT);
+    expect(sent).toHaveLength(1);
+  });
+
+  /*
+   * PER DESTINATION. Only Alpaca can be asked; Trade The Pool is behind
+   * TraderEvolution and invisible. A name held in both and flat at Alpaca must
+   * STILL be closed at the prop account — dropping the whole position would
+   * leave that one holding it into the night.
+   */
+  test('an unverifiable account is still closed when Alpaca is flat', async () => {
+    ledger([{ destination: 'alp' }, { destination: 'ttp' }]);
+    qp.manage.mockResolvedValue(answer({ exit_now: true }));
+    reconcile.flatSymbols.mockResolvedValue(new Set());
+    await manager.check(AT);
+    expect(sent).toHaveLength(1);                     // ttp only
+    expect(sent[0].url).toContain('TESTfake');        // the TTP hook
+  });
+
+  /*
+   * THE DISTINCTION THAT MATTERS MOST. "Alpaca says you hold nothing" and
+   * "Alpaca did not answer" are opposite instructions, and a caller that cannot
+   * tell them apart will eventually act on the wrong one. Unasked, nothing is
+   * filtered.
+   */
+  test('an UNANSWERED question filters nothing — it is not an empty set', async () => {
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({ exit_now: true }));
+    reconcile.flatSymbols.mockResolvedValue(null);
+    await manager.check(AT);
+    expect(sent).toHaveLength(1);
+  });
+
+  test('and neither does Alpaca throwing', async () => {
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({ exit_now: true }));
+    reconcile.flatSymbols.mockRejectedValue(new Error('down'));
+    await manager.check(AT);
+    expect(sent).toHaveLength(1);
+  });
+
+  test('it is asked ONCE per pass, not once per position', async () => {
+    ledger([{ symbol: 'CBRS' }, { symbol: 'EYPT' }]);
+    qp.manage.mockResolvedValue(answer({ exit_now: true }));
+    reconcile.flatSymbols.mockResolvedValue(new Set(['CBRS', 'EYPT']));
+    await manager.check(AT);
+    expect(reconcile.flatSymbols).toHaveBeenCalledTimes(1);
+    expect(sent).toHaveLength(2);
   });
 });

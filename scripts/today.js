@@ -336,6 +336,79 @@ function ledger() {
   return rows;
 }
 
+// ── 4b. what the BROKER says, rather than what we believe ──────────────────
+/*
+ * The ledger is a record of intentions. Alpaca is a record of positions, and it
+ * answers three things the ledger can only guess at: what is actually held, what
+ * a fill really cost, and whether the account is blocked.
+ *
+ * ONE ACCOUNT. TTP5k is behind TraderEvolution and invisible to this. Said out
+ * loud every time, because a reconciliation that silently covered half a desk
+ * would be worse than none.
+ */
+async function broker_truth() {
+  rule('WHAT THE BROKER SAYS (Alpaca only)');
+  let reconcile;
+  try { reconcile = require('../src/broker/reconcile'); }
+  catch (err) { return say(`could not load the reconciler: ${err.message}`); }
+
+  let cmp;
+  try { cmp = await reconcile.compare(DAY); }
+  catch (err) { return say(`could not ask Alpaca: ${err.message}`); }
+
+  if (cmp.unverifiable && cmp.unverifiable.length) {
+    say(`not covered here: ${cmp.unverifiable.join(', ')} — a different broker, `
+      + 'no position feed');
+  }
+  if (!cmp.reachable) {
+    say(`Alpaca did not answer: ${cmp.error}`);
+    say('Everything above is what THIS SIDE believes, unverified.');
+    return;
+  }
+
+  if (cmp.account) {
+    const a = cmp.account;
+    say(`account ${a.status}   equity ${a.equity}   buying power ${a.buyingPower}`
+      + `   day trades ${a.daytradeCount}`);
+  }
+  say('');
+  if (!cmp.positions.length) say('Alpaca holds NOTHING right now.');
+  else {
+    say('Alpaca holds:');
+    for (const p of cmp.positions) {
+      say(`  ${String(p.symbol).padEnd(6)} ${String(p.qty).padStart(6)} @ ${p.avgEntry}`
+        + `   now ${p.current}   unrealised ${p.unrealised >= 0 ? '+' : ''}${p.unrealised}`);
+    }
+  }
+
+  if (cmp.findings.length) {
+    say('');
+    // Errors first: one of them is an overnight position nothing here will close.
+    const order = { error: 0, warn: 1, info: 2 };
+    for (const f of cmp.findings.sort((x, y) => order[x.level] - order[y.level])) {
+      say(`  ${f.level === 'error' ? '✗' : f.level === 'warn' ? '⚠' : '·'} ${f.detail}`);
+    }
+  } else {
+    say('');
+    say('  ✓ what this side believes and what Alpaca holds agree.');
+  }
+
+  // ── the fills, which are what a journal actually wants ──────────────────
+  let f;
+  try { f = await reconcile.fillsFor(DAY); } catch (err) { f = { ok: false, error: err.message }; }
+  if (!f.ok) { say(''); say(`  fills unavailable: ${f.error}`); return; }
+  if (!f.symbols.length) { say(''); say('  no fills today.'); return; }
+
+  say('');
+  say('FILLS — what the account actually paid, not what the decision assumed:');
+  for (const g of f.symbols) {
+    say(`  ${g.symbol.padEnd(6)} bought ${String(g.bought).padStart(5)} @ ${g.avgBuy ?? '-'}`
+      + `   sold ${String(g.sold).padStart(5)} @ ${g.avgSell ?? '-'}`
+      + (g.closed ? `   realised ${g.realised >= 0 ? '+' : ''}${g.realised}`
+                  : '   STILL OPEN — no result yet'));
+  }
+}
+
 // ── 5. the reconciliation ──────────────────────────────────────────────────
 /*
  * The only section that can find a fault nobody reported.
@@ -450,6 +523,7 @@ function reconcile(fires, rows) {
   await setups();
   const fires = alerts();
   const rows = ledger();
+  await broker_truth();
   reconcile(fires, rows);
   console.log('');
 })();

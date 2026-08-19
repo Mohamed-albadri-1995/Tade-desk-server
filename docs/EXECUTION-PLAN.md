@@ -175,8 +175,19 @@ that way:
 **There is a callback.** SignalStack can POST when an order is *processed* —
 the half the reply cannot give.
 
-**There is no position query.** Nothing can be asked "what do I hold". This is
-the single most consequential limit in the whole list.
+**SignalStack has no position query.** Nothing can be asked "what do I hold"
+*through the bridge*.
+
+> **CORRECTED after this was written.** That was stated as a limit on the desk,
+> and it is only a limit on SignalStack. The account behind the bridge is an
+> **Alpaca** account, and Alpaca answers all three — `GET /v2/positions`,
+> `/v2/orders`, `/v2/account/activities/FILL` — with the credentials the borrow
+> check already holds. Nothing new had to be granted; the question had simply
+> never been asked. See `src/alpaca/account.js` and `src/broker/reconcile.js`.
+>
+> It remains true for **TTP5k**, a Trade The Pool account behind
+> TraderEvolution with no position feed. So the desk is half-verified, and
+> every answer names which half.
 
 ---
 
@@ -311,13 +322,27 @@ up by it.
 
 ## Stage 7 — Reconciliation
 
-Because there is no position query, the ledger *is* the position — and a ledger
-that only records what was sent will drift from reality the first time a stop
-fills.
+A ledger that only records what was sent drifts from reality the first time a
+stop fills. Where the broker can be asked, ask it; where it cannot, say so.
 
-The end-of-day answer must be assembled from: intents, orders, callbacks, and
-the broker's own statement. Anything the three disagree about is a finding, not
-a rounding error.
+The end-of-day answer is assembled from intents, orders, callbacks and the
+broker's own statement, and anything they disagree about is a finding rather
+than a rounding error. Four disagreements matter, and they do not cost the same:
+
+| | cost of getting it wrong |
+|---|---|
+| we think open, the broker is flat | a wasted close, and an "exit" for a trade that ended an hour ago |
+| **the broker holds it and we do not know** | **nothing here will flatten it — it goes overnight** |
+| the quantity disagrees | a leg did not fill; the position is not the tested shape |
+| sent, and the broker has no record | the alert said the trade was on |
+
+The second is the dangerous one, because the 15:50 flatten closes what the
+LEDGER says was opened.
+
+One distinction carries all of this: **"the broker says you hold nothing" and
+"the broker did not answer" are opposite instructions.** Anything that cannot
+tell them apart will eventually act on the wrong one, so an unreachable broker
+returns `null`, never an empty set.
 
 ## Stage 8 — What must never be silent
 

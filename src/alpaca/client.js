@@ -400,6 +400,10 @@ module.exports = {
   fetchAccount,
   fetchAccountEquity,
   getAccountBaseUrl,
+  // Exported so the account-side reader (positions, orders, fills) authenticates
+  // exactly as everything else here does — one credential path, including the
+  // fall back to the shared database when a tool has no keys of its own.
+  authHeaders,
   // Exported because a caller computing VWAP has to know which feed produced
   // the volume. IEX is a few percent of the consolidated tape, so a VWAP built
   // from it is not the VWAP anyone else is looking at — and in the T2 setup the
