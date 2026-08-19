@@ -168,6 +168,95 @@ async function compare(date, { timeoutMs = 10000 } = {}) {
 }
 
 /**
+ * Positions that survived their own session.
+ *
+ * THE HOLE THIS EXISTS TO CLOSE, found by opening the Alpaca app and seeing two
+ * names that should not have been there.
+ *
+ * The 15:50 flatten reads `openSymbols(today)`, and the ledger is keyed by day.
+ * So a position that is not closed on the day it was opened — because the alerts
+ * process was down at 15:50, because the desk was disarmed, because the close
+ * was refused — is invisible to every flatten that follows. The next morning
+ * `openSymbols` is asked about a new date, finds nothing, and closes nothing.
+ * Nothing anywhere ever looks at it again. It is not "missed once"; it is
+ * missed for good.
+ *
+ * So this asks the only party that actually knows. For each name ALPACA IS
+ * HOLDING RIGHT NOW, it walks the WHOLE ledger — every day, not today's — and
+ * finds the last entry and the last close this desk sent for it:
+ *
+ *   an entry with no close after it, dated before today   CARRIED OVER. This
+ *                                                         desk opened it and
+ *                                                         never closed it.
+ *
+ *   an entry with no close after it, dated today          normal: still running.
+ *
+ *   no entry at all                                       NOT OURS. Opened by
+ *                                                         hand, or before this
+ *                                                         ledger existed.
+ *
+ * The last distinction is the one that decides what may be done automatically.
+ * A carried-over position is this desk's own mess and closing it is finishing a
+ * job it started. A position it never opened may be a trade taken by hand for
+ * reasons no algorithm here knows, and closing that would be the worst thing in
+ * this file. It is reported, loudly, and left alone.
+ */
+async function carriedOver(today, { timeoutMs = 10000 } = {}) {
+  const r = await alpaca.positions({ timeoutMs });
+  if (!r.ok) return { ok: false, error: r.error };
+
+  const holding = r.positions.filter(p => p.qty !== 0);
+  if (!holding.length) return { ok: true, carried: [], foreign: [], running: [] };
+
+  /*
+   * The last thing this desk did to each name, over the whole ledger. Not
+   * per-day: the entire point is the days nobody looked at.
+   */
+  const lastOpen = new Map();      // SYMBOL -> the most recent sent entry row
+  const lastClose = new Map();     // SYMBOL -> the most recent sent flatten row
+  for (const o of broker.orders()) {
+    if (o.kind === 'callback' || o.kind === 'intent') continue;
+    const sym = String(o.symbol || '').toUpperCase();
+    if (!sym || !o.sent) continue;
+    const into = o.kind === 'flatten' ? lastClose : lastOpen;
+    const was = into.get(sym);
+    if (!was || (o.at || 0) > (was.at || 0)) into.set(sym, o);
+  }
+
+  const out = { ok: true, carried: [], foreign: [], running: [] };
+  for (const p of holding) {
+    const open = lastOpen.get(p.symbol);
+    const shut = lastClose.get(p.symbol);
+
+    if (!open) {
+      out.foreign.push({ ...p, why: 'nothing in this ledger ever opened it' });
+      continue;
+    }
+    // A close AFTER the last entry means the desk did its part; whatever is
+    // there now was opened by something else, or the close did not take.
+    if (shut && (shut.at || 0) > (open.at || 0)) {
+      out.foreign.push({ ...p, openedOn: open.date, closedOn: shut.date,
+        why: 'this desk closed it and it is still on — the close did not take' });
+      continue;
+    }
+    const row = {
+      ...p,
+      openedOn: open.date,
+      setupId: open.setupId || null,
+      // Which account to send the close to. Alpaca destinations only: this
+      // whole function is built on an Alpaca position query and says so.
+      destinations: [...new Set(broker.orders(open.date)
+        .filter(o => o.sent && o.kind !== 'flatten' && o.kind !== 'callback'
+                  && String(o.symbol || '').toUpperCase() === p.symbol)
+        .map(o => o.destination))].filter(d => alpacaDestinations().includes(d)),
+    };
+    if (open.date === today) out.running.push(row);
+    else out.carried.push(row);
+  }
+  return out;
+}
+
+/**
  * Which symbols Alpaca is definitely flat in — for a caller about to send a
  * close it does not need to send.
  *
@@ -221,4 +310,4 @@ async function fillsFor(date, { timeoutMs = 15000 } = {}) {
   };
 }
 
-module.exports = { compare, flatSymbols, fillsFor, alpacaDestinations };
+module.exports = { compare, carriedOver, flatSymbols, fillsFor, alpacaDestinations };

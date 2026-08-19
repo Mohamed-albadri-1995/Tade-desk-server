@@ -20,7 +20,15 @@ process.env.ALERT_RULES_FILE = path.join(DIR, 'rules.json');
 process.env.ALERT_FIRES_FILE = path.join(DIR, 'fires.json');
 process.env.ALERT_HISTORY_DIR = path.join(DIR, 'history');
 
+jest.mock('../src/broker/reconcile', () => ({
+  // Unasked by default: the flatten then behaves exactly as it did before the
+  // broker was consulted at all — today's ledger and nothing else.
+  carriedOver: jest.fn(async () => ({ ok: false, error: 'not asked' })),
+  alpacaDestinations: jest.fn(() => ['alp']),
+}));
+
 const broker = require('../src/broker/signalstack');
+const reconcile = require('../src/broker/reconcile');
 const flattener = require('../src/alerts/flattener');
 const store = require('../src/alerts/store');
 
@@ -43,6 +51,8 @@ beforeEach(() => {
   global.fetch = jest.fn(async (url, opts) => {
     sent.push(JSON.parse(opts.body)); return ok();
   });
+  reconcile.carriedOver.mockReset();
+  reconcile.carriedOver.mockResolvedValue({ ok: false, error: 'not asked' });
 });
 afterAll(() => { fs.rmSync(DIR, { recursive: true, force: true }); });
 
@@ -202,4 +212,99 @@ test('a quiet day closes nothing and says nothing', async () => {
   const out = await flattener.check(AT_1550);
   expect(out.closed).toEqual([]);
   expect(store.recentFires(DAY)).toHaveLength(0);
+});
+
+// ── the hole that let two positions sit in the account ─────────────────────
+/*
+ * WHAT WAS FOUND BY OPENING THE BROKER'S APP: two names still open that should
+ * have been flat days earlier.
+ *
+ * This function read openSymbols(TODAY), and the ledger is keyed by day. A
+ * position not closed on the day it was opened — this process down at 15:50,
+ * the desk disarmed, a close refused — is invisible to every flatten that
+ * follows: the next day asks about a new date, finds nothing, closes nothing.
+ * Not missed once. Missed for good.
+ *
+ * So it now also asks Alpaca what is actually held, and closes what THIS DESK
+ * opened on an earlier day. What it did not open, it names and leaves.
+ */
+describe('a position carried in from an earlier session', () => {
+  const carried = (symbol = 'VIK', over = {}) => ({
+    ok: true, running: [], foreign: [],
+    carried: [{ symbol, qty: 100, side: 'long', openedOn: '2026-08-07',
+                setupId: 'S@09:35', destinations: ['alp'], ...over }],
+  });
+
+  test('is closed, even though today\'s ledger is empty', async () => {
+    armed();
+    reconcile.carriedOver.mockResolvedValue(carried());
+    const out = await flattener.check(AT_1550);
+    expect(out.ran).toBe(true);
+    expect(sent.map(b => b.symbol)).toEqual(['VIK']);
+    expect(sent[0].action).toBe('close');
+  });
+
+  test('and the alert says it came from an earlier day', async () => {
+    armed();
+    reconcile.carriedOver.mockResolvedValue(carried());
+    await flattener.check(AT_1550);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.detail).toMatch(/EARLIER session/);
+    expect(said.detail).toMatch(/VIK/);
+  });
+
+  test('one already in today\'s ledger is not closed twice', async () => {
+    armed();
+    await buy('LIFE');
+    reconcile.carriedOver.mockResolvedValue({
+      ok: true, running: [], foreign: [],
+      carried: [{ symbol: 'LIFE', qty: 10, openedOn: DAY, destinations: ['alp'] }],
+    });
+    sent.length = 0;
+    await flattener.check(AT_1550);
+    expect(sent.filter(b => b.symbol === 'LIFE' && b.action === 'close')).toHaveLength(1);
+  });
+
+  /*
+   * A POSITION THIS DESK NEVER OPENED IS NOT THIS DESK'S TO CLOSE. It may be a
+   * trade taken by hand. Named at error level, and left exactly where it is.
+   */
+  test('one nothing here opened is named and NOT closed', async () => {
+    armed();
+    reconcile.carriedOver.mockResolvedValue({
+      ok: true, running: [], carried: [],
+      foreign: [{ symbol: 'NVDA', qty: 50, why: 'nothing in this ledger ever opened it' }],
+    });
+    const out = await flattener.check(AT_1550);
+    expect(out.ran).toBe(true);
+    expect(sent).toHaveLength(0);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.level).toBe('error');
+    expect(said.detail).toMatch(/ALPACA STILL HOLDS NVDA \(50\)/);
+    expect(said.detail).toMatch(/NOT closed/);
+  });
+
+  /*
+   * An unreachable broker must not read as a clean account. Today's ledger is
+   * still closed — that half never depended on Alpaca — and the alert says the
+   * other half could not be checked.
+   */
+  test('an unreachable Alpaca still closes today, and says what it could not check', async () => {
+    armed();
+    await buy('LIFE');
+    reconcile.carriedOver.mockResolvedValue({ ok: false, error: 'timed out' });
+    sent.length = 0;
+    await flattener.check(AT_1550);
+    expect(sent.map(b => b.symbol)).toEqual(['LIFE']);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.detail).toMatch(/could not ask Alpaca what is really open \(timed out\)/);
+  });
+
+  test('nothing anywhere is still nothing to do', async () => {
+    armed();
+    reconcile.carriedOver.mockResolvedValue({ ok: true, carried: [], foreign: [], running: [] });
+    const out = await flattener.check(AT_1550);
+    expect(out.closed).toEqual([]);
+    expect(sent).toHaveLength(0);
+  });
 });

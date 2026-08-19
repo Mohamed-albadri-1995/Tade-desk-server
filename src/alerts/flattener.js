@@ -24,6 +24,7 @@
  */
 
 const broker = require('../broker/signalstack');
+const reconcile = require('./../broker/reconcile');
 const store = require('./store');
 const { toETDate } = require('../utils/time');
 
@@ -71,9 +72,58 @@ async function check(at = Date.now()) {
   lastRun = day;
 
   const open = broker.openSymbols(day);
-  if (!open.length) return { ran: true, closed: [] };
+
+  /*
+   * AND ANYTHING THAT SURVIVED AN EARLIER SESSION.
+   *
+   * openSymbols() is keyed by DAY, and so was this whole function. A position
+   * not closed on the day it was opened — because this process was down at
+   * 15:50, because the desk was disarmed, because the close was refused — is
+   * invisible to every flatten that follows: the next day asks about a new
+   * date, finds nothing, closes nothing. It was not missed once. It was missed
+   * for good, and it sat in the account until somebody opened the broker's app
+   * and saw it. That is how this was found.
+   *
+   * carriedOver() asks Alpaca what it is actually holding and matches each name
+   * against the WHOLE ledger, so a stale position is found however old it is.
+   * It also separates the two cases that must never be treated alike:
+   *
+   *   `carried`  this desk opened it and never closed it. Closing it is
+   *              finishing a job this desk started, and it is closed.
+   *
+   *   `foreign`  nothing here ever opened it. That may be a trade taken by hand
+   *              for reasons no algorithm on this box knows about, and closing
+   *              it would be the worst thing in this file. Said, never touched.
+   *
+   * Alpaca only. TTP5k is behind TraderEvolution with no position feed, so a
+   * position carried over there is still invisible — and this says so rather
+   * than implying the account is covered.
+   */
+  let stale = { ok: false };
+  try { stale = await reconcile.carriedOver(day); }
+  catch (err) { stale = { ok: false, error: err.message }; }
+
+  const carried = stale.ok ? stale.carried : [];
+  const foreign = stale.ok ? stale.foreign : [];
+  const extra = carried.map(p => p.symbol).filter(s => !open.includes(s));
+
+  if (!open.length && !extra.length && !foreign.length) return { ran: true, closed: [] };
 
   const results = await broker.flattenAll(day, cfg);
+  for (const sym of extra) {
+    /*
+     * To the accounts that OPENED it, not to today's default. A close sent to
+     * an account that never held it is a no-op there and leaves the position
+     * exactly where it was.
+     */
+    const p = carried.find(x => x.symbol === sym);
+    const dests = (p.destinations || []).length ? p.destinations : [null];
+    for (const d of dests) {
+      results.push(await broker.closePosition(sym, day,
+        (d && broker.destinationCfg(d)) || cfg));
+    }
+  }
+
   const done = results.filter(r => r.sent).map(r => r.symbol);
   const failed = results.filter(r => !r.sent);
 
@@ -91,13 +141,32 @@ async function check(at = Date.now()) {
     date: day,
     at: Date.now(),
     kind: 'broker',
-    level: failed.length ? 'error' : 'info',
-    detail: failed.length
+    level: (failed.length || foreign.length) ? 'error' : 'info',
+    detail: (failed.length
       ? `COULD NOT CLOSE ${failed.map(f => f.symbol).join(', ')} — `
         + `${failed[0].error || 'refused'}. Close it yourself before the bell.`
         + (done.length ? ` (${done.join(', ')} did close.)` : '')
-      : `Closed at ${cfg.flattenAt}: ${done.join(', ')}. `
-        + 'Any that were already flat ignored it.',
+      : `Closed at ${cfg.flattenAt}: ${done.join(', ') || 'nothing was open'}. `
+        + 'Any that were already flat ignored it.')
+      // What was carried in from an earlier session, so it is visible that this
+      // was not a normal day's close.
+      + (extra.length
+        ? ` · ${extra.join(', ')} had been left open from an EARLIER session and `
+          + 'was closed too — find out why it survived its own day.'
+        : '')
+      /*
+       * AND WHAT WAS DELIBERATELY LEFT. A position this desk never opened is
+       * not this desk's to close: it may be a trade taken by hand. But going
+       * quiet about it is how one goes overnight, which is the failure that
+       * started all of this.
+       */
+      + (foreign.length
+        ? ` · ALPACA STILL HOLDS ${foreign.map(f => `${f.symbol} (${f.qty})`).join(', ')}`
+          + ' — nothing here opened it, so it was NOT closed. If you want it flat,'
+          + ' do it yourself before the bell.'
+        : '')
+      + (stale.ok ? '' : ` · could not ask Alpaca what is really open (${stale.error
+          || 'no reason given'}), so only today's ledger was closed`),
   }], day);
 
   console.log(`[Flatten] ${cfg.flattenAt} — closed ${done.length}/${results.length}`);

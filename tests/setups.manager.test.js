@@ -32,6 +32,7 @@ jest.mock('../src/setups/qpClient', () => ({ manage: jest.fn() }));
 jest.mock('../src/setups/catalog', () => ({ list: jest.fn() }));
 jest.mock('../src/alerts/store', () => ({ publishFires: jest.fn() }));
 jest.mock('../src/broker/reconcile', () => ({
+  carriedOver: jest.fn(async () => ({ ok: false, error: 'not asked' })),
   flatSymbols: jest.fn(async () => null),
   alpacaDestinations: jest.fn(() => ['alp']),
 }));
@@ -83,9 +84,27 @@ beforeEach(() => {
   // was consulted at all.
   reconcile.flatSymbols.mockReset();
   reconcile.flatSymbols.mockResolvedValue(null);
+  reconcile.carriedOver.mockReset();
+  reconcile.carriedOver.mockResolvedValue(unreachable());
   reconcile.alpacaDestinations.mockReturnValue(['alp']);
 });
 afterAll(() => { fs.rmSync(DIR, { recursive: true, force: true }); });
+
+/*
+ * What Alpaca is holding, in the shape reconcile.carriedOver() returns it.
+ *
+ * `running` is a position opened TODAY — the normal case. `carried` survived an
+ * earlier session, `foreign` was never opened by this desk at all, and the two
+ * are treated very differently: one gets closed, the other never is.
+ */
+const holds = (...symbols) => ({
+  ok: true, carried: [], foreign: [],
+  running: symbols.map(s => ({ symbol: s, qty: 100, side: 'long', openedOn: DAY })),
+});
+/* Alpaca answered and is holding nothing — NOT the same as not answering. */
+const holdsNothing = () => ({ ok: true, carried: [], foreign: [], running: [] });
+/* Alpaca could not be asked. Nothing may be filtered on this answer. */
+const unreachable = (error = 'down') => ({ ok: false, error });
 
 /** An entry on the ledger, as placeOrder would have written it. */
 const ledger = rows => fs.writeFileSync(process.env.BROKER_LEDGER,
@@ -397,7 +416,7 @@ describe('what the broker says is actually held', () => {
   test('a position Alpaca is FLAT in is not closed again', async () => {
     ledger([{}]);
     qp.manage.mockResolvedValue(answer({ exit_now: true }));
-    reconcile.flatSymbols.mockResolvedValue(new Set());        // holding nothing
+    reconcile.carriedOver.mockResolvedValue(holdsNothing());   // holding nothing
     const r = await manager.check(AT);
     expect(sent).toHaveLength(0);
     expect(r.acted[0].alreadyFlat).toBe(1);
@@ -406,7 +425,7 @@ describe('what the broker says is actually held', () => {
   test('a position Alpaca still holds IS closed', async () => {
     ledger([{}]);
     qp.manage.mockResolvedValue(answer({ exit_now: true }));
-    reconcile.flatSymbols.mockResolvedValue(new Set(['CBRS']));
+    reconcile.carriedOver.mockResolvedValue(holds('CBRS'));
     await manager.check(AT);
     expect(sent).toHaveLength(1);
   });
@@ -420,7 +439,7 @@ describe('what the broker says is actually held', () => {
   test('an unverifiable account is still closed when Alpaca is flat', async () => {
     ledger([{ destination: 'alp' }, { destination: 'ttp' }]);
     qp.manage.mockResolvedValue(answer({ exit_now: true }));
-    reconcile.flatSymbols.mockResolvedValue(new Set());
+    reconcile.carriedOver.mockResolvedValue(holdsNothing());
     await manager.check(AT);
     expect(sent).toHaveLength(1);                     // ttp only
     expect(sent[0].url).toContain('TESTfake');        // the TTP hook
@@ -435,7 +454,7 @@ describe('what the broker says is actually held', () => {
   test('an UNANSWERED question filters nothing — it is not an empty set', async () => {
     ledger([{}]);
     qp.manage.mockResolvedValue(answer({ exit_now: true }));
-    reconcile.flatSymbols.mockResolvedValue(null);
+    reconcile.carriedOver.mockResolvedValue(unreachable());
     await manager.check(AT);
     expect(sent).toHaveLength(1);
   });
@@ -443,7 +462,7 @@ describe('what the broker says is actually held', () => {
   test('and neither does Alpaca throwing', async () => {
     ledger([{}]);
     qp.manage.mockResolvedValue(answer({ exit_now: true }));
-    reconcile.flatSymbols.mockRejectedValue(new Error('down'));
+    reconcile.carriedOver.mockRejectedValue(new Error('down'));
     await manager.check(AT);
     expect(sent).toHaveLength(1);
   });
@@ -451,9 +470,125 @@ describe('what the broker says is actually held', () => {
   test('it is asked ONCE per pass, not once per position', async () => {
     ledger([{ symbol: 'CBRS' }, { symbol: 'EYPT' }]);
     qp.manage.mockResolvedValue(answer({ exit_now: true }));
-    reconcile.flatSymbols.mockResolvedValue(new Set(['CBRS', 'EYPT']));
+    reconcile.carriedOver.mockResolvedValue(holds('CBRS', 'EYPT'));
     await manager.check(AT);
-    expect(reconcile.flatSymbols).toHaveBeenCalledTimes(1);
+    expect(reconcile.carriedOver).toHaveBeenCalledTimes(1);
     expect(sent).toHaveLength(2);
+  });
+});
+
+// ── the one that was found by opening the broker's app ─────────────────────
+/*
+ * TWO POSITIONS WERE SITTING IN THE ALPACA ACCOUNT that should not have been.
+ *
+ * The 15:50 flatten reads openSymbols(TODAY), and the ledger is keyed by day.
+ * So a position not closed on the day it was opened — the alerts process down
+ * at 15:50, the desk disarmed, a close refused — is invisible to every flatten
+ * that follows: the next morning asks about a new date, finds nothing, closes
+ * nothing. It was not missed once. It was missed for good.
+ *
+ * And this loop could not see it either, because it asked Alpaca AFTER an early
+ * return for "the ledger says nothing is open today" — which is exactly the
+ * state a carried-over position produces.
+ */
+describe('a position that survived its own session', () => {
+  const carried = (over = {}) => ({
+    ok: true, foreign: [], running: [],
+    carried: [{ symbol: 'VIK', qty: 100, side: 'long', openedOn: '2026-08-17',
+                setupId: 'S@09:35', destinations: ['alp'], ...over }],
+  });
+  const foreign = (over = {}) => ({
+    ok: true, carried: [], running: [],
+    foreign: [{ symbol: 'VIK', qty: 100, side: 'long',
+                why: 'nothing in this ledger ever opened it', ...over }],
+  });
+
+  test('is announced even when today\'s ledger is completely empty', async () => {
+    ledger([]);
+    reconcile.carriedOver.mockResolvedValue(carried());
+    await manager.check(AT);
+    const said = store.publishFires.mock.calls.flatMap(c => c[0]);
+    expect(said.some(f => /ALPACA STILL HOLDS/.test(f.detail))).toBe(true);
+  });
+
+  /*
+   * BEFORE the positions are counted. The old order asked Alpaca only after an
+   * early return that a carried-over position guarantees you reach.
+   */
+  test('Alpaca is asked before the ledger decides there is nothing to do', async () => {
+    ledger([]);
+    reconcile.carriedOver.mockResolvedValue(holdsNothing());
+    await manager.check(AT);
+    expect(reconcile.carriedOver).toHaveBeenCalledTimes(1);
+  });
+
+  // A name of its own, because `announced` is per-process by design — a person
+  // is told once, and these tests share one process.
+  test('it says which day it was opened on, so the gap can be found', async () => {
+    ledger([]);
+    reconcile.carriedOver.mockResolvedValue(carried({ symbol: 'DAYSTAMP' }));
+    await manager.check(AT);
+    const said = store.publishFires.mock.calls.flatMap(c => c[0]);
+    expect(said[0].detail).toMatch(/2026-08-17/);
+    expect(said[0].level).toBe('error');
+  });
+
+  /*
+   * A POSITION THIS DESK NEVER OPENED IS NOT THIS DESK'S TO CLOSE. It may be a
+   * trade taken by hand for reasons no algorithm here knows about, and
+   * flattening somebody's deliberate position without being asked is worse than
+   * leaving it. Said loudly, and said to be left alone.
+   */
+  test('one nothing here opened is reported as NOT going to be closed', async () => {
+    ledger([]);
+    reconcile.carriedOver.mockResolvedValue(foreign());
+    await manager.check(AT);
+    const said = store.publishFires.mock.calls.flatMap(c => c[0]);
+    expect(said[0].detail).toMatch(/NOTHING HERE OPENED IT/);
+    expect(said[0].detail).toMatch(/will NOT be closed automatically/);
+  });
+
+  test('the two are never described the same way', async () => {
+    ledger([]);
+    reconcile.carriedOver.mockResolvedValue(carried({ symbol: 'MINE1' }));
+    await manager.check(AT);
+    const mine = store.publishFires.mock.calls.flatMap(c => c[0])[0].detail;
+    store.publishFires.mockReset();
+    reconcile.carriedOver.mockResolvedValue(foreign({ symbol: 'ZZZZ' }));
+    await manager.check(AT);
+    const theirs = store.publishFires.mock.calls.flatMap(c => c[0])[0].detail;
+    expect(mine).toMatch(/WILL be closed/);
+    expect(theirs).toMatch(/will NOT be closed/);
+  });
+
+  /* Once per name. Told every minute, a person stops reading. */
+  test('it is said once, not once a minute', async () => {
+    ledger([]);
+    reconcile.carriedOver.mockResolvedValue(carried({ symbol: 'ONCEONLY' }));
+    await manager.check(AT);
+    await manager.check(AT + 60000);
+    await manager.check(AT + 120000);
+    const said = store.publishFires.mock.calls.flatMap(c => c[0])
+      .filter(f => f.ticker === 'ONCEONLY');
+    expect(said).toHaveLength(1);
+  });
+
+  /* An unreachable broker says nothing rather than inventing a clean account. */
+  test('nothing is announced when Alpaca could not be asked', async () => {
+    ledger([]);
+    reconcile.carriedOver.mockResolvedValue(unreachable());
+    await manager.check(AT);
+    expect(store.publishFires).not.toHaveBeenCalled();
+  });
+
+  /*
+   * A position running normally, opened today, is not a finding. Announcing
+   * every healthy trade here would bury the two that matter.
+   */
+  test('a position opened today is not announced', async () => {
+    ledger([]);
+    reconcile.carriedOver.mockResolvedValue(holds('CBRS'));
+    await manager.check(AT);
+    expect(store.publishFires).not.toHaveBeenCalled();
   });
 });

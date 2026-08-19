@@ -292,3 +292,137 @@ describe('the fills', () => {
     expect(r.error).toBe('down');
   });
 });
+
+// ── the one that was found by opening the broker's app ─────────────────────
+/*
+ * TWO POSITIONS WERE SITTING IN THE ALPACA ACCOUNT that should not have been.
+ *
+ * The 15:50 flatten reads openSymbols(TODAY), and the ledger is keyed by day.
+ * So a position not closed on the day it was opened — the alerts process down
+ * at 15:50, the desk disarmed, a close refused — is invisible to every flatten
+ * that follows: the next morning asks about a new date, finds nothing, closes
+ * nothing. It was not missed once, it was missed for good, and it sat there
+ * until somebody opened the app.
+ *
+ * carriedOver() asks the only party that knows, then walks the WHOLE ledger —
+ * every day, not today's — and sorts what is held into three:
+ *
+ *   running  opened today. Normal.
+ *   carried  opened earlier and never closed. This desk's own mess, and it
+ *            finishes the job.
+ *   foreign  nothing here ever opened it. Reported, NEVER touched: it may be a
+ *            trade taken by hand, and flattening somebody's deliberate position
+ *            without being asked is worse than leaving it.
+ */
+describe('positions that survived their own session', () => {
+  const YESTERDAY = '2026-08-17';
+
+  const rows = list => fs.writeFileSync(process.env.BROKER_LEDGER,
+    list.map(r => JSON.stringify({
+      date: DAY, at: Date.parse(`${r.date || DAY}T13:36:00Z`), sent: true,
+      symbol: 'CBRS', signal: 'LONG', action: 'buy', price: 10, quantity: 20,
+      setupId: 'S@09:35', destination: 'alp', ...r })).join('\n'));
+
+  test('opened today and still held is RUNNING, not a finding', async () => {
+    rows([{ date: DAY }]);
+    holds([{}]);
+    const r = await reconcile.carriedOver(DAY);
+    expect(r.running.map(p => p.symbol)).toEqual(['CBRS']);
+    expect(r.carried).toEqual([]);
+    expect(r.foreign).toEqual([]);
+  });
+
+  test('opened on an earlier day and never closed is CARRIED', async () => {
+    rows([{ date: YESTERDAY }]);
+    holds([{}]);
+    const r = await reconcile.carriedOver(DAY);
+    expect(r.carried).toHaveLength(1);
+    expect(r.carried[0]).toMatchObject({ symbol: 'CBRS', openedOn: YESTERDAY,
+                                         setupId: 'S@09:35' });
+  });
+
+  /* Which accounts to send the close to — never today's default. */
+  test('it carries the accounts that opened it', async () => {
+    rows([{ date: YESTERDAY, destination: 'alp' }]);
+    holds([{}]);
+    expect((await reconcile.carriedOver(DAY)).carried[0].destinations).toEqual(['alp']);
+  });
+
+  /*
+   * Alpaca destinations only. The whole function is built on an Alpaca position
+   * query, and offering to close a Trade The Pool leg off the back of it would
+   * be answering a question nobody asked.
+   */
+  test('a prop-account leg is not offered up for closing from an Alpaca answer', async () => {
+    rows([{ date: YESTERDAY, destination: 'ttp' }]);
+    holds([{}]);
+    expect((await reconcile.carriedOver(DAY)).carried[0].destinations).toEqual([]);
+  });
+
+  test('a name nothing here ever opened is FOREIGN', async () => {
+    fs.writeFileSync(process.env.BROKER_LEDGER, '');
+    holds([{ symbol: 'NVDA', qty: 100 }]);
+    const r = await reconcile.carriedOver(DAY);
+    expect(r.foreign).toHaveLength(1);
+    expect(r.foreign[0].why).toMatch(/nothing in this ledger ever opened it/);
+    expect(r.carried).toEqual([]);
+  });
+
+  /*
+   * Closed here and still on means the close did not take. Also foreign — this
+   * desk did its part, and re-sending a close that already failed once without
+   * a person looking is how a loop starts.
+   */
+  test('closed here and still held is foreign, worded for it', async () => {
+    rows([{ date: YESTERDAY },
+           { date: YESTERDAY, kind: 'flatten', action: 'close',
+             at: Date.parse('2026-08-17T19:50:00Z') }]);
+    holds([{}]);
+    const r = await reconcile.carriedOver(DAY);
+    expect(r.carried).toEqual([]);
+    expect(r.foreign[0].why).toMatch(/the close did not take/);
+  });
+
+  /*
+   * A close BEFORE the entry does not close it. Same name, closed at the bell
+   * one day and re-entered the next — reading the close as final would leave
+   * the new position unmanaged for good.
+   */
+  test('a close from before the entry does not count as closing it', async () => {
+    rows([{ date: '2026-08-14', kind: 'flatten', action: 'close',
+            at: Date.parse('2026-08-14T19:50:00Z') },
+          { date: YESTERDAY }]);
+    holds([{}]);
+    expect((await reconcile.carriedOver(DAY)).carried).toHaveLength(1);
+  });
+
+  test('a refused entry opened nothing, so what is held is not ours', async () => {
+    rows([{ date: YESTERDAY, sent: false, skipped: 'no buying power' }]);
+    holds([{}]);
+    expect((await reconcile.carriedOver(DAY)).foreign).toHaveLength(1);
+  });
+
+  test('an intent row is not an entry', async () => {
+    rows([{ date: YESTERDAY, kind: 'intent', intentId: 'i1' }]);
+    holds([{}]);
+    expect((await reconcile.carriedOver(DAY)).foreign).toHaveLength(1);
+  });
+
+  test('a zero position is not held at all', async () => {
+    rows([{ date: YESTERDAY }]);
+    holds([{ qty: 0 }]);
+    const r = await reconcile.carriedOver(DAY);
+    expect(r).toEqual({ ok: true, carried: [], foreign: [], running: [] });
+  });
+
+  /*
+   * "Alpaca holds nothing" and "Alpaca did not answer" are opposite facts, and
+   * the flattener acts on this one.
+   */
+  test('an unreachable broker is ok:false, never an empty account', async () => {
+    alpaca.positions.mockResolvedValue({ ok: false, error: 'down' });
+    const r = await reconcile.carriedOver(DAY);
+    expect(r.ok).toBe(false);
+    expect(r.carried).toBeUndefined();
+  });
+});

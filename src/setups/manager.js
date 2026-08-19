@@ -191,9 +191,6 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
     }], day);
   }
 
-  const positions = openPositions(day);
-  if (!positions.length) return { ran: true, positions: 0, acted: [] };
-
   /*
    * CLOSING THE LOOP — what does the broker say is actually there?
    *
@@ -208,14 +205,66 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
    * the same as an empty set — "Alpaca says you hold nothing" and "Alpaca did
    * not answer" are opposite instructions. Unasked, nothing is filtered and the
    * loop behaves exactly as it did before.
+   *
+   * ASKED BEFORE the open positions are counted, and this is a correction. It
+   * used to sit after an early return for "the ledger says nothing is open" —
+   * which is exactly the state in which a position carried in from an earlier
+   * session is invisible, because the ledger is keyed by day and yesterday's
+   * rows are on yesterday's date. Two of those sat in the account until they
+   * were found by opening the broker's app.
    */
-  let stillHeld = null;
+  let stale = { ok: false, error: 'not asked' };
   try {
-    stillHeld = await reconcile.flatSymbols();
+    stale = await reconcile.carriedOver(day);
   } catch (err) {
-    console.warn(`[Manager] could not verify positions with Alpaca: ${err.message}`);
+    stale = { ok: false, error: err.message };
   }
+  if (!stale.ok) console.warn(`[Manager] could not verify positions with Alpaca: ${stale.error}`);
+  const stillHeld = stale.ok
+    ? new Set([...stale.carried, ...stale.foreign, ...stale.running].map(p => p.symbol))
+    : null;
   const verifiable = new Set(reconcile.alpacaDestinations());
+
+  /*
+   * A POSITION THAT IS ALREADY WRONG, said the minute it is seen rather than at
+   * 15:50 or whenever somebody next opens the broker's app.
+   *
+   *   carried  this desk opened it on an earlier day and never closed it. The
+   *            15:50 flatten now picks these up, but the fact that one exists
+   *            at all means a session ended without closing — worth knowing at
+   *            09:31, not at 15:50.
+   *
+   *   foreign  nothing in this ledger ever opened it. It will NOT be closed
+   *            automatically, because it may be a trade taken by hand, and the
+   *            one thing worse than leaving it is flattening somebody's
+   *            deliberate position without being asked.
+   *
+   * Once per symbol per process, for the same reason as the orphans.
+   */
+  if (stale.ok) {
+    for (const p of [...stale.carried, ...stale.foreign]) {
+      const key = `held:${p.symbol}:${p.openedOn || 'none'}`;
+      if (announced.has(key)) continue;
+      announced.add(key);
+      const mine = p.openedOn && !p.why;
+      store.publishFires([{
+        ruleId: p.setupId || 'broker', rule: 'Manager', ticker: p.symbol,
+        toolId: 'ALERTS', date: day, at: Date.now(), kind: 'broker', level: 'error',
+        detail: mine
+          ? `${p.symbol}: ALPACA STILL HOLDS ${p.qty}, opened ${p.openedOn} and never `
+            + 'closed. It survived its own session — every flatten since asked about a '
+            + `different day and could not see it. It WILL be closed at ${cfgAll.flattenAt}`
+            + ' today; find out why it was left open.'
+          : `${p.symbol}: ALPACA HOLDS ${p.qty} AND NOTHING HERE OPENED IT`
+            + (p.why ? ` — ${p.why}` : '')
+            + '. It will NOT be closed automatically, because a position this desk '
+            + 'did not open may be one you took by hand. Close it yourself if you want it flat.',
+      }], day);
+    }
+  }
+
+  const positions = openPositions(day);
+  if (!positions.length) return { ran: true, positions: 0, acted: [], held: stillHeld };
 
   const acted = [];
   const looked = [];
