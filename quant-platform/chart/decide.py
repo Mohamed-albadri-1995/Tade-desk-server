@@ -228,6 +228,10 @@ def exit_plan(strategy: dict, side: str, entry: float, stop: float,
         # stop can reproduce that, and pretending otherwise puts a stop
         # somewhere the backtest never had one.
         'stop_anchored': any(l.get('sl_kind') == 'anchored' for l in (proto.get('legs') or [])),
+        # An exit RULE, carried onto the plan so the ORDER layer can say who is
+        # watching for it. No broker can; the box does. Without this the rule
+        # was invisible to everything downstream of the strategy.
+        'exit_rule': bool(proto.get('has_exit_rule')),
         'breakeven_after_leg': bool(((strategy or {}).get('risk') or {})
                                     .get('breakeven_after_target')),
     }

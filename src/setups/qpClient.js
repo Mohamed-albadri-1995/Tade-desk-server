@@ -61,6 +61,36 @@ async function decide({ strategyId, strategies, symbols, date, tf = '1m',
 }
 
 /**
+ * What to do with a position that is ALREADY open.
+ *
+ * The half a broker cannot hold: an exit RULE — no broker watches for a VWAP
+ * cross — and a stop that MOVES, when a broker is handed one price and keeps
+ * it. Answered by qp from the same functions the backtest uses, so a managed
+ * position is managed BY the strategy rather than by a second reading of it.
+ *
+ * A shorter timeout than the decision, and for the opposite reason: this runs
+ * every minute and being late is normal. A slow answer is skipped and asked
+ * again next minute; a wrong one would close a position.
+ */
+async function manage({ name, strategyId, symbol, side, entry, entryIso,
+                        stopAtEntry = null, tf = '1m', feed = 'yahoo',
+                        days = 2, asof = null, timeoutMs = 20000 }) {
+  const body = { symbol, side, entry, entry_iso: entryIso,
+                 stop_at_entry: stopAtEntry, tf, feed, days, asof };
+  if (strategyId) body.strategy_id = strategyId; else body.name = name;
+
+  const res = await axios.post(`${baseUrl()}/api/strategy/manage`, body, {
+    timeout: timeoutMs,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const data = res.data || {};
+  // qp answers 200 with ok:false for its own errors. An unanswered question is
+  // NOT "hold" — the caller has to be able to tell the two apart.
+  if (!data.ok) throw new Error(data.error || 'qp could not manage the position');
+  return data;
+}
+
+/**
  * Every strategy saved in qp.
  *
  * This is what makes the setups list live rather than copied: build a strategy
@@ -104,4 +134,4 @@ async function health(timeoutMs = 5000) {
   }
 }
 
-module.exports = { decide, strategies, setTools, health, baseUrl };
+module.exports = { decide, manage, strategies, setTools, health, baseUrl };

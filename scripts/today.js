@@ -263,6 +263,46 @@ function ledger() {
 
   const sent = rows.filter(o => o.sent);
   say(`${rows.length} attempt(s): ${sent.length} sent, ${rows.length - sent.length} not`);
+
+  /*
+   * DID THE BROKER EVER CONFIRM, and what did the fill actually cost?
+   *
+   * An order is recorded sent on SignalStack's HTTP reply, which means
+   * "accepted for delivery" and not "the broker has it" — both live rejections
+   * so far arrived by email hours later. reconciled() joins the callbacks back
+   * on, so "accepted, never heard from again" is answerable; it just was not
+   * being asked.
+   */
+  try {
+    const back = require('../src/broker/signalstack').reconciled(DAY)
+      .filter(o => o.sent && o.kind !== 'callback');
+    const unconfirmed = back.filter(o => !o.confirmed);
+    const slips = back.map(o => o.slip).filter(v => typeof v === 'number');
+    if (back.length) {
+      say('');
+      if (unconfirmed.length) {
+        say(`  ⚠ ${unconfirmed.length} of ${back.length} sent order(s) were NEVER CONFIRMED`
+          + ' by the broker — accepted, then silence:');
+        for (const o of unconfirmed.slice(0, 8)) {
+          say(`      ${o.symbol} ${o.quantity} [${o.destination || '-'}] ${o.setupId || o.source || ''}`);
+        }
+      } else {
+        say(`  all ${back.length} sent order(s) came back confirmed`);
+      }
+      if (slips.length) {
+        // Signed against the position: positive is worse than the decision
+        // assumed, whichever way the trade faces.
+        const worst = slips.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a));
+        const avg = slips.reduce((a, b) => a + b, 0) / slips.length;
+        say(`  fill vs the price the decision used: average ${avg >= 0 ? '+' : ''}`
+          + `${avg.toFixed(4)}, worst ${worst >= 0 ? '+' : ''}${worst.toFixed(4)}`
+          + '   (+ = worse than assumed)');
+      } else {
+        say('  no fill prices came back, so the cost of the delay is unmeasured');
+      }
+    }
+  } catch (err) { say(`  could not reconcile the callbacks: ${err.message}`); }
+
   say('');
   for (const o of rows) {
     const t = new Date(o.at).toLocaleTimeString('en-GB', { timeZone: 'America/New_York', hour12: false });

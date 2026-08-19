@@ -1428,9 +1428,19 @@ function previewOrder(args) {
 async function placeOrder({ symbol, signal, quantity, price, stop = null,
                             target = null, date, source = null, setupId = null,
                             maxPerDay = null, plan: exitPlan = null,
-                            cfg = settings() }) {
+                            decisionBar = null, cfg = settings() }) {
   const base = {
     at: Date.now(), date, symbol, signal, price, stop, target, source,
+    /*
+     * WHICH BAR DECIDED IT — '09:35', not the second the POST left.
+     *
+     * Anything that manages this position afterwards has to line up with the
+     * simulation's entry bar, and the send time is the wrong anchor: it lands
+     * a minute or so later, which is a whole bar on a 1m strategy. One bar out
+     * seeds a ratchet from the wrong level and can skip the exact bar a cross
+     * fired on.
+     */
+    decisionBar,
     // Recorded so the per-setup cap can be counted from the ledger rather than
     // from anything held in memory — a restart at 10:00 must not hand a setup
     // its whole allowance back.
@@ -1849,6 +1859,28 @@ function receiveCallback(payload) {
   return entry;
 }
 
+/**
+ * The difference between the price a trade was priced at and the one it got.
+ *
+ * `null` when either side is missing — a number invented from a missing fill
+ * would be indistinguishable from a perfect one, which is the worst possible
+ * answer to "how much is this costing me".
+ */
+function slipOf(o, callback) {
+  const paid = callback && callback.fillPrice != null ? Number(callback.fillPrice) : null;
+  const want = o && o.price != null ? Number(o.price) : null;
+  if (!Number.isFinite(paid) || !Number.isFinite(want) || want === 0) {
+    return { slip: null, slipPct: null };
+  }
+  // Positive = worse than the decision assumed, whichever way the trade faces.
+  const raw = paid - want;
+  const signed = String(o.action || '').toLowerCase() === 'sell' ? -raw : raw;
+  return {
+    slip: Math.round(signed * 10000) / 10000,
+    slipPct: Math.round((signed / want) * 1e6) / 1e4,
+  };
+}
+
 /*
  * Which of it is bad news.
  *
@@ -1885,6 +1917,23 @@ function reconciled(date = null) {
       finalPrice: last && last.fillPrice != null ? last.fillPrice : null,
       confirmed: !!last,
       callbacks: later.length,
+      /*
+       * WHAT THE DECISION ASSUMED versus WHAT IT GOT.
+       *
+       * Everything about a trade is derived from `price` — the close of the bar
+       * the strategy decided on. The order then goes to market a minute or so
+       * later, so R, both targets and the share count are all measured from a
+       * price that was never traded. qp's own docstring calls the fill model
+       * this uses "optimistic by ~one spread"; the gap has simply never been
+       * measured, and an unmeasured cost is not a small one, it is an unknown
+       * one.
+       *
+       * SIGNED AGAINST THE POSITION, not against the number line: paying 5.42
+       * for a long you priced at 5.39 is three cents WORSE, and selling a short
+       * at 5.42 that you priced at 5.39 is three cents BETTER. An unsigned
+       * difference would report those two identically.
+       */
+      ...slipOf(o, last),
     };
   });
 }
@@ -1900,6 +1949,7 @@ module.exports = {
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,
   openSymbols, closePosition, flattenAll,
+  slipOf,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled,
 };

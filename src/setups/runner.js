@@ -176,6 +176,19 @@ function borrowNote(o) {
 function unmanagedLine(plan) {
   if (!plan) return '';
   const notes = [];
+  /*
+   * WHO CLOSES THIS, said on the order rather than assumed.
+   *
+   * OR + VWAP 09:35 leaves on a VWAP cross and no broker can watch for one, so
+   * the box does it — and that means the exit lives on this side and stops
+   * happening the moment this side stops running. The alert has to carry that,
+   * because a strategy managed here and one managed at the broker look
+   * identical from a phone.
+   */
+  if (plan.exit_rule) {
+    notes.push('it also leaves on a RULE — the box watches for that and closes '
+      + 'the position itself; the broker only holds the stop and the targets');
+  }
   if (plan.stop_anchored) {
     notes.push('the stop trails an indicator — sent as a fixed level, so it will '
       + 'NOT follow. Manage it yourself');
@@ -498,6 +511,10 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
             // restart between the two picks cannot hand the allowance back.
             setupId: setup.id,
             maxPerDay: setup.maxTradesPerDay || null,
+            // The bar the decision was made on, so anything managing this
+            // position afterwards lines up with the simulation's entry bar
+            // rather than with the second the POST happened to leave.
+            decisionBar,
             // The strategy's OWN exit plan — its scale-out legs and whether its
             // stop trails — straight from qp. Without it every trade was given a
             // single 2R target whatever the strategy said, which for a

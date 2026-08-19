@@ -1059,6 +1059,49 @@ def strategy_exit_plan(payload: dict = Body(...)):
             'entry': entry, 'stop': stop, 'plan': plan}
 
 
+@app.post('/api/strategy/manage')
+def strategy_manage(payload: dict = Body(...)):
+    """What to do with a position that is already open.
+
+    The half a broker cannot hold: an exit RULE (no broker watches for a VWAP
+    cross) and a stop that MOVES (a broker is handed one price and keeps it).
+    Answered from the same functions the backtest uses, so the live position is
+    managed by the strategy rather than by a second reading of it.
+
+    Body: {name | strategy_id, symbol, side, entry, entry_iso, stop_at_entry,
+           tf, feed, days, asof, drop_last}
+    """
+    try:
+        st = None
+        if payload.get('strategy_id'):
+            st = store.get_strategy(int(payload['strategy_id']))
+        elif payload.get('name'):
+            want = str(payload['name']).strip()
+            st = next((x for x in store.list_strategies() if x.get('name') == want), None)
+        if not st:
+            return JSONResponse({'ok': False, 'error': 'no such strategy',
+                                 'have': [x.get('name') for x in store.list_strategies()]},
+                                status_code=200)
+        from chart import manage as _mg
+        stop = payload.get('stop_at_entry')
+        return JSONResponse(_mg.manage(
+            st,
+            symbol=str(payload.get('symbol', '')).upper(),
+            side=str(payload.get('side') or st.get('side') or 'long'),
+            entry=float(payload.get('entry')),
+            entry_iso=payload.get('entry_iso') or None,
+            tf=payload.get('tf', '1m'),
+            feed=payload.get('feed', 'yahoo'),
+            days=int(payload.get('days', 2)),
+            view=payload.get('view', 'regular'),
+            asof=payload.get('asof') or None,
+            stop_at_entry=(None if stop in (None, '') else float(stop)),
+            drop_last=bool(payload.get('drop_last')),
+        ))
+    except Exception as e:                                # noqa: BLE001
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
+
+
 @app.post('/api/strategy/test')
 def strategy_test(payload: dict = Body(...)):
     """Evaluate a single condition (rule or group) and mark every bar it holds

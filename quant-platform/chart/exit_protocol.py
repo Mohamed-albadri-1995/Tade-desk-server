@@ -195,6 +195,19 @@ def normalise(strategy: dict) -> dict:
         'derived': not bool(declared),
         'legs': legs,
         'runner': {'fraction': runner_fraction, 'manage': runner_manage},
+            # AN EXIT RULE IS A FACT ABOUT THIS STRATEGY, and it was invisible.
+        #
+        # `tp_kind == 'rule'` below only happens when a strategy has NO targets
+        # at all. OR + VWAP 09:35 has a target on its first leg AND a rule that
+        # closes everything remaining — so it reported order_ok True, order_errors
+        # empty, and the rule was dropped in silence. Live, the runner rode its
+        # stop to the bell while the backtested win rate had been measured with
+        # the rule.
+        #
+        # It is not an ERROR: no broker can watch for a VWAP cross, but the box
+        # can, and does. It is a fact the order layer has to be told, so that
+        # what closes the position is stated rather than assumed.
+        'has_exit_rule': bool(((s.get('exit') or {}).get('rules')) or []),
     }
     protocol['shape'] = describe(protocol)
     protocol.update(validate(protocol))
@@ -269,6 +282,16 @@ def validate(protocol: dict) -> dict:
                 'watch for that. It alerts correctly; it must not be auto-traded '
                 'unless you give it a target, or the order would be a different '
                 'strategy from the one that was tested')
+
+    # See the note in normalise(). Said out loud on every order, because a
+    # position whose exit lives on this side rather than at the broker is one
+    # that stops being managed the moment this side stops running — and that
+    # failure is otherwise completely silent.
+    if protocol.get('has_exit_rule'):
+        warnings.append('this strategy also leaves on a RULE. No broker can '
+                        'watch for that, so the box closes the position itself '
+                        '— if the box is not running, the position is not '
+                        'managed and only the stop is protecting it')
 
     if r_fraction > 0:
         if runner.get('manage') == 'manual':

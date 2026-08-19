@@ -510,3 +510,60 @@ describe('sentAlready', () => {
     expect(broker.sentAlready(DAY, 'test-strategy', null, 'alp')).toBe(false);
   });
 });
+
+// ── what the trade assumed versus what it got ──────────────────────────────
+/*
+ * Everything about a trade is derived from `price` — the close of the bar the
+ * strategy decided on. The order goes to market a minute or so later, so R,
+ * both targets and the share count are all measured from a price that was never
+ * traded. qp calls the fill model this uses "optimistic by ~one spread"; the
+ * gap had simply never been measured, and an unmeasured cost is not a small one,
+ * it is an unknown one.
+ */
+describe('slippage, signed against the position', () => {
+  const s = (action, price, fill) =>
+    broker.slipOf({ action, price }, { fillPrice: fill });
+
+  test('a long that paid more got a WORSE price', () => {
+    expect(s('buy', 5.39, 5.42).slip).toBeCloseTo(0.03, 6);
+  });
+
+  test('a long that paid less got a BETTER one', () => {
+    expect(s('buy', 5.39, 5.36).slip).toBeCloseTo(-0.03, 6);
+  });
+
+  /*
+   * THE SIGN IS THE POINT. Selling a short at 5.42 when it was priced at 5.39
+   * is three cents BETTER; buying a long at 5.42 on the same numbers is three
+   * cents worse. An unsigned difference reports the two identically and makes
+   * the whole measurement useless on a desk that trades both ways.
+   */
+  test('a short that sold higher got a BETTER price — the mirror of the long', () => {
+    expect(s('sell', 5.39, 5.42).slip).toBeCloseTo(-0.03, 6);
+    expect(s('sell', 5.39, 5.36).slip).toBeCloseTo(0.03, 6);
+  });
+
+  test('it is also reported as a percentage of the price', () => {
+    expect(s('buy', 100, 101).slipPct).toBeCloseTo(1.0, 6);
+  });
+
+  /*
+   * A number invented from a missing fill is indistinguishable from a perfect
+   * one, which is the worst available answer to "how much is this costing me".
+   */
+  test('an unconfirmed order has no slippage, not zero slippage', () => {
+    expect(broker.slipOf({ action: 'buy', price: 5.39 }, null).slip).toBeNull();
+    expect(broker.slipOf({ action: 'buy', price: 5.39 }, {}).slip).toBeNull();
+    expect(broker.slipOf({ action: 'buy', price: null }, { fillPrice: 5.4 }).slip).toBeNull();
+    expect(broker.slipOf({ action: 'buy', price: 0 }, { fillPrice: 5.4 }).slipPct).toBeNull();
+  });
+
+  test('it reaches the reconciled view, beside the price it is measured from', async () => {
+    const cfg = armed();
+    const out = await broker.placeOrder({ ...entry({ price: 10 }), cfg });
+    broker.receiveCallback({ id: out.orderId, status: 'filled', price: 10.05 });
+    const row = broker.reconciled(DAY).find(r => r.orderId === out.orderId);
+    expect(row.confirmed).toBe(true);
+    expect(row.slip).toBeCloseTo(0.05, 6);
+  });
+});

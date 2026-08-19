@@ -589,6 +589,14 @@ if (require.main === module) {
     // Closing what was opened is not optional in an account that cannot hold
     // overnight, so it starts with the server rather than on demand.
     require('./flattener').start();
+    /*
+     * The half of a strategy a broker cannot hold — an exit RULE and a stop
+     * that moves. Here rather than in the nine tool processes for the same
+     * reason the flattener is: `close` takes no quantity, so two processes
+     * deciding to flatten one symbol is one flat position and one accidental
+     * reversal.
+     */
+    require('../setups/manager').start();
   });
 }
 
