@@ -1145,6 +1145,12 @@ async function loadSetups() {
             ...(s.universeScanAt ? [['extra scan', esc(s.universeScanAt)]] : []),
             ...(s.maxTradesPerDay ? [['max/day', `${esc(s.maxTradesPerDay)} order(s)`]] : []),
             ...(s.riskPerTrade ? [['risk', `$${esc(s.riskPerTrade)}/trade`]] : []),
+            // Only when it OVERRIDES the desk's. A setup showing the account's
+            // own figure back at you says nothing and hides the ones that do.
+            ...(s.maxPositionPct
+              ? [['max position', `${esc(s.maxPositionPct)}% `
+                  + `(${Math.max(1, Math.floor(100 / s.maxPositionPct))} at once)`]]
+              : []),
           ].map(([k, v]) => `<span class="dg-i"><b>${k}</b> ${v}</span>`).join('')}
           <button class="lnk" onclick="editSetup(${i})">edit filter</button>
         </div>
@@ -1327,9 +1333,43 @@ function editSetup(i) {
         <input id="st-risk-${i}" type="number" min="1" step="1" placeholder="account"
                value="${esc(s.riskPerTrade || '')}" style="width:80px">
       </label>
+      <!-- THE CAP THAT DECIDES HOW MANY POSITIONS FIT AT ONCE, per setup.
+           It existed only desk-wide, so lowering it to fit six 09:35 trades in
+           a day also capped T2 and Test — which take one position each and had
+           no reason to be squeezed. The account figure is the fallback; this
+           overrides it for this setup alone, up or down. -->
+      <label class="note">max position %
+        <input id="st-mpp-${i}" type="number" min="1" max="100" step="1" placeholder="account"
+               value="${esc(s.maxPositionPct || '')}" style="width:80px"
+               oninput="paintSetupSlots(${i})">
+        <span class="note" id="st-slots-${i}"></span>
+      </label>
       <button class="btn primary" onclick="saveSetup(${i})">Save</button>
       <span class="note" id="st-msg-${i}"></span>
     </div>`;
+  // The cap only means something in positions, so it says so before it is
+  // touched rather than after.
+  paintSetupSlots(i);
+}
+
+/*
+ * What the cap MEANS, next to the box you type it in.
+ *
+ * "16%" is a number. "16% — up to 6 positions at once" is the decision that was
+ * actually being made, and it is the reasoning that put the wrong figure on the
+ * whole desk in the first place: six 09:35 trades a day needs six slots, and
+ * setting that account-wide also squeezed the setups that take one.
+ */
+function paintSetupSlots(i) {
+  const el = document.getElementById(`st-slots-${i}`);
+  if (!el) return;
+  const pct = Number(document.getElementById(`st-mpp-${i}`).value);
+  if (!pct) {
+    const acct = (RISK && RISK.maxPositionPct) || 100;
+    el.textContent = `= the account's ${acct}% (${Math.max(1, Math.floor(100 / acct))} at once)`;
+    return;
+  }
+  el.textContent = `= up to ${Math.max(1, Math.floor(100 / pct))} position(s) at once`;
 }
 
 function ruleRow(i, j, r = {}) {
@@ -1366,6 +1406,10 @@ async function saveSetup(i) {
     rankMetric: document.getElementById(`st-metric-${i}`).value || null,
     maxTradesPerDay: Number(document.getElementById(`st-max-${i}`).value) || null,
     riskPerTrade: Number(document.getElementById(`st-risk-${i}`).value) || null,
+    // Blank means "use the account's", which is why it is sent as null rather
+    // than as 100 — storing 100 would freeze this setup at today's default and
+    // silently stop tracking a later change to the desk figure.
+    maxPositionPct: Number(document.getElementById(`st-mpp-${i}`).value) || null,
   };
   try {
     const r = await fetch(`/api/setups/${encodeURIComponent(s.id)}/settings`, {

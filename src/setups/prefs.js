@@ -138,6 +138,24 @@ function saveSettings(setupId, patch) {
     if (v === null || v === '' || v === undefined) delete next[k];
     else next[k] = v;
   }
+  /*
+   * A PERCENTAGE, refused where it is typed.
+   *
+   * It divides into 100 to decide how many positions fit at once, so 0 is an
+   * infinity and 600 is a position six times the account. Stored either would
+   * read back as a real preference and size an order from it. The desk-wide
+   * figure has had this check since it existed; the per-setup one is newer and
+   * went in without it.
+   */
+  if (next.maxPositionPct != null) {
+    const n = Number(next.maxPositionPct);
+    if (!Number.isFinite(n) || n <= 0 || n > 100) {
+      throw new Error('max position % must be between 1 and 100 — '
+        + 'leave it blank to use the account\'s');
+    }
+    next.maxPositionPct = n;
+  }
+
   // Only ever true by being said so. A truthy string or a stray 1 must not be
   // what turns a setup into one that spends money.
   if ('autoTrade' in patch) next.autoTrade = patch.autoTrade === true;
