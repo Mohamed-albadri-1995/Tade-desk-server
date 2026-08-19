@@ -1,0 +1,205 @@
+//@version=6
+// ═════════════════════════════════════════════════════════════════════════
+// OR + VWAP 09:35  —  long and short, one decision, at 09:35 ET
+//
+// A faithful port of the qp strategy of the same name. Everything it does is
+// here EXCEPT which stock to trade: the desk ranks its screener's cards by
+// VWAP extension and takes the top two, and Pine only ever sees one chart.
+// So this fires on whatever symbol you put it on — treat it as "would this
+// name have qualified", not as the whole system.
+//
+// RUN IT ON 1-MINUTE BARS. The opening range is 09:30–09:35 ET and the
+// decision is the 09:35 bar; on 5m the range and the trigger are the same
+// bar, which is a different strategy.
+//
+// ── the decision, once, on the 09:35 bar ────────────────────────────────
+//   LONG                                   SHORT
+//   close > VWAP                           close < VWAP
+//   VWAP > VWAP 3 bars ago                 VWAP < VWAP 3 bars ago
+//   position in OR >= 0.55                 position in OR <= 0.45
+//   close - ORmid >= ATR(14) * 0.5         ORmid - close >= ATR(14) * 0.5
+//
+//   position in OR = (close - ORlow) / (ORhigh - ORlow)
+//   ORmid          = ORlow + (ORhigh - ORlow) / 2
+//
+// ── out ──────────────────────────────────────────────────────────────────
+//   stop     ORmid, FIXED at entry
+//   leg 1    50% at 2R
+//   runner   50%, no target, rides the stop
+//   rule     close crossing back through VWAP closes everything
+//   eod      flat at 15:50 ET
+//
+// ── the two things that are NOT approximations ──────────────────────────
+// VWAP and the opening range are computed here the way qp computes them,
+// not the way the chart happens to be configured:
+//
+//   · VWAP accumulates HLC3*volume over RTH BARS ONLY and resets at 09:30.
+//     Pine's ta.vwap() accumulates every bar it is given, so on a chart with
+//     extended hours switched on it would silently be a different line.
+//   · The opening range is [09:30, 09:35) — half open. The 09:35 bar is the
+//     TRIGGER and is not part of the range it breaks out of.
+// ═════════════════════════════════════════════════════════════════════════
+
+strategy("OR + VWAP 09:35", overlay = true,
+     default_qty_type = strategy.fixed, default_qty_value = 1,
+     initial_capital = 50000, currency = currency.USD,
+     commission_type = strategy.commission.cash_per_order, commission_value = 0.75,
+     calc_on_every_tick = false, process_orders_on_close = false)
+
+// ── inputs ──────────────────────────────────────────────────────────────
+riskUSD   = input.float(250, "Risk per trade ($)", minval = 1, group = "Size")
+minShares = input.int(3, "Do not trade under this many shares", minval = 1,
+     group = "Size",
+     tooltip = "The desk refuses a position too small to hold the strategy's " +
+               "shape — one share cannot be split 50/50.")
+
+doLong    = input.bool(true,  "Longs",  group = "Side")
+doShort   = input.bool(true,  "Shorts", group = "Side")
+
+orStart   = input.int(930,  "Opening range from (ET hhmm)", group = "Timing")
+orEnd     = input.int(935,  "Opening range to, EXCLUSIVE",  group = "Timing")
+decideAt  = input.int(935,  "Decide on this bar (ET hhmm)", group = "Timing")
+flattenAt = input.int(1550, "Flatten at (ET hhmm)",         group = "Timing")
+
+atrLen    = input.int(14,   "ATR length",            group = "Thresholds")
+atrMult   = input.float(0.5,"ATR multiple from mid", group = "Thresholds")
+posLong   = input.float(0.55,"Long: position in OR >=",  group = "Thresholds")
+posShort  = input.float(0.45,"Short: position in OR <=", group = "Thresholds")
+vwapBack  = input.int(3,    "VWAP slope lookback (bars)", group = "Thresholds")
+legFrac   = input.float(0.5,"First leg fraction", minval=0.01, maxval=1.0, group="Exits")
+legR      = input.float(2.0,"First leg target (R)", group = "Exits")
+
+// ── the clock, in New York ──────────────────────────────────────────────
+etH    = hour(time, "America/New_York")
+etM    = minute(time, "America/New_York")
+nowMin = etH * 60 + etM
+hhmmToMin(hhmm) => (hhmm / 100) * 60 + hhmm % 100
+isRth  = nowMin >= hhmmToMin(930) and nowMin < hhmmToMin(1600)
+newDay = ta.change(time("D")) != 0
+
+// ── session VWAP, qp's way: HLC3 * volume, RTH only, reset at 09:30 ─────
+var float cumPV = 0.0
+var float cumV  = 0.0
+if newDay
+    cumPV := 0.0
+    cumV  := 0.0
+if isRth
+    cumPV += hlc3 * volume
+    cumV  += volume
+vwap = cumV > 0 ? cumPV / cumV : float(na)
+
+// ── the opening range, [start, end), frozen for the rest of the day ────
+var float orHigh = na
+var float orLow  = na
+if newDay
+    orHigh := na
+    orLow  := na
+inOR = nowMin >= hhmmToMin(orStart) and nowMin < hhmmToMin(orEnd)
+if inOR
+    orHigh := na(orHigh) ? high : math.max(orHigh, high)
+    orLow  := na(orLow)  ? low  : math.min(orLow,  low)
+
+orRange = orHigh - orLow
+orMid   = orLow + orRange / 2.0
+// A zero-width range makes "position in the range" a division by zero, and
+// every name would look like a perfect breakout. It is not a setup.
+orOk    = not na(orHigh) and not na(orLow) and orRange > 0
+posInOR = orOk ? (close - orLow) / orRange : float(na)
+
+atrv = ta.atr(atrLen)
+
+// ── the four conditions, all on the same bar ────────────────────────────
+vwapRising  = not na(vwap) and not na(vwap[vwapBack]) and vwap > vwap[vwapBack]
+vwapFalling = not na(vwap) and not na(vwap[vwapBack]) and vwap < vwap[vwapBack]
+
+longOk  = orOk and not na(vwap) and not na(atrv) and
+     close > vwap and vwapRising and
+     posInOR >= posLong and
+     (close - orMid) >= atrv * atrMult
+
+shortOk = orOk and not na(vwap) and not na(atrv) and
+     close < vwap and vwapFalling and
+     posInOR <= posShort and
+     (orMid - close) >= atrv * atrMult
+
+// ── one decision, one entry, one day ────────────────────────────────────
+isDecisionBar = nowMin == hhmmToMin(decideAt)
+var bool tradedToday = false
+if newDay
+    tradedToday := false
+
+// Shares from risk, then the desk's floor. Sized off this bar's close, which
+// is the price the decision was made at — the fill is the next bar's open and
+// the difference is the slippage the backtest is meant to show you.
+riskPerShare = math.abs(close - orMid)
+qtyRaw       = riskPerShare > 0 ? math.floor(riskUSD / riskPerShare) : 0
+bigEnough    = qtyRaw >= minShares
+
+goLong  = doLong  and isDecisionBar and not tradedToday and longOk  and bigEnough
+goShort = doShort and isDecisionBar and not tradedToday and shortOk and bigEnough
+
+// The split, floored the way the order layer floors it — the remainder goes to
+// the RUNNER, so every share sized is a share ordered.
+q1 = math.floor(qtyRaw * legFrac)
+q2 = qtyRaw - q1
+
+var float entryStop = na
+var float entryR    = na
+
+if goLong
+    entryStop := orMid
+    entryR    := close - orMid
+    tradedToday := true
+    strategy.entry("L", strategy.long, qty = qtyRaw)
+
+if goShort
+    entryStop := orMid
+    entryR    := orMid - close
+    tradedToday := true
+    strategy.entry("S", strategy.short, qty = qtyRaw)
+
+// ── the exits ───────────────────────────────────────────────────────────
+// Two brackets sharing one stop: a first leg with a target, and a runner with
+// none. That is exactly what goes to the broker — one order per leg, because
+// a bracket has one target and a scale-out has several.
+inLong  = strategy.position_size > 0
+inShort = strategy.position_size < 0
+
+if inLong and not na(entryStop)
+    t1 = strategy.opentrades.entry_price(0) + entryR * legR
+    strategy.exit("L1", from_entry = "L", qty = q1, limit = t1, stop = entryStop)
+    strategy.exit("L2", from_entry = "L", qty = q2, stop = entryStop)
+
+if inShort and not na(entryStop)
+    t1 = strategy.opentrades.entry_price(0) - entryR * legR
+    strategy.exit("S1", from_entry = "S", qty = q1, limit = t1, stop = entryStop)
+    strategy.exit("S2", from_entry = "S", qty = q2, stop = entryStop)
+
+// The exit RULE — price crossing back through VWAP takes the whole position,
+// runner included. This is the half no broker can hold for you.
+ruleLong  = inLong  and ta.crossunder(close, vwap)
+ruleShort = inShort and ta.crossover(close, vwap)
+if ruleLong or ruleShort
+    strategy.close_all(comment = "VWAP cross")
+
+// End of session. The runner has no target and would otherwise sit overnight
+// in an account that is not allowed to hold one.
+if nowMin >= hhmmToMin(flattenAt)
+    strategy.close_all(comment = "15:50 flat")
+
+// ── what you are looking at ─────────────────────────────────────────────
+plot(vwap, "VWAP", color.new(color.orange, 0), linewidth = 2)
+plot(orOk ? orHigh : na, "OR high", color.new(color.teal, 0), style = plot.style_linebr)
+plot(orOk ? orLow  : na, "OR low",  color.new(color.teal, 0), style = plot.style_linebr)
+plot(orOk ? orMid  : na, "OR mid / stop", color.new(color.red, 0),
+     style = plot.style_linebr, linewidth = 2)
+
+plotshape(goLong,  "long",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small)
+plotshape(goShort, "short", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small)
+
+// Why a bar that looked right did NOT fire — the question that otherwise takes
+// an afternoon. Only on the decision bar, where it is the only thing that
+// matters.
+tooSmall = isDecisionBar and (longOk or shortOk) and not bigEnough
+plotshape(tooSmall, "under the share floor", shape.xcross, location.belowbar,
+     color.new(color.gray, 0), size = size.tiny)

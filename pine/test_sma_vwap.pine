@@ -1,0 +1,198 @@
+//@version=6
+// ═════════════════════════════════════════════════════════════════════════
+// Test  —  long only, watched every bar from 09:30 to 11:30 ET
+//
+// A faithful port of the qp strategy called "Test". Unlike the other two this
+// one is a WATCH setup: it is asked its question on every bar of a two-hour
+// window rather than once at a fixed minute. It still takes at most one
+// position a day.
+//
+// Everything is here EXCEPT the ranking — the desk picks from its screener's
+// card list and Pine only sees one chart.
+//
+// RUN IT ON 1-MINUTE BARS.
+//
+// ── the entry, on any bar between 09:30 and 11:30, all four at once ─────
+//   close > today's open
+//   close > VWAP
+//   SMA(9) > SMA(13)
+//   SMA(13) crosses ABOVE VWAP        ← the trigger; the other three are state
+//
+// ── out ──────────────────────────────────────────────────────────────────
+//   stop     lower VWAP standard-deviation band, mult 0.2
+//   leg 1    10% at 3R
+//   leg 2    80% at 6R
+//   runner   10%, no target, rides the stop
+//   eod      flat at 15:50 ET
+//
+// ═════════════════════════════════════════════════════════════════════════
+// THE ONE THING TO UNDERSTAND BEFORE TRUSTING THIS
+//
+// The stop is `hold: true` in qp, which means it MOVES: the backtest re-reads
+// the band on every bar and the stop follows it up. A broker cannot do that —
+// it is handed one price and that price stays there. So the live trade and the
+// backtested trade are not the same trade, and the backtest is the more
+// flattering of the two.
+//
+// "Freeze stop at entry" below switches between them:
+//
+//   OFF (default)  the band is re-read every bar — what qp backtests
+//   ON             the band at the entry bar, frozen — what the broker gets
+//
+// Run it both ways. The gap between the two results is the size of the
+// exception, in your own numbers, on your own symbol. Ticking "fix at entry"
+// in the strategy builder is what makes them agree.
+// ═════════════════════════════════════════════════════════════════════════
+
+strategy("Test — SMA/VWAP cross", overlay = true,
+     default_qty_type = strategy.fixed, default_qty_value = 1,
+     initial_capital = 50000, currency = currency.USD,
+     commission_type = strategy.commission.cash_per_order, commission_value = 0.75,
+     calc_on_every_tick = false, process_orders_on_close = false)
+
+// ── inputs ──────────────────────────────────────────────────────────────
+riskUSD   = input.float(250, "Risk per trade ($)", minval = 1, group = "Size")
+minShares = input.int(10, "Do not trade under this many shares", minval = 1,
+     group = "Size",
+     tooltip = "TEN, not three. The smallest leg is 10% of the position, so " +
+               "under ten shares it floors to zero and disappears — the " +
+               "account then runs a two-leg strategy that looks like this one.")
+
+freezeStop = input.bool(false, "Freeze stop at entry (what the broker gets)",
+     group = "The exception",
+     tooltip = "OFF = the band is re-read every bar, which is what qp " +
+               "backtests. ON = the band at the entry bar, frozen, which is " +
+               "what actually goes to the broker. Run both.")
+
+winStart  = input.int(930,  "Watch from (ET hhmm)", group = "Timing")
+winEnd    = input.int(1130, "Watch until (ET hhmm)", group = "Timing")
+flattenAt = input.int(1550, "Flatten at (ET hhmm)",  group = "Timing")
+
+fastLen   = input.int(9,  "Fast SMA",  group = "Thresholds")
+slowLen   = input.int(13, "Slow SMA",  group = "Thresholds")
+bandMult  = input.float(0.2, "VWAP band multiple (stop)", group = "Thresholds")
+
+f1 = input.float(0.10, "Leg 1 fraction", minval = 0.0, maxval = 1.0, group = "Exits")
+r1 = input.float(3.0,  "Leg 1 target (R)", group = "Exits")
+f2 = input.float(0.80, "Leg 2 fraction", minval = 0.0, maxval = 1.0, group = "Exits")
+r2 = input.float(6.0,  "Leg 2 target (R)", group = "Exits")
+// The runner is whatever is left — 10% by default. It is never an input,
+// because the three fractions have to add to one and a third box is a third
+// chance for them not to.
+
+// ── the clock, in New York ──────────────────────────────────────────────
+etH    = hour(time, "America/New_York")
+etM    = minute(time, "America/New_York")
+nowMin = etH * 60 + etM
+hhmmToMin(hhmm) => (hhmm / 100) * 60 + hhmm % 100
+isRth  = nowMin >= hhmmToMin(930) and nowMin < hhmmToMin(1600)
+newDay = ta.change(time("D")) != 0
+
+// ── session VWAP AND its standard-deviation bands, qp's way ─────────────
+// The band is a VOLUME-weighted stdev of HLC3 around the running VWAP —
+// E[p²] - E[p]² accumulated the same way the VWAP is, not a rolling stdev of
+// close. Those are different lines and the stop sits on this one.
+var float cumPV  = 0.0
+var float cumPV2 = 0.0
+var float cumV   = 0.0
+if newDay
+    cumPV  := 0.0
+    cumPV2 := 0.0
+    cumV   := 0.0
+if isRth
+    cumPV  += hlc3 * volume
+    cumPV2 += hlc3 * hlc3 * volume
+    cumV   += volume
+
+vwap   = cumV > 0 ? cumPV / cumV : float(na)
+varRaw = cumV > 0 ? cumPV2 / cumV - vwap * vwap : float(na)
+sdev   = na(varRaw) ? float(na) : (varRaw > 0 ? math.sqrt(varRaw) : 0.0)
+bandLo = na(vwap) or na(sdev) ? float(na) : vwap - bandMult * sdev
+
+// ── today's open — the 09:30 bar's open, held all day ──────────────────
+var float dayOpen = na
+if newDay
+    dayOpen := na
+if isRth and na(dayOpen)
+    dayOpen := open
+
+// ── the four conditions ─────────────────────────────────────────────────
+smaFast = ta.sma(close, fastLen)
+smaSlow = ta.sma(close, slowLen)
+
+// The cross is the TRIGGER and must happen on this bar. The other three are
+// states that merely have to be true at the same moment.
+trigger = not na(vwap) and ta.crossover(smaSlow, vwap)
+
+entryOk = not na(dayOpen) and not na(vwap) and not na(smaFast) and not na(smaSlow) and
+     close > dayOpen and
+     close > vwap and
+     smaFast > smaSlow and
+     trigger
+
+// ── one entry a day, inside the window ──────────────────────────────────
+inWindow = nowMin >= hhmmToMin(winStart) and nowMin <= hhmmToMin(winEnd)
+var bool tradedToday = false
+if newDay
+    tradedToday := false
+
+riskPerShare = not na(bandLo) ? close - bandLo : float(na)
+qtyRaw       = not na(riskPerShare) and riskPerShare > 0 ? math.floor(riskUSD / riskPerShare) : 0
+bigEnough    = qtyRaw >= minShares
+
+goLong = inWindow and not tradedToday and entryOk and bigEnough
+
+// The split, floored the way the order layer floors it. The REMAINDER goes to
+// the runner, so every share sized is a share ordered — 10 shares becomes
+// 1 / 8 / 1 rather than 1 / 8 / 1 with one lost to rounding.
+q1 = math.floor(qtyRaw * f1)
+q2 = math.floor(qtyRaw * f2)
+q3 = qtyRaw - q1 - q2
+
+var float entryStop = na
+var float entryR    = na
+
+if goLong
+    entryStop := bandLo
+    entryR    := close - bandLo
+    tradedToday := true
+    strategy.entry("L", strategy.long, qty = qtyRaw)
+
+// ── the exits: three orders, one position ───────────────────────────────
+// Three, because a bracket holds one target and this strategy has two plus a
+// runner. Exactly what the broker receives.
+inLong = strategy.position_size > 0
+
+// THE STOP, and the whole point of the toggle. Frozen it is one price for the
+// life of the trade; unfrozen it is re-read here on every bar and the exit
+// orders are re-issued with the new level.
+curStop = freezeStop ? entryStop : (na(bandLo) ? entryStop : bandLo)
+
+if inLong and not na(entryStop) and not na(entryR)
+    ep = strategy.opentrades.entry_price(0)
+    if q1 > 0
+        strategy.exit("L1", from_entry = "L", qty = q1, limit = ep + entryR * r1, stop = curStop)
+    if q2 > 0
+        strategy.exit("L2", from_entry = "L", qty = q2, limit = ep + entryR * r2, stop = curStop)
+    if q3 > 0
+        strategy.exit("L3", from_entry = "L", qty = q3, stop = curStop)
+
+if nowMin >= hhmmToMin(flattenAt)
+    strategy.close_all(comment = "15:50 flat")
+
+// ── what you are looking at ─────────────────────────────────────────────
+plot(vwap,   "VWAP", color.new(color.orange, 0), linewidth = 2)
+plot(bandLo, "VWAP lower band", color.new(color.purple, 0))
+plot(smaFast, "SMA 9",  color.new(color.blue, 0))
+plot(smaSlow, "SMA 13", color.new(color.navy, 0))
+plot(inLong ? curStop : na, "live stop", color.new(color.red, 0),
+     style = plot.style_linebr, linewidth = 2)
+
+plotshape(goLong, "long", shape.triangleup, location.belowbar,
+     color.new(color.green, 0), size = size.small)
+
+// Everything qualified except the size — the difference between "no setup" and
+// "a setup this account cannot hold", which otherwise look identical.
+plotshape(inWindow and not tradedToday and entryOk and not bigEnough,
+     "under the share floor", shape.xcross, location.belowbar,
+     color.new(color.gray, 0), size = size.tiny)

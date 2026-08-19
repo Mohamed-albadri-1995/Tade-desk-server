@@ -1,0 +1,183 @@
+//@version=6
+// ═════════════════════════════════════════════════════════════════════════
+// T2 10:00 VWAP Extension  —  long and short, one decision, at 10:00 ET
+//
+// A faithful port of the qp strategy of the same name. The simplest of the
+// three: one decision, one order, one target. Everything is here EXCEPT the
+// ranking — the desk sorts its screener's cards by VWAP extension and takes
+// the top two, and Pine only sees one chart.
+//
+// RUN IT ON 1-MINUTE BARS. The 09:41 and 09:51 sub-windows below only exist
+// on minute bars.
+//
+// ── the decision, once, on the 10:00 bar ────────────────────────────────
+//   LONG                                    SHORT
+//   close > VWAP                            close < VWAP
+//   VWAP > VWAP 10 bars ago                 VWAP < VWAP 10 bars ago
+//   position in 09:30–10:00 range >= 55%    position <= 45%
+//   low(09:41–10:00) >= low(09:30–09:41)    high(09:51–10:00) <= high(09:30–09:51)
+//
+// That last one is the shape test, and the two sides are deliberately NOT
+// mirror images of each other — the long wants a higher low in the back half
+// of the half hour, the short wants a lower high in the last ten minutes.
+// They were tuned separately; do not "fix" the asymmetry.
+//
+// ── out ──────────────────────────────────────────────────────────────────
+//   stop     session VWAP, FIXED at the entry bar's value
+//   target   the whole position at 2R
+//   eod      flat at 15:50 ET
+//
+// The stop is the VWAP READING AT ENTRY, frozen. It does not follow the line
+// afterwards — that is what the strategy says and what the broker receives.
+//
+// VWAP is computed here the way qp computes it — HLC3 * volume over RTH bars
+// only, reset at 09:30 — rather than however the chart happens to be set up.
+// Pine's ta.vwap() accumulates every bar it is given, so with extended hours
+// switched on it is a different line and this is a different strategy.
+// ═════════════════════════════════════════════════════════════════════════
+
+strategy("T2 10:00 VWAP Extension", overlay = true,
+     default_qty_type = strategy.fixed, default_qty_value = 1,
+     initial_capital = 50000, currency = currency.USD,
+     commission_type = strategy.commission.cash_per_order, commission_value = 0.75,
+     calc_on_every_tick = false, process_orders_on_close = false)
+
+// ── inputs ──────────────────────────────────────────────────────────────
+riskUSD   = input.float(250, "Risk per trade ($)", minval = 1, group = "Size")
+minShares = input.int(3, "Do not trade under this many shares", minval = 1, group = "Size")
+
+doLong    = input.bool(true, "Longs",  group = "Side")
+doShort   = input.bool(true, "Shorts", group = "Side")
+
+decideAt  = input.int(1000, "Decide on this bar (ET hhmm)", group = "Timing")
+flattenAt = input.int(1550, "Flatten at (ET hhmm)",         group = "Timing")
+
+posLong   = input.float(55, "Long: position in range >= (%)",  group = "Thresholds")
+posShort  = input.float(45, "Short: position in range <= (%)", group = "Thresholds")
+vwapBack  = input.int(10,   "VWAP slope lookback (bars)",      group = "Thresholds")
+targetR   = input.float(2.0,"Target (R)",                      group = "Exits")
+
+// ── the clock, in New York ──────────────────────────────────────────────
+etH    = hour(time, "America/New_York")
+etM    = minute(time, "America/New_York")
+nowMin = etH * 60 + etM
+hhmmToMin(hhmm) => (hhmm / 100) * 60 + hhmm % 100
+isRth  = nowMin >= hhmmToMin(930) and nowMin < hhmmToMin(1600)
+newDay = ta.change(time("D")) != 0
+
+// ── session VWAP, qp's way ──────────────────────────────────────────────
+var float cumPV = 0.0
+var float cumV  = 0.0
+if newDay
+    cumPV := 0.0
+    cumV  := 0.0
+if isRth
+    cumPV += hlc3 * volume
+    cumV  += volume
+vwap = cumV > 0 ? cumPV / cumV : float(na)
+
+// ── the intraday windows, each [start, end) and frozen after ────────────
+// Four of them, and they overlap on purpose: the whole half hour for the
+// position test, then it split at 09:41 (long) and at 09:51 (short).
+var float hiFull = na    // 09:30–10:00 high
+var float loFull = na    // 09:30–10:00 low
+var float loEarly = na   // 09:30–09:41 low
+var float loLate  = na   // 09:41–10:00 low
+var float hiEarly = na   // 09:30–09:51 high
+var float hiLate  = na   // 09:51–10:00 high
+if newDay
+    hiFull  := na
+    loFull  := na
+    loEarly := na
+    loLate  := na
+    hiEarly := na
+    hiLate  := na
+
+inWin(s, e) => nowMin >= hhmmToMin(s) and nowMin < hhmmToMin(e)
+
+if inWin(930, 1000)
+    hiFull := na(hiFull) ? high : math.max(hiFull, high)
+    loFull := na(loFull) ? low  : math.min(loFull, low)
+if inWin(930, 941)
+    loEarly := na(loEarly) ? low : math.min(loEarly, low)
+if inWin(941, 1000)
+    loLate  := na(loLate)  ? low : math.min(loLate,  low)
+if inWin(930, 951)
+    hiEarly := na(hiEarly) ? high : math.max(hiEarly, high)
+if inWin(951, 1000)
+    hiLate  := na(hiLate)  ? high : math.max(hiLate,  high)
+
+rng     = hiFull - loFull
+rngOk   = not na(hiFull) and not na(loFull) and rng > 0
+posPct  = rngOk ? (close - loFull) / rng * 100.0 : float(na)
+
+// ── the four conditions, all on the same bar ────────────────────────────
+vwapRising  = not na(vwap) and not na(vwap[vwapBack]) and vwap > vwap[vwapBack]
+vwapFalling = not na(vwap) and not na(vwap[vwapBack]) and vwap < vwap[vwapBack]
+
+higherLow = not na(loLate)  and not na(loEarly) and loLate  >= loEarly
+lowerHigh = not na(hiLate)  and not na(hiEarly) and hiLate  <= hiEarly
+
+longOk  = rngOk and not na(vwap) and
+     close > vwap and vwapRising and posPct >= posLong and higherLow
+
+shortOk = rngOk and not na(vwap) and
+     close < vwap and vwapFalling and posPct <= posShort and lowerHigh
+
+// ── one decision, one entry, one day ────────────────────────────────────
+isDecisionBar = nowMin == hhmmToMin(decideAt)
+var bool tradedToday = false
+if newDay
+    tradedToday := false
+
+riskPerShare = math.abs(close - vwap)
+qtyRaw       = riskPerShare > 0 ? math.floor(riskUSD / riskPerShare) : 0
+bigEnough    = qtyRaw >= minShares
+
+goLong  = doLong  and isDecisionBar and not tradedToday and longOk  and bigEnough
+goShort = doShort and isDecisionBar and not tradedToday and shortOk and bigEnough
+
+var float entryStop = na
+var float entryR    = na
+
+if goLong
+    entryStop := vwap                 // FROZEN here — it does not follow later
+    entryR    := close - vwap
+    tradedToday := true
+    strategy.entry("L", strategy.long, qty = qtyRaw)
+
+if goShort
+    entryStop := vwap
+    entryR    := vwap - close
+    tradedToday := true
+    strategy.entry("S", strategy.short, qty = qtyRaw)
+
+// ── the exit: one bracket, whole position ───────────────────────────────
+inLong  = strategy.position_size > 0
+inShort = strategy.position_size < 0
+
+if inLong and not na(entryStop)
+    strategy.exit("L-out", from_entry = "L",
+         limit = strategy.opentrades.entry_price(0) + entryR * targetR,
+         stop  = entryStop)
+
+if inShort and not na(entryStop)
+    strategy.exit("S-out", from_entry = "S",
+         limit = strategy.opentrades.entry_price(0) - entryR * targetR,
+         stop  = entryStop)
+
+if nowMin >= hhmmToMin(flattenAt)
+    strategy.close_all(comment = "15:50 flat")
+
+// ── what you are looking at ─────────────────────────────────────────────
+plot(vwap, "VWAP", color.new(color.orange, 0), linewidth = 2)
+plot(rngOk ? hiFull : na, "09:30–10:00 high", color.new(color.teal, 0), style = plot.style_linebr)
+plot(rngOk ? loFull : na, "09:30–10:00 low",  color.new(color.teal, 0), style = plot.style_linebr)
+plot(strategy.position_size != 0 ? entryStop : na, "stop (frozen)",
+     color.new(color.red, 0), style = plot.style_linebr, linewidth = 2)
+
+plotshape(goLong,  "long",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small)
+plotshape(goShort, "short", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small)
+plotshape(isDecisionBar and (longOk or shortOk) and not bigEnough,
+     "under the share floor", shape.xcross, location.belowbar,
+     color.new(color.gray, 0), size = size.tiny)
