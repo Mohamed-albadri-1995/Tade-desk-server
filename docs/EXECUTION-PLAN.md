@@ -536,7 +536,37 @@ open risk — and a certain round trip to undo an uncertain problem is a decisio
 about money. The alert says exactly that, so the choice is made knowingly rather
 than by default.
 
-**6 — still open, and it needs a market.** A three-leg placement has never been
-watched arrive at a broker. `scripts/order-test.js` will send one on the paper
-account; until it has been run and the broker's own order list checked, `Test`
-should stay off.
+**6 — done, on 2026-08-19, and it found something on the way.**
+`scripts/order-test.js` put the `Test` strategy's real order set into the paper
+account at 10 shares — the floor at which every leg survives the rounding — and
+`scripts/check-position.js` read back what the broker actually held:
+
+```
+ [1] 1 sh, target 324.51     limit 1 @ 324.51 · stop 1 @ 311.92
+ [2] 8 sh, target 333.96     limit 8 @ 333.96 · stop 8 @ 311.92
+ [3] 1 sh, RUNNER no target                     stop 1 @ 311.92
+
+ position 10 · stops cover 10 · targets cover 9
+```
+
+Every property this step existed to check: three brackets from one call, the
+1/8/1 split matching the 10/80/10 shape, every share behind a stop, and the
+RUNNER carrying no target — the leg most likely to be dropped in silence, and
+the one whose presence-with-a-target would mean a strategy nobody tested.
+
+THE FIRST ATTEMPT WAS REFUSED, by this desk rather than by the broker:
+
+    NOTHING WOULD BE SENT — take_profit_price 324.47 is a sub-penny price
+
+324.47 has two decimals. `validateBody` asked "is this whole cents" as
+`Math.round(v * 100) !== v * 100`, and multiplying by 100 is exactly where a
+double loses that fact: `324.47 * 100` is `32447.000000000004` while
+`15.73 * 100` is `1573`. Nine percent of every two-decimal price from 0.01 to
+2000.00 was being refused — about one order in eleven, selected by nothing but
+binary representation, and blamed on the price. WULF had gone out that morning
+only because its numbers happened to land exactly.
+
+That is what a rehearsal is for. It cost ten shares of AAPL to find a fault
+that had been live for as long as the validator has existed.
+
+`Test` can be armed.
