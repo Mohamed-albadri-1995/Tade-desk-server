@@ -37,6 +37,37 @@
  *
  *    ALPACA ONLY. TTP5k is behind TraderEvolution with no position feed, so a
  *    card traded there shows nothing rather than showing zero.
+ *
+ * 4. A STATUS LINE, because 3 was invisible. The fill line is drawn only when
+ *    Alpaca has a fill for that name on that date, which is right — a "0" on a
+ *    card nobody traded is a number nobody made. But on a day with no fills it
+ *    means the page looks EXACTLY as it did before any of this existed, and
+ *    "connected, nothing to show" is indistinguishable from "broken". That was
+ *    reported as "I am not seeing any connection to Alpaca in this tool", and
+ *    it was a fair reading of what the page showed.
+ *
+ *    So the trades list now carries one line saying whether the desk answered,
+ *    whether Alpaca answered it, and how many names it has for today. Silence
+ *    stays silent per CARD; the CONNECTION says so out loud.
+ *
+ * 5. THE SETUP FIELD, FILLED BY THE DESK THAT PLACED THE ORDER. The journal's
+ *    setup tag is what per-setup expectancy is computed from, and it was typed
+ *    by hand — so an untagged day is a day that cannot be measured, and tagging
+ *    from memory a week later is how a trade gets filed under the wrong
+ *    strategy. The desk chose the setup, sized it, sent it and wrote the row.
+ *
+ *    Three rules, and they are the whole design:
+ *
+ *      it only ever fills a field that is EMPTY. A tag chosen by a person is
+ *      never touched, and a trade opened by hand stays untagged for a person to
+ *      tag — which is the case this must not break.
+ *
+ *      it only fills when the DESK SENT AN ORDER for that name on that date. No
+ *      inference from the ticker, no nearest match.
+ *
+ *      two setups on one name on one day is AMBIGUOUS and it stops. A wrong tag
+ *      is worse than no tag: it is invisible, and it moves a losing trade into
+ *      another strategy's record.
  */
 (function () {
   'use strict';
@@ -72,6 +103,83 @@
 
   function money(n) {
     return (n >= 0 ? '+' : '') + Number(n).toFixed(2);
+  }
+
+  function deskUrl(path) {
+    return location.protocol + '//' + location.hostname + ':' + ALERTS_PORT + path;
+  }
+
+  /* ── which setup put each name on, per date ───────────────────────────
+   * Same caching rule as the fills, and for the same reason: the list
+   * re-renders on every keystroke in the ticker filter.
+   */
+  var setupsByDate = {};
+
+  function deskSetupsFor(date) {
+    if (setupsByDate[date]) return setupsByDate[date];
+    setupsByDate[date] = fetch(deskUrl('/api/broker/setups?date=' + encodeURIComponent(date)))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var map = {};
+        if (d && d.ok) (d.symbols || []).forEach(function (g) { map[g.symbol] = g; });
+        return map;
+      })
+      .catch(function () { return {}; });
+    return setupsByDate[date];
+  }
+
+  /* ── is any of this actually connected? ───────────────────────────────
+   * One line above the trades list. It exists because the per-card line is
+   * drawn only when there is a fill to draw, so a day with none looks exactly
+   * like a page with no add-ons at all — and that is the state this was
+   * reported in.
+   *
+   * It probes TODAY, once per page load, which is the only date whose answer
+   * says something about the CONNECTION rather than about history.
+   */
+  function statusLine() {
+    var el = document.getElementById('jnl-desk-status');
+    if (el) return;
+    var host = document.getElementById(CONTAINER);
+    if (!host || !host.parentNode) return;
+
+    el = document.createElement('div');
+    el.id = 'jnl-desk-status';
+    el.style.cssText = 'font-size:11px;color:#64748b;margin:0 0 8px;padding:6px 9px;'
+      + 'background:#0f172a;border:1px solid #1e293b;border-radius:6px';
+    el.textContent = 'Alpaca — asking the desk…';
+    // BEFORE the container, not inside it: the list replaces its own innerHTML
+    // on every render, and anything inside would be wiped and redrawn.
+    host.parentNode.insertBefore(el, host);
+
+    function set(text, colour) {
+      el.textContent = 'Alpaca — ' + text;
+      el.style.color = colour || '#64748b';
+    }
+
+    fetch(deskUrl('/api/broker/fills'))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) {
+          // The desk answered and could not ask Alpaca. That is a different
+          // fault from an unreachable desk and it names itself.
+          return set('the desk answered but the account did not: '
+            + ((d && d.error) || 'no reason given'), '#f59e0b');
+        }
+        if (d.unverified) return set(d.unverified + '.', '#f59e0b');
+        var n = (d.symbols || []).length;
+        set(n
+          ? 'connected · ' + n + ' name(s) filled on ' + d.date
+            + '. Cards for those names carry the real fill price.'
+          : 'connected · no fills on ' + d.date + ' yet. A card gets a fill line'
+            + ' on the days its name actually traded in this account.',
+          n ? '#22c55e' : '#64748b');
+      })
+      .catch(function (err) {
+        set('the desk did not answer on port ' + ALERTS_PORT + ' ('
+          + (err && err.message ? err.message : 'no reason given')
+          + '). Nothing on these cards comes from the broker.', '#ef4444');
+      });
   }
 
   /* One line, appended to a card, saying what the account really did. */
@@ -127,6 +235,98 @@
     });
     return 'http://' + location.hostname + ':' + QP_PORT
          + '/api/pairs/print?' + qs.toString();
+  }
+
+  /* ── the setup tag, filled by the desk that placed the order ──────────
+   *
+   * Attempted at most once per trade per page load, and the mark goes down
+   * BEFORE the request rather than after: the list re-renders on every
+   * keystroke in the ticker filter, and a mark written on success would let a
+   * slow PATCH be issued once per letter typed.
+   */
+  var tagged = {};
+
+  function optionFor(sel, id) {
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === id) return sel.options[i];
+    }
+    return null;
+  }
+
+  /*
+   * The page renders each card from its own copy of the trade, so the tag has
+   * to land on the objects as well as on the control — otherwise the next
+   * render, which is the next keystroke, draws it untagged again and this runs
+   * a second time. loadAll() would do it properly and also destroy and rebuild
+   * the whole list under our feet, on a timer we do not control.
+   */
+  function markTagged(id, setupId, setupName) {
+    [window.__trades, window.__allTrades].forEach(function (arr) {
+      (arr || []).forEach(function (t) {
+        if (t.id !== id) return;
+        t.setup_id = setupId;
+        if ('setup' in t) t.setup = setupName || setupId;
+      });
+    });
+  }
+
+  function note(sel, text, colour) {
+    if (sel.parentNode.querySelector('.jnl-setup-note')) return;
+    var s = document.createElement('span');
+    s.className = 'jnl-setup-note';
+    s.style.cssText = 'font-size:9px;color:' + (colour || '#64748b') + ';white-space:nowrap';
+    s.textContent = text;
+    sel.parentNode.appendChild(s);
+  }
+
+  function autoTag(host) {
+    host.querySelectorAll('.jnl-setup-sel').forEach(function (sel) {
+      var id = sel.getAttribute('data-id');
+      // NEVER OVERWRITE. A tag already chosen — by a person or by an earlier
+      // pass of this — is the answer, and this has nothing to add to it.
+      if (!id || sel.value || tagged[id]) return;
+      var t = findTrade(id);
+      if (!t || !t.ticker || !t.date) return;
+
+      deskSetupsFor(t.date).then(function (map) {
+        var g = map[String(t.ticker).toUpperCase()];
+        // The desk sent nothing for that name that day: a trade taken by hand,
+        // or one from before any of this. Left for a person, silently.
+        if (!g) return;
+
+        if (g.ambiguous) {
+          return note(sel, 'two setups took this name that day — tag it yourself', '#f59e0b');
+        }
+        /*
+         * The id has to be one the journal can actually display. Its list comes
+         * from the same /api/setups this desk serves, so a miss means the setup
+         * was renamed or removed since the order went out — and storing an id
+         * with no option would show "— untagged —" over a tagged row for ever.
+         */
+        if (!optionFor(sel, g.setupId)) {
+          return note(sel, 'the desk says ' + g.setupId + ', which is not in this list', '#f59e0b');
+        }
+        // It may have been chosen, or tagged, while the request was in flight.
+        if (sel.value || tagged[id]) return;
+        tagged[id] = true;
+
+        fetch('/api/journal/trades/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ setup_id: g.setupId }),
+        }).then(function (r) {
+          if (!r.ok) throw new Error('the journal said ' + r.status);
+          sel.value = g.setupId;
+          markTagged(id, g.setupId, g.setupName);
+          note(sel, 'from the desk', '#22c55e');
+        }).catch(function (err) {
+          // Let it be tried again on the next render rather than losing the tag
+          // silently — and say which one failed.
+          tagged[id] = false;
+          note(sel, 'could not tag: ' + (err && err.message || err), '#ef4444');
+        });
+      });
+    });
   }
 
   function findTrade(id) {
@@ -224,6 +424,9 @@
         card.appendChild(fillLine(g, t));
       });
     });
+
+    autoTag(host);
+    statusLine();
   }
 
   function start() {

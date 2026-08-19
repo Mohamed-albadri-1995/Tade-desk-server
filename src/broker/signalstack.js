@@ -1679,6 +1679,54 @@ function openSymbols(date) {
 }
 
 /**
+ * Which setup put each name on, on a given day.
+ *
+ * WHY IT EXISTS. The journal tags every trade with a setup by hand, and that
+ * tag is what per-setup expectancy is computed from — so a day of untagged
+ * trades is a day that cannot be measured, and tagging from memory a week later
+ * is how a trade ends up filed under the wrong strategy. The desk already knows:
+ * it chose the setup, sized it, and wrote the row.
+ *
+ * ONLY WHAT WENT OUT. Entries, sent, not flattens and not the broker talking
+ * back. A refusal placed nothing and must not tag anything.
+ *
+ * AMBIGUITY IS REPORTED, NEVER RESOLVED. If two setups both took the same name
+ * on the same day, no answer here is better than a coin toss: a wrong tag is
+ * worse than no tag, because it is invisible and it moves a losing trade into
+ * another strategy's record. Both ids come back with `ambiguous` set, and the
+ * caller is expected to leave the field alone and say why.
+ */
+function setupBySymbol(date) {
+  const out = {};
+  for (const o of orders(date)) {
+    if (!o.sent || o.kind === 'flatten' || o.kind === 'callback') continue;
+    if (!o.symbol || !o.setupId) continue;
+    const sym = String(o.symbol).toUpperCase();
+    const was = out[sym];
+    if (!was) {
+      out[sym] = {
+        symbol: sym,
+        setupId: o.setupId,
+        setupIds: [o.setupId],
+        side: String(o.signal || '').toUpperCase() === 'SHORT' ? 'short' : 'long',
+        // The EARLIEST send is the entry. A later row for the same name is
+        // another account's half of the same signal, or a second leg.
+        at: o.at || null,
+        ambiguous: false,
+      };
+      continue;
+    }
+    if (!was.setupIds.includes(o.setupId)) {
+      was.setupIds.push(o.setupId);
+      was.ambiguous = true;
+      was.setupId = null;                 // no guess is better than a wrong one
+    }
+    if ((o.at || 0) < (was.at || Infinity)) was.at = o.at;
+  }
+  return out;
+}
+
+/**
  * Close a whole position. `close` takes no quantity — see the docs.
  *
  * The whole symbol, not a leg: at the cutoff what matters is being flat, and
@@ -1948,7 +1996,7 @@ module.exports = {
   fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,
-  openSymbols, closePosition, flattenAll,
+  openSymbols, setupBySymbol, closePosition, flattenAll,
   slipOf,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled,

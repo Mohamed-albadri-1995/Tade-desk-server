@@ -126,7 +126,14 @@ describe('what it leaves alone', () => {
   test('it appends a line and writes nothing back', () => {
     expect(SRC).toMatch(/card\.appendChild\(fillLine\(g, t\)\)/);
     expect(SRC).not.toMatch(/t\.entryPrice\s*=[^=]/);
-    expect(SRC).not.toMatch(/method:\s*'(POST|PUT|PATCH)'/);
+    /*
+     * The file DOES write now — the setup tag does, and only that. So this
+     * checks the one thing it was always really about: no price or quantity the
+     * journal recorded is ever sent back over Alpaca's version of it. The
+     * disagreement is the finding, and overwriting either side hides it.
+     */
+    const writes = SRC.match(/body: JSON\.stringify\(\{[^}]*\}\)/g) || [];
+    expect(writes).toEqual(['body: JSON.stringify({ setup_id: g.setupId })']);
   });
 
   /*

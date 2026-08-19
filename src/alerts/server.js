@@ -228,6 +228,54 @@ app.get('/api/broker/fills', async (req, res) => {
   }
 });
 
+/*
+ * WHICH SETUP PUT EACH NAME ON, for the journal to tag itself with.
+ *
+ * The journal's setup field is filled by hand, and it is what per-setup
+ * expectancy is computed from — so an untagged day is a day that cannot be
+ * measured, and tagging from memory a week later is how a trade gets filed
+ * under the wrong strategy. The desk already knows: it chose the setup, sized
+ * it, sent it and wrote the row. Nothing had ever asked it.
+ *
+ * The ids are the SAME ids the journal's own setup list carries: that list is
+ * proxied from /api/setups on this app, so a journal trade ends up tagged with
+ * the setup that actually fired, under the id the backtests use. Anything else
+ * and per-setup expectancy would measure a different set of names while looking
+ * identical.
+ *
+ * NOTHING IS WRITTEN HERE. This says what the desk did; the journal decides
+ * whether to accept it, and only ever for a field that is still empty.
+ */
+app.get('/api/broker/setups', async (req, res) => {
+  try {
+    const { toETDate } = require('../utils/time');
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '')
+      ? req.query.date : toETDate(Date.now());
+    const bySymbol = broker.setupBySymbol(day);
+    /*
+     * The name, joined on best effort. qp may be down, and a tag with an id and
+     * no display name still tags correctly — the id is what is stored. So a
+     * failure here costs the label, never the answer.
+     */
+    const names = {};
+    if (Object.keys(bySymbol).length) {
+      try {
+        for (const s of await require('../setups/catalog').list()) names[s.id] = s.name;
+      } catch { /* the label only. The id is what gets stored. */ }
+    }
+    res.json({
+      ok: true, date: day, scope: 'this desk only',
+      symbols: Object.values(bySymbol).map(g => ({
+        ...g, setupName: g.setupId ? (names[g.setupId] || g.setupId) : null,
+      })),
+    });
+  } catch (err) {
+    // 200 with ok:false — see /api/broker/fills. A page that got a 500 shows
+    // nothing and says nothing, which reads as "no trades".
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/broker', (req, res) => {
   const { toETDate } = require('../utils/time');
   const day = toETDate(Date.now());
