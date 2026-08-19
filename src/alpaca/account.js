@@ -154,12 +154,43 @@ function flatten(o) {
  * order can fill in several prints at several prices, and the average on the
  * order hides that.
  */
+const FILL_PAGE = 100;          // Alpaca's maximum; 500 is a 422, not a truncation
+const FILL_PAGES_MAX = 20;      // 2,000 fills in a day is already absurd
+
 async function fills({ after = null, timeoutMs = 15000 } = {}) {
-  const q = new URLSearchParams({ page_size: '500' });
-  if (after) q.set('after', after);
-  const r = await get(`/v2/account/activities/FILL?${q}`, { timeoutMs });
-  if (!r.ok) return r;
-  const rows = Array.isArray(r.data) ? r.data : [];
+  /*
+   * PAGED, at Alpaca's limit rather than at a number that looked generous.
+   *
+   * Asking for 500 does not return 100 — it returns
+   *
+   *     422 {"code":40010001,"message":"tried to set the page size to 500,
+   *          but the maximum is 100"}
+   *
+   * so the whole day came back as an error rather than as a first page. Which
+   * is the better failure of the two, and was still a failure.
+   *
+   * One day CAN exceed a page: a three-leg scale-out in two accounts is six
+   * orders, each able to fill in several prints. So it follows `page_token`,
+   * which for activities is the id of the last row received, and stops when a
+   * page comes back short. Bounded, because an endpoint that never returns a
+   * short page would otherwise loop forever.
+   */
+  const rows = [];
+  let token = null;
+  for (let page = 0; page < FILL_PAGES_MAX; page += 1) {
+    const q = new URLSearchParams({ page_size: String(FILL_PAGE) });
+    if (after) q.set('after', after);
+    if (token) q.set('page_token', token);
+    const r = await get(`/v2/account/activities/FILL?${q}`, { timeoutMs });
+    // A failure mid-way is reported, not silently returned as a partial day —
+    // half a day's fills look exactly like a quiet day.
+    if (!r.ok) return r;
+    const got = Array.isArray(r.data) ? r.data : [];
+    rows.push(...got);
+    if (got.length < FILL_PAGE) break;
+    token = got[got.length - 1].id;
+    if (!token) break;
+  }
   return {
     ok: true,
     fills: rows.map(f => ({
