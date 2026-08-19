@@ -289,6 +289,63 @@ except Exception:
 " 2>/dev/null || echo "FAIL"
 done
 
+# ── qp, which this deploy does not own but the desk depends on ─────────────
+#
+# THE OUTAGE THIS EXISTS TO PREVENT. The chart platform runs as a SYSTEMD
+# service, not under pm2, so nothing above restarts it. When the position
+# manager was added, its endpoint — /api/strategy/manage — shipped inside
+# quant-platform/ and the running qp never picked it up. Every pass got a 404
+# for an hour, with a real short open and nothing evaluating its exit rule.
+#
+# There WAS a warning here already, printed when quant-platform/ changed in the
+# pull. It is not enough, and the reason is worth stating: it fires on the
+# deploy that introduces the change, and is silent on every deploy afterwards —
+# so a note that was missed once is missed for good, while the desk stays
+# broken. A warning about an event cannot detect a STATE.
+#
+# So this asks qp what it is actually running. /api/health returns the short SHA
+# resolved at ITS startup; if that is not this checkout's HEAD, the process is
+# holding older code whatever the pull did, and it is restarted rather than
+# mentioned. Never fatal: qp not being installed is a normal way to run the
+# screeners, and a failure here must not fail a deploy that otherwise worked.
+echo
+echo "[6b/6] Chart platform (qp)..."
+if [ -d quant-platform ]; then
+  QP_PORT="${QP_PORT:-8765}"
+  WANT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+  RUNNING=$(curl -s --max-time 4 "http://127.0.0.1:${QP_PORT}/api/health" 2>/dev/null \
+    | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+        try{process.stdout.write(String(JSON.parse(s).build||''))}catch{process.stdout.write('')}});" 2>/dev/null)
+
+  if [ -z "$RUNNING" ]; then
+    echo "  not answering on :${QP_PORT} — the manager cannot evaluate exit rules"
+    echo "  or move trailing stops without it."
+  elif [ "$RUNNING" = "$WANT" ]; then
+    echo "  OK — running ${RUNNING}, which is this checkout"
+  else
+    echo "  STALE — running ${RUNNING}, this checkout is ${WANT}"
+    if systemctl list-unit-files 2>/dev/null | grep -q '^qp-chart.service'; then
+      echo "  restarting qp-chart…"
+      sudo systemctl restart qp-chart 2>/dev/null || echo "  could not restart it — do it by hand"
+      sleep 4
+      AFTER=$(curl -s --max-time 5 "http://127.0.0.1:${QP_PORT}/api/health" 2>/dev/null \
+        | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+            try{process.stdout.write(String(JSON.parse(s).build||''))}catch{process.stdout.write('')}});" 2>/dev/null)
+      if [ "$AFTER" = "$WANT" ]; then
+        echo "  now running ${AFTER}"
+      else
+        echo "  STILL ${AFTER:-not answering} — the manager will keep failing. Look at:"
+        echo "    sudo journalctl -u qp-chart -n 50"
+      fi
+    else
+      # Started by hand rather than as a service. Say exactly what is wrong
+      # rather than guessing how it was launched.
+      echo "  no qp-chart service — it was started some other way. Restart it, or"
+      echo "  the position manager will keep getting 404s from an old process."
+    fi
+  fi
+fi
+
 echo
 IP=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || echo localhost)
 echo "Landing page: http://${IP}:3000/"

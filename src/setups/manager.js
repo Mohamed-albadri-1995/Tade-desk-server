@@ -51,6 +51,15 @@ const { toETDate } = require('../utils/time');
  */
 const announced = new Set();
 
+/*
+ * Symbols currently unjudgeable, so the alarm is raised once rather than once a
+ * minute — and rearmed by a recovery, unlike `announced` above. The difference
+ * matters: a carried-over position is one permanent fact, while "qp is down" is
+ * a condition that can end and start again, and the second outage is as worth
+ * knowing as the first.
+ */
+const unjudged = new Set();
+
 /** HH:MM in New York — the market's clock, not the machine's. */
 function etNow(at = Date.now()) {
   return new Intl.DateTimeFormat('en-GB', {
@@ -293,6 +302,16 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
                     ...answer, entryExact: exact });
 
       /*
+       * JUDGED. Rearm the alarm below, HERE and not at the end of the block —
+       * every path out of this loop from this point on is a `continue`, and the
+       * common one ("nothing to manage") is the most common outcome there is.
+       * Clearing it at the end meant a recovery almost never registered, so a
+       * second outage would have been swallowed by the first. Caught by the
+       * test for exactly that.
+       */
+      unjudged.delete(pos.symbol);
+
+      /*
        * NOTHING TO MANAGE is the common case and must be cheap and silent.
        * A frozen stop with no exit rule is already entirely in the broker's
        * hands — T2 10:00 is exactly that — and a message every minute saying
@@ -379,12 +398,34 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
       /*
        * An unanswered question is NOT "hold".
        *
-       * A position whose exit could not be evaluated is one nobody is managing,
-       * and staying quiet about it would look exactly like one that is fine.
-       * Said once per position per pass; the loop keeps going.
+       * A position whose exit could not be evaluated is one NOBODY IS MANAGING,
+       * and it looks exactly like one that is fine.
+       *
+       * THIS WAS CONSOLE-ONLY, and it cost a live position an hour of being
+       * unwatched. qp was restarted as a systemd service that the deploy never
+       * touched, so /api/strategy/manage did not exist on the running process
+       * and every pass got a 404. The alert feed said nothing. It was found by
+       * grepping a pm2 log — and only because somebody thought to look.
+       *
+       * So it now raises a fire. ONCE per symbol while it stays broken, because
+       * a message a minute is what teaches you to stop reading the feed; and the
+       * mark is cleared the moment that symbol is judged again, so a LATER
+       * failure is announced afresh rather than swallowed by the first one.
        */
       looked.push({ symbol: pos.symbol, setupId: pos.setupId, error: err.message });
       console.error(`[Manager] ${pos.symbol}: ${err.message}`);
+      if (!unjudged.has(pos.symbol)) {
+        unjudged.add(pos.symbol);
+        store.publishFires([{
+          ruleId: pos.setupId || 'broker', rule: 'Manager', ticker: pos.symbol,
+          toolId: 'ALERTS', date: day, at: Date.now(), kind: 'broker', level: 'error',
+          detail: `${pos.symbol}: NOBODY IS MANAGING THIS POSITION — qp could not be `
+            + `asked what to do with it (${err.message}). Its exit rule is not being `
+            + 'evaluated and its trailing stop is not moving; only the fixed stop at '
+            + `the broker and the ${cfgAll.flattenAt} flatten still apply. This will `
+            + 'be said once, and again if it recurs after recovering.',
+        }], day);
+      }
     }
   }
 

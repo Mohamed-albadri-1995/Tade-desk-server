@@ -592,3 +592,141 @@ describe('a position that survived its own session', () => {
     expect(store.publishFires).not.toHaveBeenCalled();
   });
 });
+
+// ── the hour a live position went unwatched ────────────────────────────────
+/*
+ * WHAT HAPPENED. qp runs as a systemd service that the deploy does not touch,
+ * so when the manager shipped, /api/strategy/manage did not exist on the
+ * running process. Every pass got a 404 for an hour, with a real short open and
+ * nothing evaluating its exit rule or moving its stop.
+ *
+ * The alert feed said NOTHING. The failure went to console.error, and a
+ * position nobody was managing looked exactly like one that was fine. It was
+ * found by grepping a pm2 log, and only because somebody thought to look.
+ *
+ * "An unanswered question is not hold" was already written in the comment above
+ * that catch. It just was not true of anything a person would see.
+ */
+describe('a position that cannot be judged', () => {
+  test('raises an alert, at error level, naming the position', async () => {
+    ledger([{}]);
+    qp.manage.mockRejectedValue(new Error('Request failed with status code 404'));
+    await manager.check(AT);
+    const said = store.publishFires.mock.calls.flatMap(c => c[0])
+      .filter(f => f.ticker === 'CBRS');
+    expect(said).toHaveLength(1);
+    expect(said[0].level).toBe('error');
+    expect(said[0].detail).toMatch(/NOBODY IS MANAGING THIS POSITION/);
+  });
+
+  /* The reason is carried, or the alert cannot be acted on. */
+  test('it says what qp actually answered', async () => {
+    ledger([{ symbol: 'WHYME' }]);
+    qp.manage.mockRejectedValue(new Error('Request failed with status code 404'));
+    await manager.check(AT);
+    expect(store.publishFires.mock.calls.flatMap(c => c[0])[0].detail)
+      .toMatch(/status code 404/);
+  });
+
+  /*
+   * And what DOES still apply, because the answer to "so is it unprotected"
+   * is no — the broker's fixed stop and the flatten are untouched. An alarm
+   * that leaves that ambiguous gets acted on wrongly.
+   */
+  test('it says what still protects the position', async () => {
+    ledger([{ symbol: 'STILLOK' }]);
+    qp.manage.mockRejectedValue(new Error('down'));
+    await manager.check(AT);
+    expect(store.publishFires.mock.calls.flatMap(c => c[0])[0].detail)
+      .toMatch(/fixed stop at the broker and the 15:50 flatten still apply/);
+  });
+
+  /* ONCE. A message a minute is what teaches you to stop reading the feed. */
+  test('it is said once, not once a minute', async () => {
+    ledger([{ symbol: 'NOISY' }]);
+    qp.manage.mockRejectedValue(new Error('down'));
+    await manager.check(AT);
+    await manager.check(AT + 60000);
+    await manager.check(AT + 120000);
+    expect(store.publishFires.mock.calls.flatMap(c => c[0])
+      .filter(f => f.ticker === 'NOISY')).toHaveLength(1);
+  });
+
+  /*
+   * AND REARMED BY A RECOVERY. Unlike the carried-over alarm, "qp is down" is a
+   * CONDITION rather than a fact: it can end and start again, and the second
+   * outage is as worth knowing as the first. Latching it for the session would
+   * make exactly one outage a day visible.
+   */
+  test('a later failure is announced again after a recovery', async () => {
+    ledger([{ symbol: 'AGAIN' }]);
+    qp.manage.mockRejectedValue(new Error('down'));
+    await manager.check(AT);
+    qp.manage.mockResolvedValue(answer({}));          // recovered
+    await manager.check(AT + 60000);
+    qp.manage.mockRejectedValue(new Error('down again'));
+    await manager.check(AT + 120000);
+    expect(store.publishFires.mock.calls.flatMap(c => c[0])
+      .filter(f => f.ticker === 'AGAIN')).toHaveLength(2);
+  });
+
+  /* A healthy position says nothing at all — that is the common case. */
+  test('nothing is said while it can be judged', async () => {
+    ledger([{ symbol: 'FINE' }]);
+    qp.manage.mockResolvedValue(answer({}));
+    await manager.check(AT);
+    expect(store.publishFires).not.toHaveBeenCalled();
+  });
+
+  /*
+   * ONE POSITION MUST NOT STOP THE OTHERS — the others may be the ones that
+   * need closing. The alert is per symbol for the same reason.
+   */
+  test('one unjudgeable position does not stop the rest of the pass', async () => {
+    ledger([{ symbol: 'BROKEN' }, { symbol: 'WORKS' }]);
+    qp.manage.mockImplementation(async ({ symbol }) => {
+      if (symbol === 'BROKEN') throw new Error('down');
+      return answer({ exit_now: true });
+    });
+    reconcile.carriedOver.mockResolvedValue(holds('WORKS'));
+    const r = await manager.check(AT);
+    expect(sent).toHaveLength(1);                      // WORKS was still closed
+    expect(r.looked.find(p => p.symbol === 'BROKEN').error).toBeTruthy();
+  });
+});
+
+describe('the deploy keeps qp in step', () => {
+  const SH = fs.readFileSync(
+    path.join(__dirname, '..', 'deploy-tools.sh'), 'utf8');
+
+  /*
+   * The warning that already existed fired only when quant-platform/ changed in
+   * THAT pull — silent on every deploy afterwards. A note missed once was missed
+   * for good while the desk stayed broken. A warning about an event cannot
+   * detect a STATE.
+   */
+  test('it asks qp what it is RUNNING, not what the pull changed', () => {
+    expect(SH).toMatch(/api\/health/);
+    expect(SH).toMatch(/git rev-parse --short HEAD/);
+    expect(SH).toMatch(/A warning about an event cannot detect a STATE/);
+  });
+
+  test('a stale qp is restarted, not mentioned', () => {
+    expect(SH).toMatch(/sudo systemctl restart qp-chart/);
+    expect(SH).toMatch(/STALE — running/);
+  });
+
+  test('and the restart is verified rather than assumed', () => {
+    expect(SH).toMatch(/AFTER=/);
+    expect(SH).toMatch(/STILL \$\{AFTER:-not answering\}/);
+  });
+
+  /*
+   * NEVER FATAL. Running the screeners without qp is a normal setup, and a
+   * failure here must not fail a deploy that otherwise worked.
+   */
+  test('no qp at all is not an error', () => {
+    expect(SH).toMatch(/if \[ -d quant-platform \]; then/);
+    expect(SH).toMatch(/no qp-chart service/);
+  });
+});
