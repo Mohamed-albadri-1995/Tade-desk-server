@@ -251,7 +251,7 @@ function alerts() {
 }
 
 // ── 4. what went on the wire ───────────────────────────────────────────────
-function ledger() {
+async function ledger() {
   rule('WHAT WENT TO THE BROKER');
   let rows = [];
   try {
@@ -299,20 +299,29 @@ function ledger() {
    *
    * An order is recorded sent on SignalStack's HTTP reply, which means
    * "accepted for delivery" and not "the broker has it" — both live rejections
-   * so far arrived by email hours later. reconciled() joins the callbacks back
-   * on, so "accepted, never heard from again" is answerable; it just was not
-   * being asked.
+   * so far arrived by email hours later.
+   *
+   * THE CALLBACK IS NOT COMING. SignalStack say it is a live-account feature,
+   * and this is a paper account, so every order here read as "accepted, then
+   * silence" and the whole report of it was a false alarm about a message that
+   * does not exist. `reconcile.confirmed()` asks Alpaca instead — the same
+   * question, put to the party that actually filled the order.
    */
   try {
-    const back = require('../src/broker/signalstack').reconciled(DAY)
-      .filter(o => o.sent && o.kind !== 'callback');
+    const recon = require('../src/broker/reconcile');
+    const conf = await recon.confirmed(DAY);
+    const back = conf.rows.filter(o => o.sent && o.kind !== 'callback');
     const unconfirmed = back.filter(o => !o.confirmed);
     const slips = back.map(o => o.slip).filter(v => typeof v === 'number');
     if (back.length) {
       say('');
-      if (unconfirmed.length) {
-        say(`  ⚠ ${unconfirmed.length} of ${back.length} sent order(s) were NEVER CONFIRMED`
-          + ' by the broker — accepted, then silence:');
+      if (!conf.ok) {
+        say(`  could not read the fills from Alpaca: ${conf.error}`);
+      } else if (unconfirmed.length) {
+        // Now a real finding rather than the default state: Alpaca WAS asked
+        // and has no fill matching these orders.
+        say(`  ⚠ ${unconfirmed.length} of ${back.length} sent order(s) have NO FILL at`
+          + ' Alpaca — accepted by SignalStack, never filled:');
         for (const o of unconfirmed.slice(0, 8)) {
           // A flatten carries no quantity — `close` takes none, it flattens the
           // symbol — so printing o.quantity gave "WULF undefined", which reads
@@ -322,7 +331,12 @@ function ledger() {
           say(`      ${o.symbol} ${qty} [${o.destination || '-'}] ${o.setupId || o.source || ''}`);
         }
       } else {
-        say(`  all ${back.length} sent order(s) came back confirmed`);
+        // Which party answered, because they are not equally good evidence: a
+        // fill from Alpaca is the account statement, a callback is a relay's
+        // report of it.
+        const byAlpaca = back.filter(o => o.confirmedBy === 'alpaca').length;
+        say(`  all ${back.length} sent order(s) filled`
+          + (byAlpaca ? `  (${byAlpaca} confirmed from Alpaca's own fill record)` : ''));
       }
       if (slips.length) {
         // Signed against the position: positive is worse than the decision
@@ -331,12 +345,35 @@ function ledger() {
         const avg = slips.reduce((a, b) => a + b, 0) / slips.length;
         say(`  fill vs the price the decision used: average ${avg >= 0 ? '+' : ''}`
           + `${avg.toFixed(4)}, worst ${worst >= 0 ? '+' : ''}${worst.toFixed(4)}`
-          + '   (+ = worse than assumed)');
-      } else {
-        say('  no fill prices came back, so the cost of the delay is unmeasured');
+          + `   (+ = worse than assumed, ${slips.length} order(s))`);
+        /*
+         * WHAT THE SLIP DID TO THE TRADE, not just to the price.
+         *
+         * Three cents is meaningless on its own. Three cents on a stop
+         * thirty-seven cents away is 8% of the risk, and it comes off the
+         * reward as well: a plan tested at 2R is not a 2R trade any more. This
+         * is the number the strategy is actually being judged on, and until
+         * now nothing computed it.
+         */
+        for (const o of back.filter(v => typeof v.slip === 'number' && v.stop != null)) {
+          const risk = Math.abs(Number(o.price) - Number(o.stop));
+          if (!Number.isFinite(risk) || risk === 0) continue;
+          const realRisk = Math.abs(Number(o.finalPrice) - Number(o.stop));
+          if (!Number.isFinite(realRisk) || realRisk === 0) continue;
+          const plannedR = o.target != null
+            ? Math.abs(Number(o.target) - Number(o.price)) / risk : null;
+          const realR = o.target != null
+            ? Math.abs(Number(o.target) - Number(o.finalPrice)) / realRisk : null;
+          say(`      ${String(o.symbol).padEnd(6)} planned from ${Number(o.price).toFixed(2)},`
+            + ` filled ${Number(o.finalPrice).toFixed(2)}`
+            + `  — risk ${risk.toFixed(2)} → ${realRisk.toFixed(2)}`
+            + (plannedR ? `, ${plannedR.toFixed(2)}R → ${realR.toFixed(2)}R` : ''));
+        }
+      } else if (conf.ok) {
+        say('  no fills matched these orders, so the cost of the delay is unmeasured');
       }
     }
-  } catch (err) { say(`  could not reconcile the callbacks: ${err.message}`); }
+  } catch (err) { say(`  could not confirm the fills: ${err.message}`); }
 
   say('');
   for (const o of rows) {
@@ -633,7 +670,7 @@ function reconcile(fires, rows) {
 (async () => {
   await setups();
   const fires = alerts();
-  const rows = ledger();
+  const rows = await ledger();
   await broker_truth();
   managed();
   reconcile(fires, rows);

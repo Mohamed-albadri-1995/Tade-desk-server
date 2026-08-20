@@ -2048,6 +2048,10 @@ function reconciled(date = null) {
       finalStatus: last ? last.status : null,
       finalPrice: last && last.fillPrice != null ? last.fillPrice : null,
       confirmed: !!last,
+      // WHO answered. A callback is SignalStack's word; `confirmFromFills`
+      // below can answer the same question from the broker's own record, and a
+      // row that says neither was never answered at all.
+      confirmedBy: last ? 'signalstack' : null,
       callbacks: later.length,
       /*
        * WHAT THE DECISION ASSUMED versus WHAT IT GOT.
@@ -2070,6 +2074,99 @@ function reconciled(date = null) {
   });
 }
 
+/*
+ * CONFIRMING AN ORDER FROM THE BROKER'S OWN RECORD.
+ *
+ * The callback above is the designed answer to "what did it actually fill at",
+ * and on a PAPER account it does not exist. SignalStack say the callback is a
+ * live-account feature, so the desk was waiting for a message that was never
+ * going to arrive: every paper order read as "accepted, then silence", and
+ * `slipOf` — the entire measurement of what the minute between the decision
+ * bar's close and the market order costs — had no input at all on any trade.
+ *
+ * Alpaca's own fill record answers the same question and answers it better.
+ * The callback carries one average price; the account statement carries every
+ * print, so a fill that came in three pieces is visible as three pieces.
+ *
+ * MATCHING IS BY SYMBOL, SIDE AND TIME, because there is no shared id to match
+ * on: SignalStack's reply carries SignalStack's order id, and Alpaca's fills
+ * carry Alpaca's. So the rows are walked oldest-first and each one takes the
+ * earliest fill that could be its answer — same symbol, same side, at or after
+ * the moment the order was sent — and every other print of THAT broker order
+ * with it. Fills are consumed as they are taken, so two orders on one symbol
+ * cannot both claim the same fill.
+ *
+ * SIDE IS WHAT SEPARATES AN ENTRY FROM ITS EXIT. A long's entry fills `buy`
+ * and its stop or target fills `sell`; a short's entry fills `sell_short` and
+ * its cover fills `buy`. Without that check every entry would be "confirmed"
+ * by the fill that closed it, hours later and at a completely different price,
+ * and the slip figure would be a measure of the trade's P&L instead.
+ *
+ * A REAL CALLBACK STILL WINS. If SignalStack ever does answer — on a live
+ * account it will — that is the more direct record of the order this row is
+ * about, and this never overwrites it.
+ */
+
+/** Clock skew between this box and Alpaca. Fills are not early by more. */
+const FILL_GRACE_MS = 5000;
+
+function sideMatches(action, fillSide) {
+  const a = String(action || '').toLowerCase();
+  const s = String(fillSide || '').toLowerCase();
+  // Alpaca says buy | sell | sell_short; the ledger only ever says buy | sell.
+  return a === 'buy' ? s.startsWith('buy') : s.startsWith('sell');
+}
+
+function confirmFromFills(rows, fills) {
+  const viaAlpaca = new Set(destinations()
+    .filter(d => d.dialect === 'alpaca')
+    .map(d => d.id));
+
+  const ordered = (fills || [])
+    .map(f => ({ ...f, ts: Date.parse(f.at) }))
+    .filter(f => Number.isFinite(f.ts))
+    .sort((a, b) => a.ts - b.ts);
+
+  // Matched oldest-first, but RETURNED in the order they came in: the ledger's
+  // own order is what the broker page and the day report print.
+  const answer = new Map();
+  const taken = new Set();
+  const chronological = rows
+    .map((row, i) => ({ row, i }))
+    .sort((a, b) => (a.row.at || 0) - (b.row.at || 0));
+
+  for (const { row, i } of chronological) {
+    if (row.confirmed || !row.sent) continue;
+    if (!viaAlpaca.has(row.destination)) continue;
+    const first = ordered.find(f => !taken.has(f.id)
+      && f.symbol === row.symbol
+      && sideMatches(row.action, f.side)
+      && f.ts >= (row.at || 0) - FILL_GRACE_MS);
+    if (!first) continue;
+
+    // Every print of the SAME broker order. A partial fill is not a second
+    // order, and averaging only the first print would report a price the
+    // position never had.
+    const prints = ordered.filter(f => !taken.has(f.id) && f.orderId === first.orderId);
+    for (const f of prints) taken.add(f.id);
+    const qty = prints.reduce((n, f) => n + f.qty, 0);
+    if (!qty) continue;
+    const paid = prints.reduce((n, f) => n + (f.qty * f.price), 0) / qty;
+    const fillPrice = Math.round(paid * 10000) / 10000;
+    answer.set(i, {
+      finalStatus: 'filled',
+      finalPrice: fillPrice,
+      confirmed: true,
+      confirmedBy: 'alpaca',
+      filledQty: qty,
+      prints: prints.length,
+      ...slipOf(row, { fillPrice }),
+    });
+  }
+
+  return rows.map((row, i) => (answer.has(i) ? { ...row, ...answer.get(i) } : row));
+}
+
 module.exports = {
   FILE, LEDGER, HOOK_RE, MIN_SHARES,
   settings, publicSettings, save, mask,
@@ -2083,5 +2180,5 @@ module.exports = {
   openSymbols, setupBySymbol, closePosition, flattenAll, orphanIntents,
   slipOf,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
-  reconciled,
+  reconciled, confirmFromFills,
 };

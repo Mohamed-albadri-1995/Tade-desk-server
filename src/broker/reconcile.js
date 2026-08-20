@@ -323,4 +323,32 @@ async function fillsFor(date, { timeoutMs = 15000 } = {}) {
   };
 }
 
-module.exports = { compare, carriedOver, flatSymbols, fillsFor, alpacaDestinations };
+/**
+ * The day's orders with the fill price joined back on — from the broker, since
+ * SignalStack's callback is a live-account feature and this desk is on paper.
+ *
+ * Always returns the rows. A day report that printed nothing because Alpaca was
+ * unreachable would be a worse failure than one that prints the orders and says
+ * the fill prices are missing, so `ok:false` carries the unenriched rows with it.
+ */
+async function confirmed(date, { timeoutMs = 15000 } = {}) {
+  const rows = broker.reconciled(date);
+  // Nothing to ask about, or nothing Alpaca could answer for. Not an error:
+  // a TTP-only desk is correctly reported as simply having no fill record here.
+  if (!rows.length || !alpacaDestinations().length) {
+    return { ok: true, rows, verifiable: false };
+  }
+  const after = new Date(`${date}T04:00:00-04:00`).toISOString();
+  let r;
+  try {
+    r = await alpaca.fills({ after, timeoutMs });
+  } catch (err) {
+    return { ok: false, error: err.message, rows, verifiable: true };
+  }
+  if (!r.ok) return { ok: false, error: r.error, rows, verifiable: true };
+  return { ok: true, rows: broker.confirmFromFills(rows, r.fills), verifiable: true };
+}
+
+module.exports = {
+  compare, carriedOver, flatSymbols, fillsFor, confirmed, alpacaDestinations,
+};
