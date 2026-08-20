@@ -130,11 +130,15 @@ chkv('day-10 has both tickers', sorted(t['symbol'] for t in out2['trades']
 ctxs = {(t['date'], t['symbol']): t.get('ctx') or {} for t in out2['trades']}
 chkv('R1 card rides with each trade', ctxs[('2024-01-09', 'AAA')].get('score'), 71)
 chkv('per-day ctx differs', ctxs[('2024-01-10', 'AAA')].get('regime'), 'CHOP')
-# symbols universe carries NO register card — only the run's own diagnostics
-# (drop_pct, and `strategy`, which names the strategy that produced the trade
-# so a run carrying a long book AND a short book stays attributable)
+# symbols universe carries NO register card — only the run's own diagnostics.
+# The set grew on 2026-08-20 and the point of the check did not: what is being
+# asserted is that no SCREENER column leaks in, not that the diagnostics never
+# change. `decided` is the price the decision used, carried so a report can put
+# it beside the price the trade got — under the 'desk' fill model those are two
+# different numbers and their difference is the execution gap.
 chkv('symbols universe ctx has no register card (only diagnostics)',
-     all(set(t.get('ctx') or {}) <= {'drop_pct', 'strategy'} for t in out['trades']), True)
+     all(set(t.get('ctx') or {}) <= {'drop_pct', 'strategy', 'decided'}
+         for t in out['trades']), True)
 chkv('every trade names the strategy that produced it',
      all((t.get('ctx') or {}).get('strategy') for t in out['trades']), True)
 chkv('drop_pct diagnostic rides on each trade',

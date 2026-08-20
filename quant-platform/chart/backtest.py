@@ -1074,7 +1074,14 @@ def run(spec: dict, progress_cb=None) -> dict:
                                    'ret': t['ret'] - (2.0 + nlegs) * cost,
                                    'reason': t['reason'],
                                    # diagnostics ride in ctx (no schema change)
+                                   # THE PRICE THE DECISION USED, beside the
+                                   # price the trade got. They differ only under
+                                   # the 'desk' fill model, and where they differ
+                                   # the difference is the execution gap — the
+                                   # whole reason that model exists. Dropping it
+                                   # here left the gap computable and unreadable.
                                    'ctx': {**(rctx or {}),
+                                           'decided': t.get('decided'),
                                            'drop_pct': t.get('drop_pct'),
                                            'strategy': sname},
                                    'legs': t.get('legs') or []})
@@ -1098,6 +1105,7 @@ def run(spec: dict, progress_cb=None) -> dict:
                                   'ret': ot['ret_pct'] / 100.0 - (1.0 + nlegs) * cost,
                                   'reason': 'open',
                                   'ctx': {**(rctx or {}),
+                                          'decided': ot.get('decided'),
                                           'drop_pct': ot.get('drop_pct'),
                                           'strategy': sname},
                                   'legs': ot.get('legs') or []})

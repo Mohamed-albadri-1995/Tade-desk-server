@@ -45,6 +45,17 @@ def _hhmm(ts) -> str:
     return t.strftime('%H:%M') if t is not None else '—'
 
 
+def _fnum(v) -> float | None:
+    """A float, or None. Never a zero standing in for a missing number — a
+    price of 0.0 and no price at all mean opposite things in every calculation
+    below."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None
+
+
 def _stop_of(t: dict) -> float | None:
     """The trade's stop PRICE.
 
@@ -334,7 +345,9 @@ def _group(pnl: list, key, keep_order: bool = False) -> dict:
 JOURNAL_COLUMNS = [
     ('n', '#'), ('date', 'date'), ('symbol', 'symbol'), ('side', 'side'),
     ('entry_time', 'entry'), ('entry_price', 'entry $'),
+    ('decided_price', 'decided $'), ('slip_per_share', 'slip/sh'),
     ('stop_price', 'stop $'), ('risk_per_share', 'risk/sh'),
+    ('planned_risk_per_share', 'planned risk/sh'),
     ('exit_time', 'exit'), ('exit_price', 'exit $'), ('exit_reason', 'why'),
     ('hold_min', 'held (min)'),
     ('shares', 'shares'), ('position_usd', 'position $'),
@@ -417,13 +430,34 @@ def journal(trades: list, summary: dict) -> list:
         hold = ((int(t['exit_ts']) - int(t['entry_ts'])) / 60.0
                 if t.get('exit_ts') and t.get('entry_ts') else None)
         per_share = (abs(float(t['entry']) - stop) if stop is not None else None)
+        decided = _fnum((t.get('ctx') or {}).get('decided'))
+        planned_risk = (abs(decided - stop)
+                        if (decided is not None and stop is not None) else None)
+        slip = None
+        if decided is not None:
+            raw = float(t['entry']) - decided
+            slip = -raw if str(t.get('side')).lower() == 'short' else raw
         out.append({
             'n': i, 'date': t.get('date'), 'symbol': t.get('symbol'),
             'side': t.get('side'),
             'entry_time': _hhmm(t.get('entry_ts')),
             'entry_price': round(float(t['entry']), 4),
+            # WHAT THE DECISION USED, beside what the trade got. Equal under
+            # every fill model but 'desk'; where they differ, that difference is
+            # the execution gap — the stop, the target, the R and the share
+            # count were all priced from `decided`, and the money went in at
+            # `entry_price`. Signed against the POSITION: positive is worse,
+            # whichever way the trade faces, so a long paying up and a short
+            # selling down do not report as opposites.
+            'decided_price': (round(decided, 4) if decided is not None else None),
+            'slip_per_share': (round(slip, 4) if slip is not None else None),
             'stop_price': (round(stop, 4) if stop is not None else None),
             'risk_per_share': (round(per_share, 4) if per_share is not None else None),
+            # The risk the PLAN assumed, against the risk actually taken. A 2R
+            # plan entered a few cents worse is not a 2R trade, and until these
+            # sat side by side nothing said so.
+            'planned_risk_per_share': (round(planned_risk, 4)
+                                       if planned_risk is not None else None),
             'exit_time': _hhmm(t.get('exit_ts')),
             'exit_price': (round(float(t['exit']), 4) if t.get('exit') is not None else None),
             'exit_reason': t.get('reason'),
