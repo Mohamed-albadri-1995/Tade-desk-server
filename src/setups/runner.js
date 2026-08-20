@@ -28,6 +28,40 @@ const prefs = require('./prefs');
 const broker = require('../broker/signalstack');
 const alertStore = require('../alerts/store');
 
+/*
+ * HOW OLD A SIGNAL MAY BE AND STILL BE THE TRADE YOU ARE PLACING.
+ *
+ * One bar, and the reason is not tolerance for staleness — it is that the
+ * desk's own order lands a bar late by construction. The decision is taken on
+ * the close of the bar just finished and the market order reaches the tape
+ * inside the next one, so a signal stamped one minute before the bar being
+ * decided is the SAME trade seen through a feed that published a minute late.
+ *
+ * Refusing that would turn a one-bar feed lag into a setup that silently takes
+ * nothing at all, every bar, for the whole window — the failure that is hardest
+ * to notice, because a strategy finding nothing looks exactly like a quiet day.
+ *
+ * Anything older is a different trade. The setups run on 1-minute bars, so this
+ * is one bar; it is expressed in minutes because that is what qp stamps.
+ */
+const STALE_TOLERANCE_MIN = 1;
+
+/** How many minutes before `bar` a pick fired. 0 when it is the same bar. */
+function staleBy(entryAt, bar) {
+  const mins = (hhmm) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const a = mins(entryAt);
+  const b = mins(bar);
+  // An unparseable stamp is not evidence of staleness. qp always sends one;
+  // if it ever stops, dropping every pick would be the worst possible reading.
+  if (a === null || b === null) return 0;
+  // A pick from the FUTURE is not stale, and cannot happen — qp evaluates
+  // closed bars. Clamped rather than made negative so the comparison is simple.
+  return Math.max(0, b - a);
+}
+
 /** The minute before the decision — the last bar that must have closed. */
 function lastWantedBar(decisionTime) {
   const [h, m] = String(decisionTime).split(':').map(Number);
@@ -423,6 +457,49 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
    * order guard — one entry per setup per name per day is already the rule
    * money follows, and the alert should not describe a different desk.
    */
+  /*
+   * A PICK IS ONLY A PICK ON THE BAR IT FIRED ON.
+   *
+   * qp is asked to decide `date`, and it answers with every signal that opened
+   * that session — which is the right answer to the question asked, and the
+   * wrong set to trade. A WATCH setup is asked once a minute across its whole
+   * window, and on every one of those passes the strategy still reports the
+   * entry it found earlier. So a setup watching 09:40–10:10 that first sees a
+   * stock at 10:05 is handed a signal from 09:42 and, until now, sent a market
+   * order for it.
+   *
+   * Two separate things are wrong with that, and only one of them is obvious:
+   *
+   *   THE PRICE IS STALE. The stop, the target, the R and the share count were
+   *   all computed from the 09:42 close. Twenty-three minutes later that is
+   *   not a slightly worse entry, it is a different trade wearing the numbers
+   *   of the tested one.
+   *
+   *   THE STOCK WAS NOT ON THE WATCHLIST AT 09:42. The scanner surfaced it at
+   *   10:00. No alert could have fired and no order could have been placed on
+   *   a name the desk had not found yet — so the backtest's watchlist gate
+   *   drops exactly this trade, and the live side was taking it. The two were
+   *   measuring different strategies, and the live one was the looser.
+   *
+   * A clock setup is unaffected: its window is one minute wide, so the bar it
+   * decides on is the only bar its signals can carry. The guard costs it
+   * nothing and protects it from the same fault if its window is ever widened.
+   *
+   * Dropped LOUDLY. A stale pick is not noise — it means the setup found
+   * something on a bar it could not act on, which is worth seeing.
+   */
+  if (decisionBar) {
+    const stale = out.picks.filter(p => staleBy(p.decisionAt, decisionBar) > STALE_TOLERANCE_MIN);
+    if (stale.length) {
+      const drop = new Set(stale.map(p => p.ticker));
+      out.picks = out.picks.filter(p => !drop.has(p.ticker));
+      out.staleBars = stale.map(p => `${p.ticker}@${p.decisionAt}`);
+      console.log(`[Setups] ${setup.id}: ${stale.length} pick(s) fired on an `
+        + `earlier bar than ${decisionBar} and were dropped — `
+        + `${out.staleBars.join(', ')}`);
+    }
+  }
+
   const alreadyToday = new Set();
   if (!dryRun) {
     for (const f of alertStore.recentFires(day, 500)) {
@@ -844,6 +921,10 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
       attempts: data.attempts,
     },
     tookMs: Date.now() - started,
+    // Picks that fired on an earlier bar and were refused. Carried out of the
+    // run because "the setup found something on a bar it could not act on" is
+    // a fact about the day, not a log line — the session report reads it.
+    staleBars: out.staleBars,
     fires,
   };
   console.log(`[Setups] ${setup.id}: ${out.picks.length} pick(s) from ${list.length} cards `

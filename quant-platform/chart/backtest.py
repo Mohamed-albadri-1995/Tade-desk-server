@@ -133,27 +133,66 @@ def select_by_rank(closed: list, metric, direction, top_n: int = 0):
             round(sc, 6) if sc is not None else None)
         by_date.setdefault(t['date'], []).append(t)
 
-    keep, dropped, unscored = [], 0, 0
+    keep, dropped, unscored, late = [], 0, 0, 0
     for d, rows in by_date.items():
-        # best first for the chosen direction; ties broken by ticker so a run
-        # is reproducible. Unscorable rows sort last either way and are dropped
-        # explicitly, never treated as merely weakest.
-        rows.sort(key=lambda t: (
-            (sgn * t['ctx']['rank_metric']) if t['ctx'].get('rank_metric') is not None
-            else float('inf'), t['symbol']))
-        for i, t in enumerate(rows):
-            t['ctx']['rank_in_day'] = i + 1
-            if t['ctx'].get('rank_metric') is None:
-                dropped += 1
-                unscored += 1
-            elif top_n and i >= top_n:
-                dropped += 1
-            else:
-                keep.append(t)
+        # WITHIN A DECISION MOMENT, NEVER ACROSS THE DAY.
+        #
+        # Grouping the whole day and keeping the best `top_n` was a look-ahead
+        # and a bad one: it ranked a 10:05 signal against a 13:20 signal and
+        # kept the better. At 10:05 the 13:20 signal did not exist. Nobody
+        # could have made that choice, so no result that depended on it was
+        # ever reachable.
+        #
+        # A live desk decides bar by bar: it sees what has fired ON THIS BAR,
+        # ranks those against each other, takes what its remaining allowance
+        # lets it take, and then lives with having spent it. A better signal
+        # three hours later is not an argument — the money is already in
+        # something.
+        #
+        # So: signals are walked in TIME order, ranked only against others at
+        # the same instant, and `top_n` is spent as a budget for the day. For a
+        # clock setup — the two live ones fire in a single minute — every
+        # signal shares one moment, so this is exactly the old behaviour and
+        # the numbers do not move. For anything with a WINDOW (every scalp:
+        # 10:00–13:30, 09:59–16:00) it is the difference between a result and
+        # a wish.
+        by_moment: dict = {}
+        for t in rows:
+            by_moment.setdefault(t.get('entry_ts') or 0, []).append(t)
+
+        budget = top_n if top_n else None
+        rank_seq = 0
+        for _ts in sorted(by_moment):
+            # best first for the chosen direction; ties broken by ticker so a
+            # run is reproducible. Unscorable rows sort last either way and are
+            # dropped explicitly, never treated as merely weakest.
+            moment = sorted(by_moment[_ts], key=lambda t: (
+                (sgn * t['ctx']['rank_metric']) if t['ctx'].get('rank_metric') is not None
+                else float('inf'), t['symbol']))
+            for t in moment:
+                rank_seq += 1
+                t['ctx']['rank_in_day'] = rank_seq
+                if t['ctx'].get('rank_metric') is None:
+                    dropped += 1
+                    unscored += 1
+                elif budget is not None and budget <= 0:
+                    # Lost to the CLOCK, not to a better signal. Counted apart
+                    # because the two say different things about a strategy:
+                    # one is being out-ranked, the other is firing more often
+                    # than the day's allowance can pay for.
+                    dropped += 1
+                    late += 1
+                else:
+                    keep.append(t)
+                    if budget is not None:
+                        budget -= 1
 
     return keep, {'metric': metric, 'direction': direction, 'top_n': top_n,
                   'kept': len(keep), 'dropped_by_rank': dropped,
-                  'dropped_unscorable': unscored}
+                  'dropped_unscorable': unscored,
+                  # Signals that lost to something that had already fired, not
+                  # to something better. See the note above.
+                  'dropped_budget_used': late}
 
 
 def _et_date(ts_s: int) -> str:

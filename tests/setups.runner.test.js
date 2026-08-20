@@ -374,6 +374,62 @@ describe('a setup with a window rather than a minute', () => {
   });
 
   /*
+   * THE STALE PICK — the fault that let the desk trade a stock at a time when
+   * it was not on the watchlist.
+   *
+   * qp is asked to decide a DATE and answers with every signal that opened
+   * that session. A watch setup asks once a minute, so on the 10:05 pass it is
+   * handed the entry the strategy found at 09:42 — and until this guard it
+   * sent a market order for it.
+   *
+   * Both halves of that are wrong. The stop, the target, the R and the share
+   * count were all priced from the 09:42 close, so twenty-three minutes later
+   * the order is a different trade wearing the tested trade's numbers. And the
+   * scanner had not surfaced the stock at 09:42: no alert could have fired and
+   * no order could have been placed, which is precisely the trade the
+   * backtest's watchlist gate drops. The two sides were measuring different
+   * strategies and the live one was the looser.
+   */
+  test('a pick from an earlier bar is refused, not traded late', async () => {
+    decided([pick('LIFE', { at: '09:42' })]);
+    const [out] = await runner.runDue('10:05', { date: DATE });
+    expect(out.fires).toHaveLength(0);
+    expect(store.recentFires(DATE).filter(f => f.ticker)).toHaveLength(0);
+  });
+
+  /*
+   * ONE BAR IS NOT STALENESS, IT IS THE DESK'S OWN LATENCY.
+   *
+   * The decision is taken on the close of the bar just finished and the market
+   * order reaches the tape inside the NEXT one. A signal stamped a minute
+   * before the bar being decided is that same trade, seen through a feed that
+   * published late. Refusing it would turn a one-bar lag into a setup that
+   * takes nothing at all for its whole window — and a strategy finding nothing
+   * looks exactly like a quiet day, which is why that failure never gets seen.
+   */
+  test('a pick one bar behind is still taken — that is the desk itself', async () => {
+    decided([pick('LIFE', { at: '10:04' })]);
+    const [out] = await runner.runDue('10:05', { date: DATE });
+    expect(out.fires.filter(f => f.ticker)).toHaveLength(1);
+    expect(out.staleBars).toBeUndefined();
+  });
+
+  test('two bars behind is a different trade, and is refused', async () => {
+    decided([pick('LIFE', { at: '10:03' })]);
+    const [out] = await runner.runDue('10:05', { date: DATE });
+    expect(out.fires.filter(f => f.ticker)).toHaveLength(0);
+  });
+
+  test('the drop is reported, because it means the setup missed a bar', async () => {
+    decided([pick('LIFE', { at: '09:42' }), pick('LSCC', { at: '10:05' })]);
+    const [out] = await runner.runDue('10:05', { date: DATE });
+    expect(out.staleBars).toEqual(['LIFE@09:42']);
+    // …and the pick that DID fire on this bar is untouched by the guard.
+    expect(store.recentFires(DATE).filter(f => f.ticker).map(f => f.ticker))
+      .toEqual(['LSCC']);
+  });
+
+  /*
    * Thirty-one bars, thirty-one "nothing qualified" lines, one of which matters.
    * The empty answer is worth publishing once — on the last bar, when it is
    * final — and worth suppressing on the bars where the day is still open.
@@ -397,19 +453,25 @@ describe('a setup with a window rather than a minute', () => {
    * answers the same trade on every remaining bar. One break, one alert.
    */
   test('a ticker that already fired today does not fire again', async () => {
-    decided([pick('LIFE')]);
+    // The pick's own bar, matching the bar being decided. It used to say
+    // 10:00 for a run at 09:52 — a shape qp cannot produce and the runner now
+    // refuses, because a signal from another bar carries another bar's prices.
+    decided([pick('LIFE', { at: '09:52' })]);
     const first = await runner.runDue('09:52', { date: DATE });
     expect(first[0].fires).toHaveLength(1);
 
+    // Still the same broken level a minute later, so qp answers with the same
+    // trade — now stamped 09:53, which is what a re-evaluation really returns.
+    decided([pick('LIFE', { at: '09:53' })]);
     const again = await runner.runDue('09:53', { date: DATE });
     expect(again[0].latched).toBe(1);
     expect(store.recentFires(DATE).filter(f => f.ticker === 'LIFE')).toHaveLength(1);
   });
 
   test('but a different ticker later in the window still does', async () => {
-    decided([pick('LIFE')]);
+    decided([pick('LIFE', { at: '09:52' })]);
     await runner.runDue('09:52', { date: DATE });
-    decided([pick('LSCC')]);
+    decided([pick('LSCC', { at: '09:58' })]);
     await runner.runDue('09:58', { date: DATE });
     const tickers = store.recentFires(DATE).filter(f => f.ticker).map(f => f.ticker);
     expect(tickers.sort()).toEqual(['LIFE', 'LSCC']);
