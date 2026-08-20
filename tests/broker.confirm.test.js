@@ -198,3 +198,70 @@ test('no fills at all changes nothing and throws nothing', () => {
   expect(broker.confirmFromFills([row()], null)[0].confirmed).toBe(false);
   expect(broker.confirmFromFills([], [fill()])).toEqual([]);
 });
+
+/*
+ * TWO ALPACA ACCOUNTS, ONE KEY PAIR.
+ *
+ * `alpaca/client.js` resolves credentials with `... LIMIT 1` — the default
+ * broker profile. Every position and every fill therefore answers for exactly
+ * one account, and nothing in the answer says which. A second Alpaca account
+ * would not be uncovered, it would be MIS-attributed: B's order matched to A's
+ * fill on the same symbol, same side, the same few seconds. The match succeeds
+ * and the price is another account's money.
+ *
+ * That is not a missing number, it is a confident wrong one — and `slip`, the
+ * whole measurement this feeds, would be built on it. So the answer becomes
+ * unavailable instead.
+ */
+const reconcile = require('../src/broker/reconcile');
+
+test('one Alpaca account is unambiguous', () => {
+  expect(reconcile.credentialScope()).toMatchObject({ ambiguous: false, ids: ['alp'] });
+});
+
+test('a second Alpaca account makes attribution impossible, and says so', () => {
+  broker.save({
+    enabled: true,
+    destinations: [
+      { id: 'alp', name: 'Alpaca A', dialect: 'alpaca', webhookUrl: HOOK,
+        ratio: 1, buyingPower: 50000, mode: 'auto' },
+      { id: 'alp2', name: 'Alpaca B', dialect: 'alpaca', webhookUrl: HOOK,
+        ratio: 1, buyingPower: 50000, mode: 'auto' },
+    ],
+  });
+  const scope = reconcile.credentialScope();
+  expect(scope.ambiguous).toBe(true);
+  // Names both accounts, so the reader knows which pair is in question.
+  expect(scope.reason).toMatch(/alp, alp2/);
+  expect(scope.reason).toMatch(/ONE set of Alpaca credentials/);
+});
+
+test("confirmation refuses rather than borrowing the other account's fill", async () => {
+  // A real ledger line, so `confirmed()` reaches the guard instead of
+  // short-circuiting on an empty day.
+  fs.writeFileSync(process.env.BROKER_LEDGER, `${JSON.stringify(row())}\n`);
+  broker.save({
+    enabled: true,
+    destinations: [
+      { id: 'alp', name: 'Alpaca A', dialect: 'alpaca', webhookUrl: HOOK,
+        ratio: 1, buyingPower: 50000, mode: 'auto' },
+      { id: 'alp2', name: 'Alpaca B', dialect: 'alpaca', webhookUrl: HOOK,
+        ratio: 1, buyingPower: 50000, mode: 'auto' },
+    ],
+  });
+
+  const out = await reconcile.confirmed(DAY);
+  expect(out.ok).toBe(false);
+  expect(out.ambiguous).toBe(true);
+  expect(out.error).toMatch(/ONE set of Alpaca credentials/);
+  // The orders still come back — a day report that printed nothing because the
+  // account was ambiguous would be a worse failure than one that prints the
+  // orders and says the fill prices are unavailable.
+  expect(out.rows).toHaveLength(1);
+  expect(out.rows[0].confirmed).toBe(false);
+
+  // And this is the danger being averted: the matcher itself would have said
+  // yes. The guard is the only thing standing between a plausible number and
+  // another account's money.
+  expect(broker.confirmFromFills([row()], [fill()])[0].confirmed).toBe(true);
+});

@@ -46,6 +46,49 @@ function alpacaDestinations() {
     .map(d => d.id);
 }
 
+/*
+ * ONE SET OF CREDENTIALS, HOWEVER MANY ALPACA ACCOUNTS ARE CONFIGURED.
+ *
+ * `alpacaDestinations()` returns a LIST, which reads as though a second Alpaca
+ * account would simply be covered too. It would not. `alpaca/client.js`
+ * resolves credentials with
+ *
+ *     SELECT config FROM trading_brokers WHERE type='alpaca' AND enabled=1
+ *      ORDER BY is_default DESC, created_at ASC LIMIT 1
+ *
+ * — ONE key pair, the default profile. Every position, every fill and every
+ * account read therefore answers for exactly one account, and nothing in the
+ * answer says which one.
+ *
+ * WHAT THAT WOULD DO IF IT WENT UNGUARDED, and it is worse than a gap:
+ *
+ *   RECONCILIATION would compare account A's positions against orders sent to
+ *   A and to B together. Every B position would land in 'unknown-position' —
+ *   the loudest finding there is — and every real one would be buried under
+ *   the noise, which is how a reconciliation stops being read.
+ *
+ *   CONFIRMATION would match B's orders to A's fills. Same symbol, same side,
+ *   the same few seconds: the match would succeed and the fill price would be
+ *   another account's. That is not a missing number, it is a confident wrong
+ *   one, and `slip` — the whole measurement this feeds — would be built on it.
+ *
+ * So a second Alpaca account makes these answers UNAVAILABLE rather than
+ * wrong, until credentials are resolved per destination. Silence here is a
+ * feature request; a wrong fill price is a corrupted record.
+ */
+function credentialScope() {
+  const ids = alpacaDestinations();
+  if (ids.length <= 1) return { ids, ambiguous: false, reason: null };
+  return {
+    ids,
+    ambiguous: true,
+    reason: `${ids.length} Alpaca accounts are configured (${ids.join(', ')}) and `
+      + 'this desk holds ONE set of Alpaca credentials — every read answers for '
+      + 'one of them and nothing here can say which. Positions and fills cannot '
+      + 'be attributed to an account until credentials are stored per destination.',
+  };
+}
+
 /**
  * The two views, side by side, with the disagreements named.
  *
@@ -65,6 +108,12 @@ async function compare(date, { timeoutMs = 10000 } = {}) {
     positions: [],
     findings: [],
   };
+
+  const scope = credentialScope();
+  if (scope.ambiguous) {
+    out.ambiguous = true;
+    out.findings.push({ level: 'error', kind: 'ambiguous-account', detail: scope.reason });
+  }
 
   const [pos, acct] = await Promise.all([
     alpaca.positions({ timeoutMs }),
@@ -151,7 +200,14 @@ async function compare(date, { timeoutMs = 10000 } = {}) {
   }
 
   // ── held at Alpaca and unknown here — the dangerous direction ────────────
-  for (const p of out.positions) {
+  //
+  // Skipped entirely when the account is ambiguous. With two Alpaca accounts
+  // and one key pair, every position in the OTHER account arrives here as
+  // 'ALPACA HOLDS n AND THIS SIDE DOES NOT KNOW IT' — the loudest line the
+  // reconciliation has, fired on positions that are perfectly well known. The
+  // real one would then be indistinguishable from the noise, which is worse
+  // than not asking. The ambiguity itself is already reported above.
+  for (const p of (out.ambiguous ? [] : out.positions)) {
     if (believed.has(p.symbol) && !closedHere.has(p.symbol)) continue;
     out.findings.push({
       level: 'error', kind: 'unknown-position', symbol: p.symbol,
@@ -338,6 +394,12 @@ async function confirmed(date, { timeoutMs = 15000 } = {}) {
   if (!rows.length || !alpacaDestinations().length) {
     return { ok: true, rows, verifiable: false };
   }
+  // Two Alpaca accounts, one key pair: a match would succeed and be another
+  // account's fill. See credentialScope().
+  const scope = credentialScope();
+  if (scope.ambiguous) {
+    return { ok: false, error: scope.reason, rows, verifiable: false, ambiguous: true };
+  }
   const after = new Date(`${date}T04:00:00-04:00`).toISOString();
   let r;
   try {
@@ -350,5 +412,6 @@ async function confirmed(date, { timeoutMs = 15000 } = {}) {
 }
 
 module.exports = {
-  compare, carriedOver, flatSymbols, fillsFor, confirmed, alpacaDestinations,
+  compare, carriedOver, flatSymbols, fillsFor, confirmed,
+  alpacaDestinations, credentialScope,
 };
