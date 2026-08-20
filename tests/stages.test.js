@@ -207,21 +207,40 @@ describe('stage decides the order', () => {
   /*
    * AND THE SECTIONS ARE REAL, not just an order. A chip is a label; a section
    * is a place, and the reader has to see at a glance which part of the page
-   * they are in. Every stage is drawn whether or not it has anything in it —
-   * "nothing is validated yet" is a fact about the desk, not a rendering gap,
-   * and it is the fact most worth seeing.
+   * they are in.
+   *
+   * EVERY STAGE USED TO BE DRAWN WHETHER OR NOT IT HELD ANYTHING, on the
+   * reasoning that "nothing is validated yet" is a fact about the desk rather
+   * than a rendering gap. That reasoning still stands. The EXECUTION of it did
+   * not: three headings each followed by "Nothing here yet." took the top
+   * forty percent of the page, and the nine screeners — the entire reason
+   * anybody opens a page called "Which screener?" — began below the fold on a
+   * phone.
+   *
+   * So the fact is kept and the scaffolding is not. Four counts in a strip say
+   * "0 validated, 0 under study, 9 unstaged" in one line and one glance, which
+   * is more than three empty sections said in a screenful. A stage that has
+   * tools in it still gets its heading, because there it is separating things
+   * rather than announcing an absence.
    */
-  test('every stage is its own section, drawn even when empty', () => {
+  test('every stage is counted, and only a stage with tools gets a heading', () => {
     const html = require('fs').readFileSync(
       require('path').join(__dirname, '../public/screeners.html'), 'utf8');
     for (const s of ['valid', 'study', 'collecting']) {
       expect(html).toContain(`${s}:`);            // in STAGE_SECTION
     }
-    expect(html).toMatch(/for \(const stage of \['valid', 'study', 'collecting', 'unknown'\]\)/);
-    expect(html).toContain('stage-empty');
-    expect(html).toContain('Nothing here yet.');
-    // a full-width heading — the container is flex-wrap, so width does the work
-    expect(html).toMatch(/\.stage-head \{ width: 100%/);
+    // Every stage is counted, empty or not — that is where the fact now lives.
+    expect(html).toMatch(/const STAGES = \['valid', 'study', 'collecting', 'unknown'\]/);
+    expect(html).toMatch(/inStage\[stage\] = ordered\.filter\(/);
+    expect(html).toMatch(/document\.getElementById\('stage-strip'\)\.innerHTML/);
+    // An empty stage no longer produces a heading and a "nothing here" line.
+    expect(html).toMatch(/if \(!mine\.length\) continue;/);
+    // One stage holding everything needs no heading at all: it would be a
+    // label for the whole page, and the strip has already said it.
+    expect(html).toMatch(/const heads = used\.length > 1;/);
+    // The heading spans the row. The container is a GRID now, so the span does
+    // the work that width:100% used to do on a flex-wrap container.
+    expect(html).toMatch(/\.cards > \.stage-head[^}]*grid-column:1 \/ -1/);
   });
 
   test('each section says what its stage MEANS, not just its name', () => {

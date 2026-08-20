@@ -189,8 +189,20 @@ describe('the shared lists read like data', () => {
  */
 
 describe('the suite page puts today first', () => {
-  test('the shortlist comes before the nine tool cards', () => {
-    expect(suite.indexOf('id="uni-wrap"')).toBeLessThan(suite.indexOf('id="cards"'));
+  /*
+   * REVERSED, deliberately, on 2026-08-19.
+   *
+   * The shortlist led the page on the reasoning that it is what today is
+   * about. But the page is titled "Which screener?", and the nine screeners
+   * began roughly eight hundred pixels down it — below a subtitle, a status
+   * bar, the shortlist panel and two shelf cards. On a phone that is the whole
+   * first screen and none of it answers the question in the title.
+   *
+   * The shortlist is still here and still worth having. It answers a DIFFERENT
+   * question, so it follows the one that was asked.
+   */
+  test('the nine tool cards come before the shortlist', () => {
+    expect(suite.indexOf('id="cards"')).toBeLessThan(suite.indexOf('id="uni-wrap"'));
   });
 
   test('CANSLIM and the comparison are doors, not panels', () => {

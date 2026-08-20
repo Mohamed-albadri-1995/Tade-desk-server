@@ -227,3 +227,101 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
   font-family:inherit; min-height:32px; }
 .dk-sun:hover { color:var(--text2); }
 .dk-sun.on { color:var(--m-mine); border-color:var(--m-mine); }
+
+/* ══ THE STATUS STRIP ══════════════════════════════════════════════════════
+ *
+ * A row of big numbers under the title, each with a small label beneath it.
+ *
+ * WHY IT EXISTS. Every serious trading screen opens with one — a broker's
+ * dashboard, a backtest report, a live-deploy console — and the reason is not
+ * decoration. The state of the desk is six or seven facts, they are the first
+ * thing wanted every single time the page opens, and each is a NUMBER. Set as
+ * a sentence they have to be read; set as a strip they are seen.
+ *
+ * This page had them as prose, in grey, at the bottom of a settings box:
+ *
+ *     next setup decision 09:30, 09:35 ET tomorrow · ⚡ algo trading on, but
+ *     no account is on full auto with a setup
+ *
+ * Two facts that decide whether real money moves this morning, in the same
+ * type as the sentence explaining what a rule is, below the fold on a phone.
+ *
+ * THE RULES OF THE STRIP:
+ *
+ *   ONE FACT PER CELL, and the fact is the VALUE. The label says which
+ *   question; the value answers it. A cell whose value is a clause belongs in
+ *   prose, not here.
+ *
+ *   THE VALUE IS BIG AND MONOSPACE. These are compared against each other and
+ *   against yesterday, so the digits must line up.
+ *
+ *   COLOUR ONLY WHERE IT MEANS SOMETHING, using the language above — `live`
+ *   for a thing that is happening now, `warn` for a thing that needs a person,
+ *   `bad` for a thing that is wrong. A cell with nothing to say stays grey,
+ *   which is what makes a coloured one carry.
+ *
+ *   IT NEVER SCROLLS AWAY on a phone: it wraps to two or three across rather
+ *   than becoming a horizontal scroller, because a fact you have to swipe for
+ *   is a fact you will not check.
+ */
+/*
+ * FLEX, NOT GRID, and the reason is the last row.
+ *
+ * A grid with a fixed column count leaves a hole beside the final cell
+ * whenever the count is not a multiple of the columns — four facts in a
+ * three-across grid is three and then one, with a gap next to it that reads as
+ * a cell whose data failed to load. Grid cannot be told "fill whatever is
+ * left" without knowing the count, and the count is decided at runtime.
+ * Flex wrapping with a shared basis stretches the last row to the edge for any
+ * number of cells, which is the behaviour actually wanted.
+ */
+.strip {
+  display:flex; flex-wrap:wrap; gap:0;
+  border:1px solid var(--border); border-radius:10px; overflow:hidden;
+  margin:var(--s3) 0;
+}
+/*
+ * THE GRID LINES ARE ON THE CELLS, not painted as a container background
+ * showing through 1px gaps. The obvious way round leaves the UNFILLED part of
+ * the last row as a solid grey block — seven facts in a three-across grid is
+ * two empty cells that look like data nobody loaded. Cells that draw their own
+ * edges simply stop where they stop.
+ */
+.strip-cell { background:var(--bg2); padding:10px 12px; min-width:0;
+  flex:1 1 112px;
+  border-right:1px solid var(--border); border-bottom:1px solid var(--border); }
+.strip-v {
+  font-family:var(--mono); font-size:19px; font-weight:700; letter-spacing:-.02em;
+  color:var(--text); line-height:1.15;
+  /* Long values shrink rather than breaking the grid — a ticker list or an
+     account name must not push the cell wider than its neighbours. */
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.strip-k {
+  font-size:9.5px; letter-spacing:.11em; text-transform:uppercase;
+  color:var(--text3); margin-top:3px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis;
+}
+/* The four things a value can mean. Anything else stays --text. */
+.strip-v.live { color:var(--green); }
+.strip-v.warn { color:var(--yellow); }
+.strip-v.bad  { color:var(--red); }
+.strip-v.off  { color:var(--text3); font-weight:600; }
+
+/* A cell that is the loudest thing on the page when it is on: a desk that can
+   open positions by itself must never be doing it quietly. */
+.strip-cell.armed { background:color-mix(in srgb, var(--green) 12%, var(--bg2)); }
+.strip-cell.alarm { background:color-mix(in srgb, var(--red) 14%, var(--bg2)); }
+
+@media (max-width:560px) { .strip-v { font-size:16px; } }
+/* A narrow phone gets two across rather than three squeezed ones. */
+@media (max-width:380px) { .strip-cell { flex-basis:calc(50% - 1px); } }
+
+/* ── TABS THAT DO NOT GET CUT OFF ──
+ * "Settin…" on a 420px phone is a tab nobody knows is there. The row scrolls
+ * horizontally, snaps, and hides its scrollbar — and the fade on the right
+ * edge is what says there is more, since a hidden scrollbar cannot. */
+.tabs { overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+  scroll-snap-type:x proximity; }
+.tabs::-webkit-scrollbar { display:none; }
+.tabs > .tb { scroll-snap-align:start; flex:0 0 auto; }

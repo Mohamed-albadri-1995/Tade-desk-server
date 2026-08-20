@@ -264,9 +264,23 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
    A filled pill at 390px is a button competing with the buttons below it, and
    the screener settled this question long before this page existed. */
 .tabs { position:sticky; top:0; z-index:20; display:flex; gap:2px;
-  overflow-x:auto; scrollbar-width:none; background:var(--bg2);
+  overflow-x:auto; scrollbar-width:none;
   border-bottom:1px solid var(--border); margin:0 -14px var(--s4);
-  padding:var(--s2) var(--s3) 0 }
+  padding:var(--s2) var(--s3) 0;
+  /* ── THE EDGE THAT SAYS THERE IS MORE ──
+     Five tabs do not fit a 420px phone, so the last one read as "Setting…" —
+     a tab nobody knows is there, containing the broker. The row has always
+     scrolled; nothing said so, because the scrollbar is hidden.
+     The classic scroll-shadow: two `local` layers travel with the content and
+     mask the two `scroll` layers underneath, so a shadow appears on whichever
+     side has more and disappears at the ends. No JS, and it cannot get out of
+     step with the actual scroll position. */
+  background:
+    linear-gradient(90deg, var(--bg2) 40%, transparent) left / 28px 100% no-repeat local,
+    linear-gradient(90deg, transparent, var(--bg2) 60%) right / 28px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.45), transparent) left / 14px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.45), transparent) right / 14px 100% no-repeat scroll,
+    var(--bg2); }
 .tabs::-webkit-scrollbar { display:none }
 .tb { flex:0 0 auto; padding:10px 16px; font:600 var(--f-sm)/1 var(--ui);
   cursor:pointer; color:var(--text2); background:none; border:none;
@@ -472,11 +486,21 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
           title="high contrast, for reading the screen outdoors">☀</button>
 </div>
+<!-- ── THE STATE OF THE DESK, before anything else ──
+     Six facts decide what this morning is: is it armed, has anything fired,
+     is anything open, how much has been spent, when is the next decision, and
+     how many accounts will act on it. They were three grey sentences inside
+     the settings box below the tabs — so the two that decide whether real
+     money moves were below the fold on a phone, in the same type as the
+     paragraph explaining what a rule is.
+     Outside the tabs on purpose: it is true on every tab, so it should not
+     disappear when you go to look at the rules. -->
+<div class="strip" id="deskstrip" aria-label="desk status"></div>
+
 <!-- One line, and the reasoning behind a tap. Eight lines of prose above the
      tabs is eight lines between you and this morning's alert. -->
-<div class="sub">Two kinds of alert arrive here: <b>rules</b> every five minutes,
-  <b>setups</b> once at a fixed minute.
-  <details class="why"><summary>why that matters</summary>
+<div class="sub">
+  <details class="why"><summary>what the two kinds of alert are</summary>
     <div class="why-body">
       <b>Rules</b> are evaluated inside every screener on its own scan, so they need no
       separate data feed — and <b>see the market roughly every five minutes</b>. A break
@@ -521,10 +545,15 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
        is CLOSED. So it gets a button rather than a promise. -->
   <button class="lnk" id="ntf-test" onclick="testPush()">test</button>
   <span class="note" id="noise-note"></span>
-  <span class="note" id="next-decision"></span>
-  <!-- The loudest thing on the page when it is on. A system that opens
-       positions by itself must never be doing so quietly. -->
-  <span class="note" id="algo-state"></span>
+  <!-- The next decision time and the armed state used to be printed here as
+       grey clauses. They are two of the six facts in the status strip above
+       the tabs now, where they are numbers rather than sentences and are on
+       screen from every tab. Saying them twice would make the strip look like
+       a summary of something else. The nodes stay, empty and hidden, because
+       two painters still write to them and a missing node is a thrown error
+       at 09:35. -->
+  <span class="note" id="next-decision" hidden></span>
+  <span class="note" id="algo-state" hidden></span>
 </div>
 
 </div><!-- /today -->
@@ -754,6 +783,10 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
  * disagree with them about what "crossed" means.
  */
 let META = null, TOOLS = [], SEEN = new Set(), FIRST_LOAD = true;
+/* Today's fires, kept so the status strip can count them without a second
+   request. /api/alerts/fires is already scoped to today, so everything in
+   here is today's by construction. */
+let FIRES = [];
 // The desk-wide Position size. Each broker account may override any of it,
 // and the account rows show these as the placeholder for what is left blank.
 let RISK = {};
@@ -1634,6 +1667,8 @@ async function loadFires() {
   try {
     const d = await (await fetch('/api/alerts/fires?limit=60')).json();
     const fires = d.fires || [];
+    FIRES = fires;
+    paintStrip();
     document.getElementById('fire-count').textContent = fires.length ? `${fires.length} today` : '';
     // Also on the tab, so a fire is visible from Setups or Settings.
     tabBadge('today', fires.length);
@@ -2029,7 +2064,93 @@ async function copyCallback(url) {
  * time either lands, so a page that loaded the broker first is not left saying
  * "no setup has orders enabled" for the rest of the morning.
  */
+/*
+ * THE STATUS STRIP — the state of the desk, as numbers, above the tabs.
+ *
+ * Every fact here already existed on the page. Each was a clause in a grey
+ * sentence, inside a box, below the tabs: "next setup decision 09:30, 09:35 ET
+ * tomorrow · ⚡ algo trading on, but no account is on full auto with a setup".
+ * Two of those decide whether real money moves this morning and both were
+ * below the fold on a phone, set in the same type as the paragraph explaining
+ * what a rule is.
+ *
+ * Repainted from whatever has landed. The broker, the setups and the fires
+ * arrive from three requests in whatever order the network chooses, so this is
+ * called by all of them and must read as "not known yet" rather than as a
+ * fact, for anything it has not been told.
+ */
+function cell(k, v, cls, wrapCls) {
+  return `<div class="strip-cell${wrapCls ? ` ${wrapCls}` : ''}">`
+    + `<div class="strip-v${cls ? ` ${cls}` : ''}">${esc(v)}</div>`
+    + `<div class="strip-k">${esc(k)}</div></div>`;
+}
+
+function paintStrip() {
+  const el = document.getElementById('deskstrip');
+  if (!el) return;
+  const b = (BROKER && BROKER.broker) || null;
+  const out = [];
+
+  /*
+   * ARMED FIRST, and it is the only cell that gets a background. A desk that
+   * can open positions by itself must never be doing so quietly, and "quietly"
+   * is exactly what a grey clause at the end of a sentence is.
+   */
+  if (!b) out.push(cell('orders', '···', 'off'));
+  else if (!b.enabled) out.push(cell('orders', 'OFF', 'off'));
+  else if (!b.armed) out.push(cell('orders', 'SAFE', 'warn'));
+  else {
+    // Counted from the ACCOUNTS, where the permission actually lives: an
+    // account on full auto with at least one setup is what opens a position.
+    // The count rides in the LABEL rather than taking a cell of its own —
+    // "armed" and "how many accounts will act" are one fact, and a seventh
+    // cell would sit alone on the last row of a three-across grid.
+    const live = (b.destinations || []).filter(d => d.enabled !== false && d.hasWebhook);
+    const auto = live.filter(d => d.mode === 'auto' && (d.setups || []).length);
+    out.push(auto.length
+      ? cell(`${auto.length} of ${live.length} on auto`, 'ARMED', 'live', 'armed')
+      : cell('no account on auto', 'ARMED', 'warn'));
+  }
+
+  // Today's fires, split — three alerts and three errors are different days.
+  // The endpoint is scoped to today, so no date filter belongs here.
+  const today = FIRES || [];
+  const bad = today.filter(f => f.level === 'error').length;
+  out.push(cell('fired today', String(today.length)));
+  out.push(cell('errors', String(bad), bad ? 'bad' : 'off', bad ? 'alarm' : ''));
+
+  if (b) {
+    const open = (b.openSymbols || []);
+    out.push(cell('open now', open.length ? open.join(' ') : '—',
+      open.length ? 'live' : 'off'));
+    const spent = Number((BROKER && BROKER.committedToday) || 0);
+    out.push(cell('committed', spent ? `$${Math.round(spent).toLocaleString()}` : '—',
+      spent ? '' : 'off'));
+  }
+
+  /*
+   * WHEN THE NEXT DECISION IS — the one fact that says whether to have this
+   * page open at all. A window that is OPEN right now is the loudest state it
+   * has, so it is green rather than a time.
+   */
+  if (DECISIONS.length) {
+    const open = decisionWindowOpen();
+    const away = minutesToNextDecision();
+    const next = DECISIONS.map(d => d.from).sort()
+      .find(t => toMinutes(t) >= nowMinutesET()) || DECISIONS.map(d => d.from).sort()[0];
+    out.push(open
+      ? cell('decision window', 'NOW', 'live', 'armed')
+      : cell(away <= 60 && away >= 0 ? `in ${away} min` : 'next decision',
+             `${next} ET`, away <= 5 && away >= 0 ? 'warn' : ''));
+  } else if (SETUPS.length) {
+    out.push(cell('next decision', 'none', 'off'));
+  }
+
+  el.innerHTML = out.join('');
+}
+
 function paintAlgoState() {
+  paintStrip();
   const algo = document.getElementById('algo-state');
   if (!algo) return;
   const b = (BROKER && BROKER.broker) || {};
@@ -3080,6 +3201,7 @@ schedulePoll();
  * manageable — it tells you when to have this page in front of you.
  */
 function paintNextDecision() {
+  paintStrip();
   const el = document.getElementById('next-decision');
   if (!el) return;
   // No decision times means every setup is switched off. Saying nothing there

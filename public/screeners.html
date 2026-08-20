@@ -36,10 +36,18 @@
   padding:6px 10px; margin:-34px 0 20px -8px; border-radius:6px; }
 .crumb:hover { color:var(--accent); background:var(--bg2); }
 .logo { font-size:13px; letter-spacing:.28em; color:var(--accent); font-weight:700; }
+/* ── ONE COLUMN, ONE EDGE ──
+   The title and subtitle were centred across the full window while everything
+   below them sat in a 1000px column starting at the left. Three alignments on
+   one page means nothing lines up with anything, and the eye has to find the
+   start of each block separately.
+   Left, in the same column as the cards — which is also what the page's own
+   rule at the top of this file already said: headings may centre, prose does
+   not, and a heading over a left-aligned grid is prose about that grid. */
 .title { font-size:var(--f-xl); font-weight:700; margin:var(--s3) 0 var(--s1);
-  letter-spacing:-.02em; text-align:center; }
-.subtitle { font-size:var(--f-sm); color:var(--text2); margin-bottom:var(--s5);
-  text-align:center; max-width:60ch; }
+  letter-spacing:-.02em; width:100%; max-width:1000px; }
+.subtitle { font-size:var(--f-sm); color:var(--text2); margin-bottom:var(--s4);
+  width:100%; max-width:1000px; }
 
 /* The applications. Bigger than a tool card on purpose — the choice between
    charting and screening is made before the choice of which screener, and the
@@ -66,14 +74,24 @@
 .app-card:hover .app-arrow { color:var(--accent); }
 
 .section-head { font-size:var(--f-xs); font-weight:700; letter-spacing:.13em;
-  text-transform:uppercase; color:var(--text2); margin:var(--s5) 0 var(--s3);
-  text-align:center; width:100%; }
-.section-head::before, .section-head::after { content:'——'; opacity:.4; margin:0 10px; }
+  text-transform:uppercase; color:var(--text2); margin:var(--s5) 0 var(--s2);
+  /* Left, in the same column as everything else — see the alignment note by
+     .title. The em-dash rules that used to bracket it were decoration on a
+     label, and a label does not need announcing. */
+  text-align:left; width:100%; max-width:1000px; }
 
-.cards { display:flex; flex-wrap:wrap; gap:16px; justify-content:center;
-         width:100%; max-width:1000px; }
+/* A GRID, so every row starts at the same edge. Centring a wrapping flex row
+   leaves the last row floating in the middle of the page, which reads as a
+   different kind of thing rather than as the end of the same list. */
+.cards { display:grid; gap:16px; width:100%; max-width:1000px;
+         grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); }
+/* A stage heading is a divider, not a card: it takes the whole row. Left as a
+   grid item it became a narrow first column with the cards flowing past it. */
+.cards > .stage-head, .cards > .stage-empty { grid-column:1 / -1; }
+/* The count strip lines up with the cards it is counting. */
+#stage-strip { width:100%; max-width:1000px; }
 .tool-card {
-  position:relative; width:300px; background:var(--panel); border:1px solid var(--line);
+  position:relative; background:var(--panel); border:1px solid var(--line);
   border-radius:14px; padding:var(--s4); text-decoration:none; color:inherit;
   display:flex; flex-direction:column; gap:var(--s2);
   transition:border-color .15s, transform .15s;
@@ -331,7 +349,7 @@
 .cmp-foot { font-size:11.5px; color:var(--text3); margin-top:12px; line-height:1.7; text-align:left;
   max-width:80ch; margin-left:auto; margin-right:auto; }
 .note { margin-top:var(--s5); font-size:var(--f-xs); color:var(--text3);
-        text-align:center; max-width:60ch; line-height:1.7; }
+        width:100%; max-width:1000px; line-height:1.7; }
 .version { margin-top:22px; font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
 @media (max-width:580px) {
   body { padding:32px 14px; }
@@ -355,6 +373,18 @@
 
 
 <div class="subtitle">Nine of them. Each screens differently and learns from its own history.</div>
+
+<!-- ── THE ANSWER FIRST ──
+     This page is called "Which screener?" and the nine screeners used to
+     begin roughly eight hundred pixels down it, below a subtitle, a status
+     bar, the shortlist panel and two shelf cards. On a phone that is the
+     whole first screen and none of it answers the question in the title.
+     The shortlist, CANSLIM and the comparison are all real and all worth
+     having — they are just answers to DIFFERENT questions, so they follow
+     the one that was asked. -->
+<div class="section-head">The nine screeners</div>
+<div id="stage-strip"></div>
+<div class="cards" id="cards"></div>
 
 <div class="now-bar" id="now-bar">Checking which tools are live…</div>
 
@@ -416,8 +446,6 @@
   </a>
 </div>
 
-<div class="section-head">The nine screeners</div>
-<div class="cards" id="cards"></div>
 
 <div class="note">
   Every tool runs its own screeners, keeps its own registers and shortlist, and trains
@@ -442,6 +470,12 @@
   .stage-head b { font-size: 15px; font-weight: 700; letter-spacing: .02em; }
   .stage-head span { font-size: 11.5px; color: var(--text3); font-weight: 400;
     letter-spacing: 0; }
+  /* The same three meanings on the count strip, so a number and its heading
+     are never a different colour for the same stage. */
+  .strip-v.s-valid      { color: #22c55e; }
+  .strip-v.s-study      { color: #f5a623; }
+  .strip-v.s-collecting { color: var(--text2); }
+  .strip-v.s-unknown    { color: var(--text2); }
   .stage-head.s-valid      { color: #22c55e; }
   .stage-head.s-study      { color: #f5a623; }
   .stage-head.s-collecting { color: #7c8798; }
@@ -671,7 +705,7 @@ function card(t, state, info, check, summary, timeLabel) {
           <div class="status ${state}"><span class="dot"></span>${label}</div>
         </div>
         ${checkLine(check)}
-        <div class="card-desc">${t.desc}</div>
+        <div class="card-desc">${esc(t.desc || '')}</div>
       </a>
       ${screensBlock(t, summary)}
       <div class="stats">${stats.map(s => `<span class="stat">${s}</span>`).join('')}</div>
@@ -780,22 +814,57 @@ function render(states) {
 
   const ordered = TOOLS.slice().sort(byWhenItMatters(states));
   const html = [];
+
+  const STAGES = ['valid', 'study', 'collecting', 'unknown'];
+  const inStage = {};
+  for (const stage of STAGES) {
+    inStage[stage] = ordered.filter(
+      t => (STAGE_SECTION[t.stage] ? t.stage : 'unknown') === stage);
+  }
+
   /*
-   * EVERY section is drawn, in order, whether or not it has anything in it.
+   * THE COUNTS AS A STRIP, and the headings only where there is something.
    *
-   * Building headings only when the stage changes means an empty stage simply
-   * vanishes — and "nothing is validated yet" is a fact about the desk, not a
-   * rendering gap. It is also the fact most worth seeing.
+   * Every section used to be drawn whether or not it held anything, on the
+   * reasoning that "nothing is validated yet" is a fact about the desk rather
+   * than a rendering gap. That reasoning is right and the execution was not:
+   * three headings each followed by "Nothing here yet." took the top forty
+   * percent of the page, and the nine screeners — the entire reason anybody
+   * opens it — began below the fold.
+   *
+   * The fact survives, as a number. Four counts in a row say "0 validated, 0
+   * under study, 9 unstaged" in one glance and one line, which is more than
+   * three empty sections said in a screenful. A stage with tools in it still
+   * gets its heading, because there it is separating things.
    */
-  for (const stage of ['valid', 'study', 'collecting', 'unknown']) {
-    const mine = ordered.filter(t => (STAGE_SECTION[t.stage] ? t.stage : 'unknown') === stage);
-    if (!mine.length && stage === 'unknown') continue;   // no such thing normally
-    const [title, why] = STAGE_SECTION[stage];
-    html.push(`<div class="stage-head s-${stage}"><b>${title}</b>`
-      + `<span>${mine.length} · ${why}</span></div>`);
-    if (!mine.length) {
-      html.push(`<div class="stage-empty">Nothing here yet.</div>`);
-      continue;
+  // Its OWN element, not the first thing inside #cards: that container is a
+  // wrapping flex row of cards, so a strip pushed into it becomes a card-sized
+  // flex item and drags the whole grid out of line.
+  const strip = [];
+  for (const stage of STAGES) {
+    const n = inStage[stage].length;
+    const [title] = STAGE_SECTION[stage];
+    if (!n && stage === 'unknown') continue;
+    strip.push(`<div class="strip-cell"><div class="strip-v${n ? ` s-${stage}` : ' off'}">`
+      + `${n}</div><div class="strip-k">${esc(title)}</div></div>`);
+  }
+  document.getElementById('stage-strip').innerHTML =
+    `<div class="strip">${strip.join('')}</div>`;
+
+  /*
+   * ONE stage holding everything needs no heading at all — "Unstaged 9" above
+   * nine cards is a label for the whole page, and the strip already said it.
+   */
+  const used = STAGES.filter(s => inStage[s].length);
+  const heads = used.length > 1;
+
+  for (const stage of STAGES) {
+    const mine = inStage[stage];
+    if (!mine.length) continue;
+    if (heads) {
+      const [title, why] = STAGE_SECTION[stage];
+      html.push(`<div class="stage-head s-${stage}"><b>${title}</b>`
+        + `<span>${mine.length} · ${why}</span></div>`);
     }
     // The clock has not gone away — it decides the order inside the section and
     // is still said on the card, where it belongs to that one tool.
