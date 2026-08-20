@@ -445,11 +445,21 @@ def backtest_report(bid: int):
     warn = []
     if not spec.get('cost_bps'):
         warn.append(('costs 0 bps — spread and slippage not modelled', None))
-    if spec.get('fill', 'close') == 'close':
-        warn.append(("fill = close",
-                     "Optimistic by about one spread. 'next open' is the "
-                     "live-honest fill: a signal at a bar's close becomes a "
-                     "market order filled at the next bar's open."))
+    _fill = spec.get('fill', 'close')
+    if _fill == 'close':
+        warn.append(("fill = close — THIS RUN IS NOT WHAT THE DESK WOULD GET",
+                     "Every entry is booked at the signal bar's close, which is "
+                     "a price no order can reach: it only becomes knowable at "
+                     "the instant the bar ends, and the market order goes out "
+                     "after that. Re-run on 'desk'."))
+    elif _fill == 'next_open':
+        warn.append(("fill = next_open — the entry is honest, the levels are not",
+                     "The entry is the next bar's open, which is right. But the "
+                     "stop and every target are then re-measured from that fill, "
+                     "which hands the trade back the exact R the strategy was "
+                     "tested at. The desk prices them from the DECISION close "
+                     "and sends them to the broker before the fill exists, so "
+                     "its real R differs on every trade. 'desk' models that."))
     cov = s.get('coverage') or {}
     if cov.get('entry_drops'):
         # These are BAR-LEVEL events, not lost opportunities, and printing them

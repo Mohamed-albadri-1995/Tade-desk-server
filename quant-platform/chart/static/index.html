@@ -478,8 +478,8 @@
           <label class="fld"><span>Universe</span>
             <select id="btUni"><option value="symbols">Symbols</option><option value="R1">Register R1</option><option value="Shortlist">Shortlist</option></select></label>
           <label class="fld"><span>Fill model
-            <b class="q" title="next open = honest live fills (a signal at a bar's close becomes a market order at the NEXT bar's open — what the funded account actually gets). close = the signal bar's own close: optimistic, for eyeballing only.">?</b></span>
-            <select id="btFill"><option value="next_open" selected>next open</option><option value="close">close</option></select></label>
+            <b class="q" title="desk = what this desk really gets: the order fills at the NEXT bar's open, but the stop and every target were priced from the DECISION bar's close and sent to the broker before the fill existed. Use this one. · next open = the entry is honest, then the levels are re-measured from it, which hands the trade back the exact R it was tested at. · close = the signal bar's own close, a price no order can reach; for eyeballing only.">?</b></span>
+            <select id="btFill"><option value="desk" selected>desk (what you really get)</option><option value="next_open">next open</option><option value="close">close</option></select></label>
         </div>
         <div class="frow one">
           <label class="fld"><span>Symbols</span>

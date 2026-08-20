@@ -75,7 +75,14 @@ try:
     cov2 = out2['summary'].get('coverage') or {}
     chkv("feed '' -> polygon", cov2.get('feed'), 'polygon')
     chkv("tf '' -> 5m", cov2.get('tf'), '5m')
-    chkv("fill '' -> close", cov2.get('fill'), 'close')
+    # WAS 'close' UNTIL 2026-08-20. The point of this check is that an empty
+    # select normalizes to a real value instead of reaching the engine as a
+    # mystery — and that still holds. What changed is WHICH value, and it had
+    # to: 'close' books every entry at the signal bar's close, a price no order
+    # can reach, so the old default made every untouched run flatter its own
+    # strategy. The default is now the model that describes the account being
+    # traded. See FILL_MODELS in chart/strategy.py.
+    chkv("fill '' -> desk", cov2.get('fill'), 'desk')
     chkv('normalized run still evaluates', cov2.get('evaluated'), 1)
 finally:
     if _orig_poly is not None:

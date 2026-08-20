@@ -14,8 +14,11 @@ Honesty rules (see chart/PHASE4_PLAN.md — decisions 2-4):
 - A position still open at the evaluation window's end is recorded with
   reason 'open' and its unrealized return — reported separately, never mixed
   into the closed-trade win rate.
-- Fill model is explicit per run: 'close' (preview assumption) or
-  'next_open' (honest live fills).
+- Fill model is explicit per run and DEFAULTS TO 'desk' — the fill at the next
+  bar's open, with the stop and every target measured from the decision bar's
+  close, which is the pair of prices the live desk really uses. 'next_open'
+  and 'close' remain available for comparison; both flatter the result, and
+  the report says so.
 
 Sequential by design (t3.micro): one (day, symbol) at a time, progress
 reported as the fraction of pairs completed.
@@ -865,7 +868,12 @@ def run(spec: dict, progress_cb=None) -> dict:
     tf = spec.get('tf') or '5m'
     feed = spec.get('feed') or 'polygon'
     view = spec.get('view') or 'all'
-    fill = spec.get('fill') or 'close'
+    # THE DEFAULT IS THE DESK, because a backtest's whole job is to tell you
+    # what this strategy would have done in the account you actually trade.
+    # 'close' — the old default — books every entry at a price no order can
+    # reach, and every result it ever produced was better than the same trades
+    # would have been. A default that flatters is not a neutral choice.
+    fill = spec.get('fill') or 'desk'
     base_days = int(spec.get('days', 3) or 3)  # evaluate() auto-extends warm-up
     # transaction costs (Chan ch.3: costs flip marginal strategies negative —
     # a backtest without them lies). Fractional cost per SIDE in basis points

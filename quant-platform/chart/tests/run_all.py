@@ -51,6 +51,7 @@ PARTS = [
     ('logic_audit36.py',    'watchlist gate: no trade before the scanner found the stock'),
     ('logic_audit37.py',    'every headline metric against hand arithmetic'),
     ('logic_audit38.py',    'managing an open position: exit rules + the ratchet'),
+    ('logic_audit39.py',    "fill model 'desk': the fill and the levels come from different prices"),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They

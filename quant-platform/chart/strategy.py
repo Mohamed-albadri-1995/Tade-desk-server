@@ -716,6 +716,23 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
     return out
 
 
+# ── the fill models ────────────────────────────────────────────────────────
+#
+# Named here rather than inline so there is ONE list, and so an unknown value
+# is a refusal instead of a silent fallback to the most optimistic one.
+#
+#   close      the signal bar's close. What the chart preview assumes, and
+#              optimistic by about one spread: no order can reach a price that
+#              only became knowable at the instant the bar ended.
+#   next_open  the following bar's open, with every level re-measured from it.
+#              Honest about the ENTRY; quietly restores the exact R the
+#              strategy was tested at, which the desk never gets.
+#   desk       the following bar's open, with every level measured from the
+#              SIGNAL bar's close — the two prices the live desk really uses.
+#              See the FILL MODEL note in _pair_trades.
+FILL_MODELS = ('close', 'next_open', 'desk')
+
+
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  exit_group: dict | None = None, fill: str = 'close',
                  entry_ok=None, eod_close=None, max_per_day=None,
@@ -747,6 +764,36 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     precedes intrabar SL/TP on the fill bar (the open prints
                     first); fixed SL/TP distances anchor to the OPEN fill
                     price, ATR taken at the signal bar (last completed bar).
+      'desk'      — what the live desk ACTUALLY does, which is neither of the
+                    above. See the block below.
+
+    WHY 'desk' EXISTS — THE FILL AND THE LEVELS COME FROM DIFFERENT PRICES.
+
+    Both models above use ONE price for two jobs: the price the trade is booked
+    at, and the price every level is measured from. The live desk uses two, and
+    it has no choice about it.
+
+      · The decision is taken on the CLOSE of bar j, which is the first moment
+        that price is knowable. The stop and every target are priced from it,
+        right there — `decide.exit_plan(entry=close[j], stop=…)` — and sent to
+        the broker as absolute prices, because SignalStack takes a bracket and
+        has no way to amend one afterwards.
+      · The order is a MARKET order and reaches the tape a few seconds into bar
+        j+1. It fills near open[j+1]. Nothing re-prices the bracket afterwards.
+
+    So the trade is entered at open[j+1] against levels measured from close[j].
+    Neither existing model reproduces that: 'close' gets the levels right and
+    the entry wrong, 'next_open' gets the entry right and then re-measures the
+    levels from it, quietly restoring the exact R the strategy was tested at.
+
+    That difference is the whole gap between a tested trade and a real one.
+    Live, 2026-08-19: WULF short, decided at 15.37, filled at 15.24, stop at
+    15.74. The plan said 2.00R. Priced from the fill, the same trade was 1.31R
+    — a third of the reward gone, and no report anywhere said so, because the
+    backtest that justified the setup had measured the second version.
+
+    'desk' therefore takes the fill from open[j+1] and every LEVEL from
+    close[j]. Two prices, doing the two jobs they do live.
     TP fills intrabar AT the level. A STOP fills at the level on a within-bar
     touch, but at the OPEN when the bar GAPS through it (opens already beyond
     the level) — a market order can't fill at a price the tape skipped, so the
@@ -816,10 +863,21 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     # (a fixed stop plots flat, an anchored one visibly trails its line).
     sl_view = np.full(n, np.nan)
     tp_view = np.full(n, np.nan)
-    next_open = (fill == 'next_open')
+    # AN UNKNOWN MODEL IS AN ERROR, never a silent fallback. Falling back would
+    # fall back to 'close', which is the most optimistic of the three — so a
+    # typo in the one field that decides how honest the run is would make the
+    # run less honest and say nothing.
+    if fill not in FILL_MODELS:
+        raise ValueError(f'unknown fill model {fill!r} — known: '
+                         + ', '.join(sorted(FILL_MODELS)))
+    # Both models fill on the NEXT bar's open. They differ only in which price
+    # the stop and the targets are measured from — see the FILL MODEL note.
+    desk_fill = (fill == 'desk')
+    next_open = (fill == 'next_open') or desk_fill
     trades = []
     open_trade = None
     in_pos = False; ei = 0; sl = tp = None; ep_cur = None
+    dp_cur = None                        # the price the levels were measured from
     sl_eff = None                        # RATCHET: a stop never loosens (see below)
     sl_at_entry = None                   # the armed stop AT ENTRY (position sizing)
     pending_exit = False                 # next_open: exit signal seen, fills next bar
@@ -908,6 +966,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     continue             # signal on the last bar — no bar to fill on
                 ep = opn[j + 1] if next_open else close[j]
                 ej = j + 1 if next_open else j
+                # THE PRICE THE LEVELS ARE MEASURED FROM, which is not always
+                # the price the trade is booked at. Only 'desk' separates them;
+                # for every other model this IS `ep`, so nothing changes.
+                dp = close[j] if desk_fill else ep
                 if entry_ok is not None and not entry_ok[ej]:
                     _drop('rth_session')
                     continue             # fill moment outside the allowed session
@@ -929,12 +991,12 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 # fixed-distance stops: long → SL BELOW entry / TP above;
                 # short → SL ABOVE entry / TP below. ATR at the SIGNAL bar —
                 # the last COMPLETED bar at fill time in both models.
-                sd = _risk_dist(risk.get('sl'), ep, atr[j])
-                td = _risk_dist(risk.get('tp'), ep, atr[j])
+                sd = _risk_dist(risk.get('sl'), dp, atr[j])
+                td = _risk_dist(risk.get('tp'), dp, atr[j])
                 if side == 'long':
-                    sl = ep - sd if sd else None; tp = ep + td if td else None
+                    sl = dp - sd if sd else None; tp = dp + td if td else None
                 else:
-                    sl = ep + sd if sd else None; tp = ep - td if td else None
+                    sl = dp + sd if sd else None; tp = dp - td if td else None
                 # priceability check uses the SIGNAL bar's anchored value (the
                 # last completed one) — the trailing array takes over per bar.
                 e_sl = sl_arr[j] if sl_arr is not None else sl
@@ -949,8 +1011,12 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 # not a snapback), the LoD-anchored stop can be 50%+ away — a
                 # trade no one would take. Skip it, exactly like an unpriceable
                 # stop. (see JEM 2026-07-01: entry 10.38, stop at the 4.98 LoD.)
-                if max_stop_pct and e_sl is not None and e_sl == e_sl and ep:
-                    if abs(ep - e_sl) / ep * 100.0 > float(max_stop_pct):
+                # Measured from the DECISION price: this is a gate a live trader
+                # applies at the moment of deciding, when the fill does not
+                # exist yet. Judging it on the fill would refuse trades the desk
+                # would have taken, and take ones it would have refused.
+                if max_stop_pct and e_sl is not None and e_sl == e_sl and dp:
+                    if abs(dp - e_sl) / dp * 100.0 > float(max_stop_pct):
                         _drop('stop_too_far')
                         continue
                 # arm scale-out legs for THIS trade. Each leg resolves to a
@@ -963,7 +1029,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 # would have to unwind an entry (and its daily-cap tally).
                 remaining = 1.0; realized = 0.0; legs = []
                 tgt_fr = []; tgt_fixed = []; tgt_arrs = []; tgt_done = []
-                rdist = ((ep - e_sl) if side == 'long' else (e_sl - ep)) \
+                # 1R, as the DESK computes it: `decide.exit_plan` is handed the
+                # decision close and the stop, and every R-multiple target is
+                # priced off that distance before a single share is bought.
+                rdist = ((dp - e_sl) if side == 'long' else (e_sl - dp)) \
                     if (e_sl is not None and e_sl == e_sl) else None
                 for t in targets:
                     lvl = None; arr = t['arr']
@@ -980,12 +1049,12 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     if arr is None and lvl is None:
                         if t['r_multiple'] is not None:
                             if rdist and rdist > 0:
-                                lvl = (ep + t['r_multiple'] * rdist) if side == 'long' \
-                                    else (ep - t['r_multiple'] * rdist)
+                                lvl = (dp + t['r_multiple'] * rdist) if side == 'long' \
+                                    else (dp - t['r_multiple'] * rdist)
                         elif t['tp'] is not None:
-                            d = _risk_dist(t['tp'], ep, atr[j])
+                            d = _risk_dist(t['tp'], dp, atr[j])
                             if d:
-                                lvl = (ep + d) if side == 'long' else (ep - d)
+                                lvl = (dp + d) if side == 'long' else (dp - d)
                     # WRONG-SIDE GUARD — a profit target must be BEYOND the
                     # entry fill. A violent signal bar can gap the next-open
                     # fill ABOVE a frozen pullback-high target (backtest #127:
@@ -993,6 +1062,13 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     # there would fill instantly and book a LOSS as a "target".
                     # No trader can place that order — drop the leg instead
                     # (the trade becomes stop + exit-rule managed).
+                    #
+                    # Compared against the FILL, not the decision price, and in
+                    # 'desk' mode that is the whole point: a target measured
+                    # from close[j] can land on the wrong side of an open[j+1]
+                    # fill, and that is a real thing the desk has to survive —
+                    # it is exactly the trade where the gap ate the entire
+                    # planned reward before a share was bought.
                     if lvl is not None and ((side == 'long' and lvl <= ep)
                                             or (side == 'short' and lvl >= ep)):
                         continue
@@ -1041,7 +1117,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     elif near < float(min_target_usd):
                         _drop('target_too_close')
                         continue
-                in_pos = True; ei = ej; ep_cur = ep; pending_exit = False
+                in_pos = True; ei = ej; ep_cur = ep; dp_cur = dp
+                pending_exit = False
                 entered_run = True        # this true-run has now been taken
                 sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
                 sl_at_entry = sl_eff
@@ -1081,6 +1158,11 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             total = realized + remaining * r
             trades.append({'ei': ei, 'xi': xi, 'ret': float(total), 'reason': reason,
                            'entry': float(ep_cur), 'exit': float(px),
+                           # WHAT THE DECISION USED, beside what the trade
+                           # got. Equal in every model but 'desk'; where they
+                           # differ, the difference IS the execution gap, and
+                           # a report that cannot see both cannot show it.
+                           'decided': float(dp_cur),
                            # the ARMED stop at entry — risk-based position
                            # sizing needs the per-share risk, not just the %
                            'stop': (float(sl_at_entry) if sl_at_entry is not None
@@ -1175,6 +1257,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 trades.append({'ei': ei, 'xi': last['xi'], 'ret': float(realized),
                                'reason': last['reason'], 'entry': float(ep_cur),
                                'exit': last['price'],
+                               # Same pair as the other exit path. A trade that
+                               # left through its last target must report the
+                               # execution gap exactly like one that was stopped.
+                               'decided': float(dp_cur),
                                'stop': (float(sl_at_entry) if sl_at_entry is not None
                                         and sl_at_entry == sl_at_entry else None),
                                'legs': list(legs)})
@@ -1215,6 +1301,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
             r = -r
         # fold any banked partials into the still-open position's mark-to-market
         open_trade = {'ei': ei, 'entry': float(ep_cur),
+                      'decided': (float(dp_cur) if dp_cur is not None else None),
                       'last': float(close[-1]), 'ret': float(realized + remaining * r),
                       'stop': (float(sl_at_entry) if sl_at_entry is not None
                                and sl_at_entry == sl_at_entry else None),

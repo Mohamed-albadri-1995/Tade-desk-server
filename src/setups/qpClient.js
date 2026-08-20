@@ -35,6 +35,21 @@ function baseUrl() {
  * that is slow to answer has to become a reported failure rather than a
  * silently late alert.
  */
+/*
+ * `fill = 'close'` HERE IS CORRECT AND MUST STAY. It is not the optimistic
+ * setting it is in a backtest.
+ *
+ * This call runs at 09:36:00, on the completed 09:35 bar, and the 09:36 bar is
+ * zero seconds old. 'close' gives the pick an entry of close[09:35] and prices
+ * the stop and every target from it — which is exactly what happens next: the
+ * bracket is built from those numbers and sent to the broker. Live and the
+ * backtest's 'desk' model agree by construction.
+ *
+ * Asking for 'desk' or 'next_open' here would ask the simulation to fill on a
+ * bar that does not exist yet. It handles that correctly — a signal on the last
+ * bar produces no trade — so the decision would return NOTHING, every day, and
+ * say "nothing qualified".
+ */
 async function decide({ strategyId, strategies, symbols, date, tf = '1m',
                         feed = 'yahoo', topN = 0, targetR = 2.0,
                         metric = null, direction = null, ctx = null,
