@@ -941,6 +941,7 @@ def run(spec: dict, progress_cb=None) -> dict:
     # block it vanished silently, which can make a thin feed (alpaca IEX on
     # small caps) look like a strategy that never fires.
     cov = {'pairs': len(pairs), 'evaluated': 0, 'no_data': 0,
+           'pairs_by_day': {}, 'no_data_by_day': {},
            'no_data_samples': [], 'signals_on_day': 0, 'signal_pairs': 0,
            'traded_pairs': 0, 'tf': tf, 'feed': feed, 'fill': fill}
     # PER SCANNING TOOL. With several screeners merged ('*:R1'), the tools do
@@ -1111,8 +1112,17 @@ def run(spec: dict, progress_cb=None) -> dict:
                                   'legs': ot.get('legs') or []})
             except Exception as e:  # noqa: BLE001 — one bad pair must not kill the run
                 errors.append(f'{day} {sym} [{sname}]: {e}')
+        # Tallied PER DAY as well as in total, because where the gaps fall is
+        # the whole diagnosis and a count cannot show it. A feed with a ROLLING
+        # intraday history — yahoo gives roughly a month of 1-minute bars and
+        # the window slides — loses the OLDEST days first, so the same backtest
+        # run a fortnight apart quietly covers a shorter period and returns
+        # fewer trades. "21 pairs had no bars" reads like scattered bad luck.
+        # "the first 11 sessions of your range produced nothing" is the fact.
+        cov['pairs_by_day'][day] = cov['pairs_by_day'].get(day, 0) + 1
         if not counted:
             cov['no_data'] += 1
+            cov['no_data_by_day'][day] = cov['no_data_by_day'].get(day, 0) + 1
             if len(cov['no_data_samples']) < 12:
                 cov['no_data_samples'].append(f'{day} {sym}')
         if took:
@@ -1125,6 +1135,17 @@ def run(spec: dict, progress_cb=None) -> dict:
     if bar_counts:
         bar_counts.sort()
         cov['bars_median'] = int(bar_counts[len(bar_counts) // 2])
+    # Days on which EVERY pair came back empty. Those sessions are not part of
+    # the run at all, whatever range the header prints, and a strategy cannot
+    # be judged over days it was never shown.
+    blank = sorted(d for d, n in cov['no_data_by_day'].items()
+                   if n >= cov['pairs_by_day'].get(d, 0))
+    cov['blank_days'] = blank
+    if blank:
+        live = sorted(set(cov['pairs_by_day']) - set(blank))
+        cov['covered_days'] = len(live)
+        cov['covered_from'] = live[0] if live else None
+        cov['covered_to'] = live[-1] if live else None
     # PER-DAY RANKING (opt-in). Some setups are not "take every signal" — they
     # score the day's signals against EACH OTHER and trade only the strongest
     # few. That is a cross-symbol decision, so it cannot live in a strategy:

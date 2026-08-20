@@ -1570,8 +1570,21 @@ function btRenderCore(g,extra){
       +`<div class="s">${_usd(_ac.account_equity_start)} → <b>${_usd(_ac.equity_end)}</b>`
         +` · after ${_usd(_ac.fees_usd)} fees</div></div>`;
   } else if(s.trades){
+    /* NAME THE FIELD THAT IS ACTUALLY MISSING.
+       It used to say "fill in account $ and risk %" whichever of the two was
+       blank — so someone who had typed 100000 into ACCOUNT $ was told to fill
+       in a box they had just filled in, and the one still empty went unnamed.
+       Being told to do what you have already done reads as the page being
+       broken, and here it sent the reader to the wrong box. */
+    const _eq=parseFloat((document.getElementById('btEquity')||{}).value)||0;
+    const _rp=parseFloat((document.getElementById('btRiskPct')||{}).value)||0;
+    const _need=[!_eq?'<b>account $</b>':null,!_rp?'<b>risk % / trade</b>':null]
+      .filter(Boolean);
     html+=`<div class="bt-money"><div class="v" style="color:var(--text2);font-size:15px">no dollar P&L</div>`
-      +`<div class="s">fill in <b>account $</b> and <b>risk %</b> above to size these trades</div></div>`;
+      +`<div class="s">${_need.length
+          ? 'fill in '+_need.join(' and ')+' above to size these trades'
+          : 'these trades could not be sized — every one of them was missing a stop'
+        }</div></div>`;
   }
 
   if(s.trades){
@@ -1631,6 +1644,14 @@ function btRenderCore(g,extra){
   if(cov&&cov.scan_gate===false)flags.push('watchlist gate OFF — includes trades from before the scanner found the stock');
   if(cov&&cov.before_scan)flags.push(`${_pl(cov.before_scan,'trade')} removed — the scanner had not found the name yet`);
   if(s.errors)flags.push(`<span id="btErrTgl" style="cursor:pointer;text-decoration:underline dotted">${_pl(s.errors,'pair')} failed to evaluate</span>`);
+  if(cov&&cov.blank_days&&cov.blank_days.length)flags.push(
+    `<b>${_pl(cov.blank_days.length,'session')} produced NO bars at all</b> — `
+    +`the run really covers ${cov.covered_days||0} session(s)`
+    +`${cov.covered_from?` (${cov.covered_from} → ${cov.covered_to})`:''}. `
+    +`yahoo's intraday history is a rolling window of about a month and it `
+    +`slides, so the OLDEST days of a range drop out over time and the same `
+    +`backtest returns fewer trades than it did a fortnight ago. Use polygon `
+    +`for anything older than a week.`);
   if(cov&&cov.no_data)flags.push(`<span id="btNdTgl" style="cursor:pointer;text-decoration:underline dotted">${_pl(cov.no_data,'pair')} had no bars from ${cov.feed}</span>`);
   if(cov&&cov.source_imbalance)flags.push(cov.source_imbalance);
   if(BT_FILTERS.length)flags.push('the money block is the WHOLE run — sizing compounds and shares one balance, so filters cannot apply to it');
