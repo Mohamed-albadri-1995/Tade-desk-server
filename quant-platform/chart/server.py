@@ -533,6 +533,47 @@ def backtest_report(bid: int):
                      f"on feed '{cov.get('feed')}' — universe only PARTIALLY evaluated",
                      "alpaca/IEX carries no data for many small caps. Rerun on "
                      "polygon."))
+    if cov.get('blank_days'):
+        _bd = cov['blank_days']
+        warn.append((f"{len(_bd)} session(s) produced NO bars at all — this run really "
+                     f"covers {cov.get('covered_days', 0)} session(s)"
+                     + (f" ({cov.get('covered_from')} → {cov.get('covered_to')})"
+                        if cov.get('covered_from') else ''),
+                     "yahoo serves roughly a month of 1-minute bars and the window "
+                     "SLIDES, so the oldest days of a range drop out over time and "
+                     "the same backtest returns fewer trades than it did a fortnight "
+                     "ago. Use polygon for anything older than a week. Blank: "
+                     + ', '.join(_bd[:12]) + ('…' if len(_bd) > 12 else '')))
+    # A VWAP-ANCHORED STOP IS ONLY AS GOOD AS THE VOLUME UNDER IT.
+    #
+    # Both live setups stop at the session VWAP, which is a volume-weighted
+    # number, so the feed does not merely supply the bars, it DEFINES where the
+    # stop sits. yahoo and polygon are consolidated (the whole market); Alpaca's
+    # free tier is IEX only, a few percent of the volume, and its VWAP is a
+    # different line on the same chart.
+    #
+    # Backtesting a VWAP-stopped strategy on IEX therefore does not measure that
+    # strategy. It measures a strategy nobody wrote, with a stop nobody would
+    # place, and reports it in the same shape as a real result. The runner
+    # already says this at the moment of a live pick; a backtest that stayed
+    # quiet about it was the louder of the two silences.
+    if str(spec.get('feed') or '') == 'alpaca':
+        _vwap_stopped = []
+        for _st in (spec.get('strategies') or ([spec.get('strategy')]
+                                               if spec.get('strategy') else [])):
+            _sl = ((_st or {}).get('risk') or {}).get('sl') or {}
+            _anchor = json.dumps(_sl.get('anchor') or {})
+            if 'vwap' in _anchor:
+                _vwap_stopped.append((_st or {}).get('name') or '?')
+        if _vwap_stopped:
+            warn.append(("THE STOP IS THE SESSION VWAP AND THIS RAN ON ALPACA/IEX — "
+                         "the numbers below are not this strategy",
+                         "VWAP is volume-weighted, so the feed decides where the "
+                         "stop sits. Alpaca's free tier carries IEX only — a few "
+                         "percent of the market — and its VWAP is a different line "
+                         "from the one the chart and the live desk use. Rerun on "
+                         "polygon or yahoo. Affected: "
+                         + ', '.join(_vwap_stopped)))
     from chart import report as rpt
     trades = g.get('trades') or []
     st = rpt.compute(trades, s, spec)
