@@ -140,6 +140,30 @@ const n = (v, d = 2) => (typeof v === 'number' ? v.toFixed(d) : '—');
     catch (err) { console.log(`  ${m.padEnd(10)} FAILED — ${err.message}`); out[m] = null; }
   }
 
+  /*
+   * WHAT THE RUN ACTUALLY COVERED, which is not what was asked for.
+   *
+   * A register universe can only be evaluated on days the screener FROZE. Ask
+   * for five months when the register holds seven weeks and the run reports
+   * the range you typed and the trades it had — a 2026-04-01 → 2026-08-19 run
+   * came back with the same 16 trades and the same 31.2% win rate as the
+   * 2026-07-01 run, because it was the same seven weeks. Nothing said so, and
+   * "I widened the window and the result did not change" is the most
+   * misleading possible reading of that.
+   */
+  const covered = (out.desk && out.desk.dates) || (out.close && out.close.dates) || [];
+  if (covered.length) {
+    const first = covered[0];
+    const last = covered[covered.length - 1];
+    console.log('');
+    console.log(`  sessions with data: ${covered.length}  (${first} → ${last})`);
+    if (first !== START || last !== END) {
+      console.log(`  ⚠ YOU ASKED FOR ${START} → ${END}. The rest of that range has`
+        + ' no frozen register day, so it contributed nothing —'
+        + ' the numbers below cover the shorter period only.');
+    }
+  }
+
   console.log('');
   console.log(`${'model'.padEnd(11)}${'trades'.padStart(7)}${'win %'.padStart(8)}`
     + `${'net %'.padStart(10)}${'avg %'.padStart(9)}${'max DD'.padStart(9)}${'sharpe'.padStart(8)}`);
