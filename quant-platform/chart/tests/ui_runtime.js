@@ -39,6 +39,10 @@ const mkEl = (id) => {
     appendChild(c) { this.children.push(c); return c; },
     removeChild() {}, remove() {}, insertBefore(c) { this.children.push(c); return c; },
     addEventListener() {}, removeEventListener() {}, click() {},
+    // Every real element has it. Stubbed so a caller is exercised rather than
+    // guarded against in production code that will never meet a browser
+    // without it.
+    scrollIntoView() {},
     setAttribute() {}, getAttribute() { return null; }, focus() {},
     getBoundingClientRect: () => ({ width: 800, height: 400, top: 0, left: 0 }),
     querySelector: () => mkEl('q'), querySelectorAll: () => [],
@@ -533,6 +537,67 @@ try {
      wrap.style.height === '' && wrap.style.flex === '',
      wrap.style.height + ' / ' + wrap.style.flex);
 } catch (e) { ok('releasing really clears them', false, e.message); }
+
+
+/* ── THE LEFT RAIL ────────────────────────────────────────────────────────
+ *
+ * Every tool used to sit behind one "More" button: two taps to reach, and
+ * invisible until you found it. On a phone you could not tell the strategy
+ * builder existed.
+ *
+ * THE PROPERTY THAT MATTERS MOST is that the rail duplicates NOTHING. A rail
+ * with its own copy of "chart type" would be a second source of truth for one
+ * setting, and the two would disagree the first time either was changed — the
+ * failure this codebase keeps finding elsewhere. So each button either clicks
+ * the button that already owns the behaviour, or opens the existing sheet and
+ * brings the right group into view.
+ */
+ok('the rail exists, on the left of the chart',
+   /<nav id="leftRail"[\s\S]{0,2000}<div id="chartWrap">/.test(html));
+ok('it has a FIXED width, so the chart does not resize under your hand',
+   /#leftRail \{[^}]*flex:0 0 54px/.test(html));
+
+// An icon-only rail is a memory test. The labels are what make it readable to
+// someone who did not build it.
+ok('every button carries a word, not just an icon',
+   (html.match(/class="rl"/g) || []).length >= 6);
+
+// NOT ONE INPUT IS DUPLICATED. Checked by counting the ids that own a setting:
+// if the rail had copied any of them there would be two in the file.
+for (const id of ['ctype', 'scaleMode', 'view', 'days', 'feed', 'addPrim']) {
+  ok(`#${id} exists exactly once — the rail copied no control`,
+     (html.match(new RegExp(`id="${id}"`, 'g')) || []).length === 1);
+}
+
+// The three that own behaviour are FORWARDED to, never re-implemented: the
+// strategy drawer, the alert watcher and the print sheet each carry their own
+// state, and a second caller is a second place to get that state wrong.
+ok('strategy, alerts, print and panel forward to the buttons that own them',
+   /railForward\('railStrat','stratBtn'\)/.test(html)
+   && /railForward\('railAlerts','alertsBtn'\)/.test(html)
+   && /railForward\('railPrint','printR1Btn'\)/.test(html)
+   && /railForward\('railPanel','sideBtn'\)/.test(html));
+
+ok('`railOpen` is defined at top level and runs',
+   typeof ctx.railOpen === 'function');
+try {
+  ctx.railOpen('mgrpChart');
+  ok('railOpen() opens the sheet', doc.body.classList.contains('more-open'));
+  ok('...and marks the group it brought into view',
+     els.mgrpChart.classList.contains('flash'),
+     'landing mid-sheet with nothing highlighted reads as the wrong button');
+} catch (e) { ok('railOpen() runs', false, e.message); }
+
+// A toggle with no sign of its state is a button you press twice to find out
+// what it did.
+ok('the rail shows what is currently open', typeof ctx.railSync === 'function');
+try { ctx.railSync(); ok('railSync() runs', true); }
+catch (e) { ok('railSync() runs', false, e.message); }
+
+// NEVER HIDDEN ON A PHONE — that is where the complaint came from, and hiding
+// it would put every tool back behind the one menu button it replaced.
+ok('the rail narrows on a phone rather than disappearing',
+   /#leftRail \{ flex:0 0 44px/.test(html) && !/#leftRail \{[^}]*display:none/.test(html));
 
 console.log('\n' + '='.repeat(64));
 console.log('RESULT  PASS=' + PASS + '  FAIL=' + FAIL);

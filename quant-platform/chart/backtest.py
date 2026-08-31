@@ -1302,11 +1302,33 @@ def run_and_store(bt_id: int, spec: dict) -> None:
             last['p'] = p
             store.update_backtest(bt_id, progress=p)
 
-    try:
-        out = run(spec, progress_cb=_cb)
-        store.add_bt_trades(bt_id, out['trades'])
-        store.update_backtest(bt_id, status='done', progress=1.0,
-                              summary=out['summary'])
-    except Exception as e:  # noqa: BLE001
-        store.update_backtest(bt_id, status='error',
-                              error=f'{e}\n{traceback.format_exc()[-300:]}')
+    from chart import oplog
+    # THE RUN'S OWN RECORD. The store keeps the result; this keeps the fact that
+    # it ran, how long it took and on how much — the numbers behind "why did
+    # that take six minutes" and "why did it come back with four trades".
+    with oplog.timed('backtest', id=bt_id,
+                     name=str(spec.get('name') or ''),
+                     start=str(spec.get('start') or ''),
+                     end=str(spec.get('end') or ''),
+                     tf=str(spec.get('tf') or ''),
+                     feed=str(spec.get('feed') or ''),
+                     fill=str(spec.get('fill') or '')) as _t:
+        try:
+            out = run(spec, progress_cb=_cb)
+            store.add_bt_trades(bt_id, out['trades'])
+            store.update_backtest(bt_id, status='done', progress=1.0,
+                                  summary=out['summary'])
+            _sum = out.get('summary') or {}
+            _cov = _sum.get('coverage') or {}
+            _t.add(trades=_sum.get('trades'),
+                   pairs=_sum.get('pairs'),
+                   sessions=len(_sum.get('dates') or []),
+                   # The counts that explain a small result without opening it.
+                   no_data=_cov.get('no_data'),
+                   before_scan=_cov.get('before_scan'))
+        except Exception as e:  # noqa: BLE001
+            store.update_backtest(bt_id, status='error',
+                                  error=f'{e}\n{traceback.format_exc()[-300:]}')
+            # Recorded as a failure and NOT re-raised: this is a background
+            # thread, and the store already carries the error for the poller.
+            _t.add(ok=False, error=str(e)[:400])

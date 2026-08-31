@@ -58,6 +58,7 @@ PARTS = [
     ('logic_audit43.py',    'flat-dollar risk vs compounding, and what the per-trade cap buys'),
     ('logic_audit44.py',    "fill 'live': the backtest's decision, taken in real time"),
     ('logic_audit45.py',    'the alignment holds for EVERY window shape, not just 09:35'),
+    ('logic_audit46.py',    'the operations log: the failure path, and never the cause of one'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They

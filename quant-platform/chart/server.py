@@ -324,6 +324,27 @@ def desk_backtest_defaults():
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/oplog')
+def oplog_read(limit: int = 200, op: str = '', day: str = '', summary: int = 0):
+    """What qp has been asked to do, newest first.
+
+    The record that did not exist: `print()` to stdout is kept by systemd for a
+    while, read by nobody, and cannot be queried. After the fact this is what
+    answers "was the 09:35 decision even asked", "how long did it take" and
+    "how many charts was the sheet building when it died".
+
+    `summary=1` gives counts and timings per operation instead of the rows —
+    the shape of a session in one object.
+    """
+    from chart import oplog
+    try:
+        if summary:
+            return {'ok': True, 'day': day, 'summary': oplog.summary(day)}
+        return {'ok': True, 'rows': oplog.read(limit=limit, op=op, day=day)}
+    except Exception as e:  # noqa: BLE001 — a log reader must not 500
+        return {'ok': False, 'error': str(e)}
+
+
 @app.get('/api/backtests')
 def backtests_list():
     return {'ok': True, 'backtests': store.list_backtests()}
@@ -1127,30 +1148,47 @@ def setup_decide(payload: dict = Body(...)):
         if not symbols:
             return JSONResponse({'ok': False, 'error': 'symbols required'})
 
-        out = dec.decide(
-            strategies, symbols,
-            date=str(payload.get('date') or ''),
-            tf=payload.get('tf', '1m'),
-            feed=payload.get('feed', 'yahoo'),
-            # 0 = take every signal. NOT 2: a silent top-2 is the same error
-            # as a silent metric, one layer down.
-            top_n=int(payload.get('top_n') or 0),
-            metric=payload.get('metric') or None,
-            direction=payload.get('direction') or None,
-            ctx=payload.get('ctx') or None,
-            target_r=float(payload.get('target_r') or 2.0),
-            days=int(payload.get('days') or 2),
-            # 'close' fills at the signal bar's close; 'next_open' at the
-            # following bar's open, which is what a market order really gets.
-            # It moves the entry, and with it the risk, the target and the
-            # ranking metric, so it is a caller's decision rather than a default
-            # nobody chose.
-            fill=str(payload.get('fill') or 'close'),
-            # Defaults to the BACKTEST's default so the two see the same bars.
-            # 'regular' was hardcoded here and it changed every rolling
-            # indicator's warm-up — see the note in decide.evaluate_symbol.
-            view=str(payload.get('view') or 'all'),
-        )
+        from chart import oplog
+        with oplog.timed('decide',
+                         setup=str(payload.get('strategy_id') or ''),
+                         date=str(payload.get('date') or ''),
+                         symbols=len(symbols),
+                         fill=str(payload.get('fill') or 'close'),
+                         tf=payload.get('tf', '1m'),
+                         feed=payload.get('feed', 'yahoo')) as _t:
+            out = dec.decide(
+                strategies, symbols,
+                date=str(payload.get('date') or ''),
+                tf=payload.get('tf', '1m'),
+                feed=payload.get('feed', 'yahoo'),
+                # 0 = take every signal. NOT 2: a silent top-2 is the same error
+                # as a silent metric, one layer down.
+                top_n=int(payload.get('top_n') or 0),
+                metric=payload.get('metric') or None,
+                direction=payload.get('direction') or None,
+                ctx=payload.get('ctx') or None,
+                target_r=float(payload.get('target_r') or 2.0),
+                days=int(payload.get('days') or 2),
+                # 'close' fills at the signal bar's close; 'next_open' at the
+                # following bar's open, which is what a market order really gets.
+                # It moves the entry, and with it the risk, the target and the
+                # ranking metric, so it is a caller's decision rather than a default
+                # nobody chose.
+                fill=str(payload.get('fill') or 'close'),
+                # Defaults to the BACKTEST's default so the two see the same bars.
+                # 'regular' was hardcoded here and it changed every rolling
+                # indicator's warm-up — see the note in decide.evaluate_symbol.
+                view=str(payload.get('view') or 'all'),
+            )
+            # THE SHAPE OF THE ANSWER, never the answer. "0 picks from 39
+            # symbols with 2 errors" is the line that explains a quiet morning;
+            # the picks themselves are already in the alert feed.
+            _c = (out or {}).get('counts') or {}
+            _t.add(picks=len((out or {}).get('picks') or []),
+                   evaluated=_c.get('evaluated'),
+                   signalled=_c.get('signalled'),
+                   errored=_c.get('errored'),
+                   ok=bool((out or {}).get('ok', True)))
         return JSONResponse(out)
     except Exception as e:
         return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
@@ -1638,6 +1676,11 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
     numbers as a spreadsheet.
     """
     if not _PRINT_LOCK.acquire(blocking=False):
+        # RECORDED, because a refusal is the interesting event: it means two
+        # sheets were started together, which is the shape of the crash this
+        # lock exists to prevent.
+        from chart import oplog
+        oplog.record('print_refused', ok=False, reason='another sheet is building')
         return _print_busy()
     try:
         sheets, errors, ovs, rng, bad = _build_sheets(
@@ -2024,6 +2067,11 @@ def pairs_print(pairs: str = '', tf: str = '5m', feed: str = 'polygon',
     # different way. Two print endpoints with one guard between them would
     # simply move the crash to whichever one was left unguarded.
     if not _PRINT_LOCK.acquire(blocking=False):
+        # RECORDED, because a refusal is the interesting event: it means two
+        # sheets were started together, which is the shape of the crash this
+        # lock exists to prevent.
+        from chart import oplog
+        oplog.record('print_refused', ok=False, reason='another sheet is building')
         return _print_busy()
     try:
         sheets, errors, ovs, rng, bad = _build_pair_sheets(

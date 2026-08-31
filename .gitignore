@@ -26,3 +26,8 @@ broker.json
 
 # The chosen data feed — a local choice, not code.
 quant-platform/.default-feed
+
+# qp's operations log (chart/oplog.py), when QP_DATA_DIR is not set and it
+# falls back to living beside the code. It is a record of what this box did,
+# not source — and it names symbols, timings and error text.
+quant-platform/chart/data/

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Alerts · Trade Desk</title>
+<title>Algo · Trade Desk</title>
 <link rel="stylesheet" href="/desk.css">
 <script src="/desk.js"></script>
 <style>
@@ -478,7 +478,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <div class="wrap">
 
 <div class="top">
-  <h1>⚠ Alerts</h1>
+  <h1>⚡ Algo</h1>
   <a class="home" id="home-link" href="/">← all tools</a>
   <!-- The screener has treated high contrast as the NORMAL case since someone
        tried to read a card at a bus stop. Same button, same corner, every
@@ -1048,8 +1048,8 @@ function announce(fires) {
     try { new Notification(title, { body, tag: 'td-alert' }); } catch {}
   }
   // The title carries it even when the tab is in the background with sound off.
-  document.title = `(${fires.length}) Alerts · Trade Desk`;
-  setTimeout(() => { document.title = 'Alerts · Trade Desk'; }, 30000);
+  document.title = `(${fires.length}) Algo · Trade Desk`;
+  setTimeout(() => { document.title = 'Algo · Trade Desk'; }, 30000);
 }
 
 /* ── setups ──

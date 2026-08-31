@@ -160,11 +160,11 @@
     },
     {
       "id": "ALERTS",
-      "name": "Alerts",
+      "name": "Algo",
       "port": 3090,
       "path": "/",
       "accent": "#fbbf24",
-      "desc": "Rules that watch every screener's cards and tell you when one crosses a level. Per stock, per tool, or both."
+      "desc": "The execution desk: setups deciding on their own bar, sizing from their own backtest, routing to their own account \u2014 with the alerts, the orders and the reconciliation beside them."
     }
   ]
 }
