@@ -884,6 +884,21 @@ async function loadChart(){
   const tf=document.getElementById('tf').value, days=document.getElementById('days').value;
   const feed=document.getElementById('feed').value, view=document.getElementById('view').value;
   const asof=document.getElementById('asof').value||'';
+  /*
+   * A NEW CHART GETS THE FULL HEIGHT BACK.
+   *
+   * The axis correction pins #chartWrap to a pixel height measured against the
+   * PREVIOUS render. A different symbol can have a taller or shorter overlay
+   * legend, so that pin is a number computed for a layout that no longer
+   * exists — and left in place it is what produced "when I change the symbol
+   * the screen shrinks": a strip of candles above a black page.
+   *
+   * Released here rather than only inside the correction, because this is the
+   * moment the layout is known to be about to change. If the axis still needs
+   * shortening afterwards, _keepAxisOnScreen measures it again and does it.
+   */
+  _releaseChartHeight();
+  _axisFix = 0;
   syncAsofUI();
   ['symbol','tf','days','feed','view'].forEach(k=>localStorage.setItem('qpc_'+k,document.getElementById(k).value));
   document.getElementById('status').textContent='loading…';
@@ -2204,9 +2219,42 @@ function _resizeChart(){ if(CHART){ const el=document.getElementById('chart'); C
  * right it does nothing at all.
  */
 let _axisFix = 0;
+
+/*
+ * GIVE THE HEIGHT BACK BEFORE MEASURING IT AGAIN.
+ *
+ * THE BUG THIS FIXES, reported as "when I change the symbol the screen
+ * shrinks": the correction below pins #chartWrap to an explicit pixel height
+ * and sets flex:0 0 auto, and nothing ever undid it. That is correct exactly
+ * once — for the layout it was measured against.
+ *
+ * Change the symbol and the chart is rebuilt inside a wrapper still pinned to a
+ * height computed for the PREVIOUS render. On a phone the overlay legend is
+ * taller for some symbols than others, so the pin can be a hundred pixels too
+ * small, and what is left is a strip of candles with a black page under it.
+ * _axisFix resetting to 0 did not help: it resets the COUNTER, never the pin.
+ *
+ * So a fresh measurement starts by releasing the pin and letting the CSS lay
+ * the page out. If the axis is then on screen — which it is whenever the
+ * viewport grew, the drawer closed, or the legend got shorter — the chart keeps
+ * its full height, and nothing is shortened for a reason that expired.
+ */
+function _releaseChartHeight(){
+  const wrap = document.getElementById('chartWrap');
+  if(!wrap) return;
+  wrap.style.height = '';
+  wrap.style.flex = '';
+}
+
 function _keepAxisOnScreen(){
   const el = document.getElementById('chart');
   if(!el || !CHART) return;
+  // Only at the START of a correction: doing it mid-sequence would undo the
+  // shrink that is being verified and the two would fight, frame by frame.
+  if(_axisFix === 0){
+    _releaseChartHeight();
+    CHART.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+  }
   const rows = el.querySelectorAll('table tr');
   if(!rows.length) return;
   const axis = rows[rows.length-1].getBoundingClientRect();

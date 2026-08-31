@@ -490,6 +490,50 @@ ok('an unreachable desk falls back to the shipped table',
 ok('...and the page SAYS the numbers are not the desk’s',
    /NOT the desk/.test(html));
 
+
+/* ── THE CHART MUST GET ITS HEIGHT BACK ──────────────────────────────────
+ *
+ * Reported as "when I try to change the symbol the screen shrinks", with a
+ * screenshot of a strip of candles above a black page.
+ *
+ * The axis correction pins #chartWrap to an explicit pixel height and sets
+ * flex:0 0 auto. That is right exactly once — for the layout it measured. A
+ * different symbol has a taller or shorter overlay legend, so the pin is a
+ * number computed for a layout that no longer exists, and nothing undid it.
+ * Resetting _axisFix does not help: it resets the COUNTER, never the pin.
+ */
+ok('there is a way to release the pinned height',
+   typeof ctx._releaseChartHeight === 'function');
+ok('...and it clears BOTH the height and the flex override',
+   /wrap\.style\.height = '';[\s\S]{0,80}wrap\.style\.flex = '';/.test(html),
+   'a height cleared while flex:0 0 auto remains is still pinned');
+
+// Called on every chart load, which is the moment the layout is known to be
+// about to change — a symbol change goes through here.
+ok('every chart load releases it before drawing',
+   /_releaseChartHeight\(\);\s*\n\s*_axisFix = 0;\s*\n\s*syncAsofUI\(\);/.test(html),
+   'loadChart must reset the pin, or a new symbol inherits the old height');
+
+// And a fresh measurement starts from the full height, so a chart shortened
+// for a viewport that has since grown is not left short forever.
+ok('a fresh measurement releases first, then re-measures',
+   /if\(_axisFix === 0\)\{[\s\S]{0,160}_releaseChartHeight\(\);/.test(html));
+
+// It must NOT release mid-correction: that would undo the shrink being
+// verified and the two would fight, frame by frame.
+ok('...but not mid-correction', /if\(_axisFix === 0\)\{/.test(html));
+
+try {
+  // The stub creates elements on demand, so ask for it the way the page does.
+  const wrap = doc.getElementById('chartWrap');
+  wrap.style.height = '180px';
+  wrap.style.flex = '0 0 auto';
+  ctx._releaseChartHeight();
+  ok('releasing really clears them',
+     wrap.style.height === '' && wrap.style.flex === '',
+     wrap.style.height + ' / ' + wrap.style.flex);
+} catch (e) { ok('releasing really clears them', false, e.message); }
+
 console.log('\n' + '='.repeat(64));
 console.log('RESULT  PASS=' + PASS + '  FAIL=' + FAIL);
 console.log('='.repeat(64));
