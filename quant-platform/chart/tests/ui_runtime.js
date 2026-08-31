@@ -779,6 +779,49 @@ ok('the drawer is taller on a phone, where the columns stack',
    /#drawer \{ height:62vh; \}/.test(html)
    && /padding-bottom: var\(--drawerH, 62vh\)/.test(html));
 
+/*
+ * ── EVERY CONTAINER THAT CAN OUTGROW THE SCREEN SCROLLS ───────────────────
+ *
+ * Checked as a LIST rather than one at a time, because the failure is always
+ * the same shape and always in whichever one was added last: a panel is built,
+ * it fits the content it was built with, and it silently clips the day
+ * somebody puts more in it. The drawer was the one that got reported; two
+ * others had the same hole and had simply not been opened on a small screen
+ * yet.
+ *
+ * Each entry names the container, the rule that gives it a ceiling, and the
+ * rule that lets it scroll. A ceiling without a scroll clips; a scroll without
+ * a ceiling never triggers.
+ */
+const SCROLLERS = [
+  // [what,             the ceiling,                     the scroll]
+  ['the side panel',    /#side \{[^}]*flex:0 0 260px/,     /#side \{[^}]*overflow:auto/],
+  ['the settings sheet', /#hdrMore \{[^}]*max-height:70vh/, /#hdrMore \{[^}]*overflow-y:auto/],
+  ['...on a phone',     /#hdrMore \{[^}]*max-height:82vh/,  /#hdrMore \{[^}]*overflow-y:auto/],
+  ['the left rail',     /#leftRail \{[^}]*flex:0 0 54px/,   /#leftRail \{[^}]*overflow-y:auto/],
+  ['the drawer body',   /#drawer \.dbody \{[^}]*min-height:0/, /#drawer \.dbody \{[^}]*overflow-y:auto/],
+  ['the drawer head',   /#drawer \.dhead \{[^}]*max-height:45%/, /#drawer \.dhead \{[^}]*overflow-y:auto/],
+  ['the register list', /#regList \{[^}]*max-height:38vh/,  /#regList \{[^}]*overflow:auto/],
+  ['the trades list',   /id="btTrades"[^>]*max-height:38vh/, /id="btTrades"[^>]*overflow:auto/],
+  ['the print panel',   /max-height:calc\(100vh - 68px\)/,  /overflow-y:auto;'\s*\n\s*\+ 'overscroll/],
+  ['the alert log',     /max-height:180px/,                 /overflow-y:auto/],
+];
+for (const [what, ceiling, scroll] of SCROLLERS) {
+  ok(`${what} has a ceiling`, ceiling.test(html),
+     'without one it pushes the page instead of scrolling');
+  ok(`...and ${what} scrolls`, scroll.test(html),
+     'a ceiling with no scroll CLIPS — the content is there and unreachable');
+}
+
+/*
+ * A panel section is not its own scroller and must not become one: it lives
+ * inside #side, which scrolls. Two nested scroll areas is how a flick does
+ * nothing — the gesture lands on whichever is under the thumb.
+ */
+ok('a panel section leaves the scrolling to the panel',
+   /\.psec \{ display:none; \}/.test(html)
+   && !/\.psec \{[^}]*overflow/.test(html));
+
 // A toggle with no sign of its state is a button you press twice to find out
 // what it did.
 ok('the rail shows what is currently open', typeof ctx.railSync === 'function');

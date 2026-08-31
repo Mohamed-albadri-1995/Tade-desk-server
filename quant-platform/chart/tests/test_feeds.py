@@ -575,3 +575,144 @@ def test_a_cut_WITH_a_metric_is_honoured(monkeypatch):
                      metric='vwap_extension', top_n=1)
     assert len(out['picks']) == 1
     assert out['rank'].get('ignored_top_n') is None
+
+
+# ── the polygon + yahoo join ──────────────────────────────────────────────
+#
+# WHY THIS FEED EXISTS. Neither source answers the question this platform asks.
+# Polygon has a year of history and full premarket but its free plan is a day
+# behind, so a live 09:35 decision taken on it has no bars for this morning at
+# all. Yahoo arrives during the session but keeps roughly a week of 1-minute
+# history, which is not a backtest. Joined, they answer both halves.
+#
+# THE JOIN IS THE RISK, so it is what is tested. Stubbed sources, because a
+# network fetch in a unit test is a test that fails on a Sunday for reasons
+# unrelated to the code.
+
+def _frame(times, vol=1000.0, px=10.0):
+    import pandas as pd
+    idx = pd.DatetimeIndex([pd.Timestamp(t, tz='UTC') for t in times], name='t')
+    return pd.DataFrame(
+        {'open': px, 'high': px, 'low': px, 'close': px, 'volume': vol},
+        index=idx)
+
+
+def test_polygon_supplies_history_and_yahoo_only_the_gap(monkeypatch):
+    from tools.data import hybrid_yahoo as hy
+    import pandas as pd
+    poly = _frame(['2026-08-28 14:30', '2026-08-28 14:31'], px=10.0)
+    # Yahoo is handed the whole window and returns an OVERLAPPING frame — which
+    # is what it really does, because it is asked for a range not a slice.
+    yah = _frame(['2026-08-28 14:31', '2026-08-31 13:31'], px=99.0)
+    monkeypatch.setattr(hy.polygon, 'load', lambda *a, **k: poly)
+    monkeypatch.setattr(hy.yahoo, 'load', lambda *a, **k: yah)
+    out = hy.load('X', '1m', pd.Timestamp('2026-08-28', tz='UTC'),
+                  pd.Timestamp('2026-08-31 20:00', tz='UTC'))
+    assert len(out) == 3
+    # POLYGON WINS THE OVERLAP. It is the consolidated settled record; Yahoo is
+    # here for the minutes Polygon has not published. Taking Yahoo's copy of a
+    # bar Polygon already has would put two tapes' versions of one minute in
+    # the frame and pick between them silently.
+    assert out.loc[pd.Timestamp('2026-08-28 14:31', tz='UTC'), 'close'] == 10.0
+    # ...and only the bars AFTER polygon's last are taken from yahoo.
+    assert out.loc[pd.Timestamp('2026-08-31 13:31', tz='UTC'), 'close'] == 99.0
+
+
+def test_the_yahoo_half_is_asked_for_extended_hours(monkeypatch):
+    """Polygon's history carries the premarket, so the gap must too.
+
+    A seam where the premarket simply stops existing reads as "the stock did
+    not trade before the open today" — a statement about the world rather than
+    about the feed.
+    """
+    from tools.data import hybrid_yahoo as hy
+    import pandas as pd
+    seen = {}
+
+    def _yah(symbol, tf, start, end, *a, **kw):
+        seen.update(kw)
+        return _frame([])
+    monkeypatch.setattr(hy.polygon, 'load', lambda *a, **k: _frame([]))
+    monkeypatch.setattr(hy.yahoo, 'load', _yah)
+    try:
+        hy.load('X', '1m', pd.Timestamp('2026-08-28', tz='UTC'),
+                pd.Timestamp('2026-08-31', tz='UTC'))
+    except RuntimeError:
+        pass                     # both empty is a refusal, tested below
+    assert seen.get('prepost') is True
+
+
+def test_yahoos_extended_frame_is_cached_apart_from_the_regular_one():
+    """prepost changes which BARS come back, not how they are formatted.
+
+    A regular-hours frame served from cache to a caller that asked for extended
+    hours is silently the wrong window, and the caller cannot tell: a session
+    with no premarket looks exactly like a stock that did not trade before the
+    open.
+    """
+    from tools.data import yahoo
+    import pandas as pd
+    a = pd.Timestamp('2026-08-28', tz='UTC')
+    b = pd.Timestamp('2026-08-31', tz='UTC')
+    assert yahoo._cache_path('X', '1m', a, b, False) \
+        != yahoo._cache_path('X', '1m', a, b, True)
+
+
+def test_one_source_down_still_returns_the_other(monkeypatch):
+    """A chart with half the window beats no chart."""
+    from tools.data import hybrid_yahoo as hy
+    import pandas as pd
+    yah = _frame(['2026-08-31 13:31'])
+    monkeypatch.setattr(hy.polygon, 'load',
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError('403')))
+    monkeypatch.setattr(hy.yahoo, 'load', lambda *a, **k: yah)
+    out = hy.load('X', '1m', pd.Timestamp('2026-08-28', tz='UTC'),
+                  pd.Timestamp('2026-08-31 20:00', tz='UTC'))
+    assert len(out) == 1
+
+
+def test_both_sources_down_raises_and_names_both(monkeypatch):
+    """Not an empty frame. Zero bars and two dead sources are different facts,
+    and returning the first as the second is how a blank chart reads as a
+    quiet stock."""
+    from tools.data import hybrid_yahoo as hy
+    import pandas as pd
+    monkeypatch.setattr(hy.polygon, 'load',
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError('poly boom')))
+    monkeypatch.setattr(hy.yahoo, 'load',
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError('yah boom')))
+    with pytest.raises(RuntimeError) as e:
+        hy.load('X', '1m', pd.Timestamp('2026-08-28', tz='UTC'),
+                pd.Timestamp('2026-08-31', tz='UTC'))
+    assert 'poly boom' in str(e.value) and 'yah boom' in str(e.value)
+
+
+def test_the_frame_is_sorted_and_has_the_five_columns(monkeypatch):
+    from tools.data import hybrid_yahoo as hy
+    import pandas as pd
+    monkeypatch.setattr(hy.polygon, 'load',
+                        lambda *a, **k: _frame(['2026-08-28 14:31', '2026-08-28 14:30']))
+    monkeypatch.setattr(hy.yahoo, 'load', lambda *a, **k: _frame([]))
+    out = hy.load('X', '1m', pd.Timestamp('2026-08-28', tz='UTC'),
+                  pd.Timestamp('2026-08-31', tz='UTC'))
+    assert list(out.columns) == ['open', 'high', 'low', 'close', 'volume']
+    assert out.index.is_monotonic_increasing
+
+
+def test_it_is_the_default_when_polygon_is_configured(monkeypatch):
+    """The only feed that answers BOTH halves of the question — a year to test
+    against and today to decide from — so it is what the fallback reaches for.
+
+    Still only a fallback: a chosen feed wins, and yahoo remains the answer on
+    a box with no keys.
+    """
+    import tools.compare_server as cs
+    monkeypatch.setattr(cs, 'default_feed_override', lambda: '')
+    monkeypatch.setenv('POLYGON_API_KEY', 'x')
+    assert cs._feed_status()['default_feed'] == 'hybrid_yahoo'
+    monkeypatch.delenv('POLYGON_API_KEY')
+    assert cs._feed_status()['default_feed'] == 'yahoo'
+    # A choice still wins over the preference.
+    monkeypatch.setattr(cs, 'default_feed_override', lambda: 'yahoo')
+    monkeypatch.setenv('POLYGON_API_KEY', 'x')
+    assert cs._feed_status()['default_feed'] == 'yahoo'

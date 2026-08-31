@@ -97,7 +97,11 @@
      a phone, where the alternative was a horizontal scroll whose end you could
      not see. Same markup either way — only the CSS moves it. */
   #hdrMore { flex:0 0 auto; background:var(--bg2); border-bottom:1px solid var(--border);
-    padding:var(--s3); display:none; gap:var(--s2) var(--s4); flex-wrap:wrap; }
+    padding:var(--s3); display:none; gap:var(--s2) var(--s4); flex-wrap:wrap;
+    /* A CEILING ON EVERY SCREEN. Only the phone rule capped this; on a desktop
+       it was a flex:0 0 auto row in the body's column with no max-height, so a
+       long section pushed the chart off the bottom instead of scrolling. */
+    max-height:70vh; overflow-y:auto; overscroll-behavior:contain; }
   body.more-open #hdrMore { display:flex; }
   /* ── ONE SECTION AT A TIME ──
      The sheet used to show every group at once and the rail "scrolled you to
@@ -456,6 +460,12 @@
                  BLANK and posts an empty string, and the page's own error read
                  "unknown feed '' (have: [alpaca, hybrid, polygon, yahoo])". The list
                  that names the feeds was the one place that did not know about one. -->
+              <!-- hybrid_yahoo first, because it is the default when a Polygon
+                   key exists: Polygon's history joined to Yahoo for the minutes
+                   Polygon has not published yet. Both tapes are consolidated,
+                   so a VWAP means the same thing either side of the seam —
+                   which plain `hybrid` (Polygon + IEX-only Alpaca) cannot say. -->
+              <option value="hybrid_yahoo">hybrid_yahoo (polygon + yahoo)</option>
               <option>yahoo</option><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
       <label class="fld"><span>As-of
         <b class="q" title="REPLAY cutoff: hide every bar after this date, so a setup is judged as it stood then. Blank = the full tape through today. Clicking a register stock does NOT set this — it loads everything and scrolls to that day.">?</b></span>
@@ -680,6 +690,7 @@
                  BLANK and posts an empty string, and the page's own error read
                  "unknown feed '' (have: [alpaca, hybrid, polygon, yahoo])". The list
                  that names the feeds was the one place that did not know about one. -->
+              <option value="hybrid_yahoo">hybrid_yahoo (polygon + yahoo)</option>
               <option>yahoo</option><option>alpaca</option><option selected>polygon</option><option>hybrid</option></select></label>
         </div>
         <div class="frow">
@@ -2924,8 +2935,17 @@ document.getElementById('printR1Btn').onclick = async () => {
   if (box) { box.remove(); return; }
   box = document.createElement('div');
   box.id = 'prBox';
+  /* IT SCROLLS. Twelve form rows plus the swing block in a fixed box pinned
+     56px from the top: on a phone — and on any laptop in landscape — the last
+     controls fell off the bottom of the screen with no way to reach them. The
+     buttons that RUN it are at the bottom, so the panel looked like a form
+     with no submit.
+     max-width as well as width: 300px is wider than the narrowest phones once
+     the 10px inset is counted. */
   box.style.cssText = 'position:fixed;top:56px;right:10px;z-index:120;background:#0f172a;'
     + 'border:1px solid #334155;border-radius:10px;padding:12px;width:300px;'
+    + 'max-width:calc(100vw - 20px);max-height:calc(100vh - 68px);overflow-y:auto;'
+    + 'overscroll-behavior:contain;-webkit-overflow-scrolling:touch;'
     + 'color:#e2e8f0;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.5)';
   const ovNames = (OVERLAYS||[]).map(o=>o.key).join(', ') || 'none — add some with + Add';
   box.innerHTML = `

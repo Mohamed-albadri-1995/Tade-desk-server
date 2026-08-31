@@ -13,9 +13,15 @@ import math
 
 import pandas as pd
 
-from tools.data import alpaca, polygon, hybrid, yahoo
+from tools.data import alpaca, polygon, hybrid, hybrid_yahoo, yahoo
 
 LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid,
+           # Polygon's deep history + Yahoo for the minutes Polygon has not
+           # published yet. Both tapes are CONSOLIDATED, which is what makes
+           # this joinable where 'hybrid' (Polygon + IEX-only Alpaca) is not:
+           # there the volume column collapses at the seam and every VWAP after
+           # it means something different. See tools/data/hybrid_yahoo.py.
+           'hybrid_yahoo': hybrid_yahoo,
            # The only feed here that can serve a decision taken DURING the
            # session: polygon is a day behind on the free plan and alpaca's free
            # tier is IEX. Consolidated tape, and measured against polygon on the

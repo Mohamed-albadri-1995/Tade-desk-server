@@ -37,8 +37,20 @@ describe('the default', () => {
     expect(QP).not.toMatch(/default = 'polygon' if has_polygon/);
   });
 
+  /*
+   * YAHOO IS STILL THE ANSWER WITH NO KEYS, which is the correction this file
+   * was written for: delayed data that arrives beats deeper data that 403s.
+   * The fallback now prefers the polygon+yahoo join FIRST when a Polygon key
+   * exists — the only feed that answers both halves of the question, a year to
+   * test against and today to decide from — and yahoo remains the floor.
+   */
   test('falls back to yahoo, which needs no plan at all', () => {
-    expect(QP).toMatch(/default = chosen if \(chosen and have\.get\(chosen\)\) else 'yahoo'/);
+    expect(QP).toMatch(/else:\n {8}default = 'yahoo'/);
+  });
+
+  test('...and prefers the join only when polygon is actually configured', () => {
+    expect(QP).toMatch(/elif have\.get\('hybrid_yahoo'\):\n {8}default = 'hybrid_yahoo'/);
+    expect(QP).toMatch(/'hybrid_yahoo': has_polygon/);
   });
 
   /*
@@ -47,7 +59,7 @@ describe('the default', () => {
    * choice is only honoured when the feed is actually configured.
    */
   test('a chosen feed is only used when it is configured', () => {
-    expect(QP).toMatch(/chosen if \(chosen and have\.get\(chosen\)\)/);
+    expect(QP).toMatch(/if chosen and have\.get\(chosen\):\n {8}default = chosen/);
   });
 
   /*

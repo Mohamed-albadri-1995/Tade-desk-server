@@ -41,7 +41,7 @@ import qp  # noqa: E402  — populates REGISTRY via primitive decorators
 from qp.registry import REGISTRY, get_approval, save_approval
 from qp.primitives.bars import Bars
 from qp.primitives._session import in_rth as _in_rth, in_premarket as _in_premarket
-from tools.data import alpaca, polygon, hybrid, yahoo
+from tools.data import alpaca, polygon, hybrid, hybrid_yahoo, yahoo
 
 # Data feeds the compare tool can pull bars from. Each module exposes the
 # same load(symbol, tf, start, end) → tz-aware UTC OHLCV DataFrame.
@@ -52,7 +52,7 @@ from tools.data import alpaca, polygon, hybrid, yahoo
 # one and not the other gets you "unknown feed 'yahoo'" from the half you
 # forgot, which is exactly how yahoo shipped the first time.
 _LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid,
-            'yahoo': yahoo}
+            'hybrid_yahoo': hybrid_yahoo, 'yahoo': yahoo}
 
 
 def _load_dotenv() -> None:
@@ -87,7 +87,7 @@ _load_dotenv()
 
 
 _FEED_PREF = Path(__file__).resolve().parents[1] / '.default-feed'
-_VALID_FEEDS = ('yahoo', 'alpaca', 'polygon', 'hybrid')
+_VALID_FEEDS = ('yahoo', 'alpaca', 'polygon', 'hybrid', 'hybrid_yahoo')
 
 
 def default_feed_override() -> str:
@@ -154,11 +154,31 @@ def _feed_status() -> dict:
         'alpaca':  has_alpaca,
         'polygon': has_polygon,
         'hybrid':  has_alpaca and has_polygon,
+        # Polygon's history + Yahoo for the minutes Polygon has not published.
+        # Needs only the Polygon key: yahoo costs nothing and needs none.
+        'hybrid_yahoo': has_polygon,
     }
     # A chosen default wins, and only if that feed is actually configured —
     # otherwise the page would again point at something that cannot answer.
+    #
+    # THE FALLBACK PREFERS THE JOIN when Polygon is configured, because it is
+    # the only feed here that answers both halves of the question this platform
+    # asks: a YEAR of history to test against, and TODAY to decide from.
+    # Polygon alone is a day behind on the free plan — a live 09:35 decision
+    # taken on it has no bars for this morning at all — and Yahoo alone keeps
+    # roughly a week of 1-minute history, which is not a backtest.
+    #
+    # It is still only a FALLBACK. A feed somebody chose wins, and yahoo
+    # remains the answer on a box with no keys: delayed data that arrives
+    # beats deeper data that 403s, which is the correction the note above was
+    # written for and this does not undo it.
     chosen = default_feed_override()
-    default = chosen if (chosen and have.get(chosen)) else 'yahoo'
+    if chosen and have.get(chosen):
+        default = chosen
+    elif have.get('hybrid_yahoo'):
+        default = 'hybrid_yahoo'
+    else:
+        default = 'yahoo'
     return {'feeds': have, 'default_feed': default,
             # Which of the two this is, so a page can say "chosen" vs "fallback"
             # rather than presenting a guess as a decision.

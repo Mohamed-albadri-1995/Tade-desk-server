@@ -59,14 +59,22 @@ _TF_MAP = {'1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
 _MAX_DAYS = {'1m': 30, '5m': 60, '15m': 60, '30m': 60, '1h': 730, '1d': 3650}
 
 
-def _cache_path(symbol: str, tf: str, start: pd.Timestamp, end: pd.Timestamp) -> Path:
+def _cache_path(symbol: str, tf: str, start: pd.Timestamp, end: pd.Timestamp,
+                prepost: bool = False) -> Path:
     # Both endpoints bucketed to the minute, so a re-fetch during the session
     # busts the cache and picks up bars that have appeared since. Without this
     # a 10:00 decision could be served the frame fetched at 09:55.
+    #
+    # PREPOST IS PART OF THE KEY. It changes which BARS come back, not how they
+    # are formatted, so a regular-hours frame served from cache to a caller
+    # that asked for extended hours is silently the wrong window — and the
+    # caller cannot tell, because a session with no premarket looks exactly
+    # like a stock that did not trade before the open.
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     s = start.floor('min').strftime('%Y%m%dT%H%M')
     e = end.floor('min').strftime('%Y%m%dT%H%M')
-    return _CACHE_DIR / f'yahoo_{symbol.upper()}_{tf}_{s}_{e}.parquet'
+    tag = '_ext' if prepost else ''
+    return _CACHE_DIR / f'yahoo_{symbol.upper()}_{tf}{tag}_{s}_{e}.parquet'
 
 
 def _range_for(tf: str, start: pd.Timestamp, end: pd.Timestamp) -> str:
@@ -149,9 +157,17 @@ def _fetch(symbol: str, params: dict) -> dict:
 
 
 def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
-         feed: str = 'yahoo') -> pd.DataFrame:
+         feed: str = 'yahoo', prepost: bool = False) -> pd.DataFrame:
     """Return a tz-aware UTC DataFrame with columns
-    [open, high, low, close, volume] indexed by bar timestamp."""
+    [open, high, low, close, volume] indexed by bar timestamp.
+
+    `prepost` asks Yahoo for the extended session (04:00-20:00 ET) as well as
+    the regular one. OFF by default, which is what every existing caller has
+    always got: the session anchoring in every VWAP primitive is built on the
+    regular session, and turning this on underneath them would move every VWAP
+    on the platform. The hybrid feed passes True, because the history it is
+    joining to — Polygon — carries premarket, and a seam where the premarket
+    stops existing is worse than one where the volume merely changes."""
     if timeframe not in _TF_MAP:
         raise ValueError(f'unsupported timeframe {timeframe!r}')
     start = pd.Timestamp(start)
@@ -159,16 +175,16 @@ def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
     start = start.tz_convert('UTC') if start.tz else start.tz_localize('UTC')
     end = end.tz_convert('UTC') if end.tz else end.tz_localize('UTC')
 
-    cache = _cache_path(symbol, timeframe, start, end)
+    cache = _cache_path(symbol, timeframe, start, end, prepost)
     if cache.exists():
         return pd.read_parquet(cache)
 
     result = _fetch(symbol, {
         'interval': _TF_MAP[timeframe],
         'range': _range_for(timeframe, start, end),
-        # Regular session only, matching the other loaders' default view and the
-        # session anchoring every VWAP primitive relies on.
-        'includePrePost': 'false',
+        # Regular session only by default, matching the other loaders' default
+        # view and the session anchoring every VWAP primitive relies on.
+        'includePrePost': 'true' if prepost else 'false',
     })
 
     stamps = result.get('timestamp') or []
