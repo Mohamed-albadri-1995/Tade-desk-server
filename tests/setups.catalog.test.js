@@ -522,6 +522,60 @@ describe('pairing notes', () => {
  * The decision minute is unchanged and still names the bar. Only the moment of
  * asking moved, to just after that bar closes.
  */
+/*
+ * THE MONEY RULES REACH THE RUNNER.
+ *
+ * The catalogue is the only thing between data/setup-prefs.json and the code
+ * that sizes an order. A field it does not copy does not exist downstream — and
+ * `riskPct` was one: a setup adopted from a backtest that won at 0.5% fell
+ * through to the account's rule and was sized by something nobody chose, while
+ * every report read the account and agreed.
+ */
+describe("a setup's own money rules survive the catalogue", () => {
+  test('a percentage risk reaches the setup object', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const [first] = await catalog.list();
+    require('../src/setups/prefs').saveSettings(first.id,
+      { riskPct: 0.5, maxPositionPct: 100 });
+    const [s] = await catalog.list();
+    expect(s.riskPct).toBe(0.5);
+    expect(s.maxPositionPct).toBe(100);
+    require('../src/setups/prefs').saveSettings(first.id,
+      { riskPct: null, maxPositionPct: null });
+  });
+
+  test('a flat risk still does too', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const [first] = await catalog.list();
+    require('../src/setups/prefs').saveSettings(first.id, { riskPerTrade: 500 });
+    const [s] = await catalog.list();
+    expect(s.riskPerTrade).toBe(500);
+    require('../src/setups/prefs').saveSettings(first.id, { riskPerTrade: null });
+  });
+
+  // And the resolver has to see it — the catalogue object is what the runner
+  // hands to risk.resolve(), so the two halves are only useful together.
+  test('...and the resolver sizes from it', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const [first] = await catalog.list();
+    require('../src/setups/prefs').saveSettings(first.id, { riskPct: 0.5 });
+    const [s] = await catalog.list();
+    const risk = require('../src/setups/risk');
+    const eff = risk.resolve({ accountSize: 50000, riskPerTrade: 500 }, s);
+    expect(eff.riskRule).toBe('pct_of_equity');
+    expect(eff.sources.risk).toBe('setup');
+    require('../src/setups/prefs').saveSettings(first.id, { riskPct: null });
+  });
+
+  // THE TOOL LEVEL HOLDS NO MONEY SETTINGS. Stated here so a tool that started
+  // carrying one would fail rather than become a third place for this to drift.
+  test('the catalogue never invents an account figure of its own', async () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '..', 'src', 'setups', 'catalog.js'), 'utf8');
+    expect(/accountSize/.test(src)).toBe(false);
+  });
+});
+
 describe('a setup runs after the bar it decides on', () => {
   test('the run minute is one after the decision minute', () => {
     expect(catalog.minutesBefore('09:35', -1)).toBe('09:36');

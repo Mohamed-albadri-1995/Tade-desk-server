@@ -47,6 +47,9 @@ router.get('/', async (req, res) => {
       autoTrade: s.autoTrade === true,
       maxTradesPerDay: s.maxTradesPerDay || null,
       riskPerTrade: s.riskPerTrade || null,
+      // ...or as a percentage. Absent here, the page shows a setup sized
+      // at 0.5% as having no risk figure at all.
+      riskPct: s.riskPct || null,
       maxPositionPct: s.maxPositionPct || null,
       // Whether it can produce a clean alert and a clean order at all.
       readiness: s.readiness || null,
@@ -89,20 +92,26 @@ router.get('/backtest-defaults', async (req, res) => {
   }
 
   const specFor = (s) => {
-    // A setup may override the account's risk; the override is what runs, so
-    // it is what the backtest has to be given.
-    const riskUsd = s.riskPerTrade || account.riskPerTrade || 0;
+    /*
+     * RESOLVED ACROSS THE LEVELS, never read off the account.
+     *
+     * The setup holds its own risk rule and cap — that is where adoption writes
+     * them, so that one strategy's winner cannot resize another's trades. This
+     * used to read `s.riskPerTrade || account.riskPerTrade`, which knew nothing
+     * about a PERCENTAGE at either level: a setup sized at 0.5% reported no
+     * risk at all, and the backtest form opened with the money boxes empty.
+     */
+    const eff = risk.resolve(account, s);
     // 100% live means NO cap, which is what an absent cap means in the
     // backtest — sending 100 would make them differ while meaning the same.
-    const capRaw = s.maxPositionPct || account.maxPositionPct;
-    const cap = (capRaw && capRaw !== 100) ? capRaw : 0;
+    const cap = (eff.maxPositionPct && eff.maxPositionPct !== 100) ? eff.maxPositionPct : 0;
     return {
-      account_equity: account.accountSize || 0,
-      // Flat dollars, never a percentage: a percentage compounds and the desk
-      // does not. Sending risk_pct here would reintroduce the difference this
-      // endpoint exists to remove.
-      risk_usd: riskUsd,
-      risk_pct: 0,
+      account_equity: eff.accountSize || 0,
+      // WHICHEVER RULE IS IN FORCE, in its own unit. Converting a percentage
+      // into dollars here would put a number in the form that reproduces the
+      // first trade and nothing after it, because a backtest compounds.
+      risk_usd: eff.riskPerTrade || 0,
+      risk_pct: eff.riskPerTrade ? 0 : (eff.riskPct || 0),
       max_position_pct: cap,
       rank_per_day: ((s.rank || {}).metric && (s.rank || {}).topN)
         ? { metric: s.rank.metric, top_n: s.rank.topN,

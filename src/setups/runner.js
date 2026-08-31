@@ -745,8 +745,19 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
       // Which risk figure produced this size. An alert that says "18 shares"
       // and an account set to $25 do not add up when the setup is capped at
       // $10, and the arithmetic is the first thing anyone checks.
-      riskUsed: riskCfg.riskPerTrade || null,
-      riskFrom: setup.riskPerTrade ? 'setup' : 'account',
+      //
+      // THE BUDGET, not the flat figure. A setup sized as a PERCENTAGE has no
+      // riskPerTrade at all, and reading that field reported "no risk figure"
+      // beside a real share count — the exact arithmetic this line exists to
+      // let someone check.
+      riskUsed: riskCfg.riskPerTrade
+        || (riskCfg.riskPct && riskCfg.accountSize
+              ? Math.round(riskCfg.accountSize * (riskCfg.riskPct / 100) * 100) / 100
+              : null),
+      // ...and the rule behind it, because "$250" means something different
+      // when it is half a percent of the account than when it is a flat figure.
+      riskRule: riskCfg.riskRule,
+      riskFrom: riskCfg.sources.risk,
     },
     };
   });

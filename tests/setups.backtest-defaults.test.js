@@ -106,6 +106,38 @@ describe('the account settings arrive in backtest vocabulary', () => {
     expect(body.spec.risk_usd).toBe(200);
     expect(body.spec.max_position_pct).toBe(10);
   });
+
+  /*
+   * THE ADOPTED SHAPE. After `--adopt`, the setup holds its own risk rule —
+   * that is where adoption writes it, so one strategy's winner cannot resize
+   * another's. If this endpoint only knows how to read a flat dollar, a setup
+   * sized at 0.5% reports no risk at all and the backtest form opens with the
+   * money boxes empty — the exact state this endpoint exists to prevent.
+   */
+  test('a setup sized as a PERCENTAGE reports the percentage', async () => {
+    writePrefs({ setups: { [ID]: { riskPct: 0.5, maxPositionPct: 100 } } });
+    const { body } = await get(`?setup=${encodeURIComponent(ID)}`);
+    expect(body.spec.risk_pct).toBe(0.5);
+    // ...and the flat figure is zero, because the two are mutually exclusive
+    // and sending both makes the run refuse to start.
+    expect(body.spec.risk_usd).toBe(0);
+  });
+
+  test("...and its no-cap is reported as no cap, not as the account's", async () => {
+    writeRisk({ accountSize: 50000, riskPerTrade: 500, maxPositionPct: 16.66 });
+    writePrefs({ setups: { [ID]: { riskPct: 0.5, maxPositionPct: 100 } } });
+    const { body } = await get(`?setup=${encodeURIComponent(ID)}`);
+    expect(body.spec.max_position_pct).toBe(0);
+  });
+
+  // The setup's rule replaces the account's WHOLE, never mixes with it — half
+  // a percentage and half a flat dollar is neither.
+  test('a setup percentage beats an account flat dollar cleanly', async () => {
+    writeRisk({ accountSize: 50000, riskPerTrade: 500, maxPositionPct: 100 });
+    writePrefs({ setups: { [ID]: { riskPct: 0.5 } } });
+    const { body } = await get(`?setup=${encodeURIComponent(ID)}`);
+    expect([body.spec.risk_usd, body.spec.risk_pct]).toEqual([0, 0.5]);
+  });
 });
 
 describe('the execution settings', () => {

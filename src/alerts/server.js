@@ -84,6 +84,9 @@ app.get('/api/setups', async (req, res) => {
         })),
         maxTradesPerDay: s.maxTradesPerDay || null,
         riskPerTrade: s.riskPerTrade || null,
+        // ...or as a percentage. Absent here, the page shows a setup sized
+        // at 0.5% as having no risk figure at all.
+        riskPct: s.riskPct || null,
         maxPositionPct: s.maxPositionPct || null,
         // Whether it can produce a clean alert and a clean order at all.
         readiness: s.readiness || null,

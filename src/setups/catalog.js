@@ -374,6 +374,15 @@ async function list() {
        * each morning is how it ends up wrong. Absent means "use the account's".
        */
       riskPerTrade: p.riskPerTrade || null,
+      /*
+       * ...or as a PERCENTAGE. Missing here, the catalogue silently dropped it
+       * on the way to the runner: a setup adopted from a backtest that won at
+       * 0.5% would fall through to the account's rule and be sized by
+       * something nobody chose, with every report reading the account and
+       * agreeing. The two are resolved together in risk.resolve(); both have to
+       * arrive for that to mean anything.
+       */
+      riskPct: p.riskPct || null,
       maxPositionPct: p.maxPositionPct || null,
       universe: p.universe || null,
       /*
