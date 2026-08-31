@@ -30,6 +30,13 @@ jest.mock('../src/alpaca/account', () => ({
   positions: jest.fn(),
   account: jest.fn(),
   fills: jest.fn(),
+  /*
+   * credsOf is PURE — it turns a destination into a key pair or null — so the
+   * real one is used rather than a stub. A stub here would let the test pass
+   * against a credential rule the desk does not actually apply, which is the
+   * one thing this file must never do.
+   */
+  credsOf: jest.requireActual('../src/alpaca/account').credsOf,
 }));
 
 const alpaca = require('../src/alpaca/account');
@@ -166,7 +173,11 @@ describe('the account', () => {
       tradingBlocked: true, accountBlocked: false, status: 'ACCOUNT_BLOCKED' } });
     const f = finding(await reconcile.compare(DAY), 'blocked');
     expect(f.level).toBe('error');
-    expect(f.detail).toMatch(/BLOCKED THIS ACCOUNT/);
+    // NAMES THE ACCOUNT. With more than one configured, "this account" is not
+    // an answer — a block is a property of one account and says nothing about
+    // another, so the line has to say which one is refusing orders.
+    expect(f.detail).toMatch(/ALPACA HAS BLOCKED alp\b/);
+    expect(f.account).toBe('alp');
   });
 });
 

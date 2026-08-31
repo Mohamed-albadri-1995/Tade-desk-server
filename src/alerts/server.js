@@ -349,12 +349,42 @@ app.get('/api/broker/journal-trades', async (req, res) => {
     // 04:00 ET covers the pre-market, so nothing placed early is missed.
     const after = new Date(`${from}T04:00:00-04:00`).toISOString();
 
+    /*
+     * ONE ACCOUNT AT A TIME, EACH WITH ITS OWN KEYS.
+     *
+     * Pooling two accounts' fills and pairing them into round trips would build
+     * trades that never happened: a buy in account A closed by a sell in
+     * account B is one imaginary round trip and two real positions left open.
+     * So each account is fetched and paired separately, and every trade carries
+     * the account that made it.
+     */
     const alpaca = require('../alpaca/account');
-    const r = await alpaca.fills({ after });
-    if (!r.ok) return res.json({ ok: false, error: r.error, scope: 'alpaca' });
-
+    const reconcile = require('../broker/reconcile');
     const { tradesFrom } = require('../broker/journalTrades');
-    const trades = tradesFrom(r.fills);
+
+    const scope = reconcile.credentialScope();
+    const readable = scope.readable;
+    if (!readable.length) {
+      return res.json({ ok: false, scope: 'alpaca',
+                        error: scope.reason || 'no readable Alpaca account' });
+    }
+
+    const trades = [];
+    const problems = scope.blind.length ? [scope.reason] : [];
+    let fillCount = 0;
+    for (const id of readable) {
+      const { creds, error } = reconcile.credsForDest(id);
+      if (error) { problems.push(error); continue; }
+      const r = await alpaca.fills({ after, account: creds });
+      if (!r.ok) { problems.push(`${id}: ${r.error}`); continue; }
+      fillCount += r.fills.length;
+      /*
+       * A LONE ACCOUNT IS NOT LABELLED. With one account the journal's rows
+       * have always read 'Alpaca', and stamping an internal destination id on
+       * them would rewrite every existing trade's identity for no gain.
+       */
+      trades.push(...tradesFrom(r.fills, readable.length > 1 ? id : null));
+    }
 
     /*
      * WHICH SETUP TOOK IT, joined on while we are here. The journal's setup tag
@@ -368,8 +398,12 @@ app.get('/api/broker/journal-trades', async (req, res) => {
       if (g && !g.ambiguous) t.setupId = g.setupId;
     }
 
-    res.json({ ok: true, from, days, scope: 'alpaca',
-               fills: r.fills.length, trades });
+    res.json({ ok: problems.length === 0, from, days, scope: 'alpaca',
+               // Which accounts this covers, so a partial answer and a complete
+               // one do not look the same.
+               accounts: readable,
+               ...(problems.length ? { error: problems.join(' · ') } : {}),
+               fills: fillCount, trades });
   } catch (err) {
     // 200 with ok:false — see /api/broker/fills.
     res.json({ ok: false, error: err.message });

@@ -127,6 +127,98 @@ function credsForDest(dest) {
  * read as "you hold nothing" and is the single most dangerous thing this could
  * get wrong.
  */
+/*
+ * ── THE RECONCILIATION, ONE ACCOUNT AT A TIME ────────────────────────────
+ *
+ * What this report answers: "does what the desk THINKS it holds match what the
+ * broker actually holds", and the dangerous direction is a position the broker
+ * has that the desk does not know about — the 15:50 flatten only closes what
+ * this side opened, so an unknown one goes overnight.
+ *
+ * WHY IT HAD TO BECOME ACCOUNT-AWARE. Every map in here is keyed by SYMBOL.
+ * With two accounts that is not a key: the same name held in both collides, and
+ * the ledger's total for it spans both accounts. Reading one account's
+ * positions against both accounts' orders reports the OTHER account's holdings
+ * as "ALPACA HOLDS n AND THIS SIDE DOES NOT KNOW IT" — the loudest line here,
+ * fired on positions that are perfectly well known. A reconciliation that cries
+ * wolf is one that stops being read, and the real finding is then invisible.
+ *
+ * So the whole comparison runs PER ACCOUNT: that account's positions, read with
+ * its own keys, against the orders sent to that account only. Findings carry
+ * the account they belong to. An account that cannot be identified is reported
+ * and skipped, never merged into another's.
+ */
+function believedFor(date, destId) {
+  const rows = broker.orders(date);
+  const closedHere = new Set();
+  const believed = new Map();               // SYMBOL -> { setupId, dests:Set, qty }
+  for (const o of rows) {
+    if (o.kind === 'callback') continue;
+    // THIS ACCOUNT'S ORDERS ONLY. Without this the believed quantity is the sum
+    // across accounts and every two-account signal reports a mismatch.
+    if ((o.destination || null) !== destId) continue;
+    const sym = String(o.symbol || '').toUpperCase();
+    if (!sym) continue;
+    if (o.kind === 'flatten') { if (o.sent) closedHere.add(sym); continue; }
+    if (!o.sent) continue;
+    const was = believed.get(sym) || { setupId: o.setupId || null, dests: new Set(), qty: 0 };
+    was.dests.add(o.destination);
+    // Signed, so a short's believed size is comparable with Alpaca's.
+    was.qty += (String(o.action || '').toLowerCase() === 'sell' ? -1 : 1)
+      * (Number(o.quantity) || 0);
+    believed.set(sym, was);
+  }
+  return { believed, closedHere };
+}
+
+/** One account's positions against one account's orders. */
+function findingsFor(date, destId, positions) {
+  const findings = [];
+  const { believed, closedHere } = believedFor(date, destId);
+  const held = new Map(positions.map(p => [p.symbol, p]));
+
+  for (const [sym, b] of believed) {
+    if (closedHere.has(sym)) continue;                 // we already flattened it
+    const p = held.get(sym);
+    if (!p) {
+      findings.push({
+        level: 'info', kind: 'already-closed', symbol: sym, setupId: b.setupId,
+        account: destId,
+        detail: `${sym}: this side still thinks it is open in ${destId}; Alpaca is `
+          + 'FLAT. A stop or a target filled. Nothing more needs closing.',
+      });
+      continue;
+    }
+    /*
+     * Compared as a MAGNITUDE. Both sides are now scoped to one account, so a
+     * difference here is a real one: a leg did not fill, filled partly, or one
+     * has already been taken out.
+     */
+    if (Math.abs(p.qty) !== Math.abs(b.qty)) {
+      findings.push({
+        level: 'warn', kind: 'qty', symbol: sym, setupId: b.setupId, account: destId,
+        detail: `${sym}: ${destId} holds ${p.qty}, this side sent ${b.qty} there. A leg `
+          + 'did not fill, filled partly, or one has already been taken out.',
+      });
+    }
+  }
+
+  // ── held at the broker and unknown here — the dangerous direction ────────
+  for (const p of positions) {
+    if (believed.has(p.symbol) && !closedHere.has(p.symbol)) continue;
+    findings.push({
+      level: 'error', kind: 'unknown-position', symbol: p.symbol, account: destId,
+      detail: `${p.symbol}: ${destId} HOLDS ${p.qty} AND THIS SIDE DOES NOT KNOW IT. `
+        + (closedHere.has(p.symbol)
+            ? 'It was closed here and is still on — the close did not take. '
+            : 'Nothing here opened it. ')
+        + 'The 15:50 flatten only closes what this side opened, so this one will '
+        + 'go OVERNIGHT unless you close it yourself.',
+    });
+  }
+  return findings;
+}
+
 async function compare(date, { timeoutMs = 10000 } = {}) {
   const verifiable = alpacaDestinations();
   const out = {
@@ -140,114 +232,73 @@ async function compare(date, { timeoutMs = 10000 } = {}) {
   };
 
   const scope = credentialScope();
-  if (scope.ambiguous) {
+  if (scope.blind.length) {
     out.ambiguous = true;
     out.findings.push({ level: 'error', kind: 'ambiguous-account', detail: scope.reason });
   }
 
-  const [pos, acct] = await Promise.all([
-    alpaca.positions({ timeoutMs }),
-    alpaca.account({ timeoutMs }),
-  ]);
-
-  if (!pos.ok) {
-    out.error = pos.error;
-    out.findings.push({
-      level: 'warn', kind: 'unreachable',
-      detail: `could not ask Alpaca what is open (${pos.error}) — everything below `
-        + 'is what THIS SIDE believes, unverified',
-    });
+  const dests = alpacaDests().filter(d => scope.readable.includes(d.id));
+  if (!dests.length) {
+    out.error = scope.reason || 'no readable Alpaca account';
     return out;
   }
-  out.reachable = true;
-  out.positions = pos.positions;
 
-  if (acct.ok) {
-    out.account = acct.account;
-    /*
-     * A blocked account fails every order, one at a time, with a different
-     * message each time. Asked once, it is a single line at the top.
-     */
-    if (acct.account.tradingBlocked || acct.account.accountBlocked) {
+  for (const d of dests) {
+    const { creds } = credsForDest(d);
+    const [pos, acct] = await Promise.all([
+      alpaca.positions({ timeoutMs, account: creds }),
+      alpaca.account({ timeoutMs, account: creds }),
+    ]);
+
+    if (!pos.ok) {
+      /*
+       * ONE UNREACHABLE ACCOUNT DOES NOT BLANK THE REPORT. It used to return
+       * early, so a single timeout hid every finding about every other account
+       * — and "nothing found" is the answer that gets a position left open.
+       */
       out.findings.push({
-        level: 'error', kind: 'blocked',
-        detail: 'ALPACA HAS BLOCKED THIS ACCOUNT — every order today will be '
-          + `refused (status ${acct.account.status})`,
+        level: 'warn', kind: 'unreachable', account: d.id,
+        detail: `could not ask ${d.id} what is open (${pos.error}) — its orders below `
+          + 'are what THIS SIDE believes, unverified',
       });
-    }
-  }
-
-  // ── what this side believes ──────────────────────────────────────────────
-  const rows = broker.orders(date);
-  const closedHere = new Set();
-  const believed = new Map();               // SYMBOL -> { setupId, dests:Set, qty }
-  for (const o of rows) {
-    if (o.kind === 'callback') continue;
-    const sym = String(o.symbol || '').toUpperCase();
-    if (!sym) continue;
-    if (o.kind === 'flatten') { if (o.sent) closedHere.add(sym); continue; }
-    if (!o.sent) continue;
-    const was = believed.get(sym) || { setupId: o.setupId || null, dests: new Set(), qty: 0 };
-    was.dests.add(o.destination);
-    // Signed, so a short's believed size is comparable with Alpaca's.
-    was.qty += (String(o.action || '').toLowerCase() === 'sell' ? -1 : 1)
-      * (Number(o.quantity) || 0);
-    believed.set(sym, was);
-  }
-
-  const held = new Map(out.positions.map(p => [p.symbol, p]));
-
-  // ── believed open, and Alpaca's answer ───────────────────────────────────
-  for (const [sym, b] of believed) {
-    if (closedHere.has(sym)) continue;                 // we already flattened it
-    const onlyAlpaca = [...b.dests].every(d => verifiable.includes(d));
-    const p = held.get(sym);
-
-    if (!p && onlyAlpaca) {
-      out.findings.push({
-        level: 'info', kind: 'already-closed', symbol: sym, setupId: b.setupId,
-        detail: `${sym}: this side still thinks it is open; Alpaca is FLAT. A stop `
-          + 'or a target filled. Nothing more needs closing.',
-      });
+      out.ok = false;
       continue;
     }
-    if (!p) continue;                                   // held elsewhere; cannot verify
+    out.reachable = true;
+    const positions = pos.positions.map(p => ({ ...p, account: d.id }));
+    out.positions.push(...positions);
 
-    /*
-     * Compared as a MAGNITUDE against the Alpaca share of what was sent. The
-     * ledger's total spans every account, so a straight comparison would report
-     * a mismatch on every two-account signal — which is the reconciliation
-     * crying wolf, exactly what makes one stop being read.
-     */
-    const alpacaOnly = [...b.dests].filter(d => verifiable.includes(d));
-    if (alpacaOnly.length === b.dests.size && Math.abs(p.qty) !== Math.abs(b.qty)) {
-      out.findings.push({
-        level: 'warn', kind: 'qty', symbol: sym, setupId: b.setupId,
-        detail: `${sym}: Alpaca holds ${p.qty}, this side sent ${b.qty}. A leg did not `
-          + 'fill, filled partly, or one has already been taken out.',
-      });
+    if (acct.ok) {
+      // Per account, because a block is a property of the account and one
+      // blocked account does not say anything about another.
+      out.accounts = out.accounts || {};
+      out.accounts[d.id] = acct.account;
+      if (acct.account.tradingBlocked || acct.account.accountBlocked) {
+        out.findings.push({
+          level: 'error', kind: 'blocked', account: d.id,
+          detail: `ALPACA HAS BLOCKED ${d.id} — every order to it today will be `
+            + `refused (status ${acct.account.status})`,
+        });
+      }
     }
+
+    out.findings.push(...findingsFor(date, d.id, positions));
   }
 
-  // ── held at Alpaca and unknown here — the dangerous direction ────────────
-  //
-  // Skipped entirely when the account is ambiguous. With two Alpaca accounts
-  // and one key pair, every position in the OTHER account arrives here as
-  // 'ALPACA HOLDS n AND THIS SIDE DOES NOT KNOW IT' — the loudest line the
-  // reconciliation has, fired on positions that are perfectly well known. The
-  // real one would then be indistinguishable from the noise, which is worse
-  // than not asking. The ambiguity itself is already reported above.
-  for (const p of (out.ambiguous ? [] : out.positions)) {
-    if (believed.has(p.symbol) && !closedHere.has(p.symbol)) continue;
-    out.findings.push({
-      level: 'error', kind: 'unknown-position', symbol: p.symbol,
-      detail: `${p.symbol}: ALPACA HOLDS ${p.qty} AND THIS SIDE DOES NOT KNOW IT. `
-        + (closedHere.has(p.symbol)
-            ? 'It was closed here and is still on — the close did not take. '
-            : 'Nothing here opened it. ')
-        + 'The 15:50 flatten only closes what this side opened, so this one will '
-        + 'go OVERNIGHT unless you close it yourself.',
-    });
+  /*
+   * ORDERS SENT TO AN ACCOUNT THAT CANNOT BE READ. Reported once rather than
+   * silently absent: those rows are unverified, and a report that simply did
+   * not mention them reads as a clean account.
+   */
+  for (const id of scope.blind) {
+    const { believed } = believedFor(date, id);
+    if (believed.size) {
+      out.findings.push({
+        level: 'warn', kind: 'unverified-account', account: id,
+        detail: `${believed.size} name(s) were sent to ${id}, which has no keys of `
+          + 'its own — nothing here can check what it actually holds.',
+      });
+    }
   }
 
   return out;
@@ -592,4 +643,7 @@ async function confirmed(date, { timeoutMs = 15000 } = {}) {
 module.exports = {
   compare, carriedOver, flatSymbols, fillsFor, confirmed, heldNow,
   alpacaDestinations, credentialScope,
+  // Exported so the journal import can fetch each account's fills with that
+  // account's keys rather than reimplementing the credential rule.
+  credsForDest,
 };

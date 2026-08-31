@@ -265,7 +265,17 @@ describe('the endpoint', () => {
   const SERVER = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'alerts', 'server.js'), 'utf8');
   const at2 = SERVER.indexOf("app.get('/api/broker/journal-trades'");
-  const body = SERVER.slice(at2, at2 + 2200);
+  /*
+   * THE WHOLE HANDLER, bounded by the route that follows it.
+   *
+   * This was a fixed 2,200-character slice, which is a test that fails when a
+   * comment is added — and it did: the setup-tagging assertion below started
+   * failing because the code it looks for had moved past the window, not
+   * because it had gone. A window measured in characters is a window that
+   * expires.
+   */
+  const next2 = SERVER.indexOf("\napp.", at2 + 1);
+  const body = SERVER.slice(at2, next2 > at2 ? next2 : SERVER.length);
 
   test('exists, and answers for a window of days', () => {
     expect(at2).toBeGreaterThan(-1);

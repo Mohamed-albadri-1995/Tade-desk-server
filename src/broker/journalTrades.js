@@ -65,7 +65,7 @@ const round = (n, dp = 4) => {
  * price, at }. Order does not matter — they are sorted here, because activities
  * come back paged and a page boundary is not a chronology.
  */
-function tradesFrom(fills = []) {
+function tradesFrom(fills = [], account = null) {
   const bySymbol = new Map();
   for (const f of fills) {
     const sym = String(f.symbol || '').toUpperCase();
@@ -109,7 +109,18 @@ function tradesFrom(fills = []) {
               // Stable across re-imports: the first fill of a trade identifies
               // it for good, so importing the same day twice is a no-op rather
               // than a second copy.
-              extId: `alpaca:${f.id || `${symbol}:${at}`}`,
+              /*
+                * THE ACCOUNT IS PART OF THE IDENTITY, not a label on it.
+                *
+                * Two accounts trade the same name on the same day — that is the
+                * point of running them side by side — and Alpaca's fill ids are
+                * per account, so two real trades could collide on the fallback
+                * `symbol:timestamp` id. Colliding means the second import
+                * OVERWRITES the first: one account's trade silently replaced by
+                * the other's, in the record that measures them separately.
+                */
+              extId: `alpaca:${account ? `${account}:` : ''}${f.id || `${symbol}:${at}`}`,
+              account,
               symbol, date, entryTime: time, entryAt: at,
               direction: sign > 0 ? 'Long' : 'Short',
               entryQty: 0, entryCost: 0, exitQty: 0, exitCost: 0, exitAt: null,
@@ -156,6 +167,13 @@ function finish(t) {
     exitTime: closed && ex ? ex.time : null,
     status: closed ? 'closed' : 'open',
     fills: t.fills,
+    /*
+     * WHICH ACCOUNT TRADED IT. Null when the caller did not say, and the
+     * importer then falls back to 'Alpaca' exactly as before — a single-account
+     * desk is unchanged. With two accounts this is the only thing that lets the
+     * journal report them apart, which is the whole reason they are separate.
+     */
+    account: t.account || null,
     source: 'alpaca',
   };
 }

@@ -477,6 +477,144 @@
       });
   }
 
+  /* ── ONE ACCOUNT, OR ALL OF THEM ──────────────────────────────────────
+   *
+   * Two Alpaca paper accounts run one setup each, so "how is this strategy
+   * doing" and "how is this account doing" are the same question asked twice —
+   * and a single undifferentiated list answers neither. Every imported trade
+   * now carries the account that made it (src/broker/journalTrades.js), and
+   * this is the control that reads it.
+   *
+   * BUILT FROM THE TRADES ON SCREEN, not from a list typed in here. Add an
+   * account at the desk and it appears the first time it trades; nothing to
+   * register twice, which is the whole point of the desk being the one place
+   * accounts are configured.
+   *
+   * OUTSIDE THE CONTAINER, like the status line and for the same reason: the
+   * list replaces its own innerHTML on every filter, sort and delete, so a
+   * control inside it would survive exactly until the first keystroke.
+   *
+   * The filter HIDES cards rather than re-fetching. The page owns the data and
+   * its own render; reaching in to re-query would be a second source of truth
+   * for the list, and the two would disagree the first time a filter changed.
+   */
+  var accountFilter = 'all';
+
+  function tradesOnScreen() {
+    return (window.__allTrades && window.__allTrades.length)
+      ? window.__allTrades : (window.__trades || []);
+  }
+
+  /* The accounts that actually appear, in a stable order. */
+  function accountsPresent() {
+    var seen = {};
+    var out = [];
+    tradesOnScreen().forEach(function (t) {
+      var a = (t && t.account) ? String(t.account) : null;
+      if (!a || seen[a]) return;
+      seen[a] = 1;
+      out.push(a);
+    });
+    return out.sort();
+  }
+
+  function applyAccountFilter() {
+    var host = document.getElementById(CONTAINER);
+    if (!host) return;
+    var shown = 0;
+    host.querySelectorAll('.jnl-del-btn').forEach(function (del) {
+      var card = del.closest('.jnl-card') || del.parentNode.parentNode;
+      if (!card) return;
+      var t = findTrade(del.getAttribute('data-id'));
+      var acct = (t && t.account) ? String(t.account) : null;
+      var show = accountFilter === 'all' || acct === accountFilter;
+      card.style.display = show ? '' : 'none';
+      if (show) shown += 1;
+    });
+    var count = document.getElementById('jnl-acct-count');
+    if (count) {
+      count.textContent = accountFilter === 'all'
+        ? shown + ' trade(s)'
+        : shown + ' trade(s) in ' + accountFilter;
+    }
+  }
+
+  function accountBar() {
+    var host = document.getElementById(CONTAINER);
+    if (!host || !host.parentNode) return;
+    var accts = accountsPresent();
+    var bar = document.getElementById('jnl-acct-bar');
+
+    /*
+     * NOTHING IS DRAWN FOR ONE ACCOUNT. A filter with a single option is a
+     * control that can only do nothing, and on a one-account desk the trades
+     * carry no account at all — so there is genuinely nothing to choose
+     * between, and a chooser would imply there is.
+     */
+    if (accts.length < 2) {
+      if (bar) bar.remove();
+      return;
+    }
+
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'jnl-acct-bar';
+      bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;'
+        + 'margin:0 0 8px';
+      host.parentNode.insertBefore(bar, host);
+    }
+    // Rebuilt only when the set of accounts changed, so a re-render does not
+    // throw away the choice that is currently applied.
+    var signature = accts.join(',');
+    if (bar.getAttribute('data-accts') === signature) { applyAccountFilter(); return; }
+    bar.setAttribute('data-accts', signature);
+    bar.innerHTML = '';
+
+    var mk = function (id, label) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.setAttribute('data-acct', id);
+      b.style.cssText = 'font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;'
+        + 'border:1px solid #334155;background:#0f172a;color:#94a3b8';
+      b.addEventListener('click', function () {
+        accountFilter = id;
+        paintAccountButtons();
+        applyAccountFilter();
+      });
+      bar.appendChild(b);
+      return b;
+    };
+
+    // ALL FIRST, and it is the default: the combined book is the one you look
+    // at to answer "how is the desk doing", and one account is the exception.
+    mk('all', 'All accounts');
+    accts.forEach(function (a) { mk(a, a); });
+
+    var count = document.createElement('span');
+    count.id = 'jnl-acct-count';
+    count.style.cssText = 'font-size:11px;color:#64748b;margin-left:2px';
+    bar.appendChild(count);
+
+    // A remembered choice that no longer exists would hide every trade.
+    if (accountFilter !== 'all' && accts.indexOf(accountFilter) === -1) {
+      accountFilter = 'all';
+    }
+    paintAccountButtons();
+    applyAccountFilter();
+  }
+
+  function paintAccountButtons() {
+    var bar = document.getElementById('jnl-acct-bar');
+    if (!bar) return;
+    bar.querySelectorAll('button[data-acct]').forEach(function (b) {
+      var on = b.getAttribute('data-acct') === accountFilter;
+      b.style.background = on ? '#1d4ed8' : '#0f172a';
+      b.style.color = on ? '#e2e8f0' : '#94a3b8';
+      b.style.borderColor = on ? '#1d4ed8' : '#334155';
+    });
+  }
+
   /* ── the button, added to every card ──────────────────────────────────
    * A MutationObserver rather than a one-off pass: the list re-renders on
    * every filter, sort and delete, and each render replaces the innerHTML —
@@ -527,6 +665,7 @@
 
     autoTag(host);
     statusLine();
+    accountBar();
     importButton();
     fixDashboardLink();
   }

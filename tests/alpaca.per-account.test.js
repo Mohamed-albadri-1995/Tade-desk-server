@@ -427,3 +427,135 @@ describe("an account's fills confirm only its own orders", () => {
     expect(scope.reason).toBeNull();
   });
 });
+
+/*
+ * ── THE RECONCILIATION MUST NOT CRY WOLF ─────────────────────────────────
+ *
+ * Every map in compare() is keyed by SYMBOL. With two accounts that is not a
+ * key: the same name held in both collides, and the ledger's total for it spans
+ * both accounts.
+ *
+ * Read one account's positions against BOTH accounts' orders and the other
+ * account's holdings arrive as "ALPACA HOLDS n AND THIS SIDE DOES NOT KNOW IT"
+ * — the loudest line the report has, fired on positions that are perfectly well
+ * known. A reconciliation that cries wolf is one that stops being read, and the
+ * real finding is then invisible.
+ */
+describe('reconciliation with the same name in two accounts', () => {
+  const reconcile = require('../src/broker/reconcile');
+  const DAY = '2026-09-01';
+
+  beforeEach(() => {
+    write({
+      enabled: true,
+      destinations: [
+        { id: 'paperA', name: 'Paper A', dialect: 'alpaca', mode: 'auto',
+          webhookUrl: HOOK_A, enabled: true, setups: [],
+          alpacaKeyId: KEY_A, alpacaSecret: SEC_A },
+        { id: 'paperB', name: 'Paper B', dialect: 'alpaca', mode: 'auto',
+          webhookUrl: HOOK_B, enabled: true, setups: [],
+          alpacaKeyId: KEY_B, alpacaSecret: SEC_B },
+      ],
+    });
+    // BOTH accounts hold WULF, in different sizes — the collision case.
+    jest.spyOn(alpaca, 'positions').mockImplementation(async ({ account: acct }) => {
+      const qty = acct && acct.keyId === KEY_B ? -60 : -100;
+      return { ok: true, positions: [{ symbol: 'WULF', qty, side: 'short' }] };
+    });
+    jest.spyOn(alpaca, 'account').mockResolvedValue({ ok: true, account: {} });
+    // ...and each was sent from its own account, in its own size.
+    jest.spyOn(broker, 'orders').mockReturnValue([
+      { symbol: 'WULF', action: 'sell', quantity: 100, sent: true,
+        destination: 'paperA', setupId: 'S' },
+      { symbol: 'WULF', action: 'sell', quantity: 60, sent: true,
+        destination: 'paperB', setupId: 'S' },
+    ]);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  test('NOTHING is reported — both accounts agree with their own orders', async () => {
+    const out = await reconcile.compare(DAY);
+    expect(out.reachable).toBe(true);
+    expect(out.findings.filter(f => f.kind === 'unknown-position')).toEqual([]);
+    expect(out.findings.filter(f => f.kind === 'qty')).toEqual([]);
+  });
+
+  test('both positions come back, each labelled with its account', async () => {
+    const out = await reconcile.compare(DAY);
+    const byAcct = Object.fromEntries(out.positions.map(p => [p.account, p.qty]));
+    expect(byAcct).toEqual({ paperA: -100, paperB: -60 });
+  });
+
+  /*
+   * AND IT STILL BITES. The whole value of the report is the dangerous
+   * direction — a position the broker holds that the desk never opened — so a
+   * fix that silenced it would be worse than the false alarm it replaced.
+   */
+  test('a position nobody opened is still the loudest line, and names the account', async () => {
+    jest.spyOn(broker, 'orders').mockReturnValue([
+      { symbol: 'WULF', action: 'sell', quantity: 100, sent: true,
+        destination: 'paperA', setupId: 'S' },
+    ]);
+    const out = await reconcile.compare(DAY);
+    const unknown = out.findings.filter(f => f.kind === 'unknown-position');
+    expect(unknown.length).toBe(1);
+    expect(unknown[0].account).toBe('paperB');
+    expect(unknown[0].level).toBe('error');
+  });
+
+  // A size that really differs, within one account, is still reported.
+  test('a genuine quantity mismatch inside one account is reported', async () => {
+    jest.spyOn(broker, 'orders').mockReturnValue([
+      { symbol: 'WULF', action: 'sell', quantity: 40, sent: true,
+        destination: 'paperA', setupId: 'S' },
+      { symbol: 'WULF', action: 'sell', quantity: 60, sent: true,
+        destination: 'paperB', setupId: 'S' },
+    ]);
+    const out = await reconcile.compare(DAY);
+    const qty = out.findings.filter(f => f.kind === 'qty');
+    expect(qty.length).toBe(1);
+    expect(qty[0].account).toBe('paperA');   // 100 held vs 40 sent
+  });
+
+  /*
+   * ONE UNREACHABLE ACCOUNT MUST NOT BLANK THE REPORT. It used to return early,
+   * so a single timeout hid every finding about every other account — and
+   * "nothing found" is the answer that gets a position left open overnight.
+   */
+  test('one account timing out still leaves the other reconciled', async () => {
+    jest.spyOn(alpaca, 'positions').mockImplementation(async ({ account: acct }) => {
+      if (acct && acct.keyId === KEY_B) return { ok: false, error: 'timeout' };
+      return { ok: true, positions: [{ symbol: 'WULF', qty: -100, side: 'short' }] };
+    });
+    jest.spyOn(broker, 'orders').mockReturnValue([
+      { symbol: 'ZZZZ', action: 'buy', quantity: 10, sent: true,
+        destination: 'paperA', setupId: 'S' },
+    ]);
+    const out = await reconcile.compare(DAY);
+    expect(out.findings.some(f => f.kind === 'unreachable' && f.account === 'paperB'))
+      .toBe(true);
+    // paperA was still compared: it holds WULF that nothing opened.
+    expect(out.findings.some(f => f.kind === 'unknown-position' && f.account === 'paperA'))
+      .toBe(true);
+    expect(out.reachable).toBe(true);
+  });
+
+  // Orders sent to an account with no keys are UNVERIFIED, and saying nothing
+  // about them would read as a clean account.
+  test('an unreadable account with orders is named as unverified', async () => {
+    write({
+      enabled: true,
+      destinations: [
+        { id: 'paperA', name: 'Paper A', dialect: 'alpaca', mode: 'auto',
+          webhookUrl: HOOK_A, enabled: true, setups: [],
+          alpacaKeyId: KEY_A, alpacaSecret: SEC_A },
+        { id: 'paperB', name: 'Paper B', dialect: 'alpaca', mode: 'auto',
+          webhookUrl: HOOK_B, enabled: true, setups: [] },
+      ],
+    });
+    const out = await reconcile.compare(DAY);
+    expect(out.ambiguous).toBe(true);
+    expect(out.findings.some(f => f.kind === 'unverified-account'
+                              && f.account === 'paperB')).toBe(true);
+  });
+});
