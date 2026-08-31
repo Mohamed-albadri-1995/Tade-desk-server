@@ -754,18 +754,46 @@ ok('no spacer pushes rail buttons below the fold',
  *
  * Three separate things had to be true, so all three are checked.
  */
-ok('the drawer head cannot grow into the body’s share',
-   /#drawer \.dhead \{[^}]*flex:0 0 auto/.test(html)
-   && /#drawer \.dhead \{[^}]*max-height:45%/.test(html),
-   'a wrapped head with no cap leaves the body zero height');
-ok('...and scrolls itself when it wraps', /#drawer \.dhead \{[^}]*overflow-y:auto/.test(html));
-ok('the body scrolls in BOTH directions',
-   /#drawer \.dbody \{[^}]*overflow-x:auto/.test(html)
-   && /#drawer \.dbody \{[^}]*overflow-y:auto/.test(html));
+/*
+ * ONE SCROLLER, and that is the whole shape.
+ *
+ * The first fix capped the head at 45% and gave it its own scrollbar, on the
+ * reading that it is "fourteen controls". It is not: #slAnchor and #tpAnchor
+ * live in the head, and for an `@ line` stop they render a nested expression
+ * editor — Expr( Value 0.2 × Expr( … — with no bound at all. Capping THAT and
+ * scrolling it apart is why the tab stopped looking like the others: you read
+ * a fragment of an expression with the strategy's name, its side and its Save
+ * button scrolled out of sight above it.
+ *
+ * Head, scale-out, discipline and rules are one column with one scrollbar now,
+ * which is the same shape as a panel section.
+ */
+ok('the drawer has ONE scroller, not one per part',
+   /#drawer \.dscroll \{[^}]*overflow-y:auto/.test(html)
+   && /<div class="dscroll">/.test(html));
 // A flex child will not shrink below its content — and therefore will not
 // scroll — without this. It is the single most common cause of exactly this bug.
-ok('...and can shrink below its content, which is what makes that work',
-   /#drawer \.dbody \{[^}]*min-height:0/.test(html));
+ok('...which can shrink below its content, which is what makes it scroll',
+   /#drawer \.dscroll \{[^}]*min-height:0/.test(html));
+ok('the head has no cap and no scrollbar of its own',
+   !/#drawer \.dhead \{[^}]*max-height/.test(html)
+   && !/#drawer \.dhead \{[^}]*overflow/.test(html),
+   'an SL anchored to a line renders an unbounded editor in the head');
+ok('the body takes its natural height and scrolls only sideways',
+   /#drawer \.dbody \{[^}]*flex:0 0 auto/.test(html)
+   && /#drawer \.dbody \{[^}]*overflow-x:auto/.test(html)
+   && !/#drawer \.dbody \{[^}]*overflow-y/.test(html),
+   'flex:1 stretched it to fill the drawer while its children took only what '
+   + 'they needed — which is exactly the empty band at the bottom');
+
+/*
+ * The grip and the ✕ are OUTSIDE the scroller. Either one scrolling out of
+ * reach is a drawer you are stuck inside — and the ✕ used to sit between the
+ * head and the target row, which was harmless while nothing scrolled.
+ */
+ok('the resize grip and the close button do not scroll away',
+   html.indexOf('id="drawerGrip"') < html.indexOf('<div class="dscroll">')
+   && html.indexOf('id="drawerClose"') < html.indexOf('<div class="dscroll">'));
 // A rule row of selects can be wider than a phone column, and a control you
 // cannot reach is a rule you cannot edit.
 ok('a rule column scrolls sideways rather than clipping a wide row',
@@ -831,8 +859,7 @@ const SCROLLERS = [
   ['the settings sheet', /#hdrMore \{[^}]*max-height:70vh/, /#hdrMore \{[^}]*overflow-y:auto/],
   ['...on a phone',     /#hdrMore \{[^}]*max-height:82vh/,  /#hdrMore \{[^}]*overflow-y:auto/],
   ['the left rail',     /#leftRail \{[^}]*flex:0 0 54px/,   /#leftRail \{[^}]*overflow-y:auto/],
-  ['the drawer body',   /#drawer \.dbody \{[^}]*min-height:0/, /#drawer \.dbody \{[^}]*overflow-y:auto/],
-  ['the drawer head',   /#drawer \.dhead \{[^}]*max-height:45%/, /#drawer \.dhead \{[^}]*overflow-y:auto/],
+  ['the drawer',        /#drawer \{[^}]*max-height:42vh/,    /#drawer \.dscroll \{[^}]*overflow-y:auto/],
   // The register list is NOT in this table on purpose — see below.
   ['the alerts list',   /#side \{[^}]*flex:0 0 260px/,      /#side \{[^}]*overflow:auto/],
   ['the trades list',   /id="btTrades"[^>]*max-height:38vh/, /id="btTrades"[^>]*overflow:auto/],

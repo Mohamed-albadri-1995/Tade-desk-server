@@ -196,6 +196,9 @@
   #sideTop { display:flex; align-items:center; justify-content:space-between; margin:0 0 6px; }
   #sideTop b { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:.08em; }
   #sideClose { cursor:pointer; color:var(--text); font-size:22px; line-height:1; padding:2px 10px; border:1px solid var(--border); border-radius:6px; background:#1c2431; }
+  /* Both of these sit on the DRAWER, above the scroller — they are how you
+     resize it and how you close it, and either one scrolling out of reach is
+     a drawer you are stuck inside. */
   #drawerGrip { position:absolute; top:0; left:0; right:0; height:14px; cursor:row-resize; z-index:7; touch-action:none; }
   #drawerGrip::before { content:''; position:absolute; left:50%; top:4px; transform:translateX(-50%); width:44px; height:4px; border-radius:3px; background:var(--text3); opacity:.55; }
   #drawerGrip:hover::before { background:var(--blue); opacity:1; }
@@ -257,15 +260,10 @@
        the chart keeps its time axis either way — main reserves --drawerH. */
     #drawer { height:auto; max-height:62vh; }
     body.drawer-open main { padding-bottom: var(--drawerH, 62vh); }
-    /* The head is the bigger offender at this width — fourteen controls over
-       six or seven rows — so it is capped harder and scrolls itself. */
-    #drawer .dhead { max-height:38%; }
-    /* NATURAL HEIGHT, so the BODY scrolls rather than each column.
-       `.rulecol` is `flex:1`, which in a row means "share the width" and in a
-       stacked column means "share the HEIGHT" — so Entry and Exit were forced
-       to equal halves of a short drawer and each grew its own inner scrollbar.
-       Two nested scroll areas inside a third is how a flick does nothing: the
-       gesture lands on whichever one is under the thumb. One list, one scroll. */
+    /* `.rulecol` is `flex:1`, which in a row means "share the width" and in a
+       stacked column means "share the HEIGHT" — so Entry and Exit would be
+       forced to equal halves and each grow its own scrollbar. Natural height,
+       so the one scroller above holds them both. */
     #drawer .dbody > .rulecol { flex:0 0 auto; overflow-x:auto; }
   }
   #side h3 { margin:12px 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text2); }
@@ -360,9 +358,17 @@
      INTO, and a strategy with more than two rules could not be reached at all.
      `flex:0 0 auto` stops it growing into the body's share, and its own cap
      plus scroll means a wrapped head scrolls itself rather than the drawer. */
+  /* A HEAD, not a scroll region. It is capped at nothing and scrolls with
+     everything else — see the note in the markup for why capping it was wrong
+     in the first place. */
   #drawer .dhead { display:flex; gap:8px; align-items:center; padding:8px 44px 8px 12px;
     border-bottom:1px solid var(--border); flex-wrap:wrap; font-size:12px;
-    flex:0 0 auto; max-height:45%; overflow-y:auto; overscroll-behavior:contain; }
+    flex:0 0 auto; }
+  /* THE ONE SCROLLER. Everything the drawer holds, in one column with one
+     scrollbar — the same shape as a panel section, which is what makes this
+     tab read like the others again. */
+  #drawer .dscroll { flex:1 1 auto; min-height:0; overflow-y:auto;
+    overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
   /* Pinned to the drawer, above everything in it, in the one place a close
      control is always looked for. 34px is a real tap target on a phone. */
   /* ── the backtest result: money, then figures, then everything else ──
@@ -400,9 +406,14 @@
      it is spelled out because the height it needed was the real fix and the
      two belong together. overscroll-behavior stops a flick at the end of the
      rules from scrolling the page underneath instead. */
-  #drawer .dbody { flex:1 1 auto; display:flex; gap:12px; padding:10px 12px;
-    overflow-x:auto; overflow-y:auto; min-height:0; overscroll-behavior:contain;
-    -webkit-overflow-scrolling:touch; }
+  /* NATURAL HEIGHT, and sideways only. It used to be `flex:1` with its own
+     vertical scrollbar — a second scroll area inside the drawer, and the
+     source of the empty band at the bottom: flex stretched it to fill the
+     drawer while its own children took only the height they needed. The
+     `.dscroll` above owns the vertical direction now. Sideways stays, because
+     a rule row of selects can still be wider than a phone. */
+  #drawer .dbody { flex:0 0 auto; display:flex; gap:12px; padding:10px 12px;
+    overflow-x:auto; -webkit-overflow-scrolling:touch; }
   /* A rule row is a line of selects and inputs. They wrap, but one long
      primitive name can still be wider than a phone's column — and a control
      you cannot reach is a rule you cannot edit. It scrolls sideways rather
@@ -588,6 +599,25 @@
     <div id="chart"></div>
     <div id="drawer">
       <div id="drawerGrip" title="drag to resize"></div>
+      <!-- Pinned to the drawer, OUTSIDE the scroller below, in the one place a
+           close control is always looked for. It used to sit between the head
+           and the target row, which was harmless while nothing scrolled and
+           became a button that scrolled away the moment something did. -->
+      <button id="drawerClose" type="button" aria-label="close the strategy builder"
+              title="Close (Esc)">✕</button>
+      <!-- ── ONE SCROLL, LIKE EVERY OTHER TAB ──
+           The head was capped at 38% and given its own scrollbar, on the
+           reading that it is "fourteen controls". It is not: #slAnchor and
+           #tpAnchor live in it, and for an `@ line` stop they render a whole
+           nested expression editor — Expr( Value 0.2 × Expr( … — which has no
+           bound at all. Capping THAT and scrolling it separately is why this
+           tab stopped looking like the others: you were left reading a
+           fragment of an expression with the strategy's name, its side and its
+           Save button scrolled out of sight above it.
+           Head, scale-out, discipline and rules are one column with one
+           scrollbar now. The grip and the ✕ are the only things outside it,
+           because those two must not move. -->
+      <div class="dscroll">
       <div class="dhead">
         <strong style="color:var(--blue)">⚡ Strategy</strong>
         <input id="stratName" placeholder="strategy name" size="16">
@@ -624,8 +654,6 @@
            a phone it wrapped somewhere into the middle of a five-line block and
            the honest report was "there is no way to close this". A control that
            dismisses a panel must be in the same place every time. -->
-      <button id="drawerClose" type="button" aria-label="close the strategy builder"
-              title="Close (Esc)">✕</button>
       <div id="tgtRow" style="padding:4px 8px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px">
         <span style="color:var(--text2)" title="Scale-out: take a FRACTION of the position off at each target; the runner (rest) rides to your SL / exit rule. R× uses the entry→stop distance as 1R (needs an SL).">Scale-out</span>
         <span id="tgtList" style="display:flex;flex-wrap:wrap;gap:6px"></span>
@@ -655,6 +683,7 @@
           <button class="addrule" data-g="exit" data-t="group">+ group ( )</button>
         </div>
       </div>
+      </div><!-- /dscroll -->
     </div>
   </div>
   <div id="sideBackdrop"></div>
