@@ -92,8 +92,17 @@ describe('which bar the decision is taken on', () => {
   });
 });
 
-describe('backtest #349 against the desk as it was configured', () => {
-  const res = () => parity.compare({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
+describe('the desk as it WAS — pinned to the old close fill', () => {
+  // The regression this whole exercise came from. `fill: 'close'` decides on
+  // the window bar itself, a full bar later than the backtest that justified
+  // the setup. Kept as a test because the preference still exists and someone
+  // could set it again.
+  const res = () => {
+    write('setup-prefs.json', { setups: { [SETUP.id]: {
+      rankMetric: 'vwap_extension', topN: 3, tf: '1m', feed: 'polygon',
+      maxTradesPerDay: 1, fill: 'close' } } });
+    return parity.compare({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
+  };
 
   test('THE DECISION BAR IS A FULL MINUTE APART', () => {
     const r = find(res(), 'decision bar');
@@ -107,9 +116,30 @@ describe('backtest #349 against the desk as it was configured', () => {
     expect(parity.summarise(res())[0]).toMatch(/^decision bar/);
   });
 
-  test('the fill models differ too, which is the cause of it', () => {
+  test("'close' against 'next_open' is a real difference, not a naming one", () => {
     const r = find(res(), 'fill model');
+    expect(r.status).toBe('differ');
     expect([r.live, r.backtest]).toEqual(['close', 'next_open']);
+  });
+});
+
+describe('the desk as it IS — the default live fill', () => {
+  const res = () => parity.compare({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
+
+  // THE FIX, stated as a test. 'live' enters at the 09:35 open exactly as
+  // 'next_open' does, so both decide on the completed 09:34 bar.
+  test('the decision bar now MATCHES the backtest', () => {
+    const r = find(res(), 'decision bar');
+    expect(r.status).toBe('match');
+    expect([r.live, r.backtest]).toEqual(['09:34', '09:34']);
+  });
+
+  // 'live' and 'desk'/'next_open' are the same decision from the same bar with
+  // the same levels; only the reported entry differs, and only because one is
+  // a plan and the other a measurement. Flagging that would leave a correctly
+  // aligned desk permanently red, which is how a checker gets ignored.
+  test("'live' and 'next_open' are not counted as a difference", () => {
+    expect(find(res(), 'fill model').status).toBe('match');
   });
 
   test('the ranking MATCHES — this was never the problem', () => {
@@ -117,15 +147,14 @@ describe('backtest #349 against the desk as it was configured', () => {
     expect(find(res(), 'rank top N').status).toBe('match');
   });
 
-  test('risk model: flat dollars live, compounding percent in the backtest', () => {
+  // What is still outstanding on #349, and it is configuration rather than
+  // timing: the run compounded a percentage and took no position cap.
+  test('risk model still differs: flat dollars live, compounding percent tested', () => {
     const r = find(res(), 'risk model');
     expect(r.status).toBe('differ');
     expect([r.live, r.backtest]).toEqual(['fixed $', '% of equity']);
   });
 
-  // 0.5% of 50,000 is 250 for the FIRST trade and more after every winner.
-  // Live risks 500 flat. Comparable only because the percentage is converted;
-  // the note says the converted figure is a starting budget, not a constant.
   test('...and the dollars are twice apart on trade one', () => {
     const r = find(res(), 'risk per trade');
     expect([r.live, r.backtest]).toEqual([500, 250]);
@@ -142,7 +171,7 @@ describe('backtest #349 against the desk as it was configured', () => {
 
 describe('a desk configured to match', () => {
   const SPEC_MATCHED = { ...SPEC_349,
-    fill: 'close', risk_pct: 0, risk_usd: 500, max_position_pct: 16.66 };
+    fill: 'desk', risk_pct: 0, risk_usd: 500, max_position_pct: 16.66 };
 
   test('every comparison passes', () => {
     const res = parity.compare({ setup: SETUP, spec: SPEC_MATCHED, strategy: STRATEGY });
@@ -150,10 +179,19 @@ describe('a desk configured to match', () => {
     expect(parity.summarise(res)).toEqual([]);
   });
 
-  test('...including the decision bar, on the same minute', () => {
+  test('...including the decision bar, on the 09:34 bar both sides', () => {
     const res = parity.compare({ setup: SETUP, spec: SPEC_MATCHED, strategy: STRATEGY });
     const r = find(res, 'decision bar');
-    expect([r.live, r.backtest]).toEqual(['09:35', '09:35']);
+    expect([r.live, r.backtest]).toEqual(['09:34', '09:34']);
+  });
+
+  // A backtest run on 'close' is still a real mismatch against a live desk,
+  // whichever way round it is.
+  test("a 'close' backtest against the live desk is caught", () => {
+    const res = parity.compare({ setup: SETUP, strategy: STRATEGY,
+                                 spec: { ...SPEC_MATCHED, fill: 'close' } });
+    expect(find(res, 'decision bar').status).toBe('differ');
+    expect(find(res, 'fill model').status).toBe('differ');
   });
 });
 

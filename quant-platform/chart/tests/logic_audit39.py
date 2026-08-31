@@ -186,8 +186,12 @@ except ValueError as e:
     ok('a typo raises and names the known models',
        'next-open' in str(e) and 'desk' in str(e), str(e))
 
-chkv('the three models are the declared set',
-     tuple(sorted(S.FILL_MODELS)), ('close', 'desk', 'next_open'))
+# FOUR since 2026-08-31: 'live' joined them. It is 'desk' with the future
+# removed — the same decision bar, the same levels from the same close, but it
+# does not require the fill bar to exist, so the desk can take the backtest's
+# decision at the moment the signal bar closes. Pinned by logic_audit44.
+chkv('the four models are the declared set',
+     tuple(sorted(S.FILL_MODELS)), ('close', 'desk', 'live', 'next_open'))
 
 print()
 print(f"        {PASS} passed, {FAIL} failed")

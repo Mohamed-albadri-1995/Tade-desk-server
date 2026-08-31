@@ -80,7 +80,11 @@ function decisionBar(windowStart, windowEnd, fill) {
     return { bar: null, why: `a ${at}–${until} window fires on any bar inside it` };
   }
   if (fill === 'close') return { bar: at, why: `fill 'close' decides on the ${at} bar` };
-  if (fill === 'next_open' || fill === 'desk') {
+  // 'live' belongs with the next-open models, not with 'close'. It measures
+  // every level from the decision bar's close exactly as 'desk' does; the only
+  // difference is that it does not need the fill bar to exist yet, which is
+  // what lets the desk take the backtest's decision in real time.
+  if (fill === 'next_open' || fill === 'desk' || fill === 'live') {
     const prev = shift(at, -1);
     return { bar: prev, why: `fill '${fill}' fills at the ${at} open, so it decides on ${prev}` };
   }
@@ -118,9 +122,9 @@ function compare({ setup, spec, strategy } = {}) {
   const live = risk.settings();
   const p = prefs.settingsFor(s.id) || {};
 
-  // The desk's fill model, which is 'close' unless a preference says otherwise
+  // The desk's fill model, which is 'live' unless a preference says otherwise
   // — the same default runner.js applies when it calls qp.
-  const liveFill = p.fill || s.fill || 'close';
+  const liveFill = p.fill || s.fill || 'live';
   const btFill = bt.fill || null;
 
   const wStart = r.window_start !== undefined ? r.window_start : null;
@@ -136,9 +140,25 @@ function compare({ setup, spec, strategy } = {}) {
    */
   rows.push(row('decision bar', liveBar.bar, btBar.bar,
     `${liveBar.why} · backtest: ${btBar.why}`));
-  rows.push(row('fill model', liveFill, btFill,
-    "the desk sends a market order on the bar it decided; 'close' books it at "
-    + "that bar's close, which is a price no order can reach"));
+  /*
+   * 'live' and 'desk' are the SAME DECISION. They read the same bar, measure
+   * the stop and the target from the same close, and rank on the same number;
+   * they differ only in the entry PRICE they report, and only because one is a
+   * plan and the other is a measurement taken afterwards. Calling that a
+   * difference would leave a correctly aligned desk permanently red, which is
+   * how a checker gets ignored.
+   */
+  const sameDecision = (a, b) => {
+    const nextOpen = new Set(['next_open', 'desk', 'live']);
+    return a === b || (nextOpen.has(a) && nextOpen.has(b));
+  };
+  const fillRow = row('fill model', liveFill, btFill,
+    "'live' and 'desk'/'next_open' take the same decision from the same bar — "
+    + "'close' books the signal bar's own close, a price no order can reach");
+  if (fillRow.status === 'differ' && sameDecision(liveFill, btFill)) {
+    fillRow.status = 'match';
+  }
+  rows.push(fillRow);
 
   // RANKING — which of the day's signals are taken at all.
   const btRank = bt.rank_per_day || null;

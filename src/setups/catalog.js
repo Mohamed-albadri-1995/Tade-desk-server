@@ -63,6 +63,35 @@ function minutesBefore(time, mins) {
   return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
 }
 
+/** '1m' -> 1, '5m' -> 5, '1h' -> 60. Unknown -> 1, the only safe assumption. */
+function tfMinutes(tf) {
+  const m = /^(\d+)\s*([mh])$/i.exec(String(tf || '1m').trim());
+  if (!m) return 1;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return m[2].toLowerCase() === 'h' ? n * 60 : n;
+}
+
+/*
+ * THE BAR THE DESK MUST EVALUATE, given the minute the ENTRY is meant to land.
+ *
+ * A strategy's window pins the ENTRY bar — the 09:35 setup is named for the
+ * bar it buys on, and its opening range is 09:30-09:34. So a fill model that
+ * enters at the next bar's open decides ONE BAR EARLIER than its window says.
+ *
+ * This is the whole of the live-vs-backtest gap. The desk used to run
+ * fill='close', which decides ON the window bar, so it evaluated 09:35 while
+ * every backtest of the setup evaluated 09:34 — a different bar's close, VWAP
+ * and ATR, and therefore a different SIGNAL rather than a different price.
+ *
+ * ONE BAR, not one minute: a 5m clock setup shifts five minutes.
+ */
+function decidesOn(entryMinute, fill, tf) {
+  if (!entryMinute) return null;
+  if (fill === 'close') return entryMinute;      // decides on the window bar
+  return minutesBefore(entryMinute, tfMinutes(tf));
+}
+
 /** Is `hhmm` inside [from, to]? Both ends included; strings compare fine. */
 function withinWindow(hm, from, to) {
   if (!hm || !from) return false;
@@ -286,8 +315,24 @@ async function list() {
     const p = prefs.settingsFor(g.id);
     const { raw, ...rest } = g;
     const pairing = pairingNote(g, groups);
+    // Needed BEFORE the object literal: the bar the desk evaluates is derived
+    // from both, and deriving it twice is how the two would drift apart.
+    const fill = p.fill || 'live';
+    const tf = p.tf || '1m';
     return {
       ...rest,
+      /*
+       * THE BAR THE DESK EVALUATES, which is not the same as the minute the
+       * entry lands in unless the fill model is 'close'. The scheduler matches
+       * on THIS, so a setup entering at the 09:35 open is run at 09:35:00 on
+       * the completed 09:34 bar — exactly the bar its backtest used.
+       *
+       * Carried explicitly rather than recomputed downstream: it is the one
+       * number the desk and the backtest have to agree on, and a second
+       * derivation of it is a second thing to get wrong.
+       */
+      decidesOnBar: decidesOn(g.decisionTime, fill, tf),
+      decidesUntilBar: decidesOn(g.windowEnd || g.decisionTime, fill, tf),
       /*
        * A WATCH setup, or a CLOCK one.
        *
@@ -346,17 +391,29 @@ async function list() {
       rank: { metric: p.rankMetric || null,
               direction: p.rankDirection || null,
               topN: p.topN || 0 },
-      tf: p.tf || '1m',
+      tf,
       feed: p.feed || 'yahoo',
       targetR: p.targetR || 2.0,
-      fill: p.fill || 'close',
+      /*
+       * 'live' IS THE BACKTEST'S DECISION, TAKEN LIVE.
+       *
+       * It was 'close', which decides on the window bar and books that bar's
+       * close — a price no order can reach, and a bar later than every
+       * backtest of these setups. 'live' measures every level from the
+       * decision bar's close exactly as 'desk' does, and does not need the
+       * next bar to exist, which is what made 'desk' itself unusable here.
+       *
+       * A preference still overrides it, so a setup can be pinned to another
+       * model deliberately.
+       */
+      fill,
       liveFeed: p.feed || 'yahoo',
       caution: p.caution
         || 'Backtest it in qp before trusting it live. Trade small until the sample grows.',
       describe: [
-        `Decided on the ${g.decisionTime} ET bar, run at `
-          + `${minutesBefore(g.decisionTime, -1)} once that bar has closed, `
-          + `on the card list of ${g.tools.join(', ')}.`,
+        `Entry lands in the ${g.decisionTime} ET minute. Decided on the `
+          + `${decidesOn(g.decisionTime, fill, tf)} bar, run once that bar has `
+          + `closed, on the card list of ${g.tools.join(', ')}.`,
         `Decided by the qp strategy "${g.name}" (${g.sides.join(' and ') || 'long'}).`,
         p.rankMetric
           ? `Ranked by ${p.rankMetric}${p.rankDirection ? ` (${p.rankDirection})` : ''}`
@@ -377,4 +434,4 @@ async function get(id) {
 }
 
 module.exports = { list, forTool, get, hhmm, baseName, minutesBefore,
-                   withinWindow, readiness };
+                   withinWindow, readiness, decidesOn, tfMinutes };

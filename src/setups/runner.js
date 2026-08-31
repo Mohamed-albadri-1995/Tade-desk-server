@@ -250,7 +250,10 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
   const day = date || toETDate(Date.now());
   // Which bar this run is answering for. The scheduler knows it; a direct call
   // (preview, a test) does not, and for a clock setup there is only ever one.
-  const decisionBar = bar || setup.decisionTime;
+  // THE BAR EVALUATED, not the minute the entry lands in. They differ by one
+  // bar for every fill model that enters at the next open — which is now the
+  // default, because it is what the backtests were run on.
+  const decisionBar = bar || setup.decidesOnBar || setup.decisionTime;
   const started = Date.now();
 
   // A setup names the tools it belongs to — the qp strategy carries them — so a
@@ -328,7 +331,11 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
       .map(r => [String(r.ticker).toUpperCase(),
         { score: r._score, rvol_day: (r.stock || {}).rvol }])),
     targetR: setup.targetR || 2.0,
-    fill: setup.fill || 'close',
+    // 'live' — the backtest's decision taken in real time: levels from the
+    // decision bar's close, and no need for a bar that has not printed. The
+    // old default of 'close' decided a bar later than every backtest of these
+    // setups, on a different bar's close, VWAP and ATR.
+    fill: setup.fill || 'live',
   });
 
   // qp's shape, translated once into the shape the alerts already speak. Every
@@ -807,7 +814,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
    */
   const windowShutting = !setup.watch
     || !decisionBar
-    || decisionBar >= (setup.windowEnd || setup.decisionTime);
+    || decisionBar >= (setup.decidesUntilBar || setup.windowEnd || setup.decisionTime);
   if (!fires.length && !windowShutting) {
     console.log(`[Setups] ${setup.id}: nothing on the ${decisionBar} bar `
       + `(window ${setup.decisionTime}–${setup.windowEnd}, still open)`);
@@ -893,7 +900,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
     fires.push({
       ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
       date: day, at: Date.now(), kind: 'setup', level: 'warn',
-      detail: `No ${lastWantedBar(setup.decisionTime)} bar for `
+      detail: `No ${setup.decidesOnBar || lastWantedBar(setup.decisionTime)} bar for `
         + `${data.missing.slice(0, 8).join(', ')}`
         + `${data.missing.length > 8 ? ` +${data.missing.length - 8} more` : ''}`
         + ' — these were ranked against nothing and could not be picked.',
@@ -940,7 +947,13 @@ async function runDue(decisionTime, opts = {}) {
   const mine = (await catalog.forTool(config.toolId))
     // A clock setup matches its one minute; a watch setup matches any bar in
     // its window. Same predicate — a clock setup is a one-minute window.
-    .filter(s => catalog.withinWindow(decisionTime, s.decisionTime, s.windowEnd))
+    // Matched on the bars the setup DECIDES on, which for a next-open fill are
+    // one bar before its entry window. Matching on the entry window would ask
+    // the setup about a bar it does not trade from, and a clock setup would
+    // then never fire at all.
+    .filter(s => catalog.withinWindow(decisionTime,
+                                      s.decidesOnBar || s.decisionTime,
+                                      s.decidesUntilBar || s.windowEnd))
     // Switched off from the alerts page. Silently skipped rather than
     // publishing "nothing qualified": you turned it off, and a message every
     // morning saying so is the thing that makes people stop reading the feed.

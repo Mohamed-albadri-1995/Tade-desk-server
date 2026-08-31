@@ -539,11 +539,53 @@ describe('a setup runs after the bar it decides on', () => {
     expect(catalog.minutesBefore('00:01', 2)).toBeNull();
   });
 
-  test('the description says both the bar and the run minute', async () => {
+  /*
+   * THE DESCRIPTION NAMES BOTH MINUTES, AND THEY ARE NOT THE SAME ONE.
+   *
+   * A strategy's window pins the minute the ENTRY lands in. Under the default
+   * fill the order goes in at that minute's OPEN, so the bar it was decided
+   * from is the one before — which is the bar every backtest of the setup
+   * evaluated, and the whole reason live and backtest had diverged.
+   *
+   * The line used to read "Decided on the 10:00 ET bar, run at 10:01", which
+   * described the old behaviour: a decision a full bar later than the tested
+   * one.
+   */
+  test('the description names the entry minute and the bar it decides from', async () => {
     qp.strategies.mockResolvedValue([T2_LONG]);
     const [s] = await catalog.list();
     const line = s.describe.join(' ');
-    expect(line).toMatch(/10:00 ET bar/);
-    expect(line).toMatch(/run at 10:01/);
+    expect(line).toMatch(/Entry lands in the 10:00 ET minute/);
+    expect(line).toMatch(/Decided on the 09:59 bar/);
+  });
+
+  test('and the catalogue carries that bar as a field, not only as prose', async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const [s] = await catalog.list();
+    // The scheduler matches on THIS. Prose the scheduler cannot read would
+    // leave the two free to disagree.
+    expect(s.decidesOnBar).toBe('09:59');
+    expect(s.decidesUntilBar).toBe('09:59');
+    expect(s.decisionTime).toBe('10:00');
+  });
+
+  test("a setup pinned to 'close' decides ON its window bar", async () => {
+    qp.strategies.mockResolvedValue([T2_LONG]);
+    const [first] = await catalog.list();
+    require('../src/setups/prefs').saveSettings(first.id, { fill: 'close' });
+    const [s] = await catalog.list();
+    expect(s.fill).toBe('close');
+    expect(s.decidesOnBar).toBe('10:00');
+    require('../src/setups/prefs').saveSettings(first.id, { fill: null });
+  });
+
+  test('the shift is one BAR, so a 5m setup moves five minutes', () => {
+    expect(catalog.decidesOn('10:00', 'live', '5m')).toBe('09:55');
+    expect(catalog.decidesOn('10:00', 'live', '1m')).toBe('09:59');
+    expect(catalog.decidesOn('10:00', 'close', '5m')).toBe('10:00');
+    expect(catalog.tfMinutes('1h')).toBe(60);
+    // An unreadable timeframe must not become zero — that would decide on the
+    // entry bar itself and silently restore the old behaviour.
+    expect(catalog.tfMinutes('nonsense')).toBe(1);
   });
 });

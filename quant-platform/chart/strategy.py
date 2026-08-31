@@ -730,7 +730,31 @@ def _anchor_levels(spec: dict, side: str, bars, ctx) -> np.ndarray | None:
 #   desk       the following bar's open, with every level measured from the
 #              SIGNAL bar's close — the two prices the live desk really uses.
 #              See the FILL MODEL note in _pair_trades.
-FILL_MODELS = ('close', 'next_open', 'desk')
+FILL_MODELS = ('close', 'next_open', 'desk', 'live')
+
+# 'live' IS 'desk' WITH THE FUTURE REMOVED, and it exists so the desk can take
+# the SAME decision the backtest took.
+#
+# The 09:35 setup decides on the 09:34 close and enters at the 09:35 open, so a
+# backtest of it runs 'next_open' or 'desk'. Neither can be evaluated at
+# 09:35:00 in real time:
+#
+#   'next_open' and 'desk' both read opn[j+1] to report the entry, and at
+#   09:35:00 that bar has not printed. The signal is dropped as 'last_bar'.
+#
+#   'close' would fire on the 09:35 bar instead, a minute later than the
+#   backtest, on a different bar's close, VWAP and ATR — a different signal.
+#
+# 'live' measures every level from close[j], exactly as 'desk' does, and checks
+# the entry window against the minute the fill is INTENDED to land in (one bar
+# on) computed from the clock rather than from a bar that does not exist yet.
+# It reports the decision price as the entry, because the fill price is not
+# knowable at the moment the order is sent — the broker reports it afterwards.
+#
+# So a 'live' pick and a 'desk' backtested trade come from the same bar, carry
+# the same stop and target, and rank on the same number. Only the reported
+# entry differs, and only because one of them is a plan and the other is a
+# measurement.
 
 
 def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
@@ -873,6 +897,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     # Both models fill on the NEXT bar's open. They differ only in which price
     # the stop and the targets are measured from — see the FILL MODEL note.
     desk_fill = (fill == 'desk')
+    live_fill = (fill == 'live')
     next_open = (fill == 'next_open') or desk_fill
     trades = []
     open_trade = None
@@ -907,9 +932,20 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     # SL/TP/exit still manage a position that runs past it, and eod still
     # flattens. None = no window (all session).
     et_hhmm = None
+    et_hhmm_fill = None
     if win_start is not None or win_end is not None:
         _et = bars.index.tz_convert(cs._ET)
         et_hhmm = np.asarray(_et.hour) * 100 + np.asarray(_et.minute)
+        # THE MINUTE THE FILL IS INTENDED FOR, from the CLOCK rather than from
+        # a bar. 'live' runs at the moment the signal bar closes, so the bar it
+        # will fill on has not printed and et_hhmm[j+1] does not exist — but
+        # the minute it will carry is simply one bar-interval later, and that
+        # is knowable. Inferred from the index so a 5m strategy shifts by five
+        # minutes rather than by one.
+        if live_fill:
+            _step = (bars.index[1] - bars.index[0]) if n > 1 else pd.Timedelta(minutes=1)
+            _etf = _et + _step
+            et_hhmm_fill = np.asarray(_etf.hour) * 100 + np.asarray(_etf.minute)
     day_count: dict = {}
     last_exit_bar = None                  # index of the most recent exit (this day)
     cur_day = None
@@ -966,12 +1002,16 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 if next_open and j + 1 >= n:
                     _drop('last_bar')
                     continue             # signal on the last bar — no bar to fill on
+                # 'live' deliberately does NOT drop here: a signal on the last
+                # bar is the normal live case, because the last bar is the one
+                # that just closed. That drop is what makes 'next_open'
+                # unusable in real time.
                 ep = opn[j + 1] if next_open else close[j]
                 ej = j + 1 if next_open else j
                 # THE PRICE THE LEVELS ARE MEASURED FROM, which is not always
                 # the price the trade is booked at. Only 'desk' separates them;
                 # for every other model this IS `ep`, so nothing changes.
-                dp = close[j] if desk_fill else ep
+                dp = close[j] if (desk_fill or live_fill) else ep
                 if entry_ok is not None and not entry_ok[ej]:
                     _drop('rth_session')
                     continue             # fill moment outside the allowed session
@@ -999,7 +1039,10 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     # merely different prices. chart/parity.py exists to make
                     # that visible, because the live desk runs fill='close'
                     # and every backtest of this setup has run 'next_open'.
-                    hm = int(et_hhmm[ej])
+                    # The FILL minute: bar ej for a model that has one, and the
+                    # clock for 'live', which is deciding before it exists.
+                    hm = int(et_hhmm_fill[j] if et_hhmm_fill is not None
+                             else et_hhmm[ej])
                     if (win_start is not None and hm < win_start) or \
                        (win_end is not None and hm > win_end):
                         _drop('outside_window')

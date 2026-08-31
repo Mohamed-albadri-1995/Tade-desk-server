@@ -96,6 +96,14 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
                 'side': res.get('side') or s.get('side') or 'long',
                 'entry': t.get('entry'),
                 'stop': t.get('stop'),
+                # THE PRICE THE DECISION WAS TAKEN AT, carried explicitly.
+                # RANK_METRICS reads it and falls back to `entry` when it is
+                # absent — and under fill='live' those two are the same number,
+                # so the fallback was correct by accident. Carried anyway: the
+                # accident stops being true the moment anyone runs the desk on
+                # another model, and a ranking that quietly changes basis is
+                # exactly the bug this whole exercise came from.
+                'signal_px': t.get('signal_px', t.get('entry')),
                 'entry_at': _hhmm(t['entry_ts']),
                 'entry_ts': int(t['entry_ts']),
             })
@@ -123,6 +131,7 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
                     'side': res.get('side') or s.get('side') or 'long',
                     'entry': ot.get('entry'),
                     'stop': ot.get('stop'),
+                    'signal_px': ot.get('signal_px', ot.get('entry')),
                     'entry_at': _hhmm(when),
                     'entry_ts': int(when),
                     'open': True,

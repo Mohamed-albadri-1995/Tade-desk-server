@@ -299,15 +299,18 @@ function startScheduler() {
        * the last print so far, the session VWAP was short a third of its
        * minute, and the entry condition was tested against both.
        *
-       * The backtest uses the COMPLETED 09:35 bar and fills at the 09:36 open.
-       * So the two were not evaluating the same thing, and a signal that
-       * qualified at 09:35:24 need not have qualified at 09:35:59 — which is
-       * the version that was measured, ranked and believed.
+       * A backtest always evaluates a COMPLETED bar, so the two were not
+       * evaluating the same thing: a signal that qualified at 09:35:24 need
+       * not have qualified at 09:35:59, and 09:35:59 is the version that was
+       * measured, ranked and believed.
        *
-       * Firing at 09:36 asks qp for the same 09:35 bar, now whole. The strategy
-       * is unchanged: its window_start still says 09:35, and that is still the
-       * bar every decision is taken on. Only the moment of asking moved, from
-       * inside the bar to just after it.
+       * `decidedOn` is therefore always the bar that has just CLOSED. WHICH
+       * setups that bar belongs to is a separate question, answered below by
+       * decidesOnBar — and for the 09:35 setup the answer is now the 09:34
+       * bar, because its entry is the 09:35 OPEN. So it fires when the clock
+       * reads 09:35 and the order lands inside the 09:35 minute, which is the
+       * entry every backtest of it measured. It used to fire at 09:36 on the
+       * 09:35 bar: a whole bar later than the strategy it was reproducing.
        *
        * If the feed has not published that bar yet, qp falls back to the last
        * one that exists and the alert records which — that is what the lag
@@ -330,8 +333,19 @@ function startScheduler() {
        * window", and a clock setup is the case where the window is one minute
        * wide. `runDue` still receives the bar, so nothing downstream changes.
        */
+      /*
+       * MATCHED ON THE BAR THE SETUP DECIDES FROM, not on its entry window.
+       *
+       * They are the same minute only under fill='close'. Every other model
+       * enters at the NEXT bar's open, so a setup whose entry window is 09:35
+       * decides on the completed 09:34 bar — which is what its backtest did.
+       * Filtering on the entry window here asked the setup about a bar it does
+       * not trade from, and after this tick moved it would never fire at all.
+       */
       const firing = due.filter(s => s.enabled !== false
-        && catalog.withinWindow(decidedOn, s.decisionTime, s.windowEnd));
+        && catalog.withinWindow(decidedOn,
+                                s.decidesOnBar || s.decisionTime,
+                                s.decidesUntilBar || s.windowEnd));
       if (firing.length) {
         const watching = firing.filter(s => s.watch).length;
         console.log(`[Setups] ${now} — ${firing.length} setup(s) on the `
