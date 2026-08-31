@@ -258,7 +258,7 @@
        columns stack, so the same strategy is twice as tall as on a desktop and
        42vh showed roughly one rule. The grip at the top still resizes it, and
        the chart keeps its time axis either way — main reserves --drawerH. */
-    #drawer { height:auto; max-height:62vh; }
+    #drawer { height:auto; max-height:62vh; max-height:62dvh; }
     body.drawer-open main { padding-bottom: var(--drawerH, 62vh); }
     /* `.rulecol` is `flex:1`, which in a row means "share the width" and in a
        stacked column means "share the HEIGHT" — so Entry and Exit would be
@@ -338,7 +338,29 @@
      ceiling and scrolls inside it. The resize grip still sets an explicit
      height, and an inline style wins — so dragging it to a size you want is
      still a decision the page keeps. */
-  #drawer { position:absolute; left:0; right:0; bottom:0; height:auto; max-height:42vh;
+  /* ── PINNED TO THE VIEWPORT, LIKE THE SETTINGS SHEET ──
+     It was `position:absolute` inside <main>, which made its bottom edge
+     depend on main's box — and main's box depends on a padding-bottom this
+     same drawer sets. Two things defining each other, and on a phone they
+     disagreed:
+
+         body      height:100dvh     the CURRENT viewport
+         #drawer   max-height:62vh   the LARGE viewport (URL bar hidden)
+
+     On Android Chrome `vh` is bigger than `dvh` by the height of the URL bar
+     whenever the bar is showing. So the drawer could be taller than the space
+     main actually had; main's padding then exceeded its own height and the
+     bottom of the drawer was pushed below the visible screen — content cut
+     off mid-row with black underneath, which is "it lifts the bottom of the
+     screen up".
+
+     #hdrMore, the other bottom sheet on this page, has always been
+     `position:fixed` and has never had this. Now they are the same thing.
+     Fixed means the drawer's bottom IS the screen's bottom, whatever main is
+     doing, and `dvh` means the cap and the viewport agree about which
+     viewport they mean. */
+  #drawer { position:fixed; left:0; right:0; bottom:0; height:auto;
+    max-height:42vh; max-height:42dvh;
     background:var(--panel); border-top:1px solid var(--border); z-index:6;
     display:none; flex-direction:column; }
   #drawer.open { display:flex; }
@@ -2734,7 +2756,27 @@ function syncDrawerHeight(){
   const d = document.getElementById('drawer');
   if(!d || !d.classList.contains('open')) return;
   const h = d.getBoundingClientRect().height;
-  if(h > 0) document.documentElement.style.setProperty('--drawerH', h + 'px');
+  if(h > 0){
+    /*
+     * CLAMPED, so the reservation can never be bigger than the thing it is
+     * reserved out of.
+     *
+     * This padding shrinks <main> to keep the chart's time axis above the
+     * drawer. If it ever exceeds main's own height the content box goes to
+     * zero — no chart at all — and before the drawer was pinned to the
+     * viewport it also pushed main's bottom, and the drawer with it, off the
+     * screen. The drawer is `position:fixed` now so it can no longer be
+     * moved by this; the floor is what keeps the CHART from disappearing.
+     *
+     * 140px is a chart you can still read a candle on. Below that there is
+     * nothing worth reserving space for, and the drawer covering the axis is
+     * the better of two bad results.
+     */
+    const main = document.querySelector('main');
+    const room = main ? main.getBoundingClientRect().height : window.innerHeight;
+    const capped = Math.max(0, Math.min(h, room - 140));
+    document.documentElement.style.setProperty('--drawerH', capped + 'px');
+  }
   _resizeChart();
 }
 

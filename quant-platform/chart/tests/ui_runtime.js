@@ -813,10 +813,42 @@ ok('stacked rule columns take their natural height, so the body is one scroll',
  * arrangements rather than a compromise between them.
  */
 ok('the drawer sizes to its content, under a ceiling',
-   /#drawer \{[^}]*height:auto; max-height:42vh/.test(html),
+   /#drawer \{[^}]*height:auto;\s*\n?\s*max-height:42vh/.test(html),
    'a fixed height reserves the ceiling even for an empty strategy');
 ok('...a taller ceiling on a phone, where the columns stack',
-   /#drawer \{ height:auto; max-height:62vh; \}/.test(html));
+   /#drawer \{ height:auto; max-height:62vh; max-height:62dvh; \}/.test(html));
+
+/*
+ * ── PINNED TO THE VIEWPORT, LIKE THE OTHER BOTTOM SHEET ───────────────────
+ *
+ * The drawer was `position:absolute` inside <main>, so its bottom edge
+ * depended on main's box — and main's box depends on a padding-bottom this
+ * same drawer sets. Two things defining each other, and on a phone they
+ * disagreed about WHICH VIEWPORT:
+ *
+ *     body      height:100dvh     the current viewport
+ *     #drawer   max-height:62vh   the LARGE viewport, URL bar hidden
+ *
+ * On Android Chrome `vh` exceeds `dvh` by the height of the URL bar while
+ * that bar is showing. So the drawer could be taller than the space main
+ * had, main's padding exceeded its own height, and the bottom of the drawer
+ * went below the visible screen: content cut off mid-row with black beneath
+ * it. #hdrMore has always been position:fixed and never had this.
+ */
+ok('the drawer is pinned to the viewport, not to main',
+   /#drawer \{ position:fixed;/.test(html),
+   'absolute inside main makes its bottom depend on a padding it sets itself');
+ok('...and it is the same positioning as the settings sheet',
+   /#hdrMore \{ position:fixed;/.test(html));
+// Both caps carry a dvh form, so the drawer and the body agree about which
+// viewport they are measuring.
+ok('the cap is stated in the same viewport unit as the body height',
+   /max-height:42dvh/.test(html) && /max-height:62dvh/.test(html)
+   && /height:100dvh/.test(html));
+// And the reservation cannot be bigger than the thing it is reserved out of.
+ok('the space held back for the drawer leaves a usable chart',
+   /room - 140/.test(html),
+   'a padding larger than main takes the chart to zero height');
 
 /*
  * AND <main> RESERVES WHAT IT ACTUALLY IS.
