@@ -167,11 +167,6 @@
     header label { gap:0; }
     header .lbl { display:none; }
     header #symbol { width:64px; }
-    header #compute { font-size:0; padding:8px 10px; }
-    header #compute::after { content:'▶▶'; font-size:var(--f-sm); }
-    /* Working state, because at this width the label is gone and a tap with no
-       visible result is indistinguishable from a dead control. */
-    header #compute.busy::after { content:'…'; }
     header #liveBtn { font-size:0; padding:8px 10px; }
     header #liveBtn::after { content:'●'; font-size:14px; }
     header #sideBtn { font-size:0; padding:8px 10px; }
@@ -183,7 +178,6 @@
   .grp { border-top:1px solid var(--border); padding-top:var(--s3); margin-top:var(--s3); }
   .grp > h4 { margin:0 0 var(--s2); font-size:10.5px; letter-spacing:.1em;
     text-transform:uppercase; color:var(--text2); font-weight:700; }
-  #compute { background:var(--accent); color:#000; }
   #liveBtn { background:#1c2431; color:var(--text); border:1px solid var(--border); }
   #liveBtn.on { background:var(--red); color:#fff; border-color:var(--red); }
   #addBtn { background:var(--accent); color:#000; }
@@ -358,7 +352,14 @@
   <strong style="color:var(--accent)">qp</strong>
   <label><span class="lbl">Symbol</span> <input id="symbol" value="SPY" size="6"></label>
   <label><span class="lbl">TF</span> <select id="tf"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
-  <button id="compute" class="prim">Compute</button>
+  <!-- ── "COMPUTE" (▶▶) IS GONE, and it had nothing to do ──
+       Every control that feeds the chart already reloads it on change —
+       symbol, timeframe, days, feed, session, as-of — and so does adding,
+       editing or removing an indicator. The button re-ran what had just run.
+       On a phone its label collapsed to a ▶▶ glyph, which reads as "play"
+       next to a live button that actually is one.
+       The loading state it used to show lives on #status below, which says
+       "loading…" for the same fetch and is not a button you can press. -->
   <button id="liveBtn">▶ Live</button>
   <!-- ☰ Panel and ⚙ More used to sit here, and both were a second way to press
        a rail button: More opened the same sheet as Chart and Study, Panel the
@@ -446,9 +447,9 @@
     <button class="railBtn" id="railChart" data-sheet="mgrpChart" data-title="Chart"
             title="type, scale, days, session, feed, as-of">
       <span class="ri">&#128202;</span><span class="rl">Chart</span></button>
-    <button class="railBtn" id="railStudy" data-psec="psecStudy" data-title="Study"
+    <button class="railBtn" id="railStudy" data-psec="psecStudy" data-title="Indicators"
             title="add an indicator, and edit the ones on the chart">
-      <span class="ri">&#128200;</span><span class="rl">Study</span></button>
+      <span class="ri">&#128200;</span><span class="rl">Indicators</span></button>
     <button class="railBtn" id="railStrat" title="build, test and save a strategy">
       <span class="ri">&#9889;</span><span class="rl">Strategy</span></button>
     <button class="railBtn" id="railBt" data-psec="psecBt" data-title="Backtest"
@@ -1022,8 +1023,6 @@ async function loadChart(){
      icon and a tap with no visible result reads as a dead control. `finally`,
      not the success path: an error must clear it too, or the icon sticks on
      '…' and now it really does look broken. */
-  const _btn=document.getElementById('compute');
-  if(_btn)_btn.classList.add('busy');
   const qs=new URLSearchParams({symbol,tf,days,feed,view,overlays:JSON.stringify(OVERLAYS)});
   if(asof)qs.set('asof',asof);
   try{
@@ -1047,7 +1046,6 @@ async function loadChart(){
     renderRegister();           // keep the register highlight on the loaded symbol
     if(LIVE&&!asof) startLive();       // re-subscribe with the new params (live only)
   }catch(e){ document.getElementById('status').textContent='error: '+e.message; }
-  finally{ if(_btn)_btn.classList.remove('busy'); }
 }
 
 // ── live streaming ──
@@ -2521,7 +2519,6 @@ window.addEventListener('load',async()=>{
   loadRegDates();
   // strategy builder
   seedTemplate(); renderStrat(); loadStrategies();
-  document.getElementById('compute').onclick=loadChart;
   document.getElementById('addBtn').onclick=addOverlay;
   document.getElementById('liveBtn').onclick=toggleLive;
   // pro chart controls

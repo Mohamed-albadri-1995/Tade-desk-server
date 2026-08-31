@@ -594,6 +594,24 @@ ok('the header no longer carries its own way into the sheet and the panel',
    'More and Panel were a second way to press a rail button');
 ok('the tool buttons exist once as behaviour, not twice as buttons',
    /id="toolActions" hidden/.test(html));
+
+/*
+ * NO RELOAD BUTTON, because there is nothing for it to do.
+ *
+ * "Compute" sat in the header and re-ran loadChart(). Every control that feeds
+ * the chart already calls loadChart() on change — symbol, timeframe, days,
+ * feed, session, as-of — and so does adding, editing or removing an indicator.
+ * The button re-ran what had just run, and on a phone its label collapsed to a
+ * ▶▶ glyph sitting next to a live button that actually plays something.
+ */
+ok('the chart reloads itself when any of its inputs change',
+   /for\(const id of \['symbol','tf','days','feed','view'\]\)/.test(html)
+   && /addEventListener\('change',\(\)=>\{ if\(LIVE&&id!=='days'\)startLive\(\); loadChart\(\); \}\)/.test(html));
+ok('...so there is no button that only reloads it again',
+   !/id="compute"/.test(html));
+// The loading state it used to show has somewhere honest to live.
+ok('a fetch still says it is working, on the status line',
+   /getElementById\('status'\)\.textContent='loading…'/.test(html));
 for (const id of ['stratBtn', 'printR1Btn', 'alertsBtn', 'sideBtn', 'moreBtn']) {
   ok(`#${id} exists exactly once — it moved, it was not copied`,
      (html.match(new RegExp(`id="${id}"`, 'g')) || []).length === 1);
