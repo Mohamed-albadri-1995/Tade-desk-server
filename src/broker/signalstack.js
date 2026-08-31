@@ -1827,16 +1827,82 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
  * a symbol that is already flat is a no-op at the broker; missing one that is
  * still open is an overnight position in an account that may not hold one.
  */
-function openSymbols(date) {
+/**
+ * Which symbols are open IN WHICH ACCOUNTS — `{ SYMBOL: [destinationId, …] }`.
+ *
+ * PER DESTINATION, because a position is not one thing any more. One signal
+ * goes into two accounts as two orders, and `close` is sent to an account, not
+ * to a desk: closing WULF at Paper A does nothing whatever to the WULF sitting
+ * in Paper B.
+ *
+ * openSymbols() answered with a flat list and a single `closed` set, so ONE
+ * successful flatten anywhere marked the name closed everywhere. The second
+ * account's position then became invisible to every flatten that followed —
+ * held overnight, in an account that may not be allowed to hold overnight, and
+ * with nothing anywhere reporting it. The manager already worked this out for
+ * itself (openPositions groups by setup and name and collects `destinations`);
+ * this is the same fact, on the ledger's own terms, so the end-of-session path
+ * stops being the one place that still thinks there is one account.
+ *
+ * A row from before destinations existed carries no `destination`. It comes
+ * back under `null`, which matches the flatten rows of the same era — so an
+ * old ledger reads exactly as it always did.
+ *
+ * It still OVER-reports, deliberately: a position closed by its own stop or
+ * target is invisible here, and sending `close` for a flat symbol is a no-op
+ * at the broker, while missing one is a position nobody meant to hold.
+ */
+function openByDestination(date) {
   const rows = orders(date);
-  const opened = [];
-  const closed = new Set();
+  const up = s => String(s || '').toUpperCase();
+  const closed = new Map();               // SYMBOL -> Set(destinationId|null)
+  /*
+   * A SENT CLOSE THAT NAMES NO ACCOUNT CLOSES THE SYMBOL EVERYWHERE.
+   *
+   * Flatten rows only started carrying a destination with this change, so
+   * every close already in the ledger has none. Matching those against the
+   * `null` account alone would leave every position ever closed reading as
+   * open again, and the next flatten would re-send a close for each — safe at
+   * the broker, which no-ops a close on a flat symbol, but a page of alerts
+   * about positions that were shut days ago.
+   *
+   * Reading them as closing everything is also the HONEST reading: in the era
+   * that wrote them there was one hook, so there was nowhere else the position
+   * could have been. And a null-destination close cannot be written today —
+   * `closePosition` now refuses when the cfg has no webhook, and refusals are
+   * not `sent`, so they never reach this set.
+   */
+  const closedEverywhere = new Set();
   for (const o of rows) {
-    if (o.kind === 'callback') continue;
-    if (o.kind === 'flatten') { if (o.sent) closed.add(o.symbol); continue; }
-    if (o.sent && o.symbol && !opened.includes(o.symbol)) opened.push(o.symbol);
+    if (o.kind !== 'flatten' || !o.sent || !o.symbol) continue;
+    const sym = up(o.symbol);
+    if (!o.destination) { closedEverywhere.add(sym); continue; }
+    if (!closed.has(sym)) closed.set(sym, new Set());
+    closed.get(sym).add(o.destination);
   }
-  return opened.filter(sym => !closed.has(sym));
+  const open = {};
+  for (const o of rows) {
+    if (!o.sent || !o.symbol) continue;
+    if (o.kind === 'callback' || o.kind === 'flatten' || o.kind === 'intent') continue;
+    const sym = up(o.symbol);
+    if (closedEverywhere.has(sym)) continue;
+    const dest = o.destination || null;
+    if ((closed.get(sym) || new Set()).has(dest)) continue;
+    if (!open[sym]) open[sym] = [];
+    if (!open[sym].includes(dest)) open[sym].push(dest);
+  }
+  return open;
+}
+
+/**
+ * Which symbols this box has an open position in, by its own reckoning.
+ *
+ * The names from openByDestination, so the two can never disagree about what
+ * is still on — one of them being right and the other stale is exactly how a
+ * position gets left behind.
+ */
+function openSymbols(date) {
+  return Object.keys(openByDestination(date));
 }
 
 /**
@@ -1895,10 +1961,45 @@ function setupBySymbol(date) {
  * position that no longer exists.
  */
 async function closePosition(symbol, date, cfg = settings()) {
+  /*
+   * WHICH ACCOUNT WAS CLOSED is part of the record, not a detail.
+   *
+   * The flatten row carried no `destination` at all, so the ledger could say
+   * that WULF had been closed and not say WHERE — and `close` goes to one
+   * account, not to a desk. Reading that back, a close sent to Paper A looked
+   * like a close of the position, and Paper B's half became invisible to every
+   * flatten that followed.
+   *
+   * Stamped on `base` so it is on the row whatever happens next — including
+   * the refusals and the throw below, where "which account failed to close"
+   * is the whole content of the message.
+   */
   const base = { at: Date.now(), date, symbol, kind: 'flatten', action: 'close',
+                 destination: cfg.destinationId || null,
+                 broker: cfg.destinationName || null,
                  source: 'end of session' };
-  if (!cfg.armed || !cfg.webhookUrl) {
+  /*
+   * THE TWO REASONS NOTHING IS SENT ARE NOT THE SAME REASON, and saying the
+   * wrong one sends you to the wrong setting at 15:50 with ten minutes left.
+   *
+   * `armed` is a decision — the master switch is off and nothing should go
+   * out. No webhook is a MISCONFIGURATION: this cfg has nowhere to send to.
+   * They were reported identically as "not armed", which was a lie in the
+   * second case and a lie that pointed at a switch that was already on.
+   */
+  if (!cfg.armed) {
     const out = { ...base, sent: false, skipped: 'not armed' };
+    record(out); return out;
+  }
+  if (!cfg.webhookUrl) {
+    const out = { ...base, sent: false,
+      destination: cfg.destinationId || null, broker: cfg.destinationName || null,
+      skipped: cfg.destinationId
+        ? `"${cfg.destinationName || cfg.destinationId}" has no webhook URL`
+        : 'no account was named for this close, and the desk has no webhook of '
+          + 'its own — THE POSITION IS STILL OPEN',
+      error: 'nowhere to send the close — CHECK THE BROKER, this position may '
+        + 'still be open' };
     record(out); return out;
   }
   const body = { symbol: String(symbol).toUpperCase(), action: 'close' };
@@ -1919,11 +2020,44 @@ async function closePosition(symbol, date, cfg = settings()) {
   return out;
 }
 
-/** Close everything opened today. Returns one result per symbol. */
+/**
+ * Close everything opened today — in EVERY account that holds it.
+ *
+ * One result per (symbol, account), not per symbol.
+ *
+ * THIS SENT NOTHING AT ALL on the configuration this desk now runs. It closed
+ * every symbol through one `cfg`, defaulting to `settings()` — and
+ * settings().webhookUrl is the desk-wide legacy hook, which is null once
+ * orders go to named destinations. So every close hit the `!cfg.webhookUrl`
+ * guard, was recorded as "not armed" while the desk was armed, and the 15:50
+ * flatten quietly did nothing on any account.
+ *
+ * The half of an OR + VWAP position that rides the stop has no target by
+ * design — the backtest closes it at the session end and the broker does not —
+ * so that is a position held overnight, every day, in an account that is not
+ * allowed to hold one. carriedOver() would find it the NEXT morning by asking
+ * Alpaca, which is a safety net and not a plan.
+ *
+ * Even with a hook set it was wrong the other way: one cfg for every symbol
+ * means a name held in two accounts is closed in one. The manager has always
+ * looped over `pos.destinations` for exactly this reason; this is the same
+ * loop, on the ledger's own record of who holds what.
+ *
+ * `cfg` is now only the fallback for a ledger row that names no destination —
+ * a position opened before destinations existed.
+ */
 async function flattenAll(date, cfg = settings()) {
-  const symbols = openSymbols(date);
+  const open = openByDestination(date);
   const out = [];
-  for (const sym of symbols) out.push(await closePosition(sym, date, cfg));
+  for (const [sym, dests] of Object.entries(open)) {
+    for (const dest of dests) {
+      // The account's OWN hook and dialect. Falling back to `cfg` only for a
+      // row that names no account at all.
+      const use = dest ? (destinationCfg(dest) || cfg) : cfg;
+      out.push({ ...(await closePosition(sym, date, use)),
+                 destination: dest, broker: use.destinationName || null });
+    }
+  }
   return out;
 }
 
@@ -2279,7 +2413,8 @@ module.exports = {
   fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,
-  openSymbols, setupBySymbol, closePosition, flattenAll, orphanIntents,
+  openSymbols, openByDestination, setupBySymbol, closePosition, flattenAll,
+  orphanIntents,
   slipOf,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled, confirmFromFills,
