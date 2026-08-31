@@ -58,6 +58,86 @@ router.get('/', async (req, res) => {
 });
 
 /*
+ * GET /api/setups/backtest-defaults — THE SETTINGS A BACKTEST MUST BE RUN WITH.
+ *
+ * ONE SOURCE OF TRUTH, READ IN THE BACKTEST'S OWN VOCABULARY.
+ *
+ * A backtest is only evidence about the desk if it was run with the desk's
+ * settings, and until now those settings had to be re-typed into the qp form
+ * by hand: account size, risk per trade, the position cap, the rank metric and
+ * count, the timeframe, the feed, the session view, the fill model. Every one
+ * of them is a chance for the two to disagree, and three of them did — for two
+ * weeks, silently, with a P&L that did not match as the only symptom.
+ *
+ * So the desk states them, in the exact key names chart/backtest.py reads, and
+ * the qp form fills itself from this. Change riskPerTrade on the alerts page
+ * and the next backtest form opens with the new number: there is nothing to
+ * remember to update, because nothing is stored twice.
+ *
+ * Deliberately NOT included: start, end and the strategy itself. The date range
+ * is a claim about which market you are testing and must be chosen each time,
+ * and the strategy is what you are choosing when you open the form.
+ */
+router.get('/backtest-defaults', async (req, res) => {
+  const risk = require('../setups/risk');
+  const account = risk.settings();
+  const setups = await catalog.list();
+  const want = String(req.query.setup || '').trim();
+  const one = want ? setups.find(s => s.id === want || s.name === want) : null;
+  if (want && !one) {
+    return res.status(404).json({ ok: false, error: `no setup called ${want}` });
+  }
+
+  const specFor = (s) => {
+    // A setup may override the account's risk; the override is what runs, so
+    // it is what the backtest has to be given.
+    const riskUsd = s.riskPerTrade || account.riskPerTrade || 0;
+    // 100% live means NO cap, which is what an absent cap means in the
+    // backtest — sending 100 would make them differ while meaning the same.
+    const capRaw = s.maxPositionPct || account.maxPositionPct;
+    const cap = (capRaw && capRaw !== 100) ? capRaw : 0;
+    return {
+      account_equity: account.accountSize || 0,
+      // Flat dollars, never a percentage: a percentage compounds and the desk
+      // does not. Sending risk_pct here would reintroduce the difference this
+      // endpoint exists to remove.
+      risk_usd: riskUsd,
+      risk_pct: 0,
+      max_position_pct: cap,
+      rank_per_day: ((s.rank || {}).metric && (s.rank || {}).topN)
+        ? { metric: s.rank.metric, top_n: s.rank.topN,
+            direction: s.rank.direction || null }
+        : null,
+      tf: s.tf || '1m',
+      feed: s.feed || null,
+      view: s.view || 'all',
+      /*
+       * THE FILL MODEL A BACKTEST OF THIS SETUP MUST USE.
+       *
+       * The desk runs 'live', which cannot be backtested — it reports the
+       * decision price as the entry because live has no fill price yet. Its
+       * backtestable twin is 'desk': the same decision from the same bar with
+       * the same levels, plus the fill the next bar's open really gave.
+       */
+      fill: (s.fill === 'live' || !s.fill) ? 'desk' : s.fill,
+      universe: (s.tools || []).length
+        ? { kind: 'tools', register: 'R1', tools: s.tools }
+        : null,
+      rules: { max_entries_per_day: s.maxTradesPerDay || null },
+    };
+  };
+
+  if (one) return res.json({ ok: true, setup: one.id, spec: specFor(one) });
+  res.json({
+    ok: true,
+    account,
+    setups: setups.map(s => ({ id: s.id, name: s.name,
+                               strategies: s.strategies,
+                               spec: specFor(s) })),
+  });
+});
+
+/*
  * Switch a setup on or off.
  *
  * The definition itself is the qp strategy — its windows, cutoffs and rules are

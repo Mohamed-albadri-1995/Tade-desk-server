@@ -504,6 +504,11 @@
           <label class="fld"><span>Timeframe
             <b class="q" title="Bar timeframe the backtest evaluates on — use the TF you built the strategy on.">?</b></span>
             <select id="btTf"><option selected>1m</option><option>2m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
+          <label class="fld"><span>Session
+            <b class="q" title="WHICH BARS ARE IN THE FRAME. all = pre/post-market included; regular = 09:30-16:00 only. Not cosmetic: a rolling indicator's window differs, so the same strategy reads a different ATR at 09:35 under each — and 'regular' has no 09:29 bar, which is the decision bar for any setup entering at the 09:30 open. Entries are still confined to the session by the RTH rule below.">?</b></span>
+            <select id="btView"><option value="all" selected>All-day</option><option value="regular">Regular</option></select></label>
+        </div>
+        <div class="frow">
           <label class="fld"><span>Feed
             <b class="q" title="Data feed for the backtest. polygon covers the whole market; alpaca (IEX) has NO data for many small caps — those pairs would be skipped.">?</b></span>
             <select id="btFeed"><!-- yahoo has been a working feed in chart/data_manager.py all along; it was
@@ -623,6 +628,10 @@
       </div>
 
       <div class="grp">
+        <!-- WHERE THESE NUMBERS CAME FROM. A form that silently fell back to
+             its own defaults would look exactly like one that matched the
+             desk, and that is the failure this line exists to remove. -->
+        <div id="btDeskNote" class="muted" style="margin-bottom:6px;font-size:var(--f-xs)">Reading the desk’s settings…</div>
         <button id="btRun" class="dk-btn primary" style="width:100%">Run the backtest</button>
         <div id="btStat" class="muted" style="margin-top:6px">Runs on the timeframe and feed chosen above.</div>
         <!-- The way back out of the page's memory. Every field above is
@@ -1468,7 +1477,7 @@ let BT_POLL=null, BT_LAST=null, BT_FILTERS=[];
  */
 const BT_DEFAULTS = {
   btUni: 'R1', btFill: 'next_open', btSyms: '',
-  btTf: '1m', btFeed: 'polygon',
+  btTf: '1m', btFeed: 'polygon', btView: 'all',
   btEquity: '50000', btRiskPct: '0.5', btRiskUsd: '',
   btMaxPos: '', btCost: '',
   btRankMetric: 'vwap_extension', btTopN: '3', btMinRvol: '',
@@ -1501,6 +1510,91 @@ function btDefaultDates(){
   if (e && !e.value) e.value = iso(end);
 }
 
+/* ── THE DESK'S OWN SETTINGS, AS THE FORM'S DEFAULTS ──────────────────────
+ *
+ * BT_DEFAULTS above is what the form ships with. This is what the DESK is
+ * actually configured to do, fetched from it, and it wins over the shipped
+ * table for every field the desk has an opinion about.
+ *
+ * WHY. A backtest is only evidence about the desk if it was run with the
+ * desk's settings. Re-typing them here by hand is exactly how three of them
+ * drifted apart for a fortnight with nothing but a mismatched P&L to show for
+ * it. Change riskPerTrade on the alerts page and this form opens with the new
+ * number — there is nothing to remember to update, because nothing is stored
+ * in two places.
+ *
+ * What the desk does NOT decide: the date range (a claim about which market
+ * you are testing, chosen every time) and the strategy (that is the thing you
+ * are choosing when you open the form).
+ *
+ * A value YOU changed still wins. The order is: what you last used, then the
+ * desk, then the shipped table. "Reset" drops what you last used and comes
+ * back to the desk.
+ */
+let BT_DESK = null;          // null = not asked yet / unreachable
+
+/** The desk's spec for one setup → the form's field ids. */
+function btDeskFields(spec){
+  if(!spec) return {};
+  const out = {};
+  const put = (id, v) => { if(v !== null && v !== undefined && v !== '') out[id] = String(v); };
+  put('btEquity', spec.account_equity);
+  // FLAT DOLLARS, and the percentage cleared with it. Leaving a stale 0.5 in
+  // the percent box while the dollar box is filled makes the server refuse the
+  // run — the two are mutually exclusive on purpose.
+  if(spec.risk_usd){ out.btRiskUsd = String(spec.risk_usd); out.btRiskPct = ''; }
+  else if(spec.risk_pct){ out.btRiskPct = String(spec.risk_pct); out.btRiskUsd = ''; }
+  // 0 means NO cap on both sides, so it must land as an empty box rather than
+  // as the number zero.
+  out.btMaxPos = spec.max_position_pct ? String(spec.max_position_pct) : '';
+  const rank = spec.rank_per_day;
+  out.btRankMetric = (rank && rank.metric) || '';
+  out.btTopN = (rank && rank.top_n) ? String(rank.top_n) : '';
+  put('btTf', spec.tf);
+  put('btFeed', spec.feed);
+  put('btView', spec.view);
+  put('btFill', spec.fill);
+  out.btMaxDay = (spec.rules && spec.rules.max_entries_per_day)
+    ? String(spec.rules.max_entries_per_day) : '';
+  if(spec.universe && spec.universe.kind === 'tools') out.btUni = spec.universe.register || 'R1';
+  return out;
+}
+
+/** Which desk setup a chosen strategy belongs to — matched by NAME. */
+function btDeskSpecFor(){
+  if(!BT_DESK || !Array.isArray(BT_DESK.setups)) return null;
+  const el = document.getElementById('btStrat');
+  const name = el && el.selectedIndex >= 0 && el.options[el.selectedIndex]
+    ? String(el.options[el.selectedIndex].textContent).replace(/\s*·\s*dev$/, '').trim()
+    : '';
+  const base = name.replace(/\s*\((Long|Short)\)\s*$/i, '').trim();
+  if(!base) return null;
+  const hit = BT_DESK.setups.find(x => x.name === base
+    || (x.strategies || []).some(n => String(n).trim() === name));
+  return hit ? hit.spec : null;
+}
+
+async function btLoadDeskDefaults(){
+  try{
+    const r = await fetch('/api/desk/backtest-defaults', { cache: 'no-store' });
+    const j = await r.json();
+    BT_DESK = (j && j.ok) ? j : null;
+  }catch(_){ BT_DESK = null; }
+  const note = document.getElementById('btDeskNote');
+  if(note){
+    // SAY WHICH IT IS. A form that silently falls back to typed-in numbers
+    // looks exactly like one that matched the desk, and that is the failure
+    // this feature exists to remove.
+    note.textContent = BT_DESK
+      ? 'Money, ranking and execution below are the live desk\u2019s own settings.'
+      : 'Could not reach the desk \u2014 the values below are this page\u2019s defaults, NOT the desk\u2019s.';
+    note.classList.toggle('warn', !BT_DESK);
+  }
+  // Re-apply now that the answer is in; anything the user has already typed is
+  // preserved by btSettingsRestore's own precedence.
+  btSettingsRestore();
+}
+
 function btSettingsSave(){
   try{
     const out = {};
@@ -1525,9 +1619,14 @@ function btSettingsSave(){
 function btSettingsRestore(){
   let saved = {};
   try{ saved = JSON.parse(localStorage.getItem(BT_LS) || '{}') || {}; }catch(_){ saved = {}; }
+  // PRECEDENCE: what you last used, then the DESK's own setting, then the
+  // shipped table. The desk layer is what makes a fresh form describe the
+  // machine rather than describing this file.
+  const desk = btDeskFields(btDeskSpecFor());
   for(const [id, dflt] of Object.entries(BT_DEFAULTS)){
     const el = document.getElementById(id); if(!el) continue;
-    const v = Object.prototype.hasOwnProperty.call(saved, id) ? saved[id] : dflt;
+    const v = Object.prototype.hasOwnProperty.call(saved, id) ? saved[id]
+      : (Object.prototype.hasOwnProperty.call(desk, id) ? desk[id] : dflt);
     if(typeof dflt === 'boolean') el.checked = !!v;
     else el.value = (v == null ? '' : String(v));
   }
@@ -2002,7 +2101,11 @@ async function btRun(){
       : {kind:'register', register:uni},
     start:document.getElementById('btStart').value, end:document.getElementById('btEnd').value,
     tf:document.getElementById('btTf').value, feed:document.getElementById('btFeed').value,
-    view:document.getElementById('view').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0,
+    // THE BACKTEST'S OWN Session control. This used to read the CHART's
+    // selector, so scrolling the chart to RTH quietly changed what the next
+    // backtest evaluated — and the live desk has its own view setting, which
+    // this one has to match.
+    view:document.getElementById('btView').value, fill:document.getElementById('btFill').value, days:3, cost_bps:parseFloat(document.getElementById('btCost').value)||0,
     min_rvol:(document.getElementById('btMinRvol').value!==''?parseFloat(document.getElementById('btMinRvol').value):null),
     // The watchlist gate. Sent explicitly rather than relying on the server's
     // default, so what the box is showing and what the run did cannot differ.
@@ -2260,6 +2363,18 @@ window.addEventListener('load',async()=>{
   document.getElementById('btPreset').addEventListener('change',e=>{ if(e.target.value==='ttp'){ document.getElementById('btFee').value='0.005'; document.getElementById('btFeeMin').value='0.75'; document.getElementById('btMinPs').value='0.10'; document.getElementById('btShares').value=document.getElementById('btShares').value||'100'; document.getElementById('btRules').checked=true; btSettingsSave(); } });
   document.getElementById('btReport').onclick=()=>{ if(BT_LAST&&BT_LAST.id)window.open('/api/backtest/'+BT_LAST.id+'/report','_blank'); };
   document.getElementById('btUni').addEventListener('change',e=>{ document.getElementById('btSyms').style.display=e.target.value==='symbols'?'':'none'; });
+  /* A DIFFERENT STRATEGY IS A DIFFERENT SETUP, with its own desk settings —
+     its own rank metric, its own risk, its own cap. Re-read them when the
+     choice changes, or the form would keep showing the previous setup's. */
+  document.getElementById('btStrat').addEventListener('change',()=>{
+    const spec = btDeskSpecFor(); if(!spec) return;
+    const fields = btDeskFields(spec);
+    for(const [id, v] of Object.entries(fields)){
+      const el = document.getElementById(id); if(el) el.value = v;
+    }
+    btSettingsSave();
+  });
+  btLoadDeskDefaults();
   // strategies arrive asynchronously; if the list is already in, take the
   // defaults now — loadStrategies() does it again when it lands.
   btApplyStratDefaults(false);

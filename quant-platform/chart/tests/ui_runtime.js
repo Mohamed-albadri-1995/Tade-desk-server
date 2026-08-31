@@ -388,6 +388,108 @@ els.btFeed.value = 'polygon';
 ctx.btFeedSanity();
 ok('...and a working feed is left alone', els.btFeed.value === 'polygon');
 
+
+/* ── THE DESK'S SETTINGS ARE THE FORM'S DEFAULTS ─────────────────────────
+ *
+ * A backtest is only evidence about the desk if it was run with the desk's
+ * settings. They used to be re-typed into this form by hand, which is exactly
+ * how three of them drifted apart for a fortnight — with a mismatched P&L as
+ * the only symptom.
+ *
+ * Now the desk states them in the backtest's own key names
+ * (/api/setups/backtest-defaults, proxied by qp) and the form fills itself.
+ * Precedence: what you last used, then the DESK, then this file's table.
+ */
+const DESK = {
+  ok: true,
+  setups: [{
+    id: 'OR + VWAP 09:35@09:35',
+    name: 'OR + VWAP 09:35',
+    strategies: ['OR + VWAP 09:35 (Long)', 'OR + VWAP 09:35 (Short)'],
+    spec: {
+      account_equity: 50000, risk_usd: 500, risk_pct: 0,
+      max_position_pct: 16.66,
+      rank_per_day: { metric: 'vwap_extension', top_n: 3 },
+      tf: '1m', feed: 'polygon', view: 'all', fill: 'desk',
+      universe: { kind: 'tools', register: 'R1', tools: ['T2'] },
+      rules: { max_entries_per_day: 1 },
+    },
+  }],
+};
+
+ok('the form asks the desk for its settings',
+   /\/api\/desk\/backtest-defaults/.test(html));
+ok('...and the backtest has its OWN Session control now',
+   /id="btView"/.test(html)
+   // it used to send the CHART's selector, so scrolling the chart to RTH
+   // quietly changed what the next backtest evaluated
+   && !/view:document\.getElementById\('view'\)\.value, fill:/.test(html));
+
+const deskFields = evalIn('btDeskFields');
+const f = deskFields(DESK.setups[0].spec);
+ok('account size comes from the desk', f.btEquity === '50000', f.btEquity);
+ok('risk arrives as FLAT DOLLARS', f.btRiskUsd === '500', f.btRiskUsd);
+// The two are mutually exclusive server-side; leaving a stale 0.5 in the
+// percent box while the dollar box is filled makes the run refuse to start.
+ok('...and the percentage box is CLEARED with it', f.btRiskPct === '', f.btRiskPct);
+ok('the position cap comes across', f.btMaxPos === '16.66', f.btMaxPos);
+ok('the ranking comes across',
+   f.btRankMetric === 'vwap_extension' && f.btTopN === '3',
+   [f.btRankMetric, f.btTopN]);
+ok('so do the frame settings',
+   f.btTf === '1m' && f.btFeed === 'polygon' && f.btView === 'all',
+   [f.btTf, f.btFeed, f.btView]);
+ok("and the fill model — 'desk', the backtestable twin of live's 'live'",
+   f.btFill === 'desk', f.btFill);
+
+// A cap of 0 means NO cap on both sides, so it must land as an EMPTY box
+// rather than as the number zero, which would read as "cap at 0%".
+const noCap = deskFields({ ...DESK.setups[0].spec, max_position_pct: 0 });
+ok('no cap lands as an empty box, not as 0', noCap.btMaxPos === '', noCap.btMaxPos);
+const noRank = deskFields({ ...DESK.setups[0].spec, rank_per_day: null });
+ok('no ranking lands as empty, not as a leftover metric',
+   noRank.btRankMetric === '' && noRank.btTopN === '',
+   [noRank.btRankMetric, noRank.btTopN]);
+ok('and an unreachable desk yields nothing rather than guesses',
+   Object.keys(deskFields(null)).length === 0);
+
+// PRECEDENCE, which is the whole contract.
+evalIn('BT_DESK = ' + JSON.stringify(DESK) + ';');
+els.btStrat.selectedIndex = 0;
+els.btStrat.options = [{ value: '7', textContent: 'OR + VWAP 09:35 (Long)' }];
+store.qpc_bt_form = JSON.stringify({ btEquity: '250000' });
+ctx.btSettingsRestore();
+ok('what you last used still wins over the desk',
+   els.btEquity.value === '250000', els.btEquity.value);
+ok('...and the desk wins over this file for everything else',
+   els.btRiskUsd.value === '500' && els.btMaxPos.value === '16.66',
+   [els.btRiskUsd.value, els.btMaxPos.value]);
+
+delete store.qpc_bt_form;
+ctx.btSettingsRestore();
+ok('with nothing remembered, the form IS the desk',
+   els.btEquity.value === '50000' && els.btRiskUsd.value === '500'
+   && els.btMaxPos.value === '16.66' && els.btRiskPct.value === '',
+   [els.btEquity.value, els.btRiskUsd.value, els.btMaxPos.value, els.btRiskPct.value]);
+
+// RESET drops what you last used and comes back to the DESK, not to this file.
+store.qpc_bt_form = JSON.stringify({ btEquity: '999' });
+ctx.btSettingsReset();
+ok('reset returns to the desk, not to the shipped table',
+   els.btEquity.value === '50000', els.btEquity.value);
+
+// A DESK THAT CANNOT BE REACHED must not look like one that agreed.
+// Storage is cleared first because the reset above SAVED what it applied —
+// which is correct behaviour, and would otherwise mask the fallback here.
+evalIn('BT_DESK = null;');
+delete store.qpc_bt_form;
+ctx.btSettingsRestore();
+ok('an unreachable desk falls back to the shipped table',
+   els.btEquity.value === '50000' && els.btRiskUsd.value === '',
+   [els.btEquity.value, els.btRiskUsd.value]);
+ok('...and the page SAYS the numbers are not the desk’s',
+   /NOT the desk/.test(html));
+
 console.log('\n' + '='.repeat(64));
 console.log('RESULT  PASS=' + PASS + '  FAIL=' + FAIL);
 console.log('='.repeat(64));

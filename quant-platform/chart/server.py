@@ -308,6 +308,22 @@ def backtest_get(bid: int, trades: int = 1):
     return JSONResponse({'ok': bool(g), 'backtest': g})
 
 
+@app.get('/api/desk/backtest-defaults')
+def desk_backtest_defaults():
+    """The live desk's settings, in this backtest's own key names.
+
+    Proxied rather than fetched by the browser because the desk answers on a
+    different port: the page would need CORS on every tool, and a page that
+    silently fails to reach one of them would fall back to typed-in numbers —
+    which is the failure this whole endpoint exists to remove.
+    """
+    from chart import screener as sc
+    try:
+        return sc.backtest_defaults()
+    except Exception as e:  # noqa: BLE001 — a dead desk is an answer, not a 500
+        return {'ok': False, 'error': str(e)}
+
+
 @app.get('/api/backtests')
 def backtests_list():
     return {'ok': True, 'backtests': store.list_backtests()}

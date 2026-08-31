@@ -223,6 +223,38 @@ def _get(path: str, base: str = ''):
         return json.loads(r.read().decode('utf-8'))
 
 
+def backtest_defaults() -> dict:
+    """The live desk's settings for every setup, in backtest spec vocabulary.
+
+    WHY qp ASKS RATHER THAN STORES. A backtest is only evidence about the desk
+    if it was run with the desk's settings, and those settings live on the desk
+    — account size, risk per trade, the position cap, the ranking, the feed,
+    the session view, the fill model. Typing them into this form by hand is
+    what let three of them drift apart for a fortnight.
+
+    The FIRST reachable source answers. They all read the same data/risk.json
+    and data/setup-prefs.json — those are desk-wide files, not per-tool
+    databases — so any tool that is up gives the same answer, and asking the
+    rest would only slow the form down.
+
+    Returns {} when nothing is reachable. The caller must treat that as "no
+    answer" rather than as "no settings": defaulting to something here would be
+    a fourth place for the two sides to disagree.
+    """
+    last = None
+    for src in _SOURCES:
+        url = f'{src["url"].rstrip("/")}/api/setups/backtest-defaults'
+        try:
+            with _OPENER.open(url, timeout=_TIMEOUT) as r:
+                doc = json.loads(r.read().decode('utf-8'))
+            if doc.get('ok'):
+                return {**doc, 'source': src.get('id')}
+            last = doc.get('error')
+        except Exception as e:  # noqa: BLE001 — try the next tool
+            last = str(e)
+    return {'ok': False, 'error': last or 'no screener reachable'}
+
+
 def source_health() -> list:
     """One row per configured source — which scanners are actually up. A dead
     source is REPORTED, never quietly treated as "no candidates that day"."""

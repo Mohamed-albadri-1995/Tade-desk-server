@@ -45,6 +45,25 @@ function settings() {
   return {
     accountSize: num(s.accountSize),
     riskPerTrade: num(s.riskPerTrade),
+    /*
+     * RISK AS A PERCENT OF THE ACCOUNT, the alternative to a flat dollar.
+     *
+     * It exists because a backtest can be run either way, and whichever
+     * version WON is the one the desk has to reproduce. A validated result at
+     * "0.5% per trade" could not be expressed here at all: the desk only knew
+     * flat dollars, so adopting that winner meant converting it by hand into a
+     * number that then silently stopped matching.
+     *
+     * ONE HONEST DIFFERENCE, stated here because nothing else can state it: a
+     * backtest COMPOUNDS — each trade is sized on the equity that existed when
+     * it was entered. The desk sizes on the CONFIGURED account size, which is
+     * the backtest's first trade and drifts from it as the run banks P&L. Over
+     * the tested fortnight that was a few percent. Fixing it properly means
+     * sizing off live broker equity, which is a different change with
+     * different risks; until then this is the closer of the two available
+     * answers, and parity names the gap rather than hiding it.
+     */
+    riskPct: num(s.riskPct),
     // A ceiling on the position itself, separate from the risk. A 0.3%-risk
     // candidate sized purely on risk can come out as a position several times
     // the account, which is not a position anyone can take. Percent of account.
@@ -56,7 +75,7 @@ function settings() {
 function save(patch) {
   const current = read();
   const next = { ...current };
-  for (const key of ['accountSize', 'riskPerTrade', 'maxPositionPct']) {
+  for (const key of ['accountSize', 'riskPerTrade', 'riskPct', 'maxPositionPct']) {
     if (!(key in patch)) continue;
     const raw = patch[key];
     if (raw === '' || raw === null) { delete next[key]; continue; }
@@ -68,6 +87,17 @@ function save(patch) {
   }
   if (next.riskPerTrade && next.accountSize && next.riskPerTrade > next.accountSize) {
     throw new Error('risk per trade cannot exceed the account size');
+  }
+  // MUTUALLY EXCLUSIVE, the same rule the backtest enforces. A percentage and
+  // a flat dollar are two different position-sizing strategies, not two
+  // settings of one dial, and silently preferring one would size the book by a
+  // rule nobody chose.
+  if (next.riskPerTrade && next.riskPct) {
+    throw new Error('set risk per trade OR risk percent, not both — a percentage '
+      + 'of the account and a flat dollar are two different sizing rules');
+  }
+  if (next.riskPct && !next.accountSize) {
+    throw new Error('risk percent needs an account size to be a percentage OF');
   }
   next.updatedAt = Date.now();
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
@@ -167,15 +197,21 @@ function scaleTo(standard, dest) {
  * something to know before placing the order rather than after.
  */
 function sizeFor({ entry, riskPerShare }, cfg = settings()) {
-  if (!cfg.riskPerTrade) return null;
+  // THE BUDGET FOR THIS TRADE, from whichever rule is configured. A percentage
+  // reads the account size; a flat dollar does not read it at all.
+  const budget = cfg.riskPerTrade
+    || (cfg.riskPct && cfg.accountSize ? cfg.accountSize * (cfg.riskPct / 100) : 0);
+  if (!budget) return null;
   if (!(riskPerShare > 0) || !(entry > 0)) return null;
 
-  const byRisk = Math.floor(cfg.riskPerTrade / riskPerShare);
+  const byRisk = Math.floor(budget / riskPerShare);
   if (byRisk < 1) {
     return {
       shares: 0,
       reason: `one share risks $${riskPerShare.toFixed(2)}, more than the `
-        + `$${cfg.riskPerTrade} you risk per trade`,
+        + (cfg.riskPerTrade
+            ? `$${cfg.riskPerTrade} you risk per trade`
+            : `${cfg.riskPct}% of the account ($${budget.toFixed(2)}) you risk per trade`),
     };
   }
 
@@ -197,7 +233,11 @@ function sizeFor({ entry, riskPerShare }, cfg = settings()) {
     positionValue: shares * entry,
     // What it actually risks after any cap, which is not what was asked for
     // when a cap bit. Stating both is the point.
-    intendedRisk: cfg.riskPerTrade,
+    intendedRisk: budget,
+    // WHICH RULE PRODUCED IT. A report that said "$250" without saying whether
+    // that was a flat figure or half a percent cannot be checked against the
+    // backtest it is meant to reproduce.
+    riskRule: cfg.riskPerTrade ? 'fixed_usd' : 'pct_of_equity',
     capped,
   };
 }

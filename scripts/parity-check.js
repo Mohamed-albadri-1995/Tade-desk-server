@@ -30,6 +30,18 @@
  *   node scripts/parity-check.js --backtest 349 --setup "OR + VWAP 09:35@09:35"
  *   node scripts/parity-check.js --list          # the setups the desk knows
  *
+ *   node scripts/parity-check.js --backtest 349 --adopt        # SHOW the changes
+ *   node scripts/parity-check.js --backtest 349 --adopt --yes  # apply them
+ *
+ * ADOPT is the direction that matters once a run has won. You try combinations
+ * in qp until one is clearly best; that run is then the specification, and the
+ * desk has to be set to it. Doing that by hand across two config files, in a
+ * different vocabulary, is where the original divergences came from.
+ *
+ * It prints the changes and writes NOTHING without --yes, because it changes
+ * what a live account does with real money and that must never be a side
+ * effect of running a check.
+ *
  * `--all` is the one to run after a deploy and before trusting a morning: it
  * walks every setup the desk would fire and checks it against the most recent
  * finished backtest of its own strategy. A setup with no backtest at all is
@@ -224,6 +236,41 @@ const MARK = { match: '  ok  ', differ: 'DIFFER', unknown: '  ?   ' };
   }
   // /api/strategies may list without the body; fetch the full one if so.
   const full = await fullStrategy(strategy);
+  if (has('adopt')) {
+    const plan = parity.planAdopt({ setup, spec, strategy: full });
+    console.log(`Adopting backtest #${id} into ${setup.id}`);
+    console.log(`strategy  ${full.name}`);
+    console.log('');
+    if (!plan.changes.length) {
+      console.log('  Nothing to change — the desk already runs these settings.');
+    } else {
+      for (const c of plan.changes) {
+        console.log(`  ${pad(c.what, 20)} ${pad(c.from, 14)} -> ${c.to}`);
+        if (c.why) console.log(`  ${' '.repeat(20)} ${c.why}`);
+      }
+    }
+    for (const r of plan.refused) {
+      console.log('');
+      console.log(`  NOT CARRIED: ${r}`);
+    }
+    console.log('');
+    // ACCOUNT-WIDE changes resize every other setup's trades too. Said once,
+    // loudly, because it is the one consequence that is not local to the setup
+    // being adopted.
+    if (plan.changes.some(c => c.why && c.why.includes('ACCOUNT-WIDE'))) {
+      console.log('  ⚠ Some of these are ACCOUNT-WIDE. They change the size of');
+      console.log('    EVERY setup\'s trades, not just this one.');
+      console.log('');
+    }
+    if (!has('yes')) {
+      console.log('  Nothing written. Re-run with --yes to apply.');
+      process.exit(plan.changes.length ? 1 : 0);
+    }
+    parity.applyAdopt(plan);
+    console.log('  Applied. Re-run without --adopt to confirm the comparison is clean.');
+    process.exit(0);
+  }
+
   const res = parity.compare({ setup, spec, strategy: full });
   report(setup, id, bt.name, full.name, res);
   process.exit(res.differs.length ? 1 : 0);

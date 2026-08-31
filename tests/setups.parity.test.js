@@ -237,3 +237,124 @@ describe('a setup may override the account, and the override is what runs', () =
     expect(r.backtest).toBeNull();
   });
 });
+
+/*
+ * ── ADOPT: the winning backtest becomes the desk's settings ──────────────
+ *
+ * The direction that matters once a run has won. You try combinations in qp
+ * until one is clearly best; that run is then the specification. Setting the
+ * desk to it by hand, across two config files in a different vocabulary, is
+ * where the original divergences came from.
+ *
+ * One-way, always: BACKTEST -> DESK. Nothing here ever edits a backtest.
+ */
+describe('adopting a winning backtest', () => {
+  // #349 as it was actually run: 0.5% of 50,000, no position cap, next_open.
+  const plan = () => parity.planAdopt({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
+
+  test('the risk RULE changes, not just the number', () => {
+    const p = plan();
+    expect(p.account.riskPct).toBe(0.5);
+    // Set to null rather than left alone: the two are mutually exclusive, and
+    // a stale flat dollar beside a new percentage is refused on save.
+    expect(p.account.riskPerTrade).toBeNull();
+  });
+
+  test('the account size comes across', () => {
+    expect(plan().account.accountSize).toBe(50000);
+  });
+
+  // Absent in a backtest means NO cap. The desk spells no-cap as 100, so an
+  // uncapped winner must clear a 16.66 that is currently set.
+  test('an uncapped backtest clears the live cap', () => {
+    expect(plan().account.maxPositionPct).toBe(100);
+  });
+
+  /*
+   * THE FILL MODEL IS TRANSLATED. A backtest runs 'desk' or 'next_open';
+   * neither can be evaluated in real time, because both report the entry as a
+   * bar that has not printed. Copying the name across would stop the desk
+   * firing at all.
+   */
+  test("'next_open' is adopted as 'live', its real-time twin", () => {
+    expect(plan().setupPatch.fill).toBe('live');
+  });
+
+  test("a 'close' backtest is adopted as 'close' — it IS runnable live", () => {
+    const p = parity.planAdopt({ setup: SETUP, strategy: STRATEGY,
+                                 spec: { ...SPEC_349, fill: 'close' } });
+    expect(p.setupPatch.fill).toBe('close');
+  });
+
+  test('the ranking, timeframe, feed and view come across', () => {
+    const p = plan().setupPatch;
+    expect(p.rankMetric).toBe('vwap_extension');
+    expect(p.topN).toBe(3);
+    expect(p.tf).toBe('1m');
+    expect(p.feed).toBe('polygon');
+    expect(p.view).toBe('all');
+  });
+
+  test('every change is listed with what it was and what it becomes', () => {
+    const c = plan().changes;
+    const risk = c.find(x => x.what === 'risk per trade (%)');
+    expect(risk).toBeTruthy();
+    expect([risk.from, risk.to]).toEqual([null, 0.5]);
+    const cap = c.find(x => x.what === 'max position %');
+    expect([cap.from, cap.to]).toEqual([16.66, 100]);
+  });
+
+  // Account settings resize EVERY setup's trades. That consequence is not
+  // local to the setup being adopted, so it has to be on the change itself.
+  test('account-wide changes say so', () => {
+    const c = plan().changes.filter(x => x.why && x.why.includes('ACCOUNT-WIDE'));
+    expect(c.length).toBeGreaterThan(0);
+  });
+
+  // The percentage compounds in the backtest and does not on the desk. Naming
+  // it is the only honest option while live sizes off a configured number.
+  test('the compounding gap is named rather than hidden', () => {
+    const risk = plan().changes.find(x => x.what === 'risk per trade (%)');
+    expect(risk.why).toMatch(/COMPOUNDS/);
+  });
+
+  // The universe is the strategy's TOOL assignment, decided in qp. A backtest
+  // run against other tools is a question about the strategy, not a setting to
+  // copy onto the desk behind your back.
+  test('a mismatched universe is refused, not silently applied', () => {
+    const p = parity.planAdopt({ setup: SETUP, strategy: STRATEGY,
+      spec: { ...SPEC_349, universe: { kind: 'tools', register: 'R1', tools: ['T5'] } } });
+    expect(p.refused.length).toBe(1);
+    expect(p.refused[0]).toMatch(/T5/);
+  });
+
+  test('a matching universe is not flagged', () => {
+    expect(plan().refused).toEqual([]);
+  });
+
+  // BUILDING a plan must never write. Running a check should not be able to
+  // change what a live account does with real money.
+  test('planning writes nothing', () => {
+    plan();
+    expect(risk_settings().maxPositionPct).toBe(16.66);
+  });
+
+  test('applying it makes the comparison clean', () => {
+    const p = plan();
+    parity.applyAdopt(p);
+    const res = parity.compare({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
+    // The decision bar, the fill, the ranking and the sizing now all agree.
+    expect(res.differs).toEqual([]);
+  });
+
+  test('...and adopting twice is a no-op', () => {
+    parity.applyAdopt(plan());
+    expect(plan().changes).toEqual([]);
+  });
+});
+
+// Read through the same module the desk uses, so the test cannot pass against
+// a stale copy of the file.
+function risk_settings() {
+  return require('../src/setups/risk').settings();
+}

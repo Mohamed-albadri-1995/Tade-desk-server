@@ -249,4 +249,115 @@ function summarise(result) {
   return out;
 }
 
-module.exports = { compare, summarise, decisionBar, hhmm, shift, row };
+/*
+ * ── ADOPT: MAKE THE DESK RUN THE BACKTEST THAT WON ───────────────────────
+ *
+ * THE WORKFLOW THIS SERVES. You try combinations in qp — caps, risk rules,
+ * rank metrics, fill models — until one is clearly best. That run is then the
+ * specification, and the desk has to be set to it. Doing that by hand across
+ * two config files, in a different vocabulary, is where the three original
+ * divergences came from.
+ *
+ * So the winning run states the settings and this translates them, once.
+ *
+ * Direction matters and it is one-way: BACKTEST -> DESK. The comparison in
+ * compare() answers "do these agree"; this answers "make them agree, on the
+ * backtest's terms". Nothing here ever edits a backtest.
+ *
+ * Returns the two patches and the reasons, WITHOUT writing. The caller decides
+ * whether to apply them, because this changes what a live account does with
+ * real money and that must never be a side effect of running a check.
+ */
+function planAdopt({ setup, spec, strategy } = {}) {
+  const s = setup || {};
+  const bt = spec || {};
+  const cur = risk.settings();
+  const curPrefs = prefs.settingsFor(s.id) || {};
+  const changes = [];
+  const note = (what, from, to, why) => {
+    if (String(from ?? '') === String(to ?? '')) return;
+    changes.push({ what, from: from ?? null, to: to ?? null, why: why || null });
+  };
+
+  /* THE ACCOUNT — shared by every setup, so it is written once and named as
+   * account-wide. Changing it here changes the size of every other setup's
+   * trades too, and that has to be visible before it is applied. */
+  const account = {};
+  if (bt.account_equity) account.accountSize = bt.account_equity;
+  if (bt.risk_usd) {
+    account.riskPerTrade = bt.risk_usd;
+    account.riskPct = null;
+  } else if (bt.risk_pct) {
+    account.riskPct = bt.risk_pct;
+    account.riskPerTrade = null;
+  }
+  // Absent in the backtest means NO cap, which the desk spells as 100.
+  account.maxPositionPct = bt.max_position_pct || 100;
+
+  note('account size', cur.accountSize, account.accountSize, 'ACCOUNT-WIDE');
+  note('risk per trade ($)', cur.riskPerTrade, account.riskPerTrade, 'ACCOUNT-WIDE');
+  note('risk per trade (%)', cur.riskPct, account.riskPct,
+    'ACCOUNT-WIDE. The backtest COMPOUNDS this; the desk sizes on the '
+    + 'configured account size, so the two match on trade one and drift as '
+    + 'the run banks P&L');
+  note('max position %', cur.maxPositionPct, account.maxPositionPct, 'ACCOUNT-WIDE');
+
+  /* THE SETUP — everything that belongs to this strategy alone. */
+  const rank = bt.rank_per_day || null;
+  const setupPatch = {
+    rankMetric: (rank && rank.metric) || null,
+    rankDirection: (rank && rank.direction) || null,
+    topN: (rank && rank.top_n) || null,
+    tf: bt.tf || null,
+    feed: bt.feed || null,
+    view: bt.view || 'all',
+    /*
+     * THE FILL MODEL IS TRANSLATED, NOT COPIED. A backtest runs 'desk' or
+     * 'next_open'; neither can be evaluated in real time, because both report
+     * the entry as a bar that has not printed. Their live twin is 'live' — the
+     * same decision from the same bar with the same levels. Copying the
+     * backtest's own name here would stop the desk firing altogether.
+     */
+    fill: (bt.fill === 'desk' || bt.fill === 'next_open' || !bt.fill) ? 'live' : bt.fill,
+    maxTradesPerDay: (bt.rules && bt.rules.max_entries_per_day) || null,
+  };
+
+  note('rank metric', curPrefs.rankMetric, setupPatch.rankMetric);
+  note('rank top N', curPrefs.topN, setupPatch.topN);
+  note('timeframe', curPrefs.tf, setupPatch.tf);
+  note('feed', curPrefs.feed, setupPatch.feed);
+  note('view', curPrefs.view || 'all', setupPatch.view);
+  note('fill model', curPrefs.fill || 'live', setupPatch.fill,
+    bt.fill && setupPatch.fill !== bt.fill
+      ? `the backtest ran '${bt.fill}', whose live twin is '${setupPatch.fill}'` : null);
+  note('max entries / day', curPrefs.maxTradesPerDay, setupPatch.maxTradesPerDay);
+
+  /*
+   * WHAT IT REFUSES TO CARRY. The universe is the setup's TOOL assignment, and
+   * that is a decision about which screener feeds it — made in qp, on the
+   * strategy itself. A backtest run against a different register is a question
+   * about the strategy, not a setting to copy onto the desk behind your back.
+   */
+  const refused = [];
+  const btTools = ((bt.universe || {}).tools || []);
+  if (btTools.length && String(btTools.sort()) !== String((s.tools || []).slice().sort())) {
+    refused.push(`the backtest ran on ${btTools.join(', ')} and this setup belongs `
+      + `to ${(s.tools || []).join(', ') || 'no tool'} — change the strategy's tools `
+      + 'in qp if that is what you mean');
+  }
+
+  return { setup: s.id || null, account, setupPatch, changes, refused };
+}
+
+/** Apply a plan. Separate from building it, so nothing writes by accident. */
+function applyAdopt(plan) {
+  if (!plan) throw new Error('no plan to apply');
+  // The account first: a setup patch that referenced a risk rule the account
+  // did not have yet would be saved against the old one.
+  risk.save(plan.account);
+  prefs.saveSettings(plan.setup, plan.setupPatch);
+  return { account: risk.settings(), setup: prefs.settingsFor(plan.setup) };
+}
+
+module.exports = { compare, summarise, decisionBar, hhmm, shift, row,
+                   planAdopt, applyAdopt };
