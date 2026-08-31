@@ -233,7 +233,12 @@ test('a second Alpaca account makes attribution impossible, and says so', () => 
   expect(scope.ambiguous).toBe(true);
   // Names both accounts, so the reader knows which pair is in question.
   expect(scope.reason).toMatch(/alp, alp2/);
+  // The message names the FIX now, because there is one: give each account its
+  // own key pair. Before per-account credentials existed the only honest thing
+  // to say was that the desk holds one set; now that is the reason and not the
+  // whole story.
   expect(scope.reason).toMatch(/ONE set of Alpaca credentials/);
+  expect(scope.reason).toMatch(/own API key and secret/);
 });
 
 test("confirmation refuses rather than borrowing the other account's fill", async () => {

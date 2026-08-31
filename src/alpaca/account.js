@@ -50,17 +50,68 @@ const { getAccountBaseUrl, authHeaders } = require('./client');
  * from an empty account — which is the distinction that matters most, because
  * "no positions" and "could not ask" look identical and mean opposite things.
  */
-async function get(path, { timeoutMs = 10000 } = {}) {
+/*
+ * ── WHOSE ACCOUNT IS BEING ASKED ─────────────────────────────────────────
+ *
+ * Every function here takes an optional `account`:
+ *
+ *     { keyId, secret, paper }   this account's own credentials
+ *     undefined                  the desk-wide pair, exactly as before
+ *
+ * WHY IT IS OPTIONAL RATHER THAN REQUIRED. With one Alpaca account the
+ * desk-wide pair is the right answer and always was; making it mandatory would
+ * be churn in six call sites to change nothing. With TWO it stops being an
+ * answer at all — every read returns one account's truth with nothing saying
+ * which — and that is not a gap but a confidently wrong number, because
+ * confirmation matches an order to a fill by symbol, side and time. Account
+ * B's order matches account A's fill and takes A's price.
+ *
+ * PAPER UNLESS TOLD OTHERWISE. Guessing wrong towards paper queries a
+ * simulator; guessing wrong the other way queries real money.
+ *
+ * The market-data side of alpaca/client.js is deliberately untouched: bars and
+ * shortability are facts about the market, not about an account, and any valid
+ * key answers them identically.
+ */
+const PAPER_URL = 'https://paper-api.alpaca.markets';
+const LIVE_URL = 'https://api.alpaca.markets';
+
+function credsFor(account) {
+  if (!account || !account.keyId || !account.secret) return null;
+  return {
+    headers: {
+      'APCA-API-KEY-ID': String(account.keyId),
+      'APCA-API-SECRET-KEY': String(account.secret),
+      accept: 'application/json',
+    },
+    baseUrl: account.paper === false ? LIVE_URL : PAPER_URL,
+  };
+}
+
+async function get(path, { timeoutMs = 10000, account = null } = {}) {
   let headers;
-  try {
-    headers = authHeaders();
-  } catch (err) {
-    return { ok: false, error: `no Alpaca credentials: ${err.message}` };
+  let baseUrl;
+  const own = credsFor(account);
+  if (own) {
+    headers = own.headers;
+    baseUrl = own.baseUrl;
+  } else if (account && (account.keyId || account.secret)) {
+    // HALF A PAIR IS NOT A CREDENTIAL, and falling back to the desk-wide one
+    // here would answer for a DIFFERENT account than the caller named — which
+    // is the whole failure this parameter exists to prevent.
+    return { ok: false, error: 'that account has only half an Alpaca key pair' };
+  } else {
+    try {
+      headers = authHeaders();
+    } catch (err) {
+      return { ok: false, error: `no Alpaca credentials: ${err.message}` };
+    }
+    baseUrl = getAccountBaseUrl();
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${getAccountBaseUrl()}${path}`,
+    const res = await fetch(`${baseUrl}${path}`,
       { headers, signal: ctrl.signal });
     const text = await res.text();
     if (!res.ok) return { ok: false, error: `Alpaca ${path} ${res.status}: ${text.slice(0, 200)}` };
@@ -87,8 +138,8 @@ async function get(path, { timeoutMs = 10000 } = {}) {
  * because "how much and which way" is one fact and splitting it into two is how
  * a short gets closed by buying more of it.
  */
-async function positions({ timeoutMs = 10000 } = {}) {
-  const r = await get('/v2/positions', { timeoutMs });
+async function positions({ timeoutMs = 10000, account: acct = null } = {}) {
+  const r = await get('/v2/positions', { timeoutMs, account: acct });
   if (!r.ok) return r;
   const rows = Array.isArray(r.data) ? r.data : [];
   return {
@@ -113,11 +164,12 @@ async function positions({ timeoutMs = 10000 } = {}) {
  * so flat is a list where nothing says which stop belongs to which lot.
  */
 async function orders({ after = null, status = 'all', limit = 500,
-                        nested = true, timeoutMs = 15000 } = {}) {
+                        nested = true, timeoutMs = 15000,
+                        account: acct = null } = {}) {
   const q = new URLSearchParams({ status, limit: String(limit),
                                   direction: 'asc', nested: String(!!nested) });
   if (after) q.set('after', after);
-  const r = await get(`/v2/orders?${q}`, { timeoutMs });
+  const r = await get(`/v2/orders?${q}`, { timeoutMs, account: acct });
   if (!r.ok) return r;
   const rows = Array.isArray(r.data) ? r.data : [];
   return { ok: true, orders: rows.map(flatten) };
@@ -157,7 +209,7 @@ function flatten(o) {
 const FILL_PAGE = 100;          // Alpaca's maximum; 500 is a 422, not a truncation
 const FILL_PAGES_MAX = 20;      // 2,000 fills in a day is already absurd
 
-async function fills({ after = null, timeoutMs = 15000 } = {}) {
+async function fills({ after = null, timeoutMs = 15000, account: acct = null } = {}) {
   /*
    * PAGED, at Alpaca's limit rather than at a number that looked generous.
    *
@@ -181,7 +233,7 @@ async function fills({ after = null, timeoutMs = 15000 } = {}) {
     const q = new URLSearchParams({ page_size: String(FILL_PAGE) });
     if (after) q.set('after', after);
     if (token) q.set('page_token', token);
-    const r = await get(`/v2/account/activities/FILL?${q}`, { timeoutMs });
+    const r = await get(`/v2/account/activities/FILL?${q}`, { timeoutMs, account: acct });
     // A failure mid-way is reported, not silently returned as a partial day —
     // half a day's fills look exactly like a quiet day.
     if (!r.ok) return r;
@@ -207,8 +259,8 @@ async function fills({ after = null, timeoutMs = 15000 } = {}) {
 }
 
 /** Buying power and equity, as the broker counts them rather than as we do. */
-async function account({ timeoutMs = 10000 } = {}) {
-  const r = await get('/v2/account', { timeoutMs });
+async function account({ timeoutMs = 10000, account: acct = null } = {}) {
+  const r = await get('/v2/account', { timeoutMs, account: acct });
   if (!r.ok) return r;
   const a = r.data || {};
   return {
@@ -242,4 +294,24 @@ async function account({ timeoutMs = 10000 } = {}) {
   };
 }
 
-module.exports = { positions, orders, fills, account, get };
+/*
+ * A DESTINATION'S CREDENTIALS, in the shape every function here takes.
+ *
+ * Callers name an ACCOUNT, never a key pair — a helper that took loose strings
+ * would make it possible to pass account A's id with account B's secret, and
+ * the failure of that is a 401 hours later in a log nobody reads.
+ *
+ * Returns null when the destination has no keys of its own, which is the
+ * signal to fall back to the desk-wide pair: correct while there is one Alpaca
+ * account, and refused by reconcile.credentialScope() when there is more.
+ */
+function credsOf(dest) {
+  if (!dest || !dest.alpacaKeyId || !dest.alpacaSecret) return null;
+  return {
+    keyId: dest.alpacaKeyId,
+    secret: dest.alpacaSecret,
+    paper: dest.alpacaPaper !== false,
+  };
+}
+
+module.exports = { positions, orders, fills, account, get, credsOf };

@@ -70,6 +70,20 @@ function mask(url) {
 }
 
 /*
+ * An API KEY ID, shortened. Not the same shape as a hook: mask() prints
+ * "…/hook/ABCD…WXYZ", which would be an outright lie about a key.
+ *
+ * Enough tail to tell two accounts apart at a glance — which is the only thing
+ * this is for — and never enough to be one. The SECRET is not masked anywhere;
+ * it is deleted (see publicSettings).
+ */
+function maskId(id) {
+  if (!id) return null;
+  const v = String(id);
+  return v.length > 8 ? `${v.slice(0, 4)}…${v.slice(-4)}` : '…';
+}
+
+/*
  * WHERE AN ORDER GOES.
  *
  * There was one hook, so "the broker" and "the account" were the same thing and
@@ -193,6 +207,27 @@ function destinations(s = read()) {
        * config written before this still means what it meant.
        */
       ratio: num(d.ratio) || num(d.scale),
+      /*
+       * THIS ACCOUNT'S OWN ALPACA CREDENTIALS.
+       *
+       * Until these existed the desk held ONE key pair however many Alpaca
+       * accounts were configured, and every position, fill and account read
+       * answered for one of them with nothing in the answer saying which. The
+       * consequence was not a gap, it was a confidently wrong number:
+       * confirmation matches an order to a fill by symbol, side and time, so
+       * account B's order would match account A's fill and take A's price. See
+       * reconcile.credentialScope(), which refused to answer at all rather than
+       * answer wrongly — this is what lets it answer.
+       *
+       * PAPER BY DEFAULT. An account that does not say is treated as paper,
+       * because the failure of guessing wrong in that direction is a query
+       * against a simulator and in the other it is a query against real money.
+       *
+       * The secret never leaves this process — see publicSettings().
+       */
+      alpacaKeyId: d.alpacaKeyId ? String(d.alpacaKeyId).trim() : null,
+      alpacaSecret: d.alpacaSecret ? String(d.alpacaSecret).trim() : null,
+      alpacaPaper: d.alpacaPaper !== false,
       accountSize: num(d.accountSize),
       riskPerTrade: num(d.riskPerTrade),
       maxPositionPct: num(d.maxPositionPct),
@@ -280,6 +315,12 @@ function destinationCfg(id, s = read()) {
     minShares: d.minShares != null ? d.minShares : base.minShares,
     // Carried through so risk.scaleTo() can take this account's fraction.
     ratio: d.ratio,
+    // This account's own Alpaca keys, for the reads that must be attributed to
+    // it. Null falls back to the desk-wide pair, which is correct while there
+    // is only one Alpaca account and refused when there is more than one.
+    alpacaKeyId: d.alpacaKeyId,
+    alpacaSecret: d.alpacaSecret,
+    alpacaPaper: d.alpacaPaper,
     accountSize: d.accountSize,
     riskPerTrade: d.riskPerTrade,
     maxPositionPct: d.maxPositionPct,
@@ -458,13 +499,29 @@ function publicSettings() {
      * a chat window it has been published. The existing test caught it, which
      * is the only reason this line exists rather than a leak.
      */
-    destinations: (s.destinations || []).map(d => ({
-      ...d,
-      webhookUrl: mask(d.webhookUrl),
-      testWebhookUrl: mask(d.testWebhookUrl),
-      hasWebhook: !!d.webhookUrl,
-      hasTestWebhook: !!d.testWebhookUrl,
-    })),
+    destinations: (s.destinations || []).map(d => {
+      /*
+       * THE SECRET NEVER LEAVES THIS PROCESS — not masked, DELETED. A masked
+       * hook is still useful on screen because you can check the tail against
+       * SignalStack; an API secret has no such use, and the only safe number of
+       * places it can appear is one.
+       *
+       * The key id is masked rather than dropped: it is how you tell two
+       * accounts apart when both are configured, and it cannot place an order
+       * on its own.
+       */
+      const { alpacaSecret, ...rest } = d;
+      return {
+        ...rest,
+        webhookUrl: mask(d.webhookUrl),
+        testWebhookUrl: mask(d.testWebhookUrl),
+        hasWebhook: !!d.webhookUrl,
+        hasTestWebhook: !!d.testWebhookUrl,
+        alpacaKeyId: maskId(d.alpacaKeyId),
+        // What the page actually needs to know: can this account be read?
+        hasAlpacaKeys: !!(d.alpacaKeyId && d.alpacaSecret),
+      };
+    }),
   };
 }
 
@@ -592,6 +649,51 @@ function save(patch = {}) {
           throw new Error(`destination "${id}": ${key} must be a positive number`);
         }
         out[key] = n;
+      }
+      /*
+       * THIS ACCOUNT'S ALPACA KEYS.
+       *
+       * Stored beside the hook, in data/broker.json, which is gitignored — the
+       * same file and the same reasoning as the hook itself. Never in the
+       * repository, never in a log, never back out of publicSettings().
+       *
+       * A key mentioned as '' is a key being REMOVED, which is how an account
+       * is put back on the desk-wide pair. Not mentioned at all keeps what is
+       * there, so saving a name does not silently drop the credentials.
+       */
+      for (const key of ['alpacaKeyId', 'alpacaSecret']) {
+        const v = d[key];
+        if (v === undefined) {
+          if (was && was[key]) out[key] = was[key];   // not mentioned — keep it
+          continue;
+        }
+        if (v === '' || v === null) continue;          // said to be gone
+        const val = String(v).trim();
+        // A key pasted with surrounding quotes or whitespace fails at the first
+        // request with a 401, hours later, in a log nobody is reading.
+        if (/\s|["']/.test(val)) {
+          throw new Error(`destination "${id}": the Alpaca ${key === 'alpacaKeyId'
+            ? 'key id' : 'secret'} has quotes or spaces in it`);
+        }
+        if (val.length < 16) {
+          throw new Error(`destination "${id}": that does not look like an Alpaca `
+            + `${key === 'alpacaKeyId' ? 'key id' : 'secret'}`);
+        }
+        out[key] = val;
+      }
+      /*
+       * BOTH OR NEITHER. Half a credential pair authenticates nothing, and it
+       * would read on the page as "this account has its own keys" — which is
+       * the claim reconciliation relies on to attribute a fill.
+       */
+      if (!!out.alpacaKeyId !== !!out.alpacaSecret) {
+        throw new Error(`destination "${id}": an Alpaca key id needs its secret, `
+          + 'and a secret needs its key id');
+      }
+      if (d.alpacaPaper !== undefined) {
+        out.alpacaPaper = d.alpacaPaper !== false;
+      } else if (was && was.alpacaPaper !== undefined) {
+        out.alpacaPaper = was.alpacaPaper;
       }
       // Caught here rather than at 09:36, where it would come back as a broker
       // rejection with no explanation attached.

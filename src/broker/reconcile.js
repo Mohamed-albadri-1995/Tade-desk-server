@@ -47,46 +47,76 @@ function alpacaDestinations() {
 }
 
 /*
- * ONE SET OF CREDENTIALS, HOWEVER MANY ALPACA ACCOUNTS ARE CONFIGURED.
+ * WHICH ALPACA ACCOUNTS CAN BE READ, AND WHICH CANNOT BE TOLD APART.
  *
- * `alpacaDestinations()` returns a LIST, which reads as though a second Alpaca
- * account would simply be covered too. It would not. `alpaca/client.js`
- * resolves credentials with
+ * THE FAILURE THIS GUARDS, which is worse than a gap. Confirmation matches an
+ * order to a fill by symbol, side and time. Two accounts running the same desk
+ * see the same symbols in the same seconds, so account B's order matches
+ * account A's fill and takes A's price — not a missing number, a confident
+ * wrong one, in the record that measures execution.
  *
- *     SELECT config FROM trading_brokers WHERE type='alpaca' AND enabled=1
- *      ORDER BY is_default DESC, created_at ASC LIMIT 1
+ * Each Alpaca destination may now carry its own key pair, and one that does is
+ * readable on its own terms: its fills are ITS fills, and attribution is a
+ * fact rather than an assumption.
  *
- * — ONE key pair, the default profile. Every position, every fill and every
- * account read therefore answers for exactly one account, and nothing in the
- * answer says which one.
+ * A destination with NO keys of its own falls back to the desk-wide pair. That
+ * is exactly right while it is the only Alpaca account on the desk, and
+ * unanswerable the moment there is a second — the shared pair points at one
+ * account and nothing says which. So those are refused, BY NAME, and the ones
+ * that do have keys are unaffected.
  *
- * WHAT THAT WOULD DO IF IT WENT UNGUARDED, and it is worse than a gap:
- *
- *   RECONCILIATION would compare account A's positions against orders sent to
- *   A and to B together. Every B position would land in 'unknown-position' —
- *   the loudest finding there is — and every real one would be buried under
- *   the noise, which is how a reconciliation stops being read.
- *
- *   CONFIRMATION would match B's orders to A's fills. Same symbol, same side,
- *   the same few seconds: the match would succeed and the fill price would be
- *   another account's. That is not a missing number, it is a confident wrong
- *   one, and `slip` — the whole measurement this feeds — would be built on it.
- *
- * So a second Alpaca account makes these answers UNAVAILABLE rather than
- * wrong, until credentials are resolved per destination. Silence here is a
- * feature request; a wrong fill price is a corrupted record.
+ * Silence about an account is a feature request. A wrong fill price is a
+ * corrupted record.
  */
+function alpacaDests() {
+  return broker.destinations().filter(d => d.dialect === 'alpaca');
+}
+
 function credentialScope() {
-  const ids = alpacaDestinations();
-  if (ids.length <= 1) return { ids, ambiguous: false, reason: null };
+  const dests = alpacaDests();
+  const ids = dests.map(d => d.id);
+  const own = dests.filter(d => d.alpacaKeyId && d.alpacaSecret);
+  const shared = dests.filter(d => !(d.alpacaKeyId && d.alpacaSecret));
+
+  // Readable: everything with its own keys, plus a lone keyless account, which
+  // the desk-wide pair unambiguously IS.
+  const readable = own.map(d => d.id);
+  if (shared.length && ids.length === 1) readable.push(shared[0].id);
+
+  const blind = ids.filter(id => !readable.includes(id));
   return {
     ids,
-    ambiguous: true,
-    reason: `${ids.length} Alpaca accounts are configured (${ids.join(', ')}) and `
-      + 'this desk holds ONE set of Alpaca credentials — every read answers for '
-      + 'one of them and nothing here can say which. Positions and fills cannot '
-      + 'be attributed to an account until credentials are stored per destination.',
+    readable,
+    blind,
+    ambiguous: blind.length > 0,
+    reason: blind.length
+      ? `${blind.join(', ')} ${blind.length > 1 ? 'have no Alpaca key pairs of '
+          + 'their own' : 'has no Alpaca key pair of its own'}, and `
+        + `${ids.length} Alpaca accounts are configured — this desk holds ONE set `
+        + 'of Alpaca credentials beside them, which answers for one account and '
+        + 'nothing here can say which. Give each account its own API key and '
+        + 'secret on the Settings tab, or its positions and fills cannot be '
+        + 'attributed to it.'
+      : null,
   };
+}
+
+/**
+ * The credentials to read ONE destination with, or the reason there are none.
+ *
+ * Never guesses. A destination that cannot be identified comes back with a
+ * reason, and every caller reports that instead of reading some other account
+ * and labelling the answer with this one's name.
+ */
+function credsForDest(dest) {
+  const d = typeof dest === 'string'
+    ? alpacaDests().find(x => x.id === dest) : dest;
+  if (!d) return { creds: null, error: 'no such Alpaca account' };
+  const own = alpaca.credsOf(d);
+  if (own) return { creds: own, error: null };
+  const scope = credentialScope();
+  if (scope.readable.includes(d.id)) return { creds: null, error: null };  // desk-wide
+  return { creds: null, error: scope.reason };
 }
 
 /**
@@ -410,28 +440,59 @@ async function heldNow({ maxAgeMs = 8000, timeoutMs = 6000 } = {}) {
     return { ok: true, verifiable: false, reason: 'no Alpaca account configured',
              positions: null };
   }
+  /*
+   * EVERY READABLE ACCOUNT, EACH WITH ITS OWN KEYS, and the answer says which
+   * position came from where.
+   *
+   * A pooled total would be worse than useless here: two accounts holding 100
+   * WULF each is not one position of 200, and flattening against a merged
+   * number closes the wrong quantity in both. So a position carries the
+   * account that holds it, and two accounts holding the same name are two rows.
+   *
+   * An account that cannot be identified is REPORTED, never silently dropped —
+   * a shorter list reads as "you hold less", which is the direction that gets
+   * a position left open overnight.
+   */
   const scope = credentialScope();
-  if (scope.ambiguous) {
-    return { ok: false, verifiable: false, reason: scope.reason, positions: null };
+  const dests = alpacaDests().filter(d => scope.readable.includes(d.id));
+  const positions = [];
+  const problems = scope.blind.length ? [scope.reason] : [];
+  let anyOk = false;
+
+  for (const d of dests) {
+    const { creds } = credsForDest(d);
+    let r;
+    try {
+      r = await alpaca.positions({ timeoutMs, account: creds });
+    } catch (err) { problems.push(`${d.id}: ${err.message}`); continue; }
+    if (!r.ok) { problems.push(`${d.id}: ${r.error}`); continue; }
+    anyOk = true;
+    for (const p of r.positions) {
+      if (p.qty === 0) continue;
+      positions.push({ symbol: p.symbol, qty: p.qty, account: d.id });
+    }
   }
 
-  let r;
-  try {
-    r = await alpaca.positions({ timeoutMs });
-  } catch (err) {
-    return { ok: false, verifiable: true, reason: err.message, positions: null };
+  if (!anyOk) {
+    return { ok: false, verifiable: dests.length > 0,
+             reason: problems.join(' · ') || 'no readable Alpaca account',
+             positions: null };
   }
-  if (!r.ok) return { ok: false, verifiable: true, reason: r.error, positions: null };
 
   const value = {
-    ok: true,
+    ok: problems.length === 0,
     verifiable: true,
     at: now,
-    positions: r.positions
-      .filter(p => p.qty !== 0)
-      .map(p => ({ symbol: p.symbol, qty: p.qty })),
+    positions,
+    // Which accounts this answer actually covers. Without it a partial answer
+    // and a complete one look the same, and the difference is a position
+    // nobody knows they are holding.
+    scope: dests.map(d => d.id),
+    ...(problems.length ? { reason: problems.join(' · ') } : {}),
   };
-  _heldCache = { at: now, value };
+  // A PARTIAL ANSWER IS NOT CACHED. Caching it would keep an account invisible
+  // for the whole cache window after its keys were fixed.
+  if (!problems.length) _heldCache = { at: now, value };
   return value;
 }
 
@@ -450,21 +511,82 @@ async function confirmed(date, { timeoutMs = 15000 } = {}) {
   if (!rows.length || !alpacaDestinations().length) {
     return { ok: true, rows, verifiable: false };
   }
-  // Two Alpaca accounts, one key pair: a match would succeed and be another
-  // account's fill. See credentialScope().
-  const scope = credentialScope();
-  if (scope.ambiguous) {
-    return { ok: false, error: scope.reason, rows, verifiable: false, ambiguous: true };
-  }
+  /*
+   * ONE ACCOUNT AT A TIME, EACH AGAINST ITS OWN FILLS.
+   *
+   * This is the whole safety property. Confirmation matches by symbol, side and
+   * time; pooling two accounts' fills and matching every row against the pool
+   * would confirm account B's order with account A's print, at A's price, and
+   * the match would look perfect. So the rows are split by the destination that
+   * placed them and each group is confirmed only against fills fetched with
+   * THAT account's credentials.
+   *
+   * A destination that cannot be identified is left UNCONFIRMED and named. Its
+   * rows still come back — a day report that printed nothing because one
+   * account was unreadable would be a worse failure than one that prints the
+   * orders and says which prices are missing.
+   */
   const after = new Date(`${date}T04:00:00-04:00`).toISOString();
-  let r;
-  try {
-    r = await alpaca.fills({ after, timeoutMs });
-  } catch (err) {
-    return { ok: false, error: err.message, rows, verifiable: true };
+  const byDest = new Map();
+  for (const row of rows) {
+    const id = row.destination || null;
+    if (!byDest.has(id)) byDest.set(id, []);
+    byDest.get(id).push(row);
   }
-  if (!r.ok) return { ok: false, error: r.error, rows, verifiable: true };
-  return { ok: true, rows: broker.confirmFromFills(rows, r.fills), verifiable: true };
+
+  const out = [];
+  const errors = [];
+  let anyVerified = false;
+  // Kept as its own flag rather than inferred from the message: "could not be
+  // told apart" is a configuration problem with a fix, and "Alpaca timed out"
+  // is weather. A caller that has to tell them apart by reading prose will one
+  // day read it wrongly.
+  let ambiguous = false;
+  const alpacaIds = new Set(alpacaDests().map(d => d.id));
+
+  for (const [id, group] of byDest) {
+    // Not an Alpaca account — TTP has no fill feed, so these are correctly
+    // returned untouched rather than reported as a failure.
+    if (id !== null && !alpacaIds.has(id)) { out.push(...group); continue; }
+    /*
+     * A row with NO destination predates destinations, or was placed before
+     * one was named. It can only be attributed when there is exactly one
+     * Alpaca account to attribute it to.
+     */
+    const target = id !== null ? id
+      : (alpacaIds.size === 1 ? [...alpacaIds][0] : null);
+    if (target === null) {
+      out.push(...group);
+      errors.push('some orders carry no account, and there is more than one '
+        + 'Alpaca account — those cannot be confirmed');
+      ambiguous = true;
+      continue;
+    }
+    const { creds, error } = credsForDest(target);
+    if (error) {
+      out.push(...group); errors.push(error); ambiguous = true; continue;
+    }
+    let r;
+    try {
+      r = await alpaca.fills({ after, timeoutMs, account: creds });
+    } catch (err) {
+      out.push(...group); errors.push(`${target}: ${err.message}`); continue;
+    }
+    if (!r.ok) { out.push(...group); errors.push(`${target}: ${r.error}`); continue; }
+    out.push(...broker.confirmFromFills(group, r.fills));
+    anyVerified = true;
+  }
+
+  return {
+    ok: errors.length === 0,
+    error: errors.length ? errors.join(' · ') : undefined,
+    rows: out,
+    verifiable: anyVerified,
+    ...(ambiguous ? { ambiguous: true } : {}),
+    // Named so a partly-confirmed day is legible: some prices are real and
+    // some are missing, and which is which matters more than the total.
+    unconfirmed: errors.length ? errors : undefined,
+  };
 }
 
 module.exports = {
