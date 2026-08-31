@@ -648,7 +648,30 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         risk_pct = float(spec.get('risk_pct') or 0)
     except (TypeError, ValueError):
         risk_pct = 0.0
-    if risk_pct <= 0:
+    # FIXED DOLLARS PER TRADE, the alternative to a percentage — and what the
+    # live desk actually does (`riskPerTrade: 500` in data/risk.json). The two
+    # are not the same strategy: a percentage COMPOUNDS, so a good run sizes up
+    # and a bad one sizes down, while a fixed dollar risks the same amount on
+    # trade one and trade three hundred. Over the user's fortnight the
+    # percentage grew its budget 499.95 -> 552.40 while the desk risked a flat
+    # 500, which is a 10% size difference by the end of the sample and nothing
+    # in either report said so.
+    #
+    # Offered rather than argued: whichever the account really uses is the one
+    # the backtest must model, so both are runnable and comparable.
+    try:
+        risk_usd = float(spec.get('risk_usd') or 0)
+    except (TypeError, ValueError):
+        risk_usd = 0.0
+    if risk_usd < 0:
+        risk_usd = 0.0
+    if risk_usd and risk_pct:
+        raise ValueError(
+            'set risk_pct OR risk_usd, not both — a percentage compounds and a '
+            'fixed dollar does not, so there is no meaning to running both at '
+            'once. Live uses risk_usd (riskPerTrade); backtests have used '
+            'risk_pct.')
+    if risk_pct <= 0 and risk_usd <= 0:
         return None
     lev = float(spec.get('max_leverage', 1) or 1)   # 1.0 = cash, no margin
     # PER-TRADE position cap, the same setting the screener applies live
@@ -732,13 +755,18 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         # this trade may lose" — arithmetic nonsense ($0.19 against a $499
         # budget) for trades whose real problem was that the account was
         # already full. A wrong diagnosis sends you to change the wrong knob.
-        shares = math.floor((equity * risk_pct / 100.0) / per_share_risk)
+        # THE RISK BUDGET FOR THIS TRADE. A flat dollar does not read `equity`
+        # at all — that is the entire difference between the two models, and
+        # the reason the live desk's size does not drift with the P&L.
+        budget = risk_usd if risk_usd else (equity * risk_pct / 100.0)
+        shares = math.floor(budget / per_share_risk)
         if shares < 1:
             unsized += 1
             t.setdefault('ctx', {})['acct_note'] = (
                 f'one share risks ${per_share_risk:,.2f}, more than the '
-                f'{risk_pct}% of equity ({equity * risk_pct / 100.0:,.0f}) '
-                f'this trade may lose')
+                + (f'${risk_usd:,.0f}' if risk_usd
+                   else f'{risk_pct}% of equity ({budget:,.0f})')
+                + ' this trade may lose')
             continue
         # PER-TRADE CAP, applied BEFORE the portfolio one. Order matters: cap
         # this trade first, then measure what is left for the rest of the day.
@@ -838,7 +866,11 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     challenge = _challenge_block(ledger, equity0, spec)
     return {
         'account_equity_start': round(equity0, 2),
+        # Both reported, and only one of them is ever non-zero. A report that
+        # printed "risk 0%" for a flat-dollar run would read as broken.
         'risk_pct': risk_pct,
+        'risk_usd': risk_usd or None,
+        'risk_model': 'fixed_usd' if risk_usd else 'pct_of_equity',
         'max_leverage': lev,
         'max_position_pct': max_pos_pct or None,
         **({'challenge': challenge} if challenge else {}),

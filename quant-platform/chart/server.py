@@ -425,7 +425,11 @@ def _account_html(s: dict) -> str:
     # every one of these can be None when nothing was sizable — format safely
     def _n(v, fmt='{:,.2f}', dash='—'):
         return dash if v is None else fmt.format(v)
-    return f"""<h3>Real account — ${a['account_equity_start']:,.0f} risking {a['risk_pct']}% per trade</h3>
+    # The heading has to name the model that was actually run. Printing
+    # "risking 0% per trade" over a flat-dollar book reads as a broken report.
+    _risk = (f"${a['risk_usd']:,.0f} per trade (flat, no compounding)"
+             if a.get('risk_usd') else f"{a['risk_pct']}% per trade")
+    return f"""<h3>Real account — ${a['account_equity_start']:,.0f} risking {_risk}</h3>
 {warn}<div class="grid">
 <div class="kpi"><b>${_n(a.get('equity_end'))}</b><span>ending equity (compounded in trade order)</span></div>
 <div class="kpi"><b>{_n(a.get('return_pct'), '{:+.2f}%')}</b><span>account return</span></div>

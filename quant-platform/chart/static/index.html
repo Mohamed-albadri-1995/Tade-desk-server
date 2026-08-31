@@ -526,8 +526,13 @@
             <b class="q" title="Starting equity. Position size per trade = (equity x risk%) / (entry - stop), so every stop-out loses the same % of the account. Equity compounds in trade order. Empty = off.">?</b></span>
             <input id="btEquity" type="number" step="any" value="100000"></label>
           <label class="fld"><span>Risk % / trade
-            <b class="q" title="Percent of CURRENT equity lost if the stop is hit. Requires the strategy to define a stop.">?</b></span>
+            <b class="q" title="Percent of CURRENT equity lost if the stop is hit. COMPOUNDS: a good run sizes up, a bad one sizes down. Requires the strategy to define a stop. Leave empty to risk a flat dollar instead.">?</b></span>
             <input id="btRiskPct" type="number" step="any" value="0.5"></label>
+        </div>
+        <div class="frow">
+          <label class="fld"><span>Risk $ / trade
+            <b class="q" title="FLAT DOLLARS at risk per trade — what the live desk does (riskPerTrade in data/risk.json). Does not compound: the same dollars on trade one and trade three hundred. Fill this OR Risk %, never both. Empty = use Risk %.">?</b></span>
+            <input id="btRiskUsd" type="number" step="any" placeholder="e.g. 500"></label>
         </div>
         <div class="frow">
           <label class="fld"><span>Max position %
@@ -1600,7 +1605,12 @@ function btRenderCore(g,extra){
        broken, and here it sent the reader to the wrong box. */
     const _eq=parseFloat((document.getElementById('btEquity')||{}).value)||0;
     const _rp=parseFloat((document.getElementById('btRiskPct')||{}).value)||0;
-    const _need=[!_eq?'<b>account $</b>':null,!_rp?'<b>risk % / trade</b>':null]
+    /* EITHER risk model sizes the book, so asking for the percentage when the
+       flat dollar is filled in would send the reader to the wrong box again —
+       the exact mistake this message was rewritten to stop making. */
+    const _ru=parseFloat((document.getElementById('btRiskUsd')||{}).value)||0;
+    const _need=[!_eq?'<b>account $</b>':null,
+                 (!_rp&&!_ru)?'<b>risk % / trade</b> or <b>risk $ / trade</b>':null]
       .filter(Boolean);
     html+=`<div class="bt-money"><div class="v" style="color:var(--text2);font-size:15px">no dollar P&L</div>`
       +`<div class="s">${_need.length
@@ -1688,8 +1698,14 @@ function btRenderCore(g,extra){
   let det='';
   if(_ac){
     det+=`<div class="bt-det"><b>How these were sized.</b> `
-      +`${_usd(_ac.account_equity_start)} starting equity, risking ${_ac.risk_pct}% per trade: `
-      +`size = (equity × ${_ac.risk_pct}%) ÷ (entry − stop), compounding in trade order`
+      /* THE FORMULA THAT WAS ACTUALLY USED. A flat-dollar run does not read
+         equity at all, so printing the compounding formula over it would
+         describe a book that was never sized that way. */
+      +(_ac.risk_usd
+        ?`${_usd(_ac.account_equity_start)} starting equity, risking ${_usd(_ac.risk_usd)} per trade: `
+          +`size = ${_usd(_ac.risk_usd)} ÷ (entry − stop) — flat, so a winning run does NOT size up`
+        :`${_usd(_ac.account_equity_start)} starting equity, risking ${_ac.risk_pct}% per trade: `
+          +`size = (equity × ${_ac.risk_pct}%) ÷ (entry − stop), compounding in trade order`)
       +(_ac.max_leverage>1?`, capped at ${_ac.max_leverage}× equity across all open positions`:`, cash only`)
       +(_ac.max_position_pct?`, and at ${_ac.max_position_pct}% of equity per position`:'')+`. `
       +`${_ac.trades_sized} of ${s.trades} trades were sized`
@@ -1851,6 +1867,9 @@ async function btRun(){
       return (Number.isFinite(n)&&n>0)?{metric:m,top_n:n}:null; })(),
     account_equity:parseFloat(document.getElementById('btEquity').value)||0,
     risk_pct:parseFloat(document.getElementById('btRiskPct').value)||0,
+    // Flat dollars, the live desk's model. Mutually exclusive with risk_pct —
+    // the server refuses both rather than silently preferring one.
+    risk_usd:parseFloat(document.getElementById('btRiskUsd').value)||0,
     max_position_pct:parseFloat(document.getElementById('btMaxPos').value)||0,
     // BOTH numbers or no verdict: a target with no limit, or a limit with no
     // target, cannot answer "which came first" — the only question asked here.
