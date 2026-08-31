@@ -741,6 +741,44 @@ ok('no spacer pushes rail buttons below the fold',
    !/railSpacer/.test(html),
    'the rail scrolls with a hidden scrollbar; anything past the fold is lost');
 
+/*
+ * ── THE STRATEGY DRAWER SCROLLS, BOTH WAYS ────────────────────────────────
+ *
+ * It could not, and `overflow:auto` was never the missing piece — it had been
+ * on `.dbody` all along. The drawer is a 42vh flex COLUMN, and `.dhead` holds
+ * fourteen controls with flex-wrap and no height limit: on a phone they wrap
+ * to six or seven rows, taller than the whole drawer, so the body below —
+ * `flex:1`, and therefore last in line — was squeezed to nothing. There was no
+ * height to scroll INTO, and a strategy with more than two rules could not be
+ * reached at all.
+ *
+ * Three separate things had to be true, so all three are checked.
+ */
+ok('the drawer head cannot grow into the body’s share',
+   /#drawer \.dhead \{[^}]*flex:0 0 auto/.test(html)
+   && /#drawer \.dhead \{[^}]*max-height:45%/.test(html),
+   'a wrapped head with no cap leaves the body zero height');
+ok('...and scrolls itself when it wraps', /#drawer \.dhead \{[^}]*overflow-y:auto/.test(html));
+ok('the body scrolls in BOTH directions',
+   /#drawer \.dbody \{[^}]*overflow-x:auto/.test(html)
+   && /#drawer \.dbody \{[^}]*overflow-y:auto/.test(html));
+// A flex child will not shrink below its content — and therefore will not
+// scroll — without this. It is the single most common cause of exactly this bug.
+ok('...and can shrink below its content, which is what makes that work',
+   /#drawer \.dbody \{[^}]*min-height:0/.test(html));
+// A rule row of selects can be wider than a phone column, and a control you
+// cannot reach is a rule you cannot edit.
+ok('a rule column scrolls sideways rather than clipping a wide row',
+   /\.rulecol \{[^}]*overflow-x:auto/.test(html));
+// On a phone the columns stack, so `flex:1` would mean "share the HEIGHT" —
+// two nested scroll areas inside a third, where a flick lands on whichever is
+// under the thumb.
+ok('stacked rule columns take their natural height, so the body is one scroll',
+   /#drawer \.dbody > \.rulecol \{ flex:0 0 auto/.test(html));
+ok('the drawer is taller on a phone, where the columns stack',
+   /#drawer \{ height:62vh; \}/.test(html)
+   && /padding-bottom: var\(--drawerH, 62vh\)/.test(html));
+
 // A toggle with no sign of its state is a button you press twice to find out
 // what it did.
 ok('the rail shows what is currently open', typeof ctx.railSync === 'function');

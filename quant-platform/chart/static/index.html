@@ -247,6 +247,22 @@
        ~160px column clips the added controls (level-line picker, extra params)
        off to the side and they look like they never appeared. */
     #drawer .dbody { flex-direction:column; }
+    /* TALLER ON A PHONE, because it is doing more work there: the two rule
+       columns stack, so the same strategy is twice as tall as on a desktop and
+       42vh showed roughly one rule. The grip at the top still resizes it, and
+       the chart keeps its time axis either way — main reserves --drawerH. */
+    #drawer { height:62vh; }
+    body.drawer-open main { padding-bottom: var(--drawerH, 62vh); }
+    /* The head is the bigger offender at this width — fourteen controls over
+       six or seven rows — so it is capped harder and scrolls itself. */
+    #drawer .dhead { max-height:38%; }
+    /* NATURAL HEIGHT, so the BODY scrolls rather than each column.
+       `.rulecol` is `flex:1`, which in a row means "share the width" and in a
+       stacked column means "share the HEIGHT" — so Entry and Exit were forced
+       to equal halves of a short drawer and each grew its own inner scrollbar.
+       Two nested scroll areas inside a third is how a flick does nothing: the
+       gesture lands on whichever one is under the thumb. One list, one scroll. */
+    #drawer .dbody > .rulecol { flex:0 0 auto; overflow-x:auto; }
   }
   #side h3 { margin:12px 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text2); }
   /* One panel section on screen at a time — see the note in the markup. */
@@ -310,7 +326,17 @@
      drawer does not move, while the chart shrinks and its axis stays visible.
      --drawerH is kept in sync by the resize grip. */
   body.drawer-open main { padding-bottom: var(--drawerH, 42vh); }
-  #drawer .dhead { display:flex; gap:8px; align-items:center; padding:8px 44px 8px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; font-size:12px; }
+  /* ── THE HEAD MUST NOT EAT THE BODY ──
+     Fourteen controls with flex-wrap and no height limit, in a drawer 42vh
+     tall. On a phone they wrap to six or seven rows — taller than the whole
+     drawer — so `.dbody` below, which is `flex:1`, was squeezed to nothing.
+     It has always had `overflow:auto`; there was simply no height to scroll
+     INTO, and a strategy with more than two rules could not be reached at all.
+     `flex:0 0 auto` stops it growing into the body's share, and its own cap
+     plus scroll means a wrapped head scrolls itself rather than the drawer. */
+  #drawer .dhead { display:flex; gap:8px; align-items:center; padding:8px 44px 8px 12px;
+    border-bottom:1px solid var(--border); flex-wrap:wrap; font-size:12px;
+    flex:0 0 auto; max-height:45%; overflow-y:auto; overscroll-behavior:contain; }
   /* Pinned to the drawer, above everything in it, in the one place a close
      control is always looked for. 34px is a real tap target on a phone. */
   /* ── the backtest result: money, then figures, then everything else ──
@@ -344,8 +370,19 @@
     border-radius:8px; font-size:15px; line-height:1; cursor:pointer; padding:0; }
   #drawerClose:hover { color:var(--red); border-color:var(--red); }
   #drawer .dhead input, #drawer .dhead select { background:#1c2431; border:1px solid var(--border); color:var(--text); padding:5px 7px; border-radius:5px; font-size:12px; }
-  #drawer .dbody { flex:1; display:flex; gap:12px; padding:10px 12px; overflow:auto; min-height:0; }
-  .rulecol { flex:1; min-width:0; border:1px solid var(--border); border-radius:7px; padding:8px; background:#141a24; }
+  /* BOTH AXES. `overflow:auto` was already here and covers both in principle;
+     it is spelled out because the height it needed was the real fix and the
+     two belong together. overscroll-behavior stops a flick at the end of the
+     rules from scrolling the page underneath instead. */
+  #drawer .dbody { flex:1 1 auto; display:flex; gap:12px; padding:10px 12px;
+    overflow-x:auto; overflow-y:auto; min-height:0; overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch; }
+  /* A rule row is a line of selects and inputs. They wrap, but one long
+     primitive name can still be wider than a phone's column — and a control
+     you cannot reach is a rule you cannot edit. It scrolls sideways rather
+     than being clipped. */
+  .rulecol { flex:1; min-width:0; border:1px solid var(--border); border-radius:7px;
+    padding:8px; background:#141a24; overflow-x:auto; -webkit-overflow-scrolling:touch; }
   .rulecol h4 { margin:0 0 7px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text2); display:flex; align-items:center; gap:8px; }
   .rulecol h4 .en { margin-left:auto; font-weight:600; font-size:10px; padding:1px 6px; border-radius:8px; }
   .en.t { background:rgba(34,197,94,.18); color:var(--accent); } .en.f { background:#1c2431; color:var(--text3); }
@@ -2559,7 +2596,7 @@ function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!
   // reserve the drawer's height on <main> so it never covers the chart's time
   // axis (see the #drawer CSS note)
   document.body.classList.toggle('drawer-open',open);
-  if(open) document.documentElement.style.setProperty('--drawerH', (d.getBoundingClientRect().height||window.innerHeight*0.42)+'px');
+  if(open) document.documentElement.style.setProperty('--drawerH', (d.getBoundingClientRect().height||window.innerHeight*0.62)+'px');
   document.getElementById('stratBtn').classList.toggle('on',open);
   setTimeout(_resizeChart,50); }
 function restore(){
