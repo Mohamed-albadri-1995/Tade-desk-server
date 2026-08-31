@@ -143,13 +143,28 @@
        "Symbol" is not needed above a box containing SPY, and "Compute" and
        "Panel" are their icons at this width. */
     header { padding:var(--s2) 6px; gap:5px; }
-    header #status, header #build { display:none; }
+    /* #build is chrome and can go. #status CANNOT: it is the ONLY place
+       Compute ever reports anything — 'loading…', 'error: …', and the bar
+       count on success. Hiding it here meant that on a phone the button lost
+       its label AND its entire feedback channel at the same width, so pressing
+       it looked identical whether it worked or failed. That is the whole of
+       "the icon does not work".
+
+       It moves to its own line under the controls instead: full width, one
+       line, ellipsised. It costs 14px and it is the difference between a
+       button that answers and one that appears dead. */
+    header #build { display:none; }
+    header #status { order:99; flex:1 0 100%; margin:2px 0 0; font-size:11px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     header > strong { display:none; }
     header label { gap:0; }
     header .lbl { display:none; }
     header #symbol { width:64px; }
     header #compute { font-size:0; padding:8px 10px; }
     header #compute::after { content:'▶▶'; font-size:var(--f-sm); }
+    /* Working state, because at this width the label is gone and a tap with no
+       visible result is indistinguishable from a dead control. */
+    header #compute.busy::after { content:'…'; }
     header #liveBtn { font-size:0; padding:8px 10px; }
     header #liveBtn::after { content:'●'; font-size:14px; }
     header #sideBtn { font-size:0; padding:8px 10px; }
@@ -851,6 +866,12 @@ async function loadChart(){
   syncAsofUI();
   ['symbol','tf','days','feed','view'].forEach(k=>localStorage.setItem('qpc_'+k,document.getElementById(k).value));
   document.getElementById('status').textContent='loading…';
+  /* The button says so itself, because on a phone the label is replaced by an
+     icon and a tap with no visible result reads as a dead control. `finally`,
+     not the success path: an error must clear it too, or the icon sticks on
+     '…' and now it really does look broken. */
+  const _btn=document.getElementById('compute');
+  if(_btn)_btn.classList.add('busy');
   const qs=new URLSearchParams({symbol,tf,days,feed,view,overlays:JSON.stringify(OVERLAYS)});
   if(asof)qs.set('asof',asof);
   try{
@@ -874,6 +895,7 @@ async function loadChart(){
     renderRegister();           // keep the register highlight on the loaded symbol
     if(LIVE&&!asof) startLive();       // re-subscribe with the new params (live only)
   }catch(e){ document.getElementById('status').textContent='error: '+e.message; }
+  finally{ if(_btn)_btn.classList.remove('busy'); }
 }
 
 // ── live streaming ──

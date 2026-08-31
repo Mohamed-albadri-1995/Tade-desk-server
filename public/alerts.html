@@ -2079,8 +2079,12 @@ async function copyCallback(url) {
  * called by all of them and must read as "not known yet" rather than as a
  * fact, for anything it has not been told.
  */
-function cell(k, v, cls, wrapCls) {
-  return `<div class="strip-cell${wrapCls ? ` ${wrapCls}` : ''}">`
+function cell(k, v, cls, wrapCls, title) {
+  // `title` carries the REASON a cell cannot answer — hover on a desktop, and
+  // long-press on a phone. A cell that says "UNVERIFIED" without saying why is
+  // an alarm with no next step.
+  return `<div class="strip-cell${wrapCls ? ` ${wrapCls}` : ''}"`
+    + `${title ? ` title="${esc(title)}"` : ''}>`
     + `<div class="strip-v${cls ? ` ${cls}` : ''}">${esc(v)}</div>`
     + `<div class="strip-k">${esc(k)}</div></div>`;
 }
@@ -2120,11 +2124,37 @@ function paintStrip() {
   out.push(cell('errors', String(bad), bad ? 'bad' : 'off', bad ? 'alarm' : ''));
 
   if (b) {
-    const open = (b.openSymbols || []);
-    out.push(cell('open now', open.length ? open.join(' ') : '—',
-      open.length ? 'live' : 'off'));
+    /*
+     * THE BROKER'S ANSWER, not this side's belief — and a dash ONLY when the
+     * question could not be asked.
+     *
+     * Two faults, and the second is the one that mattered. The cosmetic one:
+     * `fired today` and `errors` rendered 0 while `open now` and `committed`
+     * rendered an em dash for the same state, so a flat, healthy desk looked
+     * broken. The real one: `openSymbols` comes from the LEDGER — sent minus
+     * closed — and cannot see a stop or a target that filled at the broker. It
+     * over-reports by design, which is correct for the 15:50 flatten and wrong
+     * for a number a person reads.
+     *
+     * So the account is asked. `held.positions` is the truth when it is there;
+     * a dash now means "could not ask", and hovering says why. Nothing renders
+     * a confident 0 for a question that was never answered.
+     */
+    const held = BROKER && BROKER.held;
+    const known = held && held.ok && Array.isArray(held.positions);
+    const names = known ? held.positions.map(p => p.symbol)
+                        : (b.openSymbols || []);
+    out.push(known
+      ? cell(names.length ? 'open now' : 'open now — flat at the broker',
+             names.length ? names.join(' ') : '0',
+             names.length ? 'live' : 'off')
+      : cell('open now — UNVERIFIED', names.length ? names.join(' ') : '—',
+             names.length ? 'warn' : 'off', '',
+             `from this side's ledger, not the account: `
+             + `${(held && held.reason) || 'the broker was not asked'}`));
+
     const spent = Number((BROKER && BROKER.committedToday) || 0);
-    out.push(cell('committed', spent ? `$${Math.round(spent).toLocaleString()}` : '—',
+    out.push(cell('committed', `$${Math.round(spent).toLocaleString()}`,
       spent ? '' : 'off'));
   }
 

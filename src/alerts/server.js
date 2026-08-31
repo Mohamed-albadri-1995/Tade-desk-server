@@ -373,10 +373,28 @@ app.get('/api/broker/journal-trades', async (req, res) => {
   }
 });
 
-app.get('/api/broker', (req, res) => {
+app.get('/api/broker', async (req, res) => {
   const { toETDate } = require('../utils/time');
   const day = toETDate(Date.now());
   const cfg = broker.settings();
+  /*
+   * WHAT THE BROKER SAYS, beside what this side believes.
+   *
+   * `openSymbols` reads the LEDGER — sent minus closed — so it cannot see a
+   * stop or a target that filled at the broker. It over-reports by design,
+   * which is right for the 15:50 flatten and wrong for a number on a screen.
+   * The page was showing a committed-dollars figure from one source and an
+   * open-positions figure from another, and only one of them had ever been
+   * checked against the account.
+   *
+   * Never blocks the response: `heldNow` is cached, short-timeout, and returns
+   * a REASON rather than an empty list when it cannot ask. "You hold nothing"
+   * and "I could not find out" must not render the same.
+   */
+  let held = { ok: false, verifiable: false, reason: 'not asked', positions: null };
+  try { held = await require('../broker/reconcile').heldNow(); }
+  catch (err) { held = { ok: false, verifiable: true, reason: err.message, positions: null }; }
+
   res.json({
     ok: true,
     broker: broker.publicSettings(),
@@ -385,6 +403,8 @@ app.get('/api/broker', (req, res) => {
     // What the box believes it still has open, so "will anything be left at the
     // bell" is answerable before the bell.
     openSymbols: broker.openSymbols(day),
+    // …and what the account itself reports, which is the one that is true.
+    held,
     remaining: broker.remaining(day, cfg),
     // With whatever SignalStack later said became of each one, so "accepted,
     // never heard from again" is visible rather than read as "filled".

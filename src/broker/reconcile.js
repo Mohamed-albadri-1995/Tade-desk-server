@@ -379,6 +379,62 @@ async function fillsFor(date, { timeoutMs = 15000 } = {}) {
   };
 }
 
+/*
+ * WHAT IS ACTUALLY HELD, RIGHT NOW — cached, because a page polls.
+ *
+ * `broker.openSymbols(date)` answers from the LEDGER: what was sent, minus what
+ * was closed. It cannot see a stop or a target that filled at the broker, so it
+ * over-reports by design — safe for the 15:50 flatten, which would rather send
+ * a close for a position that is already flat than miss one, and wrong for
+ * anything that puts a number on a screen.
+ *
+ * That is the fault behind "the dashboard shows committed dollars and Open
+ * always shows a dash": the two come from different places and only one of them
+ * has ever been checked against the account.
+ *
+ * CACHED for a few seconds because the alerts page polls this route. Without a
+ * cache every open tab would put its own request rate on the broker, and the
+ * answer does not change between two polls a second apart.
+ *
+ * NEVER THROWS, and never answers an empty list when it does not know. "You
+ * hold nothing" and "I could not ask" have to be different answers — reporting
+ * the first when the second is true is the single most dangerous thing here.
+ */
+let _heldCache = { at: 0, value: null };
+
+async function heldNow({ maxAgeMs = 8000, timeoutMs = 6000 } = {}) {
+  const now = Date.now();
+  if (_heldCache.value && (now - _heldCache.at) < maxAgeMs) return _heldCache.value;
+
+  if (!alpacaDestinations().length) {
+    return { ok: true, verifiable: false, reason: 'no Alpaca account configured',
+             positions: null };
+  }
+  const scope = credentialScope();
+  if (scope.ambiguous) {
+    return { ok: false, verifiable: false, reason: scope.reason, positions: null };
+  }
+
+  let r;
+  try {
+    r = await alpaca.positions({ timeoutMs });
+  } catch (err) {
+    return { ok: false, verifiable: true, reason: err.message, positions: null };
+  }
+  if (!r.ok) return { ok: false, verifiable: true, reason: r.error, positions: null };
+
+  const value = {
+    ok: true,
+    verifiable: true,
+    at: now,
+    positions: r.positions
+      .filter(p => p.qty !== 0)
+      .map(p => ({ symbol: p.symbol, qty: p.qty })),
+  };
+  _heldCache = { at: now, value };
+  return value;
+}
+
 /**
  * The day's orders with the fill price joined back on — from the broker, since
  * SignalStack's callback is a live-account feature and this desk is on paper.
@@ -412,6 +468,6 @@ async function confirmed(date, { timeoutMs = 15000 } = {}) {
 }
 
 module.exports = {
-  compare, carriedOver, flatSymbols, fillsFor, confirmed,
+  compare, carriedOver, flatSymbols, fillsFor, confirmed, heldNow,
   alpacaDestinations, credentialScope,
 };
