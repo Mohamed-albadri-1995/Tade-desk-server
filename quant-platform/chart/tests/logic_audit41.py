@@ -68,12 +68,24 @@ ok('the print lock exists and is a real lock',
 ok('the lock is acquired NON-blocking',
    'acquire(blocking=False)' in SRC,
    'a blocking acquire would queue requests instead of refusing them')
-ok('it is taken twice — once per print endpoint',
-   SRC.count('_PRINT_LOCK.acquire(blocking=False)') == 2,
-   SRC.count('_PRINT_LOCK.acquire(blocking=False)'))
-ok('and released twice',
-   SRC.count('_PRINT_LOCK.release()') == 2,
-   SRC.count('_PRINT_LOCK.release()'))
+# ONCE PER SHEET-BUILDING ENDPOINT, counted rather than hardcoded.
+#
+# It was pinned at exactly two, which was right when there were two sheets and
+# became a failing test the day a third arrived — reporting a fault in the
+# lock when the lock was fine. Worse, the number it should have been checking
+# is not "two": it is "every endpoint that fetches weeks of bars takes it, and
+# none of them forgets". A count against the endpoints themselves says that;
+# a literal says only that nobody has added a sheet.
+_takers = SRC.count('_PRINT_LOCK.acquire(blocking=False)')
+# The endpoints that build one. Each calls a _build_*sheets() and each is the
+# expensive fetch this lock exists to keep from running three at a time.
+_sheets = len([m for m in ('def r1_print(', 'def pairs_print(', 'def r1_swing(')
+               if m in SRC])
+ok('every sheet-building endpoint takes it — none forgets',
+   _takers == _sheets, (_takers, _sheets))
+ok('...and every one of them releases it',
+   SRC.count('_PRINT_LOCK.release()') == _takers,
+   (SRC.count('_PRINT_LOCK.release()'), _takers))
 
 # Held, the second attempt must fail immediately rather than wait.
 S._PRINT_LOCK.acquire()

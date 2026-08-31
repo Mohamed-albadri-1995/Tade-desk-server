@@ -1418,6 +1418,223 @@ def _print_span(w_start, w_end) -> int:
     return max(1, int((w_end - w_start).total_seconds() // 86400) + 1)
 
 
+# ── THE SWING SHEET ───────────────────────────────────────────────────────
+#
+# The register print sheet above is a DAY TRADE sheet and everything about it
+# says so: 1-minute bars, a window of one or two sessions, extended hours
+# shaded because the premarket is where the setup forms. It answers "what did
+# this stock do on the morning it was found".
+#
+# A swing sheet asks a different question, and none of those choices survive
+# the change:
+#
+#     where was this stock in its OWN year before the scanner found it —
+#     at a high, at a base, halfway down a decline — and what has it done in
+#     every session SINCE?
+#
+# So: daily bars, at least a year of them before the day it was found, and
+# then every bar after it up to the last one that exists. The found day is
+# MARKED, which is the one rule the intraday sheet deliberately breaks the
+# other way ("the register day gets no special colour") — there the window is
+# two sessions wide and you can see which is which, here it is one bar in
+# three hundred and unmarked it cannot be found at all.
+#
+# ONE TRADING YEAR. 252 sessions is the convention and it is the right default
+# for the question: it puts the 52-week high and low on the chart, which is
+# what "where is it in its own range" means to anyone reading one.
+_SWING_LOOKBACK = 252
+# Coarser than 1d is a different sheet; finer cannot hold a year. Held to the
+# timeframes whose bars ARE sessions, because "the day it was found" has to be
+# one bar for the mark to mean anything.
+_SWING_TFS = ('1d',)
+
+
+def _swing_window(day: str, lookback: int):
+    """(window start, fetch calendar days) for a swing sheet anchored on `day`.
+
+    The window runs `lookback` TRADING days before the found day and then
+    forward to NOW — not to a fixed number of days after. "Until the last
+    available day" is the whole ask: a name found three weeks ago has three
+    weeks of follow-through and one found in January has seven months, and
+    both are the honest answer for that name rather than a window someone
+    chose.
+
+    Returns the ET start and the CALENDAR days a loader must fetch to cover
+    start → now, because loaders take calendar days and a trading-day window
+    has to pay for its weekends.
+    """
+    import pandas as _pd
+    d0 = _pd.Timestamp(day).normalize()
+    nb = max(1, int(lookback))
+    first = _pd.bdate_range(end=d0, periods=nb + 1)[0]
+    w_start = _pd.Timestamp(first.strftime('%Y-%m-%d') + ' 00:00', tz=cs._ET)
+    now = _pd.Timestamp.now(tz=cs._ET)
+    # +1 so the boundary day is inside the fetch rather than exactly on its edge.
+    return w_start, max(1, int((now - w_start).total_seconds() // 86400) + 2)
+
+
+def _swing_stats(bars: list, found_ts: int) -> dict:
+    """What the sheet exists to produce: where it was when it was found, and
+    what has happened since.
+
+    NOT a backtest and deliberately not dressed as one. There is no entry, no
+    stop and no exit here — a name being on a register is not a trade. These
+    are four facts about the bars: what it closed at that day, where it is
+    now, the best it got, and the worst. Anyone reading a swing sheet is
+    asking exactly those, and reading them off three hundred candles by eye is
+    how you end up remembering the winners.
+
+    MFE AND MAE ARE BOTH REPORTED, and the adverse one is not optional. A
+    sheet that showed only "+37% since" would be a machine for making every
+    register look good — the name that went to +37% after first going to −22%
+    is a different name, and the −22% is the half that decides whether it was
+    holdable.
+    """
+    after = [b for b in bars if b['time'] > found_ts]
+    found = next((b for b in bars if b['time'] == found_ts), None)
+    if not found:
+        return {}
+    ref = float(found['close'])
+    out = {'close': ref, 'bars_before': sum(1 for b in bars if b['time'] < found_ts),
+           'bars_after': len(after)}
+    if not after or not ref:
+        return out
+    hi = max(float(b['high']) for b in after)
+    lo = min(float(b['low']) for b in after)
+    last = float(after[-1]['close'])
+    out.update({
+        'last': last,
+        'since_pct': round((last - ref) / ref * 100, 2),
+        'max_up_pct': round((hi - ref) / ref * 100, 2),
+        'max_dn_pct': round((lo - ref) / ref * 100, 2),
+        'high': hi, 'low': lo,
+    })
+    return out
+
+
+def _build_swing_sheets(start: str, end: str, day: str, tf: str, feed: str,
+                        overlays: str, register: str, lookback: int):
+    """Daily bars for every ticker of every register day in a range, from a
+    year before the day it was found through to the last bar that exists.
+
+    Same contract as _build_sheets — the payload BOTH the sheet and the CSV
+    are built from, so the two can never disagree about a number.
+    """
+    import json as _json
+    import pandas as _pd
+    if day and not start and not end:
+        start = end = day
+    start = start or end
+    end = end or start
+    if not start:
+        return [], [], [], '', 'need a date (start/end, or day)'
+    if tf not in _SWING_TFS:
+        return [], [], [], '', (f'a swing sheet needs session bars — {tf} is not '
+                                f'one of {", ".join(_SWING_TFS)}')
+    try:
+        ovs = _json.loads(overlays) if overlays else []
+    except _json.JSONDecodeError:
+        ovs = []
+    rng = start if start == end else f'{start} → {end}'
+
+    have = sc.available_dates(register) or []
+    days = sorted(d for d in have if str(start) <= d <= str(end))
+    if not days:
+        return [], [], ovs, rng, f'no frozen {register} days between {start} and {end}'
+
+    sheets, errors = [], []
+    for d in days:
+        reg = sc.register_rows(register, d, full=True)
+        if not reg.get('ok'):
+            errors.append(f'{d}: register fetch failed ({reg.get("error")})')
+            continue
+        tickers, cards, seen = [], {}, set()
+        for r in reg.get('rows') or []:
+            t = str(r.get('ticker') or '').strip().upper()
+            if t and t not in seen:
+                seen.add(t); tickers.append(t); cards[t] = r
+        if not tickers:
+            errors.append(f'{d}: no tickers')
+            continue
+
+        w_start, span = _swing_window(d, lookback)
+        lo_ts = int(w_start.timestamp())
+        need = dm.required_days(ovs, tf, span)
+        # The found day, as the ET calendar date its bar carries. Daily bars are
+        # stamped at the session date, so the mark is found by DATE rather than
+        # by an assumed hour — the hour differs between loaders and an assumed
+        # one would mark nothing on the feed that disagreed.
+        want_date = str(_pd.Timestamp(d).date())
+
+        charts = []
+        for sym in tickers:
+            if len(charts) >= _PRINT_MAX_CHARTS:
+                errors.append(f'{d}: stopped at {_PRINT_MAX_CHARTS} charts — '
+                              f'{len(tickers) - len(charts)} more ticker(s) NOT drawn. '
+                              'Narrow the day range or the register.')
+                break
+            try:
+                # LIVE, not `asof`. The sheet runs to the last bar that exists,
+                # which is the point of it — anchoring to the found day would
+                # cut off exactly the half being asked for.
+                #
+                # view='regular' because a daily bar IS the regular session.
+                # With 'all' every bar is stamped at midnight ET, which the
+                # session classifier reads as post-market — so a year of daily
+                # candles would come back shaded as after-hours from end to end,
+                # and the legend would be describing something that is not there.
+                data = cs.compute_data(symbol=sym, tf=tf, days=need,
+                                       overlays=ovs, feed=feed, view='regular')
+                bars = [b for b in (data.get('bars') or []) if b['time'] >= lo_ts]
+                if not bars:
+                    errors.append(f'{d} {sym}: no daily bars in the window'); continue
+                found_ts = next(
+                    (b['time'] for b in bars
+                     if str(_pd.Timestamp(b['time'], unit='s', tz='UTC')
+                            .tz_convert(cs._ET).date()) == want_date), None)
+                ser = []
+                for sr in (data.get('series') or []):
+                    ser.append({**sr, 'values': [v for v in (sr.get('values') or [])
+                                                 if v['time'] >= lo_ts]})
+                ch = {'symbol': sym, 'bars': bars, 'series': ser,
+                      'card': cards.get(sym) or {}}
+                if found_ts is None:
+                    # SAID, not skipped. No bar on the day the scanner found it
+                    # means a halt, a holiday, or a symbol that has since been
+                    # renamed — and an unmarked chart that looked like every
+                    # other one would be read as "it was found here", pointing
+                    # at nothing.
+                    errors.append(f'{d} {sym}: no daily bar ON the found day — '
+                                  'drawn without a mark')
+                else:
+                    ch['found'] = {'time': found_ts, 'date': d,
+                                   **_swing_stats(bars, found_ts)}
+                # HOW MUCH HISTORY ACTUALLY ARRIVED. The feed decides this, not
+                # the request: Yahoo serves at most a year of daily bars per
+                # call whatever was asked for, so "one year before the found
+                # day" can come back as a chart that starts ON it. Unmarked,
+                # that reads as a stock that listed the week it was scanned.
+                ch['history_days'] = (ch.get('found') or {}).get('bars_before', 0)
+                charts.append(ch)
+            except Exception as e:      # one bad symbol never kills the sheet
+                errors.append(f'{d} {sym}: {e}')
+            finally:
+                data = None
+        if charts:
+            short = [c['symbol'] for c in charts
+                     if c.get('found') and c['history_days'] < lookback * 0.75]
+            if short:
+                errors.append(
+                    f'{d}: less than {lookback} sessions of history before the found '
+                    f'day for {", ".join(short[:8])}'
+                    + (f' +{len(short) - 8} more' if len(short) > 8 else '')
+                    + f' — the {feed} feed did not return it. A newly listed stock '
+                    'looks the same as a truncated fetch; polygon serves the longer '
+                    'history.')
+            sheets.append({'day': d, 'charts': charts})
+    return sheets, errors, ovs, rng, ''
+
+
 def _build_sheets(start: str, end: str, day: str, tf: str, feed: str,
                   overlays: str, register: str, days_before: int, days_after: int):
     """Bars + indicator series for every ticker of every register day in a
@@ -1705,6 +1922,135 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
                        day_prefix='register day ')
 
 
+@app.get('/api/r1/swing', response_class=HTMLResponse)
+def r1_swing(start: str = '', end: str = '', day: str = '', tf: str = '1d',
+             feed: str = 'polygon', overlays: str = '[]', register: str = 'R1',
+             lookback: int = _SWING_LOOKBACK,
+             cols: int = 1, height: int = 420):
+    """SWING SHEET: one DAILY chart per register ticker — a year of its own
+    history before the day the scanner found it, the found day marked, and
+    every session since.
+
+    The other sheet (/api/r1/print) is the day-trade one: 1-minute bars over a
+    session or two, extended hours shaded. This answers the other question —
+    where was this stock in its own year when it was found, and what has it
+    done since — and none of those choices survive the change, so the bars are
+    daily, the window is a trading year plus everything after, and the found
+    day is marked.
+
+    `lookback` counts TRADING days before the found day; 252 is one year.
+    There is no `days_after`: the window runs to the last bar that exists,
+    which is different for every register day and is the honest answer for
+    each.
+    """
+    if not _PRINT_LOCK.acquire(blocking=False):
+        from chart import oplog
+        oplog.record('print_refused', ok=False, kind='swing',
+                     reason='another sheet is building')
+        return _print_busy()
+    try:
+        sheets, errors, ovs, rng, bad = _build_swing_sheets(
+            start, end, day, tf, feed, overlays, register, lookback)
+    finally:
+        _PRINT_LOCK.release()
+    if bad:
+        return HTMLResponse(f'<h3>{bad}</h3>')
+    from urllib.parse import urlencode as _ue
+    csv_qs = _ue({'start': start or day, 'end': end or day, 'day': day, 'tf': tf,
+                  'feed': feed, 'overlays': overlays, 'register': register,
+                  'lookback': lookback})
+    cards_qs = _ue({'start': start or day, 'end': end or day, 'day': day,
+                    'register': register})
+    return _sheet_page(
+        sheets, errors, ovs, f'{register} SWING', rng, tf, feed,
+        lookback, 0, cols, height,
+        csv_url=f'/api/r1/swing.csv?{csv_qs}',
+        cards_url=f'/api/r1/cards.csv?{cards_qs}',
+        day_prefix='found on ',
+        window_html=(f'window: {lookback} trading days before the found day '
+                     '(≈1 year) → the LAST bar available, daily'),
+        shade_html=('<span class="sw" style="background:rgba(245,158,11,.55)"></span>'
+                    'the day the scanner found it &nbsp;'
+                    '<span class="sw" style="background:rgba(16,185,129,.10)"></span>'
+                    'every session since &nbsp; · unshaded = its year before'))
+
+
+@app.get('/api/r1/swing.csv')
+def r1_swing_csv(start: str = '', end: str = '', day: str = '', tf: str = '1d',
+                 feed: str = 'polygon', overlays: str = '[]', register: str = 'R1',
+                 lookback: int = _SWING_LOOKBACK):
+    """The swing sheet as a SPREADSHEET — same parameters, same window, same
+    numbers, one row per daily bar.
+
+    Two columns the intraday export has no use for: `phase` says whether a bar
+    is BEFORE the found day, IS it, or comes AFTER, and `pct_from_found` is
+    that bar's close against the found day's close. Those two are what turns a
+    pile of OHLC into the question being asked, and computing them in a
+    spreadsheet means re-deriving which row was the found day.
+    """
+    import csv
+    import io
+    from fastapi.responses import PlainTextResponse
+    sheets, errors, _ovs, rng, bad = _build_swing_sheets(
+        start, end, day, tf, feed, overlays, register, lookback)
+    if bad:
+        return PlainTextResponse(bad, status_code=200)
+    buf = io.StringIO()
+    # Indicator columns, named exactly as the sheet's legend names them, with a
+    # #2 suffix for a repeated label — same rule as the intraday export, so the
+    # two spreadsheets can be read by the same eyes.
+    labels: list = []
+    for sh in sheets:
+        for c in sh['charts']:
+            for sr in c['series']:
+                lbl = str(sr.get('name') or '?')
+                n, out_lbl = 1, lbl
+                while out_lbl in labels:
+                    n += 1; out_lbl = f'{lbl} #{n}'
+                if out_lbl not in labels:
+                    labels.append(out_lbl)
+    w = csv.writer(buf)
+    w.writerow(['found_day', 'symbol', 'date_et', 'epoch', 'phase',
+                'open', 'high', 'low', 'close', 'volume', 'pct_from_found']
+               + labels)
+    import pandas as pd
+    for sh in sheets:
+        for c in sh['charts']:
+            found = c.get('found') or {}
+            f_ts = found.get('time')
+            ref = found.get('close')
+            by_time = {}
+            used: list = []
+            for sr in c['series']:
+                lbl = str(sr.get('name') or '?')
+                n, out_lbl = 1, lbl
+                while out_lbl in used:
+                    n += 1; out_lbl = f'{lbl} #{n}'
+                used.append(out_lbl)
+                by_time[out_lbl] = {v['time']: v.get('value')
+                                    for v in (sr.get('values') or [])}
+            for b in c['bars']:
+                et = pd.Timestamp(b['time'], unit='s', tz='UTC').tz_convert(cs._ET)
+                phase = ('found' if f_ts is not None and b['time'] == f_ts
+                         else 'after' if f_ts is not None and b['time'] > f_ts
+                         else 'before' if f_ts is not None else '')
+                # BLANK, never zero, when there is nothing to compare against.
+                # A 0.0 here reads as "unchanged", which is a measurement.
+                pct = ('' if not ref else round((b['close'] - ref) / ref * 100, 4))
+                w.writerow([sh['day'], c['symbol'], et.strftime('%Y-%m-%d'),
+                            b['time'], phase, b['open'], b['high'], b['low'],
+                            b['close'], b['volume'], pct]
+                           + [('' if by_time.get(lbl, {}).get(b['time']) is None
+                               else by_time[lbl][b['time']]) for lbl in labels])
+    if errors:
+        # In the FILE, because a spreadsheet is opened away from the page that
+        # would otherwise have carried the warning.
+        w.writerow([])
+        for e in errors[:20]:
+            w.writerow(['# skipped', e])
+    return PlainTextResponse(buf.getvalue(), media_type='text/csv')
+
+
 def _print_busy() -> HTMLResponse:
     """What a second print sheet gets while the first is still building.
 
@@ -1723,10 +2069,20 @@ def _print_busy() -> HTMLResponse:
 def _sheet_page(sheets: list, errors: list, ovs: list, title: str, rng: str,
                 tf: str, feed: str, days_before: int, days_after: int,
                 cols: int, height: int, csv_url: str = '', cards_url: str = '',
-                day_prefix: str = '') -> HTMLResponse:
-    """Render a sheet payload as the printable page. ONE renderer for both the
-    register sheet and the ticker-list sheet, so a change to the legend, the
-    session shading or the card block reaches both."""
+                day_prefix: str = '', window_html: str = '',
+                shade_html: str = '') -> HTMLResponse:
+    """Render a sheet payload as the printable page. ONE renderer for the
+    register sheet, the ticker-list sheet and the swing sheet, so a change to
+    the legend, the card block or the chart itself reaches all three.
+
+    `window_html` and `shade_html` exist because the two SENTENCES that
+    describe a sheet are the two things that do not survive between them. The
+    intraday sheet's "−1 → +0 TRADING days (04:00–20:00 ET, pre/post included)"
+    and its premarket/post-market swatches are true of a 1-minute session
+    window and false of a year of daily bars, where there is no premarket to
+    shade and the shading means something else entirely. Left as defaults they
+    would be a legend that describes a chart nobody drew — which is worse than
+    no legend, because it is read as a fact about the picture."""
     import json as _json
     # LEGEND: name + colour of every indicator line, taken from the series the
     # engine actually produced (not from the request), so the swatch can never
@@ -1776,6 +2132,12 @@ def _sheet_page(sheets: list, errors: list, ovs: list, title: str, rng: str,
    border-radius:6px;padding:5px 7px;margin:2px 0 8px;line-height:1.7}}
  .cd{{display:inline-block;margin-right:10px;white-space:nowrap}}
  .cd b{{color:#64748b;font-weight:600}}
+ /* The swing line sits between the ticker and the chart because it is the
+    conclusion, and a conclusion under the picture is one people scroll past.
+    Amber to match the stripe and the arrow on the chart itself — the eye
+    should connect the number to the bar without being told to. */
+ .swing{{font-size:11.5px;color:#78350f;background:#fef3c7;border:1px solid #fcd34d;
+   border-radius:6px;padding:4px 7px;margin:4px 0 6px;line-height:1.6}}
  /* PRINTING: browsers drop every BACKGROUND colour by default, which silently
     erased the whole point of this sheet — the indicator swatches, the
     register-day header and the warning band all came out blank on paper and
@@ -1788,12 +2150,12 @@ def _sheet_page(sheets: list, errors: list, ovs: list, title: str, rng: str,
 </style></head><body>
 <h2>{title} · {rng}</h2>
 <div class="sub">{n_charts} charts over {len(sheets)} day(s) · {tf} · feed {feed} ·
- window: −{days_before} → +{days_after} TRADING days (04:00–20:00 ET, pre/post included)</div>
+ {window_html or f'window: −{days_before} → +{days_after} TRADING days (04:00–20:00 ET, pre/post included)'}</div>
 <div class="key"><b>indicators:</b> {ind_html}</div>
-<div class="key">shaded = extended hours on every day:
- <span class="sw" style="background:rgba(59,130,246,.35)"></span>premarket (04:00–09:30)
- <span class="sw" style="background:rgba(168,85,247,.35)"></span>post-market (16:00–20:00)
- · unshaded = regular session</div>
+<div class="key">{shade_html or '''shaded = extended hours on every day:
+ <span class="sw" style="background:rgba(59,130,246,.35)"></span>premarket (04:00-09:30)
+ <span class="sw" style="background:rgba(168,85,247,.35)"></span>post-market (16:00-20:00)
+ &middot; unshaded = regular session'''}</div>
 {err_html}
 <button class="noprint" onclick="window.print()">🖨 Print / Save as PDF</button>
 {f'''<a class="noprint" href="{csv_url}"
@@ -1825,6 +2187,36 @@ for (const sheet of SHEETS) {{
     hd.innerHTML = '<span class="tk">'+c.symbol+'</span> <span class="rng">'
                  + fmt(a.time)+' → '+fmt(z.time)+' ET · '+c.bars.length+' bars</span>';
     card.appendChild(hd);
+    // ── WHAT IT HAS DONE SINCE IT WAS FOUND ────────────────────────────
+    // The four numbers a swing sheet exists to produce, above the chart
+    // rather than inside it: reading them off three hundred candles by eye is
+    // how you end up remembering only the winners.
+    //
+    // BOTH EXCURSIONS, always. A line that showed "+37% since" and nothing
+    // else is a machine for making every register look good — the name that
+    // reached +37% after first going to −22% is a different name, and the
+    // −22% is the half that decides whether it was holdable.
+    if (c.found && c.found.bars_after) {{
+      const f = c.found;
+      const pc = n => (n > 0 ? '+' : '') + n.toFixed(1) + '%';
+      const col = f.since_pct >= 0 ? '#15803d' : '#b91c1c';
+      const sw = document.createElement('div'); sw.className = 'swing';
+      sw.innerHTML =
+        '<b>found ' + f.date + '</b> at ' + f.close
+        + ' · <span style="color:' + col + ';font-weight:700">' + pc(f.since_pct)
+        + '</span> now ' + f.last
+        + ' · best ' + pc(f.max_up_pct) + ' · worst ' + pc(f.max_dn_pct)
+        + ' · ' + f.bars_after + ' session(s) since'
+        + ' · ' + f.bars_before + ' before';
+      card.appendChild(sw);
+    }} else if (c.found) {{
+      const sw = document.createElement('div'); sw.className = 'swing';
+      // FOUND TODAY. Nothing has happened yet, and saying so is different from
+      // leaving the line off — an absent line reads as a sheet that failed.
+      sw.innerHTML = '<b>found ' + c.found.date + '</b> at ' + c.found.close
+        + ' · no sessions since yet · ' + c.found.bars_before + ' before';
+      card.appendChild(sw);
+    }}
     // per-chart indicator legend: name + its exact line colour
     if ((c.series||[]).length) {{
       const lg = document.createElement('div'); lg.className='key';
@@ -1874,8 +2266,18 @@ for (const sheet of SHEETS) {{
         visible:false}});
     // PRE / POST get their own colour on EVERY day; RTH is plain white, so
     // the register day looks exactly like its context days.
+    //
+    // ON A SWING SHEET THE RULE IS THE OPPOSITE, and deliberately. There the
+    // window is two sessions and you can see which is which; here it is one
+    // bar in three hundred, and an unmarked found day cannot be found at all.
+    // So that bar gets a strong stripe and everything after it a faint tint —
+    // which is the request drawn rather than described: the day it was found,
+    // and the days since.
+    const F = c.found ? c.found.time : null;
     bg.setData(c.bars.map(b => ({{time:b.time, value:1,
-      color: b.sess==='pre'  ? 'rgba(59,130,246,.16)'
+      color: (F !== null && b.time === F) ? 'rgba(245,158,11,.55)'
+           : (F !== null && b.time  >  F) ? 'rgba(16,185,129,.10)'
+           : b.sess==='pre'  ? 'rgba(59,130,246,.16)'
            : b.sess==='post' ? 'rgba(168,85,247,.16)'
            : 'rgba(0,0,0,0)'}})));
     const cs_ = ch.addCandlestickSeries({{upColor:'#16a34a', downColor:'#dc2626',
@@ -1888,6 +2290,25 @@ for (const sheet of SHEETS) {{
           lineStyle:s.style||0, priceLineVisible:false, lastValueVisible:false,
           ...(s.step ? {{lineType:1}} : {{}})}});
       ln.setData(s.values);
+    }}
+    // ── THE DAY THE SCANNER FOUND IT ─────────────────────────────────────
+    // Three marks, because the stripe alone answers only WHEN. The arrow puts
+    // the date on the bar so a printed page still says which one it is, and
+    // the price line carries the number across the whole chart — that line is
+    // what makes "and what has it done since" readable at a glance, because
+    // every bar after it is simply above or below it.
+    //
+    // ONE MARKER LIST FOR THE WHOLE CHART. setMarkers REPLACES rather than
+    // adds, so two callers each setting their own means the second silently
+    // erases the first — and it erases it on the page, with no error, which is
+    // the shape of a bug nobody finds. Both the found day and a trade push
+    // here and the list is set once, below.
+    const MARKS = [];
+    if (c.found) {{
+      cs_.createPriceLine({{price:c.found.close, color:'#f59e0b', lineWidth:1,
+        lineStyle:2, axisLabelVisible:true, title:'found '+c.found.close}});
+      MARKS.push({{time:c.found.time, position:'aboveBar', color:'#d97706',
+        shape:'arrowDown', text:'FOUND '+c.found.date}});
     }}
     // ── YOUR TRADE on the chart ──────────────────────────────────────────
     // Drawn three ways because each answers a different question at a glance:
@@ -1925,14 +2346,15 @@ for (const sheet of SHEETS) {{
       if (isFinite(outP)) cs_.createPriceLine({{price:outP, color:col,
         lineWidth:1, lineStyle:2, axisLabelVisible:true, title:'EXIT '+outP}});
       // and the arrows, on the bars they happened on
-      const mk = [];
-      if (t0) mk.push({{time:t0, position:(long_?'belowBar':'aboveBar'),
+      if (t0) MARKS.push({{time:t0, position:(long_?'belowBar':'aboveBar'),
         color:'#94a3b8', shape:(long_?'arrowUp':'arrowDown'),
         text:(long_?'IN':'IN ▼')}});
-      if (t1) mk.push({{time:t1, position:(long_?'aboveBar':'belowBar'),
+      if (t1) MARKS.push({{time:t1, position:(long_?'aboveBar':'belowBar'),
         color:col, shape:(long_?'arrowDown':'arrowUp'), text:'OUT'}});
-      if (mk.length) cs_.setMarkers(mk.sort((a,b)=>a.time-b.time));
     }}
+    // Set ONCE, sorted — the library requires ascending time and drops the
+    // whole list if it is not.
+    if (MARKS.length) cs_.setMarkers(MARKS.sort((a,b)=>a.time-b.time));
     ch.timeScale().fitContent();
   }}
 }}
