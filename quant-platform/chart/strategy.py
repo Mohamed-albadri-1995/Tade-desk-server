@@ -763,7 +763,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  cooldown_bars=None, min_hold_bars=None, entry_mode='edge',
                  max_stop_pct=None, min_target_usd=None,
                  win_start=None, win_end=None,
-                 exit_scope: str | None = None, diag: dict | None = None):
+                 exit_scope: str | None = None, diag: dict | None = None,
+                 entry_ok_fill=None, no_open_fill=None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
     checks, not one-shot signals: while FLAT, enter on any bar the entry
     condition IS true (so after a stop-out it can re-enter while the setup
@@ -1012,10 +1013,23 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 # the price the trade is booked at. Only 'desk' separates them;
                 # for every other model this IS `ep`, so nothing changes.
                 dp = close[j] if (desk_fill or live_fill) else ep
-                if entry_ok is not None and not entry_ok[ej]:
+                # THE SESSION GATES ARE ABOUT THE FILL, and under 'live' the
+                # fill bar does not exist yet — so they are answered from the
+                # clock instead. Every other model keeps reading bar ej.
+                if live_fill and entry_ok_fill is not None:
+                    _session_blocked = not entry_ok_fill[j]
+                elif entry_ok is not None:
+                    _session_blocked = not entry_ok[ej]
+                else:
+                    _session_blocked = False
+                if _session_blocked:
                     _drop('rth_session')
                     continue             # fill moment outside the allowed session
-                if eod_close is not None and eod_close[ej]:
+                if live_fill and no_open_fill is not None:
+                    if no_open_fill[j]:
+                        _drop('eod_bar')
+                        continue         # the fill would land in liquidation
+                elif eod_close is not None and eod_close[ej]:
                     _drop('eod_bar')
                     continue             # never open into the liquidation bar
                 if et_hhmm is not None:
@@ -1628,6 +1642,39 @@ def _session_masks(bars, rules: dict | None):
     return entry_ok, eod
 
 
+def _fill_gates(bars, rules: dict | None, step):
+    """The session gates as they apply to the bar the fill will land ON.
+
+    WHY A SECOND SET. The entry gates ask two questions about the FILL — "is
+    the session open when this order goes in" and "is it already liquidation
+    time" — and every model but 'live' answers them by looking at bar j+1.
+    'live' runs at the moment bar j closes, so j+1 does not exist yet.
+
+    It is a CLOCK question, not a bar question: the fill lands one bar-interval
+    later, and `rth_entries` is defined purely as a time-of-day range. So the
+    answer is computable without the bar, and computing it is the difference
+    between a 09:30-entry setup working live and never firing at all — under
+    the signal bar's own clock, its 09:29 decision reads as premarket and is
+    dropped, while the backtest that justified it allowed exactly that trade.
+
+    Returns (entry_ok_fill, no_open_fill), either may be None when the
+    corresponding rule is off.
+    """
+    if not rules or not (rules.get('rth_entries') or rules.get('eod_close')):
+        return None, None
+    et = bars.index.tz_convert(cs._ET) + step
+    hhmm = np.asarray(et.hour, dtype=int) * 100 + np.asarray(et.minute, dtype=int)
+    start = int(rules.get('entry_start', 930))
+    cutoff = int(rules.get('entry_cutoff', 1550))
+    entry_ok_fill = ((hhmm >= start) & (hhmm < cutoff)) if rules.get('rth_entries') else None
+    # "the fill would land at or after the liquidation cutoff" — the same thing
+    # eod_close[ej] means for the ENTRY gate, said about a bar that has not
+    # printed. The forced-EXIT use of eod_close is untouched: that one is about
+    # a bar the simulation really has.
+    no_open_fill = (hhmm >= cutoff) if rules.get('eod_close') else None
+    return entry_ok_fill, no_open_fill
+
+
 def evaluate(strategy: dict, symbol: str, tf: str, days: int,
              feed: str = 'polygon', view: str = 'all',
              asof: str | None = None, fill: str = 'close',
@@ -1662,6 +1709,10 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
     # exit bar (or SL/TP) — see _pair_trades for the priority protocol.
     _entry_drops: dict = {}      # why fired signals didn't become trades
     entry_ok, eod_close = _session_masks(bars, rules)
+    # The same gates measured at the FILL moment, for 'live' — see _fill_gates.
+    _step = (bars.index[1] - bars.index[0]) if n > 1 else pd.Timedelta(minutes=1)
+    entry_ok_fill, no_open_fill = ((_fill_gates(bars, rules, _step))
+                                   if fill == 'live' else (None, None))
     # discipline knobs: the strategy carries its own (saved with it), the panel
     # `rules` can OVERRIDE the attempts cap for a one-off run.
     _risk = strategy.get('risk') or {}
@@ -1678,6 +1729,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         max_stop_pct=_risk.get('max_stop_pct'),
         min_target_usd=_risk.get('min_target_usd'),
         win_start=_risk.get('window_start'), win_end=_risk.get('window_end'),
+        entry_ok_fill=entry_ok_fill, no_open_fill=no_open_fill,
         exit_scope=(exit_group or {}).get('scope'), diag=_entry_drops)
 
     # WINDOW HONESTY: required_days may have EXTENDED the fetch beyond what

@@ -139,7 +139,13 @@ def test_parallel_evaluation_cannot_change_the_picks(monkeypatch):
 
     prices = {'AAA': (10.0, 9.0), 'BBB': (10.0, 9.5), 'CCC': (10.0, 9.8)}
 
-    def fake(strategies, sym, date, tf, feed, days=2, fill='close'):
+    # `view` joined the signature on 2026-08-31: qp's decide path had it
+    # hardcoded to 'regular' while every backtest defaults to 'all', so the
+    # two evaluated different frames — a different rolling-indicator warm-up,
+    # and no 09:29 bar at all for a setup whose entry window opens at 09:30.
+    # These stubs take it and ignore it; what these tests are about is the
+    # ranking.
+    def fake(strategies, sym, date, tf, feed, days=2, fill='live', view='all'):
         _t.sleep(random.uniform(0, 0.03))       # uneven, so order really varies
         e, s = prices[sym]
         return [{'symbol': sym, 'strategy': 'X', 'side': 'long',
@@ -156,7 +162,7 @@ def test_parallel_evaluation_cannot_change_the_picks(monkeypatch):
 
 
 def _one(entry=10.0, stop=9.0):
-    def fake(strategies, sym, date, tf, feed, days=2, fill='close'):
+    def fake(strategies, sym, date, tf, feed, days=2, fill='live', view='all'):
         st = None if sym == 'NOSTOP' else stop
         return [{'symbol': sym, 'strategy': 'X', 'side': 'long',
                  'entry': entry, 'stop': st, 'entry_at': '10:00', 'entry_ts': 0}]
@@ -178,7 +184,7 @@ def test_the_direction_reverses_the_picks(monkeypatch):
     from chart import decide as dec
     prices = {'AAA': 9.0, 'BBB': 9.5, 'CCC': 9.8}
 
-    def fake(strategies, sym, date, tf, feed, days=2, fill='close'):
+    def fake(strategies, sym, date, tf, feed, days=2, fill='live', view='all'):
         return [{'symbol': sym, 'strategy': 'X', 'side': 'long', 'entry': 10.0,
                  'stop': prices[sym], 'entry_at': '10:00', 'entry_ts': 0}]
 
@@ -230,7 +236,7 @@ def test_a_run_reports_how_long_it_took():
 def test_one_symbol_failing_does_not_stop_the_others(monkeypatch):
     from chart import decide as dec
 
-    def fake(strategies, sym, date, tf, feed, days=2, fill='close'):
+    def fake(strategies, sym, date, tf, feed, days=2, fill='live', view='all'):
         if sym == 'BAD':
             return [{'symbol': sym, 'strategy': 'X', 'error': 'no bars'}]
         return [{'symbol': sym, 'strategy': 'X', 'side': 'long', 'entry': 10.0,

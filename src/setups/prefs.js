@@ -55,6 +55,14 @@ function settingsFor(setupId) {
     topN: e.topN || null,
     tf: e.tf || null,
     feed: e.feed || null,
+    /*
+     * WHICH BARS qp EVALUATES ON — 'all' (with pre/post) or 'regular' (RTH).
+     *
+     * A setting rather than a constant because it must match the backtest that
+     * validated the setup, and the backtest has always had a view control.
+     * Absent means the backtest's own default, 'all'.
+     */
+    view: e.view || null,
     targetR: e.targetR || null,
     fill: e.fill || null,
     caution: e.caution || null,
@@ -130,7 +138,7 @@ function saveSettings(setupId, patch) {
   state.setups = state.setups || {};
   const cur = state.setups[setupId] || {};
   const next = { ...cur };
-  for (const k of ['universe', 'topN', 'tf', 'feed', 'targetR', 'fill', 'caution',
+  for (const k of ['universe', 'topN', 'tf', 'feed', 'view', 'targetR', 'fill', 'caution',
                    'maxTradesPerDay', 'riskPerTrade', 'maxPositionPct',
                    'rankMetric', 'rankDirection']) {
     if (!(k in patch)) continue;

@@ -214,6 +214,15 @@ function compare({ setup, spec, strategy } = {}) {
       : (btUni.kind === 'register' ? btUni.register : btUni.kind) || null));
   rows.push(row('timeframe', p.tf || s.tf || '1m', bt.tf || null));
   rows.push(row('feed', p.feed || s.feed || null, bt.feed || null));
+  /*
+   * WHICH BARS ARE IN THE FRAME. Not cosmetic: a rolling indicator's window
+   * differs between them, so the same strategy reads a different ATR at 09:35
+   * under 'all' than under 'regular' — and a setup whose entry window opens at
+   * 09:30 decides from the 09:29 bar, which 'regular' does not contain at all.
+   */
+  rows.push(row('view', p.view || s.view || 'all', bt.view || 'all',
+    "'regular' drops the pre-market bars, which changes every rolling "
+    + "indicator's warm-up and removes the 09:29 decision bar entirely"));
 
   const differs = rows.filter(x => x.status === 'differ');
   const unknown = rows.filter(x => x.status === 'unknown');

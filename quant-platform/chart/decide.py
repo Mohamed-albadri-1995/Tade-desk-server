@@ -60,7 +60,8 @@ def _et_date(ts_seconds: int) -> str:
 
 
 def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
-                    feed: str, days: int = 2, fill: str = 'close') -> list:
+                    feed: str, days: int = 2, fill: str = 'close',
+                    view: str = 'all') -> list:
     """Every signal this symbol produced on `date`, across the strategies given.
 
     A setup is usually two strategies — a long and a short — and a symbol can
@@ -73,8 +74,27 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
     out = []
     for s in strategies:
         try:
+            # THE SAME BARS THE BACKTEST SAW.
+            #
+            # This was hardcoded to 'regular' while chart/backtest.py defaults
+            # to 'all', and the two are not cosmetic variants of one another:
+            #
+            #   a rolling indicator's window differs. ATR(14) on the first RTH
+            #   bars is measured over premarket bars under 'all' and over the
+            #   previous SESSION's bars under 'regular', so the same strategy
+            #   reads a different ATR at 09:35 on the two sides.
+            #
+            #   the 09:29 bar does not exist under 'regular'. Any setup whose
+            #   entry window opens at 09:30 decides from that bar under every
+            #   next-open fill model — so live could never fire it at all,
+            #   while its backtest traded it.
+            #
+            # Which view a setup uses is now a setting like tf and feed, and
+            # the default matches the backtest's. Entries are still confined to
+            # the session by the rth_entries rule, which is a clock gate and
+            # does not care which bars are in the frame.
             res = strat.evaluate(s, symbol=symbol, tf=tf, days=days,
-                                 feed=feed, view='regular', asof=date, fill=fill)
+                                 feed=feed, view=view, asof=date, fill=fill)
         except Exception as e:                       # noqa: BLE001 — reported, not raised
             out.append({'symbol': symbol, 'strategy': s.get('name'),
                         'error': str(e)})
@@ -250,7 +270,8 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
            feed: str = 'yahoo', top_n: int = 0, target_r: float = 2.0,
            metric: str | None = None, direction: str | None = None,
            ctx: dict | None = None,
-           days: int = 2, workers: int = _WORKERS, fill: str = 'close') -> dict:
+           days: int = 2, workers: int = _WORKERS, fill: str = 'close',
+           view: str = 'all') -> dict:
     """Run the strategies over the universe and return the ranked picks.
 
     Returns the picks AND every candidate that was considered, because "why is
@@ -267,7 +288,8 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
     # restored by the ranking below, so concurrency cannot change which two
     # names are taken — only how long it takes to name them.
     def one(sym):
-        return evaluate_symbol(strategies, sym, date, tf, feed, days=days, fill=fill)
+        return evaluate_symbol(strategies, sym, date, tf, feed, days=days,
+                               fill=fill, view=view)
 
     if symbols:
         with ThreadPoolExecutor(max_workers=max(1, min(workers, len(symbols)))) as pool:

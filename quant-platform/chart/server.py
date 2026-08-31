@@ -1130,6 +1130,10 @@ def setup_decide(payload: dict = Body(...)):
             # ranking metric, so it is a caller's decision rather than a default
             # nobody chose.
             fill=str(payload.get('fill') or 'close'),
+            # Defaults to the BACKTEST's default so the two see the same bars.
+            # 'regular' was hardcoded here and it changed every rolling
+            # indicator's warm-up — see the note in decide.evaluate_symbol.
+            view=str(payload.get('view') or 'all'),
         )
         return JSONResponse(out)
     except Exception as e:

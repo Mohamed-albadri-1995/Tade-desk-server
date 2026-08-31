@@ -53,9 +53,14 @@ function baseUrl() {
 async function decide({ strategyId, strategies, symbols, date, tf = '1m',
                         feed = 'yahoo', topN = 0, targetR = 2.0,
                         metric = null, direction = null, ctx = null,
-                        fill = 'close', timeoutMs = 45000 }) {
+                        fill = 'live', view = 'all', timeoutMs = 45000 }) {
   const body = {
     symbols, date, tf, feed, top_n: topN, target_r: targetR, fill,
+    // WHICH BARS qp EVALUATES ON. 'regular' was hardcoded on qp's side while
+    // every backtest defaults to 'all', so the same strategy read a different
+    // ATR warm-up live, and a setup whose window opens at 09:30 could never
+    // fire — its decision bar is 09:29, which 'regular' does not contain.
+    view,
     // Named, never assumed — see catalog.js. qp refuses an unknown one rather
     // than guessing, and refuses to invent one when none is given.
     metric, direction, ctx,

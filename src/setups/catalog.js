@@ -393,6 +393,9 @@ async function list() {
               topN: p.topN || 0 },
       tf,
       feed: p.feed || 'yahoo',
+      // Matches chart/backtest.py's own default, so live and backtest evaluate
+      // the same frame unless a preference deliberately says otherwise.
+      view: p.view || 'all',
       targetR: p.targetR || 2.0,
       /*
        * 'live' IS THE BACKTEST'S DECISION, TAKEN LIVE.

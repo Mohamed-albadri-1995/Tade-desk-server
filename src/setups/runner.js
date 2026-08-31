@@ -336,6 +336,9 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
     // old default of 'close' decided a bar later than every backtest of these
     // setups, on a different bar's close, VWAP and ATR.
     fill: setup.fill || 'live',
+    // The frame qp evaluates on. See qpClient.decide — hardcoding this to RTH
+    // was the second way live and backtest were reading different numbers.
+    view: setup.view || 'all',
   });
 
   // qp's shape, translated once into the shape the alerts already speak. Every
