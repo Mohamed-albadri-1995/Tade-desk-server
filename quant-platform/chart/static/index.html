@@ -204,13 +204,19 @@
               border-right:1px solid var(--border); overflow-y:auto;
               overflow-x:hidden; }
   #leftRail::-webkit-scrollbar { width:0; }
-  .railSpacer { flex:1 1 auto; }
   .railBtn { display:flex; flex-direction:column; align-items:center; gap:1px;
              background:transparent; border:1px solid transparent; color:var(--text2);
              border-radius:7px; padding:6px 2px; cursor:pointer; line-height:1.1;
              font-family:inherit; }
   .railBtn:hover { background:#1c2431; color:var(--text); }
   .railBtn.on { background:rgba(59,130,246,.16); border-color:var(--blue); color:var(--text); }
+  /* WATCHING is not the same as OPEN. `.on` says "this section is the one on
+     screen"; this says "the watcher is running", which has to be readable from
+     every other section — that is the whole complaint the switch had. */
+  .railBtn.watching { position:relative; color:var(--green); }
+  .railBtn.watching::after { content:''; position:absolute; top:4px; right:6px;
+    width:6px; height:6px; border-radius:50%; background:var(--green);
+    box-shadow:0 0 6px var(--green); }
   .railBtn .ri { font-size:16px; }
   /* THE LABEL is what makes a rail readable to someone who did not build it. An
      icon-only rail is a memory test, and the thing it replaced was a menu whose
@@ -247,6 +253,24 @@
   .psec { display:none; }
   .psec.show { display:block; }
   .psec > h3:first-child { margin-top:0; }
+  /* ── THE ALERT SWITCH ──
+     A toggle whose state you cannot read is a button you press twice to find
+     out what it did. The word is the state, it is the biggest thing in the
+     section, and the colour agrees with it. */
+  #alState { display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap;
+    border:1px solid var(--border); border-radius:8px; padding:8px 10px;
+    background:var(--bg3); }
+  #alState button { margin-left:auto; }
+  #alStateWord { font-size:15px; letter-spacing:.06em; }
+  #alState.al-on  { border-color:var(--green); background:rgba(34,197,94,.10); }
+  #alState.al-on  #alStateWord { color:var(--green); }
+  #alState.al-off #alStateWord { color:var(--text3); }
+  #alWatch b { color:var(--text); }
+  .why-note { font-size:10.5px; line-height:1.6; margin:6px 0 0;
+    border-left:2px solid var(--border); padding-left:8px; }
+  .al-row { border-bottom:1px solid var(--border); padding:5px 0; font-size:11.5px; }
+  .al-row b { color:var(--blue); }
+  .al-row .when { color:var(--text3); font-family:var(--mono); font-size:10.5px; }
   #side h3:first-child { margin-top:0; }
   #overlayList { display:flex; flex-direction:column; gap:4px; }
   .ovrow { display:flex; align-items:center; gap:7px; padding:5px 7px; border:1px solid var(--border); border-radius:5px; cursor:pointer; background:#141a24; }
@@ -458,8 +482,13 @@
     <button class="railBtn" id="railReg" data-psec="psecReg" data-title="Register"
             title="what the scanners found — by tool and by day">
       <span class="ri">&#128203;</span><span class="rl">Register</span></button>
-    <span class="railSpacer"></span>
-    <button class="railBtn" id="railAlerts" title="live signal watcher across today's register">
+    <!-- NO SPACER. Alerts and Print used to be pushed to the BOTTOM of the rail
+         by a flex spacer, which on a phone put them below the fold of a column
+         whose scrollbar is hidden — so Print was unreachable and there was
+         nothing on screen to suggest it existed. Seven buttons, one run, in
+         reading order. -->
+    <button class="railBtn" id="railAlerts" data-psec="psecAlerts" data-title="Alerts"
+            title="the live signal watcher: what it is watching, and what it has found">
       <span class="ri">&#128276;</span><span class="rl">Alerts</span></button>
     <button class="railBtn" id="railPrint" title="print a register day as charts">
       <span class="ri">&#128424;</span><span class="rl">Print</span></button>
@@ -790,6 +819,39 @@
       <h3>Parameters</h3>
       <div id="paramsGrid"><div class="muted">—</div></div>
     </div><!-- /psecStudy -->
+
+    <!-- ── ALERTS: A SWITCH THAT SAYS WHAT IT IS DOING ──
+         This was a button in a menu. You could not tell whether it was on;
+         there was nothing to configure; and if it WAS on, nothing said what it
+         was watching or why anything had fired. The only output was a beep and
+         a floating box in the corner of the screen.
+         Worse, the ON state was written as the label of that button — and when
+         the button moved behind the rail it stopped being visible at all.
+         Every fact below already existed on the server. /api/alerts/status has
+         returned the strategy count, the symbol list, the feed, the timeframe,
+         the interval, the cycle count, the last cycle time and the errors since
+         the watcher was written. The page had simply never asked for it. -->
+    <div class="psec" id="psecAlerts">
+      <div id="alState" class="al-off">
+        <div><b id="alStateWord">OFF</b>
+          <span class="muted" id="alStateWhy">nothing is being watched</span></div>
+        <button id="alToggle" class="dk-btn primary">Start watching</button>
+      </div>
+      <h3>What it watches</h3>
+      <div id="alWatch" class="muted">—</div>
+      <!-- WHY THERE ARE NO SETTINGS HERE. There is nothing to set: it watches
+           every SAVED STRATEGY whose entry window is open right now, across
+           today's register. Both of those are edited where they live — the
+           strategy in the Strategy drawer, the register by the scanners — and a
+           second copy of either here would be a second thing to keep in step.
+           Saying so is the point; a screen with no controls and no explanation
+           is what made this feel like it did nothing. -->
+      <div class="why-note muted">It watches every saved strategy whose entry
+        window is open at this minute, over today’s register. To change WHAT is
+        watched, change a strategy’s window in <b>Strategy</b>, or its tools.</div>
+      <h3>Signals today</h3>
+      <div id="alList" class="muted">—</div>
+    </div><!-- /psecAlerts -->
   </div>
 </main>
 <script>
@@ -2642,8 +2704,16 @@ window.addEventListener('load',async()=>{
     if(r && t) r.addEventListener('click',()=>t.click());
   };
   railForward('railStrat','stratBtn');
-  railForward('railAlerts','alertsBtn');
   railForward('railPrint','printR1Btn');
+  /* NOT railAlerts. It opens the Alerts SECTION now, and the switch lives
+     inside it — forwarding as well would start or stop the watcher every time
+     you went to look at whether it was running. */
+  const alT = document.getElementById('alToggle');
+  if(alT) alT.addEventListener('click',()=>document.getElementById('alertsBtn').click());
+  // Read the watcher when the section is opened, so it is current on arrival
+  // rather than showing whatever it said the last time something polled.
+  const alRail = document.getElementById('railAlerts');
+  if(alRail) alRail.addEventListener('click',()=>alRefresh());
 
   document.getElementById('railStrat').addEventListener('click',()=>setTimeout(railSync,0));
   document.getElementById('sideBtn').addEventListener('click',()=>setTimeout(railSync,0));
@@ -2653,6 +2723,11 @@ window.addEventListener('load',async()=>{
      and the sheet would come up with nothing in it. Set WITHOUT opening
      either: this decides what is behind the door, not whether it is ajar. */
   sectionDefaults();
+  /* ASK THE SERVER ON LOAD. The watcher survives a page reload — it is a thread
+     in qp, not a timer in this tab — so a fresh page that assumed "off" would
+     show a stopped switch over a running watcher, and pressing it would stop
+     the thing you were trying to start. */
+  alRefresh();
   railSync();
   /* A DIFFERENT STRATEGY IS A DIFFERENT SETUP, with its own desk settings —
      its own rank metric, its own risk, its own cap. Re-read them when the
@@ -2698,22 +2773,112 @@ function alLog(a){let d=document.getElementById('alLog');
 async function alPoll(){ if(!AL_ON)return;
   try{const r=await fetch('api/alerts/recent?since_ts='+AL_LAST); const j=await r.json();
     (j.alerts||[]).forEach(a=>{ AL_LAST=Math.max(AL_LAST,a.ts); alBeep(); alLog(a);
+      // Kept for the section, so what fired survives a scroll and a reload of
+      // the corner box. Newest first.
+      AL_FOUND.unshift(a);
       if(window.Notification&&Notification.permission==='granted')
         new Notification('⚡ '+a.strategy,{body:a.symbol+' '+(a.side||'')+' — signal at '+a.bar,
                          tag:a.strategy+'|'+a.symbol});});
-  }catch(e){} }
+    if(j.alerts && j.alerts.length) alRenderList();
+  }catch(e){}
+  // The SERVER's view of whether it is on, every poll. The watcher can stop on
+  // its own — a restart, an error — and a page still showing ON would be the
+  // one lie this section exists to prevent.
+  alRefresh();
+}
 alBtn.onclick=async()=>{
   if(!AL_ON){
     if(window.Notification&&Notification.permission==='default')
       try{await Notification.requestPermission();}catch(e){}
     try{await fetch('api/alerts/start',{method:'POST'});}catch(e){}
-    AL_ON=true; alBtn.style.color='var(--blue)'; alBtn.textContent='🔔 Alerts ON';
+    AL_ON=true;
     AL_TIMER=setInterval(alPoll,20000); alPoll();
   }else{
     try{await fetch('api/alerts/stop',{method:'POST'});}catch(e){}
-    AL_ON=false; alBtn.style.color=''; alBtn.textContent='🔔 Alerts';
+    AL_ON=false;
     if(AL_TIMER)clearInterval(AL_TIMER);
-  }};
+  }
+  alRefresh(); railSync();
+};
+
+/*
+ * ── WHAT THE WATCHER IS ACTUALLY DOING ────────────────────────────────
+ *
+ * The toggle used to write its state into its own LABEL — "🔔 Alerts ON" —
+ * which was the only sign it was running, and which disappeared entirely the
+ * day that button moved behind the rail. So: is it on, what is it watching,
+ * and has it found anything, all read from the server rather than from a
+ * variable this page happens to hold. A page that believes it is watching
+ * while the server has stopped is the failure that matters here.
+ */
+function alSetState(on, why){
+  const box = document.getElementById('alState');
+  const word = document.getElementById('alStateWord');
+  const whyEl = document.getElementById('alStateWhy');
+  const btn = document.getElementById('alToggle');
+  if(box){ box.classList.toggle('al-on', !!on); box.classList.toggle('al-off', !on); }
+  if(word) word.textContent = on ? 'ON' : 'OFF';
+  if(whyEl) whyEl.textContent = why || '';
+  if(btn) btn.textContent = on ? 'Stop watching' : 'Start watching';
+  const rail = document.getElementById('railAlerts');
+  // The rail carries it too, so "is it watching" is answerable from any
+  // section rather than only from this one.
+  if(rail) rail.classList.toggle('watching', !!on);
+}
+
+async function alRefresh(){
+  let st = null;
+  try{ st = await (await fetch('api/alerts/status')).json(); }catch(e){ st = null; }
+  const watch = document.getElementById('alWatch');
+  if(!st){
+    // NOT "off". Not being able to ask is a different fact from a clear no,
+    // and reporting it as off is how you sit watching a switch that is lying.
+    alSetState(false, '— could not reach the watcher');
+    if(watch) watch.textContent = 'qp did not answer. It may be restarting.';
+    return;
+  }
+  AL_ON = !!st.on;
+  alSetState(st.on, st.on
+    ? `${st.watched||0} strategy(ies) in window · ${(st.symbols||[]).length} symbol(s)`
+    : 'nothing is being watched');
+  if(watch){
+    const syms = st.symbols || [];
+    watch.innerHTML =
+      `<b>${st.watched||0}</b> strategy(ies) whose window is open now`
+      + `<br><b>${syms.length}</b> symbol(s) from today’s register`
+      + (syms.length ? `<br><span class="muted">${syms.slice(0,24).join(', ')}`
+          + (syms.length>24 ? ` +${syms.length-24} more` : '') + '</span>' : '')
+      + `<br><br>every <b>${st.interval||60}s</b> · <b>${st.tf||'1m'}</b> bars · feed <b>${st.feed||'?'}</b>`
+      + `<br>${st.cycles||0} scan(s) so far`
+      + (st.last_cycle ? ` · last ${st.last_cycle}` : ' · none yet')
+      // A WATCHER IN SESSION THAT HAS NEVER SCANNED is the case worth seeing:
+      // it means it is on and doing nothing, which looks identical to a quiet
+      // market from every other angle.
+      + (st.on && !st.cycles
+          ? '<br><span style="color:var(--draft)">on, but it has not completed a '
+            + 'scan yet — it only runs during the session</span>' : '')
+      + ((st.errors||[]).length
+          ? `<br><span style="color:var(--red)">${st.errors.length} error(s): `
+            + `${st.errors.slice(0,3).join('; ')}</span>` : '');
+  }
+  alRenderList();
+}
+
+/* Everything it has found today, in the section rather than in a floating box
+   in the corner that vanishes on reload. */
+let AL_FOUND = [];
+function alRenderList(){
+  const el = document.getElementById('alList');
+  if(!el) return;
+  if(!AL_FOUND.length){
+    el.textContent = AL_ON ? 'Nothing has fired yet.'
+                           : 'Not watching, so nothing can fire.';
+    return;
+  }
+  el.innerHTML = AL_FOUND.slice(0,40).map(a =>
+    `<div class="al-row"><b>${a.symbol||'?'}</b> ${a.side||''} — ${a.strategy||''}`
+    + `<br><span class="when">${a.bar||''}</span></div>`).join('');
+}
 /* ── 🖨 Print R1 ────────────────────────────────────────────────────────
    Opens a print sheet: one chart per ticker in the chosen register day,
    on the chosen timeframe, with the indicators currently on the chart. */

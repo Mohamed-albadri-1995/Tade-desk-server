@@ -572,10 +572,22 @@ for (const id of ['ctype', 'scaleMode', 'view', 'days', 'feed', 'addPrim']) {
 // The three that own behaviour are FORWARDED to, never re-implemented: the
 // strategy drawer, the alert watcher and the print sheet each carry their own
 // state, and a second caller is a second place to get that state wrong.
-ok('strategy, alerts and print forward to the buttons that own them',
+ok('strategy and print forward to the buttons that own them',
    /railForward\('railStrat','stratBtn'\)/.test(html)
-   && /railForward\('railAlerts','alertsBtn'\)/.test(html)
    && /railForward\('railPrint','printR1Btn'\)/.test(html));
+
+/*
+ * ALERTS DOES NOT FORWARD, and must not.
+ *
+ * It opens the Alerts SECTION, and the start/stop switch lives inside it.
+ * Forwarding as well would toggle the watcher every time you went to look at
+ * whether it was running — a switch you cannot inspect without flipping.
+ */
+ok('the Alerts rail button opens a section rather than toggling the watcher',
+   !/railForward\('railAlerts'/.test(html)
+   && /id="railAlerts" data-psec="psecAlerts"/.test(html));
+ok('...and the switch inside it is what starts and stops the watcher',
+   /alT\.addEventListener\('click',\(\)=>document\.getElementById\('alertsBtn'\)\.click\(\)\)/.test(html));
 
 /*
  * ── ONE BUTTON PER SECTION ────────────────────────────────────────────────
@@ -679,6 +691,55 @@ ok('adding an indicator and editing it are the same section',
    && html.indexOf('id="overlayList"') > html.indexOf('id="addPrim"'));
 ok('the register and the backtest are separate sections',
    /id="psecReg"/.test(html) && /id="psecBt"/.test(html));
+
+/*
+ * ── THE ALERT SWITCH SAYS WHAT IT IS DOING ────────────────────────────────
+ *
+ * It was a button in a menu: you could not tell whether it was on, there was
+ * nothing to configure, and if it WAS on nothing said what it was watching.
+ * The ON state was written into that button's own LABEL — so when the button
+ * moved behind the rail, the only indication there had ever been vanished.
+ *
+ * Every fact it now shows already existed. /api/alerts/status has returned the
+ * strategy count, the symbol list, the feed, the timeframe, the interval, the
+ * cycle count, the last cycle and the errors since the watcher was written.
+ * The page had never asked for it.
+ */
+ok('the state is a word, not the label of a button that may be hidden',
+   /id="alStateWord"/.test(html) && !/textContent='🔔 Alerts ON'/.test(html));
+ok('it reads the watcher from the SERVER, not from a page variable',
+   /fetch\('api\/alerts\/status'\)/.test(html),
+   'a page that believes it is watching while the server stopped is the failure');
+ok('...on load too, because the watcher outlives the page',
+   /alRefresh\(\);\n  railSync\(\)/.test(html));
+ok('it says WHAT is being watched — strategies and symbols',
+   /id="alWatch"/.test(html) && /st\.watched/.test(html) && /st\.symbols/.test(html));
+ok('...and the feed, timeframe and interval it is doing it on',
+   /st\.interval/.test(html) && /st\.tf/.test(html) && /st\.feed/.test(html));
+ok('...and whether it has actually scanned', /st\.cycles/.test(html)
+   && /st\.last_cycle/.test(html));
+ok('an unreachable watcher is NOT reported as "off"',
+   /could not reach the watcher/.test(html),
+   'not being able to ask is a different fact from a clear no');
+ok('the signals it found live in the section, not only a floating box',
+   /id="alList"/.test(html) && /AL_FOUND/.test(html));
+// A screen with no controls and no explanation is what made this feel dead.
+ok('it explains why there is nothing to configure',
+   /watches every saved strategy whose entry/.test(html));
+// Readable from ANY section — "is it watching" is not a question you should
+// have to open the alerts screen to answer.
+ok('the rail shows the watcher running, separately from which section is open',
+   /\.railBtn\.watching/.test(html)
+   && /rail\.classList\.toggle\('watching'/.test(html));
+
+/*
+ * PRINT HAS TO BE REACHABLE. It sat after a flex spacer that pushed it to the
+ * bottom of a rail whose scrollbar is hidden — so on a phone it was below the
+ * fold with nothing on screen suggesting it existed.
+ */
+ok('no spacer pushes rail buttons below the fold',
+   !/railSpacer/.test(html),
+   'the rail scrolls with a hidden scrollbar; anything past the fold is lost');
 
 // A toggle with no sign of its state is a button you press twice to find out
 // what it did.
