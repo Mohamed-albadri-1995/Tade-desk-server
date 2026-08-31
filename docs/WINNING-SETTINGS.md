@@ -97,8 +97,25 @@ answer per setting, or the desk sizes by a rule nobody chose.
 | level | file | holds |
 |---|---|---|
 | **tool** | `tools.config.json` | which tool runs a setup, its card register. **No money settings at all.** |
-| **account** | `data/risk.json` | account size, risk (flat $ **or** %), max position % — shared by every setup |
-| **setup** | `data/setup-prefs.json` | the same three for ONE strategy, plus rank, tf, feed, view, fill, max entries/day |
+| **account** | `data/risk.json` | **the balance only** — what a percentage is a percentage OF |
+| **setup** | `data/setup-prefs.json` | **all money management**: risk rule (flat $ **or** %), max position %, plus rank, tf, feed, view, fill, max entries/day |
+| **destination** | `data/broker.json` | buying power, max order value, min shares, `ratio`, its own Alpaca keys — *can this account execute it*, not how much to risk |
+
+**Money management lives at ONE level: the setup.** That is what its winning
+backtest specified, so that is where it belongs. The account is shared by every
+setup, so a risk rule written there is not any strategy's setting — it is a
+default that quietly sizes whichever strategy has not been adopted yet.
+
+A rule still sitting on the account is **read** (nothing stops trading) and
+**reported** on every run. Move it once:
+
+```
+node scripts/risk-to-setups.js          # show what would move
+node scripts/risk-to-setups.js --yes    # move it
+```
+
+Nothing changes size: each setup is given the number sizing it today, and only
+then is the account's cleared.
 
 **The rule: setup beats account. The risk rule is taken WHOLE.**
 

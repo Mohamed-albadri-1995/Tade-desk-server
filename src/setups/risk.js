@@ -181,6 +181,7 @@ function resolve(account = settings(), setup = null) {
   const sources = { accountSize: 'account' };
   const conflicts = [];
   const overrides = [];
+  let legacy = null;
 
   // THE RISK RULE, taken WHOLE from whichever level names one.
   const setupUsd = pos(s.riskPerTrade);
@@ -205,6 +206,27 @@ function resolve(account = settings(), setup = null) {
     out.riskPerTrade = pos(a.riskPerTrade);
     out.riskPct = out.riskPerTrade ? null : pos(a.riskPct);
     sources.risk = 'account';
+    /*
+     * A RISK RULE ON THE ACCOUNT IS A LEFTOVER, and it is the last place two
+     * levels can still disagree.
+     *
+     * Money management belongs to the SETUP, because it is what that strategy's
+     * winning backtest specified. The account is shared by every setup on the
+     * desk, so a rule written there is not any strategy's setting — it is a
+     * default that quietly sizes whichever strategy has not been adopted yet,
+     * by a number nobody chose for it.
+     *
+     * Still READ, deliberately: refusing it outright would stop a working setup
+     * from sizing the moment this shipped, which is a silent halt rather than a
+     * fix. Reported instead, so it can be moved once and never thought about
+     * again — `node scripts/risk-to-setups.js` does exactly that.
+     */
+    if (out.riskPerTrade || out.riskPct) {
+      legacy = `this setup has no risk rule of its own and is being sized by the `
+        + `ACCOUNT's ${out.riskPerTrade ? `$${out.riskPerTrade}` : `${out.riskPct}%`} `
+        + '— a default, not this strategy\'s tested setting. Adopt its winning '
+        + 'backtest, or run scripts/risk-to-setups.js to move the rule onto it.';
+    }
   }
   out.riskRule = out.riskPerTrade ? 'fixed_usd' : (out.riskPct ? 'pct_of_equity' : null);
 
@@ -224,7 +246,11 @@ function resolve(account = settings(), setup = null) {
     sources.maxPositionPct = 'account';
   }
 
-  return { ...out, sources, conflicts, overrides };
+  return { ...out, sources, conflicts, overrides,
+           // Set when the risk rule came from the account rather than the setup.
+           // Its own field, not folded into `overrides`: an override is a
+           // deliberate choice and this is an un-migrated leftover.
+           ...(legacy ? { legacy } : {}) };
 }
 
 /** What fraction of the standard account this one is. 1 when it says nothing. */

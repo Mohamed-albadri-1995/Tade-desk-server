@@ -401,6 +401,9 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
   if (riskCfg.conflicts.length) {
     console.warn(`[Setups] ${setup.id}: ${riskCfg.conflicts.join(' · ')}`);
   }
+  // A rule still on the ACCOUNT is sizing a strategy by a default rather than
+  // by its own tested setting. Said once per run, not per pick.
+  if (riskCfg.legacy) console.warn(`[Setups] ${setup.id}: ${riskCfg.legacy}`);
 
   /*
    * The orders, placed before the alerts are published.
