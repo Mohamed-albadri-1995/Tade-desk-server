@@ -167,9 +167,10 @@ function save(patch) {
  * ignored entirely. A percentage and a flat dollar are two different sizing
  * strategies, and half of each is neither.
  *
- * `sources` says which level each value came from, so a report can show it.
- * `conflicts` names anything that had to be overridden, so adoption can clear
- * it rather than leaving a value that quietly wins.
+ * `sources` says which level each value came from. `overrides` lists what the
+ * setup superseded — INFORMATION, not a fault: overriding is the design, and
+ * every adopted setup does it. `conflicts` is reserved for the one case that is
+ * genuinely ambiguous, a single level naming both risk rules at once.
  */
 function resolve(account = settings(), setup = null) {
   const s = setup || {};
@@ -179,6 +180,7 @@ function resolve(account = settings(), setup = null) {
   const out = { accountSize: pos(a.accountSize) };
   const sources = { accountSize: 'account' };
   const conflicts = [];
+  const overrides = [];
 
   // THE RISK RULE, taken WHOLE from whichever level names one.
   const setupUsd = pos(s.riskPerTrade);
@@ -192,12 +194,12 @@ function resolve(account = settings(), setup = null) {
     out.riskPct = setupUsd ? null : setupPct;
     sources.risk = 'setup';
     if (pos(a.riskPerTrade) && !setupUsd) {
-      conflicts.push(`the account risks $${pos(a.riskPerTrade)} per trade and this `
-        + `setup overrides it with ${setupPct}% — the setup wins`);
+      overrides.push(`risk: the account says $${pos(a.riskPerTrade)}, this setup `
+        + `says ${setupPct}%`);
     }
     if (pos(a.riskPct) && !setupPct) {
-      conflicts.push(`the account risks ${pos(a.riskPct)}% per trade and this setup `
-        + `overrides it with $${setupUsd} — the setup wins`);
+      overrides.push(`risk: the account says ${pos(a.riskPct)}%, this setup `
+        + `says $${setupUsd}`);
     }
   } else {
     out.riskPerTrade = pos(a.riskPerTrade);
@@ -214,15 +216,15 @@ function resolve(account = settings(), setup = null) {
     sources.maxPositionPct = 'setup';
     const acctCap = pos(a.maxPositionPct) || 100;
     if (acctCap !== setupCap) {
-      conflicts.push(`the account caps a position at ${acctCap}% and this setup `
-        + `overrides it with ${setupCap}% — the setup wins`);
+      overrides.push(`max position: the account says ${acctCap}%, this setup `
+        + `says ${setupCap}%`);
     }
   } else {
     out.maxPositionPct = pos(a.maxPositionPct) || 100;
     sources.maxPositionPct = 'account';
   }
 
-  return { ...out, sources, conflicts };
+  return { ...out, sources, conflicts, overrides };
 }
 
 /** What fraction of the standard account this one is. 1 when it says nothing. */

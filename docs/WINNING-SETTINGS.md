@@ -106,19 +106,31 @@ If the setup names *either* risk rule, the account's is ignored entirely — hal
 a percentage and half a flat dollar is neither. `risk.resolve()` is the only
 place this is decided; the runner, the parity check and the reports all read it.
 
-**Why it matters here.** Adopting #349 writes `riskPct: 0.5` to the account. A
-setup still carrying `riskPerTrade: 500` from an earlier experiment would win
-silently — the sizing prefers a flat dollar — while every report reads the
-account and says everything agrees.
+### Adoption writes at the SETUP level
 
-So `--adopt` **clears** the setup-level `riskPerTrade`, `riskPct` and
-`maxPositionPct`, and lists the clearing as a change. After adopting, exactly
-one level holds each setting: the account, which is this specification.
+`--adopt` writes this run's risk rule and position cap onto **the setup**, and
+only the account **balance** onto the account.
 
-A conflict that exists today shows in `parity-check` as its own **setting
-conflict** row, even when the resolved value happens to match the backtest —
-because it means the run agrees with the override and not with the account, and
-editing the account later would change nothing.
+That is the whole reason the levels exist. The account is shared by every setup
+on the desk, so a risk rule written there is not this strategy's setting — it is
+the desk's. Adopt a winner for `Test` next week at $300 flat and it would
+silently resize 09:35's trades, and nothing would report it.
+
+The balance is different: there is **one** balance, and every setup is sized
+against the same money. It is the only line adoption marks ACCOUNT-WIDE.
+
+Exactly one risk rule is written and the other is deleted, so a setup can never
+name both. A cap the run did not have is written as `100` (= no cap) rather than
+cleared — clearing it would fall through to whatever the account happens to say.
+
+### What counts as a conflict
+
+A setup **overriding** the account is the design, not a fault. Every adopted
+setup does it, and `parity-check` reports it as information, never as a
+difference — flagging it would leave a correctly configured desk permanently red.
+
+The one real conflict is **one level naming two risk rules at once**. No
+precedence can settle that, so it gets its own row and fails the check.
 
 ## Applying it
 

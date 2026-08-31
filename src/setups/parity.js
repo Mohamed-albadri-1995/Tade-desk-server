@@ -232,16 +232,17 @@ function compare({ setup, spec, strategy } = {}) {
     + "indicator's warm-up and removes the 09:29 decision bar entirely"));
 
   /*
-   * TWO LEVELS HOLDING DIFFERENT ANSWERS is worth reporting even when the
-   * resolved one matches: it means the backtest agrees with the override and
-   * NOT with the account, so editing the account later changes nothing and
-   * looks broken.
+   * A SETUP OVERRIDING THE ACCOUNT IS THE DESIGN, not a fault — every adopted
+   * setup does it, and flagging it would leave a correctly configured desk
+   * permanently red. What IS a fault is ONE level naming two risk rules at
+   * once, which no precedence can settle.
    */
   if (eff.conflicts.length) {
     rows.push({ what: 'setting conflict', live: eff.conflicts.join(' · '),
                 backtest: null, status: 'differ',
-                note: 'the same setting is held at two levels — adopt clears the '
-                  + 'one that is being superseded so exactly one level decides' });
+                note: 'ONE level names two risk rules at once. A percentage and '
+                  + 'a flat dollar are different sizing strategies, and half of '
+                  + 'each is neither' });
   }
 
   const differs = rows.filter(x => x.status === 'differ');
@@ -299,28 +300,23 @@ function planAdopt({ setup, spec, strategy } = {}) {
     changes.push({ what, from: from ?? null, to: to ?? null, why: why || null });
   };
 
-  /* THE ACCOUNT — shared by every setup, so it is written once and named as
-   * account-wide. Changing it here changes the size of every other setup's
-   * trades too, and that has to be visible before it is applied. */
+  /*
+   * THE ACCOUNT GETS ONE THING: THE BALANCE.
+   *
+   * Everything else this run specifies is written at the SETUP level, and that
+   * is the whole design. The account is shared by every setup on the desk, so a
+   * risk rule written there is not this strategy's setting — it is the desk's.
+   * Adopt a winner for `Test` next week at $300 flat and it would silently
+   * resize 09:35's trades, which nobody asked for and nothing would report.
+   *
+   * The account size is different: there is ONE balance, and every setup is
+   * sized against the same money. It stays account-wide because it genuinely
+   * is, and it is the only line here that carries that warning.
+   */
   const account = {};
   if (bt.account_equity) account.accountSize = bt.account_equity;
-  if (bt.risk_usd) {
-    account.riskPerTrade = bt.risk_usd;
-    account.riskPct = null;
-  } else if (bt.risk_pct) {
-    account.riskPct = bt.risk_pct;
-    account.riskPerTrade = null;
-  }
-  // Absent in the backtest means NO cap, which the desk spells as 100.
-  account.maxPositionPct = bt.max_position_pct || 100;
-
-  note('account size', cur.accountSize, account.accountSize, 'ACCOUNT-WIDE');
-  note('risk per trade ($)', cur.riskPerTrade, account.riskPerTrade, 'ACCOUNT-WIDE');
-  note('risk per trade (%)', cur.riskPct, account.riskPct,
-    'ACCOUNT-WIDE. The backtest COMPOUNDS this; the desk sizes on the '
-    + 'configured account size, so the two match on trade one and drift as '
-    + 'the run banks P&L');
-  note('max position %', cur.maxPositionPct, account.maxPositionPct, 'ACCOUNT-WIDE');
+  note('account size', cur.accountSize, account.accountSize,
+    'ACCOUNT-WIDE — there is one balance, and every setup is sized against it');
 
   /* THE SETUP — everything that belongs to this strategy alone. */
   const rank = bt.rank_per_day || null;
@@ -341,27 +337,36 @@ function planAdopt({ setup, spec, strategy } = {}) {
     fill: (bt.fill === 'desk' || bt.fill === 'next_open' || !bt.fill) ? 'live' : bt.fill,
     maxTradesPerDay: (bt.rules && bt.rules.max_entries_per_day) || null,
     /*
-     * THE OVERRIDES ARE CLEARED, and that is the point of adopting rather than
-     * editing the account by hand.
+     * THE MONEY RULES, WRITTEN HERE RATHER THAN ON THE ACCOUNT.
      *
-     * The backtest describes ONE book, so after adoption exactly one level may
-     * decide its size. A setup-level riskPerTrade left standing beside a newly
-     * adopted account riskPct wins silently — the desk then sizes by a rule
-     * nobody chose while every report reads the account and says it agrees.
+     * This is the setting that belongs to THIS strategy, because it is what
+     * THIS strategy's winning backtest specified. Written at the setup level it
+     * cannot be disturbed by adopting a winner for another strategy, and it
+     * beats the account by the precedence in risk.resolve().
      *
-     * Null deletes the key (prefs.saveSettings), so the setup falls through to
-     * the account, which is now the adopted specification.
+     * Exactly ONE risk rule is written and the other is explicitly nulled —
+     * null deletes the key — so the setup can never end up naming both, which
+     * is the one case resolve() has to call ambiguous.
+     *
+     * A cap absent in the backtest means NO cap, which the desk spells as 100.
+     * Writing 100 rather than clearing the key matters: clearing it would fall
+     * through to whatever the account happens to say, and the run said none.
      */
-    riskPerTrade: null,
-    riskPct: null,
-    maxPositionPct: null,
+    riskPerTrade: bt.risk_usd || null,
+    riskPct: bt.risk_usd ? null : (bt.risk_pct || null),
+    maxPositionPct: bt.max_position_pct || 100,
   };
 
-  note('setup risk override ($)', curPrefs.riskPerTrade, null,
-    'CLEARED — the account is the specification now, and two levels holding '
-    + 'the same setting is how one of them wins silently');
-  note('setup risk override (%)', curPrefs.riskPct, null, 'CLEARED');
-  note('setup position cap override', curPrefs.maxPositionPct, null, 'CLEARED');
+  // Named as this setup's own, because that is what they are — and so a
+  // reader can see they will not move when another strategy is adopted.
+  note('risk per trade ($)', curPrefs.riskPerTrade, setupPatch.riskPerTrade,
+    "this setup's own");
+  note('risk per trade (%)', curPrefs.riskPct, setupPatch.riskPct,
+    "this setup's own. The backtest COMPOUNDS this; the desk sizes on the "
+    + 'configured account size, so the two match on trade one and drift as the '
+    + 'run banks P&L');
+  note('max position %', curPrefs.maxPositionPct, setupPatch.maxPositionPct,
+    "this setup's own. 100 means NO cap, which is what the run had");
   note('rank metric', curPrefs.rankMetric, setupPatch.rankMetric);
   note('rank top N', curPrefs.topN, setupPatch.topN);
   note('timeframe', curPrefs.tf, setupPatch.tf);
