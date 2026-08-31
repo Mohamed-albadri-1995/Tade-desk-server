@@ -878,6 +878,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     open_trade = None
     in_pos = False; ei = 0; sl = tp = None; ep_cur = None
     dp_cur = None                        # the price the levels were measured from
+    sig_cur = None                       # the signal bar's close — what the RANK sees
     sl_eff = None                        # RATCHET: a stop never loosens (see below)
     sl_at_entry = None                   # the armed stop AT ENTRY (position sizing)
     pending_exit = False                 # next_open: exit signal seen, fills next bar
@@ -1118,6 +1119,16 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                         _drop('target_too_close')
                         continue
                 in_pos = True; ei = ej; ep_cur = ep; dp_cur = dp
+                # THE PRICE THE DECISION WAS TAKEN AT, independent of every
+                # fill model. `ep` is where the money went in and `dp` is where
+                # the levels were measured from; this is neither — it is the
+                # close of the bar the strategy looked at, which is the only
+                # price that exists at the moment of choosing.
+                #
+                # It is separate because RANKING is a decision-time question. A
+                # metric computed from the fill would rank candidates on a price
+                # that had not printed when the choice was made.
+                sig_cur = close[j]
                 pending_exit = False
                 entered_run = True        # this true-run has now been taken
                 sl_eff = e_sl if (e_sl is not None and e_sl == e_sl) else None
@@ -1163,6 +1174,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                            # differ, the difference IS the execution gap, and
                            # a report that cannot see both cannot show it.
                            'decided': float(dp_cur),
+                           'signal_px': float(sig_cur),
                            # the ARMED stop at entry — risk-based position
                            # sizing needs the per-share risk, not just the %
                            'stop': (float(sl_at_entry) if sl_at_entry is not None
@@ -1261,6 +1273,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                                # left through its last target must report the
                                # execution gap exactly like one that was stopped.
                                'decided': float(dp_cur),
+                               'signal_px': float(sig_cur),
                                'stop': (float(sl_at_entry) if sl_at_entry is not None
                                         and sl_at_entry == sl_at_entry else None),
                                'legs': list(legs)})
@@ -1302,6 +1315,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         # fold any banked partials into the still-open position's mark-to-market
         open_trade = {'ei': ei, 'entry': float(ep_cur),
                       'decided': (float(dp_cur) if dp_cur is not None else None),
+                      'signal_px': (float(sig_cur) if sig_cur is not None else None),
                       'last': float(close[-1]), 'ret': float(realized + remaining * r),
                       'stop': (float(sl_at_entry) if sl_at_entry is not None
                                and sl_at_entry == sl_at_entry else None),
@@ -1711,6 +1725,14 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         # EXACTLY this, so preview and backtest can never disagree.
         'trades': [{'entry_ts': int(ts[t['ei']]), 'exit_ts': int(ts[t['xi']]),
                     'entry': t['entry'], 'exit': t['exit'], 'ret': t['ret'],
+                    # THE TWO NON-FILL PRICES, projected out with the trade.
+                    # `decided` is where the LEVELS were measured from and
+                    # `signal_px` is what the RANK sees. The sim has always had
+                    # both; this projection is the only way out of it, so a key
+                    # missing here is a key that does not exist downstream —
+                    # and the ranker then silently falls back to the fill.
+                    'decided': t.get('decided'),
+                    'signal_px': t.get('signal_px'),
                     'stop': t.get('stop'),
                     'reason': t['reason'], 'drop_pct': _drop_at(t['ei'], t['entry']),
                     # scale-out partials, timestamped for the chart (Step 3)
@@ -1729,6 +1751,13 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         'stats': stats,
         'open_trade': ({'time': int(ts[open_trade['ei']]),
                         'entry': open_trade['entry'],
+                        # carried out of the sim, not left behind in it. A
+                        # still-open trade is ranked against the closed ones on
+                        # the same day, so it needs the same decision price —
+                        # without these two keys it silently fell back to the
+                        # FILL and ranked on a price it never saw.
+                        'decided': open_trade.get('decided'),
+                        'signal_px': open_trade.get('signal_px'),
                         'stop': open_trade.get('stop'),
                         'ret_pct': round(100.0 * open_trade['ret'], 3),
                         'drop_pct': _drop_at(open_trade['ei'], open_trade['entry']),

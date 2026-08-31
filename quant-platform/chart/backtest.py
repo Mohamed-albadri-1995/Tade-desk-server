@@ -75,14 +75,45 @@ def rank_metric(side: str, entry, stop) -> float | None:
 # So: a strategy that does not NAME a metric is not ranked. Taking every
 # signal is the honest default, because it is the only one that does not
 # invent a preference.
+def decision_px(t: dict):
+    """The price the DECISION was taken at — never the price the fill got.
+
+    RANKING IS A DECISION-TIME QUESTION, and this is the whole of the bug it
+    fixes. `vwap_extension` is the distance from price to the stop, and it was
+    being measured from `entry` — which is the FILL. Under fill='next_open'
+    that is the following bar's open, a price that had not printed when the
+    choice was made. So the backtest sorted its candidates on information the
+    live desk could not have, and picked a different top N.
+
+    Measured live, 2026-08-19, WULF short with a 15.74 stop:
+
+        decision close 15.37  ->  extension 2.41%     what the desk ranked on
+        next-bar open  15.45  ->  extension 1.88%     what the backtest ranked on
+
+    Twenty-eight percent apart on the number that decides which three trades of
+    thirty get taken. That is not a P&L difference, it is a different book — and
+    it is why the same strategy, the same days and the same rank settings chose
+    AMLX/HL/BILL live and BILL/CRCL/SEI in the backtest.
+
+    Falls back to `entry` for rows written before `signal_px` existed, and for
+    live picks, where fill='close' makes the two the same number anyway.
+    """
+    for src in (t, t.get('ctx') or {}):
+        v = src.get('signal_px')
+        if v is not None:
+            return v
+    return t.get('entry')
+
+
 RANK_METRICS = {
-    # distance from entry to the stop, in percent. For a VWAP-anchored stop
-    # this is extension from VWAP (T2's spec). Descending = most extended.
-    'vwap_extension': (lambda t: rank_metric(t['side'], t['entry'], t.get('stop')),
+    # distance from the DECISION price to the stop, in percent. For a
+    # VWAP-anchored stop this is extension from VWAP (T2's spec). Descending =
+    # most extended.
+    'vwap_extension': (lambda t: rank_metric(t['side'], decision_px(t), t.get('stop')),
                        'desc'),
     # the same number, ascending — for setups whose edge is a TIGHT stop, where
     # the T2 ordering picks precisely against you.
-    'tight_stop': (lambda t: rank_metric(t['side'], t['entry'], t.get('stop')),
+    'tight_stop': (lambda t: rank_metric(t['side'], decision_px(t), t.get('stop')),
                    'asc'),
     # the register's own conviction score, when the screener supplied one
     'reg_score': (lambda t: _num((t.get('ctx') or {}).get('score')), 'desc'),
@@ -1083,6 +1114,7 @@ def run(spec: dict, progress_cb=None) -> dict:
                                    # here left the gap computable and unreadable.
                                    'ctx': {**(rctx or {}),
                                            'decided': t.get('decided'),
+                                           'signal_px': t.get('signal_px'),
                                            'drop_pct': t.get('drop_pct'),
                                            'strategy': sname},
                                    'legs': t.get('legs') or []})
@@ -1107,6 +1139,7 @@ def run(spec: dict, progress_cb=None) -> dict:
                                   'reason': 'open',
                                   'ctx': {**(rctx or {}),
                                           'decided': ot.get('decided'),
+                                          'signal_px': ot.get('signal_px'),
                                           'drop_pct': ot.get('drop_pct'),
                                           'strategy': sname},
                                   'legs': ot.get('legs') or []})
