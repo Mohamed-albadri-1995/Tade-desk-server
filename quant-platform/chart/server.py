@@ -324,6 +324,71 @@ def desk_backtest_defaults():
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/cache')
+def cache_stats():
+    """How much disk the bar cache is using, and whether that is a problem.
+
+    Three loaders write parquet frames into ~/.qp-cache and NOTHING used to
+    delete one. A print sheet is what fills it fastest: 150 charts a day, a
+    file each, hundreds of kilobytes apiece — a few afternoons of printing is
+    gigabytes, and when it filled the disk the platform stopped working in a
+    way that pointed nowhere near the cache.
+    """
+    from tools.data import cache
+    try:
+        return {'ok': True, **cache.stats()}
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
+@app.post('/api/cache/clear')
+def cache_clear(payload: dict = Body(default={})):
+    """Delete the cached bars. Safe by construction.
+
+    Every file here is a COPY of something the feeds can return again, so
+    losing all of it costs the next fetch its network time and nothing else.
+    That is why this needs no confirmation beyond pressing it.
+
+    `older_than_days` deletes only what has not been written since then —
+    for reclaiming a print sheet's worth without dropping today's bars.
+    """
+    from tools.data import cache
+    from chart import oplog
+    try:
+        days = payload.get('older_than_days')
+        days = float(days) if days not in (None, '') else None
+        before = cache.stats()
+        out = cache.clear(older_than_days=days)
+        # RECORDED. Deleting a few gigabytes is worth being able to find
+        # afterwards — "the cache was empty on Tuesday" has an answer now.
+        oplog.record('cache_clear', deleted=out.get('deleted'),
+                     freed_mb=out.get('freed_mb'), older_than_days=days,
+                     was_mb=before.get('mb'))
+        return {'ok': True, **out, 'now': cache.stats()}
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
+@app.post('/api/cache/sweep')
+def cache_sweep():
+    """Trim to the limit now, rather than waiting for the next fetch to do it.
+
+    The cache trims itself where it GROWS — every loader calls the sweeper
+    after writing a file — so this is only for a box that has stopped fetching
+    and is still over, which is exactly the state a full disk produces.
+    """
+    from tools.data import cache
+    from chart import oplog
+    try:
+        out = cache.sweep(force=True)
+        if out.get('deleted'):
+            oplog.record('cache_sweep', **{k: v for k, v in out.items()
+                                           if k != 'freed_bytes'})
+        return {'ok': True, **out, 'now': cache.stats()}
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
 @app.get('/api/oplog')
 def oplog_read(limit: int = 200, op: str = '', day: str = '', summary: int = 0):
     """What qp has been asked to do, newest first.

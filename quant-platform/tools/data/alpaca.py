@@ -22,7 +22,12 @@ from urllib.parse import urlencode
 import pandas as pd
 
 
-_CACHE_DIR = Path.home() / '.qp-cache'
+from tools.data import cache as _cache      # noqa: E402  the shared bar cache
+
+# ONE DIRECTORY, DEFINED ONCE. Three loaders each declared this path, so a
+# sweeper pointed at one of them would have missed the other two — and the
+# whole point of a limit is that nothing escapes it.
+_CACHE_DIR = _cache.DIR
 _BASE = 'https://data.alpaca.markets/v2/stocks'
 
 _TF_MAP = {'1m': '1Min', '2m': '2Min', '5m': '5Min', '15m': '15Min', '30m': '30Min',
@@ -99,5 +104,13 @@ def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
                              'l': 'low', 'c': 'close', 'v': 'volume'})
              .set_index('time').sort_index())
     df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
-    df.to_parquet(cache)
+    try:
+        df.to_parquet(cache)
+    except Exception:
+        pass                     # a cache that cannot be written is not an error
+    # THE CACHE IS CHECKED WHERE IT GROWS. Nothing else deletes these files,
+    # so the one call that creates one is the one place a limit can be
+    # enforced without a cron job or a person remembering. Throttled inside;
+    # never raises. See tools/data/cache.py.
+    _cache.after_write()
     return df

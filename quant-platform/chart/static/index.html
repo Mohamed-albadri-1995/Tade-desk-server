@@ -494,6 +494,26 @@
         <input id="asof" type="date"></label>
     </div>
     <button id="fitBtn" class="dk-btn" style="width:100%" title="fit all bars to view">⤢ Fit all bars</button>
+    <!-- ── THE BAR CACHE ──
+         Every fetched frame is written to disk so the next request for the
+         same window costs nothing. Nothing used to delete one, and a print
+         sheet is 150 files a day — a few afternoons of printing filled the
+         disk and took the platform down in a way that pointed nowhere near
+         here. It trims itself now; this is the number, and the button for
+         when you want the space back at once. -->
+    <div id="cacheBox" class="muted" style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px">
+      <div style="display:flex;align-items:baseline;gap:6px">
+        <b style="color:var(--text2);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase">Cached bars</b>
+        <span id="cacheStat">…</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button id="cacheClear" class="dk-btn" style="flex:1">Delete all</button>
+        <button id="cacheOld" class="dk-btn" style="flex:1" title="keep what has been fetched in the last 2 days">Delete &gt; 2 days</button>
+      </div>
+      <div style="font-size:10px;margin-top:5px;line-height:1.6">Safe: every file is a copy of
+        something the feed can send again, so deleting costs the next chart its network time
+        and nothing else.</div>
+    </div>
   </div>
 
   <!-- "Add an indicator" was here, in the same sheet as the chart settings, while
@@ -2455,6 +2475,43 @@ async function evalStrategy(){
  * time and nowhere else, which is the one bug class the UI harness exists to
  * catch. Nothing here is worth hiding.
  */
+/*
+ * ── THE BAR CACHE, on the page that can delete it ─────────────────────
+ *
+ * It reports its own size and says when it is over its limit, because "the
+ * server broke and I did not know why" is the failure this is fixing, and a
+ * number nobody can see is not an improvement on no number at all.
+ */
+async function cacheRefresh(){
+  const el = document.getElementById('cacheStat');
+  if(!el) return;
+  try{
+    const d = await (await fetch('api/cache')).json();
+    if(!d.ok) throw new Error(d.error||'no answer');
+    el.textContent = `${d.mb} MB in ${d.files} file(s) · limit ${d.max_mb} MB`
+      + (d.free_mb >= 0 ? ` · ${Math.round(d.free_mb/1000*10)/10} GB free` : '');
+    // OVER ITS LIMIT is shown, not just implied by two numbers. It trims
+    // itself on the next fetch, so this is information rather than an alarm.
+    el.style.color = d.over ? 'var(--draft)' : '';
+    if(d.over) el.textContent += ' — over, will trim';
+  }catch(e){ el.textContent = 'could not read the cache'; }
+}
+
+async function cacheDelete(days){
+  const el = document.getElementById('cacheStat');
+  if(el) el.textContent = 'deleting…';
+  try{
+    const body = days ? {older_than_days: days} : {};
+    const d = await (await fetch('api/cache/clear', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})).json();
+    if(!d.ok) throw new Error(d.error||'refused');
+    if(el) el.textContent = `deleted ${d.deleted} file(s), freed ${d.freed_mb} MB`;
+    // ...then the real number a moment later, so the page settles on what IS
+    // rather than on what just happened.
+    setTimeout(cacheRefresh, 1200);
+  }catch(e){ if(el) el.textContent = 'could not delete: ' + e.message; }
+}
+
 /* Open ONE section of the settings sheet, and title the sheet after it.
    It used to open the sheet and SCROLL to a group, leaving the other two above
    and below — so Chart and Study were the same screen and the button you
@@ -2811,6 +2868,15 @@ window.addEventListener('load',async()=>{
   // rather than showing whatever it said the last time something polled.
   const alRail = document.getElementById('railAlerts');
   if(alRail) alRail.addEventListener('click',()=>alRefresh());
+  // The cache lives in the Chart section; read it when that section opens
+  // rather than on a timer — it is a number about the disk, not a live feed.
+  const chRail = document.getElementById('railChart');
+  if(chRail) chRail.addEventListener('click',()=>cacheRefresh());
+  const cc = document.getElementById('cacheClear');
+  if(cc) cc.addEventListener('click',()=>cacheDelete(null));
+  const co = document.getElementById('cacheOld');
+  if(co) co.addEventListener('click',()=>cacheDelete(2));
+  cacheRefresh();
 
   document.getElementById('railStrat').addEventListener('click',()=>setTimeout(railSync,0));
   document.getElementById('sideBtn').addEventListener('click',()=>setTimeout(railSync,0));
