@@ -97,14 +97,25 @@
      a phone, where the alternative was a horizontal scroll whose end you could
      not see. Same markup either way — only the CSS moves it. */
   #hdrMore { flex:0 0 auto; background:var(--bg2); border-bottom:1px solid var(--border);
-    padding:var(--s3); display:none; gap:var(--s4); }
+    padding:var(--s3); display:none; gap:var(--s2) var(--s4); flex-wrap:wrap; }
   body.more-open #hdrMore { display:flex; }
-  #hdrMore .mgrp { flex:1 1 260px; min-width:0; }
+  /* ── ONE SECTION AT A TIME ──
+     The sheet used to show every group at once and the rail "scrolled you to
+     one" — so Chart and Study were the same screen with a different scroll
+     position, and pressing either read as the button not working. A section is
+     now a section: the rail chooses which one is on, and only that one exists
+     on screen. */
+  #hdrMore .mgrp { flex:1 1 auto; min-width:0; display:none; }
+  #hdrMore .mgrp.show { display:block; }
   #hdrMore h5 { margin:0 0 var(--s2); font-size:10.5px; letter-spacing:.1em;
     text-transform:uppercase; color:var(--text2); font-weight:700; }
-  #moreTop { display:none; }
-  .mtools { display:flex; flex-wrap:wrap; gap:var(--s2); }
-  .mtools button { flex:1 1 auto; }
+  /* The sheet's title says which section is open, on every screen size — it was
+     hidden on desktop, so a one-section sheet would have been unlabelled. */
+  #moreTop { display:flex; align-items:center; justify-content:space-between;
+    width:100%; margin-bottom:var(--s2); }
+  #moreTop b { font-size:var(--f-md); }
+  #moreClose { cursor:pointer; font-size:18px; line-height:1; padding:2px 10px;
+    color:var(--text2); }
   #hdrMore button { border:1px solid var(--border); background:var(--bg3); color:var(--text);
     padding:9px 12px; border-radius:6px; font:600 var(--f-sm)/1 var(--ui); cursor:pointer;
     min-height:36px; }
@@ -127,11 +138,7 @@
       transform:translateY(102%); transition:transform .18s ease-out;
       padding:var(--s3) var(--s3) var(--s5); }
     body.more-open #hdrMore { transform:translateY(0); }
-    #hdrMore .mgrp + .mgrp { border-top:1px solid var(--border);
-      padding-top:var(--s3); margin-top:var(--s3); }
-    #moreTop { display:flex; align-items:center; justify-content:space-between;
-      margin-bottom:var(--s3); }
-    #moreTop b { font-size:var(--f-md); }
+    #moreTop { margin-bottom:var(--s3); }
     #moreClose { cursor:pointer; font-size:20px; line-height:1; padding:4px 12px;
       border:1px solid var(--border); border-radius:8px; color:var(--text); }
     body.more-open #moreBackdrop { display:block; position:fixed; inset:0;
@@ -242,6 +249,10 @@
     #drawer .dbody { flex-direction:column; }
   }
   #side h3 { margin:12px 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text2); }
+  /* One panel section on screen at a time — see the note in the markup. */
+  .psec { display:none; }
+  .psec.show { display:block; }
+  .psec > h3:first-child { margin-top:0; }
   #side h3:first-child { margin-top:0; }
   #overlayList { display:flex; flex-direction:column; gap:4px; }
   .ovrow { display:flex; align-items:center; gap:7px; padding:5px 7px; border:1px solid var(--border); border-radius:5px; cursor:pointer; background:#141a24; }
@@ -349,16 +360,22 @@
   <label><span class="lbl">TF</span> <select id="tf"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
   <button id="compute" class="prim">Compute</button>
   <button id="liveBtn">▶ Live</button>
-  <button id="sideBtn" title="show / hide the side panel">☰ Panel</button>
-  <button id="moreBtn" title="chart type, scale, session, indicators, tools"
-          onclick="document.body.classList.toggle('more-open')">⚙ More</button>
+  <!-- ☰ Panel and ⚙ More used to sit here, and both were a second way to press
+       a rail button: More opened the same sheet as Chart and Study, Panel the
+       same panel as Register and Backtest. The header is now what it says it
+       is — WHICH symbol, WHAT timeframe, is it live — and every way INTO
+       something is on the rail, in one place, always visible.
+       They keep their handlers and stay hidden: `sideBtn` owns the open/close
+       logic the rail forwards to. -->
+  <button id="sideBtn" hidden title="show / hide the side panel">☰ Panel</button>
+  <button id="moreBtn" hidden onclick="document.body.classList.toggle('more-open')">⚙ More</button>
   <span id="status"></span>
   <span id="build" class="muted" style="margin-left:auto"></span>
 </header>
 
 <div id="moreBackdrop" onclick="document.body.classList.remove('more-open')"></div>
 <div id="hdrMore">
-  <div id="moreTop"><b>Chart &amp; tools</b>
+  <div id="moreTop"><b id="moreTitle">Chart</b>
     <span id="moreClose" onclick="document.body.classList.remove('more-open')">✕</span></div>
 
   <div class="mgrp" id="mgrpChart"><h5>Chart</h5>
@@ -385,53 +402,66 @@
     <button id="fitBtn" class="dk-btn" style="width:100%" title="fit all bars to view">⤢ Fit all bars</button>
   </div>
 
-  <div class="mgrp" id="mgrpInd"><h5>Add an indicator</h5>
-    <div class="frow three">
-      <label class="fld"><span>Indicator</span><select id="addPrim"></select></label>
-      <label class="fld"><span>Length</span><input id="addLen" type="number" placeholder="e.g. 20"></label>
-      <label class="fld"><span>Source</span><select id="addSource">
-        <option>close</option><option>open</option><option>high</option><option>low</option>
-        <option>hl2</option><option>hlc3</option><option>ohlc4</option><option>volume</option>
-      </select></label>
-    </div>
-    <button id="addBtn" class="dk-btn primary" style="width:100%">+ Add to chart</button>
-  </div>
+  <!-- "Add an indicator" was here, in the same sheet as the chart settings, while
+       the list of indicators you had added lived at the bottom of the side
+       panel. It is all in the panel's Study section now — one place, reached by
+       one rail button. Moved, not copied: there is still exactly one #addPrim,
+       one #addLen and one #addBtn on this page. -->
 
-  <div class="mgrp" id="mgrpTools"><h5>Tools</h5>
-    <div class="mtools">
-      <button id="stratBtn">⚡ Strategy</button>
-      <button id="printR1Btn" title="Print every ticker in an R1/Shortlist day as charts — your timeframe, your indicators, full extended hours plus the previous day">🖨 Print R1</button>
-      <button id="alertsBtn" title="live signal watcher: today's R1 + Shortlist × every saved setup, browser notification + sound on any entry signal">🔔 Alerts</button>
-    </div>
+  <!-- ── WHERE THE TOOL BUTTONS WENT ──
+       Strategy, Print and Alerts were three buttons in a "Tools" group inside
+       this sheet, AND three buttons on the left rail that did nothing but click
+       these. Two places to press for one action, which is what "many buttons do
+       the same thing" means.
+       The rail is the one that stays: it is on screen at all times, so the tool
+       is one tap rather than two. These keep the BEHAVIOUR — every handler in
+       this page is bound to these ids and moving them would be a rewrite of the
+       three largest ones — but they are no longer a second thing to press.
+       Hidden, not deleted, and the rail forwards to them. -->
+  <div id="toolActions" hidden>
+    <button id="stratBtn">⚡ Strategy</button>
+    <button id="printR1Btn" title="Print every ticker in an R1/Shortlist day as charts — your timeframe, your indicators, full extended hours plus the previous day">🖨 Print R1</button>
+    <button id="alertsBtn" title="live signal watcher: today's R1 + Shortlist × every saved setup, browser notification + sound on any entry signal">🔔 Alerts</button>
   </div>
 </div>
 <main>
-  <!-- ── THE LEFT RAIL ──
-       Everything you reach for WHILE LOOKING AT THE CHART, one tap away and
-       always on screen.
-
-       The header holds what identifies the chart — symbol, timeframe, is it
-       live. Everything else was behind one "More" button, which meant every
-       tool was two taps and none of them were visible: on a phone you could not
-       tell the strategy builder existed.
-
-       The rail does NOT duplicate a single control. Each button opens the same
-       #hdrMore sheet and brings its group into view, so there is one copy of
-       every input and nothing to drift. -->
-  <nav id="leftRail" aria-label="chart tools">
-    <button class="railBtn" data-group="mgrpChart" title="chart type, scale, session, days, feed">
+  <!-- ── THE LEFT RAIL: ONE WAY IN, PER SECTION ──
+       Seven things this page does, seven buttons, and each one opens ITS OWN
+       section. That is the whole design, and the first version of this rail
+       did not have it.
+       WHAT WAS WRONG BEFORE. The rail forwarded to the buttons that already
+       existed, on the reasoning that forwarding duplicates no control. It
+       duplicated the NAVIGATION instead, which is worse, because a control
+       does at least do one thing:
+           Chart and Study        opened the same sheet, scrolled differently
+           ⚙ More (header)        opened that same sheet again
+           ☰ Panel (header)       opened the same panel as the rail's Panel
+           Strategy/Print/Alerts  each existed twice — rail and "Tools" group
+       Six buttons for three destinations, and the two destinations themselves
+       were each a scroll of unrelated things: chart settings above an indicator
+       form; a register list above twenty backtest fields.
+       Now: one button per section, one section on screen, and the header is
+       back to being the header — which symbol, what timeframe, is it live. -->
+  <nav id="leftRail" aria-label="sections">
+    <button class="railBtn" id="railChart" data-sheet="mgrpChart" data-title="Chart"
+            title="type, scale, days, session, feed, as-of">
       <span class="ri">&#128202;</span><span class="rl">Chart</span></button>
-    <button class="railBtn" data-group="mgrpInd" title="add an indicator to the chart">
+    <button class="railBtn" id="railStudy" data-psec="psecStudy" data-title="Study"
+            title="add an indicator, and edit the ones on the chart">
       <span class="ri">&#128200;</span><span class="rl">Study</span></button>
     <button class="railBtn" id="railStrat" title="build, test and save a strategy">
       <span class="ri">&#9889;</span><span class="rl">Strategy</span></button>
+    <button class="railBtn" id="railBt" data-psec="psecBt" data-title="Backtest"
+            title="run a strategy over a date range and read the trades">
+      <span class="ri">&#129514;</span><span class="rl">Test</span></button>
+    <button class="railBtn" id="railReg" data-psec="psecReg" data-title="Register"
+            title="what the scanners found — by tool and by day">
+      <span class="ri">&#128203;</span><span class="rl">Register</span></button>
+    <span class="railSpacer"></span>
     <button class="railBtn" id="railAlerts" title="live signal watcher across today's register">
       <span class="ri">&#128276;</span><span class="rl">Alerts</span></button>
-    <button class="railBtn" id="railPrint" title="print a whole register day as charts">
+    <button class="railBtn" id="railPrint" title="print a register day as charts">
       <span class="ri">&#128424;</span><span class="rl">Print</span></button>
-    <span class="railSpacer"></span>
-    <button class="railBtn" id="railPanel" title="show / hide the side panel">
-      <span class="ri">&#9776;</span><span class="rl">Panel</span></button>
   </nav>
   <div id="chartWrap">
     <div id="banner"></div>
@@ -511,8 +541,15 @@
   <div id="sideBackdrop"></div>
   <div id="side">
     <div id="sideGrip" title="drag to resize"></div>
-    <div id="sideTop"><b>Panel</b><span id="sideClose" title="close panel">✕</span></div>
-    <h3>Screener register</h3>
+    <div id="sideTop"><b id="sideTitle">Register</b><span id="sideClose" title="close panel">✕</span></div>
+    <!-- ── TWO JOBS, TWO SECTIONS ──
+         "Which stocks did the scanners find this morning" and "what would this
+         strategy have done over three weeks" are not the same question, and
+         they were one scroll: the register list, then twenty backtest fields
+         under it, in a panel titled "Panel". You scrolled past one to reach the
+         other and neither had a name of its own.
+         Same markup, same ids, one shown at a time — the rail chooses. -->
+    <div class="psec" id="psecReg">
     <div id="regBar">
       <select id="regReg" title="which scanning tool's register to browse"><option value="R1">R1</option><option value="Shortlist">Shortlist</option></select>
       <select id="regDate"></select>
@@ -520,7 +557,9 @@
     <div id="srcBar" class="muted" style="font-size:10px;margin:2px 0 4px"></div>
     <div id="regWarn" class="muted" style="font-size:10px;margin:0 0 4px"></div>
     <div id="regList"><div class="muted">Loading register…</div></div>
-    <h3>🧪 Backtest</h3>
+    </div><!-- /psecReg -->
+
+    <div class="psec" id="psecBt">
     <!-- LABELLED AND GROUPED.
          This was twenty numeric inputs in one column, each labelled only by its
          own placeholder — grey, inside the box, and gone the moment there was a
@@ -722,14 +761,34 @@
         </details>
       </div>
     </div>
+    </div><!-- /psecBt -->
 
-    <h3>Overlays</h3>
-    <div id="overlayList"><div class="muted">Pick an indicator in the top bar → + Add.</div></div>
-    <h3>Selected</h3>
-    <div id="primName" class="muted">—</div>
-    <div id="primDesc" class="muted" style="font-size:11px;margin-top:4px;max-height:120px;overflow:auto">—</div>
-    <h3>Parameters</h3>
-    <div id="paramsGrid"><div class="muted">—</div></div>
+    <!-- ── STUDY, IN ONE PLACE ──
+         The indicator work was split across two screens: "Add an indicator"
+         was in the sheet behind the Chart button, and the list of what you had
+         added — plus the selected one and its parameters — was down here at the
+         bottom of the panel, under the backtest. Adding a moving average and
+         then changing its length were different journeys through the app.
+         Add, list, and edit are one section now. -->
+    <div class="psec" id="psecStudy">
+      <h3>Add an indicator</h3>
+      <div class="frow three">
+        <label class="fld"><span>Indicator</span><select id="addPrim"></select></label>
+        <label class="fld"><span>Length</span><input id="addLen" type="number" placeholder="e.g. 20"></label>
+        <label class="fld"><span>Source</span><select id="addSource">
+          <option>close</option><option>open</option><option>high</option><option>low</option>
+          <option>hl2</option><option>hlc3</option><option>ohlc4</option><option>volume</option>
+        </select></label>
+      </div>
+      <button id="addBtn" class="dk-btn primary" style="width:100%">+ Add to chart</button>
+      <h3>On the chart</h3>
+      <div id="overlayList"><div class="muted">Nothing added yet — pick one above.</div></div>
+      <h3>Selected</h3>
+      <div id="primName" class="muted">—</div>
+      <div id="primDesc" class="muted" style="font-size:11px;margin-top:4px;max-height:120px;overflow:auto">—</div>
+      <h3>Parameters</h3>
+      <div id="paramsGrid"><div class="muted">—</div></div>
+    </div><!-- /psecStudy -->
   </div>
 </main>
 <script>
@@ -2261,17 +2320,60 @@ async function evalStrategy(){
  * time and nowhere else, which is the one bug class the UI harness exists to
  * catch. Nothing here is worth hiding.
  */
-function railOpen(groupId){
+/* Open ONE section of the settings sheet, and title the sheet after it.
+   It used to open the sheet and SCROLL to a group, leaving the other two above
+   and below — so Chart and Study were the same screen and the button you
+   pressed was not obvious from what you got. */
+function railOpen(groupId, title){
   document.body.classList.add('more-open');
-  const g = document.getElementById(groupId);
-  if(!g) return;
-  // Scrolled into view AND marked. The sheet holds three groups, and landing in
-  // the middle of it with nothing highlighted reads as the wrong button having
-  // been pressed.
-  try{ g.scrollIntoView({ block:'nearest', behavior:'smooth' }); }catch(_){ g.scrollIntoView(); }
-  document.querySelectorAll('.mgrp.flash').forEach(x=>x.classList.remove('flash'));
-  g.classList.add('flash');
-  setTimeout(()=>g.classList.remove('flash'), 1600);
+  document.querySelectorAll('#hdrMore .mgrp').forEach(g =>
+    g.classList.toggle('show', g.id === groupId));
+  const t = document.getElementById('moreTitle');
+  if(t && title) t.textContent = title;
+  railSync();
+}
+
+/* The same idea for the side panel: Register, Study and Backtest are three
+   jobs, not one scroll. Opens the panel if it is closed — pressing "Register"
+   with the panel shut has exactly one sensible meaning. */
+function panelOpen(secId, title){
+  const side = document.getElementById('side');
+  if(side) side.classList.remove('hide');
+  document.body.classList.remove('more-open');
+  document.querySelectorAll('#side .psec').forEach(s =>
+    s.classList.toggle('show', s.id === secId));
+  const t = document.getElementById('sideTitle');
+  if(t && title) t.textContent = title;
+  // The panel scrolls; a new section has to start at ITS top rather than at
+  // wherever the last one was left.
+  if(side) side.scrollTop = 0;
+  railSync();
+}
+
+/* The section each container shows before anything has been pressed.
+   Register for the panel, because "what did the scanners find" is the morning's
+   question; Chart for the sheet. Neither container is opened here — a default
+   is about what is behind the door, not about whether it is ajar. */
+function sectionDefaults(){
+  const side = document.getElementById('side');
+  if(side && !side.querySelector('.psec.show')){
+    const reg = document.getElementById('psecReg');
+    if(reg) reg.classList.add('show');
+    const t = document.getElementById('sideTitle');
+    if(t) t.textContent = 'Register';
+  }
+  if(!document.querySelector('#hdrMore .mgrp.show')){
+    const c = document.getElementById('mgrpChart');
+    if(c) c.classList.add('show');
+  }
+}
+
+/* Which panel section is on, or '' when the panel is shut. */
+function panelSection(){
+  const side = document.getElementById('side');
+  if(!side || side.classList.contains('hide')) return '';
+  const on = side.querySelector('.psec.show');
+  return on ? on.id : '';
 }
 
 /* WHAT IS CURRENTLY OPEN, shown on the rail. A toggle that gives no sign of its
@@ -2281,8 +2383,13 @@ function railSync(){
     const el = document.getElementById(id);
     if(el) el.classList.toggle('on', !!yes);
   };
-  const side = document.getElementById('side');
-  on('railPanel', side && !side.classList.contains('hide'));
+  const sec = panelSection();
+  on('railReg',   sec === 'psecReg');
+  on('railStudy', sec === 'psecStudy');
+  on('railBt',    sec === 'psecBt');
+  const sheetOpen = document.body.classList.contains('more-open');
+  const chart = document.querySelector('#hdrMore .mgrp.show');
+  on('railChart', sheetOpen && chart && chart.id === 'mgrpChart');
   const drawer = document.getElementById('drawer');
   on('railStrat', drawer && drawer.classList.contains('open'));
 }
@@ -2503,23 +2610,35 @@ window.addEventListener('load',async()=>{
   document.getElementById('btReport').onclick=()=>{ if(BT_LAST&&BT_LAST.id)window.open('/api/backtest/'+BT_LAST.id+'/report','_blank'); };
   document.getElementById('btUni').addEventListener('change',e=>{ document.getElementById('btSyms').style.display=e.target.value==='symbols'?'':'none'; });
 
-  /* ── THE LEFT RAIL, wired to the controls that already exist ──────────
+  /* ── THE LEFT RAIL: ONE BUTTON PER SECTION ───────────────────────────
    *
-   * Not one input is duplicated here. A rail with its own copy of "chart type"
+   * Not one input is duplicated. A rail with its own copy of "chart type"
    * would be a second source of truth for the same setting, and the two would
    * disagree the first time one of them was changed — the failure this whole
    * codebase keeps finding in other places.
    *
-   * So a rail button either CLICKS the existing button, or opens the existing
-   * sheet and brings the right group into view.
+   * What the first version DID duplicate was the navigation: two buttons for
+   * the sheet, two for the panel, and three tool buttons that existed twice.
+   * A section is declared on the button now — `data-sheet` or `data-psec` —
+   * and the same two functions open every one of them, so a new section is a
+   * button rather than another special case.
    */
-  document.querySelectorAll('#leftRail .railBtn[data-group]').forEach(b=>{
-    b.addEventListener('click',()=>railOpen(b.dataset.group));
+  document.querySelectorAll('#leftRail .railBtn[data-sheet]').forEach(b=>{
+    b.addEventListener('click',()=>railOpen(b.dataset.sheet, b.dataset.title));
   });
-  /* These three FORWARD to the buttons that own the behaviour, rather than
-     re-implementing it: the strategy drawer, the alert watcher and the print
-     sheet each have handlers with their own state, and a second caller would
-     be a second place for that state to be got wrong. */
+  document.querySelectorAll('#leftRail .railBtn[data-psec]').forEach(b=>{
+    b.addEventListener('click',()=>{
+      // PRESSING THE SECTION YOU ARE ALREADY ON CLOSES THE PANEL. On a phone
+      // the panel covers the chart, and a button that only ever opens leaves
+      // you hunting for the ✕.
+      if(panelSection() === b.dataset.psec){ closeSide(); railSync(); return; }
+      panelOpen(b.dataset.psec, b.dataset.title);
+    });
+  });
+  /* Strategy, Alerts and Print FORWARD to the buttons that own the behaviour
+     rather than re-implementing it: each has handlers with their own state,
+     and a second caller would be a second place for that state to be got
+     wrong. Those buttons are hidden — the rail is the only way to press them. */
   const railForward = (railId, targetId) => {
     const r = document.getElementById(railId);
     const t = document.getElementById(targetId);
@@ -2528,11 +2647,15 @@ window.addEventListener('load',async()=>{
   railForward('railStrat','stratBtn');
   railForward('railAlerts','alertsBtn');
   railForward('railPrint','printR1Btn');
-  railForward('railPanel','sideBtn');
 
-  document.getElementById('railPanel').addEventListener('click',()=>setTimeout(railSync,0));
   document.getElementById('railStrat').addEventListener('click',()=>setTimeout(railSync,0));
   document.getElementById('sideBtn').addEventListener('click',()=>setTimeout(railSync,0));
+  /* WHICH SECTION IS SHOWING BEFORE ANYTHING IS PRESSED.
+     Both containers start empty otherwise — every .psec and every .mgrp is
+     display:none until something adds .show — so the panel would open blank
+     and the sheet would come up with nothing in it. Set WITHOUT opening
+     either: this decides what is behind the door, not whether it is ajar. */
+  sectionDefaults();
   railSync();
   /* A DIFFERENT STRATEGY IS A DIFFERENT SETUP, with its own desk settings —
      its own rank metric, its own risk, its own cap. Re-read them when the

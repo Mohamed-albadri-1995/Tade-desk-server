@@ -572,21 +572,95 @@ for (const id of ['ctype', 'scaleMode', 'view', 'days', 'feed', 'addPrim']) {
 // The three that own behaviour are FORWARDED to, never re-implemented: the
 // strategy drawer, the alert watcher and the print sheet each carry their own
 // state, and a second caller is a second place to get that state wrong.
-ok('strategy, alerts, print and panel forward to the buttons that own them',
+ok('strategy, alerts and print forward to the buttons that own them',
    /railForward\('railStrat','stratBtn'\)/.test(html)
    && /railForward\('railAlerts','alertsBtn'\)/.test(html)
-   && /railForward\('railPrint','printR1Btn'\)/.test(html)
-   && /railForward\('railPanel','sideBtn'\)/.test(html));
+   && /railForward\('railPrint','printR1Btn'\)/.test(html));
+
+/*
+ * ── ONE BUTTON PER SECTION ────────────────────────────────────────────────
+ *
+ * The first rail forwarded to the controls that already existed, on the
+ * reasoning that forwarding duplicates no control. It duplicated the
+ * NAVIGATION instead: Chart and Study opened the same sheet at different
+ * scroll positions, the header's "More" opened it a third way, the header's
+ * "Panel" opened the same panel as the rail's Panel, and Strategy / Print /
+ * Alerts each existed twice — once on the rail and once in a "Tools" group.
+ * Six buttons, three destinations, and each destination was itself a scroll of
+ * unrelated things.
+ */
+ok('the header no longer carries its own way into the sheet and the panel',
+   /id="moreBtn" hidden/.test(html) && /id="sideBtn" hidden/.test(html),
+   'More and Panel were a second way to press a rail button');
+ok('the tool buttons exist once as behaviour, not twice as buttons',
+   /id="toolActions" hidden/.test(html));
+for (const id of ['stratBtn', 'printR1Btn', 'alertsBtn', 'sideBtn', 'moreBtn']) {
+  ok(`#${id} exists exactly once — it moved, it was not copied`,
+     (html.match(new RegExp(`id="${id}"`, 'g')) || []).length === 1);
+}
+
+// Every rail button goes somewhere, and no two go to the same place.
+const RAIL = [...html.matchAll(/<button class="railBtn" id="(rail\w+)"([^>]*)>/g)]
+  .map(m => ({ id: m[1], attrs: m[2] }));
+ok('every rail button names a section or forwards to an owner',
+   RAIL.every(b => /data-(sheet|psec)=/.test(b.attrs)
+                   || /railForward\('rail/.test(html.slice(html.indexOf(b.id)))),
+   RAIL.map(b => b.id).join(', '));
+const DESTS = RAIL.map(b => (/data-(?:sheet|psec)="(\w+)"/.exec(b.attrs) || [])[1])
+  .filter(Boolean);
+ok('...and no two rail buttons open the same section',
+   new Set(DESTS).size === DESTS.length, DESTS.join(', '));
 
 ok('`railOpen` is defined at top level and runs',
    typeof ctx.railOpen === 'function');
 try {
-  ctx.railOpen('mgrpChart');
+  ctx.railOpen('mgrpChart', 'Chart');
   ok('railOpen() opens the sheet', doc.body.classList.contains('more-open'));
-  ok('...and marks the group it brought into view',
-     els.mgrpChart.classList.contains('flash'),
-     'landing mid-sheet with nothing highlighted reads as the wrong button');
+  // The sheet is TITLED after the section. It used to say "Chart & tools"
+  // whatever you pressed, over a scroll of everything.
+  ok('...and the sheet is titled after the section', els.moreTitle.textContent === 'Chart');
 } catch (e) { ok('railOpen() runs', false, e.message); }
+
+ok('`panelOpen` is defined at top level and runs',
+   typeof ctx.panelOpen === 'function');
+try {
+  ctx.panelOpen('psecBt', 'Backtest');
+  ok('panelOpen() titles the panel after the section',
+     els.sideTitle.textContent === 'Backtest');
+  ok('...and opens the panel, because pressing a section has one meaning',
+     !els.side.classList.contains('hide'));
+} catch (e) { ok('panelOpen() runs', false, e.message); }
+
+// ONLY ONE SECTION IS ON SCREEN — the CSS is what enforces it, so the CSS is
+// what is checked. Without these rules every section renders at once and the
+// rail is back to being a scroll-to button.
+ok('a sheet section is hidden until it is chosen',
+   /#hdrMore \.mgrp \{[^}]*display:none/.test(html)
+   && /#hdrMore \.mgrp\.show \{ display:block/.test(html));
+ok('a panel section is hidden until it is chosen',
+   /\.psec \{ display:none/.test(html) && /\.psec\.show \{ display:block/.test(html));
+
+// ...and something is showing before anything is pressed, or the first tap
+// opens an empty container.
+ok('a default section is set for both, without opening either',
+   typeof ctx.sectionDefaults === 'function');
+try {
+  ctx.sectionDefaults();
+  ok('sectionDefaults() runs', true);
+} catch (e) { ok('sectionDefaults() runs', false, e.message); }
+
+/*
+ * STUDY IS ONE PLACE. "Add an indicator" was in the sheet behind Chart and the
+ * list of what you had added was at the bottom of the panel under the
+ * backtest, so adding a moving average and changing its length were different
+ * journeys through the app.
+ */
+ok('adding an indicator and editing it are the same section',
+   /id="psecStudy"/.test(html)
+   && html.indexOf('id="addPrim"') > html.indexOf('id="psecStudy"')
+   && html.indexOf('id="overlayList"') > html.indexOf('id="addPrim"'));
+ok('the register and the backtest are separate sections',
+   /id="psecReg"/.test(html) && /id="psecBt"/.test(html));
 
 // A toggle with no sign of its state is a button you press twice to find out
 // what it did.
