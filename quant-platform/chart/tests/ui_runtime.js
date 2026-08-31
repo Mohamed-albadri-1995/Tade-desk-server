@@ -552,8 +552,12 @@ try {
  * the button that already owns the behaviour, or opens the existing sheet and
  * brings the right group into view.
  */
+// ORDER, not proximity. This measured the gap between the two in characters,
+// which is not what "on the left of" means and broke the day a comment was
+// added between them.
 ok('the rail exists, on the left of the chart',
-   /<nav id="leftRail"[\s\S]{0,2000}<div id="chartWrap">/.test(html));
+   html.includes('<nav id="leftRail"')
+   && html.indexOf('<nav id="leftRail"') < html.indexOf('<div id="chartWrap">'));
 ok('it has a FIXED width, so the chart does not resize under your hand',
    /#leftRail \{[^}]*flex:0 0 54px/.test(html));
 
@@ -640,6 +644,28 @@ const DESTS = RAIL.map(b => (/data-(?:sheet|psec)="(\w+)"/.exec(b.attrs) || [])[
   .filter(Boolean);
 ok('...and no two rail buttons open the same section',
    new Set(DESTS).size === DESTS.length, DESTS.join(', '));
+
+/*
+ * THE RAIL AND THE SECTION IT OPENS MUST CALL THE PLACE THE SAME THING.
+ *
+ * The Backtest button said "Test" while the section it opened was titled
+ * "Backtest" — two names for one place, and on a trading desk "Test" also
+ * reads as a broker connection test, which is a real control elsewhere in this
+ * system that sends a one-share order.
+ *
+ * Checked as a rule rather than as a list, so the next section is named once.
+ */
+for (const b of RAIL) {
+  const title = (/data-title="([^"]+)"/.exec(b.attrs) || [])[1];
+  if (!title) continue;                    // forwards to an owner; no section
+  // Bounded by the button's own closing tag, not by a character count — a
+  // comment inside the button is normal here and a fixed window silently
+  // stopped finding the label.
+  const btn = (new RegExp(`id="${b.id}"[\\s\\S]*?</button>`).exec(html) || [])[0] || '';
+  const label = (/class="rl">([^<]+)</.exec(btn) || [])[1];
+  ok(`the ${b.id} button and its section agree on the name`,
+     label === title, `rail says "${label}", the section says "${title}"`);
+}
 
 ok('`railOpen` is defined at top level and runs',
    typeof ctx.railOpen === 'function');

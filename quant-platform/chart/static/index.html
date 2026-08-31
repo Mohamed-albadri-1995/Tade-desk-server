@@ -600,7 +600,11 @@
       <span class="ri">&#9889;</span><span class="rl">Strategy</span></button>
     <button class="railBtn" id="railBt" data-psec="psecBt" data-title="Backtest"
             title="run a strategy over a date range and read the trades">
-      <span class="ri">&#129514;</span><span class="rl">Test</span></button>
+      <!-- "Backtest", not "Test". The section it opens is titled Backtest and
+           the rail should not call the same place something else — and "Test"
+           on a trading desk reads as a broker connection test, which is a real
+           button elsewhere in this system that sends a one-share order. -->
+      <span class="ri">&#129514;</span><span class="rl">Backtest</span></button>
     <button class="railBtn" id="railReg" data-psec="psecReg" data-title="Register"
             title="what the scanners found — by tool and by day">
       <span class="ri">&#128203;</span><span class="rl">Register</span></button>
