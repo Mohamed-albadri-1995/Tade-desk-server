@@ -262,6 +262,132 @@ const H2 = els.btSummary.innerHTML;
 ok('with no account $, the panel says how to get a dollar figure',
    /no dollar P&L/.test(H2) && !/YOUR ACCOUNT/.test(H2));
 
+
+/* ── THE BACKTEST FORM'S DEFAULTS, AND ITS MEMORY ────────────────────────
+ *
+ * The form had no memory at all: every reload put back the shipped values,
+ * so re-running a configuration you already trusted meant retyping nineteen
+ * fields on a phone. Worse, two of them were overwritten AFTER the form was
+ * built — the backtest timeframe from the CHART's timeframe, and the feed
+ * from the server default — so a field could change itself between loads with
+ * nothing on screen saying why.
+ *
+ * These defaults are the settings behind backtest #349 (+$3,346.50, 30 trades,
+ * 2026-08-11 → 08-31). They are a STARTING POINT for real inputs, never a
+ * decision taken behind one: btRun() reads the fields, so what is on screen is
+ * what runs.
+ */
+const BT_WANT = {
+  btUni: 'R1', btFill: 'next_open', btTf: '1m', btFeed: 'polygon',
+  btEquity: '50000', btRiskPct: '0.5',
+  btRankMetric: 'vwap_extension', btTopN: '3',
+  btPreset: 'ttp', btShares: '100',
+  btFee: '0.005', btFeeMin: '0.75', btMinPs: '0.10',
+};
+// Fields the screenshots leave EMPTY. A default here would silently change
+// what gets tested — a max-position cap or a cost the user never chose.
+const BT_BLANK = ['btSyms', 'btRiskUsd', 'btMaxPos', 'btCost',
+                  'btMinRvol', 'btTarget', 'btMaxDD', 'btMaxDay'];
+
+/* `const` at a script's top level is a LEXICAL binding, not a property of the
+ * global object, so ctx.BT_DEFAULTS is undefined even though the name is very
+ * much in scope. Read it the way the page's own code does — by evaluating the
+ * identifier inside the same context. */
+const evalIn = (src) => vm.runInContext(src, ctx);
+const BT_DEFAULTS = evalIn('BT_DEFAULTS');
+const BT_STRAT_DEFAULTS = evalIn('BT_STRAT_DEFAULTS');
+ok('the defaults live in ONE table, not scattered through the handlers',
+   typeof BT_DEFAULTS === 'object' && BT_DEFAULTS !== null);
+for (const [id, want] of Object.entries(BT_WANT)) {
+  ok(`default ${id} = ${want}`, String(BT_DEFAULTS[id]) === want,
+     'got ' + JSON.stringify(BT_DEFAULTS[id]));
+}
+for (const id of BT_BLANK) {
+  ok(`${id} ships EMPTY`, BT_DEFAULTS[id] === '',
+     'got ' + JSON.stringify(BT_DEFAULTS[id]));
+}
+ok('RTH-only + forced 15:50 close is on by default', BT_DEFAULTS.btRules === true);
+ok('the scanner gate is on by default', BT_DEFAULTS.btScanGate === true);
+ok('the two books are named, not numbered — ids are per-database',
+   BT_STRAT_DEFAULTS.btStrat === 'OR + VWAP 09:35 (Long)'
+   && BT_STRAT_DEFAULTS.btStrat2 === 'OR + VWAP 09:35 (Short)');
+
+// EVERY DEFAULT MUST BE A FIELD ON THE PAGE. A default with no input behind
+// it is a hardcoded setting wearing a table's clothes.
+for (const id of [...Object.keys(BT_DEFAULTS), ...Object.keys(BT_STRAT_DEFAULTS)]) {
+  ok(`${id} is an editable control in the HTML`,
+     new RegExp(`id="${id}"`).test(html));
+}
+
+// RESTORE puts the defaults on the page.
+try {
+  ctx.btSettingsRestore();
+  ok('btSettingsRestore() runs', true);
+} catch (e) { ok('btSettingsRestore() runs', false, e.message); }
+ok('...and the form now holds them', els.btEquity.value === '50000'
+   && els.btTopN.value === '3' && els.btFill.value === 'next_open',
+   [els.btEquity.value, els.btTopN.value, els.btFill.value].join('/'));
+ok('...including the checkboxes, by the table not by el.type',
+   els.btRules.checked === true && els.btScanGate.checked === true);
+
+// THE DATE RANGE IS NOT REMEMBERED — see the note in the page. A remembered
+// "to 2026-08-31" would still be sitting there in November, and a run of the
+// last-tested window reads exactly like a run of the recent one.
+ok('the range opens on a rolling 20 days, both ends filled',
+   /^\d{4}-\d{2}-\d{2}$/.test(els.btStart.value)
+   && /^\d{4}-\d{2}-\d{2}$/.test(els.btEnd.value),
+   els.btStart.value + ' → ' + els.btEnd.value);
+ok('...and it really is 20 days wide',
+   Math.round((Date.parse(els.btEnd.value) - Date.parse(els.btStart.value)) / 86400000) === 20,
+   els.btStart.value + ' → ' + els.btEnd.value);
+ok('the dates are NOT written to storage',
+   !/btStart|btEnd/.test(store.qpc_bt_form || ''));
+
+// MEMORY: what you last used comes back.
+els.btEquity.value = '250000';
+els.btMaxPos.value = '16.66';
+els.btRules.checked = false;
+ctx.btSettingsSave();
+els.btEquity.value = ''; els.btMaxPos.value = ''; els.btRules.checked = true;
+ctx.btSettingsRestore();
+ok('a changed account size survives a reload', els.btEquity.value === '250000',
+   els.btEquity.value);
+ok('...so does a field the defaults leave empty', els.btMaxPos.value === '16.66',
+   els.btMaxPos.value);
+ok('...and an UNCHECKED box stays unchecked (false is a value, not "missing")',
+   els.btRules.checked === false);
+
+// RESET is the way back out of the memory.
+try { ctx.btSettingsReset(); ok('btSettingsReset() runs', true); }
+catch (e) { ok('btSettingsReset() runs', false, e.message); }
+ok('reset restores the shipped account size', els.btEquity.value === '50000',
+   els.btEquity.value);
+ok('reset clears a value the defaults leave empty', els.btMaxPos.value === '',
+   els.btMaxPos.value);
+ok('reset re-checks the boxes', els.btRules.checked === true);
+
+// NOTHING MAY OVERWRITE THE FORM AFTER IT IS BUILT. Both of these used to.
+ok('the backtest TF is no longer taken from the chart on load',
+   !/getElementById\('btTf'\)\.value\s*=\s*document\.getElementById\('tf'\)\.value/.test(html));
+ok('the backtest feed is no longer overwritten by the server default',
+   !/if\(h\.default_feed\)document\.getElementById\('btFeed'\)\.value=h\.default_feed/.test(html));
+// A commission preset reaching two sections up to change an EXECUTION
+// assumption is the same class of bug: a setting moved by something the reader
+// cannot see, on a phone where the field is off screen.
+ok('the fee preset no longer sets the fill model behind your back',
+   !/btPreset[\s\S]{0,400}getElementById\('btFill'\)\.value/.test(html));
+
+// A dead feed is the one remembered value that fails SILENTLY.
+evalIn("FEEDS = { polygon: false, yahoo: true }; DEFAULT_FEED = 'yahoo';");
+els.btFeed.value = 'polygon';
+try { ctx.btFeedSanity(); } catch (e) { /* reported below */ }
+ok('a remembered feed with no API key falls back to one that has one',
+   els.btFeed.value === 'yahoo', els.btFeed.value);
+evalIn('FEEDS = { polygon: true, yahoo: true };');
+els.btFeed.value = 'polygon';
+ctx.btFeedSanity();
+ok('...and a working feed is left alone', els.btFeed.value === 'polygon');
+
 console.log('\n' + '='.repeat(64));
 console.log('RESULT  PASS=' + PASS + '  FAIL=' + FAIL);
 console.log('='.repeat(64));

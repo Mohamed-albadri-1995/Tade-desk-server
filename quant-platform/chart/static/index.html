@@ -491,10 +491,10 @@
       <div class="grp"><h4>What to test</h4>
         <div class="frow">
           <label class="fld"><span>Universe</span>
-            <select id="btUni"><option value="symbols">Symbols</option><option value="R1">Register R1</option><option value="Shortlist">Shortlist</option></select></label>
+            <select id="btUni"><option value="symbols">Symbols</option><option value="R1" selected>Register R1</option><option value="Shortlist">Shortlist</option></select></label>
           <label class="fld"><span>Fill model
             <b class="q" title="desk = what this desk really gets: the order fills at the NEXT bar's open, but the stop and every target were priced from the DECISION bar's close and sent to the broker before the fill existed. Use this one. · next open = the entry is honest, then the levels are re-measured from it, which hands the trade back the exact R it was tested at. · close = the signal bar's own close, a price no order can reach; for eyeballing only.">?</b></span>
-            <select id="btFill"><option value="desk" selected>desk (what you really get)</option><option value="next_open">next open</option><option value="close">close</option></select></label>
+            <select id="btFill"><option value="desk">desk (what you really get)</option><option value="next_open" selected>next open</option><option value="close">close</option></select></label>
         </div>
         <div class="frow one">
           <label class="fld"><span>Symbols</span>
@@ -503,7 +503,7 @@
         <div class="frow">
           <label class="fld"><span>Timeframe
             <b class="q" title="Bar timeframe the backtest evaluates on — use the TF you built the strategy on.">?</b></span>
-            <select id="btTf"><option>1m</option><option>2m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
+            <select id="btTf"><option selected>1m</option><option>2m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>1d</option></select></label>
           <label class="fld"><span>Feed
             <b class="q" title="Data feed for the backtest. polygon covers the whole market; alpaca (IEX) has NO data for many small caps — those pairs would be skipped.">?</b></span>
             <select id="btFeed"><!-- yahoo has been a working feed in chart/data_manager.py all along; it was
@@ -512,7 +512,7 @@
                  BLANK and posts an empty string, and the page's own error read
                  "unknown feed '' (have: [alpaca, hybrid, polygon, yahoo])". The list
                  that names the feeds was the one place that did not know about one. -->
-              <option>yahoo</option><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
+              <option>yahoo</option><option>alpaca</option><option selected>polygon</option><option>hybrid</option></select></label>
         </div>
         <div class="frow">
           <label class="fld"><span>From</span><input id="btStart" type="date"></label>
@@ -524,7 +524,7 @@
         <div class="frow">
           <label class="fld"><span>Account $
             <b class="q" title="Starting equity. Position size per trade = (equity x risk%) / (entry - stop), so every stop-out loses the same % of the account. Equity compounds in trade order. Empty = off.">?</b></span>
-            <input id="btEquity" type="number" step="any" value="100000"></label>
+            <input id="btEquity" type="number" step="any" value="50000"></label>
           <label class="fld"><span>Risk % / trade
             <b class="q" title="Percent of CURRENT equity lost if the stop is hit. COMPOUNDS: a good run sizes up, a bad one sizes down. Requires the strategy to define a stop. Leave empty to risk a flat dollar instead.">?</b></span>
             <input id="btRiskPct" type="number" step="any" value="0.5"></label>
@@ -555,7 +555,7 @@
             <b class="q" title="How the day's signals are scored against each other. 'nothing' takes every signal and ignores the count beside it.">?</b></span>
             <select id="btRankMetric">
               <option value="">nothing — take every signal</option>
-              <option value="vwap_extension">VWAP extension (T2)</option>
+              <option value="vwap_extension" selected>VWAP extension (T2)</option>
               <option value="tight_stop">tightest stop</option>
               <option value="reg_score">register score</option>
               <option value="rvol">RVOL</option>
@@ -564,7 +564,7 @@
         <div class="frow">
           <label class="fld"><span>Top N / day
             <b class="q" title="RANK the day's signals against each other and trade only the strongest N, across the whole universe. Blank/0 = off, take every signal. This is a cross-symbol decision, so it happens in the runner after all symbols are evaluated — a strategy cannot see the other names.">?</b></span>
-            <input id="btTopN" type="number" step="1" min="0" placeholder="blank = all"></label>
+            <input id="btTopN" type="number" step="1" min="0" value="3" placeholder="blank = all"></label>
           <label class="fld"><span>Min RVOL
             <b class="q" title="SMB In-Play universe filter: skip a day-symbol pair unless its HONEST cumulative RVOL (qp rel_volume: volume so far today vs the average by the same time of day, 20 sessions) is at least this at the strategy's session start. Empty = off. This is NOT the register's ctx_rvol.">?</b></span>
             <input id="btMinRvol" type="number" step="any" placeholder="e.g. 5"></label>
@@ -589,21 +589,21 @@
         <div class="frow">
           <label class="fld"><span>Preset
             <b class="q" title="Fills the fields below; everything stays editable.">?</b></span>
-            <select id="btPreset"><option value="">custom</option><option value="ttp">Trade The Pool</option></select></label>
+            <select id="btPreset"><option value="">custom</option><option value="ttp" selected>Trade The Pool</option></select></label>
           <label class="fld"><span>Fixed shares
             <b class="q" title="Fixed share size for $ P&L and per-share fees.">?</b></span>
-            <input id="btShares" type="number" placeholder="100"></label>
+            <input id="btShares" type="number" value="100" placeholder="100"></label>
         </div>
         <div class="frow three">
           <label class="fld"><span>$ / share
             <b class="q" title="Commission per share per order (TTP: 0.005).">?</b></span>
-            <input id="btFee" type="number" step="any" placeholder="0.005"></label>
+            <input id="btFee" type="number" step="any" value="0.005" placeholder="0.005"></label>
           <label class="fld"><span>Min $ / order
             <b class="q" title="Minimum commission per filled order (TTP: 0.75).">?</b></span>
-            <input id="btFeeMin" type="number" step="any" placeholder="0.75"></label>
+            <input id="btFeeMin" type="number" step="any" value="0.75" placeholder="0.75"></label>
           <label class="fld"><span>Min $ / sh
             <b class="q" title="Minimum profit per share for a win to COUNT toward the target (TTP: 0.10) — losses always count.">?</b></span>
-            <input id="btMinPs" type="number" step="any" placeholder="0.10"></label>
+            <input id="btMinPs" type="number" step="any" value="0.10" placeholder="0.10"></label>
         </div>
         <div class="frow one">
           <label class="fld"><span>Max entries / day
@@ -611,7 +611,7 @@
             <input id="btMaxDay" type="number" min="1" step="1" placeholder="blank = the strategy's own cap"></label>
         </div>
         <label style="display:flex;gap:7px;align-items:flex-start;color:var(--text2);font-size:var(--f-xs);line-height:1.5">
-          <input type="checkbox" id="btRules" style="margin-top:2px">
+          <input type="checkbox" id="btRules" checked style="margin-top:2px">
           RTH-only entries + forced 15:50 EOD close <span class="muted">(the chart keeps all-day data for indicators)</span></label>
         <!-- Checked by default. Unchecking it is asking for the optimistic
              number on purpose, which is a legitimate thing to want and should
@@ -625,6 +625,10 @@
       <div class="grp">
         <button id="btRun" class="dk-btn primary" style="width:100%">Run the backtest</button>
         <div id="btStat" class="muted" style="margin-top:6px">Runs on the timeframe and feed chosen above.</div>
+        <!-- The way back out of the page's memory. Every field above is
+             remembered in this browser, so without this there is no route
+             back to the shipped configuration except clearing site data. -->
+        <div style="margin-top:6px"><button id="btReset" class="dk-btn" style="width:100%;font-size:var(--f-xs)">Reset these settings to the defaults</button></div>
       </div>
 
       <div id="btSummary" style="margin-top:var(--s2)"></div>
@@ -666,6 +670,9 @@
 let CHART=null, PRICE=null, BG=null, VOL=null, LINES=[], PRIMS=[], WS=null, LIVE=false;
 let OVERLAYS=[], SELECTED=null, _nid=1, PRICEBARS=[], STRATLINES=[], LASTSYMTF='';
 let FEEDS={}, REG_ROWS=[], CHARTTYPE='candles';
+// the feed the SERVER says is configured — the fallback when a remembered
+// or defaulted feed turns out to have no key, which returns no data silently
+let DEFAULT_FEED='';
 const feedHas=n=>!!FEEDS[n];
 // ── chart-type (candles/bar/line/area/Heikin Ashi) ──
 function _ha(bars){ const out=[]; let p=null; for(const b of bars){ const c=(b.open+b.high+b.low+b.close)/4; const o=p?(p.open+p.close)/2:(b.open+b.close)/2; const x={time:b.time,open:o,high:Math.max(b.high,o,c),low:Math.min(b.low,o,c),close:c}; out.push(x); p=x; } return out; }
@@ -957,7 +964,7 @@ async function initHealth(){
             +'controls will be missing. Pull down to refresh, or close this tab '
             +'and reopen '+location.host+'. (page '+mine+' vs server '+h.ui+')');
     }
-    FEEDS=h.feeds||{};
+    FEEDS=h.feeds||{}; DEFAULT_FEED=h.default_feed||'';
     for(const id of ['feed','btFeed']){
       const sel=document.getElementById(id);
       for(const o of sel.options){ const ok=h.feeds&&h.feeds[o.value]; o.textContent=o.value+(ok?'':' (no key)'); }
@@ -967,9 +974,12 @@ async function initHealth(){
     // a persisted selection whose key is GONE would silently return no data —
     // fall back to the feed the server says is actually configured
     if(h.default_feed&&FEEDS[sel.value]===false)sel.value=h.default_feed;
-    // backtests default to the server's preferred feed (full-market coverage),
-    // NOT the chart's current pick — thin feeds silently shrink the universe
-    if(h.default_feed)document.getElementById('btFeed').value=h.default_feed;
+    // THE BACKTEST FEED IS THE FORM'S, NOT THIS FUNCTION'S. It used to be
+    // overwritten with the server default on every load, which silently undid
+    // the field's own default and anything the user had picked. All that is
+    // owed here is the one thing health knows: whether the chosen feed has a
+    // key at all.
+    btFeedSanity();
   }catch(_){}
 }
 
@@ -1433,10 +1443,151 @@ async function loadStrategies(){
   fill(document.getElementById('btStrat2'),
        '— second book (optional, e.g. the short side) —',
        document.getElementById('btStrat2') && document.getElementById('btStrat2').value);
+  // the two books the backtest opens on, once there is a list to pick from
+  if(typeof btApplyStratDefaults === 'function') btApplyStratDefaults(false);
 }
 
 // ── Phase 4: backtest panel ──
 let BT_POLL=null, BT_LAST=null, BT_FILTERS=[];
+
+/* ── THE FORM'S SHIPPING DEFAULTS, IN ONE PLACE ───────────────────────────
+ *
+ * Every value below is a STARTING POINT for a real input on the page, never a
+ * decision taken behind one. Nothing here is applied at run time — btRun()
+ * still reads the fields, so whatever is on screen is what gets tested. Change
+ * anything and the change is what runs; these only decide what the boxes hold
+ * before you touch them.
+ *
+ * They match the settings that produced backtest #349 (+$3,346.50 on 30 trades
+ * over 2026-08-11 → 08-31), because re-entering nineteen fields to re-run the
+ * configuration you already trust is the actual cost of a form with no memory.
+ *
+ * AND THE PAGE NOW REMEMBERS. Every field is written to this browser on change
+ * and read back on load, so the defaults below only ever apply the first time
+ * — or after "reset". A backtest form that forgets is a form you retype.
+ */
+const BT_DEFAULTS = {
+  btUni: 'R1', btFill: 'next_open', btSyms: '',
+  btTf: '1m', btFeed: 'polygon',
+  btEquity: '50000', btRiskPct: '0.5', btRiskUsd: '',
+  btMaxPos: '', btCost: '',
+  btRankMetric: 'vwap_extension', btTopN: '3', btMinRvol: '',
+  btTarget: '', btMaxDD: '', btDDBasis: 'start',
+  btPreset: 'ttp', btShares: '100',
+  btFee: '0.005', btFeeMin: '0.75', btMinPs: '0.10',
+  btMaxDay: '',
+  btRules: true, btScanGate: true,
+};
+/* Named, not numbered. Strategy ids are per-database; the name is what is on
+ * the screen and what survives a rebuild of the strategy table. */
+const BT_STRAT_DEFAULTS = { btStrat: 'OR + VWAP 09:35 (Long)',
+                            btStrat2: 'OR + VWAP 09:35 (Short)' };
+const BT_LS = 'qpc_bt_form';
+
+/* THE DATES ARE DELIBERATELY NOT REMEMBERED.
+ *
+ * Every other field is a preference; the range is a claim about which market
+ * you are testing. A remembered "to 2026-08-31" would still be sitting there
+ * in November, and a run of the last-tested window reads exactly like a run of
+ * the recent one. So the range always opens on the last 20 days and stays
+ * fully editable — the one field worth choosing on purpose each time. */
+function btDefaultDates(){
+  const end = new Date();
+  const start = new Date(end.getTime() - 20 * 86400000);
+  const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString().slice(0, 10);
+  const s = document.getElementById('btStart'), e = document.getElementById('btEnd');
+  if (s && !s.value) s.value = iso(start);
+  if (e && !e.value) e.value = iso(end);
+}
+
+function btSettingsSave(){
+  try{
+    const out = {};
+    for(const id of Object.keys(BT_DEFAULTS)){
+      const el = document.getElementById(id); if(!el) continue;
+      // A BOOLEAN DEFAULT IS THE DECLARATION that this field is a checkbox.
+      // Reading el.type instead would make the answer depend on the DOM
+      // rather than on the table above, and the table is the thing anyone
+      // reads to find out what the form ships with.
+      out[id] = (typeof BT_DEFAULTS[id] === 'boolean') ? !!el.checked : el.value;
+    }
+    for(const id of Object.keys(BT_STRAT_DEFAULTS)){
+      const el = document.getElementById(id);
+      // The strategy list loads asynchronously; storing a blank while it is
+      // still empty would erase yesterday's choice on every reload.
+      if(el && el.value) out[id] = el.value;
+    }
+    localStorage.setItem(BT_LS, JSON.stringify(out));
+  }catch(_){}
+}
+
+function btSettingsRestore(){
+  let saved = {};
+  try{ saved = JSON.parse(localStorage.getItem(BT_LS) || '{}') || {}; }catch(_){ saved = {}; }
+  for(const [id, dflt] of Object.entries(BT_DEFAULTS)){
+    const el = document.getElementById(id); if(!el) continue;
+    const v = Object.prototype.hasOwnProperty.call(saved, id) ? saved[id] : dflt;
+    if(typeof dflt === 'boolean') el.checked = !!v;
+    else el.value = (v == null ? '' : String(v));
+  }
+  btDefaultDates();
+  btFeedSanity();
+  // Symbols only exist for a symbols universe — keep the box in step with it.
+  const uni = document.getElementById('btUni');
+  const syms = document.getElementById('btSyms');
+  if(uni && syms) syms.style.display = uni.value === 'symbols' ? '' : 'none';
+  return saved;
+}
+
+/* THE FEED IS THE ONE SETTING THAT CAN BE SILENTLY DEAD. A remembered
+ * 'polygon' with no key configured returns nothing for every pair and the run
+ * reports an empty backtest rather than a missing key. Checked after the
+ * health call, which is the only thing that knows. */
+function btFeedSanity(){
+  const el = document.getElementById('btFeed');
+  // DEFAULT_FEED is set by the health call. Order between that call and the
+  // form restore is not guaranteed, so BOTH run this and it is a no-op until
+  // the answer has actually arrived.
+  if(!el || !DEFAULT_FEED) return;
+  if(FEEDS && FEEDS[el.value] === false){
+    el.value = DEFAULT_FEED;
+    btSettingsSave();
+  }
+}
+
+function btSettingsWire(){
+  for(const id of [...Object.keys(BT_DEFAULTS), ...Object.keys(BT_STRAT_DEFAULTS)]){
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('change', btSettingsSave);
+  }
+}
+
+/* Memory needs a way out of itself: one bad afternoon of settings should not
+ * be permanent, and there is no other way back to the shipped configuration. */
+function btSettingsReset(){
+  try{ localStorage.removeItem(BT_LS); }catch(_){}
+  const s = document.getElementById('btStart'), e = document.getElementById('btEnd');
+  if(s) s.value = ''; if(e) e.value = '';
+  btSettingsRestore();
+  btApplyStratDefaults(true);
+  btSettingsSave();
+}
+
+/* The strategy dropdowns are filled asynchronously, so their default lands
+ * after the list exists — by NAME, matched against what the server sent. */
+function btApplyStratDefaults(force){
+  let saved = {};
+  try{ saved = JSON.parse(localStorage.getItem(BT_LS) || '{}') || {}; }catch(_){}
+  for(const [id, name] of Object.entries(BT_STRAT_DEFAULTS)){
+    const el = document.getElementById(id); if(!el) continue;
+    if(el.value && !force) continue;
+    const want = (!force && saved[id]) ? String(saved[id]) : null;
+    if(want && [...el.options].some(o => o.value === want)){ el.value = want; continue; }
+    const hit = (SAVED || []).find(x => x.name === name);
+    if(hit && [...el.options].some(o => o.value === String(hit.id))) el.value = String(hit.id);
+  }
+}
 const _ET_DOW=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short'});
 function btDerive(t){ // per-trade derived fields for filtering (all ET)
   const e=new Date(t.entry_ts*1000);
@@ -2089,14 +2240,29 @@ window.addEventListener('load',async()=>{
     document.getElementById(g+'K').addEventListener('change',e=>{ const k=parseInt(e.target.value,10); STRAT[g].k=Number.isFinite(k)?k:1; });
   }
   document.getElementById('btRun').onclick=btRun;
-  // start the backtest TF on whatever the chart is on (the TF the strategy
-  // was built against) — but it's its own visible control from here on
-  document.getElementById('btTf').value=document.getElementById('tf').value;
+  /* THE FORM'S OWN VALUES, restored before anything else can overwrite them.
+     The backtest TF used to be set from the CHART's timeframe on every load —
+     so a 5m chart silently re-armed a 1m backtest as 5m, every time, and the
+     only sign was a number that had changed itself. The backtest timeframe is
+     its own control; it starts from the default below or from what was last
+     used here. */
+  btSettingsRestore();
+  btSettingsWire();
+  document.getElementById('btReset').onclick=btSettingsReset;
   document.getElementById('btFAdd').onclick=()=>{ const f={field:document.getElementById('btFField').value, op:document.getElementById('btFOp').value, val:document.getElementById('btFVal').value.trim()}; if(f.field&&f.val!=='')BT_FILTERS.push(f); document.getElementById('btFVal').value=''; btRefresh(); };
   document.getElementById('btCsv').onclick=btCsvExport;
-  document.getElementById('btPreset').addEventListener('change',e=>{ if(e.target.value==='ttp'){ document.getElementById('btFee').value='0.005'; document.getElementById('btFeeMin').value='0.75'; document.getElementById('btMinPs').value='0.10'; document.getElementById('btShares').value=document.getElementById('btShares').value||'100'; document.getElementById('btRules').checked=true; document.getElementById('btFill').value='next_open'; } });
+  /* A PRESET FILLS THE FIELDS UNDER IT — and nothing else.
+     It used to reach up into "What to test" and set the FILL MODEL as well,
+     two sections away and off screen on a phone. Picking a fee schedule
+     silently changed an execution assumption, and the report gave no sign
+     which one had been chosen or why. Fill model is its own visible control
+     with its own default; a commission preset has no business moving it. */
+  document.getElementById('btPreset').addEventListener('change',e=>{ if(e.target.value==='ttp'){ document.getElementById('btFee').value='0.005'; document.getElementById('btFeeMin').value='0.75'; document.getElementById('btMinPs').value='0.10'; document.getElementById('btShares').value=document.getElementById('btShares').value||'100'; document.getElementById('btRules').checked=true; btSettingsSave(); } });
   document.getElementById('btReport').onclick=()=>{ if(BT_LAST&&BT_LAST.id)window.open('/api/backtest/'+BT_LAST.id+'/report','_blank'); };
   document.getElementById('btUni').addEventListener('change',e=>{ document.getElementById('btSyms').style.display=e.target.value==='symbols'?'':'none'; });
+  // strategies arrive asynchronously; if the list is already in, take the
+  // defaults now — loadStrategies() does it again when it lands.
+  btApplyStratDefaults(false);
   document.getElementById('regReg').addEventListener('change',loadRegDates);
   document.getElementById('regDate').addEventListener('change',loadRegister);
   document.getElementById('asof').addEventListener('change',()=>{ syncAsofUI(); loadChart(); });
