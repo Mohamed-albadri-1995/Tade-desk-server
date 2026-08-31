@@ -775,9 +775,41 @@ ok('a rule column scrolls sideways rather than clipping a wide row',
 // under the thumb.
 ok('stacked rule columns take their natural height, so the body is one scroll',
    /#drawer \.dbody > \.rulecol \{ flex:0 0 auto/.test(html));
-ok('the drawer is taller on a phone, where the columns stack',
-   /#drawer \{ height:62vh; \}/.test(html)
-   && /padding-bottom: var\(--drawerH, 62vh\)/.test(html));
+/*
+ * AS TALL AS IT NEEDS, NEVER TALLER.
+ *
+ * A FIXED height meant a blank strategy — a name, a side, two empty rule
+ * columns — reserved the same 42vh (62 on a phone) as a full one. The bottom
+ * half of the drawer was dead space AND the chart above was squeezed to a
+ * strip to make room for it: both at once, which is the worst of the two
+ * arrangements rather than a compromise between them.
+ */
+ok('the drawer sizes to its content, under a ceiling',
+   /#drawer \{[^}]*height:auto; max-height:42vh/.test(html),
+   'a fixed height reserves the ceiling even for an empty strategy');
+ok('...a taller ceiling on a phone, where the columns stack',
+   /#drawer \{ height:auto; max-height:62vh; \}/.test(html));
+
+/*
+ * AND <main> RESERVES WHAT IT ACTUALLY IS.
+ *
+ * main pads its bottom by the drawer's height so the chart's time axis is
+ * never covered. With a drawer that changes size, a padding fixed at the
+ * ceiling would hold the chart down to the smallest it ever needs to be — the
+ * squeezed chart this change exists to give back. So it is MEASURED, and
+ * re-measured every time the content changes.
+ */
+ok('the space held back for the drawer is measured, not assumed',
+   /function syncDrawerHeight\(\)/.test(html)
+   && /d\.getBoundingClientRect\(\)\.height/.test(html));
+ok('...re-measured when the strategy is re-rendered',
+   /renderTargets\(\);[\s\S]{0,400}syncDrawerHeight\(\);/.test(html),
+   'loading a strategy or adding a rule changes the height');
+ok('...and when it is opened', /if\(open\) syncDrawerHeight\(\);/.test(html));
+// The grip sets an inline height, which beats the stylesheet — so dragging it
+// to a size is still a decision the page keeps.
+ok('dragging the grip still pins a size of your own',
+   /drawerGrip'[\s\S]{0,400}\.style\.height=h\+'px'/.test(html));
 
 /*
  * ── EVERY CONTAINER THAT CAN OUTGROW THE SCREEN SCROLLS ───────────────────
@@ -801,7 +833,8 @@ const SCROLLERS = [
   ['the left rail',     /#leftRail \{[^}]*flex:0 0 54px/,   /#leftRail \{[^}]*overflow-y:auto/],
   ['the drawer body',   /#drawer \.dbody \{[^}]*min-height:0/, /#drawer \.dbody \{[^}]*overflow-y:auto/],
   ['the drawer head',   /#drawer \.dhead \{[^}]*max-height:45%/, /#drawer \.dhead \{[^}]*overflow-y:auto/],
-  ['the register list', /#regList \{[^}]*max-height:38vh/,  /#regList \{[^}]*overflow:auto/],
+  // The register list is NOT in this table on purpose — see below.
+  ['the alerts list',   /#side \{[^}]*flex:0 0 260px/,      /#side \{[^}]*overflow:auto/],
   ['the trades list',   /id="btTrades"[^>]*max-height:38vh/, /id="btTrades"[^>]*overflow:auto/],
   ['the print panel',   /max-height:calc\(100vh - 68px\)/,  /overflow-y:auto;'\s*\n\s*\+ 'overscroll/],
   ['the alert log',     /max-height:180px/,                 /overflow-y:auto/],
@@ -821,6 +854,31 @@ for (const [what, ceiling, scroll] of SCROLLERS) {
 ok('a panel section leaves the scrolling to the panel',
    /\.psec \{ display:none; \}/.test(html)
    && !/\.psec \{[^}]*overflow/.test(html));
+
+/*
+ * ...AND NEITHER DOES THE LIST INSIDE IT.
+ *
+ * #regList was capped at 38vh, which was right when Register, Backtest and
+ * Overlays were one long scroll: without it the register pushed everything
+ * under it off the bottom. They are separate sections now and the list is the
+ * LAST thing in its own, so the cap stopped being a ceiling and became DEAD
+ * SPACE — the cards ended at 38% of the screen and the rest of a full-height
+ * panel was empty. It was also a second scroll area inside a panel that
+ * already scrolls.
+ */
+ok('the register list grows instead of capping itself',
+   !/#regList \{[^}]*max-height/.test(html)
+   && !/#regList \{[^}]*overflow/.test(html),
+   'it is the last thing in its section — a cap there is dead space, not a ceiling');
+
+/*
+ * The trades list KEEPS its cap, and the difference is the reason: it is not
+ * last. The CSV and full-report buttons come after it, and an uncapped list of
+ * three hundred trades would put them a long scroll away.
+ */
+ok('the trades list keeps its cap, because something comes after it',
+   /id="btTrades"[^>]*max-height:38vh/.test(html)
+   && html.indexOf('id="btFilters"') > html.indexOf('id="btTrades"'));
 
 // A toggle with no sign of its state is a button you press twice to find out
 // what it did.

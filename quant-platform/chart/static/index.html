@@ -255,7 +255,7 @@
        columns stack, so the same strategy is twice as tall as on a desktop and
        42vh showed roughly one rule. The grip at the top still resizes it, and
        the chart keeps its time axis either way — main reserves --drawerH. */
-    #drawer { height:62vh; }
+    #drawer { height:auto; max-height:62vh; }
     body.drawer-open main { padding-bottom: var(--drawerH, 62vh); }
     /* The head is the bigger offender at this width — fourteen controls over
        six or seven rows — so it is capped harder and scrolls itself. */
@@ -307,7 +307,16 @@
   /* ── screener register browser ── */
   #regBar { display:flex; gap:6px; margin-bottom:7px; }
   #regBar select { flex:1; min-width:0; }
-  #regList { display:flex; flex-direction:column; gap:4px; max-height:38vh; overflow:auto; }
+  /* ── NO CAP, BECAUSE THE PANEL IS THE SCROLLER ──
+     38vh was right when Register, Backtest and Overlays were one long scroll:
+     without it the register list pushed everything under it off the bottom.
+     They are separate sections now, and the list is the LAST thing in its own
+     one — so the cap stopped being a ceiling and became dead space: the cards
+     ended at 38% of the screen and the rest of a full-height panel was empty.
+     It also made a second scroll area inside a panel that already scrolls, and
+     a flick lands on whichever one is under the thumb. #side has the ceiling
+     and the scroll; this just grows. */
+  #regList { display:flex; flex-direction:column; gap:4px; }
   .card { padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:#141a24; cursor:pointer; }
   .card:hover { border-color:var(--accent); background:#182130; }
   .card.on { border-color:var(--draft); background:#1c2330; }
@@ -320,7 +329,20 @@
   #stratBtn { background:#1c2431; color:var(--text); border:1px solid var(--border); }
   #stratBtn.on { background:var(--blue); color:#fff; border-color:var(--blue); }
   /* ── strategy builder drawer ── */
-  #drawer { position:absolute; left:0; right:0; bottom:0; height:42vh; background:var(--panel); border-top:1px solid var(--border); z-index:6; display:none; flex-direction:column; }
+  /* ── AS TALL AS IT NEEDS, NEVER TALLER ──
+     This was a FIXED height, so a blank strategy — a name, a side, and two
+     empty rule columns — reserved the same 42vh (62 on a phone) as a full one.
+     The bottom half of the drawer was dead black space AND the chart above was
+     squeezed to a strip to make room for it. Both at once, which is the worst
+     of the two arrangements rather than a compromise between them.
+     `height:auto` with a `max-height` ceiling: a short strategy takes a short
+     drawer and gives the rest back to the chart; a long one grows to the
+     ceiling and scrolls inside it. The resize grip still sets an explicit
+     height, and an inline style wins — so dragging it to a size you want is
+     still a decision the page keeps. */
+  #drawer { position:absolute; left:0; right:0; bottom:0; height:auto; max-height:42vh;
+    background:var(--panel); border-top:1px solid var(--border); z-index:6;
+    display:none; flex-direction:column; }
   #drawer.open { display:flex; }
   /* The drawer is absolutely positioned OVER the bottom of <main>, and
      lightweight-charts draws its TIME AXIS along the bottom edge of its own
@@ -1598,6 +1620,11 @@ function renderStrat(){
   document.getElementById('discWinStart').value=risk.window_start!=null?risk.window_start:'';
   document.getElementById('discWinEnd').value=risk.window_end!=null?risk.window_end:'';
   renderTargets();
+  /* The drawer is as tall as this render made it, so the space <main> holds
+     back for it has to be re-measured. Loading a strategy, adding a rule or
+     removing one all change that height — without this the chart keeps the
+     squeeze from whichever strategy was biggest. */
+  syncDrawerHeight();
 }
 // ── scale-out targets editor ──
 function renderTargets(){
@@ -2603,11 +2630,33 @@ function _syncViewportHeight(){
   _axisFix=0;                       // a resize is a fresh layout, not a retry
   _resizeChart();
 }
+/*
+ * WHAT <main> RESERVES FOR THE DRAWER, measured rather than assumed.
+ *
+ * The drawer is absolutely positioned over the bottom of <main>, and
+ * lightweight-charts draws its time axis along the bottom of its own canvas —
+ * so main reserves the drawer's height as padding and the axis stays visible.
+ *
+ * That reservation has to be the drawer's ACTUAL height. Now that the drawer
+ * sizes to its content, a blank strategy is short and a full one is tall, and
+ * a padding fixed at the ceiling would hold the chart down to the smallest it
+ * ever needs to be — the squeezed chart and the half-empty drawer that this
+ * whole change is about. Re-measured whenever the content changes, which is
+ * what makes the space actually come back.
+ */
+function syncDrawerHeight(){
+  const d = document.getElementById('drawer');
+  if(!d || !d.classList.contains('open')) return;
+  const h = d.getBoundingClientRect().height;
+  if(h > 0) document.documentElement.style.setProperty('--drawerH', h + 'px');
+  _resizeChart();
+}
+
 function toggleDrawer(){ const d=document.getElementById('drawer'); const open=!d.classList.contains('open'); d.classList.toggle('open',open);
   // reserve the drawer's height on <main> so it never covers the chart's time
   // axis (see the #drawer CSS note)
   document.body.classList.toggle('drawer-open',open);
-  if(open) document.documentElement.style.setProperty('--drawerH', (d.getBoundingClientRect().height||window.innerHeight*0.62)+'px');
+  if(open) syncDrawerHeight();
   document.getElementById('stratBtn').classList.toggle('on',open);
   setTimeout(_resizeChart,50); }
 function restore(){
