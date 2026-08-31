@@ -95,8 +95,13 @@ out = run(FOUND_AT_10, strat_at(945))
 cov = out['summary'].get('coverage') or {}
 chkv('the 09:45 trade is not counted', len(out['trades']), 0)
 chkv('and it is counted as removed, not vanished', cov.get('before_scan'), 1)
+# "decided", not "entry": the gate asks whether the name was on the WATCHLIST
+# when the choice was made, and under next_open/desk the fill is a bar later
+# than the decision. Gating on the fill let a name trade a minute before the
+# scanner had it — the exact hole this part exists to close — so the sample
+# names the decision time, which is the one being compared.
 chkv('the sample names the two times',
-     (cov.get('before_scan_samples') or [None])[0], '2024-01-09 GOOD entry 09:45 < found 10:00')
+     (cov.get('before_scan_samples') or [None])[0], '2024-01-09 GOOD decided 09:45 < found 10:00')
 chkv('the gate is recorded on the run', cov.get('scan_gate'), True)
 
 # The same strategy, one minute after the name arrived, is a real trade.

@@ -879,6 +879,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
     in_pos = False; ei = 0; sl = tp = None; ep_cur = None
     dp_cur = None                        # the price the levels were measured from
     sig_cur = None                       # the signal bar's close — what the RANK sees
+    si = None                            # the signal BAR — when the decision was taken
     sl_eff = None                        # RATCHET: a stop never loosens (see below)
     sl_at_entry = None                   # the armed stop AT ENTRY (position sizing)
     pending_exit = False                 # next_open: exit signal seen, fills next bar
@@ -977,7 +978,27 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 if eod_close is not None and eod_close[ej]:
                     _drop('eod_bar')
                     continue             # never open into the liquidation bar
-                if et_hhmm is not None:  # per-strategy time-of-day window (ET)
+                if et_hhmm is not None:
+                    # THE WINDOW PINS THE ENTRY BAR — the minute the money goes
+                    # in — so it is measured on the FILL bar ej, deliberately.
+                    # The 09:35 setup is named for its entry: the opening range
+                    # is 09:30-09:34, the decision is the 09:34 CLOSE, and the
+                    # fill is the 09:35 OPEN (chart/exports/or_vwap_0935.py,
+                    # pinned by logic_audit31).
+                    #
+                    # THE CONSEQUENCE, WHICH IS NOT A BUG BUT IS A TRAP: on a
+                    # ONE-MINUTE window the fill model then decides which bar
+                    # the conditions are read on.
+                    #
+                    #   'next_open' / 'desk'   ej = j+1  ->  signal bar 09:34
+                    #   'close'                ej = j    ->  signal bar 09:35
+                    #
+                    # Both put the entry in the 09:35 minute, so both satisfy
+                    # the window — but they test a different bar's close, VWAP
+                    # and ATR, and therefore produce DIFFERENT SIGNALS, not
+                    # merely different prices. chart/parity.py exists to make
+                    # that visible, because the live desk runs fill='close'
+                    # and every backtest of this setup has run 'next_open'.
                     hm = int(et_hhmm[ej])
                     if (win_start is not None and hm < win_start) or \
                        (win_end is not None and hm > win_end):
@@ -1118,7 +1139,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                     elif near < float(min_target_usd):
                         _drop('target_too_close')
                         continue
-                in_pos = True; ei = ej; ep_cur = ep; dp_cur = dp
+                in_pos = True; ei = ej; si = j; ep_cur = ep; dp_cur = dp
                 # THE PRICE THE DECISION WAS TAKEN AT, independent of every
                 # fill model. `ep` is where the money went in and `dp` is where
                 # the levels were measured from; this is neither — it is the
@@ -1175,6 +1196,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                            # a report that cannot see both cannot show it.
                            'decided': float(dp_cur),
                            'signal_px': float(sig_cur),
+                           'si': int(si),
                            # the ARMED stop at entry — risk-based position
                            # sizing needs the per-share risk, not just the %
                            'stop': (float(sl_at_entry) if sl_at_entry is not None
@@ -1274,6 +1296,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                                # execution gap exactly like one that was stopped.
                                'decided': float(dp_cur),
                                'signal_px': float(sig_cur),
+                               'si': int(si),
                                'stop': (float(sl_at_entry) if sl_at_entry is not None
                                         and sl_at_entry == sl_at_entry else None),
                                'legs': list(legs)})
@@ -1316,6 +1339,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
         open_trade = {'ei': ei, 'entry': float(ep_cur),
                       'decided': (float(dp_cur) if dp_cur is not None else None),
                       'signal_px': (float(sig_cur) if sig_cur is not None else None),
+                      'si': (int(si) if si is not None else None),
                       'last': float(close[-1]), 'ret': float(realized + remaining * r),
                       'stop': (float(sl_at_entry) if sl_at_entry is not None
                                and sl_at_entry == sl_at_entry else None),
@@ -1733,6 +1757,15 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
                     # and the ranker then silently falls back to the fill.
                     'decided': t.get('decided'),
                     'signal_px': t.get('signal_px'),
+                    # WHEN THE DECISION WAS TAKEN, which under next_open/desk
+                    # is one bar before the money moved. The watchlist gate
+                    # ("was this name on the scanner yet?") is a question about
+                    # the decision, so it must read this and not entry_ts —
+                    # otherwise the gate is one bar more lenient under one fill
+                    # model than another, and the fill model is again choosing
+                    # which trades exist.
+                    'signal_ts': (int(ts[t['si']]) if t.get('si') is not None
+                                  else int(ts[t['ei']])),
                     'stop': t.get('stop'),
                     'reason': t['reason'], 'drop_pct': _drop_at(t['ei'], t['entry']),
                     # scale-out partials, timestamped for the chart (Step 3)
@@ -1758,6 +1791,9 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
                         # FILL and ranked on a price it never saw.
                         'decided': open_trade.get('decided'),
                         'signal_px': open_trade.get('signal_px'),
+                        'signal_ts': (int(ts[open_trade['si']])
+                                      if open_trade.get('si') is not None
+                                      else int(ts[open_trade['ei']])),
                         'stop': open_trade.get('stop'),
                         'ret_pct': round(100.0 * open_trade['ret'], 3),
                         'drop_pct': _drop_at(open_trade['ei'], open_trade['entry']),

@@ -1116,12 +1116,17 @@ def run(spec: dict, progress_cb=None) -> dict:
                 for t in r.get('trades') or []:
                     if _et_date(t['entry_ts']) != day:      # day-slice honesty
                         continue
-                    # Not on the watchlist yet — see _scan_time.
-                    if scan_gate and _scan_at is not None and t['entry_ts'] < _scan_at:
+                    # Not on the watchlist yet — see _scan_time. Measured at
+                    # the DECISION, not at the fill: under next_open/desk the
+                    # fill is a bar later, and gating on it let a name trade one
+                    # minute before the scanner had it. Falls back to entry_ts
+                    # for rows written before signal_ts existed.
+                    _dec_ts = t.get('signal_ts') or t['entry_ts']
+                    if scan_gate and _scan_at is not None and _dec_ts < _scan_at:
                         cov['before_scan'] = cov.get('before_scan', 0) + 1
                         if len(cov.setdefault('before_scan_samples', [])) < 12:
                             cov['before_scan_samples'].append(
-                                f'{day} {sym} entry {_et_hm(t["entry_ts"])} '
+                                f'{day} {sym} decided {_et_hm(_dec_ts)} '
                                 f'< found {_et_hm(_scan_at)}')
                         continue
                     took = True
@@ -1151,9 +1156,10 @@ def run(spec: dict, progress_cb=None) -> dict:
                                            'strategy': sname},
                                    'legs': t.get('legs') or []})
                 ot = r.get('open_trade')
+                _ot_dec = (ot.get('signal_ts') or ot['time']) if ot else None
                 if (ot and _et_date(ot['time']) == day
                         and scan_gate and _scan_at is not None
-                        and ot['time'] < _scan_at):
+                        and _ot_dec < _scan_at):
                     cov['before_scan'] = cov.get('before_scan', 0) + 1
                     ot = None
                 if ot and _et_date(ot['time']) == day:
