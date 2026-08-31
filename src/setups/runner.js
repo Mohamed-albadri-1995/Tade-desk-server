@@ -27,6 +27,7 @@ const universeFilter = require('./universe');
 const prefs = require('./prefs');
 const broker = require('../broker/signalstack');
 const alertStore = require('../alerts/store');
+const sessionLog = require('./sessionLog');
 
 /*
  * HOW OLD A SIGNAL MAY BE AND STILL BE THE TRADE YOU ARE PLACING.
@@ -246,7 +247,7 @@ function unmanagedLine(plan) {
  * endpoint uses, so a setup can be inspected on a past date without putting
  * yesterday's trades into today's alert feed.
  */
-async function runSetup(setup, { date, dryRun = false, tickers = null, bar = null } = {}) {
+async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = null } = {}) {
   const day = date || toETDate(Date.now());
   // Which bar this run is answering for. The scheduler knows it; a direct call
   // (preview, a test) does not, and for a clock setup there is only ever one.
@@ -296,7 +297,8 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
         + Object.entries(gate.reasons).map(([k, n]) => `${n}× ${k}`).join('; '),
     };
     if (!dryRun) alertStore.publishFires([fire], day);
-    return { ok: true, picks: [], universe: 0, gate, fires: [fire] };
+    return { ok: true, picks: [], universe: 0,
+             cards: gate.kept.length + gate.dropped.length, gate, fires: [fire] };
   }
 
   if (!list.length) {
@@ -306,7 +308,7 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
       detail: 'No cards on the list at the decision — nothing to rank.',
     };
     if (!dryRun) alertStore.publishFires([fire], day);
-    return { ok: true, picks: [], universe: 0, fires: [fire] };
+    return { ok: true, picks: [], universe: 0, cards: 0, gate, fires: [fire] };
   }
 
   /*
@@ -520,11 +522,16 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
   }
 
   const alreadyToday = new Set();
+  let latched = [];
   if (!dryRun) {
     for (const f of alertStore.recentFires(day, 500)) {
       if (f.ruleId === setup.id && f.ticker) alreadyToday.add(String(f.ticker).toUpperCase());
     }
     const before = out.picks.length;
+    // The NAMES, not just how many. "1 latched" and "WULF latched" are the same
+    // count and only one of them can be checked against the morning's chart.
+    latched = out.picks.filter(p => alreadyToday.has(String(p.ticker).toUpperCase()))
+      .map(p => p.ticker);
     out.picks = out.picks.filter(p => !alreadyToday.has(String(p.ticker).toUpperCase()));
     if (before !== out.picks.length) {
       console.log(`[Setups] ${setup.id}: ${before - out.picks.length} name(s) `
@@ -533,7 +540,12 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
     // Nothing NEW on this bar is the normal case for a watch setup: it is
     // asked thirty-one times and answers once. Publishing "nothing qualified"
     // every minute would bury the one bar that mattered.
-    if (!out.picks.length && before) return { ok: true, picks: 0, fires: [], latched: before };
+    if (!out.picks.length && before) {
+      return { ok: true, picks: 0, fires: [], latched: before,
+               dropped: { stale: out.staleBars, latched },
+               counts: out.counts, cards: list.length, universe: list.length,
+               gate, data, riskCfg, rank: decided.rank || {} };
+    }
   }
 
   const orderable = !setup.readiness || setup.readiness.orderOk !== false;
@@ -561,6 +573,20 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
       console.log(`[Setups] ${setup.id}: no order placed — ${routing.error}`);
     }
   }
+  /*
+   * The routing, reduced to what may be written down.
+   *
+   * `routing.cfgs` holds each destination's OWN Alpaca key and secret. The
+   * session log is a file people read, copy and paste into a question, so the
+   * names are separated from the configs here rather than trusted to be dropped
+   * by whatever consumes them later.
+   */
+  const routeLog = {
+    to: routing.cfgs.map(c => c.destinationName || c.destinationId),
+    error: routing.error || null,
+    orderable,
+    blocking: orderable ? [] : ((setup.readiness || {}).orderBlocking || []),
+  };
   // Does ANY account claim this setup? The difference between "you meant this
   // to trade and it did not" and "this desk alerts, as arranged".
   const listedSomewhere = broker.accountsFor(setup.id).length > 0;
@@ -657,6 +683,10 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
   const fires = out.picks.map(pick => {
     const size = risk.sizeFor(
       { entry: pick.plan.entry, riskPerShare: pick.plan.risk }, riskCfg);
+    // The standard share count, kept on the pick so the session log records the
+    // number the alert showed rather than deriving a second one that could
+    // disagree with it.
+    pick.shares = size ? size.shares : null;
     return {
     ruleId: setup.id,
     rule: setup.name,
@@ -841,7 +871,14 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
   if (!fires.length && !windowShutting) {
     console.log(`[Setups] ${setup.id}: nothing on the ${decisionBar} bar `
       + `(window ${setup.decisionTime}–${setup.windowEnd}, still open)`);
-    return { ok: true, picks: 0, fires: [], quiet: true };
+    // Recorded even though nothing is published. "Asked on this bar and found
+    // nothing" and "was never asked on this bar" are the two cases the log
+    // exists to separate, and the alert feed shows the same silence for both.
+    return { ok: true, picks: 0, fires: [], quiet: true,
+             counts: out.counts, cards: list.length, universe: list.length,
+             gate, data, riskCfg, routing: routeLog,
+             dropped: { stale: out.staleBars, latched },
+             rank: decided.rank || {} };
   }
   if (!fires.length) {
     fires.push({
@@ -937,9 +974,23 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
     setupId: setup.id,
     date: day,
     universe: list.length,
-    gate: { filtered: gate.filtered, kept: list.length, dropped: gate.dropped.length },
+    // How many the tool actually surfaced, before the setup's own filter. The
+    // difference between this and `universe` is the whole of the gate, and
+    // "2 picks from 12" cannot be read without both.
+    cards: gate.filtered ? gate.kept.length + gate.dropped.length : list.length,
+    gate: { filtered: gate.filtered, kept: list.length, dropped: gate.dropped.length,
+            reasons: gate.reasons },
     picks: out.picks,
     counts: out.counts,
+    // Carried for the session log: which rule sized these, where the orders
+    // were headed, and how the ranking cut. `routing` is names only — the
+    // configs behind it hold each account's broker keys.
+    riskCfg,
+    routing: routeLog,
+    orders,
+    rank: { ...(decided.rank || {}),
+            unscorable: (decided.dropped_unscorable || []).map(d => d.symbol) },
+    dropped: { stale: out.staleBars, latched },
     data: {
       feed: data.feed,
       mixed: data.mixed,
@@ -961,6 +1012,62 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
     + `on ${data.feed || data.used.join('+') || 'no feed'} `
     + `(${Math.round(data.coverage * 100)}% had bars, waited ${Math.round(data.waitedMs / 1000)}s)`);
   return result;
+}
+
+/*
+ * Every run is written down, on every path out — including the ones that
+ * published nothing.
+ *
+ * WHY A WRAPPER. `_runSetup` returns from six different places, and five of
+ * them are the interesting ones: the filter removed every card, there were no
+ * cards, every pick was already alerted, nothing qualified on this bar of a
+ * window, it threw. Those are the runs a review is actually looking for, and a
+ * `record()` call inside each would be five chances to add a sixth return and
+ * forget. One site, at the boundary, cannot be forgotten.
+ *
+ * NEVER THE CAUSE OF A FAILURE. `sessionLog.record` reports a failed write and
+ * carries on, and this adds nothing that can throw — a full disk must not stop
+ * a decision. The caller's own exception is re-thrown untouched, because a log
+ * that ate the error would turn a visible failure into a silent one.
+ */
+async function runSetup(setup, opts = {}) {
+  const started = Date.now();
+  const day = opts.date || toETDate(Date.now());
+  const bar = opts.bar || setup.decidesOnBar || setup.decisionTime;
+  const base = { date: day, setupId: setup.id, setupName: setup.name, bar,
+                 dryRun: !!opts.dryRun };
+  let res;
+  try {
+    res = await _runSetup(setup, opts);
+  } catch (err) {
+    sessionLog.record(sessionLog.runOf({
+      ...base, ok: false, error: err.message, ms: Date.now() - started,
+    }));
+    throw err;
+  }
+  sessionLog.record(sessionLog.runOf({
+    ...base,
+    // `ok:false` here is the OTHER refusal: the setup belongs to another tool.
+    // It is not an error and it is worth seeing once, because a setup that
+    // silently belongs elsewhere looks exactly like one that found nothing.
+    ok: res.ok !== false,
+    error: res.ok === false ? res.reason : null,
+    ms: res.tookMs === undefined ? Date.now() - started : res.tookMs,
+    quiet: !!res.quiet,
+    universe: { cards: res.cards, kept: res.universe },
+    gate: res.gate,
+    counts: res.counts,
+    rank: res.rank,
+    // The early returns count their picks; the full one lists them. Only a
+    // list can be logged pick-by-pick, and a number is not one.
+    picks: Array.isArray(res.picks) ? res.picks : [],
+    dropped: res.dropped,
+    orders: res.orders,
+    routing: res.routing,
+    riskCfg: res.riskCfg,
+    data: res.data,
+  }));
+  return res;
 }
 
 /** Every setup this tool owns, run in turn. Used by the scheduler. */

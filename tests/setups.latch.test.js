@@ -34,7 +34,10 @@ describe('the once-a-day latch', () => {
   /* The fix itself: no longer conditional on the kind of setup. */
   test('applies to every setup, not only watch setups', () => {
     expect(SRC).not.toMatch(/if \(setup\.watch && !dryRun\) \{/);
-    expect(SRC).toMatch(/const alreadyToday = new Set\(\);\n\s*if \(!dryRun\) \{/);
+    // The guard on the latch block is the dry-run one and nothing else. Matched
+    // loosely across the declarations between, so adding one there does not
+    // read as the kind-of-setup condition coming back.
+    expect(SRC).toMatch(/const alreadyToday = new Set\(\);\n(?:\s*(?:let|const)[^\n]*\n)*\s*if \(!dryRun\) \{/);
   });
 
   /*

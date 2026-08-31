@@ -499,11 +499,77 @@ async function broker_truth() {
  * thoroughly as no file at all, so a run of passes that all said the same thing
  * prints once.
  */
+/*
+ * WHAT EACH SETUP WAS ASKED, AND WHERE THE NAMES WENT.
+ *
+ * The other half of the same file, and the half that answers the question this
+ * report is usually opened with: it took two names — out of how many, and what
+ * removed the rest?
+ *
+ * Nothing else in this report can answer it. The ORDERS section shows what was
+ * sent and the alert history shows what fired, and a name that was dropped
+ * appears in neither, because being dropped is precisely what "no alert, no
+ * order" means. So a morning where the filter removed all forty cards and a
+ * morning where the strategy genuinely found nothing print the same two lines
+ * everywhere else — and they are not the same morning.
+ */
+function decided() {
+  const log = require('../src/setups/sessionLog');
+  rule('WHAT EACH SETUP DECIDED');
+
+  const summary = log.summaryOf(DAY);
+  const ids = Object.keys(summary);
+  if (!ids.length) {
+    say('no setup runs recorded.');
+    say('  A setup writes a line here every time it is asked, including the times');
+    say('  it answered "nothing". So an empty section means none was DUE today, or');
+    say('  the scheduler did not run — which are different facts, and the next');
+    say('  section will tell you which: a manager that ran means the app was up.');
+    return;
+  }
+
+  for (const id of ids) {
+    const g = summary[id];
+    say('');
+    say(`  ${g.setup}`);
+    say(`    ${g.runs} run(s)`
+      + (g.firstBar ? `, ${g.firstBar}${g.lastBar && g.lastBar !== g.firstBar
+        ? `–${g.lastBar}` : ''}` : '')
+      + (g.msMax ? `, slowest ${g.msMax}ms` : ''));
+    // THE FUNNEL, as one line. Each arrow is a stage that could have removed
+    // the name, and the one where the number collapses is the answer.
+    say(`    ${g.evaluated} evaluated → ${g.signalled} signalled → ${g.picked} taken`
+      + (g.staleDropped ? `  (${g.staleDropped} dropped as stale)` : '')
+      + (g.latched ? `  (${g.latched} held by the latch)` : ''));
+    say(`    orders: ${g.ordersSent} sent`
+      + (g.ordersFailed ? `, ${g.ordersFailed} FAILED` : '')
+      + (g.ordersSkipped ? `, ${g.ordersSkipped} skipped` : '')
+      + (g.failed ? `  ·  ${g.failed} run(s) FAILED` : ''));
+    for (const p of g.problems || []) say(`    ! ${p}`);
+  }
+
+  // The bars a name was found on but could not be acted from. Not noise: it
+  // means the setup saw something on a bar outside the one it decides from,
+  // which is the difference between the live desk and the backtest.
+  const stale = log.runsOn(DAY)
+    .flatMap(r => ((r.dropped || {}).stale || []));
+  if (stale.length) {
+    say('');
+    say(`  dropped as stale: ${[...new Set(stale)].join(', ')}`);
+    say('    — found on an earlier bar than the one being decided. The price, the');
+    say('      stop and the size all came from that bar, and the name may not have');
+    say('      been on the watchlist yet. The backtest drops these too.');
+  }
+}
+
 function managed() {
   const log = require('../src/setups/sessionLog');
   rule('HOW EACH POSITION WAS MANAGED');
 
-  const passes = log.read(DAY);
+  // PASSES ONLY. The same file now also holds one row per decision, and
+  // counting those as management sweeps would report a manager that ran on a
+  // morning it never started.
+  const passes = log.passesOn(DAY);
   if (!passes.length) {
     say('no manager passes recorded.');
     say('  Either nothing was open, or the alerts app was not running — those are');
@@ -672,6 +738,9 @@ function reconcile(fires, rows) {
   const fires = alerts();
   const rows = await ledger();
   await broker_truth();
+  // The entry side before the exit side, because that is the order they happen
+  // to a trade — what was decided, then how it was managed out.
+  decided();
   managed();
   reconcile(fires, rows);
   console.log('');

@@ -472,6 +472,45 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   background:var(--bg3); color:var(--text2); border:1px solid var(--border); user-select:none; }
 .chip.on { background:var(--blue); color:#08111f; border-color:var(--blue); }
 .empty { font-size:12px; color:var(--text3); margin-top:12px; line-height:1.7; }
+
+/* ── THE SESSION LOG ──
+ *
+ * THE FUNNEL IS THE POINT, so it is drawn as one — a row of stages with the
+ * count that survived each. "2 picks" is not a fact about a morning; "40 cards
+ * → 12 past the filter → 5 signalled → 2 kept by the ranking" is, and the
+ * stage where the number collapses is the thing being looked for.
+ *
+ * A stage that removed nothing is grey. A stage that removed everything is
+ * red — that is the shape of a setup that has quietly stopped trading, and it
+ * looks identical to a quiet week in every other view on this page.
+ */
+.lg-set { background:var(--bg2); border:1px solid var(--border); border-radius:8px;
+  padding:12px; margin-bottom:10px; }
+.lg-set h4 { margin:0 0 8px; font-size:13px; font-weight:700; color:var(--text);
+  display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.lg-set h4 .when { font-family:var(--mono); font-size:11px; color:var(--text3);
+  font-weight:400; }
+.lg-funnel { display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin:6px 0; }
+.lg-stage { flex:1 1 70px; min-width:64px; padding:6px 8px; border-right:1px solid var(--border); }
+.lg-stage:last-child { border-right:0; }
+.lg-stage b { display:block; font-family:var(--mono); font-size:16px;
+  font-weight:700; color:var(--text); line-height:1.2; }
+.lg-stage span { display:block; font-size:10px; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--text3); margin-top:2px; }
+/* Nothing got through this stage. */
+.lg-stage.zero b { color:var(--red); }
+/* Nothing was lost here — the stage did not narrow anything. */
+.lg-stage.flat b { color:var(--text3); }
+.lg-stage.good b { color:var(--green); }
+.lg-prob { font-size:11.5px; color:var(--orange); margin-top:8px; line-height:1.6; }
+.lg-run { border-left:2px solid var(--border); padding:6px 0 6px 10px;
+  margin:6px 0; font-size:11.5px; color:var(--text2); line-height:1.6; }
+.lg-run.bad { border-left-color:var(--red); }
+.lg-run.took { border-left-color:var(--green); }
+.lg-run .b { font-family:var(--mono); color:var(--text); font-weight:700; }
+.lg-run .drop { color:var(--orange); }
+.lg-run .ord { color:var(--text3); }
+.lg-run .ord.fail { color:var(--red); }
 </style>
 </head>
 <body>
@@ -532,6 +571,12 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
        last Tuesday, and the send button lived down there with it. -->
   <button class="tb" data-t="history">History</button>
   <button class="tb" data-t="setups">Setups</button>
+  <!-- LOG answers the question the feed structurally cannot.
+       Every other tab here shows what FIRED. A name that was dropped produces
+       no alert, by definition — so "why did it take two and not five" had no
+       answer on this page at all, and the reasons are exactly where a strategy
+       stops being the one that was backtested. -->
+  <button class="tb" data-t="log">Log</button>
   <button class="tb" data-t="rules">Rules</button>
   <button class="tb" data-t="settings">Settings</button>
 </div>
@@ -772,6 +817,22 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <div id="form" class="form" style="display:none"></div>
 <div id="rules"></div>
 </div><!-- /rules -->
+
+<!-- THE SESSION LOG.
+     Two halves of a day, in the order they happen to a trade: the decision
+     that took it (or did not), and the sweeps that managed it out. The funnel
+     is at the top because it is the answer to the question people arrive with
+     — "it took two names, out of how many, and what removed the rest". -->
+<div class="pane" data-t="log" hidden>
+<div class="sec">
+  <span>Session log</span>
+  <span class="note">What the desk did, including what it decided not to do.</span>
+  <input type="date" id="log-date" onchange="loadLog()">
+  <button class="btn" onclick="loadLog()">Reload</button>
+</div>
+<div id="log-summary"></div>
+<div id="log-runs"></div>
+</div><!-- /log -->
 
 </div>
 <script>
@@ -2702,6 +2763,16 @@ function showTab(name) {
     b.classList.toggle('on', b.getAttribute('data-t') === want);
   });
   try { localStorage.setItem('alertsTab', want); } catch { /* private mode */ }
+  /*
+   * The log is fetched when it is OPENED, not on a timer.
+   *
+   * Every other pane here is kept live because it is answering a question
+   * about the next few minutes. This one is a record of what already happened
+   * — polling it would add a request every few seconds all morning to keep a
+   * hidden pane current, and the one moment it needs to be current is the
+   * moment somebody taps the tab. There is a Reload button for the rest.
+   */
+  if (want === 'log') loadLog();
   window.scrollTo(0, 0);
 }
 
@@ -2925,6 +2996,133 @@ function feedLag(f) {
  * unused: an unreferenced renderer for the most important object on the page
  * is an invitation to call it again.
  */
+
+/*
+ * ── THE SESSION LOG ───────────────────────────────────────────────────────
+ *
+ * The feed above answers "what fired". This answers the question it cannot:
+ * what did NOT, and why.
+ *
+ * A name that was dropped produces no alert — that is what dropping it means —
+ * so every stage that removes one was invisible on this page. And the stages
+ * are where a strategy stops being the one that was backtested: the card
+ * filter took it out, the pick fired on a bar it could not act on, the latch
+ * had already used the name, the account had no size for it, the broker
+ * refused it. Five different mornings that all look like "nothing fired".
+ *
+ * READ-ONLY, and deliberately so. Nothing here changes a setting; it is the
+ * record of what happened, and a record you can edit from the page that shows
+ * it is not a record.
+ */
+function lgStage(n, label, prev) {
+  // Grey when the stage let everything through, red when it let nothing —
+  // those are the two readings that need no arithmetic.
+  const cls = n === 0 ? 'zero'
+    : (prev !== null && prev !== undefined && n === prev) ? 'flat' : '';
+  return `<div class="lg-stage ${cls}"><b>${n === null || n === undefined ? '–' : n}</b>
+    <span>${esc(label)}</span></div>`;
+}
+
+function lgFunnel(g) {
+  const f = g || {};
+  return `<div class="lg-funnel">
+    ${lgStage(f.cards, 'cards', null)}
+    ${lgStage(f.kept, 'past filter', f.cards)}
+    ${lgStage(f.evaluated, 'evaluated', f.kept)}
+    ${lgStage(f.signalled, 'signalled', f.evaluated)}
+    ${lgStage(f.picked, 'taken', f.signalled)}
+  </div>`;
+}
+
+function lgRun(r) {
+  const f = r.funnel || {};
+  const took = (r.picks || []).length;
+  const bits = [];
+  if (r.error) bits.push(`<b class="drop">${esc(r.error)}</b>`);
+  else if (r.quiet) bits.push('nothing on this bar (window still open)');
+  else if (!took) {
+    bits.push(`nothing qualified — ${f.evaluated ?? '?'} evaluated, `
+      + `${f.signalled ?? 0} signalled`);
+  }
+  const d = r.dropped || {};
+  // The names, not the counts. By this stage the list is short enough that a
+  // name is something you can put on a chart and check.
+  if ((d.stale || []).length) {
+    bits.push(`<span class="drop">dropped as stale: ${esc(d.stale.join(', '))}</span>`);
+  }
+  if ((d.latched || []).length) {
+    bits.push(`<span class="drop">already alerted today: ${esc(d.latched.join(', '))}</span>`);
+  }
+  if ((r.routing || {}).error) {
+    bits.push(`<span class="drop">no order — ${esc(r.routing.error)}</span>`);
+  }
+  for (const p of r.picks || []) {
+    const orders = (p.orders || []).map(o => {
+      if (o.skipped) return `<span class="ord fail">${esc(o.to || 'broker')}: not sent (${esc(o.skipped)})</span>`;
+      if (!o.sent) return `<span class="ord fail">${esc(o.to || 'broker')}: FAILED — ${esc(o.error || 'refused')}</span>`;
+      return `<span class="ord">${esc(o.to || 'broker')}: ${o.qty ?? '?'} ${esc(o.status || 'sent')}</span>`;
+    }).join(' · ');
+    bits.push(`<b>${esc(p.side || '')} ${esc(p.ticker)}</b>`
+      + `${p.shares ? ` ${p.shares} sh` : ''}`
+      + `${p.entry ? ` @ ${p.entry}` : ''}${p.stop ? ` stop ${p.stop}` : ''}`
+      // No order line at all is different from a failed one: it means nothing
+      // was even attempted, which is a fact about the routing, not the broker.
+      + (orders ? ` · ${orders}` : ' · <span class="ord">no order attempted</span>'));
+  }
+  const cls = r.ok === false ? 'bad' : (took ? 'took' : '');
+  return `<div class="lg-run ${cls}"><span class="b">${esc(r.bar || '–')}</span>
+    ${r.ms === null || r.ms === undefined ? '' : `<span class="ord">${r.ms}ms</span>`}
+    — ${bits.join(' · ') || 'ran'}</div>`;
+}
+
+async function loadLog() {
+  const sum = document.getElementById('log-summary');
+  const runs = document.getElementById('log-runs');
+  if (!sum || !runs) return;
+  const picker = document.getElementById('log-date');
+  const want = (picker && picker.value) || '';
+  try {
+    const d = await (await fetch(
+      `/api/session-log${want ? `?date=${encodeURIComponent(want)}` : ''}`)).json();
+    if (picker && !picker.value && d.date) picker.value = d.date;
+    const setups = Object.entries(d.summary || {});
+    if (!setups.length) {
+      sum.innerHTML = `<div class="empty">Nothing recorded for ${esc(d.date || 'today')}.
+        A setup writes a line here every time it is asked — so an empty day means
+        none was due, or the scheduler did not run.</div>`;
+      runs.innerHTML = '';
+      return;
+    }
+    const byId = {};
+    for (const r of d.runs || []) (byId[r.setupId] = byId[r.setupId] || []).push(r);
+    sum.innerHTML = setups.map(([id, g]) => `
+      <div class="lg-set">
+        <h4>${esc(g.setup || id)}
+          <span class="when">${g.runs} run${g.runs === 1 ? '' : 's'}${
+            g.firstBar ? ` · ${esc(g.firstBar)}${g.lastBar && g.lastBar !== g.firstBar
+              ? `–${esc(g.lastBar)}` : ''}` : ''}${
+            g.msMax ? ` · slowest ${g.msMax}ms` : ''}</span></h4>
+        ${lgFunnel({ cards: null, kept: null, evaluated: g.evaluated,
+                     signalled: g.signalled, picked: g.picked })}
+        <div class="note">
+          ${g.ordersSent} order(s) sent${g.ordersFailed ? `, ${g.ordersFailed} failed` : ''}${
+            g.ordersSkipped ? `, ${g.ordersSkipped} skipped` : ''}${
+            g.staleDropped ? ` · ${g.staleDropped} dropped as stale` : ''}${
+            g.latched ? ` · ${g.latched} held by the latch` : ''}${
+            g.failed ? ` · ${g.failed} run(s) FAILED` : ''}
+        </div>
+        ${(g.problems || []).length
+          ? `<div class="lg-prob">${g.problems.map(esc).join('<br>')}</div>` : ''}
+        ${(byId[id] || []).map(lgRun).join('')}
+      </div>`).join('');
+    runs.innerHTML = '';
+  } catch (e) {
+    // The page someone opens BECAUSE something went wrong must not be the next
+    // thing that goes wrong.
+    sum.innerHTML = `<div class="empty">Could not read the log — ${esc(e.message)}</div>`;
+    runs.innerHTML = '';
+  }
+}
 
 async function loadHistory(date) {
   const out = document.getElementById('history');

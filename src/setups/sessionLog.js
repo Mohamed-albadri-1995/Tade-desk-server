@@ -32,6 +32,34 @@
  * ONE LINE PER PASS, not per position — a pass is what the manager actually did
  * and its positions belong together. Roughly 390 lines a session, a few hundred
  * kilobytes a day, rotated by month like the alert history.
+ *
+ * BOTH HALVES OF THE DAY, in one file.
+ *
+ * The above is the EXIT side. The ENTRY side had the same hole and it was
+ * bigger: the runner decides which names to take, and everything it decided
+ * NOT to take went to `console.log` — kept by systemd for a while, read by
+ * nobody, impossible to query, and gone by the time anyone asks. So these had
+ * no answer after the fact either:
+ *
+ *     it took two names — out of how many, and what removed the rest?
+ *     three picks came back and one order went out. What happened to the
+ *       other two — stale bar, already alerted, no size, refused?
+ *     which risk rule sized it, and which LEVEL did that rule come from?
+ *     the ranking kept the top 2 by what number, out of how many signals?
+ *     nothing fired all morning. Was it asked?
+ *
+ * The alert feed answers "what fired". It cannot answer "what did not, and
+ * why", because a thing that did not fire produces no alert — and the reasons
+ * are precisely where a strategy quietly stops being the one that was tested.
+ *
+ * Two shapes, one file, told apart by `kind`:
+ *
+ *     kind: 'run'   one decision — what was asked, ranked, dropped, sent
+ *     kind: 'pass'  one management sweep — where the stops were, what closed
+ *
+ * A row written before `kind` existed has none, and is a pass: it has
+ * `positions`, which a run never does. Every reader here treats it that way,
+ * so the file that was being written last week still reads.
  */
 
 const fs = require('fs');
@@ -76,6 +104,7 @@ function passOf({ at, date, positions = [], held = null, acted = [] }) {
   return {
     at: at || Date.now(),
     date,
+    kind: 'pass',
     // `null` means Alpaca was not asked or did not answer, which is NOT the
     // same as an empty list, and a review has to be able to tell them apart.
     heldAtBroker: held === null ? null : [...held],
@@ -116,6 +145,141 @@ function passOf({ at, date, positions = [], held = null, acted = [] }) {
   };
 }
 
+/**
+ * ONE DECISION: what was asked, what was ranked, what was dropped and why, and
+ * what the broker did with what was left.
+ *
+ * The point of the shape is the FUNNEL. A run that took two names out of forty
+ * and a run that took two out of twelve are different statements about the same
+ * morning, and the alert feed shows the same two lines for both. Every stage
+ * that removes a name is counted here, in the order it removes them:
+ *
+ *     cards on the list  →  the setup's own filter  →  qp evaluated
+ *       →  had a direction  →  survived the ranking  →  fired on THIS bar
+ *       →  not already alerted today  →  had a size  →  the broker took it
+ *
+ * DELIBERATELY NOT the whole qp answer. Every candidate's bars, indicators and
+ * intermediate levels are megabytes a run and none of it is what the question
+ * needs; what is kept is the count at each stage and the NAMES that fell out of
+ * the last few, because by then a name is specific enough to go and look at.
+ */
+function runOf({
+  at, date, setupId, setupName, bar, dryRun = false, ok = true, error = null,
+  ms = null, universe = null, gate = null, counts = null, rank = null,
+  picks = [], dropped = null, orders = null, routing = null, riskCfg = null,
+  data = null, quiet = false,
+} = {}) {
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return {
+    at: at || Date.now(),
+    date,
+    kind: 'run',
+    setupId,
+    setup: setupName || undefined,
+    // WHICH BAR was decided, which is not the minute this ran. They differ by
+    // one for every fill model that enters at the next open, and a review that
+    // confuses them is comparing the wrong bar's close to the backtest.
+    bar: bar || null,
+    ok: !!ok,
+    error: error || undefined,
+    ms: num(ms),
+    dryRun: dryRun || undefined,
+    // Nothing to say on this bar of a watch window — recorded rather than
+    // returned silently, because "asked and answered nothing" and "never asked"
+    // are the two cases this file exists to tell apart.
+    quiet: quiet || undefined,
+    funnel: {
+      cards: num(universe && universe.cards),
+      kept: num(universe && universe.kept),
+      // Why the filter removed them, as counts by reason — the gate is the
+      // stage most likely to be blamed for the wrong thing.
+      filtered: gate && gate.filtered ? (gate.reasons || {}) : undefined,
+      evaluated: num(counts && counts.evaluated),
+      signalled: num(counts && counts.signalled),
+      errored: num(counts && counts.skipped),
+      picked: picks.length,
+    },
+    rank: rank && (rank.metric || rank.ignored_top_n) ? {
+      metric: rank.metric || null,
+      direction: rank.direction || null,
+      topN: num(rank.top_n),
+      // A cut asked for and not honoured: "top 2" of an unordered list is two
+      // arbitrary names, and it looks exactly like a working ranking.
+      ignoredTopN: num(rank.ignored_top_n) || undefined,
+      unscorable: (rank.unscorable || []).length ? rank.unscorable : undefined,
+    } : undefined,
+    // NAMES, not counts, for the last stages — by here the list is short and a
+    // name is something you can go and put on a chart.
+    dropped: dropped && (
+      (dropped.stale || []).length || (dropped.latched || []).length
+    ) ? {
+      // Found on a bar it could not act on: the price is stale AND the name may
+      // not have been on the watchlist yet, which is the gate the backtest applies.
+      stale: (dropped.stale || []).length ? dropped.stale : undefined,
+      // Already alerted today — the once-per-name latch.
+      latched: (dropped.latched || []).length ? dropped.latched : undefined,
+    } : undefined,
+    picks: picks.map(p => ({
+      ticker: p.ticker,
+      side: p.signal || p.side || null,
+      at: p.decisionAt || null,
+      entry: num(p.plan && p.plan.entry),
+      stop: num(p.plan && p.plan.stop),
+      target: num(p.plan && p.plan.target),
+      metric: num(p.extension),
+      shares: num(p.shares),
+      // Per destination: what it was sized for and what came back. "40 asked,
+      // 12 sent" needs both numbers, and with two accounts the interesting case
+      // is the one where they disagree.
+      orders: ((orders || {})[p.ticker] || []).map(o => ({
+        to: o.destination || o.broker || null,
+        sizedFor: num(o.sizedFor),
+        sent: !!o.sent,
+        qty: num(o.quantity),
+        status: o.status || undefined,
+        skipped: o.skipped || undefined,
+        partial: o.partial || undefined,
+        error: o.sent ? undefined : (o.error || undefined),
+      })),
+    })),
+    // WHICH RULE SIZED IT AND WHERE THAT RULE CAME FROM. The share count is the
+    // number that is checked first and it cannot be checked without these: the
+    // same $250 means one thing as a flat figure and another as half a percent.
+    risk: riskCfg ? {
+      rule: riskCfg.riskRule || null,
+      from: (riskCfg.sources || {}).risk || null,
+      perTrade: num(riskCfg.riskPerTrade),
+      pct: num(riskCfg.riskPct),
+      accountSize: num(riskCfg.accountSize),
+      // One level naming both rules — a real ambiguity, not the ordinary case
+      // of a setup overriding its account.
+      conflicts: (riskCfg.conflicts || []).length ? riskCfg.conflicts : undefined,
+      legacy: riskCfg.legacy || undefined,
+    } : undefined,
+    routing: routing ? {
+      // NAMES ONLY. A destination config carries that account's own Alpaca key
+      // and secret, and this file is read, copied and pasted into questions.
+      // The caller passes `to` already reduced; the fallback is here so a future
+      // caller that hands over the raw configs still cannot write one out.
+      to: Array.isArray(routing.to) ? routing.to
+        : (routing.cfgs || []).map(c => c.destinationName || c.destinationId),
+      // The reason nothing was sent, which is the difference between a desk
+      // that alerts on purpose and one that quietly stopped trading.
+      error: routing.error || undefined,
+      orderable: routing.orderable === undefined ? undefined : !!routing.orderable,
+      blocking: (routing.blocking || []).length ? routing.blocking : undefined,
+    } : undefined,
+    feed: data ? {
+      used: data.feed || null,
+      mixed: data.mixed || undefined,
+      // Ranked against nothing: a gap in the universe changes the ranking,
+      // because the ranking is over the universe.
+      missing: (data.missing || []).length ? data.missing : undefined,
+      coverage: num(data.coverage),
+    } : undefined,
+  };
+}
+
 /** Every pass recorded for a date, oldest first. */
 function read(date) {
   let raw;
@@ -143,7 +307,9 @@ function trackOf(date, symbol) {
   const want = String(symbol || '').toUpperCase();
   const out = [];
   let last = null;
-  for (const pass of read(date)) {
+  // Passes only. A run row carries picks, not positions, and reading it here
+  // would be reading the entry side's answer as an exit-side observation.
+  for (const pass of read(date).filter(isPass)) {
     const p = (pass.positions || []).find(x => String(x.symbol).toUpperCase() === want);
     if (!p) continue;
     // The fields whose CHANGE is the story. `barsHeld` moves every minute by
@@ -165,7 +331,7 @@ function trackOf(date, symbol) {
 /** Every name the manager looked at on a date, in the order it first saw them. */
 function symbolsOn(date) {
   const seen = [];
-  for (const pass of read(date)) {
+  for (const pass of read(date).filter(isPass)) {
     for (const p of pass.positions || []) {
       const s = String(p.symbol || '').toUpperCase();
       if (s && !seen.includes(s)) seen.push(s);
@@ -174,4 +340,79 @@ function symbolsOn(date) {
   return seen;
 }
 
-module.exports = { record, passOf, read, trackOf, symbolsOn, fileFor, LOG_DIR };
+/*
+ * A row from before `kind` existed has none. It is a management pass — it has
+ * `positions`, which a run never does. Written once here so the two readers
+ * below and anything added later cannot disagree about it.
+ */
+function isRun(row) { return row && row.kind === 'run'; }
+function isPass(row) { return row && (row.kind === 'pass' || (!row.kind && row.positions)); }
+
+/** Every decision recorded on a date, oldest first; one setup if named. */
+function runsOn(date, setupId) {
+  return read(date).filter(r => isRun(r)
+    && (!setupId || r.setupId === setupId));
+}
+
+/** Every management sweep on a date, oldest first. */
+function passesOn(date) {
+  return read(date).filter(isPass);
+}
+
+/**
+ * The day in one object: what each setup was asked, and where the names went.
+ *
+ * The question this answers is "did the desk do what I set it up to do today",
+ * and the honest answer is a funnel per setup rather than a count of alerts —
+ * because the alerts are only the names that survived every stage, and the
+ * stages are where a strategy stops being the one that was tested.
+ */
+function summaryOf(date) {
+  const out = {};
+  for (const r of runsOn(date)) {
+    const g = out[r.setupId] || (out[r.setupId] = {
+      setup: r.setup || r.setupId, runs: 0, failed: 0, quiet: 0,
+      // The last bar it was asked about, so "it stopped running at 09:52" is
+      // visible without reading every row.
+      firstBar: r.bar || null, lastBar: null, msMax: 0,
+      evaluated: 0, signalled: 0, picked: 0,
+      staleDropped: 0, latched: 0,
+      ordersSent: 0, ordersFailed: 0, ordersSkipped: 0,
+      // Only the reasons, deduped — the same refusal on 31 bars of a watch
+      // window is one fact, not 31.
+      problems: [],
+    });
+    g.runs += 1;
+    if (r.ok === false) g.failed += 1;
+    if (r.quiet) g.quiet += 1;
+    if (r.bar) g.lastBar = r.bar;
+    if (typeof r.ms === 'number') g.msMax = Math.max(g.msMax, r.ms);
+    const f = r.funnel || {};
+    g.evaluated += f.evaluated || 0;
+    g.signalled += f.signalled || 0;
+    g.picked += f.picked || 0;
+    g.staleDropped += ((r.dropped || {}).stale || []).length;
+    g.latched += ((r.dropped || {}).latched || []).length;
+    for (const p of r.picks || []) {
+      for (const o of p.orders || []) {
+        if (o.sent) g.ordersSent += 1;
+        else if (o.skipped) g.ordersSkipped += 1;
+        else g.ordersFailed += 1;
+      }
+    }
+    const note = (s) => { if (s && !g.problems.includes(s)) g.problems.push(s); };
+    if (r.error) note(r.error);
+    if ((r.routing || {}).error) note(r.routing.error);
+    for (const c of (r.risk || {}).conflicts || []) note(c);
+    if ((r.risk || {}).legacy) note(r.risk.legacy);
+    if ((r.rank || {}).ignoredTopN) {
+      note(`"top ${r.rank.ignoredTopN}" ignored — no ranking metric is set`);
+    }
+  }
+  return out;
+}
+
+module.exports = {
+  record, passOf, runOf, read, trackOf, symbolsOn,
+  runsOn, passesOn, summaryOf, isRun, isPass, fileFor, LOG_DIR,
+};

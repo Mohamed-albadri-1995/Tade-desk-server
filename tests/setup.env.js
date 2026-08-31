@@ -55,3 +55,23 @@ process.env.DB_PATH = process.env.DB_PATH
 for (const v of ['APCA_API_KEY_ID', 'APCA_API_SECRET_KEY', 'FINNHUB_API_KEY']) {
   delete process.env[v];
 }
+
+/*
+ * ...AND OFF THE REAL SESSION LOG.
+ *
+ * The same idea, for a file rather than a credential. `runSetup` now writes one
+ * line per decision, so every suite that runs a setup with a stubbed feed
+ * appends an invented run — fake tickers, fake fills, dated whenever the test
+ * says — to the record of what the desk actually did. That file is what a
+ * morning gets reviewed from, and a review cannot be worth anything if a test
+ * run can put trades into it.
+ *
+ * Found the honest way: a full `npx jest` wrote rows into
+ * data/history/session-2026-08.jsonl.
+ *
+ * Set here, before any module resolves the path, for the same reason as the
+ * lines above. A suite that wants its own directory still wins — it assigns
+ * SESSION_LOG_DIR at the top of the file, which runs after this.
+ */
+process.env.SESSION_LOG_DIR = process.env.SESSION_LOG_DIR
+  || path.join(os.tmpdir(), `jest-session-log-${process.pid}`);

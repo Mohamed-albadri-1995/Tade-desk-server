@@ -747,6 +747,71 @@ app.get('/api/tools', (req, res) => {
 });
 
 /*
+ * THE SESSION LOG: what the desk did, including what it decided not to do.
+ *
+ * The alert feed on this page answers "what fired". It cannot answer "what
+ * did not, and why" — a thing that did not fire produces no alert — and the
+ * reasons are exactly where a strategy quietly stops being the one that was
+ * tested: the filter took the name out, the pick fired on a bar it could not
+ * act on, the latch had already used it, the account had no size for it, the
+ * broker refused it.
+ *
+ * Two shapes come back, and they are the two halves of a day:
+ *
+ *     runs    one per decision  — the funnel from cards to orders
+ *     passes  one per sweep     — where the stops were, what closed
+ *
+ * `summary` is the whole day per setup, which is the view that answers "did
+ * the desk do what I set it up to do" without reading four hundred rows.
+ */
+const sessionLog = require('../setups/sessionLog');
+
+app.get('/api/session-log', (req, res) => {
+  // NEVER 500. This is the page someone opens BECAUSE something went wrong,
+  // and a reader that fails when the day was bad is a reader that is never
+  // there when it is needed.
+  try {
+    const { toETDate } = require('../utils/time');
+    const date = String(req.query.date || '') || toETDate(Date.now());
+    const setupId = String(req.query.setup || '') || null;
+    const kind = String(req.query.kind || '');
+    const limit = Math.min(Math.max(Number(req.query.limit) || 400, 1), 5000);
+    const out = { ok: true, date, summary: sessionLog.summaryOf(date) };
+    if (kind !== 'pass') {
+      // NEWEST FIRST. The file is append-only and oldest-first, which is the
+      // right order to write and the wrong one to open: what just happened is
+      // what is being looked for.
+      out.runs = sessionLog.runsOn(date, setupId).reverse().slice(0, limit);
+    }
+    if (kind !== 'run') {
+      out.passes = sessionLog.passesOn(date).reverse().slice(0, limit);
+      out.symbols = sessionLog.symbolsOn(date);
+    }
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message, runs: [], passes: [], summary: {} });
+  }
+});
+
+/*
+ * One position's day, collapsed to the changes.
+ *
+ * 390 near-identical rows hide the shape of a day as thoroughly as having no
+ * file at all, so consecutive passes that say the same thing are one line.
+ */
+app.get('/api/session-log/track', (req, res) => {
+  try {
+    const { toETDate } = require('../utils/time');
+    const date = String(req.query.date || '') || toETDate(Date.now());
+    const symbol = String(req.query.symbol || '');
+    if (!symbol) return res.json({ ok: false, error: 'symbol is required', track: [] });
+    res.json({ ok: true, date, symbol, track: sessionLog.trackOf(date, symbol) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, track: [] });
+  }
+});
+
+/*
  * Push: notifications that arrive with the page closed.
  *
  * Everything else on that page needs an open tab. A setup fires at a fixed
