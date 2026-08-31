@@ -53,6 +53,7 @@ PARTS = [
     ('logic_audit38.py',    'managing an open position: exit rules + the ratchet'),
     ('logic_audit39.py',    "fill model 'desk': the fill and the levels come from different prices"),
     ('logic_audit40.py',    "O'Neil relative strength: percentile vs RSI, splits, group funnel"),
+    ('logic_audit41.py',    'print sheet: one at a time, bounded, refuses rather than queues'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They

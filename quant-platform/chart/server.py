@@ -218,6 +218,42 @@ import threading as _threading
 _BT_RUNNING: dict = {'id': None}
 _BT_START_LOCK = _threading.Lock()     # closes the double-POST race window
 
+# ── the print sheet: ONE AT A TIME, AND BOUNDED ───────────────────────────
+#
+# A print sheet is the heaviest thing this process does, and until now it was
+# the only heavy thing with no limit on it. The backtest has taken the lock
+# above since it was written; printing took nothing, and two or three sheets
+# started together were three of everything at once.
+#
+# WHAT ONE SHEET COSTS, per ticker:
+#
+#   compute_data() materialises up to _MAX_DAYS[tf] days of bars to draw a
+#   two-day window — 60 days of 1-minute bars in full extended hours is about
+#   57,600 rows, fetched to display roughly 1,900 of them, plus every overlay
+#   series computed across the whole span.
+#
+# and then, ONCE, for the whole sheet:
+#
+#   json.dumps(sheets) builds the entire payload as one string; the f-string
+#   template copies it into a larger one; HTMLResponse encodes that to UTF-8.
+#   Three copies of everything, live at the same moment, before a byte is sent.
+#
+# Multiply that by three concurrent requests and the box has no headroom left —
+# which is why adding RAM did not help. More memory does not bound an unbounded
+# job; it only moves the point where it falls over.
+#
+# REFUSED, NOT QUEUED. Blocking on the lock would hold a threadpool worker for
+# the minutes a rate-limited Polygon fetch can take, so a second request is
+# turned away immediately with a page that says what is happening. Waiting and
+# dying is worse than being told to wait.
+_PRINT_LOCK = _threading.Lock()
+
+# A hard ceiling on one sheet. A register day is normally tens of tickers; the
+# cap exists for the day it is not, and it TRUNCATES LOUDLY rather than dying
+# halfway through — a sheet that silently stopped at chart 90 would be read as
+# "only 90 names qualified".
+_PRINT_MAX_CHARTS = 150
+
 
 @app.post('/api/backtest')
 def backtest_start(payload: dict = Body(...)):
@@ -1399,6 +1435,14 @@ def _charts_for_day(d: str, tickers: list, cards: dict, tf: str, feed: str,
 
     charts = []
     for sym in tickers:
+        # TRUNCATE LOUDLY. A sheet that quietly stopped at the cap would be read
+        # as "only this many names qualified", which is a different and much
+        # more damaging statement than "the sheet was too big".
+        if len(charts) >= _PRINT_MAX_CHARTS:
+            errors.append(f'{d}: stopped at {_PRINT_MAX_CHARTS} charts — '
+                          f'{len(tickers) - len(charts)} more ticker(s) NOT drawn. '
+                          'Narrow the day range or the register.')
+            break
         try:
             data = cs.compute_data(symbol=sym, tf=tf, days=need, overlays=ovs,
                                    feed=feed, view='all', asof=asof)
@@ -1414,6 +1458,12 @@ def _charts_for_day(d: str, tickers: list, cards: dict, tf: str, feed: str,
                            'card': (cards or {}).get(sym) or {}})
         except Exception as e:          # one bad symbol never kills the sheet
             errors.append(f'{d} {sym}: {e}')
+        finally:
+            # `data` holds up to _MAX_DAYS[tf] days of bars plus every overlay
+            # series computed across them — tens of thousands of rows, to keep
+            # the ~1,900 inside the window. Dropped the moment it is filtered,
+            # so the peak is ONE ticker's history rather than the whole sheet's.
+            data = None
     return charts
 
 
@@ -1563,8 +1613,16 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
     cs.compute_data() the live chart uses; /api/r1/csv exports these exact
     numbers as a spreadsheet.
     """
-    sheets, errors, ovs, rng, bad = _build_sheets(
-        start, end, day, tf, feed, overlays, register, days_before, days_after)
+    if not _PRINT_LOCK.acquire(blocking=False):
+        return _print_busy()
+    try:
+        sheets, errors, ovs, rng, bad = _build_sheets(
+            start, end, day, tf, feed, overlays, register, days_before, days_after)
+    finally:
+        # Released as soon as the BARS are in hand. Rendering the page is string
+        # work on data already held — it does not fetch, and holding the lock
+        # across it would serialise two cheap operations behind one expensive one.
+        _PRINT_LOCK.release()
     if bad:
         return HTMLResponse(f'<h3>{bad}</h3>')
     from urllib.parse import urlencode as _ue
@@ -1578,6 +1636,21 @@ def r1_print(start: str = '', end: str = '', day: str = '', tf: str = '1m',
                        csv_url=f'/api/r1/csv?{csv_qs}',
                        cards_url=f'/api/r1/cards.csv?{cards_qs}',
                        day_prefix='register day ')
+
+
+def _print_busy() -> HTMLResponse:
+    """What a second print sheet gets while the first is still building.
+
+    A page, not a 503: this is opened in a browser tab, and an error status
+    renders as the browser's own failure screen with none of this text on it.
+    """
+    return HTMLResponse(
+        '<body style="background:#fff;color:#111;font:15px system-ui;margin:40px">'
+        '<h3 style="margin:0 0 8px">Another print sheet is still building.</h3>'
+        '<p style="color:#555;max-width:52ch">Only one runs at a time — each one '
+        'fetches weeks of bars for every ticker on the sheet, and three at once '
+        'is what takes the server down. Wait for the first tab to finish, then '
+        'reload this one.</p></body>')
 
 
 def _sheet_page(sheets: list, errors: list, ovs: list, title: str, rng: str,
@@ -1923,8 +1996,16 @@ def pairs_print(pairs: str = '', tf: str = '5m', feed: str = 'polygon',
     /static assets resolve normally. A few hundred pairs fit in a query
     string; beyond that, split the list.
     """
-    sheets, errors, ovs, rng, bad = _build_pair_sheets(
-        pairs, tf, feed, overlays, days_before, days_after, register, trades)
+    # Same lock as the register sheet: this is the SAME work, chosen a
+    # different way. Two print endpoints with one guard between them would
+    # simply move the crash to whichever one was left unguarded.
+    if not _PRINT_LOCK.acquire(blocking=False):
+        return _print_busy()
+    try:
+        sheets, errors, ovs, rng, bad = _build_pair_sheets(
+            pairs, tf, feed, overlays, days_before, days_after, register, trades)
+    finally:
+        _PRINT_LOCK.release()
     if bad:
         return HTMLResponse(f'<h3>{bad}</h3>')
     from urllib.parse import urlencode as _ue
