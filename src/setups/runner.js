@@ -390,11 +390,17 @@ async function runSetup(setup, { date, dryRun = false, tickers = null, bar = nul
    * numbers even if they are edited while this is executing.
    */
   const account = risk.settings();
-  const riskCfg = {
-    ...account,
-    ...(setup.riskPerTrade ? { riskPerTrade: setup.riskPerTrade } : {}),
-    ...(setup.maxPositionPct ? { maxPositionPct: setup.maxPositionPct } : {}),
-  };
+  /*
+   * RESOLVED, not merged. The old per-field spread let an account risking 0.5%
+   * meet a setup still carrying a flat riskPerTrade from an earlier experiment:
+   * both survived the merge and the sizing quietly preferred the flat dollar,
+   * which is a rule nobody chose. risk.resolve() takes the risk rule WHOLE from
+   * whichever level names one, and reports what it had to override.
+   */
+  const riskCfg = risk.resolve(account, setup);
+  if (riskCfg.conflicts.length) {
+    console.warn(`[Setups] ${setup.id}: ${riskCfg.conflicts.join(' · ')}`);
+  }
 
   /*
    * The orders, placed before the alerts are published.

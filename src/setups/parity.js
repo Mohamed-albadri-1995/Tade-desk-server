@@ -169,25 +169,32 @@ function compare({ setup, spec, strategy } = {}) {
   const btRiskUsd = bt.risk_usd || null;
   const btRiskPct = bt.risk_pct || null;
   /*
-   * A SETUP MAY OVERRIDE THE ACCOUNT. `riskPerTrade` and `maxPositionPct` exist
-   * on both the account and the setup, and the setup wins where it is set — so
-   * comparing the account figure alone would report a match on a setup that is
-   * sized differently from it.
+   * RESOLVED ACROSS THE LEVELS, not read off the account.
+   *
+   * riskPerTrade, riskPct and maxPositionPct all exist on BOTH the account and
+   * the setup, and the setup wins. Comparing the account figure alone reported
+   * a match on a setup that was sized by an override — which is the same class
+   * of invisible difference this whole file exists to catch, one layer down.
    */
-  const liveRiskUsd = p.riskPerTrade || live.riskPerTrade || null;
-  rows.push(row('risk model', liveRiskUsd ? 'fixed $' : null,
+  const eff = risk.resolve(live, p);
+  const liveRiskUsd = eff.riskPerTrade;
+  const liveRiskPct = eff.riskPct;
+  rows.push(row('risk model',
+    eff.riskRule === 'fixed_usd' ? 'fixed $'
+      : (eff.riskRule === 'pct_of_equity' ? '% of equity' : null),
     btRiskUsd ? 'fixed $' : (btRiskPct ? '% of equity' : null),
-    'a percentage COMPOUNDS and a flat dollar does not — over a fortnight that '
-    + 'is a size difference nothing in either report mentions'));
-  rows.push(row('risk per trade', liveRiskUsd,
-    btRiskUsd || (btRiskPct && bt.account_equity
-      ? Math.round(bt.account_equity * btRiskPct) / 100 : null),
-    btRiskPct && !btRiskUsd ? "backtest figure is the FIRST trade's budget; it compounds from there" : null));
+    'a percentage COMPOUNDS in the backtest and does not on the desk — they '
+    + 'agree on trade one and drift as the run banks P&L'));
+  // Compared in the unit the run was configured in, so a percentage is not
+  // silently turned into a dollar figure that then reads as a mismatch.
+  rows.push(row('risk per trade',
+    liveRiskUsd ? `$${liveRiskUsd}` : (liveRiskPct ? `${liveRiskPct}%` : null),
+    btRiskUsd ? `$${btRiskUsd}` : (btRiskPct ? `${btRiskPct}%` : null),
+    `set at ${eff.sources.risk} level`));
   rows.push(row('account size', live.accountSize || null, bt.account_equity || null));
-  // maxPositionPct defaults to 100 live (no cap); the backtest treats absent as
-  // no cap too, so 100 and absent mean the same thing and must compare equal.
-  const liveCapRaw = p.maxPositionPct || live.maxPositionPct;
-  const liveCap = liveCapRaw === 100 ? null : (liveCapRaw || null);
+  // 100 live means NO cap, which is what an absent cap means in the backtest,
+  // so the two must compare equal rather than as 100 against nothing.
+  const liveCap = eff.maxPositionPct === 100 ? null : (eff.maxPositionPct || null);
   const btCap = bt.max_position_pct || null;
   rows.push(row('max position %', liveCap, btCap,
     'absent on either side means NO cap — the first tight stop can take the '
@@ -223,6 +230,19 @@ function compare({ setup, spec, strategy } = {}) {
   rows.push(row('view', p.view || s.view || 'all', bt.view || 'all',
     "'regular' drops the pre-market bars, which changes every rolling "
     + "indicator's warm-up and removes the 09:29 decision bar entirely"));
+
+  /*
+   * TWO LEVELS HOLDING DIFFERENT ANSWERS is worth reporting even when the
+   * resolved one matches: it means the backtest agrees with the override and
+   * NOT with the account, so editing the account later changes nothing and
+   * looks broken.
+   */
+  if (eff.conflicts.length) {
+    rows.push({ what: 'setting conflict', live: eff.conflicts.join(' · '),
+                backtest: null, status: 'differ',
+                note: 'the same setting is held at two levels — adopt clears the '
+                  + 'one that is being superseded so exactly one level decides' });
+  }
 
   const differs = rows.filter(x => x.status === 'differ');
   const unknown = rows.filter(x => x.status === 'unknown');
@@ -320,8 +340,28 @@ function planAdopt({ setup, spec, strategy } = {}) {
      */
     fill: (bt.fill === 'desk' || bt.fill === 'next_open' || !bt.fill) ? 'live' : bt.fill,
     maxTradesPerDay: (bt.rules && bt.rules.max_entries_per_day) || null,
+    /*
+     * THE OVERRIDES ARE CLEARED, and that is the point of adopting rather than
+     * editing the account by hand.
+     *
+     * The backtest describes ONE book, so after adoption exactly one level may
+     * decide its size. A setup-level riskPerTrade left standing beside a newly
+     * adopted account riskPct wins silently — the desk then sizes by a rule
+     * nobody chose while every report reads the account and says it agrees.
+     *
+     * Null deletes the key (prefs.saveSettings), so the setup falls through to
+     * the account, which is now the adopted specification.
+     */
+    riskPerTrade: null,
+    riskPct: null,
+    maxPositionPct: null,
   };
 
+  note('setup risk override ($)', curPrefs.riskPerTrade, null,
+    'CLEARED — the account is the specification now, and two levels holding '
+    + 'the same setting is how one of them wins silently');
+  note('setup risk override (%)', curPrefs.riskPct, null, 'CLEARED');
+  note('setup position cap override', curPrefs.maxPositionPct, null, 'CLEARED');
   note('rank metric', curPrefs.rankMetric, setupPatch.rankMetric);
   note('rank top N', curPrefs.topN, setupPatch.topN);
   note('timeframe', curPrefs.tf, setupPatch.tf);

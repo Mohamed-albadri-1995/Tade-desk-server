@@ -117,6 +117,13 @@ function settingsFor(setupId) {
      * normal case.
      */
     riskPerTrade: e.riskPerTrade || null,
+    /*
+     * ...or as a PERCENTAGE, for the same reason the account has both: a
+     * backtest can be won either way, and whichever won is what the desk has
+     * to reproduce. Naming both here is a conflict, and risk.resolve() reports
+     * it rather than silently preferring one.
+     */
+    riskPct: e.riskPct || null,
     maxPositionPct: e.maxPositionPct || null,
     /*
      * HOW the day's signals are ranked against each other, and there is no
@@ -139,7 +146,7 @@ function saveSettings(setupId, patch) {
   const cur = state.setups[setupId] || {};
   const next = { ...cur };
   for (const k of ['universe', 'topN', 'tf', 'feed', 'view', 'targetR', 'fill', 'caution',
-                   'maxTradesPerDay', 'riskPerTrade', 'maxPositionPct',
+                   'maxTradesPerDay', 'riskPerTrade', 'riskPct', 'maxPositionPct',
                    'rankMetric', 'rankDirection']) {
     if (!(k in patch)) continue;
     const v = patch[k];

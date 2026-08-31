@@ -155,10 +155,21 @@ describe('the desk as it IS — the default live fill', () => {
     expect([r.live, r.backtest]).toEqual(['fixed $', '% of equity']);
   });
 
-  test('...and the dollars are twice apart on trade one', () => {
+  // COMPARED IN THE UNIT EACH SIDE WAS CONFIGURED IN. Converting the
+  // percentage to dollars would print "250" against "500" and invite the fix
+  // of typing 250 into the desk — which reproduces the first trade and nothing
+  // after it, because the backtest compounds and the desk does not.
+  test('...and each is shown in its own unit, not converted', () => {
     const r = find(res(), 'risk per trade');
-    expect([r.live, r.backtest]).toEqual([500, 250]);
-    expect(r.note).toMatch(/compounds/);
+    expect([r.live, r.backtest]).toEqual(['$500', '0.5%']);
+    expect(find(res(), 'risk model').note).toMatch(/COMPOUNDS/);
+  });
+
+  // WHICH LEVEL SET IT. Two levels hold this setting and the setup wins; a
+  // report that did not say which one was in force sends you to edit the
+  // wrong file.
+  test('the row names the level the value came from', () => {
+    expect(find(res(), 'risk per trade').note).toMatch(/account level/);
   });
 
   test('the position cap is live-only — the backtest ran uncapped', () => {
@@ -358,3 +369,141 @@ describe('adopting a winning backtest', () => {
 function risk_settings() {
   return require('../src/setups/risk').settings();
 }
+
+/*
+ * ── THE THREE LEVELS MUST NOT CONFLICT ───────────────────────────────────
+ *
+ * Money settings live at TWO levels — the account (data/risk.json, shared by
+ * every setup) and the setup (data/setup-prefs.json, one strategy alone). The
+ * TOOL level holds none: a tool decides which setups it runs and owns its card
+ * register, and never sizes anything.
+ *
+ * The trap is not that both exist. It is that they used to be merged FIELD BY
+ * FIELD: adopt a run that won at 0.5% of equity, and a setup still carrying a
+ * flat riskPerTrade from an earlier experiment survives the merge and wins,
+ * because the sizing prefers a flat dollar. The desk then sizes by a rule
+ * nobody chose while every report reads the account and says it agrees.
+ */
+describe('account level vs setup level', () => {
+  const risk = require('../src/setups/risk');
+
+  test('with no override, the account decides', () => {
+    const e = risk.resolve({ accountSize: 50000, riskPct: 0.5, maxPositionPct: 100 }, {});
+    expect(e.riskRule).toBe('pct_of_equity');
+    expect(e.riskPct).toBe(0.5);
+    expect(e.sources.risk).toBe('account');
+    expect(e.conflicts).toEqual([]);
+  });
+
+  // THE TRAP, as a test. The risk rule is taken WHOLE from whichever level
+  // names one — half a percentage and half a flat dollar is neither.
+  test('a setup flat dollar BEATS an account percentage, and says so', () => {
+    const e = risk.resolve({ accountSize: 50000, riskPct: 0.5, maxPositionPct: 100 },
+                           { riskPerTrade: 500 });
+    expect(e.riskRule).toBe('fixed_usd');
+    expect(e.riskPerTrade).toBe(500);
+    // The account's percentage must be GONE, not carried alongside.
+    expect(e.riskPct).toBeNull();
+    expect(e.sources.risk).toBe('setup');
+    expect(e.conflicts.length).toBe(1);
+    expect(e.conflicts[0]).toMatch(/0\.5% per trade/);
+  });
+
+  test('a setup percentage beats an account flat dollar the same way', () => {
+    const e = risk.resolve({ accountSize: 50000, riskPerTrade: 500, maxPositionPct: 100 },
+                           { riskPct: 0.5 });
+    expect(e.riskRule).toBe('pct_of_equity');
+    expect(e.riskPerTrade).toBeNull();
+    expect(e.conflicts.length).toBe(1);
+  });
+
+  test('a setup naming BOTH is a conflict, resolved to the flat figure', () => {
+    const e = risk.resolve({ accountSize: 50000, riskPct: 0.5 },
+                           { riskPerTrade: 500, riskPct: 1.0 });
+    expect(e.riskRule).toBe('fixed_usd');
+    expect(e.conflicts[0]).toMatch(/BOTH/);
+  });
+
+  test('the position cap resolves the same way, and reports the override', () => {
+    const e = risk.resolve({ accountSize: 50000, riskPct: 0.5, maxPositionPct: 100 },
+                           { maxPositionPct: 16.66 });
+    expect(e.maxPositionPct).toBe(16.66);
+    expect(e.sources.maxPositionPct).toBe('setup');
+    expect(e.conflicts.some(c => /100%/.test(c))).toBe(true);
+  });
+
+  // 100 is the account default and means NO cap, so it is not an override when
+  // the setup says nothing.
+  test('no setup cap falls through to the account with no conflict', () => {
+    const e = risk.resolve({ accountSize: 50000, riskPct: 0.5, maxPositionPct: 100 }, {});
+    expect(e.maxPositionPct).toBe(100);
+    expect(e.conflicts).toEqual([]);
+  });
+
+  test('the tool level holds no money settings at all', () => {
+    // Stated as a test so the absence is on the record: a tool that started
+    // carrying a risk figure would be a third place for this to drift.
+    const catalog = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'setups', 'catalog.js'), 'utf8');
+    expect(/accountSize/.test(catalog)).toBe(false);
+  });
+});
+
+describe('adopting resolves the levels rather than adding to them', () => {
+  test('the setup-level overrides are CLEARED, so one level decides', () => {
+    write('setup-prefs.json', { setups: { [SETUP.id]: {
+      rankMetric: 'vwap_extension', topN: 3,
+      // left over from an earlier experiment — exactly the trap
+      riskPerTrade: 500, maxPositionPct: 16.66 } } });
+    const plan = parity.planAdopt({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
+    expect(plan.setupPatch.riskPerTrade).toBeNull();
+    expect(plan.setupPatch.riskPct).toBeNull();
+    expect(plan.setupPatch.maxPositionPct).toBeNull();
+  });
+
+  test('...and the clearing is listed as a change, not done quietly', () => {
+    write('setup-prefs.json', { setups: { [SETUP.id]: { riskPerTrade: 500 } } });
+    const plan = parity.planAdopt({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
+    const c = plan.changes.find(x => x.what === 'setup risk override ($)');
+    expect([c.from, c.to]).toEqual([500, null]);
+    expect(c.why).toMatch(/CLEARED/);
+  });
+
+  test('after adopting, exactly one level holds the risk rule', () => {
+    write('setup-prefs.json', { setups: { [SETUP.id]: {
+      rankMetric: 'vwap_extension', topN: 3, riskPerTrade: 500, maxPositionPct: 16.66 } } });
+    parity.applyAdopt(parity.planAdopt({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY }));
+    const risk = require('../src/setups/risk');
+    const eff = risk.resolve(risk.settings(), require('../src/setups/prefs').settingsFor(SETUP.id));
+    expect(eff.sources.risk).toBe('account');
+    expect(eff.riskPct).toBe(0.5);
+    expect(eff.riskPerTrade).toBeNull();
+    // No conflict left to report, which is the whole objective.
+    expect(eff.conflicts).toEqual([]);
+  });
+
+  test('...and the comparison is clean afterwards', () => {
+    write('setup-prefs.json', { setups: { [SETUP.id]: {
+      rankMetric: 'vwap_extension', topN: 3, riskPerTrade: 500, maxPositionPct: 16.66 } } });
+    parity.applyAdopt(parity.planAdopt({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY }));
+    const res = parity.compare({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
+    expect(res.differs).toEqual([]);
+  });
+});
+
+// A conflict is worth reporting even when the RESOLVED value happens to match
+// the backtest: it means the run agrees with the override and not with the
+// account, so editing the account later changes nothing and looks broken.
+describe('a live conflict is surfaced by the comparison', () => {
+  test('two levels disagreeing shows up as its own row', () => {
+    write('risk.json', { accountSize: 50000, riskPct: 0.5, maxPositionPct: 100 });
+    write('setup-prefs.json', { setups: { [SETUP.id]: {
+      rankMetric: 'vwap_extension', topN: 3, tf: '1m', feed: 'polygon',
+      maxTradesPerDay: 1, riskPerTrade: 500 } } });
+    const res = parity.compare({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
+    const row = res.rows.find(r => r.what === 'setting conflict');
+    expect(row).toBeTruthy();
+    expect(row.status).toBe('differ');
+    expect(row.live).toMatch(/the setup wins/);
+  });
+});

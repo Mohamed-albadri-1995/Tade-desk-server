@@ -137,6 +137,94 @@ function save(patch) {
  * the same trade as the large one, exactly 5% of it.
  */
 
+/*
+ * ── THE THREE LEVELS, RESOLVED IN ONE PLACE ──────────────────────────────
+ *
+ * Money settings exist at two levels and are read by three things, and until
+ * this function they were merged ad hoc at each reader.
+ *
+ *   ACCOUNT   data/risk.json — accountSize, riskPerTrade OR riskPct,
+ *             maxPositionPct. Shared by every setup on the desk.
+ *   SETUP     data/setup-prefs.json — the same three, for one strategy alone.
+ *             "What may THIS strategy lose", which is a smaller number while a
+ *             strategy is young.
+ *   TOOL      holds NO money settings. A tool decides which setups it runs and
+ *             owns its own card register; it never sizes anything. Named here
+ *             so the absence is on the record rather than assumed.
+ *
+ * THE CONFLICT THIS EXISTS TO KILL. The old merge was a per-field spread:
+ *
+ *     {...account, ...(setup.riskPerTrade ? {riskPerTrade} : {})}
+ *
+ * Adopt a backtest that won at 0.5% of equity and the account gets riskPct
+ * 0.5 — but a setup that still carries a flat riskPerTrade from an earlier
+ * experiment merges on top, and sizeFor prefers the flat dollar. The desk then
+ * sizes by a rule nobody chose, the parity check reads the account and says
+ * everything agrees, and the difference is invisible in both places.
+ *
+ * THE RULE. The risk BUDGET is resolved as a whole, not field by field: if the
+ * setup names EITHER risk rule, the setup's rule is used and the account's is
+ * ignored entirely. A percentage and a flat dollar are two different sizing
+ * strategies, and half of each is neither.
+ *
+ * `sources` says which level each value came from, so a report can show it.
+ * `conflicts` names anything that had to be overridden, so adoption can clear
+ * it rather than leaving a value that quietly wins.
+ */
+function resolve(account = settings(), setup = null) {
+  const s = setup || {};
+  const a = account || {};
+  const pos = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+
+  const out = { accountSize: pos(a.accountSize) };
+  const sources = { accountSize: 'account' };
+  const conflicts = [];
+
+  // THE RISK RULE, taken WHOLE from whichever level names one.
+  const setupUsd = pos(s.riskPerTrade);
+  const setupPct = pos(s.riskPct);
+  if (setupUsd && setupPct) {
+    conflicts.push('this setup names BOTH a flat risk and a percentage — '
+      + 'the flat figure is used and the percentage ignored');
+  }
+  if (setupUsd || setupPct) {
+    out.riskPerTrade = setupUsd;
+    out.riskPct = setupUsd ? null : setupPct;
+    sources.risk = 'setup';
+    if (pos(a.riskPerTrade) && !setupUsd) {
+      conflicts.push(`the account risks $${pos(a.riskPerTrade)} per trade and this `
+        + `setup overrides it with ${setupPct}% — the setup wins`);
+    }
+    if (pos(a.riskPct) && !setupPct) {
+      conflicts.push(`the account risks ${pos(a.riskPct)}% per trade and this setup `
+        + `overrides it with $${setupUsd} — the setup wins`);
+    }
+  } else {
+    out.riskPerTrade = pos(a.riskPerTrade);
+    out.riskPct = out.riskPerTrade ? null : pos(a.riskPct);
+    sources.risk = 'account';
+  }
+  out.riskRule = out.riskPerTrade ? 'fixed_usd' : (out.riskPct ? 'pct_of_equity' : null);
+
+  // THE POSITION CAP. 100 means no cap; absent at the setup level means "use
+  // the account's", which is why 0 and absent must not be conflated.
+  const setupCap = pos(s.maxPositionPct);
+  if (setupCap) {
+    out.maxPositionPct = setupCap;
+    sources.maxPositionPct = 'setup';
+    const acctCap = pos(a.maxPositionPct) || 100;
+    if (acctCap !== setupCap) {
+      conflicts.push(`the account caps a position at ${acctCap}% and this setup `
+        + `overrides it with ${setupCap}% — the setup wins`);
+    }
+  } else {
+    out.maxPositionPct = pos(a.maxPositionPct) || 100;
+    sources.maxPositionPct = 'account';
+  }
+
+  return { ...out, sources, conflicts };
+}
+
 /** What fraction of the standard account this one is. 1 when it says nothing. */
 function ratioOf(dest) {
   if (!dest) return 1;
@@ -242,4 +330,4 @@ function sizeFor({ entry, riskPerShare }, cfg = settings()) {
   };
 }
 
-module.exports = { FILE, settings, save, sizeFor, scaleTo, ratioOf };
+module.exports = { FILE, settings, save, resolve, sizeFor, scaleTo, ratioOf };

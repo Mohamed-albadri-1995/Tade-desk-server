@@ -89,6 +89,37 @@ account size. They agree on trade one — 0.5% of 50,000 = $250 — and drift as
 run banks P&L. Closing that gap means sizing off live broker equity, which has
 not been built.
 
+## The three levels, and which one decides
+
+The desk holds settings at three levels. They must resolve to exactly one
+answer per setting, or the desk sizes by a rule nobody chose.
+
+| level | file | holds |
+|---|---|---|
+| **tool** | `tools.config.json` | which tool runs a setup, its card register. **No money settings at all.** |
+| **account** | `data/risk.json` | account size, risk (flat $ **or** %), max position % — shared by every setup |
+| **setup** | `data/setup-prefs.json` | the same three for ONE strategy, plus rank, tf, feed, view, fill, max entries/day |
+
+**The rule: setup beats account. The risk rule is taken WHOLE.**
+
+If the setup names *either* risk rule, the account's is ignored entirely — half
+a percentage and half a flat dollar is neither. `risk.resolve()` is the only
+place this is decided; the runner, the parity check and the reports all read it.
+
+**Why it matters here.** Adopting #349 writes `riskPct: 0.5` to the account. A
+setup still carrying `riskPerTrade: 500` from an earlier experiment would win
+silently — the sizing prefers a flat dollar — while every report reads the
+account and says everything agrees.
+
+So `--adopt` **clears** the setup-level `riskPerTrade`, `riskPct` and
+`maxPositionPct`, and lists the clearing as a change. After adopting, exactly
+one level holds each setting: the account, which is this specification.
+
+A conflict that exists today shows in `parity-check` as its own **setting
+conflict** row, even when the resolved value happens to match the backtest —
+because it means the run agrees with the override and not with the account, and
+editing the account later would change nothing.
+
 ## Applying it
 
 ```
