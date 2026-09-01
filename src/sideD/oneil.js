@@ -244,6 +244,50 @@ async function loadRatings(symbols) {
   return _ratings;
 }
 
+/*
+ * C, A and the weekly base — the panel's slowest and most stable inputs.
+ *
+ * Cached for the whole ET day like the others, and it is generous rather than
+ * risky: fundamentals change QUARTERLY and a base changes by the week. The
+ * page asks once for what is on screen; a card never fetches.
+ */
+let _fundamentals = { day: null, stocks: {}, at: 0 };
+let _bases = { day: null, stocks: {}, at: 0 };
+
+async function _qpBatch(pathname, symbols, into, size, timeoutMs) {
+  const day = _etDay();
+  if (into.day !== day) { into.day = day; into.stocks = {}; into.at = 0; }
+  const want = [...new Set((symbols || []).map(s => String(s).toUpperCase()))]
+    .filter(s => s && !(s in into.stocks));
+  if (!want.length) return into;
+  const qp = process.env.QP_URL || 'http://127.0.0.1:8765';
+  for (let i = 0; i < want.length; i += size) {
+    const chunk = want.slice(i, i + size);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const r = await fetch(`${qp}${pathname}?symbols=${chunk.join(',')}`,
+        { signal: ctl.signal });
+      const d = await r.json();
+      if (d && d.ok) { Object.assign(into.stocks, d.stocks || {}); into.at = Date.now(); }
+    } catch {
+      // Nothing is cached as "checked and empty", so the next call retries.
+    } finally {
+      clearTimeout(timer);      // in a finally: the throwing path is the
+                                // common one when qp is down.
+    }
+  }
+  return into;
+}
+
+// EDGAR is one HTTP request per company and rate-limited to ten a second, so
+// the chunks are small and the timeout is long. This is the slowest thing the
+// page asks for and the one whose answer changes least often.
+const loadFundamentals = syms => _qpBatch('/api/oneil/fundamentals', syms, _fundamentals, 10, 60000);
+const loadBases = syms => _qpBatch('/api/oneil/base', syms, _bases, 20, 60000);
+const fundamentalsCache = () => (_fundamentals.day === _etDay() ? _fundamentals : { stocks: {} });
+const basesCache = () => (_bases.day === _etDay() ? _bases : { stocks: {} });
+
 function ratingsCache() {
   return _ratings.day === _etDay() ? _ratings : { day: null, stocks: {}, at: 0 };
 }
@@ -255,4 +299,5 @@ function stocksCache() {
 module.exports = {
   read, stockVsDistribution, EXPOSURE, ftdBand, FILE,
   loadStocks, stocksCache, loadRatings, ratingsCache,
+  loadFundamentals, fundamentalsCache, loadBases, basesCache,
 };

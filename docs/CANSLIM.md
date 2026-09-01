@@ -1197,7 +1197,7 @@ the CANSLIM panel (§11.3) · `NEWS` = the card's existing News section ·
 | **2** ✅ | The market tab O'Neil block (M5–M12) **and its per-card reflection P1–P5, P7, P8** | phase 1 |
 | **3** ✅ | Groups: R3–R4, R7–R9, L1–L3, L5(RS), L6, L9, L10, N10, N16, **P6** | `relstrength.py` |
 | **4** ✅ | Ratings that need bars: **R6** (A/D, ours), **S4** (U/D ratio), **L8** (RS line before price), and the workshop's **divergence** test. R1/L4/L7 deferred — see below | phase 3 |
-| **5** | EDGAR: C1–C8, A1–A6, R2, R5, S1, L5(EPS) | EDGAR fetcher |
+| **5** ✅ | EDGAR: C1–C8, A1–A6, S1 — plus the WEEKLY base pattern | EDGAR fetcher |
 | **6** | 13F & FINRA: I1–I4, S2, S3 | phase 5 |
 | **7** | The N pipeline: N1–N9, N11–N15 | phases 3 and 5 |
 
@@ -1558,3 +1558,84 @@ the number into the definition card, not just into this file.
 | **R1** | Composite rating | It blends EPS, RS, SMR, A/D and group. **EPS and SMR are phase 5** — a composite built now would be a partial one wearing a complete name, which is the exact failure §6 exists to prevent |
 | **L4** | New highs / lows within a group | Needs 52-week highs for every group member, which is a universe-wide pass; it belongs with the group build, not the per-card one |
 | **L7** | Sector rank 1 of 33 | The machinery is the group ranking with a different key. Cheap, but it is the **coarse** level and §9 is explicit that the group is the one that decides — so it waits rather than competing for the same row |
+
+
+---
+
+## 17. Phase 5 — the C and A tables, and the weekly base
+
+### 17.1 The five EDGAR traps, each of which produces a NUMBER
+
+Every one of these is wrong in a way that renders as a perfectly normal table:
+
+| # | Trap | What it does if missed |
+|---|---|---|
+| 1 | **C is year-over-year, never sequential** | a retailer's December against its September is a fact about Christmas |
+| 2 | **Q4 is usually not filed as a quarter** | a 10-K reports the year, so Q4 exists only as FY − Q1 − Q2 − Q3. Reading only what is tagged quarterly **drops a quarter of every table** |
+| 3 | **The same period is filed more than once** | restatements, amendments and comparative columns. The most recently **filed** value wins; taking the first match returns whatever was earliest in the array |
+| 4 | **A percentage from a negative base is not a number** | this is how a screen surfaces a company that lost money last year as a 500% grower |
+| 5 | **Revenue lives under four tags** | a filer who switched tags in 2021 has a hole in the middle of its table |
+
+Q4 is derived **only when all three earlier quarters are present**. A
+subtraction with a hole in it is a *wrong* number rather than a missing one.
+
+### 17.2 The weekly base — and weekly is not a display choice
+
+O'Neil taught bases on weekly charts and MarketSmith draws them weekly. It
+changes the answer:
+
+- a base is **7–65 weeks**. On daily bars that is 35–325, and every shape test
+  drowns in intraday noise
+- *"heavy volume without price progress"* is a **week** closing flat on heavy
+  volume. One day doing that is a session; five weeks of it is institutions
+  absorbing what the decline shook out
+- the handle is a **minor controlled drift of 2–8 weeks**. Measured daily it is
+  a fortnight of wiggles with no shape
+
+The three phases, each reported with its number rather than collapsed into a
+verdict — because O'Neil's own point about bases is that you *look* at them:
+
+```
+28-week base, 25% deep, 3 waves down, 4 accumulation weeks, handle 4w
+Lip 100.00 (2024-03-01) → low 75.00 (2024-06-14)
+Accumulation: 2024-05-10 2.1× · 2024-05-17 1.9× · …
+Handle: 4 weeks, 7% deep, in the upper half
+Pivot 104.60 · 3.2% away · 6 of 6 checks
+```
+
+A "handle" that gives back half the cup is the **cup failing**, not a handle —
+so `in_upper_half` is a named test and the panel says which test failed.
+
+### 17.3 Where it lands
+
+The **CANSLIM ⤢** badge on every card opens a full-width panel in letter
+order — C, A, N, S, L, I, M. That is where §7's tables finally live: a card
+column is 300–400px and an eight-quarter table does not fit in one, which is
+how the tables quietly become a single percentage again.
+
+**I is not built** and says so on the panel: fund ownership by quarter comes
+from Form 13F, which is phase 6. It is not estimated.
+
+### 17.4 What the first live data check found
+
+Run on the box, and it did its job:
+
+| Source | Verdict |
+|---|---|
+| yahoo, hybrid_yahoo, ^GSPC, ^IXIC | ok |
+| polygon, alpaca, hybrid | DOWN — **no keys in the shell's environment** |
+| polygon grouped-daily (RS universe) | DOWN — nothing cached |
+| group ranks, industry map | not written yet |
+
+And it exposed a flaw in **the check itself**: qp runs under systemd with
+`EnvironmentFile=~/trade-desk.env`, a bare shell does not, so the runner was
+reporting a different environment from the one that actually runs. A red light
+over a green system is worse than no light — the next real failure is the one
+nobody believes. The runner now loads the same file and says which.
+
+It also now reports when **fewer than two feeds can be compared**: with one
+working feed nothing is checking whether it is *right*, only that it answered,
+and that state was previously invisible because the agreement rows simply did
+not appear.
+
+Every failing check now carries a **fix**, not just a diagnosis.

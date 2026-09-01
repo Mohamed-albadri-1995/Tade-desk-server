@@ -149,4 +149,34 @@ router.get('/oneil/ratings', async (req, res) => {
   }
 });
 
+/*
+ * GET /api/market/oneil/canslim?symbols=A,B,C
+ *
+ * Everything the CANSLIM PANEL needs, in one call: the C and A tables from
+ * EDGAR, and the weekly base. One request rather than three because the panel
+ * opens all at once and three round trips would show it filling in in pieces.
+ */
+router.get('/oneil/canslim', async (req, res) => {
+  const symbols = String(req.query.symbols || '')
+    .replace(/\s+/g, ',').split(',').filter(Boolean);
+  if (!symbols.length) return res.json({ ok: false, error: 'no symbols' });
+  try {
+    const [f, b] = await Promise.all([
+      oneil.loadFundamentals(symbols),
+      oneil.loadBases(symbols),
+    ]);
+    res.json({
+      ok: true,
+      fundamentals: f.stocks,
+      // Declared, so nobody reads the base numbers as daily ones. Every
+      // length in there is in WEEKS.
+      baseTimeframe: 'weekly',
+      bases: b.stocks,
+      fetchedAt: Math.max(f.at || 0, b.at || 0) || null,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

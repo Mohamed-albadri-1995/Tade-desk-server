@@ -66,6 +66,8 @@ PARTS = [
     ('logic_audit51.py',    "the L: group rank, and the leader inside the group"),
     ('logic_audit52.py',    'demand, the RS line before price, and divergence'),
     ('logic_audit53.py',    'the data check catches BAD data, not just missing data'),
+    ('logic_audit54.py',    'C and A from EDGAR: year-over-year, Q4, the loss base'),
+    ('logic_audit55.py',    'the base, on a WEEKLY chart, as O\'Neil taught it'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They

@@ -265,6 +265,34 @@ ok('...and the industry map, on its SIZE rather than its existence',
 ok('qp being unreachable is itself a finding, not a shorter list',
    'no health report' in NODE.lower() or 'NO health report' in NODE)
 
+# THE ENVIRONMENT THE CHECK RUNS IN MUST BE THE ONE THE SERVICE RUNS IN, and
+# this is a real failure the first live run produced: qp runs under systemd
+# with EnvironmentFile=~/trade-desk.env, a shell does not, and the check
+# reported polygon and alpaca DOWN with "API key must be set" while the service
+# beside it had the keys and was working. A red light for a green system is
+# worse than no light: the next real failure is the one nobody believes.
+ok('the live runner loads the same env file the service does',
+   'trade-desk.env' in LIVE)
+ok('...and an exported key still WINS, so a one-off run keeps working',
+   'setdefault' in LIVE)
+ok('...and it says which env files it loaded', '_LOADED' in LIVE)
+ok('...and warns loudly when it found none, naming the consequence',
+   'no environment file found' in LIVE and 'because the feed is broken' in LIVE)
+
+# One working feed is not a healthy system. Reporting only that it answered,
+# with nothing to check it AGAINST, is the state most worth naming.
+ok('fewer than two comparable feeds is reported, not silently omitted',
+   'only {len(names)} feed can be compared' in SRC)
+ok('...and says what is missing: whether it is RIGHT, not whether it answered',
+   'only that it answered' in SRC)
+
+# A check that says something is broken and not how to unbreak it makes the
+# reader open an SSH session to find out, which is most of the cost.
+ok('failures carry a FIX, not just a diagnosis', 'FIXES' in SRC and "'fix'" in SRC)
+ok('...and the runner prints it', "c.get('fix')" in LIVE)
+ok('the RS universe fix names the actual command',
+   'relstrength.backfill' in SRC)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

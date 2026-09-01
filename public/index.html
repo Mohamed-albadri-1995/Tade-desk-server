@@ -3558,6 +3558,12 @@ function buildCard(row) {
 
   <div class="card-badges">
     ${firstSeenHTML}${alsoBadge}${canslimBadge}${badges}${hotBadge}${alignBadge}${catalystBadge}
+    <!-- THE PANEL OPENER. The C and A tables need a full-width surface; a
+         card column cannot hold an eight-quarter table and pretending it can
+         is how the tables become one number again. -->
+    <span class="badge" style="cursor:pointer;border-color:var(--accent);color:var(--accent)"
+          onclick="openCanslimPanel('${row.ticker}')"
+          title="C, A, N, S, L, I and M for this stock — the full tables">CANSLIM ⤢</span>
   </div>
   ${signalTags}
 
@@ -4135,6 +4141,177 @@ function oneilDates(ticker) {
     <div class="def-sec def-src">Relative = this stock's close-to-close move minus the index's on
       the same session. A stock rising while the index is being sold is being accumulated.</div>`;
   document.getElementById('def-overlay').classList.add('open');
+}
+
+/* ─────────── THE CANSLIM PANEL ─────────────────────────────────────────
+   Where the C and A TABLES live. Not on the card: a screener card column is
+   300-400px and an eight-quarter table of EPS, %Chg, Sales, %Chg and Margin
+   does not fit in one — squeezing it there is how the tables quietly become a
+   single percentage again, which is exactly what the spec was rewritten to
+   prevent.
+
+   Letter order, C A N S L I M, because the panel IS the method and somebody
+   working down it should not have to hunt for A.
+
+   EVERY BLOCK CARRIES ITS OWN AS-OF DATE. They refresh on completely different
+   clocks — EDGAR lands weeks after quarter-end, groups are daily, the base is
+   weekly — and one timestamp at the top would claim a freshness most of them
+   do not have. */
+let CANSLIM_PANEL = { fundamentals: {}, bases: {} };
+
+async function openCanslimPanel(ticker) {
+  const tk = String(ticker).toUpperCase();
+  document.getElementById('def-title').textContent = `${tk} · CANSLIM`;
+  document.getElementById('def-body').innerHTML =
+    '<div class="loading">Fetching filings and the weekly base…</div>';
+  document.getElementById('def-overlay').classList.add('open');
+  try {
+    const r = await fetch(`/api/market/oneil/canslim?symbols=${tk}`);
+    const d = await r.json();
+    if (d.ok) {
+      Object.assign(CANSLIM_PANEL.fundamentals, d.fundamentals || {});
+      Object.assign(CANSLIM_PANEL.bases, d.bases || {});
+    }
+    renderCanslimPanel(tk);
+  } catch (e) {
+    document.getElementById('def-body').innerHTML =
+      `<div class="sb-result err">Could not load: ${esc(e.message)}</div>`;
+  }
+}
+
+const _n = (v, d) => (v == null ? '—' : Number(v).toFixed(d == null ? 2 : d));
+const _m = v => (v == null ? '—' : v >= 1e9 ? (v / 1e9).toFixed(2) + 'B'
+  : v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : Number(v).toLocaleString());
+const _sign = v => (v == null ? '' : v >= 0 ? 'pos' : 'neg');
+
+function renderCanslimPanel(tk) {
+  const f = CANSLIM_PANEL.fundamentals[tk] || {};
+  const b = CANSLIM_PANEL.bases[tk] || {};
+  const g = GROUPS_MODEL && (GROUPS_MODEL.stocks || {})[tk];
+  const x = ONEIL_RATINGS[tk] || {};
+  const m = ONEIL_MODEL || {};
+  const sd = (ONEIL_STOCKS.stocks || {})[tk];
+  const sec = (title, body, note) => `<div class="def-sec">
+    <div class="def-sec-title">${title}</div><div class="def-sec-body">${body}</div>
+    ${note ? `<div class="def-src" style="border:0;padding-top:4px">${esc(note)}</div>` : ''}
+  </div>`;
+
+  // ── C — eight quarters, EPS AND SALES side by side ──────────────────────
+  let cHtml;
+  if (f.ok && f.c && f.c.rows && f.c.rows.length) {
+    const c = f.c;
+    cHtml = `<div class="oneil-dd-wrap"><table class="oneil-dd">
+      <thead><tr><th>Qtr</th><th>EPS $</th><th>%Chg</th><th>Sales</th><th>%Chg</th><th>Margin</th></tr></thead>
+      <tbody>${c.rows.map(r => `<tr>
+        <td>${esc(r.quarter)}</td>
+        <td>${_n(r.eps)}</td>
+        <td class="${_sign(r.eps_chg)}">${esc(r.eps_chg_label)}</td>
+        <td>${_m(r.sales)}</td>
+        <td class="${_sign(r.sales_chg)}">${esc(r.sales_chg_label)}</td>
+        <td>${r.margin_pct == null ? '—' : r.margin_pct + '%'}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div style="margin-top:8px">
+        <b class="${c.accelerating ? 'bias-bull' : ''}">Accelerating: ${
+          c.accelerating ? 'yes' : 'no'}</b>
+        (last ${c.accelerating_of} quarters) ·
+        <b>Beat +${c.bar_pct}%: ${c.beat_25} of ${c.beat_25_of}</b></div>`;
+    cHtml += `<div class="def-src" style="border:0;padding-top:6px">${esc(c.note)}</div>`;
+  } else {
+    cHtml = `<span style="color:var(--text3)">${esc(f.error
+      || 'not fetched yet — EDGAR is walked nightly')}</span>`;
+  }
+
+  // ── A — annual, with the growth rate, stability and the ROE floor ───────
+  let aHtml;
+  if (f.ok && f.a && f.a.rows && f.a.rows.length) {
+    const a = f.a;
+    aHtml = `<div class="oneil-dd-wrap"><table class="oneil-dd">
+      <thead><tr><th>FY</th><th>EPS $</th><th>%Chg</th><th>ROE</th></tr></thead>
+      <tbody>${a.rows.map(r => `<tr>
+        <td>${esc(r.fy)}</td><td>${_n(r.eps)}</td>
+        <td class="${_sign(r.eps_chg)}">${esc(r.eps_chg_label)}</td>
+        <td>${r.roe_pct == null ? '—' : r.roe_pct + '%'}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div style="margin-top:8px">
+        3-yr growth <b>${a.growth_3yr_pct == null ? '—' : a.growth_3yr_pct + '%'}</b> ·
+        Stability <b>${a.stability == null ? '—' : a.stability}</b> ·
+        ROE <b class="${a.roe_pass === true ? 'bias-bull' : a.roe_pass === false ? 'bias-bear' : ''}">${
+          a.roe_pct == null ? '—' : a.roe_pct + '%'}</b>
+        vs the ${a.roe_floor}% floor ${a.roe_pass === true ? '✓' : a.roe_pass === false ? '✗' : ''}
+      </div>
+      <div class="def-src" style="border:0;padding-top:6px">${esc(a.stability_note)}</div>`;
+  } else {
+    aHtml = '<span style="color:var(--text3)">not fetched yet</span>';
+  }
+
+  // ── N — the base, WEEKLY, plus what is new ─────────────────────────────
+  let nHtml;
+  if (b.ok) {
+    const h = b.handle;
+    nHtml = `<b>${esc(b.summary || '')}</b>
+      <div style="margin-top:6px">
+        Lip ${b.left_lip} (${esc(b.lip_week)}) → low ${b.low} (${esc(b.low_week)}) ·
+        <b>${b.depth_pct}% deep</b> over <b>${b.weeks} weeks</b> ·
+        ${b.waves_down} waves down</div>
+      <div style="margin-top:4px">Accumulation weeks (heavy volume, no price progress):
+        <b>${b.accumulation_weeks.length}</b>${b.accumulation_weeks.length
+          ? ' — ' + b.accumulation_weeks.slice(0, 5)
+              .map(a => `${esc(a.week)} ${a.vol_x}×`).join(' · ') : ''}</div>
+      <div style="margin-top:4px">Handle: ${h && h.valid
+        ? `<b class="bias-bull">${h.weeks} weeks, ${h.depth_pct}% deep</b>, in the upper half`
+        : h ? `<span style="color:var(--text3)">${h.weeks}w, ${h.depth_pct}% — ${
+            h.in_upper_half ? 'too deep' : 'not in the upper half of the base'}</span>`
+          : '<span style="color:var(--text3)">none yet</span>'}</div>
+      <div style="margin-top:6px">Pivot <b>${b.pivot}</b> ·
+        <b class="${_sign(-(b.pct_to_pivot || 0))}">${b.pct_to_pivot}% away</b>
+        · ${b.score} of ${b.of} checks</div>`;
+  } else {
+    nHtml = `<span style="color:var(--text3)">${esc(b.error || b.reason
+      || 'no base reading yet')}</span>`;
+  }
+  if (x.rs_line && x.rs_line.tell) {
+    nHtml += `<div style="margin-top:6px" class="bias-bull"><b>RS line at new high
+      BEFORE price</b> — the confirmation O'Neil looks for, and it is visible now
+      rather than after the breakout.</div>`;
+  }
+
+  // ── S, L, I, M ─────────────────────────────────────────────────────────
+  const s = (f.ok && f.s) || {};
+  const sHtml = `Shares outstanding <b>${_m(s.shares_outstanding)}</b>
+    ${s.as_of ? `<span style="color:var(--text3)">as of ${esc(s.as_of)}</span>` : ''}
+    · Float <span style="color:var(--text3)">${esc(s.float_note || 'not available')}</span>
+    ${x.ud && x.ud.ratio != null ? `<br>U/D volume <b>${x.ud.ratio}</b> over 50 sessions` : ''}
+    ${x.ad && x.ad.letter ? ` · A/D <b>${esc(x.ad.letter)}</b> (${x.ad.raw}) over 13 weeks` : ''}`;
+
+  const lHtml = g
+    ? `Group <b>${esc(g.group)}</b> · rank <b>${g.group_rank} of ${g.group_of}</b>
+       (${g.group_pct} ${esc(g.group_letter || '')})<br>
+       This stock: <b>RS ${g.rs_in_group} of ${g.members}</b> in its group`
+    : '<span style="color:var(--text3)">group not ranked yet</span>';
+
+  const iHtml = '<span style="color:var(--text3)">Fund ownership by quarter comes '
+    + 'from SEC Form 13F — phase 6. Not estimated here.</span>';
+
+  const mHtml = `<b>${esc(m.status_label || '—')}</b>
+    ${m.distribution_days ? ` · ${m.distribution_days.length} distribution days live` : ''}
+    ${sd && sd.checked ? `<br>This stock on those days: <b>${sd.held} of ${sd.checked}</b>
+      · ${esc(sd.verdict || '')}` : ''}`;
+
+  document.getElementById('def-body').innerHTML =
+    sec('C — current quarterly earnings', cHtml)
+    + sec('A — annual earnings', aHtml)
+    + sec('N — the base (WEEKLY) and what is new', nHtml,
+          b.timeframe_note || "O'Neil analyses bases on weekly charts; every length here is in weeks.")
+    + sec('S — supply', sHtml)
+    + sec('L — leader or laggard', lHtml)
+    + sec('I — institutional sponsorship', iHtml)
+    + sec('M — market direction', mHtml)
+    + `<div class="def-sec def-src">Sources and dates —
+        ${f.built_at ? `EDGAR ${esc(String(f.built_at).slice(0, 10))}` : 'EDGAR not fetched'} ·
+        ${GROUPS_MODEL && GROUPS_MODEL.as_of ? `groups ${esc(GROUPS_MODEL.as_of)}` : 'groups pending'} ·
+        ${m.as_of ? `market ${esc(m.as_of)}` : 'market pending'} ·
+        base from weekly bars. Each block refreshes on its own clock: filings land
+        weeks after quarter-end, groups daily, the base weekly.</div>`;
 }
 
 /* ─────────── PHASE 4: DEMAND, THE RS LINE, AND DIVERGENCE ──────────────

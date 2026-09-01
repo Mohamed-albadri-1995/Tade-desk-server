@@ -15,22 +15,64 @@ part that can regress. This is the part that tells you about today.
 Exit code is 1 if anything is DOWN, 0 if everything is ok or merely degraded —
 so it can be a deploy step or a cron line without failing on a half-day.
 """
+import os
 import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+
+# LOAD THE SAME ENVIRONMENT THE SERVICE RUNS IN, and this is not a nicety.
+#
+# qp runs under systemd with `EnvironmentFile=~/trade-desk.env`. A shell does
+# not, so the first live run of this reported polygon and alpaca as DOWN with
+# "API key must be set" — about the SHELL's environment, while the service
+# beside it had the keys and was working.
+#
+# A health check that reports a different environment from the one that
+# actually runs is worse than no health check: it is a red light for a green
+# system, and the next real failure is the one nobody believes.
+_LOADED = []
+for _f in (pathlib.Path.home() / 'trade-desk.env',
+           pathlib.Path(__file__).resolve().parents[2] / '.env'):
+    try:
+        if not _f.exists():
+            continue
+        for _line in _f.read_text().splitlines():
+            _line = _line.strip()
+            if not _line or _line.startswith('#') or '=' not in _line:
+                continue
+            _k, _v = _line.split('=', 1)
+            _k = _k.strip().removeprefix('export ').strip()
+            _v = _v.strip().strip('"').strip("'")
+            # Anything already exported WINS: running with a key on the command
+            # line has to keep working, and this is a fallback not an override.
+            os.environ.setdefault(_k, _v)
+        _LOADED.append(str(_f))
+    except Exception:                                          # noqa: BLE001
+        pass
 
 from chart import datacheck as dc                              # noqa: E402
 
 MARK = {'ok': 'ok  ', 'degraded': 'WARN', 'down': 'DOWN'}
 
 symbol = sys.argv[1] if len(sys.argv) > 1 else 'SPY'
-print(f'Checking every data source against {symbol}…\n')
+print(f'Checking every data source against {symbol}…')
+if _LOADED:
+    print(f'environment from: {", ".join(_LOADED)}')
+else:
+    # Said out loud, because without it every keyed feed reports DOWN for a
+    # reason that has nothing to do with the feed.
+    print('WARNING: no environment file found (~/trade-desk.env). Any feed that '
+          'needs a key will report DOWN because this shell has no keys, not '
+          'because the feed is broken.')
+print()
 r = dc.run_all(symbol)
 
 for c in r['checks']:
     print(f"[{MARK.get(c.get('severity'), '????')}] {c.get('name', '?'):38s} "
           f"{c.get('detail', '')}")
+    if c.get('fix'):
+        print(f"{'':7s}{'':38s} → {c['fix']}")
 
 print()
 print(f"{r['passed']}/{r['total']} sources returned usable data")

@@ -65,6 +65,18 @@ AGREE_PCT = 0.5
 ABSURD_MOVE_PCT = 25.0
 
 
+# What to DO about each failure. A health check that says something is broken
+# and not how to unbreak it makes the reader open an SSH session to find out,
+# which is most of the cost of the failure.
+FIXES = {
+    "O'Neil market model": 'curl "localhost:8765/api/oneil/market?refresh=1"',
+    'group ranks': ('run a scan on any tool so the industry map fills, then '
+                    'curl "localhost:8765/api/oneil/groups?refresh=1"'),
+    'industry map': ('run a scan on any tool — the tools write this as they '
+                     'scan, so it is empty until the first one runs'),
+}
+
+
 def _sev(ok: bool, degraded: bool = False) -> str:
     """OK, DEGRADED and DOWN are three states, not two.
 
@@ -243,6 +255,7 @@ def judge_file(path, *, label: str, max_age_hours: float = 36.0,
         p = Path(path)
         if not p.exists():
             out['detail'] = 'not written yet'
+            out['fix'] = FIXES.get(label)
             return out
         raw = json.loads(p.read_text())
         age_h = (time.time() - p.stat().st_mtime) / 3600
@@ -305,6 +318,9 @@ def check_universe() -> dict:
         if not days:
             out['detail'] = ('no grouped-daily sessions cached — the RS rating, '
                              'group ranks and rank-in-group all depend on this')
+            out['fix'] = ("python3 -c \"from chart import relstrength; "
+                          "relstrength.backfill()\"  (needs POLYGON_API_KEY; "
+                          "one request per session, so the first run is slow)")
             return out
         px, _dv = relstrength.closes(sessions=3)
         out['symbols'] = int(px.shape[1]) if len(px) else 0
@@ -324,6 +340,45 @@ def check_universe() -> dict:
         return out
     except Exception as e:                                # noqa: BLE001
         out['detail'] = str(e)[:200]
+        return out
+    finally:
+        out['ms'] = int((time.time() - t0) * 1000)
+
+
+def check_edgar() -> dict:
+    """EDGAR: the ticker map, and one real company's facts.
+
+    THE 403 IS THE INTERESTING FAILURE. EDGAR refuses requests without a
+    descriptive User-Agent, and the refusal looks exactly like an outage —
+    so the check names the header rather than reporting "unreachable".
+    """
+    out = {'name': 'SEC EDGAR (C and A tables)', 'ok': False, 'severity': 'down'}
+    t0 = time.time()
+    try:
+        from chart import edgar
+        m = edgar.ticker_map()
+        out['tickers'] = len(m)
+        if len(m) < 5000:
+            out['detail'] = (f'the ticker map has only {len(m)} entries — '
+                             f'expected thousands')
+            return out
+        cf = edgar.fetch('AAPL')
+        tab = edgar.tables(cf)
+        n = len(tab['c']['rows'])
+        if not n:
+            out['detail'] = ('AAPL returned facts but no quarters could be '
+                             'parsed — the XBRL tags have moved')
+            return out
+        out.update({'ok': True, 'severity': 'ok', 'quarters': n,
+                    'detail': f'{len(m):,} tickers mapped; AAPL parsed to '
+                              f'{n} quarters'})
+        return out
+    except Exception as e:                                # noqa: BLE001
+        msg = str(e)[:160]
+        if '403' in msg:
+            msg += ' — EDGAR refuses requests without a descriptive '\
+                   'User-Agent; set EDGAR_UA'
+        out['detail'] = msg
         return out
     finally:
         out['ms'] = int((time.time() - t0) * 1000)
@@ -358,7 +413,21 @@ def run_all(symbol: str = 'SPY') -> dict:
 
     # Cross-source agreement, which is the only check that can catch a feed
     # that is confidently wrong.
-    names = [f for f in ('yahoo', 'polygon', 'alpaca') if f in frames]
+    names = [f for f in ('yahoo', 'polygon', 'alpaca', 'hybrid_yahoo')
+             if f in frames]
+    if len(names) < 2:
+        # SAID OUT LOUD, because the alternative is that the agreement rows
+        # simply do not appear and the list looks shorter rather than weaker.
+        # With one working feed there is nothing to check it against, and the
+        # only test that can catch a source which is confidently wrong is the
+        # one that is missing.
+        checks.append({
+            'name': 'cross-source agreement',
+            'ok': False, 'severity': 'degraded',
+            'detail': (f'only {len(names)} feed can be compared — nothing is '
+                       f'checking whether it is RIGHT, only that it answered'),
+            'fix': 'configure a second feed (POLYGON_API_KEY or the Alpaca keys)',
+        })
     for i in range(len(names)):
         for j in range(i + 1, len(names)):
             checks.append(judge_agreement(frames[names[i]], frames[names[j]],
@@ -372,6 +441,10 @@ def run_all(symbol: str = 'SPY') -> dict:
                              max_age_hours=36, require=('groups',)))
     checks.append(judge_file(gmod.MAP_FILE, label='industry map',
                              max_age_hours=24 * 14, require=('symbols',)))
+
+    # EDGAR, which needs no key and returns 403 without a descriptive
+    # User-Agent — a failure that looks like an outage and is a header.
+    checks.append(check_edgar())
 
     # COUNTED BY SEVERITY, not by `ok`. A degraded check is usable — so `ok` is
     # true — and it still needs to appear in the count and in the summary, or

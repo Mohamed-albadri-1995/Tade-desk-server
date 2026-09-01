@@ -429,6 +429,67 @@ def oneil_groups(refresh: int = 0):
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/oneil/fundamentals')
+def oneil_fundamentals(symbols: str = '', refresh: int = 0):
+    """C and A — the earnings tables, from SEC EDGAR. Free, no key.
+
+    Served from a per-ticker cache with a WEEK's life, because fundamentals
+    move quarterly and a card must never trigger a fetch. `refresh=1` rebuilds.
+
+    Every table carries the date it was built: filings land weeks after
+    quarter-end, so a card in May legitimately showing a February filing is the
+    system working, and the as-of date is the difference between that and a bug.
+    """
+    from chart import edgar
+    try:
+        syms = [s for s in (symbols or '').replace(' ', ',').split(',') if s][:40]
+        if not syms:
+            return {'ok': False, 'error': 'no symbols'}
+        out = {}
+        for s in syms:
+            hit = None if refresh else edgar.cached(s)
+            if hit is None:
+                hit = edgar.build(s)
+                if hit.get('ok'):
+                    edgar.write_cached(hit)
+                hit['cached'] = False
+            else:
+                hit['cached'] = True
+            out[s.upper()] = hit
+        return {'ok': True, 'stocks': out}
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
+@app.get('/api/oneil/base')
+def oneil_base(symbols: str = '', feed: str = 'yahoo'):
+    """The base — cup with handle, rounding bottom — on a WEEKLY chart.
+
+    Weekly because that is how O'Neil taught it and how MarketSmith draws it,
+    and it is not a display choice: a base is 7-65 WEEKS, and the same shape
+    tests on daily bars measure something else entirely.
+
+    Two years of daily bars, resampled: 65 weeks is the longest base worth
+    reading and the lip needs history before it.
+    """
+    from chart import base as bmod, data_manager
+    try:
+        syms = [s for s in (symbols or '').replace(' ', ',').split(',') if s][:60]
+        if not syms:
+            return {'ok': False, 'error': 'no symbols'}
+        out = {}
+        for raw in syms:
+            s = raw.strip().upper()
+            try:
+                df = data_manager.load_bars(s, '1d', 560, feed)
+                out[s] = bmod.analyse(df)
+            except Exception as e:                  # noqa: BLE001
+                out[s] = {'ok': False, 'error': f'could not fetch bars: {str(e)[:120]}'}
+        return {'ok': True, 'timeframe': 'weekly', 'stocks': out}
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
 @app.get('/api/datacheck')
 def datacheck(symbol: str = 'SPY'):
     """Does every data source actually return USABLE data?
