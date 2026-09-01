@@ -33,6 +33,7 @@ in a constant — see [Thresholds that moved](#thresholds-that-moved).
 | **Base stage** | Which base this is **counted from the market bottom** — 1st, 2nd, late | Any consolidation. The count is the point: late-stage bases (3rd, 4th) fail far more often because the move is obvious by then |
 | **Group rank vs Group RS Rating** | **One fact, two directions.** Rank 63 of 197 *is* the 68th percentile *is* the letter B+ | Three separate measurements. They cannot disagree; building them as three fields invites a card that shows them doing so — see [§9.2](#92-the-precision-point-three-prints-one-fact) |
 | **Stock rank *within* its group** | "**RS 1 of 13**" — the stock's RS Rating ranked against **only its own group's members** | The RS Rating itself. A stock can be RS 95 market-wide and 8 of 13 inside its group, i.e. the twelfth-best way to own the same theme. Nothing on our cards shows this today |
+| **N — the "new" thing** | **Three** things: new product/service, new management, **or better industry conditions** — >95% of winners had one, *before* the advance | Two things (product + management), and a **news feed**. The third is always dropped, and it is the one we can compute without any news at all — see [§10](#10-n--the-news-algorithm-not-a-news-tab) |
 
 ---
 
@@ -404,11 +405,13 @@ Short interest      1.2 days, −21%
 |---|---|---|
 | New **price high** | Yes | At/near a 52-week high — but the O'Neil meaning is *emerging from a base*, which needs base detection (phase 2) |
 | New **management** | Yes, roughly | MarketSmith shows `New CEO 02/2021`. Source: SEC **Form 8-K Item 5.02**, which is filed for exactly this |
-| New **product** | No | This lives in the news, and the card already carries a catalyst field |
+| New **product** | ~~No~~ **Yes** | Superseded — openFDA, 8-K Items 8.01/7.01/1.01 and USASpending are all free and dated. See [§10](#10-n--the-news-algorithm-not-a-news-tab) |
 | New **industry conditions** | Partly | The group's rank *rising* is the measurable trace |
 
-Proposal: show **% off 52-week high** and **New CEO date** now; leave "new
-product" to the existing catalyst; treat "out of a base" as phase 2.
+~~Proposal: show % off 52-week high and New CEO date now; leave "new product"
+to the existing catalyst.~~ **Superseded by [§10](#10-n--the-news-algorithm-not-a-news-tab)**, which
+makes all four computable through one scored pipeline. The "no" above was
+wrong: it assumed news had to come from a news feed. It comes from EDGAR.
 
 ---
 
@@ -535,3 +538,171 @@ On a MarketSmith index chart the blue line on the Nasdaq Composite is the
 black. Same construction as a stock's RS line, one level up: it says which
 index is leading, which is the earliest read on whether growth or defensives
 are being bought. It belongs on the **market tab**, not the cards.
+
+---
+
+## 10. N — the news algorithm (not a news tab)
+
+You are right that N ends up being news, and right that a normal news tab is
+the wrong shape for it. This section is the algorithm.
+
+### 10.1 What N actually is — and it is three things, not two
+
+O'Neil studied the greatest winners 1953–1993 and found **more than 95%** had,
+before their big advance, one of:
+
+1. a major **new product or service**
+2. **new management**
+3. an important **change for the better in the conditions of their industry**
+
+The third is the one everybody drops, and we already compute it — a group
+climbing the rank in §9 *is* the measurable trace of changed industry
+conditions. It needs no news feed at all.
+
+The fourth sense of "N", **new high**, is price and is already on the chart. It
+is the *confirmation*, not the cause.
+
+### 10.2 Why the check period must be long — the core point
+
+A news tab looks back **hours**. N must look back **24 months**.
+
+The reason is O'Neil's own sequence: **the new thing comes first, the price
+move comes after.** A CEO who arrived nine months ago can still be the entire
+reason the stock is breaking out today. A tab that shows the last 24 hours can
+never see that, and will instead show an analyst note from this morning that
+means nothing.
+
+So: **lookback 24 months, with decay, not a cutoff.**
+
+| Age of the event | Weight | Why |
+|---|---|---|
+| 0–3 months | 1.0 | Fresh, and the move may be starting |
+| 3–6 months | 0.9 | O'Neil's sweet spot — old enough to be proven, young enough to still be running |
+| 6–12 months | 0.7 | Still the reason, but the obvious money is made |
+| 12–24 months | 0.4 | Fading into "the old story" |
+| >24 months | 0 | Dropped |
+
+Note the shape: 3–6 months is **not** penalised versus today. A same-day
+headline has no price reaction yet, so it cannot be confirmed — it enters the
+card marked **unconfirmed**, not scored.
+
+### 10.3 The pipeline
+
+```
+HARVEST  ->  CLASSIFY  ->  REACT  ->  PERSIST  ->  SCORE  ->  one line
+(24 mo)      (3 buckets)   (price)   (RS line)    (0-100)    on the card
+```
+
+**The step that makes this not a news tab is REACT.** An event with no
+price-and-volume response *at the time it happened* is discarded. That is
+O'Neil's discipline applied to news: the story is only real if institutions
+acted on it. A new CEO announced into silence is not N.
+
+### 10.4 HARVEST — the sources, all free
+
+| Bucket | Source | Free | What it gives |
+|---|---|---|---|
+| New management | **EDGAR 8-K Item 5.02** | Yes | *Structured.* The item code IS the classifier — mandatory, dated, no NLP needed. Highest precision source in the whole spec |
+| New product | **openFDA** (drug approvals, device 510(k)/PMA) | Yes | A literal dated new product, for pharma/device names |
+| New product | **EDGAR 8-K Item 8.01 / 7.01** | Yes | "Other events" / Reg FD — where product launches are announced |
+| New contract | **EDGAR 8-K Item 1.01** | Yes | Material definitive agreement — a large new contract is a new revenue source |
+| New contract | **USASpending.gov** | Yes | Government contract awards, dated, with the dollar amount |
+| New industry conditions | **our own group rank** (§9) | Yes | Computed. Rank rising 3 months = the trace |
+| Corroboration only | Finnhub / press-release RSS | Yes | Never the trigger — used to confirm and to supply the headline text |
+
+EDGAR is the spine because it is **structured, dated, mandatory and free**.
+News APIs are the corroboration layer, never the source of truth: a filing
+happened, a headline was written.
+
+### 10.5 CLASSIFY — and what must be thrown away
+
+Everything not in the three buckets is discarded. Named explicitly, because
+these are exactly the items that make a news tab feel busy and mean nothing:
+
+| Rejected | Why |
+|---|---|
+| Analyst upgrades / downgrades / price targets | Nothing is new **at the company**. This is opinion about the same facts |
+| Index inclusion / rebalancing | Mechanical flow, not a business change |
+| Earnings releases | That is **C and A**. Counting it in N double-counts the same fact |
+| Splits, buybacks, dividends | Financial engineering, not a new product |
+| Lawsuits, short-seller reports | News, but not the O'Neil sense of new |
+| **Secondary offerings / dilution** | This is real and it belongs in **S** — supply going *up*. Routed there, not to N |
+
+### 10.6 REACT and PERSIST — the two price tests
+
+**REACT**, measured on the event date + 2 sessions:
+
+```
+gap/move  in multiples of the stock's own 20-day ATR
+volume    vs its own 50-day average
+```
+
+`R` is 0 when the move is inside one ATR on normal volume — and an event with
+`R = 0` is **dropped**, not shown small. This alone removes most of what a news
+tab would print.
+
+**PERSIST**, measured today against the event date:
+
+```
+RS line higher than on the event day    P = 1.0
+flat                                     P = 0.5
+lower                                    P = 0.2
+```
+
+A catalyst the market has since given back is not the reason to buy today.
+
+### 10.7 SCORE
+
+```
+N_event = W(class) x R(reaction) x D(age) x P(persistence)
+N       = max over events, scaled 0-100
+```
+
+Class weights, in O'Neil's own order of importance:
+
+| Class | W |
+|---|---|
+| New product / service | 1.00 |
+| New management (CEO / President) | 0.90 |
+| New material contract | 0.80 |
+| New industry conditions (group rank rising) | 0.70 |
+| New high with no other N | 0.40 |
+
+**Dedupe** by `(class, date +/- 3 sessions)` — one event reaches us as an 8-K
+and as five headlines, and counting it six times would make the noisiest story
+the highest score.
+
+### 10.8 How it presents on the card
+
+One line, and a panel behind it:
+
+```
+N  86   New CEO - 2026-03-12 (5.8 mo) - +11.4% on 4.2x vol - RS line held
+```
+
+```
+N - WHAT IS NEW                                        score 86
+  2026-03-12  New management   8-K 5.02  +11.4%  4.2x vol  held    86
+  2026-06-01  New product      FDA 510(k) +6.2%  2.1x vol  held    61
+  2026-05..08 Industry cond.   group 141 -> 28   -         -       44
+  ---
+  unconfirmed (too new to score)
+  2026-08-31  Contract         8-K 1.01  filed yesterday
+  ---
+  discarded: 34 items (no price reaction), 11 (wrong class)
+```
+
+The discarded count is printed on purpose. It is the evidence that the number
+is a filter and not a feed.
+
+### 10.9 The difference, stated
+
+| A normal news tab | The N algorithm |
+|---|---|
+| Sorted by **time** | Sorted by **score** |
+| Recent = important | A 9-month-old event can outrank this morning's |
+| Every headline | Three buckets; everything else named and dropped |
+| No link to price | No price-and-volume reaction, no entry |
+| Window: hours | Window: **24 months** |
+| You read it | It emits **one number and one dated line** |
+| Duplicates across outlets | Deduped to the underlying event |
