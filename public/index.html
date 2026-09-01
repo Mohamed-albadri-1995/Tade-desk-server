@@ -459,6 +459,34 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
    said which system a line belonged to. The letter is now a chip at the left
    of its own row, which is what makes the column scannable — you look down
    the letters, not across the words. */
+/* FOLDS — every section is one line until you ask for more.
+   The card had grown to a screen and a half of rows that are worth having and
+   are not worth scrolling past twenty times a morning. Each section now shows
+   its heading and a ONE-LINE summary; tapping opens it. The open/closed choice
+   is remembered per SECTION, not per card, because "I always want news open"
+   is a preference about the section, and it would be useless if it had to be
+   made again on every one of 25 cards.
+   This is display only. The registers are written server-side from r0 rows and
+   cannot see the DOM, so nothing here changes what is collected. */
+.fold { border-bottom: 1px solid #1e2233; }
+.mkt-fold { border: 1px solid var(--border); border-radius: 8px;
+  margin-bottom: 10px; background: var(--bg2); overflow: hidden; }
+.mkt-fold .fold-body { padding: 10px 12px 12px; }
+.mkt-fold[data-open="1"] .fold-chev { transform: rotate(180deg); }
+.mkt-fold[data-open="1"] .fold-one { display: none; }
+.fold:last-child { border-bottom: none; }
+.fold-head { display: flex; align-items: baseline; gap: 7px; width: 100%;
+  padding: 8px 14px; background: none; border: 0; cursor: pointer;
+  text-align: left; color: inherit; font: inherit; }
+.fold-head:hover { background: var(--bg3); }
+.fold-title { font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--text3); flex: 0 0 auto; }
+.fold-one { font-size: 11px; color: var(--text2); flex: 1 1 auto;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fold-chev { font-size: 9px; color: var(--text3); flex: 0 0 auto; }
+.fold[data-open="1"] .fold-chev { transform: rotate(180deg); }
+.fold[data-open="1"] .fold-one { display: none; }
+.fold-body { padding: 0 14px 10px; }
 .canslim-sec { border-left: 2px solid var(--accent); padding-left: 9px; }
 .cl-letter { display: inline-block; min-width: 15px; font-weight: 800;
   font-size: 11px; color: var(--accent); letter-spacing: 0; }
@@ -1111,49 +1139,81 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 
   <!-- ═══════════════ MARKET TAB ═══════════════ -->
   <div class="tab-pane" id="tab-market">
-    <!-- EVERY BLOCK ON THIS TAB IS NOW NAMED.
+    <!-- EVERY BLOCK ON THIS TAB IS NAMED AND FOLDED.
          It was six unlabelled slabs stacked on each other — indexes, the
-         O'Neil model, the analysis, the regime, the heatmap, the groups —
-         and only one of them carried a heading, so the tab read as one
-         undifferentiated scroll. The headings say what each block is and,
-         where it matters, what it is measured on. -->
-    <div class="heatmap-title">Indexes · live</div>
-    <div class="market-grid" id="idx-grid">
-      <div class="loading">Loading market data…</div>
+         O'Neil model, the analysis, the regime, the heatmap, the groups — and
+         only one carried a heading, so the tab read as one undifferentiated
+         scroll. Same treatment as the cards: a name, a one-line summary, and
+         the detail behind a tap. The market model is open by default because
+         it is the one that decides whether to be buying at all. -->
+    <div class="mkt-fold" data-mfold="idx" data-open="1">
+      <button class="fold-head" onclick="toggleMktFold(this)">
+        <span class="fold-title">Indexes &middot; live</span>
+        <span class="fold-one" id="mkt-one-idx"></span>
+        <span class="fold-chev">&#9662;</span>
+      </button>
+      <div class="fold-body">
+        <div class="market-grid" id="idx-grid">
+          <div class="loading">Loading market data&hellip;</div>
+        </div>
+      </div>
     </div>
-    <!-- O'NEIL'S MARKET MODEL.
-         First on the tab because it is the one that decides whether to be
-         buying at all — he found three out of four stocks follow the general
-         market. Everything below it is the finer texture underneath that
-         decision, and it is deliberately untouched. -->
-    <div class="heatmap-title" style="margin-top:18px">M · O'Neil market model
-      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3)">
-        — should you be buying at all</span></div>
-    <div class="oneil-block" id="oneil-model"></div>
-    <div class="heatmap-title" style="margin-top:18px">Desk analysis</div>
-    <div class="market-analysis" id="market-analysis"></div>
-    <div class="regime-card" id="regime-card" style="display:none"></div>
-    <div class="heatmap-title" style="margin-top:18px">Sector heatmap
-      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3)">
-        — 15 sector ETFs</span></div>
-    <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
-      <table class="heatmap-table">
-        <thead>
-          <tr>
-            <th>Sector</th><th>ETF</th><th>Daily</th><th>Week</th><th>RS Day</th><th>RS Week</th><th>Bias</th><th>Score</th><th>ADX</th><th>Status</th>
-          </tr>
-        </thead>
-        <tbody id="sector-tbody"><tr><td colspan="8" class="loading">Loading…</td></tr></tbody>
-      </table>
+
+    <!-- O'NEIL'S MARKET MODEL. First because he found three out of four
+         stocks follow the general market: it decides whether to be buying at
+         all, and everything below it is the finer texture under that. -->
+    <div class="mkt-fold" data-mfold="oneil" data-open="1">
+      <button class="fold-head" onclick="toggleMktFold(this)">
+        <span class="fold-title">M &middot; O'Neil market model</span>
+        <span class="fold-one" id="mkt-one-oneil">should you be buying at all</span>
+        <span class="fold-chev">&#9662;</span>
+      </button>
+      <div class="fold-body"><div class="oneil-block" id="oneil-model"></div></div>
     </div>
+
+    <div class="mkt-fold" data-mfold="analysis" data-open="0">
+      <button class="fold-head" onclick="toggleMktFold(this)">
+        <span class="fold-title">Desk analysis</span>
+        <span class="fold-one">the desk's own read, separate from O'Neil's</span>
+        <span class="fold-chev">&#9662;</span>
+      </button>
+      <div class="fold-body" hidden>
+        <div class="market-analysis" id="market-analysis"></div>
+        <div class="regime-card" id="regime-card" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="mkt-fold" data-mfold="sectors" data-open="0">
+      <button class="fold-head" onclick="toggleMktFold(this)">
+        <span class="fold-title">Sector heatmap</span>
+        <span class="fold-one">15 sector ETFs</span>
+        <span class="fold-chev">&#9662;</span>
+      </button>
+      <div class="fold-body" hidden>
+        <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
+          <table class="heatmap-table">
+            <thead>
+              <tr>
+                <th>Sector</th><th>ETF</th><th>Daily</th><th>Week</th><th>RS Day</th><th>RS Week</th><th>Bias</th><th>Score</th><th>ADX</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="sector-tbody"><tr><td colspan="8" class="loading">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- ONE LEVEL FINER THAN THE HEATMAP ABOVE. That is 15 sector ETFs; this
          is the industry group, which is where O'Neil says the leadership
          actually is — 37% of a stock's move against the sector's 12%. -->
-    <div class="heatmap-title" style="margin-top:18px">L · Industry groups
-      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3)">
-        — where O'Neil says the leadership is: 37% of a stock's move, against
-        the sector's 12%</span></div>
-    <div id="group-table"></div>
+    <div class="mkt-fold" data-mfold="groups" data-open="0">
+      <button class="fold-head" onclick="toggleMktFold(this)">
+        <span class="fold-title">L &middot; Industry groups</span>
+        <span class="fold-one" id="mkt-one-groups">37% of a stock's move, against the sector's 12%</span>
+        <span class="fold-chev">&#9662;</span>
+      </button>
+      <div class="fold-body" hidden><div id="group-table"></div></div>
+    </div>
   </div>
 
   <!-- ═══════════════ SHORTLIST TAB ═══════════════ -->
@@ -3603,12 +3663,6 @@ function buildCard(row) {
 
   <div class="card-badges">
     ${firstSeenHTML}${alsoBadge}${canslimBadge}${badges}${hotBadge}${alignBadge}${catalystBadge}
-    <!-- THE PANEL OPENER. The C and A tables need a full-width surface; a
-         card column cannot hold an eight-quarter table and pretending it can
-         is how the tables become one number again. -->
-    <span class="badge" style="cursor:pointer;border-color:var(--accent);color:var(--accent)"
-          onclick="openCanslimPanel('${row.ticker}')"
-          title="C, A, N, S, L, I and M for this stock — the full tables">CANSLIM ⤢</span>
   </div>
   ${signalTags}
 
@@ -3617,29 +3671,61 @@ function buildCard(row) {
     <!-- RANGE — straight after the MA tags, because both answer "where is this
          thing sitting", one against its moving averages and one against its
          own history. -->
-    ${rangeBar ? `<div class="card-section">
-      <div class="section-title">Range</div>
-      ${rangeBar}
-    </div>` : ''}
+    ${fold('range', 'Range',
+      usableBars.map(b => `${esc(b.label[0])} ${b.pos.toFixed(0)}%`).join(' · ')
+        || 'tap to open',
+      rangeBar)}
 
     <!-- NEWS — why the stock is moving belongs next to how much it is moving,
          not eight sections below it. -->
-    <div class="card-section">
-      <div class="section-title">News ${catalyst ? '· ' + (catalyst.tier === 1 ? '⚡ ' : '') + catalyst.label + (catalyst.others && catalyst.others.length ? ' <span style="opacity:0.6;font-weight:400">+ ' + catalyst.others.map(o => o.label).join(', ') + '</span>' : '') : ''}</div>
-      <div id="news-${row.ticker}">${newsHTML}</div>
-    </div>
+    ${fold('news',
+      `News ${catalyst ? '· ' + (catalyst.tier === 1 ? '⚡ ' : '') + catalyst.label + (catalyst.others && catalyst.others.length ? ' <span style="opacity:0.6;font-weight:400">+ ' + catalyst.others.map(o => o.label).join(', ') + '</span>' : '') : ''}`,
+      newsItems.length
+        ? `${newsItems.length} ${newsItems.length === 1 ? 'story' : 'stories'} · ${esc((newsItems[0] || {}).title || '')}`
+        : 'nothing in three weeks',
+      `<div id="news-${row.ticker}">${newsHTML}</div>`)}
 
-    <!-- CHART — shown rather than hidden behind a click, but mounted only when
-         the card is actually on screen. See mountChart(). -->
-    <div class="card-section">
-      <div class="section-title">Chart
-        <span class="chart-expand" onclick="openChart('${row.ticker}')" title="open the full chart">⤢ full</span>
-      </div>
-      <div class="card-chart" id="cchart-${row.ticker}"
+    <!-- CANSLIM — BETWEEN THE NEWS AND THE CHART, which is where it is read:
+         after why the stock is moving, before what the move looks like. It
+         used to be behind a ⤢ panel and then behind the Details fold; both
+         put O'Neil's checklist somewhere you had to go looking for it.
+         Everything is here now, the panel is gone. -->
+    ${(() => {
+      const rows = canslimCardBlock(row.ticker) + ratingsCardBlock(row.ticker)
+        + groupCardBlock(row.ticker) + oneilCardBlock(row.ticker);
+      const strength = strengthCardBlock(row.ticker);
+      if (!rows && !strength) return '';
+      // WHICH LETTERS ARE NOT ON THE CARD, AND WHY. A checklist missing a
+      // line silently is worse than one that says the line is pending: the
+      // first reads as "nothing to report", the second as "not measured yet".
+      const missing = [];
+      if (!/cl-letter">C</.test(rows)) missing.push('C and A (no filings cached yet)');
+      if (!/cl-letter">L</.test(rows)) missing.push('L (group ranks still building)');
+      missing.push('I (fund counts — 13F, phase 6)');
+      // THE LETTERS ARE THE SUMMARY; THE TABLES ARE THE WORKING UNDERNEATH.
+      // Nested rather than a second top-level section, because they are the
+      // same reading at two depths — the eight-quarter table IS C, spelled
+      // out. It is the part of C that cannot be said in one line, which is
+      // exactly why it must not be the part that is hardest to reach.
+      const body = `<div class="canslim-sec">${rows}
+          <div class="cl-pending">Not shown: ${missing.join(' · ')}</div>
+        </div>
+        ${strength ? `<div class="section-title" style="margin-top:9px">Relative strength</div>${strength}` : ''}
+        ${fold('canslim-tables', 'Full tables',
+               'eight quarters, the annual run, and the whole base',
+               canslimTablesHTML(row.ticker))}`;
+      return fold('canslim', "CANSLIM · O'Neil", canslimOneLine(row.ticker), body);
+    })()}
+
+    <!-- CHART — mounted only when the card is on screen AND its fold is open.
+         See mountChart() and toggleFold(). -->
+    ${fold('chart', 'Chart', 'tap to open',
+      `<div class="card-chart" id="cchart-${row.ticker}"
            data-sym="${esc(s.tvSymbol || row.ticker)}" data-tkr="${esc(row.ticker)}">
         <div class="cchart-idle">chart loads when this card is on screen</div>
-      </div>
-    </div>
+      </div>`,
+      `<span class="chart-expand" style="float:none;padding:0 14px 4px;display:block"
+             onclick="openChart('${row.ticker}')" title="open the full chart">⤢ full</span>`)}
 
     <!-- Everything above this line is the card. Everything below it is the
          detail behind the card, folded away by default: it is worth having and
@@ -3649,95 +3735,53 @@ function buildCard(row) {
     <div class="card-more-body" id="more-${row.ticker}" hidden>
 
     <!-- THEMES -->
-    ${themesHTML ? `<div class="card-section">
-      <div class="section-title">Themes</div>
-      ${themesHTML}
-    </div>` : ''}
-
-    <!-- CANSLIM — ITS OWN SECTION, READ DOWN THE LETTERS.
-         These seven and the desk's own regime rows used to share one
-         undifferentiated list, so the card was a long column where nothing
-         said which system a line belonged to. They are a checklist and they
-         are separated as one: the order IS the method — C and A say whether
-         the company is worth owning, N whether the chart is ready, S and L
-         who else is in it, M whether now is the time. -->
-    ${(() => {
-      const rows = canslimCardBlock(row.ticker) + ratingsCardBlock(row.ticker)
-        + groupCardBlock(row.ticker) + oneilCardBlock(row.ticker);
-      if (!rows) return '';
-      // WHICH LETTERS ARE NOT ON THE CARD, AND WHY. A checklist missing a
-      // line silently is worse than one that says the line is pending: the
-      // first reads as "nothing to report", the second as "not measured yet".
-      const missing = [];
-      if (!/cl-letter">C</.test(rows)) missing.push('C and A (no filings cached yet)');
-      if (!/cl-letter">L</.test(rows)) missing.push('L (group ranks still building)');
-      missing.push('I (fund counts — 13F, phase 6)');
-      return `<div class="card-section">
-        <div class="section-title">CANSLIM · O'Neil</div>
-        <div class="canslim-sec">${rows}
-          <div class="cl-pending">Not shown: ${missing.join(' · ')}</div>
-        </div>
-      </div>`;
-    })()}
-
-    <!-- RELATIVE STRENGTH — phase 4, and NOT a CANSLIM letter, so it is not
-         filed under one. -->
-    ${(() => {
-      const rows = strengthCardBlock(row.ticker);
-      return rows ? `<div class="card-section">
-        <div class="section-title">Relative strength</div>${rows}</div>` : '';
-    })()}
+    ${fold('themes', 'Themes', 'tap to open', themesHTML)}
 
     <!-- MARKET CONTEXT — the DESK's own read, which is a different system
          from the seven letters above and no longer shares a heading with
          them. -->
-    <div class="card-section">
-      <div class="section-title">Market Context</div>
-      <div class="ctx-row"><span class="ctx-label">Regime</span>${regimeHTML}</div>
+    ${fold('context', 'Market Context',
+      `${esc(ctx.regime || '—')} · long ${esc(ctx.longTerm || '—')} · short ${esc(ctx.shortTerm || '—')}`,
+      `<div class="ctx-row"><span class="ctx-label">Regime</span>${regimeHTML}</div>
       <div class="ctx-row"><span class="ctx-label">Long term</span><span class="ctx-val ${biasCls(ctx.longTerm)}">${ctx.longTerm||'—'}</span></div>
       <div class="ctx-row"><span class="ctx-label">Mid term</span><span class="ctx-val ${biasCls(ctx.midTerm)}">${ctx.midTerm||'—'}</span></div>
       <div class="ctx-row"><span class="ctx-label">Short term</span><span class="ctx-val ${biasCls(ctx.shortTerm)}">${ctx.shortTerm||'—'}</span></div>
       ${ctx.broadResolved ? `<div class="ctx-row"><span class="ctx-label">Sector</span><span class="ctx-val"><span class="${biasCls(ctx.secBias)}">${ctx.broadResolved} · ${ctx.secBias||'—'}</span>${secScoreDisplay}</span></div>` : ''}
-      <div class="ctx-row"><span class="ctx-label">Bias</span><span class="ctx-val">${biasHTML}</span></div>
-    </div>
+      <div class="ctx-row"><span class="ctx-label">Bias</span><span class="ctx-val">${biasHTML}</span></div>`)}
 
     <!-- PRICE -->
-    <div class="card-section">
-      <div class="section-title">Price</div>
-      <div class="price-grid">
+    ${fold('price', 'Price', `$${fmt(s.price)} · gap ${fmtPct(s.gapPct)} · vwap $${fmt(s.vwap)}`,
+      `<div class="price-grid">
         <div class="price-row"><span class="price-label">Price</span><span class="price-val">$${fmt(s.price)}</span></div>
         <div class="price-row"><span class="price-label">Prev Close</span><span class="price-val">$${fmt(s.prevClose)}</span></div>
         <div class="price-row"><span class="price-label">VWAP</span><span class="price-val">$${fmt(s.vwap)}</span></div>
         <div class="price-row"><span class="price-label">5-day MA</span><span class="price-val">$${fmt(s.sma5)}</span></div>
         <div class="price-row"><span class="price-label">Open</span><span class="price-val">$${fmt(s.open)}</span></div>
         <div class="price-row"><span class="price-label">Gap %</span><span class="price-val ${(s.gapPct||0)>=0?'pos':'neg'}">${fmtPct(s.gapPct)}</span></div>
-      </div>
-    </div>
+      </div>`)}
 
     <!-- EMAs -->
-    ${emas ? `<div class="card-section"><div class="section-title">EMAs</div><div class="ema-row">${emas}</div></div>` : ''}
+    ${fold('emas', 'EMAs',
+      `9 ${fmt(s.ema9)} · 20 ${fmt(s.ema20)} · 50 ${fmt(s.ema50)}`,
+      emas ? `<div class="ema-row">${emas}</div>` : '')}
 
     <!-- ATR & MOVE -->
-    <div class="card-section">
-      <div class="section-title">ATR & Move</div>
-      <div class="price-grid">
+    ${fold('atr', 'ATR & Move', `ADR ${s.adrPct != null ? s.adrPct.toFixed(1)+'%' : '—'} · move ${moveATR}`,
+      `<div class="price-grid">
         <div class="price-row"><span class="price-label">ADR $</span><span class="price-val">$${fmt(s.atr)}</span></div>
         <div class="price-row"><span class="price-label">ADR %</span><span class="price-val">${s.adrPct != null ? s.adrPct.toFixed(1)+'%' : '—'}</span></div>
         <div class="price-row"><span class="price-label">Move</span><span class="price-val">${moveATR}</span></div>
         <div class="price-row"><span class="price-label">Day H/L</span><span class="price-val">$${fmt(s.dayHigh)} / $${fmt(s.dayLow)}</span></div>
-      </div>
-    </div>
+      </div>`)}
 
     <!-- PM RANGE -->
-    <div class="card-section">
-      <div class="section-title">Pre-Market Range</div>
-      <div class="price-grid">
+    ${fold('pm', 'Pre-Market Range', `PM/ADR ${s.pmAdrRatio != null ? s.pmAdrRatio.toFixed(2)+'×' : '—'} · range $${fmt(s.pmRange)}`,
+      `<div class="price-grid">
         <div class="price-row"><span class="price-label">PM High</span><span class="price-val">$${fmt(s.pmHigh)}</span></div>
         <div class="price-row"><span class="price-label">PM Low</span><span class="price-val">$${fmt(s.pmLow)}</span></div>
         <div class="price-row"><span class="price-label">PM Range</span><span class="price-val">$${fmt(s.pmRange)}</span></div>
         <div class="price-row"><span class="price-label">PM / ADR</span><span class="price-val">${s.pmAdrRatio != null ? s.pmAdrRatio.toFixed(2)+'×' : '—'}</span></div>
-      </div>
-    </div>
+      </div>`)}
 
     </div><!-- /card-more-body -->
   </div>
@@ -4084,7 +4128,7 @@ const DEFS = {
       + "                        O'Neil's minimum\n\n"
       + "Sales are shown BESIDE EPS, never instead of it: a buyback lifts "
       + "EPS with the business standing still, and only the pair separates "
-      + "the two. The full eight-quarter table is behind CANSLIM ⤢.",
+      + 'the two. The full eight-quarter table is under "Full tables".',
     not: "Not a forecast and not an estimate — these are filed figures, so "
       + "they arrive WEEKS after the quarter ends and the newest quarter may "
       + "not be here yet. Not a percentage from a loss: a growth rate off a "
@@ -4131,7 +4175,7 @@ const DEFS = {
       + "either: a pivot is a price, not an instruction, and 'no handle' "
       + "means the pattern is unfinished, not that it failed.",
     src: 'Weekly bars resampled from qp daily history, Friday-ended. The full '
-      + 'reading — lip, low, waves, accumulation weeks — is behind CANSLIM ⤢.',
+      + 'reading — lip, low, waves, accumulation weeks — is under "Full tables".',
   },
   held_up: {
     title: 'On the distribution days',
@@ -4298,7 +4342,78 @@ function oneilDates(ticker) {
    clocks — EDGAR lands weeks after quarter-end, groups are daily, the base is
    weekly — and one timestamp at the top would claim a freshness most of them
    do not have. */
+/* ─────────── FOLDS ────────────────────────────────────────────────────
+ * A section is one line until it is asked to be more. The choice is stored
+ * per SECTION KIND, not per ticker: "keep news open" is a statement about
+ * news, and making it again on each of 25 cards would be no saving at all.
+ * Chart defaults open because it is the one section that is not a list of
+ * numbers — a card of nothing but headings is not easier to read, it is just
+ * shorter. */
+const FOLD_DEFAULT_OPEN = new Set(['chart']);
+let FOLD_OPEN = new Set(FOLD_DEFAULT_OPEN);
+try {
+  const raw = localStorage.getItem('foldOpen');
+  if (raw) FOLD_OPEN = new Set(JSON.parse(raw));
+} catch { /* private mode — the defaults stand */ }
+
+function fold(key, title, oneLine, body, extraHead) {
+  if (!body) return '';
+  const open = FOLD_OPEN.has(key);
+  return `<div class="fold" data-fold="${key}" data-open="${open ? 1 : 0}">
+    <button class="fold-head" onclick="toggleFold(this)"
+            aria-expanded="${open}">
+      <span class="fold-title">${title}</span>
+      <span class="fold-one">${oneLine || ''}</span>
+      <span class="fold-chev">▾</span>
+    </button>${extraHead || ''}
+    <div class="fold-body"${open ? '' : ' hidden'}>${body}</div>
+  </div>`;
+}
+
+function toggleFold(btn) {
+  const box = btn.closest('.fold');
+  const key = box.getAttribute('data-fold');
+  const open = box.getAttribute('data-open') !== '1';
+  box.setAttribute('data-open', open ? 1 : 0);
+  btn.setAttribute('aria-expanded', String(open));
+  const body = box.querySelector('.fold-body');
+  if (body) body.hidden = !open;
+  if (open) FOLD_OPEN.add(key); else FOLD_OPEN.delete(key);
+  try { localStorage.setItem('foldOpen', JSON.stringify([...FOLD_OPEN])); }
+  catch { /* the fold still works, it just will not be remembered */ }
+  // THE CHART IS MOUNTED LAZILY AND ONLY WHEN VISIBLE. Opening its fold is
+  // the moment it becomes visible, and the observer cannot see that by
+  // itself, so it is re-offered here.
+  if (open && _chartObserver) {
+    box.querySelectorAll('.card-chart').forEach(el => _chartObserver.observe(el));
+  }
+}
+
 let CANSLIM_PANEL = { fundamentals: {}, bases: {} };
+
+/* THE ONE LINE THAT STANDS FOR THE WHOLE CHECKLIST.
+ * Not a score and not a verdict — the letters, each with its single most
+ * decisive number, in method order. Reading it should tell you whether
+ * opening the section is worth it, which is the only job a summary has. */
+function canslimOneLine(ticker) {
+  const tk = String(ticker).toUpperCase();
+  const f = CANSLIM_PANEL.fundamentals[tk] || {};
+  const b = CANSLIM_PANEL.bases[tk] || {};
+  const x = ONEIL_RATINGS[tk] || {};
+  const g = GROUPS_MODEL && (GROUPS_MODEL.stocks || {})[tk];
+  const m = ONEIL_MODEL || {};
+  const bits = [];
+  if (f.ok && f.c && f.c.rows && f.c.rows.length) {
+    bits.push('C ' + (f.c.rows[0].eps_chg_label || '—'));
+  }
+  if (f.ok && f.a && f.a.growth_3yr_pct != null) bits.push('A ' + f.a.growth_3yr_pct + '%');
+  if (b.ok && b.pct_to_pivot != null) bits.push('N ' + b.pct_to_pivot + '% to pivot');
+  if (x.ud && x.ud.ratio != null) bits.push('S ' + x.ud.ratio);
+  if (g) bits.push('L ' + g.group_rank + '/' + g.group_of);
+  if (m.status_label) bits.push('M ' + esc(m.status_label));
+  return bits.length ? bits.join(' · ')
+    : '<span style="color:var(--text3)">building…</span>';
+}
 
 /* C, A AND N ON THE CARD ITSELF, NOT ONLY BEHIND THE ⤢.
  *
@@ -4323,7 +4438,7 @@ let CANSLIM_PANEL = { fundamentals: {}, bases: {} };
  * page hung on the slowest source AND the burst got the news feed's EDGAR
  * source rate-limited, which put "edgar not answering" on every card in the
  * scan. A miss is a normal answer here; the nightly walk fills the cache, and
- * tapping CANSLIM ⤢ fills it for that one name. */
+ * the background warmer fills it a name at a time after the response. */
 async function _canslimPart(want, part, into, blank) {
   try {
     const r = await fetch('/api/market/oneil/canslim?cards=1&parts=' + part
@@ -4423,32 +4538,19 @@ function canslimCardBlock(ticker) {
   return html;
 }
 
-async function openCanslimPanel(ticker) {
-  const tk = String(ticker).toUpperCase();
-  document.getElementById('def-title').textContent = `${tk} · CANSLIM`;
-  document.getElementById('def-body').innerHTML =
-    '<div class="loading">Fetching filings and the weekly base…</div>';
-  document.getElementById('def-overlay').classList.add('open');
-  try {
-    const r = await fetch(`/api/market/oneil/canslim?symbols=${tk}`);
-    const d = await r.json();
-    if (d.ok) {
-      Object.assign(CANSLIM_PANEL.fundamentals, d.fundamentals || {});
-      Object.assign(CANSLIM_PANEL.bases, d.bases || {});
-    }
-    renderCanslimPanel(tk);
-  } catch (e) {
-    document.getElementById('def-body').innerHTML =
-      `<div class="sb-result err">Could not load: ${esc(e.message)}</div>`;
-  }
-}
-
 const _n = (v, d) => (v == null ? '—' : Number(v).toFixed(d == null ? 2 : d));
 const _m = v => (v == null ? '—' : v >= 1e9 ? (v / 1e9).toFixed(2) + 'B'
   : v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : Number(v).toLocaleString());
 const _sign = v => (v == null ? '' : v >= 0 ? 'pos' : 'neg');
 
-function renderCanslimPanel(tk) {
+/* THE FULL TABLES, ON THE CARD.
+ * These used to live in a modal opened from a badge. A popup is a place you
+ * have to decide to go to, and the eight-quarter table is the part of C that
+ * cannot be said in a line — so it was the part nobody saw. It is now the
+ * expandable half of the card's own CANSLIM section: the letters are the
+ * summary, this is the working underneath them. Returns HTML; renders
+ * nothing itself. */
+function canslimTablesHTML(tk) {
   const f = CANSLIM_PANEL.fundamentals[tk] || {};
   const b = CANSLIM_PANEL.bases[tk] || {};
   const g = GROUPS_MODEL && (GROUPS_MODEL.stocks || {})[tk];
@@ -4561,8 +4663,7 @@ function renderCanslimPanel(tk) {
     ${sd && sd.checked ? `<br>This stock on those days: <b>${sd.held} of ${sd.checked}</b>
       · ${esc(sd.verdict || '')}` : ''}`;
 
-  document.getElementById('def-body').innerHTML =
-    sec('C — current quarterly earnings', cHtml)
+  return sec('C — current quarterly earnings', cHtml)
     + sec('A — annual earnings', aHtml)
     + sec('N — the base (WEEKLY) and what is new', nHtml,
           b.timeframe_note || "O'Neil analyses bases on weekly charts; every length here is in weeks.")
@@ -4882,7 +4983,40 @@ function renderOneil(m) {
     <div class="oneil-rules" style="color:var(--text3);opacity:.8">${esc(m.model_note || '')}</div>`;
 }
 
+/* The market tab's folds. Same idea as the cards', remembered separately —
+   what you want open on a page you visit to make one decision is not what you
+   want open on a page of 25 cards. */
+function toggleMktFold(btn) {
+  const box = btn.closest('.mkt-fold');
+  const key = box.getAttribute('data-mfold');
+  const open = box.getAttribute('data-open') !== '1';
+  box.setAttribute('data-open', open ? 1 : 0);
+  const body = box.querySelector('.fold-body');
+  if (body) body.hidden = !open;
+  try {
+    const cur = new Set(JSON.parse(localStorage.getItem('mktFold') || '[]'));
+    if (open) cur.add(key); else cur.delete(key);
+    localStorage.setItem('mktFold', JSON.stringify([...cur]));
+  } catch { /* the fold still works, it just will not be remembered */ }
+}
+
+function restoreMktFolds() {
+  let want = null;
+  try {
+    const raw = localStorage.getItem('mktFold');
+    if (raw) want = new Set(JSON.parse(raw));
+  } catch { /* private mode — the markup's defaults stand */ }
+  if (!want) return;
+  document.querySelectorAll('.mkt-fold').forEach(box => {
+    const open = want.has(box.getAttribute('data-mfold'));
+    box.setAttribute('data-open', open ? 1 : 0);
+    const body = box.querySelector('.fold-body');
+    if (body) body.hidden = !open;
+  });
+}
+
 async function loadMarket() {
+  restoreMktFolds();
   // TWO INDEPENDENT READS, and neither can take the other down. They are
   // different claims from different sources: the snapshot is TradingView's
   // live index data behind a short-term momentum blend, the O'Neil model is a

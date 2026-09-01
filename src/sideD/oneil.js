@@ -298,6 +298,56 @@ const loadFundamentals = syms => _qpBatch('/api/oneil/fundamentals', syms, _fund
 const loadFundamentalsCached = syms =>
   _qpBatch('/api/oneil/fundamentals', syms, _fundamentals, 40, 15000,
            '&cached_only=1');
+
+/*
+ * ...AND SOMETHING HAS TO FILL THAT CACHE.
+ *
+ * While C and A lived behind a popup, the popup was the only thing that ever
+ * walked EDGAR: one symbol, when a person asked for it. Moving the tables
+ * onto the card removed that path, and a cache nothing fills is an empty
+ * cache — every card would have read "not fetched yet" forever.
+ *
+ * So the misses are walked HERE, in the background, after the response has
+ * already gone out. The request still never waits on EDGAR — that is the
+ * rule, and it is what the page's own timings depend on — but the names it
+ * asked for are queued and will be there next time.
+ *
+ * Deliberately slow. EDGAR asks for under ten requests a second and qp
+ * already spaces them; this adds a queue of one at a time so a 25-card scan
+ * cannot become a burst, and it drops any name already in flight so two tools
+ * scanning the same ticker do not fetch it twice.
+ */
+const _warming = new Set();
+let _warmQueue = [];
+let _warmRunning = false;
+
+async function _warmLoop() {
+  if (_warmRunning) return;
+  _warmRunning = true;
+  try {
+    while (_warmQueue.length) {
+      const sym = _warmQueue.shift();
+      try {
+        await loadFundamentals([sym]);      // the BUILDING path, one name
+      } catch { /* a name EDGAR has nothing for is not an error */ }
+      finally { _warming.delete(sym); }
+    }
+  } finally { _warmRunning = false; }
+}
+
+function warmFundamentals(symbols) {
+  const day = _etDay();
+  if (_fundamentals.day !== day) { _fundamentals.day = day; _fundamentals.stocks = {}; }
+  for (const raw of symbols || []) {
+    const s = String(raw).toUpperCase();
+    if (!s || s in _fundamentals.stocks || _warming.has(s)) continue;
+    _warming.add(s);
+    _warmQueue.push(s);
+  }
+  // NOT AWAITED BY THE CALLER, and it must stay that way.
+  _warmLoop();
+  return { queued: _warmQueue.length };
+}
 const loadBases = syms => _qpBatch('/api/oneil/base', syms, _bases, 20, 60000);
 const fundamentalsCache = () => (_fundamentals.day === _etDay() ? _fundamentals : { stocks: {} });
 const basesCache = () => (_bases.day === _etDay() ? _bases : { stocks: {} });
@@ -313,6 +363,6 @@ function stocksCache() {
 module.exports = {
   read, stockVsDistribution, EXPOSURE, ftdBand, FILE,
   loadStocks, stocksCache, loadRatings, ratingsCache,
-  loadFundamentals, loadFundamentalsCached, fundamentalsCache,
+  loadFundamentals, loadFundamentalsCached, warmFundamentals, fundamentalsCache,
   loadBases, basesCache,
 };

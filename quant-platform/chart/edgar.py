@@ -281,7 +281,13 @@ def _year_ago(d: dict, end: str):
         except Exception:                                 # noqa: BLE001
             continue
         g = abs((kd - want).days)
-        if g < gap and g <= 35:
+        # 45 DAYS, NOT 35. Quarter-ends drift more than a month between years:
+        # a filer whose Q1 ended 30 April last year and 31 March this year is
+        # 30 days out before any 52/53-week drift is added, and 35 left no
+        # room for both. 45 is the widest that still cannot reach the quarter
+        # beside it — adjacent quarter-ends are about 91 days apart, so the
+        # halfway point is 45 and anything under it is unambiguous.
+        if g < gap and g <= 45:
             best, gap = v, g
     return best
 
@@ -357,15 +363,31 @@ def a_table(cf: dict, years: int = 5) -> dict:
         except Exception:                                 # noqa: BLE001
             return None
 
-    def _apart(a: str, b: str) -> int | None:
-        """Whole years between two fiscal year-ends, or None if unreadable."""
-        ya, yb = _yr(a), _yr(b)
-        return None if (ya is None or yb is None) else ya - yb
+    def _days_apart(a: str, b: str) -> int | None:
+        try:
+            return (_dt.date.fromisoformat(a) - _dt.date.fromisoformat(b)).days
+        except Exception:                                 # noqa: BLE001
+            return None
+
+    def _apart(a: str, b: str, years: int = 1) -> bool:
+        """Are these two fiscal year-ends `years` apart?
+
+        MEASURED IN DAYS, NOT CALENDAR YEARS. Subtracting the year numbers
+        looks equivalent and is not: a filer whose year ends 31 January files
+        2026-01-31 against 2024-12-31 — thirteen months apart, which the year
+        numbers call TWO years and the table then refused to compare. Fiscal
+        year-ends drift; a 52/53-week filer moves by up to a week, a changed
+        year-end moves by a month or more, and none of that stops it being the
+        next year. The window is wide enough for that drift and far too narrow
+        to reach the year beside it.
+        """
+        d = _days_apart(a, b)
+        return d is not None and abs(d - years * 365) <= 75
 
     rows = []
     for i, end in enumerate(ends):
         nxt = ends[i + 1] if i + 1 < len(ends) else None
-        prev = nxt if (nxt and _apart(end, nxt) == 1) else None
+        prev = nxt if (nxt and _apart(end, nxt)) else None
         if nxt and prev is None:
             chg, lab = None, 'n/a (no prior year filed)'
         else:
@@ -388,7 +410,7 @@ def a_table(cf: dict, years: int = 5) -> dict:
     growth3 = None
     kept = [r for r in rows if r['eps'] is not None]
     vals = [r['eps'] for r in kept]
-    if (len(kept) >= 4 and _apart(kept[0]['fy'], kept[3]['fy']) == 3
+    if (len(kept) >= 4 and _apart(kept[0]['fy'], kept[3]['fy'], 3)
             and vals[3] and vals[3] > 0 and vals[0] > 0):
         growth3 = round(((vals[0] / vals[3]) ** (1 / 3) - 1) * 100, 1)
 

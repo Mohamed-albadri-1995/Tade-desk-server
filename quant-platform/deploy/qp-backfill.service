@@ -1,0 +1,51 @@
+# THE RS UNIVERSE BACKFILL, AS A SERVICE.
+#
+# It was being launched by hand over SSH from a phone. `setsid` kept it alive
+# past the disconnect, but nothing restarted it when it died — and it died
+# twice: once on a missing POLYGON_API_KEY, once silently. Both times the run
+# was lost and the count stopped moving, which is not something a person
+# should have to notice.
+#
+# One session at a time, about 13 seconds apart, until roughly a year of
+# non-empty sessions is on disk. Free-tier Polygon allows five requests a
+# minute; the pacing lives in relstrength.backfill and is not repeated here.
+#
+# Install:
+#   sudo cp quant-platform/deploy/qp-backfill.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl start qp-backfill
+# Watch:   journalctl -u qp-backfill -f
+# Count:   ls ~/.qp-cache/grouped/*.parquet | wc -l
+
+[Unit]
+Description=qp RS universe backfill (Polygon grouped daily bars)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/Tade-desk-server/quant-platform
+
+# The key lives in quant-platform/.env, which is gitignored and read, never
+# written. EnvironmentFile takes it directly so the unit holds no secret.
+EnvironmentFile=/home/ec2-user/Tade-desk-server/quant-platform/.env
+
+# -u so the log is written as it happens rather than in 8KB blocks. A run
+# that buffers looks identical to a run that has hung, and that cost an
+# afternoon of "the log is empty, is it working?".
+ExecStart=/usr/bin/python3 -u -c "import sys; sys.path.insert(0, '.'); from chart import relstrength as r; print(r.backfill())"
+
+# It walks backwards from yesterday and skips days already on disk, so a
+# restart resumes rather than starting over. Ten minutes between attempts
+# because the usual reason for a failure is Polygon, and hammering it is how
+# a rate limit becomes a ban.
+Restart=on-failure
+RestartSec=600
+TimeoutStartSec=0
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

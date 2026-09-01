@@ -431,6 +431,37 @@ ok('the canslim route picks the loader by who is asking',
 ok('...and can serve the base WITHOUT waiting on the filings',
    "req.query.parts" in ROUTE and "parts === 'bases'" in ROUTE)
 
+# ── "ONE YEAR APART" IS MEASURED IN DAYS, NOT YEAR NUMBERS ──────────────
+# Reported from the live cards: a comparison refused as "no prior year filed"
+# when the two years were plainly consecutive. Fiscal year-ends drift — a
+# 31-January filer files 2026-01-31 against 2024-12-31, thirteen months, which
+# subtracting the year numbers calls TWO years apart.
+def _fyr(end, val, start):
+    """A fiscal YEAR whose start is not 1 January — which is the whole point
+    of this case, and which _fy's derived start cannot express."""
+    return {'start': start, 'end': end, 'val': val, 'fy': end[:4], 'filed': end}
+
+
+JAN = {'facts': {'us-gaap': {'EarningsPerShareDiluted': {'units': {'shares': [
+    _fyr('2026-01-31', 3.00, '2025-02-01'), _fy('2024-12-31', 2.00),
+    _fy('2023-12-31', 1.50), _fy('2022-12-31', 1.00),
+]}}}}}
+ja = edgar.a_table(JAN)
+jr = {r['fy']: r for r in ja['rows']}
+ok('a 13-month gap between fiscal year-ends is still ONE year',
+   jr['2026-01-31']['eps_chg'] == 50.0, ja)
+ok('...and the 3-year rate is computed over it rather than refused',
+   ja['growth_3yr_pct'] is not None, ja)
+ok('a genuine hole is still refused',
+   by_fy['2023-12-31']['eps_chg_label'] == 'n/a (no prior year filed)')
+
+# The same drift in the QUARTERLY table: Q1 ending 30 April one year and
+# 31 March the next is 30 days out before any 52/53-week drift is added.
+ok('a quarter that moved from April to March still finds its year-ago quarter',
+   edgar._year_ago({'2025-04-30': 1.0, '2025-01-31': 9.0}, '2026-03-31') == 1.0)
+ok('...and the window still cannot reach the quarter beside it',
+   edgar._year_ago({'2025-01-31': 9.0}, '2026-03-31') is None)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

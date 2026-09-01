@@ -178,6 +178,14 @@ router.get('/oneil/canslim', async (req, res) => {
             : Promise.resolve({ stocks: undefined, at: 0 }),
       wantB ? oneil.loadBases(symbols) : Promise.resolve({ stocks: undefined, at: 0 }),
     ]);
+    // FILL THE CACHE THE CARDS READ FROM, WITHOUT MAKING THEM WAIT FOR IT.
+    // Not awaited, deliberately: the response below goes out with whatever
+    // EDGAR has already given us, and the names it did not have are walked
+    // one at a time afterwards so the next scan has them. While C and A lived
+    // behind a popup, that popup was the only thing that ever walked EDGAR;
+    // without this, moving them onto the card would leave the cache empty
+    // forever.
+    if (cards && wantF) oneil.warmFundamentals(symbols);
     res.json({
       ok: true,
       fundamentals: f.stocks,

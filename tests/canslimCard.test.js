@@ -240,9 +240,19 @@ describe('the card fetches once for the whole screen, never per card', () => {
     expect(m).toContain('cards=1');
   });
 
-  test('...and the panel does NOT, because one deliberate tap may build', () => {
-    const m = page.match(/async function openCanslimPanel[\s\S]*?\n\}/)[0];
-    expect(m).not.toContain('cards=1');
+  test('...and something still FILLS that cache, in the background', () => {
+    // While C and A lived behind a popup, that popup was the only thing that
+    // ever walked EDGAR. Moving them onto the card removed that path, and a
+    // cache nothing fills is an empty cache — every card would have read
+    // "not fetched yet" forever.
+    const oneil = fs.readFileSync(
+      path.join(__dirname, '../src/sideD/oneil.js'), 'utf8');
+    expect(oneil).toContain('function warmFundamentals');
+    const route = fs.readFileSync(
+      path.join(__dirname, '../src/routes/market.js'), 'utf8');
+    expect(route).toContain('oneil.warmFundamentals(symbols)');
+    // NOT awaited — the response must not wait on EDGAR.
+    expect(route).not.toMatch(/await oneil\.warmFundamentals/);
   });
 
   test('the base and the filings are asked for separately', () => {
@@ -259,15 +269,14 @@ describe('the card has sections, not one flat list', () => {
   /*
    * The seven letters and the desk's own regime rows shared one heading, so
    * the card was a long column where nothing said which system a line
-   * belonged to. Three headings now: the CANSLIM checklist, the phase-4
-   * strength reads (which are NOT a letter), and the desk's own context.
+   * belonged to. Each section is now a fold with a one-line summary, and
+   * CANSLIM has its own.
    */
-  // The IIFE that assembles the section's rows, then paints its heading.
   const sec = page.match(
-    /const rows = canslimCardBlock[\s\S]*?RELATIVE STRENGTH/)[0];
+    /const rows = canslimCardBlock[\s\S]*?return fold\('canslim',/)[0];
 
   test('CANSLIM is its own titled section', () => {
-    expect(page).toContain(">CANSLIM · O'Neil<");
+    expect(page).toContain("fold('canslim', \"CANSLIM · O'Neil\"");
   });
 
   test('the letters run C A N, then S, then L, then M inside it', () => {
@@ -285,13 +294,15 @@ describe('the card has sections, not one flat list', () => {
   test('the RS line and divergence are NOT filed under a letter', () => {
     // They are phase-4 strength reads, not a CANSLIM letter, and putting them
     // under one would be a claim about what O'Neil's method contains.
-    expect(sec).not.toContain('strengthCardBlock');
-    expect(page).toContain('>Relative strength<');
+    expect(sec).toContain('Relative strength');
+    expect(sec).toContain('strengthCardBlock');
+    expect(sec.indexOf('Relative strength'))
+      .toBeGreaterThan(sec.indexOf('cl-pending'));
   });
 
   test("the desk's own regime rows are a separate section", () => {
     const desk = page.match(
-      /section-title">Market Context<\/div>[\s\S]*?ctx-label">Bias/)[0];
+      /fold\('context', 'Market Context'[\s\S]*?ctx-label">Bias/)[0];
     expect(desk).not.toContain('canslimCardBlock');
     expect(desk).not.toContain('oneilCardBlock');
     expect(desk).toContain('ctx-label">Regime');
@@ -313,17 +324,92 @@ describe('the card has sections, not one flat list', () => {
   });
 });
 
-describe('the market tab names every block', () => {
+describe('CANSLIM sits between the news and the chart', () => {
+  // Where it is read: after why the stock is moving, before what the move
+  // looks like. It was behind a ⤢ popup, then behind the Details fold; both
+  // put the checklist somewhere you had to decide to go.
+  test('news, then CANSLIM, then chart', () => {
+    const body = page.match(/fold\('range'[\s\S]*?fold\('chart'/)[0];
+    expect(body.indexOf("fold('news'")).toBeGreaterThan(-1);
+    expect(body.indexOf("fold('news'"))
+      .toBeLessThan(body.indexOf('canslimCardBlock'));
+  });
+
+  test('the popup is gone entirely', () => {
+    expect(page).not.toContain('openCanslimPanel');
+    expect(page).not.toContain('CANSLIM ⤢');
+  });
+
+  test('...but the full tables survived onto the card', () => {
+    // The eight-quarter table is the part of C that cannot be said in a line,
+    // which is exactly why it must not be the part that is hardest to reach.
+    expect(page).toContain('function canslimTablesHTML');
+    expect(page).toContain("fold('canslim-tables', 'Full tables'");
+  });
+});
+
+describe('folds: one line until asked for more', () => {
+  for (const k of ['range', 'news', 'canslim', 'chart', 'context', 'price',
+                   'emas', 'atr', 'pm']) {
+    test(`${k} is a fold`, () => expect(page).toContain(`fold('${k}'`));
+  }
+
+  test('the open/closed choice is remembered per section, not per card', () => {
+    // "Keep news open" is a statement about news; making it again on each of
+    // 25 cards would be no saving at all.
+    expect(page).toMatch(/localStorage\.setItem\('foldOpen'/);
+  });
+
+  test('opening the chart fold mounts the chart', () => {
+    // The chart is mounted lazily by an IntersectionObserver, which cannot
+    // see that a hidden element just became visible.
+    const m = page.match(/function toggleFold[\s\S]*?\n\}/)[0];
+    expect(m).toContain('_chartObserver.observe');
+  });
+
+  test('a section with no body renders nothing rather than an empty fold', () => {
+    const m = page.match(/function fold\(key[\s\S]*?\n\}/)[0];
+    expect(m).toContain("if (!body) return ''");
+  });
+});
+
+describe('the market tab names and folds every block', () => {
   // It was six unlabelled slabs and only the heatmap carried a heading.
-  for (const t of ['Indexes · live', "M · O'Neil market model", 'Desk analysis',
-                   'Sector heatmap', 'L · Industry groups']) {
-    test(`"${t}" has a heading`, () => {
-      expect(page).toContain('>' + t);
+  const tab = page.match(
+    /<div class="tab-pane" id="tab-market">[\s\S]*?SHORTLIST TAB/)[0];
+
+  for (const [key, title] of [['idx', 'Indexes'], ['oneil', "O'Neil market model"],
+                              ['analysis', 'Desk analysis'],
+                              ['sectors', 'Sector heatmap'],
+                              ['groups', 'Industry groups']]) {
+    test(`${key} is a named fold`, () => {
+      expect(tab).toContain(`data-mfold="${key}"`);
+      expect(tab).toContain(title);
     });
   }
 
-  test('the group table is still on the tab, under its own name', () => {
-    const m = page.match(/L · Industry groups[\s\S]*?id="group-table"/);
-    expect(m).toBeTruthy();
+  test('the model is open by default — it decides whether to buy at all', () => {
+    expect(tab).toMatch(/data-mfold="oneil" data-open="1"/);
+  });
+
+  test('the heavier blocks start folded', () => {
+    expect(tab).toMatch(/data-mfold="sectors" data-open="0"/);
+    expect(tab).toMatch(/data-mfold="groups" data-open="0"/);
+  });
+
+  test('every block the loaders write into is still on the tab', () => {
+    // Folding must not remove an element a loader looks up by id, or the
+    // block silently stops updating.
+    for (const id of ['idx-grid', 'oneil-model', 'market-analysis',
+                      'regime-card', 'sector-tbody', 'group-table']) {
+      expect(tab).toContain(`id="${id}"`);
+    }
+  });
+
+  test('the open/closed choice is remembered separately from the cards', () => {
+    // What you want open on a page you visit to make one decision is not what
+    // you want open on a page of 25 cards.
+    expect(page).toMatch(/localStorage\.setItem\('mktFold'/);
+    expect(page).toContain('function restoreMktFolds');
   });
 });
