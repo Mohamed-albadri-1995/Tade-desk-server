@@ -267,8 +267,11 @@ def build(symbols=None, limit: int | None = None,
                 'first': now, 'seen': now,
                 'src': 'sic',
             }
-        if fetched % 250 == 0:
-            log(f'  {fetched}/{len(by_cik)} filers · {len(symbols_out)} tickers')
+        # Every hundred, which is about fifteen seconds at EDGAR's rate
+        # limit. Often enough to tell a working run from a stalled one at a
+        # glance, rare enough not to fill the journal.
+        if fetched % 100 == 0:
+            log(f'{fetched}/{len(by_cik)} filers · {len(symbols_out)} tickers')
 
     merged = _merge_into_shared(symbols_out, now)
     return {

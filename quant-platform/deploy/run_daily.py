@@ -68,7 +68,13 @@ def main():
     def _sic():
         rs = relstrength.rs_rating()
         universe = list(rs.index) if rs is not None and not rs.empty else None
-        out = sic.build(universe, log=lambda *_: None)
+        # LOGS AS IT GOES, and it must. This step is the long one — one
+        # request per filer, twenty minutes on its first pass — and it was
+        # silenced here, so the journal showed three lines and then nothing
+        # for twenty minutes. A job that prints nothing while it works is
+        # indistinguishable from a job that has hung, which is exactly the
+        # question the log exists to answer.
+        out = sic.build(universe, log=lambda m: print(f'       {m}', flush=True))
         return (f"{out.get('tickers')} classified, {out.get('fetched')} fetched, "
                 f"{out.get('total_in_map')} in map")
     step('industry map (SIC)', _sic)
