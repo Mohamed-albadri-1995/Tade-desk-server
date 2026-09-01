@@ -259,7 +259,14 @@ ok('...and says why it is not in the gate', 'not in the gate' in LIVE)
 # RS universe; the tool holds the scanner, the news and the industry map.
 NODE = (pathlib.Path(__file__).resolve().parents[3] / 'src' / 'routes' / 'datacheck.js').read_text()
 ok('the tool checks the scanner it actually runs on', 'tradingview scanner' in NODE)
-ok('...the news sources', 'finnhub' in NODE)
+ok('...the news sources', "'news sources'" in NODE)
+# A MISCONFIGURED SOURCE IS ONE PROBLEM, NOT ONE PER CARD. A missing or
+# rejected key fails identically on every stock until somebody edits a file, so
+# it appeared on all 25 cards saying the same thing on each — the same mistake
+# as stamping the market status on every card. Those are reported HERE, once,
+# with the fix; a timeout stays on the card, where it belongs.
+ok('...and a misconfigured one is reported here, once, with the fix',
+   'v.config' in NODE and 'no longer warn' in NODE)
 ok('...and the industry map, on its SIZE rather than its existence',
    'industry map' in NODE and 'only ${s.symbols} symbols' in NODE)
 # MARKET DATA AND EXECUTION USE DIFFERENT CREDENTIALS, and the check has to

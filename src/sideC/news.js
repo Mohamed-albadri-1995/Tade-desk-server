@@ -359,6 +359,26 @@ function ok(items) { return { items, status: 'ok' }; }
 function bad(status, detail) { return { items: [], status, detail }; }
 
 /*
+ * A SOURCE THAT IS MISCONFIGURED IS ONE PROBLEM, NOT ONE PER CARD.
+ *
+ * A missing or rejected key fails identically on every stock, for every scan,
+ * until somebody edits a file. Putting that on 150 cards is the same mistake
+ * as stamping the market status on 150 cards: a warning with the same value on
+ * every row carries no information about any row, and after two mornings the
+ * eye stops seeing it — including on the day it says something new.
+ *
+ * A TIMEOUT IS THE OPPOSITE. It is about this fetch, for this stock, right
+ * now, and the card is exactly where it belongs.
+ *
+ * So the statuses are split by KIND. The card shows the transient ones; the
+ * configuration ones are reported once, in Settings > Data sources, where the
+ * fix also lives.
+ */
+const CONFIG_STATUSES = new Set(['no-key', 'denied']);
+
+function isConfigFailure(status) { return CONFIG_STATUSES.has(status); }
+
+/*
  * Roundups.
  *
  * "Top Premarket Gainers", "BC-Most Active Stocks", "Top Midday Decliners" —
@@ -929,12 +949,18 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
   // the roundup count — worth seeing, because a source sending nothing but
   // listings looks identical to a quiet one without it.
   const sources = {
-    tradingview: { status: tv.status, detail: tv.detail || null, count: tradingview.length, dropped: tv.dropped || 0 },
-    alpaca: { status: ap.status, detail: ap.detail || null, count: alpaca.length, dropped: ap.dropped || 0 },
-    yahoo: { status: yh.status, detail: yh.detail || null, count: yahoo.length, dropped: yh.dropped || 0 },
-    edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length, dropped: ed.dropped || 0 },
-    finnhub: { status: fh.status, detail: fh.detail || null, count: finnhub.length, dropped: fh.dropped || 0 },
-    google: { status: gn.status, detail: gn.detail || null, count: google.length, dropped: gn.dropped || 0 },
+    tradingview: { status: tv.status, detail: tv.detail || null, count: tradingview.length, dropped: tv.dropped || 0,
+              config: isConfigFailure(tv.status) },
+    alpaca: { status: ap.status, detail: ap.detail || null, count: alpaca.length, dropped: ap.dropped || 0,
+              config: isConfigFailure(ap.status) },
+    yahoo: { status: yh.status, detail: yh.detail || null, count: yahoo.length, dropped: yh.dropped || 0,
+              config: isConfigFailure(yh.status) },
+    edgar: { status: ed.status, detail: ed.detail || null, count: edgar.length, dropped: ed.dropped || 0,
+              config: isConfigFailure(ed.status) },
+    finnhub: { status: fh.status, detail: fh.detail || null, count: finnhub.length, dropped: fh.dropped || 0,
+              config: isConfigFailure(fh.status) },
+    google: { status: gn.status, detail: gn.detail || null, count: google.length, dropped: gn.dropped || 0,
+              config: isConfigFailure(gn.status) },
   };
 
   return {
@@ -952,5 +978,6 @@ async function fetchNewsForTicker(ticker, tvSymbol) {
 
 module.exports = {
   fetchNewsForTicker, classifyCatalyst, classifyCatalysts, CATALYST_PATTERNS,
+  isConfigFailure, CONFIG_STATUSES,
   isRoundup, MAX_RELATED_SYMBOLS, MAX_CATALYST_AGE_DAYS, MAX_NEWS_AGE_DAYS,
 };

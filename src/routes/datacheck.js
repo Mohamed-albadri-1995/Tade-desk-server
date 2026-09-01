@@ -80,22 +80,33 @@ async function checkNews() {
     const ms = Date.now() - t0;
     const items = (news && news.items) || [];
     const sources = (news && news.sources) || {};
-    const broken = Object.entries(sources)
-      .filter(([, v]) => v.status && v.status !== 'ok' && v.status !== 'not-needed')
-      .map(([k, v]) => `${k}: ${v.detail || v.status}`);
+    // HERE is where a misconfigured source belongs — once, with the fix,
+    // rather than on every card. See the note in src/sideC/news.js.
+    const all = Object.entries(sources)
+      .filter(([, v]) => v.status && v.status !== 'ok' && v.status !== 'not-needed');
+    const config = all.filter(([, v]) => v.config).map(([k, v]) => `${k} (${v.status})`);
+    const broken = all.map(([k, v]) => `${k}: ${v.detail || v.status}`);
     if (!items.length) {
-      return DOWN('news (finnhub / yahoo / edgar)',
+      return DOWN('news sources',
         `no stories at all for AAPL — ${broken.length ? broken.join('; ') : 'every source returned empty'}`,
         { ms });
     }
     if (broken.length) {
-      return WARN('news (finnhub / yahoo / edgar)',
-        `${items.length} stories, but ${broken.join('; ')}`, { ms, items: items.length });
+      return WARN('news sources',
+        `${items.length} stories, but ${broken.join('; ')}`, {
+          ms,
+          items: items.length,
+          fix: config.length
+            ? `${config.join(', ')} — the key is missing or rejected. Update it in `
+              + 'data/keys.json next to the databases, or Settings > API Keys. '
+              + 'The cards no longer warn about this; it is reported here instead.'
+            : null,
+        });
     }
-    return OK('news (finnhub / yahoo / edgar)', `${items.length} stories for AAPL`,
+    return OK('news sources', `${items.length} stories for AAPL`,
       { ms, items: items.length });
   } catch (err) {
-    return DOWN('news (finnhub / yahoo / edgar)',
+    return DOWN('news sources',
       `failed: ${String(err.message).slice(0, 160)}`, { ms: Date.now() - t0 });
   }
 }

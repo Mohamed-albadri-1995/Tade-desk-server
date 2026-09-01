@@ -290,3 +290,46 @@ describe('the per-card market reflection is fetched once, not per card', () => {
     expect(Date.now() - before).toBeLessThan(200);   // it never left the process
   });
 });
+
+/*
+ * A misconfigured news source is ONE problem, not one per card.
+ *
+ * A missing or rejected key fails identically on every stock, every scan,
+ * until somebody edits a file — so it appeared on all 25 cards at once saying
+ * the same thing on each. That is the same mistake as stamping the market
+ * status on every card: a warning with the same value on every row carries no
+ * information about any row, and after two mornings the eye stops seeing it,
+ * including on the day it changes.
+ *
+ * A TIMEOUT IS THE OPPOSITE — about this fetch, for this stock, now — and the
+ * card is exactly where it belongs.
+ */
+describe('news source failures are sorted by kind', () => {
+  const news = require('../src/sideC/news');
+
+  test('a missing key is a configuration failure', () => {
+    expect(news.isConfigFailure('no-key')).toBe(true);
+  });
+
+  test('a rejected key is too — this is the regenerated-key case', () => {
+    expect(news.isConfigFailure('denied')).toBe(true);
+  });
+
+  test('a timeout is NOT — it is about this fetch, for this stock, now', () => {
+    expect(news.isConfigFailure('timeout')).toBe(false);
+  });
+
+  test('rate-limiting is not a configuration problem either', () => {
+    expect(news.isConfigFailure('rate-limited')).toBe(false);
+  });
+
+  test('nor is a source that answered with something unreadable', () => {
+    expect(news.isConfigFailure('unreadable')).toBe(false);
+    expect(news.isConfigFailure('error')).toBe(false);
+  });
+
+  test('a healthy source is never a failure of any kind', () => {
+    expect(news.isConfigFailure('ok')).toBe(false);
+    expect(news.isConfigFailure('not-needed')).toBe(false);
+  });
+});

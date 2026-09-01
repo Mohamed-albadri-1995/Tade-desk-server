@@ -3408,7 +3408,19 @@ function buildCard(row) {
     if (!s) return '';
     // 'not-needed' is Google saying it was never asked because the tagged
     // sources answered — that is the system working, not a fault.
-    const broken = Object.entries(s).filter(([, v]) => v.status && v.status !== 'ok' && v.status !== 'not-needed');
+    //
+    // AND A MISCONFIGURED SOURCE IS NOT A CARD'S PROBLEM. A missing or
+    // rejected key fails identically on every stock, every scan, until
+    // somebody edits a file — so it appeared on all 25 cards at once and said
+    // the same thing on each. That is the same mistake as stamping the market
+    // status on every card: a warning with the same value on every row carries
+    // no information about any row, and after two mornings the eye stops
+    // seeing it, including on the day it changes.
+    //
+    // Those are reported ONCE, in Settings > Data sources, where the fix also
+    // lives. A timeout stays here: it is about this fetch, for this stock, now.
+    const broken = Object.entries(s).filter(([, v]) =>
+      v.status && v.status !== 'ok' && v.status !== 'not-needed' && !v.config);
     if (!broken.length) return '';
     return `<div class="news-src-warn" title="${esc(broken.map(([k, v]) => `${k}: ${v.detail || v.status}`).join(' · '))}">
       ⚠ ${broken.map(([k]) => k).join(', ')} not answering — the list below is what the rest found</div>`;
