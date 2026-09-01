@@ -787,46 +787,110 @@ checked once.
 renders the card exactly as it renders today. The market model being stale
 must never be able to stop a scan.
 
-### 11.3 The card — what changes, and how little
+### 11.3 The card — the row, and the panel behind it
 
-The card is already dense: header, Volume & Float, badges, Range, News, Chart,
-then a `▾ Details` fold holding Themes, Market Context, Price, EMAs, ATR, PM
-Range. Adding six CANSLIM tables above the fold would ruin the thing that
-works. So:
+**Correction to this section's first draft.** It reduced §7 to a badge reading
+`C92 A88 N86` and put "the tables" behind the existing Details fold. That
+contradicts §7, which exists *because* a single percentage throws away the
+shape O'Neil actually reads. A screener card column is 300–400px wide; an
+eight-quarter table with EPS, %Chg, Sales, %Chg and Margin does not fit in it
+and never will. Squeezing it in there is how the tables would have quietly
+become one number again.
 
-**Above the fold — two changes only.**
+So the split is the one §7 already stated — **a row, and a panel** — and the
+panel is a real full-width surface, not a fold inside a card.
 
-1. **One badge**, next to the CANSLIM badge that is already there:
+#### On the card, always visible — the §7.1 row
 
-   ```
-   ★ CANSLIM 47d      C92 A88 N86 · RS 96 · grp 12/197 · RS 1 of 13
-   ```
+Two lines, under the ticker line, above Volume & Float:
 
-   Six numbers on one line. It is the whole letter set at a glance, and it is
-   the only thing most mornings need.
+```
+Comp 96    EPS 76 · RS 99 · Grp B+ · SMR B · A/D B+
+           vol 1,737k vs 50-day 1,044k (+66%)  ·  grp 63/197 · RS 1 of 13
+```
 
-2. **The News section leads with N.** This is the direct answer to "not like a
-   normal news tab", and it needs no new section:
+The same six ratings MarketSmith's list view carries, plus volume against its
+own 50-day average, plus the two group facts from §9. Tapping it opens the
+panel. This is what most mornings need and it is a block, not a badge.
 
-   ```
-   News · N 86
-   ▸ New CEO · 2026-03-12 (5.8 mo) · +11.4% on 4.2x vol · RS line held
-   ---- recent headlines (3 weeks), unchanged ----
-   ```
+#### The News section leads with N
 
-   The existing headline list stays exactly as it is, three-week window and
-   all. The scored 24-month answer sits **above** it. Two different objects in
-   one place, which is where they belong: what is new about this company, and
-   what was said about it this week.
+```
+News · N 86
+▸ New CEO · 2026-03-12 (5.8 mo) · +11.4% on 4.2x vol · RS line held
+---- recent headlines (3 weeks), unchanged ----
+```
 
-**Behind the fold — one new section**, `CANSLIM`, holding the tables from §7:
-C, A, I with history, S, and the L group panel. Placed directly above Market
-Context, because both are context and the letters are the slower one.
+The existing headline list stays exactly as it is, three-week window and all.
+The scored 24-month answer sits **above** it. Two different objects in one
+place, which is where they belong: what is new about this company, and what
+was said about it this week. The full N table (§10.8) is in the panel.
 
-**Market Context gains one line**: the O'Neil status, next to the existing
+#### The CANSLIM panel — where the tables actually live
+
+Opened from the row. Full width, its own scroll, seven blocks in O'Neil's own
+letter order so the panel reads as the method rather than as a data dump. The
+mechanism already exists on this page — `openChart()`, `toggleScoreBreakdown()`
+and `openTableInspector()` all open full surfaces from a card.
+
+```
+┌─ BGFV · Big 5 Sporting Corp ─────────────────── Comp 96 ─┐
+│  EPS 76 · RS 99 · Grp B+ · SMR B · A/D B+                │
+├──────────────────────────────────────────────────────────┤
+│  C — CURRENT QUARTERLY EARNINGS            §7.2          │
+│  8 quarters. Qtr | EPS $ | %Chg | Sales $M | %Chg | Marg │
+│  %Chg always vs the SAME quarter a year earlier.         │
+│  n/a on a loss base. Capped +999%.                       │
+│  Accelerating: yes (3 of 3)   ·   Beat +25%: 5 of 8      │
+├──────────────────────────────────────────────────────────┤
+│  A — ANNUAL EARNINGS                       §7.3          │
+│  FY | EPS $ | %Chg | Price high | Price low   (3-5 yrs)  │
+│  3-yr EPS growth 34%  ·  Stability 12  ·  ROE 21%        │
+│  ROE floor 17%: PASS                                     │
+├──────────────────────────────────────────────────────────┤
+│  N — WHAT IS NEW                           §10.8         │
+│  date | class | source | reaction | persisted | score    │
+│  unconfirmed (too new to score) listed separately        │
+│  discarded: 34 no reaction, 11 wrong class               │
+├──────────────────────────────────────────────────────────┤
+│  S — SUPPLY                                §7.6          │
+│  Shares out 21.9M · Float 21.3M · Short 1.2 days, -21%   │
+│  U/D volume ratio 1.41 (50d)                             │
+├──────────────────────────────────────────────────────────┤
+│  L — LEADER OR LAGGARD                     §7.5, §9      │
+│  Group Retail-Leisure Products     rank 63 of 197        │
+│  Stocks in group 13   ·   New highs/lows 4 / 0           │
+│  THIS STOCK   RS 1 of 13 · EPS 7 of 13 · A/D 4 of 13     │
+│  Top RS in group  BGFV 99 · HIBB 97 · HZO 96 · ONEW 96   │
+│  RS line: new high 2026-08-14, BEFORE price              │
+├──────────────────────────────────────────────────────────┤
+│  I — INSTITUTIONAL SPONSORSHIP             §7.4          │
+│  Quarter | No. of funds     (8 quarters, from 13F)       │
+│  311 → 425 over 4 quarters — the TREND is the signal     │
+│  Funds 42% · Banks 9% · Management 14%                   │
+├──────────────────────────────────────────────────────────┤
+│  M — MARKET DIRECTION                      §2, §8        │
+│  Uptrend under pressure · 5 distribution days live       │
+│  (the one shared fact — same object the market tab shows)│
+├──────────────────────────────────────────────────────────┤
+│  Sources & dates: EDGAR 2026-08-30 · 13F Q2-26 ·         │
+│  FINRA 2026-08-15 · groups 2026-08-31 close              │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Why letter order and not importance order.** The panel is the method, and
+the method is the mnemonic. Somebody checking a name works down the letters;
+a panel sorted by our idea of importance makes them hunt for A.
+
+**Every block carries its own as-of date**, because they refresh on completely
+different clocks — 13F is quarterly and 45 days late by law, FINRA is twice a
+month, groups are daily. A panel with one timestamp at the top would be
+claiming a freshness five of the seven blocks do not have.
+
+**Market Context gains one line**: the O'Neil status, beside the existing
 Regime/Long/Mid/Short rows, labelled so it cannot be read as the same claim.
 
-Nothing is removed. Nothing above the fold moves.
+Nothing is removed. Nothing that is on the card today moves.
 
 ### 11.4 The market tab — added beside, not over
 
@@ -904,3 +968,159 @@ as a zero.
 5. **The market tab's existing blocks are not rewritten.** Added beside, and
    the O'Neil state is labelled so the page never shows two market reads that
    use the same words for different claims.
+
+---
+
+## 12. The manifest — everything promised, and where each piece lands
+
+You asked me to check everything I said, because §11 first shrank §7 into a
+badge. This section is the audit: **every element promised anywhere in this
+document**, its home, its source, and its build phase. If something is
+described above and is not in this table, it was dropped and that is a bug in
+the document.
+
+Legend for **Home**: `ROW` = always visible on the screener card · `PANEL` =
+the CANSLIM panel (§11.3) · `NEWS` = the card's existing News section ·
+`CTX` = the card's Market Context rows · `MKT` = the market tab.
+
+### 12.1 M — market direction
+
+| # | Element | Home | Source | Rule | Phase |
+|---|---|---|---|---|---|
+| M1 | Distribution day: close −0.2%+ on higher volume, **only in a confirmed uptrend** | MKT | Index bars | §2.2 | 1 |
+| M2 | **Stalling day** — heavy volume, gain <0.2%, close in lower half | MKT | Index bars | §2.2b | 1 |
+| M3 | Live count per index, 25-session window | MKT | derived | §2.3 | 1 |
+| M4 | Removal by age (25 sessions) **and by 5% intraday recovery** | MKT | derived | §2.2 | 1 |
+| M5 | The three statuses: confirmed uptrend / under pressure / correction | MKT + CTX | derived | §2.1, §2.3 | 1 |
+| M6 | Rally attempt — the internal 4th state, day 1 = first up close off the low | MKT | derived | §2.4 | 1 |
+| M7 | **Follow-through day** — +1.7%, days 4–7 (late to 10–11), volume > prior **and** > 50-day avg | MKT | derived | §2.4, §5 | 1 |
+| M8 | FTD failure caveat — ~1 in 4 fail; necessary, not sufficient | MKT | text | §2.4 | 1 |
+| M9 | **Dated distribution-day table** — every live day with date, index, %, vol ratio, expiry | MKT | derived | §8 | 1 |
+| M10 | **Rules-in-use line** printed beside any signal that fires | MKT | constants | §5, §8 | 1 |
+| M11 | Index **RS line** — index ÷ S&P 500 | MKT | Index bars | §9.6 | 2 |
+| M12 | Existing Final Regime kept, title qualified so two market reads never share words | MKT | existing | §11.4 | 2 |
+
+### 12.2 The row — §7.1, always visible on the card
+
+| # | Element | Home | Source | Rule | Phase |
+|---|---|---|---|---|---|
+| R1 | **Composite** rating | ROW | derived | §7.1, §6 | 4 |
+| R2 | **EPS** rating | ROW | EDGAR | §7.1 | 5 |
+| R3 | **RS** rating 1–99 | ROW | `relstrength.py` | §2.5 | 3 |
+| R4 | **Grp** RS — letter form of the group percentile | ROW | groups file | §9.2 | 3 |
+| R5 | **SMR** — sales/margin/ROE | ROW | EDGAR | §7.1 | 5 |
+| R6 | **A/D** rating A–E, 13 weeks price+volume | ROW | bars | §1, §7.1 | 4 |
+| R7 | Volume vs its own 50-day average | ROW | bars | §7.1 | 3 |
+| R8 | `grp 63 of 197` — **always with the divisor** | ROW | groups file | §9.3, §9.4 | 3 |
+| R9 | `RS 1 of 13` — rank inside its own group | ROW | groups file | §9.1 | 3 |
+| R10 | Existing `★ CANSLIM 47d` membership badge — unchanged | ROW | existing | — | — |
+
+### 12.3 C — current quarterly earnings, §7.2
+
+| # | Element | Home | Source | Rule | Phase |
+|---|---|---|---|---|---|
+| C1 | **8-quarter table**: Qtr, EPS $, %Chg, Sales $M, %Chg, Margin | PANEL | EDGAR XBRL | §7.2 | 5 |
+| C2 | %Chg always against the **same quarter one year earlier** | PANEL | derived | §1, §7.2 | 5 |
+| C3 | `n/a` when the year-ago quarter was a **loss** — never a percentage off a negative base | PANEL | derived | §7.2 | 5 |
+| C4 | Capped at **+999%** | PANEL | derived | §7.2 | 5 |
+| C5 | **Sales beside EPS, always** — earnings growth without sales growth is the warning | PANEL | EDGAR | §7.2 | 5 |
+| C6 | After-tax **margin** column | PANEL | EDGAR | §7.2 | 5 |
+| C7 | **Accelerating?** — each of the last 2–3 quarters' %Chg larger than the one before | PANEL | derived | §7.2 | 5 |
+| C8 | How many of the last 8 quarters beat **+25%** | PANEL | derived | §7.2 | 5 |
+
+### 12.4 A — annual earnings, §7.3
+
+| # | Element | Home | Source | Rule | Phase |
+|---|---|---|---|---|---|
+| A1 | **FY table**: FY, EPS $, %Chg, Price high, Price low — 3–5 years | PANEL | EDGAR + bars | §7.3 | 5 |
+| A2 | Price high/low column, so the earnings series sits next to what the stock did | PANEL | bars | §7.3 | 5 |
+| A3 | **3-year EPS growth rate** | PANEL | derived | §7.3 | 5 |
+| A4 | **Earnings Stability** 0–99 — the wobble around trend, low is good | PANEL | derived | §7.3 | 5 |
+| A5 | **ROE**, against O'Neil's **17% floor**, pass/fail shown | PANEL | EDGAR | §7.3 | 5 |
+| A6 | Estimates marked `est.` and never mixed with reported | PANEL | EDGAR | §7.3 | 5 |
+
+### 12.5 N — what is new, §10
+
+| # | Element | Home | Source | Rule | Phase |
+|---|---|---|---|---|---|
+| N1 | **Scored N line** at the top of the News section | NEWS | pipeline | §10.8 | 7 |
+| N2 | **Event table**: date, class, source, reaction, persisted, score | PANEL | pipeline | §10.8 | 7 |
+| N3 | **24-month** lookback with decay 1.0 / 0.9 / 0.7 / 0.4 | PANEL | — | §10.2 | 7 |
+| N4 | **Unconfirmed** list — too new to have a price reaction | PANEL | pipeline | §10.2 | 7 |
+| N5 | **Discarded counts** printed — the proof it is a filter, not a feed | PANEL | pipeline | §10.8 | 7 |
+| N6 | New management — **8-K Item 5.02** | PANEL | EDGAR | §10.4 | 7 |
+| N7 | New product — **openFDA** approvals, 510(k)/PMA | PANEL | openFDA | §10.4 | 7 |
+| N8 | New product — 8-K Items **8.01 / 7.01** | PANEL | EDGAR | §10.4 | 7 |
+| N9 | New contract — 8-K **1.01**, USASpending awards | PANEL | EDGAR, USASpending | §10.4 | 7 |
+| N10 | New industry conditions — **our group rank rising** | PANEL | groups file | §10.1, §9 | 3 |
+| N11 | **REACT** test — no move beyond 1 ATR on normal volume ⇒ dropped | PANEL | bars | §10.6 | 7 |
+| N12 | **PERSIST** test — RS line vs the event day | PANEL | bars | §10.6 | 7 |
+| N13 | Dedupe by (class, date ±3 sessions) | — | pipeline | §10.7 | 7 |
+| N14 | Rejects named: analyst notes, index inclusion, earnings, splits/buybacks, suits | — | pipeline | §10.5 | 7 |
+| N15 | **Secondary offerings routed to S**, not N — supply going up | PANEL(S) | EDGAR | §10.5 | 7 |
+| N16 | **% off 52-week high** | ROW | bars | §7.7 | 3 |
+| N17 | Existing three-week headline list — **unchanged, kept below N1** | NEWS | existing | §11.7 | — |
+
+### 12.6 S — supply, §7.6
+
+| # | Element | Home | Source | Rule | Phase |
+|---|---|---|---|---|---|
+| S1 | Shares outstanding | PANEL | EDGAR `dei:` | §3.1 | 5 |
+| S2 | **Float — an estimate, and labelled as one** (no free feed publishes it) | PANEL | EDGAR 4 / 13D/G | §3.1 | 6 |
+| S3 | Short interest — days to cover and % change | PANEL | FINRA | §3.1 | 6 |
+| S4 | **U/D volume ratio** over 50 days — a different object from A/D | PANEL | bars | §1 | 4 |
+| S5 | Existing Volume & Float block on the card — unchanged | ROW | existing | — | — |
+
+### 12.7 L — leader or laggard, §7.5 + §9
+
+| # | Element | Home | Source | Rule | Phase |
+|---|---|---|---|---|---|
+| L1 | Group name and **rank of divisor** | PANEL + ROW | groups file | §7.5, §9.3 | 3 |
+| L2 | Divisor **stored with the value**, because 197 → 145 happened | — | groups file | §9.4 | 3 |
+| L3 | Stocks in group | PANEL | groups file | §7.5 | 3 |
+| L4 | New highs / lows within the group | PANEL | bars | §7.5 | 4 |
+| L5 | **This stock ranks**: RS, EPS, A/D, Comp — each `n of N` | PANEL | groups file | §7.5 | 3–5 |
+| L6 | **Top RS names in the group**, listed | PANEL | groups file | §7.5 | 3 |
+| L7 | **Sector rank 1 of 33** — the coarse level, kept distinct from group | PANEL | derived | §9.1 | 4 |
+| L8 | **RS line at a new high before price** — the MarketSmith tell | PANEL | bars | §1, §7.5 | 4 |
+| L9 | **Group table on the market tab** — top 20 / bottom 10 with divisors | MKT | groups file | §11.4 | 3 |
+| L10 | Honest note: our membership is ours, not IBD's | PANEL | text | §9.5 | 3 |
+
+### 12.8 I — institutional sponsorship, §7.4
+
+| # | Element | Home | Source | Rule | Phase |
+|---|---|---|---|---|---|
+| I1 | **Fund count by quarter, 8 quarters** | PANEL | SEC **13F** | §7.4 | 6 |
+| I2 | The **trend** called out, not just the level | PANEL | derived | §7.4 | 6 |
+| I3 | Funds % / Banks % / Management % | PANEL | 13F + Forms 3/4/5 | §3.1 | 6 |
+| I4 | The 45-day statutory lag stated on screen | PANEL | text | §3.1 | 6 |
+
+### 12.9 Cross-cutting
+
+| # | Element | Rule |
+|---|---|---|
+| X1 | **Every block carries its own as-of date** — they refresh on different clocks | §11.3 |
+| X2 | Panel is in **letter order** (C A N S L I M), because the panel is the method | §11.3 |
+| X3 | Reconstructions are named as reconstructions — `rs`, never "IBD RS" | §6 |
+| X4 | **Nothing enters a score, filter or rank.** Label, never filter | §11.1, §6 |
+| X5 | **No network call in a card render** — every field comes from a written file | §11.7 |
+| X6 | Computed once by qp, read by nine tools; failure = no data, never a failed scan | §11.2 |
+| X7 | A missing file reads **"not fetched yet"** with the last attempt date — never a blank that looks like zero | §11.5 |
+| X8 | Thresholds are **O'Neil's**, named constants, printed next to any signal | §5 |
+
+### 12.10 Phases — what each one delivers
+
+| Phase | Delivers | Depends on |
+|---|---|---|
+| **1** | M1–M10 — the whole market model, written to `oneil-market.json` | index bars only |
+| **2** | The market tab O'Neil block (M5–M12) | phase 1 |
+| **3** | Groups: R3–R4, R7–R9, L1–L3, L5(RS), L6, L9, L10, N10, N16 | `relstrength.py` |
+| **4** | Ratings that need bars: R1, R6, S4, L4, L7, L8 | phase 3 |
+| **5** | EDGAR: C1–C8, A1–A6, R2, R5, S1, L5(EPS) | EDGAR fetcher |
+| **6** | 13F & FINRA: I1–I4, S2, S3 | phase 5 |
+| **7** | The N pipeline: N1–N9, N11–N15 | phases 3 and 5 |
+
+Phases 1–4 need **no new data source at all** — index bars, Polygon grouped
+daily and `relstrength.py` are already in the system. That is where the market
+model, the whole group hierarchy and most of the row live, and it is why the
+build order in §11.6 starts there.
