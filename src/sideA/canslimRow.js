@@ -70,6 +70,11 @@ function rowFor(ticker, { market, stocks, groups, f13, ratings, fundamentals, ba
 
     // L — the group, ranked over the whole market.
     csGroup: g.group || null,
+    // WHICH LEVEL THE RANK WAS TAKEN AT. An industry too thin to rank is
+    // merged into its SIC major group, and "rank 12 of 180" over a rolled-up
+    // bucket is a coarser fact than the same numbers over a named industry.
+    // Without this column a training set cannot tell them apart.
+    csGroupLevel: g.group_level || null,
     csGroupRank: num(g.group_rank),
     csGroupOf: num(g.group_of),
     csRsInGroup: num(g.rs_in_group),

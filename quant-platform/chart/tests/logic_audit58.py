@@ -235,6 +235,77 @@ ok('both functions report the sessions they used, which is what makes the '
    'sessions' in ratings.up_down_volume_ratio.__doc__ + str(
        ratings.up_down_volume_ratio.__code__.co_consts))
 
+# ── A GROUP OF THREE IS NOT AN INDUSTRY ────────────────────────────────
+#
+# From the live group table, ranked over the whole market:
+#
+#     1 of 229  Computer Storage Devices                  5 members
+#     3 of 229  Services-Skilled Nursing Care Facilities  3 members
+#     5 of 229  Wholesale-Electronic Parts & Equipment    5 members
+#
+# The median of three IS the middle stock, so "the #1 industry group in the
+# market" was one company's twelve-month move wearing an industry's name —
+# and O'Neil's instruction, buy the leader of a top group, was pointed at it.
+# Thin groups have the widest spread too, so they crowd BOTH ends of the
+# ranking and push real industries into the middle.
+import pandas as _pd                                       # noqa: E402
+from chart import groups as _g                             # noqa: E402
+
+ok('the floor is high enough that no single stock IS the median',
+   _g.MIN_MEMBERS >= 6, _g.MIN_MEMBERS)
+ok('...and the reason is the live table, quoted where the constant is',
+   'Computer Storage Devices' in _g.__doc__ + open(
+       ROOT / 'chart' / 'groups.py').read())
+ok('it stays overridable', 'QP_GROUP_MIN_MEMBERS' in
+   (ROOT / 'chart' / 'groups.py').read_text())
+
+# Raising the floor ALONE would delete the L letter for every stock in a small
+# industry. SIC is a hierarchy, so there is a real level above to use.
+_MAP = {}
+for _s in ('A1', 'A2', 'A3'):
+    _MAP[_s] = {'industry': 'Tiny Storage', 'sector': 'Industrial Machinery'}
+for _s in ('B1', 'B2', 'B3', 'B4'):
+    _MAP[_s] = {'industry': 'Tiny Nursing', 'sector': 'Industrial Machinery'}
+for _i in range(8):
+    _MAP[f'C{_i}'] = {'industry': 'Real Software', 'sector': 'Business Services'}
+_RS = _pd.Series({'A1': 99, 'A2': 98, 'A3': 97, 'B1': 96, 'B2': 95, 'B3': 94,
+                  'B4': 93, **{f'C{_i}': 60 + _i for _i in range(8)}})
+_ROWS = _g.build_groups(_RS, _MAP)
+_NAMES = [r['group'] for r in _ROWS]
+_SR = _g.stock_rows(_ROWS)
+
+ok('a three-name industry is no longer ranked as an industry',
+   'Tiny Storage' not in _NAMES, _NAMES)
+ok('...and its stocks are NOT dropped — they roll up to their major group',
+   'A1' in _SR and _SR['A1']['members'] == 7, _SR.get('A1'))
+ok('two small industries in one sector land in the SAME bucket',
+   _SR['A1']['group'] == _SR['B1']['group'], (_SR['A1'], _SR['B1']))
+ok('a real industry keeps its own name and is ranked at industry level',
+   'Real Software' in _NAMES
+   and [r for r in _ROWS if r['group'] == 'Real Software'][0]['level']
+   == 'industry')
+ok('the rolled-up bucket is marked as a COARSER claim, never as an industry',
+   _SR['A1']['group_level'] == 'sector'
+   and 'small industries' in _SR['A1']['group'], _SR['A1'])
+ok('...and the rank inside it is over the merged membership, not the old three',
+   _SR['A1']['rs_in_group'] == 1 and _SR['B4']['rs_in_group'] == 7, _SR['B4'])
+ok('the divisor still travels with every rank',
+   all(r['of'] == len(_ROWS) for r in _ROWS))
+
+# A whole major group with too few ranked names has no level above it.
+_TINY = _g.build_groups(_pd.Series({'Z1': 90, 'Z2': 80}),
+                        {'Z1': {'industry': 'Q', 'sector': 'S'},
+                         'Z2': {'industry': 'Q', 'sector': 'S'}})
+ok('a sector that is itself too small is dropped, not ranked on two names',
+   _TINY == [], _TINY)
+
+ok('the card marks a rolled-up group so it is not read as an industry',
+   'rolled up' in UI and 'group_level' in UI)
+ok('...in the group table as well as on the card',
+   UI.count('rolled up') >= 2)
+ok('the table says what the floor is and why it exists',
+   'wearing an industry' in UI or 'one company\'s year' in UI)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

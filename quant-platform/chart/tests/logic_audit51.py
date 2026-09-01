@@ -123,12 +123,20 @@ print('== C. the MEDIAN, and the member floor ==')
 # One 99 in a group of laggards is a single stock's story. A mean lets that one
 # name carry the whole group — exactly the mistake the group level exists to
 # prevent.
+# SIX A SIDE, not four: the member floor went from 3 to 6 when the live
+# ranking put a three-name industry at #1 of 229 and a median of three turned
+# out to be one stock. The fixtures grew with it — the property under test
+# (median, not mean) is unchanged.
 rs2 = pd.Series({
-    'RUNAWAY': 99, 'L1': 5, 'L2': 6, 'L3': 7,          # one star, three dogs
+    'RUNAWAY': 99, 'L1': 5, 'L2': 6, 'L3': 7,          # one star, five dogs
+    'L4': 8, 'L5': 9,
     'B1': 70, 'B2': 72, 'B3': 74, 'B4': 71,            # a broadly strong group
+    'B5': 73, 'B6': 69,
 })
 m2 = {'RUNAWAY': 'Dogs', 'L1': 'Dogs', 'L2': 'Dogs', 'L3': 'Dogs',
-      'B1': 'Broad', 'B2': 'Broad', 'B3': 'Broad', 'B4': 'Broad'}
+      'L4': 'Dogs', 'L5': 'Dogs',
+      'B1': 'Broad', 'B2': 'Broad', 'B3': 'Broad', 'B4': 'Broad',
+      'B5': 'Broad', 'B6': 'Broad'}
 g2 = {g['group']: g for g in groups.build_groups(rs2, m2)}
 ok('the broadly strong group outranks the one with a single star',
    g2['Broad']['rank'] < g2['Dogs']['rank'], {k: v['rank'] for k, v in g2.items()})
@@ -146,10 +154,11 @@ ok('...and the floor is configurable without a code change',
 
 # A symbol with no rating cannot be counted. Dropping it silently would shrink
 # a group without saying so, which changes its median.
-part = groups.build_groups(pd.Series({'A': 90, 'B': 80, 'C': 70}),
-                           {'A': 'G', 'B': 'G', 'C': 'G', 'D': 'G'})
+part = groups.build_groups(
+    pd.Series({'A': 90, 'B': 80, 'C': 70, 'D': 60, 'E': 50, 'F': 40}),
+    {k: 'G' for k in 'ABCDEFG'})              # G is mapped but has no rating
 ok('an unrated symbol is not counted as a member',
-   part and part[0]['members'] == 3, part)
+   part and part[0]['members'] == 6, part)
 
 
 print()
@@ -244,12 +253,22 @@ ok('a mapping entry with no industry or sector is skipped, not crashed on',
 # fallback. A row that silently used the sector would be a different question
 # answered with the same words.
 mixed = groups.build_groups(
-    pd.Series({'A': 90, 'B': 80, 'C': 70}),
-    {'A': {'industry': 'Fine', 'sector': 'Coarse'},
-     'B': {'industry': 'Fine', 'sector': 'Coarse'},
-     'C': {'industry': 'Fine', 'sector': 'Coarse'}})
+    pd.Series({'A': 90, 'B': 80, 'C': 70, 'D': 60, 'E': 50, 'F': 40}),
+    {k: {'industry': 'Fine', 'sector': 'Coarse'} for k in 'ABCDEF'})
 ok('the INDUSTRY is used, not the sector, when both are present',
    mixed and mixed[0]['group'] == 'Fine', mixed)
+ok('...and a group that stands on its own says so, rather than being rolled up',
+   mixed and mixed[0]['level'] == 'industry', mixed)
+# THE ROLL-UP IS THE EXCEPTION, AND IT ONLY APPLIES BELOW THE FLOOR. Three of
+# the same names would now merge into 'Coarse — small industries' — which is
+# why this fixture has six. Both behaviours are wanted; neither may be silent.
+thin = groups.build_groups(
+    pd.Series({k: 90 for k in 'PQRSTU'}),
+    {**{k: {'industry': 'Thin1', 'sector': 'Coarse'} for k in 'PQR'},
+     **{k: {'industry': 'Thin2', 'sector': 'Coarse'} for k in 'STU'}})
+ok('two below-floor industries in one sector merge instead of vanishing',
+   len(thin) == 1 and thin[0]['members'] == 6
+   and thin[0]['level'] == 'sector', thin)
 
 shutil.rmtree(_tmp, ignore_errors=True)
 

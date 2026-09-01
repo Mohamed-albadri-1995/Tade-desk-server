@@ -4838,7 +4838,12 @@ function canslimTablesHTML(tk) {
   const lHtml = g
     ? `Group <b>${esc(g.group)}</b> · rank <b>${g.group_rank} of ${g.group_of}</b>
        (${g.group_pct} ${esc(g.group_letter || '')})<br>
-       This stock: <b>RS ${g.rs_in_group} of ${g.members}</b> in its group`
+       This stock: <b>RS ${g.rs_in_group} of ${g.members}</b> in its group
+       ${g.group_level === 'sector' ? `<div class="def-src" style="border:0;padding-top:6px">
+         Rolled up: this stock's own industry has fewer than the
+         ${(GROUPS_MODEL && GROUPS_MODEL.min_members) || 6} ranked names a median
+         needs, so it is ranked against its SIC major group instead. A coarser
+         claim than a named industry, and marked so it is not read as one.</div>` : ''}`
     : `<span style="color:var(--text3)">${esc(
         !gm || !gm.ok ? 'group ranks not built yet — the nightly job builds them'
         : `not in the industry map (${gm.mapped_symbols || 0} symbols, `
@@ -5070,7 +5075,10 @@ function groupCardBlock(ticker) {
   const lead = s.rs_in_group === 1 ? 'bias-bull' : s.rs_in_group <= 2 ? 'bias-bull' : '';
 
   let html = `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">L</span> group${info('group_rank')}</span>
-    <span class="ctx-val">${esc(s.group || '')} · <b>${rank}</b>${pct}
+    <span class="ctx-val">${esc(s.group || '')}${s.group_level === 'sector'
+      ? ' <span class="m-none" title="this stock\'s own industry has too few '
+        + 'ranked names for a median to mean anything, so it is ranked one '
+        + 'level up">rolled up</span>' : ''} · <b>${rank}</b>${pct}
       ${g && g.rotation && g.rotation !== 'flat'
         ? `<span class="${g.rotation === 'into' ? 'bias-bull' : 'bias-bear'}"
              title="rank ${g.rank_3mo} of ${g.of_3mo} three months ago">${
@@ -5124,7 +5132,9 @@ function renderGroupTable(m) {
   const bottom = gs.slice(-10);
   const row = g => `<tr>
     <td><b>${g.rank} of ${g.of}</b></td>
-    <td>${esc(g.group)}</td>
+    <td>${esc(g.group)}${g.level === 'sector'
+      ? ` <span class="m-none" title="industries too small to rank on their own,
+            merged into their SIC major group">rolled up</span>` : ''}</td>
     <td>${g.pct != null ? g.pct + ' ' + esc(g.letter || '') : '—'}</td>
     <td>${g.members}</td>
     <td>${g.median_rs}</td>
@@ -5137,7 +5147,11 @@ function renderGroupTable(m) {
     <div class="oneil-none" style="padding-bottom:8px">${info('group_rank')}
       ${esc(m.limit_note || '')}
       ${m.map ? `<br>${m.map.symbols} symbols across ${m.map.industries} industries mapped;
-        ${m.total_groups} groups have the ${m.min_members}+ members needed to rank.` : ''}</div>
+        ${m.total_groups} groups have the ${m.min_members}+ members needed to rank.` : ''}
+      <br>An industry with fewer than ${m.min_members || 6} ranked names is merged into
+      its SIC major group and marked <b>rolled up</b>, rather than ranked on its own or
+      dropped. The median of three IS the middle stock, and a group of three at rank 1
+      is one company's year wearing an industry's name.</div>
     <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
       <table class="heatmap-table">
         <thead><tr><th>Rank</th><th>Group</th><th>Pct</th><th>Members</th>

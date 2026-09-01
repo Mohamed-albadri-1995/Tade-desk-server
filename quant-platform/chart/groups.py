@@ -64,10 +64,23 @@ SHARED = Path(os.environ.get('ONEIL_GROUPS_FILE')
 MAP_FILE = Path(os.environ.get('INDUSTRY_MAP_FILE')
                 or (Path(__file__).resolve().parents[2] / 'data' / 'industry-map.json'))
 
-# A group needs enough members for a median to mean anything. Two stocks is not
-# an industry, and ranking a group of one puts a single name's 12-month move on
-# the same footing as a real group's broad advance.
-MIN_MEMBERS = int(os.environ.get('QP_GROUP_MIN_MEMBERS') or 3)
+# A group needs enough members for a median to mean anything.
+#
+# THREE WAS TOO FEW, AND THE RANKING SHOWED IT. From the live group table:
+#
+#     1 of 229  Computer Storage Devices               5 members
+#     3 of 229  Services-Skilled Nursing Care Facilities  3 members
+#     5 of 229  Wholesale-Electronic Parts & Equipment  5 members
+#
+# The median of three IS the middle stock. So "the #1 industry group in the
+# market" was one company's twelve-month move wearing an industry's name, and
+# O'Neil's whole instruction — buy the leader of a top group — was pointed at
+# noise. Small groups also have the widest spread, so they crowd BOTH ends of
+# the ranking and push real industries into the middle.
+#
+# Six is where the median stops being a single stock: at an even count it is
+# the average of the two middle names, so no one company can be the group.
+MIN_MEMBERS = int(os.environ.get('QP_GROUP_MIN_MEMBERS') or 6)
 
 # How far back the rotation comparison looks. Three months is the horizon over
 # which a group's rank moving is a change in industry conditions rather than
@@ -157,6 +170,22 @@ def _group_of(entry) -> str | None:
     return None
 
 
+def _sector_of(entry) -> str | None:
+    """The SIC major group — the level above the industry, already on every
+    entry the map's SIC pass wrote. Nothing new is fetched to roll up."""
+    if isinstance(entry, dict):
+        return (entry.get('sector') or '').strip() or None
+    return None
+
+
+# The name a rolled-up bucket carries. Never the bare sector name: a stock in
+# "Business Services" that got there because its own industry was too small to
+# rank is in a DIFFERENT bucket from one classified at the sector level, and
+# printing both as "Business Services" would merge two different claims.
+def _rollup_name(sector: str) -> str:
+    return f'{sector} — small industries'
+
+
 def build_groups(rs: pd.Series, mapping: dict) -> list[dict]:
     """Rank the groups, and rank the stocks inside each one.
 
@@ -169,6 +198,7 @@ def build_groups(rs: pd.Series, mapping: dict) -> list[dict]:
     prevent.
     """
     by: dict[str, list[tuple[str, float]]] = {}
+    sectors: dict[str, str] = {}
     for sym, entry in (mapping or {}).items():
         g = _group_of(entry)
         if not g:
@@ -178,15 +208,46 @@ def build_groups(rs: pd.Series, mapping: dict) -> list[dict]:
         if v is None or v != v:
             continue
         by.setdefault(g, []).append((s, float(v)))
+        sec = _sector_of(entry)
+        if sec:
+            sectors[s] = sec
+
+    # ROLLED UP, NOT THROWN AWAY.
+    #
+    # Raising the floor on its own would have quietly deleted the L letter for
+    # every stock in a small industry — the card would say "not in the
+    # industry map" for a stock that is in it, in an industry too thin to
+    # rank. SIC is a hierarchy, so there is a real level above: an industry
+    # below the floor merges into its own major group, which every entry the
+    # SIC pass wrote already carries. Nothing is fetched and nothing invented;
+    # the group is simply named one level up, and `level` says so.
+    level: dict[str, str] = {g: 'industry' for g in by}
+    for g in [g for g, m in by.items() if len(m) < MIN_MEMBERS]:
+        members = by.pop(g)
+        for s, v in members:
+            sec = sectors.get(s)
+            if not sec:
+                continue        # a tool-written label with no sector above it
+            name = _rollup_name(sec)
+            by.setdefault(name, []).append((s, v))
+            level[name] = 'sector'
+        level.pop(g, None)
 
     rows = []
     for g, members in by.items():
+        # Still short after the roll-up — a whole major group with fewer than
+        # six ranked names. Dropped, as before: there is no level above it.
         if len(members) < MIN_MEMBERS:
             continue
         members.sort(key=lambda t: -t[1])
         vals = pd.Series([v for _, v in members])
         rows.append({
             'group': g,
+            # WHICH LEVEL THIS ROW WAS BUILT AT. A rolled-up bucket is a
+            # coarser claim than a named industry and must never be presented
+            # as the same thing — the module note has said so since the first
+            # version, and nothing set the field until there was a roll-up.
+            'level': level.get(g, 'industry'),
             'members': len(members),
             'median_rs': round(float(vals.median()), 1),
             'top_rs': round(float(vals.max()), 1),
@@ -226,6 +287,7 @@ def stock_rows(groups: list[dict]) -> dict:
         for sym, rank in (g.get('_ranks') or {}).items():
             out[sym] = {
                 'group': g['group'],
+                'group_level': g.get('level', 'industry'),
                 'group_rank': g['rank'],
                 'group_of': g['of'],
                 'group_pct': g['pct'],
