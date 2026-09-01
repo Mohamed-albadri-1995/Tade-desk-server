@@ -139,7 +139,6 @@ Day 1 of a rally attempt = the first UP close after a correction low
 Follow-through day       = on day 4 or later of that rally attempt:
                              index gains ≥ 1.7%
                              AND volume > prior session's volume
-                             AND volume > its own 50-day average
 ```
 
 **SETTLED — 1.7%, which is O'Neil's own number**, not a figure chosen here.
@@ -148,14 +147,32 @@ in Stocks*, and to **1.7%** in *The Successful Investor* after program trading
 made 1% days ordinary. 1.7% is the last value he set, so it is the default.
 
 **The day window has a far end too**, and the first draft here missed it: the
-follow-through is expected on **days 4–7**, occasionally as late as 10–11. A
-big up day on day 30 of a rally attempt is not a bottom signal — the bottom
-was already in or it never came. Days 8–11 are flagged as **late**, past 11
-the rally attempt is not confirmed by it.
+follow-through is expected on **days 4–7**, occasionally as late as 10–11.
+Days 8–11 are flagged **late**, past 11 **very late**.
 
-**Volume has two tests, not one:** above the prior session *and* above the
-index's own 50-day average. The second was missing here. Heavier than a quiet
-prior day is not institutional buying.
+**Flagged, not refused.** An earlier version of this section said a rally
+attempt past day 11 "is not confirmed by it". Enforcing that creates a state
+the market cannot leave — an attempt that could never be confirmed sits in
+"correction" through an entire advance. The late ones are shown with their day
+number and their flag, and the reader decides.
+
+**The volume test is ONE comparison: above the prior session.** An earlier
+draft here required volume above the index's own 50-day average as well. That
+was this document inventing a rule — it is a stricter variant some people
+apply, not the published one, which is *"in higher volume than the previous
+session"*.
+
+**It was caught by the first live run, and the cost is worth recording.** With
+the extra test in place the model blocked the Nasdaq's August 2026
+follow-through, the rally attempt ran to **day 23** unconfirmed, and the model
+published **"market in correction"** through a rally the S&P 500 had already
+confirmed with a clean day-4 follow-through. A rule stricter than the published
+one does not fail safe: it fails to the wrong answer, quietly, and in the
+direction of telling you not to buy.
+
+The 50-day comparison is still measured and **reported** beside every
+follow-through, so the page can say how heavy the day was. It does not decide
+one.
 
 - A follow-through **before day 4** is explicitly *not* one. Bounces in the
   first three days are the norm inside downtrends; the wait is the filter.
@@ -267,7 +284,8 @@ them**. Each is a named constant with both values recorded:
 |---|---|---|
 | **Follow-through gain** | **1.7%** | O'Neil's last published figure, *The Successful Investor*. He set 1% in the early editions, 1.5% in *How to Make Money in Stocks*, then 1.7% once program trading made 1% days ordinary. The last value he set is the one we use |
 | **Follow-through day window** | **Days 4–7**, late to 10–11 | O'Neil. Day 1 is the first up close off the low |
-| **Follow-through volume** | **> prior session AND > 50-day average** | Two tests, both O'Neil's |
+| **Follow-through volume** | **> prior session** — that is the whole test | IBD: *"in higher volume than the previous session"*. An earlier draft also demanded > the 50-day average; that was invented here, and the first live run showed what it cost — see §2.4 |
+| **Follow-through day window** | days 4–7, **flagged** late to 11 and beyond | Flagged, never refused: a rally attempt that can never be confirmed is a state the market cannot leave |
 | **Distribution recovery removal** | **5%, intraday** | IBD: the index *trades* 5% above that day's close. On the high, not the close |
 | Distribution window | **25 sessions** | Consistent everywhere |
 | Distribution day trigger | **−0.2%** on higher volume | Consistent everywhere |
@@ -457,7 +475,7 @@ O'NEIL MARKET MODEL
   Nasdaq        4 live      S&P 500   5 live
   Rally         n/a - in a confirmed uptrend since the FTD of 2026-07-18
   Rules in use  DD -0.2% on higher volume - 25 sessions - 5% intraday recovery
-                FTD +1.7% on day 4-7, volume over prior AND over its 50-day avg
+                FTD +1.7% on day 4-7, volume over the prior session
 
   DISTRIBUTION DAYS
   2026-08-27  S&P 500  -0.7%  vol x1.14   expires 2026-10-01
@@ -993,7 +1011,7 @@ the CANSLIM panel (§11.3) · `NEWS` = the card's existing News section ·
 | M4 | Removal by age (25 sessions) **and by 5% intraday recovery** | MKT | derived | §2.2 | 1 |
 | M5 | The three statuses: confirmed uptrend / under pressure / correction | MKT + CTX | derived | §2.1, §2.3 | 1 |
 | M6 | Rally attempt — the internal 4th state, day 1 = first up close off the low | MKT | derived | §2.4 | 1 |
-| M7 | **Follow-through day** — +1.7%, days 4–7 (late to 10–11), volume > prior **and** > 50-day avg | MKT | derived | §2.4, §5 | 1 |
+| M7 | **Follow-through day** — +1.7%, day 4+, volume **> the prior session** (the whole test). Days 8–11 flagged late, beyond that very late — flagged, never refused | MKT | derived | §2.4, §5 | 1 |
 | M8 | FTD failure caveat — ~1 in 4 fail; necessary, not sufficient | MKT | text | §2.4 | 1 |
 | M9 | **Dated distribution-day table** — every live day with date, index, %, vol ratio, expiry | MKT | derived | §8 | 1 |
 | M10 | **Rules-in-use line** printed beside any signal that fires | MKT | constants | §5, §8 | 1 |

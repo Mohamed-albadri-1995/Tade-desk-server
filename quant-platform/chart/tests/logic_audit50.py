@@ -17,7 +17,9 @@ PART A — a distribution day is a DOWN day on HIGHER volume, and only inside a
 PART B — stalling: the distribution that is not a down day.
 PART C — the two removal rules, and the 5% one is INTRADAY.
 PART D — rally attempt, undercut reset, and the follow-through day: day 4+,
-         +1.7%, and volume over BOTH the prior day and the 50-day average.
+         +1.7%, and volume over the PRIOR SESSION — which is the whole of the
+         volume test, and getting that wrong cost a wrong answer on the first
+         live run. See the note in part D.
 PART E — the count becomes the status, and the WORSE index wins.
 PART F — what one STOCK did on those exact days (the per-card reflection).
 PART G — it can never be the cause of a failure, and the shared file is atomic.
@@ -224,8 +226,18 @@ ok('...+1.8% is', attempt(4, gain=0.018)['ftd'] is not None)
 ok('a big gain on LIGHTER volume than the prior day is not a follow-through',
    attempt(4, vol_mult=0.5)['ftd'] is None)
 
-# ...and above the index's own 50-day average. Heavier than one quiet prior day
-# is not institutional buying.
+# THE PRIOR SESSION IS THE WHOLE VOLUME TEST, and getting this wrong cost a
+# wrong answer on the FIRST live run.
+#
+# This model also required volume above the index's own 50-day average. That is
+# a stricter variant some people apply; it is not the published rule, which is
+# "in higher volume than the previous session". On real bars it blocked the
+# Nasdaq's August 2026 follow-through, the rally attempt ran to day 23
+# unconfirmed, and the model published "market in correction" through a rally
+# the S&P 500 had already confirmed with a clean day-4 follow-through.
+#
+# A rule stricter than the published one does not fail safe. It fails to the
+# wrong answer, and it does it quietly.
 rows = []
 p = 100.0
 for _ in range(80):
@@ -235,8 +247,13 @@ for _ in range(3):
     p *= 1.003
     rows.append((p, 900_000))              # then a few very quiet days
 rows.append((p * 1.025, 1_100_000))        # up on the prior day, under the avg
-ok('...nor is one that beats the prior day but not the 50-day average',
-   oneil.index_pass(bars(rows), 'T')['ftd'] is None)
+r = oneil.index_pass(bars(rows), 'T')
+ok('a day that beats the PRIOR SESSION is a follow-through, even under the '
+   '50-day average — that is his rule', r['ftd'] is not None, r['ftd'])
+ok('...and the 50-day comparison is still REPORTED, it just does not decide',
+   r['ftd']['vol_above_50d'] is False, r['ftd'])
+ok('the model says so in its own thresholds, so nobody re-tightens it',
+   'not the published rule' in oneil.THRESHOLDS['ftd_volume']['why'])
 
 # UNDERCUT. Without the reset the day-count keeps rising through a continuing
 # decline and a bounce on day 40 of a bear market reads as a bottom.
@@ -262,6 +279,15 @@ ok('...and the reset is recorded, not silent',
 # A late follow-through is FLAGGED, not refused — he allows day 10-11.
 ok('day 4-7 is on time', attempt(6)['ftd']['timing'] == 'on time')
 ok('day 8-11 is flagged late', attempt(9)['ftd']['timing'] == 'late')
+# PAST DAY 11 IT IS FLAGGED, NOT REFUSED. A rally attempt that could never be
+# confirmed would be a state the market cannot leave — it would sit in
+# "correction" through an entire advance, which is the failure this model
+# exists to avoid.
+late = attempt(20)
+ok('past day 11 it is flagged "very late" and still counted',
+   late['ftd'] is not None and late['ftd']['timing'] == 'very late', late['ftd'])
+ok('...and the state does become a confirmed uptrend, not a dead end',
+   late['state'] == 'confirmed_uptrend', late['state'])
 
 # A NEW UPTREND STARTS WITH A CLEAN COUNT.
 rows = uptrend_prefix()

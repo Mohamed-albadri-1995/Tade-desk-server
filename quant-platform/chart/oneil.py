@@ -98,9 +98,24 @@ THRESHOLDS = {
     'ftd_day_late': {
         'value': 11,
         'label': 'day 11',
-        'why': ('a follow-through this late is flagged LATE rather than '
-                'refused; past it the rally attempt is not confirmed by it'),
+        'why': ('past this the follow-through is FLAGGED "very late" and still '
+                'counted. Not refused: a rally attempt that could never be '
+                'confirmed would be a state the market cannot leave, and it '
+                'would sit in correction through an entire advance'),
         'source': "O'Neil — occasionally as late as day 10 or 11",
+    },
+    'ftd_volume': {
+        'value': 'above the prior session',
+        'label': 'volume > prior session',
+        'why': ('the ONLY volume test. An earlier version of this model also '
+                'required volume above the index\'s own 50-day average, and '
+                'that was an invention: it is a stricter variant some people '
+                'apply, not the published rule. On the first live run it '
+                'blocked the Nasdaq\'s August follow-through and left the '
+                'model calling a correction on day 23 of a rally the S&P had '
+                'already confirmed. The 50-day comparison is still REPORTED '
+                'beside every follow-through — it just does not decide one'),
+        'source': 'IBD: "in higher volume than the previous session"',
     },
     'stall_max_gain': {
         'value': 0.002,
@@ -363,12 +378,25 @@ def index_pass(df: pd.DataFrame, name: str = '') -> dict:
                 # from the first draft of the spec: volume above the PRIOR
                 # session AND above the index's own 50-day average. Heavier
                 # than one quiet day is not institutional buying.
+                # THE FOLLOW-THROUGH. Two tests, and the volume one is a
+                # comparison with the PRIOR SESSION — that is the whole of it.
+                #
+                # This model first also required volume above the index's own
+                # 50-day average, which was an invention rather than his rule,
+                # and the first live run showed exactly what it cost: the
+                # Nasdaq's August follow-through was blocked, the attempt ran
+                # to day 23 unconfirmed, and the model published "market in
+                # correction" through a rally the S&P had already confirmed.
+                # A rule that is stricter than the published one does not fail
+                # safe — it fails to the wrong answer, quietly.
+                #
+                # The 50-day comparison is still measured and reported, so the
+                # page can say how heavy the day was. It does not decide.
                 vol50 = row['vol50']
                 big_enough = row['ret'] >= _t('ftd_gain_pct')
                 over_prior = row['volume'] > row['vol_prev']
-                over_avg = vol50 != vol50 or row['volume'] > vol50
-                if (rally_day >= _t('ftd_day_min') and big_enough
-                        and over_prior and over_avg):
+                over_avg = bool(vol50 == vol50 and row['volume'] > vol50)
+                if rally_day >= _t('ftd_day_min') and big_enough and over_prior:
                     ftd = {
                         '_i': i,
                         'date': str(when.date() if hasattr(when, 'date') else when),
@@ -377,6 +405,8 @@ def index_pass(df: pd.DataFrame, name: str = '') -> dict:
                         'gain_pct': round(float(row['ret']) * 100, 2),
                         'vol_ratio': (round(float(row['volume'] / row['vol_prev']), 2)
                                       if row['vol_prev'] else None),
+                        # Reported, never a gate — see ftd_volume above.
+                        'vol_above_50d': over_avg,
                         'timing': ('on time' if rally_day <= _t('ftd_day_max')
                                    else 'late' if rally_day <= _t('ftd_day_late')
                                    else 'very late'),
@@ -502,8 +532,8 @@ def market_model(frames: dict[str, pd.DataFrame]) -> dict:
             f"{THRESHOLDS['dd_window']['label']} · "
             f"{THRESHOLDS['dd_recovery_pct']['label']} recovery · "
             f"FTD {THRESHOLDS['ftd_gain_pct']['label']} on day "
-            f"{_t('ftd_day_min')}–{_t('ftd_day_max')}, volume over prior "
-            f"AND over its 50-day average"
+            f"{_t('ftd_day_min')}–{_t('ftd_day_max')}, volume over the prior "
+            f"session"
         ),
     }
 
