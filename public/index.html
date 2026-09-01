@@ -4745,12 +4745,15 @@ function canslimTablesHTML(tk) {
   if (f.ok && f.c && f.c.rows && f.c.rows.length) {
     const c = f.c;
     cHtml = `<div class="oneil-dd-wrap"><table class="oneil-dd">
-      <thead><tr><th>Qtr</th><th>EPS $</th><th>%Chg</th><th>Sales</th><th>%Chg</th><th>Margin</th></tr></thead>
+      <thead><tr><th>Qtr</th><th>EPS $</th><th>Yr ago</th><th>%Chg</th>
+        <th>Sales</th><th>Yr ago</th><th>%Chg</th><th>Margin</th></tr></thead>
       <tbody>${c.rows.map(r => `<tr>
         <td>${esc(r.quarter)}</td>
         <td>${_n(r.eps)}</td>
+        <td style="color:var(--text3)">${_n(r.eps_yr_ago)}</td>
         <td class="${_sign(r.eps_chg)}">${esc(r.eps_chg_label)}</td>
         <td>${_m(r.sales)}</td>
+        <td style="color:var(--text3)">${_m(r.sales_yr_ago)}</td>
         <td class="${_sign(r.sales_chg)}">${esc(r.sales_chg_label)}</td>
         <td>${r.margin_pct == null ? '—' : r.margin_pct + '%'}</td></tr>`).join('')}
       </tbody></table></div>

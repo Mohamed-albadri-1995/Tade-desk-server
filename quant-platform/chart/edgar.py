@@ -305,11 +305,28 @@ def c_table(cf: dict, quarters: int = 8) -> dict:
     rows = []
     for end in ends:
         eps, rev, ni = eps_q.get(end), rev_q.get(end), ni_q.get(end)
-        eps_chg, eps_lab = pct_change(eps, _year_ago(eps_q, end))
-        rev_chg, rev_lab = pct_change(rev, _year_ago(rev_q, end), kind='sales')
+        eps_then = _year_ago(eps_q, end)
+        rev_then = _year_ago(rev_q, end)
+        eps_chg, eps_lab = pct_change(eps, eps_then)
+        rev_chg, rev_lab = pct_change(rev, rev_then, kind='sales')
         rows.append({
             'quarter': end,
             'eps': eps,
+            # THE NUMBER THE COMPARISON WAS MADE AGAINST, on the row.
+            #
+            # Reported from live use, looking straight at eight rows of
+            # "n/a (loss a year ago)": "how year ago is not exist and it's in
+            # front of me in the table". The label was right — every one of
+            # those year-ago quarters WAS a loss, and a percentage from a
+            # negative base is arithmetic without meaning — but it reads as
+            # "the year-ago quarter is missing", which is a completely
+            # different claim and the one thing this must never say.
+            #
+            # Printing the value ends the ambiguity: -0.64 against -5.07 is
+            # visibly a comparison that was made and could not be expressed as
+            # a percentage, not a comparison that could not be made.
+            'eps_yr_ago': eps_then,
+            'sales_yr_ago': rev_then,
             'eps_chg': eps_chg, 'eps_chg_label': eps_lab,
             # SALES BESIDE EPS, ALWAYS. O'Neil's warning is earnings growth
             # without sales growth — buybacks, margin games, one-offs. The pair
@@ -334,10 +351,11 @@ def c_table(cf: dict, quarters: int = 8) -> dict:
         'beat_25': sum(1 for c in chgs if c >= QUARTER_BAR),
         'beat_25_of': len(chgs),
         'bar_pct': QUARTER_BAR,
-        'note': ('%Chg is always against the SAME quarter one year earlier. '
-                 'n/a where the year-ago quarter was a loss — a percentage '
-                 'from a negative base is arithmetic without meaning. '
-                 f'Capped at +{PCT_CAP:.0f}%.'),
+        'note': ('%Chg is always against the SAME quarter one year earlier, '
+                 'and that quarter\'s figure is in the YR AGO column — n/a '
+                 'never means it is missing. It means the base was a loss or '
+                 'zero, and a percentage from a negative base is arithmetic '
+                 f'without meaning. Capped at +{PCT_CAP:.0f}%.'),
     }
 
 

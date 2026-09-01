@@ -373,6 +373,35 @@ for _f in ('run_daily.py', 'run_edgar.py'):
     ok(f'{_f} prefers the SIC-sourced half of the map, not the whole map',
        "v.get('src') == 'sic'" in _T and 'prefer=filers' in _T)
 
+# ── "n/a" MUST NOT READ AS "THE DATA IS MISSING" ───────────────────────
+#
+# Reported from live use, looking straight at eight rows of "n/a (loss a year
+# ago)": "how year ago is not exist and it's in front of me in the table".
+#
+# The label was arithmetically right — every one of those year-ago quarters
+# WAS a loss, and a percentage from a negative base is meaningless — but it
+# reads as "the year-ago quarter could not be found", which is a different
+# claim entirely and the one thing this must never make.
+_EPS = {'2026-06-30': -0.64, '2025-06-30': -5.07}
+_CF = {'facts': {'us-gaap': {'EarningsPerShareDiluted': {'units': {'shares': [
+    {'end': k, 'start': k[:4] + '-04-01', 'val': v, 'form': '10-Q',
+     'fp': 'Q2', 'accn': k, 'filed': k} for k, v in _EPS.items()]}}}}}
+_C = edgar.c_table(_CF)
+_R = _C['rows'][0]
+ok('the value the comparison was made against is ON the row',
+   _R['eps_yr_ago'] == -5.07, _R)
+ok('...so a loss base is visibly a comparison MADE, not one that failed',
+   _R['eps_chg'] is None and 'loss a year ago' in _R['eps_chg_label'], _R)
+ok('a genuinely absent year-ago quarter carries None and a bare "n/a", '
+   'which is the case the other label was being confused with',
+   edgar.pct_change(1.0, None) == (None, 'n/a'))
+ok('the note says outright that n/a is not a missing figure',
+   'never means it is missing' in _C['note'] and 'YR AGO' in _C['note'])
+ok('sales carries its year-ago figure too', 'sales_yr_ago' in _R)
+ok('the card prints both columns', 'eps_yr_ago' in UI and 'sales_yr_ago' in UI)
+ok('...under headings, so the extra columns are readable',
+   UI.count('<th>Yr ago</th>') == 2)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)
