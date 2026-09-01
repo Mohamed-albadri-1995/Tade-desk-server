@@ -503,13 +503,20 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 /* LEVEL 1 — a section heading. Uppercase and letterspaced, which no value on
    the card is, so it reads as a label even in peripheral vision.
 
-   AND BIGGER THAN EVERY LABEL UNDER IT. In sunlight mode --text3 is #aab2c4,
+   BIGGER THAN EVERY LABEL UNDER IT. In sunlight mode --text3 is #aab2c4,
    near-white: the palette deliberately lifts every grey so the screen stays
    readable outdoors, which deletes the lightness steps hierarchy was resting
    on. A heading that is only "brighter grey" than its sub-labels has no rank
-   at all there. Size and the band survive the palette; lightness does not. */
-.fold-title { font-size: 12px; font-weight: 800; letter-spacing: .09em;
-  text-transform: uppercase; color: #fff; flex: 0 0 auto; }
+   at all there. Size and the band survive the palette; lightness does not.
+
+   AND ITS OWN COLOUR — m-chrome, which the colour language above defines as
+   FURNITURE: links, borders, things that carry no meaning. That is exactly
+   what a heading is, a label rather than a claim, so it is the one colour a
+   heading may take without stealing a meaning. It cannot be green or red
+   (those are DIRECTION and would read as a judgement about the section), and
+   white was already taken by every value on the card. */
+.fold-title { font-size: 13px; font-weight: 800; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--m-chrome); flex: 0 0 auto; }
 
 /* EVERY LABEL NESTED INSIDE A SECTION DROPS A LEVEL, whatever it was styled
    as when it lived on its own. The O'Neil block was built as a standalone
@@ -3740,6 +3747,20 @@ function buildCard(row) {
 
   <div class="card-body">
 
+    <!-- CHART, FIRST. The picture is what the eye goes to; everything below it
+         is a number explaining the picture. It was last, under three folds,
+         which put the one thing you can read at a glance behind the things
+         you have to read word by word.
+         Mounted only when the card is on screen AND its fold is open.
+         See mountChart() and toggleFold(). -->
+    ${fold('chart', 'Chart', 'tap to open',
+      `<div class="card-chart" id="cchart-${row.ticker}"
+           data-sym="${esc(s.tvSymbol || row.ticker)}" data-tkr="${esc(row.ticker)}">
+        <div class="cchart-idle">chart loads when this card is on screen</div>
+      </div>`,
+      `<span class="chart-expand" style="float:none;padding:0 14px 4px;display:block"
+             onclick="openChart('${row.ticker}')" title="open the full chart">⤢ full</span>`)}
+
     <!-- RANGE — straight after the MA tags, because both answer "where is this
          thing sitting", one against its moving averages and one against its
          own history. -->
@@ -3789,15 +3810,6 @@ function buildCard(row) {
       return fold('canslim', "CANSLIM · O'Neil", canslimOneLine(row.ticker), body);
     })()}
 
-    <!-- CHART — mounted only when the card is on screen AND its fold is open.
-         See mountChart() and toggleFold(). -->
-    ${fold('chart', 'Chart', 'tap to open',
-      `<div class="card-chart" id="cchart-${row.ticker}"
-           data-sym="${esc(s.tvSymbol || row.ticker)}" data-tkr="${esc(row.ticker)}">
-        <div class="cchart-idle">chart loads when this card is on screen</div>
-      </div>`,
-      `<span class="chart-expand" style="float:none;padding:0 14px 4px;display:block"
-             onclick="openChart('${row.ticker}')" title="open the full chart">⤢ full</span>`)}
 
     <!-- Everything above this line is the card. Everything below it is the
          detail behind the card, folded away by default: it is worth having and

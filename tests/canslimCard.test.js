@@ -324,12 +324,27 @@ describe('the card has sections, not one flat list', () => {
   });
 });
 
-describe('CANSLIM sits between the news and the chart', () => {
-  // Where it is read: after why the stock is moving, before what the move
-  // looks like. It was behind a ⤢ popup, then behind the Details fold; both
-  // put the checklist somewhere you had to decide to go.
-  test('news, then CANSLIM, then chart', () => {
-    const body = page.match(/fold\('range'[\s\S]*?fold\('chart'/)[0];
+describe('the card opens with the picture, then the numbers', () => {
+  /*
+   * CHART FIRST. The picture is what the eye goes to; everything under it is
+   * a number explaining the picture. It was last, behind three folds — the
+   * one thing readable at a glance placed after the things that have to be
+   * read word by word.
+   *
+   * Then Range, News, CANSLIM: why it is moving, then O'Neil's checklist on
+   * whether the move is worth owning.
+   */
+  const body = page.match(/fold\('chart'[\s\S]*?return fold\('canslim',/)[0];
+
+  test('chart is the first section', () => {
+    const order = ["fold('chart'", "fold('range'", "fold('news'"];
+    const at = order.map(k => page.indexOf(k));
+    expect(at[0]).toBeGreaterThan(-1);
+    expect(at[0]).toBeLessThan(at[1]);
+    expect(at[1]).toBeLessThan(at[2]);
+  });
+
+  test('...and CANSLIM still follows the news', () => {
     expect(body.indexOf("fold('news'")).toBeGreaterThan(-1);
     expect(body.indexOf("fold('news'"))
       .toBeLessThan(body.indexOf('canslimCardBlock'));
@@ -402,7 +417,15 @@ describe('there are three type levels and they do not look alike', () => {
   test('...and is uppercase and letterspaced, which no value is', () => {
     expect(css).toMatch(/text-transform: uppercase/);
     expect(css).toMatch(/letter-spacing: \.09em/);
-    expect(css).toMatch(/color: #fff/);
+  });
+
+  test('a heading takes the FURNITURE colour, stealing no meaning', () => {
+    // The colour language gives every hue one meaning: green and red are
+    // DIRECTION, and a heading in them would read as a judgement about the
+    // section. m-chrome is defined as carrying no meaning, which is exactly
+    // what a label is.
+    expect(css).toMatch(/color: var\(--m-chrome\)/);
+    expect(css).not.toMatch(/--m-up|--m-down|--green|--red/);
   });
 
   test('a heading is BIGGER than every label nested under it', () => {
