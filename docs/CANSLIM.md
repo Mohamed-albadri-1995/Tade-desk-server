@@ -28,6 +28,9 @@ in a constant — see [Thresholds that moved](#thresholds-that-moved).
 | **N — New high** | Price emerging from a **base** into new high ground, on volume | Any 52-week high. A stock grinding to a high with no base and no volume is the opposite of the setup |
 | **Group rank** | Rank of the stock's **industry group** (IBD uses **197**) by 6-month price performance | The GICS **sector** (11 of them). A sector is far too coarse — O'Neil's point is that leadership is a *group* phenomenon |
 | **M — Market direction** | A **rule-based state machine** over the indexes | A sentiment read or a moving-average cross. O'Neil's whole claim is that it is mechanical |
+| **RS *Line*** | The plotted ratio **stock ÷ index**, over time. Its *shape* is the signal — "RS line at a new high **before** price" is the MarketSmith tell | The **RS Rating**. Different objects: the Rating is today's percentile (a number 1–99), the Line is a curve. A stock can hold RS Rating 95 while its RS line rolls over — the Rating is backward-looking over 12 months, the Line turns first |
+| **Up/Down Volume Ratio** | Up-day volume ÷ down-day volume over the last **50 days**. One number, ~1.0 neutral | The Acc/Dis Rating. Both measure institutional demand; U/D is a plain volume ratio over 50 days, Acc/Dis is a graded read of price *and* volume over 13 weeks. They disagree often and that disagreement is informative |
+| **Base stage** | Which base this is **counted from the market bottom** — 1st, 2nd, late | Any consolidation. The count is the point: late-stage bases (3rd, 4th) fail far more often because the move is obvious by then |
 
 ---
 
@@ -204,3 +207,104 @@ checked against a chart afterwards.
 - **It does not replace the day-trading fields.** CAN SLIM is a
   position-trading framework; the desk trades intraday setups. These fields
   are context, not entries.
+
+
+---
+
+## 7. The card — exact spec
+
+**Approved before building.** This section is what will be implemented; nothing
+below is built yet.
+
+### 7.1 What a card carries today
+
+```
+EIX -4.8%                                    70
+Strong Uptrend · Utilities · sec NEUTRAL
+gap +1.3% · rvol 3.5 · 2x T9,T4
+```
+
+Three lines, all day-trading fields. Nothing speaks to CAN SLIM except the
+membership tag.
+
+### 7.2 What is added — ONE line
+
+```
+CS  RS 94 · C +38%^ · A +27% · U/D 1.8 · Grp 12 · -4% off high
+```
+
+One line, prefixed `CS` so it is obviously a different frame from the rest of
+the card. Read left to right it is L, C, A, I, I, N — O'Neil's own order for
+the letters that can be put on a line.
+
+| Chip | Letter | Meaning | Format | Colour |
+|---|---|---|---|---|
+| `RS 94` | **L** | RS Rating percentile | integer 1-99 | >=80 green, 40-79 grey, <40 red |
+| `C +38%^` | **C** | Latest quarter EPS vs **same quarter a year ago**. `^` = **accelerating** (this quarter's growth exceeds last quarter's) | signed % | >=25% green, 0-24% grey, negative red |
+| `A +27%` | **A** | 3-year annual EPS CAGR | signed % | >=25% green |
+| `U/D 1.8` | **I** | Up/down volume ratio, 50 days | 1 decimal | >=1.5 green, 1.0-1.49 grey, <1.0 red |
+| `Grp 12` | **L**/**I** | Industry group rank, of the groups we compute | integer + total on tap | top 20% green |
+| `-4% off high` | **N** | Below the 52-week high | signed % | >=-15% green (near highs) |
+
+### 7.3 The rules of presentation
+
+1. **UNKNOWN IS NOT ZERO, and unknown chips are OMITTED.** A company that has
+   not filed has no `C` — printing `C 0%` states that its earnings were flat,
+   which is a measurement nobody made. A card with three chips is honest; a
+   card with six chips two of which are invented is not.
+2. **The whole line is dropped when nothing is known.** No empty `CS` prefix.
+3. **It is a LABEL, never a filter.** Exactly like the existing CANSLIM
+   membership tag: no tool's candidate list changes because of it.
+4. **Tapping the line opens the detail**, which names the source and the as-of
+   date for every number — EDGAR filings are quarterly and a card in May may be
+   showing a February filing, and that has to be visible.
+5. **Nothing here is called an IBD rating.** These are reconstructions from the
+   published descriptions, under our own names.
+
+### 7.4 Phase 1 vs phase 2
+
+**Phase 1** — everything in the table above. Every input is either already in
+the system (price, volume, the RS percentile) or comes from one free keyless
+source (EDGAR).
+
+**Phase 2**, deliberately not promised now because each needs base detection:
+
+- **Buy zone / extended** — within 5% above the pivot is buyable; beyond that
+  O'Neil says do not chase. Needs a detected base and pivot.
+- **Base stage** — 1st, 2nd, late — counted from the market bottom.
+- **RS line at a new high before price** — the MarketSmith tell.
+
+These are worth building and they are a separate piece of work: they need
+pattern detection, which is a different kind of code from fetching a filing.
+
+---
+
+## 8. The market tab
+
+**The existing tab is kept.** Its short-term index/sector read is useful and is
+not being replaced — it is renamed so it cannot be mistaken for the O'Neil
+state, and the O'Neil model is **added beside it** as its own block:
+
+```
+O'NEIL MARKET MODEL
+  Status        Uptrend under pressure
+  Because       5 distribution days live (>=5 is the threshold)
+  Nasdaq        4 live      S&P 500   5 live
+  Rally         n/a - in a confirmed uptrend since the FTD of 2026-07-18
+  Rules in use  DD -0.2% on higher volume - 25 sessions - 5% recovery removal
+                FTD +1.2% on day 4+ of a rally attempt
+
+  DISTRIBUTION DAYS
+  2026-08-27  S&P 500  -0.7%  vol x1.14   expires 2026-10-01
+  2026-08-21  Nasdaq   -1.1%  vol x1.31   expires 2026-09-25
+  ...
+```
+
+Every number carries the rule that produced it, and the distribution days are
+listed with their dates so the count can be checked against a chart. A status
+word with no rows behind it is not checkable, and this is a claim about when to
+stop buying.
+
+**A stated caveat sits under the follow-through line**: roughly one in four
+follow-through days fails. It is a necessary condition for a bottom, not a
+sufficient one, and the tab must not read as permission to size up.
