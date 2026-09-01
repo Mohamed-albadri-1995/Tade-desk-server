@@ -373,6 +373,74 @@ describe('folds: one line until asked for more', () => {
   });
 });
 
+describe('there are three type levels and they do not look alike', () => {
+  /*
+   * Reported from the live cards: "you can't distinguish between headers, sub
+   * headers and information". Everything was rendering at 9px uppercase grey
+   * — section headings, the sub-headings inside them, and the values — so the
+   * card was one flat run of text with no shape.
+   */
+  const css = page.match(/\.fold-title \{[^}]*\}/)[0];
+  const sub = page.match(/\.fold \.fold \.fold-title \{[^}]*\}/)[0];
+
+  test('a SECTION heading is large, heavy and bright', () => {
+    expect(css).toMatch(/font-size: 12px/);
+    expect(css).toMatch(/font-weight: 800/);
+    expect(css).toMatch(/color: var\(--text\)/);
+  });
+
+  test('...and is NOT the small uppercase grey a sub-heading uses', () => {
+    expect(css).not.toMatch(/text-transform: uppercase/);
+    expect(css).not.toMatch(/var\(--text3\)/);
+  });
+
+  test('a NESTED fold reads one level down, not as an equal', () => {
+    expect(sub).toMatch(/font-size: 9px/);
+    expect(sub).toMatch(/text-transform: uppercase/);
+    expect(sub).toMatch(/var\(--text3\)/);
+  });
+
+  test('an open section is marked by more than a rotated chevron', () => {
+    // A heading that looks identical open and closed gives no clue where you
+    // are in a card of nine sections.
+    expect(page).toMatch(/\.fold\[data-open="1"\] > \.fold-head \{[^}]*border-left-color/);
+  });
+
+  test('a value outranks its label', () => {
+    // They were the same colour, so a row read as one grey run.
+    const v = page.match(/\.ctx-val, \.price-val \{[^}]*\}/)[0];
+    const l = page.match(/\.ctx-label, \.price-label \{[^}]*\}/)[0];
+    expect(v).toContain('var(--text)');
+    expect(l).toContain('var(--text2)');
+  });
+
+  test('a sub-row is indented rather than given an empty letter chip', () => {
+    // "since the FTD" and "on the DD days" belong under M, and were rendered
+    // with an empty <span class="cl-letter">, which printed a stray leading
+    // space and read as a broken row.
+    expect(page).not.toMatch(/cl-letter"><\/span>/);
+    expect(page).toContain('cl-sub">since the FTD');
+    expect(page).toContain('cl-sub">on the DD days');
+  });
+});
+
+describe('the summary lines say something', () => {
+  test('the news line carries the top headline, not an empty separator', () => {
+    // It printed "5 stories ·" on every card: the items carry `h`, not
+    // `title`, so the headline was undefined and only the dot survived.
+    const m = page.match(/fold\('news',[\s\S]*?newsHTML\}<\/div>`\)\}/)[0];
+    expect(m).toContain('.h ||');
+    expect(m).not.toContain('.title ||');
+  });
+
+  test('a failed or paused scan is not reported as a completed one', () => {
+    // It printed "Scan complete · undefined rows · —".
+    const m = page.match(/async function runScan[\s\S]*?\n\}/)[0];
+    expect(m).toContain("if (!d.ok) setStatus('Scan failed");
+    expect(m).toContain('d.paused');
+  });
+});
+
 describe('the market tab names and folds every block', () => {
   // It was six unlabelled slabs and only the heatmap carried a heading.
   const tab = page.match(

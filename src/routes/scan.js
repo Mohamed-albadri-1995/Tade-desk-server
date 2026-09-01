@@ -20,7 +20,16 @@ router.post('/capture-r3', async (req, res) => {
 router.post('/run', async (req, res) => {
   try {
     const result = await runFullScan();
-    res.json({ ok: true, rowsProcessed: result.rowsProcessed, ts: result.ts });
+    // `paused` travels too. Without it the page said "Scan complete · 0 rows"
+    // for a tool that deliberately did not scan, which is the same sentence a
+    // scan that found nothing produces — and the two need different answers.
+    res.json({
+      ok: true,
+      rowsProcessed: result && result.rowsProcessed,
+      ts: result && result.ts,
+      paused: !!(result && result.paused),
+      pausedReason: result && result.pausedReason,
+    });
   } catch (err) {
     console.error('[Scan] Error:', err.message);
     res.status(500).json({ ok: false, error: err.message });

@@ -468,26 +468,55 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
    made again on every one of 25 cards.
    This is display only. The registers are written server-side from r0 rows and
    cannot see the DOM, so nothing here changes what is collected. */
-.fold { border-bottom: 1px solid #1e2233; }
+/* THREE LEVELS, AND THEY MUST NOT LOOK ALIKE.
+   Everything on the card was rendering at the same weight and size — section
+   headings, the sub-headings inside them, and the values — so there was no
+   way to tell what was a title and what was a number. The scale is now:
+
+     SECTION   12px, heavy, bright, an accent bar down its left edge
+     sub-head   9px, uppercase, grey, letterspaced
+     label     11px, muted            value  11px, semibold, bright
+
+   Nothing on the card may use a fourth. */
+.fold { border-bottom: 1px solid var(--border); }
 .mkt-fold { border: 1px solid var(--border); border-radius: 8px;
   margin-bottom: 10px; background: var(--bg2); overflow: hidden; }
 .mkt-fold .fold-body { padding: 10px 12px 12px; }
 .mkt-fold[data-open="1"] .fold-chev { transform: rotate(180deg); }
 .mkt-fold[data-open="1"] .fold-one { display: none; }
 .fold:last-child { border-bottom: none; }
-.fold-head { display: flex; align-items: baseline; gap: 7px; width: 100%;
-  padding: 8px 14px; background: none; border: 0; cursor: pointer;
-  text-align: left; color: inherit; font: inherit; }
+.fold-head { display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 10px 14px 10px 12px; background: none; border: 0; cursor: pointer;
+  text-align: left; color: inherit; font: inherit;
+  border-left: 3px solid transparent; }
 .fold-head:hover { background: var(--bg3); }
-.fold-title { font-size: 9px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .08em; color: var(--text3); flex: 0 0 auto; }
+.fold[data-open="1"] > .fold-head { border-left-color: var(--accent);
+  background: var(--bg3); }
+/* LEVEL 1 — a section heading. Bright and heavy, because the eye finds the
+   card's structure by these and nothing else. */
+.fold-title { font-size: 12px; font-weight: 800; letter-spacing: .01em;
+  color: var(--text); flex: 0 0 auto; }
 .fold-one { font-size: 11px; color: var(--text2); flex: 1 1 auto;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fold-chev { font-size: 9px; color: var(--text3); flex: 0 0 auto; }
-.fold[data-open="1"] .fold-chev { transform: rotate(180deg); }
-.fold[data-open="1"] .fold-one { display: none; }
-.fold-body { padding: 0 14px 10px; }
+.fold-chev { font-size: 9px; color: var(--text3); flex: 0 0 auto;
+  margin-left: auto; }
+.fold[data-open="1"] > .fold-head .fold-chev { transform: rotate(180deg); }
+.fold[data-open="1"] > .fold-head .fold-one { display: none; }
+.fold-body { padding: 2px 14px 12px; }
+/* A NESTED FOLD IS A SUB-HEADING, and has to read as one level down or the
+   card looks like a flat list of equals again. */
+.fold .fold { border: 0; margin-top: 8px;
+  border-top: 1px dashed var(--border); }
+.fold .fold .fold-title { font-size: 9px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--text3); }
+.fold .fold > .fold-head { padding: 8px 0 8px 9px; border-left-width: 2px; }
+.fold .fold .fold-body { padding: 0 0 4px 9px; }
+/* LEVEL 3 — a value outranks its label, which is the other half of the
+   problem: they were the same colour, so a row read as one grey run. */
+.ctx-val, .price-val { color: var(--text); }
+.ctx-label, .price-label { color: var(--text2); }
 .canslim-sec { border-left: 2px solid var(--accent); padding-left: 9px; }
+.cl-sub { display: inline-block; padding-left: 15px; color: var(--text2); }
 .cl-letter { display: inline-block; min-width: 15px; font-weight: 800;
   font-size: 11px; color: var(--accent); letter-spacing: 0; }
 .cl-pending { font-size: 10px; color: var(--text3); margin-top: 5px;
@@ -2814,7 +2843,12 @@ async function runScan() {
   try {
     const r = await fetch('/api/scan/run', { method: 'POST' });
     const d = await r.json();
-    setStatus(`Scan complete · ${d.rowsProcessed} rows · ${fmtTime(d.ts)}`);
+    // A FAILED SCAN IS NOT A COMPLETED ONE. This printed "Scan complete ·
+    // undefined rows · —" whenever the response was an error or the tool was
+    // paused, which reads as a scan that worked and found nothing.
+    if (!d.ok) setStatus('Scan failed: ' + (d.error || 'no reason given'));
+    else if (d.paused) setStatus('Tool is paused — no scan run');
+    else setStatus(`Scan complete · ${d.rowsProcessed} rows · ${fmtTime(d.ts)}`);
     await Promise.all([loadRegistry(), loadMarket()]);
   } catch(e) {
     setStatus('Scan error: ' + e.message);
@@ -3681,7 +3715,7 @@ function buildCard(row) {
     ${fold('news',
       `News ${catalyst ? '· ' + (catalyst.tier === 1 ? '⚡ ' : '') + catalyst.label + (catalyst.others && catalyst.others.length ? ' <span style="opacity:0.6;font-weight:400">+ ' + catalyst.others.map(o => o.label).join(', ') + '</span>' : '') : ''}`,
       newsItems.length
-        ? `${newsItems.length} ${newsItems.length === 1 ? 'story' : 'stories'} · ${esc((newsItems[0] || {}).title || '')}`
+        ? `${newsItems.length} ${newsItems.length === 1 ? 'story' : 'stories'} · ${esc((newsItems[0] || {}).h || '')}`
         : 'nothing in three weeks',
       `<div id="news-${row.ticker}">${newsHTML}</div>`)}
 
@@ -4283,7 +4317,7 @@ function oneilCardBlock(ticker) {
       m.distribution_days && m.distribution_days.length
         ? ` · ${m.distribution_days.length} DD live` : ''}</span></div>`;
   if (m.sessions_since_ftd != null) {
-    html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter"></span> since the FTD${info('ftd_band')}</span>
+    html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-sub">since the FTD</span>${info('ftd_band')}</span>
       <span class="ctx-val">${m.sessions_since_ftd} sessions · ${esc(m.ftdBand || m.ftd_band || '')}</span></div>`;
   }
 
@@ -4292,13 +4326,13 @@ function oneilCardBlock(ticker) {
   if (!s.checked) {
     // "0 of 0" reads as a failure. Not checked, no live days, and no bars are
     // three different things and each says which it is.
-    return html + `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter"></span> on the DD days${info('held_up')}</span>
+    return html + `<div class="ctx-row"><span class="ctx-label"><span class="cl-sub">on the DD days</span>${info('held_up')}</span>
       <span class="ctx-val" style="color:var(--text3)">${esc(s.note || 'not checked')}</span></div>`;
   }
   const vCls = s.verdict === 'HOLDING UP' ? 'bias-bull'
     : s.verdict === 'GIVING WAY' ? 'bias-bear' : 'bias-neutral';
   const rel = s.avg_rel != null ? `${s.avg_rel >= 0 ? '+' : ''}${s.avg_rel}%` : '—';
-  html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter"></span> on the DD days${info('held_up')}</span>
+  html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-sub">on the DD days</span>${info('held_up')}</span>
     <span class="ctx-val">up on <b>${s.held} of ${s.checked}</b> · ${rel} vs the index
       <span class="${vCls}" style="font-weight:700">${esc(s.verdict || '')}</span>
       <span class="chart-expand" onclick="oneilDates('${esc(ticker)}')" title="the exact sessions">⤢</span>
@@ -4818,7 +4852,7 @@ function groupCardBlock(ticker) {
              title="rank ${g.rank_3mo} of ${g.of_3mo} three months ago">${
              g.rotation === 'into' ? '▲ into' : '▼ out of'}</span>` : ''}
     </span></div>
-    <div class="ctx-row"><span class="ctx-label"><span class="cl-letter"></span> in its group${info('rs_in_group')}</span>
+    <div class="ctx-row"><span class="ctx-label"><span class="cl-sub">in its group</span>${info('rs_in_group')}</span>
       <span class="ctx-val"><b class="${lead}">RS ${s.rs_in_group} of ${s.members}</b>
         <span class="chart-expand" onclick="groupLeaders('${esc(s.group)}')"
               title="the leaders in this group">⤢</span></span></div>`;
