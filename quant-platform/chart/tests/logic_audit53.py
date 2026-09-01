@@ -262,6 +262,27 @@ ok('the tool checks the scanner it actually runs on', 'tradingview scanner' in N
 ok('...the news sources', 'finnhub' in NODE)
 ok('...and the industry map, on its SIZE rather than its existence',
    'industry map' in NODE and 'only ${s.symbols} symbols' in NODE)
+# MARKET DATA AND EXECUTION USE DIFFERENT CREDENTIALS, and the check has to
+# cover both — which it did not, until a regenerated Alpaca key made the gap
+# obvious. Changing the market-data key cannot break trading; the REVERSE is
+# the risk, because regenerating a key kills it everywhere it was used. The
+# feed check goes red immediately and loudly, and the stored TRADING key for
+# the same account is dead too, silently, until an order 401s.
+ok('the trading accounts are checked, not only the market-data feeds',
+   'checkBrokerAccounts' in NODE)
+ok('...each Algo destination that has its own keys is asked who it is',
+   'Algo account:' in NODE)
+ok('...and the desk-wide pair, which the journal reads its fills through',
+   'desk-wide' in NODE and 'journal' in NODE)
+ok('a REJECTED trading key says both places need updating, because they are '
+   'separate', 'both' in NODE and 'need updating' in NODE)
+ok('...and the fix names where those keys live', 'Destinations' in NODE)
+ok('the account NUMBER comes back, not just "connected" — two names were once '
+   'open while the API answered with two different ones',
+   'a.number' in NODE)
+ok('no destinations configured is a warning, not a failure',
+   'nothing to check' in NODE)
+
 ok('qp being unreachable is itself a finding, not a shorter list',
    'no health report' in NODE.lower() or 'NO health report' in NODE)
 

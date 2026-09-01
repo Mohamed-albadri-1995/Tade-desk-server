@@ -135,6 +135,87 @@ function checkCanslim() {
   }
 }
 
+/*
+ * THE TRADING ACCOUNTS — the Algo desk's destinations and the journal.
+ *
+ * WHY THIS IS SEPARATE FROM THE FEED CHECKS, and why it was missing.
+ *
+ * Market data and execution use DIFFERENT credentials by construction:
+ *
+ *   qp market data   APCA_API_KEY_ID / APCA_API_SECRET_KEY, from the
+ *                    ENVIRONMENT (~/trade-desk.env, via systemd)
+ *   Algo + journal   data/broker.json per destination, falling back to the
+ *                    broker profile in the database. The Node side NEVER
+ *                    reads the environment for Alpaca credentials
+ *
+ * So changing the market-data key cannot break trading. THE REVERSE IS THE
+ * RISK, and it is the one that actually happened: regenerating a key on an
+ * Alpaca account kills it EVERYWHERE it was used. The market-data check goes
+ * red immediately and loudly — and the stored trading key for the same account
+ * is dead too, silently, until an order 401s at the worst possible moment.
+ *
+ * That is the gap this closes. Every destination with its own keys is asked
+ * who it is, and the desk-wide pair is asked as well.
+ */
+async function checkBrokerAccounts() {
+  const out = [];
+  let alpaca;
+  let dests = [];
+  try {
+    alpaca = require('../alpaca/account');
+    dests = require('../broker/signalstack').destinations();
+  } catch (err) {
+    return [DOWN('broker accounts', `could not load: ${String(err.message).slice(0, 140)}`)];
+  }
+
+  const ask = async (label, acct) => {
+    const t0 = Date.now();
+    try {
+      const r = await alpaca.account({ account: acct, timeoutMs: 12000 });
+      const ms = Date.now() - t0;
+      if (!r.ok) {
+        const msg = String(r.error || '').slice(0, 160);
+        const rejected = /401|403|forbidden|unauthorized/i.test(msg);
+        return DOWN(label, rejected
+          ? 'the stored key was REJECTED — regenerated on the Alpaca side? '
+            + 'The market-data key and this one are separate places, so both '
+            + 'need updating'
+          : `could not ask: ${msg}`,
+          { ms, fix: rejected ? 'update this account\'s keys in the Algo tab '
+              + '(Destinations), or Settings > API Keys for the desk-wide pair' : null });
+      }
+      const a = r.account || {};
+      // WHICH account answered, not just that one did. Two names were once
+      // reported open while the API answered with two different ones — either
+      // alone is alarming, together they mean the keys on this box and the
+      // screen being read are not the same account.
+      return OK(label, `${a.number || a.id || 'connected'}`
+        + `${a.status ? ` · ${a.status}` : ''}`
+        + `${a.paper === false ? ' · LIVE' : ' · paper'}`, { ms });
+    } catch (err) {
+      return DOWN(label, String(err.message).slice(0, 160), { ms: Date.now() - t0 });
+    }
+  };
+
+  const own = dests.filter(d => d.alpacaKeyId && d.alpacaSecret);
+  for (const d of own) {
+    out.push(await ask(`Algo account: ${d.name || d.id}`, alpaca.credsOf(d)));
+  }
+  // The desk-wide pair, which every destination without its own keys uses and
+  // which the journal reads its fills through.
+  const sharedUsers = dests.filter(d => !(d.alpacaKeyId && d.alpacaSecret));
+  if (!own.length || sharedUsers.length) {
+    out.push(await ask(
+      `Alpaca desk-wide (journal${sharedUsers.length
+        ? `, and ${sharedUsers.length} destination${sharedUsers.length === 1 ? '' : 's'}` : ''})`,
+      null));
+  }
+  if (!out.length) {
+    out.push(WARN('broker accounts', 'no Alpaca destinations configured — nothing to check'));
+  }
+  return out;
+}
+
 /* qp's half. Its absence is itself a finding: half the platform's data would
  * otherwise have no health report and the list would just look shorter. */
 async function checkQp(symbol) {
@@ -165,10 +246,10 @@ router.get('/', async (req, res) => {
   const symbol = String(req.query.symbol || 'SPY').toUpperCase();
   const t0 = Date.now();
   try {
-    const [scanner, news, qp] = await Promise.all([
-      checkScanner(), checkNews(), checkQp(symbol),
+    const [scanner, news, brokers, qp] = await Promise.all([
+      checkScanner(), checkNews(), checkBrokerAccounts(), checkQp(symbol),
     ]);
-    const mine = [scanner, news, checkIndustryMap(), checkCanslim()];
+    const mine = [scanner, news, ...brokers, checkIndustryMap(), checkCanslim()];
     const checks = [...mine, ...((qp && qp.checks) || [])];
     const down = checks.filter(c => c.severity === 'down');
     const degraded = checks.filter(c => c.severity === 'degraded');
