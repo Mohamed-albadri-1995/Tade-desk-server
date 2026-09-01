@@ -63,6 +63,7 @@ PARTS = [
     ('logic_audit48.py',    "the EXIT contract: qp's exit plan is the JSON the broker gets"),
     ('logic_audit49.py',    'the bar cache: a ceiling, a sweeper, and the disk as the real limit'),
     ('logic_audit50.py',    "O'Neil's market model: distribution, stalling, the follow-through"),
+    ('logic_audit51.py',    "the L: group rank, and the leader inside the group"),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They

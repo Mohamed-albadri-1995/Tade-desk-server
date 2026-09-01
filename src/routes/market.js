@@ -98,4 +98,36 @@ router.get('/oneil/stocks', async (req, res) => {
   }
 });
 
+/*
+ * GET /api/market/groups — the L block: group ranks and rank-within-group.
+ *
+ * Like /oneil, a reader that finds nothing asks qp once. Nothing else builds
+ * the file, and waiting for somebody to run a curl is not a mechanism.
+ */
+router.get('/groups', async (req, res) => {
+  const groups = require('../sideD/groups');
+  let model = groups.read();
+  if (!model) {
+    try {
+      const qp = process.env.QP_URL || 'http://127.0.0.1:8765';
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 60000);
+      try {
+        await fetch(`${qp}/api/oneil/groups`, { signal: ctl.signal });
+      } finally { clearTimeout(timer); }
+      model = groups.read();
+    } catch { /* qp down — the honest answer below */ }
+  }
+  if (!model) {
+    return res.json({
+      ok: false,
+      reason: 'not built yet',
+      detail: 'qp ranks the groups from the industry map the tools write as '
+        + 'they scan. Run a scan, then GET /api/oneil/groups?refresh=1 on qp.',
+      map: require('../sideA/industryMap').stats(),
+    });
+  }
+  res.json({ ok: model.ok !== false, ...model, map: require('../sideA/industryMap').stats() });
+});
+
 module.exports = router;

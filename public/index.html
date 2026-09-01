@@ -1121,6 +1121,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <tbody id="sector-tbody"><tr><td colspan="8" class="loading">Loading…</td></tr></tbody>
       </table>
     </div>
+    <!-- ONE LEVEL FINER THAN THE HEATMAP ABOVE. That is 15 sector ETFs; this
+         is the industry group, which is where O'Neil says the leadership
+         actually is — 37% of a stock's move against the sector's 12%. -->
+    <div id="group-table" style="margin-top:18px"></div>
   </div>
 
   <!-- ═══════════════ SHORTLIST TAB ═══════════════ -->
@@ -3581,6 +3585,7 @@ function buildCard(row) {
     <div class="card-section">
       <div class="section-title">Market Context</div>
       ${oneilCardBlock(row.ticker)}
+      ${groupCardBlock(row.ticker)}
       <div class="ctx-row"><span class="ctx-label">Regime</span>${regimeHTML}</div>
       <div class="ctx-row"><span class="ctx-label">Long term</span><span class="ctx-val ${biasCls(ctx.longTerm)}">${ctx.longTerm||'—'}</span></div>
       <div class="ctx-row"><span class="ctx-label">Mid term</span><span class="ctx-val ${biasCls(ctx.midTerm)}">${ctx.midTerm||'—'}</span></div>
@@ -3820,33 +3825,82 @@ const DEFS = {
     what: "The confirmation that a rally attempt is a real bottom. Until one "
       + "appears, a market that has fallen is still in a correction however "
       + "much it has bounced.",
-    how: "Day 1 of a rally attempt = the first UP close after the low.\n"
+    how: "Day 1 = the session after the LOWEST CLOSE of the correction.\n"
       + "On day 4 or later:\n"
       + "  gain >= +1.7%\n"
       + "  AND volume > the prior session\n"
-      + "  AND volume > the index's own 50-day average\n"
-      + "Expected on days 4-7; days 8-11 are flagged LATE.",
-    not: "Not any strong up day. THE DAY COUNT IS THE FILTER — bounces in the "
-      + "first three days are the norm inside downtrends. And the volume test "
-      + "is two tests: heavier than one quiet prior day is not institutional "
-      + "buying.",
+      + "Expected on days 4-7; 8-11 flagged LATE, beyond that VERY LATE.",
+    not: "Not any strong up day. THE DAY COUNT IS THE FILTER — days 1, 2 and "
+      + "normally 3 are ignored entirely, because early bounces off a bottom "
+      + "fail often enough that the wait is the whole point. And the volume "
+      + "test is ONE comparison, against the prior session: requiring the "
+      + "50-day average too is a stricter variant, not the published rule.",
     src: "+1.7% is O'Neil's LAST published figure (The Successful Investor). He "
       + "set 1% in the early editions and 1.5% in How to Make Money in Stocks, "
       + "then raised it once program trading made 1% days ordinary.",
   },
   rally_attempt: {
-    title: 'Rally attempt',
-    what: "The market has fallen and is trying to bounce. Day 1 is the first up "
-      + "close after the low. It resets if the low is undercut before a "
-      + "follow-through appears.",
-    how: "Counted in sessions from the first up close off the correction low. "
-      + "The count exists because the follow-through rule is measured against "
-      + "it — day 4 is the earliest a bottom can be confirmed.",
-    not: "NOT a fourth market status. IBD publishes exactly three, and a rally "
+    title: 'Rally attempt · the day count',
+    what: "The market has fallen and is trying to bounce. The count runs from "
+      + "the ABSOLUTE BOTTOM of this correction — which means the lowest "
+      + "CLOSING price of the cycle, not zero; an index cannot reach zero. "
+      + "Day 1 is the trading session immediately after that lowest close, "
+      + "whether that session is up or down.",
+    how: "  anchor    the lowest CLOSE of this correction\n"
+      + "  Day 1     the session immediately after it\n"
+      + "  days 1-3  ignored entirely — early bounces off a bottom fail often\n"
+      + "  day 4+    watched for a follow-through\n\n"
+      + "THE RESET: a new lower CLOSE is a new bottom, so the anchor moves\n"
+      + "there and the count starts again at day 1.",
+    not: "NOT a fourth market status — IBD publishes exactly three, and an "
       + "attempt happens INSIDE 'Market in correction'. Showing it as its own "
       + "status would read as an improvement on a correction, which is exactly "
-      + "backwards: a rally attempt is a correction, plus hope.",
-    src: "O'Neil.",
+      + "backwards: an attempt IS a correction, plus hope. And the anchor is "
+      + "not an intraday low: a wick below the previous low that CLOSES above "
+      + "it does not move the bottom or restart the count.",
+    src: "O'Neil's CAN SLIM workshop, January 2010.",
+  },
+  group_rank: {
+    title: 'Industry group rank',
+    what: "Where this stock's industry group ranks against every other group, "
+      + "by how strong its members are. 1 is the best. O'Neil published the "
+      + "arithmetic: 37% of a stock's price move is attributed to its industry "
+      + "group and another 12% to its sector — roughly half the move is not "
+      + "about the company.",
+    how: "Every mapped stock gets its RS Rating. Stocks are bundled by industry,\n"
+      + "each group is scored on the MEDIAN member rating, and the groups are\n"
+      + "ranked on that.\n\n"
+      + "  median, not mean   one 99 among laggards is one stock's story, and\n"
+      + "                     a mean lets that name carry the whole group\n"
+      + "  3+ members         two stocks are not an industry\n\n"
+      + "  rank 63 of 197  =  68th percentile  =  B+\n"
+      + "One fact, three forms. 1 - 63/197 = 68%.",
+    not: "Not the SECTOR. A sector is 15 ETFs and far too coarse — 'Technology "
+      + "is strong' says nothing about which of four hundred names to own. And "
+      + "the rank is NOT the percentile: a rank counts up from best, a "
+      + "percentile counts down, so a bare number is excellent as one and "
+      + "mediocre as the other. That is why the divisor is always printed. "
+      + "These are also OUR groups, not IBD's — IBD's 197-way split is "
+      + "proprietary.",
+    src: 'Our industry map, built from the label the scanner returns on every '
+      + 'card, ranked against qp\'s whole-market RS.',
+  },
+  rs_in_group: {
+    title: 'Rank inside its own group',
+    what: "Where this stock's RS Rating ranks against ONLY the other members of "
+      + "its industry group. 'RS 1 of 13' means it is the strongest of the "
+      + "thirteen. O'Neil buys the #1 or #2 name in a leading group — never the "
+      + "cheapest name in it.",
+    how: "Take every mapped member of this group, sort by RS Rating, and read\n"
+      + "off this stock's position. The count is the group's member count, so\n"
+      + "'1 of 13' and '1 of 3' are visibly different claims.",
+    not: "Not the RS Rating. A stock can be RS 95 — top 5% of the entire market "
+      + "— and still be 8 of 13 inside its own group, which means twelve better "
+      + "expressions of the same theme are on the screen beside it. This is the "
+      + "check O'Neil is strictest about and nothing in this system showed it "
+      + "before.",
+    src: 'Computed from the same ratings as the group rank. Tap ⤢ for the '
+      + 'strongest names in the group.',
   },
   held_up: {
     title: 'On the distribution days',
@@ -3999,6 +4053,125 @@ function oneilDates(ticker) {
   document.getElementById('def-overlay').classList.add('open');
 }
 
+/* ─────────── L, ON EVERY CARD ──────────────────────────────────────────
+   O'Neil published the arithmetic: 37% of a stock's move is its industry
+   group, 12% its sector. Half the move is not about the company.
+
+   TWO facts, and both matter — is the group strong, and is this stock the
+   leader inside it. He buys the #1 or #2 name in a top group, never the
+   cheapest name in it, and "RS 1 of 13" is what makes that checkable. A stock
+   can be RS 95 market-wide and 8 of 13 in its own group: the twelfth-best way
+   to own the same theme. */
+let GROUPS_MODEL = null;
+
+async function loadGroups() {
+  try {
+    const r = await fetch('/api/market/groups');
+    GROUPS_MODEL = await r.json();
+    renderGroupTable(GROUPS_MODEL);
+  } catch { /* the cards and the tab render without it */ }
+}
+
+function groupCardBlock(ticker) {
+  const m = GROUPS_MODEL;
+  if (!m || !m.ok) return '';
+  const s = (m.stocks || {})[String(ticker).toUpperCase()];
+  if (!s) return '';
+  const g = (m.groups || []).find(x => x.group === s.group);
+
+  // NEVER A BARE RANK. `63 of 197` — a rank counts up from best and a
+  // percentile counts down, so "63" alone is excellent as one and mediocre as
+  // the other. The divisor also moves: IBD went from 197 groups to 145.
+  const rank = `${s.group_rank} of ${s.group_of}`;
+  const pct = s.group_pct != null ? ` · ${s.group_pct} ${esc(s.group_letter || '')}` : '';
+
+  // THE ONE O'NEIL IS STRICTEST ABOUT. Leader or laggard inside the theme.
+  const lead = s.rs_in_group === 1 ? 'bias-bull' : s.rs_in_group <= 2 ? 'bias-bull' : '';
+
+  let html = `<div class="ctx-row"><span class="ctx-label">Group (L)${info('group_rank')}</span>
+    <span class="ctx-val">${esc(s.group || '')} · <b>${rank}</b>${pct}
+      ${g && g.rotation && g.rotation !== 'flat'
+        ? `<span class="${g.rotation === 'into' ? 'bias-bull' : 'bias-bear'}"
+             title="rank ${g.rank_3mo} of ${g.of_3mo} three months ago">${
+             g.rotation === 'into' ? '▲ into' : '▼ out of'}</span>` : ''}
+    </span></div>
+    <div class="ctx-row"><span class="ctx-label">In its group${info('rs_in_group')}</span>
+      <span class="ctx-val"><b class="${lead}">RS ${s.rs_in_group} of ${s.members}</b>
+        <span class="chart-expand" onclick="groupLeaders('${esc(s.group)}')"
+              title="the leaders in this group">⤢</span></span></div>`;
+  return html;
+}
+
+// THE LEADERS, BY NAME. "Top RS 99" is a number; a list of symbols is the
+// shortlist O'Neil would actually buy from — and it is how you find out you
+// are looking at the wrong name in the right theme.
+function groupLeaders(name) {
+  const g = (GROUPS_MODEL && GROUPS_MODEL.groups || []).find(x => x.group === name);
+  if (!g) return;
+  document.getElementById('def-title').textContent = name;
+  document.getElementById('def-body').innerHTML = `
+    <div class="def-sec"><div class="def-sec-title">This group</div>
+      <div class="def-sec-body">Rank <b>${g.rank} of ${g.of}</b>${
+        g.pct != null ? ` · ${g.pct} percentile · ${esc(g.letter || '')}` : ''} ·
+        ${g.members} members · median RS ${g.median_rs} ·
+        ${Math.round((g.share_over_80 || 0) * 100)}% of them over RS 80
+        ${g.rank_3mo != null ? `<br>Three months ago: rank ${g.rank_3mo} of ${g.of_3mo}
+          — <b>${esc(g.rotation)}</b>` : ''}</div></div>
+    <div class="def-sec"><div class="def-sec-title">Strongest members</div>
+      <div class="oneil-dd-wrap"><table class="oneil-dd">
+        <thead><tr><th>#</th><th>Symbol</th><th>RS</th></tr></thead>
+        <tbody>${(g.leaders || []).map((l, i) => `<tr><td>${i + 1}</td>
+          <td><b>${esc(l.symbol)}</b></td><td>${l.rs}</td></tr>`).join('')}</tbody>
+      </table></div></div>
+    <div class="def-sec def-src">${esc((GROUPS_MODEL && GROUPS_MODEL.limit_note) || '')}</div>`;
+  document.getElementById('def-overlay').classList.add('open');
+}
+
+// The GROUP table on the market tab. The sector heatmap above it is 15 ETFs —
+// the coarse level. This is the one O'Neil trades.
+function renderGroupTable(m) {
+  const el = document.getElementById('group-table');
+  if (!el) return;
+  if (!m || !m.ok) {
+    el.innerHTML = `<div class="oneil-none">Group ranks not built yet.
+      ${m && m.detail ? esc(m.detail) : ''}
+      ${m && m.map ? ` (${m.map.symbols} symbols, ${m.map.industries} industries mapped so far)` : ''}</div>`;
+    return;
+  }
+  const gs = m.groups || [];
+  const top = gs.slice(0, 20);
+  const bottom = gs.slice(-10);
+  const row = g => `<tr>
+    <td><b>${g.rank} of ${g.of}</b></td>
+    <td>${esc(g.group)}</td>
+    <td>${g.pct != null ? g.pct + ' ' + esc(g.letter || '') : '—'}</td>
+    <td>${g.members}</td>
+    <td>${g.median_rs}</td>
+    <td>${Math.round((g.share_over_80 || 0) * 100)}%</td>
+    <td class="${g.rotation === 'into' ? 'pos' : g.rotation === 'out of' ? 'neg' : ''}">${
+      g.rank_3mo != null ? `${g.rank_3mo} → ${g.rank}` : '—'}</td>
+    <td>${(g.leaders || []).slice(0, 4).map(l => esc(l.symbol) + ' ' + l.rs).join(' · ')}</td>
+  </tr>`;
+  el.innerHTML = `
+    <div class="heatmap-title">Industry groups${info('group_rank')}</div>
+    <div class="oneil-none" style="padding-bottom:8px">${esc(m.limit_note || '')}
+      ${m.map ? `<br>${m.map.symbols} symbols across ${m.map.industries} industries mapped;
+        ${m.total_groups} groups have the ${m.min_members}+ members needed to rank.` : ''}</div>
+    <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
+      <table class="heatmap-table">
+        <thead><tr><th>Rank</th><th>Group</th><th>Pct</th><th>Members</th>
+          <th>Median RS</th><th>Over 80</th><th>3mo</th><th>Leaders</th></tr></thead>
+        <tbody>
+          ${top.map(row).join('')}
+          ${bottom.length && gs.length > 30
+            ? `<tr><td colspan="8" style="color:var(--text3);font-size:11px;padding:8px 10px">
+                 …${gs.length - 30} groups between… then the weakest ten:</td></tr>` : ''}
+          ${gs.length > 30 ? bottom.map(row).join('') : ''}
+        </tbody>
+      </table>
+    </div>`;
+}
+
 /* ─────────── O'NEIL'S MARKET MODEL, on the market tab ──────────────── */
 let ONEIL_MODEL = null;
 async function loadOneil() {
@@ -4095,6 +4268,7 @@ async function loadMarket() {
   // them — which the first version of this did — meant one failing TradingView
   // request silently removed the market model from the page.
   loadOneil();
+  loadGroups();
   try {
     const r = await fetch('/api/market/snapshot');
     marketSnapshot = await r.json();

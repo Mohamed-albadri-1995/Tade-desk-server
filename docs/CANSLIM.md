@@ -70,6 +70,22 @@ AND volume > prior_volume                 on higher volume
 AND the market is in a confirmed uptrend  (see below)
 ```
 
+**TWO FORMS, AND THEY DO NOT CONFLICT.** The workshop states this plainly —
+*"closes LOWER in price than the prior session while trading volume
+increases"* — with no percentage at all. IBD's **0.2%** is the operational
+floor on that same rule, and it is there because without it roughly a quarter
+of all sessions qualify and the 5–6 cluster fires constantly. The floor is a
+named constant: **set it to 0 for O'Neil's plain form.**
+
+**THE WINDOW, likewise.** The workshop gives the cluster as **5–6 days within
+5–6 weeks**, which is 25–30 sessions. **25** is the tight end of his own range
+and IBD's published figure, so it is the default.
+
+**ONE INDEX IS ENOUGH.** The workshop: *"You only need one major market index
+to hit this distribution threshold to shift the market status to a
+downtrend."* That is exactly why the published status here is the **worse** of
+the S&P 500 and the Nasdaq rather than a blend of the two.
+
 **The uptrend condition matters and is widely dropped.** During a correction or
 a rally attempt there is no established uptrend to distribute *from*, so a heavy
 down day is not added to the count. A count that ignores this runs up during
@@ -132,9 +148,21 @@ divergence.
 
 ### 2.4 Rally attempt and follow-through day
 
+**CORRECTED FROM THE WORKSHOP (O'Neil, January 2010).** The first version of
+this section anchored the count on "the first UP close after the low". That is
+a different anchor and therefore a different day number on every signal.
+
 ```
-Day 1 of a rally attempt = the first UP close after a correction low
-                            (the low itself is day 0)
+The ABSOLUTE MARKET BOTTOM = the LOWEST CLOSING PRICE of this correction
+                             cycle. It never means zero — an index cannot
+                             reach zero — it means the lowest local close
+                             before the recovery begins.
+
+Day 1 = the trading session IMMEDIATELY FOLLOWING that lowest close,
+        whether that session is up or down.
+
+Days 1, 2 and normally 3 are ignored ENTIRELY: early bounces off a bottom
+fail often enough that the wait is the whole filter.
 
 Follow-through day       = on day 4 or later of that rally attempt:
                              index gains ≥ 1.7%
@@ -176,6 +204,14 @@ one.
 
 - A follow-through **before day 4** is explicitly *not* one. Bounces in the
   first three days are the norm inside downtrends; the wait is the filter.
+**THE RESET IS THE SAME FACT, NOT A SECOND RULE.** A new lower **close** *is* a
+new bottom, so the anchor moves there and the count starts again at day 1.
+
+And the anchor is a **close**, not an intraday low. A wick below the previous
+low that *closes above it* does not move the bottom and does not restart the
+count — the first version reset on the intraday low, which is a different bar
+and fired on days the market never actually closed through.
+
 - A follow-through **fails** if the index subsequently undercuts the rally
   low. O'Neil is clear that not every FTD works — roughly a quarter fail —
   but that no major bottom has occurred *without* one. It is a **necessary,
@@ -1012,6 +1048,7 @@ the CANSLIM panel (§11.3) · `NEWS` = the card's existing News section ·
 | M5 | The three statuses: confirmed uptrend / under pressure / correction | MKT + CTX | derived | §2.1, §2.3 | 1 |
 | M6 | Rally attempt — the internal 4th state, day 1 = first up close off the low | MKT | derived | §2.4 | 1 |
 | M7 | **Follow-through day** — +1.7%, day 4+, volume **> the prior session** (the whole test). Days 8–11 flagged late, beyond that very late — flagged, never refused | MKT | derived | §2.4, §5 | 1 |
+| M6b | **The anchor** — the lowest **CLOSE** of the correction; day 1 is the session after it; a new lower close moves it and restarts the count | MKT | derived | §15.1 | 1 |
 | M8 | FTD failure caveat — ~1 in 4 fail; necessary, not sufficient | MKT | text | §2.4 | 1 |
 | M9 | **Dated distribution-day table** — every live day with date, index, %, vol ratio, expiry | MKT | derived | §8 | 1 |
 | M10 | **Rules-in-use line** printed beside any signal that fires | MKT | constants | §5, §8 | 1 |
@@ -1404,3 +1441,56 @@ every stock on the page.
 - **It says when there are none.** In a confirmed uptrend with zero
   distribution days there is nothing to hold up through, and the block says
   exactly that rather than printing `0 of 0` or a blank.
+
+
+---
+
+## 15. From the workshop (O'Neil, January 2010) — what it changed
+
+Three corrections to this document, all in the counting, plus one section that
+is still to build.
+
+### 15.1 The anchor was wrong
+
+| | Was | Is |
+|---|---|---|
+| The bottom | the correction low | the **lowest CLOSE** of the cycle |
+| Day 1 | the first **up** close after it | the session **immediately after** the lowest close, up or down |
+| The reset | the **intraday low** undercut | a **new lower close** — which *is* a new bottom |
+
+The reset is the part worth being careful about, because the two versions fire
+on different bars. A wick below the previous low that closes above it does not
+move the bottom; the old rule restarted a count the market had never broken.
+And the two are not separate rules at all: the anchor is "the lowest close so
+far", so a lower close moves it and the count naturally starts again.
+
+### 15.2 Two forms of the same rule, both recorded
+
+Neither is a conflict, and both are now in the model with their provenance:
+
+- **Distribution day** — the workshop says plainly *"closes lower on higher
+  volume"*. IBD's **−0.2%** is the operational floor on that. Configurable;
+  zero gives the plain form.
+- **The window** — the workshop says **5–6 weeks**; IBD says **25 sessions**.
+  25 is the tight end of his own range.
+
+### 15.3 Still to build, from the workshop
+
+The base pattern, which is what N and the buy point actually rest on:
+
+| Phase | What to detect |
+|---|---|
+| **1 — Decline** | the correction, typically in **three waves** down |
+| **2 — Base support** | heavy volume with **no further price progress** — weeks where volume spikes or stays high while the price closes flat or tight. Institutional accumulation |
+| **3 — Handle** | a minor controlled drift down, or tight sideways action, near the **upper** part of the base, before the pivot |
+
+And the divergence test, which is the sharpest version of what §14 already
+computes per card:
+
+> While the index breaks to new lows, the stock **fails to make a new low** and
+> reverses up. Its **RS line makes higher highs and enters new high ground
+> BEFORE the price does.**
+
+§14's "held up on 4 of 5 distribution days" is the same idea measured on
+distribution days. The full version — RS line at a new high before price — is
+`L8` in the manifest and belongs with base detection.

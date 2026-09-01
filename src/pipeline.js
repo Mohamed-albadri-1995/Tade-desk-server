@@ -160,6 +160,17 @@ async function runFullScan() {
     // publishes its matches; every tool reads that list and tags any of its own
     // candidates that appear on it. A label only — nothing here changes which
     // stocks were found, so one tool still cannot influence another's results.
+    // THE INDUSTRY MAP. qp holds prices for the whole US market and no industry
+    // labels; this tool has an industry string on every row and no market-wide
+    // prices. Group ranking needs both, so the labels flow up: every scan
+    // records what it saw, qp ranks groups against the full-universe RS it
+    // already computes. Nothing extra is fetched — this was already on every
+    // row and was being thrown away. See src/sideA/industryMap.js.
+    await stageWrapSoft(report, 'industryMap', async () => {
+      const n = require('./sideA/industryMap').record(r0.getAll());
+      return { recorded: n };
+    });
+
     await stageWrapSoft(report, 'canslim', async () => {
       const canslim = require('./sideA/canslim');
       if (config.toolId === CANSLIM_TOOL) {

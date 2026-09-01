@@ -255,26 +255,82 @@ ok('...and the 50-day comparison is still REPORTED, it just does not decide',
 ok('the model says so in its own thresholds, so nobody re-tightens it',
    'not the published rule' in oneil.THRESHOLDS['ftd_volume']['why'])
 
-# UNDERCUT. Without the reset the day-count keeps rising through a continuing
-# decline and a bounce on day 40 of a bear market reads as a bottom.
+# ── THE ANCHOR, AND THE RESET ────────────────────────────────────────────
+# From the workshop, and this model had it wrong. O'Neil's "absolute market
+# bottom" is the LOWEST CLOSING PRICE of the correction cycle — it never means
+# zero, it means the lowest local close — and Day 1 is the trading session
+# IMMEDIATELY FOLLOWING it, up or down.
+#
+# This model counted day 1 as "the first UP close after the low", which is a
+# different anchor and therefore a different day number on every signal.
+rows = []
+p = 100.0
+for _ in range(80):
+    p *= 0.997
+    rows.append((p, 1_000_000))
+anchor = p                                  # the lowest CLOSE
+rows.append((anchor * 1.010, 1_000_000))    # day 1
+rows.append((anchor * 1.004, 1_000_000))    # day 2 — DOWN on the day, and it
+                                            #   is still day 2: the count runs
+                                            #   from the LOW, not from the last
+                                            #   up close
+rows.append((anchor * 1.006, 1_000_000))    # day 3
+rows.append((anchor * 1.030, 4_000_000))    # day 4 — the follow-through
+r = oneil.index_pass(bars(rows), 'T')
+ok('a DOWN session inside the count does not restart it, because the count '
+   'runs from the lowest close', r['ftd'] is not None and r['ftd']['day'] == 4,
+   r['ftd'])
+ok('...and the follow-through names the low it was counted from',
+   r['ftd'] and r['ftd'].get('from_low'), r['ftd'])
+
+# THE RESET IS THE SAME FACT, NOT A SECOND RULE: a new lower close IS a new
+# bottom, so the anchor moves there and the count starts again. Without it the
+# day-count keeps rising through a continuing decline and a bounce on day 40 of
+# a bear market reads as a bottom.
 rows = []
 p = 100.0
 for _ in range(80):
     p *= 0.997
     rows.append((p, 1_000_000))
 low = p
-rows.append((p * 1.003, 1_000_000))        # day 1
-rows.append((p * 1.004, 1_000_000))        # day 2
-rows.append((low * 0.97, 2_000_000))       # undercuts the low — attempt dead
-rows.append((low * 0.98, 1_000_000))       # new day 1
-rows.append((low * 0.985, 1_000_000))
-rows.append((low * 0.99, 1_000_000))
-rows.append((low * 0.99 * 1.025, 4_000_000))   # day 4 of the NEW attempt
+rows.append((low * 1.003, 1_000_000))      # day 1
+rows.append((low * 1.004, 1_000_000))      # day 2
+rows.append((low * 0.97, 2_000_000))       # a NEW LOWER CLOSE — anchor moves
+newlow = low * 0.97
+rows.append((newlow * 1.002, 1_000_000))   # day 1 again
+rows.append((newlow * 1.004, 1_000_000))   # day 2
+rows.append((newlow * 1.006, 1_000_000))   # day 3
+rows.append((newlow * 1.032, 4_000_000))   # day 4 of the NEW count
 r = oneil.index_pass(bars(rows), 'T')
-ok('undercutting the low resets the attempt, and the count restarts',
+ok('a new lower CLOSE moves the bottom and restarts the count at day 1',
    r['ftd'] is not None and r['ftd']['day'] == 4, r['ftd'])
-ok('...and the reset is recorded, not silent',
-   any(e['type'] == 'rally_reset' for e in r['events']))
+ok('...and the restart is recorded, never silent — a day number that jumped '
+   'without explanation is the most confusing thing this model can print',
+   any(e['type'] == 'anchor_moved' for e in r['events']),
+   [e['type'] for e in r['events'][-4:]])
+
+# THE ANCHOR IS A CLOSE, NOT AN INTRADAY LOW, and the difference is a real bar.
+# A wick through the prior low that CLOSES above it does not move the bottom —
+# the old version reset on it and restarted a count the market never broke.
+ohlc = []
+p = 100.0
+for _ in range(80):
+    p *= 0.997
+    ohlc.append((p, p * 1.004, p * 0.996, p, 1_000_000))
+a = p                                       # the anchor: the lowest CLOSE
+# Day 1 wicks WELL below the anchor intraday and closes above it. The old
+# version reset here and started counting again from a bottom the market never
+# actually made.
+ohlc.append((a, a * 1.01, a * 0.90, a * 1.008, 1_000_000))
+ohlc.append((a * 1.008, a * 1.02, a * 1.005, a * 1.012, 1_000_000))   # day 2
+ohlc.append((a * 1.012, a * 1.02, a * 1.008, a * 1.016, 1_000_000))   # day 3
+ohlc.append((a * 1.016, a * 1.05, a * 1.015, a * 1.046, 4_000_000))   # day 4
+r = oneil.index_pass(bars(ohlc), 'T')
+ok('a wick BELOW the low that CLOSES above it does not move the anchor',
+   r['ftd'] is not None and r['ftd']['day'] == 4, r['ftd'])
+ok('...so nothing was reset by it',
+   not any(e['type'] == 'anchor_moved' for e in r['events']),
+   [e['type'] for e in r['events'][-3:]])
 
 # A late follow-through is FLAGGED, not refused — he allows day 10-11.
 ok('day 4-7 is on time', attempt(6)['ftd']['timing'] == 'on time')
@@ -332,8 +388,14 @@ ok('...and the reason says the correction still stands',
 ok('only the three published labels can ever be a status',
    set(oneil.STATUS_LABEL) == {'confirmed_uptrend', 'uptrend_under_pressure',
                                'market_in_correction'})
-ok('...while the machine still tracks the internal state it needs',
-   m6['indexes']['^GSPC']['state'] == 'rally_attempt')
+# There is no separate 'rally_attempt' STATE any more, and that is the point:
+# an attempt IS the correction, counted from its lowest close. The machine
+# still tracks the day number, which is what the follow-through is measured
+# against.
+ok('...while the machine still tracks the day count it needs',
+   m6['indexes']['^GSPC']['state'] == 'correction'
+   and m6['indexes']['^GSPC']['rally_day'] >= 1,
+   (m6['indexes']['^GSPC']['state'], m6['indexes']['^GSPC']['rally_day']))
 
 # COUNTED PER INDEX, NEVER POOLED. They diverge often and the divergence says
 # which half of the market is being sold. Pooling would double-count a day the
@@ -360,6 +422,22 @@ ok('the rules in use are published with the status', '1.7%' in m5['rules_in_use'
    and '25 sessions' in m5['rules_in_use'], m5['rules_in_use'])
 ok('...and every threshold carries its provenance',
    all('source' in t and 'why' in t for t in m5['thresholds'].values()))
+# THE WORKSHOP'S OWN FORMS ARE RECORDED, so a later reader does not "fix" the
+# model back toward one of them without knowing the other exists.
+ok('the plain "closes lower" form of a distribution day is recorded beside '
+   "IBD's 0.2% floor", 'closes LOWER' in m5['thresholds']['dd_drop_pct']['why'])
+ok('...and it is configurable, so the plain form is reachable',
+   'set it to 0' in m5['thresholds']['dd_drop_pct']['why'])
+ok('the 5-6 WEEK cluster window is recorded beside the 25 sessions',
+   '5-6 WEEKS' in m5['thresholds']['dd_window']['why'])
+ok('ONE index reaching the cluster is enough, and that is why the status is '
+   'the worse of the two',
+   'worse of' in m5['thresholds']['correction_dd_count']['why'])
+ok('the ANCHOR is published as its own threshold, not buried in the code',
+   'ftd_anchor' in m5['thresholds'])
+ok('...and it says the bottom is a CLOSE, and never means zero',
+   'never' in m5['thresholds']['ftd_anchor']['why']
+   and 'zero' in m5['thresholds']['ftd_anchor']['why'])
 ok("...naming O'Neil for the follow-through gain, not us",
    "O'Neil" in m5['thresholds']['ftd_gain_pct']['source'])
 ok('the fuzzy edge is admitted rather than hidden',

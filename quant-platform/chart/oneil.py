@@ -57,14 +57,23 @@ THRESHOLDS = {
     'dd_drop_pct': {
         'value': 0.002,
         'label': '−0.2%',
-        'why': "a session closing down 0.2% or more counts; smaller is drift",
-        'source': 'IBD, consistent across every published description',
+        'why': ('a session closing down 0.2% or more counts; smaller is drift. '
+                'NOTE THE TWO FORMS, and they do not conflict: the workshop '
+                'states it plainly as "closes LOWER than the prior session on '
+                'higher volume", with no percentage. 0.2% is IBD\'s '
+                'operational floor on that same rule — without it roughly a '
+                'quarter of all sessions qualify and the 5-6 cluster fires '
+                'constantly. Configurable; set it to 0 for the plain form.'),
+        'source': "IBD's published floor on O'Neil's plain rule",
     },
     'dd_window': {
         'value': 25,
         'label': '25 sessions',
-        'why': 'the rolling window a distribution day stays live in',
-        'source': 'IBD, consistent',
+        'why': ('the rolling window a distribution day stays live in. The '
+                'workshop states the cluster as 5-6 days within 5-6 WEEKS, '
+                'which is 25-30 sessions; 25 is the tight end of his own '
+                'range and IBD\'s published figure, so it is the default.'),
+        'source': "IBD 25 sessions; O'Neil's workshop 5-6 weeks",
     },
     'dd_recovery_pct': {
         'value': 0.05,
@@ -84,10 +93,12 @@ THRESHOLDS = {
     'ftd_day_min': {
         'value': 4,
         'label': 'day 4',
-        'why': ('the earliest a follow-through can occur. Bounces in the first '
-                'three days are the norm inside downtrends; the wait IS the '
-                'filter'),
-        'source': "O'Neil",
+        'why': ('the earliest a follow-through can occur. Days 1, 2 and '
+                'normally 3 are ignored ENTIRELY — early bounces off a bottom '
+                'fail often enough that the wait IS the filter. Day 1 is the '
+                'session immediately after the lowest CLOSE of the '
+                'correction, up or down; see the anchor note in index_pass.'),
+        'source': "O'Neil's workshop, January 2010",
     },
     'ftd_day_max': {
         'value': 7,
@@ -103,6 +114,20 @@ THRESHOLDS = {
                 'confirmed would be a state the market cannot leave, and it '
                 'would sit in correction through an entire advance'),
         'source': "O'Neil — occasionally as late as day 10 or 11",
+    },
+    'ftd_anchor': {
+        'value': 'the lowest CLOSE of the correction',
+        'label': 'lowest closing low',
+        'why': ('what the day count runs from. "Absolute market bottom" never '
+                'means zero — an index cannot reach zero — it means the lowest '
+                'local CLOSING price of this correction cycle, and Day 1 is '
+                'the trading session immediately following it. A new lower '
+                'close IS a new bottom, so the anchor moves there and the '
+                'count restarts. An earlier version counted from the first UP '
+                'close and reset on the intraday LOW, which is a different '
+                'bar: a wick through the low that closed above it restarted a '
+                'count the market had not broken.'),
+        'source': "O'Neil's workshop, January 2010",
     },
     'ftd_volume': {
         'value': 'above the prior session',
@@ -128,8 +153,12 @@ THRESHOLDS = {
     'correction_dd_count': {
         'value': 6,
         'label': '6 live',
-        'why': 'the count at which the uptrend is treated as broken',
-        'source': 'IBD — 5–6+ in 25 sessions is the published trigger band',
+        'why': ('the count at which the uptrend is treated as broken. The '
+                'workshop: "it took 3 or 4 days historically, modern markets '
+                'require 5 to 6 clustered in 5-6 weeks", and ONE major index '
+                'reaching it is enough — which is why the status here is the '
+                'worse of the S&P 500 and the Nasdaq rather than a blend.'),
+        'source': "O'Neil's workshop and IBD both give 5-6",
     },
     'pressure_dd_count': {
         'value': 5,
@@ -268,8 +297,12 @@ def index_pass(df: pd.DataFrame, name: str = '') -> dict:
     idx = d.index
 
     state = 'correction'          # conservative seed: nothing is confirmed yet
-    rally_low = float(d['low'].iloc[0]) if n else float('nan')
-    rally_low_date = idx[0] if n else None
+    # THE ANCHOR IS A CLOSING PRICE, not an intraday low. O'Neil's "absolute
+    # market bottom" is the lowest CLOSE of the correction cycle, and the day
+    # count runs from the session immediately after it.
+    anchor_close = float(d['close'].iloc[0]) if n else float('nan')
+    anchor_date = idx[0] if n else None
+    uptrend_from = anchor_close   # the close the current uptrend was confirmed off
     rally_day = 0
     ftd = None
     live: list[dict] = []         # distribution days still counting
@@ -328,7 +361,11 @@ def index_pass(df: pd.DataFrame, name: str = '') -> dict:
             # break of the 50-day average on heavy volume. Reconstructed as the
             # count reaching 6, or a decisive undercut of the rally low, which
             # is O'Neil's own "the uptrend has broken" and is not fuzzy at all.
-            broke_low = rally_low == rally_low and row['close'] < rally_low
+            # THE UPTREND BREAKS ON A CLOSE BELOW THE LOW IT STARTED FROM,
+            # and that low is a CLOSE too. Comparing a close against an
+            # intraday low mixes two different bars and fires on days the
+            # market never actually closed through.
+            broke_low = uptrend_from == uptrend_from and row['close'] < uptrend_from
             if len(live) >= _t('correction_dd_count') or broke_low:
                 events.append({
                     'type': 'correction',
@@ -338,8 +375,8 @@ def index_pass(df: pd.DataFrame, name: str = '') -> dict:
                             else f'{len(live)} distribution days live'),
                 })
                 state = 'correction'
-                rally_low = float(row['low'])
-                rally_low_date = when
+                anchor_close = float(row['close'])
+                anchor_date = when
                 rally_day = 0
                 live = []          # the count restarts with the next uptrend
             else:
@@ -348,53 +385,49 @@ def index_pass(df: pd.DataFrame, name: str = '') -> dict:
                          else 'confirmed_uptrend')
 
         elif state == 'correction':
-            if row['low'] < rally_low:
-                rally_low = float(row['low'])
-                rally_low_date = when
-            # Day 1 of a rally attempt is the first UP close after the low.
-            if row['close'] > d['close'].iloc[i - 1]:
-                state = 'rally_attempt'
-                rally_day = 1
-
-        elif state == 'rally_attempt':
-            rally_day += 1
-            if row['low'] < rally_low:
-                # UNDERCUT. The attempt is over and the low is now here; a new
-                # attempt needs a new first up close. Without this reset the
-                # day-count keeps rising through a continuing decline and a
-                # bounce on day 40 of a bear market reads as a bottom.
-                events.append({
-                    'type': 'rally_reset',
-                    'date': str(when.date() if hasattr(when, 'date') else when),
-                    'index': name,
-                    'why': 'the rally low was undercut before a follow-through',
-                })
-                state = 'correction'
-                rally_low = float(row['low'])
-                rally_low_date = when
+            # THE ANCHOR IS THE LOWEST CLOSING PRICE OF THE CORRECTION, and
+            # the count is simply the sessions since it. Corrected from the
+            # workshop: this model counted day 1 as "the first UP close after
+            # the low", which is a different anchor and a different number.
+            #
+            # O'Neil's own framing: the absolute market bottom is the lowest
+            # CLOSING price of the correction cycle, and Day 1 is the trading
+            # session immediately following it — whether that session is up or
+            # not. "Absolute bottom" never means zero; it means the lowest
+            # local close before the recovery.
+            #
+            # THE RESET IS THE SAME FACT, NOT A SECOND RULE. A new lower close
+            # IS a new bottom, so the anchor moves and the count starts again
+            # from there. The old version reset on the intraday LOW being
+            # undercut, which is a different bar and fires on days the close
+            # never confirmed — a wick through the low restarted a count the
+            # market had not actually broken.
+            if row['close'] < anchor_close:
+                anchor_close = float(row['close'])
+                anchor_date = when
+                if rally_day:
+                    # Recorded, never silent: a count that restarted is the
+                    # single most confusing thing this model can do to somebody
+                    # reading the day number off the page.
+                    events.append({
+                        'type': 'anchor_moved',
+                        'date': str(when.date() if hasattr(when, 'date') else when),
+                        'index': name,
+                        'why': ('a new lower CLOSE — the bottom moved here, so '
+                                f'the count restarts (was day {rally_day})'),
+                    })
                 rally_day = 0
             else:
-                # THE FOLLOW-THROUGH. Three tests, and the third was missing
-                # from the first draft of the spec: volume above the PRIOR
-                # session AND above the index's own 50-day average. Heavier
-                # than one quiet day is not institutional buying.
-                # THE FOLLOW-THROUGH. Two tests, and the volume one is a
-                # comparison with the PRIOR SESSION — that is the whole of it.
-                #
-                # This model first also required volume above the index's own
-                # 50-day average, which was an invention rather than his rule,
-                # and the first live run showed exactly what it cost: the
-                # Nasdaq's August follow-through was blocked, the attempt ran
-                # to day 23 unconfirmed, and the model published "market in
-                # correction" through a rally the S&P had already confirmed.
-                # A rule that is stricter than the published one does not fail
-                # safe — it fails to the wrong answer, quietly.
-                #
-                # The 50-day comparison is still measured and reported, so the
-                # page can say how heavy the day was. It does not decide.
+                # Day 1 is the session after the lowest close. Days 1-3 are
+                # ignored entirely: early bounces off a bottom fail often
+                # enough that the wait IS the filter.
+                rally_day += 1
                 vol50 = row['vol50']
                 big_enough = row['ret'] >= _t('ftd_gain_pct')
                 over_prior = row['volume'] > row['vol_prev']
+                # Measured and reported, never a gate. Requiring it as well was
+                # an invention that cost a wrong answer on the first live run —
+                # see THRESHOLDS['ftd_volume'].
                 over_avg = bool(vol50 == vol50 and row['volume'] > vol50)
                 if rally_day >= _t('ftd_day_min') and big_enough and over_prior:
                     ftd = {
@@ -402,10 +435,11 @@ def index_pass(df: pd.DataFrame, name: str = '') -> dict:
                         'date': str(when.date() if hasattr(when, 'date') else when),
                         'index': name,
                         'day': rally_day,
+                        'from_low': str(anchor_date.date()
+                                        if hasattr(anchor_date, 'date') else anchor_date),
                         'gain_pct': round(float(row['ret']) * 100, 2),
                         'vol_ratio': (round(float(row['volume'] / row['vol_prev']), 2)
                                       if row['vol_prev'] else None),
-                        # Reported, never a gate — see ftd_volume above.
                         'vol_above_50d': over_avg,
                         'timing': ('on time' if rally_day <= _t('ftd_day_max')
                                    else 'late' if rally_day <= _t('ftd_day_late')
@@ -416,6 +450,7 @@ def index_pass(df: pd.DataFrame, name: str = '') -> dict:
                                       if not k.startswith('_')}})
                     state = 'confirmed_uptrend'
                     live = []      # a new uptrend starts with a clean count
+                    uptrend_from = anchor_close
                     rally_day = 0
 
     for dd in live:
@@ -425,13 +460,17 @@ def index_pass(df: pd.DataFrame, name: str = '') -> dict:
         'index': name,
         'state': state,                    # internal, includes rally_attempt
         'published': _PUBLISHED[state],    # one of IBD's three labels
-        'in_rally_attempt': state == 'rally_attempt',
+        # An attempt exists from the first session after the lowest close.
+        # There is no separate 'rally_attempt' state any more: it IS the
+        # correction, counted — which is what the workshop describes.
+        'in_rally_attempt': state == 'correction' and rally_day >= 1,
         'live': [{k: v for k, v in dd.items() if not k.startswith('_')}
                  for dd in sorted(live, key=lambda x: -x['_i'])],
         'count': len(live),
-        'rally_low': None if rally_low != rally_low else round(rally_low, 2),
-        'rally_low_date': (str(rally_low_date.date())
-                           if hasattr(rally_low_date, 'date') else None),
+        # The CLOSING low the count runs from, named for what it is.
+        'anchor_close': None if anchor_close != anchor_close else round(anchor_close, 2),
+        'anchor_date': (str(anchor_date.date())
+                        if hasattr(anchor_date, 'date') else None),
         'rally_day': rally_day,
         'ftd': {k: v for k, v in ftd.items() if not k.startswith('_')} if ftd else None,
         'sessions_since_ftd': (n - 1 - ftd['_i']) if ftd else None,
@@ -483,7 +522,8 @@ def market_model(frames: dict[str, pd.DataFrame]) -> dict:
             # is measured against, so it is worth showing; it is not an
             # improvement on a correction.
             because = (f"{worst['index']}: day {worst['rally_day']} of a rally "
-                       f"attempt off {worst['rally_low_date']} — no "
+                       f"attempt off the {worst['anchor_date']} closing low "
+                       f"— no "
                        f"follow-through yet, so the correction still stands")
         else:
             because = f"{worst['index']}: the uptrend has broken"
@@ -504,7 +544,11 @@ def market_model(frames: dict[str, pd.DataFrame]) -> dict:
 
     rally = next((
         {'index': v['index'], 'day': v['rally_day'],
-         'low': v['rally_low'], 'low_date': v['rally_low_date']}
+         'low': v['anchor_close'], 'low_date': v['anchor_date'],
+         # Named so nobody reads it as an intraday low: the anchor is the
+         # lowest CLOSE of the correction, and the count runs from the session
+         # after it.
+         'anchor': 'lowest close'}
         for v in per.values() if v['in_rally_attempt']), None)
 
     return {

@@ -393,6 +393,42 @@ def oneil_market(refresh: int = 0, days: int = 500, feed: str = 'yahoo'):
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/oneil/groups')
+def oneil_groups(refresh: int = 0):
+    """The L in CAN SLIM: group ranks, and each stock's rank inside its group.
+
+    O'Neil published the arithmetic — 37% of a stock's move is its industry
+    group, 12% its sector. The existing sector heatmap is the coarse level;
+    this is the one he actually trades.
+
+    Cached in `data/oneil-groups.json` with a 12-hour TTL, for the same reason
+    the market model is: nine tools read it, it is one ranking of one universe,
+    and computing it nine times is nine chances to disagree.
+    """
+    import datetime as _dt
+    from chart import groups, oplog
+    try:
+        if not refresh:
+            cached = groups.read_shared()
+            if cached:
+                try:
+                    built = _dt.datetime.fromisoformat(cached.get('built_at'))
+                    age_h = (_dt.datetime.now(_dt.timezone.utc) - built).total_seconds() / 3600
+                except Exception:                   # noqa: BLE001
+                    age_h = 1e9
+                if age_h < 12:
+                    return {'ok': cached.get('ok', False), 'cached': True,
+                            'age_hours': round(age_h, 1), **cached}
+        model = groups.build()
+        where = groups.write_shared(model)
+        oplog.record('oneil_groups', ok=model.get('ok'),
+                     total=model.get('total_groups'),
+                     mapped=model.get('mapped_symbols'), wrote=where)
+        return {'cached': False, 'wrote': where, **model}
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
 @app.get('/api/oneil/stock')
 def oneil_stock(symbols: str = '', feed: str = 'yahoo'):
     """What each of these stocks did on the live distribution days.
