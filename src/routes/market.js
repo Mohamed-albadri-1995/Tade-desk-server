@@ -165,8 +165,14 @@ router.get('/short-interest', async (req, res) => {
   const si = require('../sideC/shortInterest');
   const out = {};
   for (const t of symbols.slice(0, 10)) {
+    // EVERY SOURCE'S REASON, not just the verdict. The first version of this
+    // reported "no source answered" and nothing else, which left three very
+    // different problems — Yahoo's cookie wall, a moved FINRA file, and a
+    // stock with genuinely no reported short position — looking identical.
+    const diag = {};
     // eslint-disable-next-line no-await-in-loop
-    out[t.toUpperCase()] = (await si.lookup(t)) || 'no source answered';
+    const rec = await si.lookup(t, { diag });
+    out[t.toUpperCase()] = rec || { answered: false, tried: diag };
   }
   res.json({ ok: true, stocks: out });
 });

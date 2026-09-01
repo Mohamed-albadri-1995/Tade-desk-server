@@ -123,6 +123,42 @@ describe('the denominator is never fudged', () => {
   });
 });
 
+describe('Nasdaq, the third source', () => {
+  const NAS = {
+    data: {
+      shortInterestTable: {
+        rows: [
+          { settlementDate: '08/15/2026', interest: '20,000,000', daysToCover: '5.2' },
+          { settlementDate: '07/31/2026', interest: '18,000,000', daysToCover: '4.8' },
+        ],
+      },
+    },
+  };
+
+  test('the newest settlement row is the current figure', () => {
+    expect(si.parseNasdaq(NAS).sharesShort).toBe(20_000_000);
+    expect(si.parseNasdaq(NAS).asOf).toBe('08/15/2026');
+  });
+
+  test('commas and symbols are stripped, not parsed as NaN', () => {
+    expect(si.parseNasdaq(NAS).daysToCover).toBe(5.2);
+  });
+
+  test('the previous settlement gives the direction', () => {
+    expect(si.parseNasdaq(NAS).trend).toBe('rising');
+  });
+
+  test('it reports SHARES, like FINRA — a float still has to come from us', () => {
+    expect(si.parseNasdaq(NAS).basis).toBe('shares');
+    expect(si.parseNasdaq(NAS).shortFloat).toBeNull();
+  });
+
+  test('an empty table is null, not zero', () => {
+    expect(si.parseNasdaq({ data: { shortInterestTable: { rows: [] } } })).toBeNull();
+    expect(si.parseNasdaq({})).toBeNull();
+  });
+});
+
 describe('it can never be the reason a scan fails', () => {
   const fs = require('fs');
   const path = require('path');
@@ -135,8 +171,26 @@ describe('it can never be the reason a scan fails', () => {
     expect(pipeline).toMatch(/stageWrapSoft\(report, 'shortInterest'/);
   });
 
-  test('lookup swallows its own errors', () => {
-    expect(src).toMatch(/catch \{ rec = null; \}/);
+  test('lookup swallows its own errors and records the reason', () => {
+    expect(src).toMatch(/catch \(e\) \{ diag\.error/);
+    expect(src).toMatch(/rec = null;/);
+  });
+
+  test('a FAILURE is not cached, only an answer', () => {
+    // Caching a miss would mean a source that recovered five minutes later
+    // still reported nothing until tomorrow — and would make the probe
+    // useless for debugging exactly the thing it exists to debug.
+    expect(src).toContain('A CACHED FAILURE IS NOT CACHED');
+    expect(src).toMatch(/hit\.day === day && hit\.rec/);
+  });
+
+  test('every source records WHY it failed', () => {
+    // "No source answered" left three different problems looking identical:
+    // Yahoo's cookie wall, a moved FINRA file, and a stock with genuinely no
+    // reported short position.
+    expect(src).toMatch(/diag\.yahoo =/);
+    expect(src).toMatch(/diag\.nasdaq =/);
+    expect(src).toMatch(/diag\.finra =/);
   });
 
   test('only rows MISSING the field are looked up', () => {

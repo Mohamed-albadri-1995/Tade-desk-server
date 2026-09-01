@@ -15,14 +15,17 @@
  * redistributes that same file. So there is no question of which source is
  * "right" — only which one is reachable, and how it is denominated.
  *
- * TWO SOURCES, TRIED IN ORDER, because neither can be verified from a
- * development machine and both have failed for others before:
+ * THREE SOURCES, TRIED IN ORDER. None can be verified from a development
+ * machine, and the first attempt at this got nothing from any of them and
+ * could not say why — so each one now records its own reason for failing:
  *
  *   1. Yahoo quoteSummary. Gives shares short AND the percentage of float
- *      already computed, plus the prior month for a direction. It is the
- *      same FINRA data, and this repo already talks to Yahoo with working
- *      headers. Its risk is the cookie/crumb wall it puts up periodically.
- *   2. FINRA's own published file. Authoritative and needs no key, but gives
+ *      already computed, plus the prior month for a direction. It needs a
+ *      cookie and a crumb first; a bare request is 401 Invalid Cookie, which
+ *      is what the first version walked into.
+ *   2. Nasdaq. Free, no key, per symbol, and it returns the two-week history
+ *      so the direction comes with it. Gives SHARES.
+ *   3. FINRA's own published file. Authoritative and needs no key, but gives
  *      SHARES short — a percentage needs a float, which the scanner does
  *      supply on every row.
  *
@@ -163,23 +166,124 @@ function _etDay() {
   }).format(new Date());
 }
 
-async function fetchYahoo(ticker) {
+/*
+ * YAHOO NOW REQUIRES A COOKIE AND A CRUMB.
+ *
+ * A bare quoteSummary request returns 401 "Invalid Cookie" — which is why the
+ * first version of this got nothing from either source and could not say so.
+ * The handshake is three steps and is stable:
+ *
+ *   1. GET fc.yahoo.com — it sets the consent cookie and returns an error
+ *      page, which is fine; the cookie is the point.
+ *   2. GET /v1/test/getcrumb with that cookie — returns a short token.
+ *   3. Send both on the real request.
+ *
+ * Cached for the process: the crumb is tied to the cookie and both last for
+ * hours, so re-doing the dance per symbol would triple every lookup.
+ */
+let _yf = { cookie: null, crumb: null, at: 0 };
+
+async function yahooCrumb() {
+  const AGE = 6 * 3600 * 1000;
+  if (_yf.crumb && Date.now() - _yf.at < AGE) return _yf;
+  let cookie = null;
+  try {
+    const r = await axios.get('https://fc.yahoo.com/', {
+      headers: YF_HEADERS, timeout: 10000,
+      // It answers 404 and that is expected — the Set-Cookie header is what
+      // is being collected, so a non-2xx must not throw here.
+      validateStatus: () => true,
+      maxRedirects: 0,
+    });
+    const set = r.headers?.['set-cookie'];
+    if (set && set.length) cookie = set.map(c => c.split(';')[0]).join('; ');
+  } catch { /* fall through — some regions answer without a cookie */ }
+  let crumb = null;
+  try {
+    const r = await axios.get(
+      'https://query1.finance.yahoo.com/v1/test/getcrumb',
+      { headers: { ...YF_HEADERS, ...(cookie ? { Cookie: cookie } : {}) },
+        timeout: 10000, responseType: 'text' });
+    if (typeof r.data === 'string' && r.data.length && r.data.length < 64) {
+      crumb = r.data.trim();
+    }
+  } catch { /* no crumb — the request below will report the 401 honestly */ }
+  _yf = { cookie, crumb, at: Date.now() };
+  return _yf;
+}
+
+async function fetchYahoo(ticker, diag) {
+  const { cookie, crumb } = await yahooCrumb();
   for (const host of YF_HOSTS) {
     try {
       const r = await axios.get(
         `https://${host}/v10/finance/quoteSummary/${encodeURIComponent(ticker)}`,
-        { headers: YF_HEADERS, params: { modules: 'defaultKeyStatistics' },
+        { headers: { ...YF_HEADERS, ...(cookie ? { Cookie: cookie } : {}) },
+          params: { modules: 'defaultKeyStatistics', ...(crumb ? { crumb } : {}) },
           timeout: 12000 });
       const rec = parseYahoo(r.data);
       if (rec) return rec;
-    } catch { /* try the other host, then fall through to FINRA */ }
+      if (diag) diag.yahoo = `answered but no defaultKeyStatistics`;
+    } catch (e) {
+      if (diag) {
+        diag.yahoo = `${e.response?.status || ''} ${String(e.message).slice(0, 80)}`
+          + (crumb ? ' (crumb obtained)' : ' (NO crumb)');
+      }
+    }
+  }
+  return null;
+}
+
+/*
+ * NASDAQ, the third source. Free, no key, and it serves short interest per
+ * symbol as a small JSON document — the two-week history included, which is
+ * the direction O'Neil's reading wants. It refuses a request that does not
+ * look like a browser, hence the headers.
+ */
+function parseNasdaq(payload) {
+  const rows = payload?.data?.shortInterestTable?.rows;
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const n = v => {
+    const x = Number(String(v == null ? '' : v).replace(/[$,%\s]/g, ''));
+    return Number.isFinite(x) ? x : null;
+  };
+  const cur = rows[0];
+  const prev = rows[1];
+  const shares = n(cur.interest);
+  if (shares == null) return null;
+  const prior = prev ? n(prev.interest) : null;
+  return {
+    shortFloat: null,               // shares only — the caller supplies a float
+    sharesShort: shares,
+    sharesShortPrior: prior,
+    trend: prior == null ? null
+      : shares > prior ? 'rising' : shares < prior ? 'falling' : 'flat',
+    daysToCover: n(cur.daysToCover),
+    asOf: String(cur.settlementDate || '').trim() || null,
+    basis: 'shares',
+    src: 'nasdaq',
+  };
+}
+
+async function fetchNasdaq(ticker, diag) {
+  try {
+    const r = await axios.get(
+      `https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/short-interest`,
+      { headers: { ...YF_HEADERS, Origin: 'https://www.nasdaq.com',
+                   Referer: 'https://www.nasdaq.com/' },
+        params: { assetclass: 'stocks' }, timeout: 12000 });
+    const rec = parseNasdaq(r.data);
+    if (rec) return rec;
+    if (diag) diag.nasdaq = 'answered but no shortInterestTable';
+  } catch (e) {
+    if (diag) diag.nasdaq = `${e.response?.status || ''} ${String(e.message).slice(0, 80)}`;
   }
   return null;
 }
 
 let _finraFile = { day: null, text: null };
 
-async function fetchFinraFile() {
+async function fetchFinraFile(diag) {
   const day = _etDay();
   if (_finraFile.day === day) return _finraFile.text;
   // Walk back from today to the last published file. FINRA publishes on a
@@ -199,6 +303,7 @@ async function fetchFinraFile() {
       }
     } catch { /* not published that day — keep walking back */ }
   }
+  if (diag) diag.finra = 'no published file found in the last 25 days';
   _finraFile = { day, text: null };
   return null;
 }
@@ -212,16 +317,25 @@ async function lookup(ticker, ctx = {}) {
   if (!t) return null;
   const day = _etDay();
   const hit = _cache.get(t);
-  if (hit && hit.day === day) return hit.rec;
+  // A CACHED FAILURE IS NOT CACHED. A successful answer holds for the day —
+  // the number only changes twice a month — but caching a miss would mean a
+  // source that came back five minutes later still reported nothing until
+  // tomorrow, and would make the probe useless for debugging.
+  if (hit && hit.day === day && hit.rec) return hit.rec;
+  const diag = ctx.diag || {};
   let rec = null;
   try {
-    rec = await fetchYahoo(t);
+    rec = await fetchYahoo(t, diag);
+    if (!rec) rec = await fetchNasdaq(t, diag);
     if (!rec) {
-      const text = await fetchFinraFile();
-      if (text) rec = parseFinra(text, t);
+      const text = await fetchFinraFile(diag);
+      if (text) {
+        rec = parseFinra(text, t);
+        if (!rec && diag) diag.finra = 'file fetched, symbol not in it';
+      }
     }
     rec = toPercent(rec, ctx);
-  } catch { rec = null; }
+  } catch (e) { diag.error = String(e.message).slice(0, 120); rec = null; }
   _cache.set(t, { day, rec });
   return rec;
 }
@@ -259,5 +373,5 @@ async function fill(rows, { concurrency = 4 } = {}) {
 }
 
 module.exports = {
-  parseYahoo, parseFinra, toPercent, lookup, fill, FINRA_URL,
+  parseYahoo, parseFinra, parseNasdaq, toPercent, lookup, fill, FINRA_URL,
 };
