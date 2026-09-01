@@ -345,6 +345,11 @@ const loadFundamentalsCached = syms =>
 const _warming = new Set();
 let _warmQueue = [];
 let _warmRunning = false;
+// ONE ATTEMPT PER NAME PER DAY. A symbol EDGAR has nothing for — a fund, an
+// ADR, a company that files on paper — comes back ok:false and is never
+// cached, so "re-queue anything that is still a miss" would walk it again on
+// every single scan, forever, for an answer that will not change today.
+let _warmTried = { day: null, seen: new Set() };
 
 async function _warmLoop() {
   if (_warmRunning) return;
@@ -353,6 +358,11 @@ async function _warmLoop() {
     while (_warmQueue.length) {
       const sym = _warmQueue.shift();
       try {
+        // THE CACHED MISS HAS TO GO FIRST. _qpBatch skips any symbol already
+        // in the cache, and a miss is in the cache — so without this the
+        // building path returned instantly having fetched nothing, which is
+        // the second half of the same bug.
+        delete _fundamentals.stocks[sym];
         await loadFundamentals([sym]);      // the BUILDING path, one name
       } catch { /* a name EDGAR has nothing for is not an error */ }
       finally { _warming.delete(sym); }
@@ -360,18 +370,41 @@ async function _warmLoop() {
   } finally { _warmRunning = false; }
 }
 
+/*
+ * A MISS IS NOT AN ANSWER, and treating it as one broke this completely.
+ *
+ * loadFundamentalsCached runs first — the route awaits it — and for every
+ * symbol EDGAR has not cached it stores {ok:false, 'not fetched yet'} in
+ * _fundamentals.stocks. The warmer then skipped anything already "in" the
+ * cache, so it skipped EVERY symbol it existed to fetch and queued nothing,
+ * ever. C and A stayed empty on almost every card and the warmer reported
+ * itself as having run.
+ *
+ * So the test is not "is it present" but "does it hold a real answer".
+ */
+const _isMiss = rec => !rec || rec.ok === false;
+
 function warmFundamentals(symbols) {
   const day = _etDay();
   if (_fundamentals.day !== day) { _fundamentals.day = day; _fundamentals.stocks = {}; }
+  if (_warmTried.day !== day) _warmTried = { day, seen: new Set() };
+  let queued = 0;
   for (const raw of symbols || []) {
     const s = String(raw).toUpperCase();
-    if (!s || s in _fundamentals.stocks || _warming.has(s)) continue;
+    if (!s || _warming.has(s) || _warmTried.seen.has(s)) continue;
+    if (!_isMiss(_fundamentals.stocks[s])) continue;      // already answered
     _warming.add(s);
+    _warmTried.seen.add(s);
     _warmQueue.push(s);
+    queued += 1;
   }
   // NOT AWAITED BY THE CALLER, and it must stay that way.
   _warmLoop();
-  return { queued: _warmQueue.length };
+  // WHAT THIS CALL ADDED, not what is left in the queue. _warmLoop drains the
+  // first name synchronously before its first await, so the residual length
+  // reads 0 for a single symbol — a log line saying "queued: 0" for a name it
+  // had in fact just queued.
+  return { queued, pending: _warmQueue.length };
 }
 const loadBases = syms => _qpBatch('/api/oneil/base', syms, _bases, 20, 60000);
 const fundamentalsCache = () => (_fundamentals.day === _etDay() ? _fundamentals : { stocks: {} });
