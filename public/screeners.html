@@ -680,10 +680,17 @@ function stageNote(t) {
   return bits.length ? `<span class="stage-note">${bits.join(' · ')}</span>` : '';
 }
 
-function card(t, state, info, check, summary, timeLabel) {
+function card(t, state, info, check, summary, timeLabel, live) {
+  live = live || {};
+  const paused = !!live.paused;
   const cls = (state === 'down' ? 'down' : '')
-    + (state === 'up' && check && !check.now ? ' asleep' : '');
-  const label = { up:'online', down:'offline', wait:'checking' }[state];
+    + (state === 'up' && check && !check.now ? ' asleep' : '')
+    + (paused ? ' asleep' : '');
+  // PAUSED IS ITS OWN WORD. "offline" means it is not answering and something
+  // is wrong; paused means somebody stopped it and can start it again. Nine
+  // cards on one page, and telling those two apart at a glance is the whole
+  // job of this label.
+  const label = paused ? 'paused' : { up:'online', down:'offline', wait:'checking' }[state];
   const stats = [];
   if (info && info.rows != null) stats.push(`${info.rows} live`);
   if (info && info.model) stats.push(info.model);
@@ -698,7 +705,8 @@ function card(t, state, info, check, summary, timeLabel) {
       <a class="tc-open" href="${baseFor(t)}/scanner">
         <div class="card-top">
           <div>
-            <div class="card-name">${t.name}</div>
+            <div class="card-name">${esc(live.name || t.name)}${
+              paused ? ' <span style="color:#fb923c;font-size:11px">⏸ paused</span>' : ''}</div>
             <div class="card-port">${t.id} · PORT ${t.port}${
               timeLabel ? ` · ${timeLabel}` : ''} ${stageNote(t)}</div>
           </div>
@@ -870,7 +878,7 @@ function render(states) {
     // is still said on the card, where it belongs to that one tool.
     for (const t of mine) {
       html.push(card(t, states[t.id].state, states[t.id].info, states[t.id].check,
-                     states[t.id].summary, TIME_LABEL[timeOf(t)]));
+                     states[t.id].summary, TIME_LABEL[timeOf(t)], states[t.id]));
     }
   }
   document.getElementById('cards').innerHTML = html.join('');
@@ -889,7 +897,14 @@ async function probe(t) {
     const h = await r.json();
     // The tool computes "now" against its own clock, not the phone's — the
     // phone travels and the market does not.
-    states[t.id] = { state:'up', info:null, check: h.check || null, summary: h.summary || null };
+    // THE NAME COMES FROM THE TOOL, NOT FROM THE CONFIG. A rename is stored in
+    // each tool's own database — this page cannot read those — so /health is
+    // the only way a renamed tool shows its new name here rather than the one
+    // in the repo. Same for the pause: a quiet tool that is paused on purpose
+    // must not read the same as one that has stopped working.
+    states[t.id] = { state:'up', info:null, check: h.check || null, summary: h.summary || null,
+                     name: h.name || null, paused: !!h.paused,
+                     pausedAt: h.pausedAt || null, pausedReason: h.pausedReason || null };
 
     // Best-effort extras — a tool that is up but still warming up should not
     // be shown as down just because these are not ready yet.

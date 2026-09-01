@@ -70,6 +70,20 @@ function stageWrapSoft(report, key, fn) {
 }
 
 async function runFullScan() {
+  // PAUSED MEANS PAUSED, and the guard lives HERE rather than in the scheduler
+  // because there are two ways in — the cron job and the Run-scan button — and
+  // a pause that only stopped one of them would be a pause you could not
+  // trust. This is the single door both go through.
+  //
+  // It stops NEW scanning and nothing else: every card, register, shortlist
+  // and backtest the tool has already produced is untouched and still opens.
+  const identity = require('./sideA/toolIdentity');
+  if (identity.isPaused()) {
+    const st = identity.pauseState();
+    console.log('[Pipeline] Tool is paused — no scan');
+    return { rowsProcessed: 0, ts: Date.now(), paused: true,
+             pausedAt: st && st.at, pausedReason: st && st.reason };
+  }
   if (scanStatus.running) {
     console.log('[Pipeline] Scan already running, skipping');
     return { rowsProcessed: 0, ts: Date.now() };
@@ -329,6 +343,12 @@ async function runFullScan() {
  * card was given at discovery from drifting underneath the trader.
  */
 async function runRefreshOnly() {
+  // A paused tool does not re-quote either. Refreshing prices on a paused
+  // tool's rows would leave the register moving while the tool that built it
+  // is stopped — a page that looks live and is not.
+  if (require('./sideA/toolIdentity').isPaused()) {
+    return { refreshed: 0, skipped: 'tool is paused' };
+  }
   if (scanStatus.running) return { refreshed: 0, skipped: 'scan in progress' };
   scanStatus.running = true;
   try {
@@ -345,7 +365,14 @@ async function runRefreshOnly() {
 }
 
 function getScanStatus() {
+  const identity = require('./sideA/toolIdentity');
+  const paused = identity.pauseState();
   return {
+    // On the status endpoint, so anything asking "why is this tool quiet?"
+    // gets the answer in the same call rather than concluding it is broken.
+    paused: !!paused,
+    pausedAt: paused ? paused.at : null,
+    pausedReason: paused ? paused.reason : null,
     lastRun: scanStatus.lastRun,
     lastRowCount: scanStatus.lastRowCount,
     running: scanStatus.running,

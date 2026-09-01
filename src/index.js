@@ -32,6 +32,7 @@ const LANDING_PROBE_PATHS = [
   '/api/alerts/meta',                // fields and operators for the builder
   '/api/alerts/risk',                // account size and risk per trade
   '/api/setups',                     // the setups, for the alerts app to list
+  '/api/tool',                       // this tool's name and whether it is paused
 ];
 app.use((req, res, next) => {
   if (req.method === 'GET' && LANDING_PROBE_PATHS.includes(req.path)) {
@@ -44,6 +45,7 @@ app.use((req, res, next) => {
 app.use('/api/registry', require('./routes/registry'));
 app.use('/api/scan', require('./routes/scan'));
 app.use('/api/screeners', require('./routes/screeners'));
+app.use('/api/tool', require('./routes/tool'));
 app.use('/api/shortlist', require('./routes/shortlist'));
 app.use('/api/market', require('./routes/market'));
 app.use('/api/news', require('./routes/news'));
@@ -136,8 +138,29 @@ app.get('/health', (req, res) => {
     summary = require('./sideA/screenerSummary').summarise();
   } catch { /* same as check: a tool with no screeners still answers */ }
 
+  // The NAME AND THE PAUSE ride on /health for the same reason `summary` does:
+  // the landing page already probes this once per tool every 30 seconds, and a
+  // second request per card would be nine more to carry two fields. It is also
+  // what makes a rename visible on the landing page at all — the name override
+  // lives in each tool's own database, so no other process can read it.
+  //
+  // `configName` travels beside it so the difference between "renamed" and
+  // "this is what it is called" stays visible rather than mysterious.
+  let identity = null;
+  try {
+    identity = require('./sideA/toolIdentity').identity();
+  } catch { /* a tool whose settings table is unreadable still answers */ }
+
   res.json({
-    ok: true, tool: config.toolId, name: config.toolName, ts: Date.now(), check, summary,
+    ok: true,
+    tool: config.toolId,
+    name: identity ? identity.name : config.toolName,
+    configName: config.toolName,
+    renamed: identity ? identity.renamed : false,
+    paused: identity ? identity.paused : false,
+    pausedAt: identity ? identity.pausedAt : null,
+    pausedReason: identity ? identity.pausedReason : null,
+    ts: Date.now(), check, summary,
   });
 });
 

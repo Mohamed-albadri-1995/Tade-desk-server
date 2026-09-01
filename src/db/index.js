@@ -173,6 +173,15 @@ ensureColumns('screeners', { label_only: 'INTEGER NOT NULL DEFAULT 0' });
 // the whole directional comparison went missing for that tool.
 ensureColumns('screeners', { mirror_of: 'TEXT' });
 
+// PAUSED, not merely disabled. The two words mean different things to whoever
+// comes back to this list in a fortnight: "disabled" reads as a decision, and
+// "paused" reads as one that is waiting to be undone. Recording WHEN it was
+// paused is what makes that real — a screener paused three months ago on a
+// hunch nobody remembers is a different object from one paused this morning
+// while its rules are being reworked, and without the timestamp they look the
+// same. `paused_reason` is optional and is the note to your future self.
+ensureColumns('screeners', { paused_at: 'INTEGER', paused_reason: 'TEXT' });
+
 // The 09:30–09:35 opening range. Free to capture — the 1-minute bars are
 // already fetched for the outcome maths — and it is the trigger level for the
 // one day-trading setup with published evidence behind it, so not recording it

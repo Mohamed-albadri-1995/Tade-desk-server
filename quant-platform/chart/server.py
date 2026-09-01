@@ -341,6 +341,39 @@ def cache_stats():
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/oneil/market')
+def oneil_market(refresh: int = 0, days: int = 500, feed: str = 'yahoo'):
+    """O'Neil's market model — the M in CAN SLIM.
+
+    He found THREE OUT OF FOUR stocks follow the general market direction and
+    called M the letter most investors ignore. Everything else on a card is
+    about one company; this decides whether to be buying at all.
+
+    Cached in `data/oneil-market.json` and served from there, because nine
+    screener tools read the same file and the model is one fact about the
+    market — computing it nine times is nine chances to disagree, on nine
+    different page loads. `refresh=1` recomputes and republishes.
+
+    NEVER A CAUSE OF FAILURE. A reader that cannot get an answer here renders
+    its page exactly as it does today; the market model being stale must not be
+    able to stop a scan.
+    """
+    from chart import oneil, oplog
+    try:
+        if not refresh:
+            cached = oneil.read_shared()
+            if cached:
+                return {'ok': True, 'cached': True, **cached}
+        model = oneil.build(days=days, feed=feed)
+        where = oneil.write_shared(model) if model.get('ok') else None
+        oplog.record('oneil_market', status=model.get('status'),
+                     live=len(model.get('distribution_days') or []),
+                     partial=model.get('partial'), wrote=where)
+        return {'ok': model.get('ok', False), 'cached': False, **model}
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
 @app.post('/api/cache/clear')
 def cache_clear(payload: dict = Body(default={})):
     """Delete the cached bars. Safe by construction.

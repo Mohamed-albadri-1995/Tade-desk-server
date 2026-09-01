@@ -83,6 +83,43 @@ router.put('/:id', express.json(), (req, res) => {
   }
 });
 
+// PUT /api/screeners/:id/name — rename, and nothing else.
+//
+// Separate from the full update on purpose: renaming used to mean loading the
+// whole definition into the editor and saving it back, which touches every
+// rule, the window, the sort and the mirror for the sake of a typo. The key is
+// NOT changed — it is stamped on every card this screener has ever matched.
+router.put('/:id/name', express.json(), (req, res) => {
+  try {
+    res.json({ ok: true, screener: store.rename(Number(req.params.id), (req.body || {}).name) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/screeners/:id/pause  ·  POST /api/screeners/:id/resume
+//
+// Pausing stops the screener LOOKING. Everything it already found stays: the
+// cards keep its key, still open, and still count in every backtest they were
+// already part of. That is what makes it safe to press on a hunch and undo an
+// hour later, which is the only reason to have a pause rather than a delete.
+router.post('/:id/pause', express.json(), (req, res) => {
+  try {
+    const reason = (req.body || {}).reason || null;
+    res.json({ ok: true, screener: store.setPaused(Number(req.params.id), true, reason) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/:id/resume', (req, res) => {
+  try {
+    res.json({ ok: true, screener: store.setPaused(Number(req.params.id), false) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // POST /api/screeners/:id/mirror — store the opposite-facing twin
 router.post('/:id/mirror', (req, res) => {
   try {

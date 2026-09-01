@@ -330,6 +330,11 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .sb-pill { font:10px ui-monospace,Menlo,monospace; padding:2px 6px; border-radius:3px;
            border:1px solid #3a4152; color:var(--text2); }
 .sb-pill.sb-when { color:#fbbf24; border-color:#fbbf2455; }
+/* PAUSED, not 'disabled'. The second reads as a decision somebody made
+   on purpose; the first reads as one waiting to be undone, which is what
+   it usually is. The elapsed time beside it is what makes the difference
+   legible three weeks later. */
+.sb-pill.sb-paused { color:#fb923c; border-color:#fb923c55; }
 .sb-rules { margin-top:8px; display:flex; flex-wrap:wrap; gap:4px; }
 /* ── daily schedule strip ── */
 .sch { background:var(--bg2); border:1px solid #2a2f3d; border-radius:7px; padding:12px 14px; margin-bottom:12px; }
@@ -622,6 +627,50 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .stance-neutral { background: #8b92a520; color: var(--text2); border: 1px solid #8b92a540; }
 
 /* sector heatmap */
+/* O'NEIL'S MARKET MODEL — the block above the existing analysis.
+   Deliberately styled like the rest of the tab rather than as a feature: it
+   is one more fact about the market, and a box that shouted would make the
+   short/mid/long read below it look secondary, which it is not. */
+.oneil-block { background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+.oneil-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.oneil-status { font-size: 20px; font-weight: 700; }
+.oneil-st-up { color: var(--green); }
+.oneil-st-pressure { color: var(--orange); }
+.oneil-st-corr { color: var(--red); }
+.oneil-because { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.oneil-grid { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px; }
+.oneil-stat { min-width: 120px; }
+.oneil-stat-label { font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text3); }
+.oneil-stat-val { font-size: 14px; font-weight: 600; margin-top: 2px; }
+.oneil-exposure { margin-top: 12px; padding: 9px 11px; border-radius: 6px;
+  background: var(--bg3); font-size: 12px; line-height: 1.45; }
+/* THE RULES THAT PRODUCED THE NUMBERS. A status word with no definition behind
+   it cannot be checked against a chart afterwards, and this is a claim about
+   when to stop buying. */
+.oneil-rules { margin-top: 10px; font-size: 10.5px; color: var(--text3);
+  font-family: ui-monospace, Menlo, monospace; line-height: 1.5;
+  overflow-wrap: anywhere; }
+.oneil-caveat { margin-top: 8px; font-size: 11px; color: var(--orange);
+  line-height: 1.45; }
+.oneil-dd-wrap { margin-top: 12px; overflow-x: auto; }
+.oneil-dd { width: 100%; border-collapse: collapse; min-width: 460px; }
+.oneil-dd th { font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text3); padding: 5px 8px; text-align: left;
+  border-bottom: 1px solid var(--border); white-space: nowrap; }
+.oneil-dd td { padding: 5px 8px; font-size: 11.5px; border-bottom: 1px solid #1a1e28;
+  white-space: nowrap; }
+.oneil-dd tr:last-child td { border-bottom: none; }
+.oneil-kind-stall { color: var(--orange); }
+.oneil-none { font-size: 12px; color: var(--text2); padding: 6px 0; }
+/* Tap, not hover: a title attribute does not exist on a touch screen, which is
+   where this desk is actually read. */
+.oneil-info { display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--text3);
+  color: var(--text3); font-size: 10px; font-weight: 700; cursor: pointer;
+  margin-left: 5px; flex: none; user-select: none; }
+.oneil-info:hover { color: var(--accent); border-color: var(--accent); }
 .heatmap-title { font-size: 12px; font-weight: 700; color: var(--text2); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .05em; }
 .heatmap-table { width: 100%; border-collapse: collapse; }
 .heatmap-table th { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
@@ -875,6 +924,38 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .sl-card { cursor:pointer; }
 .sl-card:hover { border-color:var(--accent); }
 .sl-open-hint { font-size:10px; color:var(--text3); margin-top:6px; }
+/* THE DEFINITION CARD — every field explains itself, inside the tool.
+   The card already carried good explanations, all of them as title="..."
+   attributes, and a title attribute DOES NOT APPEAR ON A TOUCH SCREEN. There
+   is no hover on Android Chrome, which is where this desk is read, so every
+   one of those sentences was invisible on the device that matters. This is the
+   tap-to-open replacement, and it is the mechanism every CANSLIM field uses. */
+.def-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.82);
+  z-index:2100; align-items:flex-start; justify-content:center; padding:16px;
+  overflow-y:auto; }
+.def-overlay.open { display:flex; }
+.def-modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px;
+  width:100%; max-width:560px; margin:auto; overflow:hidden; }
+.def-header { display:flex; align-items:center; gap:10px; padding:12px 16px;
+  background:var(--bg3); border-bottom:1px solid var(--border); }
+.def-title { font-size:15px; font-weight:700; color:#fff; flex:1; }
+.def-close { background:none; border:1px solid var(--border); color:var(--text2);
+  border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
+.def-body { padding:14px 16px; }
+.def-sec { margin-bottom:14px; }
+.def-sec:last-child { margin-bottom:0; }
+.def-sec-title { font-size:10px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.08em; color:var(--text3); margin-bottom:5px; }
+.def-sec-body { font-size:12.5px; line-height:1.55; color:var(--text); }
+.def-formula { font-family:ui-monospace, Menlo, monospace; font-size:11.5px;
+  background:var(--bg3); border-radius:6px; padding:8px 10px; margin-top:6px;
+  overflow-x:auto; white-space:pre; color:var(--text2); }
+/* WHAT IT IS NOT is mandatory and never cosmetic. Every trap in this system
+   came from a concept whose plain-English name means something else. */
+.def-not { border-left:3px solid var(--orange); padding-left:10px; }
+.def-not .def-sec-title { color:var(--orange); }
+.def-src { font-size:11px; color:var(--text3); border-top:1px solid var(--border);
+  padding-top:9px; }
 .ti-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.8); z-index:2000; align-items:flex-start; justify-content:center; padding:20px; overflow-y:auto; }
 .ti-overlay.open { display:flex; }
 .ti-modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:100%; max-width:900px; margin:auto; overflow:hidden; }
@@ -1021,6 +1102,12 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
     <div class="market-grid" id="idx-grid">
       <div class="loading">Loading market data…</div>
     </div>
+    <!-- O'NEIL'S MARKET MODEL.
+         First on the tab because it is the one that decides whether to be
+         buying at all — he found three out of four stocks follow the general
+         market. Everything below it is the finer texture underneath that
+         decision, and it is deliberately untouched. -->
+    <div class="oneil-block" id="oneil-model"></div>
     <div class="market-analysis" id="market-analysis"></div>
     <div class="regime-card" id="regime-card" style="display:none"></div>
     <div class="heatmap-title">Sector Heatmap</div>
@@ -1529,6 +1616,16 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 </div>
 
 <!-- Table Inspector Modal -->
+<div class="def-overlay" id="def-overlay" onclick="if(event.target===this)closeDef()">
+  <div class="def-modal">
+    <div class="def-header">
+      <div class="def-title" id="def-title">Definition</div>
+      <button class="def-close" onclick="closeDef()">✕</button>
+    </div>
+    <div class="def-body" id="def-body"></div>
+  </div>
+</div>
+
 <div class="ti-overlay" id="ti-overlay" onclick="if(event.target===this)closeTI()">
   <div class="ti-modal">
     <div class="ti-header">
@@ -3608,7 +3705,257 @@ async function cycleBias(ticker, btn) {
 // ═══════════════════════════════════════════════════
 // MARKET TAB
 // ═══════════════════════════════════════════════════
+/* ─────────── THE DEFINITION REGISTRY ───────────────────────────────────
+   Every field explains its own MEANING and its own CALCULATION inside the
+   tool. Not in a document — the person reading this at 07:40 is not going to
+   open a repository.
+
+   Four parts, always the same four, because a definition with only the first
+   is what created every trap in the first place:
+
+     what      plain English, what the number is about
+     how       the exact arithmetic, and the window it runs over
+     not       WHAT IT IS NOT — mandatory. These concepts have plain-English
+               names that mean something else, and the wrong reading produces
+               a number that looks right and is about a different thing
+     src       where the data came from, and whose threshold it is
+
+   The registry grows with each phase. A field that arrives without its
+   definition is not finished. */
+const DEFS = {
+  oneil_model: {
+    title: "O'Neil's market model (M)",
+    what: "The M in CAN SLIM. A rule-based state machine over the S&P 500 and "
+      + "the Nasdaq Composite that answers one question: should you be buying "
+      + "at all. O'Neil found THREE OUT OF FOUR stocks follow the general "
+      + "market direction, and called M the letter most investors ignore.",
+    how: "Institutions cannot move a position in a day, so their selling leaves "
+      + "a footprint: an index closing DOWN on volume HIGHER than the session "
+      + "before. Count those over 25 sessions. Coming the other way, a fallen "
+      + "market rallies constantly and most attempts fail, so a bottom is not "
+      + "called until an attempt is four or more days old AND puts in a big "
+      + "gain on heavy volume.",
+    not: "Not the Final Regime box below it, and not a sentiment read or a "
+      + "moving-average cross. That block scores same-day and one-week index "
+      + "moves — a short-term momentum blend, which is useful and is a "
+      + "different claim. Both are on this page; they must never share words.",
+    src: "A reconstruction from O'Neil's published descriptions. NOT IBD's "
+      + "Market Pulse, which is a commercial product.",
+  },
+  distribution_day: {
+    title: 'Distribution day',
+    what: "One session in which institutions were selling. It is the footprint "
+      + "of large sellers, not of the index drifting lower.",
+    how: "close <= prior close x (1 - 0.002)      down 0.2% or more\n"
+      + "AND volume > prior session's volume\n"
+      + "AND the market is in a confirmed uptrend",
+    not: "Not any down day. VOLUME IS THE WHOLE POINT. And the uptrend "
+      + "condition is widely dropped and matters: during a correction there is "
+      + "no uptrend to distribute FROM, so heavy down days are not counted. "
+      + "Without that, the count runs up through every decline and reads "
+      + "'extremely dangerous' on the day the bottom forms — inverted, on the "
+      + "one day it decides anything.",
+    src: 'IBD, consistent across every published description.',
+  },
+  stalling_day: {
+    title: 'Stalling day (churning)',
+    what: "The form of distribution that is NOT a down day. Institutions "
+      + "selling into strength: the price does not fall because the selling is "
+      + "being absorbed, which is exactly what heavy volume with no progress "
+      + "means.",
+    how: "volume is heavy — above the prior day or the 25-day average\n"
+      + "AND the gain is under +0.2%\n"
+      + "AND it closes in the LOWER HALF of the day's range",
+    not: "Not a quiet day. This is the shape that appears at tops, where an "
+      + "index grinds sideways on huge volume for a fortnight before it "
+      + "breaks. A count that only looks for -0.2% closes misses it entirely.",
+    src: 'IBD. Counted as a distribution day, flagged separately here because '
+      + 'the two read differently on a chart.',
+  },
+  dd_count: {
+    title: 'Distribution day count',
+    what: "How many distribution days are CURRENTLY LIVE in a rolling window. "
+      + "0-2 is a confirmed uptrend; 5 is an uptrend under pressure; 6 or more "
+      + "and the uptrend is treated as broken.",
+    how: "A day leaves the count when EITHER rule fires:\n"
+      + "  1. age      it passes out of the trailing 25 sessions\n"
+      + "  2. recovery the index TRADES 5% above that day's close",
+    not: "Not a running total — a count that never expires only rises and is "
+      + "meaningless by March. And rule 2 is INTRADAY, on the high, not the "
+      + "close: using the close is stricter than IBD's rule and would hold "
+      + "days in the count they had already dropped, making the market read "
+      + "more dangerous than it is on exactly the days a new uptrend starts.",
+    src: 'IBD. Counted PER INDEX and never pooled — the two diverge often, and '
+      + 'the divergence says which half of the market is being sold.',
+  },
+  follow_through: {
+    title: 'Follow-through day',
+    what: "The confirmation that a rally attempt is a real bottom. Until one "
+      + "appears, a market that has fallen is still in a correction however "
+      + "much it has bounced.",
+    how: "Day 1 of a rally attempt = the first UP close after the low.\n"
+      + "On day 4 or later:\n"
+      + "  gain >= +1.7%\n"
+      + "  AND volume > the prior session\n"
+      + "  AND volume > the index's own 50-day average\n"
+      + "Expected on days 4-7; days 8-11 are flagged LATE.",
+    not: "Not any strong up day. THE DAY COUNT IS THE FILTER — bounces in the "
+      + "first three days are the norm inside downtrends. And the volume test "
+      + "is two tests: heavier than one quiet prior day is not institutional "
+      + "buying.",
+    src: "+1.7% is O'Neil's LAST published figure (The Successful Investor). He "
+      + "set 1% in the early editions and 1.5% in How to Make Money in Stocks, "
+      + "then raised it once program trading made 1% days ordinary.",
+  },
+  rally_attempt: {
+    title: 'Rally attempt',
+    what: "The market has fallen and is trying to bounce. Day 1 is the first up "
+      + "close after the low. It resets if the low is undercut before a "
+      + "follow-through appears.",
+    how: "Counted in sessions from the first up close off the correction low. "
+      + "The count exists because the follow-through rule is measured against "
+      + "it — day 4 is the earliest a bottom can be confirmed.",
+    not: "NOT a fourth market status. IBD publishes exactly three, and a rally "
+      + "attempt happens INSIDE 'Market in correction'. Showing it as its own "
+      + "status would read as an improvement on a correction, which is exactly "
+      + "backwards: a rally attempt is a correction, plus hope.",
+    src: "O'Neil.",
+  },
+  ftd_band: {
+    title: 'Sessions since the follow-through',
+    what: "How far into the current uptrend the market is. O'Neil buys EARLY "
+      + "in one: a breakout 5 sessions after a follow-through and the same "
+      + "breakout 200 sessions after it are different propositions.",
+    how: "Trading days from the confirmed follow-through to today.\n"
+      + "  early        under 25\n"
+      + "  established  25-150\n"
+      + "  late         over 150",
+    not: "Not a countdown to anything. It is also where BASE-STAGE counting "
+      + "starts — bases are counted from the market bottom, so a late-stage "
+      + "base is late relative to this date, not to wherever a chart begins.",
+    src: 'Derived from the follow-through date in the model above.',
+  },
+};
+
+function openDef(key) {
+  const d = DEFS[key];
+  if (!d) return;
+  document.getElementById('def-title').textContent = d.title;
+  const sec = (title, body, cls) => body
+    ? `<div class="def-sec ${cls || ''}"><div class="def-sec-title">${title}</div>
+         <div class="def-sec-body">${body}</div></div>` : '';
+  document.getElementById('def-body').innerHTML =
+    sec('What it means', esc(d.what))
+    + `<div class="def-sec"><div class="def-sec-title">How it is calculated</div>
+        <div class="def-formula">${esc(d.how)}</div></div>`
+    + sec('What it is NOT', esc(d.not), 'def-not')
+    + `<div class="def-sec def-src">${esc(d.src)}</div>`;
+  document.getElementById('def-overlay').classList.add('open');
+}
+function closeDef() {
+  document.getElementById('def-overlay').classList.remove('open');
+}
+// TAP, not hover. See the .def-overlay comment: a title attribute does not
+// exist on a touch screen, and this desk is read on one.
+function info(key) {
+  return `<span class="oneil-info" onclick="event.stopPropagation();openDef('${key}')"
+           role="button" tabindex="0" aria-label="what this means">i</span>`;
+}
+
+/* ─────────── O'NEIL'S MARKET MODEL, on the market tab ──────────────── */
+async function loadOneil() {
+  const el = document.getElementById('oneil-model');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/market/oneil');
+    renderOneil(await r.json());
+  } catch (e) {
+    // NEVER THE CAUSE OF A FAILURE. The rest of the tab is untouched by this.
+    el.innerHTML = `<div class="oneil-none">O'Neil market model unavailable — ${esc(e.message)}</div>`;
+  }
+}
+
+function renderOneil(m) {
+  const el = document.getElementById('oneil-model');
+  if (!el) return;
+  if (!m || !m.ok) {
+    // Missing is a normal answer, not an error, and it says what to do about
+    // it rather than leaving a blank that could be read as "no distribution".
+    el.innerHTML = `<div class="oneil-head"><div class="oneil-stat-label">O'Neil market model</div>${info('oneil_model')}</div>
+      <div class="oneil-none">Not built yet. qp publishes this after each close.
+      ${m && m.detail ? esc(m.detail) : ''}</div>`;
+    return;
+  }
+  const cls = m.status === 'confirmed_uptrend' ? 'oneil-st-up'
+    : m.status === 'uptrend_under_pressure' ? 'oneil-st-pressure' : 'oneil-st-corr';
+  const idx = Object.values(m.indexes || {});
+  const days = m.distribution_days || [];
+
+  const stat = (label, val, key) => `<div class="oneil-stat">
+    <div class="oneil-stat-label">${label}${key ? info(key) : ''}</div>
+    <div class="oneil-stat-val">${val}</div></div>`;
+
+  const perIndex = idx.map(v =>
+    `${esc(v.index)} <b>${v.count}</b>`).join(' · ') || '—';
+
+  const ftd = m.ftd
+    ? `${esc(m.ftd.date)} · day ${m.ftd.day} · +${m.ftd.gain_pct}%`
+      + (m.ftd.timing !== 'on time' ? ` <span class="oneil-kind-stall">(${esc(m.ftd.timing)})</span>` : '')
+    : '<span style="color:var(--text3)">none in this window</span>';
+
+  const since = m.sessions_since_ftd != null
+    ? `${m.sessions_since_ftd} sessions · ${esc(m.ftdBand || m.ftd_band || '')}`
+    : '—';
+
+  const rally = m.rally_attempt
+    ? `day ${m.rally_attempt.day} off ${esc(m.rally_attempt.low_date || '')}`
+    : 'n/a — not in one';
+
+  // THE DATED TABLE. A status word with no rows behind it is not checkable,
+  // and this is a claim about when to stop buying. Every row carries the move,
+  // the volume ratio and when it expires, so it can be read off a chart.
+  const ddTable = days.length ? `
+    <div class="oneil-dd-wrap"><table class="oneil-dd">
+      <thead><tr><th>Date</th><th>Index</th><th>Kind</th><th>Move</th><th>Volume</th><th>Expires in</th></tr></thead>
+      <tbody>${days.map(d => `<tr>
+        <td>${esc(d.date)}</td>
+        <td>${esc(d.index || '')}</td>
+        <td class="${d.kind === 'stalling' ? 'oneil-kind-stall' : ''}">${esc(d.kind)}</td>
+        <td class="${(d.pct || 0) < 0 ? 'neg' : ''}">${d.pct != null ? d.pct + '%' : '—'}</td>
+        <td>${d.vol_ratio != null ? d.vol_ratio + '×' : '—'}</td>
+        <td>${d.expires_after != null ? d.expires_after + ' sessions' : '—'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`
+    : `<div class="oneil-none">No live distribution days. Nothing is being sold into this market on the count's own terms.</div>`;
+
+  el.innerHTML = `
+    <div class="oneil-head">
+      <div class="oneil-status ${cls}">${esc(m.status_label || m.status)}</div>
+      ${info('oneil_model')}
+      <div style="margin-left:auto;font-size:11px;color:var(--text3)">as of ${esc(m.as_of || '—')}</div>
+    </div>
+    <div class="oneil-because">${esc(m.because || '')}</div>
+    <div class="oneil-grid">
+      ${stat('Live distribution', perIndex, 'dd_count')}
+      ${stat('Follow-through', ftd, 'follow_through')}
+      ${stat('Since the FTD', since, 'ftd_band')}
+      ${stat('Rally attempt', rally, 'rally_attempt')}
+    </div>
+    ${m.exposure ? `<div class="oneil-exposure"><b>What O'Neil does here:</b> ${esc(m.exposure)}</div>` : ''}
+    ${ddTable}
+    <div class="oneil-rules">${esc(m.rules_in_use || '')}</div>
+    ${m.ftd_caveat ? `<div class="oneil-caveat">⚠ ${esc(m.ftd_caveat)}</div>` : ''}
+    <div class="oneil-rules" style="color:var(--text3);opacity:.8">${esc(m.model_note || '')}</div>`;
+}
+
 async function loadMarket() {
+  // TWO INDEPENDENT READS, and neither can take the other down. They are
+  // different claims from different sources: the snapshot is TradingView's
+  // live index data behind a short-term momentum blend, the O'Neil model is a
+  // state machine qp computed from index history after the close. Chaining
+  // them — which the first version of this did — meant one failing TradingView
+  // request silently removed the market model from the page.
+  loadOneil();
   try {
     const r = await fetch('/api/market/snapshot');
     marketSnapshot = await r.json();
@@ -4568,8 +4915,10 @@ function sbRenderList() {
     <div class="sb-card ${s.enabled ? '' : 'sb-off'}">
       <div class="sb-card-top">
         <div>
-          <span class="sb-name">${esc(s.name)}</span><span class="sb-key">${esc(s.key)}</span>
-          ${s.enabled ? '' : '<span class="sb-pill">disabled</span>'}
+          <span class="sb-name" onclick="sbRename(${s.id})" title="click to rename"
+                style="cursor:text;border-bottom:1px dotted var(--text3)">${esc(s.name)}</span><span class="sb-key">${esc(s.key)}</span>
+          ${s.enabled ? '' : `<span class="sb-pill sb-paused">paused${
+            s.pausedAt ? ' ' + esc(sbAgo(s.pausedAt)) : ''}</span>`}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <span class="sb-pill">${s.filters.length} rules${!s.labelOnly && sbFloorCount() ? ` + ${sbFloorCount()} floor` : ''}</span>
@@ -4579,13 +4928,21 @@ function sbRenderList() {
             ? `<span class="sb-pill sb-when">runs ${s.runFrom}–${s.runTo} ET</span>`
             : `<span class="sb-pill">runs all day</span>`}
           <button class="sb-btn" onclick="sbEdit(${s.id})">Edit</button>
+          <button class="sb-btn" onclick="sbRename(${s.id})" title="Change the name only. The key stays, so cards this screener already matched keep pointing at it.">Rename</button>
           <button class="sb-btn" onclick="sbMirror(${s.id})" title="Create the opposite-facing twin">Mirror</button>
-          <button class="sb-btn" onclick="sbToggle(${s.id},${s.enabled ? 0 : 1})">${s.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="sb-btn" onclick="sbToggle(${s.id},${s.enabled ? 0 : 1})"
+            title="${s.enabled ? 'Stops it looking. Everything it already found stays — the cards keep its key and still count in every backtest.' : 'Start looking again.'}">${s.enabled ? '⏸ Pause' : '▶ Resume'}</button>
           <button class="sb-btn sb-danger" onclick="sbDelete(${s.id})">Delete</button>
         </div>
       </div>
       <div class="sb-rules">${s.filters.map(f => `<span class="sb-rule">${esc(sbRuleText(f))}</span>`).join('')
         + (s.labelOnly ? '' : sbFloorRules())}</div>
+      ${!s.enabled ? `<div class="sb-why">
+        <span class="sb-why-k">Paused</span>
+        ${s.pausedAt ? `Since ${esc(new Date(s.pausedAt).toLocaleString('en-US', { timeZone: 'America/New_York' }))} ET (${esc(sbAgo(s.pausedAt))}).` : ''}
+        ${s.pausedReason ? esc(s.pausedReason) + ' ' : ''}It finds nothing new. Everything it already
+        found stays exactly where it is — the cards keep its key, still open, and still count in
+        every backtest they were already part of.</div>` : ''}
       ${s.labelOnly ? `<div class="sb-why">
         <span class="sb-why-k">List only</span>
         Maintains a list; it does not produce cards. Its matches never enter the day's registers,
@@ -4773,9 +5130,53 @@ async function sbMirror(id) {
   sbEdit(d.screener.id);   // open it so the pair can be checked and tuned
 }
 
+// "Paused 3 days ago" answers a question "disabled" never did: is this a
+// decision somebody made, or one they forgot to undo?
+function sbAgo(ts) {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 90) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 90) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 36) return `${h} hr ago`;
+  const d = Math.floor(h / 24);
+  return d < 45 ? `${d} day${d === 1 ? '' : 's'} ago` : `${Math.floor(d / 30)} months ago`;
+}
+
+// RENAME ONLY. Opening the full editor to fix a typo loads every rule, the
+// window, the sort and the mirror, and gives all of them a chance to be saved
+// back differently. The key is deliberately not touched — it is stamped on
+// every card this screener has ever matched.
+async function sbRename(id) {
+  const s = SB_LIST.find(x => x.id === id);
+  if (!s) return;
+  const next = prompt('Rename this screener.\n\nThe key stays as it is, so cards it has already '
+    + 'matched keep pointing at it, and anything mirroring it follows the new name.', s.name);
+  if (next === null || !next.trim() || next.trim() === s.name) return;
+  const r = await fetch(`/api/screeners/${id}/name`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: next.trim() }),
+  });
+  const d = await r.json();
+  if (!d.ok) return alert(`Could not rename: ${d.error}`);
+  loadBuilder();
+}
+
 async function sbToggle(id, enabled) {
-  await fetch(`/api/screeners/${id}`, { method: 'PUT',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !!enabled }) });
+  // Pausing asks for a note. Not required — an empty one is fine — but the
+  // field being there is what makes a screener paused in March explicable in
+  // June, which is the whole difference between a pause and an abandonment.
+  let reason = null;
+  if (!enabled) {
+    reason = prompt('Pause this screener.\n\nIt stops looking. Everything it already found stays: '
+      + 'the cards keep its key, still open, and still count in every backtest.\n\n'
+      + 'Note to yourself (optional):', '');
+    if (reason === null) return;                 // cancelled, not paused
+  }
+  await fetch(`/api/screeners/${id}/${enabled ? 'resume' : 'pause'}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: reason || null }),
+  });
   loadBuilder();
 }
 async function sbDelete(id) {
@@ -4801,8 +5202,13 @@ async function initToolSwitcher() {
     TOOL_SELF = me;
     TOOL_LIST = all.tools || [];
     const entry = TOOL_LIST.find(t => t.id === me.tool);
-    const name = (entry && entry.name) || me.name || 'Trade Desk';
+    // /health wins over the registry: the name override lives in THIS tool's
+    // own database, and /api/tools is generated from the repo's config, which
+    // cannot see it. Taking the registry's name first is how a rename would
+    // appear to save and then not stick.
+    const name = me.name || (entry && entry.name) || 'Trade Desk';
     document.getElementById('tool-label').textContent = name.toUpperCase();
+    renderToolPause(me);
     if (entry && entry.accent) {
       document.querySelector('.tool-btn').style.color = entry.accent;
     }
@@ -4833,7 +5239,75 @@ function renderToolMenu() {
          <span class="swatch" style="background:var(--text3)"></span>
          <span class="tname">All tools</span>
        </a>
+       <!-- THIS tool's own name and running state. Both used to be fixed in a
+            file in the repo and changeable only by redeploying. They are stored
+            in this tool's database now, which lives outside the repo, so both
+            survive a deploy for the same reason the user's strategies do. -->
+       <a class="tool-item" role="menuitem" onclick="toolRename()" style="cursor:pointer">
+         <span class="swatch" style="background:var(--text3)"></span>
+         <span class="tname">Rename this tool…</span>
+       </a>
+       <a class="tool-item" role="menuitem" onclick="toolPauseToggle()" style="cursor:pointer">
+         <span class="swatch" style="background:${TOOL_SELF && TOOL_SELF.paused ? 'var(--green)' : 'var(--orange)'}"></span>
+         <span class="tname">${TOOL_SELF && TOOL_SELF.paused ? '▶ Resume this tool' : '⏸ Pause this tool'}</span>
+       </a>
      </div>`;
+}
+
+/* A PAUSED TOOL SAYS SO ON EVERY PAGE OF ITSELF.
+   Nine tools are nine experiments running at once, and the failure mode a
+   pause has to defend against is coming back in a week, seeing an empty
+   register and concluding the tool is broken. A banner that cannot be missed
+   is cheaper than that hour. */
+function renderToolPause(me) {
+  let el = document.getElementById('tool-paused-banner');
+  if (!me || !me.paused) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'tool-paused-banner';
+    el.style.cssText = 'background:#f9731620;border-bottom:1px solid #f9731650;'
+      + 'color:#fb923c;padding:8px 14px;font-size:12px;line-height:1.5';
+    document.body.insertBefore(el, document.body.firstChild);
+  }
+  const since = me.pausedAt
+    ? new Date(me.pausedAt).toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' ET'
+    : '';
+  el.innerHTML = `⏸ <b>This tool is paused.</b> No new scans${since ? ` since ${esc(since)}` : ''}.
+    ${me.pausedReason ? esc(me.pausedReason) + ' ' : ''}
+    Everything it already produced — every card, register, shortlist and backtest — is unchanged
+    and still opens.
+    <a onclick="toolPauseToggle()" style="cursor:pointer;text-decoration:underline">Resume</a>`;
+}
+
+async function toolRename() {
+  const me = TOOL_SELF || {};
+  const next = prompt('Rename this tool.\n\nStored in this tool\'s own database, so it survives a '
+    + 'deploy. Type the original name to clear the override.\n\nOriginal: '
+    + (me.configName || ''), me.name || '');
+  if (next === null || !next.trim()) return;
+  const r = await fetch('/api/tool/name', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: next.trim() }),
+  });
+  const d = await r.json();
+  if (!d.ok) return alert(`Could not rename: ${d.error}`);
+  initToolSwitcher();
+}
+
+async function toolPauseToggle() {
+  const me = TOOL_SELF || {};
+  let reason = null;
+  if (!me.paused) {
+    reason = prompt('Pause this tool.\n\nIt stops SCANNING — the scheduled scans and the Run-scan '
+      + 'button alike. Nothing that already exists is touched: every card, register, shortlist '
+      + 'and backtest stays and still opens.\n\nNote to yourself (optional):', '');
+    if (reason === null) return;
+  }
+  await fetch(`/api/tool/${me.paused ? 'resume' : 'pause'}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: reason || null }),
+  });
+  initToolSwitcher();
 }
 
 function toggleToolMenu(ev) {

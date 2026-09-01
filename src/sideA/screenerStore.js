@@ -367,6 +367,11 @@ function rowToScreener(row) {
     // canslim-universe, where "is this a growth company" has nothing to do
     // with whether you could day-trade it today.
     labelOnly: !!row.label_only,
+    // PAUSED, not merely off. `enabled` is the switch; these two say when it
+    // was thrown and why, which is what turns "disabled" into something you
+    // can act on a fortnight later. Null on a running screener.
+    pausedAt: row.paused_at || null,
+    pausedReason: row.paused_reason || null,
     updatedAt: row.updated_at,
   };
 }
@@ -403,8 +408,8 @@ function create(def) {
   }
 
   const info = db.prepare(`
-    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, run_from, run_to, check_from, check_to, mirror_of, label_only, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO screeners (key, name, enabled, filters, sort, limit_n, run_from, run_to, check_from, check_to, mirror_of, label_only, paused_at, paused_reason, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     key,
     String(def.name).trim(),
@@ -418,6 +423,8 @@ function create(def) {
     def.checkTo || null,
     def.mirrorOf || null,
     def.labelOnly ? 1 : 0,
+    def.enabled === false ? Date.now() : null,
+    def.enabled === false ? (def.pausedReason || null) : null,
     Date.now()
   );
   return get(info.lastInsertRowid);
@@ -443,11 +450,28 @@ function update(id, def) {
   const errors = validateDefinition(merged);
   if (errors.length) throw new Error(errors.join('; '));
 
+  // THE PAUSE CLOCK IS STAMPED ON THE TRANSITION, NOT ON EVERY SAVE. Editing a
+  // paused screener's rules must not reset "paused since March" to today —
+  // that is exactly the field you go looking for when you find something off
+  // and cannot remember why.
+  let pausedAt = existing.pausedAt;
+  let pausedReason = existing.pausedReason;
+  if (existing.enabled && !merged.enabled) {
+    pausedAt = Date.now();
+    pausedReason = def.pausedReason || null;
+  } else if (!existing.enabled && merged.enabled) {
+    pausedAt = null;                       // resumed: the clock is not history
+    pausedReason = null;
+  } else if (def.pausedReason !== undefined && !merged.enabled) {
+    pausedReason = def.pausedReason || null;
+  }
+
   db.prepare(`
     UPDATE screeners
        SET name = ?, enabled = ?, filters = ?, sort = ?, limit_n = ?,
            run_from = ?, run_to = ?, check_from = ?, check_to = ?,
-           mirror_of = ?, label_only = ?, updated_at = ?
+           mirror_of = ?, label_only = ?, paused_at = ?, paused_reason = ?,
+           updated_at = ?
      WHERE id = ?
   `).run(
     String(merged.name).trim(),
@@ -461,10 +485,59 @@ function update(id, def) {
     merged.checkTo || null,
     merged.mirrorOf || null,
     merged.labelOnly ? 1 : 0,
+    pausedAt,
+    pausedReason,
     Date.now(),
     id
   );
   return get(id);
+}
+
+/**
+ * Rename, and nothing else.
+ *
+ * Renaming used to mean opening the full editor, which loads every rule, the
+ * window, the sort and the mirror — and then saving it back. That is a lot of
+ * moving parts to touch for a typo, and every one of them is a chance to save
+ * something you did not mean to change.
+ *
+ * WHAT A RENAME MUST NOT DO: change the KEY. The key is what lands in
+ * `screenerKeys` on every card this screener has ever matched, and rewriting it
+ * would orphan that history — cards from last month would point at a screener
+ * that no longer exists under that name. So the key is assigned once, at
+ * creation, and a rename changes only what is displayed.
+ *
+ * The mirror link is by NAME, so it is repointed here rather than broken.
+ */
+function rename(id, name) {
+  const existing = get(id);
+  if (!existing) throw new Error(`Screener ${id} not found`);
+  const clean = String(name || '').trim();
+  if (!clean) throw new Error('name is required');
+  if (clean === existing.name) return existing;
+
+  db.prepare('UPDATE screeners SET name = ?, updated_at = ? WHERE id = ?')
+    .run(clean, Date.now(), id);
+  // Anything that mirrored the old name follows it. The link is stored by name
+  // precisely so it survives a rename, and that only works if something moves it.
+  db.prepare('UPDATE screeners SET mirror_of = ? WHERE mirror_of = ?')
+    .run(clean, existing.name);
+  return get(id);
+}
+
+/**
+ * Pause or resume. The screener stops looking; everything it already found
+ * stays exactly where it is.
+ *
+ * WHAT PAUSING DOES NOT DO, and this is the part worth being sure of: it does
+ * not delete the screener, touch a single card it has matched, or alter any
+ * register. A paused screener finds nothing new. Yesterday's cards still carry
+ * its key, still open, still count in every backtest they were already in.
+ * That is what makes pausing safe enough to do on a hunch and undo an hour
+ * later, which is the whole point of having it.
+ */
+function setPaused(id, paused, reason) {
+  return update(id, { enabled: !paused, pausedReason: paused ? (reason || null) : null });
 }
 
 function remove(id) {
@@ -480,7 +553,8 @@ function createMirror(id) {
 }
 
 module.exports = {
-  list, get, create, update, remove, createMirror, mirrorDefinition, isActiveAt,
+  list, get, create, update, rename, setPaused, remove, createMirror,
+  mirrorDefinition, isActiveAt,
   isWorthCheckingAt, checkWindow,
   validateDefinition, validateFilter, isKnownField, slugify,
   OPERATIONS, FIELDS,
