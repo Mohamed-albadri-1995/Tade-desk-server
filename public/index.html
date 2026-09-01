@@ -4254,27 +4254,44 @@ let CANSLIM_PANEL = { fundamentals: {}, bases: {} };
  * ONE REQUEST FOR EVERY TICKER ON SCREEN, in the same pass that already
  * fetches the distribution-day and ratings blocks — X5 holds: a card render
  * never triggers a fetch, it reads what this put in the cache. */
-async function loadCanslimFacts(tickers) {
-  const want = (tickers || []).filter(
-    t => t && !(t in CANSLIM_PANEL.fundamentals) && !(t in CANSLIM_PANEL.bases));
-  if (!want.length) return;
+/* TWO REQUESTS, NOT ONE, and cards=1 on both.
+ *
+ * The base comes from price bars and answers in a moment; C and A come from
+ * SEC filings. Asked together, N waited on EDGAR for no reason and the cards
+ * drew nothing until both were back. Asked separately, each half appears when
+ * it is ready.
+ *
+ * cards=1 means the EDGAR half reads the cache and never walks it. The first
+ * version of this did walk it — 25 cold tickers inside one request — so the
+ * page hung on the slowest source AND the burst got the news feed's EDGAR
+ * source rate-limited, which put "edgar not answering" on every card in the
+ * scan. A miss is a normal answer here; the nightly walk fills the cache, and
+ * tapping CANSLIM ⤢ fills it for that one name. */
+async function _canslimPart(want, part, into, blank) {
   try {
-    const r = await fetch(`/api/market/oneil/canslim?symbols=${want.join(',')}`);
+    const r = await fetch('/api/market/oneil/canslim?cards=1&parts=' + part
+      + '&symbols=' + want.join(','));
     const d = await r.json();
-    if (!d.ok) return;
-    Object.assign(CANSLIM_PANEL.fundamentals, d.fundamentals || {});
-    Object.assign(CANSLIM_PANEL.bases, d.bases || {});
-    // A ticker EDGAR has nothing for must still be marked as asked, or every
+    if (!d.ok) return false;
+    Object.assign(CANSLIM_PANEL[into], d[into] || {});
+    // A ticker with nothing for it must still be marked as asked, or every
     // re-render queues it again forever.
     want.forEach(t => {
-      if (!(t in CANSLIM_PANEL.fundamentals)) {
-        CANSLIM_PANEL.fundamentals[t] = { ok: false, error: 'no filings cached' };
-      }
-      if (!(t in CANSLIM_PANEL.bases)) {
-        CANSLIM_PANEL.bases[t] = { ok: false, reason: 'no weekly base yet' };
-      }
+      if (!(t in CANSLIM_PANEL[into])) CANSLIM_PANEL[into][t] = blank;
     });
-  } catch { /* the cards render without the block */ }
+    return true;
+  } catch { return false; }     // the cards render without the block
+}
+
+async function loadCanslimFacts(tickers) {
+  const wantF = (tickers || []).filter(t => t && !(t in CANSLIM_PANEL.fundamentals));
+  const wantB = (tickers || []).filter(t => t && !(t in CANSLIM_PANEL.bases));
+  await Promise.all([
+    wantF.length ? _canslimPart(wantF, 'fundamentals', 'fundamentals',
+      { ok: false, error: 'not fetched yet — EDGAR is walked nightly' }) : null,
+    wantB.length ? _canslimPart(wantB, 'bases', 'bases',
+      { ok: false, reason: 'no weekly base yet' }) : null,
+  ]);
 }
 
 /* The C, A and N rows. Same ctx-row shape as every other line in Market

@@ -160,10 +160,23 @@ router.get('/oneil/canslim', async (req, res) => {
   const symbols = String(req.query.symbols || '')
     .replace(/\s+/g, ',').split(',').filter(Boolean);
   if (!symbols.length) return res.json({ ok: false, error: 'no symbols' });
+
+  // `cards=1` — the whole screen at once, so it reads EDGAR's cache and never
+  // walks it. The panel is one symbol and a deliberate tap, so it may.
+  const cards = String(req.query.cards || '') === '1';
+  // `parts` splits the two halves because they have nothing in common but the
+  // panel that shows them: the base comes from price bars and answers in a
+  // moment, C and A come from filings. Asked together, N waited on EDGAR for
+  // no reason and the cards drew nothing until both were back.
+  const parts = String(req.query.parts || 'all');
+  const wantF = parts === 'all' || parts === 'fundamentals';
+  const wantB = parts === 'all' || parts === 'bases';
   try {
     const [f, b] = await Promise.all([
-      oneil.loadFundamentals(symbols),
-      oneil.loadBases(symbols),
+      wantF ? (cards ? oneil.loadFundamentalsCached(symbols)
+                     : oneil.loadFundamentals(symbols))
+            : Promise.resolve({ stocks: undefined, at: 0 }),
+      wantB ? oneil.loadBases(symbols) : Promise.resolve({ stocks: undefined, at: 0 }),
     ]);
     res.json({
       ok: true,

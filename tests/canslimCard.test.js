@@ -221,9 +221,37 @@ describe('the card fetches once for the whole screen, never per card', () => {
 
   test('a ticker EDGAR has nothing for is still marked as asked', () => {
     // Otherwise every re-render queues it again, forever.
-    const m = page.match(/async function loadCanslimFacts[\s\S]*?\n\}/)[0];
+    const m = page.match(/async function _canslimPart[\s\S]*?\n\}/)[0];
     expect(m).toMatch(/must still be marked as asked/);
-    expect(m).toMatch(/CANSLIM_PANEL\.fundamentals\[t\] = \{ ok: false/);
+    expect(m).toMatch(/CANSLIM_PANEL\[into\]\[t\] = blank/);
+  });
+
+  /*
+   * THE CARD PREFETCH READS EDGAR'S CACHE AND NEVER WALKS IT.
+   *
+   * The first version walked it: 25 cold tickers inside one request, so the
+   * page waited on the slowest source before drawing anything AND the burst
+   * got the news feed's EDGAR source rate-limited — every card in that scan
+   * printed "edgar not answering". The panel, one symbol and a deliberate
+   * tap, is the only path allowed to build.
+   */
+  test('the card prefetch asks for cached EDGAR data only', () => {
+    const m = page.match(/async function _canslimPart[\s\S]*?\n\}/)[0];
+    expect(m).toContain('cards=1');
+  });
+
+  test('...and the panel does NOT, because one deliberate tap may build', () => {
+    const m = page.match(/async function openCanslimPanel[\s\S]*?\n\}/)[0];
+    expect(m).not.toContain('cards=1');
+  });
+
+  test('the base and the filings are asked for separately', () => {
+    // The base comes from price bars and answers in a moment; C and A come
+    // from filings. Asked together, N waited on EDGAR for no reason.
+    const m = page.match(/async function loadCanslimFacts[\s\S]*?\n\}/)[0];
+    expect(m).toMatch(/'fundamentals'/);
+    expect(m).toMatch(/'bases'/);
+    expect(page).toMatch(/parts=' \+ part/);
   });
 });
 

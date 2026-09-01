@@ -254,7 +254,7 @@ async function loadRatings(symbols) {
 let _fundamentals = { day: null, stocks: {}, at: 0 };
 let _bases = { day: null, stocks: {}, at: 0 };
 
-async function _qpBatch(pathname, symbols, into, size, timeoutMs) {
+async function _qpBatch(pathname, symbols, into, size, timeoutMs, extra = '') {
   const day = _etDay();
   if (into.day !== day) { into.day = day; into.stocks = {}; into.at = 0; }
   const want = [...new Set((symbols || []).map(s => String(s).toUpperCase()))]
@@ -266,7 +266,7 @@ async function _qpBatch(pathname, symbols, into, size, timeoutMs) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
-      const r = await fetch(`${qp}${pathname}?symbols=${chunk.join(',')}`,
+      const r = await fetch(`${qp}${pathname}?symbols=${chunk.join(',')}${extra}`,
         { signal: ctl.signal });
       const d = await r.json();
       if (d && d.ok) { Object.assign(into.stocks, d.stocks || {}); into.at = Date.now(); }
@@ -284,6 +284,20 @@ async function _qpBatch(pathname, symbols, into, size, timeoutMs) {
 // the chunks are small and the timeout is long. This is the slowest thing the
 // page asks for and the one whose answer changes least often.
 const loadFundamentals = syms => _qpBatch('/api/oneil/fundamentals', syms, _fundamentals, 10, 60000);
+
+/*
+ * THE CARDS' VERSION: read what EDGAR has already given us, never go and ask.
+ *
+ * The panel is one symbol and a deliberate tap, so it can afford to walk
+ * EDGAR. A scan is 25 cold tickers at once, and walking them inside one
+ * request made the page wait on the slowest source before it drew anything
+ * AND got the news feed's EDGAR source rate-limited — every card in that scan
+ * printed "edgar not answering". A miss here is a normal answer: the nightly
+ * walk fills the cache, and tapping ⤢ fills it for that one name.
+ */
+const loadFundamentalsCached = syms =>
+  _qpBatch('/api/oneil/fundamentals', syms, _fundamentals, 40, 15000,
+           '&cached_only=1');
 const loadBases = syms => _qpBatch('/api/oneil/base', syms, _bases, 20, 60000);
 const fundamentalsCache = () => (_fundamentals.day === _etDay() ? _fundamentals : { stocks: {} });
 const basesCache = () => (_bases.day === _etDay() ? _bases : { stocks: {} });
@@ -299,5 +313,6 @@ function stocksCache() {
 module.exports = {
   read, stockVsDistribution, EXPOSURE, ftdBand, FILE,
   loadStocks, stocksCache, loadRatings, ratingsCache,
-  loadFundamentals, fundamentalsCache, loadBases, basesCache,
+  loadFundamentals, loadFundamentalsCached, fundamentalsCache,
+  loadBases, basesCache,
 };

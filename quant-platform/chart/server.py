@@ -430,11 +430,20 @@ def oneil_groups(refresh: int = 0):
 
 
 @app.get('/api/oneil/fundamentals')
-def oneil_fundamentals(symbols: str = '', refresh: int = 0):
+def oneil_fundamentals(symbols: str = '', refresh: int = 0,
+                       cached_only: int = 0):
     """C and A — the earnings tables, from SEC EDGAR. Free, no key.
 
     Served from a per-ticker cache with a WEEK's life, because fundamentals
     move quarterly and a card must never trigger a fetch. `refresh=1` rebuilds.
+
+    `cached_only=1` MEANS IT. A cache miss answers "not fetched yet" instead of
+    walking EDGAR, and that is the mode the cards use. Without it, opening a
+    scan of 25 cold tickers walked EDGAR 25 times inside one request: the page
+    waited on the slowest source before it drew anything, and the burst got the
+    news feed's EDGAR source rate-limited, which is why every card in that scan
+    printed "edgar not answering". The panel — one symbol, a deliberate tap —
+    still builds on demand.
 
     Every table carries the date it was built: filings land weeks after
     quarter-end, so a card in May legitimately showing a February filing is the
@@ -448,6 +457,12 @@ def oneil_fundamentals(symbols: str = '', refresh: int = 0):
         out = {}
         for s in syms:
             hit = None if refresh else edgar.cached(s)
+            if hit is None and cached_only:
+                out[s.upper()] = {
+                    'ok': False, 'cached': False,
+                    'error': 'not fetched yet — EDGAR is walked nightly',
+                }
+                continue
             if hit is None:
                 hit = edgar.build(s)
                 if hit.get('ok'):

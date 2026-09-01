@@ -404,6 +404,33 @@ ok('the market model is fetched at boot, not only on the market tab',
    UI.count('loadOneil();') >= 2)
 ok('...and so are the group ranks', UI.count('loadGroups();') >= 2)
 
+# ── A CARD MUST NEVER WALK EDGAR ────────────────────────────────────────
+# The endpoint's own docstring said so and the endpoint did it anyway, once a
+# card prefetch started asking for 25 cold tickers at a time: the page waited
+# on the slowest source before drawing anything, and the burst got the news
+# feed's EDGAR source rate-limited, so every card in that scan printed
+# "edgar not answering". cached_only=1 is the mode the cards use.
+SRV = (pathlib.Path(__file__).resolve().parents[1] / 'server.py').read_text()
+ok('the fundamentals endpoint takes a cached_only mode',
+   'cached_only: int = 0' in SRV)
+ok('...and a miss under it ANSWERS rather than fetching',
+   'if hit is None and cached_only:' in SRV
+   and SRV.index('if hit is None and cached_only:')
+   < SRV.index('hit = edgar.build(s)'))
+ok('...and says what it is waiting for, not just that it is empty',
+   'EDGAR is walked nightly' in SRV)
+
+NODE = (pathlib.Path(__file__).resolve().parents[3] / 'src').joinpath(
+    'sideD', 'oneil.js').read_text()
+ok('the node side has a cached-only loader for the cards',
+   'loadFundamentalsCached' in NODE and 'cached_only=1' in NODE)
+ROUTE = (pathlib.Path(__file__).resolve().parents[3] / 'src').joinpath(
+    'routes', 'market.js').read_text()
+ok('the canslim route picks the loader by who is asking',
+   "req.query.cards" in ROUTE and 'loadFundamentalsCached' in ROUTE)
+ok('...and can serve the base WITHOUT waiting on the filings',
+   "req.query.parts" in ROUTE and "parts === 'bases'" in ROUTE)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)
