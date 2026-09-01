@@ -170,8 +170,13 @@ router.get('/short-interest', async (req, res) => {
     // different problems — Yahoo's cookie wall, a moved FINRA file, and a
     // stock with genuinely no reported short position — looking identical.
     const diag = {};
+    // A FLOAT MAY BE SUPPLIED, because FINRA gives shares and the percentage
+    // needs a denominator. During a scan that comes from the scanner row; here
+    // it has to be passed or the probe shows a null percentage and looks like
+    // a failure when the lookup in fact worked.
+    const floatShares = Number(req.query.float) || undefined;
     // eslint-disable-next-line no-await-in-loop
-    const rec = await si.lookup(t, { diag });
+    const rec = await si.lookup(t, { diag, floatShares });
     out[t.toUpperCase()] = rec || { answered: false, tried: diag };
   }
   res.json({ ok: true, stocks: out });

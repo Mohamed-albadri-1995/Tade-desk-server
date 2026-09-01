@@ -15,19 +15,23 @@
  * redistributes that same file. So there is no question of which source is
  * "right" — only which one is reachable, and how it is denominated.
  *
- * THREE SOURCES, TRIED IN ORDER. None can be verified from a development
- * machine, and the first attempt at this got nothing from any of them and
- * could not say why — so each one now records its own reason for failing:
+ * THREE SOURCES, TRIED IN ORDER — and the order was earned by measurement,
+ * not by guessing. Every one failed on the first attempt and none could say
+ * why, so each now records its own reason. What that showed, from the box
+ * that actually runs this:
  *
- *   1. Yahoo quoteSummary. Gives shares short AND the percentage of float
- *      already computed, plus the prior month for a direction. It needs a
- *      cookie and a crumb first; a bare request is 401 Invalid Cookie, which
- *      is what the first version walked into.
- *   2. Nasdaq. Free, no key, per symbol, and it returns the two-week history
- *      so the direction comes with it. Gives SHARES.
- *   3. FINRA's own published file. Authoritative and needs no key, but gives
- *      SHARES short — a percentage needs a float, which the scanner does
- *      supply on every row.
+ *   yahoo   401, and the CRUMB step itself failed
+ *   nasdaq  answered, but not with the shape that was assumed
+ *   finra   nothing — the path being tried serves OTC names only
+ *
+ *   1. FINRA's own published file. It is the source every other one
+ *      redistributes, needs no key and no cookie dance, and is ONE FILE
+ *      COVERING EVERY SYMBOL — so filling a register of 150 names costs one
+ *      request rather than 150. It gives SHARES short; the percentage needs
+ *      a float, which the scanner supplies on every row.
+ *   2. Yahoo quoteSummary, per symbol, for names FINRA's file does not carry.
+ *      It computes the share of float itself. Needs a cookie and a crumb.
+ *   3. Nasdaq, per symbol, free and no key, with the two-week history.
  *
  * WHAT IS NEVER DONE. Short % of float and short % of shares OUTSTANDING are
  * different numbers, and outstanding is always the larger denominator, so
@@ -365,15 +369,24 @@ async function lookup(ticker, ctx = {}) {
   const diag = ctx.diag || {};
   let rec = null;
   try {
-    rec = await fetchYahoo(t, diag);
-    if (!rec) rec = await fetchNasdaq(t, diag);
-    if (!rec) {
-      const text = await fetchFinraFile(diag);
-      if (text) {
-        rec = parseFinra(text, t);
-        if (!rec && diag) diag.finra = 'file fetched, symbol not in it';
-      }
+    // FINRA FIRST, and by a distance. It is the source every other one
+    // redistributes, it needs no key and no cookie dance, and above all it is
+    // ONE FILE COVERING EVERY SYMBOL — cached for the day, so filling 150
+    // rows costs one request instead of 150.
+    //
+    // It was third when this was written, on the assumption that a
+    // ready-made percentage was worth more than the raw shares. That cost
+    // every symbol a Yahoo 401 and a Nasdaq miss before reaching the only
+    // source that answered: 300 wasted requests on a register day.
+    const text = await fetchFinraFile(diag);
+    if (text) {
+      rec = parseFinra(text, t);
+      if (!rec && diag) diag.finra = 'file fetched, symbol not in it';
     }
+    // The per-symbol sources are the fallback now — for names FINRA's file
+    // does not carry, and for the share-of-float Yahoo computes for us.
+    if (!rec) rec = await fetchYahoo(t, diag);
+    if (!rec) rec = await fetchNasdaq(t, diag);
     rec = toPercent(rec, ctx);
   } catch (e) { diag.error = String(e.message).slice(0, 120); rec = null; }
   _cache.set(t, { day, rec });

@@ -159,6 +159,37 @@ describe('Nasdaq, the third source', () => {
   });
 });
 
+describe('the order was earned by measurement', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '../src/sideC/shortInterest.js'), 'utf8');
+  const fn = src.match(/async function lookup[\s\S]*?\n\}/)[0];
+
+  test('FINRA is tried FIRST', () => {
+    /*
+     * It was third, on the assumption that a ready-made percentage beat raw
+     * shares. Measured on the real box, Yahoo 401'd and Nasdaq returned an
+     * unexpected shape, so every symbol paid for two failures before reaching
+     * the only source that answered — 300 wasted requests on a register day.
+     */
+    expect(fn.indexOf('fetchFinraFile')).toBeGreaterThan(-1);
+    expect(fn.indexOf('fetchFinraFile')).toBeLessThan(fn.indexOf('fetchYahoo'));
+    expect(fn.indexOf('fetchYahoo')).toBeLessThan(fn.indexOf('fetchNasdaq'));
+  });
+
+  test('...and the reason is ONE FILE for every symbol, not one per symbol', () => {
+    expect(fn).toContain('ONE FILE');
+    expect(fn).toContain('costs one request instead of 150');
+  });
+
+  test('the probe can be given a float, or its percentage reads as a failure', () => {
+    const route = fs.readFileSync(
+      path.join(__dirname, '../src/routes/market.js'), 'utf8');
+    expect(route).toContain('req.query.float');
+  });
+});
+
 describe('it can never be the reason a scan fails', () => {
   const fs = require('fs');
   const path = require('path');
