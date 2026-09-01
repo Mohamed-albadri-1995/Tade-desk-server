@@ -429,6 +429,27 @@ def oneil_groups(refresh: int = 0):
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/datacheck')
+def datacheck(symbol: str = 'SPY'):
+    """Does every data source actually return USABLE data?
+
+    Not "is it up" — a source answering 200 with an empty frame, a stale one,
+    or one where a split was never applied renders as a normal-looking card,
+    and nothing else in this platform would catch any of them.
+
+    Slow on purpose: it fetches from every loader and compares them against
+    each other. Not on a schedule and not on a page load — this is a button.
+    """
+    from chart import datacheck as dc
+    try:
+        return dc.run_all(symbol)
+    except Exception as e:                          # noqa: BLE001
+        # A health check that can itself fail is not one, so even this path
+        # answers in the shape the caller expects.
+        return {'ok': False, 'total': 0, 'passed': 0, 'down': 1, 'degraded': 0,
+                'checks': [], 'summary': f'the check itself failed: {str(e)[:200]}'}
+
+
 @app.get('/api/oneil/ratings')
 def oneil_ratings(symbols: str = '', feed: str = 'yahoo', index: str = '^GSPC'):
     """Phase 4: U/D volume, Accumulation/Distribution, the RS line, divergence.

@@ -1355,6 +1355,20 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
         <div id="tool-identity-box"><div class="loading">Loading…</div></div>
       </div>
 
+      <!-- DATA SOURCES. Not "is it up" — a source answering 200 with an empty
+           frame, a stale one, or one where a split was never applied renders
+           as a perfectly normal card, and nothing else here would catch it. -->
+      <div class="settings-section">
+        <div class="settings-section-title">Data sources</div>
+        <div class="settings-hint" style="margin-bottom:10px">
+          Fetches from every source and looks at what came back — rows, freshness, volume,
+          and whether two feeds quoting the same session agree with each other. Takes up to a
+          minute because it really fetches.
+        </div>
+        <button class="sb-btn" onclick="runDataCheck(this)">Check every data source</button>
+        <div id="datacheck-out" style="margin-top:12px"></div>
+      </div>
+
       <!-- Hot Sector -->
       <div class="settings-section">
         <div class="settings-section-title">Hot Sector</div>
@@ -5801,6 +5815,41 @@ function renderToolIdentity() {
           ${esc(v.sha)} — reload to pick it up.</div>` : ''}
       </div>
     </div>`;
+}
+
+async function runDataCheck(btn) {
+  const el = document.getElementById('datacheck-out');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  el.innerHTML = '<div class="loading">Fetching from every source…</div>';
+  try {
+    const r = await fetch('/api/datacheck');
+    const d = await r.json();
+    if (!d.checks) throw new Error(d.error || 'no answer');
+    const mark = { ok: '✓', degraded: '⚠', down: '✕' };
+    const col = { ok: 'var(--green)', degraded: 'var(--orange)', down: 'var(--red)' };
+    el.innerHTML = `
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:${
+        d.down ? 'var(--red)' : d.degraded ? 'var(--orange)' : 'var(--green)'}">
+        ${d.passed}/${d.total} sources returned usable data${
+        d.degraded ? ` · ${d.degraded} degraded` : ''}${d.down ? ` · ${d.down} DOWN` : ''}
+      </div>
+      ${!d.qpReachable ? `<div class="oneil-caveat">⚠ qp did not answer, so the bar feeds,
+        the RS universe and the market model have no health report at all.</div>` : ''}
+      <div class="oneil-dd-wrap"><table class="oneil-dd">
+        <thead><tr><th></th><th>Source</th><th>What came back</th><th>ms</th></tr></thead>
+        <tbody>${d.checks.map(c => `<tr>
+          <td style="color:${col[c.severity] || ''};font-weight:700">${mark[c.severity] || '?'}</td>
+          <td>${esc(c.name || '')}</td>
+          <td style="white-space:normal">${esc(c.detail || '')}</td>
+          <td>${c.ms != null ? c.ms : ''}</td></tr>`).join('')}</tbody>
+      </table></div>
+      <div class="settings-hint" style="margin-top:8px">Took ${(d.ms / 1000).toFixed(1)}s.
+        ⚠ means working but worth a look; ✕ means this source is not usable right now.</div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="sb-result err">Could not run the check: ${esc(e.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Check every data source'; }
+  }
 }
 
 async function toolRenameFromInput() {

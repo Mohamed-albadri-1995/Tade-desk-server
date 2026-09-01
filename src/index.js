@@ -69,6 +69,9 @@ app.use('/api/registry', require('./routes/registry'));
 app.use('/api/scan', require('./routes/scan'));
 app.use('/api/screeners', require('./routes/screeners'));
 app.use('/api/tool', require('./routes/tool'));
+// Does every data source return USABLE data? Slow and deliberate — a button,
+// not a poll. See src/routes/datacheck.js.
+app.use('/api/datacheck', require('./routes/datacheck'));
 // Which commit this process loaded. Read once at startup on purpose — it must
 // describe the code that is RUNNING, not the code in the working tree.
 app.get('/api/version', (req, res) => res.json({ ok: true, ...require('./version').version() }));
