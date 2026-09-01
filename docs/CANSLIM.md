@@ -1108,19 +1108,281 @@ the CANSLIM panel (§11.3) · `NEWS` = the card's existing News section ·
 | X7 | A missing file reads **"not fetched yet"** with the last attempt date — never a blank that looks like zero | §11.5 |
 | X8 | Thresholds are **O'Neil's**, named constants, printed next to any signal | §5 |
 
+### 12.9b The market tab reflected per card — §14
+
+| # | Element | Home | Source | Rule | Phase |
+|---|---|---|---|---|---|
+| P1 | The state, one compact line | CTX | `oneil-market.json` | §14.2 | 2 |
+| P2 | **What this stock did on the live distribution days** — `up on 4 of 5, avg +0.9% vs index −0.8%` | CTX | market file + bars | §14.3 | 2 |
+| P3 | The five dates behind a tap, so it is checkable against a chart | CTX | market file | §14.5 | 2 |
+| P4 | Verdict: HOLDING UP / IN LINE / GIVING WAY | CTX | derived | §14.2 | 2 |
+| P5 | **Sessions since the follow-through day**, banded early/established/late | CTX | market file | §14.3 | 2 |
+| P6 | **Group rotation** — rank now vs 3 months ago, ▲into / ▼out of | CTX | groups file | §14.3 | 3 |
+| P7 | The exposure implication in O'Neil's words | CTX | text | §14.3 | 2 |
+| P8 | Says so explicitly when there are **no** live distribution days | CTX | derived | §14.5 | 2 |
+
+### 12.9c Everything explains itself — §13
+
+| # | Element | Rule |
+|---|---|---|
+| E1 | Every label carries a tappable `ⓘ` — **tap, not hover**, because `title` does not exist on a touch screen | §13.1 |
+| E2 | The definition card has **four parts, always**: what it means · how it is calculated · **what it is NOT** · source and as-of | §13.2 |
+| E3 | `WHAT IT IS NOT` comes from the §1 trap table and is **mandatory** | §13.2 |
+| E4 | A **Method page** in the tool: the trap table, every formula, the thresholds with provenance, the honest limits | §13.2 |
+| E5 | No bare number — ranks print divisors, ratios print windows, percentiles print scales | §13.3 |
+| E6 | No blank that reads as zero: `not fetched yet · last tried DATE` | §13.3, X7 |
+| E7 | Every threshold that fires prints itself and whose number it is | §13.3, X8 |
+| E8 | Existing `title` tooltips kept, but never the only copy of an explanation | §13.1 |
+
 ### 12.10 Phases — what each one delivers
 
 | Phase | Delivers | Depends on |
 |---|---|---|
 | **1** | M1–M10 — the whole market model, written to `oneil-market.json` | index bars only |
-| **2** | The market tab O'Neil block (M5–M12) | phase 1 |
-| **3** | Groups: R3–R4, R7–R9, L1–L3, L5(RS), L6, L9, L10, N10, N16 | `relstrength.py` |
+| **2** | The market tab O'Neil block (M5–M12) **and its per-card reflection P1–P5, P7, P8** | phase 1 |
+| **3** | Groups: R3–R4, R7–R9, L1–L3, L5(RS), L6, L9, L10, N10, N16, **P6** | `relstrength.py` |
 | **4** | Ratings that need bars: R1, R6, S4, L4, L7, L8 | phase 3 |
 | **5** | EDGAR: C1–C8, A1–A6, R2, R5, S1, L5(EPS) | EDGAR fetcher |
 | **6** | 13F & FINRA: I1–I4, S2, S3 | phase 5 |
 | **7** | The N pipeline: N1–N9, N11–N15 | phases 3 and 5 |
 
+**E1–E8 are not a phase.** Every phase ships its own definition cards with it;
+a field that arrives without its explanation is not finished. The Method page
+(E4) grows with each phase rather than being written once at the end.
+
 Phases 1–4 need **no new data source at all** — index bars, Polygon grouped
 daily and `relstrength.py` are already in the system. That is where the market
 model, the whole group hierarchy and most of the row live, and it is why the
 build order in §11.6 starts there.
+
+---
+
+## 13. LOCKED — the card, and the rule that everything explains itself
+
+**The card spec (§7, §11.3, §12) is confirmed and locked.** Changes to it from
+here are amendments with a reason recorded, not redesigns.
+
+One requirement is added, and it applies to **every field in this document**:
+
+> **Nothing is hidden, and every number explains its own meaning and its own
+> calculation, inside the tool.**
+
+Not in this file. This file is for building; the person using the tool at
+07:40 is not going to open a repository.
+
+### 13.1 The problem with how the card explains itself today
+
+The card already carries good explanations — 14 of them in the card renderer
+alone, written as `title="..."` attributes:
+
+```html
+title="volume against a normal day — 1.5× notable, 5× extreme"
+title="shares actually available — under 20M is notable, under 10M is extreme"
+```
+
+**A `title` attribute does not appear on a touch screen.** There is no hover on
+Android Chrome, which is where this desk is actually read. So every one of
+those sentences is, in practice, invisible on the device it matters on — the
+work of explaining was already done and it is not reaching you.
+
+That is not a CANSLIM problem, but CANSLIM triples the number of fields that
+need explaining, so it is fixed here rather than made worse.
+
+### 13.2 The three levels of explanation
+
+Every field gets all three. They are different jobs.
+
+**Level 1 — the label, tappable.** Every label carries a small `ⓘ`. Tapping
+opens a definition card. Tapping, not hovering, so it works on the phone. The
+existing `title` text stays where it is — it costs nothing and it works on a
+desktop — but it is never the only copy of an explanation.
+
+**Level 2 — the definition card.** Four parts, always the same four, because a
+definition with only the first part is what created every trap in §1:
+
+```
+┌ RS Rating ────────────────────────────────┐
+│                                            │
+│ WHAT IT MEANS                              │
+│ Where this stock's 12-month price          │
+│ performance ranks against every other US   │
+│ stock. 99 = top 1%. 50 = middle.           │
+│                                            │
+│ HOW IT IS CALCULATED                       │
+│   RS = 0.4·(P0/P63) + 0.2·(P0/P126)        │
+│       + 0.2·(P0/P189) + 0.2·(P0/P252)      │
+│ 63/126/189/252 trading days = 3/6/9/12     │
+│ months. The most recent quarter counts     │
+│ double. Then ranked into a percentile      │
+│ 1-99 against every US ticker.              │
+│ Split-adjusted prices.                     │
+│                                            │
+│ WHAT IT IS NOT                             │
+│ Not RSI. RSI compares a stock to its own   │
+│ recent range and says nothing about any    │
+│ other stock. Two stocks can both print     │
+│ RSI 70 while one leads the market and the  │
+│ other is a laggard bouncing in a downtrend.│
+│                                            │
+│ SOURCE · AS OF                             │
+│ Polygon grouped daily · 2026-08-31 close   │
+└────────────────────────────────────────────┘
+```
+
+**`WHAT IT IS NOT` is mandatory and comes straight from §1.** That table exists
+because these concepts have plain-English names that mean something else. The
+trap column was written for the person reading the card, not for me.
+
+**Level 3 — the Method page.** One page in the tool, reachable from the panel
+and from the market tab, holding every definition in one scrollable document:
+the §1 trap table, the formulas, the thresholds with O'Neil's provenance from
+§5, and the honest limits from §3.1 and §9.5. It is this document's content,
+rendered where it can actually be read.
+
+### 13.3 "Everything visible" — what that rules out
+
+- **No bare number anywhere.** A rank prints its divisor (`63 of 197`), a
+  percentile prints its scale, a ratio prints its window (`U/D 1.41 · 50d`).
+- **No blank that could be read as a zero.** Missing is `not fetched yet ·
+  last tried 2026-08-30`; not-applicable is `n/a` with the reason on tap.
+- **No number without its as-of date** — per block, because they refresh on
+  different clocks (§11.3, X1).
+- **No reconstruction presented as the original.** `rs`, never "IBD RS", and
+  the definition card says so (§6, X3).
+- **Every threshold that fired prints itself**, with whose number it is:
+  `FTD +1.7% — O'Neil, The Successful Investor` (§5, X8).
+
+---
+
+## 14. The market tab, reflected in every card
+
+This is the part that makes M worth having, and it is the one thing that
+cannot be solved by printing the market status on the card.
+
+**Why it matters, in O'Neil's own terms:** he found **three out of four stocks
+follow the general market direction**, and called M the most important letter
+— the one most investors ignore. His words: *"You can be right on every one of
+the factors in the last six chapters, but if you're wrong about the direction
+of the general market, and that direction is down, three out of four of your
+stocks will plummet along with the market averages."*
+
+### 14.1 The trap: the same sentence on 150 cards is not information
+
+The obvious build is to stamp `Market: uptrend under pressure` on every card.
+On a register day that is **150 identical lines**. A field with the same value
+on every row carries no information about any row — it is a page header that
+has been copied into the body 150 times, and after two mornings the eye stops
+seeing it.
+
+So the market state appears on a card in **two parts**, and only the first is
+shared:
+
+| Part | Varies per card? | What it is |
+|---|---|---|
+| **The state** | No | One line, compact, the same everywhere. It is the header fact |
+| **This stock against it** | **Yes** | What this specific stock did during the market events the tab is counting |
+
+The second is the point. It is computed from the market tab's own output —
+the dated distribution days and the follow-through date — crossed with this
+stock's bars.
+
+### 14.2 The block, on every card
+
+```
+M — MARKET, AND THIS STOCK IN IT
+
+  Market        Uptrend under pressure · 5 distribution days live
+  Since FTD     32 sessions (follow-through 2026-07-18)
+
+  ON THOSE 5 DISTRIBUTION DAYS
+    This stock  up on 4 of 5   ·   avg +0.9%   vs index avg −0.8%
+    Verdict     HOLDING UP — being accumulated while the index is
+                being distributed
+
+  GROUP ROTATION
+    Retail-Leisure Products   rank 141 → 28 over 3 months   ▲ into
+
+  WHAT O'NEIL DOES HERE
+    Stop initiating new positions; tighten stops on open ones.
+    A name holding up through distribution is a leader candidate
+    for the next follow-through day.
+```
+
+### 14.3 The four per-card readings, and how each is computed
+
+**1. Behaviour on the distribution days — the strongest one.**
+
+The market tab already knows the exact dates of the live distribution days.
+For each, ask what *this* stock did on that same session:
+
+```
+held_up = count of live distribution days where
+              stock's close-to-close return  >  index's return
+avg_rel  = mean(stock return − index return) over those days
+```
+
+This is O'Neil's "leaders hold up during market pullbacks", made checkable.
+It is a **different number on every card**, computed from a market-level fact,
+and it is the single most useful thing the market model can tell you about one
+stock. Nothing in the system does this today.
+
+**2. Sessions since the follow-through day — the clock on the uptrend.**
+
+O'Neil buys early in a new uptrend. A breakout 5 sessions after an FTD and the
+same breakout 200 sessions after it are different propositions, and this is
+also the input to base-stage counting (§1) — bases are counted **from the
+market bottom**, so the FTD date is where that count starts.
+
+```
+sessions_since_ftd = trading days from the confirmed FTD to today
+```
+
+Banded on the card: `early (<25)` · `established (25–150)` · `late (>150)`.
+
+**3. Group rotation — the market's money, at this stock's level.**
+
+The market state is about the index; the group rank change is about where the
+money inside it is going. From §9's group file:
+
+```
+rank now  vs  rank 3 months ago      ▲ into / ▼ out of / flat
+```
+
+This is also N10 in the manifest — "new industry conditions" — and it is the
+same computation serving both letters. Computed once.
+
+**4. The exposure implication, in O'Neil's words, not a number.**
+
+Each of the three states carries the action O'Neil draws from it (§2.1). It is
+printed as text because it is a rule, not a measurement, and printed on the
+card because that is where the decision is being made.
+
+### 14.4 Where each piece lives
+
+| Reading | Market tab | Card |
+|---|---|---|
+| The state and why | **Full** — status, per-index counts, dated distribution table, rules in use | One compact line |
+| Distribution days | **The list**, with dates | **What this stock did on those dates** |
+| Follow-through day | **The date, the day-count, the caveat** | Sessions since, banded |
+| Groups | **Top 20 / bottom 10 table** | **This stock's group, and its rotation** |
+| Exposure implication | Once, at the top | Once, per card |
+
+The tab holds the evidence; the card holds this stock's relationship to it.
+Neither repeats the other, and the card's version is a different number for
+every stock on the page.
+
+### 14.5 The rules this must not break
+
+- **Still a label, never a filter** (X4). "Held up on 4 of 5 distribution
+  days" does not change the stock's score or whether it appears. It is the
+  most tempting thing in this document to feed into a score, and feeding it in
+  would make every card captured before today incomparable with every card
+  captured after.
+- **Computed from the shared file** (X6). The card does not recompute the
+  market state; it reads `oneil-market.json` for the dates and does one
+  comparison against bars it already has.
+- **The dates are shown**, not just the count. "Up on 4 of 5" with the five
+  dates behind a tap, so it can be checked against a chart.
+- **It says when there are none.** In a confirmed uptrend with zero
+  distribution days there is nothing to hold up through, and the block says
+  exactly that rather than printing `0 of 0` or a blank.
