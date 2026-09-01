@@ -3758,8 +3758,8 @@ function buildCard(row) {
             <div class="price-row"><span class="price-label">Float</span><span class="price-val ${magFloat}" title="shares actually available — under 20M is notable, under 10M is extreme">${fmtShares(s.floatShares)}</span></div>
             <div class="price-row"><span class="price-label">Short %</span><span class="price-val ${magShort}" title="${
               s.shortFloat != null
-                ? 'short interest as a share of float — 10% notable, 20% extreme'
-                : 'TradingView’s scanner does not serve short interest on any name — seven column names were probed against seven stocks including GME and every one came back empty. This is not missing data for this stock, it is a field the source does not provide.'
+                ? `short interest as a share of ${s.shortBasis === 'outstanding' ? 'SHARES OUTSTANDING (no float available — a larger denominator, so this understates it)' : 'float'} — 10% notable, 20% extreme${s.shortAsOf ? ', reported ' + s.shortAsOf : ''}${s.daysToCover ? ' · ' + s.daysToCover + ' days to cover' : ''}`
+                : 'No short interest reported for this stock. TradingView’s scanner does not serve the field at all — seven column names were probed against seven stocks including GME and every one came back empty — so it is filled from Yahoo, and failing that from FINRA’s own twice-monthly file. Every US short interest figure originates with FINRA; brokers report twice a month and vendors redistribute the same data.'
               }">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : 'n/a'}</span></div>
           </div>`)}
 

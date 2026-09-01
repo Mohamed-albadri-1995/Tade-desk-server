@@ -166,6 +166,15 @@ async function runFullScan() {
     // records what it saw, qp ranks groups against the full-universe RS it
     // already computes. Nothing extra is fetched — this was already on every
     // row and was being thrown away. See src/sideA/industryMap.js.
+    // SHORT INTEREST. The scanner's column has never returned a value, so
+    // this fills the gap from Yahoo and, failing that, from FINRA's own
+    // published file. SOFT: a missing short interest costs a field, and it
+    // must never be the reason a scan fails.
+    await stageWrapSoft(report, 'shortInterest', async () => {
+      const si = require('./sideC/shortInterest');
+      return si.fill(r0.getAll());
+    });
+
     await stageWrapSoft(report, 'industryMap', async () => {
       const n = require('./sideA/industryMap').record(r0.getAll());
       return { recorded: n };

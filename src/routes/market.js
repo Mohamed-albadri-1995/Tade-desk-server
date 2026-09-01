@@ -151,6 +151,27 @@ router.get('/oneil/13f', async (req, res) => {
 });
 
 /*
+ * GET /api/market/short-interest?symbols=A,B
+ *
+ * A PROBE, not a card feed. Short interest has two possible sources and
+ * neither can be verified from a development machine, so this says which one
+ * answered and what it gave — otherwise diagnosing an empty field means
+ * guessing between "Yahoo refused", "FINRA moved the file" and "this stock
+ * genuinely has no reported short position".
+ */
+router.get('/short-interest', async (req, res) => {
+  const symbols = String(req.query.symbols || 'GME,AAPL')
+    .replace(/\s+/g, ',').split(',').filter(Boolean);
+  const si = require('../sideC/shortInterest');
+  const out = {};
+  for (const t of symbols.slice(0, 10)) {
+    // eslint-disable-next-line no-await-in-loop
+    out[t.toUpperCase()] = (await si.lookup(t)) || 'no source answered';
+  }
+  res.json({ ok: true, stocks: out });
+});
+
+/*
  * POST /api/market/oneil/seed-industries
  *
  * Rebuild the industry map from the registers this tool has already frozen.
