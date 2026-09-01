@@ -4151,9 +4151,10 @@ const DEFS = {
       + "arithmetic: 37% of a stock's price move is attributed to its industry "
       + "group and another 12% to its sector — roughly half the move is not "
       + "about the company.",
-    how: "Every mapped stock gets its RS Rating. Stocks are bundled by industry,\n"
-      + "each group is scored on the MEDIAN member rating, and the groups are\n"
-      + "ranked on that.\n\n"
+    how: "EVERY stock in the market is classified by its SIC industry code, not\n"
+      + "just the ones a screener returned. Each gets its RS Rating, stocks are\n"
+      + "bundled by industry, each group is scored on the MEDIAN member rating,\n"
+      + "and the groups are ranked on that.\n\n"
       + "  median, not mean   one 99 among laggards is one stock's story, and\n"
       + "                     a mean lets that name carry the whole group\n"
       + "  3+ members         two stocks are not an industry\n\n"
@@ -4164,10 +4165,17 @@ const DEFS = {
       + "the rank is NOT the percentile: a rank counts up from best, a "
       + "percentile counts down, so a bare number is excellent as one and "
       + "mediocre as the other. That is why the divisor is always printed. "
-      + "These are also OUR groups, not IBD's — IBD's 197-way split is "
-      + "proprietary.",
-    src: 'Our industry map, built from the label the scanner returns on every '
-      + 'card, ranked against qp\'s whole-market RS.',
+      + "Not IBD's 197-way split either: those definitions are proprietary and "
+      + "cannot be reproduced from public data. SIC is an older scheme and "
+      + "groups some things differently — a software company and a payroll "
+      + "processor can share a code. What matters for O'Neil's rule is that "
+      + "the group is the WHOLE industry rather than a sample of it.",
+    src: "SIC industry codes from SEC EDGAR, which cover every filer in the "
+      + "market, ranked against qp's whole-market RS. An earlier version built "
+      + "groups from the stocks our own screeners happened to return — so the "
+      + "rank measured the screeners, not the market, and a true industry "
+      + "leader could rank 8th because the seven names we caught were the "
+      + "strong ones.",
   },
   rs_in_group: {
     title: 'Rank inside its own group',
