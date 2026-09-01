@@ -2972,17 +2972,21 @@ function renderCards() {
   // back, so a re-quote does not redraw 150 cards for nothing.
   const need = rows.map(r => r.ticker).filter(tk => !(tk in ONEIL_STOCKS.stocks));
   const needR = rows.map(r => r.ticker).filter(tk => !(tk in ONEIL_RATINGS));
-  if ((need.length || needR.length) && !_oneilStocksBusy) {
+  const needF = rows.map(r => r.ticker)
+    .filter(tk => !(tk in CANSLIM_PANEL.fundamentals));
+  if ((need.length || needR.length || needF.length) && !_oneilStocksBusy) {
     _oneilStocksBusy = true;
-    // Both in one pass, and ONE re-render at the end. Two independent
-    // re-renders would redraw 150 cards twice for one page load.
+    // All three in one pass, and ONE re-render at the end. Three independent
+    // re-renders would redraw 150 cards three times for one page load.
     Promise.all([
       need.length ? loadOneilStocks(need) : null,
       needR.length ? loadOneilRatings(needR) : null,
+      needF.length ? loadCanslimFacts(needF) : null,
     ]).then(() => {
       _oneilStocksBusy = false;
       const got = need.some(tk => tk in ONEIL_STOCKS.stocks)
-        || needR.some(tk => tk in ONEIL_RATINGS);
+        || needR.some(tk => tk in ONEIL_RATINGS)
+        || needF.some(tk => tk in CANSLIM_PANEL.fundamentals);
       if (got) renderCards();
     });
   }
@@ -3624,9 +3628,14 @@ function buildCard(row) {
     <!-- MARKET CONTEXT -->
     <div class="card-section">
       <div class="section-title">Market Context</div>
-      ${oneilCardBlock(row.ticker)}
-      ${groupCardBlock(row.ticker)}
+      <!-- IN LETTER ORDER, because the order IS the method: C and A say
+           whether the company is worth owning, N whether the chart is ready,
+           S L I who else is in it, M whether now is the time. Reading them
+           scattered is reading a different checklist. -->
+      ${canslimCardBlock(row.ticker)}
       ${ratingsCardBlock(row.ticker)}
+      ${groupCardBlock(row.ticker)}
+      ${oneilCardBlock(row.ticker)}
       <div class="ctx-row"><span class="ctx-label">Regime</span>${regimeHTML}</div>
       <div class="ctx-row"><span class="ctx-label">Long term</span><span class="ctx-val ${biasCls(ctx.longTerm)}">${ctx.longTerm||'—'}</span></div>
       <div class="ctx-row"><span class="ctx-label">Mid term</span><span class="ctx-val ${biasCls(ctx.midTerm)}">${ctx.midTerm||'—'}</span></div>
@@ -4004,6 +4013,69 @@ const DEFS = {
     src: 'Computed from the same ratings as the group rank. Tap ⤢ for the '
       + 'strongest names in the group.',
   },
+  canslim_c: {
+    title: 'C — current quarterly earnings',
+    what: "The C in CAN SLIM, and the letter O'Neil put first. The most "
+      + "recent quarter's earnings per share against the SAME quarter one "
+      + "year earlier — not against last quarter, which would compare a "
+      + "retailer's Christmas with its spring.",
+    how: "  EPS %    this quarter's EPS vs the year-ago quarter\n"
+      + "  sales %  same comparison on revenue\n"
+      + "  accelerating   the last three quarters' EPS growth rates are\n"
+      + "                 each larger than the one before\n"
+      + "  beat +25% in N of M   how many of the quarters on file cleared\n"
+      + "                        O'Neil's minimum\n\n"
+      + "Sales are shown BESIDE EPS, never instead of it: a buyback lifts "
+      + "EPS with the business standing still, and only the pair separates "
+      + "the two. The full eight-quarter table is behind CANSLIM ⤢.",
+    not: "Not a forecast and not an estimate — these are filed figures, so "
+      + "they arrive WEEKS after the quarter ends and the newest quarter may "
+      + "not be here yet. Not a percentage from a loss: a growth rate off a "
+      + "negative base is arithmetic without meaning and prints n/a instead. "
+      + "Not comparable across a gap either — where a filer stopped tagging a "
+      + "year, the change says so rather than reaching over the hole.",
+    src: "SEC EDGAR companyfacts (XBRL), the company's own filings. Walked "
+      + 'nightly and cached; a card never triggers a fetch.',
+  },
+  canslim_a: {
+    title: 'A — annual earnings',
+    what: "The A in CAN SLIM: does the quarter in C sit on top of years of "
+      + "growth, or is it one good quarter in a flat decade. Three numbers — "
+      + "the growth rate, the wobble, and the return on equity.",
+    how: "  3yr      compound annual EPS growth over three years,\n"
+      + "           (newest / three-years-ago) ^ (1/3) - 1\n"
+      + "  wobble   how far the yearly figures scatter around their own\n"
+      + "           straight-line trend, 0-99\n"
+      + "  ROE      net income / shareholder equity, against a 17% floor\n\n"
+      + "Compounded, never averaged: averaging +100% and -50% gives +25% for "
+      + "a company that ended where it started.",
+    not: "WOBBLE IS THE ONE NUMBER HERE WHERE LOW IS GOOD — it is the "
+      + "opposite of every other figure on this card, which is why it is "
+      + "named rather than left bare. O'Neil wants a straight line, not a "
+      + "high average with holes in it. And the 3-year rate is not shown at "
+      + "all unless four consecutive years are actually on file.",
+    src: 'SEC EDGAR companyfacts (XBRL). ROE uses net income and equity from '
+      + 'the same filing.',
+  },
+  canslim_n: {
+    title: 'N — the base, on WEEKLY bars',
+    what: "The N in CAN SLIM is the new thing — product, management, high — "
+      + "and the chart pattern that lets you act on it. This is the base the "
+      + "stock has built and how far price sits below the buy point.",
+    how: "  Nw          the base's length in WEEKS\n"
+      + "  % deep      from the left lip down to the low\n"
+      + "  handle      a short drift down in the UPPER HALF of the base\n"
+      + "  pivot       the handle's high plus $0.10, O'Neil's buy point\n"
+      + "  % away      how far today's price is below that pivot\n"
+      + "  N of 6      how many of the base's checks it passes",
+    not: "NOT A DAILY-CHART READING. O'Neil taught bases on weekly charts and "
+      + "these are weekly bars — the same tests run on daily bars measure "
+      + "something else and would call almost anything a base. Not a signal "
+      + "either: a pivot is a price, not an instruction, and 'no handle' "
+      + "means the pattern is unfinished, not that it failed.",
+    src: 'Weekly bars resampled from qp daily history, Friday-ended. The full '
+      + 'reading — lip, low, waves, accumulation weeks — is behind CANSLIM ⤢.',
+  },
   held_up: {
     title: 'On the distribution days',
     what: "What THIS stock did on the exact sessions the index was being sold. "
@@ -4170,6 +4242,112 @@ function oneilDates(ticker) {
    weekly — and one timestamp at the top would claim a freshness most of them
    do not have. */
 let CANSLIM_PANEL = { fundamentals: {}, bases: {} };
+
+/* C, A AND N ON THE CARD ITSELF, NOT ONLY BEHIND THE ⤢.
+ *
+ * S, L and M were already card rows; C, A and N were not, because the eight-
+ * quarter table needs a full-width surface. But the TABLE needing width does
+ * not mean the READING does: "EPS +48%, sales +65%, accelerating" is one line,
+ * and it is the line that decides whether the card is worth opening at all.
+ * The panel keeps the tables. The card gets the reading.
+ *
+ * ONE REQUEST FOR EVERY TICKER ON SCREEN, in the same pass that already
+ * fetches the distribution-day and ratings blocks — X5 holds: a card render
+ * never triggers a fetch, it reads what this put in the cache. */
+async function loadCanslimFacts(tickers) {
+  const want = (tickers || []).filter(
+    t => t && !(t in CANSLIM_PANEL.fundamentals) && !(t in CANSLIM_PANEL.bases));
+  if (!want.length) return;
+  try {
+    const r = await fetch(`/api/market/oneil/canslim?symbols=${want.join(',')}`);
+    const d = await r.json();
+    if (!d.ok) return;
+    Object.assign(CANSLIM_PANEL.fundamentals, d.fundamentals || {});
+    Object.assign(CANSLIM_PANEL.bases, d.bases || {});
+    // A ticker EDGAR has nothing for must still be marked as asked, or every
+    // re-render queues it again forever.
+    want.forEach(t => {
+      if (!(t in CANSLIM_PANEL.fundamentals)) {
+        CANSLIM_PANEL.fundamentals[t] = { ok: false, error: 'no filings cached' };
+      }
+      if (!(t in CANSLIM_PANEL.bases)) {
+        CANSLIM_PANEL.bases[t] = { ok: false, reason: 'no weekly base yet' };
+      }
+    });
+  } catch { /* the cards render without the block */ }
+}
+
+/* The C, A and N rows. Same ctx-row shape as every other line in Market
+ * Context, so it reads as part of the card rather than a panel bolted on. */
+function canslimCardBlock(ticker) {
+  const tk = String(ticker).toUpperCase();
+  const f = CANSLIM_PANEL.fundamentals[tk];
+  const b = CANSLIM_PANEL.bases[tk];
+  let html = '';
+
+  // ── C — the most recent quarter, EPS AND SALES TOGETHER ───────────────
+  // Never EPS alone: a buyback lifts EPS with the business standing still,
+  // and the pair is what separates the two.
+  if (f && f.ok && f.c && f.c.rows && f.c.rows.length) {
+    const c = f.c, r0 = c.rows[0];
+    const eCls = r0.eps_chg == null ? '' : r0.eps_chg >= c.bar_pct ? 'bias-bull'
+      : r0.eps_chg < 0 ? 'bias-bear' : '';
+    const sCls = r0.sales_chg == null ? '' : r0.sales_chg >= 25 ? 'bias-bull'
+      : r0.sales_chg < 0 ? 'bias-bear' : '';
+    html += `<div class="ctx-row"><span class="ctx-label">C — quarter${info('canslim_c')}</span>
+      <span class="ctx-val">
+        <span class="${eCls}">EPS ${esc(r0.eps_chg_label || '—')}</span> ·
+        <span class="${sCls}">sales ${esc(r0.sales_chg_label || '—')}</span>
+        <span style="color:var(--text3)">${esc(r0.quarter || '')}</span><br>
+        <span class="${c.accelerating ? 'bias-bull' : ''}">${c.accelerating
+          ? 'accelerating' : 'not accelerating'}</span> ·
+        <span style="color:var(--text3)">beat +${c.bar_pct}% in
+          ${c.beat_25} of ${c.beat_25_of}</span>
+      </span></div>`;
+  }
+
+  // ── A — the three-year rate, the wobble, and the ROE floor ────────────
+  if (f && f.ok && f.a && f.a.rows && f.a.rows.length) {
+    const a = f.a;
+    // Stability is the one number here where LOW is good, so it is the one
+    // number that must never be coloured by the same rule as the others.
+    const stCls = a.stability == null ? '' : a.stability <= 25 ? 'bias-bull'
+      : a.stability >= 60 ? 'bias-bear' : '';
+    html += `<div class="ctx-row"><span class="ctx-label">A — annual${info('canslim_a')}</span>
+      <span class="ctx-val">
+        3yr <b>${a.growth_3yr_pct == null ? '—' : a.growth_3yr_pct + '%'}</b> ·
+        <span class="${stCls}">wobble ${a.stability == null ? '—' : a.stability}</span>
+        <span style="color:var(--text3)">low is good</span> ·
+        <span class="${a.roe_pass === true ? 'bias-bull'
+          : a.roe_pass === false ? 'bias-bear' : ''}">ROE ${
+          a.roe_pct == null ? '—' : a.roe_pct + '%'}</span>
+        <span style="color:var(--text3)">vs ${a.roe_floor}%</span>
+      </span></div>`;
+  }
+
+  // ── N — the WEEKLY base and how far the pivot is ──────────────────────
+  // Labelled weekly on the card as well as in the panel. The same tests on
+  // daily bars measure something else, and a card is where that gets forgotten.
+  if (b && b.ok) {
+    const away = b.pct_to_pivot;
+    const pCls = away == null ? '' : away <= 5 ? 'bias-bull'
+      : away >= 25 ? 'bias-bear' : '';
+    html += `<div class="ctx-row"><span class="ctx-label">N — base${info('canslim_n')}</span>
+      <span class="ctx-val">
+        <b>${b.weeks}w</b> · ${b.depth_pct}% deep ·
+        ${b.handle && b.handle.valid
+          ? '<span class="bias-bull">handle</span>'
+          : '<span style="color:var(--text3)">no handle</span>'}<br>
+        pivot <b>${b.pivot}</b> ·
+        <span class="${pCls}">${away == null ? '—' : away + '% away'}</span> ·
+        <span style="color:var(--text3)">${b.score} of ${b.of} checks · weekly</span>
+      </span></div>`;
+  } else if (b && (b.error || b.reason)) {
+    html += `<div class="ctx-row"><span class="ctx-label">N — base${info('canslim_n')}</span>
+      <span class="ctx-val" style="color:var(--text3)">${esc(b.error || b.reason)}</span></div>`;
+  }
+  return html;
+}
 
 async function openCanslimPanel(ticker) {
   const tk = String(ticker).toUpperCase();
