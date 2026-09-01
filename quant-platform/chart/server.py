@@ -358,18 +358,37 @@ def oneil_market(refresh: int = 0, days: int = 500, feed: str = 'yahoo'):
     its page exactly as it does today; the market model being stale must not be
     able to stop a scan.
     """
+    import datetime as _dt
     from chart import oneil, oplog
     try:
         if not refresh:
             cached = oneil.read_shared()
+            # A CACHE WITH NO EXPIRY IS A STALE MARKET READ. Nothing else in
+            # this system rebuilds the model on a schedule, so without a TTL
+            # the file written the day it was first requested would still be
+            # answering in November — and a market status is the one number
+            # where being a month old is worse than being absent.
+            #
+            # Twelve hours: the bars are daily, the rebuild is two requests,
+            # and the first page opened after a close picks up that close.
             if cached:
-                return {'ok': True, 'cached': True, **cached}
+                try:
+                    built = _dt.datetime.fromisoformat(cached.get('built_at'))
+                    age_h = (_dt.datetime.now(_dt.timezone.utc) - built).total_seconds() / 3600
+                except Exception:                   # noqa: BLE001
+                    age_h = 1e9                     # unparseable → rebuild
+                if age_h < 12:
+                    return {'ok': True, 'cached': True,
+                            'age_hours': round(age_h, 1), **cached}
         model = oneil.build(days=days, feed=feed)
         where = oneil.write_shared(model) if model.get('ok') else None
         oplog.record('oneil_market', status=model.get('status'),
                      live=len(model.get('distribution_days') or []),
                      partial=model.get('partial'), wrote=where)
-        return {'ok': model.get('ok', False), 'cached': False, **model}
+        # `wrote` is in the RESPONSE, not only the log. "Did it publish, and
+        # where?" was a question that needed an SSH session to answer.
+        return {'ok': model.get('ok', False), 'cached': False,
+                'wrote': where, **model}
     except Exception as e:                          # noqa: BLE001
         return {'ok': False, 'error': str(e)}
 

@@ -10,6 +10,28 @@ const { toETDate } = require('./utils/time');
 const app = express();
 app.use(express.json());
 
+/*
+ * HTML IS NEVER CACHED WITHOUT REVALIDATING. This is the fix for a real
+ * failure: a deploy finished, every process restarted, every health check
+ * passed — and the browser kept showing the old page on all nine tools at
+ * once. Express's sendFile defaults to `public, max-age=0`, and Android
+ * Chrome will still serve a page it already has from its own memory or
+ * back-forward cache without asking.
+ *
+ * `no-cache` does not mean "do not store", it means "ask before you use it".
+ * The page is small and the answer is almost always a 304, so the cost is one
+ * round trip and the benefit is that a deploy is a deploy.
+ *
+ * Assets keep normal caching — they are what caching is for.
+ */
+app.use((req, res, next) => {
+  if (req.method === 'GET' && (req.path === '/' || !path.extname(req.path)
+      || req.path.endsWith('.html'))) {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
+  }
+  next();
+});
+
 // Serve frontend
 app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 
@@ -33,6 +55,7 @@ const LANDING_PROBE_PATHS = [
   '/api/alerts/risk',                // account size and risk per trade
   '/api/setups',                     // the setups, for the alerts app to list
   '/api/tool',                       // this tool's name and whether it is paused
+  '/api/version',                    // which commit each tool is running
 ];
 app.use((req, res, next) => {
   if (req.method === 'GET' && LANDING_PROBE_PATHS.includes(req.path)) {
@@ -46,6 +69,9 @@ app.use('/api/registry', require('./routes/registry'));
 app.use('/api/scan', require('./routes/scan'));
 app.use('/api/screeners', require('./routes/screeners'));
 app.use('/api/tool', require('./routes/tool'));
+// Which commit this process loaded. Read once at startup on purpose — it must
+// describe the code that is RUNNING, not the code in the working tree.
+app.get('/api/version', (req, res) => res.json({ ok: true, ...require('./version').version() }));
 app.use('/api/shortlist', require('./routes/shortlist'));
 app.use('/api/market', require('./routes/market'));
 app.use('/api/news', require('./routes/news'));
@@ -153,6 +179,10 @@ app.get('/health', (req, res) => {
 
   res.json({
     ok: true,
+    // WHICH CODE IS ANSWERING. "It says 4fa1f05" settles in one glance what
+    // otherwise needs an SSH session: whether the deploy reached this process,
+    // and whether the page you are looking at came from it.
+    version: require('./version').version(),
     tool: config.toolId,
     name: identity ? identity.name : config.toolName,
     configName: config.toolName,

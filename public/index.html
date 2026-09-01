@@ -1341,6 +1341,16 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
   <div class="tab-pane" id="tab-settings">
     <div class="settings-wrap">
 
+      <!-- THIS TOOL. Renaming and pausing were first put in the tool-switcher
+           dropdown, which is where you go to LEAVE this tool — nobody looks
+           there for its controls, and nobody found them. They live here, at
+           the top of Settings, which is where a name and an on/off switch
+           belong. The menu entries stay as a shortcut. -->
+      <div class="settings-section">
+        <div class="settings-section-title">This tool</div>
+        <div id="tool-identity-box"><div class="loading">Loading…</div></div>
+      </div>
+
       <!-- Hot Sector -->
       <div class="settings-section">
         <div class="settings-section-title">Hot Sector</div>
@@ -5192,6 +5202,11 @@ async function sbDelete(id) {
 // you can move between them without going back to the landing page. Tools live
 // on separate ports, so switching is a navigation, not a state change.
 let TOOL_SELF = null, TOOL_LIST = [];
+// The commit the SERVER was running when this page was first fetched. Compared
+// against the live one on every refresh, so a page served from the browser's
+// cache after a deploy says so rather than looking like a change that did not
+// work. See src/version.js.
+let PAGE_SHA = null;
 
 async function initToolSwitcher() {
   try {
@@ -5208,7 +5223,9 @@ async function initToolSwitcher() {
     // appear to save and then not stick.
     const name = me.name || (entry && entry.name) || 'Trade Desk';
     document.getElementById('tool-label').textContent = name.toUpperCase();
+    if (!PAGE_SHA && me.version && me.version.sha) PAGE_SHA = me.version.sha;
     renderToolPause(me);
+    renderToolIdentity();
     if (entry && entry.accent) {
       document.querySelector('.tool-btn').style.color = entry.accent;
     }
@@ -5277,6 +5294,82 @@ function renderToolPause(me) {
     Everything it already produced — every card, register, shortlist and backtest — is unchanged
     and still opens.
     <a onclick="toolPauseToggle()" style="cursor:pointer;text-decoration:underline">Resume</a>`;
+}
+
+// The Settings panel for this tool: its name, whether it is running, and which
+// commit is answering.
+function renderToolIdentity() {
+  const el = document.getElementById('tool-identity-box');
+  if (!el) return;
+  const me = TOOL_SELF || {};
+  const v = me.version || {};
+  // THE VERSION MISMATCH CHECK. PAGE_SHA is stamped into this file at load
+  // from the same /health response; if the server has moved on since, the page
+  // in front of you is a cached copy and says so instead of looking broken.
+  const stale = PAGE_SHA && v.sha && PAGE_SHA !== v.sha;
+  const since = me.pausedAt
+    ? new Date(me.pausedAt).toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' ET'
+    : null;
+  el.innerHTML = `
+    <div class="settings-grid">
+      <div class="settings-field">
+        <label>Name</label>
+        <div class="settings-hint">What this tool is called everywhere — this page, the tab title
+          and the landing page. Stored in this tool's own database, so it survives a deploy.
+          ${me.renamed ? `Originally <b>${esc(me.configName || '')}</b>.` : ''}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input type="text" class="settings-input" id="s-tool-name" value="${esc(me.name || '')}"
+                 style="flex:1;min-width:180px">
+          <button class="sb-btn" onclick="toolRenameFromInput()">Save name</button>
+          ${me.renamed ? `<button class="sb-btn" onclick="toolResetName()">Reset to ${esc(me.configName || 'default')}</button>` : ''}
+        </div>
+      </div>
+      <div class="settings-field">
+        <label>Running</label>
+        <div class="settings-hint">${esc(me.pauseMeans || '')}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <span class="sb-pill ${me.paused ? 'sb-paused' : ''}">${me.paused ? 'PAUSED' : 'RUNNING'}</span>
+          <button class="sb-btn ${me.paused ? '' : 'sb-danger'}" onclick="toolPauseToggle()">
+            ${me.paused ? '▶ Resume this tool' : '⏸ Pause this tool'}</button>
+        </div>
+        ${me.paused && since ? `<div class="settings-hint" style="margin-top:6px">Paused since ${esc(since)}.
+          ${me.pausedReason ? esc(me.pausedReason) : ''}</div>` : ''}
+      </div>
+      <div class="settings-field">
+        <label>Version</label>
+        <div class="settings-hint">Which commit this process loaded. If a deploy seems to have
+          changed nothing, compare this with the one you just pushed.</div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px">
+          <b>${esc(v.sha || 'unknown')}</b>${v.subject ? ' · ' + esc(v.subject) : ''}
+        </div>
+        ${stale ? `<div class="settings-hint" style="color:var(--orange);margin-top:6px">
+          ⚠ This page was loaded from an older version (${esc(PAGE_SHA)}). The server is running
+          ${esc(v.sha)} — reload to pick it up.</div>` : ''}
+      </div>
+    </div>`;
+}
+
+async function toolRenameFromInput() {
+  const v = document.getElementById('s-tool-name').value.trim();
+  if (!v) return alert('A name is required.');
+  const r = await fetch('/api/tool/name', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: v }),
+  });
+  const d = await r.json();
+  if (!d.ok) return alert(`Could not rename: ${d.error}`);
+  initToolSwitcher();
+}
+
+async function toolResetName() {
+  const me = TOOL_SELF || {};
+  // Sending the config's own name back CLEARS the override rather than storing
+  // a copy of it, so a later change in the repo is picked up.
+  await fetch('/api/tool/name', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: me.configName }),
+  });
+  initToolSwitcher();
 }
 
 async function toolRename() {
