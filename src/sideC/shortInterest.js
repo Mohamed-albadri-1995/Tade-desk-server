@@ -48,7 +48,17 @@ const YF_HEADERS = {
 
 // FINRA publishes twice a month. The file is small and covers every symbol, so
 // one download serves the whole register rather than a request per ticker.
-const FINRA_URL = 'https://cdn.finra.org/equity/otcmarket/biweekly/shrt{ymd}.txt';
+// FINRA PUBLISHES MORE THAN ONE FILE, and the first pattern tried was the
+// OTC one — which is why 25 days of walking back found nothing for GME, a
+// listed stock. The consolidated file covering listed names is served from a
+// different path, and FINRA has moved these before, so the known patterns are
+// tried in turn and the one that answers is reported.
+const FINRA_URLS = [
+  'https://cdn.finra.org/equity/regsho/monthly/shrt{ymd}.txt',
+  'https://cdn.finra.org/equity/otcmarket/biweekly/shrt{ymd}.txt',
+  'https://cdn.finra.org/equity/otcmarket/biweekly/shrt{ymd}.csv',
+];
+const FINRA_URL = FINRA_URLS[0];
 
 const num = v => (v == null || v === '' || Number.isNaN(Number(v))
   ? null : Number(v));
@@ -187,6 +197,22 @@ async function yahooCrumb() {
   const AGE = 6 * 3600 * 1000;
   if (_yf.crumb && Date.now() - _yf.at < AGE) return _yf;
   let cookie = null;
+  const notes = [];
+  for (const url of ['https://fc.yahoo.com/', 'https://finance.yahoo.com/']) {
+    try {
+      const r = await axios.get(url, {
+        headers: { ...YF_HEADERS, Accept: 'text/html,application/xhtml+xml' },
+        timeout: 10000, validateStatus: () => true, maxRedirects: 0,
+      });
+      const set = r.headers?.['set-cookie'];
+      if (set && set.length) {
+        cookie = set.map(c => c.split(';')[0]).join('; ');
+        notes.push(`cookie from ${url} (${r.status})`);
+        break;
+      }
+      notes.push(`${url} ${r.status} no set-cookie`);
+    } catch (e) { notes.push(`${url} ${String(e.message).slice(0, 40)}`); }
+  }
   try {
     const r = await axios.get('https://fc.yahoo.com/', {
       headers: YF_HEADERS, timeout: 10000,
@@ -195,9 +221,8 @@ async function yahooCrumb() {
       validateStatus: () => true,
       maxRedirects: 0,
     });
-    const set = r.headers?.['set-cookie'];
-    if (set && set.length) cookie = set.map(c => c.split(';')[0]).join('; ');
-  } catch { /* fall through — some regions answer without a cookie */ }
+    void r;
+  } catch { /* the loop above already has whatever cookie is available */ }
   let crumb = null;
   try {
     const r = await axios.get(
@@ -206,14 +231,19 @@ async function yahooCrumb() {
         timeout: 10000, responseType: 'text' });
     if (typeof r.data === 'string' && r.data.length && r.data.length < 64) {
       crumb = r.data.trim();
+    } else {
+      notes.push(`getcrumb returned ${typeof r.data} len=${String(r.data || '').length}`);
     }
-  } catch { /* no crumb — the request below will report the 401 honestly */ }
-  _yf = { cookie, crumb, at: Date.now() };
+  } catch (e) {
+    notes.push(`getcrumb ${e.response?.status || ''} ${String(e.message).slice(0, 40)}`);
+  }
+  _yf = { cookie, crumb, at: Date.now(), notes };
   return _yf;
 }
 
 async function fetchYahoo(ticker, diag) {
-  const { cookie, crumb } = await yahooCrumb();
+  const { cookie, crumb, notes } = await yahooCrumb();
+  if (diag && notes) diag.yahooHandshake = notes.join(' | ');
   for (const host of YF_HOSTS) {
     try {
       const r = await axios.get(
@@ -274,7 +304,13 @@ async function fetchNasdaq(ticker, diag) {
         params: { assetclass: 'stocks' }, timeout: 12000 });
     const rec = parseNasdaq(r.data);
     if (rec) return rec;
-    if (diag) diag.nasdaq = 'answered but no shortInterestTable';
+    if (diag) {
+      // IT ANSWERED. So the endpoint is reachable and the shape is wrong,
+      // which is a different problem from being blocked — and one that cannot
+      // be fixed by guessing at the path a second time.
+      diag.nasdaq = 'answered but no shortInterestTable';
+      diag.nasdawRaw = JSON.stringify(r.data).slice(0, 400);
+    }
   } catch (e) {
     if (diag) diag.nasdaq = `${e.response?.status || ''} ${String(e.message).slice(0, 80)}`;
   }
@@ -293,15 +329,19 @@ async function fetchFinraFile(diag) {
   for (let back = 0; back < 25; back++) {
     const t = new Date(d.getTime() - back * 86400000);
     const ymd = t.toISOString().slice(0, 10).replace(/-/g, '');
-    try {
-      const r = await axios.get(FINRA_URL.replace('{ymd}', ymd), {
-        timeout: 20000, responseType: 'text',
-      });
-      if (typeof r.data === 'string' && r.data.includes('|')) {
-        _finraFile = { day, text: r.data };
-        return r.data;
-      }
-    } catch { /* not published that day — keep walking back */ }
+    for (const pat of FINRA_URLS) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const r = await axios.get(pat.replace('{ymd}', ymd), {
+          timeout: 20000, responseType: 'text', headers: YF_HEADERS,
+        });
+        if (typeof r.data === 'string' && r.data.includes('|')) {
+          if (diag) diag.finraUrl = pat.replace('{ymd}', ymd);
+          _finraFile = { day, text: r.data };
+          return r.data;
+        }
+      } catch { /* not this file, not this day — keep going */ }
+    }
   }
   if (diag) diag.finra = 'no published file found in the last 25 days';
   _finraFile = { day, text: null };
