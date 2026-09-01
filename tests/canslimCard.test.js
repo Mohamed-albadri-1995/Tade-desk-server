@@ -405,6 +405,31 @@ describe('there are three type levels and they do not look alike', () => {
     expect(css).toMatch(/color: #fff/);
   });
 
+  test('a heading is BIGGER than every label nested under it', () => {
+    /*
+     * In sunlight mode --text3 is #aab2c4, near-white: the palette lifts every
+     * grey so the screen stays readable outdoors, which deletes the lightness
+     * steps hierarchy was resting on. A heading that is only "brighter grey"
+     * than its sub-labels has no rank at all there. Size survives the palette.
+     */
+    const headingPx = parseFloat(css.match(/font-size: ([\d.]+)px/)[1]);
+    const nested = page.match(
+      /\.fold-body \.oneil-stat-label,[\s\S]*?\}/)[0];
+    const nestedPx = parseFloat(nested.match(/font-size: ([\d.]+)px/)[1]);
+    expect(headingPx).toBeGreaterThan(nestedPx);
+  });
+
+  test("a nested block loses its own card chrome", () => {
+    // The O'Neil block was built as a standalone card. A bordered panel inside
+    // a bordered section reads as two boxes, not one section.
+    expect(page).toMatch(
+      /\.fold-body \.oneil-block \{[^}]*border: 0[^}]*\}/);
+  });
+
+  test('the band gets stronger in sunlight, where text contrast is gone', () => {
+    expect(page).toMatch(/body\.sunlight \.fold-head \{[^}]*background: var\(--bg4\)/);
+  });
+
   test('a NESTED heading uses the same idea hollow, so it reads lower', () => {
     // Filling is what says SECTION. A sub-heading that filled too would just
     // be a second section.

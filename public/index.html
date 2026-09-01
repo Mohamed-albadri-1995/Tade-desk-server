@@ -501,9 +501,32 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .fold-head:hover { background: #262c3d; }
 .fold[data-open="1"] > .fold-head { border-left-color: var(--accent); }
 /* LEVEL 1 — a section heading. Uppercase and letterspaced, which no value on
-   the card is, so it reads as a label even in peripheral vision. */
-.fold-title { font-size: 10.5px; font-weight: 700; letter-spacing: .09em;
+   the card is, so it reads as a label even in peripheral vision.
+
+   AND BIGGER THAN EVERY LABEL UNDER IT. In sunlight mode --text3 is #aab2c4,
+   near-white: the palette deliberately lifts every grey so the screen stays
+   readable outdoors, which deletes the lightness steps hierarchy was resting
+   on. A heading that is only "brighter grey" than its sub-labels has no rank
+   at all there. Size and the band survive the palette; lightness does not. */
+.fold-title { font-size: 12px; font-weight: 800; letter-spacing: .09em;
   text-transform: uppercase; color: #fff; flex: 0 0 auto; }
+
+/* EVERY LABEL NESTED INSIDE A SECTION DROPS A LEVEL, whatever it was styled
+   as when it lived on its own. The O'Neil block was built as a standalone
+   card with its own 10px uppercase labels; nested in a fold those competed
+   with — and at a glance beat — the heading above them. */
+.fold-body .oneil-stat-label,
+.fold-body .section-title,
+.fold-body .def-sec-title { font-size: 9px; font-weight: 700;
+  letter-spacing: .06em; color: var(--text3); }
+/* ...and the block loses its own card chrome, because a bordered panel inside
+   a bordered section reads as two boxes rather than one section. */
+.fold-body .oneil-block { background: none; border: 0; padding: 0; margin: 0; }
+/* In sunlight every text colour is lifted, so the band has to carry more of
+   the separation on its own. */
+body.sunlight .fold-head { background: var(--bg4); }
+body.sunlight .fold-head:hover { background: #262c3d; }
+body.sunlight .fold .fold > .fold-head { background: none; }
 .fold-one { font-size: 11px; color: var(--text2); flex: 1 1 auto;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fold-chev { font-size: 9px; color: var(--text3); flex: 0 0 auto;
