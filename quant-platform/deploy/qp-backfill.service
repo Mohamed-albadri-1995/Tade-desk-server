@@ -27,14 +27,20 @@ Type=oneshot
 User=ec2-user
 WorkingDirectory=/home/ec2-user/Tade-desk-server/quant-platform
 
+# THE KEY IS SOURCED BY THE SHELL, NOT BY systemd's EnvironmentFile.
+#
 # The key lives in quant-platform/.env, which is gitignored and read, never
-# written. EnvironmentFile takes it directly so the unit holds no secret.
-EnvironmentFile=/home/ec2-user/Tade-desk-server/quant-platform/.env
-
+# written — the unit itself holds no secret either way. But systemd's parser
+# is stricter than the shell's: it rejects `export KEY=...`, trailing
+# comments and several quoting styles that a .env written for `set -a; .` in
+# bash uses freely. A unit that fails to start because of a quoting rule
+# nobody knew about is the same outcome as no unit at all, so the shell reads
+# it and the shell's rules are the ones that apply.
+#
 # -u so the log is written as it happens rather than in 8KB blocks. A run
 # that buffers looks identical to a run that has hung, and that cost an
 # afternoon of "the log is empty, is it working?".
-ExecStart=/usr/bin/python3 -u -c "import sys; sys.path.insert(0, '.'); from chart import relstrength as r; print(r.backfill())"
+ExecStart=/bin/bash -lc 'set -a; . ./.env; set +a; exec python3 -u -c "import sys; sys.path.insert(0, \".\"); from chart import relstrength as r; print(r.backfill())"'
 
 # It walks backwards from yesterday and skips days already on disk, so a
 # restart resumes rather than starting over. Ten minutes between attempts
