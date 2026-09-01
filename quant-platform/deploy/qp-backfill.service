@@ -23,7 +23,18 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+# NOT oneshot. Type=oneshot tells systemd "this runs and exits quickly", and
+# systemd then holds the START JOB open for the whole execution and applies
+# TimeoutStartSec to it — so a job that legitimately takes an hour is killed
+# with SIGTERM partway through, every time, and the unit reports "Failed to
+# start" for something that was working perfectly. That is exactly what
+# happened: killed at six minutes, 206 of 262 sessions in, status=15/TERM.
+#
+# Type=simple treats the process AS the service: it is considered started the
+# moment it execs, so no start timeout applies and it may run as long as it
+# needs to.
+Type=simple
+TimeoutStartSec=infinity
 User=ec2-user
 WorkingDirectory=/home/ec2-user/Tade-desk-server/quant-platform
 
@@ -43,12 +54,18 @@ WorkingDirectory=/home/ec2-user/Tade-desk-server/quant-platform
 ExecStart=/bin/bash -lc 'set -a; . ./.env; set +a; exec python3 -u -c "import sys; sys.path.insert(0, \".\"); from chart import relstrength as r; print(r.backfill())"'
 
 # It walks backwards from yesterday and skips days already on disk, so a
-# restart resumes rather than starting over. Ten minutes between attempts
-# because the usual reason for a failure is Polygon, and hammering it is how
-# a rate limit becomes a ban.
+# restart resumes rather than starting over — nothing already fetched is
+# fetched twice.
+#
+# on-failure, not always: finishing the year is a SUCCESS and must end the
+# job, or the unit would restart forever re-reading a complete cache.
+#
+# Thirty seconds, not ten minutes. The earlier value assumed a failure meant
+# Polygon was angry and needed to be left alone. The failure that actually
+# happened was systemd's own timeout, and waiting ten minutes to resume from
+# that made a fixable stall look like a dead job.
 Restart=on-failure
-RestartSec=600
-TimeoutStartSec=0
+RestartSec=30
 
 StandardOutput=journal
 StandardError=journal
