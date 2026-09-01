@@ -185,6 +185,56 @@ JS = (ROOT.parent / 'src' / 'sideD' / 'oneil.js').read_text()
 ok('the warmer treats a cached "no filings" as answered, not as a miss',
    "rec.cached !== true" in JS)
 
+# ── THE CARD MUST NOT CONTRADICT ITSELF, OR NAME A WINDOW IT DID NOT HAVE ──
+#
+# From a live card, all on one screen:
+#
+#   L — LEADER OR LAGGARD        group not ranked yet
+#   I — INSTITUTIONAL SPONSORSHIP  ...from SEC Form 13F — phase 6.
+#                                  Not estimated here.
+#   Sources and dates — ... groups 2026-08-31 ...
+#
+# The footer said the ranks were built that day while L said they were not,
+# and the I block still announced a phase that had shipped, directly under a
+# summary row printing holder counts. Neither was a data problem.
+
+ok('L says WHICH silence it is, not "not ranked yet" for all three',
+   'group ranks not built yet' in UI and 'not in the industry map' in UI)
+ok('...and names the map it is missing from, so "built" and "contains this '
+   'stock" cannot be confused again',
+   'mapped_symbols' in UI and 'an ETF, or a filer with no SIC code' in UI)
+
+# The placeholder SENTENCE, not the words "phase 6" — the comment recording
+# why this was wrong necessarily quotes it.
+ok('the I block reads the real 13F model instead of announcing a phase',
+   'phase 6. Not estimated here.</span>' not in UI
+   and 'F13_MODEL' in UI)
+ok('...and keeps the three answers apart: not built, not matched, matched',
+   '13F not built yet' in UI and 'not matched in 13F' in UI)
+ok('...and still refuses to score it, at both ends',
+   'nobody left to buy it' in UI)
+ok('the footer dates 13F too, since it is the block most often absent',
+   "13F pending" in UI and '45 days late' in UI)
+
+# A rating is NAMED for its window. A stock six weeks off its IPO showed
+# "U/D 0.49 50d · A/D E 13wk" built from about thirty sessions.
+ok('a short window is labelled short rather than by the name of the full one',
+   'function _wins' in UI and 'short of the' in UI)
+ok('...on the summary row as well as in the full table',
+   'short of ${want}' in UI and '_wins(x.ud.sessions' in UI)
+ok('the reason is written where the helper is',
+   'the one thing a reading must never do' in UI)
+
+# The window sizes on the card have to be the ones the code actually uses.
+from chart import ratings                                  # noqa: E402
+ok('the card\'s "50" is ratings.UD_SESSIONS', ratings.UD_SESSIONS == 50)
+ok('...and its "65" is AD_SESSIONS, which is what 13 weeks means here',
+   ratings.AD_SESSIONS == 65)
+ok('both functions report the sessions they used, which is what makes the '
+   'label checkable at all',
+   'sessions' in ratings.up_down_volume_ratio.__doc__ + str(
+       ratings.up_down_volume_ratio.__code__.co_consts))
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

@@ -4709,6 +4709,16 @@ const _sign = v => (v == null ? '' : v >= 0 ? 'pos' : 'neg');
  * nothing; and qp being down is neither. The raw error said the second one as
  * a URL and a 404, and the annual table said "not fetched yet" for all three.
  */
+/* HOW MUCH WINDOW THERE ACTUALLY WAS. A rating is named for its window — "U/D
+ * over 50 sessions", "A/D over 13 weeks" — and a stock six weeks off its IPO
+ * has neither. The number was still printed under the full window's name,
+ * which is the one thing a reading must never do. */
+function _wins(got, want, label) {
+  return got != null && got < want
+    ? `<b>${got} sessions</b>, short of the ${want} the ${esc(label)} window means`
+    : esc(label);
+}
+
 function _fundNote(f) {
   const e = String((f && f.error) || '');
   if (!e) return 'not fetched yet — EDGAR is walked nightly';
@@ -4813,17 +4823,56 @@ function canslimTablesHTML(tk) {
   const sHtml = `Shares outstanding <b>${_m(s.shares_outstanding)}</b>
     ${s.as_of ? `<span style="color:var(--text3)">as of ${esc(s.as_of)}</span>` : ''}
     · Float <span style="color:var(--text3)">${esc(s.float_note || 'not available')}</span>
-    ${x.ud && x.ud.ratio != null ? `<br>U/D volume <b>${x.ud.ratio}</b> over 50 sessions` : ''}
-    ${x.ad && x.ad.letter ? ` · A/D <b>${esc(x.ad.letter)}</b> (${x.ad.raw}) over 13 weeks` : ''}`;
+    ${x.ud && x.ud.ratio != null ? `<br>U/D volume <b>${x.ud.ratio}</b> over
+      ${_wins(x.ud.sessions, 50, '50 sessions')}` : ''}
+    ${x.ad && x.ad.letter ? ` · A/D <b>${esc(x.ad.letter)}</b> (${x.ad.raw}) over
+      ${_wins(x.ad.sessions, 65, '13 weeks')}` : ''}`;
 
+  /* "NOT RANKED YET" WAS THREE ANSWERS WEARING ONE COAT, and the card said
+     it while its own footer read "groups 2026-08-31" — the ranks were built,
+     that day, and this stock still had none. The three are: the file is not
+     built; it is built and this stock has no industry in it, which is what an
+     ETF or a filer EDGAR could not classify looks like; and it has an
+     industry too small to rank. Only the first one is fixed by waiting. */
+  const gm = GROUPS_MODEL;
   const lHtml = g
     ? `Group <b>${esc(g.group)}</b> · rank <b>${g.group_rank} of ${g.group_of}</b>
        (${g.group_pct} ${esc(g.group_letter || '')})<br>
        This stock: <b>RS ${g.rs_in_group} of ${g.members}</b> in its group`
-    : '<span style="color:var(--text3)">group not ranked yet</span>';
+    : `<span style="color:var(--text3)">${esc(
+        !gm || !gm.ok ? 'group ranks not built yet — the nightly job builds them'
+        : `not in the industry map (${gm.mapped_symbols || 0} symbols, `
+          + `${(gm.groups || []).length} groups as of ${gm.as_of || '—'}) — `
+          + 'an ETF, or a filer with no SIC code')}</span>`;
 
-  const iHtml = '<span style="color:var(--text3)">Fund ownership by quarter comes '
-    + 'from SEC Form 13F — phase 6. Not estimated here.</span>';
+  /* I, THE REAL ONE. This block still said "phase 6. Not estimated here."
+     long after phase 6 shipped and the summary row above it was printing
+     holder counts — the card contradicted itself on the same screen. */
+  const fm = F13_MODEL;
+  const fs = fm && fm.ok && (fm.stocks || {})[tk];
+  let iHtml;
+  if (!fm || !fm.ok) {
+    iHtml = '<span style="color:var(--text3)">13F not built yet — the nightly '
+      + 'job reads the SEC quarterly data sets. Never estimated here.</span>';
+  } else if (!fs) {
+    // NOT "0 funds", which is a claim. Unmatched means this issuer's CUSIP
+    // did not resolve to a ticker, not that no institution owns it.
+    iHtml = '<span style="color:var(--text3)">not matched in 13F — the CUSIP '
+      + 'did not resolve to this ticker</span>';
+  } else {
+    const dir = fs.direction === 'rising' ? 'bias-bull'
+      : fs.direction === 'falling' ? 'bias-bear' : '';
+    iHtml = `<b>${fs.funds}</b> institutional holders
+      ${fs.change == null ? '' : `· <span class="${dir}">${
+        fs.change >= 0 ? '+' : ''}${fs.change}</span>`}
+      <span class="${dir}">${esc(fs.direction || '')}</span>
+      <div style="margin-top:6px">${esc((fs.quarters || [])
+        .map(q => `${q.quarter} ${q.funds}`).join(' → '))}</div>
+      <div class="def-src" style="border:0;padding-top:6px">Counted by distinct
+        filing, from SEC Form 13F. More is not better at both ends: a stock
+        every fund already owns has nobody left to buy it, so this is the
+        number and the direction, never a score.</div>`;
+  }
 
   const mHtml = `<b>${esc(m.status_label || '—')}</b>
     ${m.distribution_days ? ` · ${m.distribution_days.length} distribution days live` : ''}
@@ -4842,8 +4891,11 @@ function canslimTablesHTML(tk) {
         ${f.built_at ? `EDGAR ${esc(String(f.built_at).slice(0, 10))}` : 'EDGAR not fetched'} ·
         ${GROUPS_MODEL && GROUPS_MODEL.as_of ? `groups ${esc(GROUPS_MODEL.as_of)}` : 'groups pending'} ·
         ${m.as_of ? `market ${esc(m.as_of)}` : 'market pending'} ·
+        ${fm && fm.ok && (fm.quarters || []).length
+          ? `13F ${esc(fm.quarters[fm.quarters.length - 1])}` : '13F pending'} ·
         base from weekly bars. Each block refreshes on its own clock: filings land
-        weeks after quarter-end, groups daily, the base weekly.</div>`;
+        weeks after quarter-end, 13F quarterly and ~45 days late, groups daily,
+        the base weekly.</div>`;
 }
 
 /* ─────────── PHASE 4: DEMAND, THE RS LINE, AND DIVERGENCE ──────────────
@@ -4893,12 +4945,23 @@ function ratingsCardBlock(ticker) {
       : ud.ratio <= 0.8 ? 'bias-bear' : '';
     const adCls = /^[AB]/.test(ad.letter || '') ? 'bias-bull'
       : /^[DE]/.test(ad.letter || '') ? 'bias-bear' : '';
+    /* THE LABEL WAS A LIE ON ANY YOUNG STOCK. "50d" and "13wk" were printed
+       whatever the window actually held: a name six weeks off its IPO showed
+       "U/D 0.49 50d · A/D E 13wk" built from about thirty sessions, and the
+       card gave no sign that the two thirds of the window that never existed
+       were missing. Both functions already report how many sessions they
+       used; the card simply was not reading it. Short windows now say so. */
+    const win = (got, want, unit) => (got != null && got < want
+      ? `<span class="m-none" title="the full window is ${want} sessions; this
+           stock does not have that much history">${got}d, short of ${want}</span>`
+      : `<span style="color:var(--text3)">${unit}</span>`);
     html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">S</span> supply${info('demand')}</span>
       <span class="ctx-val">
         <span class="${udCls}">U/D ${ud.ratio != null ? ud.ratio : '—'}</span>
-        <span style="color:var(--text3)">50d</span> ·
+        ${win(ud.sessions, 50, '50d')} ·
         <span class="${adCls}">A/D <b>${esc(ad.letter || '—')}</b></span>
-        <span style="color:var(--text3)">${ad.raw != null ? ad.raw : ''} · 13wk</span>
+        <span style="color:var(--text3)">${ad.raw != null ? ad.raw : ''}</span>
+        ${win(ad.sessions, 65, '13wk')}
       </span></div>`;
   }
 
