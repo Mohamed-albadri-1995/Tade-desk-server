@@ -79,9 +79,14 @@ forms — precisely inverted.
 Two removal rules, and a day leaves the count when **either** fires:
 
 1. **Age** — it passes out of the trailing **25 sessions**.
-2. **Price recovery** — the index closes **≥5% above** that day's close.
+2. **Price recovery** — the index **trades ≥5% above** that day's close.
 
-*(IBD has published both 5% and 6% for rule 2 in different years. See §5.)*
+**SETTLED — 5%, and INTRADAY, not on a closing basis.** The rule is that the
+index *trades* 5% above the distribution day's closing price, so it fires on
+the high, not the close. The first draft here said "closes ≥5% above", which
+is a stricter rule than IBD's and would hold days in the count that IBD had
+already dropped — the count would read more dangerous than the real one, on
+exactly the days a new uptrend is starting.
 
 ### 2.2b Stalling days — the form of distribution that is not a down day
 
@@ -132,9 +137,25 @@ Day 1 of a rally attempt = the first UP close after a correction low
                             (the low itself is day 0)
 
 Follow-through day       = on day 4 or later of that rally attempt:
-                             index gains ≥ THRESHOLD
+                             index gains ≥ 1.7%
                              AND volume > prior session's volume
+                             AND volume > its own 50-day average
 ```
+
+**SETTLED — 1.7%, which is O'Neil's own number**, not a figure chosen here.
+He published 1% in the early editions, raised it to 1.5% in *How to Make Money
+in Stocks*, and to **1.7%** in *The Successful Investor* after program trading
+made 1% days ordinary. 1.7% is the last value he set, so it is the default.
+
+**The day window has a far end too**, and the first draft here missed it: the
+follow-through is expected on **days 4–7**, occasionally as late as 10–11. A
+big up day on day 30 of a rally attempt is not a bottom signal — the bottom
+was already in or it never came. Days 8–11 are flagged as **late**, past 11
+the rally attempt is not confirmed by it.
+
+**Volume has two tests, not one:** above the prior session *and* above the
+index's own 50-day average. The second was missing here. Heavier than a quiet
+prior day is not institutional buying.
 
 - A follow-through **before day 4** is explicitly *not* one. Bounces in the
   first three days are the norm inside downtrends; the wait is the filter.
@@ -240,21 +261,29 @@ is worse than one that says nothing.
 These are the numbers where honest sources disagree, because **IBD changed
 them**. Each is a named constant with both values recorded:
 
-| Rule | Value | Provenance |
-|---|---|---|
-| Follow-through gain | **1.0%** | O'Neil's original, early editions of *How to Make Money in Stocks* |
-| | **1.7%** | IBD raised it in the 2000s to cut false signals |
-| | **1.2%** | Widely cited as IBD's more recent working figure |
-| Distribution day recovery removal | **5%** or **6%** | Both published |
-| Earliest follow-through day | **Day 4** | Consistent across sources |
-| Distribution window | **25 sessions** | Consistent |
-| Distribution day trigger | **−0.2%** on higher volume | Consistent |
+**SETTLED: use O'Neil's own numbers. Nothing here is chosen by us.**
 
-**Recommendation:** default the follow-through threshold to **1.2%** and the
-recovery removal to **5%**, expose both as configuration, and **print the
-threshold in use next to any signal that fires**. A follow-through day is a
-claim about the market; a claim whose definition is invisible cannot be
-checked against a chart afterwards.
+| Rule | **Value in use** | Provenance |
+|---|---|---|
+| **Follow-through gain** | **1.7%** | O'Neil's last published figure, *The Successful Investor*. He set 1% in the early editions, 1.5% in *How to Make Money in Stocks*, then 1.7% once program trading made 1% days ordinary. The last value he set is the one we use |
+| **Follow-through day window** | **Days 4–7**, late to 10–11 | O'Neil. Day 1 is the first up close off the low |
+| **Follow-through volume** | **> prior session AND > 50-day average** | Two tests, both O'Neil's |
+| **Distribution recovery removal** | **5%, intraday** | IBD: the index *trades* 5% above that day's close. On the high, not the close |
+| Distribution window | **25 sessions** | Consistent everywhere |
+| Distribution day trigger | **−0.2%** on higher volume | Consistent everywhere |
+| Stalling day | heavy volume, gain <0.2%, close in lower half | IBD, §2.2b |
+| RS weighting | 40/20/20/20 over 3/6/9/12 months | O'Neil's published formula, §2.5 |
+| CANSLIM membership hold | **90 days** | Ours — this one is a system decision, not O'Neil's, and is marked as such |
+
+The earlier draft of this section recommended 1.2% and a *closing* 5%. Both
+were this document choosing between sources rather than following O'Neil, and
+both are replaced above.
+
+Each is still a **named constant, printed next to any signal that fires**. A
+follow-through day is a claim about the market; a claim whose definition is
+invisible cannot be checked against a chart afterwards. Configurable, but the
+default is O'Neil's and changing it is a decision somebody has to make on
+purpose.
 
 ---
 
@@ -427,8 +456,8 @@ O'NEIL MARKET MODEL
   Because       5 distribution days live (>=5 is the threshold)
   Nasdaq        4 live      S&P 500   5 live
   Rally         n/a - in a confirmed uptrend since the FTD of 2026-07-18
-  Rules in use  DD -0.2% on higher volume - 25 sessions - 5% recovery removal
-                FTD +1.2% on day 4+ of a rally attempt
+  Rules in use  DD -0.2% on higher volume - 25 sessions - 5% intraday recovery
+                FTD +1.7% on day 4-7, volume over prior AND over its 50-day avg
 
   DISTRIBUTION DAYS
   2026-08-27  S&P 500  -0.7%  vol x1.14   expires 2026-10-01
@@ -706,3 +735,172 @@ is a filter and not a feed.
 | Window: hours | Window: **24 months** |
 | You read it | It emits **one number and one dated line** |
 | Duplicates across outlets | Deduped to the underlying event |
+
+---
+
+## 11. Fitting it on the existing tools
+
+Everything above is what to compute. This is where each piece lands in the
+system that already exists, and — as important — what it must not touch.
+
+### 11.1 The rule that governs all of it
+
+`src/sideA/canslim.js` already states the contract this system runs on, and it
+is the right one:
+
+> It is a **LABEL, never a filter.** No tool's results change because of it.
+> Reading it cannot alter which stocks a screener returns.
+
+**Everything in this document obeys that.** Not one number here enters a
+score, a filter, or a rank. The reason is not tidiness: T1–T9 are nine
+independent experiments whose backtests are compared against each other. The
+moment an O'Neil number changes what a screener returns, every card captured
+before that change is measuring a different thing, and the comparison — the
+entire point of running nine tools — is gone.
+
+So: **added to the card, never to the query.**
+
+### 11.2 Compute once, read nine times
+
+The market model is one fact about the market. Group ranks are one ranking of
+one universe. Computing either inside each of nine tools is nine chances to
+disagree, on nine different Polygon page loads.
+
+The pattern already exists and works — `data/canslim-members.json`, written by
+T8, read by everyone, one-way, and a reader that cannot parse it carries on
+with no tags rather than failing a scan. Three more files, same rules:
+
+| File | Written by | Contains | Refresh |
+|---|---|---|---|
+| `data/oneil-market.json` | **qp** | status, live distribution days per index with dates, rally-attempt state, last FTD, thresholds used | after each close, and intraday on demand |
+| `data/oneil-groups.json` | **qp** | every group: rank, divisor, member count, member RS ranks | after each close |
+| `data/oneil/<TICKER>.json` | nightly job | C table, A table, I history, S, N events | per field, see 11.5 |
+
+**Why qp is the writer.** It already has what this needs and the nine tools do
+not: Polygon grouped-daily for the whole US universe, the parquet bar cache,
+and `chart/relstrength.py` — which §2.5 verified is already computing O'Neil's
+RS formula correctly, on the right universe, on adjusted prices. Rebuilding
+that in Node would be a second implementation of a formula we have already
+checked once.
+
+**Failure is silence.** Every reader falls back to "no O'Neil data" and
+renders the card exactly as it renders today. The market model being stale
+must never be able to stop a scan.
+
+### 11.3 The card — what changes, and how little
+
+The card is already dense: header, Volume & Float, badges, Range, News, Chart,
+then a `▾ Details` fold holding Themes, Market Context, Price, EMAs, ATR, PM
+Range. Adding six CANSLIM tables above the fold would ruin the thing that
+works. So:
+
+**Above the fold — two changes only.**
+
+1. **One badge**, next to the CANSLIM badge that is already there:
+
+   ```
+   ★ CANSLIM 47d      C92 A88 N86 · RS 96 · grp 12/197 · RS 1 of 13
+   ```
+
+   Six numbers on one line. It is the whole letter set at a glance, and it is
+   the only thing most mornings need.
+
+2. **The News section leads with N.** This is the direct answer to "not like a
+   normal news tab", and it needs no new section:
+
+   ```
+   News · N 86
+   ▸ New CEO · 2026-03-12 (5.8 mo) · +11.4% on 4.2x vol · RS line held
+   ---- recent headlines (3 weeks), unchanged ----
+   ```
+
+   The existing headline list stays exactly as it is, three-week window and
+   all. The scored 24-month answer sits **above** it. Two different objects in
+   one place, which is where they belong: what is new about this company, and
+   what was said about it this week.
+
+**Behind the fold — one new section**, `CANSLIM`, holding the tables from §7:
+C, A, I with history, S, and the L group panel. Placed directly above Market
+Context, because both are context and the letters are the slower one.
+
+**Market Context gains one line**: the O'Neil status, next to the existing
+Regime/Long/Mid/Short rows, labelled so it cannot be read as the same claim.
+
+Nothing is removed. Nothing above the fold moves.
+
+### 11.4 The market tab — added beside, not over
+
+`#tab-market` today is `#idx-grid` → `#market-analysis` (short/mid/long) →
+`#regime-card` (Final Regime) → the sector heatmap. Per your instruction, none
+of that is touched. Two additions:
+
+- **`#oneil-model`, inserted above `#market-analysis`.** The block from §8:
+  status, why, live counts per index, the rules in use, and the dated
+  distribution-day table. It goes first because it is the one that decides
+  whether to buy at all; the existing short/mid/long read is the finer texture
+  underneath it.
+- **A group table under the sector heatmap.** The heatmap is 15 sector ETFs —
+  the coarse level. §9 is that leadership is a *group* phenomenon, so the top
+  20 and bottom 10 groups by our own rank go below it, each with its divisor
+  and its member count. Same table styling, one level finer.
+
+The existing "Final Regime" card keeps its logic and gets its title qualified
+so it cannot be mistaken for the O'Neil state — two market reads on one page
+that use the same words would be worse than only having one.
+
+### 11.5 The nightly job, and why it cannot be in the request path
+
+EDGAR is an HTTP fetch per company, rate-limited, and it must send a real
+User-Agent. openFDA and USASpending are the same shape. None of it can happen
+while a card is rendering.
+
+So a **nightly job** walks the union of every tool's registry plus the CANSLIM
+list, and fills `data/oneil/<TICKER>.json`. Refresh rates follow how often the
+underlying fact can actually change:
+
+| Field | Source | Refresh |
+|---|---|---|
+| C, A | EDGAR XBRL company facts | weekly, and on a new 10-Q/10-K |
+| I — fund count history | Form 13F | quarterly, after the 45-day filing deadline |
+| S — float, shares out | EDGAR cover page | monthly |
+| S — short interest | FINRA | twice monthly, on FINRA's own settlement calendar |
+| N — events | 8-K, openFDA, USASpending | nightly, 24-month window |
+| RS, group rank, RS-in-group | qp / Polygon | after each close |
+
+A card that finds no file says **"not fetched yet"**, with the date it was
+last tried. It never blocks, and it never renders a blank that could be read
+as a zero.
+
+### 11.6 The order to build it
+
+1. **M — the market model in qp.** Distribution days including stalling,
+   rally attempt, follow-through on O'Neil's settled numbers, three statuses,
+   written to `data/oneil-market.json`. It is self-contained, it needs only
+   index bars we already have, and it is the piece that changes behaviour on
+   the most mornings.
+2. **The market tab block.** Renders (1). Nothing else depends on it, and it
+   is where the work becomes visible to you soonest.
+3. **Groups and RS-in-group.** Built on `relstrength.py`, which already
+   works. Gives the card its `grp 12/197` and `RS 1 of 13`, and the market tab
+   its group table.
+4. **The card badge line.** Renders (3) plus the RS already computed.
+5. **EDGAR — C and A tables.** The largest piece, and the one whose tables you
+   specified in §7.2 and §7.3.
+6. **13F — the I history.**
+7. **The N pipeline.** Last, because it is the only one that depends on
+   several sources at once and on the price-reaction test.
+
+### 11.7 The five things that must not happen
+
+1. **No O'Neil number enters a score, filter or rank.** §11.1. This is the one
+   that would quietly destroy the comparison between the nine tools.
+2. **No network call in a card render.** Everything on a card comes from a
+   file that a scheduled job wrote.
+3. **Group ranks are not recomputed per tool.** One universe, one ranking,
+   one writer.
+4. **The existing three-week news window does not change.** The N pipeline is
+   a separate object with a 24-month window. Widening the headline list to two
+   years would turn the card's News section into an archive.
+5. **The market tab's existing blocks are not rewritten.** Added beside, and
+   the O'Neil state is labelled so the page never shows two market reads that
+   use the same words for different claims.
