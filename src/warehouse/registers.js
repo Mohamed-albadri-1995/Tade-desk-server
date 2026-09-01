@@ -73,6 +73,10 @@ function captureR2() {
   console.log('[Warehouse] R2 captured snapshot at slot', slot);
 }
 
+// The CANSLIM column set, so a row with no reading still carries the columns
+// rather than making the table ragged. See sideA/canslimRow.js.
+const { BLANK: CANSLIM_BLANK } = require('../sideA/canslimRow');
+
 function getRegisterData(register, date) {
   switch (register) {
     case 'R0': {
@@ -106,6 +110,19 @@ function getRegisterData(register, date) {
         mcap: row.stock?.mcap,
         floatShares: row.stock?.floatShares,
         shortFloat: row.stock?.shortFloat,
+        daysToCover: row.stock?.daysToCover,
+        shortBasis: row.stock?.shortBasis,
+        shortAsOf: row.stock?.shortAsOf,
+        weekHigh: row.stock?.weekHigh,
+        weekLow: row.stock?.weekLow,
+        weekRangePos: row.stock?.weekRangePos,
+        quarterHigh: row.stock?.quarterHigh,
+        quarterLow: row.stock?.quarterLow,
+        quarterRangePos: row.stock?.quarterRangePos,
+        yearHigh: row.stock?.yearHigh,
+        yearLow: row.stock?.yearLow,
+        yearRangePos: row.stock?.yearRangePos,
+        allTimeHigh: row.stock?.allTimeHigh,
         pmHigh: row.stock?.pmHigh,
         pmLow: row.stock?.pmLow,
         pmRange: row.stock?.pmRange,
@@ -127,6 +144,13 @@ function getRegisterData(register, date) {
         bias: row.bias || 'auto',
         ...signalCols(row),
         // catalyst & news summary
+        // THE SEVEN LETTERS, SPREAD FLAT. Attached to the row by the
+        // canslimRow stage during the scan, from the same shared files the
+        // card reads — so a register and a card can never disagree about what
+        // a stock scored. Spread rather than hand-listed: one source of truth
+        // for the column set, in sideA/canslimRow.js.
+        ...CANSLIM_BLANK,
+        ...(row.canslim_row || {}),
         catalyst: row.catalyst?.label || null,
         canslim: row.canslim || 'no',
         shortlistedElsewhere: row.shortlistedElsewhere || 'no',
@@ -169,6 +193,19 @@ function getRegisterData(register, date) {
           mcap: d.stock?.mcap,
           floatShares: d.stock?.floatShares,
           shortFloat: d.stock?.shortFloat,
+          daysToCover: d.stock?.daysToCover,
+          shortBasis: d.stock?.shortBasis,
+          shortAsOf: d.stock?.shortAsOf,
+          weekHigh: d.stock?.weekHigh,
+          weekLow: d.stock?.weekLow,
+          weekRangePos: d.stock?.weekRangePos,
+          quarterHigh: d.stock?.quarterHigh,
+          quarterLow: d.stock?.quarterLow,
+          quarterRangePos: d.stock?.quarterRangePos,
+          yearHigh: d.stock?.yearHigh,
+          yearLow: d.stock?.yearLow,
+          yearRangePos: d.stock?.yearRangePos,
+          allTimeHigh: d.stock?.allTimeHigh,
           pmHigh: d.stock?.pmHigh,
           pmLow: d.stock?.pmLow,
           pmRange: d.stock?.pmRange,
@@ -189,6 +226,8 @@ function getRegisterData(register, date) {
           themes: d.context?.themes,
           bias: d.bias || 'auto',
           ...signalCols(d),
+          ...CANSLIM_BLANK,
+          ...(d.canslim_row || {}),
           catalyst: d.catalyst?.label || null,
           canslim: d.canslim || 'no',
           shortlistedElsewhere: d.shortlistedElsewhere || 'no',
@@ -253,6 +292,28 @@ function getRegisterData(register, date) {
           sectorBullish: bullish,
           sectorBearish: bearish,
           breakouts: d.breakoutNames,
+          // O'NEIL'S MARKET MODEL — M, and this is its natural home.
+          //
+          // It is stamped on every stock row too, but there it is the same
+          // value on 150 rows: a page header copied into the body. HERE it is
+          // one row per market snapshot, which is what it actually is, and
+          // where a backtest can join it by date without carrying it 150
+          // times over.
+          //
+          // Read from the shared file rather than recomputed, so the register,
+          // the card and the market tab cannot disagree.
+          ...(() => {
+            let m = null;
+            try { m = require('../sideD/oneil').read(); } catch { m = null; }
+            const dd = (m && m.distribution_days) || [];
+            return {
+              oneilStatus: m?.status ?? null,
+              oneilAsOf: m?.as_of ?? null,
+              oneilDistributionDays: m ? dd.length : null,
+              oneilSessionsSinceFtd: m?.sessions_since_ftd ?? null,
+              oneilFtdDate: m?.ftd?.date ?? null,
+            };
+          })(),
           // Per-sector columns
           ...sectorEntries,
           capturedAt: row.captured_at,

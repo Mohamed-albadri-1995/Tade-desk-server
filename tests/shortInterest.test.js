@@ -266,18 +266,23 @@ describe('days to cover on the card, and NOT in the dataset', () => {
   });
 
   /*
-   * THE REGISTERS ARE NOT TOUCHED, and that is the point.
+   * IT IS COLLECTED NOW — reversed on 2026-09-01, on an explicit instruction
+   * that the registers should carry what the cards carry.
    *
-   * dataflow.guard.test.js locks the collected columns because the month-long
-   * run only means something if the data means one thing for the whole month.
-   * Its own note says the question is never "how do I update the expected
-   * list" but "did I mean to change the dataset". A new card field is a
-   * display change, so it stops at the display.
+   * When this was first written the answer was the other way, and correctly:
+   * dataflow.guard.test.js locks the collected columns so that adding a number
+   * to a card cannot quietly change what is trained on. That guard's own note
+   * says the question is never "how do I update the expected list" but "did I
+   * mean to change the dataset" — and this time the answer was yes, so the run
+   * starts from that date.
    */
-  test('R0 gains no column for it', () => {
+  test('R0 collects it, as of 2026-09-01', () => {
     const reg = fs.readFileSync(
       path.join(__dirname, '../src/warehouse/registers.js'), 'utf8');
-    expect(reg).not.toContain('daysToCover');
+    expect(reg).toContain('daysToCover');
+    // ...with the basis beside it, or a percentage of outstanding and a
+    // percentage of float would be indistinguishable in the training data.
+    expect(reg).toContain('shortBasis');
   });
 
   test('the scorer is not given it either', () => {

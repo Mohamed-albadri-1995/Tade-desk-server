@@ -175,6 +175,16 @@ async function runFullScan() {
       return si.fill(r0.getAll());
     });
 
+    // THE CANSLIM READING, ONTO THE ROW. Every letter reaches the card from
+    // a different shared file, and all of them arrive in the browser — so the
+    // card knew seven letters and the dataset knew none. This puts the same
+    // numbers on the row the registers are built from, read from the same
+    // files the page reads, so the two cannot disagree.
+    await stageWrapSoft(report, 'canslimRow', async () => {
+      const cs = require('./sideA/canslimRow');
+      return cs.attach(r0.getAll());
+    });
+
     await stageWrapSoft(report, 'industryMap', async () => {
       const n = require('./sideA/industryMap').record(r0.getAll());
       return { recorded: n };
