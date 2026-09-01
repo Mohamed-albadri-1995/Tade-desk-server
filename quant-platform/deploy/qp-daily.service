@@ -1,0 +1,35 @@
+# The nightly refresh of the whole CANSLIM chain. See deploy/run_daily.py.
+#
+# Started by qp-daily.timer, not enabled directly — enabling this unit would
+# run it once at boot and never again, which is the failure it exists to fix.
+#
+# Install:
+#   sudo cp quant-platform/deploy/qp-daily.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now qp-daily.timer
+# Watch:    journalctl -u qp-daily -f
+# When next: systemctl list-timers qp-daily
+
+[Unit]
+Description=qp nightly refresh — RS universe, market model, SIC map, group ranks
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# simple, not oneshot: oneshot applies TimeoutStartSec to the whole run and
+# kills a long job partway through. The backfill learned that the hard way.
+Type=simple
+TimeoutStartSec=infinity
+User=ec2-user
+WorkingDirectory=/home/ec2-user/Tade-desk-server/quant-platform
+
+# The shell sources .env because systemd's EnvironmentFile parser rejects
+# export prefixes and several quoting styles a .env uses freely. No nested
+# quotes in the command: the unit names a file, the file is ordinary Python.
+ExecStart=/bin/bash -lc 'set -a; . ./.env; set +a; exec python3 -u deploy/run_daily.py'
+
+# NO Restart=. Every step already survives its own failure and reports it, and
+# the next firing is tomorrow's close — retrying a market model at 3am against
+# the same unchanged data buys nothing.
+StandardOutput=journal
+StandardError=journal

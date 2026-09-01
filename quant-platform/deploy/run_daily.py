@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Keep the whole CANSLIM chain current. One job, run after every close.
+
+NOTHING HERE IS BUILT ONCE.
+
+Every link depends on the one above it, and each goes stale on its own clock:
+
+    prices        one new session a day
+    RS ratings    recomputed from those prices — a rank is only as fresh as
+                  the last session in it
+    SIC map       new listings appear constantly and companies reclassify;
+                  a group that gains four members has a different median
+    groups        ranked from RS over that map, and the 3-month rotation
+                  compares against a moving point 63 sessions back
+    market model  distribution days age out of a 25-session window, so it
+                  changes even on a day the market does nothing
+
+Built once and left, the card would keep printing a rank from the day it was
+first opened. The pieces do carry their own TTLs and rebuild when a page asks
+for them — but that means the first person to open a tool in the morning pays
+for the rebuild, and nothing at all happens on a day nobody opens one. This
+runs after the close so the answers are already waiting.
+
+Each step is independent: one failing must not stop the rest, because a stale
+group rank costs a line on a card and a stale market model is the one number
+where being a month old is worse than being absent.
+
+    cd quant-platform && set -a && . ./.env && set +a && python3 -u deploy/run_daily.py
+"""
+
+import sys
+import traceback
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+def step(name, fn):
+    """Run one link. Report what happened; never take the others down."""
+    try:
+        out = fn()
+        print(f'[ok  ] {name}: {out}', flush=True)
+        return out
+    except Exception as e:                                # noqa: BLE001
+        print(f'[FAIL] {name}: {e}', flush=True)
+        traceback.print_exc()
+        return None
+
+
+def main():
+    from chart import relstrength, oneil, groups, sic
+
+    # 1. PRICES. One session a day; the whole chain is built on this.
+    step('rs universe top-up', lambda: relstrength.top_up())
+
+    # 2. THE MARKET MODEL. Rebuilt even on a quiet day: distribution days age
+    #    out of a 25-session window whether or not anything happened.
+    def _market():
+        m = oneil.build()
+        if m.get('ok'):
+            oneil.write_shared(m)
+        return m.get('status')
+    step('market model (M)', _market)
+
+    # 3. THE INDUSTRY MAP. Only new tickers and entries older than the cache
+    #    age are fetched, so this is a few requests on an ordinary day and a
+    #    long walk only the first time — see sic.MAX_AGE_DAYS.
+    def _sic():
+        rs = relstrength.rs_rating()
+        universe = list(rs.index) if rs is not None and not rs.empty else None
+        out = sic.build(universe, log=lambda *_: None)
+        return (f"{out.get('tickers')} classified, {out.get('fetched')} fetched, "
+                f"{out.get('total_in_map')} in map")
+    step('industry map (SIC)', _sic)
+
+    # 4. THE GROUPS. Last, because it reads everything above it.
+    def _groups():
+        g = groups.build()
+        return (f"{g.get('total_groups')} groups over "
+                f"{g.get('mapped_symbols')} symbols, as of {g.get('as_of')}"
+                if g.get('ok') else f"not built: {g.get('error')}")
+    step('group ranks (L)', _groups)
+
+
+if __name__ == '__main__':
+    main()

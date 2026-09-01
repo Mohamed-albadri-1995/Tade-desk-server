@@ -1,0 +1,33 @@
+# WHEN THE CHAIN IS REBUILT.
+#
+# 22:30 UTC on weekdays — 18:30 ET, about three hours after the close and well
+# after Polygon has published the day's grouped file. Earlier and the top-up
+# fetches a session that does not exist yet and the whole run is one day
+# behind; the model would then be reading yesterday's close all of today.
+#
+# UTC, not local: the server runs UTC and the US market moves with New York's
+# daylight saving, so this drifts by an hour twice a year relative to the
+# close. Three hours of margin absorbs that — it is the reason the gap is that
+# wide rather than thirty minutes.
+#
+# Mon-Fri because a weekend run would fetch nothing and republish the same
+# model with a fresh timestamp, which makes a stale file look current.
+
+[Unit]
+Description=Run the qp nightly refresh after the US close
+
+[Timer]
+OnCalendar=Mon..Fri 22:30 UTC
+
+# If the box was asleep or rebooted at 22:30, run as soon as it is back rather
+# than skipping the day. A missed night is a missed session in every rank.
+Persistent=true
+
+# Nine tools and qp share one box; a fixed instant means the refresh always
+# lands on the same second. A small jitter keeps it off any other schedule.
+RandomizedDelaySec=300
+
+Unit=qp-daily.service
+
+[Install]
+WantedBy=timers.target

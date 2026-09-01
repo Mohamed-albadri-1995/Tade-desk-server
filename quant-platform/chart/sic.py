@@ -58,8 +58,8 @@ SUBMISSIONS = 'https://data.sec.gov/submissions/CIK{cik:010d}.json'
 SHARED = Path(os.environ.get('INDUSTRY_MAP_FILE')
               or (Path(__file__).resolve().parents[2] / 'data' / 'industry-map.json'))
 
-# Per-CIK cache. A company's SIC changes when it reclassifies, which is rare,
-# so this is written once and re-read forever; `refresh` re-walks it.
+# Per-CIK cache. Entries EXPIRE — see MAX_AGE_DAYS below. A classification
+# that is never re-checked answers with last year's industry forever.
 CACHE = Path(os.environ.get('QP_SIC_CACHE')
              or (Path.home() / '.qp-cache' / 'sic'))
 
@@ -158,12 +158,38 @@ def parse_submission(payload: dict) -> dict:
     }
 
 
-def _cached(cik: int) -> dict | None:
+# HOW LONG A CLASSIFICATION IS TRUSTED.
+#
+# "Build it once" is wrong twice over. Companies reclassify — a filer that
+# reports under one SIC after a merger or a change of business reports under
+# another — and the market itself changes underneath: every IPO is a ticker
+# with no entry at all, and a group that gains four members has a different
+# median. A cache with no expiry answers with last year's industry forever and
+# never notices the new listings, which is the same failure as ranking groups
+# from a stale sample.
+#
+# Ninety days because SIC moves on the scale of corporate actions, not
+# sessions, and because re-walking every filer more often costs an hour to
+# learn almost nothing. New tickers are picked up on EVERY run regardless of
+# this, since they have no cache entry to be old.
+MAX_AGE_DAYS = int(os.environ.get('QP_SIC_MAX_AGE_DAYS') or 90)
+
+
+def _cached(cik: int, max_age_days: int | None = MAX_AGE_DAYS) -> dict | None:
+    """A cached classification, or None if it is missing OR too old."""
     p = CACHE / f'{int(cik):010d}.json'
     try:
-        return json.loads(p.read_text())
+        rec = json.loads(p.read_text())
     except Exception:                                     # noqa: BLE001
         return None
+    if max_age_days:
+        try:
+            age_days = (time.time() - p.stat().st_mtime) / 86400
+            if age_days > max_age_days:
+                return None                # stale → re-fetch, keep the old one
+        except OSError:                                   # noqa: BLE001
+            pass
+    return rec
 
 
 def _write_cached(cik: int, rec: dict) -> None:
@@ -179,9 +205,9 @@ def fetch_tickers() -> dict:
     return parse_tickers(_edgar._get(TICKERS_URL))
 
 
-def fetch_submission(cik: int) -> dict:
-    """One company's classification. Cached on disk; SIC rarely changes."""
-    hit = _cached(cik)
+def fetch_submission(cik: int, max_age_days: int | None = MAX_AGE_DAYS) -> dict:
+    """One company's classification. Cached on disk, and the cache EXPIRES."""
+    hit = _cached(cik, max_age_days)
     if hit is not None:
         return hit
     rec = parse_submission(_edgar._get(SUBMISSIONS.format(cik=int(cik))))
@@ -189,7 +215,8 @@ def fetch_submission(cik: int) -> dict:
     return rec
 
 
-def build(symbols=None, limit: int | None = None, log=print) -> dict:
+def build(symbols=None, limit: int | None = None,
+          max_age_days: int | None = MAX_AGE_DAYS, log=print) -> dict:
     """Classify the market and write the shared industry map.
 
     `symbols` restricts the walk — pass the RS universe so the map covers
@@ -221,7 +248,7 @@ def build(symbols=None, limit: int | None = None, log=print) -> dict:
         if limit and fetched >= limit:
             break
         try:
-            rec = fetch_submission(cik)
+            rec = fetch_submission(cik, max_age_days)
             fetched += 1
         except Exception as e:                            # noqa: BLE001
             # A filer EDGAR will not serve is one missing group member, not a

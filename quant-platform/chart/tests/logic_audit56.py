@@ -121,6 +121,46 @@ ok('the runner classifies the RS universe, not every EDGAR ticker',
 ok('...and ranks the groups in the same pass, leaving a usable state',
    'groups.build()' in RUN)
 
+# ── NOTHING IN THE CHAIN IS BUILT ONCE ──────────────────────────────────
+# Reported from live use: "you need to take into your account the update of
+# ranking and group and anything up and down to this — it's not just one and
+# forever." Every link goes stale on its own clock, and the SIC map was the
+# one with no expiry at all: it would answer with last year's industry
+# forever and never notice a new listing.
+ok('a cached classification EXPIRES rather than being trusted forever',
+   'MAX_AGE_DAYS' in SRC and 'stale → re-fetch' in SRC)
+ok('...and the reason is stated: companies reclassify AND the market changes',
+   'reclassify' in SRC and 'every IPO is a ticker' in SRC)
+ok('a new ticker is picked up on every run, having no entry to be old',
+   'New tickers are picked up on EVERY run' in SRC)
+ok('the age is overridable, because 90 days is a judgement not a law',
+   'QP_SIC_MAX_AGE_DAYS' in SRC)
+ok('the cache comment does not still claim it is written once',
+   're-read forever' not in SRC)
+
+DAILY = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
+         / 'run_daily.py').read_text()
+for link in ('relstrength.top_up', 'oneil.build', 'sic.build', 'groups.build'):
+    ok(f'the nightly job refreshes {link.split(".")[0]}', link in DAILY)
+ok('the groups are rebuilt LAST, because they read everything above them',
+   DAILY.index('groups.build') > DAILY.index('sic.build')
+   > DAILY.index('oneil.build') > DAILY.index('relstrength.top_up'))
+ok('one link failing does not take the others down',
+   'never take the others down' in DAILY and 'def step(' in DAILY)
+
+TIMER = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
+         / 'qp-daily.timer').read_text()
+ok('it runs AFTER the close, with margin for the daylight-saving drift',
+   '22:30' in TIMER and 'daylight saving' in TIMER)
+ok('...on weekdays only, so a weekend cannot restamp a stale file',
+   'Mon..Fri' in TIMER and 'look current' in TIMER)
+ok('a missed night is made up rather than skipped', 'Persistent=true' in TIMER)
+
+SVC = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
+       / 'qp-daily.service').read_text()
+ok('the service is not oneshot, which killed the backfill mid-run',
+   'Type=simple' in SVC and 'TimeoutStartSec=infinity' in SVC)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)
