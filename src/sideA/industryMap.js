@@ -90,6 +90,49 @@ function record(rows, now = Date.now()) {
   }
 }
 
+/**
+ * Rebuild the map from the frozen registers this tool has already captured.
+ *
+ * WHY THIS IS NEEDED AT ALL. `record()` is fed from r0, and r0 is an in-memory
+ * Map: every deploy restarts nine processes and empties it. So a scan run
+ * after a restart, or outside the screeners' run window, records NOTHING — and
+ * the map that group ranking depends on stays empty until the next morning's
+ * window happens to coincide with a process that has been up long enough to
+ * have rows. That is a long wait for data the system already has on disk.
+ *
+ * R1 froze every row it ever captured, industry string included, so the whole
+ * history can be mined. Same merge rules as `record()`: it only ever grows, a
+ * changed industry is taken because a reclassification is real, and a failure
+ * is silence rather than an exception.
+ *
+ * `first` is taken from the register's own date, not from now, so a symbol
+ * seeded from three months of history does not claim to have been first seen
+ * today.
+ */
+function seedFromRegisters(limitDays = 400) {
+  try {
+    const db = require('../db');
+    const rows = db.prepare(
+      'SELECT date, ticker, data FROM r1_frozen ORDER BY date DESC').all();
+    const seen = new Set();
+    const flat = [];
+    for (const r of rows) {
+      if (seen.size && seen.size >= limitDays * 500) break;
+      let d;
+      try { d = JSON.parse(r.data); } catch { continue; }
+      const stock = (d && (d.stock || d)) || {};
+      if (!stock.industry && !stock.sector) continue;
+      flat.push({ ticker: r.ticker, stock, _date: r.date });
+      seen.add(r.ticker);
+    }
+    if (!flat.length) return { added: 0, scanned: rows.length };
+    const added = record(flat);
+    return { added, scanned: rows.length, symbols: seen.size };
+  } catch (err) {
+    return { added: 0, error: String(err && err.message).slice(0, 160) };
+  }
+}
+
 function stats() {
   const state = read();
   const symbols = state.symbols || {};
@@ -103,4 +146,4 @@ function stats() {
   };
 }
 
-module.exports = { read, record, stats, FILE };
+module.exports = { read, record, seedFromRegisters, stats, FILE };

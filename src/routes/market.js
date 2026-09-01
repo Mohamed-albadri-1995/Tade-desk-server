@@ -131,6 +131,24 @@ router.get('/groups', async (req, res) => {
 });
 
 /*
+ * POST /api/market/oneil/seed-industries
+ *
+ * Rebuild the industry map from the registers this tool has already frozen.
+ *
+ * The map is normally fed from r0 during a scan, and r0 is in-memory: every
+ * deploy empties it, and a scan outside the screeners' run window has no rows
+ * to record. So after a restart the map that group ranking depends on can sit
+ * empty for a day while the answer is already on disk in R1. This mines it.
+ *
+ * POST rather than GET because it writes.
+ */
+router.post('/oneil/seed-industries', (req, res) => {
+  const map = require('../sideA/industryMap');
+  const out = map.seedFromRegisters();
+  res.json({ ok: !out.error, ...out, map: map.stats() });
+});
+
+/*
  * GET /api/market/oneil/ratings?symbols=A,B,C
  *
  * Phase 4: U/D volume ratio, Accumulation/Distribution, and the workshop's
