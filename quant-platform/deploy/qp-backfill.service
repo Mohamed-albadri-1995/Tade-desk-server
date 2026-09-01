@@ -51,7 +51,13 @@ WorkingDirectory=/home/ec2-user/Tade-desk-server/quant-platform
 # -u so the log is written as it happens rather than in 8KB blocks. A run
 # that buffers looks identical to a run that has hung, and that cost an
 # afternoon of "the log is empty, is it working?".
-ExecStart=/bin/bash -lc 'set -a; . ./.env; set +a; exec python3 -u -c "import sys; sys.path.insert(0, \".\"); from chart import relstrength as r; print(r.backfill())"'
+# NO NESTED QUOTES. The command has to survive systemd's parser and then
+# bash's, and systemd strips backslash escapes even inside single quotes — so
+# an inlined `python3 -c "...sys.path.insert(0, \".\")..."` reached Python as
+# a bare `.` and died with SyntaxError on every start. A quoting bug in a unit
+# file is invisible until it runs and reads as though the program is broken.
+# The unit names a file; the file is ordinary Python.
+ExecStart=/bin/bash -lc 'set -a; . ./.env; set +a; exec python3 -u deploy/run_backfill.py'
 
 # It walks backwards from yesterday and skips days already on disk, so a
 # restart resumes rather than starting over — nothing already fetched is
