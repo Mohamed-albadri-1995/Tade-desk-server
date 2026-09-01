@@ -52,6 +52,12 @@ const FIELDS = {
   gapPct:       { path: r => r.stock?.gapPct, kind: 'number', label: 'Gap %' },
   mcap:         { path: r => r.stock?.mcap, kind: 'number', label: 'Market cap' },
   floatShares:  { path: r => r.stock?.floatShares, kind: 'number', label: 'Float' },
+  // Short interest, once there was a source for it. NOT added to the scorer's
+  // card: that is the model's input, and a new field there would change every
+  // score and break comparability with everything captured before it. Here it
+  // is opt-in — a filter only does something when someone writes one.
+  shortFloat:   { path: r => r.stock?.shortFloat, kind: 'number', label: 'Short % of float' },
+  daysToCover:  { path: r => r.stock?.daysToCover, kind: 'number', label: 'Days to cover' },
   pmAdrRatio:   { path: r => r.stock?.pmAdrRatio, kind: 'number', label: 'PM / ADR' },
   monthRangePos:{ path: r => r.stock?.monthRangePos, kind: 'number', label: 'Month range %' },
   yearRangePos: { path: r => r.stock?.yearRangePos, kind: 'number', label: 'Year range %' },

@@ -3400,6 +3400,12 @@ function buildCard(row) {
   const magFloat = magClass(s.floatShares, 50e6, 20e6, 10e6, true);   // smaller is louder
   const magShort = magClass(s.shortFloat, 5, 10, 20);
   const magCap   = magClass(s.mcap, 2e9, 300e6, 50e6, true);          // smaller is louder
+  // DAYS TO COVER on the same ramp. It is short interest divided by average
+  // daily volume — how many normal sessions the shorts would need to buy
+  // back. The thresholds are where the number starts changing how the stock
+  // behaves: past about five days there is not enough liquidity for them to
+  // leave quietly, which is the whole mechanism behind a squeeze.
+  const magDtc   = magClass(s.daysToCover, 2, 5, 10);
 
   // Regime display
   const regimeInfo = getRegimeDisplay(ctx.regime);
@@ -3751,7 +3757,8 @@ function buildCard(row) {
          Second because whether a stock is TRADABLE AT ALL is decided by float,
          cap and RVOL, and that comes before any reason to be interested. -->
     ${fold('volume', 'Volume & Float',
-      `RVOL ${s.rvol != null ? s.rvol.toFixed(1) + '×' : '—'} · cap ${fmtMcap(s.mcap)} · float ${fmtShares(s.floatShares)}`,
+      `RVOL ${s.rvol != null ? s.rvol.toFixed(1) + '×' : '—'} · cap ${fmtMcap(s.mcap)} · float ${fmtShares(s.floatShares)}${
+        s.daysToCover != null ? ' · ' + s.daysToCover.toFixed(1) + 'd to cover' : ''}`,
       `<div class="price-grid">
             <div class="price-row"><span class="price-label">RVOL</span><span class="price-val ${magRvol}" title="volume against a normal day — 1.5× notable, 5× extreme">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
             <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val ${magCap}" title="smaller moves further — under $300M is notable, under $50M is extreme">${fmtMcap(s.mcap)}</span></div>
@@ -3761,6 +3768,11 @@ function buildCard(row) {
                 ? `short interest as a share of ${s.shortBasis === 'outstanding' ? 'SHARES OUTSTANDING (no float available — a larger denominator, so this understates it)' : 'float'} — 10% notable, 20% extreme${s.shortAsOf ? ', reported ' + s.shortAsOf : ''}${s.daysToCover ? ' · ' + s.daysToCover + ' days to cover' : ''}`
                 : 'No short interest reported for this stock. TradingView’s scanner does not serve the field at all — seven column names were probed against seven stocks including GME and every one came back empty — so it is filled from Yahoo, and failing that from FINRA’s own twice-monthly file. Every US short interest figure originates with FINRA; brokers report twice a month and vendors redistribute the same data.'
               }">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : 'n/a'}</span></div>
+            <div class="price-row"><span class="price-label">Days to cover</span><span class="price-val ${magDtc}" title="${
+              s.daysToCover != null
+                ? `short interest divided by average daily volume — ${s.daysToCover} normal sessions for the shorts to buy back. Past about five days there is not enough liquidity for them to leave quietly, which is the mechanism behind a squeeze. 2 notable, 5 high, 10 extreme.${s.shortAsOf ? ' Reported ' + s.shortAsOf + '.' : ''}`
+                : 'No short interest reported for this stock, so there is nothing to divide by volume.'
+              }">${s.daysToCover != null ? s.daysToCover.toFixed(1) : 'n/a'}</span></div>
           </div>`)}
 
     <!-- RANGE — straight after the MA tags, because both answer "where is this

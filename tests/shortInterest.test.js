@@ -237,3 +237,62 @@ describe('it can never be the reason a scan fails', () => {
     expect(src).toMatch(/TWICE A MONTH/);
   });
 });
+
+describe('days to cover on the card, and NOT in the dataset', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const page = fs.readFileSync(
+    path.join(__dirname, '../public/index.html'), 'utf8');
+
+  test('it is a row in Volume & Float, beside short %', () => {
+    expect(page).toContain('Days to cover');
+    expect(page).toContain('magDtc');
+  });
+
+  test('it is on the same magnitude ramp as the other size numbers', () => {
+    // 2 notable, 5 high, 10 extreme — past about five days there is not
+    // enough liquidity for the shorts to leave quietly, which is the whole
+    // mechanism behind a squeeze.
+    expect(page).toMatch(/magClass\(s\.daysToCover, 2, 5, 10\)/);
+  });
+
+  test('it appears in the fold summary, being the more telling of the two', () => {
+    expect(page).toMatch(/d to cover/);
+  });
+
+  test('no data says n/a, and says why — never 0 days', () => {
+    expect(page).toContain('nothing to divide by volume');
+    expect(page).toMatch(/daysToCover != null \? s\.daysToCover\.toFixed\(1\) : 'n\/a'/);
+  });
+
+  /*
+   * THE REGISTERS ARE NOT TOUCHED, and that is the point.
+   *
+   * dataflow.guard.test.js locks the collected columns because the month-long
+   * run only means something if the data means one thing for the whole month.
+   * Its own note says the question is never "how do I update the expected
+   * list" but "did I mean to change the dataset". A new card field is a
+   * display change, so it stops at the display.
+   */
+  test('R0 gains no column for it', () => {
+    const reg = fs.readFileSync(
+      path.join(__dirname, '../src/warehouse/registers.js'), 'utf8');
+    expect(reg).not.toContain('daysToCover');
+  });
+
+  test('the scorer is not given it either', () => {
+    // score.js builds the model's input. A new field there would change every
+    // score and break comparison with everything captured before it.
+    const score = fs.readFileSync(
+      path.join(__dirname, '../src/sideE/score.js'), 'utf8');
+    expect(score).not.toContain('daysToCover');
+  });
+
+  test('but a SETUP can filter on it, because that is opt-in', () => {
+    const uni = fs.readFileSync(
+      path.join(__dirname, '../src/setups/universe.js'), 'utf8');
+    expect(uni).toContain("daysToCover:");
+    expect(uni).toContain('Days to cover');
+    expect(uni).toContain('NOT added to the scorer');
+  });
+});
