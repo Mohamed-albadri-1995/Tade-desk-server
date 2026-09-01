@@ -642,6 +642,39 @@ def stock_vs_distribution(stock_daily: pd.DataFrame, days: list[dict]) -> dict:
     return out
 
 
+def stocks_ratings(symbols, feed: str = 'yahoo', index: str = '^GSPC',
+                   lookback: int = 400) -> dict:
+    """Phase 4 for a list of symbols: demand, the RS line, and divergence.
+
+    ONE INDEX FRAME FOR ALL OF THEM. The RS line and the divergence test are
+    both stock-against-index, and fetching the index once per symbol would be
+    N identical requests for the same 400 bars.
+
+    400 sessions because the RS line asks about 52 weeks of high ground and
+    needs history before that window to have a maximum to compare against.
+    """
+    from chart import data_manager, ratings
+    out = {}
+    idx = None
+    try:
+        idx = data_manager.load_bars(index, '1d', lookback, feed)
+    except Exception:                                     # noqa: BLE001
+        idx = None
+    for raw in symbols:
+        sym = str(raw).strip().upper()
+        if not sym or sym in out:
+            continue
+        try:
+            df = data_manager.load_bars(sym, '1d', lookback, feed)
+            out[sym] = ratings.stock_ratings(df, idx)
+        except Exception as e:                            # noqa: BLE001
+            # Named, not dropped: "could not check" and "checked and weak" are
+            # opposite conclusions and a missing key lets a page draw the
+            # second from the first.
+            out[sym] = {'error': f'could not fetch daily bars: {str(e)[:120]}'}
+    return out
+
+
 def stocks_vs_distribution(symbols, days, feed: str = 'yahoo',
                            lookback: int = 120) -> dict:
     """`stock_vs_distribution` for a list of symbols, with the fetching.

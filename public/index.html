@@ -2957,11 +2957,19 @@ function renderCards() {
   // and only then does anything re-render — and only if something new came
   // back, so a re-quote does not redraw 150 cards for nothing.
   const need = rows.map(r => r.ticker).filter(tk => !(tk in ONEIL_STOCKS.stocks));
-  if (need.length && !_oneilStocksBusy) {
+  const needR = rows.map(r => r.ticker).filter(tk => !(tk in ONEIL_RATINGS));
+  if ((need.length || needR.length) && !_oneilStocksBusy) {
     _oneilStocksBusy = true;
-    loadOneilStocks(need).then(() => {
+    // Both in one pass, and ONE re-render at the end. Two independent
+    // re-renders would redraw 150 cards twice for one page load.
+    Promise.all([
+      need.length ? loadOneilStocks(need) : null,
+      needR.length ? loadOneilRatings(needR) : null,
+    ]).then(() => {
       _oneilStocksBusy = false;
-      if (need.some(tk => tk in ONEIL_STOCKS.stocks)) renderCards();
+      const got = need.some(tk => tk in ONEIL_STOCKS.stocks)
+        || needR.some(tk => tk in ONEIL_RATINGS);
+      if (got) renderCards();
     });
   }
 }
@@ -3586,6 +3594,7 @@ function buildCard(row) {
       <div class="section-title">Market Context</div>
       ${oneilCardBlock(row.ticker)}
       ${groupCardBlock(row.ticker)}
+      ${ratingsCardBlock(row.ticker)}
       <div class="ctx-row"><span class="ctx-label">Regime</span>${regimeHTML}</div>
       <div class="ctx-row"><span class="ctx-label">Long term</span><span class="ctx-val ${biasCls(ctx.longTerm)}">${ctx.longTerm||'—'}</span></div>
       <div class="ctx-row"><span class="ctx-label">Mid term</span><span class="ctx-val ${biasCls(ctx.midTerm)}">${ctx.midTerm||'—'}</span></div>
@@ -3860,6 +3869,67 @@ const DEFS = {
       + "it does not move the bottom or restart the count.",
     src: "O'Neil's CAN SLIM workshop, January 2010.",
   },
+  demand: {
+    title: 'Demand — U/D volume and A/D',
+    what: "Two measures of the same question: are institutions buying this or "
+      + "selling it. They are computed differently over different windows and "
+      + "they DISAGREE often — the disagreement is the informative part, which "
+      + "is why both are shown and neither is derived from the other.",
+    how: "U/D VOLUME RATIO — 50 sessions\n"
+      + "  volume on up days / volume on down days\n"
+      + "  1.0 is neutral. Unchanged days count as neither.\n\n"
+      + "A/D — 13 weeks\n"
+      + "  each day: where the close sat in its range, -1 .. +1\n"
+      + "  weighted by that day's volume, summed, then DIVIDED by the\n"
+      + "  volume in the window. Bounded -1 .. +1.\n"
+      + "  A >= 0.30 · B >= 0.15 · C >= -0.15 · D >= -0.30 · E below",
+    not: "The A/D letter is NOT the Accumulation/Distribution INDEX (Chaikin) "
+      + "— same words, different object. Chaikin's is an UNBOUNDED CUMULATIVE "
+      + "line over all history; this is a BOUNDED read over a fixed 13-week "
+      + "window, which is what makes two stocks comparable at all. And the "
+      + "letter is OURS: IBD percentile-ranks its rating against the whole "
+      + "market and does not publish the boundaries, so this bands the raw "
+      + "score directly and prints the raw number beside it.",
+    src: 'Computed from this stock\'s own daily bars.',
+  },
+  rs_line_tell: {
+    title: 'RS line — new high ground BEFORE price',
+    what: "The RS line is stock price divided by the S&P 500, plotted. Its "
+      + "SHAPE is the signal. O'Neil: the line 'begins making higher highs and "
+      + "enters new high ground BEFORE the stock price itself breaks out, "
+      + "confirming institutional accumulation.'",
+    how: "  rs line   = this stock's close / the index's close\n"
+      + "  at high   = the line is at its highest in 52 weeks\n"
+      + "  the tell  = the line is at a new high AND price is NOT\n\n"
+      + "'Led by N sessions' is how much earlier the line got there.",
+    not: "NOT the RS Rating — that is today's percentile against every other "
+      + "stock, a number 1-99. This is a curve, and a stock can hold RS 95 "
+      + "while its line rolls over. And BOTH at new highs together is NOT the "
+      + "tell: that is arithmetic — price rose, the index did not, so the "
+      + "ratio rose — and says nothing the price chart did not. The signal is "
+      + "the line at a new high while price is still inside its base.",
+    src: "O'Neil's CAN SLIM workshop, January 2010. 52-week lookback.",
+  },
+  divergence: {
+    title: 'Divergence — decoupled from the market',
+    what: "O'Neil: 'a mathematical divergence occurs when an individual stock "
+      + "stops moving in tandem with the broad market index. While the index "
+      + "breaks down to new lows during a panic, the target stock fails to "
+      + "make a new low — holding its prior support floor — and instead "
+      + "reverses upward.'",
+    how: "All THREE have to be true:\n"
+      + "  1. the INDEX made a new low in the last ~21 sessions\n"
+      + "  2. the STOCK did not\n"
+      + "  3. the stock is above where it sat on the index's worst close\n\n"
+      + "Closing prices throughout: a spike through a level the session\n"
+      + "closed back above is not a break of it.",
+    not: "Not 'the stock did not make a new low'. WITHOUT THE PANIC THIS "
+      + "MEASURES NOTHING — a stock not making a new low in a calm month is "
+      + "not diverging from anything, it is simply a stock. That is why the "
+      + "index's own new low is the precondition, and why 'nothing to diverge "
+      + "from' is shown as a different answer from 'it failed to'.",
+    src: "O'Neil's CAN SLIM workshop, January 2010.",
+  },
   group_rank: {
     title: 'Industry group rank',
     what: "Where this stock's industry group ranks against every other group, "
@@ -4051,6 +4121,87 @@ function oneilDates(ticker) {
     <div class="def-sec def-src">Relative = this stock's close-to-close move minus the index's on
       the same session. A stock rising while the index is being sold is being accumulated.</div>`;
   document.getElementById('def-overlay').classList.add('open');
+}
+
+/* ─────────── PHASE 4: DEMAND, THE RS LINE, AND DIVERGENCE ──────────────
+   The workshop's section 3, which is the sharpest thing in CAN SLIM and the
+   part this system did not have.
+
+     "While the index breaks down to new lows during a panic, the target stock
+      fails to make a new low and instead reverses upward."
+
+     "The RS line enters new high ground BEFORE the stock price breaks out."
+
+   BEFORE is the whole signal. An RS line at a new high on the same day price
+   makes one is arithmetic; an RS line at a new high while price is still in
+   its base means somebody is buying this while the market is not. */
+let ONEIL_RATINGS = {};
+
+async function loadOneilRatings(tickers) {
+  const want = (tickers || []).filter(t => t && !(t in ONEIL_RATINGS));
+  if (!want.length) return false;
+  try {
+    const r = await fetch(`/api/market/oneil/ratings?symbols=${want.join(',')}`);
+    const d = await r.json();
+    if (!d.ok) return false;
+    Object.assign(ONEIL_RATINGS, d.stocks || {});
+    return want.some(t => t in ONEIL_RATINGS);
+  } catch { return false; }
+}
+
+function ratingsCardBlock(ticker) {
+  const x = ONEIL_RATINGS[String(ticker).toUpperCase()];
+  if (!x || x.error) return '';
+  let html = '';
+
+  // DEMAND — two measures of one question that disagree often, and the
+  // disagreement is the informative part. Never derived from each other.
+  const ud = x.ud || {};
+  const ad = x.ad || {};
+  if (ud.ratio != null || ad.letter) {
+    const udCls = ud.ratio == null ? '' : ud.ratio >= 1.2 ? 'bias-bull'
+      : ud.ratio <= 0.8 ? 'bias-bear' : '';
+    const adCls = /^[AB]/.test(ad.letter || '') ? 'bias-bull'
+      : /^[DE]/.test(ad.letter || '') ? 'bias-bear' : '';
+    html += `<div class="ctx-row"><span class="ctx-label">Demand${info('demand')}</span>
+      <span class="ctx-val">
+        <span class="${udCls}">U/D ${ud.ratio != null ? ud.ratio : '—'}</span>
+        <span style="color:var(--text3)">50d</span> ·
+        <span class="${adCls}">A/D <b>${esc(ad.letter || '—')}</b></span>
+        <span style="color:var(--text3)">${ad.raw != null ? ad.raw : ''} · 13wk</span>
+      </span></div>`;
+  }
+
+  // THE RS LINE. Only shown when it says something the price chart does not.
+  const rl = x.rs_line || {};
+  if (rl.rs_line_at_high != null) {
+    html += `<div class="ctx-row"><span class="ctx-label">RS line${info('rs_line_tell')}</span>
+      <span class="ctx-val">${rl.tell
+        ? `<b class="bias-bull">NEW HIGH BEFORE PRICE</b> · price ${rl.price_off_high_pct}% off
+           ${rl.lead_sessions > 0 ? `· led by ${rl.lead_sessions} sessions` : ''}`
+        : rl.rs_line_at_high && rl.price_at_high
+          ? '<span style="color:var(--text3)">both at new highs — the line is not leading</span>'
+          : `<span style="color:var(--text3)">${rl.rs_off_high_pct}% off its own high</span>`
+      }</span></div>`;
+  }
+
+  // DIVERGENCE. The precondition matters more than the verdict: without the
+  // index making a new low there is nothing to diverge FROM, and saying so is
+  // different from saying the stock failed.
+  const dv = x.divergence || {};
+  if (dv.diverging != null) {
+    html += `<div class="ctx-row"><span class="ctx-label">Divergence${info('divergence')}</span>
+      <span class="ctx-val">${dv.diverging
+        ? `<b class="bias-bull">DECOUPLED</b> · index made a new low ${esc(dv.index_low_date || '')},
+           this did not${dv.since_pct != null ? ` · +${dv.since_pct}% since` : ''}`
+        : !dv.index_new_low
+          ? '<span style="color:var(--text3)">the index has not made a new low — nothing to diverge from</span>'
+          : dv.stock_new_low
+            ? '<span class="bias-bear">followed the index down</span>'
+            : '<span style="color:var(--text3)">held, but has not turned up yet</span>'
+      }</span></div>`;
+  }
+  return html;
 }
 
 /* ─────────── L, ON EVERY CARD ──────────────────────────────────────────

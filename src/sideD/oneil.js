@@ -201,11 +201,58 @@ async function loadStocks(symbols) {
   return _cache;
 }
 
+/*
+ * Phase 4 per stock — demand, the RS line, divergence. Same caching contract
+ * as loadStocks(): fetched once per ET day for everything on screen, never per
+ * card, because the inputs are completed daily sessions and nothing about them
+ * moves while the market is open.
+ */
+let _ratings = { day: null, stocks: {}, at: 0 };
+
+async function loadRatings(symbols) {
+  const day = _etDay();
+  if (_ratings.day !== day) _ratings = { day, stocks: {}, at: 0 };
+  const want = [...new Set((symbols || []).map(s => String(s).toUpperCase()))]
+    .filter(s => s && !(s in _ratings.stocks));
+  if (!want.length) return _ratings;
+
+  const qp = process.env.QP_URL || 'http://127.0.0.1:8765';
+  // Smaller chunks than the distribution-day call: this one fetches 400 daily
+  // bars per name where that one fetches 120, so the same wall-clock budget
+  // buys fewer symbols per request.
+  for (let i = 0; i < want.length; i += 25) {
+    const chunk = want.slice(i, i + 25);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 45000);
+    try {
+      const r = await fetch(`${qp}/api/oneil/ratings?symbols=${chunk.join(',')}`,
+        { signal: ctl.signal });
+      const d = await r.json();
+      if (d && d.ok) {
+        Object.assign(_ratings.stocks, d.stocks || {});
+        _ratings.at = Date.now();
+      }
+    } catch {
+      // qp down or slow. Nothing is cached as "checked and empty", so the
+      // next call retries rather than leaving a permanent blank.
+    } finally {
+      clearTimeout(timer);   // in a finally: the throwing path is the common
+                             // one when qp is down, and a leaked timer per
+                             // chunk holds the process awake.
+    }
+  }
+  return _ratings;
+}
+
+function ratingsCache() {
+  return _ratings.day === _etDay() ? _ratings : { day: null, stocks: {}, at: 0 };
+}
+
 function stocksCache() {
   return _cache.day === _etDay() ? _cache : { day: null, stocks: {}, days: [], asOf: null, at: 0 };
 }
 
 module.exports = {
   read, stockVsDistribution, EXPOSURE, ftdBand, FILE,
-  loadStocks, stocksCache,
+  loadStocks, stocksCache, loadRatings, ratingsCache,
 };

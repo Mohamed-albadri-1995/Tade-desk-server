@@ -429,6 +429,26 @@ def oneil_groups(refresh: int = 0):
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/oneil/ratings')
+def oneil_ratings(symbols: str = '', feed: str = 'yahoo', index: str = '^GSPC'):
+    """Phase 4: U/D volume, Accumulation/Distribution, the RS line, divergence.
+
+    The last two are the workshop's section 3 — the RS line entering new high
+    ground BEFORE price, and the stock refusing to make a new low while the
+    index does. They are stock-against-index, so the index frame is fetched
+    once for the whole list rather than once per symbol.
+    """
+    from chart import oneil
+    try:
+        syms = [s for s in (symbols or '').replace(' ', ',').split(',') if s][:120]
+        if not syms:
+            return {'ok': False, 'error': 'no symbols'}
+        return {'ok': True, 'index': index,
+                'stocks': oneil.stocks_ratings(syms, feed=feed, index=index)}
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
 @app.get('/api/oneil/stock')
 def oneil_stock(symbols: str = '', feed: str = 'yahoo'):
     """What each of these stocks did on the live distribution days.

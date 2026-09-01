@@ -1195,8 +1195,8 @@ the CANSLIM panel (§11.3) · `NEWS` = the card's existing News section ·
 |---|---|---|
 | **1** ✅ | M1–M10 — the whole market model, written to `oneil-market.json` | index bars only |
 | **2** ✅ | The market tab O'Neil block (M5–M12) **and its per-card reflection P1–P5, P7, P8** | phase 1 |
-| **3** | Groups: R3–R4, R7–R9, L1–L3, L5(RS), L6, L9, L10, N10, N16, **P6** | `relstrength.py` |
-| **4** | Ratings that need bars: R1, R6, S4, L4, L7, L8 | phase 3 |
+| **3** ✅ | Groups: R3–R4, R7–R9, L1–L3, L5(RS), L6, L9, L10, N10, N16, **P6** | `relstrength.py` |
+| **4** ✅ | Ratings that need bars: **R6** (A/D, ours), **S4** (U/D ratio), **L8** (RS line before price), and the workshop's **divergence** test. R1/L4/L7 deferred — see below | phase 3 |
 | **5** | EDGAR: C1–C8, A1–A6, R2, R5, S1, L5(EPS) | EDGAR fetcher |
 | **6** | 13F & FINRA: I1–I4, S2, S3 | phase 5 |
 | **7** | The N pipeline: N1–N9, N11–N15 | phases 3 and 5 |
@@ -1494,3 +1494,67 @@ computes per card:
 §14's "held up on 4 of 5 distribution days" is the same idea measured on
 distribution days. The full version — RS line at a new high before price — is
 `L8` in the manifest and belongs with base detection.
+
+
+---
+
+## 16. Phase 4, as built — and what was deferred, with the reason
+
+### 16.1 Built
+
+| # | What | Where |
+|---|---|---|
+| S4 | **U/D volume ratio** — up-day volume ÷ down-day volume, 50 sessions | card · Market Context |
+| R6 | **A/D** — a bounded, windowed 13-week read, banded A–E. **Ours**, with the raw number beside the letter | card |
+| L8 | **RS line at new high ground BEFORE price** | card |
+| — | **Divergence** — the workshop's decoupling test | card |
+
+### 16.2 The two that carry the real weight
+
+**The RS line tell.** `BEFORE` is the whole signal, and it is the thing an
+implementation loses first:
+
+| Case | Fires? | Why |
+|---|---|---|
+| RS line at a new high, price still in its base | **YES** | somebody is buying this while the market is not — legible *before* the breakout |
+| RS line and price both at new highs | **no** | arithmetic. Price rose, the index did not, so the ratio rose. Says nothing the price chart did not |
+| RS line off its high | no | the line is not leading anything |
+
+The audit tests the second case as hard as the first, because a version that
+could not tell them apart would still look right on the first.
+
+**Divergence needs the panic.** All three must hold:
+
+1. the **index** made a new low in the window
+2. the **stock** did not
+3. the stock is above where it sat on the index's worst close
+
+Without (1) this measures nothing — a stock not making a new low in a calm
+month is not diverging from anything, it is simply a stock. So *"the index has
+not made a new low — nothing to diverge from"* is shown as a **different
+answer** from *"it followed the index down"*. Closes throughout, for the same
+reason the follow-through anchor is a close.
+
+### 16.3 The A/D letter, and the trap it carries
+
+`A/D` here is **not** the Accumulation/Distribution **Index** (Chaikin) — same
+words, different object, and it is in the §1 trap table for that reason.
+
+| | Chaikin's index | This |
+|---|---|---|
+| Window | all history, **cumulative** | fixed **13 weeks** |
+| Bounds | unbounded | **−1 … +1** |
+| Comparable between stocks | no | yes — normalised by the volume in the window |
+
+The letter is **ours**: IBD percentile-ranks its rating against the whole
+market and does not publish the boundaries, so this bands the raw score
+directly and prints the raw number beside the letter. Both facts travel with
+the number into the definition card, not just into this file.
+
+### 16.4 Deferred, and why
+
+| # | What | Why not yet |
+|---|---|---|
+| **R1** | Composite rating | It blends EPS, RS, SMR, A/D and group. **EPS and SMR are phase 5** — a composite built now would be a partial one wearing a complete name, which is the exact failure §6 exists to prevent |
+| **L4** | New highs / lows within a group | Needs 52-week highs for every group member, which is a universe-wide pass; it belongs with the group build, not the per-card one |
+| **L7** | Sector rank 1 of 33 | The machinery is the group ranking with a different key. Cheap, but it is the **coarse** level and §9 is explicit that the group is the one that decides — so it waits rather than competing for the same row |

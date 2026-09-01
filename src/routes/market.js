@@ -130,4 +130,23 @@ router.get('/groups', async (req, res) => {
   res.json({ ok: model.ok !== false, ...model, map: require('../sideA/industryMap').stats() });
 });
 
+/*
+ * GET /api/market/oneil/ratings?symbols=A,B,C
+ *
+ * Phase 4: U/D volume ratio, Accumulation/Distribution, and the workshop's
+ * section 3 — the RS line at new high ground BEFORE price, and divergence.
+ * One call for everything on screen; see the note on /oneil/stocks.
+ */
+router.get('/oneil/ratings', async (req, res) => {
+  const symbols = String(req.query.symbols || '')
+    .replace(/\s+/g, ',').split(',').filter(Boolean);
+  if (!symbols.length) return res.json({ ok: false, error: 'no symbols' });
+  try {
+    const c = await oneil.loadRatings(symbols);
+    res.json({ ok: true, stocks: c.stocks, fetchedAt: c.at || null });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;
