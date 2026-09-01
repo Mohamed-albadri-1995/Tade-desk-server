@@ -31,6 +31,8 @@ in a constant — see [Thresholds that moved](#thresholds-that-moved).
 | **RS *Line*** | The plotted ratio **stock ÷ index**, over time. Its *shape* is the signal — "RS line at a new high **before** price" is the MarketSmith tell | The **RS Rating**. Different objects: the Rating is today's percentile (a number 1–99), the Line is a curve. A stock can hold RS Rating 95 while its RS line rolls over — the Rating is backward-looking over 12 months, the Line turns first |
 | **Up/Down Volume Ratio** | Up-day volume ÷ down-day volume over the last **50 days**. One number, ~1.0 neutral | The Acc/Dis Rating. Both measure institutional demand; U/D is a plain volume ratio over 50 days, Acc/Dis is a graded read of price *and* volume over 13 weeks. They disagree often and that disagreement is informative |
 | **Base stage** | Which base this is **counted from the market bottom** — 1st, 2nd, late | Any consolidation. The count is the point: late-stage bases (3rd, 4th) fail far more often because the move is obvious by then |
+| **Group rank vs Group RS Rating** | **One fact, two directions.** Rank 63 of 197 *is* the 68th percentile *is* the letter B+ | Three separate measurements. They cannot disagree; building them as three fields invites a card that shows them doing so — see [§9.2](#92-the-precision-point-three-prints-one-fact) |
+| **Stock rank *within* its group** | "**RS 1 of 13**" — the stock's RS Rating ranked against **only its own group's members** | The RS Rating itself. A stock can be RS 95 market-wide and 8 of 13 inside its group, i.e. the twelfth-best way to own the same theme. Nothing on our cards shows this today |
 
 ---
 
@@ -439,3 +441,97 @@ stop buying.
 **A stated caveat sits under the follow-through line**: roughly one in four
 follow-through days fails. It is a necessary condition for a bottom, not a
 sufficient one, and the tab must not read as permission to size up.
+
+---
+
+## 9. Strength — market, sector, group, stock
+
+You asked to check strength across the levels. There are **four**, not three,
+and each is computed by a *different* method. Treating them as one thing —
+"relative strength" — is the mistake this section exists to prevent.
+
+O'Neil's own numbers for why the middle two matter, from *How to Make Money in
+Stocks*: **37%** of a stock's price move is attributed to its **industry
+group**, another **12%** to its **sector**. Roughly half the move is not about
+the company. That is the whole reason the group level exists on the card.
+
+### 9.1 The four levels, and how each is computed
+
+| Level | The number | How it is computed | What it answers |
+|---|---|---|---|
+| **Market** | The O'Neil state (§2) + the index **RS line** | State machine over distribution days / rally attempt / FTD. The RS line is `index ÷ S&P 500` plotted | Should I be buying at all |
+| **Sector** | Rank **1–33** | IBD's 33 sectors, ranked by aggregate price performance | Is the money in this half of the market — a coarse read |
+| **Group** | Rank **1–197** | Least-squares curve fit on **summed member prices**, separate weightings per time period, ~**6-month** frame, cap-weighted | Is *this* the leading group. This is O'Neil's real level |
+| **Stock in group** | "**RS 1 of 13**" | The stock's RS Rating ranked against only the members of its own group | Am I buying the leader or the laggard |
+
+The last row is the one nothing in our system shows today, and it is the one
+O'Neil is strictest about: buy the **#1 or #2** name in a top group, never the
+cheap laggard in it. A stock can carry RS Rating 95 — top 5% of the whole
+market — and still be **8 of 13** inside its own group, which means twelve
+better expressions of the same theme are on the screen next to it.
+
+### 9.2 The precision point: three prints, one fact
+
+From the MarketSmith panels, the same group appears as:
+
+```
+Industry 197 Rank    63          (rank, 1 = best, out of 197)
+Group RS Rating      68          (percentile, 99 = best)
+Group RS             B+          (letter band of that percentile)
+```
+
+These are **not three measurements**. `1 − 63/197 = 68%` — rank 63 of 197 *is*
+the 68th percentile, and B+ is that percentile in letter form. Building three
+separate fields would imply three independent reads and invite the card to
+show them disagreeing when they cannot.
+
+**Decision:** compute the rank, derive the other two. Store one number.
+
+### 9.3 Direction of the rank matters, and the two are opposite
+
+- **Rank**: 1 is best, 197 is worst. Lower is stronger.
+- **Rating / percentile**: 99 is best, 1 is worst. Higher is stronger.
+
+Every place a group number is printed must carry its scale, because a bare
+"68" is excellent as a rating and mediocre as a rank. The cards will print
+`63 of 197` — never a bare rank — for exactly this reason.
+
+### 9.4 The divisor is not permanent
+
+IBD **restructured the group list from 197 to 145**. Any code that hardcodes
+197, and any stored history that does not record which scheme it was computed
+under, silently rewrites its own past when the divisor changes. So:
+
+- the divisor is **stored with the value**, not assumed;
+- the card prints `63 of 197`, never `rank 63`;
+- historical group ranks keep the divisor they were computed with, and a
+  chart that spans the change says so rather than splicing two scales.
+
+### 9.5 What we can actually build from free data
+
+IBD's exact group definitions are proprietary — the 197-way split, and the
+"certain stocks within that industry" the curve fit runs on, are not
+published. What is reproducible:
+
+| Piece | Free? | How |
+|---|---|---|
+| Sector membership | Yes | Already in our data (`sector` on every card) |
+| Group membership | **Approximated** | SIC code (EDGAR, free, on every filer) or the finer industry field from the data provider. Finer than sector, coarser than IBD's 197 |
+| Group strength rank | Yes | Rank our own groups by 6-month cap-weighted member performance — the same *method*, our own membership |
+| Stock rank within group | Yes | Rank each member's RS Rating inside its group. **This is exact** — it needs only membership and our existing RS |
+| Index RS line | Yes | `index ÷ S&P 500`, both already fetched |
+
+**The honest limit, stated on the card:** our group rank is *our* group rank,
+not IBD's, because the membership differs. The rank **within** the group and
+the number of members are exact given whatever membership we use, and those
+are the two facts O'Neil actually trades on. A card that showed "Group rank
+63 of 197" while using a different group definition would be claiming IBD's
+number; it will print the divisor we actually used.
+
+### 9.6 The index RS line
+
+On a MarketSmith index chart the blue line on the Nasdaq Composite is the
+**Nasdaq's RS versus the S&P 500**, with the S&P 500 itself drawn behind it in
+black. Same construction as a stock's RS line, one level up: it says which
+index is leading, which is the earliest read on whether growth or defensives
+are being bought. It belongs on the **market tab**, not the cards.
