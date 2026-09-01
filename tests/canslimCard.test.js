@@ -255,19 +255,75 @@ describe('the card fetches once for the whole screen, never per card', () => {
   });
 });
 
-describe('the card reads in letter order', () => {
-  // The order IS the method: C and A say whether the company is worth owning,
-  // N whether the chart is ready, S L I who else is in it, M whether now is
-  // the time. Scattered, it is a different checklist.
-  test('C A N, then S, then L, then M', () => {
-    const body = page.match(
-      /section-title">Market Context<\/div>[\s\S]*?ctx-label">Regime/)[0];
-    expect(body.indexOf('canslimCardBlock')).toBeGreaterThan(-1);
-    expect(body.indexOf('canslimCardBlock'))
-      .toBeLessThan(body.indexOf('ratingsCardBlock'));
-    expect(body.indexOf('ratingsCardBlock'))
-      .toBeLessThan(body.indexOf('groupCardBlock'));
-    expect(body.indexOf('groupCardBlock'))
-      .toBeLessThan(body.indexOf('oneilCardBlock'));
+describe('the card has sections, not one flat list', () => {
+  /*
+   * The seven letters and the desk's own regime rows shared one heading, so
+   * the card was a long column where nothing said which system a line
+   * belonged to. Three headings now: the CANSLIM checklist, the phase-4
+   * strength reads (which are NOT a letter), and the desk's own context.
+   */
+  // The IIFE that assembles the section's rows, then paints its heading.
+  const sec = page.match(
+    /const rows = canslimCardBlock[\s\S]*?RELATIVE STRENGTH/)[0];
+
+  test('CANSLIM is its own titled section', () => {
+    expect(page).toContain(">CANSLIM · O'Neil<");
+  });
+
+  test('the letters run C A N, then S, then L, then M inside it', () => {
+    // The order IS the method: C and A say whether the company is worth
+    // owning, N whether the chart is ready, S and L who else is in it, M
+    // whether now is the time.
+    expect(sec.indexOf('canslimCardBlock'))
+      .toBeLessThan(sec.indexOf('ratingsCardBlock'));
+    expect(sec.indexOf('ratingsCardBlock'))
+      .toBeLessThan(sec.indexOf('groupCardBlock'));
+    expect(sec.indexOf('groupCardBlock'))
+      .toBeLessThan(sec.indexOf('oneilCardBlock'));
+  });
+
+  test('the RS line and divergence are NOT filed under a letter', () => {
+    // They are phase-4 strength reads, not a CANSLIM letter, and putting them
+    // under one would be a claim about what O'Neil's method contains.
+    expect(sec).not.toContain('strengthCardBlock');
+    expect(page).toContain('>Relative strength<');
+  });
+
+  test("the desk's own regime rows are a separate section", () => {
+    const desk = page.match(
+      /section-title">Market Context<\/div>[\s\S]*?ctx-label">Bias/)[0];
+    expect(desk).not.toContain('canslimCardBlock');
+    expect(desk).not.toContain('oneilCardBlock');
+    expect(desk).toContain('ctx-label">Regime');
+  });
+
+  test('every letter row is prefixed with its letter', () => {
+    const html = put('LETTERS', FULL, BASE);
+    expect(html).toContain('cl-letter">C<');
+    expect(html).toContain('cl-letter">A<');
+    expect(html).toContain('cl-letter">N<');
+  });
+
+  test('a letter that is missing says WHY, rather than vanishing', () => {
+    // A checklist that silently drops a line reads as "nothing to report".
+    expect(page).toContain('Not shown:');
+    expect(page).toMatch(/no filings cached yet/);
+    expect(page).toMatch(/group ranks still building/);
+    expect(page).toMatch(/13F, phase 6/);
+  });
+});
+
+describe('the market tab names every block', () => {
+  // It was six unlabelled slabs and only the heatmap carried a heading.
+  for (const t of ['Indexes · live', "M · O'Neil market model", 'Desk analysis',
+                   'Sector heatmap', 'L · Industry groups']) {
+    test(`"${t}" has a heading`, () => {
+      expect(page).toContain('>' + t);
+    });
+  }
+
+  test('the group table is still on the tab, under its own name', () => {
+    const m = page.match(/L · Industry groups[\s\S]*?id="group-table"/);
+    expect(m).toBeTruthy();
   });
 });

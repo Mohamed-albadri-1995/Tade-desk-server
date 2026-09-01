@@ -453,6 +453,18 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .card-section:last-child { border-bottom: none; }
 .section-title { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text3); margin-bottom: 6px; }
 
+/* THE CANSLIM SECTION READS AS A CHECKLIST, NOT A LIST OF FACTS.
+   Seven letters were arriving as seven ordinary rows mixed in with the desk's
+   own regime rows, so the card had no shape: one long column where nothing
+   said which system a line belonged to. The letter is now a chip at the left
+   of its own row, which is what makes the column scannable — you look down
+   the letters, not across the words. */
+.canslim-sec { border-left: 2px solid var(--accent); padding-left: 9px; }
+.cl-letter { display: inline-block; min-width: 15px; font-weight: 800;
+  font-size: 11px; color: var(--accent); letter-spacing: 0; }
+.cl-pending { font-size: 10px; color: var(--text3); margin-top: 5px;
+  padding-top: 5px; border-top: 1px dashed #262b3a; }
+
 /* context rows */
 .ctx-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .ctx-row:last-child { margin-bottom: 0; }
@@ -1099,6 +1111,13 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 
   <!-- ═══════════════ MARKET TAB ═══════════════ -->
   <div class="tab-pane" id="tab-market">
+    <!-- EVERY BLOCK ON THIS TAB IS NOW NAMED.
+         It was six unlabelled slabs stacked on each other — indexes, the
+         O'Neil model, the analysis, the regime, the heatmap, the groups —
+         and only one of them carried a heading, so the tab read as one
+         undifferentiated scroll. The headings say what each block is and,
+         where it matters, what it is measured on. -->
+    <div class="heatmap-title">Indexes · live</div>
     <div class="market-grid" id="idx-grid">
       <div class="loading">Loading market data…</div>
     </div>
@@ -1107,10 +1126,16 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
          buying at all — he found three out of four stocks follow the general
          market. Everything below it is the finer texture underneath that
          decision, and it is deliberately untouched. -->
+    <div class="heatmap-title" style="margin-top:18px">M · O'Neil market model
+      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3)">
+        — should you be buying at all</span></div>
     <div class="oneil-block" id="oneil-model"></div>
+    <div class="heatmap-title" style="margin-top:18px">Desk analysis</div>
     <div class="market-analysis" id="market-analysis"></div>
     <div class="regime-card" id="regime-card" style="display:none"></div>
-    <div class="heatmap-title">Sector Heatmap</div>
+    <div class="heatmap-title" style="margin-top:18px">Sector heatmap
+      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3)">
+        — 15 sector ETFs</span></div>
     <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
       <table class="heatmap-table">
         <thead>
@@ -1124,7 +1149,11 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
     <!-- ONE LEVEL FINER THAN THE HEATMAP ABOVE. That is 15 sector ETFs; this
          is the industry group, which is where O'Neil says the leadership
          actually is — 37% of a stock's move against the sector's 12%. -->
-    <div id="group-table" style="margin-top:18px"></div>
+    <div class="heatmap-title" style="margin-top:18px">L · Industry groups
+      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3)">
+        — where O'Neil says the leadership is: 37% of a stock's move, against
+        the sector's 12%</span></div>
+    <div id="group-table"></div>
   </div>
 
   <!-- ═══════════════ SHORTLIST TAB ═══════════════ -->
@@ -3625,17 +3654,45 @@ function buildCard(row) {
       ${themesHTML}
     </div>` : ''}
 
-    <!-- MARKET CONTEXT -->
+    <!-- CANSLIM — ITS OWN SECTION, READ DOWN THE LETTERS.
+         These seven and the desk's own regime rows used to share one
+         undifferentiated list, so the card was a long column where nothing
+         said which system a line belonged to. They are a checklist and they
+         are separated as one: the order IS the method — C and A say whether
+         the company is worth owning, N whether the chart is ready, S and L
+         who else is in it, M whether now is the time. -->
+    ${(() => {
+      const rows = canslimCardBlock(row.ticker) + ratingsCardBlock(row.ticker)
+        + groupCardBlock(row.ticker) + oneilCardBlock(row.ticker);
+      if (!rows) return '';
+      // WHICH LETTERS ARE NOT ON THE CARD, AND WHY. A checklist missing a
+      // line silently is worse than one that says the line is pending: the
+      // first reads as "nothing to report", the second as "not measured yet".
+      const missing = [];
+      if (!/cl-letter">C</.test(rows)) missing.push('C and A (no filings cached yet)');
+      if (!/cl-letter">L</.test(rows)) missing.push('L (group ranks still building)');
+      missing.push('I (fund counts — 13F, phase 6)');
+      return `<div class="card-section">
+        <div class="section-title">CANSLIM · O'Neil</div>
+        <div class="canslim-sec">${rows}
+          <div class="cl-pending">Not shown: ${missing.join(' · ')}</div>
+        </div>
+      </div>`;
+    })()}
+
+    <!-- RELATIVE STRENGTH — phase 4, and NOT a CANSLIM letter, so it is not
+         filed under one. -->
+    ${(() => {
+      const rows = strengthCardBlock(row.ticker);
+      return rows ? `<div class="card-section">
+        <div class="section-title">Relative strength</div>${rows}</div>` : '';
+    })()}
+
+    <!-- MARKET CONTEXT — the DESK's own read, which is a different system
+         from the seven letters above and no longer shares a heading with
+         them. -->
     <div class="card-section">
       <div class="section-title">Market Context</div>
-      <!-- IN LETTER ORDER, because the order IS the method: C and A say
-           whether the company is worth owning, N whether the chart is ready,
-           S L I who else is in it, M whether now is the time. Reading them
-           scattered is reading a different checklist. -->
-      ${canslimCardBlock(row.ticker)}
-      ${ratingsCardBlock(row.ticker)}
-      ${groupCardBlock(row.ticker)}
-      ${oneilCardBlock(row.ticker)}
       <div class="ctx-row"><span class="ctx-label">Regime</span>${regimeHTML}</div>
       <div class="ctx-row"><span class="ctx-label">Long term</span><span class="ctx-val ${biasCls(ctx.longTerm)}">${ctx.longTerm||'—'}</span></div>
       <div class="ctx-row"><span class="ctx-label">Mid term</span><span class="ctx-val ${biasCls(ctx.midTerm)}">${ctx.midTerm||'—'}</span></div>
@@ -4177,12 +4234,12 @@ function oneilCardBlock(ticker) {
   // THE SHARED HALF — one line, identical everywhere, and that is fine because
   // it is the header fact. It earns its place by being the thing the rest is
   // measured against.
-  let html = `<div class="ctx-row"><span class="ctx-label">O'Neil (M)${info('oneil_model')}</span>
+  let html = `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">M</span> market${info('oneil_model')}</span>
     <span class="ctx-val ${statusCls}">${esc(m.status_label || '')}${
       m.distribution_days && m.distribution_days.length
         ? ` · ${m.distribution_days.length} DD live` : ''}</span></div>`;
   if (m.sessions_since_ftd != null) {
-    html += `<div class="ctx-row"><span class="ctx-label">Since the FTD${info('ftd_band')}</span>
+    html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter"></span> since the FTD${info('ftd_band')}</span>
       <span class="ctx-val">${m.sessions_since_ftd} sessions · ${esc(m.ftdBand || m.ftd_band || '')}</span></div>`;
   }
 
@@ -4191,13 +4248,13 @@ function oneilCardBlock(ticker) {
   if (!s.checked) {
     // "0 of 0" reads as a failure. Not checked, no live days, and no bars are
     // three different things and each says which it is.
-    return html + `<div class="ctx-row"><span class="ctx-label">On the DD days${info('held_up')}</span>
+    return html + `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter"></span> on the DD days${info('held_up')}</span>
       <span class="ctx-val" style="color:var(--text3)">${esc(s.note || 'not checked')}</span></div>`;
   }
   const vCls = s.verdict === 'HOLDING UP' ? 'bias-bull'
     : s.verdict === 'GIVING WAY' ? 'bias-bear' : 'bias-neutral';
   const rel = s.avg_rel != null ? `${s.avg_rel >= 0 ? '+' : ''}${s.avg_rel}%` : '—';
-  html += `<div class="ctx-row"><span class="ctx-label">On the DD days${info('held_up')}</span>
+  html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter"></span> on the DD days${info('held_up')}</span>
     <span class="ctx-val">up on <b>${s.held} of ${s.checked}</b> · ${rel} vs the index
       <span class="${vCls}" style="font-weight:700">${esc(s.verdict || '')}</span>
       <span class="chart-expand" onclick="oneilDates('${esc(ticker)}')" title="the exact sessions">⤢</span>
@@ -4311,7 +4368,7 @@ function canslimCardBlock(ticker) {
       : r0.eps_chg < 0 ? 'bias-bear' : '';
     const sCls = r0.sales_chg == null ? '' : r0.sales_chg >= 25 ? 'bias-bull'
       : r0.sales_chg < 0 ? 'bias-bear' : '';
-    html += `<div class="ctx-row"><span class="ctx-label">C — quarter${info('canslim_c')}</span>
+    html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">C</span> quarter${info('canslim_c')}</span>
       <span class="ctx-val">
         <span class="${eCls}">EPS ${esc(r0.eps_chg_label || '—')}</span> ·
         <span class="${sCls}">sales ${esc(r0.sales_chg_label || '—')}</span>
@@ -4330,7 +4387,7 @@ function canslimCardBlock(ticker) {
     // number that must never be coloured by the same rule as the others.
     const stCls = a.stability == null ? '' : a.stability <= 25 ? 'bias-bull'
       : a.stability >= 60 ? 'bias-bear' : '';
-    html += `<div class="ctx-row"><span class="ctx-label">A — annual${info('canslim_a')}</span>
+    html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">A</span> annual${info('canslim_a')}</span>
       <span class="ctx-val">
         3yr <b>${a.growth_3yr_pct == null ? '—' : a.growth_3yr_pct + '%'}</b> ·
         <span class="${stCls}">wobble ${a.stability == null ? '—' : a.stability}</span>
@@ -4349,7 +4406,7 @@ function canslimCardBlock(ticker) {
     const away = b.pct_to_pivot;
     const pCls = away == null ? '' : away <= 5 ? 'bias-bull'
       : away >= 25 ? 'bias-bear' : '';
-    html += `<div class="ctx-row"><span class="ctx-label">N — base${info('canslim_n')}</span>
+    html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">N</span> base${info('canslim_n')}</span>
       <span class="ctx-val">
         <b>${b.weeks}w</b> · ${b.depth_pct}% deep ·
         ${b.handle && b.handle.valid
@@ -4360,7 +4417,7 @@ function canslimCardBlock(ticker) {
         <span style="color:var(--text3)">${b.score} of ${b.of} checks · weekly</span>
       </span></div>`;
   } else if (b && (b.error || b.reason)) {
-    html += `<div class="ctx-row"><span class="ctx-label">N — base${info('canslim_n')}</span>
+    html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">N</span> base${info('canslim_n')}</span>
       <span class="ctx-val" style="color:var(--text3)">${esc(b.error || b.reason)}</span></div>`;
   }
   return html;
@@ -4547,6 +4604,13 @@ async function loadOneilRatings(tickers) {
   } catch { return false; }
 }
 
+/* SPLIT IN TWO, because they answer to different headings.
+ *
+ * U/D volume and A/D are the S — who is accumulating the shares. The RS line
+ * and the divergence are not a CANSLIM letter at all; they are the phase-4
+ * strength reads. Printed as one undifferentiated run they made the card a
+ * column of facts with nothing saying which system each belonged to, so they
+ * now sit under their own headings. */
 function ratingsCardBlock(ticker) {
   const x = ONEIL_RATINGS[String(ticker).toUpperCase()];
   if (!x || x.error) return '';
@@ -4561,7 +4625,7 @@ function ratingsCardBlock(ticker) {
       : ud.ratio <= 0.8 ? 'bias-bear' : '';
     const adCls = /^[AB]/.test(ad.letter || '') ? 'bias-bull'
       : /^[DE]/.test(ad.letter || '') ? 'bias-bear' : '';
-    html += `<div class="ctx-row"><span class="ctx-label">Demand${info('demand')}</span>
+    html += `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">S</span> supply${info('demand')}</span>
       <span class="ctx-val">
         <span class="${udCls}">U/D ${ud.ratio != null ? ud.ratio : '—'}</span>
         <span style="color:var(--text3)">50d</span> ·
@@ -4569,6 +4633,15 @@ function ratingsCardBlock(ticker) {
         <span style="color:var(--text3)">${ad.raw != null ? ad.raw : ''} · 13wk</span>
       </span></div>`;
   }
+
+  return html;
+}
+
+/* The phase-4 strength reads. NOT a CANSLIM letter — its own heading. */
+function strengthCardBlock(ticker) {
+  const x = ONEIL_RATINGS[String(ticker).toUpperCase()];
+  if (!x || x.error) return '';
+  let html = '';
 
   // THE RS LINE. Only shown when it says something the price chart does not.
   const rl = x.rs_line || {};
@@ -4637,14 +4710,14 @@ function groupCardBlock(ticker) {
   // THE ONE O'NEIL IS STRICTEST ABOUT. Leader or laggard inside the theme.
   const lead = s.rs_in_group === 1 ? 'bias-bull' : s.rs_in_group <= 2 ? 'bias-bull' : '';
 
-  let html = `<div class="ctx-row"><span class="ctx-label">Group (L)${info('group_rank')}</span>
+  let html = `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">L</span> group${info('group_rank')}</span>
     <span class="ctx-val">${esc(s.group || '')} · <b>${rank}</b>${pct}
       ${g && g.rotation && g.rotation !== 'flat'
         ? `<span class="${g.rotation === 'into' ? 'bias-bull' : 'bias-bear'}"
              title="rank ${g.rank_3mo} of ${g.of_3mo} three months ago">${
              g.rotation === 'into' ? '▲ into' : '▼ out of'}</span>` : ''}
     </span></div>
-    <div class="ctx-row"><span class="ctx-label">In its group${info('rs_in_group')}</span>
+    <div class="ctx-row"><span class="ctx-label"><span class="cl-letter"></span> in its group${info('rs_in_group')}</span>
       <span class="ctx-val"><b class="${lead}">RS ${s.rs_in_group} of ${s.members}</b>
         <span class="chart-expand" onclick="groupLeaders('${esc(s.group)}')"
               title="the leaders in this group">⤢</span></span></div>`;
