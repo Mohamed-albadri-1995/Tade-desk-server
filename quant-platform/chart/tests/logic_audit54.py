@@ -96,6 +96,36 @@ for tag in ('Revenues', 'SalesRevenueNet',
     ok(f'revenue filed as {tag} is found',
        got['rows'] and got['rows'][0]['sales'] == 1_000_000, got['rows'][:1])
 
+# TAGS ARE MERGED, NOT PICKED. This is trap 5 in the module's own docstring,
+# and the first implementation did NOT fix it: it returned "the first tag that
+# has any", so a filer that switched tags mid-history lost one half of its
+# record entirely.
+#
+# Found on real data, not in a test: SYRE came back with 2026 and 2024 in its
+# table and NO 2025 AT ALL, and the gap looked like a company that had stopped
+# filing.
+switched = facts(
+    EarningsPerShareDiluted=('USD/shares', [
+        q('2024-01-01', '2024-03-31', 1.00), q('2024-04-01', '2024-06-30', 1.10)]),
+    EarningsPerShareBasicAndDiluted=('USD/shares', [
+        q('2025-01-01', '2025-03-31', 1.20), q('2025-04-01', '2025-06-30', 1.30)]),
+)
+sw = [r['quarter'] for r in edgar.c_table(switched)['rows']]
+ok('a filer that SWITCHED TAGS keeps both halves of its history',
+   any('2025' in x for x in sw) and any('2024' in x for x in sw), sw)
+ok('...and the merged table is still newest-first with no duplicates',
+   sw == sorted(set(sw), reverse=True), sw)
+
+# Where the SAME period appears under two tags, the earlier tag in the caller's
+# list wins — which is what the ordering of REVENUE_TAGS and EPS_TAGS is for.
+both_tags = facts(
+    EarningsPerShareDiluted=('USD/shares', [q('2025-01-01', '2025-03-31', 9.99)]),
+    EarningsPerShareBasicAndDiluted=('USD/shares', [q('2025-01-01', '2025-03-31', 1.11)]),
+)
+ok('the PREFERRED tag wins a period both of them report',
+   edgar.c_table(both_tags)['rows'][0]['eps'] == 9.99,
+   edgar.c_table(both_tags)['rows'][0])
+
 # A fact covering a whole year is not a quarter, and a fact covering a month is
 # not either. Both would land in the table as if they were.
 mixed = facts(EarningsPerShareDiluted=('USD/shares', [
@@ -129,6 +159,18 @@ ok('a year-ago LOSS gives n/a, not a percentage',
    oldest['eps_chg'] is None, oldest)
 ok('...and says WHY, because "no number" and "zero growth" are opposite reads',
    'loss a year ago' in oldest['eps_chg_label'], oldest['eps_chg_label'])
+
+# THE WORDING IS PER SERIES. A pre-revenue biotech was printing "n/a (loss a
+# year ago)" against its SALES column, and sales are not a loss — zero revenue
+# is zero revenue. Seen on SYRE's real table.
+ok('zero sales a year ago says NO SALES, not "loss"',
+   edgar.pct_change(5.0, 0.0, kind='sales')[1] == 'n/a (no sales a year ago)',
+   edgar.pct_change(5.0, 0.0, kind='sales'))
+ok('...while a loss on the EPS column still says loss',
+   edgar.pct_change(5.0, -1.0, kind='eps')[1] == 'n/a (loss a year ago)')
+ok('...and the C table passes the right kind for the sales column',
+   "kind='sales'" in (pathlib.Path(__file__).resolve().parents[1]
+                      / 'edgar.py').read_text())
 
 v, lab = edgar.pct_change(50.0, 0.01)
 ok('beyond +999% it is capped, and the cap is visible', v == 999.0 and '999' in lab,

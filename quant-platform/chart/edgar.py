@@ -119,33 +119,55 @@ def _get(url: str, tries: int = 3) -> dict:
 # ---------------------------------------------------------------------------
 
 def _facts(cf: dict, tags, unit_hint: str | None = None) -> list[dict]:
-    """Every filed fact for the first tag that has any, newest filing wins.
+    """Every filed fact for these tags, MERGED across them. Newest filing wins.
 
-    THE DEDUPE IS THE POINT. The same period is re-reported by restatements,
-    amendments and the comparative columns inside later filings, so an array
-    from EDGAR routinely holds three values for one quarter. Keyed on
-    (start, end) and resolved by `filed`, which is the only field that says
-    which one is current.
+    TWO RESOLUTIONS, AND THE FIRST WAS MISSING.
+
+    1. ACROSS TAGS. A filer that used `EarningsPerShareDiluted` until 2024 and
+       `EarningsPerShareBasicAndDiluted` afterwards has its history split in
+       two, and the first version of this returned "the first tag that has
+       any" — so one of the two halves was silently dropped.
+
+       That is exactly the trap this module's own docstring describes, and it
+       was not fixed by the code under it. Found on real data: SYRE came back
+       with 2026 and 2024 in its table and NO 2025 AT ALL, and the gap looked
+       like a company that had stopped filing.
+
+       So every tag is read and merged, and where the same period appears
+       under two, the tag EARLIER in the caller's list wins — that is what the
+       ordering of REVENUE_TAGS and EPS_TAGS is for.
+
+    2. WITHIN A TAG. The same period is re-reported by restatements,
+       amendments and the comparative columns inside later filings, so an
+       array from EDGAR routinely holds three values for one quarter. Keyed on
+       (start, end) and resolved by `filed`, which is the only field that says
+       which one is current.
     """
     facts = (cf or {}).get('facts', {})
-    for scope in ('us-gaap', 'ifrs-full', 'dei'):
+    best: dict[tuple, dict] = {}
+    rank: dict[tuple, tuple] = {}          # key -> (scope index, tag index)
+    for si, scope in enumerate(('us-gaap', 'ifrs-full', 'dei')):
         block = facts.get(scope, {})
-        for tag in tags:
+        for ti, tag in enumerate(tags):
             node = block.get(tag)
             if not node:
                 continue
-            best: dict[tuple, dict] = {}
+            here = (si, ti)
             for unit, rows in (node.get('units') or {}).items():
                 if unit_hint and unit_hint not in unit:
                     continue
                 for row in rows:
                     key = (row.get('start'), row.get('end'))
-                    prev = best.get(key)
-                    if prev is None or str(row.get('filed', '')) > str(prev.get('filed', '')):
-                        best[key] = {**row, 'unit': unit, 'tag': tag}
-            if best:
-                return sorted(best.values(), key=lambda r: str(r.get('end') or ''))
-    return []
+                    prev_rank = rank.get(key)
+                    if prev_rank is not None:
+                        if prev_rank < here:
+                            continue       # a preferred tag already has it
+                        if prev_rank == here and str(row.get('filed', '')) <= str(
+                                best[key].get('filed', '')):
+                            continue       # same tag, an older filing
+                    best[key] = {**row, 'unit': unit, 'tag': tag}
+                    rank[key] = here
+    return sorted(best.values(), key=lambda r: str(r.get('end') or ''))
 
 
 def _days(row) -> int | None:
@@ -208,12 +230,16 @@ def _fill_q4(quarters: dict, years: dict) -> dict:
     return {k: v for k, v in out.items() if not str(k).startswith('_')}
 
 
-def pct_change(now, then):
+def pct_change(now, then, kind: str = 'eps'):
     """Year-over-year change, with O'Neil's conventions.
 
     Returns (value, label). `None` means N/A and the label says why, because
     "no growth number" and "growth of zero" are opposite readings of the same
     blank space.
+
+    `kind` only changes the wording, and it matters: a pre-revenue biotech was
+    printing "n/a (loss a year ago)" against its SALES column, and sales are
+    not a loss. Zero revenue is zero revenue.
     """
     if now is None or then is None:
         return None, 'n/a'
@@ -222,6 +248,9 @@ def pct_change(now, then):
         # arithmetic without meaning, and it is the single most common way a
         # screen surfaces a company that lost money last year as a 500%
         # grower. MarketSmith prints N/A; so does this.
+        if kind == 'sales':
+            return None, ('n/a (no sales a year ago)' if then == 0
+                          else 'n/a (negative a year ago)')
         return None, 'n/a (loss a year ago)'
     v = (now - then) / abs(then) * 100.0
     if v > PCT_CAP:
@@ -267,7 +296,7 @@ def c_table(cf: dict, quarters: int = 8) -> dict:
     for end in ends:
         eps, rev, ni = eps_q.get(end), rev_q.get(end), ni_q.get(end)
         eps_chg, eps_lab = pct_change(eps, _year_ago(eps_q, end))
-        rev_chg, rev_lab = pct_change(rev, _year_ago(rev_q, end))
+        rev_chg, rev_lab = pct_change(rev, _year_ago(rev_q, end), kind='sales')
         rows.append({
             'quarter': end,
             'eps': eps,
