@@ -306,6 +306,35 @@ ok('...in the group table as well as on the card',
 ok('the table says what the floor is and why it exists',
    'wearing an industry' in UI or 'one company\'s year' in UI)
 
+# ── THE STATUS CHECK NAMES ONLY COMMANDS THAT EXIST ────────────────────
+#
+# The whole value of this script is that a person who does not read code can
+# run one command and be told the next one. A fix line pointing at a unit that
+# was never written is worse than no fix line — the first draft said
+# "systemctl start qp-sic", and there is no qp-sic.
+import re as _re                                           # noqa: E402
+STAT = (ROOT / 'deploy' / 'run_status.py').read_text()
+_UNITS = {p.stem for p in (ROOT / 'deploy').glob('qp-*.service')}
+_named = set(_re.findall(r'systemctl start (qp-[a-z]+)', STAT))
+ok('every unit the status check tells you to start actually exists',
+   _named <= _UNITS, sorted(_named - _UNITS))
+ok('...and it names the three that do', _named == {'qp-backfill', 'qp-daily',
+                                                   'qp-edgar'}, _named)
+_scripts = set(_re.findall(r'deploy/(run_[a-z_]+\.py)', STAT))
+ok('every runner it points at exists too',
+   all((ROOT / 'deploy' / f).exists() for f in _scripts), _scripts)
+
+ok('it reports coverage against the universe, not just "the file is there"',
+   'def coverage' in STAT and '% of universe' in STAT)
+ok('...and says so rather than printing 0% when the universe is unknown',
+   'coverage n/a' in STAT and 'a fact about\n    # this check' in STAT)
+ok('it reads and never builds, so it is safe to run mid-job',
+   'READ-ONLY' in STAT and '.build(' not in STAT and 'walk(' not in STAT)
+ok('a file being rewritten underneath it is not reported as a failure',
+   'mid-rewrite' in STAT)
+ok('N and S are listed as having no file, since a blank one looks identical '
+   'to a missing job', 'no file to build' in STAT and 'under 7 weeks' in STAT)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)
