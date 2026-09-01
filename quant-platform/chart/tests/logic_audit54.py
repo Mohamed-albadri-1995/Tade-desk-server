@@ -359,6 +359,51 @@ ok('every block carries its own as-of date, because they refresh on different '
 ok('I is not invented while 13F is unbuilt — it says which phase it is',
    'phase 6' in UI and 'Not estimated here' in UI)
 
+# ── A GAPPY ANNUAL SERIES ───────────────────────────────────────────────
+# FTAI's live panel printed 2025, 2024, 2023, 2018, 2017 — the filer stopped
+# tagging annual EPS for four years — and the table compared 2023 with 2018,
+# called it +999%+, and compounded the same five-year span as a three-year
+# growth rate. The row below is not necessarily the year before.
+def _fy(end, val):
+    return {'start': end[:4] + '-01-01', 'end': end, 'val': val,
+            'fy': end[:4], 'filed': end}
+
+
+GAPPY = {'facts': {'us-gaap': {'EarningsPerShareDiluted': {'units': {'shares': [
+    _fy('2025-12-31', 4.60), _fy('2024-12-31', -0.32), _fy('2023-12-31', 2.11),
+    _fy('2018-12-31', 0.07), _fy('2017-12-31', 0.00),
+]}}}}}
+ga = edgar.a_table(GAPPY)
+by_fy = {r['fy']: r for r in ga['rows']}
+ok('a year-over-year change across a HOLE is refused, not printed',
+   by_fy['2023-12-31']['eps_chg'] is None
+   and by_fy['2023-12-31']['eps_chg_label'] == 'n/a (no prior year filed)', ga)
+ok('...while a genuinely adjacent pair still computes',
+   by_fy['2024-12-31']['eps_chg'] == -115.2, ga)
+ok('the 3-year growth rate is refused when the fourth row is not 3 years back',
+   ga['growth_3yr_pct'] is None, ga)
+ok('stability regresses on the YEAR, not the row number',
+   'THE X AXIS IS THE YEAR, NOT THE ROW NUMBER' in SRC)
+
+CLEAN = {'facts': {'us-gaap': {'EarningsPerShareDiluted': {'units': {'shares': [
+    _fy('2022-12-31', 1.00), _fy('2023-12-31', 1.50),
+    _fy('2024-12-31', 2.00), _fy('2025-12-31', 8.00),
+]}}}}}
+ca = edgar.a_table(CLEAN)
+ok('...and an unbroken four-year run still reports its growth rate',
+   ca['growth_3yr_pct'] == 100.0, ca)
+ok('zero a year ago is NOT reported as a loss',
+   edgar.pct_change(0.07, 0.0)[1] == 'n/a (no earnings a year ago)')
+ok('...but an actual loss still is',
+   edgar.pct_change(0.07, -0.5)[1] == 'n/a (loss a year ago)')
+
+# ── M AND L BELONG TO EVERY TAB ─────────────────────────────────────────
+# The panel printed "—" for the market and "group not ranked yet" while the
+# same panel printed a per-stock verdict against distribution days it HAD.
+ok('the market model is fetched at boot, not only on the market tab',
+   UI.count('loadOneil();') >= 2)
+ok('...and so are the group ranks', UI.count('loadGroups();') >= 2)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

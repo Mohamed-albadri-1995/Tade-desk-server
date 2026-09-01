@@ -251,7 +251,11 @@ def pct_change(now, then, kind: str = 'eps'):
         if kind == 'sales':
             return None, ('n/a (no sales a year ago)' if then == 0
                           else 'n/a (negative a year ago)')
-        return None, 'n/a (loss a year ago)'
+        # Zero is not a loss either. A company that broke exactly even is a
+        # different fact from one that lost money, and the reason the number
+        # is missing is division by zero, not a negative base.
+        return None, ('n/a (no earnings a year ago)' if then == 0
+                      else 'n/a (loss a year ago)')
     v = (now - then) / abs(then) * 100.0
     if v > PCT_CAP:
         return PCT_CAP, f'+{PCT_CAP:.0f}%+'
@@ -339,10 +343,33 @@ def a_table(cf: dict, years: int = 5) -> dict:
     eq_by_end = {r['end']: r['val'] for r in eq if r.get('val') is not None}
 
     ends = sorted(eps_y, reverse=True)[:years]
+
+    # THE ROW BELOW IS NOT NECESSARILY THE YEAR BEFORE. A filer that stopped
+    # tagging annual EPS for a stretch leaves a HOLE, and the list closes over
+    # it: FTAI's rows ran 2025, 2024, 2023, 2018, 2017, so comparing each row
+    # with the next one printed 2023 against 2018 and called the result a
+    # year-over-year change. It was +2914%, over five years, labelled as one.
+    # A comparison is only a year-over-year comparison when the two ends are
+    # about a year apart; anything else says so instead of pretending.
+    def _yr(end: str) -> int | None:
+        try:
+            return _dt.date.fromisoformat(end).year
+        except Exception:                                 # noqa: BLE001
+            return None
+
+    def _apart(a: str, b: str) -> int | None:
+        """Whole years between two fiscal year-ends, or None if unreadable."""
+        ya, yb = _yr(a), _yr(b)
+        return None if (ya is None or yb is None) else ya - yb
+
     rows = []
     for i, end in enumerate(ends):
-        prev = ends[i + 1] if i + 1 < len(ends) else None
-        chg, lab = pct_change(eps_y.get(end), eps_y.get(prev) if prev else None)
+        nxt = ends[i + 1] if i + 1 < len(ends) else None
+        prev = nxt if (nxt and _apart(end, nxt) == 1) else None
+        if nxt and prev is None:
+            chg, lab = None, 'n/a (no prior year filed)'
+        else:
+            chg, lab = pct_change(eps_y.get(end), eps_y.get(prev) if prev else None)
         ni, equity = ni_y.get(end), eq_by_end.get(end)
         rows.append({
             'fy': end,
@@ -355,9 +382,14 @@ def a_table(cf: dict, years: int = 5) -> dict:
     # 3-YEAR GROWTH RATE as a compound annual rate, not an average of the
     # yearly changes: averaging +100% and -50% gives +25% for a company that
     # ended where it started.
+    # Same hole, same trap: the fourth row is only three years back when no
+    # year is missing. FTAI's printed 303.5% a year, which was 2025 over 2018
+    # compounded as though it were three years.
     growth3 = None
-    vals = [r['eps'] for r in rows if r['eps'] is not None]
-    if len(vals) >= 4 and vals[3] and vals[3] > 0 and vals[0] > 0:
+    kept = [r for r in rows if r['eps'] is not None]
+    vals = [r['eps'] for r in kept]
+    if (len(kept) >= 4 and _apart(kept[0]['fy'], kept[3]['fy']) == 3
+            and vals[3] and vals[3] > 0 and vals[0] > 0):
         growth3 = round(((vals[0] / vals[3]) ** (1 / 3) - 1) * 100, 1)
 
     # EARNINGS STABILITY — how much the series WOBBLES around its own trend.
@@ -365,15 +397,21 @@ def a_table(cf: dict, years: int = 5) -> dict:
     # it is why it is named and labelled rather than left as a bare figure.
     # O'Neil wants a straight line, not an average that happens to be high.
     stability = None
-    if len(vals) >= 4:
+    if len(kept) >= 4:
         seq = list(reversed(vals))                # oldest first
+        # THE X AXIS IS THE YEAR, NOT THE ROW NUMBER. Regressing on position
+        # spaces 2017 and 2023 one step apart when six years separate them,
+        # which flattens the fitted trend and reports a gappy series as
+        # steadier than it is. Steadiness is the one number here where high is
+        # bad, so an understatement flatters the stock.
+        xs = [_yr(r['fy']) or 0 for r in reversed(kept)]
         n = len(seq)
-        mx = sum(range(n)) / n
+        mx = sum(xs) / n
         my = sum(seq) / n
-        den = sum((i - mx) ** 2 for i in range(n))
+        den = sum((x - mx) ** 2 for x in xs)
         if den:
-            slope = sum((i - mx) * (seq[i] - my) for i in range(n)) / den
-            resid = [seq[i] - (my + slope * (i - mx)) for i in range(n)]
+            slope = sum((xs[i] - mx) * (seq[i] - my) for i in range(n)) / den
+            resid = [seq[i] - (my + slope * (xs[i] - mx)) for i in range(n)]
             scale = abs(my) or 1.0
             stability = int(round(min(99, (sum(r * r for r in resid) / n) ** 0.5
                                       / scale * 100)))

@@ -6116,6 +6116,17 @@ document.addEventListener('keydown', e => {
 });
 initToolSwitcher();
 
+// THE MARKET MODEL AND THE GROUP RANKS BELONG TO EVERY TAB, NOT THE MARKET TAB.
+// They used to be fetched only inside loadMarket(), which runs when you open
+// the market tab or finish a scan. Open a screener tool directly — the normal
+// way this page is used — and neither existed, so every CANSLIM panel printed
+// "—" for M and "group not ranked yet" for L while the SAME panel printed a
+// per-stock verdict against distribution days it had, in fact, received. A
+// verdict about days the page claims not to know is worse than no verdict.
+// Two cached JSON reads at boot, not one per card, so X5 still holds.
+loadOneil();
+loadGroups();
+
 // Sunlight is ON unless it has been explicitly switched off. This tool is read
 // on a phone, outdoors, at the open — that is the normal case, not the
 // exception, so it is the default and the darker palette is the opt-out.
