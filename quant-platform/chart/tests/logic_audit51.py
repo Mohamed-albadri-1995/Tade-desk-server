@@ -270,6 +270,36 @@ ok('it starts at YESTERDAY — a session that has not closed has nothing to fetc
 ok('a failed top-up is never the reason a page fails',
    'Never the reason a page fails' in RSRC)
 
+# POLYGON REFUSES TODAY'S SESSION BEFORE THE CLOSE, and the first live run of
+# backfill() died on its very first request:
+#
+#   403 {"status":"NOT_AUTHORIZED","message":"Attempted to request today's data
+#        before end of day. Please upgrade your plan"}
+#
+# That is not an authorisation problem and not a missing session. It is "come
+# back later", and the two right responses are opposite to the ones a 403
+# usually deserves: SKIP the day and carry on, and NEVER cache it.
+ok('a not-yet-published session has its own type, not a bare RuntimeError',
+   'class NotYetPublished' in RSRC)
+ok('...raised only for that exact 403, not every 403',
+   "e.code == 403 and 'before end of day' in body" in RSRC)
+ok('the backfill SKIPS it and keeps walking, rather than dying',
+   'except NotYetPublished' in RSRC and 'skipping' in RSRC)
+ok('...and reports how many it skipped', "'not_yet_published'" in RSRC)
+ok('the top-up handles it the same way',
+   RSRC.count('except NotYetPublished') >= 2)
+ok('the backfill starts at YESTERDAY, so it spends no call learning that',
+   'YESTERDAY, NOT TODAY' in RSRC)
+
+# AND THE WORSE ONE, which nothing would have reported. An empty response was
+# cached for ANY day — including a session simply not published yet — so a day
+# fetched a few hours early became a permanent "holiday" and the RS universe
+# kept a hole nothing could refill.
+ok('an empty day is cached only once the calendar has SETTLED',
+   'settled = ' in RSRC and 'if settled:' in RSRC)
+ok('...because a holiday is permanent and an unpublished session is not',
+   'never asked for again' in RSRC)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

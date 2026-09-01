@@ -50,6 +50,7 @@ a year of history is ~250 calls once, and one call a day forever after.
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import time
@@ -88,6 +89,24 @@ def _api_key() -> str:
     return key
 
 
+class NotYetPublished(RuntimeError):
+    """Polygon has this session but will not serve it yet.
+
+    On the free tier, asking for TODAY before the close returns
+
+        403 {"status":"NOT_AUTHORIZED", "message":"Attempted to request
+             today's data before end of day..."}
+
+    which is not an authorisation problem and not a missing session — it is
+    "come back later". It needs its own type because the two right responses
+    are opposite: a walk over history must SKIP this day and carry on, and it
+    must never be cached, because tomorrow the same date has real data in it.
+
+    Found the hard way: backfill() started at today, hit this on its very first
+    request, and the whole 252-session walk died on it.
+    """
+
+
 def _get(url: str, tries: int = 4) -> dict:
     """GET with a backoff for the free tier's 5 req/min limit (HTTP 429)."""
     for attempt in range(tries):
@@ -99,7 +118,10 @@ def _get(url: str, tries: int = 4) -> dict:
             if e.code == 429 and attempt < tries - 1:
                 time.sleep(2 ** attempt * 5)
                 continue
-            raise RuntimeError(f'Polygon {e.code}: {e.read().decode()[:200]}') from e
+            body = e.read().decode()[:300]
+            if e.code == 403 and 'before end of day' in body:
+                raise NotYetPublished(body) from e
+            raise RuntimeError(f'Polygon {e.code}: {body[:200]}') from e
     raise RuntimeError('Polygon: exhausted retries')
 
 
@@ -128,11 +150,21 @@ def fetch_day(day: str, force: bool = False) -> pd.DataFrame:
     rows = payload.get('results') or []
 
     if not rows:
-        # A holiday, a weekend, or a day Polygon has not published yet. Cached
-        # as an EMPTY frame so the backfill does not ask again every run — the
-        # calendar does not change retroactively.
         df = pd.DataFrame(columns=['symbol', 'close', 'volume', 'dollar_vol'])
-        df.to_parquet(p)
+        # AN EMPTY DAY IS ONLY CACHED ONCE THE CALENDAR HAS SETTLED.
+        #
+        # A holiday is a permanent fact and caching it saves a request forever.
+        # A session that simply has not been published yet is NOT — and the
+        # first version of this cached both, so a day fetched a few hours early
+        # would be recorded as a holiday and never asked for again. The RS
+        # universe would then have a hole in it that nothing could refill, and
+        # nothing anywhere would say so.
+        #
+        # Two days is comfortably past any publishing delay and still far
+        # inside the walk, so a real backfill caches every holiday it meets.
+        settled = (_dt.date.today() - _dt.date.fromisoformat(day)).days >= 2
+        if settled:
+            df.to_parquet(p)
         return df
 
     df = pd.DataFrame(rows)
@@ -169,10 +201,17 @@ def backfill(end: str | None = None, sessions: int = _YEAR + 10,
     tier's limit and this stays under it rather than relying on the 429 retry,
     which costs 35 seconds each time it fires.
     """
-    end_ts = pd.Timestamp(end) if end else pd.Timestamp.utcnow().normalize()
+    # YESTERDAY, NOT TODAY. On the free tier Polygon refuses today's session
+    # before the close with a 403, and the first version of this started at
+    # today and died on its own first request. Even with NotYetPublished
+    # handled below, starting here spends no call learning what the calendar
+    # already says.
+    end_ts = (pd.Timestamp(end) if end
+              else pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=1))
     have = set(cached_days())
     got = 0
     fetched = 0
+    skipped = 0
     day = end_ts
     # A generous walk-back bound: 252 sessions is ~366 calendar days, and a
     # bound stops a bad key turning into an unbounded loop over history.
@@ -183,7 +222,16 @@ def backfill(end: str | None = None, sessions: int = _YEAR + 10,
             if len(_read_day(d)):
                 got += 1
         elif day.weekday() < 5:                  # never spend a call on a weekend
-            df = fetch_day(d)
+            try:
+                df = fetch_day(d)
+            except NotYetPublished:
+                # Not an error and not a missing session: this day exists and
+                # will be served later. SKIP IT AND CARRY ON — dying here is
+                # what killed the first run, on its very first request.
+                log(f'  {d}  not published yet — skipping')
+                skipped += 1
+                day -= pd.Timedelta(days=1)
+                continue
             fetched += 1
             if len(df):
                 got += 1
@@ -193,7 +241,8 @@ def backfill(end: str | None = None, sessions: int = _YEAR + 10,
         day -= pd.Timedelta(days=1)
         if got >= sessions:
             break
-    return {'sessions': got, 'fetched': fetched, 'cached': len(cached_days())}
+    return {'sessions': got, 'fetched': fetched, 'not_yet_published': skipped,
+            'cached': len(cached_days())}
 
 
 def top_up(max_days: int = 3, sleep_s: float = 13.0) -> dict:
@@ -232,6 +281,10 @@ def top_up(max_days: int = 3, sleep_s: float = 13.0) -> dict:
                     if not len(df):
                         out['skipped'] += 1      # a holiday, and now cached as one
                     time.sleep(sleep_s)
+                except NotYetPublished:
+                    # This session exists and is not served yet. Walk past it;
+                    # tomorrow's run picks it up.
+                    out['not_yet_published'] = out.get('not_yet_published', 0) + 1
                 except Exception as e:           # noqa: BLE001
                     # Never the reason a page fails: the caller falls back to
                     # whatever history is already on disk.
