@@ -567,6 +567,23 @@ body.sunlight .fold .fold > .fold-head { background: none; }
 .ctx-val, .price-val { color: var(--text); }
 .ctx-label, .price-label { color: var(--text2); }
 .canslim-sec { border-left: 2px solid var(--accent); padding-left: 9px; }
+/* A CHECKLIST HAS TO LINE UP, or it stops reading as one.
+   These rows were flex with space-between, so the label column was as wide as
+   whatever label it held: "S supply" started in one place, "on the DD days"
+   in another, every (i) landed somewhere different, and long values wrapped
+   back under the label. A fixed label column and a top-aligned value column
+   put every letter, every icon and every value on the same two verticals —
+   which is the whole point of reading DOWN the letters. */
+/* EVERY row inside a fold, not only the letters — Relative Strength and
+   Market Context were ragged for the same reason. */
+.fold-body .ctx-row { display: grid; grid-template-columns: 88px 1fr;
+  gap: 9px; align-items: start; margin-bottom: 6px; }
+.fold-body .ctx-label { display: flex; align-items: flex-start; gap: 4px;
+  line-height: 1.35; }
+.fold-body .ctx-val { text-align: left; line-height: 1.4; }
+/* The icon never grows or shrinks the label column, and never sits on its own
+   line under it. */
+.fold-body .oneil-info { flex: 0 0 auto; margin-top: 1px; }
 .cl-sub { display: inline-block; padding-left: 15px; color: var(--text2); }
 .cl-letter { display: inline-block; min-width: 15px; font-weight: 800;
   font-size: 11px; color: var(--accent); letter-spacing: 0; }

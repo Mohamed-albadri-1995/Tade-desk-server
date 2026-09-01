@@ -633,3 +633,40 @@ describe('the I row', () => {
     expect(fn).not.toMatch(/fetch\(|await /);
   });
 });
+
+describe('a checklist has to line up', () => {
+  /*
+   * Reported from the live cards: the CANSLIM rows read "like baby
+   * handwriting". The cause was .ctx-row being a flex with space-between, so
+   * the label column was as wide as whatever label it held — "S supply"
+   * started in one place and "on the DD days" in another, every (i) landed
+   * somewhere different, and a long value wrapped back underneath its own
+   * label. Reading DOWN the letters was the entire point and the layout made
+   * it impossible.
+   */
+  const rule = page.match(/\.fold-body \.ctx-row \{[^}]*\}/)[0];
+
+  test('rows inside a fold are a two-column grid, not a flex', () => {
+    expect(rule).toContain('display: grid');
+    expect(rule).toMatch(/grid-template-columns: \d+px 1fr/);
+  });
+
+  test('the label column has a FIXED width, so every value starts level', () => {
+    expect(rule).not.toContain('auto 1fr');
+  });
+
+  test('rows are top-aligned, so a wrapped value does not centre its label', () => {
+    expect(rule).toContain('align-items: start');
+  });
+
+  test('the definition icon cannot resize the label column', () => {
+    const icon = page.match(/\.fold-body \.oneil-info \{[^}]*\}/)[0];
+    expect(icon).toContain('flex: 0 0 auto');
+  });
+
+  test('it applies to every folded row, not only the letters', () => {
+    // Relative Strength and Market Context were ragged for the same reason.
+    expect(page).toContain('.fold-body .ctx-row');
+    expect(page).not.toContain('.canslim-sec .ctx-row {');
+  });
+});
