@@ -122,7 +122,15 @@ def main():
         universe = list(rs.index) if rs is not None and not rs.empty else []
         if not universe:
             return 'no RS universe yet — nothing to walk'
-        out = edgar.walk(universe, log=lambda m: print(f'       {m}', flush=True))
+        # THE SIC-SOURCED HALF OF THE MAP, not the whole map: an entry the
+        # screener tools wrote carries TradingView's industry label, which an
+        # ETF has too. Only `src: 'sic'` means a real SEC filer was found, and
+        # that is exactly the set with something to fetch. Walked first — the
+        # first live run spent nearly half its night learning ETFs are ETFs.
+        filers = {s for s, v in (groups.read_map() or {}).items()
+                  if isinstance(v, dict) and v.get('src') == 'sic'}
+        out = edgar.walk(universe, prefer=filers,
+                         log=lambda m: print(f'       {m}', flush=True))
         if not out.get('ok'):
             return f"not walked: {out.get('error')}"
         return (f"{out['built']} built, {out['no_filings']} have no filings, "

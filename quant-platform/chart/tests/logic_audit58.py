@@ -335,6 +335,44 @@ ok('a file being rewritten underneath it is not reported as a failure',
 ok('N and S are listed as having no file, since a blank one looks identical '
    'to a missing job', 'no file to build' in STAT and 'under 7 weeks' in STAT)
 
+# ── COMPANIES BEFORE ETFs ───────────────────────────────────────────────
+#
+# From the first live walk, six minutes in:
+#
+#     14610 in universe · 27 already fresh · 14583 to fetch
+#     800/14583 · 462 built · 338 no filings · 0 failed
+#
+# Nearly HALF the requests were spent learning that an ETF is an ETF. The
+# price universe is every ticker that trades — ETFs, warrants, units,
+# preferred, closed-end funds — and none of them file XBRL. The SIC map is
+# already on disk and is exactly the set that does.
+seen4 = []
+real_build = edgar.build
+edgar_age = edgar._cache_age_days
+try:
+    edgar._cache_age_days = lambda t: None
+    edgar.build = lambda t: (seen4.append(t) or {'ticker': t, 'ok': False,
+                                                 'error': 'stubbed'})
+    edgar.walk(['ETF1', 'AAPL', 'ETF2', 'MSFT'], prefer={'AAPL', 'MSFT'},
+               budget_s=0, log=lambda *_: None)
+finally:
+    edgar.build = real_build
+    edgar._cache_age_days = edgar_age
+
+ok('known filers are walked before the rest of the price universe',
+   seen4[:2] == ['AAPL', 'MSFT'], seen4)
+ok('...and the rest are still walked, not skipped — their "no filings" is '
+   'an answer worth caching', sorted(seen4[2:]) == ['ETF1', 'ETF2'], seen4)
+ok('the reason is written down with the live numbers that showed it',
+   '462 built against 338' in EDG or 'an ETF is an ETF' in EDG)
+
+# Only src:'sic' entries mean a filer was actually found — a screener-written
+# entry carries TradingView's industry label, which an ETF has too.
+for _f in ('run_daily.py', 'run_edgar.py'):
+    _T = (ROOT / 'deploy' / _f).read_text()
+    ok(f'{_f} prefers the SIC-sourced half of the map, not the whole map',
+       "v.get('src') == 'sic'" in _T and 'prefer=filers' in _T)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

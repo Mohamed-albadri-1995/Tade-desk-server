@@ -627,7 +627,7 @@ def _permanent(err: str) -> bool:
 
 def walk(symbols, refresh_days: float | None = None,
          budget_s: float | None = None, limit: int | None = None,
-         log=print) -> dict:
+         prefer=None, log=print) -> dict:
     """Fill the fundamentals cache for a whole universe, oldest first.
 
     ORDERED, so it is resumable and so coverage only ever grows: names with
@@ -643,14 +643,31 @@ def walk(symbols, refresh_days: float | None = None,
 
     ages = {t: _cache_age_days(t) for t in want}
     todo = [t for t in want if ages[t] is None or ages[t] > age]
+
+    # KNOWN FILERS FIRST, and this is worth far more than it looks.
+    #
+    # The price universe is every ticker that trades: ETFs, warrants, units,
+    # preferred, closed-end funds. None of them file XBRL, and the first live
+    # run proved the cost — 462 built against 338 with no filings, so nearly
+    # HALF the night was spent learning that an ETF is an ETF.
+    #
+    # `prefer` is the SIC map: every symbol there was classified from a real
+    # SEC filer, so it is exactly the set with something to fetch. Ordering by
+    # it does not skip anything — the rest are still walked, and their "no
+    # filings" answer is still cached so tomorrow skips them — but a night
+    # that runs out of time has spent its hours on companies.
+    known = {str(s).upper() for s in (prefer or ())}
     # -inf, NOT -1. The key is the negated age, so a 30-day-old record sorts
     # at -30 and a never-fetched one at -1 landed BEHIND every stale record —
     # the exact opposite of what is wanted, and invisible until a universe
     # that had grown spent its whole night refreshing names it already had.
     # Nothing on disk outranks any age.
-    todo.sort(key=lambda t: float('-inf') if ages[t] is None else -ages[t])
+    todo.sort(key=lambda t: (0 if t in known else 1,
+                             float('-inf') if ages[t] is None else -ages[t]))
     log(f'  {len(want)} in universe · {len(want) - len(todo)} already fresh '
-        f'· {len(todo)} to fetch')
+        f'· {len(todo)} to fetch'
+        + (f' · {sum(1 for t in todo if t in known)} of them known filers'
+           if known else ''))
 
     started = time.time()
     built = failed = dead = 0

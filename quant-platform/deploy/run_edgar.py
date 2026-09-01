@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from chart import relstrength, edgar                # noqa: E402
+from chart import relstrength, edgar, groups        # noqa: E402
 
 if __name__ == '__main__':
     # THE RS UNIVERSE. A name with no price history cannot be screened, so its
@@ -42,5 +42,15 @@ if __name__ == '__main__':
               flush=True)
         sys.exit(1)
 
+    # KNOWN FILERS FIRST. The price universe is every ticker that trades, and
+    # roughly two in five are ETFs, warrants, units or preferred with no XBRL
+    # to fetch. They are still walked — their "no filings" answer is cached so
+    # later runs skip them — but companies come first, so the tables a card
+    # needs exist long before the whole list is finished.
+    filers = {s for s, v in (groups.read_map() or {}).items()
+              if isinstance(v, dict) and v.get('src') == 'sic'}
+    print(f'{len(filers)} of them are known SEC filers — walked first',
+          flush=True)
+
     # budget_s=0 removes the nightly ceiling. This run is meant to finish.
-    print(edgar.walk(universe, budget_s=0), flush=True)
+    print(edgar.walk(universe, prefer=filers, budget_s=0), flush=True)
