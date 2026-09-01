@@ -80,6 +80,29 @@ Two removal rules, and a day leaves the count when **either** fires:
 
 *(IBD has published both 5% and 6% for rule 2 in different years. See §5.)*
 
+### 2.2b Stalling days — the form of distribution that is not a down day
+
+**This was missing from the first draft of this document and it is not a
+detail.** IBD's distribution count includes a second shape:
+
+```
+STALLING (also called churning)
+    volume is heavy — above the 25-day average, or above the prior day
+    AND the index makes almost no upward progress (gain under ~0.2%)
+    AND it closes in the lower half of the day's range
+```
+
+The logic is the same as a down day: institutions are selling into strength.
+The price does not fall because the selling is being absorbed — which is
+exactly what heavy volume with no progress *means*. A count that only looks
+for −0.2% closes misses this entirely, and it is the shape that shows up at
+tops, where the index grinds sideways on huge volume for a fortnight before
+it breaks.
+
+A stalling day is a **distribution day** for counting purposes. It is flagged
+separately in the list so the two can be told apart, because they read
+differently on a chart.
+
 ### 2.3 The count → the state
 
 | Live distribution days | State |
@@ -91,6 +114,13 @@ Two removal rules, and a day leaves the count when **either** fires:
 
 The count is not the only route into a correction: a decisive break of the
 rally low also ends the uptrend regardless of the count.
+
+**COUNTED PER INDEX, NOT POOLED.** IBD tracks the Nasdaq Composite and the
+S&P 500 separately and publishes both counts. They diverge often — that
+divergence is information, because it says which half of the market is being
+sold. The status is driven by the **worse** of the two. Pooling them into one
+number would both double-count a day the two indexes shared and hide the
+divergence.
 
 ### 2.4 Rally attempt and follow-through day
 
@@ -110,6 +140,32 @@ Follow-through day       = on day 4 or later of that rally attempt:
   but that no major bottom has occurred *without* one. It is a **necessary,
   not sufficient** condition, and the tab should say so.
 - The rally attempt **resets** if the low is undercut before an FTD appears.
+
+---
+
+### 2.5 RS — verified against the published formula
+
+The implementation in `chart/relstrength.py` was checked against IBD's
+published description and **is correct**:
+
+```
+RS = 0.4·(P0/P63) + 0.2·(P0/P126) + 0.2·(P0/P189) + 0.2·(P0/P252)
+```
+
+equivalently `2·(P0/P63) + (P0/P126) + (P0/P189) + (P0/P252)`, all over 5 —
+63/126/189/252 trading days being 3/6/9/12 months, with the most recent
+quarter carrying double weight. Percentile-ranked to 1–99.
+
+Two things decide whether a reconstruction matches IBD's number, and both are
+choices this system has already made correctly:
+
+- **The universe.** IBD ranks against all listed US stocks. Ranking against
+  the Nasdaq only, or against the S&P 500, produces a different rating for
+  the same stock. Ours uses Polygon's grouped-daily endpoint — every US
+  ticker for the session — which is the right universe.
+- **Adjusted prices.** A 2-for-1 split halves the raw close, and a 12-month
+  performance measure on raw prices scores that stock at −50% and rates it 1.
+  The strongest names in a bull market are exactly the ones that split.
 
 ---
 
@@ -134,20 +190,24 @@ Proposed additions, in the order a CAN SLIM reader looks at them:
 | `accDis` | **I** | Price/volume (have) | A–E from 13 weeks of price/volume. Must not be confused with the Chaikin index |
 | `supply` | **S** | Free float × price | Small float = thinner supply = sharper moves |
 
-### 3.1 Free sources, named
+### 3.1 Free sources, named — and what each one cannot give
 
-| Need | Source | Free? | Notes |
+| Need | Source | Free | Honest limit |
 |---|---|---|---|
-| Quarterly & annual EPS, revenue, equity | **SEC EDGAR XBRL** `data.sec.gov/api/xbrl/companyfacts/CIK{...}.json` | Yes, official, **no key** | Requires a descriptive `User-Agent`; ~10 req/s. Covers every US filer. This is the authoritative source — it is what the paid vendors resell |
-| CIK ↔ ticker map | `www.sec.gov/files/company_tickers.json` | Yes, no key | One file, refresh monthly |
-| Index OHLCV for the market model | **Already have** — Yahoo / Polygon | Yes | Nasdaq Composite `^IXIC`, S&P 500 `^GSPC` |
-| Whole-market percentiles (RS, group rank) | **Already have** — Polygon grouped daily | Yes tier | One call per session |
-| Shares outstanding / float | EDGAR `dei:EntityCommonStockSharesOutstanding` | Yes | Float is harder; shares outstanding is exact and free |
+| Quarterly & annual EPS, revenue, net income, equity | **SEC EDGAR XBRL** `data.sec.gov/api/xbrl/companyfacts/CIK{...}.json` | Yes, official, **no key** | Needs a descriptive `User-Agent`. Filings land weeks after quarter-end, so a card in May may show a February filing — the as-of date must be on screen |
+| CIK ↔ ticker | `www.sec.gov/files/company_tickers.json` | Yes | Refresh monthly |
+| **Number of funds owning, by quarter** | **SEC Form 13F quarterly datasets** | Yes, official | Only managers over $100M file, and 45 days after quarter-end. So the count is real but lags a quarter — same lag MarketSmith has |
+| Fund / bank / management ownership % | 13F + Forms 3/4/5 | Yes | Management % needs insider forms; more work than the fund count |
+| Short interest | **FINRA** short interest files | Yes | Twice monthly, not daily |
+| New CEO date | **SEC Form 8-K, Item 5.02** | Yes | Item extraction is text work, not a field lookup |
+| Shares outstanding | EDGAR `dei:EntityCommonStockSharesOutstanding` | Yes | Exact |
+| **Float** | — | **Partly** | No free feed publishes float directly. It is approximable as shares outstanding minus insider and 5%-holder positions from Forms 4 and SC 13D/G. **This is the one number that will be an estimate, and it will be labelled as one** |
+| Index OHLCV for the market model | Already have — Yahoo / Polygon | Yes | Nasdaq Composite, S&P 500 |
+| Whole-market percentiles (RS, group rank) | Already have — Polygon grouped daily | Yes | One call per session |
 
-**Nothing here needs a paid vendor.** EDGAR is the primary source for every
-fundamental in CAN SLIM.
-
----
+**No paid vendor is required for anything above.** EDGAR is the authoritative
+source that the paid vendors resell, and 13F is how "number of funds" is
+knowable at all.
 
 ## 4. What goes where
 
@@ -211,71 +271,142 @@ checked against a chart afterwards.
 
 ---
 
-## 7. The card — exact spec
+## 7. The card — exact spec (v2, from the MarketSmith panels)
 
-**Approved before building.** This section is what will be implemented; nothing
-below is built yet.
+**Replaces the one-line version.** The first draft compressed CAN SLIM into a
+single strip. That was wrong: C and A are *series*, and a single percentage
+throws away the shape — which is the part O'Neil reads. These are tables.
 
-### 7.1 What a card carries today
+Two levels: a **row** in the list, and a **panel** on tap.
 
-```
-EIX -4.8%                                    70
-Strong Uptrend · Utilities · sec NEUTRAL
-gap +1.3% · rvol 3.5 · 2x T9,T4
-```
-
-Three lines, all day-trading fields. Nothing speaks to CAN SLIM except the
-membership tag.
-
-### 7.2 What is added — ONE line
+### 7.1 The row — what MarketSmith puts in its screen results
 
 ```
-CS  RS 94 · C +38%^ · A +27% · U/D 1.8 · Grp 12 · -4% off high
+BGFV  Big 5 Sporting Corp                              Comp 96
+      EPS 76 · RS 99 · Grp B+ · SMR B · A/D B+
+      vol 1,737k  vs 50-day 1,044k  (+66%)
 ```
 
-One line, prefixed `CS` so it is obviously a different frame from the rest of
-the card. Read left to right it is L, C, A, I, I, N — O'Neil's own order for
-the letters that can be put on a line.
+Six ratings, the same six MarketSmith's list view carries, plus volume against
+its own 50-day average — which is what MarketSmith means by `Volume +9%` and
+is the same quantity as the `rvol` already on our cards.
 
-| Chip | Letter | Meaning | Format | Colour |
+### 7.2 The panel — C, as a table
+
+Eight quarters. `%Chg` is always against **the same quarter one year earlier**.
+
+| Qtr | EPS $ | %Chg | Sales $M | %Chg | Margin |
+|---|---|---|---|---|---|
+| Jun-19 | −0.03 | n/a | 241.0 | 0% | |
+| Sep-19 | 0.30 | +100% | 266.2 | 0% | |
+| Dec-19 | 0.05 | +121% | 244.1 | −1% | |
+| Mar-20 | −0.22 | n/a | 217.7 | −11% | −2.1% |
+| Jun-20 | 0.39 | +999% | 227.9 | −5% | +3.7% |
+| Sep-20 | 1.31 | +337% | 305.0 | +15% | +9.3% |
+| Dec-20 | 0.83 | +999% | 290.6 | +19% | +6.3% |
+
+Conventions taken from MarketSmith and kept:
+
+- **`n/a`, not a number, when the year-ago quarter was a loss.** A percentage
+  change from a negative base is arithmetic without meaning. MarketSmith
+  prints `N/A`; so do we.
+- **Capped at +999%.** Beyond that the number is noise; the point has been
+  made.
+- **Sales beside EPS, always.** O'Neil's warning is earnings growth without
+  sales growth — margin games, buybacks, one-offs. The pair is the check.
+- **After-tax margin**, because rising margin *and* rising sales is the
+  combination he wants.
+
+Derived and shown beside the table:
+- **Accelerating?** Is each of the last 2–3 quarters' `%Chg` larger than the
+  one before? O'Neil weights acceleration heavily and it is invisible in any
+  single number.
+- **How many of the last 8 quarters beat +25%.**
+
+### 7.3 The panel — A, as a table
+
+| FY | EPS $ | %Chg | Price high | Price low |
 |---|---|---|---|---|
-| `RS 94` | **L** | RS Rating percentile | integer 1-99 | >=80 green, 40-79 grey, <40 red |
-| `C +38%^` | **C** | Latest quarter EPS vs **same quarter a year ago**. `^` = **accelerating** (this quarter's growth exceeds last quarter's) | signed % | >=25% green, 0-24% grey, negative red |
-| `A +27%` | **A** | 3-year annual EPS CAGR | signed % | >=25% green |
-| `U/D 1.8` | **I** | Up/down volume ratio, 50 days | 1 decimal | >=1.5 green, 1.0-1.49 grey, <1.0 red |
-| `Grp 12` | **L**/**I** | Industry group rank, of the groups we compute | integer + total on tap | top 20% green |
-| `-4% off high` | **N** | Below the 52-week high | signed % | >=-15% green (near highs) |
+| 2015 | 0.77 | | 20 | 9 |
+| 2016 | 0.78 | +1% | 15 | 8 |
+| … | | | | |
+| 2021 | 1.74 est. | −25% | | |
 
-### 7.3 The rules of presentation
+Plus the three numbers MarketSmith puts beside it:
+- **3-year EPS growth rate** (its `EPS Growth Rate`)
+- **Earnings Stability** — a 0-99 measure of how much the earnings series
+  *wobbles* around its trend. Low is good. O'Neil wants a straight line, not
+  an average that happens to be high
+- **Return on Equity** — his 17% floor
 
-1. **UNKNOWN IS NOT ZERO, and unknown chips are OMITTED.** A company that has
-   not filed has no `C` — printing `C 0%` states that its earnings were flat,
-   which is a measurement nobody made. A card with three chips is honest; a
-   card with six chips two of which are invented is not.
-2. **The whole line is dropped when nothing is known.** No empty `CS` prefix.
-3. **It is a LABEL, never a filter.** Exactly like the existing CANSLIM
-   membership tag: no tool's candidate list changes because of it.
-4. **Tapping the line opens the detail**, which names the source and the as-of
-   date for every number — EDGAR filings are quarterly and a card in May may be
-   showing a February filing, and that has to be visible.
-5. **Nothing here is called an IBD rating.** These are reconstructions from the
-   published descriptions, under our own names.
+The price high/low column is there for a reason: it puts the earnings series
+next to what the stock did, which is the whole CAN SLIM claim.
 
-### 7.4 Phase 1 vs phase 2
+### 7.4 The panel — I, with the history you asked for
 
-**Phase 1** — everything in the table above. Every input is either already in
-the system (price, volume, the RS percentile) or comes from one free keyless
-source (EDGAR).
+MarketSmith's *Fund Ownership Summary* is a count of funds, by quarter:
 
-**Phase 2**, deliberately not promised now because each needs base detection:
+| Quarter | No. of funds |
+|---|---|
+| Mar-19 | 311 |
+| Jun-19 | 301 |
+| Sep-19 | 302 |
+| Dec-19 | 302 |
+| Mar-20 | 313 |
+| Jun-20 | 333 |
+| Sep-20 | 417 |
+| Dec-20 | 425 |
 
-- **Buy zone / extended** — within 5% above the pivot is buyable; beyond that
-  O'Neil says do not chase. Needs a detected base and pivot.
-- **Base stage** — 1st, 2nd, late — counted from the market bottom.
-- **RS line at a new high before price** — the MarketSmith tell.
+**The trend is the signal, not the level.** 311→425 over four quarters is
+institutions accumulating; a flat or falling count is the opposite, and the
+level alone tells you neither.
 
-These are worth building and they are a separate piece of work: they need
-pattern detection, which is a different kind of code from fetching a filing.
+**This is obtainable, free and official: SEC Form 13F.** Every institutional
+manager over $100M files a 13F each quarter listing its US equity holdings,
+and the SEC publishes them as structured quarterly datasets. Counting the
+distinct filers holding a ticker in each quarter *is* this table. It is the
+same source the paid vendors use.
+
+Beside it, from the same filings: **Funds %**, **Banks %**, **Management %**.
+
+### 7.5 The panel — L, the group
+
+From MarketSmith's Industry & Sector panel:
+
+```
+Industry group      Retail-Leisure Products      rank 63 of 197
+Stocks in group     13
+New highs / lows    4 / 0
+This stock ranks    RS 1 of 13 · EPS 7 of 13 · A/D 4 of 13 · Comp 5 of 13
+Top RS in group     BGFV 99 · HIBB 97 · HZO 96 · ONEW 96 · SPWH 82
+```
+
+Two separate facts, and both matter: **is the group strong**, and **is this
+stock the leader within it**. O'Neil buys the #1 or #2 name in a top group,
+not the cheapest name in it. The rank-within-group line is what makes that
+checkable, and nothing on our cards says it today.
+
+### 7.6 The panel — S, supply
+
+```
+Shares outstanding  21.9 Mil
+Float               21.3 Mil
+Short interest      1.2 days, −21%
+```
+
+### 7.7 N — how, since you asked
+
+**N is four different things under one letter**, and only some are computable:
+
+| N | Computable? | How |
+|---|---|---|
+| New **price high** | Yes | At/near a 52-week high — but the O'Neil meaning is *emerging from a base*, which needs base detection (phase 2) |
+| New **management** | Yes, roughly | MarketSmith shows `New CEO 02/2021`. Source: SEC **Form 8-K Item 5.02**, which is filed for exactly this |
+| New **product** | No | This lives in the news, and the card already carries a catalyst field |
+| New **industry conditions** | Partly | The group's rank *rising* is the measurable trace |
+
+Proposal: show **% off 52-week high** and **New CEO date** now; leave "new
+product" to the existing catalyst; treat "out of a base" as phase 2.
 
 ---
 
