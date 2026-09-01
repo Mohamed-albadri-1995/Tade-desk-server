@@ -484,6 +484,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .mkt-fold .fold-body { padding: 10px 12px 12px; }
 .mkt-fold[data-open="1"] .fold-chev { transform: rotate(180deg); }
 .mkt-fold[data-open="1"] .fold-one { display: none; }
+/* The market tab's folds are not .fold elements, so the open-state accent had
+   to be repeated for them. Without it a heading looked identical open and
+   closed — no clue where you are on a tab of five sections. */
+.mkt-fold[data-open="1"] > .fold-head { border-left-color: var(--accent); }
 .fold:last-child { border-bottom: none; }
 /* A HEADING IS A BAND, NOT A BRIGHTER FONT.
    The first attempt made section headings large and bright and they STILL
@@ -524,8 +528,10 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
    with — and at a glance beat — the heading above them. */
 .fold-body .oneil-stat-label,
 .fold-body .section-title,
+.fold-body .analysis-title,
+.fold-body .heatmap-title,
 .fold-body .def-sec-title { font-size: 9px; font-weight: 700;
-  letter-spacing: .06em; color: var(--text3); }
+  letter-spacing: .06em; color: var(--text3); margin-bottom: 6px; }
 /* ...and the block loses its own card chrome, because a bordered panel inside
    a bordered section reads as two boxes rather than one section. */
 .fold-body .oneil-block { background: none; border: 0; padding: 0; margin: 0; }
@@ -4968,8 +4974,8 @@ function renderGroupTable(m) {
     <td>${(g.leaders || []).slice(0, 4).map(l => esc(l.symbol) + ' ' + l.rs).join(' · ')}</td>
   </tr>`;
   el.innerHTML = `
-    <div class="heatmap-title">Industry groups${info('group_rank')}</div>
-    <div class="oneil-none" style="padding-bottom:8px">${esc(m.limit_note || '')}
+    <div class="oneil-none" style="padding-bottom:8px">${info('group_rank')}
+      ${esc(m.limit_note || '')}
       ${m.map ? `<br>${m.map.symbols} symbols across ${m.map.industries} industries mapped;
         ${m.total_groups} groups have the ${m.min_members}+ members needed to rank.` : ''}</div>
     <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
@@ -5008,7 +5014,7 @@ function renderOneil(m) {
   if (!m || !m.ok) {
     // Missing is a normal answer, not an error, and it says what to do about
     // it rather than leaving a blank that could be read as "no distribution".
-    el.innerHTML = `<div class="oneil-head"><div class="oneil-stat-label">O'Neil market model</div>${info('oneil_model')}</div>
+    el.innerHTML = `<div class="oneil-head">${info('oneil_model')}</div>
       <div class="oneil-none">Not built yet. qp publishes this after each close.
       ${m && m.detail ? esc(m.detail) : ''}</div>`;
     return;

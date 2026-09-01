@@ -396,7 +396,9 @@ describe('there are three type levels and they do not look alike', () => {
    * card was one flat run of text with no shape.
    */
   const css = page.match(/\.fold-title \{[^}]*\}/)[0];
-  const head = page.match(/\.fold-head \{[^}]*\}/)[0];
+  // Anchored to the start of a line: '.mkt-fold[data-open="1"] > .fold-head'
+  // also contains '.fold-head {' and would otherwise match first.
+  const head = page.match(/^\.fold-head \{[^}]*\}/m)[0];
   const sub = page.match(/\.fold \.fold \.fold-title \{[^}]*\}/)[0];
   const subHead = page.match(/\.fold \.fold > \.fold-head \{[^}]*\}/)[0];
 
@@ -533,6 +535,30 @@ describe('the market tab names and folds every block', () => {
                       'regime-card', 'sector-tbody', 'group-table']) {
       expect(tab).toContain(`id="${id}"`);
     }
+  });
+
+  test('its headings get the same treatment as the cards', () => {
+    // Same classes, so the size and the furniture colour come for free — but
+    // .mkt-fold is not a .fold, so the open-state accent had to be repeated
+    // or a heading would look identical open and closed.
+    expect(tab).toContain('class="fold-title"');
+    expect(page).toMatch(
+      /\.mkt-fold\[data-open="1"\] > \.fold-head \{[^}]*border-left-color/);
+  });
+
+  test('no block repeats its own name inside the fold that names it', () => {
+    // Two headings for one block is an echo, not a hierarchy. The group table
+    // printed "Industry groups" inside the fold headed "L · Industry groups",
+    // and the market model did the same.
+    expect(page).not.toContain('heatmap-title">Industry groups');
+    expect(page).not.toContain("oneil-stat-label\">O'Neil market model");
+  });
+
+  test('sub-headings inside a market fold drop a level too', () => {
+    const rule = page.match(
+      /\.fold-body \.oneil-stat-label,[\s\S]*?\}/)[0];
+    expect(rule).toContain('.analysis-title');
+    expect(rule).toContain('.heatmap-title');
   });
 
   test('the open/closed choice is remembered separately from the cards', () => {
