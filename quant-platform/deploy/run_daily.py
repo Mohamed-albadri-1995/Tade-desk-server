@@ -14,6 +14,10 @@ Every link depends on the one above it, and each goes stale on its own clock:
                   compares against a moving point 63 sessions back
     market model  distribution days age out of a 25-session window, so it
                   changes even on a day the market does nothing
+    C and A       a company files four times a year, but the UNIVERSE turns
+                  over every morning: tomorrow's screener returns names
+                  nobody has opened a card on, and their tables have to be
+                  waiting or the card is blank on the only day it is looked at
 
 Built once and left, the card would keep printing a rank from the day it was
 first opened. The pieces do carry their own TTLs and rebuild when a page asks
@@ -48,7 +52,7 @@ def step(name, fn):
 
 
 def main():
-    from chart import relstrength, oneil, groups, sic, f13
+    from chart import relstrength, oneil, groups, sic, f13, edgar
 
     # 1. PRICES. One session a day; the whole chain is built on this.
     step('rs universe top-up', lambda: relstrength.top_up())
@@ -103,6 +107,28 @@ def main():
                 f" → {wrote}"
                 if g.get('ok') else f"not built: {g.get('error')}")
     step('group ranks (L)', _groups)
+
+    # 6. THE EARNINGS TABLES. Last, because it is by far the longest step and
+    #    nothing above it waits on the result — the market model and the group
+    #    ranks must be published even on a night this runs out of time.
+    #
+    #    OVER THE UNIVERSE, NOT OVER TODAY'S PICKS. Warming the cache with the
+    #    names a scan returned only helps the second time that name is
+    #    scanned, and a screener that returns the same names two days running
+    #    is a screener that has stopped working. Tomorrow's card is a name
+    #    nobody has looked at yet, so the answer has to already be there.
+    def _fundamentals():
+        rs = relstrength.rs_rating()
+        universe = list(rs.index) if rs is not None and not rs.empty else []
+        if not universe:
+            return 'no RS universe yet — nothing to walk'
+        out = edgar.walk(universe, log=lambda m: print(f'       {m}', flush=True))
+        if not out.get('ok'):
+            return f"not walked: {out.get('error')}"
+        return (f"{out['built']} built, {out['no_filings']} have no filings, "
+                f"{out['failed']} failed, {out['remaining']} left for tomorrow "
+                f"({out['seconds']}s)")
+    step('earnings tables (C, A)', _fundamentals)
 
 
 if __name__ == '__main__':

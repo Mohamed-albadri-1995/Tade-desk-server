@@ -4700,6 +4700,24 @@ const _sign = v => (v == null ? '' : v >= 0 ? 'pos' : 'neg');
  * expandable half of the card's own CANSLIM section: the letters are the
  * summary, this is the working underneath them. Returns HTML; renders
  * nothing itself. */
+/*
+ * WHY THERE IS NOTHING HERE — in words, not in EDGAR's.
+ *
+ * Three different silences look identical on a card and mean opposite things:
+ * a name the nightly walk has not reached yet WILL have tables tomorrow; a
+ * name EDGAR has no filer for never will, and waiting for it is waiting for
+ * nothing; and qp being down is neither. The raw error said the second one as
+ * a URL and a 404, and the annual table said "not fetched yet" for all three.
+ */
+function _fundNote(f) {
+  const e = String((f && f.error) || '');
+  if (!e) return 'not fetched yet — EDGAR is walked nightly';
+  if (/not in EDGAR|404/.test(e)) {
+    return 'no SEC filings — an ETF, an ADR without a filer, or delisted';
+  }
+  return e;
+}
+
 function canslimTablesHTML(tk) {
   const f = CANSLIM_PANEL.fundamentals[tk] || {};
   const b = CANSLIM_PANEL.bases[tk] || {};
@@ -4733,8 +4751,7 @@ function canslimTablesHTML(tk) {
         <b>Beat +${c.bar_pct}%: ${c.beat_25} of ${c.beat_25_of}</b></div>`;
     cHtml += `<div class="def-src" style="border:0;padding-top:6px">${esc(c.note)}</div>`;
   } else {
-    cHtml = `<span style="color:var(--text3)">${esc(f.error
-      || 'not fetched yet — EDGAR is walked nightly')}</span>`;
+    cHtml = `<span style="color:var(--text3)">${esc(_fundNote(f))}</span>`;
   }
 
   // ── A — annual, with the growth rate, stability and the ROE floor ───────
@@ -4757,7 +4774,7 @@ function canslimTablesHTML(tk) {
       </div>
       <div class="def-src" style="border:0;padding-top:6px">${esc(a.stability_note)}</div>`;
   } else {
-    aHtml = '<span style="color:var(--text3)">not fetched yet</span>';
+    aHtml = `<span style="color:var(--text3)">${esc(_fundNote(f))}</span>`;
   }
 
   // ── N — the base, WEEKLY, plus what is new ─────────────────────────────

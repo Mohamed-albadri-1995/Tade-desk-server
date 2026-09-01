@@ -1,0 +1,50 @@
+# THE FIRST FULL PASS OVER EDGAR, AS A SERVICE. See deploy/run_edgar.py.
+#
+# One-off. The nightly job keeps the tables current once they exist, under a
+# time budget; this is the pass that has thousands of companies to fetch
+# rather than a few hundred, and it runs with no ceiling.
+#
+# IT RUNS ON THE SERVER, NOT IN A PHONE'S TERMINAL. "If I left termux for 2
+# minutes it will stop" — and it did, every time. A run that takes hours
+# cannot be tied to a session that ends when a screen locks.
+#
+# Install:
+#   sudo cp quant-platform/deploy/qp-edgar.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl start qp-edgar
+# Watch:   journalctl -u qp-edgar -f
+# Count:   ls ~/Tade-desk-server/data/oneil/*.json | wc -l
+
+[Unit]
+Description=qp EDGAR fundamentals first pass (C and A tables for the universe)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# simple, not oneshot: oneshot applies TimeoutStartSec to the whole run and
+# kills a long job partway through. The backfill learned that the hard way.
+Type=simple
+TimeoutStartSec=infinity
+User=ec2-user
+WorkingDirectory=/home/ec2-user/Tade-desk-server/quant-platform
+
+# The shell sources .env because systemd's EnvironmentFile parser rejects
+# export prefixes and several quoting styles a .env uses freely. No nested
+# quotes in the command: the unit names a file, the file is ordinary Python.
+# -u so the log is written as it happens; a buffered run looks like a hung one.
+ExecStart=/bin/bash -lc 'set -a; . ./.env; set +a; exec python3 -u deploy/run_edgar.py'
+
+# Every company is written the moment it is parsed and the walk is ordered
+# "nothing on disk first, then the stalest", so a restart resumes instead of
+# starting over.
+#
+# on-failure, not always: finishing the universe is a SUCCESS and must end the
+# job, or the unit would restart forever re-reading a complete cache.
+Restart=on-failure
+RestartSec=30
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

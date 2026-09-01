@@ -381,8 +381,13 @@ async function _warmLoop() {
  * itself as having run.
  *
  * So the test is not "is it present" but "does it hold a real answer".
+ *
+ * AND "NO FILINGS" IS A REAL ANSWER. A record that came off disk (cached) and
+ * says ok:false is the nightly walk reporting that it asked and EDGAR has
+ * nothing — an ETF, an ADR without a filer, a delisted shell. Re-queuing that
+ * spends a request to be told the same thing again.
  */
-const _isMiss = rec => !rec || rec.ok === false;
+const _isMiss = rec => !rec || (rec.ok === false && rec.cached !== true);
 
 function warmFundamentals(symbols) {
   const day = _etDay();

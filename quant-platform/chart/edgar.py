@@ -557,3 +557,130 @@ def write_cached(data: dict) -> str | None:
         return str(p)
     except Exception:                                     # noqa: BLE001
         return None
+
+
+# ---------------------------------------------------------------------------
+# The nightly walk
+# ---------------------------------------------------------------------------
+#
+# WHY A WALK AND NOT ON-DEMAND FETCHING.
+#
+# Reported from live use, and it is the whole point:
+#
+#     "what will I do with it after the market close — tomorrow new scan and
+#      new stock, I don't have any stocks that stay in the screener 2 days"
+#
+# Warming the cache with the names a scan just returned helps the SECOND time
+# that name is scanned. If the screener returns a different set every morning
+# — and it does, that is what a screener is — then the second time never
+# comes, and every card is a first sighting with empty C and A tables.
+#
+# So the cache cannot be filled from what was scanned. It has to be filled
+# from what COULD be scanned, ahead of time, which is the whole universe that
+# has price history. Then tomorrow's new name is already answered before the
+# screener has picked it.
+#
+# The costs this is shaped around:
+#   · one request per company, at EDGAR's published rate limit
+#   · a companyfacts payload is megabytes, so this is bandwidth-bound long
+#     before it is rate-limit-bound
+#   · only the PARSED tables are stored, a few KB each, so the disk cost is
+#     small even though the transfer is not
+
+# Refreshed sooner than a card will accept it. If the walk used the same seven
+# days the reader does, a record refreshed at 6.9 days would be "fresh" to the
+# walk tonight and expired for the cards tomorrow — a stock would lose its
+# tables on a day nothing was wrong. Two days of margin.
+REFRESH_DAYS = float(os.environ.get('QP_EDGAR_REFRESH_DAYS') or 5)
+
+# A ceiling on the night, not on the job. The first pass over a whole universe
+# is hours; the walk is ordered and resumable, so stopping partway is simply a
+# shorter night and the next one continues from where it left off.
+WALK_BUDGET_S = float(os.environ.get('QP_EDGAR_WALK_SECONDS') or 5400)
+
+
+def _cache_age_days(ticker: str) -> float | None:
+    """Age of what is on disk, or None if nothing is."""
+    p = CACHE / f'{str(ticker).upper()}.json'
+    try:
+        return (time.time() - p.stat().st_mtime) / 86400 if p.exists() else None
+    except Exception:                                     # noqa: BLE001
+        return None
+
+
+def _permanent(err: str) -> bool:
+    """Is this a company EDGAR will never have facts for, or a bad night?
+
+    THE DISTINCTION IS THE WHOLE REASON FAILURES ARE CACHED AT ALL. Around a
+    fifth of a price universe is ETFs, ADRs without a filer, and delisted
+    shells — EDGAR has no XBRL for any of them and never will. Retried every
+    night, they are a thousand pointless requests standing in front of the
+    companies that do have filings.
+
+    A timeout or a 503 is the opposite: nothing has been learned, and writing
+    "no facts" for it would blank a real company's tables for five days over
+    one bad minute.
+    """
+    e = str(err or '')
+    return 'not in EDGAR' in e or '404' in e
+
+
+def walk(symbols, refresh_days: float | None = None,
+         budget_s: float | None = None, limit: int | None = None,
+         log=print) -> dict:
+    """Fill the fundamentals cache for a whole universe, oldest first.
+
+    ORDERED, so it is resumable and so coverage only ever grows: names with
+    nothing on disk go first, then the stalest. An interrupted run has done
+    the most valuable part of its work, and the next run does not repeat it.
+    """
+    want = [str(s).upper() for s in (symbols or []) if s]
+    want = list(dict.fromkeys(want))
+    if not want:
+        return {'ok': False, 'error': 'no universe'}
+    age = float(REFRESH_DAYS if refresh_days is None else refresh_days)
+    budget = float(WALK_BUDGET_S if budget_s is None else budget_s)
+
+    ages = {t: _cache_age_days(t) for t in want}
+    todo = [t for t in want if ages[t] is None or ages[t] > age]
+    # -inf, NOT -1. The key is the negated age, so a 30-day-old record sorts
+    # at -30 and a never-fetched one at -1 landed BEHIND every stale record —
+    # the exact opposite of what is wanted, and invisible until a universe
+    # that had grown spent its whole night refreshing names it already had.
+    # Nothing on disk outranks any age.
+    todo.sort(key=lambda t: float('-inf') if ages[t] is None else -ages[t])
+    log(f'  {len(want)} in universe · {len(want) - len(todo)} already fresh '
+        f'· {len(todo)} to fetch')
+
+    started = time.time()
+    built = failed = dead = 0
+    for i, t in enumerate(todo):
+        if limit and built + failed + dead >= limit:
+            log(f'  stopping at the {limit}-company limit')
+            break
+        if budget and time.time() - started > budget:
+            log(f'  out of time after {i} of {len(todo)} — the rest are '
+                f'first in line tomorrow')
+            break
+        rec = build(t)
+        if rec.get('ok'):
+            write_cached(rec)
+            built += 1
+        elif _permanent(rec.get('error')):
+            # CACHED AS AN ANSWER, because it is one: we asked, and EDGAR has
+            # nothing to give. The card can say so instead of "not fetched
+            # yet", and tomorrow's walk spends its requests elsewhere.
+            write_cached(rec)
+            dead += 1
+        else:
+            failed += 1
+        if (built + failed + dead) % 100 == 0:
+            log(f'{built + failed + dead}/{len(todo)} · {built} built '
+                f'· {dead} no filings · {failed} failed')
+
+    return {
+        'ok': True, 'universe': len(want), 'todo': len(todo),
+        'built': built, 'no_filings': dead, 'failed': failed,
+        'seconds': round(time.time() - started),
+        'remaining': max(0, len(todo) - (built + failed + dead)),
+    }
