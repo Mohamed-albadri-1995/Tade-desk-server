@@ -426,7 +426,17 @@ async function runAllScanners() {
   if (!screeners.length) {
     console.warn(`[TV Scanner] No screeners are due to run right now` +
       (asleep ? ` (${asleep} outside their window).` : ' — none are defined for this tool.'));
-    return {};
+    // THE SAME SHAPE AS THE SUCCESSFUL RETURN, which this used to break by
+    // returning a bare {}. The caller destructures `{ candidates, labels }`,
+    // so both arrived undefined and the very next stage threw "Cannot convert
+    // undefined or null to object" on Object.keys(labels).
+    //
+    // The scan then FAILED rather than finishing with nothing, which is a
+    // different and much worse outcome: nothing downstream ran, so no row was
+    // scored and every card showed a blank score. And it happened on the
+    // ordinary path — every scan outside the screeners' run window, which is
+    // most of the day.
+    return { candidates: {}, labels: {} };
   }
   if (asleep) console.log(`[TV Scanner] ${asleep} screener(s) outside their run window, skipped.`);
 

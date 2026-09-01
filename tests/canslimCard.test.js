@@ -381,23 +381,36 @@ describe('there are three type levels and they do not look alike', () => {
    * card was one flat run of text with no shape.
    */
   const css = page.match(/\.fold-title \{[^}]*\}/)[0];
+  const head = page.match(/\.fold-head \{[^}]*\}/)[0];
   const sub = page.match(/\.fold \.fold \.fold-title \{[^}]*\}/)[0];
+  const subHead = page.match(/\.fold \.fold > \.fold-head \{[^}]*\}/)[0];
 
-  test('a SECTION heading is large, heavy and bright', () => {
-    expect(css).toMatch(/font-size: 12px/);
-    expect(css).toMatch(/font-weight: 800/);
-    expect(css).toMatch(/color: var\(--text\)/);
+  /*
+   * A HEADING WINS ON SHAPE, NOT BRIGHTNESS.
+   *
+   * The first attempt made headings large and bright and they still lost: a
+   * green BULLISH or a red -5.83% is fully saturated, and no grey text
+   * outranks a saturated colour however heavy it is. Those value colours mean
+   * something and must stay loud — so headings are not entered in that
+   * contest at all. Every one sits in a filled band; no value ever does.
+   */
+  test('a SECTION heading sits in a filled band', () => {
+    expect(head).toMatch(/background: var\(--bg3\)/);
+    expect(head).toMatch(/border-left: 3px solid/);
   });
 
-  test('...and is NOT the small uppercase grey a sub-heading uses', () => {
-    expect(css).not.toMatch(/text-transform: uppercase/);
-    expect(css).not.toMatch(/var\(--text3\)/);
+  test('...and is uppercase and letterspaced, which no value is', () => {
+    expect(css).toMatch(/text-transform: uppercase/);
+    expect(css).toMatch(/letter-spacing: \.09em/);
+    expect(css).toMatch(/color: #fff/);
   });
 
-  test('a NESTED fold reads one level down, not as an equal', () => {
+  test('a NESTED heading uses the same idea hollow, so it reads lower', () => {
+    // Filling is what says SECTION. A sub-heading that filled too would just
+    // be a second section.
+    expect(subHead).toMatch(/background: none/);
     expect(sub).toMatch(/font-size: 9px/);
-    expect(sub).toMatch(/text-transform: uppercase/);
-    expect(sub).toMatch(/var\(--text3\)/);
+    expect(sub).toMatch(/var\(--text2\)/);
   });
 
   test('an open section is marked by more than a rotated chevron', () => {

@@ -485,32 +485,47 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .mkt-fold[data-open="1"] .fold-chev { transform: rotate(180deg); }
 .mkt-fold[data-open="1"] .fold-one { display: none; }
 .fold:last-child { border-bottom: none; }
+/* A HEADING IS A BAND, NOT A BRIGHTER FONT.
+   The first attempt made section headings large and bright and they STILL
+   lost: a green BULLISH or a red -5.83% is fully saturated, and no grey text
+   outranks a saturated colour no matter how heavy it is. Brightness is a
+   contest headings cannot win, and they should not be entered into it — the
+   value colours mean something and must stay loud.
+   So headings win on a different channel. Every one sits in a filled band
+   with an accent edge; values never do. The eye separates them by SHAPE
+   before it reads a word, and the semantic colours are left alone. */
 .fold-head { display: flex; align-items: baseline; gap: 8px; width: 100%;
-  padding: 10px 14px 10px 12px; background: none; border: 0; cursor: pointer;
-  text-align: left; color: inherit; font: inherit;
-  border-left: 3px solid transparent; }
-.fold-head:hover { background: var(--bg3); }
-.fold[data-open="1"] > .fold-head { border-left-color: var(--accent);
-  background: var(--bg3); }
-/* LEVEL 1 — a section heading. Bright and heavy, because the eye finds the
-   card's structure by these and nothing else. */
-.fold-title { font-size: 12px; font-weight: 800; letter-spacing: .01em;
-  color: var(--text); flex: 0 0 auto; }
+  padding: 7px 14px 7px 11px; border: 0; cursor: pointer;
+  text-align: left; font: inherit;
+  background: var(--bg3); border-left: 3px solid #39405a; }
+.fold-head:hover { background: #262c3d; }
+.fold[data-open="1"] > .fold-head { border-left-color: var(--accent); }
+/* LEVEL 1 — a section heading. Uppercase and letterspaced, which no value on
+   the card is, so it reads as a label even in peripheral vision. */
+.fold-title { font-size: 10.5px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: #fff; flex: 0 0 auto; }
 .fold-one { font-size: 11px; color: var(--text2); flex: 1 1 auto;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fold-chev { font-size: 9px; color: var(--text3); flex: 0 0 auto;
   margin-left: auto; }
 .fold[data-open="1"] > .fold-head .fold-chev { transform: rotate(180deg); }
 .fold[data-open="1"] > .fold-head .fold-one { display: none; }
-.fold-body { padding: 2px 14px 12px; }
-/* A NESTED FOLD IS A SUB-HEADING, and has to read as one level down or the
-   card looks like a flat list of equals again. */
-.fold .fold { border: 0; margin-top: 8px;
-  border-top: 1px dashed var(--border); }
+/* The body is indented to the band's accent edge, so a section reads as one
+   block rather than a heading with loose text under it. */
+.fold-body { padding: 9px 14px 12px 14px; }
+/* A NESTED FOLD IS A SUB-HEADING: same band idea, but hollow rather than
+   filled, so it reads as one level down instead of a second section. */
+.fold .fold { border: 0; margin-top: 10px; }
 .fold .fold .fold-title { font-size: 9px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .08em; color: var(--text3); }
-.fold .fold > .fold-head { padding: 8px 0 8px 9px; border-left-width: 2px; }
-.fold .fold .fold-body { padding: 0 0 4px 9px; }
+  text-transform: uppercase; letter-spacing: .08em; color: var(--text2); }
+.fold .fold > .fold-head { padding: 6px 0 6px 9px; background: none;
+  border-left: 2px solid var(--border); border-top: 1px solid var(--border); }
+.fold .fold > .fold-head:hover { background: var(--bg3); }
+.fold .fold[data-open="1"] > .fold-head { border-left-color: var(--text3); }
+.fold .fold .fold-body { padding: 6px 0 4px 9px; }
+/* SUB-HEADINGS INSIDE A BODY — "Relative strength", "C — current quarterly
+   earnings". Grey, small, and never filled: filling is what says SECTION. */
+.section-title, .def-sec-title { background: none; }
 /* LEVEL 3 — a value outranks its label, which is the other half of the
    problem: they were the same colour, so a row read as one grey run. */
 .ctx-val, .price-val { color: var(--text); }

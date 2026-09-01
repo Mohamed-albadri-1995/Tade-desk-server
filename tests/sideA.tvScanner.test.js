@@ -280,3 +280,48 @@ describe('nested range windows have to actually differ', () => {
     expect(err).toHaveBeenCalledTimes(1);
   });
 });
+
+/*
+ * THE "NOTHING IS DUE TO RUN" PATH RETURNS THE SAME SHAPE AS THE OTHER ONE.
+ *
+ * Every screener on a tool can carry a run window — a pre-market screener
+ * should not keep matching at 11am — so outside those windows there is
+ * nothing to run. That is the ORDINARY case for most of the day, not an edge
+ * one. It used to return a bare {}, and the caller destructures
+ * `{ candidates, labels }`, so both arrived undefined and the next stage threw
+ * "Cannot convert undefined or null to object" on Object.keys(labels).
+ *
+ * The scan then FAILED rather than finishing with nothing — nothing
+ * downstream ran, so no row was scored and every card showed a blank score.
+ */
+describe('runAllScanners when nothing is due to run', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '../src/sideA/tvScanner.js'), 'utf8');
+  const fn = src.match(/async function runAllScanners\(\)[\s\S]*?\n\}/)[0];
+
+  test('it returns both keys, not a bare object', () => {
+    expect(fn).toContain('return { candidates: {}, labels: {} };');
+    expect(fn).not.toMatch(/\n    return \{\};/);
+  });
+
+  test('both return paths destructure identically', () => {
+    // The caller does `const { candidates, labels } = await runAllScanners()`.
+    // Any path that cannot satisfy that is a crash waiting for a quiet hour.
+    const returns = fn.match(/return \{[^}]*\}[^;]*;/g) || [];
+    expect(returns.length).toBeGreaterThan(1);
+    for (const r of returns) {
+      expect(r).toContain('candidates');
+      expect(r).toContain('labels');
+    }
+  });
+
+  test('a scan with nothing due is not reported as a failure', () => {
+    // "Scan failed" and "scan found nothing" need different answers, and the
+    // page now prints whichever the server actually says.
+    const scan = fs.readFileSync(
+      path.join(__dirname, '../src/routes/scan.js'), 'utf8');
+    expect(scan).toContain('rowsProcessed: result && result.rowsProcessed');
+  });
+});
