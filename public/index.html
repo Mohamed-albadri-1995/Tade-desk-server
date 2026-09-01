@@ -2945,7 +2945,23 @@ function renderCards() {
   }
   grid.innerHTML = rows.map(buildCard).join('');
   observeCharts();   // the nodes just changed, so the observer must be reattached
+
+  // THE MARKET BLOCK ARRIVES AFTER THE CARDS, AND THAT IS DELIBERATE. It needs
+  // daily bars per ticker from qp, which takes seconds on a cold cache. Making
+  // the cards wait for it would hold the whole page hostage to a block that is
+  // context, not the reason you opened it. So the cards paint, this fills in,
+  // and only then does anything re-render — and only if something new came
+  // back, so a re-quote does not redraw 150 cards for nothing.
+  const need = rows.map(r => r.ticker).filter(tk => !(tk in ONEIL_STOCKS.stocks));
+  if (need.length && !_oneilStocksBusy) {
+    _oneilStocksBusy = true;
+    loadOneilStocks(need).then(() => {
+      _oneilStocksBusy = false;
+      if (need.some(tk => tk in ONEIL_STOCKS.stocks)) renderCards();
+    });
+  }
 }
+let _oneilStocksBusy = false;
 
 // Relational signal tags — price vs each level, MA stack, range quarter.
 // Green = above, red = below, grey = neutral fact — see the colour language in
@@ -3564,6 +3580,7 @@ function buildCard(row) {
     <!-- MARKET CONTEXT -->
     <div class="card-section">
       <div class="section-title">Market Context</div>
+      ${oneilCardBlock(row.ticker)}
       <div class="ctx-row"><span class="ctx-label">Regime</span>${regimeHTML}</div>
       <div class="ctx-row"><span class="ctx-label">Long term</span><span class="ctx-val ${biasCls(ctx.longTerm)}">${ctx.longTerm||'—'}</span></div>
       <div class="ctx-row"><span class="ctx-label">Mid term</span><span class="ctx-val ${biasCls(ctx.midTerm)}">${ctx.midTerm||'—'}</span></div>
@@ -3831,6 +3848,26 @@ const DEFS = {
       + "backwards: a rally attempt is a correction, plus hope.",
     src: "O'Neil.",
   },
+  held_up: {
+    title: 'On the distribution days',
+    what: "What THIS stock did on the exact sessions the index was being sold. "
+      + "O'Neil's test of a leader: the names that hold up while the market is "
+      + "under distribution are the ones that lead when it turns.",
+    how: "For each live distribution day, take this stock's close-to-close move\n"
+      + "and subtract the index's move on the same session:\n\n"
+      + "  relative = stock %  -  index %\n\n"
+      + "  held      relative > 0 on that day\n"
+      + "  HOLDING UP  up on 60%+ of them AND average relative positive\n"
+      + "  GIVING WAY  up on 40% or fewer, OR average relative negative\n"
+      + "  IN LINE     between the two",
+    not: "Not a claim that the stock went UP. It is a comparison against the "
+      + "index on the same day: a stock down 0.2% while the index fell 1.1% "
+      + "held up. And it is not the market status — that line is the same on "
+      + "every card, this one is different on every card, which is the whole "
+      + "reason it is here.",
+    src: 'The distribution-day dates come from the market model above; the '
+      + "stock's daily bars from qp. Tap the ⤢ to see each session.",
+  },
   ftd_band: {
     title: 'Sessions since the follow-through',
     what: "How far into the current uptrend the market is. O'Neil buys EARLY "
@@ -3872,16 +3909,108 @@ function info(key) {
            role="button" tabindex="0" aria-label="what this means">i</span>`;
 }
 
+/* ─────────── M, ON EVERY CARD ──────────────────────────────────────────
+   The market state is ONE fact and stamping it on 150 cards is 150 identical
+   lines — a page header copied into the body. A field with the same value on
+   every row carries no information about any row.
+
+   So it splits in two. One compact shared line, and one reading that is
+   DIFFERENT on every card: what this stock did on the exact sessions the index
+   was distributed. That is O'Neil's "leaders hold up during market pullbacks",
+   made checkable, and it is computed from a market-level fact crossed with
+   this stock's own bars.
+
+   Fetched once for everything on screen and read from memory by every card —
+   rule X5, no network call in a card render. */
+let ONEIL_STOCKS = { stocks: {}, days: [], asOf: null };
+
+async function loadOneilStocks(tickers) {
+  const want = (tickers || []).filter(t => t && !(t in ONEIL_STOCKS.stocks));
+  if (!want.length) return;
+  try {
+    const r = await fetch(`/api/market/oneil/stocks?symbols=${want.join(',')}`);
+    const d = await r.json();
+    if (!d.ok) return;
+    ONEIL_STOCKS = {
+      stocks: { ...ONEIL_STOCKS.stocks, ...(d.stocks || {}) },
+      days: d.distributionDays || ONEIL_STOCKS.days,
+      asOf: d.asOf || ONEIL_STOCKS.asOf,
+    };
+  } catch { /* the cards render without the block */ }
+}
+
+function oneilCardBlock(ticker) {
+  const m = ONEIL_MODEL;
+  if (!m || !m.ok) return '';
+  const s = ONEIL_STOCKS.stocks[String(ticker).toUpperCase()];
+  const statusCls = m.status === 'confirmed_uptrend' ? 'bias-bull'
+    : m.status === 'uptrend_under_pressure' ? 'bias-neutral' : 'bias-bear';
+
+  // THE SHARED HALF — one line, identical everywhere, and that is fine because
+  // it is the header fact. It earns its place by being the thing the rest is
+  // measured against.
+  let html = `<div class="ctx-row"><span class="ctx-label">O'Neil (M)${info('oneil_model')}</span>
+    <span class="ctx-val ${statusCls}">${esc(m.status_label || '')}${
+      m.distribution_days && m.distribution_days.length
+        ? ` · ${m.distribution_days.length} DD live` : ''}</span></div>`;
+  if (m.sessions_since_ftd != null) {
+    html += `<div class="ctx-row"><span class="ctx-label">Since the FTD${info('ftd_band')}</span>
+      <span class="ctx-val">${m.sessions_since_ftd} sessions · ${esc(m.ftdBand || m.ftd_band || '')}</span></div>`;
+  }
+
+  // THE HALF THAT IS DIFFERENT ON EVERY CARD.
+  if (!s) return html;
+  if (!s.checked) {
+    // "0 of 0" reads as a failure. Not checked, no live days, and no bars are
+    // three different things and each says which it is.
+    return html + `<div class="ctx-row"><span class="ctx-label">On the DD days${info('held_up')}</span>
+      <span class="ctx-val" style="color:var(--text3)">${esc(s.note || 'not checked')}</span></div>`;
+  }
+  const vCls = s.verdict === 'HOLDING UP' ? 'bias-bull'
+    : s.verdict === 'GIVING WAY' ? 'bias-bear' : 'bias-neutral';
+  const rel = s.avg_rel != null ? `${s.avg_rel >= 0 ? '+' : ''}${s.avg_rel}%` : '—';
+  html += `<div class="ctx-row"><span class="ctx-label">On the DD days${info('held_up')}</span>
+    <span class="ctx-val">up on <b>${s.held} of ${s.checked}</b> · ${rel} vs the index
+      <span class="${vCls}" style="font-weight:700">${esc(s.verdict || '')}</span>
+      <span class="chart-expand" onclick="oneilDates('${esc(ticker)}')" title="the exact sessions">⤢</span>
+    </span></div>`;
+  return html;
+}
+
+// THE DATES, ON DEMAND. "Up on 4 of 5" that cannot be checked against a chart
+// is a number to be believed rather than read.
+function oneilDates(ticker) {
+  const s = ONEIL_STOCKS.stocks[String(ticker).toUpperCase()];
+  if (!s || !s.dates || !s.dates.length) return;
+  document.getElementById('def-title').textContent = `${ticker} on the distribution days`;
+  document.getElementById('def-body').innerHTML = `
+    <div class="def-sec"><div class="def-sec-title">Each session, and what happened</div>
+      <div class="oneil-dd-wrap"><table class="oneil-dd">
+        <thead><tr><th>Date</th><th>Index</th><th>Index</th><th>${esc(ticker)}</th><th>Relative</th><th></th></tr></thead>
+        <tbody>${s.dates.map(d => `<tr>
+          <td>${esc(d.date)}</td><td>${esc(d.index || '')}</td>
+          <td class="${(d.index_pct || 0) < 0 ? 'neg' : ''}">${d.index_pct}%</td>
+          <td class="${(d.stock_pct || 0) < 0 ? 'neg' : 'pos'}">${d.stock_pct}%</td>
+          <td class="${d.rel >= 0 ? 'pos' : 'neg'}">${d.rel >= 0 ? '+' : ''}${d.rel}%</td>
+          <td>${d.held ? '✓ held' : '✗'}</td></tr>`).join('')}</tbody>
+      </table></div></div>
+    <div class="def-sec def-src">Relative = this stock's close-to-close move minus the index's on
+      the same session. A stock rising while the index is being sold is being accumulated.</div>`;
+  document.getElementById('def-overlay').classList.add('open');
+}
+
 /* ─────────── O'NEIL'S MARKET MODEL, on the market tab ──────────────── */
+let ONEIL_MODEL = null;
 async function loadOneil() {
-  const el = document.getElementById('oneil-model');
-  if (!el) return;
   try {
     const r = await fetch('/api/market/oneil');
-    renderOneil(await r.json());
+    ONEIL_MODEL = await r.json();
+    renderOneil(ONEIL_MODEL);
   } catch (e) {
     // NEVER THE CAUSE OF A FAILURE. The rest of the tab is untouched by this.
-    el.innerHTML = `<div class="oneil-none">O'Neil market model unavailable — ${esc(e.message)}</div>`;
+    const el = document.getElementById('oneil-model');
+    if (el) el.innerHTML =
+      `<div class="oneil-none">O'Neil market model unavailable — ${esc(e.message)}</div>`;
   }
 }
 

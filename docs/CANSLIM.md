@@ -1156,8 +1156,8 @@ the CANSLIM panel (§11.3) · `NEWS` = the card's existing News section ·
 
 | Phase | Delivers | Depends on |
 |---|---|---|
-| **1** | M1–M10 — the whole market model, written to `oneil-market.json` | index bars only |
-| **2** | The market tab O'Neil block (M5–M12) **and its per-card reflection P1–P5, P7, P8** | phase 1 |
+| **1** ✅ | M1–M10 — the whole market model, written to `oneil-market.json` | index bars only |
+| **2** ✅ | The market tab O'Neil block (M5–M12) **and its per-card reflection P1–P5, P7, P8** | phase 1 |
 | **3** | Groups: R3–R4, R7–R9, L1–L3, L5(RS), L6, L9, L10, N10, N16, **P6** | `relstrength.py` |
 | **4** | Ratings that need bars: R1, R6, S4, L4, L7, L8 | phase 3 |
 | **5** | EDGAR: C1–C8, A1–A6, R2, R5, S1, L5(EPS) | EDGAR fetcher |

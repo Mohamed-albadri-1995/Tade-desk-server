@@ -65,4 +65,37 @@ router.get('/snapshot', async (req, res) => {
   res.json(snapshot);
 });
 
+/*
+ * GET /api/market/oneil/stocks?symbols=A,B,C
+ *
+ * The per-card half of the market model (spec section 14): what each of these
+ * stocks did on the exact sessions the index was distributed.
+ *
+ * WHY IT IS ONE CALL FOR MANY SYMBOLS. The card must not fetch — rule X5, no
+ * network call in a card render — so the page asks once for everything on
+ * screen and every card reads from that. A register day is 150 cards and each
+ * re-renders on every re-quote; a request per card per render would be
+ * thousands, for an answer that changes once a day.
+ */
+router.get('/oneil/stocks', async (req, res) => {
+  const symbols = String(req.query.symbols || '')
+    .replace(/\s+/g, ',').split(',').filter(Boolean);
+  if (!symbols.length) return res.json({ ok: false, error: 'no symbols' });
+  try {
+    const c = await oneil.loadStocks(symbols);
+    return res.json({
+      ok: true,
+      asOf: c.asOf,
+      // The dates travel with the verdicts so the card can show WHICH sessions
+      // it is talking about. "Up on 4 of 5" that cannot be checked against a
+      // chart is a number to be believed rather than read.
+      distributionDays: c.days,
+      stocks: c.stocks,
+      fetchedAt: c.at || null,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

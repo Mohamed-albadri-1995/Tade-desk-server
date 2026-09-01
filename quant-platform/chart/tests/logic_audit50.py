@@ -412,6 +412,33 @@ ok('a stock with no bars on those days says THAT instead',
    oneil.stock_vs_distribution(leader.iloc[:1], days))
 
 
+# MANY SYMBOLS, ONE PLACE. Every screener tool wants this for the tickers on
+# its own page; nine of them each fetching the same daily bars would be nine
+# copies of the same work against the same feed.
+many = oneil.stocks_vs_distribution([], days)
+ok('an empty symbol list is an empty answer, not a crash', many == {})
+none_days = oneil.stocks_vs_distribution(['AAPL', 'MSFT'], [])
+ok('with no live distribution days every symbol says so, without fetching',
+   set(none_days) == {'AAPL', 'MSFT'}
+   and all('nothing to hold up' in v['note'] for v in none_days.values()), none_days)
+# A SYMBOL THAT CANNOT BE FETCHED IS NOT DROPPED. "We could not check this one"
+# and "this one did not hold up" are opposite conclusions, and a missing key
+# would let the page draw the second from the first.
+unfetchable = oneil.stocks_vs_distribution(['NOTAREALTICKERXYZ'], days)
+ok('a symbol that cannot be fetched comes back with a NOTE, not missing',
+   'NOTAREALTICKERXYZ' in unfetchable
+   and unfetchable['NOTAREALTICKERXYZ']['verdict'] is None
+   and unfetchable['NOTAREALTICKERXYZ']['note'], unfetchable)
+
+SRV = (pathlib.Path(__file__).resolve().parents[1] / 'server.py').read_text()
+ok('qp serves it for a LIST of symbols in one request',
+   "@app.get('/api/oneil/stock')" in SRV and 'symbols' in SRV)
+ok('the market model endpoint has a TTL, so a stale read cannot answer forever',
+   'age_h < 12' in SRV)
+ok('...and it reports WHERE it published, not only in the log',
+   "'wrote': where" in SRV)
+
+
 print()
 print('== G. it can never be the cause of a failure ==')
 # The market model being stale must never be able to stop a scan on any of the

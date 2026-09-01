@@ -136,4 +136,76 @@ function ftdBand(sessions) {
   return 'late';
 }
 
-module.exports = { read, stockVsDistribution, EXPOSURE, ftdBand, FILE };
+/*
+ * The per-stock read, fetched from qp once and held for the day.
+ *
+ * WHY CACHED, AND WHY FOR A DAY. Rule X5 of the spec: NO NETWORK CALL IN A CARD
+ * RENDER. A register day is 150 cards and a card re-renders on every re-quote;
+ * a fetch per card per render would be thousands of requests for an answer
+ * that changes once a day.
+ *
+ * And it genuinely does change only once a day: the input is a list of
+ * completed daily sessions and each stock's closes on them. Nothing about it
+ * moves while the market is open — the newest distribution day cannot appear
+ * until today has closed.
+ *
+ * FAILURE IS AN EMPTY MAP, never an exception. Every caller renders the card
+ * exactly as it does today when this returns nothing.
+ */
+let _cache = { day: null, stocks: {}, asOf: null, days: [], at: 0 };
+
+function _etDay() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
+async function loadStocks(symbols) {
+  const day = _etDay();
+  if (_cache.day !== day) _cache = { day, stocks: {}, asOf: null, days: [], at: 0 };
+
+  // Only ask for what is missing. The register grows through the morning, so
+  // this is called repeatedly with a longer list each time; refetching the
+  // whole list every time would re-pay for every name already answered.
+  const want = [...new Set((symbols || []).map(s => String(s).toUpperCase()))]
+    .filter(s => s && !(s in _cache.stocks));
+  if (!want.length) return _cache;
+
+  const qp = process.env.QP_URL || 'http://127.0.0.1:8765';
+  // Chunked: a register day is 150 names, and one URL holding all of them is
+  // both a very long query string and one slow request instead of several.
+  for (let i = 0; i < want.length; i += 50) {
+    const chunk = want.slice(i, i + 50);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 30000);
+    try {
+      const r = await fetch(`${qp}/api/oneil/stock?symbols=${chunk.join(',')}`,
+        { signal: ctl.signal });
+      const d = await r.json();
+      if (d && d.ok) {
+        _cache.asOf = d.as_of || _cache.asOf;
+        _cache.days = d.distribution_days || _cache.days;
+        Object.assign(_cache.stocks, d.stocks || {});
+        _cache.at = Date.now();
+      }
+    } catch {
+      // qp down or slow. The cards render without the block, and the next
+      // call retries — nothing is cached as "checked and empty".
+    } finally {
+      // IN A FINALLY, because the throwing path is the common one when qp is
+      // down and a leaked 30-second timer per chunk holds the process awake.
+      // Found by the test runner refusing to exit.
+      clearTimeout(timer);
+    }
+  }
+  return _cache;
+}
+
+function stocksCache() {
+  return _cache.day === _etDay() ? _cache : { day: null, stocks: {}, days: [], asOf: null, at: 0 };
+}
+
+module.exports = {
+  read, stockVsDistribution, EXPOSURE, ftdBand, FILE,
+  loadStocks, stocksCache,
+};

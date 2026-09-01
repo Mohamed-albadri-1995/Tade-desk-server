@@ -393,6 +393,37 @@ def oneil_market(refresh: int = 0, days: int = 500, feed: str = 'yahoo'):
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/oneil/stock')
+def oneil_stock(symbols: str = '', feed: str = 'yahoo'):
+    """What each of these stocks did on the live distribution days.
+
+    THE REASON THE MARKET MODEL IS WORTH PUTTING ON A CARD. Stamping "uptrend
+    under pressure" on a register day is 150 identical lines, and a field with
+    the same value on every row says nothing about any row. This one is
+    different on every card and is computed from a market-level fact: O'Neil's
+    "leaders hold up during market pullbacks", made checkable.
+
+    Served from qp because qp holds the parquet bar cache — nine tools asking
+    for the same names would otherwise be nine fetches of the same bars.
+    """
+    from chart import oneil
+    try:
+        syms = [s for s in (symbols or '').replace(' ', ',').split(',') if s][:200]
+        if not syms:
+            return {'ok': False, 'error': 'no symbols'}
+        model = oneil.read_shared() or {}
+        days = model.get('distribution_days') or []
+        return {
+            'ok': True,
+            'as_of': model.get('as_of'),
+            'status': model.get('status'),
+            'distribution_days': days,
+            'stocks': oneil.stocks_vs_distribution(syms, days, feed=feed),
+        }
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)}
+
+
 @app.post('/api/cache/clear')
 def cache_clear(payload: dict = Body(default={})):
     """Delete the cached bars. Safe by construction.

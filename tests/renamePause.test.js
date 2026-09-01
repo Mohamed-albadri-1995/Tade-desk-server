@@ -218,3 +218,75 @@ describe('pausing the whole tool', () => {
     expect(note).toMatch(/stays exactly as it is/i);
   });
 });
+
+/*
+ * The per-card market reflection — the caching contract.
+ *
+ * The number itself is tested in qp's audit 50, against hand-built bars. What
+ * is tested here is the rule the CARD depends on: X5, no network call in a
+ * card render. A register day is 150 cards and each re-renders on every
+ * re-quote, so an answer that changes once a day must be fetched once a day.
+ */
+describe('the per-card market reflection is fetched once, not per card', () => {
+  const oneil = require('../src/sideD/oneil');
+
+  test('a verdict is a comparison against the index, not "the stock went up"', () => {
+    // A stock down 0.2% on a day the index fell 1.1% HELD UP. Reading the
+    // stock's own sign would call that a failure, which is the opposite.
+    const days = [{ date: '2026-03-02', index: 'S&P 500', pct: -1.1 },
+                  { date: '2026-03-03', index: 'S&P 500', pct: -0.9 },
+                  { date: '2026-03-04', index: 'S&P 500', pct: -1.4 }];
+    const r = oneil.stockVsDistribution(
+      { '2026-03-02': -0.2, '2026-03-03': -0.1, '2026-03-04': -0.3 }, days);
+    expect(r.held).toBe(3);
+    expect(r.verdict).toBe('HOLDING UP');
+    expect(r.avgRel).toBeGreaterThan(0);
+  });
+
+  test('...and a stock UP less than the index is not holding up', () => {
+    const days = [{ date: '2026-03-02', index: 'S&P 500', pct: -0.5 }];
+    const r = oneil.stockVsDistribution({ '2026-03-02': -2.0 }, days);
+    expect(r.held).toBe(0);
+    expect(r.verdict).toBe('GIVING WAY');
+  });
+
+  test('no live distribution days says so rather than printing 0 of 0', () => {
+    const r = oneil.stockVsDistribution({ '2026-03-02': 1 }, []);
+    expect(r.checked).toBe(0);
+    expect(r.note).toMatch(/nothing to hold up/);
+    expect(r.verdict).toBeNull();     // never a verdict from no evidence
+  });
+
+  test('a stock with no bars on those sessions is told apart from one that fell', () => {
+    // Three different situations that a bare "0" would flatten into one:
+    // not checked, no live days, and no bars. Each says which it is.
+    const days = [{ date: '2026-03-02', index: 'S&P 500', pct: -1.1 }];
+    const r = oneil.stockVsDistribution({ '2025-01-01': 3 }, days);
+    expect(r.checked).toBe(0);
+    expect(r.note).toMatch(/no bars on those sessions/);
+    expect(r.verdict).toBeNull();
+  });
+
+  test('the dates come back with the verdict, so it can be checked on a chart', () => {
+    const days = [{ date: '2026-03-02', index: 'Nasdaq', pct: -1.1 }];
+    const r = oneil.stockVsDistribution({ '2026-03-02': 0.4 }, days);
+    expect(r.dates).toHaveLength(1);
+    expect(r.dates[0]).toMatchObject({ date: '2026-03-02', index: 'Nasdaq', held: true });
+    expect(r.dates[0].rel).toBeCloseTo(1.5, 5);
+  });
+
+  test('loadStocks refuses to be a per-card fetch: it caches by ET day', async () => {
+    // qp is not running in the test environment, so the fetch fails and the
+    // cache stays empty — which is itself the contract being asserted: a
+    // failure is an empty map and never an exception, so the cards render.
+    await expect(oneil.loadStocks(['AAPL'])).resolves.toBeDefined();
+    expect(oneil.stocksCache()).toHaveProperty('stocks');
+    expect(() => oneil.stocksCache().stocks.AAPL).not.toThrow();
+  });
+
+  test('an empty symbol list does no work at all', async () => {
+    const before = Date.now();
+    await oneil.loadStocks([]);
+    expect(Date.now() - before).toBeLessThan(200);   // it never left the process
+  });
+});

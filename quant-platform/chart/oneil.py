@@ -598,6 +598,41 @@ def stock_vs_distribution(stock_daily: pd.DataFrame, days: list[dict]) -> dict:
     return out
 
 
+def stocks_vs_distribution(symbols, days, feed: str = 'yahoo',
+                           lookback: int = 120) -> dict:
+    """`stock_vs_distribution` for a list of symbols, with the fetching.
+
+    ONE PLACE, NOT NINE. Every screener tool wants this for the tickers on its
+    own page, and every one of them would otherwise be fetching daily bars for
+    the same names from the same feed on its own schedule. qp already holds the
+    parquet bar cache, so the second tool to ask for AAPL pays nothing.
+
+    A symbol that cannot be fetched comes back with a NOTE rather than being
+    dropped: "we could not check this one" and "this one did not hold up" are
+    opposite conclusions, and a missing key would let the page draw the second
+    from the first.
+    """
+    out = {}
+    if not days:
+        # Nothing to hold up through — say it once here rather than making
+        # every caller work it out from an empty list.
+        note = stock_vs_distribution(None, [])
+        return {str(s).upper(): dict(note) for s in symbols}
+    from chart import data_manager
+    for raw in symbols:
+        sym = str(raw).strip().upper()
+        if not sym or sym in out:
+            continue
+        try:
+            df = data_manager.load_bars(sym, '1d', lookback, feed)
+            out[sym] = stock_vs_distribution(df, days)
+        except Exception as e:                            # noqa: BLE001
+            out[sym] = {'checked': 0, 'held': 0, 'avg_rel': None,
+                        'verdict': None, 'dates': [],
+                        'note': f'could not fetch daily bars: {str(e)[:120]}'}
+    return out
+
+
 # ---------------------------------------------------------------------------
 # The only part that touches the network, and the shared file
 # ---------------------------------------------------------------------------
