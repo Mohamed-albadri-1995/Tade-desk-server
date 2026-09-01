@@ -48,7 +48,7 @@ def step(name, fn):
 
 
 def main():
-    from chart import relstrength, oneil, groups, sic
+    from chart import relstrength, oneil, groups, sic, f13
 
     # 1. PRICES. One session a day; the whole chain is built on this.
     step('rs universe top-up', lambda: relstrength.top_up())
@@ -79,7 +79,16 @@ def main():
                 f"{out.get('total_in_map')} in map")
     step('industry map (SIC)', _sic)
 
-    # 4. THE GROUPS. Last, because it reads everything above it.
+    # 4. INSTITUTIONAL SPONSORSHIP. Quarterly data, so most nights this
+    #    finds the same quarters already cached and does nothing — but it has
+    #    to be asked, or a new quarter would land and never be picked up.
+    def _f13():
+        out = f13.build(log=lambda m: print(f'       {m}', flush=True))
+        return (f"{out.get('tickers')} tickers over {out.get('quarters')}"
+                if out.get('ok') else f"not built: {out.get('error')}")
+    step('institutional sponsorship (I)', _f13)
+
+    # 5. THE GROUPS. Last, because it reads everything above it.
     def _groups():
         g = groups.build()
         return (f"{g.get('total_groups')} groups over "

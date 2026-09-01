@@ -320,7 +320,7 @@ describe('the card has sections, not one flat list', () => {
     expect(page).toContain('Not shown:');
     expect(page).toMatch(/no filings cached yet/);
     expect(page).toMatch(/group ranks still building/);
-    expect(page).toMatch(/13F, phase 6/);
+    expect(page).toMatch(/13F not built yet/);
   });
 });
 
@@ -336,12 +336,21 @@ describe('the card opens with the picture, then the numbers', () => {
    */
   const body = page.match(/fold\('chart'[\s\S]*?return fold\('canslim',/)[0];
 
-  test('chart is the first section', () => {
-    const order = ["fold('chart'", "fold('range'", "fold('news'"];
+  test('chart is the first section, then whether it is tradable at all', () => {
+    // Volume & Float second: float, cap and RVOL decide whether the stock can
+    // be traded, and that comes before any reason to be interested in it.
+    const order = ["fold('chart'", "fold('volume'", "fold('range'", "fold('news'"];
     const at = order.map(k => page.indexOf(k));
     expect(at[0]).toBeGreaterThan(-1);
-    expect(at[0]).toBeLessThan(at[1]);
-    expect(at[1]).toBeLessThan(at[2]);
+    for (let i = 1; i < at.length; i++) {
+      expect(at[i - 1]).toBeLessThan(at[i]);
+    }
+  });
+
+  test('no section is left outside the body, styled unlike the rest', () => {
+    // Volume & Float used to sit above the badges in its own block: the one
+    // part of the card with no heading band, no summary line, always open.
+    expect(page).not.toMatch(/<div class="card-section vf-top">/);
   });
 
   test('...and CANSLIM still follows the news', () => {
@@ -364,8 +373,8 @@ describe('the card opens with the picture, then the numbers', () => {
 });
 
 describe('folds: one line until asked for more', () => {
-  for (const k of ['range', 'news', 'canslim', 'chart', 'context', 'price',
-                   'emas', 'atr', 'pm']) {
+  for (const k of ['chart', 'volume', 'range', 'news', 'canslim', 'context',
+                   'price', 'emas', 'atr', 'pm']) {
     test(`${k} is a fold`, () => expect(page).toContain(`fold('${k}'`));
   }
 
@@ -566,5 +575,61 @@ describe('the market tab names and folds every block', () => {
     // you want open on a page of 25 cards.
     expect(page).toMatch(/localStorage\.setItem\('mktFold'/);
     expect(page).toContain('function restoreMktFolds');
+  });
+});
+
+/*
+ * I — INSTITUTIONAL SPONSORSHIP, THE LAST LETTER.
+ *
+ * O'Neil wants sponsorship PRESENT and INCREASING, and warns in the same
+ * breath that a stock every fund already owns is over-owned with nobody left
+ * to buy it. "More is better" is false at both ends, so the card reports a
+ * number and a direction and refuses to grade it.
+ */
+describe('the I row', () => {
+  const fn = page.match(/function f13CardBlock[\s\S]*?\n\}/)[0];
+
+  test('it shows the holder count AND which way it is moving', () => {
+    expect(fn).toContain('holders');
+    expect(fn).toContain('s.direction');
+    expect(fn).toContain('s.change');
+  });
+
+  test('it shows the quarters, so a direction can be checked not believed', () => {
+    expect(fn).toContain('s.quarters');
+  });
+
+  test('an unmatched stock says so rather than reporting ZERO holders', () => {
+    // Zero funds is a claim about the company. Unmatched is a fact about our
+    // CUSIP-to-ticker matching, and they are opposite readings.
+    expect(fn).toContain('not matched in 13F');
+    expect(fn).toContain('NOT "0 funds", which is a claim');
+  });
+
+  test('it carries its letter, like every other row', () => {
+    expect(fn).toContain('cl-letter">I<');
+  });
+
+  test('it sits between L and M, keeping the card in method order', () => {
+    const sec = page.match(/const rows = canslimCardBlock[\s\S]*?;/)[0];
+    expect(sec.indexOf('groupCardBlock'))
+      .toBeLessThan(sec.indexOf('f13CardBlock'));
+    expect(sec.indexOf('f13CardBlock'))
+      .toBeLessThan(sec.indexOf('oneilCardBlock'));
+  });
+
+  test('its definition card says what it is NOT, including over-owned', () => {
+    const d = DEFS.canslim_i;
+    expect(d).toBeTruthy();
+    expect(d.not).toMatch(/OVER-OWNED/);
+    expect(d.not).toMatch(/NOT A SCORE/);
+    expect(d.not).toMatch(/45 days late|quarterly/);
+    expect(d.src).toMatch(/licensed/);
+  });
+
+  test('one file for every ticker, not a fetch per card', () => {
+    // X5 again: 13F is quarterly and the whole answer is small.
+    expect(page).toMatch(/async function loadF13/);
+    expect(fn).not.toMatch(/fetch\(|await /);
   });
 });

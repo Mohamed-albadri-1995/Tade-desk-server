@@ -69,6 +69,7 @@ PARTS = [
     ('logic_audit54.py',    'C and A from EDGAR: year-over-year, Q4, the loss base'),
     ('logic_audit55.py',    'the base, on a WEEKLY chart, as O\'Neil taught it'),
     ('logic_audit56.py',    'L over the whole market, not over our own screeners'),
+    ('logic_audit57.py',    'I — institutional sponsorship, counted from 13F'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They

@@ -476,6 +476,26 @@ def oneil_fundamentals(symbols: str = '', refresh: int = 0,
         return {'ok': False, 'error': str(e)}
 
 
+@app.get('/api/oneil/13f')
+def oneil_13f(refresh: int = 0):
+    """I — how many institutions own each stock, and which way that is going.
+
+    Served from data/oneil-13f.json, which the nightly job writes. 13F is
+    QUARTERLY data: rebuilding it on request would spend a several-hundred-
+    megabyte download to produce the same answer it produced yesterday.
+    `refresh=1` forces it anyway.
+    """
+    from chart import f13
+    import json as _json
+    try:
+        if not refresh and f13.SHARED.exists():
+            return {'ok': True, 'cached': True,
+                    **_json.loads(f13.SHARED.read_text())}
+        return f13.build(log=lambda *_: None)
+    except Exception as e:                          # noqa: BLE001
+        return {'ok': False, 'error': str(e)[:300]}
+
+
 @app.get('/api/oneil/base')
 def oneil_base(symbols: str = '', feed: str = 'yahoo'):
     """The base — cup with handle, rounding bottom — on a WEEKLY chart.

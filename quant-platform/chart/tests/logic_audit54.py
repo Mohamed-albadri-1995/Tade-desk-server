@@ -350,14 +350,25 @@ ok('...and says low-is-good about stability rather than leaving it bare',
    'a.stability_note' in UI)
 ok('acceleration and the +25% count are on the page, not just in the model',
    'Accelerating:' in UI and 'Beat +${c.bar_pct}%' in UI)
-ok('the panel is in LETTER order, because the panel is the method',
-   UI.index("'C — current quarterly earnings'") < UI.index("'A — annual earnings'")
-   < UI.index("'S — supply'") < UI.index("'L — leader or laggard'")
-   < UI.index("'I — institutional sponsorship'") < UI.index("'M — market direction'"))
+# SCOPED TO THE TABLE BUILDER, not the whole page. The definition cards use
+# the same letter titles, and they sit earlier in the file — indexing the
+# whole document found those instead and the order check became a check on
+# where DEFS happens to be declared.
+import re as _re                                          # noqa: E402
+_TBL = _re.search(r'function canslimTablesHTML[\s\S]*?\n\}', UI).group(0)
+ok('the tables are in LETTER order, because the order is the method',
+   _TBL.index("'C — current quarterly earnings'") < _TBL.index("'A — annual earnings'")
+   < _TBL.index("'S — supply'") < _TBL.index("'L — leader or laggard'")
+   < _TBL.index("'I — institutional sponsorship'") < _TBL.index("'M — market direction'"))
 ok('every block carries its own as-of date, because they refresh on different '
    'clocks', 'own clock' in UI)
-ok('I is not invented while 13F is unbuilt — it says which phase it is',
-   'phase 6' in UI and 'Not estimated here' in UI)
+# I IS BUILT NOW (audit 57). What this used to check — that an unbuilt letter
+# says which phase it is waiting on rather than inventing a number — still
+# holds, but the letter it applies to has changed: I now reports real 13F
+# holder counts, and says "not matched" when the CUSIP could not be resolved
+# rather than claiming zero institutions own the stock.
+ok('I reports real holder counts, and never zero for an unmatched stock',
+   'not matched in 13F' in UI and 'which is a claim' in UI)
 
 # ── A GAPPY ANNUAL SERIES ───────────────────────────────────────────────
 # FTAI's live panel printed 2025, 2024, 2023, 2018, 2017 — the filer stopped

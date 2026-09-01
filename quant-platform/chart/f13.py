@@ -1,0 +1,358 @@
+"""I — institutional sponsorship, counted from SEC Form 13F.
+
+WHAT O'NEIL MEANS BY I, AND WHAT HE DOES NOT.
+
+    "A stock needs a few institutional sponsors with better-than-average
+     recent performance."
+
+Two halves, and the second is the one that carries the signal:
+
+  PRESENT   Some funds own it. A stock no institution owns has not been
+            found yet, and it is institutional buying that moves price —
+            an individual cannot lift a stock, a fund building a position
+            over weeks can.
+  INCREASING  The COUNT is rising quarter over quarter. That is the whole
+            point. A flat count means the sponsorship is already in and the
+            fuel is spent; a rising count is money still arriving.
+
+And the trap he is equally clear about: a stock EVERY fund already owns is
+over-owned, not well-sponsored. There is nobody left to buy it. So this
+reports the number and its direction and refuses to score it — "more is
+better" is false at both ends, and a single letter grade would hide that.
+
+WHY THE FILER COUNT AND NOT THE SHARE COUNT. Shares held is dominated by the
+three or four giant index funds, which own everything and tell you nothing
+about this stock. The NUMBER OF DISTINCT MANAGERS is the measure that moves
+when a new fund decides to own something, which is the event worth seeing.
+
+THE SOURCE, AND WHY THIS ONE. Every manager with $100M+ in 13(f) securities
+files a holdings list within 45 days of each quarter end. Counting holders per
+stock means reading ALL of them — about six thousand filings a quarter. Fetched
+one at a time that is six thousand requests per quarter and unworkable.
+
+The SEC publishes the same data as a quarterly structured data set: one ZIP
+holding every filing's INFOTABLE as a TSV. One download per quarter instead of
+six thousand requests, and it is the identical data.
+
+THE CUSIP PROBLEM, STATED PLAINLY. 13F identifies securities by CUSIP; our
+universe is tickers; and the CUSIP-to-ticker table is licensed and not free.
+So the issuer NAME on the filing is matched against the company names EDGAR
+already gave us during the SIC walk, normalised on both sides. A CUSIP that
+matches once is remembered, so later quarters keep working even when a filer
+writes the name differently.
+
+Nothing is guessed. A stock whose CUSIP never matched a name reports NO DATA
+rather than a number, and the build reports its own coverage so a thin match
+rate is visible rather than silently becoming "no institutions own this".
+
+PARSING IS SEPARATE FROM FETCHING. Everything below `parse_` and `count_` is
+pure and provable offline against a hand-built TSV; only `fetch_` touches the
+network.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import re
+import zipfile
+from pathlib import Path
+
+# One ZIP per calendar quarter. The SEC has moved this file more than once and
+# the name is not guessable from the quarter alone, so several known patterns
+# are tried and the one that answers is reported — a build that fails must say
+# WHICH url it tried, or the next person debugs a 404 with no idea what was
+# requested.
+URL_PATTERNS = (
+    'https://www.sec.gov/files/structureddata/data/form-13f-data-sets/{y}q{q}_form13f.zip',
+    'https://www.sec.gov/files/dera/data/form-13f-data-sets/{y}q{q}_form13f.zip',
+    'https://www.sec.gov/files/structureddata/data/form-13f-data-sets/{y}q{q}_form13f_data.zip',
+)
+
+SHARED = Path(os.environ.get('ONEIL_13F_FILE')
+              or (Path(__file__).resolve().parents[2] / 'data' / 'oneil-13f.json'))
+
+CACHE = Path(os.environ.get('QP_13F_CACHE')
+             or (Path.home() / '.qp-cache' / 'f13'))
+
+# How many quarters of history to keep on the card. Four is a year: enough to
+# see a direction rather than one quarter's noise, and short enough that a
+# position built two years ago does not read as news.
+QUARTERS = int(os.environ.get('QP_13F_QUARTERS') or 4)
+
+# Words that appear in a company name without identifying it. Stripped from
+# both sides before matching, because "APPLE INC" and "APPLE INC." and
+# "APPLE INC COM" are one company and three strings.
+_NOISE = re.compile(
+    r'\b(INC|INCORPORATED|CORP|CORPORATION|CO|COMPANY|LTD|LIMITED|PLC|LP|LLC|'
+    r'HLDGS?|HOLDINGS?|GROUP|GRP|THE|CLASS|CL|COM|COMMON|STOCK|SHS|SHARES|'
+    r'NEW|ORD|ADR|ADS|SA|NV|AG|TR|TRUST)\b')
+
+
+def normalize_name(s: str) -> str:
+    """A company name reduced to what identifies it.
+
+    Both sides of the match go through this. It is deliberately blunt: the
+    alternative is fuzzy matching, and a fuzzy match that is wrong attributes
+    one company's institutional ownership to another — a worse outcome than
+    reporting nothing, which is what a miss does here.
+    """
+    s = str(s or '').upper()
+    s = s.replace('&', ' AND ')
+    s = re.sub(r'[^A-Z0-9 ]+', ' ', s)
+    # THE CLASS LETTER GOES WITH THE WORD "CLASS", not after it. Stripping CL
+    # and CLASS on their own left the letter stranded — "ALPHABET INC CL A"
+    # normalised to "ALPHABET A" and stopped matching "Alphabet Inc.", which
+    # silently dropped every dual-class company from the count.
+    s = re.sub(r'\b(?:CL|CLASS|SER|SERIES)\s+[A-Z]\b', ' ', s)
+    s = _NOISE.sub(' ', s)
+    return ' '.join(s.split())
+
+
+def parse_infotable(text: str) -> dict:
+    """INFOTABLE.tsv → {cusip: {'name': str, 'accessions': set}}.
+
+    One row per holding. The same manager filing the same quarter appears once
+    per position, so holders are counted by DISTINCT ACCESSION NUMBER — a
+    manager reporting three share classes of one issuer is one holder, not
+    three, and counting rows instead would inflate exactly the widely-held
+    names that are already over-owned.
+    """
+    out: dict[str, dict] = {}
+    lines = (text or '').splitlines()
+    if not lines:
+        return out
+    head = [h.strip().upper() for h in lines[0].split('\t')]
+    try:
+        i_acc = head.index('ACCESSION_NUMBER')
+        i_cusip = head.index('CUSIP')
+    except ValueError:
+        return out
+    i_name = head.index('NAMEOFISSUER') if 'NAMEOFISSUER' in head else None
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        parts = line.split('\t')
+        if len(parts) <= max(i_acc, i_cusip):
+            continue
+        cusip = parts[i_cusip].strip().upper()
+        if not cusip:
+            continue
+        rec = out.setdefault(cusip, {'name': '', 'accessions': set()})
+        rec['accessions'].add(parts[i_acc].strip())
+        if i_name is not None and not rec['name'] and len(parts) > i_name:
+            rec['name'] = parts[i_name].strip()
+    return out
+
+
+def count_holders(parsed: dict) -> dict:
+    """{cusip: number of distinct managers holding it}."""
+    return {c: len(r['accessions']) for c, r in (parsed or {}).items()}
+
+
+def match_cusips(parsed: dict, name_to_tickers: dict) -> dict:
+    """{cusip: ticker}, by exact match on the normalised issuer name.
+
+    EXACT, after normalising — never nearest. A name that normalises to
+    something two companies share is dropped rather than assigned to either:
+    attributing Ford's sponsorship to Forward Industries is a worse answer
+    than no answer, and no answer is what the card is built to show.
+    """
+    out = {}
+    for cusip, rec in (parsed or {}).items():
+        key = normalize_name(rec.get('name'))
+        if not key:
+            continue
+        hit = name_to_tickers.get(key)
+        if not hit or len(hit) != 1:
+            continue                       # missing, or ambiguous → no claim
+        out[cusip] = hit[0]
+    return out
+
+
+def trend(counts: list) -> dict:
+    """Oldest-first fund counts → the reading O'Neil actually wants.
+
+    Direction, not a score. "More is better" is false at both ends: no
+    sponsorship means undiscovered, and universal sponsorship means there is
+    nobody left to buy. So this says which way it is moving and by how much,
+    and leaves the judgement where it belongs.
+    """
+    vals = [c for c in (counts or []) if c is not None]
+    if len(vals) < 2:
+        return {'direction': None, 'change': None, 'change_pct': None,
+                'note': 'needs two quarters to have a direction'}
+    first, last = vals[0], vals[-1]
+    change = last - first
+    pct = round(change / first * 100, 1) if first else None
+    return {
+        'direction': 'rising' if change > 0 else 'falling' if change < 0 else 'flat',
+        'change': change,
+        'change_pct': pct,
+        'quarters': len(vals),
+    }
+
+
+def recent_quarters(n: int = QUARTERS, today=None) -> list:
+    """The n most recently FILED quarters, newest last.
+
+    A 13F is due 45 days after the quarter ends, so the quarter that just
+    finished is not published yet and asking for it gets a 404. The current
+    quarter is skipped and so is the one before it until that window has
+    passed — a card showing an empty quarter reads as "the funds sold out",
+    which is the opposite of "it has not been filed".
+    """
+    import datetime as _dt
+    d = today or _dt.date.today()
+    q = (d.month - 1) // 3 + 1
+    y = d.year
+    # Step back to the last quarter whose 45-day filing window has closed.
+    # Measured from the END of the previous quarter, which is what the
+    # deadline is actually counted from — measuring from the start of the
+    # current one is a day out and puts the boundary on the wrong side.
+    prev_q_end = _dt.date(y, q * 3 - 2, 1) - _dt.timedelta(days=1)
+    back = 1 if (d - prev_q_end).days >= 45 else 2
+    for _ in range(back):
+        q -= 1
+        if q == 0:
+            q, y = 4, y - 1
+    out = []
+    for _ in range(n):
+        out.append((y, q))
+        q -= 1
+        if q == 0:
+            q, y = 4, y - 1
+    return list(reversed(out))
+
+
+def _name_index() -> dict:
+    """{normalised company name: [tickers]}, from the SIC walk's own cache.
+
+    Reuses what is already on disk rather than fetching anything: the SIC pass
+    stored every filer's name and tickers, which is exactly the table needed
+    to turn an issuer name into a symbol.
+    """
+    from chart import sic
+    idx: dict[str, list] = {}
+    if not sic.CACHE.exists():
+        return idx
+    for p in sic.CACHE.glob('*.json'):
+        try:
+            rec = json.loads(p.read_text())
+        except Exception:                                 # noqa: BLE001
+            continue
+        key = normalize_name(rec.get('name'))
+        tickers = rec.get('tickers') or []
+        if not key or not tickers:
+            continue
+        idx.setdefault(key, [])
+        for t in tickers:
+            if t not in idx[key]:
+                idx[key].append(t)
+    return idx
+
+
+def fetch_quarter(y: int, q: int, log=print) -> str | None:
+    """The INFOTABLE for one quarter, as text. Cached on disk once fetched."""
+    from chart import edgar as _edgar
+    CACHE.mkdir(parents=True, exist_ok=True)
+    hit = CACHE / f'{y}q{q}.tsv'
+    if hit.exists():
+        return hit.read_text()
+
+    import urllib.request
+    tried = []
+    for pat in URL_PATTERNS:
+        url = pat.format(y=y, q=q)
+        tried.append(url)
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': _edgar.UA})
+            with urllib.request.urlopen(req, timeout=180) as r:
+                blob = r.read()
+        except Exception as e:                            # noqa: BLE001
+            log(f'  {y}Q{q}: {url.rsplit("/", 1)[-1]} — {str(e)[:60]}')
+            continue
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(blob))
+        except Exception as e:                            # noqa: BLE001
+            log(f'  {y}Q{q}: not a zip — {str(e)[:60]}')
+            continue
+        names = [n for n in zf.namelist() if n.upper().endswith('INFOTABLE.TSV')]
+        if not names:
+            log(f'  {y}Q{q}: no INFOTABLE in {zf.namelist()[:4]}')
+            continue
+        text = zf.read(names[0]).decode('utf-8', 'replace')
+        hit.write_text(text)
+        log(f'  {y}Q{q}: {len(text) // 1_000_000}MB from {url.rsplit("/", 1)[-1]}')
+        return text
+    # NAMES THE URLS IT TRIED. A build that just says "failed" leaves the next
+    # person guessing what was requested.
+    log(f'  {y}Q{q}: no dataset found. Tried: {tried}')
+    return None
+
+
+def build(quarters: int = QUARTERS, log=print) -> dict:
+    """Count holders per ticker across recent quarters and publish."""
+    names = _name_index()
+    log(f'  {len(names)} company names known from the SIC cache')
+    if not names:
+        return {'ok': False, 'error': 'no SIC cache yet — run the SIC pass first'}
+
+    qs = recent_quarters(quarters)
+    per_q: dict[tuple, dict] = {}
+    cusip_ticker: dict[str, str] = {}
+    for (y, q) in qs:
+        text = fetch_quarter(y, q, log=log)
+        if text is None:
+            continue
+        parsed = parse_infotable(text)
+        # The CUSIP map only ever grows: a CUSIP matched in ANY quarter is
+        # used in all of them, so one quarter writing the name differently
+        # does not punch a hole in the history.
+        cusip_ticker.update(match_cusips(parsed, names))
+        per_q[(y, q)] = count_holders(parsed)
+        log(f'  {y}Q{q}: {len(parsed)} securities, '
+            f'{len(cusip_ticker)} mapped to tickers so far')
+
+    if not per_q:
+        return {'ok': False, 'error': 'no 13F quarters could be fetched',
+                'quarters_wanted': [f'{y}Q{q}' for y, q in qs]}
+
+    by_ticker: dict[str, dict] = {}
+    for (y, q) in qs:
+        counts = per_q.get((y, q))
+        if counts is None:
+            continue
+        label = f'{y}Q{q}'
+        for cusip, n in counts.items():
+            t = cusip_ticker.get(cusip)
+            if not t:
+                continue
+            row = by_ticker.setdefault(t, {'quarters': []})
+            row['quarters'].append({'q': label, 'funds': n})
+
+    for t, row in by_ticker.items():
+        row['quarters'].sort(key=lambda r: r['q'])
+        row['funds'] = row['quarters'][-1]['funds']
+        row.update(trend([r['funds'] for r in row['quarters']]))
+
+    import datetime as _dt
+    out = {
+        'ok': True,
+        'built_at': _dt.datetime.now(_dt.timezone.utc).isoformat(timespec='seconds'),
+        'quarters': [f'{y}Q{q}' for y, q in qs if (y, q) in per_q],
+        'tickers': len(by_ticker),
+        'securities_seen': len(cusip_ticker),
+        'coverage_note': (
+            '13F reports CUSIPs and the CUSIP-to-ticker table is licensed, so '
+            'issuers are matched by name against EDGAR. A name that is '
+            'ambiguous or unmatched reports NO DATA rather than a guess.'),
+        'stocks': by_ticker,
+    }
+    SHARED.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SHARED.with_suffix('.json.tmp')
+    tmp.write_text(json.dumps(out))
+    tmp.replace(SHARED)
+    out['wrote'] = str(SHARED)
+    return out

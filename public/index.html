@@ -631,7 +631,11 @@ body.sunlight .fold .fold > .fold-head { background: none; }
   color: var(--text3); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
 .rb-split { font-size:10px; color:var(--text3); font-style:italic; margin-top:8px;
   padding-top:7px; border-top:1px dashed #262b3b; line-height:1.5; }
-/* The top Volume & Float block butts against the header, so it needs its own
+/* WAS the top Volume & Float block's own styling, back when it sat outside
+   the card body above the badges. It is an ordinary fold now and the rule is
+   dead — kept only so a stale class name in a cached page cannot restyle
+   something else.
+   Original note: it butts against the header, so it needs its own
    separator rather than borrowing card-body's. */
 .vf-top { background: var(--bg2); border-bottom: 1px solid var(--border); }
 /* The fold. Chrome, not meaning — it is a control, so it takes no colour from
@@ -2007,14 +2011,6 @@ function toggleScoreBreakdown(ticker) {
 // a glance. State is not remembered between renders on purpose: the card
 // re-renders every refresh, and a card that reopened itself mid-scroll would
 // move the page under your thumb.
-function toggleCardMore(ticker, btn) {
-  const el = document.getElementById('more-' + ticker);
-  if (!el) return;
-  const open = el.hidden;
-  el.hidden = !open;
-  btn.setAttribute('aria-expanded', String(open));
-  btn.textContent = open ? '▴ Hide details' : '▾ Details';
-}
 
 let _modelInfoCache = null;
 let _selectedBase = 'B6';
@@ -3727,25 +3723,6 @@ function buildCard(row) {
     </div>
   </div>
 
-  <!-- VOLUME & FLOAT — first thing under the name.
-       Whether a stock is tradable at all is decided by float, cap and RVOL,
-       and that decision comes before anything the badges say. It was at the
-       bottom of the card, which put it after every reason to be interested and
-       before none of them. -->
-  <div class="card-section vf-top">
-    <div class="section-title">Volume &amp; Float</div>
-    <div class="price-grid">
-      <div class="price-row"><span class="price-label">RVOL</span><span class="price-val ${magRvol}" title="volume against a normal day — 1.5× notable, 5× extreme">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
-      <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val ${magCap}" title="smaller moves further — under $300M is notable, under $50M is extreme">${fmtMcap(s.mcap)}</span></div>
-      <div class="price-row"><span class="price-label">Float</span><span class="price-val ${magFloat}" title="shares actually available — under 20M is notable, under 10M is extreme">${fmtShares(s.floatShares)}</span></div>
-      <div class="price-row"><span class="price-label">Short %</span><span class="price-val ${magShort}" title="${
-        s.shortFloat != null
-          ? 'short interest as a share of float — 10% notable, 20% extreme'
-          : 'TradingView’s scanner does not serve short interest on any name — seven column names were probed against seven stocks including GME and every one came back empty. This is not missing data for this stock, it is a field the source does not provide.'
-        }">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : 'n/a'}</span></div>
-    </div>
-  </div>
-
   <div class="card-badges">
     ${firstSeenHTML}${alsoBadge}${canslimBadge}${badges}${hotBadge}${alignBadge}${catalystBadge}
   </div>
@@ -3766,6 +3743,25 @@ function buildCard(row) {
       </div>`,
       `<span class="chart-expand" style="float:none;padding:0 14px 4px;display:block"
              onclick="openChart('${row.ticker}')" title="open the full chart">⤢ full</span>`)}
+
+    <!-- VOLUME & FLOAT — a section like every other one, and folded like
+         every other one. It used to sit outside the body in its own block
+         above the badges, which made it the one part of the card that did not
+         behave like the rest: no heading band, no summary line, always open.
+         Second because whether a stock is TRADABLE AT ALL is decided by float,
+         cap and RVOL, and that comes before any reason to be interested. -->
+    ${fold('volume', 'Volume & Float',
+      `RVOL ${s.rvol != null ? s.rvol.toFixed(1) + '×' : '—'} · cap ${fmtMcap(s.mcap)} · float ${fmtShares(s.floatShares)}`,
+      `<div class="price-grid">
+            <div class="price-row"><span class="price-label">RVOL</span><span class="price-val ${magRvol}" title="volume against a normal day — 1.5× notable, 5× extreme">${s.rvol != null ? s.rvol.toFixed(1)+'×' : '—'}</span></div>
+            <div class="price-row"><span class="price-label">Market Cap</span><span class="price-val ${magCap}" title="smaller moves further — under $300M is notable, under $50M is extreme">${fmtMcap(s.mcap)}</span></div>
+            <div class="price-row"><span class="price-label">Float</span><span class="price-val ${magFloat}" title="shares actually available — under 20M is notable, under 10M is extreme">${fmtShares(s.floatShares)}</span></div>
+            <div class="price-row"><span class="price-label">Short %</span><span class="price-val ${magShort}" title="${
+              s.shortFloat != null
+                ? 'short interest as a share of float — 10% notable, 20% extreme'
+                : 'TradingView’s scanner does not serve short interest on any name — seven column names were probed against seven stocks including GME and every one came back empty. This is not missing data for this stock, it is a field the source does not provide.'
+              }">${s.shortFloat != null ? s.shortFloat.toFixed(1)+'%' : 'n/a'}</span></div>
+          </div>`)}
 
     <!-- RANGE — straight after the MA tags, because both answer "where is this
          thing sitting", one against its moving averages and one against its
@@ -3791,7 +3787,8 @@ function buildCard(row) {
          Everything is here now, the panel is gone. -->
     ${(() => {
       const rows = canslimCardBlock(row.ticker) + ratingsCardBlock(row.ticker)
-        + groupCardBlock(row.ticker) + oneilCardBlock(row.ticker);
+        + groupCardBlock(row.ticker) + f13CardBlock(row.ticker)
+        + oneilCardBlock(row.ticker);
       const strength = strengthCardBlock(row.ticker);
       if (!rows && !strength) return '';
       // WHICH LETTERS ARE NOT ON THE CARD, AND WHY. A checklist missing a
@@ -3800,7 +3797,7 @@ function buildCard(row) {
       const missing = [];
       if (!/cl-letter">C</.test(rows)) missing.push('C and A (no filings cached yet)');
       if (!/cl-letter">L</.test(rows)) missing.push('L (group ranks still building)');
-      missing.push('I (fund counts — 13F, phase 6)');
+      if (!/cl-letter">I</.test(rows)) missing.push('I (13F not built yet)');
       // THE LETTERS ARE THE SUMMARY; THE TABLES ARE THE WORKING UNDERNEATH.
       // Nested rather than a second top-level section, because they are the
       // same reading at two depths — the eight-quarter table IS C, spelled
@@ -3817,12 +3814,11 @@ function buildCard(row) {
     })()}
 
 
-    <!-- Everything above this line is the card. Everything below it is the
-         detail behind the card, folded away by default: it is worth having and
-         it is not worth scrolling past twenty times a morning. -->
-    <button class="card-more" onclick="toggleCardMore('${row.ticker}',this)"
-            aria-expanded="false">▾ Details</button>
-    <div class="card-more-body" id="more-${row.ticker}" hidden>
+    <!-- NO "DETAILS" BUTTON. There used to be one here, wrapping everything
+         below in a second layer — but every section under it is a fold that
+         is already closed, so the button hid things that were hidden and cost
+         a tap to reach a tap. One level of folding is the design; two is a
+         maze. -->
 
     <!-- THEMES -->
     ${fold('themes', 'Themes', 'tap to open', themesHTML)}
@@ -3873,7 +3869,6 @@ function buildCard(row) {
         <div class="price-row"><span class="price-label">PM / ADR</span><span class="price-val">${s.pmAdrRatio != null ? s.pmAdrRatio.toFixed(2)+'×' : '—'}</span></div>
       </div>`)}
 
-    </div><!-- /card-more-body -->
   </div>
 
   ${(() => {
@@ -4274,6 +4269,34 @@ const DEFS = {
       + "means the pattern is unfinished, not that it failed.",
     src: 'Weekly bars resampled from qp daily history, Friday-ended. The full '
       + 'reading — lip, low, waves, accumulation weeks — is under "Full tables".',
+  },
+  canslim_i: {
+    title: 'I — institutional sponsorship',
+    what: "The I in CAN SLIM: how many institutions own this stock, and — the "
+      + "half that carries the signal — whether that number is RISING. It is "
+      + "institutional buying that moves price; an individual cannot lift a "
+      + "stock, a fund building a position over weeks can.",
+    how: "Every manager with $100M+ in 13(f) securities files a holdings list\n"
+      + "within 45 days of each quarter end. This counts, per stock:\n\n"
+      + "  holders    how many DISTINCT managers reported owning it\n"
+      + "  → → →      that count over the last four filed quarters\n"
+      + "  direction  rising, flat or falling across them\n\n"
+      + "Distinct MANAGERS, not rows: one manager reporting three share\n"
+      + "classes is one holder. And the count of managers, not shares held —\n"
+      + "shares are dominated by the few giant index funds, which own\n"
+      + "everything and so say nothing about this stock in particular.",
+    not: "NOT A SCORE, and deliberately. 'More is better' is false at both "
+      + "ends: a stock no institution owns has not been found yet, and a stock "
+      + "every fund already owns is OVER-OWNED — there is nobody left to buy "
+      + "it. A single grade would hide exactly that. Not a percentage of "
+      + "shares outstanding either, and not current: 13F is quarterly and lands "
+      + "45 days late, so this describes the quarter that has been filed, not "
+      + "today.",
+    src: "SEC Form 13F, from the quarterly structured data set — every filing, "
+      + "one download. 13F reports CUSIPs and the CUSIP-to-ticker table is "
+      + "licensed, so issuers are matched to tickers by company name against "
+      + "EDGAR; a name that is ambiguous or unmatched says 'not matched' "
+      + "rather than reporting zero holders.",
   },
   held_up: {
     title: 'On the distribution days',
@@ -4893,6 +4916,34 @@ async function loadGroups() {
   } catch { /* the cards and the tab render without it */ }
 }
 
+/* I — HOW MANY FUNDS, AND WHICH WAY.
+ *
+ * Never a score. O'Neil wants sponsorship PRESENT and INCREASING, but a stock
+ * every fund already owns is over-owned and has nobody left to buy it — "more
+ * is better" is false at both ends, so the card shows the number and the
+ * direction and leaves the judgement where it belongs. */
+function f13CardBlock(ticker) {
+  const m = F13_MODEL;
+  if (!m || !m.ok) return '';
+  const s = (m.stocks || {})[String(ticker).toUpperCase()];
+  if (!s) {
+    // NOT "0 funds", which is a claim. Unmatched means we could not turn this
+    // issuer's CUSIP into a ticker, not that no institution owns it.
+    return `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">I</span> funds${info('canslim_i')}</span>
+      <span class="ctx-val" style="color:var(--text3)">not matched in 13F</span></div>`;
+  }
+  const dir = s.direction === 'rising' ? 'bias-bull'
+    : s.direction === 'falling' ? 'bias-bear' : '';
+  const chg = s.change == null ? ''
+    : ` <span class="${dir}">${s.change >= 0 ? '+' : ''}${s.change}</span>`;
+  const hist = (s.quarters || []).map(q => q.funds).join(' → ');
+  return `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">I</span> funds${info('canslim_i')}</span>
+    <span class="ctx-val"><b>${s.funds}</b> holders${chg}
+      <span class="${dir}">${esc(s.direction || '')}</span><br>
+      <span style="color:var(--text3)">${esc(hist)} · ${esc((m.quarters || []).join(' '))}</span>
+    </span></div>`;
+}
+
 function groupCardBlock(ticker) {
   const m = GROUPS_MODEL;
   if (!m || !m.ok) return '';
@@ -4994,6 +5045,17 @@ function renderGroupTable(m) {
 }
 
 /* ─────────── O'NEIL'S MARKET MODEL, on the market tab ──────────────── */
+/* I — institutional sponsorship. ONE file for every ticker: 13F is quarterly
+   and the whole answer is small, so this is read once a day like the market
+   model rather than fetched per card. */
+let F13_MODEL = null;
+async function loadF13() {
+  try {
+    const r = await fetch('/api/market/oneil/13f');
+    F13_MODEL = await r.json();
+  } catch { /* the I row simply does not appear */ }
+}
+
 let ONEIL_MODEL = null;
 async function loadOneil() {
   try {
@@ -6626,6 +6688,7 @@ initToolSwitcher();
 // Two cached JSON reads at boot, not one per card, so X5 still holds.
 loadOneil();
 loadGroups();
+loadF13();
 
 // Sunlight is ON unless it has been explicitly switched off. This tool is read
 // on a phone, outdoors, at the open — that is the normal case, not the

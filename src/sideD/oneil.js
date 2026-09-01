@@ -286,6 +286,31 @@ async function _qpBatch(pathname, symbols, into, size, timeoutMs, extra = '') {
 const loadFundamentals = syms => _qpBatch('/api/oneil/fundamentals', syms, _fundamentals, 10, 60000);
 
 /*
+ * I — institutional sponsorship. ONE file for every ticker, not a per-symbol
+ * fetch: 13F is quarterly and the whole answer is a few hundred KB, so the
+ * page reads it once a day the same way it reads the market model.
+ */
+let _f13 = { day: null, data: null };
+
+async function loadF13() {
+  const day = _etDay();
+  if (_f13.day === day && _f13.data) return _f13.data;
+  const qp = process.env.QP_URL || 'http://127.0.0.1:8765';
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const r = await fetch(`${qp}/api/oneil/13f`, { signal: ctl.signal });
+    const d = await r.json();
+    if (d && d.ok) _f13 = { day, data: d };
+  } catch {
+    // Absent is a normal answer: the card drops the I row and says why.
+  } finally {
+    clearTimeout(timer);
+  }
+  return _f13.data;
+}
+
+/*
  * THE CARDS' VERSION: read what EDGAR has already given us, never go and ask.
  *
  * The panel is one symbol and a deliberate tap, so it can afford to walk
@@ -364,5 +389,6 @@ module.exports = {
   read, stockVsDistribution, EXPOSURE, ftdBand, FILE,
   loadStocks, stocksCache, loadRatings, ratingsCache,
   loadFundamentals, loadFundamentalsCached, warmFundamentals, fundamentalsCache,
+  loadF13,
   loadBases, basesCache,
 };

@@ -131,6 +131,26 @@ router.get('/groups', async (req, res) => {
 });
 
 /*
+ * GET /api/market/oneil/13f — I, for every ticker at once.
+ */
+router.get('/oneil/13f', async (req, res) => {
+  try {
+    const d = await oneil.loadF13();
+    if (!d) {
+      return res.json({
+        ok: false,
+        reason: 'not built yet',
+        detail: 'qp counts 13F holders nightly. It needs the SIC pass first, '
+          + 'because issuers are matched to tickers by company name.',
+      });
+    }
+    res.json(d);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/*
  * POST /api/market/oneil/seed-industries
  *
  * Rebuild the industry map from the registers this tool has already frozen.
