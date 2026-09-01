@@ -91,8 +91,16 @@ def main():
     # 5. THE GROUPS. Last, because it reads everything above it.
     def _groups():
         g = groups.build()
+        # BUILD DOES NOT WRITE. groups.build() computes and returns; the qp
+        # endpoint is what publishes the file the nine tools read. Calling
+        # build() alone ranked 229 groups every night and threw them away, and
+        # the market tab kept saying "not built yet" while the job's own log
+        # said it had built them. Anything computed here must be persisted
+        # here — see the same pairing on the market model above.
+        wrote = groups.write_shared(g) if g.get('ok') else None
         return (f"{g.get('total_groups')} groups over "
                 f"{g.get('mapped_symbols')} symbols, as of {g.get('as_of')}"
+                f" → {wrote}"
                 if g.get('ok') else f"not built: {g.get('error')}")
     step('group ranks (L)', _groups)
 

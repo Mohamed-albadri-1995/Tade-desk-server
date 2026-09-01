@@ -148,6 +148,24 @@ ok('the groups are rebuilt LAST, because they read everything above them',
 ok('one link failing does not take the others down',
    'never take the others down' in DAILY and 'def step(' in DAILY)
 
+# EVERY STEP PERSISTS WHAT IT COMPUTES. groups.build() returns a ranking and
+# does NOT write it — the qp endpoint is what publishes the file the nine
+# tools read. The nightly job called build() alone, so it ranked 229 groups
+# every night and threw them away, while the market tab said "not built yet"
+# and the job's own log said it had built them.
+ok('the market model is WRITTEN, not just computed',
+   'oneil.write_shared(m)' in DAILY)
+ok('...and so are the group ranks',
+   'groups.write_shared(g)' in DAILY and 'BUILD DOES NOT WRITE' in DAILY)
+GRP = (pathlib.Path(__file__).resolve().parents[1] / 'groups.py').read_text()
+# Scoped to build()'S OWN BODY, not to everything after it — write_shared is
+# DEFINED further down the file, so slicing from `def build(` to the end found
+# the definition and called it a call.
+import re as _re2                                          # noqa: E402
+_BUILD = _re2.search(r'\ndef build\(.*?(?=\ndef )', GRP, _re2.S).group(0)
+ok('build() really does not publish on its own, which is why that is needed',
+   'def write_shared' in GRP and 'write_shared' not in _BUILD)
+
 TIMER = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
          / 'qp-daily.timer').read_text()
 ok('it runs AFTER the close, with margin for the daylight-saving drift',
