@@ -253,6 +253,23 @@ ok('the INDUSTRY is used, not the sector, when both are present',
 
 shutil.rmtree(_tmp, ignore_errors=True)
 
+# THE UNIVERSE HAS TO STAY CURRENT WITHOUT ANYBODY REMEMBERING TO. backfill()
+# is a one-off bootstrap of about an hour at Polygon's five requests a minute;
+# after it the universe goes stale by one session a day, and "somebody re-runs
+# it" is not a mechanism.
+RSRC = (HERE / 'relstrength.py').read_text()
+ok('there is a bounded top-up, separate from the one-off backfill',
+   'def top_up(' in RSRC)
+ok('...and the group build calls it', 'relstrength.top_up()' in SRC)
+ok('THE BOUND is the design: it can never become the hour-long call',
+   'max_days' in RSRC and "out['fetched'] >= max_days" in RSRC)
+ok('...so an empty box gets the honest "not enough history", not a hung page',
+   'rather than hanging a page' in RSRC)
+ok('it starts at YESTERDAY — a session that has not closed has nothing to fetch',
+   'has not closed' in RSRC)
+ok('a failed top-up is never the reason a page fails',
+   'Never the reason a page fails' in RSRC)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

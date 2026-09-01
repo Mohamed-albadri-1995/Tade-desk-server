@@ -267,6 +267,12 @@ def build(asof: str | None = None, prior_asof: str | None = None) -> dict:
                              'as they scan, so this fills in after the first scan'})
         return out
     try:
+        # KEEP THE UNIVERSE CURRENT WITHOUT ANYBODY REMEMBERING TO. backfill()
+        # is a one-off bootstrap of about an hour; after it the universe goes
+        # stale by a session a day, and this build already runs at most twice a
+        # day behind its own TTL. Bounded to a few requests so it can never
+        # become the hour-long one — see relstrength.top_up().
+        out['top_up'] = relstrength.top_up()
         rs = relstrength.rs_rating(asof)
         if rs is None or rs.empty:
             out.update({'ok': False, 'groups': [], 'stocks': {},

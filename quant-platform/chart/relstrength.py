@@ -196,6 +196,54 @@ def backfill(end: str | None = None, sessions: int = _YEAR + 10,
     return {'sessions': got, 'fetched': fetched, 'cached': len(cached_days())}
 
 
+def top_up(max_days: int = 3, sleep_s: float = 13.0) -> dict:
+    """Fetch the few recent sessions that are missing. BOUNDED, on purpose.
+
+    WHY THIS EXISTS. backfill() is a one-off bootstrap that takes the better
+    part of an hour — 252 sessions at five requests a minute. After it, the
+    universe goes stale by one session a day, and "somebody remembers to re-run
+    it" is not a mechanism.
+
+    So this tops up whatever is missing at the recent end, called from the
+    group build, which already runs at most twice a day behind its own TTL.
+
+    THE BOUND IS THE WHOLE DESIGN. `max_days` caps it at a handful of requests
+    so a call can never become the 57-minute one: on a box that has never been
+    backfilled this fetches three days and stops, leaving the honest "not
+    enough history" answer rather than hanging a page for an hour. Catching up
+    from empty is backfill()'s job and it says so.
+    """
+    out = {'fetched': 0, 'skipped': 0, 'cached': len(cached_days())}
+    try:
+        have = set(cached_days())
+        day = pd.Timestamp.utcnow().normalize()
+        # Yesterday, not today: the grouped-daily endpoint has nothing for a
+        # session that has not closed, and spending a request to learn that
+        # every time this runs is a request wasted.
+        day -= pd.Timedelta(days=1)
+        for _ in range(max_days * 3):            # room to walk over weekends
+            if out['fetched'] >= max_days:
+                break
+            d = day.strftime('%Y-%m-%d')
+            if day.weekday() < 5 and d not in have:
+                try:
+                    df = fetch_day(d)
+                    out['fetched'] += 1
+                    if not len(df):
+                        out['skipped'] += 1      # a holiday, and now cached as one
+                    time.sleep(sleep_s)
+                except Exception as e:           # noqa: BLE001
+                    # Never the reason a page fails: the caller falls back to
+                    # whatever history is already on disk.
+                    out['error'] = str(e)[:160]
+                    break
+            day -= pd.Timedelta(days=1)
+        out['cached'] = len(cached_days())
+    except Exception as e:                       # noqa: BLE001
+        out['error'] = str(e)[:160]
+    return out
+
+
 def _read_day(day: str) -> pd.DataFrame:
     p = _day_path(day)
     if not p.exists():
