@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
 import time
 from pathlib import Path
 
@@ -285,6 +286,82 @@ def judge_file(path, *, label: str, max_age_hours: float = 36.0,
 # The probes. Everything below here touches the network.
 # ---------------------------------------------------------------------------
 
+# Which environment variables each feed needs, so "no key" can be told from
+# "key rejected" — see diagnose_failure().
+FEED_KEYS = {
+    'polygon': ('POLYGON_API_KEY',),
+    'alpaca': ('APCA_API_KEY_ID', 'APCA_API_SECRET_KEY'),
+    'hybrid': ('POLYGON_API_KEY', 'APCA_API_KEY_ID', 'APCA_API_SECRET_KEY'),
+    'yahoo': (),
+    'hybrid_yahoo': ('POLYGON_API_KEY',),
+}
+
+ENV_FILE = '~/trade-desk.env'
+
+
+def diagnose_failure(feed: str, err: str) -> tuple:
+    """Turn a raw fetch error into (detail, fix). THREE STATES, NOT TWO.
+
+    A failed feed is one of three completely different problems and they need
+    completely different actions, but they all arrive as one exception:
+
+        no key set        nothing was ever configured
+        key REJECTED      a 401/403 — the key exists and the source said no.
+                          A regenerated key looks exactly like this, and it is
+                          the most likely cause when a feed that used to work
+                          stops
+        plan does not     Polygon's NOT_AUTHORIZED: the key is fine and the
+        cover it          subscription does not include the data. Documented in
+                          _feed_status() as a real live failure
+
+    And the raw error is usually an nginx HTML page, which is two hundred
+    characters of markup in a terminal table where a sentence belongs.
+    """
+    low = (err or '').lower()
+    missing = [k for k in FEED_KEYS.get(feed, ()) if not os.environ.get(k)]
+
+    # The bare "must be set" is our own loaders refusing before they send
+    # anything, so it is unambiguous and goes first.
+    if 'must be set' in low:
+        names = ', '.join(FEED_KEYS.get(feed, ())) or 'the key'
+        return (f'no key configured ({names})',
+                f'add {names} to {ENV_FILE}, then: sudo systemctl restart qp-chart')
+
+    # A SERVER RESPONSE OUTRANKS A MISSING ENVIRONMENT VARIABLE, and the order
+    # here was wrong the first time. If the source answered 401 or
+    # NOT_AUTHORIZED then a request WAS made with a key — so "no key
+    # configured" is the wrong story even when this process cannot see one,
+    # which happens whenever the check runs somewhere the service does not.
+    if 'not_authorized' in low or 'upgrade your plan' in low:
+        return ('the key works but the PLAN does not include this data',
+                'either upgrade, or leave this feed unused — yahoo covers it')
+
+    if '401' in low or 'unauthorized' in low or 'authorization required' in low:
+        names = ', '.join(FEED_KEYS.get(feed, ())) or 'the key'
+        return (f'the key is SET but was REJECTED (401) — regenerated?',
+                f'update {names} in {ENV_FILE}, then: '
+                f'sudo systemctl restart qp-chart')
+
+    if '403' in low or 'forbidden' in low:
+        return ('the key is set but was refused (403)',
+                f'check the key and its permissions in {ENV_FILE}')
+
+    if 'timed out' in low or 'timeout' in low:
+        return ('timed out', 'transient — re-run before changing anything')
+
+    # No recognised response, and this process cannot see the keys either.
+    if missing:
+        names = ', '.join(missing)
+        return (f'no key configured ({names})',
+                f'add {names} to {ENV_FILE}, then: sudo systemctl restart qp-chart')
+
+    # Anything else: keep it, but keep it SHORT. An HTML page is not a message.
+    clean = ' '.join((err or '').split())
+    if '<html' in clean.lower():
+        clean = clean.split('<html')[0].strip() or 'the source returned an HTML error page'
+    return (f'fetch failed: {clean[:140]}', None)
+
+
 def check_feed(feed: str, symbol: str = 'SPY', days: int = 40) -> dict:
     """Fetch and judge one loader."""
     from chart import data_manager
@@ -292,9 +369,12 @@ def check_feed(feed: str, symbol: str = 'SPY', days: int = 40) -> dict:
     try:
         df = data_manager.load_bars(symbol, '1d', days, feed)
     except Exception as e:                                # noqa: BLE001
-        return {'name': f'{feed}:{symbol}', 'ok': False, 'severity': 'down',
-                'ms': int((time.time() - t0) * 1000),
-                'detail': f'fetch failed: {str(e)[:160]}'}
+        detail, fix = diagnose_failure(feed, str(e))
+        out = {'name': f'{feed}:{symbol}', 'ok': False, 'severity': 'down',
+               'ms': int((time.time() - t0) * 1000), 'detail': detail}
+        if fix:
+            out['fix'] = fix
+        return out
     out = judge_bars(df, label=f'{feed}:{symbol}')
     out['ms'] = int((time.time() - t0) * 1000)
     return out

@@ -222,7 +222,7 @@ SRC = (pathlib.Path(__file__).resolve().parents[1] / 'datacheck.py').read_text()
 ok('run_all never raises — every probe is wrapped',
    'Never raises' in SRC)
 ok('a failed fetch is a DOWN check, not an exception',
-   "'detail': f'fetch failed" in SRC)
+   "'severity': 'down'" in SRC and 'diagnose_failure' in SRC)
 
 # The two indexes are not one more feed. The market model runs on exactly
 # these and nothing else, so their absence has a named consequence.
@@ -292,6 +292,59 @@ ok('failures carry a FIX, not just a diagnosis', 'FIXES' in SRC and "'fix'" in S
 ok('...and the runner prints it', "c.get('fix')" in LIVE)
 ok('the RS universe fix names the actual command',
    'relstrength.backfill' in SRC)
+
+# A FAILED FEED IS THREE DIFFERENT PROBLEMS WEARING ONE EXCEPTION, and they
+# need three different actions. Reported as one line of nginx HTML they are
+# indistinguishable, which is what the desk actually hit: an Alpaca key was
+# regenerated and the check said "401 Authorization Required <html><head>…".
+import os as _os                                               # noqa: E402
+_saved = {k: _os.environ.get(k) for k in
+          ('POLYGON_API_KEY', 'APCA_API_KEY_ID', 'APCA_API_SECRET_KEY')}
+try:
+    _os.environ.pop('POLYGON_API_KEY', None)
+    d, fix = dc.diagnose_failure('polygon', 'POLYGON_API_KEY must be set')
+    ok('no key at all is named as such, with the variable',
+       'no key configured' in d and 'POLYGON_API_KEY' in d, d)
+    ok('...and the fix names the env file and the restart',
+       'trade-desk.env' in fix and 'restart' in fix, fix)
+
+    _os.environ['APCA_API_KEY_ID'] = 'x'
+    _os.environ['APCA_API_SECRET_KEY'] = 'y'
+    d2, fix2 = dc.diagnose_failure(
+        'alpaca', 'Alpaca 401: <html><head><title>401 Authorization Required')
+    ok('a key that is SET and REJECTED is a different diagnosis from no key',
+       'REJECTED' in d2 and 'no key' not in d2, d2)
+    ok('...and it suggests the most likely cause: the key was regenerated',
+       'regenerated' in d2, d2)
+    ok('...and the HTML noise is gone', '<html' not in d2 and len(d2) < 90, d2)
+
+    # Polygon's documented live failure: the key is fine, the PLAN is not.
+    # A SERVER RESPONSE OUTRANKS A MISSING ENVIRONMENT VARIABLE. The key is
+    # deliberately absent from THIS process here, and the answer must still be
+    # about the plan: a 403 NOT_AUTHORIZED proves a request was made with a
+    # key, which is exactly the case when the check runs somewhere the service
+    # does not. Getting this order wrong told the desk to add a key it had.
+    d3, fix3 = dc.diagnose_failure(
+        'polygon', '403 {"status":"NOT_AUTHORIZED","message":"upgrade your plan"}')
+    ok('a plan that does not cover the data is its own diagnosis',
+       'PLAN does not include' in d3, d3)
+    ok('...and the fix says yahoo already covers it, rather than "buy more"',
+       'yahoo covers it' in fix3, fix3)
+
+    d4, _ = dc.diagnose_failure('yahoo', 'Connection timed out')
+    ok('a timeout says to re-run before changing anything', 'timed out' in d4, d4)
+
+    # Anything unrecognised still gets through, but SHORT. An HTML page is not
+    # a message, and 200 characters of markup in a terminal table is unreadable.
+    d5, _ = dc.diagnose_failure('yahoo', 'weird thing <html><body>' + 'x' * 500)
+    ok('an unknown HTML error is cut back to a sentence',
+       '<html' not in d5 and len(d5) < 160, d5)
+finally:
+    for _k, _v in _saved.items():
+        if _v is None:
+            _os.environ.pop(_k, None)
+        else:
+            _os.environ[_k] = _v
 
 print()
 print(f'        {PASS} passed, {FAIL} failed')
