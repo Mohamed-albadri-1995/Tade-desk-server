@@ -129,6 +129,22 @@ def normalize_name(s: str) -> str:
 # — value, share counts, put/call, discretion, voting authority — is weight we
 # carry through memory and disk for no reading.
 KEEP_COLS = ('ACCESSION_NUMBER', 'CUSIP', 'NAMEOFISSUER')
+# WHO FILED IT, AND WHAT PERIOD IT DESCRIBES. INFOTABLE knows neither: it
+# identifies a holding by the FILING it arrived in, so an amendment reads as a
+# second holder, and it says nothing at all about which quarter the holdings
+# are as of — that has been INFERRED from the SEC's filename, twice, wrongly
+# once. Both facts are in SUBMISSION.tsv, a few thousand rows.
+SUB_COLS = ('ACCESSION_NUMBER', 'CIK', 'SUBMISSIONTYPE', 'PERIODOFREPORT')
+
+
+def _sub_path(hit):
+    """The submissions file that belongs to this quarter's INFOTABLE cache.
+
+    A SIBLING, AND THE PAIR IS THE CACHE UNIT. Either one alone is a quarter
+    that cannot be counted properly, so `fetch_quarter` re-fetches unless both
+    are present and non-empty.
+    """
+    return hit.with_name(hit.stem + '.sub.tsv')
 
 
 def _parse_rows(lines) -> dict:
@@ -301,8 +317,24 @@ def count_by_ticker(lines, cusip_ticker: dict) -> dict:
     return count_quarter(lines, cusip_ticker)[0]
 
 
-def count_quarter(lines, cusip_ticker: dict):
+def count_quarter(lines, cusip_ticker: dict, acc_cik: dict | None = None):
     """({ticker: managers}, how many managers filed AT ALL this quarter).
+
+    `acc_cik` MAPS FILING → MANAGER, and without it this counts filings. A
+    manager that files 13F-HR and corrects it with 13F-HR/A has two accession
+    numbers and was one holder all along. Live, the "managers filing" count
+    that made this visible:
+
+        2025Q3  8570      2025Q4  9364      2026Q1  9716
+
+    Thirteen percent in three quarters, where the real population moves a few
+    percent a year. The excess is amendments, and the same inflation was
+    inside every per-ticker count.
+
+    Passing nothing still works and still answers — a quarter cached before
+    SUBMISSION.tsv was extracted has no map — but the caller must then say the
+    unit is the filing, because an approximation that is not labelled is
+    indistinguishable from the measurement.
 
     THE SECOND NUMBER IS WHAT MAKES THE FIRST READABLE.
 
@@ -338,10 +370,14 @@ def count_quarter(lines, cusip_ticker: dict):
     if not cols:
         return {}, 0
     i_acc, i_cusip, _ = cols
-    # EVERY ACCESSION IS INTERNED, mapped or not — that is what makes `ids`
-    # the filer count rather than "filers who hold something we recognise",
-    # which is a number that moves when the NAME MATCHING improves and would
-    # read as institutions arriving.
+    # EVERY FILER IS INTERNED, whether or not it holds anything we matched —
+    # that is what makes `ids` the population rather than "filers who hold
+    # something we recognise", a number that moves when the NAME MATCHING
+    # improves and would read as institutions arriving.
+    #
+    # The id is per MANAGER when the submissions map is present and per FILING
+    # when it is not, and interning both through the same dict keeps the two
+    # paths identical everywhere below this line.
     ids: dict = {}
     for line in it:
         parts = line.rstrip('\n').split('\t')
@@ -350,9 +386,10 @@ def count_quarter(lines, cusip_ticker: dict):
         a = parts[i_acc].strip()
         if not a:
             continue
-        aid = ids.get(a)
+        who = (acc_cik or {}).get(a, a)
+        aid = ids.get(who)
         if aid is None:
-            aid = ids[a] = len(ids)
+            aid = ids[who] = len(ids)
         t = cusip_ticker.get(parts[i_cusip].strip().upper())
         if t is None:
             continue
@@ -364,10 +401,106 @@ def count_quarter(lines, cusip_ticker: dict):
     return {t: len(s) for t, s in acc.items()}, len(ids)
 
 
+def parse_submissions(lines):
+    """({accession: cik}, {period: how many filings said so}).
+
+    WHO FILED, AND WHAT THEY SAY THE PERIOD IS. Both facts were being
+    substituted for by something close but not equal:
+
+      the manager   was the ACCESSION NUMBER, which is the FILING. A manager
+                    that amends files twice and was counted as two holders.
+      the quarter   was INFERRED from the SEC's filename. That inference has
+                    been made twice in this file and was wrong once, printing
+                    2026Q2 on a card in September for holdings as of 31 March.
+
+    PERIODOFREPORT is what the filer itself states, so the second stops being
+    an argument and becomes a measurement.
+
+    Every submission is counted, amendments included: an amendment is still a
+    filing about that period, and dropping them here would only move the
+    guessing somewhere else. The CIK map is what removes the double count.
+    """
+    cik: dict[str, str] = {}
+    periods: dict[str, int] = {}
+    it = iter(lines)
+    try:
+        header = next(it)
+    except StopIteration:
+        return cik, periods
+    head = [h.strip().upper() for h in header.rstrip('\n').split('\t')]
+    try:
+        i_acc = head.index('ACCESSION_NUMBER')
+    except ValueError:
+        return cik, periods
+    i_cik = head.index('CIK') if 'CIK' in head else None
+    i_per = head.index('PERIODOFREPORT') if 'PERIODOFREPORT' in head else None
+    if i_cik is None:
+        return cik, periods
+    want = max(i for i in (i_acc, i_cik, i_per) if i is not None)
+    for line in it:
+        parts = line.rstrip('\n').split('\t')
+        if len(parts) <= want:
+            continue
+        acc, c = parts[i_acc].strip(), parts[i_cik].strip()
+        if not acc or not c:
+            continue
+        cik[acc] = c
+        if i_per is not None:
+            per = parts[i_per].strip()
+            if per:
+                periods[per] = periods.get(per, 0) + 1
+    return cik, periods
+
+
+def period_quarter(periods: dict):
+    """The (year, quarter) the FILERS say this dataset is about, or None.
+
+    THE MODE, NOT THE MAXIMUM AND NOT THE FIRST. A filing window catches late
+    filers for the quarter before and a handful of early ones after, so a
+    dataset always holds a few stray periods. The one the overwhelming
+    majority state is the dataset's period; a scattering of others is normal
+    and must not move the label.
+
+    Refuses rather than guesses when no period is clearly dominant — below
+    two-thirds, something is wrong with the assumption and a label would be
+    the confident kind of wrong.
+    """
+    if not periods:
+        return None
+    total = sum(periods.values())
+    best, n = max(periods.items(), key=lambda kv: kv[1])
+    if not total or n / total < 0.66:
+        return None
+    # 03-31-2026, 2026-03-31, 31-MAR-2026 — the SEC has written it more than
+    # one way, so the year and month are picked out rather than parsed.
+    m = re.search(r'(20\d\d)\D(\d{1,2})\D', best) or None
+    if m:
+        yy, mm = int(m.group(1)), int(m.group(2))
+    else:
+        m = re.search(r'(\d{1,2})\D(\d{1,2})\D(20\d\d)', best)
+        if not m:
+            return None
+        yy, mm = int(m.group(3)), int(m.group(1))
+    if not 1 <= mm <= 12:
+        return None
+    return yy, (mm - 1) // 3 + 1
+
+
 def parse_issuers_file(path) -> dict:
     """`parse_issuers`, a line at a time from disk. Flat memory."""
     with open(path, 'r', encoding='utf-8', errors='replace') as fh:
         return parse_issuers(fh)
+
+
+def parse_submissions_file(path):
+    """`parse_submissions`, a line at a time from disk. Flat memory."""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            return parse_submissions(fh)
+    except OSError:
+        # A quarter cached before submissions were extracted. Not an error —
+        # the caller falls back to counting filings and says which it did.
+        return {}, {}
 
 
 def count_by_ticker_file(path, cusip_ticker: dict) -> dict:
@@ -375,10 +508,10 @@ def count_by_ticker_file(path, cusip_ticker: dict) -> dict:
     return count_quarter_file(path, cusip_ticker)[0]
 
 
-def count_quarter_file(path, cusip_ticker: dict):
+def count_quarter_file(path, cusip_ticker: dict, acc_cik: dict | None = None):
     """`count_quarter`, a line at a time from disk. Flat memory."""
     with open(path, 'r', encoding='utf-8', errors='replace') as fh:
-        return count_quarter(fh, cusip_ticker)
+        return count_quarter(fh, cusip_ticker, acc_cik)
 
 
 def match_cusips(parsed: dict, name_to_tickers: dict) -> dict:
@@ -408,6 +541,21 @@ def trend(counts: list) -> dict:
     sponsorship means undiscovered, and universal sponsorship means there is
     nobody left to buy. So this says which way it is moving and by how much,
     and leaves the judgement where it belongs.
+
+    `quarters_counted`, NOT `quarters`. The caller does
+
+        row['quarters'] = [{'q': ..., 'funds': ...}, ...]   the history
+        row.update(trend([...]))
+
+    and this returned a key called `quarters` holding a COUNT, so `update`
+    replaced the history with the integer 4. The four-quarter history has
+    therefore never once reached the published file, for any stock — and the
+    card, reading `(fs.quarters || []).map(...)`, was handed a number and
+    threw, taking the whole CANSLIM fold down on exactly the 24% of stocks
+    that HAVE 13F data. Reported at the time as "no can slim inside cards".
+
+    Two dictionaries merged by `update` share one namespace. A name that is
+    right in isolation can still be the wrong name there.
     """
     vals = [c for c in (counts or []) if c is not None]
     if len(vals) < 2:
@@ -420,7 +568,7 @@ def trend(counts: list) -> dict:
         'direction': 'rising' if change > 0 else 'falling' if change < 0 else 'flat',
         'change': change,
         'change_pct': pct,
-        'quarters': len(vals),
+        'quarters_counted': len(vals),
     }
 
 
@@ -642,7 +790,7 @@ def _index_summary() -> str:
     return out
 
 
-def _reduce_member(zf, member, dest) -> int:
+def _reduce_member(zf, member, dest, keep=None) -> int:
     """Stream one INFOTABLE out of the zip, keeping only the columns read.
 
     NOTHING WHOLE IS EVER IN MEMORY. `zf.read(member)` returned the entire
@@ -668,7 +816,8 @@ def _reduce_member(zf, member, dest) -> int:
         if not header:
             return 0
         head = [h.strip().upper() for h in header.rstrip('\n').split('\t')]
-        idx = [head.index(c) for c in KEEP_COLS if c in head]
+        idx = [head.index(c) for c in (keep or KEEP_COLS)
+               if c in head]
         if not idx:
             # No recognisable columns. Written as-is rather than reduced to
             # nothing, so the failure is a parse error later with the real
@@ -690,44 +839,78 @@ def _reduce_member(zf, member, dest) -> int:
 
 
 
-def _fetch_from_zip(zf, y, q, url, hit, log):
-    """Extract the quarter's INFOTABLE into `hit`. Returns the path, or None.
+def _extract(zf, suffix, dest_path, keep, log, label):
+    """Reduce the largest member ending `suffix` into `dest_path`. Rows, or 0.
 
-    Split out so the temp-zip cleanup can live in one `finally` around the
-    whole download rather than being repeated at every early exit.
+    THE BIGGEST MATCH, NOT THE FIRST. A zip can carry a stub or a directory
+    entry whose name also ends INFOTABLE.TSV, and taking `names[0]` picked one
+    of those — the real table is by a wide margin the largest member, so size
+    is the reliable way to find it.
+
+    WRITTEN THROUGH A TEMP AND RENAMED, so an interrupted extraction cannot
+    leave a short file that the next run would serve as complete.
     """
-    # THE BIGGEST MATCH, NOT THE FIRST. A zip can carry a stub or a directory
-    # entry whose name also ends INFOTABLE.TSV, and taking `names[0]` picked
-    # one of those — the holdings table is by a wide margin the largest
-    # member, so size is the reliable way to find it.
     members = [i for i in zf.infolist()
-               if i.filename.upper().endswith('INFOTABLE.TSV')]
+               if i.filename.upper().endswith(suffix)]
     if not members:
-        log(f'  {y}Q{q}: no INFOTABLE in {zf.namelist()[:4]}')
-        return None
+        return 0
     members.sort(key=lambda i: -i.file_size)
-
-    # WRITTEN THROUGH A TEMP AND RENAMED, so an interrupted extraction cannot
-    # leave a short file that the next run would serve as complete.
-    part = hit.with_suffix('.part')
+    part = dest_path.with_suffix('.part')
     try:
         with open(part, 'w', encoding='utf-8') as dest:
-            rows = _reduce_member(zf, members[0], dest)
+            rows = _reduce_member(zf, members[0], dest, keep)
         if not rows:
-            # NOT KEPT, so the next run fetches again instead of inheriting an
-            # empty answer. Named, so a genuinely empty dataset is visible
-            # rather than being read as "no institutions own anything".
-            log(f'  {y}Q{q}: {members[0].filename} is EMPTY in '
-                f'{url.rsplit("/", 1)[-1]} — not cached, will retry')
-            return None
-        part.replace(hit)
+            log(f'  {label}: {members[0].filename} is EMPTY — not cached')
+            return 0
+        part.replace(dest_path)
     finally:
         try:
             part.unlink()
         except Exception:                                 # noqa: BLE001
             pass
+    return rows
+
+
+def _fetch_from_zip(zf, y, q, url, hit, log):
+    """Extract the quarter's INFOTABLE and SUBMISSION. Returns `hit`, or None.
+
+    BOTH MEMBERS, AND THE SECOND IS THE ONE THAT MAKES THE FIRST MEAN
+    ANYTHING.
+
+    INFOTABLE identifies a holding by ACCESSION_NUMBER — the FILING it came
+    in. A manager that files 13F-HR and then corrects it with 13F-HR/A has two
+    accession numbers and was being counted as two holders. Live, the number
+    of "managers" filing:
+
+        2025Q3  8570      2025Q4  9364      2026Q1  9716
+
+    Thirteen percent in three quarters. The real population of 13F filers
+    moves a few percent a YEAR; the rest is amendments, and the same inflation
+    sat inside every per-ticker count.
+
+    SUBMISSION.tsv maps each accession to the CIK that filed it — the MANAGER
+    — and carries PERIODOFREPORT, the quarter the filer says the holdings are
+    as of. A few thousand rows against INFOTABLE's millions.
+
+    Split out so the temp-zip cleanup can live in one `finally` around the
+    whole download rather than being repeated at every early exit.
+    """
+    rows = _extract(zf, 'INFOTABLE.TSV', hit, KEEP_COLS, log, f'{y}Q{q}')
+    if not rows:
+        # NOT KEPT, so the next run fetches again instead of inheriting an
+        # empty answer. Named, so a genuinely empty dataset is visible rather
+        # than being read as "no institutions own anything".
+        log(f'  {y}Q{q}: no usable INFOTABLE in '
+            f'{url.rsplit("/", 1)[-1]} — will retry. '
+            f'members: {zf.namelist()[:4]}')
+        return None
+    subs = _extract(zf, 'SUBMISSION.TSV', _sub_path(hit), SUB_COLS, log,
+                    f'{y}Q{q} submissions')
     log(f'  {y}Q{q}: {rows:,} rows, {hit.stat().st_size // 1_000_000}MB kept '
-        f'from {url.rsplit("/", 1)[-1]} ({members[0].filename})')
+        f'from {url.rsplit("/", 1)[-1]}'
+        + (f' · {subs:,} submissions' if subs else
+           ' · NO SUBMISSION.tsv — holders will be counted by filing, not by '
+           'manager'))
     return hit
 
 
@@ -747,7 +930,12 @@ def fetch_quarter(y: int, q: int, log=print):
     # ever re-fetching, and reported "0 securities" as though the SEC had
     # published an empty dataset. The same trap this system keeps finding:
     # an absence stored where an answer belongs.
-    if hit.exists() and hit.stat().st_size > 0:
+    # AND THE PAIR IS THE UNIT. A quarter cached before SUBMISSION.tsv was
+    # extracted has an INFOTABLE and no way to tell a manager from a filing,
+    # so it re-fetches rather than being counted in the weaker unit forever.
+    sub = _sub_path(hit)
+    if (hit.exists() and hit.stat().st_size > 0
+            and sub.exists() and sub.stat().st_size > 0):
         return hit
 
     import shutil
@@ -881,15 +1069,42 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
 
     per_q: dict[tuple, dict] = {}
     filers: dict[tuple, int] = {}
+    unit = 'manager'
+    relabelled = []
     for (y, q), path in paths:
-        per_q[(y, q)], filers[(y, q)] = count_quarter_file(path, cusip_ticker)
+        acc_cik, periods = parse_submissions_file(_sub_path(path))
+        if not acc_cik:
+            # AN APPROXIMATION MUST NOT PASS FOR THE MEASUREMENT. Counting
+            # filings instead of managers still answers, and the published
+            # file says which was done.
+            unit = 'filing'
+        # THE QUARTER THE FILERS THEMSELVES STATE, over the one inferred from
+        # the SEC's filename. That inference has been made twice here and was
+        # wrong once — every card read 2026Q2 in September for holdings as of
+        # 31 March. A measurement beats an argument.
+        stated = period_quarter(periods)
+        if stated and stated != (y, q):
+            relabelled.append(f'{y}Q{q}→{stated[0]}Q{stated[1]}')
+            log(f'  {y}Q{q}: the filings say {stated[0]}Q{stated[1]} '
+                f'— trusting the data over the filename')
+            y, q = stated
+        per_q[(y, q)], filers[(y, q)] = count_quarter_file(
+            path, cusip_ticker, acc_cik)
         log(f'  {y}Q{q}: {len(per_q[(y, q)])} tickers held, '
-            f'{filers[(y, q)]} managers filed')
-
+            f'{filers[(y, q)]:,} '
+            + ('managers filed' if acc_cik else
+               'FILINGS (no submissions file — amendments inflate this)'))
     if not per_q:
+        # THE QUARTERS ASKED FOR, which is what this message is about — so it
+        # is read before `qs` is replaced below, not after.
         return {'ok': False, 'error': 'no 13F quarters could be fetched',
-                'quarters_wanted': [f'{y}Q{q}' for y, q in qs],
+                'quarters_wanted': [_qname(k) for k in qs],
                 'index': _index_summary()}
+
+    # RELABELLING CAN REORDER THE WINDOW, and `qs` drives every list below —
+    # the published `quarters`, the history each ticker gets, the fallback
+    # note. Taking it from what was actually counted keeps the four in step.
+    qs = sorted(per_q)
 
     by_ticker: dict[str, dict] = {}
     for (y, q) in qs:
@@ -908,7 +1123,11 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
     for t, row in by_ticker.items():
         row['quarters'].sort(key=lambda r: r['q'])
         row['funds'] = row['quarters'][-1]['funds']
+        # MERGED INTO THE SAME NAMESPACE, so `trend` may not return any key
+        # this row already uses — see its docstring. It returned `quarters`
+        # and silently replaced the history above with a count.
         row.update(trend([r['funds'] for r in row['quarters']]))
+        assert isinstance(row['quarters'], list), 'trend clobbered the history'
 
     import datetime as _dt
     out = {
@@ -938,6 +1157,15 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
         # for. The card prints `quarters` either way, but a run summary that
         # does not mention it lets a fallback pass for a normal night.
         'fell_back': fell_back,
+        # WHAT A "HOLDER" IS IN THIS FILE. `manager` is the real measure —
+        # distinct CIKs. `filing` means a quarter was cached before
+        # SUBMISSION.tsv was extracted, so an amendment counts twice and the
+        # numbers run high. The card must be able to say which.
+        'holder_unit': unit,
+        # AND WHERE THE FILENAME AND THE FILINGS DISAGREED about the period.
+        # Empty is the expected answer; anything here means the naming rule
+        # this module infers has drifted from what the SEC publishes.
+        'relabelled': relabelled,
         'tickers': len(by_ticker),
         'securities_seen': len(cusip_ticker),
         'coverage_note': (

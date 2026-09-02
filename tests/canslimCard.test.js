@@ -1030,6 +1030,46 @@ describe('I — holders against the filer population', () => {
     expect(out).toContain('13F not built yet');
   });
 
+  /* THE SHAPE THAT ACTUALLY ARRIVED, and the reason these tests existed and
+     still missed the bug. The build's `trend()` returned a key called
+     `quarters` holding a COUNT, and `row.update()` replaced the history with
+     it — so what reached this function was the NUMBER 4. `4 .map` is not a
+     function, the fold threw, and the whole CANSLIM block vanished on exactly
+     the stocks that HAVE 13F data.
+     Every fixture above is hand-written and used a list, so none of them
+     could see it. A fixture that does not come from the producer is a guess
+     about the producer; audit 57 now drives the real build() and asserts the
+     row shape, and this is the reader's half of the same guard. */
+  test('a COUNT where the history should be renders, and does not throw', () => {
+    const broken = JSON.parse(JSON.stringify(F13));
+    broken.stocks.AAA.quarters = 4;          // exactly what build() published
+    let out;
+    expect(() => { out = render(broken); }).not.toThrow();
+    expect(out).toContain('6,693');          // the count still leads the row
+    expect(out).not.toMatch(/undefined|NaN/);
+  });
+
+  test('...and so does a null, or a string, or a missing key', () => {
+    for (const bad of [null, undefined, '2026Q1', {}]) {
+      const b = JSON.parse(JSON.stringify(F13));
+      b.stocks.AAA.quarters = bad;
+      expect(() => render(b)).not.toThrow();
+    }
+  });
+
+  /* AN APPROXIMATION SAYS SO ON THE CARD. `filing` means the quarter was
+     cached before the submissions table was read, so a manager that amended
+     its 13F counts twice and every figure on the row runs high. */
+  test('a count by filing rather than by manager is labelled as one', () => {
+    const byFiling = { ...F13, holder_unit: 'filing' };
+    expect(render(byFiling)).toContain('counted by FILING');
+  });
+
+  test('...and the real measure carries no such warning', () => {
+    expect(render({ ...F13, holder_unit: 'manager' }))
+      .not.toContain('counted by FILING');
+  });
+
   test('the definition explains why the denominator is on the line', () => {
     expect(DEFS.canslim_i.how).toMatch(/how many managers filed a 13F AT ALL/);
     expect(DEFS.canslim_i.how).toMatch(/WHY THE DENOMINATOR IS THERE/);

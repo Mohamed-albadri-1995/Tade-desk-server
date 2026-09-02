@@ -4385,12 +4385,18 @@ const DEFS = {
       + "  of N       how many managers filed a 13F AT ALL that quarter\n"
       + "  → → →      both, over the last four filed quarters\n"
       + "  direction  rising, flat or falling across them\n\n"
-      + "Distinct MANAGERS, not rows: one manager reporting three share\n"
-      + "classes is one holder, and one holding both the stock and its\n"
-      + "converts — filed under different CUSIPs — is still one holder. And\n"
+      + "Distinct MANAGERS, not rows and not filings. One manager reporting\n"
+      + "three share classes is one holder; one holding both the stock and\n"
+      + "its converts, filed under different CUSIPs, is one holder; and one\n"
+      + "that files 13F-HR and then corrects it with 13F-HR/A is ONE holder,\n"
+      + "identified by the CIK on the filing rather than by the filing. And\n"
       + "the count of managers, not shares held: shares are dominated by the\n"
       + "few giant index funds, which own everything and so say nothing\n"
       + "about this stock in particular.\n\n"
+      + "COUNTED BY FILING means the quarter was cached before the\n"
+      + "submissions table was read, so amendments have not been collapsed\n"
+      + "and the figures run high. It is an approximation and says so; the\n"
+      + "next build replaces it.\n\n"
       + "WHY THE DENOMINATOR IS THERE. The number of managers filing grows\n"
       + "every quarter as more cross the $100M threshold, so a widely-held\n"
       + "stock gains holders without anyone deciding anything. Read on its\n"
@@ -5058,21 +5064,36 @@ function canslimTablesHTML(tk, stock) {
        quarter is the only thing that tells them apart, so it travels with
        the count rather than being left for someone to wonder about. */
     const fq = fm.filers_by_quarter || {};
-    const hist = fs.quarters || [];
-    /* `q.q`, NOT `q.quarter`. The build writes {q, funds}; this read
+    /* A LIST, OR NOTHING. `|| []` only catches null and undefined, and what
+       arrived here was the NUMBER 4 — the build's `trend()` returned a key
+       called `quarters` holding a count and `update()` replaced the history
+       with it. `4 .map` is not a function, so this line threw and took the
+       whole CANSLIM fold down, on exactly the stocks that HAVE 13F data.
+       Reported at the time as "no can slim inside cards". A reader that
+       trusts a shape it has not checked turns a data fault into a blank
+       page. */
+    const hist = Array.isArray(fs.quarters) ? fs.quarters : [];
+    /* `h.q`, NOT `h.quarter`. The build writes {q, funds}; this read
        {quarter, funds} and printed "undefined 6693 → undefined 6800" for as
        long as the row existed. A key that does not exist renders as the word
        undefined, which looks like data and is not. */
     const line = hist.map(h => {
       const of = fq[h.q];
-      return `${h.q} ${h.funds.toLocaleString()}`
+      return `${h.q} ${(h.funds || 0).toLocaleString()}`
         + (of ? ` of ${of.toLocaleString()}` : '');
     }).join('  →  ');
+    /* AN APPROXIMATION SAYS SO. `filing` means the quarter was cached before
+       SUBMISSION.tsv was extracted, so a manager that amended its 13F counts
+       twice and every figure on this row runs high. The reason is in the ⓘ;
+       what belongs on the card is the fact that it applies. */
+    const byFiling = fm.holder_unit && fm.holder_unit !== 'manager';
     iHtml = `<b>${fs.funds.toLocaleString()}</b> institutional holders
       ${fs.change == null ? '' : `· <span class="${dir}">${
         fs.change >= 0 ? '+' : ''}${fs.change.toLocaleString()}</span>`}
       <span class="${dir}">${esc(fs.direction || '')}</span>
-      <div style="margin-top:6px">${esc(line)}</div>`;
+      ${byFiling ? '<span class="m-none">counted by FILING, not by manager'
+        + '</span>' : ''}
+      ${line ? `<div style="margin-top:6px">${esc(line)}</div>` : ''}`;
   }
 
   const mHtml = `<b>${esc(m.status_label || '—')}</b>

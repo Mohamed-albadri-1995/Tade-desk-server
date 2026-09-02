@@ -226,11 +226,24 @@ def main(tickers):
             # MSFT +635, AMD +736, PLTR +483 over the same four quarters, in
             # five different industries, is what that looks like.
             _fq = (fm or {}).get('filers_by_quarter') or {}
-            _qlist = fs.get('quarters') or []
-            _newest = _qlist[-1].get('q') if _qlist else None
+            # A LIST OR NOTHING. `trend()` used to return a key called
+            # `quarters` holding a COUNT, and `row.update()` replaced the
+            # history with it — so this field was the integer 4 and
+            # `_qlist[-1].get('q')` raised TypeError right here. The shape is
+            # checked rather than assumed, because a reader that trusts a
+            # shape it did not verify turns a data fault into a crash.
+            _q = fs.get('quarters')
+            _qlist = _q if isinstance(_q, list) else []
+            _newest = (_qlist[-1] or {}).get('q') if _qlist else None
             _of = _fq.get(_newest)
+            _unit = (fm or {}).get('holder_unit') or 'manager'
             add('I', 'holders', fs.get('funds'), '',
-                f"of {_of:,} managers who filed {_newest}" if _of else '')
+                (f"of {_of:,} managers who filed {_newest}" if _of else '')
+                # AN APPROXIMATION SAYS SO. `filing` means a quarter was
+                # cached before SUBMISSION.tsv existed, so an amendment counts
+                # twice and every figure here runs high.
+                + (' · COUNTED BY FILING, not by manager — amendments inflate '
+                   'this' if _unit != 'manager' else ''))
             add('I', 'change', fs.get('change'))
             add('I', 'direction', fs.get('direction'))
             add('I', 'managers filing',

@@ -202,6 +202,165 @@ ok('the card prints the denominator beside each quarter',
 # times.
 ok('...and reads the quarter under the key the build actually writes',
    "'q': label" in SRC_F13 and 'fq[h.q]' in _CARD57)
+
+
+# ── THE SHAPE build() ACTUALLY PUBLISHES ───────────────────────────────
+#
+# Everything above tests a piece. This runs the WHOLE roll-up over a
+# hand-built cache and asserts the row that reaches the card, because the two
+# faults that got through were both in the joins between the pieces:
+#
+#   run_fields.py:  TypeError: 'int' object is not subscriptable
+#
+# `trend()` returned a key called `quarters` holding a COUNT, and
+# `row.update(trend(...))` replaced the {q, funds} history with the integer 4.
+# The four-quarter history had therefore NEVER reached the published file, for
+# any stock, and the card's `.map` over it threw — taking the CANSLIM fold
+# down on precisely the 24% of stocks that have 13F data.
+#
+# Every unit test passed throughout, including the ones written for this row,
+# because their fixtures were hand-made and the real shape was never checked
+# against them. A fixture that does not come from the producer is a guess.
+print()
+print('== the row build() writes, end to end ==')
+
+import json as _json                                       # noqa: E402
+import os as _os                                           # noqa: E402
+import tempfile as _tf                                     # noqa: E402
+
+_d = pathlib.Path(_tf.mkdtemp())
+
+
+def _quarter_files(y, q, rows, subs):
+    p = _d / f'{y}q{q}.tsv'
+    p.write_text('ACCESSION_NUMBER\tCUSIP\tNAMEOFISSUER\n'
+                 + '\n'.join(rows) + '\n')
+    f13._sub_path(p).write_text(
+        'ACCESSION_NUMBER\tCIK\tSUBMISSIONTYPE\tPERIODOFREPORT\n'
+        + '\n'.join(subs) + '\n')
+
+
+# 2025Q4: ciks 100 (who AMENDS, so two accessions) and 200.
+_quarter_files(2025, 4,
+               ['a1\t037833100\tAPPLE INC', 'a1x\t037833100\tAPPLE INC',
+                'a2\t037833100\tAPPLE INC'],
+               ['a1\t100\t13F-HR\t12-31-2025',
+                'a1x\t100\t13F-HR/A\t12-31-2025',
+                'a2\t200\t13F-HR\t12-31-2025'])
+# 2026Q1: ciks 100, 200 and a new 300.
+_quarter_files(2026, 1,
+               ['b1\t037833100\tAPPLE INC', 'b2\t037833100\tAPPLE INC',
+                'b3\t037833100\tAPPLE INC'],
+               ['b1\t100\t13F-HR\t03-31-2026',
+                'b2\t200\t13F-HR\t03-31-2026',
+                'b3\t300\t13F-HR\t03-31-2026'])
+
+_save = (f13.CACHE, f13.SHARED, f13._name_index, f13.discover_urls,
+         f13.recent_quarters)
+try:
+    f13.CACHE = _d
+    f13.SHARED = _d / 'out.json'
+    f13._name_index = lambda: {'APPLE': ['AAPL']}
+    f13.discover_urls = lambda log=print: {}
+    f13.recent_quarters = lambda n=4, today=None: [(2025, 4), (2026, 1)]
+    _out = f13.build(quarters=2, log=lambda m: None)
+finally:
+    (f13.CACHE, f13.SHARED, f13._name_index, f13.discover_urls,
+     f13.recent_quarters) = _save
+
+_row = (_out.get('stocks') or {}).get('AAPL') or {}
+ok('the build succeeds over a cache it can read', _out.get('ok'), _out)
+ok('THE HISTORY IS A LIST, not a count — this is the whole bug',
+   isinstance(_row.get('quarters'), list), _row.get('quarters'))
+ok('...with one entry per quarter, under the keys the card reads',
+   _row.get('quarters') == [{'q': '2025Q4', 'funds': 2},
+                            {'q': '2026Q1', 'funds': 3}], _row.get('quarters'))
+ok('...and trend\'s own count lives under a name that cannot collide',
+   _row.get('quarters_counted') == 2, _row)
+ok('an AMENDMENT is not a second holder — three filings, two managers',
+   _row.get('funds') == 3 and _row['quarters'][0]['funds'] == 2, _row)
+ok('the direction reads across the history it kept',
+   _row.get('direction') == 'rising' and _row.get('change') == 1, _row)
+ok('the population is counted per quarter, by manager',
+   _out.get('filers_by_quarter') == {'2025Q4': 2, '2026Q1': 3},
+   _out.get('filers_by_quarter'))
+ok('and the file says which unit a holder is',
+   _out.get('holder_unit') == 'manager', _out.get('holder_unit'))
+ok('the published quarters match the history',
+   _out.get('quarters') == ['2025Q4', '2026Q1'], _out.get('quarters'))
+ok('nothing was relabelled, the filenames agreeing with the filings',
+   _out.get('relabelled') == [], _out.get('relabelled'))
+ok('what is written to disk is what was returned',
+   _json.loads((_d / 'out.json').read_text())['stocks']['AAPL'] == _row)
+
+# THE FILENAME IS NO LONGER THE AUTHORITY. It was inferred twice here and
+# wrong once — every card read 2026Q2 in September for holdings as of 31
+# March. PERIODOFREPORT is what the filers themselves state.
+_d2 = pathlib.Path(_tf.mkdtemp())
+_hit = _d2 / '2026q3.tsv'                       # deliberately the WRONG name
+_hit.write_text('ACCESSION_NUMBER\tCUSIP\tNAMEOFISSUER\n'
+                'c1\t037833100\tAPPLE INC\n'
+                'c2\t037833100\tAPPLE INC\n')
+f13._sub_path(_hit).write_text(
+    'ACCESSION_NUMBER\tCIK\tSUBMISSIONTYPE\tPERIODOFREPORT\n'
+    'c1\t100\t13F-HR\t03-31-2026\nc2\t200\t13F-HR\t03-31-2026\n')
+_save2 = (f13.CACHE, f13.SHARED, f13._name_index, f13.discover_urls,
+          f13.recent_quarters)
+try:
+    f13.CACHE = _d2
+    f13.SHARED = _d2 / 'out.json'
+    f13._name_index = lambda: {'APPLE': ['AAPL']}
+    f13.discover_urls = lambda log=print: {}
+    f13.recent_quarters = lambda n=1, today=None: [(2026, 3)]
+    _o2 = f13.build(quarters=1, log=lambda m: None)
+finally:
+    (f13.CACHE, f13.SHARED, f13._name_index, f13.discover_urls,
+     f13.recent_quarters) = _save2
+
+ok('a filename that disagrees with the filings loses',
+   _o2.get('quarters') == ['2026Q1'], _o2.get('quarters'))
+ok('...and the disagreement is published, not swallowed',
+   _o2.get('relabelled') == ['2026Q3→2026Q1'], _o2.get('relabelled'))
+ok('the ticker history carries the corrected label',
+   _o2['stocks']['AAPL']['quarters'] == [{'q': '2026Q1', 'funds': 2}],
+   _o2['stocks']['AAPL'])
+
+# AND WITHOUT SUBMISSIONS IT STILL ANSWERS, in the weaker unit, saying so.
+#
+# NOT A MISSING SIBLING — that re-fetches, because the pair is the cache unit.
+# This is the case the fallback is actually for: a dataset whose SUBMISSION
+# table carries no CIK column, so there is no way to tell a manager from a
+# filing and the weaker unit is the only answer available.
+_d3 = pathlib.Path(_tf.mkdtemp())
+_h3 = _d3 / '2026q1.tsv'
+_h3.write_text('ACCESSION_NUMBER\tCUSIP\tNAMEOFISSUER\n'
+               'c1\t037833100\tAPPLE INC\n'
+               'c1x\t037833100\tAPPLE INC\n')
+f13._sub_path(_h3).write_text('ACCESSION_NUMBER\tSUBMISSIONTYPE\n'
+                              'c1\t13F-HR\nc1x\t13F-HR/A\n')
+_save3 = (f13.CACHE, f13.SHARED, f13._name_index, f13.discover_urls,
+          f13.recent_quarters)
+try:
+    f13.CACHE = _d3
+    f13.SHARED = _d3 / 'out.json'
+    f13._name_index = lambda: {'APPLE': ['AAPL']}
+    f13.discover_urls = lambda log=print: {}
+    f13.recent_quarters = lambda n=1, today=None: [(2026, 1)]
+    _o3 = f13.build(quarters=1, log=lambda m: None)
+finally:
+    (f13.CACHE, f13.SHARED, f13._name_index, f13.discover_urls,
+     f13.recent_quarters) = _save3
+
+ok('a dataset with no CIK column still produces a reading — two filings, '
+   'and no way to know they are one manager',
+   _o3.get('ok') and _o3['stocks']['AAPL']['funds'] == 2, _o3.get('stocks'))
+ok('...and the file says the unit is the FILING, so the card can warn — an '
+   'approximation that is not labelled is indistinguishable from the '
+   'measurement', _o3.get('holder_unit') == 'filing', _o3.get('holder_unit'))
+ok('the card checks the shape before mapping over it, since a number reached '
+   'it once', 'Array.isArray(fs.quarters)' in _CARD57)
+ok('...and names the unit when it is not the manager',
+   'holder_unit' in _CARD57 and 'counted by FILING' in _CARD57)
 ok('the issuer name is carried through for matching',
    p['037833100']['name'] == 'APPLE INC', p['037833100'])
 
@@ -530,7 +689,7 @@ SRC3 = (pathlib.Path(__file__).resolve().parents[1] / 'f13.py').read_text()
 ok('a zero-byte cache file is not served as the answer',
    'hit.stat().st_size > 0' in SRC3)
 ok('...and an empty extract is never written in the first place',
-   'not cached, will retry' in SRC3)
+   'is EMPTY — not cached' in SRC3 and 'will retry' in SRC3)
 ok('the live listing that showed it is recorded', '2025q3.tsv' in SRC3
    or 'ZERO-BYTE' in SRC3)
 
