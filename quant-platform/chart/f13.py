@@ -619,15 +619,49 @@ def trend(counts: list, filers: list | None = None) -> dict:
         move = pct if pct is not None else 0.0
         basis = 'count'
     band = SHARE_BAND_PCT if basis == 'share' else 0.0
+    direction = ('rising' if move > band
+                 else 'falling' if move < -band else 'flat')
+
+    # STILL CLIMBING, OR ROSE ONCE AND FADED? Two stocks with the same
+    # year-over-year gain, live:
+    #
+    #     AMD    31.4 → 33.1 → 35.6 → 36.3     +15.6%   every quarter up
+    #     PLTR   32.1 → 34.9 → 34.8 → 34.2      +6.5%   up once, down three
+    #
+    # Both read "rising", because only the first quarter and the last were
+    # compared and everything between was thrown away. But O'Neil's I is money
+    # STILL ARRIVING — a stock that gained sponsors a year ago and has been
+    # losing them for three quarters is not being accumulated, it is being
+    # distributed, and the word that hides the difference is the one a reader
+    # acts on.
+    #
+    # This is the same shape as C's `accelerating`, which already refuses to
+    # judge a trend from its endpoints: chgs[0] > chgs[1] > chgs[2].
+    #
+    # THE LAST STEP DECIDES, not the last two out of four. A year's gain that
+    # is over is still a year's gain — `change_share_pct` keeps saying so —
+    # and what changes is only whether it is still happening.
+    last_step = None
+    if shares and len(shares) >= 2 and shares[-2]:
+        last_step = round((shares[-1] / shares[-2] - 1) * 100, 1)
+        if direction == 'rising' and last_step < 0:
+            direction = 'peaked'
+        elif direction == 'falling' and last_step > 0:
+            # THE MIRROR, AND IT MATTERS MORE. A stock down over the year but
+            # turning up in the newest quarter is the one being picked up
+            # again, which is the whole event worth catching.
+            direction = 'turning up'
     return {
-        'direction': ('rising' if move > band
-                      else 'falling' if move < -band else 'flat'),
+        'direction': direction,
         'direction_basis': basis,
         # BOTH NUMBERS. The raw change is what happened; the share change is
         # what it means once the population is taken out.
         'change': change,
         'change_pct': pct,
         'change_share_pct': round(move, 1) if basis == 'share' else None,
+        # AND THE NEWEST STEP ON ITS OWN, so "peaked" can be checked rather
+        # than believed.
+        'last_step_pct': last_step,
         'share_pct': shares,
         'quarters_counted': len(vals),
     }

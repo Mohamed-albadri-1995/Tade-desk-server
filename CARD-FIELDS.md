@@ -188,7 +188,8 @@ Three reasons L can be absent, and only the first is fixable by waiting:
 | 83a | **"of N" — managers who filed a 13F at all that quarter** | QP-I | absent on a file built before this existed; the count still shows. Without it a growing filer population reads as sponsorship arriving |
 | 83b | **"counted by FILING" warning** | QP-I | absent is the normal case — it appears only when a quarter was cached before `SUBMISSION.tsv` was read, so amendments are not collapsed and every figure on the row runs high |
 | 83c | **Share of filers, per quarter** | QP-I | absent on a file built before this existed. `holders / managers who filed`, and the only form the direction is read in |
-| 83d | **Direction (from the SHARE) + % move** | QP-I | needs two quarters. Relative, not points, with a 3% dead band — half a point is noise at 70% and a fifth of the position at 3%. The raw holder change is printed beside it, uncoloured, because it is a fact and not the reading |
+| 83d | **Direction (from the SHARE) + % move** | QP-I | needs two quarters. Relative, not points, with a 3% dead band — half a point is noise at 70% and a fifth of the position at 3%. The raw holder change is printed beside it, uncoloured, because it is a fact and not the reading. Five readings: `rising` (up over the year and still up), `peaked` (up over the year, newest quarter down), `flat`, `falling`, `turning up` (down over the year, newest quarter up). Only `rising` and `turning up` are coloured bullish |
+| 83f | **Newest quarter %** | QP-I | needs two quarters of share. The step that separates `rising` from `peaked`, so the reading can be checked rather than believed |
 | 83e | **"direction from the RAW count" warning** | QP-I | absent is the normal case — it appears only when the filer population for those quarters is unknown |
 
 ## M — market direction

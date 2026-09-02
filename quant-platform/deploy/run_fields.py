@@ -257,9 +257,19 @@ def main(tickers):
                  if fs.get('change_share_pct') is not None else None),
                 'direction taken from the raw count instead')
             add('I', 'change (raw holders)', fs.get('change'))
+            # THE NEWEST STEP ON ITS OWN, which is what separates a share
+            # still climbing from one that rose a year ago and has faded.
+            add('I', 'newest quarter',
+                (f"{fs['last_step_pct']:+}%"
+                 if fs.get('last_step_pct') is not None else None),
+                'needs two quarters of share to have a step')
             add('I', 'direction', fs.get('direction'), '',
                 'from the RAW COUNT — population unknown'
-                if (fs.get('direction_basis') or 'share') != 'share' else '')
+                if (fs.get('direction_basis') or 'share') != 'share' else
+                'up over the year, but the newest quarter is DOWN'
+                if fs.get('direction') == 'peaked' else
+                'down over the year, but the newest quarter is UP'
+                if fs.get('direction') == 'turning up' else '')
             add('I', 'managers filing',
                 ' · '.join(f'{q} {n:,}' for q, n in sorted(_fq.items()))
                 or None,

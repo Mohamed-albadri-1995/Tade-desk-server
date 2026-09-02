@@ -4385,9 +4385,21 @@ const DEFS = {
       + "  of N       how many managers filed a 13F AT ALL that quarter\n"
       + "  share      holders / N, the only form the direction is read in\n"
       + "  → → →      all three, over the last four filed quarters\n"
-      + "  direction  rising, flat or falling — FROM THE SHARE, and flat\n"
-      + "             unless the share moved more than 3% relative to\n"
-      + "             where it started\n\n"
+      + "  direction  FROM THE SHARE, and flat unless it moved more than\n"
+      + "             3% relative to where it started:\n\n"
+      + "     rising      up over the year AND still up in the newest quarter\n"
+      + "     peaked      up over the year, but the newest quarter is down\n"
+      + "     flat        inside the 3% band\n"
+      + "     falling     down over the year, still falling\n"
+      + "     turning up  down over the year, newest quarter up\n\n"
+      + "WHY 'PEAKED' EXISTS. Two stocks with the same yearly gain, live:\n\n"
+      + "     AMD   31.4 -> 33.1 -> 35.6 -> 36.3   +15.6%  every quarter up\n"
+      + "     PLTR  32.1 -> 34.9 -> 34.8 -> 34.2    +6.5%  up once, down 3\n\n"
+      + "Comparing only the first quarter with the last calls both of them\n"
+      + "rising. But I is money STILL ARRIVING, and a stock that gained\n"
+      + "sponsors a year ago and has shed them for three quarters is being\n"
+      + "distributed, not accumulated. The same reason C's 'accelerating'\n"
+      + "refuses to judge a trend from its endpoints.\n\n"
       + "WHY THE DIRECTION IS THE SHARE AND NOT THE COUNT. The population of\n"
       + "managers filing 13F is not constant: 8,060 then 8,034 then 8,636\n"
       + "then 8,759 over the last four quarters. Every widely-held name rides\n"
@@ -5068,7 +5080,16 @@ function canslimTablesHTML(tk, stock) {
     iHtml = '<span style="color:var(--text3)">not matched in 13F — the CUSIP '
       + 'did not resolve to this ticker</span>';
   } else {
-    const dir = fs.direction === 'rising' ? 'bias-bull'
+    /* FIVE READINGS, NOT THREE, AND ONLY ONE OF THEM IS BULLISH.
+       AMD  31.4 → 33.1 → 35.6 → 36.3  +15.6%   every quarter up — rising
+       PLTR 32.1 → 34.9 → 34.8 → 34.2   +6.5%   up once, down three — peaked
+       Both gained over the year and only one is still being accumulated.
+       "peaked" is not coloured bullish: the year's gain is real and it is
+       over, and green would say money is still arriving. "turning up" is the
+       mirror — down over the year, newest quarter up — and it IS the event
+       worth catching, so it keeps the colour. */
+    const dir = fs.direction === 'rising' || fs.direction === 'turning up'
+      ? 'bias-bull'
       : fs.direction === 'falling' ? 'bias-bear' : '';
     /* THE DIRECTION IS THE SHARE OF FILERS, NOT THE COUNT.
        The population of managers filing 13F is not constant — 8,060 · 8,034 ·
@@ -5122,6 +5143,9 @@ function canslimTablesHTML(tk, stock) {
       <br><span class="${dir}">${esc(fs.direction || '')}</span>
       ${shareMove == null ? '' : `<span class="${dir}">${
         shareMove >= 0 ? '+' : ''}${shareMove}% share of filers</span>`}
+      ${fs.last_step_pct == null ? '' : `<span style="color:var(--text3)">· ${
+        fs.last_step_pct >= 0 ? '+' : ''}${fs.last_step_pct}% newest quarter
+        </span>`}
       ${fs.change == null ? '' : `<span style="color:var(--text3)">· ${
         fs.change >= 0 ? '+' : ''}${fs.change.toLocaleString()} holders raw
         </span>`}

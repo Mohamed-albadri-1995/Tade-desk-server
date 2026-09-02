@@ -1039,6 +1039,53 @@ describe('I — holders against the filer population', () => {
     expect(out).not.toMatch(/bias-bull/);        // the reading does not
   });
 
+  /* STILL CLIMBING, OR ROSE ONCE AND FADED. Two live stocks with the same
+     yearly gain — AMD 31.4 → 33.1 → 35.6 → 36.3 and PLTR 32.1 → 34.9 → 34.8
+     → 34.2 — both read "rising" when only the endpoints were compared. I is
+     money STILL ARRIVING, and PLTR has shed sponsors for three quarters. */
+  const withDir = (direction, last_step_pct, change_share_pct) => {
+    const f = JSON.parse(JSON.stringify(F13));
+    Object.assign(f.stocks.AAA, { direction, last_step_pct, change_share_pct });
+    return f;
+  };
+
+  test('peaked is shown as its own reading, not as rising', () => {
+    const out = render(withDir('peaked', -1.7, 6.5));
+    expect(out).toContain('peaked');
+    expect(out).toContain('-1.7% newest quarter');
+  });
+
+  test('...and is NOT coloured bullish — the gain is real and it is over', () => {
+    expect(render(withDir('peaked', -1.7, 6.5))).not.toMatch(/bias-bull/);
+  });
+
+  test('a share still climbing keeps the bullish colour', () => {
+    expect(render(withDir('rising', 2.0, 15.6))).toMatch(/bias-bull/);
+  });
+
+  /* THE MIRROR, AND IT MATTERS MORE: down over the year, newest quarter up,
+     is the stock being picked up again. */
+  test('turning up is bullish, being the event worth catching', () => {
+    const out = render(withDir('turning up', 7.5, -12.0));
+    expect(out).toContain('turning up');
+    expect(out).toMatch(/bias-bull/);
+  });
+
+  test('falling stays bearish', () => {
+    expect(render(withDir('falling', -4.0, -12.0))).toMatch(/bias-bear/);
+  });
+
+  test('a row with no newest step renders without inventing one', () => {
+    const out = render(withDir('flat', null, 0.9));
+    expect(out).not.toContain('newest quarter');
+    expect(out).not.toMatch(/undefined|NaN/);
+  });
+
+  test('the definition explains why peaked is not rising', () => {
+    expect(DEFS.canslim_i.how).toMatch(/WHY 'PEAKED' EXISTS|peaked/);
+    expect(DEFS.canslim_i.how).toMatch(/still up in the newest quarter/);
+  });
+
   test('a file with no filer population says the direction is the raw count', () => {
     const old = JSON.parse(JSON.stringify(F13));
     old.stocks.AAA.direction_basis = 'count';

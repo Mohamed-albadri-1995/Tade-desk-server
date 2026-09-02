@@ -459,6 +459,71 @@ ok('a population missing for one quarter is not half-used',
 ok('one quarter has no direction at all, as before',
    f13.trend([100])['direction'] is None)
 
+# ── STILL CLIMBING, OR ROSE ONCE AND FADED ─────────────────────────────
+#
+# Two stocks with the same year-over-year gain, live:
+#
+#     AMD    31.4 → 33.1 → 35.6 → 36.3     +15.6%   every quarter up
+#     PLTR   32.1 → 34.9 → 34.8 → 34.2      +6.5%   up once, down three
+#
+# Comparing only the first quarter with the last called both "rising", and
+# everything between was thrown away. But I is money STILL ARRIVING: a stock
+# that gained sponsors a year ago and has shed them for three quarters is
+# being distributed, and "rising" is the word a reader acts on.
+#
+# The same shape as C's `accelerating`, which already refuses to judge a trend
+# from its endpoints.
+print()
+print('== a year-over-year gain that is over is not "rising" ==')
+
+_P = [8060, 8034, 8636, 8759]
+_amd2 = f13.trend([2531, 2659, 3074, 3176], _P)
+_pltr = f13.trend([2587, 2804, 3005, 2998], _P)
+
+ok('a share climbing every quarter is rising',
+   _amd2['direction'] == 'rising', _amd2)
+ok('...and one that rose a year ago and has faded since is PEAKED, not '
+   'rising — same yearly gain, opposite reading',
+   _pltr['direction'] == 'peaked', _pltr)
+ok('both still report the year\'s gain, which is real and is not withdrawn',
+   _amd2['change_share_pct'] > 0 and _pltr['change_share_pct'] > 0,
+   (_amd2['change_share_pct'], _pltr['change_share_pct']))
+ok('the newest step is published, so "peaked" can be checked not believed',
+   _pltr['last_step_pct'] < 0 < _amd2['last_step_pct'],
+   (_pltr['last_step_pct'], _amd2['last_step_pct']))
+
+# THE MIRROR, AND IT MATTERS MORE: down over the year, newest quarter up, is
+# the stock being picked up again.
+_turn = f13.trend([1000, 900, 800, 860], _P)
+ok('down over the year but turning up in the newest quarter says so',
+   _turn['direction'] == 'turning up', _turn)
+ok('...and one still falling is just falling',
+   f13.trend([1000, 900, 800, 700], _P)['direction'] == 'falling')
+
+# THE LAST STEP ONLY BREAKS A TIE. It does not overturn a flat reading — a
+# quarter of noise inside the band is not a direction, which is the whole
+# reason the band exists.
+_flat = f13.trend([5739, 5752, 6140, 6168], _P)
+ok('a flat year stays flat however the last quarter moved',
+   _flat['direction'] == 'flat', _flat)
+
+ok('without a share series there is no step to read, and none is invented',
+   f13.trend([100, 130])['last_step_pct'] is None)
+ok('two quarters still give a direction and a step',
+   f13.trend([100, 130], [1000, 1000])['last_step_pct'] == 30.0)
+
+# In the function BODY, beside the branch it explains, rather than in the
+# docstring — the docstring already carries why the direction is a share at
+# all, and this is why it is not only the endpoints.
+ok('the two live series that showed this are recorded where the rule is',
+   '31.4 → 33.1 → 35.6 → 36.3' in SRC_F13
+   and '32.1 → 34.9 → 34.8 → 34.2' in SRC_F13)
+ok('peaked is NOT coloured bullish on the card — the gain is real and it is '
+   'over, and green would say money is still arriving',
+   "fs.direction === 'rising' || fs.direction === 'turning up'" in _CARD57)
+ok('...and the newest step reaches the card beside the year\'s move',
+   'last_step_pct' in _CARD57 and 'newest quarter' in _CARD57)
+
 ok('the live five that showed this are recorded where the rule is',
    '71.2% -> 70.4%' in (f13.trend.__doc__ or ''))
 ok('the card reads the share, not the count',
