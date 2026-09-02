@@ -670,3 +670,127 @@ describe('a checklist has to line up', () => {
     expect(page).not.toContain('.canslim-sec .ctx-row {');
   });
 });
+
+/*
+ * THE S BLOCK, DRIVEN FOR REAL.
+ *
+ * A card printed "float 2.46M sh" in Volume & Float and "Float —" in the S
+ * block below it, on the same screen. The merge that was supposed to fix that
+ * was written and shipped, and changed nothing: buildCard opens with
+ * `const s = row.stock || {}`, so floatShares and the short-interest fields
+ * live on row.stock — and the call site passed `row`. Every one of them came
+ * back undefined, and undefined renders as "—", which is precisely what a
+ * genuinely missing float renders as. The bug's output was a legitimate
+ * value, so nothing looked wrong.
+ *
+ * The audit guarding it asserted `'r.floatShares' in page` — a substring
+ * search that passed while the code was broken and could never have failed,
+ * because no amount of grepping can tell whether `r` is the right object.
+ *
+ * So this executes the function. It is the only kind of check that could have
+ * caught it, and it is the principle this file's own header already states.
+ */
+function liftTables() {
+  const grab = (re, what) => {
+    const m = page.match(re);
+    if (!m) throw new Error(`${what} not found in public/index.html — renamed?`);
+    return m[0];
+  };
+  const src = [
+    grab(/function _wins\(got, want, label\) \{[\s\S]*?\n\}/, '_wins()'),
+    grab(/function _fundNote\(f\) \{[\s\S]*?\n\}/, '_fundNote()'),
+    grab(/function canslimTablesHTML\(tk, stock\) \{[\s\S]*?\n\}\n/, 'canslimTablesHTML()'),
+  ].join('\n');
+  // eslint-disable-next-line no-new-func
+  return new Function('panel', `
+    const info = k => '';
+    const esc = s => String(s == null ? '' : s);
+    const _n = v => (v == null ? '—' : String(v));
+    const _m = v => (v == null ? '—' : String(v));
+    const _sign = v => (v == null ? '' : v >= 0 ? 'pos' : 'neg');
+    const fmtShares = v => (v == null ? '—' : (v / 1e6).toFixed(2) + 'M sh');
+    let CANSLIM_PANEL = panel;
+    let GROUPS_MODEL = null, F13_MODEL = null;
+    let ONEIL_RATINGS = {}, ONEIL_MODEL = {}, ONEIL_STOCKS = { stocks: {} };
+    ${src}
+    return canslimTablesHTML;
+  `);
+}
+
+describe('S — the float the card already has', () => {
+  const SUPPLY = {
+    ok: true,
+    s: {
+      shares_outstanding: 3_435_357,
+      as_of: '2026-08-07',
+      shares_tag: 'EntityCommonStockSharesOutstanding',
+      shares_basis: 'outstanding, from the filing cover',
+      float: null,
+      float_note: 'not in EDGAR — filers do not tag float; the screener supplies it',
+    },
+  };
+  // EXACTLY THE FIELD NAMES Volume & Float reads off row.stock. If these ever
+  // diverge, the two halves of the card disagree again.
+  const STOCK = {
+    floatShares: 2_460_000, shortFloat: 12.5, shortBasis: 'float',
+    shortAsOf: '2026-08-15', daysToCover: 3.2,
+  };
+  const render = (stock, supply = SUPPLY) =>
+    liftTables()({ fundamentals: { AAA: supply }, bases: {} })('AAA', stock);
+
+  test('the float from the screener reaches the S block', () => {
+    expect(render(STOCK)).toContain('2.46M sh');
+  });
+
+  test('...and is NOT read off the row, which does not carry it', () => {
+    // The shape buildCard is handed. Passing this instead of row.stock is the
+    // bug: every screener field is one level down.
+    const row = { ticker: 'AAA', stock: STOCK };
+    expect(render(row)).not.toContain('2.46M sh');
+    expect(page).toContain('canslimTablesHTML(row.ticker, s)');
+  });
+
+  test('the fallback note appears only when there is genuinely no float', () => {
+    const out = render({});
+    expect(out).toContain('not in EDGAR');
+    expect(out).not.toContain('from the screener');
+  });
+
+  test('a float that IS present never shows the "no float" note', () => {
+    const out = render(STOCK);
+    expect(out).toContain('from the screener');
+    expect(out).not.toContain('not in EDGAR');
+  });
+
+  test('float is expressed against shares outstanding, which is the reading', () => {
+    // 2.46M of 3.435M ≈ 72% — the number that says how much of the company
+    // can actually trade.
+    expect(render(STOCK)).toContain('72% of shares');
+  });
+
+  test('short interest and days to cover reach S, the supply letter', () => {
+    const out = render(STOCK);
+    expect(out).toContain('12.5%');
+    expect(out).toContain('3.2');
+    expect(out).toContain('days to cover');
+  });
+
+  test('...and are absent, not zero, when nothing is reported', () => {
+    const out = render({ floatShares: 1e6 });
+    expect(out).not.toContain('days to cover');
+    expect(out).not.toContain('Short interest');
+  });
+
+  test('a weighted-average share count is flagged as one, never shown bare', () => {
+    const wa = { ok: true, s: {
+      shares_outstanding: 95_000_000,
+      shares_tag: 'WeightedAverageNumberOfDilutedSharesOutstanding',
+      shares_basis: 'a WEIGHTED AVERAGE over the period, diluted — not a count on a date',
+    } };
+    expect(render(STOCK, wa)).toContain('weighted avg');
+  });
+
+  test('the cover-page count carries no qualifier, being the plain answer', () => {
+    expect(render(STOCK)).not.toContain('weighted avg');
+  });
+});

@@ -3855,7 +3855,7 @@ function buildCard(row) {
         ${strength ? `<div class="section-title" style="margin-top:9px">Relative strength</div>${strength}` : ''}
         ${fold('canslim-tables', 'Full tables',
                'eight quarters, the annual run, and the whole base',
-               canslimTablesHTML(row.ticker, row))}`;
+               canslimTablesHTML(row.ticker, s))}`;
       return fold('canslim', "CANSLIM · O'Neil", canslimOneLine(row.ticker), body);
     })()}
 
@@ -4745,16 +4745,25 @@ function _fundNote(f) {
   return e;
 }
 
-/* `row` is the SCANNED ROW, and S needs it.
+/* `stock` is `row.stock`, and S needs it. NOT `row`.
  *
  * The S block used to say "no free source publishes float directly" while the
  * same card printed "float 2.46M sh" three sections higher and divided short
  * interest by that very number. EDGAR is a filings API and a filer does not
  * tag its own float, so `supply()` genuinely cannot produce one — but the
- * screener already has it on the row, and a card that contradicts itself is
- * worse than either half alone. */
-function canslimTablesHTML(tk, row) {
-  const r = row || {};
+ * screener already has it, and a card that contradicts itself is worse than
+ * either half alone.
+ *
+ * THE FIRST FIX PASSED THE WRONG OBJECT AND CHANGED NOTHING. buildCard opens
+ * with `const s = row.stock || {}` — floatShares, shortFloat, shortBasis,
+ * shortAsOf and daysToCover all live on `row.stock`, and `row` carries none
+ * of them. Reading them off `row` gave undefined, which renders as "—",
+ * which is exactly what a genuinely missing float renders as. The card went
+ * on contradicting itself and looked like it was behaving correctly.
+ *
+ * That is why the parameter is named for what it must be. */
+function canslimTablesHTML(tk, stock) {
+  const r = stock || {};
   const f = CANSLIM_PANEL.fundamentals[tk] || {};
   const b = CANSLIM_PANEL.bases[tk] || {};
   const g = GROUPS_MODEL && (GROUPS_MODEL.stocks || {})[tk];

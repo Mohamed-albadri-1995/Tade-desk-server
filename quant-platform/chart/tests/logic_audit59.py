@@ -263,8 +263,28 @@ ok('the false claim is gone from the note the card prints',
 ok('EDGAR still does not CLAIM a float, because a filer does not tag one',
    edgar.supply({})['float'] is None
    and 'not in EDGAR' in edgar.supply({})['float_note'])
-ok('the S block reads the float the screener already put on the row',
-   'r.floatShares' in _UI2 and 'canslimTablesHTML(tk, row)' in _UI2)
+# A SUBSTRING SEARCH CANNOT TELL WHETHER `r` IS THE RIGHT OBJECT, and this
+# check proved it: it asserted `'r.floatShares' in page` and passed for a day
+# while the call site handed the function `row` instead of `row.stock`. Every
+# screener field came back undefined and rendered as "—", which is exactly
+# what a genuinely absent float renders as, so nothing looked wrong.
+#
+# What is checkable HERE is the wiring — that the call site passes the object
+# carrying the field, and that the parameter is named for it so the next
+# reader cannot repeat the mistake. The BEHAVIOUR is proved by executing the
+# function, in tests/canslimCard.test.js, which is the only kind of check
+# that could have caught this.
+ok('the S block is handed row.stock, which is where the screener fields are',
+   'canslimTablesHTML(row.ticker, s)' in _UI2
+   and 'canslimTablesHTML(tk, stock)' in _UI2)
+ok('...and the failure is recorded where the parameter is',
+   'PASSED THE WRONG OBJECT' in _UI2)
+_JEST = (pathlib.Path(__file__).resolve().parents[3] / 'tests'
+         / 'canslimCard.test.js').read_text()
+ok('the behaviour is proved by RUNNING the function, not by grepping for it',
+   'canslimTablesHTML()' in _JEST and 'liftTables' in _JEST)
+ok('...including the case that was broken: a row-shaped object yields no float',
+   'does not carry it' in _JEST)
 ok('...and says where it came from, so two sources are never blended silently',
    'from the screener' in _UI2)
 ok('short interest and days to cover reach the S block too, since S is the '
