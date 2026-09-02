@@ -195,6 +195,36 @@ ok('...and dates each file by what it REPORTS, not by when it arrived',
 ok('the quarters used are published with the file, so the card cannot show '
    'stale sponsorship undated', "'quarters': [f'{y}Q{q}'" in F13)
 
+# ── 4. AND THE CHECKER HAS TO SEE THE FIELDS IT IS CHECKING ────────────
+#
+# deploy/run_fields.py is the tool that answers "does this STOCK have a number
+# in this field", which is the question a card raises. A field it does not
+# print reads as a clean bill of health, so every new field has to reach it or
+# the check quietly narrows while looking unchanged.
+#
+# It would not have caught either of the last two faults. It printed the share
+# count with nothing to compare it to, and it printed 13F's holders, change
+# and direction — all three CORRECT, and all three about the wrong quarters.
+print()
+print('== the field checker covers the fields ==')
+
+FIELDS = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
+          / 'run_fields.py').read_text()
+ok('S\'s share-count direction is checked, not only the count',
+   "'share count 1yr'" in FIELDS and 'shares_chg_1y' in FIELDS)
+ok('...with both figures and both dates, so the percentage can be checked on '
+   'its own line', "_sc['from_val']" in FIELDS and "_sc['to_val']" in FIELDS
+   and "_sc['days']" in FIELDS)
+ok('...and a blank names which reason it is',
+   'only one count on file' in FIELDS and 'no pair 290-440 days apart'
+   in FIELDS)
+ok('I reports WHICH QUARTERS, the field that was wrong all along',
+   "'quarters'" in FIELDS and "add('I', 'quarters'" in FIELDS)
+ok('...and says when the window slid, so a fallback is visible here too',
+   "'fell_back'" in FIELDS)
+ok('the reason this line exists is recorded beside it',
+   'correct ABOUT THE WRONG QUARTERS' in FIELDS)
+
 DAILY = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
          / 'run_daily.py').read_text()
 ok('nothing in the chain is built once and left', 'NOTHING HERE IS BUILT '

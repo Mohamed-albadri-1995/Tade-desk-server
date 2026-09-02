@@ -141,6 +141,28 @@ def main(tickers):
             add('S', 'shares outstanding', _fmt(s.get('shares_outstanding')),
                 'no share-count tag in the filing',
                 s.get('shares_basis') or '')
+            # THE DIRECTION, WHICH IS THE PART THAT MEANS SOMETHING. One
+            # count is a fact; whether it is shrinking is the reading. Printed
+            # with BOTH figures and BOTH dates, so the percentage can be
+            # checked on its own line rather than taken on trust — this file
+            # exists to catch numbers that are wrong, not only ones that are
+            # missing.
+            _sc = s.get('shares_chg_1y')
+            _sh = s.get('shares_history') or []
+            add('S', 'share count 1yr',
+                (f"{_sc['pct']:+.2f}% "
+                 f"({_fmt(_sc['from_val'])} on {_sc['from']} → "
+                 f"{_fmt(_sc['to_val'])} on {_sc['to']}, {_sc['days']}d)")
+                if _sc else None,
+                # THE REASON, NOT A DASH, and the two reasons are different
+                # facts about different companies — one has not filed for long
+                # enough, the other files too irregularly to give a rate.
+                ('only one count on file, so no direction yet'
+                 if len(_sh) < 2 else
+                 f'{len(_sh)} counts on file but no pair 290-440 days apart'),
+                'buying back' if _sc and _sc['pct'] <= -1 else
+                'diluting' if _sc and _sc['pct'] >= 2 else
+                'flat' if _sc else '')
 
         # ── N, computed live from bars ──────────────────────────────────
         try:
@@ -201,6 +223,20 @@ def main(tickers):
             add('I', 'holders', fs.get('funds'))
             add('I', 'change', fs.get('change'))
             add('I', 'direction', fs.get('direction'))
+            # WHICH QUARTERS, and this line is why it exists. Every 13F label
+            # was one quarter too new for as long as the letter worked, and
+            # nothing here would have shown it: holders, change and direction
+            # were all correct — they were correct ABOUT THE WRONG QUARTERS.
+            # It took reading a card in September and asking why it said Q2.
+            _qs = (fm or {}).get('quarters') or []
+            add('I', 'quarters', ' · '.join(_qs) or None,
+                'the file carries no quarter list — an older build',
+                # A SLID WINDOW IS NOT A FAULT, and it is not silence either:
+                # the SEC publishes weeks after the deadline, so the newest
+                # quarter wanted is routinely not out yet. Said here as well
+                # as in the nightly log, because this is where it is looked
+                # for.
+                (fm or {}).get('fell_back') or '')
         else:
             add('I', 'holders', None,
                 'CUSIP did not resolve to this ticker' if fm and fm.get('ok')
