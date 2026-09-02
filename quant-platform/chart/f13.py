@@ -59,11 +59,26 @@ import re
 import zipfile
 from pathlib import Path
 
-# One ZIP per calendar quarter. The SEC has moved this file more than once and
-# the name is not guessable from the quarter alone, so several known patterns
-# are tried and the one that answers is reported — a build that fails must say
-# WHICH url it tried, or the next person debugs a 404 with no idea what was
-# requested.
+# WHERE THE SEC LISTS THE FILES. The links are read from here rather than
+# constructed, and that is the whole fix.
+#
+# The comment that used to sit here said the name "is not guessable from the
+# quarter alone" — and then guessed it three ways. Which is one guess written
+# out three times, and it was wrong every night for as long as this existed:
+#
+#   2025Q3: no dataset found. Tried: [three urls]   404, 404, 404
+#   2025Q4 … 2026Q1 … 2026Q2                        all 404
+#   [ok  ] institutional sponsorship (I): not built
+#
+# Twelve 404s and not one 403, so the paths were wrong rather than the
+# User-Agent — EDGAR answered 14,583 requests on the same UA in the same run
+# with nothing refused. A filename that is not guessable has to be READ.
+INDEX_URL = ('https://www.sec.gov/data-research/sec-markets-data/'
+             'form-13f-data-sets')
+
+# KEPT AS A FALLBACK, NOT AS THE PLAN. These may still be right for older
+# quarters, and swapping a path that might work for another that might work is
+# not progress — the discovered link is tried first, these only after it.
 URL_PATTERNS = (
     'https://www.sec.gov/files/structureddata/data/form-13f-data-sets/{y}q{q}_form13f.zip',
     'https://www.sec.gov/files/dera/data/form-13f-data-sets/{y}q{q}_form13f.zip',
@@ -253,6 +268,79 @@ def _name_index() -> dict:
     return idx
 
 
+_ZIP_HREF = re.compile(r'href\s*=\s*["\']([^"\']+\.zip)["\']', re.I)
+# 2026q2, 2026Q2, 2026-q2, "2026 Q2" — the SEC has written it every way.
+_QUARTER = re.compile(r'(20\d\d)\D{0,3}[qQ]([1-4])')
+
+
+def parse_index(html: str) -> dict:
+    """(year, quarter) → absolute URL, from the SEC's own listing page.
+
+    PURE, so the parsing is provable without the network — which matters more
+    here than anywhere else in this module, because the network is exactly
+    what could not be checked when the guessed patterns were written.
+
+    Only links that look like 13F data are kept: the page carries other zips,
+    and a quarter number is not enough on its own to tell them apart.
+    """
+    out = {}
+    for href in _ZIP_HREF.findall(html or ''):
+        if '13f' not in href.lower():
+            continue
+        m = _QUARTER.search(href.rsplit('/', 1)[-1])
+        if not m:
+            continue
+        key = (int(m.group(1)), int(m.group(2)))
+        # RELATIVE LINKS ARE THE COMMON CASE on sec.gov — the page writes
+        # "/files/…", and a bare join would produce a path with no host.
+        url = href if href.startswith('http') else 'https://www.sec.gov' + (
+            href if href.startswith('/') else '/' + href)
+        # First link for a quarter wins: the page lists newest first, and a
+        # later duplicate is an archive copy of the same data.
+        out.setdefault(key, url)
+    return out
+
+
+# One page fetch per run, not one per quarter.
+_INDEX = {'html': None, 'urls': None, 'error': None}
+
+
+def discover_urls(log=print) -> dict:
+    """Read the listing page once and remember what it offered."""
+    if _INDEX['urls'] is not None or _INDEX['error'] is not None:
+        return _INDEX['urls'] or {}
+    from chart import edgar as _edgar
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            INDEX_URL, headers={'User-Agent': _edgar.UA,
+                                'Accept': 'text/html'})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            _INDEX['html'] = r.read().decode('utf-8', 'replace')
+    except Exception as e:                                # noqa: BLE001
+        # A LISTING PAGE THAT IS ITSELF GONE is a different fault from a
+        # quarter that is not published, and must not be reported as one.
+        _INDEX['error'] = f'{INDEX_URL} — {str(e)[:80]}'
+        log(f'  13F index unreachable: {_INDEX["error"]}')
+        return {}
+    _INDEX['urls'] = parse_index(_INDEX['html'])
+    log(f'  13F index: {len(_INDEX["urls"])} quarterly zips listed'
+        + (f' — newest {max(_INDEX["urls"])}' if _INDEX['urls'] else ''))
+    return _INDEX['urls']
+
+
+def _index_summary() -> str:
+    """What the index actually offered, for the failure message."""
+    if _INDEX['error']:
+        return f'index unreachable ({_INDEX["error"]})'
+    urls = _INDEX['urls'] or {}
+    if not urls:
+        return ('index reachable but listed no 13F zips — the page layout or '
+                f'its address has changed ({INDEX_URL})')
+    names = [u.rsplit('/', 1)[-1] for _, u in sorted(urls.items(), reverse=True)]
+    return f'{len(urls)} listed, newest: {", ".join(names[:4])}'
+
+
 def fetch_quarter(y: int, q: int, log=print) -> str | None:
     """The INFOTABLE for one quarter, as text. Cached on disk once fetched."""
     from chart import edgar as _edgar
@@ -263,8 +351,11 @@ def fetch_quarter(y: int, q: int, log=print) -> str | None:
 
     import urllib.request
     tried = []
-    for pat in URL_PATTERNS:
-        url = pat.format(y=y, q=q)
+    # THE LINK THE SEC PUBLISHED, FIRST. The constructed patterns follow it
+    # rather than replacing it, so an older quarter they do reach still works.
+    found = discover_urls(log).get((y, q))
+    for url in ([found] if found else []) + [p.format(y=y, q=q)
+                                             for p in URL_PATTERNS]:
         tried.append(url)
         try:
             req = urllib.request.Request(url, headers={'User-Agent': _edgar.UA})
@@ -286,9 +377,15 @@ def fetch_quarter(y: int, q: int, log=print) -> str | None:
         hit.write_text(text)
         log(f'  {y}Q{q}: {len(text) // 1_000_000}MB from {url.rsplit("/", 1)[-1]}')
         return text
-    # NAMES THE URLS IT TRIED. A build that just says "failed" leaves the next
-    # person guessing what was requested.
-    log(f'  {y}Q{q}: no dataset found. Tried: {tried}')
+    # WHAT WAS TRIED **AND** WHAT WAS OFFERED.
+    #
+    # Naming the tried URLs was not enough: twelve 404s were printed nightly
+    # for weeks and told nobody anything, because the useful fact is not which
+    # wrong addresses were requested — it is which right ones existed. One
+    # line here ends the guessing instead of starting another round of it.
+    log(f'  {y}Q{q}: no dataset found.')
+    log(f'      tried: {tried}')
+    log(f'      index: {_index_summary()}')
     return None
 
 

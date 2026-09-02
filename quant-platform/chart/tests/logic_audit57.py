@@ -133,10 +133,105 @@ ok('the CUSIP problem is stated rather than hidden',
    'licensed and not free' in SRC)
 ok('an unmatched stock reports NO DATA, never zero funds',
    'reports NO DATA' in SRC)
+# Naming the tried urls was the original rule and it was not enough — twelve
+# of them were printed nightly and told nobody anything. It still names them,
+# and now also names what the SEC's listing actually offered.
 ok('a failed fetch names the urls it tried',
-   'NAMES THE URLS IT TRIED' in SRC)
+   'WHAT WAS TRIED' in SRC and "tried: {tried}" in SRC)
+ok('...AND what was on offer, which is the half that was missing',
+   'WHAT WAS OFFERED' in SRC and 'index: {_index_summary()}' in SRC)
 ok('the CUSIP map only grows, so one odd quarter cannot hole the history',
    'only ever grows' in SRC)
+
+
+# ── THE FILENAME IS READ, NOT GUESSED ──────────────────────────────────
+#
+# This module's own comment said the name "is not guessable from the quarter
+# alone" — and then guessed it three ways. From the live journal, every night
+# for as long as 13F existed:
+#
+#   2025Q3: no dataset found. Tried: [three urls]      404 404 404
+#   2025Q4 · 2026Q1 · 2026Q2                           all 404
+#   [ok  ] institutional sponsorship (I): not built
+#
+# Twelve 404s and not one 403, so the paths were wrong and not the User-Agent:
+# EDGAR answered 14,583 requests on the same UA in the same run with nothing
+# refused. A name that cannot be guessed has to be read off the SEC's listing.
+print()
+print('== the SEC listing is the source of the URL ==')
+
+_INDEX_HTML = """
+ <li><a href="/files/structureddata/data/form-13f-data-sets/2026q2_form13f.zip">2026 Q2</a></li>
+ <li><a href="/files/structureddata/data/form-13f-data-sets/2026q1_form13f.zip">2026 Q1</a></li>
+ <li><a href="https://www.sec.gov/files/structureddata/data/form-13f-data-sets/2025q4_form13f.zip">2025 Q4</a></li>
+ <li><a href="/files/structureddata/data/financial-statement-data-sets/2026q2.zip">not 13f</a></li>
+ <li><a href="/data-research/form-13f.html">not a zip</a></li>
+"""
+_U = f13.parse_index(_INDEX_HTML)
+ok('a listed quarter resolves to its own url',
+   _U.get((2026, 2), '').endswith('2026q2_form13f.zip'), _U)
+ok('a RELATIVE href gains the host, which is the common case on sec.gov',
+   _U[(2026, 2)].startswith('https://www.sec.gov/files/'), _U[(2026, 2)])
+ok('...and an absolute one is left alone',
+   _U[(2025, 4)].startswith('https://www.sec.gov/files/'), _U[(2025, 4)])
+ok('a zip that is not 13F data is not mistaken for one — a quarter number '
+   'is not enough to tell them apart', len(_U) == 3, _U)
+ok('a link that is not a zip is ignored', (2026, 2) in _U and len(_U) == 3)
+
+ok('a page with no 13F links yields nothing rather than raising',
+   f13.parse_index('<a href="/x/2026q2.zip">x</a>') == {})
+ok('...and so does an empty or absent page',
+   f13.parse_index('') == {} and f13.parse_index(None) == {})
+
+# PURE, so the parsing is provable with no network — which matters more here
+# than anywhere else in this module, because the network is precisely what
+# could not be checked when the guessed patterns were written.
+import inspect                                             # noqa: E402
+ok('parse_index touches nothing but its argument',
+   'urllib' not in inspect.getsource(f13.parse_index))
+
+# THE FAILURE MESSAGE HAS TO NAME WHAT EXISTS, not only what was requested.
+# The old one printed the tried URLs nightly and told nobody anything: the
+# useful fact is not which wrong addresses were asked for, it is which right
+# ones were on offer.
+_save = dict(f13._INDEX)
+try:
+    f13._INDEX.update({'html': None, 'urls': None, 'error': 'HTTP Error 404'})
+    ok('an unreachable LISTING says so, rather than reading as a missing '
+       'quarter — different faults, different fixes',
+       'index unreachable' in f13._index_summary())
+    f13._INDEX.update({'html': '<html/>', 'urls': {}, 'error': None})
+    ok('a listing that carries no zips says the page has changed',
+       'listed no 13F zips' in f13._index_summary())
+    f13._INDEX.update({'urls': {(2026, 2): 'https://x/2026q2_form13f.zip'},
+                       'error': None})
+    ok('...and when links ARE found it names them, which is the line that '
+       'ends the guessing',
+       '2026q2_form13f.zip' in f13._index_summary())
+finally:
+    f13._INDEX.clear()
+    f13._INDEX.update(_save)
+
+SRC = (pathlib.Path(__file__).resolve().parents[1] / 'f13.py').read_text()
+ok('the discovered link is tried BEFORE the constructed ones',
+   'THE LINK THE SEC PUBLISHED, FIRST' in SRC)
+ok('...and the constructed ones are kept, not deleted: swapping a path that '
+   'might work for another that might work is not progress',
+   'URL_PATTERNS' in SRC and 'KEPT AS A FALLBACK' in SRC)
+ok('the listing is fetched once per run, not once per quarter',
+   '_INDEX' in SRC and 'One page fetch per run' in SRC)
+ok('the twelve 404s that showed this are recorded',
+   '404, 404, 404' in SRC or 'Twelve 404s' in SRC)
+
+# AND THE JOB MUST NOT CALL IT SUCCESS.
+DAILY = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
+         / 'run_daily.py').read_text()
+ok('a step that ran and built NOTHING is marked, not reported as ok',
+   'def _looks_failed' in DAILY and "'warn'" in DAILY)
+ok('...and it still does not take the other steps down',
+   'never take the others down' in DAILY)
+ok('the line that hid this is quoted where the marker is',
+   'no 13F quarters' in DAILY)
 
 print()
 print(f'        {PASS} passed, {FAIL} failed')

@@ -39,11 +39,36 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
+# A STEP THAT BUILT NOTHING IS NOT AN "ok" STEP.
+#
+# Every one of these words appeared on an [ok ] line, nightly, for as long as
+# 13F existed:
+#
+#     [ok  ] institutional sponsorship (I): not built: no 13F quarters
+#            could be fetched
+#
+# [ok ] meant "did not raise", which was true and useless. The letter was
+# missing from every card while the job that fills it reported success, so the
+# journal — the one place that would have shown it — agreed with the bug.
+_BAD = ('not built', 'not walked', 'no rs universe', 'nothing to walk',
+        'error', 'failed')
+
+
+def _looks_failed(out) -> bool:
+    return isinstance(out, str) and any(w in out.lower() for w in _BAD)
+
+
 def step(name, fn):
-    """Run one link. Report what happened; never take the others down."""
+    """Run one link. Report what happened; never take the others down.
+
+    Three outcomes, not two: it worked, it ran and produced nothing, or it
+    raised. Only the third stops being this step's problem — the second is the
+    one that hides, so it gets its own marker.
+    """
     try:
         out = fn()
-        print(f'[ok  ] {name}: {out}', flush=True)
+        mark = 'warn' if _looks_failed(out) else 'ok  '
+        print(f'[{mark}] {name}: {out}', flush=True)
         return out
     except Exception as e:                                # noqa: BLE001
         print(f'[FAIL] {name}: {e}', flush=True)
