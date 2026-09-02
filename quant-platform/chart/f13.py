@@ -327,7 +327,7 @@ _ZIP_HREF = re.compile(r'href\s*=\s*["\']([^"\']+\.zip)["\']', re.I)
 # 2026q2, 2026Q2, 2026-q2, "2026 Q2" — the SEC has written it every way.
 _QUARTER = re.compile(r'(20\d\d)\D{0,3}[qQ]([1-4])')
 # ...AND SOMETIMES NOT AS A QUARTER AT ALL. The newer sets are named for the
-# period they cover — 01jan2024-31mar2024_form13f.zip — which carries the same
+# period they cover — 01dec2025-28feb2026_form13f.zip — which carries the same
 # fact in a shape the pattern above cannot see.
 _DATED = re.compile(r'(\d{1,2})([a-z]{3})(20\d\d)', re.I)
 _MONTHS = {m: i + 1 for i, m in enumerate(
@@ -335,20 +335,64 @@ _MONTHS = {m: i + 1 for i, m in enumerate(
      'jul', 'aug', 'sep', 'oct', 'nov', 'dec'))}
 
 
+def _report_quarter(year: int, month: int):
+    """The quarter a filing window opening in (year, month) REPORTS ON.
+
+    THE SEC NAMES THESE FILES FOR WHEN THE FILINGS ARRIVED, NEVER FOR WHAT
+    THEY DESCRIBE, and the two are never the same quarter: a 13F is due 45
+    days after the quarter it reports on ends. So the report quarter is the
+    one whose deadline falls inside the window — which is the last quarter to
+    have ENDED by the time the window opens:
+
+        window opens Mar 2026 → Q1 2026 ended 31 Mar, due 15 May → Q1 2026
+        window opens Dec 2025 → Q4 2025 ends 31 Dec, due 14 Feb  → Q4 2025
+        window opens Oct 2023 → Q3 2023 ended 30 Sep, due 14 Nov → Q3 2023
+
+    A window that opens ON a quarter end (the newer Mar/Jun/Sep/Dec sets)
+    reports that quarter; one that opens after it (the older calendar-quarter
+    sets, which open in Jan/Apr/Jul/Oct) reports the quarter before.
+
+    WHY THIS IS THE RULE FOR BOTH NAMINGS. The listing runs 2013q2 … 2023q4 —
+    43 files, every calendar quarter — and then continues 01dec2023-29feb2024,
+    01mar2024-31may2024, and on. Read as filing windows the two sets are one
+    unbroken run of report quarters with no gap and no repeat; read any other
+    way the seam either duplicates a quarter or loses one. The SEC re-cut the
+    windows by a month so that each one captures a single deadline cleanly,
+    which is the same fact stated twice.
+
+    This was wrong here for as long as 13F worked at all. Every card said
+    2026Q2 in September 2026, for holdings as of 31 March. Caught by being
+    read: "it's until q2 2026 now we are in September?"
+    """
+    if month % 3 == 0:                       # opens on a quarter end
+        return year, month // 3
+    q = (month - 1) // 3 + 1                 # the quarter it opens in
+    return (year - 1, 4) if q == 1 else (year, q - 1)
+
+
+def _qname(k) -> str:
+    """(2026, 1) → '2026Q1'. One spelling, so log and file cannot disagree."""
+    return f'{k[0]}Q{k[1]}'
+
+
 def _quarter_of(name: str):
-    """(year, quarter) from a filename, or None if it cannot be read."""
+    """The (year, quarter) a data set's HOLDINGS are as of, from its filename.
+
+    Not the quarter in the filename. See _report_quarter — the name is the
+    filing window, the answer is what was filed in it.
+    """
     m = _QUARTER.search(name)
     if m:
-        return int(m.group(1)), int(m.group(2))
-    # THE END DATE, NOT THE START. A range is named for the period it covers,
-    # and where one straddles a boundary the quarter it belongs to is the one
-    # it finishes in — the same rule the filing deadline uses.
+        # A calendar-quarter set opens on that quarter's first month.
+        return _report_quarter(int(m.group(1)), int(m.group(2)) * 3 - 2)
+    # THE START OF THE RANGE, NOT THE END. The window is three months long and
+    # holds one deadline; where it finishes says nothing about which.
     dates = _DATED.findall(name)
     if dates:
-        _, mon, year = dates[-1]
+        _, mon, year = dates[0]
         mi = _MONTHS.get(mon.lower())
         if mi:
-            return int(year), (mi - 1) // 3 + 1
+            return _report_quarter(int(year), mi)
     return None
 
 
@@ -553,7 +597,12 @@ def fetch_quarter(y: int, q: int, log=print):
     # THE LINK THE SEC PUBLISHED, FIRST. The constructed patterns follow it
     # rather than replacing it, so an older quarter they do reach still works.
     found = discover_urls(log).get((y, q))
-    for url in ([found] if found else []) + [p.format(y=y, q=q)
+    # AND THE CONSTRUCTED ONES ARE NAMED FOR THE FILING QUARTER, not this one.
+    # Q1's filings arrive in Q2, so holdings as of 31 Mar 2026 live in a file
+    # called 2026q2 — the same off-by-one _quarter_of undoes when reading the
+    # listing, applied the other way round here.
+    fy, fq = (y + 1, 1) if q == 4 else (y, q + 1)
+    for url in ([found] if found else []) + [p.format(y=fy, q=fq)
                                              for p in URL_PATTERNS]:
         tried.append(url)
         # TO A FILE, NOT TO RAM. `r.read()` held the whole compressed zip —
@@ -623,16 +672,25 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
     # nothing here can pass itself off as current.
     #
     # The wanted quarters are still preferred. This only decides what to do
-    # when none of them exist.
+    # when some of them do not exist.
+    #
+    # SOME, NOT NONE — which is the ordinary case, not the rare one. The
+    # deadline for a quarter passing is not the SEC publishing the data set
+    # for it, and there are weeks between the two, so the NEWEST wanted
+    # quarter is routinely the one missing. Asking for four and taking
+    # whichever three happen to exist quietly shortens the history the card
+    # draws its direction from. The window slides instead: the `quarters`
+    # newest quarters the index actually offers, none newer than the deadline
+    # allows.
     fell_back = None
     have = discover_urls(log)
-    if have and not any(k in have for k in qs):
-        newest = sorted(have, reverse=True)[:quarters]
-        if newest:
-            fell_back = (f"{qs[-1][0]}Q{qs[-1][1]} not published; using "
-                         f"{newest[0][0]}Q{newest[0][1]} and back")
+    if have:
+        avail = sorted((k for k in have if k <= qs[-1]), reverse=True)[:quarters]
+        if avail and list(reversed(avail)) != qs:
+            fell_back = (f"wanted {_qname(qs[0])}–{_qname(qs[-1])}; index has "
+                         f"{_qname(avail[-1])}–{_qname(avail[0])}")
             log(f'  {fell_back}')
-            qs = list(reversed(newest))
+            qs = list(reversed(avail))
 
     per_q: dict[tuple, dict] = {}
     cusip_ticker: dict[str, str] = {}

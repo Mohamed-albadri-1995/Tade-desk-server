@@ -167,16 +167,19 @@ _INDEX_HTML = """
  <li><a href="/files/structureddata/data/financial-statement-data-sets/2026q2.zip">not 13f</a></li>
  <li><a href="/data-research/form-13f.html">not a zip</a></li>
 """
+# THE KEY IS THE REPORT QUARTER, WHICH IS NOT THE ONE IN THE NAME. A set
+# named 2026q2 holds the filings that ARRIVED in Q2 2026 — holdings as of
+# 31 March. See the block on _report_quarter below for how that was found.
 _U, _UN = f13.parse_index(_INDEX_HTML)
 ok('a listed quarter resolves to its own url',
-   _U.get((2026, 2), '').endswith('2026q2_form13f.zip'), _U)
+   _U.get((2026, 1), '').endswith('2026q2_form13f.zip'), _U)
 ok('a RELATIVE href gains the host, which is the common case on sec.gov',
-   _U[(2026, 2)].startswith('https://www.sec.gov/files/'), _U[(2026, 2)])
+   _U[(2026, 1)].startswith('https://www.sec.gov/files/'), _U[(2026, 1)])
 ok('...and an absolute one is left alone',
-   _U[(2025, 4)].startswith('https://www.sec.gov/files/'), _U[(2025, 4)])
+   _U[(2025, 3)].startswith('https://www.sec.gov/files/'), _U[(2025, 3)])
 ok('a zip that is not 13F data is not mistaken for one — a quarter number '
    'is not enough to tell them apart', len(_U) == 3, _U)
-ok('a link that is not a zip is ignored', (2026, 2) in _U and len(_U) == 3)
+ok('a link that is not a zip is ignored', (2026, 1) in _U and len(_U) == 3)
 
 ok('a page with no 13F links yields nothing rather than raising',
    f13.parse_index('<a href="/x/2026q2.zip">x</a>') == ({}, []))
@@ -203,7 +206,7 @@ try:
     f13._INDEX.update({'html': '<html/>', 'urls': {}, 'error': None})
     ok('a listing that carries no zips says the page has changed',
        'listed no 13F zips' in f13._index_summary())
-    f13._INDEX.update({'urls': {(2026, 2): 'https://x/2026q2_form13f.zip'},
+    f13._INDEX.update({'urls': {(2026, 1): 'https://x/2026q2_form13f.zip'},
                        'error': None})
     ok('...and when links ARE found it names them, which is the line that '
        'ends the guessing',
@@ -251,30 +254,83 @@ print('== the newer naming, and what still cannot be read ==')
 
 _MIXED = """
  <a href="/files/x/2023q4_form13f.zip">2023 Q4</a>
- <a href="/files/x/01jan2024-31mar2024_form13f.zip">Jan-Mar 2024</a>
- <a href="/files/x/01apr2026-30jun2026_form13f.zip">Apr-Jun 2026</a>
+ <a href="/files/x/01dec2023-29feb2024_form13f.zip">Dec-Feb</a>
+ <a href="/files/x/01mar2026-31may2026_form13f.zip">Mar-May 2026</a>
  <a href="/files/x/form13f_no_date_at_all.zip">mystery</a>
 """
 _M, _MU = f13.parse_index(_MIXED)
 ok('a date-range filename is placed in its quarter',
-   _M.get((2024, 1), '').endswith('01jan2024-31mar2024_form13f.zip'), _M)
+   _M.get((2023, 4), '').endswith('01dec2023-29feb2024_form13f.zip'), _M)
 ok('...including one the old pattern could never see',
-   (2026, 2) in _M, sorted(_M))
-ok('the YYYYqN form still works beside it', (2023, 4) in _M, sorted(_M))
+   (2026, 1) in _M, sorted(_M))
+ok('the YYYYqN form still works beside it', (2023, 3) in _M, sorted(_M))
 ok('a 13F zip it CANNOT place is named rather than dropped',
    _MU == ['form13f_no_date_at_all.zip'], _MU)
 
-# The end date, not the start: a set is named for the period it covers, and
-# where a range straddles a boundary the quarter it belongs to is the one it
-# finishes in — the same rule the filing deadline uses.
-ok('a range is dated by where it ENDS',
-   f13._quarter_of('01mar2024-31may2024_form13f.zip') == (2024, 2),
-   f13._quarter_of('01mar2024-31may2024_form13f.zip'))
-ok('every month maps to the right quarter',
-   [f13._quarter_of(f'01{m}2025_form13f.zip')[1] for m in
-    ('jan', 'apr', 'jul', 'oct')] == [1, 2, 3, 4])
+
+# ── AND THE QUARTER IN THE NAME IS NOT THE QUARTER IN THE DATA ──────────
+#
+# Read in September 2026, off a live card:
+#
+#     "it's until q2 2026 now we are in September?"
+#
+# Which is the whole bug in seven words. The build had just reported
+#
+#     ok - 3576 tickers over ['2025Q3','2025Q4','2026Q1','2026Q2']
+#
+# from these four files, and every label was one quarter too new:
+#
+#     01jun2025-31aug2025   01sep2025-30nov2025
+#     01dec2025-28feb2026   01mar2026-31may2026
+#
+# The SEC names a data set for the window in which the filings ARRIVED. A 13F
+# is due 45 days after the quarter it describes ends, so the report quarter is
+# the one whose deadline falls inside the window — the last quarter to have
+# ended when the window opened. The previous version of this file dated a
+# range by where it FINISHES and carried a comment justifying it. The comment
+# was confident and wrong, which is the only kind that survives review.
+print()
+print('== a filing window is not a report quarter ==')
+
+ok('a range is dated by where it OPENS, and by the deadline that opening '
+   'implies — Mar-May 2026 is holdings as of 31 March',
+   f13._quarter_of('01mar2026-31may2026_form13f.zip') == (2026, 1),
+   f13._quarter_of('01mar2026-31may2026_form13f.zip'))
+ok('...the four the live run mislabelled now read as filed',
+   [f13._quarter_of(n) for n in
+    ('01jun2025-31aug2025_form13f.zip', '01sep2025-30nov2025_form13f.zip',
+     '01dec2025-28feb2026_form13f.zip', '01mar2026-31may2026_form13f.zip')]
+   == [(2025, 2), (2025, 3), (2025, 4), (2026, 1)],
+   [f13._quarter_of(n) for n in
+    ('01jun2025-31aug2025_form13f.zip', '01sep2025-30nov2025_form13f.zip',
+     '01dec2025-28feb2026_form13f.zip', '01mar2026-31may2026_form13f.zip')])
+ok('the older calendar-quarter naming is a filing window too: 2023q4 is what '
+   'arrived Oct-Dec 2023, which is Q3',
+   f13._quarter_of('2023q4_form13f.zip') == (2023, 3),
+   f13._quarter_of('2023q4_form13f.zip'))
+# WHY THAT READING AND NOT THE OTHER. The listing runs 2013q2 ... 2023q4 —
+# 43 files, exactly every calendar quarter — and then continues
+# 01dec2023-29feb2024 and on. Read as filing windows the two namings form one
+# unbroken run of report quarters. Read the old half as report quarters and
+# the seam repeats 2023Q4 twice. Continuity is the evidence, so it is a test.
+ok('the seam between the two namings is continuous — no quarter repeated, '
+   'none lost, which is what says the reading is right',
+   f13._quarter_of('2023q3_form13f.zip') == (2023, 2)
+   and f13._quarter_of('2023q4_form13f.zip') == (2023, 3)
+   and f13._quarter_of('01dec2023-29feb2024_form13f.zip') == (2023, 4)
+   and f13._quarter_of('01mar2024-31may2024_form13f.zip') == (2024, 1))
+ok('every window-opening month maps to the quarter that had ended by then',
+   [f13._quarter_of(f'01{m}2025-x_form13f.zip') for m in
+    ('mar', 'jun', 'sep', 'dec')]
+   == [(2025, 1), (2025, 2), (2025, 3), (2025, 4)])
+ok('...and a January opening belongs to the year before, not to Q1',
+   f13._quarter_of('01jan2025-31mar2025_form13f.zip') == (2024, 4),
+   f13._quarter_of('01jan2025-31mar2025_form13f.zip'))
 ok('a name with no date at all is unreadable, not guessed',
    f13._quarter_of('form13f.zip') is None)
+ok('the words that caught it are recorded where the rule is',
+   'now we are in September' in
+   (pathlib.Path(__file__).resolve().parents[1] / 'f13.py').read_text())
 
 SRC2 = (pathlib.Path(__file__).resolve().parents[1] / 'f13.py').read_text()
 ok('the unplaced names reach the log, which is the point of keeping them',
@@ -289,7 +345,13 @@ ok('the silence that hid this is recorded where the parser is',
 # asked for 2025Q3-2026Q2, the listing offered nothing past 2023Q4, and the
 # whole letter was dropped because four specific quarters were absent.
 ok('build falls back to the newest quarters the index actually has',
-   'not any(k in have for k in qs)' in SRC2 and 'fell_back' in SRC2)
+   'k <= qs[-1]' in SRC2 and 'fell_back' in SRC2)
+# AND IT SLIDES WHEN ONLY THE NEWEST IS MISSING, which is the ordinary case:
+# the deadline passing is not the SEC publishing. The old condition fired only
+# when NONE of the four existed, so the usual night — three of four listed —
+# silently returned a three-quarter history instead of four.
+ok('...even when only some of the wanted quarters are missing, so the history '
+   'keeps its length', 'SOME, NOT NONE' in SRC2)
 ok('...and says so, so a fallback cannot pass for a normal night',
    "'fell_back': fell_back" in SRC2)
 ok('the published file still carries the quarters it used, which the card '
