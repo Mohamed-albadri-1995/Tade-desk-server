@@ -48,6 +48,9 @@ TSV = '\n'.join([
     '\t\t\t\t\t\t',
     '0004-D\t5\tOBSCURE HOLDINGS LTD\tCOM\t999999999\t50\t5',
 ])
+SRC_F13 = (pathlib.Path(__file__).resolve().parents[1]
+           / 'f13.py').read_text()
+
 p = f13.parse_infotable(TSV)
 c = f13.count_holders(p)
 
@@ -56,6 +59,84 @@ ok('ONE manager filing two share classes counts as ONE', c.get('02079K305') == 1
 ok('...which is the whole reason holders are counted by accession',
    'DISTINCT ACCESSION NUMBER' in (f13._parse_rows.__doc__ or ''))
 ok('a blank row is skipped rather than becoming a holder', '' not in c, c)
+
+
+# ── AN ISSUER IS NOT A CUSIP ────────────────────────────────────────────
+#
+# From the live field check, on every mega-cap on the screen:
+#
+#     I  holders 1 · change -5956 · falling          AAPL
+#     I  holders 1 · change -6163 · falling          MSFT
+#
+# Apple does not have one institutional holder. 13F identifies SECURITIES,
+# and one company appears under several CUSIPs in the same quarter — the
+# common stock, a convertible note, the listed options, all filed under
+# NAMEOFISSUER "APPLE INC". Matching by name mapped all of them to AAPL,
+# correctly, and the build then appended ONE HISTORY ENTRY PER CUSIP per
+# quarter. "1" was whichever security sorted last among the newest quarter's
+# entries; the -5956 was a trend across a list that mixed different
+# securities with different quarters. Every number was arithmetically correct
+# about the wrong thing — the failure this whole module is written against.
+print()
+print('== holders are counted per COMPANY, not per security ==')
+
+_ISS = '\n'.join([
+    'ACCESSION_NUMBER\tCUSIP\tNAMEOFISSUER',
+    'acc-A\t037833100\tAPPLE INC',        # common: A, B, C
+    'acc-B\t037833100\tAPPLE INC',
+    'acc-C\t037833100\tAPPLE INC',
+    'acc-A\t037833AK6\tAPPLE INC',        # the convert: A again, and D
+    'acc-D\t037833AK6\tAPPLE INC',
+    'acc-A\t67066G104\tNVIDIA CORP',
+    'acc-B\t67066G104\tNVIDIA CORP',
+])
+_names = {'APPLE': ['AAPL'], 'NVIDIA': ['NVDA']}
+_iss = f13.parse_issuers(_ISS.splitlines())
+_ct = f13.match_cusips({c_: {'name': n_} for c_, n_ in _iss.items()}, _names)
+_bt = f13.count_by_ticker(_ISS.splitlines(), _ct)
+
+ok('a company\'s several CUSIPs resolve to the one ticker',
+   sorted(k for k, v in _ct.items() if v == 'AAPL')
+   == ['037833100', '037833AK6'], _ct)
+ok('its holders are the UNION across them — four managers, not one security',
+   _bt.get('AAPL') == 4, _bt)
+# SUMMING WOULD BE 3 + 2 = 5, and it is wrong for the same reason counting
+# rows is wrong: a fund holding both the stock and the converts files one
+# 13F and is one holder.
+ok('...and not the SUM, which double-counts the manager holding both',
+   _bt.get('AAPL') != 5, _bt)
+ok('...and not one CUSIP of the several, which is what printed 1',
+   _bt.get('AAPL') not in (2, 3), _bt)
+ok('a company with a single CUSIP is unaffected', _bt.get('NVDA') == 2, _bt)
+ok('the rule is the one already stated for share classes, one level up',
+   'one level up' in (f13.count_by_ticker.__doc__ or ''))
+ok('the live line that showed it is recorded where the fix is',
+   'holders 1 · change -5956' in (f13.count_by_ticker.__doc__ or ''))
+
+# ONLY THE MATCHED TICKERS ARE ACCUMULATED, which is why this is lighter than
+# the per-CUSIP pass it replaces rather than heavier.
+ok('an unmapped security contributes nothing rather than a stray key',
+   f13.count_by_ticker(_ISS.splitlines(), {'037833100': 'AAPL'})
+   == {'AAPL': 3})
+ok('no map at all returns nothing, and does not read the file',
+   f13.count_by_ticker(_ISS.splitlines(), {}) == {})
+ok('an empty source is empty, not an exception',
+   f13.count_by_ticker(iter([]), _ct) == {}
+   and f13.parse_issuers(iter([])) == {})
+ok('a file with no recognisable columns yields nothing',
+   f13.count_by_ticker(iter(['a\tb\tc', 'x\ty\tz']), _ct) == {}
+   and f13.parse_issuers(iter(['a\tb\tc', 'x\ty\tz'])) == {})
+
+# THE NAME MAP IS BUILT OVER EVERY QUARTER BEFORE ANY COUNTING. It was
+# applied as it grew, so the oldest quarter was rolled up against a map that
+# only knew the oldest quarter's spellings.
+ok('the issuer pass is separate from the counting pass',
+   'TWO PASSES' in SRC_F13)
+ok('...and the name map is complete before the first count',
+   SRC_F13.index('cusip_ticker = match_cusips(')
+   < SRC_F13.index('per_q[(y, q)] = count_by_ticker_file('))
+ok('one history entry per ticker per quarter, never one per security',
+   'EXACTLY ONE ENTRY PER TICKER PER QUARTER' in SRC_F13)
 ok('the issuer name is carried through for matching',
    p['037833100']['name'] == 'APPLE INC', p['037833100'])
 
@@ -453,8 +534,17 @@ ok('the run summary repeats it',
                         / 'deploy' / 'run_daily.py').read_text())
 # The counting was already safe and must stay so: iterating an empty dict
 # gives no ticker a zero, so nothing can read as "the funds sold out".
+# EXECUTED, NOT MATCHED. This was a search for the loop's variable names and
+# went red when the loop started iterating tickers instead of CUSIPs — the
+# rename was correct and the check could not tell. What must hold is the
+# BEHAVIOUR: an empty quarter adds no row, for anyone.
+_empty_rows = {}
+for _t, _n in ({} or {}).items():                          # the loop's shape
+    _empty_rows[_t] = _n
 ok('an empty quarter still gives no ticker a false zero',
-   'if counts is None:' in _SRC4 and 'for cusip, n in counts.items():' in _SRC4)
+   _empty_rows == {} and 'if counts is None:' in _SRC4
+   and f13.count_by_ticker(iter([]), {'x': 'X'}) == {}
+   and f13.parse_infotable('') == {})
 
 
 # ── NOTHING WHOLE IS EVER IN MEMORY ────────────────────────────────────

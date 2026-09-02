@@ -221,6 +221,126 @@ def count_holders(parsed: dict) -> dict:
     return {c: len(r['accessions']) for c, r in (parsed or {}).items()}
 
 
+def _columns(header: str):
+    """(accession index, cusip index, name index or None), or None."""
+    head = [h.strip().upper() for h in (header or '').rstrip('\n').split('\t')]
+    try:
+        return (head.index('ACCESSION_NUMBER'), head.index('CUSIP'),
+                head.index('NAMEOFISSUER') if 'NAMEOFISSUER' in head else None)
+    except ValueError:
+        return None
+
+
+def parse_issuers(lines) -> dict:
+    """{cusip: issuer name}, and nothing else.
+
+    THE CHEAP HALF OF THE FILE, and it has to be read on its own.
+
+    Working out which ticker a CUSIP belongs to needs only its NAME. Counting
+    holders needs its ACCESSION NUMBERS, which are the millions of rows. Split
+    apart, the whole name map can be built across every quarter before any
+    counting starts — and it has to be, because the map only ever grows: an
+    issuer whose name is spelled recognisably in the newest quarter is the
+    same issuer in the oldest, and rolling counts up before the map is
+    complete attributes the oldest quarter's holders to nobody.
+    """
+    out: dict[str, str] = {}
+    it = iter(lines)
+    try:
+        cols = _columns(next(it))
+    except StopIteration:
+        return out
+    if not cols:
+        return out
+    _, i_cusip, i_name = cols
+    if i_name is None:
+        return out
+    for line in it:
+        parts = line.rstrip('\n').split('\t')
+        if len(parts) <= max(i_cusip, i_name):
+            continue
+        cusip = parts[i_cusip].strip().upper()
+        if cusip and cusip not in out:
+            name = parts[i_name].strip()
+            if name:
+                out[cusip] = name
+    return out
+
+
+def count_by_ticker(lines, cusip_ticker: dict) -> dict:
+    """{ticker: distinct managers holding this ISSUER}, over any line source.
+
+    AN ISSUER IS NOT A CUSIP, AND THAT IS THE WHOLE CORRECTION.
+
+    13F identifies securities, not companies. One company routinely appears
+    under several CUSIPs in the same quarter — the common stock, a convertible
+    note, and the listed options all carry NAMEOFISSUER "APPLE INC" — so
+    matching by name maps several CUSIPs to one ticker, correctly.
+
+    The old code then counted holders PER CUSIP and appended one entry per
+    CUSIP per quarter to the ticker's history. Live, on every mega-cap:
+
+        I  holders 1 · change -5956 · falling
+
+    "1" was whichever CUSIP happened to sort last among the newest quarter's
+    entries — a bond nobody holds — and the -5956 was a trend computed across
+    a list that mixed different securities with different quarters. Every
+    number was arithmetically correct about the wrong thing.
+
+    Counting the UNION of accessions across a ticker's CUSIPs is the answer,
+    and summing them is not: a fund holding both the stock and the converts
+    files one 13F and is one holder. That is the rule this module already
+    states for share classes within a CUSIP — "a manager reporting three share
+    classes of one issuer is one holder, not three" — applied one level up,
+    where it was being broken.
+
+    STREAMED, and lighter than what it replaces: only the ~3,500 tickers that
+    matched are accumulated, not all ~34,000 securities, and the accession ids
+    are interned exactly as in `_parse_rows`.
+    """
+    acc: dict[str, set] = {}
+    if not cusip_ticker:
+        return {}
+    it = iter(lines)
+    try:
+        cols = _columns(next(it))
+    except StopIteration:
+        return {}
+    if not cols:
+        return {}
+    i_acc, i_cusip, _ = cols
+    ids: dict = {}
+    for line in it:
+        parts = line.rstrip('\n').split('\t')
+        if len(parts) <= max(i_acc, i_cusip):
+            continue
+        t = cusip_ticker.get(parts[i_cusip].strip().upper())
+        if t is None:
+            continue
+        a = parts[i_acc].strip()
+        aid = ids.get(a)
+        if aid is None:
+            aid = ids[a] = len(ids)
+        s = acc.get(t)
+        if s is None:
+            acc[t] = {aid}
+        else:
+            s.add(aid)
+    return {t: len(s) for t, s in acc.items()}
+
+
+def parse_issuers_file(path) -> dict:
+    """`parse_issuers`, a line at a time from disk. Flat memory."""
+    with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+        return parse_issuers(fh)
+
+
+def count_by_ticker_file(path, cusip_ticker: dict) -> dict:
+    """`count_by_ticker`, a line at a time from disk. Flat memory."""
+    with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+        return count_by_ticker(fh, cusip_ticker)
+
+
 def match_cusips(parsed: dict, name_to_tickers: dict) -> dict:
     """{cusip: ticker}, by exact match on the normalised issuer name.
 
@@ -692,20 +812,37 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
             log(f'  {fell_back}')
             qs = list(reversed(avail))
 
-    per_q: dict[tuple, dict] = {}
-    cusip_ticker: dict[str, str] = {}
+    # TWO PASSES, AND THE ORDER OF THEM IS THE POINT.
+    #
+    # The CUSIP→ticker map only ever grows: a CUSIP matched in ANY quarter is
+    # used in all of them, so one quarter writing the name differently does
+    # not punch a hole in the history. That was already true and it was
+    # applied too late — counts for the first quarter were rolled up against a
+    # map that only knew the first quarter's names.
+    #
+    # So: every issuer name first (cheap — names, no accession sets), the map
+    # once, then the counting. Each file is read twice and the second read
+    # keeps only the ~3,500 matched tickers rather than all ~34,000
+    # securities, so this is faster in memory than the single pass it
+    # replaces and about thirty seconds slower on the clock.
+    issuers: dict[str, str] = {}
+    paths = []
     for (y, q) in qs:
         path = fetch_quarter(y, q, log=log)
         if path is None:
             continue
-        parsed = parse_infotable_file(path)
-        # The CUSIP map only ever grows: a CUSIP matched in ANY quarter is
-        # used in all of them, so one quarter writing the name differently
-        # does not punch a hole in the history.
-        cusip_ticker.update(match_cusips(parsed, names))
-        per_q[(y, q)] = count_holders(parsed)
-        log(f'  {y}Q{q}: {len(parsed)} securities, '
-            f'{len(cusip_ticker)} mapped to tickers so far')
+        paths.append(((y, q), path))
+        for cusip, name in parse_issuers_file(path).items():
+            issuers.setdefault(cusip, name)
+    cusip_ticker = match_cusips({c: {'name': n} for c, n in issuers.items()},
+                                names)
+    log(f'  {len(issuers)} securities over {len(paths)} quarters, '
+        f'{len(cusip_ticker)} mapped to tickers')
+
+    per_q: dict[tuple, dict] = {}
+    for (y, q), path in paths:
+        per_q[(y, q)] = count_by_ticker_file(path, cusip_ticker)
+        log(f'  {y}Q{q}: {len(per_q[(y, q)])} tickers with a holder count')
 
     if not per_q:
         return {'ok': False, 'error': 'no 13F quarters could be fetched',
@@ -718,10 +855,11 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
         if counts is None:
             continue
         label = f'{y}Q{q}'
-        for cusip, n in counts.items():
-            t = cusip_ticker.get(cusip)
-            if not t:
-                continue
+        # EXACTLY ONE ENTRY PER TICKER PER QUARTER. It used to append one per
+        # CUSIP, so a company with a bond and listed options got three entries
+        # for the same quarter — and `[-1]` then read the last of them as "the
+        # holder count", while `trend` read the whole mixed list as a history.
+        for t, n in counts.items():
             row = by_ticker.setdefault(t, {'quarters': []})
             row['quarters'].append({'q': label, 'funds': n})
 
