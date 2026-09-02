@@ -271,26 +271,59 @@ def _name_index() -> dict:
 _ZIP_HREF = re.compile(r'href\s*=\s*["\']([^"\']+\.zip)["\']', re.I)
 # 2026q2, 2026Q2, 2026-q2, "2026 Q2" — the SEC has written it every way.
 _QUARTER = re.compile(r'(20\d\d)\D{0,3}[qQ]([1-4])')
+# ...AND SOMETIMES NOT AS A QUARTER AT ALL. The newer sets are named for the
+# period they cover — 01jan2024-31mar2024_form13f.zip — which carries the same
+# fact in a shape the pattern above cannot see.
+_DATED = re.compile(r'(\d{1,2})([a-z]{3})(20\d\d)', re.I)
+_MONTHS = {m: i + 1 for i, m in enumerate(
+    ('jan', 'feb', 'mar', 'apr', 'may', 'jun',
+     'jul', 'aug', 'sep', 'oct', 'nov', 'dec'))}
 
 
-def parse_index(html: str) -> dict:
-    """(year, quarter) → absolute URL, from the SEC's own listing page.
+def _quarter_of(name: str):
+    """(year, quarter) from a filename, or None if it cannot be read."""
+    m = _QUARTER.search(name)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    # THE END DATE, NOT THE START. A range is named for the period it covers,
+    # and where one straddles a boundary the quarter it belongs to is the one
+    # it finishes in — the same rule the filing deadline uses.
+    dates = _DATED.findall(name)
+    if dates:
+        _, mon, year = dates[-1]
+        mi = _MONTHS.get(mon.lower())
+        if mi:
+            return int(year), (mi - 1) // 3 + 1
+    return None
+
+
+def parse_index(html: str):
+    """((year, quarter) → absolute URL, [names it could not place]).
 
     PURE, so the parsing is provable without the network — which matters more
     here than anywhere else in this module, because the network is exactly
     what could not be checked when the guessed patterns were written.
 
-    Only links that look like 13F data are kept: the page carries other zips,
-    and a quarter number is not enough on its own to tell them apart.
+    WHAT IT COULD NOT PLACE IS RETURNED, NOT DISCARDED. The first version did
+    `if not m: continue`, and that silence was the whole bug: the page listed
+    43 zips it could read, all of them 2023Q4 or older, and however many it
+    could not — while the job asked for 2026Q2 and reported only that its own
+    guesses had 404'd. A parser that drops input without saying so is the same
+    fault as a URL that is guessed without being checked.
+
+    Only links that look like 13F data are considered: the page carries other
+    zips, and a quarter number alone does not tell them apart.
     """
-    out = {}
+    out, unplaced = {}, []
     for href in _ZIP_HREF.findall(html or ''):
         if '13f' not in href.lower():
             continue
-        m = _QUARTER.search(href.rsplit('/', 1)[-1])
-        if not m:
+        name = href.rsplit('/', 1)[-1]
+        key = _quarter_of(name)
+        if key is None:
+            if name not in unplaced:
+                unplaced.append(name)
             continue
-        key = (int(m.group(1)), int(m.group(2)))
         # RELATIVE LINKS ARE THE COMMON CASE on sec.gov — the page writes
         # "/files/…", and a bare join would produce a path with no host.
         url = href if href.startswith('http') else 'https://www.sec.gov' + (
@@ -298,11 +331,11 @@ def parse_index(html: str) -> dict:
         # First link for a quarter wins: the page lists newest first, and a
         # later duplicate is an archive copy of the same data.
         out.setdefault(key, url)
-    return out
+    return out, unplaced
 
 
 # One page fetch per run, not one per quarter.
-_INDEX = {'html': None, 'urls': None, 'error': None}
+_INDEX = {'html': None, 'urls': None, 'error': None, 'unplaced': []}
 
 
 def discover_urls(log=print) -> dict:
@@ -323,9 +356,14 @@ def discover_urls(log=print) -> dict:
         _INDEX['error'] = f'{INDEX_URL} — {str(e)[:80]}'
         log(f'  13F index unreachable: {_INDEX["error"]}')
         return {}
-    _INDEX['urls'] = parse_index(_INDEX['html'])
+    _INDEX['urls'], _INDEX['unplaced'] = parse_index(_INDEX['html'])
     log(f'  13F index: {len(_INDEX["urls"])} quarterly zips listed'
-        + (f' — newest {max(_INDEX["urls"])}' if _INDEX['urls'] else ''))
+        + (f' — newest {max(_INDEX["urls"])}' if _INDEX['urls'] else '')
+        # NAMED, NOT COUNTED. If the SEC has moved to a naming this cannot
+        # read, these are the filenames that say so — and one line of them
+        # ends the guessing for good.
+        + (f' · {len(_INDEX["unplaced"])} could not be placed: '
+           f'{", ".join(_INDEX["unplaced"][:4])}' if _INDEX['unplaced'] else ''))
     return _INDEX['urls']
 
 
@@ -338,7 +376,11 @@ def _index_summary() -> str:
         return ('index reachable but listed no 13F zips — the page layout or '
                 f'its address has changed ({INDEX_URL})')
     names = [u.rsplit('/', 1)[-1] for _, u in sorted(urls.items(), reverse=True)]
-    return f'{len(urls)} listed, newest: {", ".join(names[:4])}'
+    out = f'{len(urls)} listed, newest: {", ".join(names[:4])}'
+    if _INDEX.get('unplaced'):
+        out += (f' · {len(_INDEX["unplaced"])} UNPLACED: '
+                f'{", ".join(_INDEX["unplaced"][:4])}')
+    return out
 
 
 def fetch_quarter(y: int, q: int, log=print) -> str | None:
@@ -397,6 +439,28 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
         return {'ok': False, 'error': 'no SIC cache yet — run the SIC pass first'}
 
     qs = recent_quarters(quarters)
+
+    # WHAT THE SEC HAS, NOT ONLY WHAT THE CALENDAR SAYS.
+    #
+    # recent_quarters() is right about the filing deadline and useless on its
+    # own: it asked for 2025Q3-2026Q2, the listing offered nothing past
+    # 2023Q4, and the whole letter was dropped because four specific quarters
+    # were absent. Sponsorship from an older quarter is still sponsorship —
+    # and the file carries its own `quarters`, which the card prints, so
+    # nothing here can pass itself off as current.
+    #
+    # The wanted quarters are still preferred. This only decides what to do
+    # when none of them exist.
+    fell_back = None
+    have = discover_urls(log)
+    if have and not any(k in have for k in qs):
+        newest = sorted(have, reverse=True)[:quarters]
+        if newest:
+            fell_back = (f"{qs[-1][0]}Q{qs[-1][1]} not published; using "
+                         f"{newest[0][0]}Q{newest[0][1]} and back")
+            log(f'  {fell_back}')
+            qs = list(reversed(newest))
+
     per_q: dict[tuple, dict] = {}
     cusip_ticker: dict[str, str] = {}
     for (y, q) in qs:
@@ -414,7 +478,8 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
 
     if not per_q:
         return {'ok': False, 'error': 'no 13F quarters could be fetched',
-                'quarters_wanted': [f'{y}Q{q}' for y, q in qs]}
+                'quarters_wanted': [f'{y}Q{q}' for y, q in qs],
+                'index': _index_summary()}
 
     by_ticker: dict[str, dict] = {}
     for (y, q) in qs:
@@ -439,6 +504,10 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
         'ok': True,
         'built_at': _dt.datetime.now(_dt.timezone.utc).isoformat(timespec='seconds'),
         'quarters': [f'{y}Q{q}' for y, q in qs if (y, q) in per_q],
+        # SAID OUT LOUD when the data is not the quarters the calendar asked
+        # for. The card prints `quarters` either way, but a run summary that
+        # does not mention it lets a fallback pass for a normal night.
+        'fell_back': fell_back,
         'tickers': len(by_ticker),
         'securities_seen': len(cusip_ticker),
         'coverage_note': (

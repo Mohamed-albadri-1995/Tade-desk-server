@@ -68,21 +68,35 @@ ok('the reason the screener universe is not enough is written down',
    or "tomorrow's screener returns names" in DAILY)
 
 # ── ordering: resumable, and coverage only grows ────────────────────────
+#
+# REAL FILES WITH REAL MTIMES, not a stubbed age function. The stub used to
+# stand in for the whole staleness decision, and when that decision moved into
+# cached() — where the schema check already lived — the stub stopped
+# describing anything. A fixture that fakes the thing under test passes for as
+# long as nobody looks.
+import os as _os                                           # noqa: E402
+import tempfile as _tf                                     # noqa: E402
+import time as _t2                                         # noqa: E402
+
 AGES = {'NEW': None, 'STALE': 30.0, 'OLDISH': 9.0, 'FRESH': 1.0}
-edgar_age = edgar._cache_age_days
+_cache_was = edgar.CACHE
+seen = []
+real_build = edgar.build
 try:
-    edgar._cache_age_days = lambda t: AGES.get(str(t).upper(), None)
-    seen = []
-    real_build = edgar.build
-    try:
-        edgar.build = lambda t: (seen.append(t) or {'ticker': t, 'ok': False,
-                                                    'error': 'stubbed'})
-        out = edgar.walk(['FRESH', 'STALE', 'NEW', 'OLDISH'], refresh_days=5,
-                         budget_s=0, log=lambda *_: None)
-    finally:
-        edgar.build = real_build
+    edgar.CACHE = pathlib.Path(_tf.mkdtemp())
+    for _t, _age in AGES.items():
+        if _age is None:
+            continue                       # NEW has nothing on disk at all
+        edgar.write_cached({'ticker': _t, 'ok': True, 'schema': edgar.SCHEMA})
+        _when = _t2.time() - _age * 86400
+        _os.utime(edgar.CACHE / f'{_t}.json', (_when, _when))
+    edgar.build = lambda t: (seen.append(t) or {'ticker': t, 'ok': False,
+                                                'error': 'stubbed'})
+    out = edgar.walk(['FRESH', 'STALE', 'NEW', 'OLDISH'], refresh_days=5,
+                     budget_s=0, log=lambda *_: None)
 finally:
-    edgar._cache_age_days = edgar_age
+    edgar.build = real_build
+    edgar.CACHE = _cache_was
 
 ok('a name with nothing on disk is fetched FIRST, so a universe that grew '
    'today is covered tonight rather than behind a queue of refreshes',

@@ -377,6 +377,56 @@ ok('...and a real verdict is still reached when there IS evidence',
 ok('the reason is written down where the change is',
    'a verdict on evidence that does not exist' in EDG)
 
+
+# ── H. TWO READERS OF ONE CACHE MUST AGREE IT EXISTS ───────────────────
+#
+# The schema check went into cached() and NOT into what the walk uses to
+# decide its work list, which read file mtime only. From the live run, both
+# lines true at the same moment:
+#
+#     the cards   "not fetched yet" on every stock
+#     the walk    "14612 in universe · 14606 already fresh · 0 to fetch"
+#
+# Neither is wrong alone. Together they lock: the cards will not read what the
+# walk will not rewrite, so C and A stay empty PERMANENTLY rather than for a
+# week. This is a test and not a comment because a comment would not have
+# caught it — the first version of this fix had one.
+print()
+print('== H. the walk and the cards ask the same question ==')
+import tempfile as _tf2                                    # noqa: E402
+
+_old = edgar.CACHE
+_seen = []
+_rb = edgar.build
+try:
+    edgar.CACHE = pathlib.Path(_tf2.mkdtemp())
+    edgar.write_cached({'ticker': 'STALE', 'ok': True, 'schema': edgar.SCHEMA - 1})
+    edgar.write_cached({'ticker': 'FRESH', 'ok': True, 'schema': edgar.SCHEMA})
+    ok('a previous-schema record is invisible to the reader, as intended',
+       edgar.cached('STALE') is None)
+    edgar.build = lambda t: (_seen.append(t) or {'ticker': t, 'ok': False,
+                                                 'error': 'stub'})
+    _o = edgar.walk(['STALE', 'FRESH', 'ABSENT'], budget_s=0,
+                    log=lambda *_: None)
+    ok('...and the WALK agrees it is missing, so the cache can refill — this '
+       'is the deadlock', 'STALE' in _seen, _seen)
+    ok('a record at the current schema is still skipped',
+       'FRESH' not in _seen, _seen)
+    ok('one never written is still fetched first',
+       _seen and _seen[0] == 'ABSENT', _seen)
+    ok('the counts agree with the reader, not with the mtime',
+       _o['todo'] == 2, _o)
+finally:
+    edgar.build = _rb
+    edgar.CACHE = _old
+
+ok('membership is decided by cached(), the reader\'s own question',
+   'cached(t, max_age_days=age) is None' in EDG)
+ok('...and mtime is kept only for ORDERING, which still needs a number',
+   'only for ORDERING' in ' '.join(EDG.split()))
+ok('the live pair of contradictory lines is recorded',
+   '14606 already fresh' in EDG)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

@@ -113,8 +113,10 @@ def main():
     #    to be asked, or a new quarter would land and never be picked up.
     def _f13():
         out = f13.build(log=lambda m: print(f'       {m}', flush=True))
+        if not out.get('ok'):
+            return f"not built: {out.get('error')} · {out.get('index', '')}"
         return (f"{out.get('tickers')} tickers over {out.get('quarters')}"
-                if out.get('ok') else f"not built: {out.get('error')}")
+                + (f" — {out['fell_back']}" if out.get('fell_back') else ''))
     step('institutional sponsorship (I)', _f13)
 
     # 5. THE GROUPS. Last, because it reads everything above it.

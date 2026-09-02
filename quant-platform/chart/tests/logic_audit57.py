@@ -167,7 +167,7 @@ _INDEX_HTML = """
  <li><a href="/files/structureddata/data/financial-statement-data-sets/2026q2.zip">not 13f</a></li>
  <li><a href="/data-research/form-13f.html">not a zip</a></li>
 """
-_U = f13.parse_index(_INDEX_HTML)
+_U, _UN = f13.parse_index(_INDEX_HTML)
 ok('a listed quarter resolves to its own url',
    _U.get((2026, 2), '').endswith('2026q2_form13f.zip'), _U)
 ok('a RELATIVE href gains the host, which is the common case on sec.gov',
@@ -179,9 +179,9 @@ ok('a zip that is not 13F data is not mistaken for one — a quarter number '
 ok('a link that is not a zip is ignored', (2026, 2) in _U and len(_U) == 3)
 
 ok('a page with no 13F links yields nothing rather than raising',
-   f13.parse_index('<a href="/x/2026q2.zip">x</a>') == {})
+   f13.parse_index('<a href="/x/2026q2.zip">x</a>') == ({}, []))
 ok('...and so does an empty or absent page',
-   f13.parse_index('') == {} and f13.parse_index(None) == {})
+   f13.parse_index('') == ({}, []) and f13.parse_index(None) == ({}, []))
 
 # PURE, so the parsing is provable with no network — which matters more here
 # than anywhere else in this module, because the network is precisely what
@@ -232,6 +232,73 @@ ok('...and it still does not take the other steps down',
    'never take the others down' in DAILY)
 ok('the line that hid this is quoted where the marker is',
    'no 13F quarters' in DAILY)
+
+
+# ── WHAT IT CANNOT PLACE IS NAMED, NOT DROPPED ─────────────────────────
+#
+# The first version of this parser did `if not m: continue`. From the live
+# run, with that silence in place:
+#
+#   13F index: 43 quarterly zips listed — newest (2023, 4)
+#
+# 43 is exactly 2013Q2 → 2023Q4: every quarter the YYYYqN naming ever covered.
+# Everything after it was on the page under another name and was thrown away
+# without a word, while the job reported only that its own guesses had 404'd.
+# A parser that discards input in silence is the same fault as a URL that is
+# guessed without being checked — this module has now made it twice.
+print()
+print('== the newer naming, and what still cannot be read ==')
+
+_MIXED = """
+ <a href="/files/x/2023q4_form13f.zip">2023 Q4</a>
+ <a href="/files/x/01jan2024-31mar2024_form13f.zip">Jan-Mar 2024</a>
+ <a href="/files/x/01apr2026-30jun2026_form13f.zip">Apr-Jun 2026</a>
+ <a href="/files/x/form13f_no_date_at_all.zip">mystery</a>
+"""
+_M, _MU = f13.parse_index(_MIXED)
+ok('a date-range filename is placed in its quarter',
+   _M.get((2024, 1), '').endswith('01jan2024-31mar2024_form13f.zip'), _M)
+ok('...including one the old pattern could never see',
+   (2026, 2) in _M, sorted(_M))
+ok('the YYYYqN form still works beside it', (2023, 4) in _M, sorted(_M))
+ok('a 13F zip it CANNOT place is named rather than dropped',
+   _MU == ['form13f_no_date_at_all.zip'], _MU)
+
+# The end date, not the start: a set is named for the period it covers, and
+# where a range straddles a boundary the quarter it belongs to is the one it
+# finishes in — the same rule the filing deadline uses.
+ok('a range is dated by where it ENDS',
+   f13._quarter_of('01mar2024-31may2024_form13f.zip') == (2024, 2),
+   f13._quarter_of('01mar2024-31may2024_form13f.zip'))
+ok('every month maps to the right quarter',
+   [f13._quarter_of(f'01{m}2025_form13f.zip')[1] for m in
+    ('jan', 'apr', 'jul', 'oct')] == [1, 2, 3, 4])
+ok('a name with no date at all is unreadable, not guessed',
+   f13._quarter_of('form13f.zip') is None)
+
+SRC2 = (pathlib.Path(__file__).resolve().parents[1] / 'f13.py').read_text()
+ok('the unplaced names reach the log, which is the point of keeping them',
+   'could not be placed' in SRC2 and 'UNPLACED' in SRC2)
+ok('the silence that hid this is recorded where the parser is',
+   'DISCARDED, NOT DROPPED' in SRC2 or 'discards input in silence' in SRC2
+   or 'silently dropped' in SRC2 or 'NOT DISCARDED' in SRC2)
+
+# ── AND IT USES WHAT EXISTS ─────────────────────────────────────────────
+#
+# recent_quarters() is right about the filing deadline and useless alone: it
+# asked for 2025Q3-2026Q2, the listing offered nothing past 2023Q4, and the
+# whole letter was dropped because four specific quarters were absent.
+ok('build falls back to the newest quarters the index actually has',
+   'not any(k in have for k in qs)' in SRC2 and 'fell_back' in SRC2)
+ok('...and says so, so a fallback cannot pass for a normal night',
+   "'fell_back': fell_back" in SRC2)
+ok('the published file still carries the quarters it used, which the card '
+   'prints — stale data stays visibly dated',
+   "'quarters': [f'{y}Q{q}'" in SRC2)
+DAILY2 = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
+          / 'run_daily.py').read_text()
+ok('the run summary repeats the fallback', "out['fell_back']" in DAILY2)
+ok('...and a failed build names what the index held', "out.get('index'" in DAILY2)
 
 print()
 print(f'        {PASS} passed, {FAIL} failed')

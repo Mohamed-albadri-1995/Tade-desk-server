@@ -823,8 +823,27 @@ def walk(symbols, refresh_days: float | None = None,
     age = float(REFRESH_DAYS if refresh_days is None else refresh_days)
     budget = float(WALK_BUDGET_S if budget_s is None else budget_s)
 
+    # ONE PREDICATE DECIDES WHAT IS MISSING, AND IT IS THE READER'S.
+    #
+    # THE DEADLOCK THIS FIXES. `cached()` gained a schema check, so every
+    # record written by an older parser became invisible to the cards — which
+    # was the point. But this filter asked `_cache_age_days`, which reads FILE
+    # MTIME and knows nothing about the schema. The two then disagreed about
+    # whether the same 14,606 records existed:
+    #
+    #     the cards      "not fetched yet" on every stock
+    #     the walk       "14606 already fresh · 0 to fetch"
+    #
+    # Neither is wrong alone. Together they lock: the cards will not read what
+    # the walk will not rewrite, and C and A stay empty PERMANENTLY rather
+    # than for a week. A cache with two readers that disagree about what is in
+    # it is worse than a cache with none.
+    #
+    # So membership is `cached()` — the same question, asked once. The mtime
+    # is still computed, but only for ORDERING: "nothing on disk first, then
+    # the stalest" needs a number, and a rejected record still has a date.
     ages = {t: _cache_age_days(t) for t in want}
-    todo = [t for t in want if ages[t] is None or ages[t] > age]
+    todo = [t for t in want if cached(t, max_age_days=age) is None]
 
     # KNOWN FILERS FIRST, and this is worth far more than it looks.
     #
