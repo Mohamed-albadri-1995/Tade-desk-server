@@ -104,7 +104,7 @@ One row per quarter, eight quarters.
 
 | # | Column | Source | Blank means |
 |---|---|---|---|
-| 40 | Qtr | EDGAR | never blank if the row exists |
+| 40 | Qtr — column header reads **`3 mo to`** | EDGAR | never blank if the row exists. See field 50: the same date can head a 12-month row in A |
 | 41 | EPS $ | EDGAR | the filer tagged sales but not EPS that quarter |
 | 42 | **Yr ago (EPS)** | EDGAR | no quarter within 45 days of one year back |
 | 43 | %Chg (EPS) | DESK | `n/a (loss a year ago)` — **correct**, a % from a negative base has no meaning. `n/a` alone = no year-ago quarter |
@@ -122,7 +122,8 @@ the share count moved and the subtraction would be fiction.
 
 | # | Column | Source | Blank means |
 |---|---|---|---|
-| 50 | FY | EDGAR | never blank if the row exists |
+| 50 | FY — column header reads **`12 mo to`** | EDGAR | never blank if the row exists. A fiscal year and its own fourth quarter END ON THE SAME DAY, so this date also appears in C under **`3 mo to`** with a different (three-month) figure. Both are correct |
+| 50a | **From 4 qtrs** | DESK | the year added up out of the C table, so the two can be checked against each other. `N of 4` when fewer are on file — a sum over three would read as a discrepancy in the filings; `—` when none are |
 | 51 | EPS $ | EDGAR | no annual EPS tagged |
 | 52 | %Chg | DESK | `n/a (no prior year filed)` = a gap in the filings. `n/a (loss a year ago)` = correct |
 | 53 | ROE | DESK | `n/a` = **equity is zero or negative** — correct, not a return |

@@ -434,6 +434,87 @@ ok('...and mtime is kept only for ORDERING, which still needs a number',
 ok('the live pair of contradictory lines is recorded',
    '14606 already fresh' in EDG)
 
+# ── ONE DATE, TWO SPANS ────────────────────────────────────────────────
+#
+# Read off a live card, on a filer whose fiscal year ends 31 July:
+#
+#     C — CURRENT QUARTERLY EARNINGS      A — ANNUAL EARNINGS
+#         QTR          EPS $                  FY           EPS $
+#         2025-07-31    0.36                  2025-07-31    1.60
+#
+#     "31-7-2025 earning is showing number on C and another on A"
+#
+# Both figures are right, and the year's four quarters come to exactly the
+# annual one: 0.49 + 0.38 + 0.37 + 0.36 = 1.60. A fiscal year and its own
+# fourth quarter END ON THE SAME DAY. Nothing was wrong except that two tables
+# printed one date against two numbers and neither said which span it meant —
+# which is this file's own subject from the other side: not a number that is
+# false, a true one that reads as false.
+print()
+print('== a fiscal year and its fourth quarter end on the same day ==')
+
+_JUL = {'2024-10-31': 0.49, '2025-01-31': 0.38,
+        '2025-04-30': 0.37, '2025-07-31': 0.36}
+_sum, _of = edgar._year_quarters(_JUL, '2025-07-31')
+ok('the four quarters of a July fiscal year add to the annual figure',
+   _sum == 1.60 and _of == 4, (_sum, _of))
+
+# A PARTIAL YEAR RETURNS ITS COUNT, NOT A SUM. Three quarters shown against a
+# twelve-month figure is a check that fails for a reason that is not the
+# company's, and it would read as a discrepancy in the filings.
+_p_sum, _p_of = edgar._year_quarters(
+    {k: v for k, v in list(_JUL.items())[:3]}, '2025-07-31')
+ok('...and three quarters give a COUNT rather than a sum that would look '
+   'like a discrepancy', _p_sum is None and _p_of == 3, (_p_sum, _p_of))
+ok('no quarters at all is no sum and no count', edgar._year_quarters({}, '2025-07-31') == (None, 0))
+ok('an unreadable year end is refused, not guessed',
+   edgar._year_quarters(_JUL, 'soon') == (None, 0))
+
+# MEASURED IN DAYS FROM THE YEAR END, not by year number. A fiscal year is not
+# the calendar year, and comparing year numbers takes the wrong four quarters
+# for every filer whose year does not end in December.
+_DEC = {'2025-03-31': 1.0, '2025-06-30': 1.0,
+        '2025-09-30': 1.0, '2025-12-31': 1.0}
+ok('a December filer picks up its own four quarters',
+   edgar._year_quarters(_DEC, '2025-12-31') == (4.0, 4))
+ok('...and a year with nothing inside it claims nothing',
+   edgar._year_quarters(_DEC, '2024-12-31') == (None, 0))
+ok('a July filer does not reach into the calendar year beside it',
+   edgar._year_quarters({**_JUL, '2025-10-31': 9.9}, '2025-07-31')[0] == 1.60)
+
+# AND IT REACHES THE TABLE, which is the only place it matters.
+_CF_JUL = {'facts': {'us-gaap': {
+    'EarningsPerShareDiluted': {'units': {'USD/shares': [
+        {'start': '2024-08-01', 'end': '2024-10-31', 'val': 0.49, 'filed': '2024-12-01'},
+        {'start': '2024-11-01', 'end': '2025-01-31', 'val': 0.38, 'filed': '2025-03-01'},
+        {'start': '2025-02-01', 'end': '2025-04-30', 'val': 0.37, 'filed': '2025-06-01'},
+        {'start': '2025-05-01', 'end': '2025-07-31', 'val': 0.36, 'filed': '2025-09-01'},
+        {'start': '2024-08-01', 'end': '2025-07-31', 'val': 1.60, 'filed': '2025-09-01'},
+    ]}}}}}
+_A = edgar.a_table(_CF_JUL)
+_row = _A['rows'][0]
+ok('the annual row carries the year added up from its own quarters',
+   _row['fy'] == '2025-07-31' and _row['eps'] == 1.60
+   and _row['quarters_sum'] == 1.60 and _row['quarters_of'] == 4, _row)
+_C = edgar.c_table(_CF_JUL)
+ok('...and the C table still shows that date as the THREE-month figure, '
+   'which is the pair that looked like a contradiction',
+   [r for r in _C['rows'] if r['quarter'] == '2025-07-31'][0]['eps'] == 0.36,
+   _C['rows'][0])
+
+CARD59 = (pathlib.Path(__file__).resolve().parents[3] / 'public'
+          / 'index.html').read_text()
+ok('the card says the span in both headers, which is where the collision is',
+   '<th>3 mo to</th>' in CARD59 and '<th>12 mo to</th>' in CARD59)
+ok('...and prints the quarters\' sum beside the filed annual figure',
+   'From 4 qtrs' in CARD59 and 'quarters_sum' in CARD59)
+ok('the words that reported it are recorded where the fix is',
+   'showing number on C and another on A' in
+   (pathlib.Path(__file__).resolve().parents[1] / 'edgar.py').read_text())
+ok('the schema was bumped, so no card serves an annual row without it',
+   edgar.SCHEMA >= 4, edgar.SCHEMA)
+
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

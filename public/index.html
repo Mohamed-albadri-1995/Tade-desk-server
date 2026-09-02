@@ -4345,7 +4345,17 @@ const DEFS = {
       + "           straight-line trend, 0-99\n"
       + "  ROE      net income / shareholder equity, against a 17% floor\n\n"
       + "Compounded, never averaged: averaging +100% and -50% gives +25% for "
-      + "a company that ended where it started.",
+      + "a company that ended where it started.\n\n"
+      + "THE SAME DATE APPEARS IN BOTH TABLES AND MEANS TWO DIFFERENT SPANS.\n"
+      + "A fiscal year and its own fourth quarter END ON THE SAME DAY, so a\n"
+      + "filer whose year closes 31 July shows 2025-07-31 in C at 0.36 and in\n"
+      + "A at 1.60. Neither is wrong: one is three months, the other twelve.\n"
+      + "The columns say '3 mo to' and '12 mo to' for exactly this reason,\n"
+      + "and 'From 4 qtrs' adds up that year's four quarters out of the C\n"
+      + "table so the two can be checked against each other on the card:\n"
+      + "0.49 + 0.38 + 0.37 + 0.36 = 1.60. Where fewer than four quarters are\n"
+      + "on file it says how many rather than showing a sum that would look\n"
+      + "like a discrepancy in the filings.",
     not: "WOBBLE IS THE ONE NUMBER HERE WHERE LOW IS GOOD — it is the "
       + "opposite of every other figure on this card, which is why it is "
       + "named rather than left bare. O'Neil wants a straight line, not a "
@@ -4893,7 +4903,15 @@ function canslimTablesHTML(tk, stock) {
   if (f.ok && f.c && f.c.rows && f.c.rows.length) {
     const c = f.c;
     cHtml = `<div class="oneil-dd-wrap"><table class="oneil-dd">
-      <thead><tr><th>Qtr</th><th>EPS $</th><th>Yr ago</th><th>%Chg</th>
+      <!-- "3 mo to", NOT "Qtr". A fiscal year and its own fourth quarter END
+           ON THE SAME DAY, so this table and the annual one printed one date
+           against two different figures and neither said which span it meant.
+           Both were right; nothing said they measured different lengths of
+           time. The worked example lives in DEFS.canslim_a and in
+           edgar._year_quarters — NOT here, because a comment carrying the
+           same date renders into the card and is then indistinguishable from
+           the data when anything counts occurrences of it. -->
+      <thead><tr><th>3 mo to</th><th>EPS $</th><th>Yr ago</th><th>%Chg</th>
         <th>Sales</th><th>Yr ago</th><th>%Chg</th><th>Margin</th></tr></thead>
       <tbody>${c.rows.map(r => `<tr>
         <td>${esc(r.quarter)}</td>
@@ -4919,9 +4937,20 @@ function canslimTablesHTML(tk, stock) {
   if (f.ok && f.a && f.a.rows && f.a.rows.length) {
     const a = f.a;
     aHtml = `<div class="oneil-dd-wrap"><table class="oneil-dd">
-      <thead><tr><th>FY</th><th>EPS $</th><th>%Chg</th><th>ROE</th></tr></thead>
+      <!-- "12 mo to", against C's "3 mo to" — see there. And the SAME YEAR
+           ADDED UP FROM C beside the filed figure, so the two tables can be
+           checked against each other instead of looking like they disagree.
+           The same move as C's YR AGO column, made after the same kind of
+           report. -->
+      <thead><tr><th>12 mo to</th><th>EPS $</th><th>From 4 qtrs</th>
+        <th>%Chg</th><th>ROE</th></tr></thead>
       <tbody>${a.rows.map(r => `<tr>
         <td>${esc(r.fy)}</td><td>${_n(r.eps)}</td>
+        <td style="color:var(--text3)" title="${r.quarters_sum != null
+            ? 'the four quarters of this year, added up — the C table above'
+            : 'a sum over fewer than four quarters is not a check, so none is shown'
+          }">${r.quarters_sum != null ? _n(r.quarters_sum)
+            : r.quarters_of ? `${r.quarters_of} of 4` : '—'}</td>
         <td class="${_sign(r.eps_chg)}">${esc(r.eps_chg_label)}</td>
         <td${r.roe_note ? ` title="${esc(r.roe_note)}"` : ''}>${
           r.roe_pct == null

@@ -435,12 +435,63 @@ def _roe(ni, equity):
     return round(ni / equity * 100, 1)
 
 
+def _year_quarters(quarters: dict, fy_end: str):
+    """(sum of the quarters inside this fiscal year, how many were found).
+
+    THE SAME DATE ENDS TWO DIFFERENT PERIODS, AND THE CARD DID NOT SAY SO.
+    Read off a live card, on a filer whose year ends 31 July:
+
+        C — CURRENT QUARTERLY EARNINGS      A — ANNUAL EARNINGS
+            QTR          EPS $                  FY           EPS $
+            2025-07-31    0.36                  2025-07-31    1.60
+
+        "31-7-2025 earning is showing number on C and another on A"
+
+    Both figures are right. 2025-07-31 is the end of a three-month period AND
+    the end of a twelve-month one, and the year's four quarters come to
+    exactly the annual figure: 0.49 + 0.38 + 0.37 + 0.36 = 1.60. Nothing was
+    wrong except that two tables printed one date against two numbers and
+    neither said which span it meant.
+
+    So the sum travels with the annual row and the card prints it beside the
+    filed figure — the same move as C's YR AGO column, added after the same
+    kind of report: printing the number a comparison was made against is what
+    ends the ambiguity.
+
+    A PARTIAL YEAR RETURNS ITS COUNT, NOT A SUM. Three quarters added up and
+    shown against a twelve-month figure is a check that fails for a reason
+    that is not the company's, and it would read as a discrepancy in the
+    filings. The caller prints the count instead.
+    """
+    try:
+        end = _dt.date.fromisoformat(fy_end)
+    except Exception:                                     # noqa: BLE001
+        return None, 0
+    # Inside the year, by DAYS from the year end — a fiscal year is not the
+    # calendar year, and comparing year numbers would take the wrong four for
+    # every filer whose year does not end in December.
+    inside = []
+    for q_end, val in quarters.items():
+        try:
+            gap = (end - _dt.date.fromisoformat(q_end)).days
+        except Exception:                                 # noqa: BLE001
+            continue
+        if 0 <= gap <= 366 and val is not None:
+            inside.append(val)
+    if len(inside) != 4:
+        return None, len(inside)
+    return round(sum(inside), 2), 4
+
+
 def a_table(cf: dict, years: int = 5) -> dict:
     """A — annual EPS over 3-5 years, the growth rate, stability and ROE."""
     eps_y = _annual(_facts(cf, EPS_TAGS, 'shares'))
     ni_y = _annual(_facts(cf, NET_INCOME_TAGS, 'USD'))
     eq = _facts(cf, EQUITY_TAGS, 'USD')
     eq_by_end = {r['end']: r['val'] for r in eq if r.get('val') is not None}
+    # THE QUARTERS THAT MAKE UP EACH YEAR, so the two tables can be read
+    # against each other. See `_year_quarters` below.
+    eps_q_only = _quarterly(_facts(cf, EPS_TAGS, 'shares'))
 
     ends = sorted(eps_y, reverse=True)[:years]
 
@@ -487,9 +538,15 @@ def a_table(cf: dict, years: int = 5) -> dict:
         else:
             chg, lab = pct_change(eps_y.get(end), eps_y.get(prev) if prev else None)
         ni, equity = ni_y.get(end), eq_by_end.get(end)
+        q_sum, q_of = _year_quarters(eps_q_only, end)
         rows.append({
             'fy': end,
             'eps': eps_y.get(end),
+            # THE SAME YEAR ADDED UP FROM THE C TABLE, so the two tables can
+            # be checked against each other on the card rather than looking
+            # like they disagree. See `_year_quarters`.
+            'quarters_sum': q_sum,
+            'quarters_of': q_of,
             'eps_chg': chg, 'eps_chg_label': lab,
             'roe_pct': _roe(ni, equity),
             # WHY it is absent, since "no filing" and "the arithmetic has no
@@ -693,7 +750,11 @@ def supply(cf: dict) -> dict:
 #      with no history at all, and a share count that is not compared with
 #      itself cannot show a buyback or a dilution, which is the whole of what
 #      O'Neil reads it for
-SCHEMA = 3
+#   4  2026-09-02 — quarters_sum and quarters_of on every annual row. A
+#      fiscal year and its own fourth quarter END ON THE SAME DATE, so the C
+#      and A tables printed one date against two numbers and neither said
+#      which span it meant
+SCHEMA = 4
 
 
 def tables(cf: dict) -> dict:

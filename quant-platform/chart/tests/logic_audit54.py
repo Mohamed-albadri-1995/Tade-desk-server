@@ -350,8 +350,15 @@ ok('the build stamps WHEN, because filings land weeks after quarter-end',
 # an eight-quarter table — so the panel is a full-width surface and the audit
 # checks the columns are actually there.
 UI = (pathlib.Path(__file__).resolve().parents[3] / 'public' / 'index.html').read_text()
-for col in ('Qtr', 'EPS $', '%Chg', 'Sales', 'Margin'):
+# '3 mo to', NOT 'Qtr'. A fiscal year and its own fourth quarter end on the
+# same day, so the C and A tables printed one date against two different
+# figures and neither said which span it meant — read off a live card as
+# "31-7-2025 earning is showing number on C and another on A". The header is
+# where the collision is, so the header is where the span goes.
+for col in ('3 mo to', 'EPS $', '%Chg', 'Sales', 'Margin'):
     ok(f'the C table renders a {col!r} column', f'<th>{col}</th>' in UI)
+ok('...and the annual table names its span too, or the pair still collides',
+   '<th>12 mo to</th>' in UI)
 ok('...and EPS sits beside SALES on every row, which is the check itself',
    'r.sales_chg_label' in UI and 'r.eps_chg_label' in UI)
 ok('the A table shows the ROE against its floor',

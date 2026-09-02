@@ -708,7 +708,11 @@ function liftTables() {
     // opens nothing looks identical to one that works.
     const info = k => '[[def:' + k + ']]';
     const esc = s => String(s == null ? '' : s);
-    const _n = v => (v == null ? '—' : String(v));
+    // THE REAL ONE, LIFTED, NOT A STUB. The page formats EPS to two decimals
+    // and the stub returned String(v), so 1.60 rendered as "1.6" in the test
+    // and as "1.60" on the card — a test asserting a shape the product does
+    // not produce. Number formatting is part of what a reader sees.
+    ${page.match(/const _n = \(v, d\) =>[^;]+;/)[0]}
     const _m = v => (v == null ? '—' : String(v));
     const _sign = v => (v == null ? '' : v >= 0 ? 'pos' : 'neg');
     const fmtShares = v => (v == null ? '—' : (v / 1e6).toFixed(2) + 'M sh');
@@ -1241,5 +1245,97 @@ describe('L — the rung a group rank was computed at', () => {
       expect(out).toContain('4 of 8');
       expect(out).not.toMatch(/undefined|NaN/);
     }
+  });
+});
+
+
+/*
+ * ONE DATE, TWO SPANS.
+ *
+ * Read off a live card, on a filer whose fiscal year ends 31 July:
+ *
+ *     C — QTR 2025-07-31  EPS 0.36        A — FY 2025-07-31  EPS 1.60
+ *
+ *     "31-7-2025 earning is showing number on C and another on A"
+ *
+ * Both right. A fiscal year and its own fourth quarter end on the same day,
+ * and the year's four quarters come to exactly the annual figure:
+ * 0.49 + 0.38 + 0.37 + 0.36 = 1.60. Nothing was wrong except that two tables
+ * printed one date against two numbers and neither said which span it meant.
+ */
+describe('the C and A tables say which SPAN each row covers', () => {
+  const JULY = {
+    ok: true,
+    c: {
+      rows: [
+        { quarter: '2025-07-31', eps: 0.36, eps_chg_label: '+44.0%', eps_chg: 44 },
+        { quarter: '2025-04-30', eps: 0.37, eps_chg_label: '-5.1%', eps_chg: -5.1 },
+      ],
+      accelerating: false, accelerating_of: 3,
+      bar_pct: 25, beat_25: 3, beat_25_of: 8,
+    },
+    a: {
+      rows: [
+        { fy: '2025-07-31', eps: 1.60, quarters_sum: 1.60, quarters_of: 4,
+          eps_chg: -56, eps_chg_label: '-56.0%', roe_pct: 14.5 },
+        { fy: '2024-07-31', eps: 3.64, quarters_sum: null, quarters_of: 2,
+          eps_chg: 468.8, eps_chg_label: '+468.8%', roe_pct: 30.0 },
+      ],
+      growth_3yr_pct: null, stability: 99, roe_pct: 14.5,
+      roe_floor: 17, roe_pass: false,
+    },
+  };
+  const render = (f = JULY) =>
+    liftTables()({ fundamentals: { AAA: f }, bases: {} })('AAA', {});
+
+  test('the quarterly column says three months, not just "Qtr"', () => {
+    expect(render()).toContain('3 mo to');
+  });
+
+  test('the annual column says twelve months, not just "FY"', () => {
+    expect(render()).toContain('12 mo to');
+  });
+
+  test('the same date can appear in both, which is correct and now legible', () => {
+    const out = render();
+    // Twice: once under "3 mo to" at 0.36, once under "12 mo to" at 1.60.
+    expect(out.split('2025-07-31').length - 1).toBe(2);
+    expect(out).toContain('0.36');
+    expect(out).toContain('1.60');
+  });
+
+  test('the year is shown added up from its own four quarters', () => {
+    // 1.60 appears twice on the annual row: as filed, and as the sum.
+    const out = render();
+    expect(out).toContain('From 4 qtrs');
+    expect(out.split('1.60').length - 1).toBeGreaterThanOrEqual(2);
+  });
+
+  /* A SUM OVER FEWER THAN FOUR IS NOT A CHECK. Shown against a twelve-month
+     figure it would read as a discrepancy in the filings, so the count is
+     shown instead. */
+  test('a partial year shows how many quarters it found, not a wrong sum', () => {
+    expect(render()).toContain('2 of 4');
+  });
+
+  test('a year with no quarters at all shows a dash', () => {
+    const none = JSON.parse(JSON.stringify(JULY));
+    none.a.rows[1].quarters_of = 0;
+    const out = render(none);
+    expect(out).toContain('—');
+    expect(out).not.toMatch(/undefined|NaN|0 of 4/);
+  });
+
+  test('an older record without the field renders rather than throwing', () => {
+    const old = JSON.parse(JSON.stringify(JULY));
+    old.a.rows.forEach(r => { delete r.quarters_sum; delete r.quarters_of; });
+    const out = render(old);
+    expect(out).toContain('12 mo to');
+    expect(out).not.toMatch(/undefined|NaN/);
+  });
+
+  test('the definition spells out why one date carries two figures', () => {
+    expect(DEFS.canslim_a.how).toMatch(/TWO DIFFERENT SPANS/);
+    expect(DEFS.canslim_a.how).toMatch(/0\.49 \+ 0\.38 \+ 0\.37 \+ 0\.36 = 1\.60/);
   });
 });
