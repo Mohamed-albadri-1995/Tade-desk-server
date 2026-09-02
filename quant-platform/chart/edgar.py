@@ -204,7 +204,13 @@ def _fill_q4(quarters: dict, years: dict) -> dict:
     Only filled when all three earlier quarters of that fiscal year are
     present — a subtraction with a hole in it is a wrong number rather than a
     missing one, and a wrong number is the thing this file exists to avoid.
+
+    Returns (series, derived_keys). WHICH VALUES WERE DERIVED IS NOT AN
+    IMPLEMENTATION DETAIL: subtraction is exact for dollars and only
+    conditionally valid for anything per-share, so the caller has to be able
+    to tell the two apart. See the reconciliation in c_table.
     """
+    derived: set = set()
     out = dict(quarters)
     for fy_end, fy_val in years.items():
         try:
@@ -226,8 +232,8 @@ def _fill_q4(quarters: dict, years: dict) -> dict:
         inside.sort()
         if len(inside) == 3:
             out[fy_end] = round(fy_val - sum(v for _, v in inside), 6)
-            out.setdefault('_derived', set())
-    return {k: v for k, v in out.items() if not str(k).startswith('_')}
+            derived.add(fy_end)
+    return {k: v for k, v in out.items() if not str(k).startswith('_')}, derived
 
 
 def pct_change(now, then, kind: str = 'eps'):
@@ -292,14 +298,51 @@ def _year_ago(d: dict, end: str):
     return best
 
 
+def _margin(ni, rev):
+    """After-tax margin, bounded. See the note at the call site."""
+    if ni is None or not rev:
+        return None
+    v = ni / rev * 100.0
+    if v > PCT_CAP:
+        return PCT_CAP
+    if v < -PCT_CAP:
+        return -PCT_CAP
+    return round(v, 1)
+
+
 def c_table(cf: dict, quarters: int = 8) -> dict:
     """C — the last eight quarters, each against the SAME quarter a year ago."""
-    eps_q = _fill_q4(_quarterly(_facts(cf, EPS_TAGS, 'shares')),
-                     _annual(_facts(cf, EPS_TAGS, 'shares')))
-    rev_q = _fill_q4(_quarterly(_facts(cf, REVENUE_TAGS, 'USD')),
-                     _annual(_facts(cf, REVENUE_TAGS, 'USD')))
-    ni_q = _fill_q4(_quarterly(_facts(cf, NET_INCOME_TAGS, 'USD')),
-                    _annual(_facts(cf, NET_INCOME_TAGS, 'USD')))
+    eps_q, eps_derived = _fill_q4(_quarterly(_facts(cf, EPS_TAGS, 'shares')),
+                                  _annual(_facts(cf, EPS_TAGS, 'shares')))
+    rev_q, _ = _fill_q4(_quarterly(_facts(cf, REVENUE_TAGS, 'USD')),
+                        _annual(_facts(cf, REVENUE_TAGS, 'USD')))
+    ni_q, ni_derived = _fill_q4(_quarterly(_facts(cf, NET_INCOME_TAGS, 'USD')),
+                                _annual(_facts(cf, NET_INCOME_TAGS, 'USD')))
+
+    # EPS IS A RATIO, AND A RATIO IS NOT ADDITIVE.
+    #
+    # Deriving Q4 as FY minus the first three quarters is exact for dollars —
+    # revenue and net income really do sum. It is only valid for a PER-SHARE
+    # figure while the share count holds still, and the moment a company
+    # reverse-splits or issues heavily it stops being valid: the annual EPS is
+    # struck on a weighted-average count that matches none of the quarters, so
+    # the subtraction returns a number that was never anybody's earnings.
+    #
+    # Live, and it was the largest positive figure in the table: a company
+    # that lost money in every quarter of 2025 — -4.80, -5.07, -4.74 against a
+    # full year of -8.66 — printed Q4 as +5.95. Arithmetically consistent,
+    # financially fictional, and the one row a reader would stop on.
+    #
+    # Net income for the same quarter IS a sound derivation, so it is the
+    # check: if the two disagree about whether the quarter made money, the
+    # share count moved and the EPS subtraction means nothing. Dropped rather
+    # than printed, because a missing quarter is honest and this is not.
+    for end in list(eps_derived):
+        eps_v, ni_v = eps_q.get(end), ni_q.get(end)
+        if eps_v is None or ni_v is None:
+            continue
+        if (eps_v > 0) != (ni_v > 0):
+            eps_q.pop(end, None)
 
     ends = sorted(set(eps_q) | set(rev_q), reverse=True)[:quarters]
     rows = []
@@ -336,8 +379,16 @@ def c_table(cf: dict, quarters: int = 8) -> dict:
             'sales_chg': rev_chg, 'sales_chg_label': rev_lab,
             # After-tax margin, because rising margin AND rising sales is the
             # combination he wants.
-            'margin_pct': (round(ni / rev * 100, 1)
-                           if (ni is not None and rev) else None),
+            #
+            # CAPPED, LIKE EVERY OTHER PERCENTAGE HERE. A margin is a share of
+            # sales, and a pre-revenue company divides a real loss by almost
+            # nothing: live figures of -49,482% and -237,021% appeared beside
+            # revenues of $113,000 and $1,403. Both are arithmetically true
+            # and neither is a margin — past a few hundred percent the number
+            # has stopped describing a business and started describing a
+            # denominator. The cap is the same PCT_CAP the growth columns use,
+            # and it is visible in the value rather than silently reshaping it.
+            'margin_pct': _margin(ni, rev),
         })
 
     # ACCELERATION IS INVISIBLE IN ANY SINGLE NUMBER, and O'Neil weights it
@@ -357,6 +408,26 @@ def c_table(cf: dict, quarters: int = 8) -> dict:
                  'zero, and a percentage from a negative base is arithmetic '
                  f'without meaning. Capped at +{PCT_CAP:.0f}%.'),
     }
+
+
+def _roe(ni, equity):
+    """Return on equity — NEVER computed from negative or zero equity.
+
+    THE FALSE PASS THIS EXISTS TO STOP. The guard used to be `if equity`,
+    which is true for -3,000,000 as readily as for 3,000,000. A company that
+    had lost money for years — negative income AND negative equity, because
+    the accumulated losses had eaten the balance sheet — divided one by the
+    other and printed a POSITIVE return. Live: a stock with EPS of -0.05 for
+    the year showed "ROE 34.1% vs the 17% floor ✓" and passed the one
+    criterion O'Neil put there to keep exactly that company out.
+
+    Two negatives making a positive is arithmetic; it is not a return. It is
+    the same trap as a percentage from a negative base, which this file has
+    always refused to print, and it had a second door open.
+    """
+    if ni is None or equity is None or equity <= 0:
+        return None
+    return round(ni / equity * 100, 1)
 
 
 def a_table(cf: dict, years: int = 5) -> dict:
@@ -415,8 +486,14 @@ def a_table(cf: dict, years: int = 5) -> dict:
             'fy': end,
             'eps': eps_y.get(end),
             'eps_chg': chg, 'eps_chg_label': lab,
-            'roe_pct': (round(ni / equity * 100, 1)
-                        if (ni is not None and equity) else None),
+            'roe_pct': _roe(ni, equity),
+            # WHY it is absent, since "no filing" and "the arithmetic has no
+            # meaning here" are opposite readings of the same blank cell.
+            'roe_note': (None if _roe(ni, equity) is not None
+                         else 'equity is zero or negative — a return ON equity '
+                              'needs equity' if (equity is not None
+                                                 and equity <= 0)
+                         else None),
         })
 
     # 3-YEAR GROWTH RATE as a compound annual rate, not an average of the

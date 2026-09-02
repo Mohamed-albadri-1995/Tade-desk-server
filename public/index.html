@@ -3823,10 +3823,24 @@ function buildCard(row) {
       // WHICH LETTERS ARE NOT ON THE CARD, AND WHY. A checklist missing a
       // line silently is worse than one that says the line is pending: the
       // first reads as "nothing to report", the second as "not measured yet".
+      //
+      // AND "PENDING" IS ONLY ONE OF THE REASONS. This line said "L (group
+      // ranks still building)" on a card whose own footer read "groups
+      // 2026-08-31" — they were built, that day, and this stock simply is not
+      // in the industry map. Waiting fixes the first and never fixes the
+      // second, so the line has to tell them apart, exactly as the full table
+      // below it already does.
       const missing = [];
       if (!/cl-letter">C</.test(rows)) missing.push('C and A (no filings cached yet)');
-      if (!/cl-letter">L</.test(rows)) missing.push('L (group ranks still building)');
-      if (!/cl-letter">I</.test(rows)) missing.push('I (13F not built yet)');
+      if (!/cl-letter">L</.test(rows)) {
+        missing.push(GROUPS_MODEL && GROUPS_MODEL.ok
+          ? 'L (this stock is not in the industry map)'
+          : 'L (group ranks still building)');
+      }
+      if (!/cl-letter">I</.test(rows)) {
+        missing.push(F13_MODEL && F13_MODEL.ok
+          ? 'I (not matched in 13F)' : 'I (13F not built yet)');
+      }
       // THE LETTERS ARE THE SUMMARY; THE TABLES ARE THE WORKING UNDERNEATH.
       // Nested rather than a second top-level section, because they are the
       // same reading at two depths — the eight-quarter table IS C, spelled
@@ -4776,7 +4790,10 @@ function canslimTablesHTML(tk) {
       <tbody>${a.rows.map(r => `<tr>
         <td>${esc(r.fy)}</td><td>${_n(r.eps)}</td>
         <td class="${_sign(r.eps_chg)}">${esc(r.eps_chg_label)}</td>
-        <td>${r.roe_pct == null ? '—' : r.roe_pct + '%'}</td></tr>`).join('')}
+        <td${r.roe_note ? ` title="${esc(r.roe_note)}"` : ''}>${
+          r.roe_pct == null
+            ? (r.roe_note ? '<span style="color:var(--text3)">n/a</span>' : '—')
+            : r.roe_pct + '%'}</td></tr>`).join('')}
       </tbody></table></div>
       <div style="margin-top:8px">
         3-yr growth <b>${a.growth_3yr_pct == null ? '—' : a.growth_3yr_pct + '%'}</b> ·
