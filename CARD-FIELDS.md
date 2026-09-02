@@ -181,10 +181,11 @@ Three reasons L can be absent, and only the first is fixable by waiting:
 
 | # | Field | Source | Blank means |
 |---|---|---|---|
-| 80 | Holders | QP-I | not built, or the CUSIP did not resolve |
+| 80 | Holders | QP-I | not built, or the CUSIP did not resolve. Distinct MANAGERS, unioned across every CUSIP of the issuer — the stock, its converts and its options are one company |
 | 81 | Change | QP-I | only one quarter on file |
 | 82 | Direction | QP-I | as 81 |
 | 83 | Quarter history | QP-I | as 80 |
+| 83a | **"of N" — managers who filed a 13F at all that quarter** | QP-I | absent on a file built before this existed; the count still shows. Without it a growing filer population reads as sponsorship arriving |
 
 ## M — market direction
 

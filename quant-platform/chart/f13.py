@@ -298,35 +298,70 @@ def count_by_ticker(lines, cusip_ticker: dict) -> dict:
     matched are accumulated, not all ~34,000 securities, and the accession ids
     are interned exactly as in `_parse_rows`.
     """
+    return count_quarter(lines, cusip_ticker)[0]
+
+
+def count_quarter(lines, cusip_ticker: dict):
+    """({ticker: managers}, how many managers filed AT ALL this quarter).
+
+    THE SECOND NUMBER IS WHAT MAKES THE FIRST READABLE.
+
+    From the field check, after the per-CUSIP fault above was fixed:
+
+        AAPL  6693  +729 rising      NVDA  6343  +792 rising
+        MSFT  6807  +635 rising      AMD   3442  +736 rising
+        PLTR  3209  +483 rising
+
+    Five different companies, five different industries, all rising, all by
+    roughly the same amount. That is the shape of the POPULATION growing —
+    more managers crossing the $100M threshold and filing at all — and not of
+    five stocks independently attracting sponsors. Read as sponsorship it says
+    "everything is being accumulated", which is never true and is exactly the
+    kind of confident wrong number this module exists to refuse.
+
+    Whether it IS that cannot be settled by looking at the counts, because the
+    denominator was never published. So it is published: the number of
+    distinct filings in the quarter, counted in the same pass, at the cost of
+    interning the accessions of unmapped securities too — a few thousand
+    strings against the millions of rows already being read.
+
+    The reading is left alone for now. A count of 6,693 out of 7,400 filers is
+    a different fact from 6,693 out of 12,000, and until the two are side by
+    side there is nothing to decide.
+    """
     acc: dict[str, set] = {}
-    if not cusip_ticker:
-        return {}
     it = iter(lines)
     try:
         cols = _columns(next(it))
     except StopIteration:
-        return {}
+        return {}, 0
     if not cols:
-        return {}
+        return {}, 0
     i_acc, i_cusip, _ = cols
+    # EVERY ACCESSION IS INTERNED, mapped or not — that is what makes `ids`
+    # the filer count rather than "filers who hold something we recognise",
+    # which is a number that moves when the NAME MATCHING improves and would
+    # read as institutions arriving.
     ids: dict = {}
     for line in it:
         parts = line.rstrip('\n').split('\t')
         if len(parts) <= max(i_acc, i_cusip):
             continue
-        t = cusip_ticker.get(parts[i_cusip].strip().upper())
-        if t is None:
-            continue
         a = parts[i_acc].strip()
+        if not a:
+            continue
         aid = ids.get(a)
         if aid is None:
             aid = ids[a] = len(ids)
+        t = cusip_ticker.get(parts[i_cusip].strip().upper())
+        if t is None:
+            continue
         s = acc.get(t)
         if s is None:
             acc[t] = {aid}
         else:
             s.add(aid)
-    return {t: len(s) for t, s in acc.items()}
+    return {t: len(s) for t, s in acc.items()}, len(ids)
 
 
 def parse_issuers_file(path) -> dict:
@@ -337,8 +372,13 @@ def parse_issuers_file(path) -> dict:
 
 def count_by_ticker_file(path, cusip_ticker: dict) -> dict:
     """`count_by_ticker`, a line at a time from disk. Flat memory."""
+    return count_quarter_file(path, cusip_ticker)[0]
+
+
+def count_quarter_file(path, cusip_ticker: dict):
+    """`count_quarter`, a line at a time from disk. Flat memory."""
     with open(path, 'r', encoding='utf-8', errors='replace') as fh:
-        return count_by_ticker(fh, cusip_ticker)
+        return count_quarter(fh, cusip_ticker)
 
 
 def match_cusips(parsed: dict, name_to_tickers: dict) -> dict:
@@ -840,9 +880,11 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
         f'{len(cusip_ticker)} mapped to tickers')
 
     per_q: dict[tuple, dict] = {}
+    filers: dict[tuple, int] = {}
     for (y, q), path in paths:
-        per_q[(y, q)] = count_by_ticker_file(path, cusip_ticker)
-        log(f'  {y}Q{q}: {len(per_q[(y, q)])} tickers with a holder count')
+        per_q[(y, q)], filers[(y, q)] = count_quarter_file(path, cusip_ticker)
+        log(f'  {y}Q{q}: {len(per_q[(y, q)])} tickers held, '
+            f'{filers[(y, q)]} managers filed')
 
     if not per_q:
         return {'ok': False, 'error': 'no 13F quarters could be fetched',
@@ -885,6 +927,13 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
         # the history — the same reason the unplaced index links are named.
         'quarters_empty': [f'{y}Q{q}' for y, q in qs
                            if (y, q) in per_q and not per_q[(y, q)]],
+        # THE DENOMINATOR, PUBLISHED ONCE. Every widely-held name rose by
+        # roughly the same amount over the same four quarters, which is what
+        # a growing filer population looks like and not what sponsorship
+        # looks like. Held here rather than copied onto 3,382 ticker rows —
+        # it is one number per quarter and the card joins on the label.
+        'filers_by_quarter': {f'{y}Q{q}': filers[(y, q)] for (y, q) in qs
+                              if per_q.get((y, q))},
         # SAID OUT LOUD when the data is not the quarters the calendar asked
         # for. The card prints `quarters` either way, but a run summary that
         # does not mention it lets a fallback pass for a normal night.

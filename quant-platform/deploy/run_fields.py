@@ -220,9 +220,23 @@ def main(tickers):
         # ── I ───────────────────────────────────────────────────────────
         fs = ((fm or {}).get('stocks') or {}).get(t)
         if fs:
-            add('I', 'holders', fs.get('funds'))
+            # WITH THE DENOMINATOR, because without it every widely-held name
+            # reads as "rising" — the number of managers FILING grows every
+            # quarter and carries the count up with it. AAPL +729, NVDA +792,
+            # MSFT +635, AMD +736, PLTR +483 over the same four quarters, in
+            # five different industries, is what that looks like.
+            _fq = (fm or {}).get('filers_by_quarter') or {}
+            _qlist = fs.get('quarters') or []
+            _newest = _qlist[-1].get('q') if _qlist else None
+            _of = _fq.get(_newest)
+            add('I', 'holders', fs.get('funds'), '',
+                f"of {_of:,} managers who filed {_newest}" if _of else '')
             add('I', 'change', fs.get('change'))
             add('I', 'direction', fs.get('direction'))
+            add('I', 'managers filing',
+                ' · '.join(f'{q} {n:,}' for q, n in sorted(_fq.items()))
+                or None,
+                'not published — an older build; re-run qp-13f')
             # WHICH QUARTERS, and this line is why it exists. Every 13F label
             # was one quarter too new for as long as the letter worked, and
             # nothing here would have shown it: holders, change and direction

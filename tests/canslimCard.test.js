@@ -702,7 +702,7 @@ function liftTables() {
     grab(/function canslimTablesHTML\(tk, stock\) \{[\s\S]*?\n\}\n/, 'canslimTablesHTML()'),
   ].join('\n');
   // eslint-disable-next-line no-new-func
-  return new Function('panel', `
+  return new Function('panel', 'f13', `
     // EMITS ITS KEY, like the stub in lift() above: a heading is only wired
     // to an explanation if a specific definition is named, and an icon that
     // opens nothing looks identical to one that works.
@@ -713,7 +713,7 @@ function liftTables() {
     const _sign = v => (v == null ? '' : v >= 0 ? 'pos' : 'neg');
     const fmtShares = v => (v == null ? '—' : (v / 1e6).toFixed(2) + 'M sh');
     let CANSLIM_PANEL = panel;
-    let GROUPS_MODEL = null, F13_MODEL = null;
+    let GROUPS_MODEL = null, F13_MODEL = f13 || null;
     let ONEIL_RATINGS = {}, ONEIL_MODEL = {}, ONEIL_STOCKS = { stocks: {} };
     ${src}
     return canslimTablesHTML;
@@ -946,5 +946,96 @@ describe('FULL TABLES headings carry their definition', () => {
     expect(rule).toContain('border-left');
     // Lightness cannot carry it: sunlight mode lifts --text3 to near-white.
     expect(rule).not.toContain('var(--text3)');
+  });
+});
+
+/*
+ * I — THE HOLDER COUNT, AND THE NUMBER IT HAS TO BE READ AGAINST.
+ *
+ * Two faults, both found by running the real function against the real
+ * payload shape rather than by looking at the card.
+ *
+ * The first was silent: the build writes {q, funds} and the fold read
+ * {quarter, funds}, so the quarter history rendered as
+ *
+ *     undefined 6693 → undefined 6800 → undefined 6975
+ *
+ * A key that does not exist prints the WORD undefined, which looks like data.
+ *
+ * The second was worse because it looked right. Five mega-caps in five
+ * industries all came back "rising" by about the same amount over the same
+ * four quarters — AAPL +729, NVDA +792, MSFT +635, AMD +736, PLTR +483. That
+ * is a growing filer population carrying every widely-held name up with it,
+ * and read as sponsorship it says the whole market is being accumulated.
+ */
+describe('I — holders against the filer population', () => {
+  const F13 = {
+    ok: true,
+    filers_by_quarter: {
+      '2025Q2': 7100, '2025Q3': 7240, '2025Q4': 7380, '2026Q1': 7510,
+    },
+    stocks: {
+      AAA: {
+        funds: 6693, change: 729, direction: 'rising',
+        quarters: [
+          { q: '2025Q2', funds: 5964 }, { q: '2025Q3', funds: 6210 },
+          { q: '2025Q4', funds: 6455 }, { q: '2026Q1', funds: 6693 },
+        ],
+      },
+    },
+  };
+  const render = (f13 = F13) =>
+    liftTables()({ fundamentals: {}, bases: {} }, f13)('AAA', {});
+
+  test('the quarter labels are real, not the word undefined', () => {
+    const out = render();
+    expect(out).toContain('2026Q1');
+    expect(out).not.toMatch(/undefined/);
+  });
+
+  test('each quarter carries how many managers filed at all', () => {
+    const out = render();
+    expect(out).toContain('6,693 of 7,510');
+    expect(out).toContain('5,964 of 7,100');
+  });
+
+  test('the holder count and the direction still lead the row', () => {
+    const out = render();
+    expect(out).toContain('6,693');
+    expect(out).toContain('rising');
+    expect(out).toContain('+729');
+  });
+
+  /* AN OLDER FILE HAS NO DENOMINATOR, and must still render. The count
+     without "of N" is what the card showed before, and it is a smaller claim
+     rather than a broken one. */
+  test('a file built before the denominator existed still renders', () => {
+    const old = JSON.parse(JSON.stringify(F13));
+    delete old.filers_by_quarter;
+    const out = render(old);
+    expect(out).toContain('2026Q1 6,693');
+    expect(out).not.toContain(' of ');
+    expect(out).not.toMatch(/undefined|NaN/);
+  });
+
+  test('an unmatched stock says so rather than claiming zero holders', () => {
+    const out = liftTables()({ fundamentals: {}, bases: {} }, F13)('ZZZ', {});
+    expect(out).toContain('not matched in 13F');
+    expect(out).not.toMatch(/\b0\b institutional/);
+  });
+
+  test('13F not built is a different message from not matched', () => {
+    const out = liftTables()({ fundamentals: {}, bases: {} },
+                             { ok: false })('AAA', {});
+    expect(out).toContain('13F not built yet');
+  });
+
+  test('the definition explains why the denominator is on the line', () => {
+    expect(DEFS.canslim_i.how).toMatch(/how many managers filed a 13F AT ALL/);
+    expect(DEFS.canslim_i.how).toMatch(/WHY THE DENOMINATOR IS THERE/);
+  });
+
+  test('...and that one manager holding two CUSIPs is one holder', () => {
+    expect(DEFS.canslim_i.how).toMatch(/converts/);
   });
 });

@@ -4382,12 +4382,22 @@ const DEFS = {
     how: "Every manager with $100M+ in 13(f) securities files a holdings list\n"
       + "within 45 days of each quarter end. This counts, per stock:\n\n"
       + "  holders    how many DISTINCT managers reported owning it\n"
-      + "  → → →      that count over the last four filed quarters\n"
+      + "  of N       how many managers filed a 13F AT ALL that quarter\n"
+      + "  → → →      both, over the last four filed quarters\n"
       + "  direction  rising, flat or falling across them\n\n"
       + "Distinct MANAGERS, not rows: one manager reporting three share\n"
-      + "classes is one holder. And the count of managers, not shares held —\n"
-      + "shares are dominated by the few giant index funds, which own\n"
-      + "everything and so say nothing about this stock in particular.",
+      + "classes is one holder, and one holding both the stock and its\n"
+      + "converts — filed under different CUSIPs — is still one holder. And\n"
+      + "the count of managers, not shares held: shares are dominated by the\n"
+      + "few giant index funds, which own everything and so say nothing\n"
+      + "about this stock in particular.\n\n"
+      + "WHY THE DENOMINATOR IS THERE. The number of managers filing grows\n"
+      + "every quarter as more cross the $100M threshold, so a widely-held\n"
+      + "stock gains holders without anyone deciding anything. Read on its\n"
+      + "own, '6,693 holders, rising' says sponsorship is arriving; read\n"
+      + "against the population it may say nothing changed. Five mega-caps\n"
+      + "in five industries all rose by about the same amount over the same\n"
+      + "four quarters, which is what put the second number on the line.",
     not: "NOT A SCORE, and deliberately. 'More is better' is false at both "
       + "ends: a stock no institution owns has not been found yet, and a stock "
       + "every fund already owns is OVER-OWNED — there is nobody left to buy "
@@ -5039,12 +5049,30 @@ function canslimTablesHTML(tk, stock) {
   } else {
     const dir = fs.direction === 'rising' ? 'bias-bull'
       : fs.direction === 'falling' ? 'bias-bear' : '';
-    iHtml = `<b>${fs.funds}</b> institutional holders
+    /* THE DENOMINATOR, BESIDE THE COUNT.
+       Every widely-held name rose by roughly the same amount over the same
+       four quarters — AAPL +729, NVDA +792, MSFT +635, AMD +736, PLTR +483.
+       Five industries moving together is a growing FILER POPULATION, not five
+       companies attracting sponsors, and "6,693 holders, rising" read on its
+       own says the second. The number of managers who filed at all that
+       quarter is the only thing that tells them apart, so it travels with
+       the count rather than being left for someone to wonder about. */
+    const fq = fm.filers_by_quarter || {};
+    const hist = fs.quarters || [];
+    /* `q.q`, NOT `q.quarter`. The build writes {q, funds}; this read
+       {quarter, funds} and printed "undefined 6693 → undefined 6800" for as
+       long as the row existed. A key that does not exist renders as the word
+       undefined, which looks like data and is not. */
+    const line = hist.map(h => {
+      const of = fq[h.q];
+      return `${h.q} ${h.funds.toLocaleString()}`
+        + (of ? ` of ${of.toLocaleString()}` : '');
+    }).join('  →  ');
+    iHtml = `<b>${fs.funds.toLocaleString()}</b> institutional holders
       ${fs.change == null ? '' : `· <span class="${dir}">${
-        fs.change >= 0 ? '+' : ''}${fs.change}</span>`}
+        fs.change >= 0 ? '+' : ''}${fs.change.toLocaleString()}</span>`}
       <span class="${dir}">${esc(fs.direction || '')}</span>
-      <div style="margin-top:6px">${esc((fs.quarters || [])
-        .map(q => `${q.quarter} ${q.funds}`).join(' → '))}</div>`;
+      <div style="margin-top:6px">${esc(line)}</div>`;
   }
 
   const mHtml = `<b>${esc(m.status_label || '—')}</b>

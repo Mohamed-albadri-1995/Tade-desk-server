@@ -118,7 +118,7 @@ ok('the live line that showed it is recorded where the fix is',
 ok('an unmapped security contributes nothing rather than a stray key',
    f13.count_by_ticker(_ISS.splitlines(), {'037833100': 'AAPL'})
    == {'AAPL': 3})
-ok('no map at all returns nothing, and does not read the file',
+ok('no map at all yields no tickers', 
    f13.count_by_ticker(_ISS.splitlines(), {}) == {})
 ok('an empty source is empty, not an exception',
    f13.count_by_ticker(iter([]), _ct) == {}
@@ -134,9 +134,74 @@ ok('the issuer pass is separate from the counting pass',
    'TWO PASSES' in SRC_F13)
 ok('...and the name map is complete before the first count',
    SRC_F13.index('cusip_ticker = match_cusips(')
-   < SRC_F13.index('per_q[(y, q)] = count_by_ticker_file('))
+   < SRC_F13.index('per_q[(y, q)], filers[(y, q)] = '))
 ok('one history entry per ticker per quarter, never one per security',
    'EXACTLY ONE ENTRY PER TICKER PER QUARTER' in SRC_F13)
+
+
+# ── AND A COUNT NEEDS ITS DENOMINATOR ──────────────────────────────────
+#
+# With the per-CUSIP fault fixed, the field check came back:
+#
+#     AAPL 6693 +729 rising    NVDA 6343 +792 rising    MSFT 6807 +635 rising
+#     AMD  3442 +736 rising    PLTR 3209 +483 rising
+#
+# Five companies, five industries, all rising, all by about the same amount.
+# That is the number of MANAGERS FILING growing — more crossing the $100M
+# threshold every quarter — carrying every widely-held name up with it. Read
+# as sponsorship it says the whole market is being accumulated, which is never
+# true. Nothing published the denominator, so the two could not be told apart.
+print()
+print('== the count is published with the population it came from ==')
+
+_POP = '\n'.join([
+    'ACCESSION_NUMBER\tCUSIP\tNAMEOFISSUER',
+    'acc-A\t037833100\tAPPLE INC',
+    'acc-B\t037833100\tAPPLE INC',
+    'acc-A\t037833AK6\tAPPLE INC',
+    'acc-D\t037833AK6\tAPPLE INC',
+    # Two managers who filed and hold nothing this map recognises. They are
+    # still managers who filed.
+    'acc-E\t999999999\tSOMETHING ELSE',
+    'acc-F\t999999999\tSOMETHING ELSE',
+])
+_counts, _filers = f13.count_quarter(_POP.splitlines(),
+                                     {'037833100': 'AAPL',
+                                      '037833AK6': 'AAPL'})
+ok('the holders of an issuer are still the union across its CUSIPs',
+   _counts == {'AAPL': 3}, _counts)
+ok('and the filer count is EVERY manager who filed, not only those holding '
+   'something we matched — a denominator that moved when the NAME MATCHING '
+   'improved would read as institutions arriving',
+   _filers == 5, _filers)
+ok('the older entry point still answers exactly what it did',
+   f13.count_by_ticker(_POP.splitlines(), {'037833100': 'AAPL'})
+   == {'AAPL': 2})
+ok('an empty source has no filers rather than an unknown number',
+   f13.count_quarter(iter([]), {'x': 'X'}) == ({}, 0))
+ok('the file wrappers exist for both, so production never builds a string',
+   hasattr(f13, 'count_quarter_file') and hasattr(f13, 'count_by_ticker_file'))
+ok('the published file carries the population per quarter, once, rather than '
+   'copied onto every ticker row', "'filers_by_quarter'" in SRC_F13)
+ok('the five live counts that showed this are recorded where the fix is',
+   '+729' in (f13.count_quarter.__doc__ or ''))
+# AND THE READING IS NOT CHANGED YET. 6,693 of 7,400 is a different fact from
+# 6,693 of 12,000, and until both are on the card there is nothing to decide.
+ok('the direction is still the plain count, not silently normalised',
+   'The reading is left alone for now' in (f13.count_quarter.__doc__ or ''))
+
+_CARD57 = (pathlib.Path(__file__).resolve().parents[3] / 'public'
+           / 'index.html').read_text()
+ok('the card prints the denominator beside each quarter',
+   'filers_by_quarter' in _CARD57)
+# `q.quarter` AGAINST A ROW WRITTEN AS {q, funds}. It rendered the WORD
+# undefined, four times, for as long as the row existed.
+# CHECKED AS THE EXPRESSION IT IS, not as the absence of a string: the note
+# recording the bug quotes `q.quarter`, and an audit that searched for it
+# would fail on its own explanation. This module has made that mistake four
+# times.
+ok('...and reads the quarter under the key the build actually writes',
+   "'q': label" in SRC_F13 and 'fq[h.q]' in _CARD57)
 ok('the issuer name is carried through for matching',
    p['037833100']['name'] == 'APPLE INC', p['037833100'])
 
