@@ -388,7 +388,14 @@ def fetch_quarter(y: int, q: int, log=print) -> str | None:
     from chart import edgar as _edgar
     CACHE.mkdir(parents=True, exist_ok=True)
     hit = CACHE / f'{y}q{q}.tsv'
-    if hit.exists():
+    # AN EMPTY FILE IS NOT A CACHED ANSWER.
+    #
+    # `if hit.exists()` returned whatever was on disk, and one quarter had
+    # written a ZERO-BYTE tsv — so that quarter answered '' forever, without
+    # ever re-fetching, and reported "0 securities" as though the SEC had
+    # published an empty dataset. The same trap this system keeps finding:
+    # an absence stored where an answer belongs.
+    if hit.exists() and hit.stat().st_size > 0:
         return hit.read_text()
 
     import urllib.request
@@ -411,13 +418,27 @@ def fetch_quarter(y: int, q: int, log=print) -> str | None:
         except Exception as e:                            # noqa: BLE001
             log(f'  {y}Q{q}: not a zip — {str(e)[:60]}')
             continue
-        names = [n for n in zf.namelist() if n.upper().endswith('INFOTABLE.TSV')]
-        if not names:
+        # THE BIGGEST MATCH, NOT THE FIRST. A zip can carry a stub or a
+        # directory entry whose name also ends INFOTABLE.TSV, and taking
+        # `names[0]` picked one of those — the holdings table is by a wide
+        # margin the largest member, so size is the reliable way to find it.
+        members = [i for i in zf.infolist()
+                   if i.filename.upper().endswith('INFOTABLE.TSV')]
+        if not members:
             log(f'  {y}Q{q}: no INFOTABLE in {zf.namelist()[:4]}')
             continue
-        text = zf.read(names[0]).decode('utf-8', 'replace')
+        members.sort(key=lambda i: -i.file_size)
+        text = zf.read(members[0]).decode('utf-8', 'replace')
+        if not text.strip():
+            # NOT WRITTEN, so the next run fetches again instead of inheriting
+            # an empty answer. Named, so a genuinely empty dataset is visible
+            # rather than being read as "no institutions own anything".
+            log(f'  {y}Q{q}: {members[0].filename} is EMPTY in '
+                f'{url.rsplit("/", 1)[-1]} — not cached, will retry')
+            continue
         hit.write_text(text)
-        log(f'  {y}Q{q}: {len(text) // 1_000_000}MB from {url.rsplit("/", 1)[-1]}')
+        log(f'  {y}Q{q}: {len(text) // 1_000_000}MB from {url.rsplit("/", 1)[-1]}'
+            f' ({members[0].filename})')
         return text
     # WHAT WAS TRIED **AND** WHAT WAS OFFERED.
     #

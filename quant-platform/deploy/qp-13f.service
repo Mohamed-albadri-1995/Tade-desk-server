@@ -1,0 +1,52 @@
+# I — INSTITUTIONAL SPONSORSHIP, AS A SERVICE. See deploy/run_13f.py.
+#
+# The nightly job builds this as step 4 and still does. This exists for the
+# FIRST build, which downloads a few hundred megabytes per quarter — 338MB for
+# one of them — and cannot be done from a phone:
+#
+#     "I think it will stop before finish if it's running on my phone"
+#
+# Which was right, and it did: the run died mid-download and left one quarter
+# as a zero-byte file.
+#
+# Safe to run WHILE qp-edgar is running. They fetch from different endpoints
+# and neither waits on the other.
+#
+# Install:
+#   sudo cp quant-platform/deploy/qp-13f.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl start qp-13f
+# Watch:   journalctl -u qp-13f -f
+# Result:  ls -la ~/Tade-desk-server/data/oneil-13f.json
+
+[Unit]
+Description=qp 13F build (I — institutional sponsorship)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# simple, not oneshot: oneshot applies TimeoutStartSec to the whole run and
+# kills a long job partway through. The backfill learned that the hard way.
+Type=simple
+TimeoutStartSec=infinity
+User=ec2-user
+WorkingDirectory=/home/ec2-user/Tade-desk-server/quant-platform
+
+# The shell sources .env because systemd's EnvironmentFile parser rejects
+# export prefixes and several quoting styles a .env uses freely. No nested
+# quotes in the command: the unit names a file, the file is ordinary Python.
+# -u so the log is written as it happens; a buffered run looks like a hung one.
+ExecStart=/bin/bash -lc 'set -a; . ./.env; set +a; exec python3 -u deploy/run_13f.py'
+
+# Each quarter's INFOTABLE is cached the moment it is extracted, so a restart
+# resumes rather than re-downloading what it already has.
+#
+# on-failure, not always: a completed build is a SUCCESS and must end the job.
+Restart=on-failure
+RestartSec=30
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

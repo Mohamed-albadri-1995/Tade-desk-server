@@ -300,6 +300,78 @@ DAILY2 = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
 ok('the run summary repeats the fallback', "out['fell_back']" in DAILY2)
 ok('...and a failed build names what the index held', "out.get('index'" in DAILY2)
 
+
+# ── AN EMPTY FILE IS NOT A CACHED ANSWER ───────────────────────────────
+#
+# From the live cache, after the download finally worked:
+#
+#     -rw-r--r--  0          2025q3.tsv     ← zero bytes
+#     -rw-r--r--  338236901  2025q4.tsv     ← real
+#
+# `if hit.exists(): return hit.read_text()` handed back the empty one
+# forever, so that quarter reported "0 securities" without ever re-fetching —
+# an absence stored where an answer belongs, which is the trap this whole
+# module is written around.
+print()
+print('== an empty quarter is retried, not remembered ==')
+import io as _io2                                          # noqa: E402
+import tempfile as _tf3                                    # noqa: E402
+import zipfile as _zf2                                     # noqa: E402
+
+SRC3 = (pathlib.Path(__file__).resolve().parents[1] / 'f13.py').read_text()
+ok('a zero-byte cache file is not served as the answer',
+   'hit.stat().st_size > 0' in SRC3)
+ok('...and an empty extract is never written in the first place',
+   'not cached, will retry' in SRC3)
+ok('the live listing that showed it is recorded', '2025q3.tsv' in SRC3
+   or 'ZERO-BYTE' in SRC3)
+
+# A zip can carry a stub whose name also ends INFOTABLE.TSV. Taking names[0]
+# picked one; the holdings table is by far the largest member.
+_buf = _io2.BytesIO()
+with _zf2.ZipFile(_buf, 'w') as _z:
+    _z.writestr('junk/INFOTABLE.tsv', '')
+    _z.writestr('data/INFOTABLE.tsv', 'ACCESSION_NUMBER\tCUSIP\n1\t037833100\n')
+_names = sorted(_zf2.ZipFile(_io2.BytesIO(_buf.getvalue())).infolist(),
+                key=lambda i: -i.file_size)
+ok('the largest INFOTABLE is the one read, not the first alphabetically',
+   _names[0].filename == 'data/INFOTABLE.tsv', [i.filename for i in _names])
+ok('...and the code sorts by size to find it',
+   'members.sort(key=lambda i: -i.file_size)' in SRC3)
+ok('the member it used is named in the log, so a wrong pick is visible',
+   '{members[0].filename}' in SRC3)
+
+_cache_was = f13.CACHE
+try:
+    f13.CACHE = pathlib.Path(_tf3.mkdtemp())
+    (f13.CACHE / '2025q3.tsv').write_text('')
+    _got = []
+    _real = f13.discover_urls
+    f13.discover_urls = lambda log=print: (_got.append(1) or {})
+    try:
+        f13.fetch_quarter(2025, 3, log=lambda *_: None)
+    finally:
+        f13.discover_urls = _real
+    ok('an empty cached quarter causes a REFETCH rather than an empty answer',
+       _got, 'discover_urls was never reached')
+finally:
+    f13.CACHE = _cache_was
+
+
+# The first build cannot run in a phone's terminal, and did not.
+_R13 = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
+        / 'run_13f.py').read_text()
+_U13 = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
+        / 'qp-13f.service').read_text()
+ok('13F has its own runner, so it need not drag the whole nightly job',
+   'f13.build(' in _R13)
+ok('...and its own unit, because 338MB per quarter outlives an ssh session',
+   'Type=simple' in _U13 and 'TimeoutStartSec=infinity' in _U13)
+ok('the unit says it is safe to run beside qp-edgar',
+   'qp-edgar' in _U13 and 'different endpoints' in _U13)
+ok('the reason it exists is recorded in the words it was reported in',
+   'running on my phone' in _U13)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)
