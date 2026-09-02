@@ -300,6 +300,50 @@ def stock_rows(groups: list[dict]) -> dict:
     return out
 
 
+def unranked(rs, mapping: dict, ranked: dict) -> dict:
+    """Symbols that ARE in the industry map but got no group rank, and why.
+
+    THE CARD WAS BLAMING THE WRONG THING. A stock absent from `stocks` printed
+    "not in the industry map — an ETF, or a filer with no SIC code", and for
+    four of five names on a live screen that was simply untrue: Fervo Energy
+    is a $5.8bn power producer, classified, mapped, and still unranked.
+
+    The reason is upstream and it is not a fault. A group rank is built from
+    RS ratings, and O'Neil's RS rating is defined as a TWELVE-MONTH weighted
+    performance — a stock without a full year of sessions has no rating, by
+    construction, not by omission. `raw_scores` says so in as many words: an
+    eight-month-old IPO up 300% would otherwise outrank every established
+    leader on a measure defined as twelve months long. The same gate drops
+    anything under the price and liquidity floors.
+
+    So there are three states, not two, and only one of them is "missing":
+
+        ranked        in the map, rated, in a group big enough to rank
+        unranked      in the map, but no RS rating — a young listing or an
+                      illiquid one. A real CANSLIM fact, not a gap.
+        absent        not in the map at all — an ETF, or no SIC code
+
+    Waiting fixes the first kind of silence and never the third; the second
+    fixes itself on the stock's first birthday.
+    """
+    out = {}
+    # NO `or []` HERE. A pandas Index has no truth value — `idx or []` raises
+    # "The truth value of an Index is ambiguous" the moment rs is a real
+    # Series, which is every time outside a test.
+    idx = set(rs.index) if rs is not None and hasattr(rs, 'index') else set()
+    for sym, entry in (mapping or {}).items():
+        s = str(sym).upper()
+        if s in ranked:
+            continue
+        out[s] = {
+            'industry': _group_of(entry) or '',
+            # Present in the price universe but unrated means it met none of
+            # the gate's conditions; absent means we have no bars for it.
+            'why': 'gate' if s in idx else 'nodata',
+        }
+    return out
+
+
 def build(asof: str | None = None, prior_asof: str | None = None) -> dict:
     """Fetch the ratings, rank the groups, and compare with three months ago.
 
@@ -375,6 +419,7 @@ def build(asof: str | None = None, prior_asof: str | None = None) -> dict:
             'groups': [{k: v for k, v in g.items() if not k.startswith('_')}
                        for g in groups],
             'stocks': stock_rows(groups),
+            'unranked': unranked(rs, mapping, stock_rows(groups)),
         })
         return out
     except Exception as e:                                # noqa: BLE001

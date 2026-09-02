@@ -3833,9 +3833,12 @@ function buildCard(row) {
       const missing = [];
       if (!/cl-letter">C</.test(rows)) missing.push('C and A (no filings cached yet)');
       if (!/cl-letter">L</.test(rows)) {
-        missing.push(GROUPS_MODEL && GROUPS_MODEL.ok
-          ? 'L (this stock is not in the industry map)'
-          : 'L (group ranks still building)');
+        const u = GROUPS_MODEL && GROUPS_MODEL.ok
+          && (GROUPS_MODEL.unranked || {})[String(row.ticker).toUpperCase()];
+        missing.push(!GROUPS_MODEL || !GROUPS_MODEL.ok
+          ? 'L (group ranks still building)'
+          : u ? 'L (no RS rating yet — needs a full year of sessions)'
+              : 'L (this stock is not in the industry map)');
       }
       if (!/cl-letter">I</.test(rows)) {
         missing.push(F13_MODEL && F13_MODEL.ok
@@ -4855,6 +4858,7 @@ function canslimTablesHTML(tk) {
      ETF or a filer EDGAR could not classify looks like; and it has an
      industry too small to rank. Only the first one is fixed by waiting. */
   const gm = GROUPS_MODEL;
+  const un = gm && gm.ok && (gm.unranked || {})[tk];
   const lHtml = g
     ? `Group <b>${esc(g.group)}</b> · rank <b>${g.group_rank} of ${g.group_of}</b>
        (${g.group_pct} ${esc(g.group_letter || '')})<br>
@@ -4864,11 +4868,30 @@ function canslimTablesHTML(tk) {
          ${(GROUPS_MODEL && GROUPS_MODEL.min_members) || 6} ranked names a median
          needs, so it is ranked against its SIC major group instead. A coarser
          claim than a named industry, and marked so it is not read as one.</div>` : ''}`
-    : `<span style="color:var(--text3)">${esc(
-        !gm || !gm.ok ? 'group ranks not built yet — the nightly job builds them'
-        : `not in the industry map (${gm.mapped_symbols || 0} symbols, `
-          + `${(gm.groups || []).length} groups as of ${gm.as_of || '—'}) — `
-          + 'an ETF, or a filer with no SIC code')}</span>`;
+    : !gm || !gm.ok
+      ? '<span style="color:var(--text3)">group ranks not built yet — the '
+        + 'nightly job builds them</span>'
+      : un
+        // IN THE MAP, AND STILL UNRANKED. Not a gap — a group rank is built
+        // from RS ratings, and O'Neil's RS is a TWELVE-MONTH measure. A young
+        // listing has no rating by construction, and saying "not in the
+        // industry map" about a classified $5.8bn company was simply wrong.
+        ? `Industry <b>${esc(un.industry || '—')}</b> — <span class="m-none">no
+            group rank</span><div class="def-src" style="border:0;padding-top:6px">${
+            un.why === 'gate'
+              ? 'This stock is classified but has no RS rating, so it cannot be '
+                + 'ranked inside its group. O\'Neil\'s RS is a twelve-month '
+                + 'weighted performance: a listing under a year old has no '
+                + 'rating by construction, not by omission — the same gate also '
+                + 'drops names under the price and liquidity floors. It resolves '
+                + 'itself once the stock has a full year of sessions.'
+              : 'This stock is classified but has no price history in the '
+                + 'universe yet, so there is nothing to rate it from.'
+          }</div>`
+        : `<span style="color:var(--text3)">${esc(
+            `not in the industry map (${gm.mapped_symbols || 0} symbols, `
+            + `${(gm.groups || []).length} groups as of ${gm.as_of || '—'}) — `
+            + 'an ETF, or a filer with no SIC code')}</span>`;
 
   /* I, THE REAL ONE. This block still said "phase 6. Not estimated here."
      long after phase 6 shipped and the summary row above it was printing

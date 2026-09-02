@@ -159,6 +159,65 @@ ok('zero revenue has no margin rather than an infinite one',
 ok('the live figures that showed it are recorded',
    '-237,021' in EDG and '$1,403' in EDG)
 
+
+# ── D. THREE STATES OF SILENCE FOR L, NOT TWO ──────────────────────────
+#
+# On a live screen four of five cards read "not in the industry map — an ETF,
+# or a filer with no SIC code". One of them was Fervo Energy: a $5.8bn power
+# producer, classified, mapped, and still unranked. The card was blaming the
+# wrong thing entirely.
+#
+# The reason is upstream and is not a fault. A group rank is built from RS
+# ratings, and O'Neil's RS is a TWELVE-MONTH weighted performance — raw_scores
+# refuses a partial year in as many words, because an eight-month-old IPO up
+# 300% would otherwise outrank every established leader on a measure defined
+# as twelve months long.
+print()
+print('== D. why a stock has no group ==')
+import pandas as _pd                                       # noqa: E402
+from chart import groups as _gr                            # noqa: E402
+
+_RS = _pd.Series({'RATED': 90, 'YOUNG': float('nan')})
+_MAP = {'RATED': {'industry': 'Widgets', 'src': 'sic'},
+        'YOUNG': {'industry': 'Alternative Power Generation', 'src': 'sic'},
+        'NOBARS': {'industry': 'Widgets', 'src': 'sic'}}
+_U = _gr.unranked(_RS, _MAP, {'RATED': {}})
+
+ok('a ranked stock is not listed as unranked', 'RATED' not in _U, _U)
+ok('a mapped stock that failed the RS gate is reported WITH its industry',
+   _U['YOUNG']['industry'] == 'Alternative Power Generation'
+   and _U['YOUNG']['why'] == 'gate', _U)
+ok('...distinctly from one with no price history at all',
+   _U['NOBARS']['why'] == 'nodata', _U)
+
+_GRP = (pathlib.Path(__file__).resolve().parents[1] / 'groups.py').read_text()
+# A pandas Index has no truth value: `set(getattr(rs, 'index', []) or [])`
+# raises "The truth value of an Index is ambiguous" for every real Series,
+# which is every call outside a test that passes None.
+# CODE LINES ONLY. The comment recording the rule necessarily quotes the
+# thing it forbids, and a bare substring search calls that a violation.
+_UBODY = _GRP.split('def unranked')[1].split('\ndef build')[0]
+_UCODE = [ln for ln in _UBODY.splitlines()
+          if ln.strip() and not ln.lstrip().startswith('#')]
+ok('the Index is never truth-tested, which raised on every real Series',
+   not any('or []' in ln for ln in _UCODE), _UCODE)
+ok('a missing series is still handled rather than crashing',
+   _gr.unranked(None, {'A': {'industry': 'X'}}, {})['A']['why'] == 'nodata')
+ok('the three states are named where the function is',
+   'ranked' in _GRP and 'unranked' in _GRP and 'absent' in _GRP
+   and 'not by omission' in _GRP)
+ok('the live case that showed it is recorded', 'Fervo' in _GRP)
+ok('the build publishes it, or the card cannot read it',
+   "'unranked': unranked(" in _GRP)
+
+_UI = (pathlib.Path(__file__).resolve().parents[3] / 'public' / 'index.html').read_text()
+ok('the card reads it rather than blaming the map',
+   'gm.unranked' in _UI and 'GROUPS_MODEL.unranked' in _UI)
+ok('...and says the rating needs a full year, which is the actual reason',
+   'twelve-month' in _UI and 'by construction, not by omission' in _UI)
+ok('the "not in the map" wording survives for the case it is TRUE of',
+   'an ETF, or a filer with no SIC code' in _UI)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)
