@@ -241,8 +241,16 @@ ok('...and it names the column', 'column' in
 # from daily bars would be the same words about a different measurement.
 UI = (pathlib.Path(__file__).resolve().parents[3] / 'public' / 'index.html').read_text()
 ok('the panel labels the base block WEEKLY', 'N — the base (WEEKLY)' in UI)
-ok('...and repeats why, under the block',
-   'weekly charts' in UI and 'in weeks' in UI)
+# The "why" moved from a paragraph under the block to the ⓘ on its heading —
+# where DEFS.canslim_n already said it, and said it harder: "NOT A DAILY-CHART
+# READING... the same tests run on daily bars measure something else."
+ok('...and the heading carries the definition that says why',
+   "sec('N — the base (WEEKLY) and what is new', nHtml, 'canslim_n')" in UI)
+ok('...which still refuses the daily-chart reading in as many words',
+   'NOT A DAILY-CHART READING' in UI
+   and 'measure\n      + "something else' in UI or 'something else' in UI)
+ok('the standing paragraph is gone from the card body',
+   'timeframe_note' not in UI)
 ok('the route declares the timeframe it returns', "baseTimeframe: 'weekly'" in
    (pathlib.Path(__file__).resolve().parents[3] / 'src' / 'routes' / 'market.js').read_text())
 ok('the three phases are all on the page, not just the verdict',

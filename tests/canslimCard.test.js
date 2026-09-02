@@ -703,7 +703,10 @@ function liftTables() {
   ].join('\n');
   // eslint-disable-next-line no-new-func
   return new Function('panel', `
-    const info = k => '';
+    // EMITS ITS KEY, like the stub in lift() above: a heading is only wired
+    // to an explanation if a specific definition is named, and an icon that
+    // opens nothing looks identical to one that works.
+    const info = k => '[[def:' + k + ']]';
     const esc = s => String(s == null ? '' : s);
     const _n = v => (v == null ? '—' : String(v));
     const _m = v => (v == null ? '—' : String(v));
@@ -792,5 +795,67 @@ describe('S — the float the card already has', () => {
 
   test('the cover-page count carries no qualifier, being the plain answer', () => {
     expect(render(STOCK)).not.toContain('weighted avg');
+  });
+});
+
+/*
+ * THE METHOD GOES BEHIND THE ⓘ, AND THE HEADINGS BECOME HEADINGS.
+ *
+ * Every card carried three standing paragraphs — how a year-over-year
+ * comparison works, what "wobble" measures, why bases are read on weekly
+ * bars. Reported plainly: "this is speech it's not information — you can make
+ * it in ⓘ." Right twice over, because the definitions ALREADY said all of it,
+ * and said it better: the method was on the card twice while the numbers it
+ * explained got the same weight as the explanation.
+ *
+ * These assert the wiring survives, because a definition key is easy to drop
+ * in an edit and the loss is silent — the heading simply stops offering the
+ * explanation and nothing looks broken.
+ */
+describe('FULL TABLES headings carry their definition', () => {
+  const render = () =>
+    liftTables()({ fundamentals: {}, bases: {} })('AAA', {});
+
+  const EXPECTED = [
+    ['C — current quarterly earnings', 'canslim_c'],
+    ['A — annual earnings', 'canslim_a'],
+    ['N — the base (WEEKLY) and what is new', 'canslim_n'],
+    ['S — supply', 'demand'],
+    ['L — leader or laggard', 'group_rank'],
+    ['I — institutional sponsorship', 'canslim_i'],
+    ['M — market direction', 'oneil_model'],
+  ];
+
+  test.each(EXPECTED)('%s opens its definition', (title, key) => {
+    // `info` is stubbed by lift() to emit its key, so this checks the heading
+    // is wired to a definition rather than merely that an icon exists.
+    expect(render()).toContain(`${title}[[def:${key}]]`);
+  });
+
+  test('every key names a definition that actually exists', () => {
+    const defs = page.match(/const DEFS = \{[\s\S]*?\n\};/)[0];
+    for (const [, key] of EXPECTED) expect(defs).toContain(`  ${key}: {`);
+  });
+
+  test('no standing methodology paragraph is left in the card body', () => {
+    const out = render();
+    // The only def-src that may remain is the sources-and-dates footer, which
+    // is per-card FACT — the dates are the one way to tell fresh from stale.
+    expect((out.match(/def-src/g) || []).length).toBe(1);
+    expect(out).toContain('Sources and dates');
+  });
+
+  test('the three paragraphs are gone by name', () => {
+    expect(page).not.toContain('esc(c.note)');
+    expect(page).not.toContain('esc(a.stability_note)');
+    expect(page).not.toContain('b.timeframe_note');
+  });
+
+  test('a heading outranks the table under it — size and a rule, not grey', () => {
+    const rule = page.match(/\.fold-body \.def-sec-title \{[^}]*\}/)[0];
+    expect(rule).toMatch(/font-size: 11\.5px/);
+    expect(rule).toContain('border-left');
+    // Lightness cannot carry it: sunlight mode lifts --text3 to near-white.
+    expect(rule).not.toContain('var(--text3)');
   });
 });

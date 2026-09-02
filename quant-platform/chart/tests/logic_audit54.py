@@ -356,8 +356,20 @@ ok('...and EPS sits beside SALES on every row, which is the check itself',
    'r.sales_chg_label' in UI and 'r.eps_chg_label' in UI)
 ok('the A table shows the ROE against its floor',
    'vs the ${a.roe_floor}% floor' in UI)
-ok('...and says low-is-good about stability rather than leaving it bare',
-   'a.stability_note' in UI)
+# THE CAVEAT MOVED, IT DID NOT GO. It used to be a paragraph printed under
+# the A table on every card. Reported: "this is speech it's not information —
+# you can make it in ⓘ", which was right twice over, because DEFS.canslim_a
+# already defined wobble and said LOW IS GOOD, better than the paragraph did.
+# The method was on the card twice and the numbers had to compete with it.
+#
+# So the invariant is not "the string is loose on the page" — it is that a
+# reader can still reach it from the table it qualifies.
+ok('the A heading carries the definition that explains stability',
+   "sec('A — annual earnings', aHtml, 'canslim_a')" in UI)
+ok('...and that definition still says low-is-good, which is the trap',
+   'LOW IS GOOD' in UI.split('canslim_a: {')[1].split('canslim_n: {')[0])
+ok('the standing paragraph is gone from the card body',
+   'a.stability_note' not in UI)
 ok('acceleration and the +25% count are on the page, not just in the model',
    'Accelerating:' in UI and 'Beat +${c.bar_pct}%' in UI)
 # SCOPED TO THE TABLE BUILDER, not the whole page. The definition cards use

@@ -529,9 +529,31 @@ body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira 
 .fold-body .oneil-stat-label,
 .fold-body .section-title,
 .fold-body .analysis-title,
-.fold-body .heatmap-title,
-.fold-body .def-sec-title { font-size: 9px; font-weight: 700;
+.fold-body .heatmap-title { font-size: 9px; font-weight: 700;
   letter-spacing: .06em; color: var(--text3); margin-bottom: 6px; }
+
+/* A SUB-SECTION IS NOT A FAINTER LABEL. It is a heading one level down, and
+   it needs its own device rather than a dimmer copy of the band above it.
+   "C — CURRENT QUARTERLY EARNINGS" was 9px in --text3, which made it SMALLER
+   AND FAINTER than the table underneath it: seven sections read as one
+   continuous run of grey.
+
+   Size and a RULE, not lightness. Sunlight mode deliberately lifts --text3 to
+   near-white, which deletes every lightness-based distinction on the page —
+   the same trap this file has hit before. A rule is a shape and survives it.
+   m-chrome is right by the colour language at the top of this file: it is
+   furniture, and carries no meaning of its own. */
+.fold-body .def-sec-title { font-size: 11.5px; font-weight: 800;
+  letter-spacing: .07em; text-transform: uppercase; color: var(--text);
+  border-left: 3px solid var(--m-chrome); padding-left: 9px;
+  margin: 16px 0 7px; }
+.fold-body .def-sec:first-child .def-sec-title { margin-top: 2px; }
+/* The ⓘ now carries what used to be three paragraphs of method on the card,
+   so on these headings it is the way to the explanation rather than an
+   afterthought: aligned to the cap height, and bright enough to be seen as a
+   thing you can press. */
+.fold-body .def-sec-title .oneil-info { vertical-align: middle;
+  margin-top: -2px; color: var(--m-chrome); border-color: var(--m-chrome); }
 /* ...and the block loses its own card chrome, because a bordered panel inside
    a bordered section reads as two boxes rather than one section. */
 .fold-body .oneil-block { background: none; border: 0; padding: 0; margin: 0; }
@@ -560,7 +582,11 @@ body.sunlight .fold .fold > .fold-head { background: none; }
 .fold .fold[data-open="1"] > .fold-head { border-left-color: var(--text3); }
 .fold .fold .fold-body { padding: 6px 0 4px 9px; }
 /* SUB-HEADINGS INSIDE A BODY — "Relative strength", "C — current quarterly
-   earnings". Grey, small, and never filled: filling is what says SECTION. */
+   earnings". NEVER FILLED: a filled band is what says SECTION, and that
+   distinction is the whole hierarchy. They are separated from the section by
+   size and by a left rule instead — see .fold-body .def-sec-title above.
+   "Grey and small" was the earlier answer here and it was too quiet: the
+   heading ended up fainter than its own table. */
 .section-title, .def-sec-title { background: none; }
 /* LEVEL 3 — a value outranks its label, which is the other half of the
    problem: they were the same colour, so a row read as one grey run. */
@@ -797,8 +823,12 @@ body.sunlight .fold .fold > .fold-head { background: none; }
   line-height: 1.45; }
 .oneil-dd-wrap { margin-top: 12px; overflow-x: auto; }
 .oneil-dd { width: 100%; border-collapse: collapse; min-width: 460px; }
-.oneil-dd th { font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .05em; color: var(--text3); padding: 5px 8px; text-align: left;
+/* Column headers sit BETWEEN the sub-section heading and the cell values, so
+   they take the middle grey rather than the faintest one — at --text3 they
+   were the same weight as the section heading above them and the two levels
+   collapsed into each other. */
+.oneil-dd th { font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text2); padding: 5px 8px; text-align: left;
   border-bottom: 1px solid var(--border); white-space: nowrap; }
 .oneil-dd td { padding: 5px 8px; font-size: 11.5px; border-bottom: 1px solid #1a1e28;
   white-space: nowrap; }
@@ -4216,9 +4246,21 @@ const DEFS = {
       + "and the groups are ranked on that.\n\n"
       + "  median, not mean   one 99 among laggards is one stock's story, and\n"
       + "                     a mean lets that name carry the whole group\n"
-      + "  3+ members         two stocks are not an industry\n\n"
+      + "  6+ members         the median of three IS the middle stock, so a\n"
+      + "                     three-name group at rank 1 is one company's\n"
+      + "                     year wearing an industry's name\n\n"
       + "  rank 63 of 197  =  68th percentile  =  B+\n"
-      + "One fact, three forms. 1 - 63/197 = 68%.",
+      + "One fact, three forms. 1 - 63/197 = 68%.\n\n"
+      + "ROLLED UP. An industry with fewer than six ranked names is merged\n"
+      + "into its SIC major group rather than ranked on its own or thrown\n"
+      + "away. SIC is a hierarchy, so that level is real and nothing is\n"
+      + "invented — but it is a COARSER claim than a named industry, and a\n"
+      + "card that is ranked there says so.\n\n"
+      + "NO RANK AT ALL. A group rank is built from RS Ratings, and O'Neil's\n"
+      + "RS is a twelve-month measure: a stock listed under a year ago has no\n"
+      + "rating by construction, not by omission, and so cannot be placed\n"
+      + "inside its group. The same gate drops names under the price and\n"
+      + "liquidity floors. It resolves itself on the stock's first birthday.",
     not: "Not the SECTOR. A sector is 15 ETFs and far too coarse — 'Technology "
       + "is strong' says nothing about which of four hundred names to own. And "
       + "the rank is NOT the percentile: a rank counts up from best, a "
@@ -4770,9 +4812,22 @@ function canslimTablesHTML(tk, stock) {
   const x = ONEIL_RATINGS[tk] || {};
   const m = ONEIL_MODEL || {};
   const sd = (ONEIL_STOCKS.stocks || {})[tk];
-  const sec = (title, body, note) => `<div class="def-sec">
-    <div class="def-sec-title">${title}</div><div class="def-sec-body">${body}</div>
-    ${note ? `<div class="def-src" style="border:0;padding-top:4px">${esc(note)}</div>` : ''}
+  /* THE THIRD ARGUMENT IS A DEFINITION KEY, NOT A PARAGRAPH.
+   *
+   * It used to be prose, and every card carried three standing paragraphs of
+   * it: how a year-over-year comparison works, what "wobble" measures, why
+   * bases are read on weekly bars. Reported plainly: "this is speech it's not
+   * information — you can make it in ⓘ."
+   *
+   * Which was right twice over, because the ⓘ ALREADY SAID ALL OF IT.
+   * DEFS.canslim_c.not carries the negative-base rule, DEFS.canslim_n.not the
+   * weekly-chart rule, DEFS.canslim_a.how the definition of wobble — better
+   * put, and with the "what it is NOT" section none of the paragraphs had.
+   * The method was printed twice on every card and read as noise in both
+   * places, while the numbers it was explaining got the same weight. */
+  const sec = (title, body, defKey) => `<div class="def-sec">
+    <div class="def-sec-title">${title}${defKey ? info(defKey) : ''}</div>
+    <div class="def-sec-body">${body}</div>
   </div>`;
 
   // ── C — eight quarters, EPS AND SALES side by side ──────────────────────
@@ -4797,7 +4852,6 @@ function canslimTablesHTML(tk, stock) {
           c.accelerating ? 'yes' : 'no'}</b>
         (last ${c.accelerating_of} quarters) ·
         <b>Beat +${c.bar_pct}%: ${c.beat_25} of ${c.beat_25_of}</b></div>`;
-    cHtml += `<div class="def-src" style="border:0;padding-top:6px">${esc(c.note)}</div>`;
   } else {
     cHtml = `<span style="color:var(--text3)">${esc(_fundNote(f))}</span>`;
   }
@@ -4822,8 +4876,7 @@ function canslimTablesHTML(tk, stock) {
         ROE <b class="${a.roe_pass === true ? 'bias-bull' : a.roe_pass === false ? 'bias-bear' : ''}">${
           a.roe_pct == null ? '—' : a.roe_pct + '%'}</b>
         vs the ${a.roe_floor}% floor ${a.roe_pass === true ? '✓' : a.roe_pass === false ? '✗' : ''}
-      </div>
-      <div class="def-src" style="border:0;padding-top:6px">${esc(a.stability_note)}</div>`;
+      </div>`;
   } else {
     aHtml = `<span style="color:var(--text3)">${esc(_fundNote(f))}</span>`;
   }
@@ -4899,11 +4952,9 @@ function canslimTablesHTML(tk, stock) {
     ? `Group <b>${esc(g.group)}</b> · rank <b>${g.group_rank} of ${g.group_of}</b>
        (${g.group_pct} ${esc(g.group_letter || '')})<br>
        This stock: <b>RS ${g.rs_in_group} of ${g.members}</b> in its group
-       ${g.group_level === 'sector' ? `<div class="def-src" style="border:0;padding-top:6px">
-         Rolled up: this stock's own industry has fewer than the
-         ${(GROUPS_MODEL && GROUPS_MODEL.min_members) || 6} ranked names a median
-         needs, so it is ranked against its SIC major group instead. A coarser
-         claim than a named industry, and marked so it is not read as one.</div>` : ''}`
+       ${g.group_level === 'sector'
+         ? `<br><span class="m-none">Rolled up — ranked against its SIC major
+              group, a coarser claim than a named industry.</span>` : ''}`
     : !gm || !gm.ok
       ? '<span style="color:var(--text3)">group ranks not built yet — the '
         + 'nightly job builds them</span>'
@@ -4912,18 +4963,10 @@ function canslimTablesHTML(tk, stock) {
         // from RS ratings, and O'Neil's RS is a TWELVE-MONTH measure. A young
         // listing has no rating by construction, and saying "not in the
         // industry map" about a classified $5.8bn company was simply wrong.
-        ? `Industry <b>${esc(un.industry || '—')}</b> — <span class="m-none">no
-            group rank</span><div class="def-src" style="border:0;padding-top:6px">${
+        ? `Industry <b>${esc(un.industry || '—')}</b><br><span class="m-none">${
             un.why === 'gate'
-              ? 'This stock is classified but has no RS rating, so it cannot be '
-                + 'ranked inside its group. O\'Neil\'s RS is a twelve-month '
-                + 'weighted performance: a listing under a year old has no '
-                + 'rating by construction, not by omission — the same gate also '
-                + 'drops names under the price and liquidity floors. It resolves '
-                + 'itself once the stock has a full year of sessions.'
-              : 'This stock is classified but has no price history in the '
-                + 'universe yet, so there is nothing to rate it from.'
-          }</div>`
+              ? 'No RS rating yet — needs a full year of sessions.'
+              : 'No price history in the universe yet.'}</span>`
         : `<span style="color:var(--text3)">${esc(
             `not in the industry map (${gm.mapped_symbols || 0} symbols, `
             + `${(gm.groups || []).length} groups as of ${gm.as_of || '—'}) — `
@@ -4951,11 +4994,7 @@ function canslimTablesHTML(tk, stock) {
         fs.change >= 0 ? '+' : ''}${fs.change}</span>`}
       <span class="${dir}">${esc(fs.direction || '')}</span>
       <div style="margin-top:6px">${esc((fs.quarters || [])
-        .map(q => `${q.quarter} ${q.funds}`).join(' → '))}</div>
-      <div class="def-src" style="border:0;padding-top:6px">Counted by distinct
-        filing, from SEC Form 13F. More is not better at both ends: a stock
-        every fund already owns has nobody left to buy it, so this is the
-        number and the direction, never a score.</div>`;
+        .map(q => `${q.quarter} ${q.funds}`).join(' → '))}</div>`;
   }
 
   const mHtml = `<b>${esc(m.status_label || '—')}</b>
@@ -4963,14 +5002,13 @@ function canslimTablesHTML(tk, stock) {
     ${sd && sd.checked ? `<br>This stock on those days: <b>${sd.held} of ${sd.checked}</b>
       · ${esc(sd.verdict || '')}` : ''}`;
 
-  return sec('C — current quarterly earnings', cHtml)
-    + sec('A — annual earnings', aHtml)
-    + sec('N — the base (WEEKLY) and what is new', nHtml,
-          b.timeframe_note || "O'Neil analyses bases on weekly charts; every length here is in weeks.")
-    + sec('S — supply', sHtml)
-    + sec('L — leader or laggard', lHtml)
-    + sec('I — institutional sponsorship', iHtml)
-    + sec('M — market direction', mHtml)
+  return sec('C — current quarterly earnings', cHtml, 'canslim_c')
+    + sec('A — annual earnings', aHtml, 'canslim_a')
+    + sec('N — the base (WEEKLY) and what is new', nHtml, 'canslim_n')
+    + sec('S — supply', sHtml, 'demand')
+    + sec('L — leader or laggard', lHtml, 'group_rank')
+    + sec('I — institutional sponsorship', iHtml, 'canslim_i')
+    + sec('M — market direction', mHtml, 'oneil_model')
     + `<div class="def-sec def-src">Sources and dates —
         ${f.built_at ? `EDGAR ${esc(String(f.built_at).slice(0, 10))}` : 'EDGAR not fetched'} ·
         ${GROUPS_MODEL && GROUPS_MODEL.as_of ? `groups ${esc(GROUPS_MODEL.as_of)}` : 'groups pending'} ·
