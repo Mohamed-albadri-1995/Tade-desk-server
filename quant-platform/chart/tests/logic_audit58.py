@@ -264,6 +264,7 @@ ok('both functions report the sessions they used, which is what makes the '
 # ranking and push real industries into the middle.
 import pandas as _pd                                       # noqa: E402
 from chart import groups as _g                             # noqa: E402
+from chart import sic as _sic                              # noqa: E402
 
 ok('the floor is high enough that no single stock IS the median',
    _g.MIN_MEMBERS >= 6, _g.MIN_MEMBERS)
@@ -305,6 +306,100 @@ ok('...and the rank inside it is over the merged membership, not the old three',
    _SR['A1']['rs_in_group'] == 1 and _SR['B4']['rs_in_group'] == 7, _SR['B4'])
 ok('the divisor still travels with every rank',
    all(r['of'] == len(_ROWS) for r in _ROWS))
+
+# ── AND THE MIDDLE RUNG, WHICH WAS BEING SKIPPED ───────────────────────
+#
+# From the live field check:
+#
+#     L  group   Industrial Machinery — small industries
+#     L  rank    116 of 158
+#     L  level   sector
+#
+# That is Apple. Its SIC code is 3571, Electronic Computers, which had under
+# six ranked names — so it rolled up. But SIC has THREE levels and this went
+# from the first to the last: 3571 → 35, "Industrial Machinery", and Apple was
+# ranked against pumps and machine tools. The number was computed correctly
+# over a peer set that is not its peers.
+#
+# Group 357 is computer and office equipment — storage, terminals,
+# peripherals. A real peer set, and about where IBD's 197 groups sit.
+print()
+print('== a thin industry climbs ONE rung, not two ==')
+
+_M3 = {}
+
+
+def _put(sym, ind, code, sec):
+    _M3[sym] = {'industry': ind, 'sic': code, 'sector': sec}
+
+
+for _s in ('AAPL', 'DELL', 'SMCI'):
+    _put(_s, 'Electronic Computers', '3571', 'Industrial Machinery')
+for _s in ('WDC', 'STX', 'NTAP'):
+    _put(_s, 'Computer Storage Devices', '3572', 'Industrial Machinery')
+for _s in ('HPQ', 'LOGI'):
+    _put(_s, 'Computer Peripheral Equipment', '3577', 'Industrial Machinery')
+# Genuinely thin machinery, each in a DIFFERENT three-digit group, so none of
+# them clears the floor there either — these are what the sector bucket is for.
+for _s, _c in (('PU1', '3561'), ('PU2', '3561'), ('EN1', '3510'),
+               ('EN2', '3510'), ('FA1', '3523'), ('FA2', '3523'),
+               ('MT1', '3541'), ('MT2', '3541')):
+    _put(_s, f'Machinery {_c}', _c, 'Industrial Machinery')
+
+_R3 = _pd.Series({s: 90 - i for i, s in enumerate(_M3)})
+_ROWS3 = _g.build_groups(_R3, _M3)
+_SR3 = _g.stock_rows(_ROWS3)
+_N3 = {r['group']: r for r in _ROWS3}
+
+ok('three thin computer industries merge into one industry GROUP, not into '
+   'the whole sector',
+   _SR3['AAPL']['group'] == _SR3['WDC']['group'] == _SR3['HPQ']['group'],
+   (_SR3['AAPL']['group'], _SR3['WDC']['group']))
+ok('...and that bucket is marked as the middle rung, not as an industry and '
+   'not as a sector',
+   _SR3['AAPL']['group_level'] == 'industry group', _SR3['AAPL'])
+ok('...with every one of the eight in it, so the median is over real peers',
+   _SR3['AAPL']['members'] == 8, _SR3['AAPL'])
+ok('APPLE IS NO LONGER RANKED AGAINST MACHINE TOOLS, which is the whole fix',
+   'Machinery' not in _SR3['AAPL']['group']
+   and _SR3['AAPL']['group'] != _SR3['MT1']['group'],
+   (_SR3['AAPL']['group'], _SR3['MT1']['group']))
+
+# THE NAME COMES FROM THE MEMBERS. There are about four hundred SIC industry
+# groups and their official titles are not something to reconstruct by hand —
+# a wrong one files a company under a plausible heading and never looks wrong.
+ok('the bucket is named after the biggest industry inside it, and says '
+   'others joined',
+   _SR3['AAPL']['group'] == 'Electronic Computers & related',
+   _SR3['AAPL']['group'])
+ok('...which is a claim the data supports, rather than a taxonomy title '
+   'nothing here checked',
+   'WRITTEN FROM MEMORY' in (_g._group_name.__doc__ or ''))
+
+# AND THE CASCADE STILL REACHES THE SECTOR when the middle rung is thin too.
+ok('machinery too thin at BOTH levels still lands in the major group',
+   _SR3['MT1']['group_level'] == 'sector'
+   and 'small industries' in _SR3['MT1']['group'], _SR3['MT1'])
+ok('...and nothing is lost on the way up — every stock is still ranked',
+   all(s in _SR3 for s in _M3), sorted(set(_M3) - set(_SR3)))
+
+ok('the three-digit code is read with the same padding rule as the sector, '
+   'since EDGAR strips leading zeros',
+   _sic.industry_group_of('100') == '010'
+   and _sic.industry_group_of('3571') == '357')
+ok('...and a code too short to have an industry group says so rather than '
+   'inventing one',
+   _sic.industry_group_of('35') == '' and _sic.industry_group_of('') == ''
+   and _sic.industry_group_of(None) == '')
+
+ok('the card tells the two rungs apart — one rung up is not the same claim '
+   'as two', "group_level === 'industry group'" in UI
+   and 'rolled up twice' in UI)
+ok('the live line that showed this is recorded where the fix is',
+   'rank 116 of 158' in (ROOT / 'chart' / 'groups.py').read_text()
+   or 'Industrial Machinery — small industries' in
+   (ROOT / 'chart' / 'sic.py').read_text())
+
 
 # A whole major group with too few ranked names has no level above it.
 _TINY = _g.build_groups(_pd.Series({'Z1': 90, 'Z2': 80}),

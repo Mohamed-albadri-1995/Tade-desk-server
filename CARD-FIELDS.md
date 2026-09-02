@@ -166,7 +166,7 @@ the share count moved and the subtraction would be fiction.
 | # | Field | Source | Blank means |
 |---|---|---|---|
 | 74 | Group name | QP-L | see below |
-| 75 | Rolled up marker | QP-L | absent = a real named industry, which is the normal case |
+| 75 | Rolled up marker | QP-L | absent = a real named industry, which is the normal case. `rolled up` = ranked at the SIC **industry group** (3-digit) because its own 4-digit industry had under 6 ranked names. `rolled up twice` = the **major group** (2-digit), because neither rung below had enough — a materially coarser claim |
 | 76 | Rank X of Y | QP-L | — |
 | 77 | Percentile + letter | QP-L | — |
 | 78 | RS X of N in its group | QP-L | — |

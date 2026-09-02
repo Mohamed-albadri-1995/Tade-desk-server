@@ -702,7 +702,7 @@ function liftTables() {
     grab(/function canslimTablesHTML\(tk, stock\) \{[\s\S]*?\n\}\n/, 'canslimTablesHTML()'),
   ].join('\n');
   // eslint-disable-next-line no-new-func
-  return new Function('panel', 'f13', `
+  return new Function('panel', 'f13', 'groupsModel', `
     // EMITS ITS KEY, like the stub in lift() above: a heading is only wired
     // to an explanation if a specific definition is named, and an icon that
     // opens nothing looks identical to one that works.
@@ -713,7 +713,7 @@ function liftTables() {
     const _sign = v => (v == null ? '' : v >= 0 ? 'pos' : 'neg');
     const fmtShares = v => (v == null ? '—' : (v / 1e6).toFixed(2) + 'M sh');
     let CANSLIM_PANEL = panel;
-    let GROUPS_MODEL = null, F13_MODEL = f13 || null;
+    let GROUPS_MODEL = groupsModel || null, F13_MODEL = f13 || null;
     let ONEIL_RATINGS = {}, ONEIL_MODEL = {}, ONEIL_STOCKS = { stocks: {} };
     ${src}
     return canslimTablesHTML;
@@ -1178,5 +1178,68 @@ describe('I — holders against the filer population', () => {
 
   test('...and that one manager holding two CUSIPs is one holder', () => {
     expect(DEFS.canslim_i.how).toMatch(/converts/);
+  });
+});
+
+
+/*
+ * L — WHICH RUNG OF THE SIC HIERARCHY THIS RANK WAS COMPUTED AT.
+ *
+ * From the live field check:
+ *
+ *     L  group   Industrial Machinery — small industries
+ *     L  rank    116 of 158
+ *     L  level   sector
+ *
+ * That is Apple. SIC 3571 is Electronic Computers, which had under six ranked
+ * names, so it rolled up — but straight past the THREE-digit level to the
+ * two-digit major group, and Apple was ranked against pumps and machine
+ * tools. Three rungs now, and the card must tell one rung up from two,
+ * because they are different sized claims about the same number.
+ */
+describe('L — the rung a group rank was computed at', () => {
+  const model = (level) => ({
+    ok: true,
+    stocks: {
+      AAA: {
+        group: level === 'industry' ? 'Prepackaged Software'
+          : level === 'industry group' ? 'Electronic Computers & related'
+            : 'Industrial Machinery — small industries',
+        group_rank: 31, group_of: 158, group_pct: 80, group_letter: 'B',
+        rs_in_group: 4, members: 8, group_level: level,
+      },
+    },
+  });
+  const render = (level) =>
+    liftTables()({ fundamentals: {}, bases: {} }, null, model(level))('AAA', {});
+
+  test('a real named industry carries no rolled-up note at all', () => {
+    const out = render('industry');
+    expect(out).toContain('Prepackaged Software');
+    expect(out).not.toMatch(/Rolled up/i);
+  });
+
+  test('one rung up says it is the industry GROUP, not the sector', () => {
+    const out = render('industry group');
+    expect(out).toContain('Electronic Computers & related');
+    expect(out).toMatch(/Rolled up one rung/);
+    expect(out).toContain('industry GROUP');
+    expect(out).not.toMatch(/Rolled up twice/);
+  });
+
+  test('two rungs up says so, and calls itself materially coarser', () => {
+    const out = render('sector');
+    expect(out).toMatch(/Rolled up twice/);
+    expect(out).toMatch(/major group/);
+    expect(out).toMatch(/coarser/);
+  });
+
+  test('the rank and the divisor survive at every rung', () => {
+    for (const lvl of ['industry', 'industry group', 'sector']) {
+      const out = render(lvl);
+      expect(out).toContain('31 of 158');
+      expect(out).toContain('4 of 8');
+      expect(out).not.toMatch(/undefined|NaN/);
+    }
   });
 });

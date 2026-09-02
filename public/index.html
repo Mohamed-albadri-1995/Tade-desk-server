@@ -5045,9 +5045,15 @@ function canslimTablesHTML(tk, stock) {
     ? `Group <b>${esc(g.group)}</b> · rank <b>${g.group_rank} of ${g.group_of}</b>
        (${g.group_pct} ${esc(g.group_letter || '')})<br>
        This stock: <b>RS ${g.rs_in_group} of ${g.members}</b> in its group
-       ${g.group_level === 'sector'
-         ? `<br><span class="m-none">Rolled up — ranked against its SIC major
-              group, a coarser claim than a named industry.</span>` : ''}`
+       ${g.group_level === 'industry group'
+         ? `<br><span class="m-none">Rolled up one rung — this stock's own
+              four-digit industry had too few ranked names, so it is ranked
+              against its SIC industry GROUP: the industries either side of
+              it, not the whole sector.</span>`
+         : g.group_level === 'sector'
+         ? `<br><span class="m-none">Rolled up twice — neither its industry
+              nor its industry group had enough ranked names, so this is the
+              SIC major group. A materially coarser claim.</span>` : ''}`
     : !gm || !gm.ok
       ? '<span style="color:var(--text3)">group ranks not built yet — the '
         + 'nightly job builds them</span>'
@@ -5351,10 +5357,16 @@ function groupCardBlock(ticker) {
   const lead = s.rs_in_group === 1 ? 'bias-bull' : s.rs_in_group <= 2 ? 'bias-bull' : '';
 
   let html = `<div class="ctx-row"><span class="ctx-label"><span class="cl-letter">L</span> group${info('group_rank')}</span>
-    <span class="ctx-val">${esc(s.group || '')}${s.group_level === 'sector'
-      ? ' <span class="m-none" title="this stock\'s own industry has too few '
-        + 'ranked names for a median to mean anything, so it is ranked one '
-        + 'level up">rolled up</span>' : ''} · <b>${rank}</b>${pct}
+    <span class="ctx-val">${esc(s.group || '')}${
+      s.group_level === 'industry group'
+      ? ' <span class="m-none" title="this stock\'s own four-digit industry '
+        + 'has too few ranked names for a median to mean anything, so it is '
+        + 'ranked against its SIC industry group — the industries either '
+        + 'side of it">rolled up</span>'
+      : s.group_level === 'sector'
+      ? ' <span class="m-none" title="neither its industry nor its industry '
+        + 'group had enough ranked names, so this is the SIC major group — a '
+        + 'materially coarser claim">rolled up twice</span>' : ''} · <b>${rank}</b>${pct}
       ${g && g.rotation && g.rotation !== 'flat'
         ? `<span class="${g.rotation === 'into' ? 'bias-bull' : 'bias-bear'}"
              title="rank ${g.rank_3mo} of ${g.of_3mo} three months ago">${

@@ -178,12 +178,41 @@ def _sector_of(entry) -> str | None:
     return None
 
 
+def _sic_of(entry) -> str | None:
+    """The four-digit SIC code, when the SIC pass wrote this entry.
+
+    Absent on a row a screener tool wrote from TradingView's industry string —
+    those have no code and so no hierarchy to climb.
+    """
+    if isinstance(entry, dict):
+        return str(entry.get('sic') or '').strip() or None
+    return None
+
+
 # The name a rolled-up bucket carries. Never the bare sector name: a stock in
 # "Business Services" that got there because its own industry was too small to
 # rank is in a DIFFERENT bucket from one classified at the sector level, and
 # printing both as "Business Services" would merge two different claims.
 def _rollup_name(sector: str) -> str:
     return f'{sector} — small industries'
+
+
+def _group_name(biggest: str) -> str:
+    """The name a THREE-DIGIT bucket carries, taken from its own members.
+
+    NOT FROM A TABLE OF TITLES WRITTEN FROM MEMORY. There are about four
+    hundred SIC industry groups and their official names are not something to
+    reconstruct by hand — a wrong one would file a company under a plausible
+    heading and never look wrong, which is the exact failure this system keeps
+    finding. The members already carry EDGAR's own industry descriptions, so
+    the bucket is named after the largest industry inside it and says that
+    others joined it.
+
+    "Electronic Computers & related" is a claim the data supports. "Computer
+    and Office Equipment" would be a claim about SIC's taxonomy that nothing
+    here checked.
+    """
+    return f'{biggest} & related'
 
 
 def build_groups(rs: pd.Series, mapping: dict) -> list[dict]:
@@ -197,8 +226,11 @@ def build_groups(rs: pd.Series, mapping: dict) -> list[dict]:
     whole group — which is exactly the mistake the group level exists to
     prevent.
     """
+    from chart import sic as _sic
+
     by: dict[str, list[tuple[str, float]]] = {}
     sectors: dict[str, str] = {}
+    igroups: dict[str, str] = {}          # symbol → its 3-digit SIC group
     for sym, entry in (mapping or {}).items():
         g = _group_of(entry)
         if not g:
@@ -211,6 +243,9 @@ def build_groups(rs: pd.Series, mapping: dict) -> list[dict]:
         sec = _sector_of(entry)
         if sec:
             sectors[s] = sec
+        ig = _sic.industry_group_of(_sic_of(entry))
+        if ig:
+            igroups[s] = ig
 
     # ROLLED UP, NOT THROWN AWAY.
     #
@@ -221,17 +256,65 @@ def build_groups(rs: pd.Series, mapping: dict) -> list[dict]:
     # below the floor merges into its own major group, which every entry the
     # SIC pass wrote already carries. Nothing is fetched and nothing invented;
     # the group is simply named one level up, and `level` says so.
+    # ONE RUNG AT A TIME, AND THE MIDDLE ONE WAS MISSING.
+    #
+    # SIC has three levels, not two: the four-digit industry, the THREE-digit
+    # industry group, and the two-digit major group. This went straight from
+    # the first to the last, skipping a whole level — live:
+    #
+    #     AAPL   Industrial Machinery — small industries   rank 116 of 158
+    #
+    # Apple's code is 3571, Electronic Computers, which had under six ranked
+    # names. Major group 35 is "Industrial Machinery", so Apple was ranked
+    # against pumps and machine tools and the number meant nothing. Group 357
+    # is computer and office equipment — storage, terminals, peripherals — a
+    # real peer set, and about the granularity IBD's 197 groups sit at.
+    #
+    # So: thin industry → its 3-digit group; still thin → its 2-digit sector;
+    # still thin → dropped, because there is no level above that.
     level: dict[str, str] = {g: 'industry' for g in by}
-    for g in [g for g, m in by.items() if len(m) < MIN_MEMBERS]:
-        members = by.pop(g)
-        for s, v in members:
-            sec = sectors.get(s)
-            if not sec:
-                continue        # a tool-written label with no sector above it
-            name = _rollup_name(sec)
-            by.setdefault(name, []).append((s, v))
-            level[name] = 'sector'
-        level.pop(g, None)
+
+    def _promote(too_small, bucket_of, mark):
+        """Move every member of each undersized group into a coarser bucket."""
+        for g in too_small:
+            members = by.pop(g)
+            for s, v in members:
+                name = bucket_of(s, g)
+                if not name:
+                    # Nothing above it — a tool-written label with no code and
+                    # no sector. Put it back rather than losing the stock; the
+                    # next pass drops it if it is still short.
+                    by.setdefault(g, []).append((s, v))
+                    continue
+                by.setdefault(name, []).append((s, v))
+                level[name] = mark
+            if g in by:
+                level.setdefault(g, 'industry')
+            else:
+                level.pop(g, None)
+
+    # STAGE ONE — into the 3-digit group, named after the biggest industry in
+    # it. The name is read off the members rather than a table; see
+    # `_group_name`.
+    thin = [g for g, m in by.items() if len(m) < MIN_MEMBERS]
+    biggest: dict[str, tuple[int, str]] = {}
+    for g in thin:
+        for s, _ in by[g]:
+            ig = igroups.get(s)
+            if not ig:
+                continue
+            n = len(by[g])
+            if ig not in biggest or n > biggest[ig][0]:
+                biggest[ig] = (n, g)
+    _promote(thin,
+             lambda s, g: (_group_name(biggest[igroups[s]][1])
+                           if igroups.get(s) in biggest else None),
+             'industry group')
+
+    # STAGE TWO — anything still short goes up to the major group, as before.
+    _promote([g for g, m in by.items() if len(m) < MIN_MEMBERS],
+             lambda s, g: (_rollup_name(sectors[s]) if s in sectors else None),
+             'sector')
 
     rows = []
     for g, members in by.items():

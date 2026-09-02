@@ -117,6 +117,36 @@ def sector_of(sic: str | int | None) -> str:
     return MAJOR_GROUPS.get(major, 'Other')
 
 
+def industry_group_of(sic: str | int | None) -> str:
+    """SIC's THREE-digit industry group — the rung between industry and sector.
+
+    THE MISSING STEP, AND IT WAS A WHOLE LEVEL WIDE. A four-digit SIC code is
+    an industry (about a thousand of them) and a two-digit code is a major
+    group (about eighty). Rolling a thin industry straight to the major group
+    skips the level in between and lands a stock among strangers — live:
+
+        AAPL   Industrial Machinery — small industries   rank 116 of 158
+
+    Apple's own code is 3571, Electronic Computers, which had under six ranked
+    names. Major group 35 is "Industrial Machinery", so Apple was being ranked
+    against pumps and machine tools. The three-digit group 357 is computer and
+    office equipment: storage, terminals, peripherals — a real peer set, and
+    the granularity IBD's 197 groups actually sit at.
+
+    Returns the bare code. The NAME is taken from the members themselves in
+    `groups.py` rather than from a table of four hundred titles written from
+    memory, which is the kind of confident invention this system refuses.
+
+    Same padding rule as `sector_of`: EDGAR strips leading zeros, so 0100
+    arrives as '100' and must be padded back to four before the front is read
+    off. A code shorter than three digits has no industry group.
+    """
+    s = str(sic or '').strip()
+    if not s or len(s) <= 2:
+        return ''
+    return s.zfill(4)[:3]
+
+
 def parse_tickers(payload: dict) -> dict:
     """EDGAR's company_tickers.json → {TICKER: cik}.
 
