@@ -3855,7 +3855,7 @@ function buildCard(row) {
         ${strength ? `<div class="section-title" style="margin-top:9px">Relative strength</div>${strength}` : ''}
         ${fold('canslim-tables', 'Full tables',
                'eight quarters, the annual run, and the whole base',
-               canslimTablesHTML(row.ticker))}`;
+               canslimTablesHTML(row.ticker, row))}`;
       return fold('canslim', "CANSLIM · O'Neil", canslimOneLine(row.ticker), body);
     })()}
 
@@ -4745,7 +4745,16 @@ function _fundNote(f) {
   return e;
 }
 
-function canslimTablesHTML(tk) {
+/* `row` is the SCANNED ROW, and S needs it.
+ *
+ * The S block used to say "no free source publishes float directly" while the
+ * same card printed "float 2.46M sh" three sections higher and divided short
+ * interest by that very number. EDGAR is a filings API and a filer does not
+ * tag its own float, so `supply()` genuinely cannot produce one — but the
+ * screener already has it on the row, and a card that contradicts itself is
+ * worse than either half alone. */
+function canslimTablesHTML(tk, row) {
+  const r = row || {};
   const f = CANSLIM_PANEL.fundamentals[tk] || {};
   const b = CANSLIM_PANEL.bases[tk] || {};
   const g = GROUPS_MODEL && (GROUPS_MODEL.stocks || {})[tk];
@@ -4845,7 +4854,25 @@ function canslimTablesHTML(tk) {
   const s = (f.ok && f.s) || {};
   const sHtml = `Shares outstanding <b>${_m(s.shares_outstanding)}</b>
     ${s.as_of ? `<span style="color:var(--text3)">as of ${esc(s.as_of)}</span>` : ''}
-    · Float <span style="color:var(--text3)">${esc(s.float_note || 'not available')}</span>
+    ${s.shares_basis && s.shares_tag !== 'EntityCommonStockSharesOutstanding'
+      ? `<span class="m-none" title="${esc(s.shares_basis)}">${
+          /WEIGHTED/.test(s.shares_basis) ? 'weighted avg' : 'issued'}</span>` : ''}
+    · Float <b>${r.floatShares != null ? fmtShares(r.floatShares) : '—'}</b>
+    ${r.floatShares != null
+      ? `<span style="color:var(--text3)">from the screener</span>
+         ${s.shares_outstanding
+           ? `· <span style="color:var(--text3)">${
+               Math.round(r.floatShares / s.shares_outstanding * 100)}% of shares
+               outstanding</span>` : ''}`
+      : `<span style="color:var(--text3)">${esc(s.float_note || 'not available')}</span>`}
+    ${r.shortFloat != null
+      ? `<br>Short interest <b>${r.shortFloat.toFixed(1)}%</b>
+         <span style="color:var(--text3)">of ${
+           r.shortBasis === 'outstanding' ? 'shares outstanding' : 'float'}${
+           r.shortAsOf ? ', as of ' + esc(r.shortAsOf) : ''}</span>
+         ${r.daysToCover != null
+           ? ` · <b>${r.daysToCover.toFixed(1)}</b>
+              <span style="color:var(--text3)">days to cover</span>` : ''}` : ''}
     ${x.ud && x.ud.ratio != null ? `<br>U/D volume <b>${x.ud.ratio}</b> over
       ${_wins(x.ud.sessions, 50, '50 sessions')}` : ''}
     ${x.ad && x.ad.letter ? ` · A/D <b>${esc(x.ad.letter)}</b> (${x.ad.raw}) over

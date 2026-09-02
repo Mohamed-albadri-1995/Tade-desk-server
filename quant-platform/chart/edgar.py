@@ -548,18 +548,59 @@ def a_table(cf: dict, years: int = 5) -> dict:
     }
 
 
+# S — shares outstanding, in the order they are preferred.
+#
+# ONE TAG WAS NOT ENOUGH. `EntityCommonStockSharesOutstanding` is the cover
+# page of a filing and it is the right answer when it is there — but it is a
+# dei tag and not every filer carries it in XBRL, so the card printed a bare
+# "—" for real companies that had filed the number under a us-gaap tag
+# instead. Live: two of five stocks on one screen.
+#
+# The last two are WEIGHTED AVERAGES over a period, not a count on a date.
+# They are a different measurement and only a last resort, which is why the
+# basis travels with the value instead of all four being called the same
+# thing: a weighted average across a quarter in which a company doubled its
+# share count is nobody's share count.
+SHARES_TAGS = (
+    'EntityCommonStockSharesOutstanding',           # cover page, point in time
+    'CommonStockSharesOutstanding',                 # balance sheet, same idea
+    'CommonStockSharesIssued',                      # issued ≥ outstanding
+    'WeightedAverageNumberOfDilutedSharesOutstanding',
+    'WeightedAverageNumberOfSharesOutstandingBasic',
+)
+SHARES_BASIS = {
+    'EntityCommonStockSharesOutstanding': 'outstanding, from the filing cover',
+    'CommonStockSharesOutstanding': 'outstanding, from the balance sheet',
+    'CommonStockSharesIssued': 'ISSUED, not outstanding — includes treasury '
+                               'stock, so this is an upper bound',
+    'WeightedAverageNumberOfDilutedSharesOutstanding':
+        'a WEIGHTED AVERAGE over the period, diluted — not a count on a date',
+    'WeightedAverageNumberOfSharesOutstandingBasic':
+        'a WEIGHTED AVERAGE over the period, basic — not a count on a date',
+}
+
+
 def supply(cf: dict) -> dict:
-    """S — shares outstanding, which EDGAR gives exactly."""
-    rows = _facts(cf, ('EntityCommonStockSharesOutstanding',), 'shares')
+    """S — shares outstanding, and what kind of count it is."""
+    rows = _facts(cf, SHARES_TAGS, 'shares')
     latest = rows[-1] if rows else None
+    tag = (latest or {}).get('tag')
     return {
         'shares_outstanding': latest.get('val') if latest else None,
         'as_of': latest.get('end') if latest else None,
-        # Float is NOT here and is not claimed. No free feed publishes it; it
-        # is approximable from insider and 5%-holder positions, and when that
-        # is built it will be LABELLED an estimate. See spec section 3.1.
+        'shares_tag': tag,
+        'shares_basis': SHARES_BASIS.get(tag),
+        # FLOAT IS NOT IN EDGAR, and that is all this says now.
+        #
+        # It used to say "no free source publishes float directly", which was
+        # wrong in this system's own terms and visibly so: the same card
+        # printed "float 2.46M sh" three sections higher, from the screener,
+        # and short interest is already divided by a float this file claimed
+        # did not exist. EDGAR is a filings API and a filer does not tag its
+        # own float; the screener does have it. The card merges the two.
         'float': None,
-        'float_note': 'no free source publishes float directly — not estimated here',
+        'float_note': 'not in EDGAR — filers do not tag float; '
+                      'the screener supplies it',
     }
 
 

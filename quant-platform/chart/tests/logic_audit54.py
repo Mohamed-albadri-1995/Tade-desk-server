@@ -317,14 +317,24 @@ ok('...and no ROE verdict from no ROE', empty['a']['roe_pass'] is None)
 ok('...and no growth rate from no years', empty['a']['growth_3yr_pct'] is None)
 ok('None is handled like an empty payload', edgar.tables(None)['c']['rows'] == [])
 
-# FLOAT IS NOT CLAIMED. No free source publishes it, and a number here that
-# looked exact and was an estimate would be worse than the blank.
+# FLOAT IS NOT CLAIMED *HERE*, and the reason has been corrected.
+#
+# This check used to assert the note said "no free source publishes float
+# directly". The invariant was right and the reason was false, in this
+# system's own terms: the card printed "float 2.46M sh" from the screener
+# three sections above the S block, and short interest was already being
+# divided by that float. EDGAR simply is not where it comes from — a filer
+# does not tag its own float — so this module still refuses to produce one,
+# and the card merges the screener's.
 s = edgar.supply(facts(EntityCommonStockSharesOutstanding=(
     'shares', [q('2025-01-01', '2025-12-31', 21_900_000)])))
 ok('shares outstanding comes from EDGAR exactly',
    s['shares_outstanding'] == 21_900_000, s)
-ok('float is NOT invented, and says why', s['float'] is None
-   and 'no free source' in s['float_note'], s)
+ok('...and the card is told which kind of share count it is',
+   'cover' in (s['shares_basis'] or ''), s)
+ok('float is NOT invented here, and says where it does come from',
+   s['float'] is None and 'not in EDGAR' in s['float_note']
+   and 'screener' in s['float_note'], s)
 
 SRC = (pathlib.Path(__file__).resolve().parents[1] / 'edgar.py').read_text()
 ok('EDGAR is sent a descriptive User-Agent, which it requires',

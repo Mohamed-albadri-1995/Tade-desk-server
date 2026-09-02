@@ -218,6 +218,72 @@ ok('...and says the rating needs a full year, which is the actual reason',
 ok('the "not in the map" wording survives for the case it is TRUE of',
    'an ETF, or a filer with no SIC code' in _UI)
 
+
+# ── E. EVERY FIELD GETS DATA, OR SAYS WHY ──────────────────────────────
+#
+#     "you need to make sure every field get data ... data not just place
+#      holder ... you need to make sure it's correct represented"
+#
+# Two fields were blank for reasons that were not real.
+print()
+print('== E. the fields that were blank for no good reason ==')
+
+# 1. SHARES OUTSTANDING. One dei tag, and a filer that used the us-gaap
+#    balance-sheet tag instead printed a bare "—". Two of five on one screen.
+_bs = edgar.supply(_cf(eq=[]) | {'facts': {'us-gaap': {
+    'CommonStockSharesOutstanding': {'units': {'shares': _rows(
+        [('2026-06-30', '2026-06-30', 182_490_000)])}}}}})
+ok('a filer using the balance-sheet tag is no longer blank',
+   _bs['shares_outstanding'] == 182_490_000, _bs)
+ok('...and the card is told WHICH count it is',
+   'balance sheet' in (_bs['shares_basis'] or ''), _bs)
+
+_wa = edgar.supply({'facts': {'us-gaap': {
+    'WeightedAverageNumberOfDilutedSharesOutstanding': {'units': {'shares':
+        _rows([('2026-01-01', '2026-06-30', 95_000_000)])}}}}})
+ok('a weighted average is used only as a last resort — and SAYS it is one, '
+   'because an average across a quarter that doubled its shares is nobody\'s '
+   'share count', 'WEIGHTED AVERAGE' in (_wa['shares_basis'] or ''), _wa)
+ok('the cover-page tag still wins when it is there',
+   edgar.SHARES_TAGS[0] == 'EntityCommonStockSharesOutstanding')
+ok('nothing filed is still nothing, not a zero',
+   edgar.supply({})['shares_outstanding'] is None)
+
+# 2. FLOAT. The S block said "no free source publishes float directly" while
+#    the same card printed "float 2.46M sh" three sections higher and divided
+#    short interest by that very number.
+_UI2 = (pathlib.Path(__file__).resolve().parents[3] / 'public' / 'index.html').read_text()
+# CHECKED WHERE THE STRING IS PRODUCED, not where it is rendered. The claim
+# came from supply()'s float_note, and the UI only prints it — so the UI text
+# is the wrong place to look, and looking there matches the comment that
+# records the old wording rather than the wording itself.
+ok('the false claim is gone from the note the card prints',
+   'no free source publishes' not in edgar.supply({})['float_note'],
+   edgar.supply({})['float_note'])
+ok('EDGAR still does not CLAIM a float, because a filer does not tag one',
+   edgar.supply({})['float'] is None
+   and 'not in EDGAR' in edgar.supply({})['float_note'])
+ok('the S block reads the float the screener already put on the row',
+   'r.floatShares' in _UI2 and 'canslimTablesHTML(tk, row)' in _UI2)
+ok('...and says where it came from, so two sources are never blended silently',
+   'from the screener' in _UI2)
+ok('short interest and days to cover reach the S block too, since S is the '
+   'supply letter and that is what they measure',
+   'r.shortFloat' in _UI2 and 'r.daysToCover' in _UI2)
+
+# The probe that makes this checkable without reading a card.
+_FLD = (ROOT / 'deploy' / 'run_fields.py').read_text() if False else (
+    pathlib.Path(__file__).resolve().parents[2] / 'deploy' / 'run_fields.py'
+).read_text()
+ok('there is a probe that reports every field per TICKER, not per file',
+   'every CANSLIM field' in _FLD.lower() or 'Every CANSLIM field' in _FLD)
+ok('...and it distinguishes an empty field from a wrong value',
+   'EMPTY' in _FLD and 'WRONG' in _FLD)
+ok('...and fetches nothing, so an unwalked stock cannot look healthy',
+   'Fetches\nnothing' in _FLD or 'Fetches' in _FLD)
+ok('every blank it prints carries a reason',
+   'with no reason is a bug' in _FLD)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)
