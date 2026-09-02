@@ -372,6 +372,26 @@ ok('the unit says it is safe to run beside qp-edgar',
 ok('the reason it exists is recorded in the words it was reported in',
    'running on my phone' in _U13)
 
+
+# A QUARTER THAT PARSED TO NOTHING IS NOT PART OF THE READING.
+#
+# `(y, q) in per_q` was true for an EMPTY dict, so the published `quarters` —
+# which the card prints as the range the reading spans — named a period no
+# stock had a single data point from. Live, that was 2025Q3 coming back from
+# the zero-byte cache.
+_SRC4 = (pathlib.Path(__file__).resolve().parents[1] / 'f13.py').read_text()
+ok('an empty quarter is not listed among the quarters covered',
+   "if per_q.get((y, q))" in _SRC4 and "if (y, q) in per_q]," not in _SRC4)
+ok('...but it IS named separately, so an empty dataset is visible rather '
+   'than quietly shortening the history', "'quarters_empty'" in _SRC4)
+ok('the run summary repeats it',
+   "quarters_empty" in (pathlib.Path(__file__).resolve().parents[2]
+                        / 'deploy' / 'run_daily.py').read_text())
+# The counting was already safe and must stay so: iterating an empty dict
+# gives no ticker a zero, so nothing can read as "the funds sold out".
+ok('an empty quarter still gives no ticker a false zero',
+   'if counts is None:' in _SRC4 and 'for cusip, n in counts.items():' in _SRC4)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

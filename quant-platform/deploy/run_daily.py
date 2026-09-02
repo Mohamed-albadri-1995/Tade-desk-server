@@ -116,7 +116,9 @@ def main():
         if not out.get('ok'):
             return f"not built: {out.get('error')} · {out.get('index', '')}"
         return (f"{out.get('tickers')} tickers over {out.get('quarters')}"
-                + (f" — {out['fell_back']}" if out.get('fell_back') else ''))
+                + (f" — {out['fell_back']}" if out.get('fell_back') else '')
+                + (f" · EMPTY: {out['quarters_empty']}"
+                   if out.get('quarters_empty') else ''))
     step('institutional sponsorship (I)', _f13)
 
     # 5. THE GROUPS. Last, because it reads everything above it.

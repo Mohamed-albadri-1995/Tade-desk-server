@@ -524,7 +524,19 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
     out = {
         'ok': True,
         'built_at': _dt.datetime.now(_dt.timezone.utc).isoformat(timespec='seconds'),
-        'quarters': [f'{y}Q{q}' for y, q in qs if (y, q) in per_q],
+        # A QUARTER THAT PRODUCED NOTHING IS NOT A QUARTER THIS COVERS.
+        #
+        # `in per_q` was true for a quarter that parsed to an EMPTY dict, so
+        # the list named a period no stock has a single data point from — and
+        # the card prints this list as the range the reading spans. The counts
+        # were already safe (iterating an empty dict gives no ticker a false
+        # zero, so nothing reads as "the funds sold out"); only the label was
+        # claiming more than it had.
+        'quarters': [f'{y}Q{q}' for y, q in qs if per_q.get((y, q))],
+        # NAMED, so an empty dataset is visible rather than quietly shortening
+        # the history — the same reason the unplaced index links are named.
+        'quarters_empty': [f'{y}Q{q}' for y, q in qs
+                           if (y, q) in per_q and not per_q[(y, q)]],
         # SAID OUT LOUD when the data is not the quarters the calendar asked
         # for. The card prints `quarters` either way, but a run summary that
         # does not mention it lets a fallback pass for a normal night.
