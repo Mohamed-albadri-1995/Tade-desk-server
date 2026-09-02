@@ -20,6 +20,10 @@ Description=qp EDGAR fundamentals first pass (C and A tables for the universe)
 After=network-online.target
 Wants=network-online.target
 
+# NOT ALONGSIDE qp-13f. Both fetch heavily; running them together is what
+# emptied the machine's memory. qp-13f declares Conflicts= on this unit, so
+# starting it stops this one.
+
 [Service]
 # simple, not oneshot: oneshot applies TimeoutStartSec to the whole run and
 # kills a long job partway through. The backfill learned that the hard way.

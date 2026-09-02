@@ -125,8 +125,25 @@ def normalize_name(s: str) -> str:
     return ' '.join(s.split())
 
 
-def parse_infotable(text: str) -> dict:
-    """INFOTABLE.tsv → {cusip: {'name': str, 'accessions': set}}.
+# The three columns anything downstream uses. Everything else in an INFOTABLE
+# — value, share counts, put/call, discretion, voting authority — is weight we
+# carry through memory and disk for no reading.
+KEEP_COLS = ('ACCESSION_NUMBER', 'CUSIP', 'NAMEOFISSUER')
+
+
+def _parse_rows(lines) -> dict:
+    """The counting, over ANY iterable of lines.
+
+    STREAMED, NEVER MATERIALISED. This took a single `str` and called
+    `.splitlines()` on it — for a 338MB quarter that is a list of about thirty
+    million string objects, well over a gigabyte in per-object overhead alone
+    before any content. Combined with the download holding the whole zip and
+    the whole decompressed member in RAM at the same time, one quarter peaked
+    at several gigabytes and took the machine's ssh down with it.
+
+    So the caller decides where lines come from: a small hand-built string in
+    the audits, a file handle in production. Nothing here ever holds more than
+    one row.
 
     One row per holding. The same manager filing the same quarter appears once
     per position, so holders are counted by DISTINCT ACCESSION NUMBER — a
@@ -135,17 +152,35 @@ def parse_infotable(text: str) -> dict:
     names that are already over-owned.
     """
     out: dict[str, dict] = {}
-    lines = (text or '').splitlines()
-    if not lines:
+    it = iter(lines)
+    try:
+        header = next(it)
+    except StopIteration:
         return out
-    head = [h.strip().upper() for h in lines[0].split('\t')]
+    head = [h.strip().upper() for h in header.rstrip('\n').split('\t')]
     try:
         i_acc = head.index('ACCESSION_NUMBER')
         i_cusip = head.index('CUSIP')
     except ValueError:
         return out
     i_name = head.index('NAMEOFISSUER') if 'NAMEOFISSUER' in head else None
-    for line in lines[1:]:
+
+    # ACCESSIONS ARE STORED AS SHARED IDS, NOT AS THEIR OWN STRINGS.
+    #
+    # There is one (cusip, accession) pair per holding row and a real quarter
+    # is a few million of them, but only about SIX THOUSAND distinct
+    # accessions — every manager's filing appears once per position it holds.
+    # Adding `parts[i_acc].strip()` gave each row its own str object: about
+    # 300MB of duplicates per quarter, on a box with 1GB in total and twenty
+    # other processes already on it.
+    #
+    # Mapping each accession to an int once means the sets hold repeated
+    # pointers to ~6,000 shared objects instead. Same count, a third of the
+    # memory. `count_holders` only ever takes len(), so what is IN the set is
+    # this function's business alone.
+    ids: dict = {}
+    for line in it:
+        line = line.rstrip('\n')
         if not line.strip():
             continue
         parts = line.split('\t')
@@ -155,10 +190,30 @@ def parse_infotable(text: str) -> dict:
         if not cusip:
             continue
         rec = out.setdefault(cusip, {'name': '', 'accessions': set()})
-        rec['accessions'].add(parts[i_acc].strip())
+        acc = parts[i_acc].strip()
+        aid = ids.get(acc)
+        if aid is None:
+            aid = ids[acc] = len(ids)
+        rec['accessions'].add(aid)
         if i_name is not None and not rec['name'] and len(parts) > i_name:
             rec['name'] = parts[i_name].strip()
     return out
+
+
+def parse_infotable(text: str) -> dict:
+    """INFOTABLE.tsv text → {cusip: {'name', 'accessions'}}.
+
+    For hand-built fixtures. Production reads the file — see
+    `parse_infotable_file` — because a real quarter does not fit in memory
+    as one string, let alone as a list of its lines.
+    """
+    return _parse_rows((text or '').splitlines())
+
+
+def parse_infotable_file(path) -> dict:
+    """The same answer, read a line at a time from disk. Flat memory."""
+    with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+        return _parse_rows(fh)
 
 
 def count_holders(parsed: dict) -> dict:
@@ -383,8 +438,101 @@ def _index_summary() -> str:
     return out
 
 
-def fetch_quarter(y: int, q: int, log=print) -> str | None:
-    """The INFOTABLE for one quarter, as text. Cached on disk once fetched."""
+def _reduce_member(zf, member, dest) -> int:
+    """Stream one INFOTABLE out of the zip, keeping only the columns read.
+
+    NOTHING WHOLE IS EVER IN MEMORY. `zf.read(member)` returned the entire
+    decompressed table — 338MB for one live quarter — and `.decode()` then
+    made a second copy of it. Here the member is a file object, the
+    destination is a file, and one row is resident at a time.
+
+    REDUCED WHILE IT PASSES THROUGH. An INFOTABLE also carries value, share
+    counts, put/call, discretion and voting authority, none of which anything
+    downstream reads. Dropping them turns a 338MB cache entry into tens of MB,
+    which is the difference between four quarters fitting on the disk and not.
+
+    The kept columns keep their names, so a full INFOTABLE cached by the older
+    code still parses and nothing has to be re-downloaded.
+
+    Returns the number of data rows written.
+    """
+    import io as _io
+    rows = 0
+    with zf.open(member) as raw:
+        text = _io.TextIOWrapper(raw, encoding='utf-8', errors='replace')
+        header = text.readline()
+        if not header:
+            return 0
+        head = [h.strip().upper() for h in header.rstrip('\n').split('\t')]
+        idx = [head.index(c) for c in KEEP_COLS if c in head]
+        if not idx:
+            # No recognisable columns. Written as-is rather than reduced to
+            # nothing, so the failure is a parse error later with the real
+            # file to look at, not a silently emptied cache.
+            dest.write(header)
+            for line in text:
+                dest.write(line)
+                rows += 1
+            return rows
+        kept = [head[i] for i in idx]
+        dest.write('\t'.join(kept) + '\n')
+        for line in text:
+            parts = line.rstrip('\n').split('\t')
+            if len(parts) <= idx[-1]:
+                continue
+            dest.write('\t'.join(parts[i] for i in idx) + '\n')
+            rows += 1
+    return rows
+
+
+
+def _fetch_from_zip(zf, y, q, url, hit, log):
+    """Extract the quarter's INFOTABLE into `hit`. Returns the path, or None.
+
+    Split out so the temp-zip cleanup can live in one `finally` around the
+    whole download rather than being repeated at every early exit.
+    """
+    # THE BIGGEST MATCH, NOT THE FIRST. A zip can carry a stub or a directory
+    # entry whose name also ends INFOTABLE.TSV, and taking `names[0]` picked
+    # one of those — the holdings table is by a wide margin the largest
+    # member, so size is the reliable way to find it.
+    members = [i for i in zf.infolist()
+               if i.filename.upper().endswith('INFOTABLE.TSV')]
+    if not members:
+        log(f'  {y}Q{q}: no INFOTABLE in {zf.namelist()[:4]}')
+        return None
+    members.sort(key=lambda i: -i.file_size)
+
+    # WRITTEN THROUGH A TEMP AND RENAMED, so an interrupted extraction cannot
+    # leave a short file that the next run would serve as complete.
+    part = hit.with_suffix('.part')
+    try:
+        with open(part, 'w', encoding='utf-8') as dest:
+            rows = _reduce_member(zf, members[0], dest)
+        if not rows:
+            # NOT KEPT, so the next run fetches again instead of inheriting an
+            # empty answer. Named, so a genuinely empty dataset is visible
+            # rather than being read as "no institutions own anything".
+            log(f'  {y}Q{q}: {members[0].filename} is EMPTY in '
+                f'{url.rsplit("/", 1)[-1]} — not cached, will retry')
+            return None
+        part.replace(hit)
+    finally:
+        try:
+            part.unlink()
+        except Exception:                                 # noqa: BLE001
+            pass
+    log(f'  {y}Q{q}: {rows:,} rows, {hit.stat().st_size // 1_000_000}MB kept '
+        f'from {url.rsplit("/", 1)[-1]} ({members[0].filename})')
+    return hit
+
+
+def fetch_quarter(y: int, q: int, log=print):
+    """The path to one quarter's reduced INFOTABLE, or None.
+
+    A PATH, NOT THE TEXT. Returning the text meant the caller held a 338MB
+    string and then called `.splitlines()` on it. See `_parse_rows`.
+    """
     from chart import edgar as _edgar
     CACHE.mkdir(parents=True, exist_ok=True)
     hit = CACHE / f'{y}q{q}.tsv'
@@ -396,8 +544,10 @@ def fetch_quarter(y: int, q: int, log=print) -> str | None:
     # published an empty dataset. The same trap this system keeps finding:
     # an absence stored where an answer belongs.
     if hit.exists() and hit.stat().st_size > 0:
-        return hit.read_text()
+        return hit
 
+    import shutil
+    import tempfile
     import urllib.request
     tried = []
     # THE LINK THE SEC PUBLISHED, FIRST. The constructed patterns follow it
@@ -406,40 +556,42 @@ def fetch_quarter(y: int, q: int, log=print) -> str | None:
     for url in ([found] if found else []) + [p.format(y=y, q=q)
                                              for p in URL_PATTERNS]:
         tried.append(url)
+        # TO A FILE, NOT TO RAM. `r.read()` held the whole compressed zip —
+        # ~350MB — and `BytesIO` kept it alive for as long as the ZipFile
+        # existed. zipfile does random access on a real file and never reads
+        # it whole, so a temp file costs disk instead of memory.
+        tmp = tempfile.NamedTemporaryFile(suffix='.zip', delete=False,
+                                          dir=str(CACHE))
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': _edgar.UA})
-            with urllib.request.urlopen(req, timeout=180) as r:
-                blob = r.read()
-        except Exception as e:                            # noqa: BLE001
-            log(f'  {y}Q{q}: {url.rsplit("/", 1)[-1]} — {str(e)[:60]}')
+            try:
+                req = urllib.request.Request(url,
+                                             headers={'User-Agent': _edgar.UA})
+                with urllib.request.urlopen(req, timeout=300) as r:
+                    shutil.copyfileobj(r, tmp, length=1 << 20)
+                tmp.close()
+            except Exception as e:                        # noqa: BLE001
+                log(f'  {y}Q{q}: {url.rsplit("/", 1)[-1]} — {str(e)[:60]}')
+                continue
+            try:
+                zf = zipfile.ZipFile(tmp.name)
+            except Exception as e:                        # noqa: BLE001
+                log(f'  {y}Q{q}: not a zip — {str(e)[:60]}')
+                continue
+            got = _fetch_from_zip(zf, y, q, url, hit, log)
+            if got is not None:
+                return got
             continue
-        try:
-            zf = zipfile.ZipFile(io.BytesIO(blob))
-        except Exception as e:                            # noqa: BLE001
-            log(f'  {y}Q{q}: not a zip — {str(e)[:60]}')
-            continue
-        # THE BIGGEST MATCH, NOT THE FIRST. A zip can carry a stub or a
-        # directory entry whose name also ends INFOTABLE.TSV, and taking
-        # `names[0]` picked one of those — the holdings table is by a wide
-        # margin the largest member, so size is the reliable way to find it.
-        members = [i for i in zf.infolist()
-                   if i.filename.upper().endswith('INFOTABLE.TSV')]
-        if not members:
-            log(f'  {y}Q{q}: no INFOTABLE in {zf.namelist()[:4]}')
-            continue
-        members.sort(key=lambda i: -i.file_size)
-        text = zf.read(members[0]).decode('utf-8', 'replace')
-        if not text.strip():
-            # NOT WRITTEN, so the next run fetches again instead of inheriting
-            # an empty answer. Named, so a genuinely empty dataset is visible
-            # rather than being read as "no institutions own anything".
-            log(f'  {y}Q{q}: {members[0].filename} is EMPTY in '
-                f'{url.rsplit("/", 1)[-1]} — not cached, will retry')
-            continue
-        hit.write_text(text)
-        log(f'  {y}Q{q}: {len(text) // 1_000_000}MB from {url.rsplit("/", 1)[-1]}'
-            f' ({members[0].filename})')
-        return text
+        finally:
+            # IN A FINALLY. A failure part-way through would otherwise leave
+            # 350MB behind, and there are four of these per run.
+            try:
+                tmp.close()
+            except Exception:                             # noqa: BLE001
+                pass
+            try:
+                os.unlink(tmp.name)
+            except Exception:                             # noqa: BLE001
+                pass
     # WHAT WAS TRIED **AND** WHAT WAS OFFERED.
     #
     # Naming the tried URLs was not enough: twelve 404s were printed nightly
@@ -485,10 +637,10 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
     per_q: dict[tuple, dict] = {}
     cusip_ticker: dict[str, str] = {}
     for (y, q) in qs:
-        text = fetch_quarter(y, q, log=log)
-        if text is None:
+        path = fetch_quarter(y, q, log=log)
+        if path is None:
             continue
-        parsed = parse_infotable(text)
+        parsed = parse_infotable_file(path)
         # The CUSIP map only ever grows: a CUSIP matched in ANY quarter is
         # used in all of them, so one quarter writing the name differently
         # does not punch a hole in the history.

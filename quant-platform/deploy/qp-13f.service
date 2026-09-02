@@ -9,8 +9,16 @@
 # Which was right, and it did: the run died mid-download and left one quarter
 # as a zero-byte file.
 #
-# Safe to run WHILE qp-edgar is running. They fetch from different endpoints
-# and neither waits on the other.
+# NOT WHILE qp-edgar IS RUNNING. An earlier version of this note said they
+# were safe together, which was true about endpoints and wrong about memory:
+# both were running when the box ran out and stopped answering ssh entirely —
+#
+#     kex_exchange_identification: read: Software caused connection abort
+#
+# The streaming rewrite means one quarter is now tens of megabytes resident
+# rather than several gigabytes, but two large jobs still have no reason to
+# overlap. Conflicts= makes systemd stop the other one rather than leaving it
+# to be discovered.
 #
 # Install:
 #   sudo cp quant-platform/deploy/qp-13f.service /etc/systemd/system/
@@ -23,6 +31,12 @@
 Description=qp 13F build (I — institutional sponsorship)
 After=network-online.target
 Wants=network-online.target
+Conflicts=qp-edgar.service
+# A RESTART LOOP IS BOUNDED: three tries in ten minutes, then it stops and
+# stays stopped until somebody looks. These belong in [Unit] — in [Service]
+# systemd ignores them, which is the quiet kind of wrong.
+StartLimitIntervalSec=600
+StartLimitBurst=3
 
 [Service]
 # simple, not oneshot: oneshot applies TimeoutStartSec to the whole run and
@@ -41,6 +55,18 @@ ExecStart=/bin/bash -lc 'set -a; . ./.env; set +a; exec python3 -u deploy/run_13
 # Each quarter's INFOTABLE is cached the moment it is extracted, so a restart
 # resumes rather than re-downloading what it already has.
 #
+# A CEILING, SO THE UNIT DIES INSTEAD OF THE MACHINE. Without it an OOM takes
+# whatever the kernel picks — which was sshd — and Restart=on-failure then
+# turns one bad run into a loop that keeps taking it. Inside this limit the
+# process is killed, systemd reports it, and the box stays reachable.
+#
+# 400M ON A t3.micro, WHICH HAS 1GB IN TOTAL and is already running twenty
+# PM2 processes and qp. A limit of 1G would have been no limit at all — it is
+# the whole machine — and that is exactly the mistake that reads as a safety
+# net while being none. The streamed build's own working set is the CUSIP
+# table, tens of MB, so this leaves real headroom rather than trimming it.
+MemoryMax=400M
+MemorySwapMax=0
 # on-failure, not always: a completed build is a SUCCESS and must end the job.
 Restart=on-failure
 RestartSec=30

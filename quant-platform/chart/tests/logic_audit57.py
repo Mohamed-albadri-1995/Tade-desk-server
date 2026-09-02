@@ -54,7 +54,7 @@ c = f13.count_holders(p)
 ok('two managers holding one issuer count as two', c.get('037833100') == 2, c)
 ok('ONE manager filing two share classes counts as ONE', c.get('02079K305') == 1, c)
 ok('...which is the whole reason holders are counted by accession',
-   'DISTINCT ACCESSION NUMBER' in (f13.parse_infotable.__doc__ or ''))
+   'DISTINCT ACCESSION NUMBER' in (f13._parse_rows.__doc__ or ''))
 ok('a blank row is skipped rather than becoming a holder', '' not in c, c)
 ok('the issuer name is carried through for matching',
    p['037833100']['name'] == 'APPLE INC', p['037833100'])
@@ -367,8 +367,10 @@ ok('13F has its own runner, so it need not drag the whole nightly job',
    'f13.build(' in _R13)
 ok('...and its own unit, because 338MB per quarter outlives an ssh session',
    'Type=simple' in _U13 and 'TimeoutStartSec=infinity' in _U13)
-ok('the unit says it is safe to run beside qp-edgar',
-   'qp-edgar' in _U13 and 'different endpoints' in _U13)
+ok('the unit REFUSES to run beside qp-edgar — the earlier note said they '
+   'were safe together, which was true about endpoints and wrong about the '
+   'memory that took the machine down',
+   'Conflicts=qp-edgar.service' in _U13)
 ok('the reason it exists is recorded in the words it was reported in',
    'running on my phone' in _U13)
 
@@ -391,6 +393,122 @@ ok('the run summary repeats it',
 # gives no ticker a zero, so nothing can read as "the funds sold out".
 ok('an empty quarter still gives no ticker a false zero',
    'if counts is None:' in _SRC4 and 'for cusip, n in counts.items():' in _SRC4)
+
+
+# ── NOTHING WHOLE IS EVER IN MEMORY ────────────────────────────────────
+#
+# The box stopped answering ssh entirely:
+#
+#     kex_exchange_identification: read: Software caused connection abort
+#
+# sshd accepted the socket and died before its banner — an out-of-memory
+# machine. The 13F fetch held a quarter FOUR times over: the compressed zip
+# from r.read(), the same bytes alive inside BytesIO, the decompressed member
+# from zf.read(), and a decoded copy of it — and then splitlines() turned the
+# last one into a list of ~30 million str objects, over a gigabyte in
+# per-object overhead before any content. qp-edgar was walking 14,601
+# companies beside it.
+print()
+print('== a quarter is streamed, never materialised ==')
+import resource as _rs                                     # noqa: E402
+import tempfile as _tf4                                    # noqa: E402
+import zipfile as _zf4                                     # noqa: E402
+
+_SRC5 = (pathlib.Path(__file__).resolve().parents[1] / 'f13.py').read_text()
+ok('the download goes to a FILE, not into a bytes object',
+   'shutil.copyfileobj(r, tmp' in _SRC5 and 'blob = r.read()' not in _SRC5)
+ok('...and the zip is opened from that path, so it is never read whole',
+   'zipfile.ZipFile(tmp.name)' in _SRC5 and 'io.BytesIO(blob)' not in _SRC5)
+ok('the member is streamed out, not zf.read() into memory',
+   'zf.open(member)' in _SRC5 and 'zf.read(members[0])' not in _SRC5)
+ok('the temp zip is removed in a finally, not left behind on a failure',
+   'IN A FINALLY' in _SRC5 and 'os.unlink(tmp.name)' in _SRC5)
+ok('the parser takes an ITERABLE of lines, so the caller picks the source',
+   'def _parse_rows(lines)' in _SRC5)
+ok('...and the production path reads the file, never one giant string',
+   'def parse_infotable_file' in _SRC5
+   and 'parse_infotable_file(path)' in _SRC5)
+ok('the ssh failure that showed this is recorded where the fix is',
+   'took the machine' in _SRC5 or 'thirty\n    million' in _SRC5
+   or 'thirty' in _SRC5)
+
+# THE TWO PARSERS MUST NEVER DIVERGE — one is what the audits check, the
+# other is what actually runs.
+_HEAD = ('ACCESSION_NUMBER\tINFOTABLE_SK\tNAMEOFISSUER\tTITLEOFCLASS\tCUSIP'
+         '\tVALUE\tSSHPRNAMT\tPUTCALL\tVOTING_AUTH_SOLE\n')
+_BODY = ''.join(f'ACC-{i % 7}\t{i}\tAPPLE INC\tCOM\t037833100\t1\t1\t\t1\n'
+                for i in range(500))
+_TEXT = _HEAD + _BODY
+_dir4 = pathlib.Path(_tf4.mkdtemp())
+(_dir4 / 'x.tsv').write_text(_TEXT)
+ok('the file parser and the text parser give the same counts',
+   f13.count_holders(f13.parse_infotable_file(_dir4 / 'x.tsv'))
+   == f13.count_holders(f13.parse_infotable(_TEXT))
+   == {'037833100': 7},
+   f13.count_holders(f13.parse_infotable_file(_dir4 / 'x.tsv')))
+
+# EXTRACTED AND REDUCED IN ONE PASS. An INFOTABLE also carries value, share
+# counts, put/call and voting authority, none of which anything reads.
+_zp = _dir4 / 'q.zip'
+with _zf4.ZipFile(_zp, 'w', _zf4.ZIP_DEFLATED) as _z:
+    _z.writestr('junk/INFOTABLE.tsv', '')      # the stub that fooled names[0]
+    _z.writestr('data/INFOTABLE.tsv', _TEXT)
+_cache_was4 = f13.CACHE
+try:
+    f13.CACHE = _dir4
+    _hit = _dir4 / '2026q2.tsv'
+    _rss0 = _rs.getrusage(_rs.RUSAGE_SELF).ru_maxrss
+    with _zf4.ZipFile(_zp) as _zf:
+        _got = f13._fetch_from_zip(_zf, 2026, 2, 'http://x/f.zip', _hit,
+                                   log=lambda *_: None)
+    _rss1 = _rs.getrusage(_rs.RUSAGE_SELF).ru_maxrss
+    ok('a quarter extracts to a cache file', _got == _hit and _hit.exists())
+    ok('the stub member is skipped and the real table taken',
+       _hit.stat().st_size > 0, _hit.stat().st_size)
+    ok('only the columns that are read are kept',
+       open(_hit).readline().strip().split('\t') == list(f13.KEEP_COLS),
+       open(_hit).readline())
+    ok('...so the cache is smaller than the raw table',
+       _hit.stat().st_size < len(_TEXT),
+       (_hit.stat().st_size, len(_TEXT)))
+    ok('the counts survive the reduction',
+       f13.count_holders(f13.parse_infotable_file(_hit)) == {'037833100': 7})
+    ok('extracting does not grow the heap',
+       _rss1 - _rss0 < 50_000, (_rss0, _rss1))
+finally:
+    f13.CACHE = _cache_was4
+
+# ...AND THE UNITS CANNOT DO IT AGAIN.
+_U13b = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
+         / 'qp-13f.service').read_text()
+ok('the two heavy jobs no longer claim to be safe together',
+   'Conflicts=qp-edgar.service' in _U13b
+   and 'different endpoints' not in _U13b)
+ok('a ceiling kills the UNIT rather than the machine',
+   'MemoryMax=' in _U13b)
+# A LIMIT THE SIZE OF THE MACHINE IS NOT A LIMIT. The box is a t3.micro with
+# 1GB, already running twenty PM2 processes, so MemoryMax=1G would have read
+# as a safety net while being none.
+ok('...and the ceiling is well under the machine it runs on',
+   'MemoryMax=400M' in _U13b and 'MemoryMax=1G' not in _U13b)
+ok('the instance size is written down, since the number depends on it',
+   't3.micro' in _U13b)
+
+# The accession set is what a real quarter fills: one entry per holding row,
+# a few million of them, from about six thousand distinct filings.
+_SRC6 = (pathlib.Path(__file__).resolve().parents[1] / 'f13.py').read_text()
+ok('accessions are stored as shared ids, not a str per row',
+   'aid = ids[acc] = len(ids)' in _SRC6)
+ok('...and the counts are unchanged by it',
+   f13.count_holders(f13.parse_infotable(TSV))
+   == {'037833100': 2, '02079K305': 1, '999999999': 1})
+ok('the duplication that made it matter is written down',
+   'SIX THOUSAND distinct' in _SRC6)
+ok('...and a restart loop is bounded, since on-failure plus OOM is a loop',
+   'StartLimitBurst=' in _U13b)
+_UNIT_SECTION = _U13b.split('\n[Service]\n')[0]
+ok('the limits sit in [Unit], where systemd actually reads them',
+   'StartLimitBurst=' in _UNIT_SECTION and 'MemoryMax=' not in _UNIT_SECTION)
 
 print()
 print(f'        {PASS} passed, {FAIL} failed')
