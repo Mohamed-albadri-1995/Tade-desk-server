@@ -150,6 +150,8 @@ the share count moved and the subtraction would be fiction.
 | 65 | Shares outstanding | EDGAR | no share-count tag in the filing |
 | 66 | Basis (cover / balance sheet / issued / weighted avg) | EDGAR | shown only when it is **not** the cover figure |
 | 67 | As of | EDGAR | as 65 |
+| 67a | **Share count %chg over ~1yr + buying back / diluting / flat** | DESK | never blank when 65 exists — it says which reason instead: `only one count on file` or `too bunched to give a rate`. Both are correct answers, not gaps |
+| 67b | **The two counts and dates it compared** | EDGAR | as 67a. Always from the SAME tag — a cover-page count against a weighted average would invent a buyback |
 | 68 | Float | TV | TV has none for this ticker |
 | 69 | Float as % of shares outstanding | DESK | needs both 65 and 68 |
 | 70 | Short interest % + basis + as-of | Yahoo → FINRA | not reported |

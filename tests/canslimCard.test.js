@@ -796,6 +796,95 @@ describe('S — the float the card already has', () => {
   test('the cover-page count carries no qualifier, being the plain answer', () => {
     expect(render(STOCK)).not.toContain('weighted avg');
   });
+
+  /*
+   * AND THE COUNT AGAINST ITSELF A YEAR AGO.
+   *
+   *   "we need the history to compare and check the progress but we need the
+   *    most recent data"
+   *
+   * S was the one letter with no history on the card at all: a share count
+   * and nothing to read it against. But O'Neil's S is not how many shares
+   * exist, it is whether the number is SHRINKING — a company buying its own
+   * stock back is taking supply out from under the same demand. One figure
+   * cannot say that, and the filings the card already downloads carry every
+   * figure needed to.
+   */
+  const withChg = (chg, hist) => ({
+    ok: true,
+    s: { ...SUPPLY.s, shares_chg_1y: chg, shares_history: hist },
+  });
+
+  test('a shrinking count is shown as a buyback, and green', () => {
+    const out = render(STOCK, withChg(
+      { pct: -6, from: '2025-06-30', from_val: 100e6,
+        to: '2026-06-30', to_val: 94e6, days: 365 },
+      [{ end: '2025-06-30', val: 100e6 }, { end: '2026-06-30', val: 94e6 }]));
+    expect(out).toContain('Share count');
+    expect(out).toContain('-6%');
+    expect(out).toContain('buying back');
+    expect(out).toContain('bias-bull');
+  });
+
+  test('a growing count is dilution, and red', () => {
+    const out = render(STOCK, withChg(
+      { pct: 18.4, from: '2025-06-30', from_val: 80e6,
+        to: '2026-06-30', to_val: 94.7e6, days: 365 }, []));
+    expect(out).toContain('+18.4%');
+    expect(out).toContain('diluting');
+    expect(out).toContain('bias-bear');
+  });
+
+  /* A SHARE COUNT DRIFTS through option exercises every quarter. Colouring
+     half a percent as a buyback would make the colour mean nothing, which is
+     the same failure as a green tick on a criterion nobody passed. */
+  test('a drift of well under a percent is flat — neither colour', () => {
+    const out = render(STOCK, withChg(
+      { pct: -0.4, from: '2025-06-30', from_val: 94.4e6,
+        to: '2026-06-30', to_val: 94e6, days: 365 }, []));
+    expect(out).toContain('flat');
+    expect(out).not.toContain('bias-bull');
+    expect(out).not.toContain('bias-bear');
+  });
+
+  test('both figures and both dates are printed, so the number can be checked', () => {
+    const out = render(STOCK, withChg(
+      { pct: -6, from: '2025-06-30', from_val: 100e6,
+        to: '2026-06-30', to_val: 94e6, days: 365 }, []));
+    expect(out).toContain('2025-06-30');
+    expect(out).toContain('2026-06-30');
+    expect(out).toContain('365 days');
+  });
+
+  /* "NO COMPARISON YET" AND "NO DATA" ARE DIFFERENT FACTS about different
+     companies, and a bare dash says the second when it means the first. A
+     stock that listed nine months ago is not missing its history — it has not
+     lived long enough to have one. */
+  test('one count on file says so, rather than showing nothing', () => {
+    const out = render(STOCK, withChg(null, [{ end: '2026-06-30', val: 94e6 }]));
+    expect(out).toContain('only one count on file');
+    expect(out).not.toContain('buying back');
+  });
+
+  test('...and counts that exist but are too bunched say THAT instead', () => {
+    const out = render(STOCK, withChg(null, [
+      { end: '2026-03-31', val: 100e6 }, { end: '2026-06-30', val: 94e6 }]));
+    expect(out).toContain('too bunched');
+  });
+
+  test('a stock with no share count at all adds no line about one', () => {
+    const out = render(STOCK, { ok: true, s: { shares_outstanding: null } });
+    expect(out).not.toContain('Share count');
+  });
+
+  test('the direction is never invented from the headline figure alone', () => {
+    // No shares_chg_1y on the payload at all — an older cached record. It must
+    // read as "no direction yet", never as flat.
+    const out = render(STOCK);
+    expect(out).not.toContain('buying back');
+    expect(out).not.toContain('diluting');
+    expect(out).toContain('only one count on file');
+  });
 });
 
 /*

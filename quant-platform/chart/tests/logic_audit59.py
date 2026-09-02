@@ -421,7 +421,14 @@ finally:
     edgar.CACHE = _old
 
 ok('membership is decided by cached(), the reader\'s own question',
-   'cached(t, max_age_days=age) is None' in EDG)
+   'recs = {t: cached(t, max_age_days=age) for t in want}' in EDG
+   and 'recs[t] is None' in EDG)
+# THE SECOND REASON TO FETCH ONLY EVER ADDS. `todo` gained "owes a filing"
+# (audit 60), and that must not become a second predicate the READER also
+# applies — a card would go blank the moment a company filed late. The reader
+# is still cached(), alone.
+ok('...and the extra reason to refetch does not become a reason to refuse',
+   'max_age_days' not in EDG.split('def _due_for_filing')[1].split('\ndef ')[0])
 ok('...and mtime is kept only for ORDERING, which still needs a number',
    'only for ORDERING' in ' '.join(EDG.split()))
 ok('the live pair of contradictory lines is recorded',

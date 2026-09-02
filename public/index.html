@@ -4173,12 +4173,25 @@ const DEFS = {
     src: "O'Neil's CAN SLIM workshop, January 2010.",
   },
   demand: {
-    title: 'Demand — U/D volume and A/D',
-    what: "Two measures of the same question: are institutions buying this or "
-      + "selling it. They are computed differently over different windows and "
-      + "they DISAGREE often — the disagreement is the informative part, which "
-      + "is why both are shown and neither is derived from the other.",
-    how: "U/D VOLUME RATIO — 50 sessions\n"
+    title: 'S — supply, and the demand meeting it',
+    what: "SUPPLY IS A DIRECTION, NOT A COUNT. O'Neil's S is not how many "
+      + "shares exist — it is whether that number is SHRINKING. A company "
+      + "buying its own stock back is removing supply from the same demand; "
+      + "one issuing shares is doing the opposite, and the holder pays for "
+      + "it. So the share count is shown against its own figure a year "
+      + "earlier, from the same tag in the same filings.\n\n"
+      + "Then two measures of the demand side: are institutions buying this "
+      + "or selling it. They are computed differently over different windows "
+      + "and they DISAGREE often — the disagreement is the informative part, "
+      + "which is why both are shown and neither is derived from the other.",
+    how: "SHARE COUNT — about a year apart\n"
+      + "  the newest count against the one closest to 365 days before it,\n"
+      + "  accepted only between 290 and 440 days. FROM ONE TAG ONLY: a\n"
+      + "  cover-page count against a weighted average differs by the\n"
+      + "  measurement, not the company, and would invent a buyback.\n"
+      + "  -1% or lower is buying back, +2% or higher is diluting; the gap\n"
+      + "  between is flat, because option exercises move it every quarter.\n\n"
+      + "U/D VOLUME RATIO — 50 sessions\n"
       + "  volume on up days / volume on down days\n"
       + "  1.0 is neutral. Unchanged days count as neither.\n\n"
       + "A/D — 13 weeks\n"
@@ -4193,7 +4206,9 @@ const DEFS = {
       + "letter is OURS: IBD percentile-ranks its rating against the whole "
       + "market and does not publish the boundaries, so this bands the raw "
       + "score directly and prints the raw number beside it.",
-    src: 'Computed from this stock\'s own daily bars.',
+    src: 'Share count from the SEC filings cache (EDGAR); float and short '
+      + 'interest from the screener; U/D and A/D computed from this stock\'s '
+      + 'own daily bars.',
   },
   rs_line_tell: {
     title: 'RS line — new high ground BEFORE price',
@@ -4927,6 +4942,41 @@ function canslimTablesHTML(tk, stock) {
                Math.round(r.floatShares / s.shares_outstanding * 100)}% of shares
                outstanding</span>` : ''}`
       : `<span style="color:var(--text3)">${esc(s.float_note || 'not available')}</span>`}
+    ${(() => {
+      /* THE DIRECTION OF THE COUNT, WHICH IS THE PART O'NEIL READS.
+         One share count is a fact and says nothing. Fewer shares than a year
+         ago is a company buying its own stock back — supply falling into the
+         same demand — and more is dilution, paid for by whoever already holds
+         it. Neither is visible in the headline number, and both were already
+         in the filings this card downloads.
+         SHRINKING IS GREEN, and the threshold is not zero: a share count
+         drifts by a fraction of a percent through option exercises every
+         quarter, and colouring that as a buyback would make the signal
+         meaningless. */
+      const c = s.shares_chg_1y;
+      const hist = s.shares_history || [];
+      if (c) {
+        const cls = c.pct <= -1 ? 'bias-bull' : c.pct >= 2 ? 'bias-bear' : '';
+        const word = c.pct <= -1 ? 'buying back' : c.pct >= 2 ? 'diluting' : 'flat';
+        const series = hist.map(p => `${p.end}  ${_m(p.val)}`).join('\n');
+        return `<br>Share count <b class="${cls}">${c.pct > 0 ? '+' : ''}${
+          c.pct}%</b> <span style="color:var(--text3)">over ${c.days} days —
+          ${word} · ${_m(c.from_val)} on ${esc(c.from)} → ${_m(c.to_val)} on
+          ${esc(c.to)}</span>${hist.length > 2
+            ? ` <span class="m-none" title="${esc(series)}">${hist.length} counts
+                on file</span>` : ''}`;
+      }
+      /* AND WHEN THERE IS NO COMPARISON, WHICH OF THE REASONS IT IS. "—"
+         for all of them would say the data is missing, and for a company
+         that listed nine months ago it is not missing — it does not exist
+         yet, and that is a different fact about a different stock. */
+      if (s.shares_outstanding == null) return '';
+      return `<br><span style="color:var(--text3)">Share count: ${hist.length >= 2
+        ? `${hist.length} counts on file but none about a year apart — the
+           filings are too bunched to give a rate`
+        : 'only one count on file, so no direction yet — a year of filings is '
+          + 'needed'}</span>`;
+    })()}
     ${r.shortFloat != null
       ? `<br>Short interest <b>${r.shortFloat.toFixed(1)}%</b>
          <span style="color:var(--text3)">of ${

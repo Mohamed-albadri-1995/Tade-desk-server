@@ -585,16 +585,86 @@ SHARES_BASIS = {
 }
 
 
+# HOW MANY SHARE COUNTS TO KEEP, AND WHY KEEP ANY.
+#
+# One number is a fact and says nothing. O'Neil's S is not "how many shares" —
+# it is whether the count is SHRINKING: a company buying its own stock back is
+# reducing supply into the same demand, and one issuing heavily is doing the
+# opposite to its own shareholders. Neither is visible in a single figure, and
+# both are already in the data that was downloaded to get it.
+#
+# Eight points is two years, which is long enough for a buyback programme to
+# show and short enough that a split five years ago is not read as dilution.
+SHARES_HISTORY = 8
+
+# The span a change is measured over: one year, give or take a quarter. A
+# percentage over an arbitrary gap is not a rate, and comparing across
+# whatever two dates happen to exist is how a nine-month change gets read as
+# an annual one.
+_SHARES_SPAN = (290, 440)
+
+
+def _shares_change(points):
+    """Change in share count over ~a year, or None if there is no such pair.
+
+    LIKE FOR LIKE OR NOTHING. `points` must already come from a SINGLE tag: a
+    cover-page count in one period against a weighted average in another
+    differs by the measurement and not by the company, and subtracting them
+    manufactures a buyback that never happened. The caller does that filtering
+    — this only chooses the dates.
+    """
+    if len(points) < 2:
+        return None
+    last = points[-1]
+    try:
+        to = _dt.date.fromisoformat(last['end'])
+    except Exception:                                     # noqa: BLE001
+        return None
+    best = None
+    for r in points[:-1]:
+        try:
+            gap = (to - _dt.date.fromisoformat(r['end'])).days
+        except Exception:                                 # noqa: BLE001
+            continue
+        if not _SHARES_SPAN[0] <= gap <= _SHARES_SPAN[1]:
+            continue
+        if best is None or abs(gap - 365) < abs(best[0] - 365):
+            best = (gap, r)
+    if best is None:
+        return None
+    gap, then = best
+    now_v, then_v = last.get('val'), then.get('val')
+    # A count of zero is not a base to divide by, and a negative one is not a
+    # share count at all.
+    if not now_v or not then_v or then_v <= 0:
+        return None
+    return {'pct': round((now_v - then_v) / then_v * 100, 2),
+            'from': then['end'], 'from_val': then_v,
+            'to': last['end'], 'to_val': now_v, 'days': gap}
+
+
 def supply(cf: dict) -> dict:
-    """S — shares outstanding, and what kind of count it is."""
+    """S — shares outstanding, what kind of count it is, and its direction."""
     rows = _facts(cf, SHARES_TAGS, 'shares')
     latest = rows[-1] if rows else None
     tag = (latest or {}).get('tag')
+    # ONE TAG, NEVER MIXED — see _shares_change. Keyed on the end date so a
+    # period re-reported under the same tag appears once.
+    seen: dict[str, float] = {}
+    for r in rows:
+        if (r.get('tag') == tag and r.get('end')
+                and r.get('val') is not None):
+            seen[r['end']] = r['val']
+    points = [{'end': e, 'val': v} for e, v in sorted(seen.items())]
     return {
         'shares_outstanding': latest.get('val') if latest else None,
         'as_of': latest.get('end') if latest else None,
         'shares_tag': tag,
         'shares_basis': SHARES_BASIS.get(tag),
+        # THE HISTORY, so the number can be compared with itself. Same tag as
+        # the headline figure, oldest first.
+        'shares_history': points[-SHARES_HISTORY:],
+        'shares_chg_1y': _shares_change(points),
         # FLOAT IS NOT IN EDGAR, and that is all this says now.
         #
         # It used to say "no free source publishes float directly", which was
@@ -619,7 +689,11 @@ def supply(cf: dict) -> dict:
 #      equity; a derived Q4 EPS dropped when it disagrees with net income;
 #      margin capped at PCT_CAP; shares outstanding gained four fallback tags
 #      and a basis
-SCHEMA = 2
+#   3  2026-09-02 — shares_history and shares_chg_1y: S was the one letter
+#      with no history at all, and a share count that is not compared with
+#      itself cannot show a buyback or a dilution, which is the whole of what
+#      O'Neil reads it for
+SCHEMA = 3
 
 
 def tables(cf: dict) -> dict:
@@ -781,6 +855,55 @@ REFRESH_DAYS = float(os.environ.get('QP_EDGAR_REFRESH_DAYS') or 5)
 WALK_BUDGET_S = float(os.environ.get('QP_EDGAR_WALK_SECONDS') or 5400)
 
 
+# A COMPANY THAT OWES A FILING IS STALE NO MATTER HOW YOUNG THE FILE IS.
+#
+# REFRESH_DAYS is a clock, and a clock knows nothing about earnings. A company
+# that reports on the first day of its five-day window shows the PREVIOUS
+# quarter for the next five days — and earnings day is precisely the day the C
+# letter changes and the day a card is worth looking at. "We need the most
+# recent data" is not satisfied by a cache that is merely young.
+#
+# So a second, independent reason to re-fetch: the newest quarter on file
+# ended long enough ago that the next one must already exist. A quarter is
+# about 91 days, and a 10-Q is due 40-45 days after it ends (60 for a 10-K),
+# so a record whose last quarter ended more than ~136 days ago is behind.
+#
+# MEASURED FROM THE COMPANY'S OWN LAST QUARTER, not from the calendar. A filer
+# whose year ends in January has quarters ending Jan/Apr/Jul/Oct, and judging
+# it against 31 March would call it late four times a year for being itself.
+_QUARTER_DAYS = 91
+FILING_DUE_DAYS = float(os.environ.get('QP_EDGAR_DUE_DAYS') or 45)
+
+
+def _last_quarter_end(rec) -> str | None:
+    """The newest quarter this cached record knows about."""
+    rows = (((rec or {}).get('c') or {}).get('rows')) or []
+    ends = [r.get('quarter') for r in rows if r.get('quarter')]
+    return max(ends) if ends else None
+
+
+def _due_for_filing(rec, today=None) -> bool:
+    """Has a quarter come and gone that this record has never seen?
+
+    Only ever ADDS work. The card's predicate is `cached()` and this does not
+    touch it: a company that owes a filing keeps showing the last one it made,
+    which is the right answer until a newer one exists. Making the reader
+    reject it too would blank a good table over a filing that is merely late —
+    the same shape as the deadlock in `walk`, arrived at from the other side.
+    """
+    last = _last_quarter_end(rec)
+    # No quarters at all is the no-filings case, already cached as such and
+    # not a company that is behind.
+    if not last:
+        return False
+    try:
+        end = _dt.date.fromisoformat(last)
+    except Exception:                                     # noqa: BLE001
+        return False
+    d = today or _dt.date.today()
+    return (d - end).days >= _QUARTER_DAYS + FILING_DUE_DAYS
+
+
 def _cache_age_days(ticker: str) -> float | None:
     """Age of what is on disk, or None if nothing is."""
     p = CACHE / f'{str(ticker).upper()}.json'
@@ -843,7 +966,11 @@ def walk(symbols, refresh_days: float | None = None,
     # is still computed, but only for ORDERING: "nothing on disk first, then
     # the stalest" needs a number, and a rejected record still has a date.
     ages = {t: _cache_age_days(t) for t in want}
-    todo = [t for t in want if cached(t, max_age_days=age) is None]
+    recs = {t: cached(t, max_age_days=age) for t in want}
+    # TWO REASONS TO FETCH, AND THE CLOCK IS ONLY ONE OF THEM. See
+    # _due_for_filing: a record can be a day old and already a quarter behind.
+    due = {t for t in want if recs[t] is not None and _due_for_filing(recs[t])}
+    todo = [t for t in want if recs[t] is None or t in due]
 
     # KNOWN FILERS FIRST, and this is worth far more than it looks.
     #
@@ -863,10 +990,26 @@ def walk(symbols, refresh_days: float | None = None,
     # the exact opposite of what is wanted, and invisible until a universe
     # that had grown spent its whole night refreshing names it already had.
     # Nothing on disk outranks any age.
-    todo.sort(key=lambda t: (0 if t in known else 1,
+    #
+    # AND THE ORDER INSIDE THAT IS WORST-CARD-FIRST, on a night that runs out
+    # of hours:
+    #
+    #   0  nothing on disk        the card has no tables at all
+    #   1  on disk, rejected      too old or too old a schema — the reader
+    #                             will not show it, so the card is blank too
+    #   2  readable, owes a filing  the card is right, and a quarter behind
+    #
+    # 2 is last because it is the only one of the three that still renders.
+    def _tier(t):
+        if ages[t] is None:
+            return 0
+        return 1 if recs[t] is None else 2
+
+    todo.sort(key=lambda t: (0 if t in known else 1, _tier(t),
                              float('-inf') if ages[t] is None else -ages[t]))
     log(f'  {len(want)} in universe · {len(want) - len(todo)} already fresh '
         f'· {len(todo)} to fetch'
+        + (f' · {len(due)} of them owe a filing' if due else '')
         + (f' · {sum(1 for t in todo if t in known)} of them known filers'
            if known else ''))
 
