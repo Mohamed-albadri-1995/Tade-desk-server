@@ -969,17 +969,24 @@ describe('FULL TABLES headings carry their definition', () => {
  * and read as sponsorship it says the whole market is being accumulated.
  */
 describe('I — holders against the filer population', () => {
+  /* THE SHAPE build() ACTUALLY WRITES, taken from the audit that drives the
+     real roll-up — every quarter carries the count, the population it came
+     from and the share of it. */
   const F13 = {
     ok: true,
+    holder_unit: 'manager',
     filers_by_quarter: {
-      '2025Q2': 7100, '2025Q3': 7240, '2025Q4': 7380, '2026Q1': 7510,
+      '2025Q2': 8060, '2025Q3': 8034, '2025Q4': 8636, '2026Q1': 8759,
     },
     stocks: {
       AAA: {
-        funds: 6693, change: 729, direction: 'rising',
+        funds: 6693, change: 729, change_share_pct: 12.4,
+        direction: 'rising', direction_basis: 'share',
         quarters: [
-          { q: '2025Q2', funds: 5964 }, { q: '2025Q3', funds: 6210 },
-          { q: '2025Q4', funds: 6455 }, { q: '2026Q1', funds: 6693 },
+          { q: '2025Q2', funds: 5964, of: 8060, share_pct: 74.0 },
+          { q: '2025Q3', funds: 6210, of: 8034, share_pct: 77.3 },
+          { q: '2025Q4', funds: 6455, of: 8636, share_pct: 74.7 },
+          { q: '2026Q1', funds: 6693, of: 8759, share_pct: 76.4 },
         ],
       },
     },
@@ -995,8 +1002,52 @@ describe('I — holders against the filer population', () => {
 
   test('each quarter carries how many managers filed at all', () => {
     const out = render();
-    expect(out).toContain('6,693 of 7,510');
-    expect(out).toContain('5,964 of 7,100');
+    expect(out).toContain('6,693 of 8,759');
+    expect(out).toContain('5,964 of 8,060');
+  });
+
+  /* THE DIRECTION IS THE SHARE, NOT THE COUNT. Five mega-caps in five
+     industries all printed "rising" off raw counts while the filer
+     population grew 8,060 → 8,759 underneath them — Microsoft among them,
+     at +431 holders and 71.2% of filers down to 70.4%. */
+  test('the share of filers is on every quarter, beside the count', () => {
+    const out = render();
+    expect(out).toContain('(74%)');
+    expect(out).toContain('(76.4%)');
+  });
+
+  test('the share move carries the colour and the word', () => {
+    const out = render();
+    expect(out).toContain('+12.4% share of filers');
+    expect(out).toMatch(/bias-bull[^]*rising/);
+  });
+
+  /* THE RAW CHANGE IS SHOWN AND NOT COLOURED. Printing +431 in green beside
+     the word "flat" is exactly the contradiction this change removes. */
+  test('the raw change is still shown, labelled raw', () => {
+    expect(render()).toContain('+729 holders raw');
+  });
+
+  test('a count that rose while the share fell reads flat, not rising', () => {
+    const msft = JSON.parse(JSON.stringify(F13));
+    Object.assign(msft.stocks.AAA, {
+      funds: 6168, change: 431, change_share_pct: -1.1, direction: 'flat',
+    });
+    const out = render(msft);
+    expect(out).toContain('flat');
+    expect(out).toContain('+431 holders raw');   // the fact survives
+    expect(out).not.toMatch(/bias-bull/);        // the reading does not
+  });
+
+  test('a file with no filer population says the direction is the raw count', () => {
+    const old = JSON.parse(JSON.stringify(F13));
+    old.stocks.AAA.direction_basis = 'count';
+    old.stocks.AAA.change_share_pct = null;
+    expect(render(old)).toContain('direction from the RAW count');
+  });
+
+  test('...and the normal case carries no such warning', () => {
+    expect(render()).not.toContain('direction from the RAW count');
   });
 
   test('the holder count and the direction still lead the row', () => {
@@ -1012,9 +1063,12 @@ describe('I — holders against the filer population', () => {
   test('a file built before the denominator existed still renders', () => {
     const old = JSON.parse(JSON.stringify(F13));
     delete old.filers_by_quarter;
+    old.stocks.AAA.quarters = old.stocks.AAA.quarters.map(
+      ({ q, funds }) => ({ q, funds }));
+    old.stocks.AAA.change_share_pct = null;
+    old.stocks.AAA.direction_basis = 'count';
     const out = render(old);
     expect(out).toContain('2026Q1 6,693');
-    expect(out).not.toContain(' of ');
     expect(out).not.toMatch(/undefined|NaN/);
   });
 

@@ -240,20 +240,34 @@ def _quarter_files(y, q, rows, subs):
         + '\n'.join(subs) + '\n')
 
 
-# 2025Q4: ciks 100 (who AMENDS, so two accessions) and 200.
+# A POPULATION LARGER THAN THE HOLDERS, or the share is 100% in every
+# quarter and the direction cannot be exercised at all. `zz*` are managers who
+# filed and hold something this map does not recognise — which is most of a
+# real quarter.
+#
+# 2025Q4: ciks 100 (who AMENDS, so two accessions) and 200 hold AAPL, out of
+#         a population of 4 managers → 50%.
 _quarter_files(2025, 4,
                ['a1\t037833100\tAPPLE INC', 'a1x\t037833100\tAPPLE INC',
-                'a2\t037833100\tAPPLE INC'],
+                'a2\t037833100\tAPPLE INC',
+                'z1\t999999999\tSOMETHING ELSE',
+                'z2\t999999999\tSOMETHING ELSE'],
                ['a1\t100\t13F-HR\t12-31-2025',
                 'a1x\t100\t13F-HR/A\t12-31-2025',
-                'a2\t200\t13F-HR\t12-31-2025'])
-# 2026Q1: ciks 100, 200 and a new 300.
+                'a2\t200\t13F-HR\t12-31-2025',
+                'z1\t800\t13F-HR\t12-31-2025',
+                'z2\t900\t13F-HR\t12-31-2025'])
+# 2026Q1: ciks 100, 200 and a new 300 hold it, out of 5 → 60%.
 _quarter_files(2026, 1,
                ['b1\t037833100\tAPPLE INC', 'b2\t037833100\tAPPLE INC',
-                'b3\t037833100\tAPPLE INC'],
+                'b3\t037833100\tAPPLE INC',
+                'y1\t999999999\tSOMETHING ELSE',
+                'y2\t999999999\tSOMETHING ELSE'],
                ['b1\t100\t13F-HR\t03-31-2026',
                 'b2\t200\t13F-HR\t03-31-2026',
-                'b3\t300\t13F-HR\t03-31-2026'])
+                'b3\t300\t13F-HR\t03-31-2026',
+                'y1\t800\t13F-HR\t03-31-2026',
+                'y2\t900\t13F-HR\t03-31-2026'])
 
 _save = (f13.CACHE, f13.SHARED, f13._name_index, f13.discover_urls,
          f13.recent_quarters)
@@ -272,17 +286,24 @@ _row = (_out.get('stocks') or {}).get('AAPL') or {}
 ok('the build succeeds over a cache it can read', _out.get('ok'), _out)
 ok('THE HISTORY IS A LIST, not a count — this is the whole bug',
    isinstance(_row.get('quarters'), list), _row.get('quarters'))
-ok('...with one entry per quarter, under the keys the card reads',
-   _row.get('quarters') == [{'q': '2025Q4', 'funds': 2},
-                            {'q': '2026Q1', 'funds': 3}], _row.get('quarters'))
+ok('...with one entry per quarter, under the keys the card reads — the '
+   'count, the population it came from, and the share of it',
+   _row.get('quarters') == [
+       {'q': '2025Q4', 'funds': 2, 'of': 4, 'share_pct': 50.0},
+       {'q': '2026Q1', 'funds': 3, 'of': 5, 'share_pct': 60.0}],
+   _row.get('quarters'))
 ok('...and trend\'s own count lives under a name that cannot collide',
    _row.get('quarters_counted') == 2, _row)
 ok('an AMENDMENT is not a second holder — three filings, two managers',
    _row.get('funds') == 3 and _row['quarters'][0]['funds'] == 2, _row)
-ok('the direction reads across the history it kept',
-   _row.get('direction') == 'rising' and _row.get('change') == 1, _row)
-ok('the population is counted per quarter, by manager',
-   _out.get('filers_by_quarter') == {'2025Q4': 2, '2026Q1': 3},
+ok('the direction reads across the SHARE it kept, and the raw change is '
+   'still there beside it',
+   _row.get('direction') == 'rising' and _row.get('change') == 1
+   and _row.get('change_share_pct') == 20.0
+   and _row.get('direction_basis') == 'share', _row)
+ok('the population is counted per quarter, by manager — everyone who filed, '
+   'not only those holding something we matched',
+   _out.get('filers_by_quarter') == {'2025Q4': 4, '2026Q1': 5},
    _out.get('filers_by_quarter'))
 ok('and the file says which unit a holder is',
    _out.get('holder_unit') == 'manager', _out.get('holder_unit'))
@@ -322,8 +343,8 @@ ok('a filename that disagrees with the filings loses',
 ok('...and the disagreement is published, not swallowed',
    _o2.get('relabelled') == ['2026Q3→2026Q1'], _o2.get('relabelled'))
 ok('the ticker history carries the corrected label',
-   _o2['stocks']['AAPL']['quarters'] == [{'q': '2026Q1', 'funds': 2}],
-   _o2['stocks']['AAPL'])
+   [r['q'] for r in _o2['stocks']['AAPL']['quarters']] == ['2026Q1']
+   and _o2['stocks']['AAPL']['funds'] == 2, _o2['stocks']['AAPL'])
 
 # AND WITHOUT SUBMISSIONS IT STILL ANSWERS, in the weaker unit, saying so.
 #
@@ -361,6 +382,91 @@ ok('the card checks the shape before mapping over it, since a number reached '
    'it once', 'Array.isArray(fs.quarters)' in _CARD57)
 ok('...and names the unit when it is not the manager',
    'holder_unit' in _CARD57 and 'counted by FILING' in _CARD57)
+
+
+# ── THE DIRECTION IS THE SHARE, NOT THE COUNT ──────────────────────────
+#
+# From the field check, with the counts finally in the right unit:
+#
+#     MSFT  +431 rising    but  71.2% -> 70.4% of filers
+#     AAPL  +537 rising         68.6% -> 69.2%
+#     NVDA  +605 rising         64.9% -> 66.6%
+#     AMD   +649 rising         31.4% -> 36.3%
+#     PLTR  +411 rising         32.1% -> 34.2%
+#
+# Five companies in five industries, every one "rising". The population of
+# managers filing went 8,060 · 8,034 · 8,636 · 8,759 over the same quarters
+# and carried them all up. Microsoft was LOSING ground against the managers
+# who could have held it while the card said money was arriving.
+#
+# O'Neil's I is new funds DECIDING to buy this stock. A manager that starts
+# filing this quarter and indexes everything has decided nothing about
+# Microsoft.
+print()
+print('== the direction is read from the share of filers ==')
+
+_POOL = [8060, 8034, 8636, 8759]
+_msft = f13.trend([5737, 5850, 6000, 6168], _POOL)
+_amd = f13.trend([2527, 2700, 2950, 3176], _POOL)
+_aapl = f13.trend([5527, 5600, 5900, 6064], _POOL)
+
+ok('a count that rises while the share does not is NOT rising — this is the '
+   'Microsoft case and the whole point',
+   _msft['direction'] != 'rising', _msft)
+ok('...and the share move is the negative one it actually is',
+   _msft['change_share_pct'] < 0, _msft)
+# NOT "falling" EITHER. -1.1% relative over a year is inside the noise a
+# threshold population produces; naming it a decline would be over-reading in
+# the other direction, which is the same fault wearing the other coat.
+ok('...but a 1% relative move is flat, not a decline invented to match the '
+   'correction', _msft['direction'] == 'flat', _msft)
+ok('a stock genuinely taking share still reads rising',
+   _amd['direction'] == 'rising' and _amd['change_share_pct'] > 15, _amd)
+ok('and a mega-cap standing still reads flat, however large the raw change',
+   _aapl['direction'] == 'flat' and _aapl['change'] == 537, _aapl)
+
+ok('THE RAW CHANGE IS NEVER DROPPED — it is a true fact about the stock',
+   _msft['change'] == 431 and _amd['change'] == 649)
+ok('...and the share series is published, so the reading can be checked',
+   _msft['share_pct'] == [71.2, 72.8, 69.5, 70.4], _msft['share_pct'])
+ok('the basis is named, always', _msft['direction_basis'] == 'share')
+
+# RELATIVE, NOT IN POINTS. Half a point is noise at 70% and a sixth of the
+# position at 3%, so a fixed points threshold would be deaf at one end and
+# hysterical at the other.
+_small = f13.trend([300, 360], [10000, 10000])          # 3.0% -> 3.6%
+ok('a small holder base moving half a point IS a direction, because it is '
+   'a fifth of the position', _small['direction'] == 'rising', _small)
+_big = f13.trend([7000, 7060], [10000, 10000])          # 70.0% -> 70.6%
+ok('...and the same half point at 70% is not', _big['direction'] == 'flat',
+   _big)
+
+ok('the band is a named constant, not a number buried in a comparison',
+   f13.SHARE_BAND_PCT == 3.0)
+
+# WITHOUT A POPULATION IT STILL ANSWERS, in the weaker basis, saying so.
+_nofil = f13.trend([100, 130])
+ok('no filer counts falls back to the raw count',
+   _nofil['direction'] == 'rising' and _nofil['direction_basis'] == 'count',
+   _nofil)
+ok('...and refuses to invent a share move',
+   _nofil['change_share_pct'] is None and _nofil['share_pct'] is None, _nofil)
+# A PARTIAL POPULATION IS REFUSED rather than patched: a share against one
+# quarter's filers compared with a count against another's is the same fault
+# as a cover-page share count against a weighted average.
+ok('a population missing for one quarter is not half-used',
+   f13.trend([100, 130], [1000, None])['direction_basis'] == 'count')
+ok('one quarter has no direction at all, as before',
+   f13.trend([100])['direction'] is None)
+
+ok('the live five that showed this are recorded where the rule is',
+   '71.2% -> 70.4%' in (f13.trend.__doc__ or ''))
+ok('the card reads the share, not the count',
+   'change_share_pct' in _CARD57 and 'share of filers' in _CARD57)
+ok('...and leaves the raw change UNCOLOURED, since colouring +431 green '
+   'beside the word flat is the contradiction being fixed',
+   'holders raw' in _CARD57 and 'deliberately UNCOLOURED' in _CARD57
+   or 'THE RAW CHANGE IS NOT COLOURED' in _CARD57)
 ok('the issuer name is carried through for matching',
    p['037833100']['name'] == 'APPLE INC', p['037833100'])
 

@@ -244,8 +244,22 @@ def main(tickers):
                 # twice and every figure here runs high.
                 + (' · COUNTED BY FILING, not by manager — amendments inflate '
                    'this' if _unit != 'manager' else ''))
-            add('I', 'change', fs.get('change'))
-            add('I', 'direction', fs.get('direction'))
+            # THE SHARE SERIES, which is what the direction is read from. The
+            # raw change is kept beside it and labelled as raw: five mega-caps
+            # printed "rising" on raw counts while Microsoft was losing ground
+            # against the managers who could have held it.
+            add('I', 'share of filers',
+                ' → '.join(f"{r.get('share_pct')}%" for r in _qlist
+                           if r.get('share_pct') is not None) or None,
+                'no filer population on file — an older build')
+            add('I', 'change (share)',
+                (f"{fs['change_share_pct']:+}%"
+                 if fs.get('change_share_pct') is not None else None),
+                'direction taken from the raw count instead')
+            add('I', 'change (raw holders)', fs.get('change'))
+            add('I', 'direction', fs.get('direction'), '',
+                'from the RAW COUNT — population unknown'
+                if (fs.get('direction_basis') or 'share') != 'share' else '')
             add('I', 'managers filing',
                 ' · '.join(f'{q} {n:,}' for q, n in sorted(_fq.items()))
                 or None,

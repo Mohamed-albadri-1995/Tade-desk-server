@@ -534,13 +534,51 @@ def match_cusips(parsed: dict, name_to_tickers: dict) -> dict:
     return out
 
 
-def trend(counts: list) -> dict:
+# HOW FAR THE SHARE MUST MOVE BEFORE IT IS A DIRECTION. Managers join and
+# leave the $100M threshold every quarter and a stock's share of them wobbles
+# by a percent or so on nobody's decision. Below this it is called flat, which
+# is a real answer and the commonest one.
+SHARE_BAND_PCT = 3.0
+
+
+def trend(counts: list, filers: list | None = None) -> dict:
     """Oldest-first fund counts → the reading O'Neil actually wants.
 
     Direction, not a score. "More is better" is false at both ends: no
     sponsorship means undiscovered, and universal sponsorship means there is
     nobody left to buy. So this says which way it is moving and by how much,
     and leaves the judgement where it belongs.
+
+    THE DIRECTION IS THE SHARE OF FILERS, NOT THE COUNT, and that is the
+    correction. The population of managers filing 13F is not constant:
+
+        2025Q2 8,060 · 2025Q3 8,034 · 2025Q4 8,636 · 2026Q1 8,759
+
+    +8.7% in three quarters, and every widely-held name rides it up. Live, all
+    five mega-caps on the screen printed "rising":
+
+        MSFT  +431 rising      but  71.2% -> 70.4% of filers   FALLING
+        AAPL  +537 rising           68.6% -> 69.2%             flat
+        NVDA  +605 rising           64.9% -> 66.6%             flat
+        AMD   +649 rising           31.4% -> 36.3%             rising, +15.7%
+        PLTR  +411 rising           32.1% -> 34.2%             rising, +6.6%
+
+    Microsoft was LOSING sponsors relative to the managers who could hold it
+    while the card said money was arriving. O'Neil's I is new funds DECIDING
+    to buy this stock; a manager that starts filing this quarter and indexes
+    everything has decided nothing about Microsoft, and dividing by the
+    population is what removes it.
+
+    RELATIVE, NOT IN POINTS. Half a point is noise at 70% and a sixth of the
+    position at 3%, so the move is measured against where it started.
+
+    THE RAW CHANGE STAYS. It is a true fact about the stock and dropping it
+    would hide as much as normalising reveals — the card prints both.
+
+    Without `filers` — an older file, or a quarter whose population is not
+    known — this falls back to the count and says so in `direction_basis`, on
+    the same principle as `holder_unit`: an approximation that is not labelled
+    is indistinguishable from the measurement.
 
     `quarters_counted`, NOT `quarters`. The caller does
 
@@ -560,14 +598,37 @@ def trend(counts: list) -> dict:
     vals = [c for c in (counts or []) if c is not None]
     if len(vals) < 2:
         return {'direction': None, 'change': None, 'change_pct': None,
+                'change_share_pct': None, 'direction_basis': None,
                 'note': 'needs two quarters to have a direction'}
     first, last = vals[0], vals[-1]
     change = last - first
     pct = round(change / first * 100, 1) if first else None
+
+    # THE SHARE SERIES, when the population of every quarter is known. A
+    # partial one is refused rather than patched: mixing a share against one
+    # quarter's filers with a count against another's is the same fault as
+    # comparing a cover-page share count with a weighted average.
+    shares = None
+    if filers and len(filers) == len(vals) and all(f for f in filers):
+        shares = [round(c / f * 100, 1) for c, f in zip(vals, filers)]
+
+    if shares and shares[0]:
+        move = (shares[-1] / shares[0] - 1) * 100
+        basis = 'share'
+    else:
+        move = pct if pct is not None else 0.0
+        basis = 'count'
+    band = SHARE_BAND_PCT if basis == 'share' else 0.0
     return {
-        'direction': 'rising' if change > 0 else 'falling' if change < 0 else 'flat',
+        'direction': ('rising' if move > band
+                      else 'falling' if move < -band else 'flat'),
+        'direction_basis': basis,
+        # BOTH NUMBERS. The raw change is what happened; the share change is
+        # what it means once the population is taken out.
         'change': change,
         'change_pct': pct,
+        'change_share_pct': round(move, 1) if basis == 'share' else None,
+        'share_pct': shares,
         'quarters_counted': len(vals),
     }
 
@@ -1116,9 +1177,16 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
         # CUSIP, so a company with a bond and listed options got three entries
         # for the same quarter — and `[-1]` then read the last of them as "the
         # holder count", while `trend` read the whole mixed list as a history.
+        pool = filers.get((y, q)) or 0
         for t, n in counts.items():
             row = by_ticker.setdefault(t, {'quarters': []})
-            row['quarters'].append({'q': label, 'funds': n})
+            # THE POPULATION TRAVELS WITH THE COUNT, on the same row, because
+            # the two only mean anything together — see `trend`. A quarter
+            # where 6,168 of 8,759 managers held it is a different fact from
+            # 6,168 of 12,000, and the card prints both.
+            row['quarters'].append({
+                'q': label, 'funds': n, 'of': pool or None,
+                'share_pct': round(n / pool * 100, 1) if pool else None})
 
     for t, row in by_ticker.items():
         row['quarters'].sort(key=lambda r: r['q'])
@@ -1126,7 +1194,8 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
         # MERGED INTO THE SAME NAMESPACE, so `trend` may not return any key
         # this row already uses — see its docstring. It returned `quarters`
         # and silently replaced the history above with a count.
-        row.update(trend([r['funds'] for r in row['quarters']]))
+        row.update(trend([r['funds'] for r in row['quarters']],
+                         [r['of'] for r in row['quarters']]))
         assert isinstance(row['quarters'], list), 'trend clobbered the history'
 
     import datetime as _dt

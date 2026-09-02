@@ -4383,8 +4383,23 @@ const DEFS = {
       + "within 45 days of each quarter end. This counts, per stock:\n\n"
       + "  holders    how many DISTINCT managers reported owning it\n"
       + "  of N       how many managers filed a 13F AT ALL that quarter\n"
-      + "  → → →      both, over the last four filed quarters\n"
-      + "  direction  rising, flat or falling across them\n\n"
+      + "  share      holders / N, the only form the direction is read in\n"
+      + "  → → →      all three, over the last four filed quarters\n"
+      + "  direction  rising, flat or falling — FROM THE SHARE, and flat\n"
+      + "             unless the share moved more than 3% relative to\n"
+      + "             where it started\n\n"
+      + "WHY THE DIRECTION IS THE SHARE AND NOT THE COUNT. The population of\n"
+      + "managers filing 13F is not constant: 8,060 then 8,034 then 8,636\n"
+      + "then 8,759 over the last four quarters. Every widely-held name rides\n"
+      + "that up. All five mega-caps on one screen printed rising while\n"
+      + "Microsoft was LOSING ground — +431 holders, and 71.2% of the filers\n"
+      + "down to 70.4%. A manager that starts filing this quarter and indexes\n"
+      + "everything has decided nothing about Microsoft, and dividing by the\n"
+      + "population is what removes it.\n\n"
+      + "RELATIVE, NOT IN POINTS: half a point is noise at 70% and a sixth of\n"
+      + "the position at 3%. The raw change is still printed beside it, and\n"
+      + "deliberately UNCOLOURED — it is a true fact about the stock, but it\n"
+      + "is not the reading.\n\n"
       + "Distinct MANAGERS, not rows and not filings. One manager reporting\n"
       + "three share classes is one holder; one holding both the stock and\n"
       + "its converts, filed under different CUSIPs, is one holder; and one\n"
@@ -5055,14 +5070,19 @@ function canslimTablesHTML(tk, stock) {
   } else {
     const dir = fs.direction === 'rising' ? 'bias-bull'
       : fs.direction === 'falling' ? 'bias-bear' : '';
-    /* THE DENOMINATOR, BESIDE THE COUNT.
-       Every widely-held name rose by roughly the same amount over the same
-       four quarters — AAPL +729, NVDA +792, MSFT +635, AMD +736, PLTR +483.
-       Five industries moving together is a growing FILER POPULATION, not five
-       companies attracting sponsors, and "6,693 holders, rising" read on its
-       own says the second. The number of managers who filed at all that
-       quarter is the only thing that tells them apart, so it travels with
-       the count rather than being left for someone to wonder about. */
+    /* THE DIRECTION IS THE SHARE OF FILERS, NOT THE COUNT.
+       The population of managers filing 13F is not constant — 8,060 · 8,034 ·
+       8,636 · 8,759 over the last four quarters — and every widely-held name
+       rides it up. Live, all five mega-caps on the screen said "rising":
+
+         MSFT +431 rising   but 71.2% -> 70.4% of filers   LOSING ground
+         AAPL +537 rising       68.6% -> 69.2%             flat
+         AMD  +649 rising       31.4% -> 36.3%             genuinely rising
+
+       O'Neil's I is new funds DECIDING to buy this stock. A manager that
+       starts filing this quarter and indexes everything has decided nothing
+       about Microsoft. The raw change stays on the row — it is a true fact —
+       but the word is the share's. */
     const fq = fm.filers_by_quarter || {};
     /* A LIST, OR NOTHING. `|| []` only catches null and undefined, and what
        arrived here was the NUMBER 4 — the build's `trend()` returned a key
@@ -5078,19 +5098,35 @@ function canslimTablesHTML(tk, stock) {
        long as the row existed. A key that does not exist renders as the word
        undefined, which looks like data and is not. */
     const line = hist.map(h => {
-      const of = fq[h.q];
+      const of = h.of || fq[h.q];
       return `${h.q} ${(h.funds || 0).toLocaleString()}`
-        + (of ? ` of ${of.toLocaleString()}` : '');
+        + (of ? ` of ${of.toLocaleString()}` : '')
+        + (h.share_pct != null ? ` (${h.share_pct}%)` : '');
     }).join('  →  ');
     /* AN APPROXIMATION SAYS SO. `filing` means the quarter was cached before
        SUBMISSION.tsv was extracted, so a manager that amended its 13F counts
        twice and every figure on this row runs high. The reason is in the ⓘ;
        what belongs on the card is the fact that it applies. */
     const byFiling = fm.holder_unit && fm.holder_unit !== 'manager';
+    /* THE RAW CHANGE IS NOT COLOURED. It is a fact, not the reading — and
+       colouring +431 green beside the word "flat" is the contradiction this
+       whole change is about. Only the direction and the share move carry the
+       colour, because only they have taken the population out. */
+    const shareMove = fs.change_share_pct;
+    const byCount = fs.direction_basis && fs.direction_basis !== 'share';
     iHtml = `<b>${fs.funds.toLocaleString()}</b> institutional holders
-      ${fs.change == null ? '' : `· <span class="${dir}">${
-        fs.change >= 0 ? '+' : ''}${fs.change.toLocaleString()}</span>`}
-      <span class="${dir}">${esc(fs.direction || '')}</span>
+      ${hist.length && hist[hist.length - 1].share_pct != null
+        ? `<span style="color:var(--text3)">of ${
+            (hist[hist.length - 1].of || 0).toLocaleString()} managers who
+            filed — ${hist[hist.length - 1].share_pct}%</span>` : ''}
+      <br><span class="${dir}">${esc(fs.direction || '')}</span>
+      ${shareMove == null ? '' : `<span class="${dir}">${
+        shareMove >= 0 ? '+' : ''}${shareMove}% share of filers</span>`}
+      ${fs.change == null ? '' : `<span style="color:var(--text3)">· ${
+        fs.change >= 0 ? '+' : ''}${fs.change.toLocaleString()} holders raw
+        </span>`}
+      ${byCount ? '<span class="m-none">direction from the RAW count — the '
+        + 'filer population for these quarters is not known</span>' : ''}
       ${byFiling ? '<span class="m-none">counted by FILING, not by manager'
         + '</span>' : ''}
       ${line ? `<div style="margin-top:6px">${esc(line)}</div>` : ''}`;
