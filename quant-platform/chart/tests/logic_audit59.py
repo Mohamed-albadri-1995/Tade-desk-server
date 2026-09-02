@@ -284,6 +284,79 @@ ok('...and fetches nothing, so an unwalked stock cannot look healthy',
 ok('every blank it prints carries a reason',
    'with no reason is a bug' in _FLD)
 
+
+# ── F. A PARSER FIX THAT DOES NOT REACH THE CARDS IS NOT A FIX ─────────
+#
+# Within hours of shipping A, B and C above, a live field probe showed all
+# three still wrong on the cards:
+#
+#     EPS a year ago   —              while %chg beside it read "loss a year
+#                                     ago", which is only possible if the
+#                                     year-ago figure WAS found
+#     ROE              34.10%         after the guard that forbids it shipped
+#     margin           -237,021.60%   after the cap shipped
+#
+# Nothing was broken. The cache holds PARSED tables, not raw filings, so every
+# record written before a parser change is obsolete — and nothing about the
+# file said so. It has a seven-day life, so the cards would have served the
+# old answers for a week.
+print()
+print('== F. the cache knows which parser wrote it ==')
+import json as _json                                       # noqa: E402
+import tempfile as _tmpf                                   # noqa: E402
+import time as _time                                       # noqa: E402
+
+_old_cache = edgar.CACHE
+try:
+    edgar.CACHE = pathlib.Path(_tmpf.mkdtemp())
+    edgar.write_cached({'ticker': 'CUR', 'ok': True, 'schema': edgar.SCHEMA})
+    edgar.write_cached({'ticker': 'OLD', 'ok': True, 'schema': edgar.SCHEMA - 1})
+    edgar.write_cached({'ticker': 'NONE', 'ok': True})     # written before it existed
+    ok('a record this parser wrote is served',
+       (edgar.cached('CUR') or {}).get('ticker') == 'CUR')
+    ok('a record from an OLDER parser is treated as absent, so the walk '
+       'refills it rather than the card serving a pre-fix answer',
+       edgar.cached('OLD') is None)
+    ok('...and so is one from before the version existed at all',
+       edgar.cached('NONE') is None)
+finally:
+    edgar.CACHE = _old_cache
+
+ok('the version is stamped by tables(), so every parsed record carries it',
+   edgar.tables({}).get('schema') == edgar.SCHEMA)
+# A "no filings" record never reaches tables(). Without the stamp on that path
+# too, every ETF and ADR in the market would be re-walked every night — the
+# entire cost the negative cache exists to avoid.
+_b = edgar.build.__doc__ or ''
+ok('build() stamps it on the FAILURE path too, or the negative cache dies',
+   "out = {'ticker': t, 'schema': SCHEMA" in EDG)
+# WHITESPACE-NORMALISED. The phrase is wrapped across two lines in the
+# docstring, so a raw substring search misses it — the third time that has
+# caught a check rather than a fault.
+_FLAT = ' '.join(EDG.split())
+ok('the live symptoms that showed this are recorded',
+   'YR AGO column was blank on every stock' in _FLAT
+   and 'does not reach the cards is not a fix' in _FLAT)
+ok('bumping it is documented as the thing to do when tables() changes',
+   'Bump this whenever' in EDG or 'Bump SCHEMA' in EDG)
+
+# ── G. A VERDICT NEEDS EVIDENCE ────────────────────────────────────────
+#
+# "Accelerating: no (last 0 quarters)" reads as a test that ran and a stock
+# that failed. Over zero quarters nothing ran.
+print()
+print('== G. no verdict without evidence ==')
+_noq = edgar.c_table(_cf(eps=[('2026-04-01', '2026-06-30', -0.64)]))
+ok('accelerating is UNKNOWN, not False, when no quarter has a %chg',
+   _noq['accelerating'] is None, _noq['accelerating'])
+_acc = edgar.c_table(_cf(
+    eps=[('2023-01-01', '2023-03-31', 1.0), ('2024-01-01', '2024-03-31', 2.0),
+         ('2025-01-01', '2025-03-31', 5.0), ('2026-01-01', '2026-03-31', 20.0)]))
+ok('...and a real verdict is still reached when there IS evidence',
+   _acc['accelerating'] is True, _acc)
+ok('the reason is written down where the change is',
+   'a verdict on evidence that does not exist' in EDG)
+
 print()
 print(f'        {PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

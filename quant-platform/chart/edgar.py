@@ -394,7 +394,12 @@ def c_table(cf: dict, quarters: int = 8) -> dict:
     # ACCELERATION IS INVISIBLE IN ANY SINGLE NUMBER, and O'Neil weights it
     # heavily: each of the last quarters growing FASTER than the one before.
     chgs = [r['eps_chg'] for r in rows if r['eps_chg'] is not None]
-    accelerating = (len(chgs) >= 3 and chgs[0] > chgs[1] > chgs[2])
+    # None, NOT False, when there is nothing to measure. "Accelerating: no"
+    # over ZERO quarters is a verdict on evidence that does not exist, and it
+    # reads on a card as though the test ran and the stock failed it. A
+    # loss-maker has no comparable quarters at all, so this was printing a
+    # judgement about every one of them.
+    accelerating = ((chgs[0] > chgs[1] > chgs[2]) if len(chgs) >= 3 else None)
     return {
         'rows': rows,
         'accelerating': accelerating,
@@ -604,9 +609,23 @@ def supply(cf: dict) -> dict:
     }
 
 
+# WHAT `tables()` PRODUCES. Bump this whenever that changes — a new column, a
+# corrected calculation, a value that used to be printed and no longer is.
+# `cached()` treats any record with a different number as absent, so the walk
+# refills it and the cards stop serving answers from before the fix.
+#
+#   1  the original C, A and S tables
+#   2  2026-09-02 — eps_yr_ago and sales_yr_ago; ROE refused on non-positive
+#      equity; a derived Q4 EPS dropped when it disagrees with net income;
+#      margin capped at PCT_CAP; shares outstanding gained four fallback tags
+#      and a basis
+SCHEMA = 2
+
+
 def tables(cf: dict) -> dict:
     """Everything, from one companyfacts payload. Pure."""
     return {
+        'schema': SCHEMA,
         'entity': (cf or {}).get('entityName'),
         'cik': (cf or {}).get('cik'),
         'c': c_table(cf),
@@ -659,7 +678,12 @@ def build(ticker: str) -> dict:
     so a card in May may legitimately be showing a February filing and the
     as-of date is the difference between that and a bug."""
     t = str(ticker).upper()
-    out = {'ticker': t,
+    # STAMPED ON BOTH PATHS. tables() carries the schema for a successful
+    # parse, but a "no filings" record never reaches tables() — and without
+    # the stamp `cached()` would treat every one of those as absent and
+    # re-walk the market's ETFs and ADRs every single night, which is the
+    # whole cost the negative cache exists to avoid.
+    out = {'ticker': t, 'schema': SCHEMA,
            'built_at': _dt.datetime.now(_dt.timezone.utc).isoformat(timespec='seconds')}
     try:
         out.update(tables(fetch(t)))
@@ -670,15 +694,37 @@ def build(ticker: str) -> dict:
 
 
 def cached(ticker: str, max_age_days: float = 7.0) -> dict | None:
-    """What is on disk, if it is fresh enough. Fundamentals move quarterly, so
-    a week is nowhere near stale — and a card must never trigger a fetch."""
+    """What is on disk, if it is fresh enough AND was parsed by this code.
+
+    Fundamentals move quarterly, so a week is nowhere near stale.
+    And a card must never trigger a fetch: this reads, and never builds.
+
+    TWO WAYS TO BE STALE, and only one of them is about time.
+
+    The cache holds PARSED tables, not raw filings, so every change to the
+    parser makes every stored record obsolete — and nothing about the file
+    says so. Live, within hours of three parser fixes: the YR AGO column was
+    blank on every stock while the %chg beside it still read "loss a year
+    ago", which is only possible if the year-ago figure was found; a false
+    "ROE 34.1% ✓" was still being served after the guard that forbids it
+    shipped; and a margin of -237,021% was still on the card after the cap.
+    Each fix was live and each card was showing the answer from before it.
+
+    So the schema version is written into every record and checked here. Bump
+    SCHEMA whenever `tables()` changes what it produces, and the next read
+    treats every old record as absent — the nightly walk then refills it in
+    the ordinary way. A parser fix that does not reach the cards is not a fix.
+    """
     p = CACHE / f'{str(ticker).upper()}.json'
     try:
         if not p.exists():
             return None
         if (time.time() - p.stat().st_mtime) / 86400 > max_age_days:
             return None
-        return json.loads(p.read_text())
+        rec = json.loads(p.read_text())
+        if (rec or {}).get('schema') != SCHEMA:
+            return None
+        return rec
     except Exception:                                     # noqa: BLE001
         return None
 

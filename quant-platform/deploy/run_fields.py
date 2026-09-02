@@ -63,7 +63,7 @@ def main(tickers):
     except Exception:                                     # noqa: BLE001
         pass
     try:
-        market = oneil.read()
+        market = oneil.read_shared()
     except Exception:                                     # noqa: BLE001
         market = None
 
@@ -77,8 +77,22 @@ def main(tickers):
         print(BAR)
         rows = []          # (letter, field, value, note)
 
-        def add(letter, field, value, note=''):
-            rows.append((letter, field, value, note))
+        # TWO KINDS OF ANNOTATION, AND THEY WERE THE SAME ONE.
+        #
+        #   note  WHY THIS IS BLANK. Meaningless beside a value, and printed
+        #         there anyway it produced flat contradictions: "shares
+        #         outstanding 3,435,357 — no share-count tag in the filing",
+        #         and the A/D grade's standing methodology paragraph hung off
+        #         a perfectly good letter.
+        #   qual  A CAVEAT ON A VALUE THAT IS PRESENT — "only 23 of 50
+        #         sessions", "a weighted average, not a count on a date".
+        #         These must survive, because they are the difference between
+        #         a number and a number you can trust.
+        #
+        # A field has one or the other, never both.
+        def add(letter, field, value, note='', qual=''):
+            blank = value is None or value == ''
+            rows.append((letter, field, value, note if blank else qual))
 
         # ── C and A, from the EDGAR cache ───────────────────────────────
         rec = edgar.cached(t)
@@ -105,7 +119,9 @@ def main(tickers):
                 add('C', 'sales %chg', r0.get('sales_chg_label'))
                 add('C', 'margin', _fmt(r0.get('margin_pct'), '%'))
                 add('C', 'accelerating', c.get('accelerating'),
-                    f"measured over {c.get('accelerating_of')} quarters")
+                    'no quarter had a comparable base, so there is nothing '
+                    'to accelerate from',
+                    f"over {c.get('accelerating_of')} quarters")
                 add('C', f"beat +{c.get('bar_pct')}%",
                     f"{c.get('beat_25')} of {c.get('beat_25_of')}",
                     'no quarter had a comparable base'
@@ -123,7 +139,8 @@ def main(tickers):
                 (arows[0].get('roe_note') or 'no equity figure filed')
                 if a.get('roe_pct') is None and arows else '')
             add('S', 'shares outstanding', _fmt(s.get('shares_outstanding')),
-                s.get('shares_basis') or 'no share-count tag in the filing')
+                'no share-count tag in the filing',
+                s.get('shares_basis') or '')
 
         # ── N, computed live from bars ──────────────────────────────────
         try:
@@ -141,12 +158,13 @@ def main(tickers):
             # ── S, the demand half ──────────────────────────────────────
             ud = ratings.up_down_volume_ratio(df)
             ad = ratings.acc_dis(df)
+            def _short(got, want):
+                return (f'only {got} of {want} sessions — the window is short'
+                        if (got or 0) < want else '')
             add('S', 'U/D volume', _fmt(ud.get('ratio')),
-                ud.get('note') or (f"only {ud.get('sessions')} of 50 sessions"
-                                   if (ud.get('sessions') or 0) < 50 else ''))
+                ud.get('note') or 'no ratio', _short(ud.get('sessions'), 50))
             add('S', 'A/D grade', ad.get('letter'),
-                ad.get('note') or (f"only {ad.get('sessions')} of 65 sessions"
-                                   if (ad.get('sessions') or 0) < 65 else ''))
+                ad.get('note') or 'no grade', _short(ad.get('sessions'), 65))
         except Exception as e:                            # noqa: BLE001
             add('N/S', 'price bars', None, f'no bars: {str(e)[:60]}')
 
@@ -159,13 +177,23 @@ def main(tickers):
             add('L', 'level', gs.get('group_level'))
         else:
             un = ((gm or {}).get('unranked') or {}).get(t)
-            add('L', 'group', None,
-                (f"in {un.get('industry')}, but no RS rating — a listing under "
-                 f"a year old has none by construction" if un
-                 and un.get('why') == 'gate'
-                 else f"in {un.get('industry')}, but no price history" if un
-                 else 'not in the industry map at all — an ETF, or no SIC code'
-                 if gm and gm.get('ok') else 'group ranks not built yet'))
+            if not gm or not gm.get('ok'):
+                why = 'group ranks not built yet'
+            elif un and un.get('why') == 'gate':
+                why = (f"in {un.get('industry')}, but no RS rating — a listing "
+                       f"under a year old has none by construction")
+            elif un:
+                why = f"in {un.get('industry')}, but no price history"
+            elif 'unranked' not in gm:
+                # THE FILE PREDATES THE LIST, so absence from `stocks` proves
+                # nothing. Saying "not in the industry map" here was a guess
+                # dressed as a finding — and wrong for four of five live
+                # stocks, one of them a $5.8bn company that is in the map.
+                why = ('this groups file was built before the unranked list '
+                       'existed, so why is unknown — rebuild with qp-daily')
+            else:
+                why = 'not in the industry map at all — an ETF, or no SIC code'
+            add('L', 'group', None, why)
 
         # ── I ───────────────────────────────────────────────────────────
         fs = ((fm or {}).get('stocks') or {}).get(t)
@@ -183,9 +211,16 @@ def main(tickers):
             add('M', 'market status', market.get('status'))
             add('M', 'distribution days',
                 len(market.get('distribution_days') or []))
-            sd = oneil.stockVsDistribution(t) if hasattr(
-                oneil, 'stockVsDistribution') else None
-            if isinstance(sd, dict):
+            sd = None
+            for _name in ('stock_vs_distribution', 'stockVsDistribution'):
+                _fn = getattr(oneil, _name, None)
+                if callable(_fn):
+                    try:
+                        sd = _fn(t)
+                    except Exception:                     # noqa: BLE001
+                        sd = None
+                    break
+            if isinstance(sd, dict) and sd.get('checked'):
                 add('M', 'held on DD days',
                     f"{sd.get('held')} of {sd.get('checked')}")
         else:
