@@ -32,6 +32,7 @@ where being a month old is worse than being absent.
     cd quant-platform && set -a && . ./.env && set +a && python3 -u deploy/run_daily.py
 """
 
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -50,12 +51,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # [ok ] meant "did not raise", which was true and useless. The letter was
 # missing from every card while the job that fills it reported success, so the
 # journal — the one place that would have shown it — agreed with the bug.
-_BAD = ('not built', 'not walked', 'no rs universe', 'nothing to walk',
-        'error', 'failed')
+# PHRASES, NOT BARE WORDS — and this is the correction.
+#
+# The list held 'error' and 'failed' on their own, and a HEALTHY step prints
+# both as counts. Live, on a night that worked perfectly:
+#
+#     [warn] earnings tables (C, A): 732 built, 0 have no filings,
+#            0 failed, 0 left for tomorrow (327s)
+#
+# 732 companies fetched, nothing wrong, flagged because the word "failed"
+# appears in "0 failed". A marker that fires on success is worse than no
+# marker: it teaches the reader to skip past [warn], which is exactly the
+# habit this was built to break.
+_BAD = ('not built', 'not walked', 'no rs universe', 'nothing to walk')
+
+# ...and a COUNT only means something when it is not zero. "0 failed" is the
+# step reporting health; "12 failed" is worth a look.
+_NONZERO = re.compile(r'\b[1-9]\d*\s+(?:failed|errors?)\b', re.I)
 
 
 def _looks_failed(out) -> bool:
-    return isinstance(out, str) and any(w in out.lower() for w in _BAD)
+    """Did this step run and produce nothing, or fail part-way?
+
+    Two different faults and both belong on the same marker: a step that
+    built nothing at all, and one that built some of what it should have.
+    Neither raises, so neither reaches the [FAIL] path.
+    """
+    if not isinstance(out, str):
+        return False
+    return any(w in out.lower() for w in _BAD) or bool(_NONZERO.search(out))
 
 
 def step(name, fn):

@@ -705,8 +705,47 @@ ok('the twelve 404s that showed this are recorded',
 # AND THE JOB MUST NOT CALL IT SUCCESS.
 DAILY = (pathlib.Path(__file__).resolve().parents[2] / 'deploy'
          / 'run_daily.py').read_text()
-ok('a step that ran and built NOTHING is marked, not reported as ok',
+# EXECUTED AGAINST THE REAL MESSAGES, not grepped. This was
+# `'def _looks_failed' in DAILY`, which is true of a marker that fires on
+# every line and of one that fires on none. Live, on a night that worked:
+#
+#     [warn] earnings tables (C, A): 732 built, 0 have no filings,
+#            0 failed, 0 left for tomorrow (327s)
+#
+# Nothing wrong with that run. The list held the bare word 'failed' and a
+# healthy step prints it as a COUNT. A marker that fires on success teaches
+# the reader to skip past [warn], which is the habit it was built to break.
+import importlib.util as _ilu                              # noqa: E402
+_spec = _ilu.spec_from_file_location(
+    '_rd', pathlib.Path(__file__).resolve().parents[2] / 'deploy' / 'run_daily.py')
+_rd = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_rd)
+
+for _msg, _want, _why in (
+    ('732 built, 0 have no filings, 0 failed, 0 left for tomorrow (327s)',
+     False, 'a healthy walk prints its failure COUNT and it is zero'),
+    ('700 built, 0 have no filings, 12 failed, 32 left for tomorrow',
+     True, 'a NON-zero failure count is worth a look'),
+    ('not built: no 13F quarters could be fetched',
+     True, 'the line this marker was built for'),
+    ('no RS universe yet — nothing to walk', True, 'nothing to walk'),
+    ('not walked: no universe', True, 'not walked'),
+    ("3382 tickers over ['2025Q2'] — wanted 2025Q3–2026Q2; index has …",
+     False, 'a 13F fallback is not a failure — it is the SEC publishing lag'),
+    ('175 groups over 6745 symbols, as of 2026-09-01 → …',
+     False, 'a good group build'),
+    ('6745 classified, 6095 fetched, 6745 in map', False, 'a good SIC walk'),
+    ('0 errors', False, 'zero of anything is health'),
+    ('4 errors', True, 'four is not'),
+    (None, False, 'a step that returned nothing is not a string'),
+):
+    ok(f'{"warns" if _want else "quiet"}: {_why}',
+       _rd._looks_failed(_msg) is _want, (_msg, _rd._looks_failed(_msg)))
+
+ok('the marker still exists and still writes warn',
    'def _looks_failed' in DAILY and "'warn'" in DAILY)
+ok('the false warning that showed this is recorded where the fix is',
+   '0 failed' in DAILY and 'fires on success' in DAILY)
 ok('...and it still does not take the other steps down',
    'never take the others down' in DAILY)
 ok('the line that hid this is quoted where the marker is',
