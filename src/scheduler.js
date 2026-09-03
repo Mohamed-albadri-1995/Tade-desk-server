@@ -300,10 +300,33 @@ function startScheduler() {
         console.warn('[Setups] could not read the catalog:', err.message);
         return;
       }
-      // Freshen the card list for anything deciding shortly.
+      /*
+       * FRESHEN THE CARD LIST — AND NEVER LET THAT STOP THE DECISION.
+       *
+       * This was `await runFullScan()` with nothing around it, and a scan that
+       * throws took the whole tick with it. The setups below never ran, and the
+       * only trace was one line naming the JOB rather than the strategies:
+       *
+       *     [Scheduler] Setup Tick (every minute, 04:00–16:00) failed:
+       *       Cannot convert undefined or null to object
+       *
+       * Which is backwards in the only way that matters. The scan is a
+       * CONVENIENCE — it makes the card list a few minutes fresher — and the
+       * decision is the point. Trading a list that is five minutes old is a
+       * small cost; not deciding at all is the entire session. A setup whose
+       * pre-decision scan failed still has yesterday's cards, still evaluates
+       * them, and still places an order.
+       *
+       * So the scan is allowed to fail and say so, and the tick carries on.
+       */
       if (due.some(s => s.universeScanAt === now && s.enabled !== false)) {
         console.log(`[Setups] ${now} — pre-decision scan`);
-        await runFullScan();
+        try {
+          await runFullScan();
+        } catch (err) {
+          console.warn('[Setups] the pre-decision scan failed — deciding on the '
+            + 'card list as it stands:', err.stack || err.message);
+        }
       }
       /*
        * A SETUP RUNS ONE MINUTE AFTER THE BAR IT DECIDES ON.
@@ -366,7 +389,21 @@ function startScheduler() {
         const watching = firing.filter(s => s.watch).length;
         console.log(`[Setups] ${now} — ${firing.length} setup(s) on the `
           + `${decidedOn} bar${watching ? ` (${watching} watching a window)` : ''}`);
-        await runDue(decidedOn);
+        /*
+         * NAMED, AND ON THIS SIDE OF THE BOUNDARY. `runDue` already catches per
+         * setup, but everything before that — reading the catalog again,
+         * matching the window — could still throw and be reported as "Setup
+         * Tick failed", which names the job and not one of the strategies that
+         * did not run. When the desk takes nothing all day, the difference
+         * between those two lines is the difference between knowing where to
+         * look and not.
+         */
+        try {
+          await runDue(decidedOn);
+        } catch (err) {
+          console.error(`[Setups] the ${decidedOn} bar was not decided for `
+            + `${firing.map(s => s.id).join(', ')}:`, err.stack || err.message);
+        }
       }
     });
 
