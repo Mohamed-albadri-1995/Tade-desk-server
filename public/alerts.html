@@ -2337,6 +2337,37 @@ function paintDests(list) {
         : 'https://app.signalstack.com/hook/…'}">
     </label>
 
+    <!-- ITS OWN ALPACA KEYS, AND WHY THIS ACCOUNT NEEDS THEM.
+         The desk holds ONE shared Alpaca pair beside the accounts. That pair
+         answers for one account, and while there is only one Alpaca
+         destination it unambiguously IS that one. The moment there are two,
+         nothing can say which — so reconcile.js refuses BOTH by name and the
+         journal shows neither account's fills.
+         The server has accepted, validated and masked these since accounts
+         existed; this form never had the field, so there was no way to give
+         an account its keys and the refusal could not be cleared. Reported
+         plainly: "I didn't even enter the key and secret because this option
+         is not exist".
+         Never round-tripped. The secret is not sent back to the page at all
+         and the key id comes back masked, so blank means KEEP — the same
+         contract as the hook above. -->
+    ${d.dialect !== 'alpaca' ? '' : `
+    <label class="d-akey" title="This account's own Alpaca API key id. Without its own pair, an account cannot be told apart from the other Alpaca accounts and its fills cannot be attributed to it.">Alpaca key id
+      <input class="d-akey-i" autocomplete="off" spellcheck="false"
+        placeholder="${d.hasAlpacaKeys
+          ? `saved · ${esc(d.alpacaKeyId || '')} — blank keeps it`
+          : 'PK… or AK…'}">
+    </label>
+    <label class="d-asec" title="The secret for the key id beside it. Stored, never shown again — leave blank to keep the one already saved.">Alpaca secret
+      <input class="d-asec-i" type="password" autocomplete="new-password"
+        spellcheck="false"
+        placeholder="${d.hasAlpacaKeys ? 'saved — blank keeps it' : 'the matching secret'}">
+    </label>
+    ${d.hasAlpacaKeys ? '' : `<div class="d-akey-warn m-none">No keys of its own
+      — while more than one Alpaca account is configured, this account's fills
+      cannot be attributed to it and the journal will not show them.</div>`}
+    `}
+
     <!-- WHICH SETUPS RUN HERE. The account owns the list; the setup does not
          know it exists. One place to look, one place to change. -->
     <div class="d-setups">
@@ -2469,6 +2500,14 @@ function readDests() {
       .map(b => b.getAttribute('data-setup'));
     const hook = f('d-hook-i');
     if (hook) d.webhookUrl = hook;   // omitted entirely = keep what is stored
+    // SAME CONTRACT FOR THE KEYS. Blank is not "clear it" — the secret is
+    // never sent back to this page, so a blank box is what an unchanged
+    // account looks like, and treating that as a deletion would wipe the
+    // credentials of every account each time any row was saved.
+    const akey = f('d-akey-i');
+    const asec = f('d-asec-i');
+    if (akey) d.alpacaKeyId = akey;
+    if (asec) d.alpacaSecret = asec;
     return d;
   });
 }
