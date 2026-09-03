@@ -300,7 +300,14 @@ describe('the fills', () => {
     alpaca.fills.mockResolvedValue({ ok: false, error: 'down' });
     const r = await reconcile.fillsFor(DAY);
     expect(r.ok).toBe(false);
-    expect(r.error).toBe('down');
+    /*
+     * NAMED BY ACCOUNT. This asserted the bare 'down', which was right while
+     * fillsFor asked ONE account — the desk-wide pair. It now walks every
+     * readable Alpaca destination, so a failure has to say WHICH one failed or
+     * a two-account desk reports "down" and leaves you to guess between them.
+     */
+    expect(r.error).toContain('down');
+    expect(r.error).toContain('alp');
   });
 });
 

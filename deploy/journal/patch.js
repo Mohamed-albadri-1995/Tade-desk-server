@@ -91,9 +91,20 @@
     fillsByDate[date] = fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (d) {
+        /*
+         * A LIST PER SYMBOL, NOT ONE ENTRY.
+         *
+         * The desk now returns one group per (symbol, ACCOUNT) — the same
+         * ticker bought in two accounts is two positions with two entry
+         * prices, and averaging them would print a number neither account
+         * paid. `map[g.symbol] = g` kept whichever arrived last and silently
+         * dropped the other account's fill.
+         */
         var map = {};
         if (d && d.ok) {
-          (d.symbols || []).forEach(function (g) { map[g.symbol] = g; });
+          (d.symbols || []).forEach(function (g) {
+            (map[g.symbol] = map[g.symbol] || []).push(g);
+          });
         }
         return map;
       })
@@ -267,7 +278,12 @@
             + ((d && d.error) || 'no reason given'), '#f59e0b');
         }
         if (d.unverified) return set(d.unverified + '.', '#f59e0b');
-        var n = (d.symbols || []).length;
+        // DISTINCT NAMES, not groups: one ticker held in two accounts is two
+        // groups and one name, and "2 names filled" on a day one stock traded
+        // reads as a busier day than it was.
+        var seen = {};
+        (d.symbols || []).forEach(function (g) { seen[g.symbol] = 1; });
+        var n = Object.keys(seen).length;
         set(n
           ? 'connected · ' + n + ' name(s) filled on ' + d.date
             + '. Cards for those names carry the real fill price.'
@@ -309,7 +325,13 @@
       bits.push('vs ' + want + ' planned: ' + money(slip));
     }
 
-    el.textContent = 'Alpaca — ' + bits.join(' · ');
+    /*
+     * WHICH ACCOUNT PAID IT. Only when the desk said — a single-account desk
+     * has nothing to disambiguate and a label there is noise. With two, a
+     * fill price with no account on it is a number you cannot check.
+     */
+    el.textContent = 'Alpaca' + (g.account ? ' (' + g.account + ')' : '')
+      + ' — ' + bits.join(' · ');
     return el;
   }
 
@@ -654,12 +676,26 @@
       if (!card || card.querySelector('.jnl-fill-line')) return;
       card.setAttribute('data-fills-pending', '1');
       fillsFor(t.date).then(function (map) {
-        var g = map[String(t.ticker).toUpperCase()];
+        var groups = map[String(t.ticker).toUpperCase()];
         // Nothing at Alpaca for that name on that day — a TTP-only trade, or a
         // day before the account existed. Silence, not a zero.
-        if (!g) return;
+        if (!groups || !groups.length) return;
         if (card.querySelector('.jnl-fill-line')) return;
-        card.appendChild(fillLine(g, t));
+        /*
+         * THE TRADE'S OWN ACCOUNT WHEN IT HAS ONE. An imported trade carries
+         * the account that made it; a hand-typed one does not.
+         *
+         * With no account on the trade and the name filled in BOTH accounts,
+         * there is no way to say which line belongs to this card — so both are
+         * shown, each labelled, rather than one picked. Picking would put the
+         * other account's price on this trade and it would look right.
+         */
+        var mine = t.account
+          ? groups.filter(function (g) { return g.account === t.account; })
+          : groups;
+        (mine.length ? mine : groups).forEach(function (g) {
+          card.appendChild(fillLine(g, t));
+        });
       });
     });
 

@@ -293,6 +293,77 @@ app.get('/api/broker/fills', async (req, res) => {
  * NOTHING IS WRITTEN HERE. This says what the desk did; the journal decides
  * whether to accept it, and only ever for a field that is still empty.
  */
+/*
+ * DID THE ORDER ACTUALLY LAND — asked of Alpaca, not of the ledger.
+ *
+ * The ledger records what this side ATTEMPTED and what SignalStack replied.
+ * SignalStack replying 200 means SignalStack accepted it, not that the broker
+ * ever got it, and the two are the last four words of this module's own
+ * opening note: "SENT, AND ALPACA HAS NO RECORD — SignalStack accepted it and
+ * the broker never got it. The alert said the trade was on."
+ *
+ * `reconcile.confirmed()` has answered this correctly since it was written —
+ * per destination, each group matched only against fills fetched with THAT
+ * account's credentials, so one account's print can never confirm another's
+ * order. NOTHING CALLED IT. A function that is right and unreferenced is a
+ * function that has never been right about anything, and the desk placed
+ * orders all day without ever asking the broker whether they existed.
+ *
+ * Reported as: "the Algo desk must get feedback from alpaca for orders
+ * confirmation."
+ *
+ * READ-ONLY, and on demand. It sends nothing and changes nothing — it reads
+ * the day's rows and the day's fills and says which ones match. A confirmation
+ * that could act would need to be right about a great deal more than this is.
+ */
+app.get('/api/broker/confirm', async (req, res) => {
+  try {
+    const { toETDate } = require('../utils/time');
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '')
+      ? req.query.date : toETDate(Date.now());
+    const reconcile = require('../broker/reconcile');
+    const out = await reconcile.confirmed(day);
+    const rows = out.rows || [];
+    /*
+     * THE COUNT THAT MATTERS IS THE UNMATCHED ONE. "18 of 20 confirmed" is a
+     * pass mark; "2 orders this desk believes it sent have no fill at Alpaca"
+     * is the sentence worth waking up for, so it is named here rather than
+     * left to whoever reads the array.
+     *
+     * ONLY ORDERS THAT COULD BE CONFIRMED ARE COUNTED. TTP5k sits behind
+     * TraderEvolution with no fill feed, so a TTP order has no print to match
+     * and never will — counting it as unmatched would report a permanent
+     * failure on an account that is working, every single day, and the number
+     * would stop being read.
+     */
+    const alpacaIds = new Set(reconcile.alpacaDestinations());
+    const askable = rows.filter(r => r.sent && alpacaIds.has(r.destination));
+    // `confirmedBy` distinguishes the two ways a row can be confirmed: the
+    // SignalStack callback said so, or Alpaca's own fills did. Only the second
+    // is what this endpoint was asked for.
+    const byAlpaca = askable.filter(r => r.confirmedBy === 'alpaca');
+    const unmatched = askable.filter(r => !r.confirmed);
+    res.json({
+      ...out, date: day, scope: 'alpaca',
+      sent: askable.length,
+      confirmed: byAlpaca.length,
+      // Confirmed by the callback and NOT found in the fills. Not a failure on
+      // its own — a callback is evidence — but it is a weaker kind, and the
+      // difference is the whole reason to ask Alpaca directly.
+      callbackOnly: askable.filter(r => r.confirmed && r.confirmedBy !== 'alpaca').length,
+      unmatched: unmatched.map(r => ({ symbol: r.symbol, action: r.action,
+                                       destination: r.destination || null,
+                                       at: r.at || null })),
+      // Orders this endpoint cannot speak for, so a partial answer is legible.
+      notAskable: rows.filter(r => r.sent && !alpacaIds.has(r.destination)).length,
+    });
+  } catch (err) {
+    // 200 with ok:false — see /api/broker/fills. A 500 here would read on the
+    // page as "no orders", which is the opposite of what it means.
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/broker/setups', async (req, res) => {
   try {
     const { toETDate } = require('../utils/time');

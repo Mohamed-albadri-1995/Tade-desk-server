@@ -419,21 +419,88 @@ async function fillsFor(date, { timeoutMs = 15000 } = {}) {
   // Alpaca wants an instant; the desk thinks in New York sessions. 04:00 ET
   // covers the pre-market so nothing placed early is missed.
   const after = new Date(`${date}T04:00:00-04:00`).toISOString();
-  const r = await alpaca.fills({ after, timeoutMs });
-  if (!r.ok) return { ok: false, error: r.error };
 
+  /*
+   * EVERY READABLE ACCOUNT, EACH WITH ITS OWN KEYS.
+   *
+   * This asked `alpaca.fills({ after, timeoutMs })` with no account, which
+   * means the DESK-WIDE pair — one account, and once there are two it is the
+   * wrong one. Live, with two Alpaca accounts configured and both holding
+   * their own credentials:
+   *
+   *   /api/broker/journal-trades  →  ok, accounts: [alpaca1, alpaca2]
+   *   /api/broker/fills           →  the old shared account, alone
+   *
+   * and the journal reads the second for its status line and for the fill
+   * line on every card. Reported as "both alpaca1 and 2 are not connected to
+   * journal", which was exactly right: one endpoint had been taught about
+   * accounts and its neighbour had not.
+   *
+   * `confirmed()` below already walks destinations one at a time for the same
+   * reason, and says why: pooling two accounts' fills lets one account's print
+   * answer for the other's order. That reasoning is not weaker here — a card
+   * showing the fill price from the account that did NOT trade it is a wrong
+   * number wearing a right one's clothes.
+   *
+   * EACH FILL CARRIES ITS ACCOUNT so the caller can tell them apart, and the
+   * per-symbol grouping keys on (symbol, account): the same ticker bought in
+   * both accounts is two positions, and averaging them would invent a price
+   * neither account paid.
+   */
+  const scope = credentialScope();
+  if (!scope.ids.length) return { ok: false, error: 'no Alpaca account configured' };
+
+  const errors = [];
+  const fills = [];
+  for (const id of scope.ids) {
+    const { creds, error } = credsForDest(id);
+    if (error) { errors.push(error); continue; }
+    let r;
+    try {
+      r = await alpaca.fills({ after, timeoutMs, account: creds });
+    } catch (err) {
+      errors.push(`${id}: ${err.message}`);
+      continue;
+    }
+    if (!r.ok) { errors.push(`${id}: ${r.error}`); continue; }
+    for (const f of r.fills) fills.push({ ...f, account: id });
+  }
+  // NOTHING READABLE IS A FAILURE. Some accounts readable and some not is a
+  // PARTIAL answer, and it says which — a page that showed three names and no
+  // warning would read as the whole day.
+  if (!fills.length && errors.length) {
+    return { ok: false, error: errors.join(' · ') };
+  }
+  const r = { ok: true, fills };
+  if (errors.length) r.partial = errors;
+
+  /*
+   * KEYED ON (SYMBOL, ACCOUNT), NOT ON SYMBOL.
+   *
+   * The same ticker bought in both accounts is TWO positions with two entry
+   * prices. Grouping on the symbol alone would average them into a figure
+   * neither account paid, and print it on the card as the fill — the same
+   * fault as pooling fills for confirmation, one step later.
+   */
   const by = new Map();
   for (const f of r.fills) {
-    const g = by.get(f.symbol) || { symbol: f.symbol, fills: [], bought: 0, sold: 0,
-                                    cost: 0, proceeds: 0 };
+    const key = `${f.symbol}\u0000${f.account || ''}`;
+    const g = by.get(key) || { symbol: f.symbol, account: f.account || null,
+                               fills: [], bought: 0, sold: 0,
+                               cost: 0, proceeds: 0 };
     g.fills.push(f);
     if (String(f.side).startsWith('buy')) { g.bought += f.qty; g.cost += f.qty * f.price; }
     else { g.sold += f.qty; g.proceeds += f.qty * f.price; }
-    by.set(f.symbol, g);
+    by.set(key, g);
   }
 
   return {
     ok: true,
+    // Which accounts this covers and what could not be read, so a partial
+    // answer and a complete one do not look the same — the same contract
+    // /api/broker/journal-trades already keeps.
+    accounts: scope.ids.filter(id => !errors.some(e => e.startsWith(`${id}:`))),
+    ...(errors.length ? { partial: errors } : {}),
     symbols: [...by.values()].map(g => ({
       ...g,
       avgBuy: g.bought ? Math.round((g.cost / g.bought) * 10000) / 10000 : null,
