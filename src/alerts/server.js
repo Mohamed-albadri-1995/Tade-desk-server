@@ -807,6 +807,34 @@ app.post('/api/broker/test', express.json(), async (req, res) => {
   }
 });
 
+/*
+ * THE PREFLIGHT: which legs of the chain are proven, and which have never been
+ * tested.
+ *
+ * `Test 1 share` posts one AAPL share to one account through its TEST hook. It
+ * proves that hook and nothing else — no scanner, no card list, no feed, no qp
+ * decision, no sizing, no routing — and its ledger row is dateless, so neither
+ * confirm nor the journal can ever see it. A green result there is one leg of
+ * seven, and the honest reading of the other six is "unknown".
+ *
+ * So this answers all seven, and marks the ones it could not tell as UNTESTED
+ * rather than passed. Read-only: it places no order and is safe mid-session.
+ *
+ * NEVER 500 — the same rule as the session log. This is the endpoint someone
+ * opens BECAUSE something is wrong.
+ */
+app.get('/api/preflight', async (req, res) => {
+  try {
+    const { toETDate } = require('../utils/time');
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '')
+      ? req.query.date : toETDate(Date.now());
+    res.json(await require('./preflight').check({ day }));
+  } catch (err) {
+    res.json({ ok: false, error: err.message, legs: [],
+               passed: 0, failed: 0, untested: 0 });
+  }
+});
+
 // Where a tool lives, so the page can deep-link a fire back to its card.
 app.get('/api/tools', (req, res) => {
   try {

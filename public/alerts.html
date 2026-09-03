@@ -503,6 +503,24 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .lg-stage.flat b { color:var(--text3); }
 .lg-stage.good b { color:var(--green); }
 .lg-prob { font-size:11.5px; color:var(--orange); margin-top:8px; line-height:1.6; }
+
+/* THE PREFLIGHT. Three states, and the third must not look like the first.
+   `untested` is deliberately NOT green and NOT red: it is dashed and grey,
+   because "I could not tell" is a different fact from both "it works" and "it
+   is broken", and rendering it as either is the mistake the whole panel
+   exists to prevent. */
+.pf { border-left:3px solid var(--line); padding:8px 10px; margin:6px 0;
+      background:#ffffff06; border-radius:0 4px 4px 0; }
+.pf.pass { border-left-color:#22c55e; }
+.pf.fail { border-left-color:#ef4444; background:#ef444410; }
+.pf.untested { border-left-style:dashed; border-left-color:#9ca3af; }
+.pf b { font-size:12.5px; }
+.pf .v { font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;
+         margin-left:8px; }
+.pf.pass .v { color:#22c55e; }
+.pf.fail .v { color:#ef4444; }
+.pf.untested .v { color:#9ca3af; }
+.pf .why { font-size:11.5px; color:var(--dim); margin-top:4px; line-height:1.6; }
 .lg-run { border-left:2px solid var(--border); padding:6px 0 6px 10px;
   margin:6px 0; font-size:11.5px; color:var(--text2); line-height:1.6; }
 .lg-run.bad { border-left-color:var(--red); }
@@ -768,6 +786,29 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <div class="note risk-hint" id="bk-callback"></div>
   <div class="note risk-hint" id="bk-orders"></div>
 </div>
+
+<!-- ── 4 · THE PREFLIGHT ─────────────────────────────────────────────────
+     "Test 1 share" posts one AAPL share to one account through its TEST hook.
+     It proves that hook and nothing else — no scanner, no card list, no feed,
+     no qp decision, no sizing, no routing — and its ledger row is dateless, so
+     neither confirm nor the journal can ever see it. A green result there is
+     one leg of seven.
+
+     So this asks all seven, and the leg it cannot answer says UNTESTED rather
+     than passing. Every failure this desk has had was a silence read as a
+     pass. -->
+<div class="sec">
+  <span>4 · Preflight</span>
+  <span class="note">which legs are proven — sends nothing</span>
+</div>
+<div class="row">
+  <button class="btn primary" onclick="runPreflight()">Check the chain</button>
+  <span class="note" id="pf-head"></span>
+</div>
+<div id="pf-out"><div class="empty">
+  Not run. This checks every leg between "the scanner finds a stock" and "the
+  journal shows the fill" and places no order, so it is safe at any time.
+</div></div>
 
 </div><!-- /settings -->
 
@@ -2729,6 +2770,39 @@ async function toggleArm() {
       + '\n\nSized for each account, with the stop and target attached.')) return;
   }
   await saveBroker({ armed: !armed, enabled: true });
+}
+
+/*
+ * THE PREFLIGHT PANEL.
+ *
+ * Three states, counted apart. A headline that folded "untested" into either
+ * "passed" or "failed" would be the exact mistake the endpoint exists to
+ * prevent — and it is the mistake that made a clean `Test 1 share` read as a
+ * working desk when six of the seven legs had never been exercised.
+ */
+async function runPreflight() {
+  const out = document.getElementById('pf-out');
+  const head = document.getElementById('pf-head');
+  out.innerHTML = '<div class="empty">Checking…</div>';
+  head.textContent = '';
+  try {
+    const d = await (await fetch('/api/preflight')).json();
+    if (!d.ok) throw new Error(d.error || 'the check could not run');
+    head.innerHTML = `${d.passed} proven`
+      + (d.failed ? ` · <b class="warn">${d.failed} broken</b>` : '')
+      // NEVER FOLDED INTO THE PASS COUNT.
+      + (d.untested ? ` · ${d.untested} not tested` : '');
+    out.innerHTML = (d.legs || []).map((l) => {
+      const cls = l.ok === true ? 'pass' : l.ok === false ? 'fail' : 'untested';
+      const word = l.ok === true ? 'proven' : l.ok === false ? 'broken' : 'not tested';
+      return `<div class="pf ${cls}">
+        <b>${esc(l.title || l.id)}</b><span class="v">${word}</span>
+        <div class="why">${esc(l.note || '')}</div>
+      </div>`;
+    }).join('') || '<div class="empty">Nothing to check.</div>';
+  } catch (e) {
+    out.innerHTML = `<div class="empty"><b class="warn">${esc(e.message)}</b></div>`;
+  }
 }
 
 async function testBroker(destination) {

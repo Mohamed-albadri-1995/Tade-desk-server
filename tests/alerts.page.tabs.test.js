@@ -310,11 +310,45 @@ test('the review says which account, and so does the send button', () => {
  * that the reference says it is one, and that the setup card cannot write back.
  */
 
-test('the settings tab is the three layers, in order', () => {
+test('the settings tab is the three layers, in order — then the preflight, '
+  + 'which configures nothing and only reads', () => {
   const pane = markup.slice(markup.indexOf('<div class="pane" data-t="settings"'));
   const heads = [...pane.matchAll(/<span>(\d[^<]*)<\/span>/g)].map(m => m[1].trim());
   expect(heads).toEqual(['1 · Standard account', '1b · Calculator',
-                         '2 · Broker accounts', '3 · This machine']);
+                         '2 · Broker accounts', '3 · This machine',
+                         '4 · Preflight']);
+});
+
+/*
+ * THE PREFLIGHT PANEL. It exists because a clean `Test 1 share` read as a
+ * working desk when six of its seven legs had never been exercised — the test
+ * button uses the TEST hook, runs nothing upstream, and writes a dateless
+ * ledger row that confirm and the journal can never see.
+ */
+test('the preflight says it sends nothing, because it sits under the buttons '
+  + 'that do', () => {
+  const at = markup.indexOf('4 · Preflight');
+  expect(markup.slice(at, at + 600)).toMatch(/sends nothing|places no order/i);
+});
+
+test('an untested leg is styled apart from a passing one — not green, not red', () => {
+  // THE WHOLE POINT OF THE PANEL. If `untested` rendered as a pass, this would
+  // be one more surface that turns a silence into a green light.
+  expect(markup).toMatch(/\.pf\.untested\s*\{[^}]*dashed/);
+  expect(markup).toMatch(/\.pf\.pass\s*\{[^}]*#22c55e/);
+  expect(markup).toMatch(/\.pf\.fail\s*\{[^}]*#ef4444/);
+});
+
+test('the headline counts the three states apart', () => {
+  // `script`, not `markup` — the latter is only the part before <script>.
+  const at = script.indexOf('async function runPreflight');
+  expect(at).toBeGreaterThan(-1);
+  const fn = script.slice(at, at + 1400);
+  expect(fn).toMatch(/d\.passed/);
+  expect(fn).toMatch(/d\.failed/);
+  expect(fn).toMatch(/d\.untested/);
+  // and says so in words a person reads, not just a number
+  expect(fn).toMatch(/not tested/);
 });
 
 test('the standard account says outright that it is a reference', () => {
