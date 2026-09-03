@@ -230,6 +230,58 @@ fi
 
 echo
 echo "[5/6] Starting tools..."
+
+# ── A CEILING PER PROCESS, AND WHY THESE NUMBERS ──────────────────────────
+#
+# Eighteen pm2 processes ran with no memory limit at all. On 2026-09-04 the box
+# stopped answering SSH entirely — no banner, no timeout, nothing — which is
+# what an out-of-memory kill looks like from outside when the thing it takes is
+# sshd or enough of userspace that a login cannot complete.
+#
+# THE ARITHMETIC. This is a t3.micro: 912 MiB, total. From the last healthy
+# `pm2 list`: nine tools at ~55-80 MB, nine scorers at ~10-90 MB, alerts ~72,
+# journal ~8. That is ~730 MB of pm2 alone, beside a qp-chart unit allowed 600
+# and an OS wanting ~150. It does not fit, and it has not fitted for a while —
+# it survived by luck and by processes being smaller than their peak.
+#
+# WHAT A CEILING BUYS. Not more memory. It converts a BOX-WIDE failure into ONE
+# process restarting: the kernel's OOM killer picks its victim by its own score
+# and can take sshd, systemd-journald or the alerts desk, and you find out by
+# being locked out. pm2 restarting one leaky tool is a blip nobody notices.
+#
+# Set well above each process's working size and well below what would starve
+# its neighbours: a limit that trips in normal use is a restart loop, which is
+# worse than no limit. Override per box with the env vars if yours differs.
+TOOL_MAX_MEM="${TOOL_MAX_MEM:-140M}"      # tools sit at ~60
+SCORER_MAX_MEM="${SCORER_MAX_MEM:-180M}"  # scorers reach ~90 while training
+ALERTS_MAX_MEM="${ALERTS_MAX_MEM:-180M}"  # alerts sits at ~72
+
+# ── SWAP, WHICH THE MEMORY CAPS ASSUME ────────────────────────────────────
+#
+# deploy/README.md says of the systemd units' MemoryHigh caps: "Pair with a 2 GB
+# swapfile." MemoryHigh is a SOFT cap — it throttles a service to swap rather
+# than killing it — so with no swap to throttle into it does almost nothing and
+# the kernel goes to the OOM killer instead. The pairing is not advice, it is
+# how the caps work.
+#
+# Checked and SAID, never created here: adding swap writes a file to the root
+# volume and edits /etc/fstab, which is not something a deploy should do to a
+# machine behind your back. `deploy/add-swap.sh` does it in one step when you
+# decide to.
+# ONLY WHERE IT ACTUALLY APPLIES. A 16 GB box with no swap is fine, and a
+# warning that fires on a machine it is not true of is a warning people learn to
+# scroll past — which costs it the one morning it matters. 2 GB is the line: the
+# stack's own ceilings above come to roughly 1.5 GB with qp beside them.
+_mem_mb=$(awk '/^MemTotal:/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 99999)
+_swap_kb=$(awk '/^SwapTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+if [ "$_mem_mb" -lt 2048 ] && [ "$_swap_kb" -lt 1024 ]; then
+  echo
+  echo "  !! NO SWAP on a ${_mem_mb}MB box, and this stack does not fit in it."
+  echo "     The memory caps assume swap to throttle into; without it the kernel"
+  echo "     OOM-kills instead, and what it picks may be sshd — which is a box"
+  echo "     you cannot log in to fix. Run:  bash deploy/add-swap.sh"
+  echo
+fi
 mkdir -p data
 for entry in "${TOOLS[@]}"; do
   IFS='|' read -r id name port sport <<< "$entry"
@@ -246,12 +298,14 @@ for entry in "${TOOLS[@]}"; do
 
   echo "  ${id} (${name}) — app :${port}  scorer :${sport}"
   pm2 start src/scoring/server.py --name "scorer-${id}" --interpreter "$PY" \
+    --max-memory-restart "$SCORER_MAX_MEM" \
     -- --output "$out" --port "$sport" >/dev/null
 
   TOOL_ID="$id" TOOL_NAME="$name" PORT="$port" \
   DB_PATH="$db" MODEL_OUTPUT_ROOT="$out" TMP_DIR="$tmp" \
   SCORER_URL="http://127.0.0.1:${sport}" \
-    pm2 start src/index.js --name "tool-${id}" --update-env >/dev/null
+    pm2 start src/index.js --name "tool-${id}" --update-env \
+    --max-memory-restart "$TOOL_MAX_MEM" >/dev/null
 done
 
 # The alerts service. One process, not nine: the rules and the fires are shared
@@ -264,7 +318,8 @@ done
 if [ -z "$ONLY" ]; then
   ALERTS_PORT=$(node -e "const a=require('./tools.config.json').apps.find(x=>x.id==='ALERTS');process.stdout.write(String(a?a.port:3090))")
   echo "  ALERTS — app :${ALERTS_PORT}"
-  ALERTS_PORT="$ALERTS_PORT" pm2 start src/alerts/server.js --name "alerts" --update-env >/dev/null
+  ALERTS_PORT="$ALERTS_PORT" pm2 start src/alerts/server.js --name "alerts" \
+    --update-env --max-memory-restart "$ALERTS_MAX_MEM" >/dev/null
 fi
 # pm2 save rewrites the startup list from whatever is running RIGHT NOW, so a
 # process that happened to be stopped at this moment would be dropped from it
