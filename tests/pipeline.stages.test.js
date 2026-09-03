@@ -181,4 +181,48 @@ describe('a full scan touches every stage', () => {
       expect(logged).toMatch(/\bat\b.*pipeline\.stages\.test|\bat\b/);
       spy.mockRestore();
     });
+
+  /*
+   * THE FATAL PATH NEEDS THE STACK MOST, and it was the last one without it.
+   * A soft stage that fails costs a field; a throw out of sideA or sideB ends
+   * the scan before r0 is touched, so no new card reaches the list for the
+   * rest of the window — which is how a desk ends a session with the same
+   * seven names it opened with.
+   */
+  test('a FATAL stage failure logs the stack and names the stage', async () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    require('../src/sideB/calculations').applyDerivedFields
+      .mockImplementationOnce(() => {
+        throw new TypeError('Cannot convert undefined or null to object');
+      });
+    await expect(runFullScan()).rejects.toThrow(/Cannot convert undefined/);
+    const lines = spy.mock.calls.map(c => c.map(String).join(' ')).join('\n');
+    expect(lines).toMatch(/Scan error in sideB/);
+    expect(lines).toMatch(/TypeError: Cannot convert undefined/);
+    expect(lines).toMatch(/\n\s+at /);              // an actual stack
+    spy.mockRestore();
+  });
+
+  test('...and a fatal failure leaves r0 untouched, so the cards already on '
+    + 'screen survive it', async () => {
+    const r0 = require('../src/r0/registry');
+    r0.upsertRows.mockClear();
+    r0.markAllStale.mockClear();
+    require('../src/sideB/calculations').applyDerivedFields
+      .mockImplementationOnce(() => { throw new Error('boom'); });
+    await expect(runFullScan()).rejects.toThrow(/boom/);
+    expect(r0.markAllStale).not.toHaveBeenCalled();
+    expect(r0.upsertRows).not.toHaveBeenCalled();
+  });
+
+  test('the scan releases its running flag even when it throws — one crash '
+    + 'must not block every scan after it', async () => {
+    require('../src/sideB/calculations').applyDerivedFields
+      .mockImplementationOnce(() => { throw new Error('boom'); });
+    await expect(runFullScan()).rejects.toThrow(/boom/);
+    expect(getScanStatus().running).toBe(false);
+    // and the next scan really does run
+    await runFullScan();
+    expect(getScanStatus().lastReport.ok).toBe(true);
+  });
 });

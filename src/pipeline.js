@@ -372,7 +372,21 @@ async function runFullScan() {
     report.ok = false;
     scanStatus.error = err.message;
     scanStatus.lastReport = report;
-    console.error('[Pipeline] Scan error:', err.message);
+    /*
+     * THE FATAL PATH NEEDS THE STACK MOST, and it was the one still without
+     * it. The soft wrapper logs a stack and the scheduler logs a stack, and
+     * both were fixed first — but a soft stage does not stop the scan. This
+     * does: a throw out of sideA or sideB ends the run before r0 is touched,
+     * so no new card reaches the list for the rest of the window.
+     *
+     * WHICH STAGE, TOO. `report.stages` already holds the answer — the failed
+     * stage is the last one recorded — and printing it means the log line
+     * names the stage even when a stack is somehow absent.
+     */
+    const failed = Object.entries(report.stages)
+      .filter(([, v]) => v && v.ok === false).map(([k]) => k);
+    console.error(`[Pipeline] Scan error${failed.length
+      ? ` in ${failed.join(', ')}` : ''}:`, err.stack || err.message);
     throw err;
   } finally {
     scanStatus.running = false;
