@@ -237,11 +237,59 @@ describe('the day in one object', () => {
     expect(s).toMatchObject({
       setup: 'OR + VWAP 09:35', runs: 2, failed: 0,
       evaluated: 24, signalled: 10, picked: 4,
-      staleDropped: 2, latched: 2,
+      // ONE NAME, SEEN TWICE. `staleDropped` used to be the sum and said 2.
+      staleDropped: 1, staleRepeats: 1, latched: 2,
       ordersSent: 2, ordersFailed: 2,
     });
+    expect(s.staleNames).toEqual(['CAPR@09:31']);
     expect(s.firstBar).toBe('09:34');
     expect(s.lastBar).toBe('09:35');
+  });
+
+  /*
+   * THE SAME NAME ON NINETY BARS IS ONE SIGNAL, NOT NINETY — the rule this
+   * file already applies to `problems`, applied to the counters.
+   *
+   * 2026-09-03, on the desk:
+   *
+   *     1013 EVALUATED · 180 SIGNALLED · 0 TAKEN
+   *     180 dropped as stale: GEO@09:45, IBKR@09:41
+   *
+   * Two names. qp re-reports every entry of a session on every bar it is asked
+   * about, so a watch setup running ninety times counts the same two picks
+   * ninety times. "180 dropped as stale" reads as a busy morning that the desk
+   * refused; the truth is it found two, both before it could act on them.
+   */
+  test('a name dropped as stale on ninety bars is ONE name, and the repeat is '
+    + 'said separately', () => {
+    for (let i = 0; i < 90; i += 1) {
+      log.record(aRun({ bar: `10:${String(i % 60).padStart(2, '0')}`,
+                        picks: [], orders: null,
+                        dropped: { stale: ['GEO@09:45', 'IBKR@09:41'] } }));
+    }
+    const s = log.summaryOf('2026-08-19').or_vwap_0935;
+    expect(s.staleDropped).toBe(2);
+    expect(s.staleNames).toEqual(['GEO@09:45', 'IBKR@09:41']);
+    expect(s.staleRepeats).toBe(178);          // 90 bars × 2 names, less the 2
+    expect(s.runs).toBe(90);
+  });
+
+  test('...and the raw total is still there, because it is what qp answered',
+    () => {
+      for (let i = 0; i < 4; i += 1) log.record(aRun({ picks: [], orders: null }));
+      const s = log.summaryOf('2026-08-19').or_vwap_0935;
+      expect(s.signalled).toBe(20);            // the sum across runs, unchanged
+      expect(s.signalledBars).toBe(4);         // ...and how many bars it was on
+    });
+
+  test('a setup that signals on one bar of many says so, which is what makes '
+    + 'a big total readable', () => {
+    log.record(aRun({ counts: { evaluated: 12, signalled: 0 }, picks: [],
+                      orders: null, dropped: null }));
+    log.record(aRun({ bar: '09:35', picks: [], orders: null, dropped: null }));
+    const s = log.summaryOf('2026-08-19').or_vwap_0935;
+    expect(s.runs).toBe(2);
+    expect(s.signalledBars).toBe(1);
   });
 
   /*

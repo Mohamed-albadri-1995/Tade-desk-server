@@ -3143,13 +3143,30 @@ async function loadLog() {
             g.msMax ? ` · slowest ${g.msMax}ms` : ''}</span></h4>
         ${lgFunnel({ cards: null, kept: null, evaluated: g.evaluated,
                      signalled: g.signalled, picked: g.picked })}
+        ${/* THE TILES ARE TOTALS ACROSS RUNS, and for a watch setup that is
+              not the number of things it found. Said here rather than left to
+              be inferred from a big number. */''}
+        ${g.signalled && g.signalledBars && g.signalledBars < g.runs
+          ? `<div class="note">totals across ${g.runs} runs — signalled on
+             ${g.signalledBars} bar${g.signalledBars === 1 ? '' : 's'}, and qp
+             re-reports a session's entries on every bar it is asked about</div>`
+          : ''}
         <div class="note">
           ${g.ordersSent} order(s) sent${g.ordersFailed ? `, ${g.ordersFailed} failed` : ''}${
             g.ordersSkipped ? `, ${g.ordersSkipped} skipped` : ''}${
-            g.staleDropped ? ` · ${g.staleDropped} dropped as stale` : ''}${
+            /* THE DISTINCT NAMES, and the repeat said separately. qp
+               re-reports every entry of the session on every bar, so a watch
+               setup running ninety times saw the same two picks ninety times.
+               "180 dropped as stale" reads as a busy morning; "2 names,
+               re-reported on 90 bars" is what happened. */
+            g.staleDropped ? ` · ${g.staleDropped} dropped as stale${
+              g.staleRepeats ? ` (re-reported on ${g.staleRepeats} more bar${
+                g.staleRepeats === 1 ? '' : 's'})` : ''}` : ''}${
             g.latched ? ` · ${g.latched} held by the latch` : ''}${
             g.failed ? ` · ${g.failed} run(s) FAILED` : ''}
         </div>
+        ${g.staleNames && g.staleNames.length
+          ? `<div class="note">stale: ${g.staleNames.map(esc).join(', ')}</div>` : ''}
         ${(g.problems || []).length
           ? `<div class="lg-prob">${g.problems.map(esc).join('<br>')}</div>` : ''}
         ${(byId[id] || []).map(lgRun).join('')}

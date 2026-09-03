@@ -1088,23 +1088,56 @@ async function runDue(decisionTime, opts = {}) {
     // publishing "nothing qualified": you turned it off, and a message every
     // morning saying so is the thing that makes people stop reading the feed.
     .filter(s => prefs.isEnabled(s.id));
-  const out = [];
-  for (const setup of mine) {
-    try {
-      out.push(await runSetup(setup, { ...opts, bar: decisionTime }));
-    } catch (err) {
-      console.error(`[Setups] ${setup.id} failed:`, err.message);
-      // A crash must not be silence either.
-      const day = opts.date || toETDate(Date.now());
-      alertStore.publishFires([{
-        ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
-        date: day, at: Date.now(), kind: 'setup', level: 'error',
-        detail: `Did not run: ${err.message}`,
-      }], day);
-      out.push({ ok: false, setupId: setup.id, error: err.message });
-    }
-  }
-  return out;
+  /*
+   * CONCURRENTLY, BECAUSE ONE SETUP'S MINUTE IS NOT ANOTHER'S TO SPEND.
+   *
+   * This was a sequential `for ... await`, and on 2026-09-03 that is what the
+   * day looked like:
+   *
+   *     Test              09:34   1744ms
+   *     OR + VWAP 09:35   09:34  45050ms   FAILED — timeout
+   *
+   * Both decide on the same bar. `Test` answered in under two seconds and then
+   * `OR + VWAP` held the tick for forty-five more — and a setup entering on the
+   * 09:35 open has sixty seconds in total. Had the order been reversed, the
+   * slow one would have spent the fast one's window instead, and the fast one
+   * would have placed a market order most of a minute after its decision bar.
+   *
+   * They are independent questions asked of the same platform, so they are
+   * asked at the same time. `allSettled`, not `all`: one setup failing must not
+   * cancel the others, which is the whole reason each had its own try/catch.
+   * Order is preserved, so the returned array still lines up with `mine`.
+   */
+  const day = opts.date || toETDate(Date.now());
+  const settled = await Promise.allSettled(
+    mine.map(setup => runSetup(setup, { ...opts, bar: decisionTime })));
+  return settled.map((r, i) => {
+    if (r.status === 'fulfilled') return r.value;
+    const setup = mine[i];
+    const err = r.reason || new Error('unknown failure');
+    console.error(`[Setups] ${setup.id} failed:`, err.message);
+    /*
+     * A CLOCK SETUP THAT FAILS HAS LOST THE DAY, and that is a different fact
+     * from a watch setup that will be asked again in sixty seconds.
+     *
+     * "Did not run" was the same sentence for both, and it reads as an
+     * inconvenience. For `OR + VWAP 09:35` it meant the strategy did not trade
+     * at all — the scheduler's window for it is one minute wide and that minute
+     * is gone. The alert has to say which of the two happened, because only one
+     * of them needs looking at before tomorrow.
+     */
+    const oneShot = !setup.watch;
+    const detail = oneShot
+      ? `MISSED THE ${setup.decisionTime || decisionTime} WINDOW — ${err.message}. `
+        + 'This setup decides on one bar, so there is no later attempt today.'
+      : `Did not run on the ${decisionTime} bar: ${err.message}`;
+    // A crash must not be silence either.
+    alertStore.publishFires([{
+      ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
+      date: day, at: Date.now(), kind: 'setup', level: 'error', detail,
+    }], day);
+    return { ok: false, setupId: setup.id, error: err.message, missedWindow: oneShot };
+  });
 }
 
 module.exports = {

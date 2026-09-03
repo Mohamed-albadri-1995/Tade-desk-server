@@ -241,7 +241,7 @@ describe('a run that finds nothing still says so', () => {
     qp.decide.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8765'));
     await runner.runDue('10:00', { date: DATE });
     const err = store.recentFires(DATE).find(f => f.level === 'error');
-    expect(err.detail).toMatch(/Did not run: connect ECONNREFUSED/);
+    expect(err.detail).toMatch(/connect ECONNREFUSED/);
   });
 
   test('and so is qp answering that it could not decide', async () => {
@@ -250,6 +250,91 @@ describe('a run that finds nothing still says so', () => {
     expect(store.recentFires(DATE).find(f => f.level === 'error').detail)
       .toMatch(/no strategy for/);
   });
+
+  /*
+   * A CLOCK SETUP THAT FAILS HAS LOST THE DAY. On 2026-09-03 `OR + VWAP 09:35`
+   * timed out on its single attempt and the alert said "Did not run" — the same
+   * sentence a watch setup gets when it will be asked again in sixty seconds.
+   * Only one of the two needs looking at before tomorrow.
+   */
+  test('a CLOCK setup that fails says it missed the window, not that it was late',
+    async () => {
+      qp.decide.mockRejectedValue(new Error('timeout of 18000ms exceeded'));
+      const out = await runner.runDue('10:00', { date: DATE });
+      const err = store.recentFires(DATE).find(f => f.level === 'error');
+      expect(err.detail).toMatch(/MISSED THE 10:00 WINDOW/);
+      expect(err.detail).toMatch(/no later attempt today/);
+      expect(out[0].missedWindow).toBe(true);
+    });
+
+  test('a WATCH setup that fails does NOT — it is asked again next minute',
+    async () => {
+      catalog.forTool.mockResolvedValue([{
+        ...SETUP, id: 'PML@09:40', name: 'PML breakout',
+        decisionTime: '09:40', windowEnd: '10:10', watch: true,
+      }]);
+      qp.decide.mockRejectedValue(new Error('timeout of 18000ms exceeded'));
+      const out = await runner.runDue('09:45', { date: DATE });
+      const err = store.recentFires(DATE).find(f => f.level === 'error');
+      expect(err.detail).toMatch(/Did not run on the 09:45 bar/);
+      expect(err.detail).not.toMatch(/MISSED/);
+      expect(out[0].missedWindow).toBe(false);
+    });
+});
+
+/*
+ * ONE SETUP'S MINUTE IS NOT ANOTHER'S TO SPEND.
+ *
+ * 2026-09-03, both deciding on the 09:34 bar:
+ *
+ *     Test              1744ms
+ *     OR + VWAP 09:35  45050ms   FAILED — timeout
+ *
+ * Run in turn, the slow one holds the tick for forty-five seconds — and a
+ * setup entering on the 09:35 open has sixty in total. Reverse the order and
+ * the fast one places a market order most of a minute after its decision bar.
+ */
+describe('setups on the same bar do not queue behind each other', () => {
+  test('they are asked at the same time, not one after the other', async () => {
+    const OTHER = { ...SETUP, id: 'Other@10:00', name: 'Other',
+                    strategyId: 'Other' };
+    catalog.forTool.mockResolvedValue([SETUP, OTHER]);
+    const started = [];
+    let release;
+    const held = new Promise((r) => { release = r; });
+    qp.decide.mockImplementation(async (args) => {
+      started.push(args.strategyId || args.strategies);
+      // The FIRST call blocks. If the second only starts after it resolves,
+      // `started` holds one entry when we look — which is the bug.
+      if (started.length === 1) await held;
+      return { ok: true, picks: [], counts: {} };
+    });
+    const run = runner.runDue('10:00', { date: DATE });
+    // Let the microtask queue drain so a concurrent second call can be made.
+    await new Promise(r => setImmediate(r));
+    expect(started).toHaveLength(2);
+    release();
+    await run;
+  });
+
+  test('one setup failing does not stop the other from being decided',
+    async () => {
+      const OTHER = { ...SETUP, id: 'Other@10:00', name: 'Other',
+                      strategyId: 'Other' };
+      catalog.forTool.mockResolvedValue([SETUP, OTHER]);
+      qp.decide.mockImplementation(async (args) => {
+        if (args.strategyId === SETUP.strategyId) throw new Error('boom');
+        return { ok: true, picks: [], counts: { evaluated: 7, signalled: 0 } };
+      });
+      const out = await runner.runDue('10:00', { date: DATE });
+      expect(out).toHaveLength(2);
+      expect(out[0].ok).toBe(false);
+      expect(out[1].ok).toBe(true);
+      // AND IN THE ORDER THEY WERE ASKED. `allSettled` preserves it; the
+      // returned array has to line up with the setups or a caller reading
+      // out[i] for setup i gets another setup's result.
+      expect(out[0].setupId).toBe(SETUP.id);
+    });
 });
 
 /*

@@ -377,6 +377,29 @@ function summaryOf(date) {
       firstBar: r.bar || null, lastBar: null, msMax: 0,
       evaluated: 0, signalled: 0, picked: 0,
       staleDropped: 0, latched: 0,
+      /*
+       * THE SAME NAME ON NINETY BARS IS ONE SIGNAL, NOT NINETY.
+       *
+       * This file already says so, a few lines down, about `problems`: "the
+       * same refusal on 31 bars of a watch window is one fact, not 31". The
+       * counters did not follow the rule, and on 2026-09-03 the desk read:
+       *
+       *     1013 EVALUATED · 180 SIGNALLED · 0 TAKEN
+       *     180 dropped as stale: GEO@09:45, IBKR@09:41
+       *
+       * Two names. qp re-reports every entry of the session on every bar it is
+       * asked about (see runner.js's stale guard), so a watch setup running
+       * ninety times counts the same two picks ninety times. "180 signalled, 0
+       * taken" reads as a desk finding trades all morning and refusing them;
+       * the truth is it found two, both before it could act, and said so 180
+       * times.
+       *
+       * So the sums stay — they are the honest total of what qp answered — and
+       * the DISTINCT counts sit beside them. The page shows the distinct one.
+       */
+      signalledBars: 0,          // how many runs reported at least one signal
+      staleNames: [],            // distinct TICKER@HH:MM, in order first seen
+      staleRepeats: 0,           // how many times those names came back
       ordersSent: 0, ordersFailed: 0, ordersSkipped: 0,
       // Only the reasons, deduped — the same refusal on 31 bars of a watch
       // window is one fact, not 31.
@@ -390,8 +413,15 @@ function summaryOf(date) {
     const f = r.funnel || {};
     g.evaluated += f.evaluated || 0;
     g.signalled += f.signalled || 0;
+    if (f.signalled) g.signalledBars += 1;
     g.picked += f.picked || 0;
-    g.staleDropped += ((r.dropped || {}).stale || []).length;
+    // `TICKER@HH:MM` already identifies the signal — the name AND the bar it
+    // fired on — so the string is the key and nothing has to be composed.
+    for (const s of ((r.dropped || {}).stale || [])) {
+      if (g.staleNames.includes(s)) g.staleRepeats += 1;
+      else g.staleNames.push(s);
+    }
+    g.staleDropped = g.staleNames.length;
     g.latched += ((r.dropped || {}).latched || []).length;
     for (const p of r.picks || []) {
       for (const o of p.orders || []) {

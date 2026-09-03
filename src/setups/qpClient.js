@@ -27,13 +27,61 @@ function baseUrl() {
   return process.env.QP_URL || 'http://127.0.0.1:8765';
 }
 
+/*
+ * HOW LONG A DECISION MAY TAKE, AND HOW MANY GOES IT GETS.
+ *
+ * A BUDGET, NOT A TIMEOUT. The decision has to land inside the minute it
+ * decides for: `OR + VWAP 09:35` enters on the 09:35 open, the tick fires when
+ * the clock reads 09:35, and the order has to reach the tape inside that
+ * minute. So the question is not "how long are we willing to wait" but "how
+ * much of the minute may one attempt spend".
+ *
+ * It was one attempt of 45 seconds, and on 2026-09-03 that lost the whole day:
+ *
+ *     OR + VWAP 09:35   1 run · FAILED · timeout of 45000ms exceeded
+ *
+ * A CLOCK SETUP DECIDES ON ONE BAR. `runDue` caught the timeout, published an
+ * error, and moved on; the scheduler's window is one minute wide, so it never
+ * matched again. One slow answer and the strategy did not trade at all — and
+ * 45 seconds was too long to be useful anyway: an answer arriving at 09:35:44
+ * is three quarters of the way through the bar it was meant to open on.
+ *
+ * Two attempts of eighteen seconds fit in the same minute with room left for
+ * the order, and a platform that is briefly busy — the nightly walk, a heavy
+ * scan — no longer costs a session.
+ */
+const DECIDE_TIMEOUT_MS = 18000;
+const DECIDE_ATTEMPTS = 2;
+
+/*
+ * NETWORK CODES ONLY — a second attempt must be the SAME question.
+ *
+ * qp answering "no signal", or answering with a 500, is an ANSWER. Asking it
+ * again would not be a retry, it would be a second opinion, and a desk that
+ * asks twice and takes the friendlier answer is not running the strategy that
+ * was backtested. Only a request that never got an answer at all may be
+ * repeated.
+ */
+const NEVER_ANSWERED = new Set(['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET',
+                                'ECONNREFUSED', 'EPIPE', 'EAI_AGAIN',
+                                'ERR_CANCELED']);
+
+function neverAnswered(err) {
+  if (!err) return false;
+  // A STATUS IS AN ANSWER, including 500. qp reached a conclusion and said so.
+  if (err.response) return false;
+  // ok:false is an answer too — the flag is set where that error is thrown.
+  if (err.qpAnswered) return false;
+  return NEVER_ANSWERED.has(err.code)
+    // axios reports its own timeout by message on some versions, not by code.
+    || /timeout of \d+ms exceeded/i.test(err.message || '');
+}
+
 /**
  * Decide a setup: strategies × universe × date → ranked picks.
  *
- * `timeoutMs` is deliberately shorter than it might be. This runs at the
- * decision minute and the trade is entered at market on sight, so a platform
- * that is slow to answer has to become a reported failure rather than a
- * silently late alert.
+ * Retries ONCE when the platform never answered — see the budget above. Never
+ * retries an answer, however unwelcome.
  */
 /*
  * `fill = 'close'` HERE IS CORRECT AND MUST STAY. It is not the optimistic
@@ -53,7 +101,9 @@ function baseUrl() {
 async function decide({ strategyId, strategies, symbols, date, tf = '1m',
                         feed = 'yahoo', topN = 0, targetR = 2.0,
                         metric = null, direction = null, ctx = null,
-                        fill = 'live', view = 'all', timeoutMs = 45000 }) {
+                        fill = 'live', view = 'all',
+                        timeoutMs = DECIDE_TIMEOUT_MS,
+                        attempts = DECIDE_ATTEMPTS }) {
   const body = {
     symbols, date, tf, feed, top_n: topN, target_r: targetR, fill,
     // WHICH BARS qp EVALUATES ON. 'regular' was hardcoded on qp's side while
@@ -68,16 +118,35 @@ async function decide({ strategyId, strategies, symbols, date, tf = '1m',
   if (strategies) body.strategies = strategies;
   else body.strategy_id = strategyId;
 
-  const res = await axios.post(`${baseUrl()}/api/setup/decide`, body, {
-    timeout: timeoutMs,
-    headers: { 'Content-Type': 'application/json' },
-  });
-
-  const data = res.data || {};
-  // qp answers 200 with ok:false for its own errors, so a status check is not
-  // enough to know the decision succeeded.
-  if (!data.ok) throw new Error(data.error || 'qp could not decide the setup');
-  return data;
+  const tries = Math.max(1, Number(attempts) || 1);
+  let last = null;
+  for (let i = 1; i <= tries; i += 1) {
+    try {
+      const res = await axios.post(`${baseUrl()}/api/setup/decide`, body, {
+        timeout: timeoutMs,
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = res.data || {};
+      // qp answers 200 with ok:false for its own errors, so a status check is
+      // not enough to know the decision succeeded.
+      if (!data.ok) {
+        const e = new Error(data.error || 'qp could not decide the setup');
+        e.qpAnswered = true;              // an answer. Never asked again.
+        throw e;
+      }
+      // SAID OUT LOUD when the answer only arrived on the second ask. A
+      // decision that needed a retry is one that nearly did not happen, and
+      // that is worth seeing before the day it does not.
+      if (i > 1) data.attempts = i;
+      return data;
+    } catch (err) {
+      last = err;
+      if (i >= tries || !neverAnswered(err)) throw err;
+      console.warn(`[qp] decide did not answer (${err.code || err.message}) `
+        + `— attempt ${i} of ${tries}, asking again inside the same minute`);
+    }
+  }
+  throw last;
 }
 
 /**
@@ -154,4 +223,10 @@ async function health(timeoutMs = 5000) {
   }
 }
 
-module.exports = { decide, manage, strategies, setTools, health, baseUrl };
+module.exports = {
+  decide, manage, strategies, setTools, health, baseUrl,
+  // Exported so the retry rule can be tested against real error shapes rather
+  // than trusted — "only a request that never got an answer may be repeated"
+  // is a sentence until something executes it.
+  neverAnswered, DECIDE_TIMEOUT_MS, DECIDE_ATTEMPTS,
+};
