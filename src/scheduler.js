@@ -65,7 +65,23 @@ function makeHandler(entry) {
     } catch (err) {
       entry.lastStatus = 'error';
       entry.lastError = err.message;
-      console.error(`[Scheduler] ${entry.name} failed:`, err.message);
+      /*
+       * THE STACK, NOT JUST THE MESSAGE.
+       *
+       * This logged `err.message` alone, and on 2026-09-03 that produced
+       * hundreds of lines of:
+       *
+       *     [Scheduler] Discovery — Open (09:00–10:00) failed:
+       *       Cannot convert undefined or null to object
+       *
+       * A TypeError's message names no file, no line and no function. Every
+       * discovery window on that tool had been failing — which is why its card
+       * list barely moved and its setups had nothing new to decide on — and
+       * the log could not say where. An error that repeats every five minutes
+       * for weeks and cannot be located is worse than one that crashes: the
+       * crash at least points somewhere.
+       */
+      console.error(`[Scheduler] ${entry.name} failed:`, err.stack || err.message);
     }
     entry.lastDuration = Date.now() - t0;
   };

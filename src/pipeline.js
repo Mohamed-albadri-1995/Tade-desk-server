@@ -43,30 +43,51 @@ const scanStatus = {
   lastReport: null,
 };
 
-function stageWrap(report, key, fn) {
-  return async () => {
-    const t0 = Date.now();
-    try {
-      const result = await fn();
-      report.stages[key] = { ok: true, duration: Date.now() - t0, ...result };
-    } catch (err) {
-      report.stages[key] = { ok: false, duration: Date.now() - t0, error: err.message };
-      throw err;
-    }
-  };
+/*
+ * THESE RUN THE STAGE. THEY USED TO RETURN A FUNCTION THAT RAN IT.
+ *
+ * The old shape was `stageWrap(report, key, fn)` returning `async () => {…}`,
+ * so every call site had to end `})()` — and three of the twelve did not:
+ *
+ *     await stageWrapSoft(report, 'shortInterest', async () => {…});
+ *     await stageWrapSoft(report, 'canslimRow',    async () => {…});
+ *     await stageWrapSoft(report, 'industryMap',   async () => {…});
+ *
+ * `await` on a function object resolves to the function. No error, no warning,
+ * no `report.stages` entry — the three stages simply never ran. Short interest
+ * was always empty, the CANSLIM reading never reached the row the registers
+ * are built from, and the industry labels qp needs to rank groups were never
+ * recorded. Every one of those read as "the data source has nothing", which is
+ * the most believable wrong answer there is.
+ *
+ * Currying bought nothing here — every call site invoked immediately — and it
+ * cost three stages. So the wrapper runs the stage and returns its promise.
+ * A `()` left behind at a call site now throws "is not a function" on the next
+ * scan, which is the loud failure the old shape could not produce.
+ */
+async function stageWrap(report, key, fn) {
+  const t0 = Date.now();
+  try {
+    const result = await fn();
+    report.stages[key] = { ok: true, duration: Date.now() - t0, ...result };
+  } catch (err) {
+    report.stages[key] = { ok: false, duration: Date.now() - t0, error: err.message };
+    throw err;
+  }
 }
 
-function stageWrapSoft(report, key, fn) {
-  return async () => {
-    const t0 = Date.now();
-    try {
-      const result = await fn();
-      report.stages[key] = { ok: true, duration: Date.now() - t0, ...result };
-    } catch (err) {
-      report.stages[key] = { ok: false, duration: Date.now() - t0, error: err.message };
-      console.error(`[Pipeline] ${key} failed (non-fatal):`, err.message);
-    }
-  };
+async function stageWrapSoft(report, key, fn) {
+  const t0 = Date.now();
+  try {
+    const result = await fn();
+    report.stages[key] = { ok: true, duration: Date.now() - t0, ...result };
+  } catch (err) {
+    report.stages[key] = { ok: false, duration: Date.now() - t0, error: err.message };
+    // THE STACK, NOT JUST THE MESSAGE. "Cannot convert undefined or null to
+    // object" names no file and no line, and a soft stage that fails every
+    // scan is exactly the one nobody can locate.
+    console.error(`[Pipeline] ${key} failed (non-fatal):`, err.stack || err.message);
+  }
 }
 
 async function runFullScan() {
@@ -147,14 +168,14 @@ async function runFullScan() {
       merged = mergeScannersIntoR0(gated);
       return { rowCount: merged.length, labelLists: Object.keys(labels).length,
                newsGate: report.newsGate || null };
-    })();
+    });
 
     // Side B: Internal Calculations (fatal)
     let withDerived;
     await stageWrap(report, 'sideB', async () => {
       withDerived = applyDerivedFields(merged);
       return { rowCount: withDerived.length };
-    })();
+    });
 
     // CANSLIM cross-tag (non-fatal). The tool that runs the CANSLIM screeners
     // publishes its matches; every tool reads that list and tags any of its own
@@ -216,7 +237,7 @@ async function runFullScan() {
       }
       const { tagged, memberCount } = canslim.tagRows(withDerived);
       return { tagged, memberCount };
-    })();
+    });
 
     /*
      * Alerts (non-fatal).
@@ -244,7 +265,7 @@ async function runFullScan() {
           + fires.map(f => `${f.ticker} ${f.rule}`).join(', '));
       }
       return { rules: rules.length, fired: fires.length, watched: Object.keys(alertPrev).length };
-    })();
+    });
 
     // Side D: Market Context (non-fatal)
     let withContext = withDerived;
@@ -252,7 +273,7 @@ async function runFullScan() {
       await buildMarketSnapshot();
       withContext = enrichR0WithContext(withDerived);
       return { rowCount: withContext.length };
-    })();
+    });
 
     // Side E: Live scoring via Python Flask service (non-fatal — null scores if service down)
     let withScores = withContext;
@@ -278,7 +299,7 @@ async function runFullScan() {
         ? 'Scorer online but returned no scores — model may not be trained. Retrain via the Analysis tab.'
         : null;
       return { rowCount: withScores.length, scored, scorerAvailable, note: scorerNote };
-    })();
+    });
     if (!report.stages.sideE?.ok) {
       withScores = withContext.map(row => ({ ...row, _score: null }));
     }
@@ -290,7 +311,7 @@ async function runFullScan() {
     // Side G: Refresh stale tickers with fresh TV quotes (non-fatal)
     await stageWrapSoft(report, 'sideG', async () => {
       return await refreshStaleInR0();
-    })();
+    });
 
     // Side C: News & Catalyst for all live tickers (non-fatal)
     await stageWrapSoft(report, 'sideC', async () => {
@@ -304,7 +325,7 @@ async function runFullScan() {
       );
       const failed = results.filter(r => r.status === 'rejected').length;
       return { rowCount: liveRows.length, failed };
-    })();
+    });
 
     // Side F: Restore inShortlist flags from DB (non-fatal)
     await stageWrapSoft(report, 'sideF', async () => {
@@ -317,7 +338,7 @@ async function runFullScan() {
       const globalShortlist = require('./sideF/globalShortlist');
       const { tagged, memberCount } = globalShortlist.tagRows(r0.getAll(), today);
       return { globalTagged: tagged, globalMembers: memberCount };
-    })();
+    });
 
     // r0 summary
     const allRows = r0.getAll();
