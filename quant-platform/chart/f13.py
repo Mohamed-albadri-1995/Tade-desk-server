@@ -52,6 +52,7 @@ network.
 
 from __future__ import annotations
 
+import datetime as _dt
 import io
 import json
 import os
@@ -134,7 +135,12 @@ KEEP_COLS = ('ACCESSION_NUMBER', 'CUSIP', 'NAMEOFISSUER')
 # second holder, and it says nothing at all about which quarter the holdings
 # are as of — that has been INFERRED from the SEC's filename, twice, wrongly
 # once. Both facts are in SUBMISSION.tsv, a few thousand rows.
-SUB_COLS = ('ACCESSION_NUMBER', 'CIK', 'SUBMISSIONTYPE', 'PERIODOFREPORT')
+SUB_COLS = ('ACCESSION_NUMBER', 'CIK', 'SUBMISSIONTYPE', 'PERIODOFREPORT',
+            # WHEN, which is what makes this quarter answerable about a past
+            # day. Holdings are as of the quarter end and public up to 45 days
+            # later; without this column the only honest answer to "did a
+            # reader know this on 14 March" is that nobody can tell.
+            'FILING_DATE')
 
 
 def _sub_path(hit):
@@ -402,10 +408,10 @@ def count_quarter(lines, cusip_ticker: dict, acc_cik: dict | None = None):
 
 
 def parse_submissions(lines):
-    """({accession: cik}, {period: how many filings said so}).
+    """({accession: cik}, {period: how many said so}, {filing date: how many}).
 
-    WHO FILED, AND WHAT THEY SAY THE PERIOD IS. Both facts were being
-    substituted for by something close but not equal:
+    WHO FILED, WHAT THEY SAY THE PERIOD IS, AND WHEN THEY FILED. The first two
+    were being substituted for by something close but not equal:
 
       the manager   was the ACCESSION NUMBER, which is the FILING. A manager
                     that amends files twice and was counted as two holders.
@@ -419,24 +425,33 @@ def parse_submissions(lines):
     Every submission is counted, amendments included: an amendment is still a
     filing about that period, and dropping them here would only move the
     guessing somewhere else. The CIK map is what removes the double count.
+
+    THE THIRD MAP IS FOR BACKTESTS, and it is the only thing that makes I
+    answerable about a past day. A quarter's holdings are as of 31 March and
+    are not public then: managers have 45 days to file, so a strategy that
+    read "institutions are accumulating" in April was reading a filing nobody
+    had. Counted by date rather than listed, because a window holds tens of
+    thousands of filings and only the shape of the distribution is wanted.
     """
     cik: dict[str, str] = {}
     periods: dict[str, int] = {}
+    filed: dict[str, int] = {}
     it = iter(lines)
     try:
         header = next(it)
     except StopIteration:
-        return cik, periods
+        return cik, periods, filed
     head = [h.strip().upper() for h in header.rstrip('\n').split('\t')]
     try:
         i_acc = head.index('ACCESSION_NUMBER')
     except ValueError:
-        return cik, periods
+        return cik, periods, filed
     i_cik = head.index('CIK') if 'CIK' in head else None
     i_per = head.index('PERIODOFREPORT') if 'PERIODOFREPORT' in head else None
+    i_fil = head.index('FILING_DATE') if 'FILING_DATE' in head else None
     if i_cik is None:
-        return cik, periods
-    want = max(i for i in (i_acc, i_cik, i_per) if i is not None)
+        return cik, periods, filed
+    want = max(i for i in (i_acc, i_cik, i_per, i_fil) if i is not None)
     for line in it:
         parts = line.rstrip('\n').split('\t')
         if len(parts) <= want:
@@ -449,7 +464,77 @@ def parse_submissions(lines):
             per = parts[i_per].strip()
             if per:
                 periods[per] = periods.get(per, 0) + 1
-    return cik, periods
+        if i_fil is not None:
+            d = _isodate(parts[i_fil])
+            if d:
+                filed[d] = filed.get(d, 0) + 1
+    return cik, periods, filed
+
+
+def _isodate(s: str) -> str | None:
+    """`YYYY-MM-DD` out of whatever the SEC wrote, or None.
+
+    THE SAME PROBLEM `period_quarter` ALREADY HAS, one function down: the SEC
+    has written this field as 03-31-2026, 2026-03-31 and 31-MAR-2026 in
+    different years of the same dataset. Two readers of the same shape would
+    drift, so both pick the parts out rather than parsing a fixed format —
+    and this one returns a SORTABLE string, because every comparison it feeds
+    ("was this filed by 14 March?") is a string comparison against a date.
+    """
+    s = (s or '').strip()
+    if not s:
+        return None
+    m = re.match(r'^(20\d\d)\D(\d{1,2})\D(\d{1,2})$', s)
+    if not m:
+        m2 = re.match(r'^(\d{1,2})\D(\d{1,2})\D(20\d\d)$', s)
+        if not m2:
+            return None
+        yy, mm, dd = int(m2.group(3)), int(m2.group(1)), int(m2.group(2))
+    else:
+        yy, mm, dd = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if not (1 <= mm <= 12 and 1 <= dd <= 31):
+        return None
+    return f'{yy:04d}-{mm:02d}-{dd:02d}'
+
+
+# HOW MANY OF A QUARTER'S FILINGS MUST BE IN before the quarter counts as
+# public. Not the first — one early manager is not the market seeing the
+# quarter, and dating it by them would let a backtest read the whole quarter
+# weeks before it existed. Not the last either: stragglers and amendments
+# arrive for months, and waiting for them would hide a quarter that everybody
+# else had. The median is the day the picture existed.
+PUBLISHED_AT = 0.5
+
+# The statutory deadline: a 13F is due 45 days after the quarter it covers.
+# Used only when the dataset carries no filing dates at all, and it is the
+# CONSERVATIVE fallback — the last day the filing could legally be late,
+# rather than the first day it might have been early.
+DUE_DAYS = 45
+
+
+def published_by(filed: dict, year: int, q: int) -> str | None:
+    """The date this quarter's 13F picture became public.
+
+    Returns the day the `PUBLISHED_AT` share of filings had landed. With no
+    filing dates — a quarter cached before this code, or a dataset without the
+    column — falls back to quarter-end plus the statutory 45 days, which is
+    late rather than early on purpose: a fallback that errs early is a
+    fallback that invents look-ahead.
+    """
+    total = sum((filed or {}).values())
+    if total:
+        need = total * PUBLISHED_AT
+        seen = 0
+        for d in sorted(filed):
+            seen += filed[d]
+            if seen >= need:
+                return d
+    try:
+        end = _dt.date(year + (1 if q == 4 else 0),
+                       1 if q == 4 else q * 3 + 1, 1) - _dt.timedelta(days=1)
+    except Exception:                                     # noqa: BLE001
+        return None
+    return (end + _dt.timedelta(days=DUE_DAYS)).isoformat()
 
 
 def period_quarter(periods: dict):
@@ -500,7 +585,7 @@ def parse_submissions_file(path):
     except OSError:
         # A quarter cached before submissions were extracted. Not an error —
         # the caller falls back to counting filings and says which it did.
-        return {}, {}
+        return {}, {}, {}
 
 
 def count_by_ticker_file(path, cusip_ticker: dict) -> dict:
@@ -1164,10 +1249,12 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
 
     per_q: dict[tuple, dict] = {}
     filers: dict[tuple, int] = {}
+    public: dict[tuple, str] = {}
+    dated: dict[tuple, bool] = {}
     unit = 'manager'
     relabelled = []
     for (y, q), path in paths:
-        acc_cik, periods = parse_submissions_file(_sub_path(path))
+        acc_cik, periods, filed_on = parse_submissions_file(_sub_path(path))
         if not acc_cik:
             # AN APPROXIMATION MUST NOT PASS FOR THE MEASUREMENT. Counting
             # filings instead of managers still answers, and the published
@@ -1183,6 +1270,11 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
             log(f'  {y}Q{q}: the filings say {stated[0]}Q{stated[1]} '
                 f'— trusting the data over the filename')
             y, q = stated
+        # AFTER the relabel, because the fallback is computed from the quarter
+        # the holdings are actually AS OF. Dating 2026Q1 holdings from a 2026Q2
+        # filename would push the deadline a quarter into the future.
+        public[(y, q)] = published_by(filed_on, y, q)
+        dated[(y, q)] = bool(filed_on)
         per_q[(y, q)], filers[(y, q)] = count_quarter_file(
             path, cusip_ticker, acc_cik)
         log(f'  {y}Q{q}: {len(per_q[(y, q)])} tickers held, '
@@ -1256,6 +1348,23 @@ def build(quarters: int = QUARTERS, log=print) -> dict:
         # it is one number per quarter and the card joins on the label.
         'filers_by_quarter': {f'{y}Q{q}': filers[(y, q)] for (y, q) in qs
                               if per_q.get((y, q))},
+        # WHEN EACH QUARTER BECAME PUBLIC, and it is the whole reason I can be
+        # backtested at all. This file used to record WHICH quarters it used
+        # and never when any of them became readable, so "the newest quarter as
+        # of 14 March" was unanswerable and `chart/canslim.py` refused the
+        # letter outright rather than hand back today's answer.
+        #
+        # The date is the median filing (see `published_by`), not the first —
+        # one early manager is not the market seeing the quarter.
+        'published_by': {f'{y}Q{q}': public.get((y, q)) for (y, q) in qs
+                         if per_q.get((y, q))},
+        # AND WHETHER THAT DATE WAS MEASURED OR ASSUMED. A quarter cached
+        # before FILING_DATE was read falls back to quarter-end plus the
+        # statutory 45 days, which is a legal deadline and not an observation.
+        # Both are usable; only one is evidence, and a reader has to be able to
+        # tell which it is holding.
+        'published_measured': {f'{y}Q{q}': bool(dated.get((y, q)))
+                               for (y, q) in qs if per_q.get((y, q))},
         # SAID OUT LOUD when the data is not the quarters the calendar asked
         # for. The card prints `quarters` either way, but a run summary that
         # does not mention it lets a fallback pass for a normal night.

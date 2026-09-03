@@ -269,6 +269,132 @@ def _scan_time(rctx: dict | None, day: str):
     return int((open_et + pd.Timedelta(minutes=mins)).timestamp())
 
 
+# ---------------------------------------------------------------------------
+# The CANSLIM gate — opt-in, and it refuses rather than flatters
+# ---------------------------------------------------------------------------
+#
+# EVERY RULE NAMES THE LETTER IT COMES FROM, because the letters are what
+# decides whether the run may happen at all: `chart/canslim.py` says which can
+# be reconstructed as of a past day, and a rule naming one that cannot must
+# stop the run rather than quietly fall back to today's value.
+#
+# `l_pct_min` is a PERCENTILE, not a rank, and it is spelled that way on
+# purpose. A rank counts up from best and a percentile counts down; 20 is
+# excellent as one and poor as the other, and `groups.rank_to_pct` exists
+# because that reversal has already been got wrong once here. Top fifth of all
+# groups is `l_pct_min: 80`.
+CANSLIM_RULES = {
+    'm_status': 'm',        # allowed market statuses, e.g. ['confirmed_uptrend']
+    'l_pct_min': 'l',       # group RS percentile floor — 80 is the top fifth
+    'rs_min': 'l',          # the stock's own RS rating floor (L's input)
+    'c_eps_chg_min': 'c',   # newest quarter PUBLIC BY THEN, EPS %chg floor
+    'c_sales_chg_min': 'c',
+    'a_growth_min': 'a',    # 3-year annual EPS growth, over the years filed by then
+    'a_roe_min': 'a',
+    'i_direction': 'i',     # e.g. ['rising', 'turning up']
+    'i_share_pct_min': 'i',
+}
+
+
+def _canslim_spec(spec: dict):
+    """({rule: value}, letters) for the gate, or (None, ()) when it is off.
+
+    Raises ValueError when a rule names a letter that cannot be reconstructed
+    as of a past date. THAT RAISE IS THE POINT: the alternative is a run that
+    silently gates on today's answer and reports a curve that cannot be
+    repeated live, which is the one result worth less than no result.
+    """
+    rules = spec.get('canslim') or {}
+    if not isinstance(rules, dict):
+        raise ValueError('canslim must be an object of rules, e.g. '
+                         '{"m_status": ["confirmed_uptrend"], "l_pct_min": 80}')
+    rules = {k: v for k, v in rules.items() if v not in (None, '', [], {})}
+    if not rules:
+        return None, ()
+    unknown = [k for k in rules if k not in CANSLIM_RULES]
+    if unknown:
+        raise ValueError(f'unknown canslim rule(s): {", ".join(sorted(unknown))} '
+                         f'— known: {", ".join(sorted(CANSLIM_RULES))}')
+    letters = tuple(sorted({CANSLIM_RULES[k] for k in rules}))
+    from chart import canslim
+    refused = canslim.refusals(letters)
+    if refused:
+        raise ValueError(
+            'this setup cannot be backtested honestly: '
+            + '; '.join(f'{k.upper()} — {v}' for k, v in sorted(refused.items()))
+            + '. Drop those rules or store the missing dates; gating on them '
+              'would use information that did not exist on the day.')
+    return rules, letters
+
+
+def _canslim_ok(rec: dict, rules: dict):
+    """(True, None) pass · (False, why) blocked · (None, why) unverifiable.
+
+    THREE ANSWERS, NOT TWO. "The stock failed the screen" and "the screen
+    could not be run on this stock" are different facts about a pair, and
+    collapsing them into one exclusion is how a run that verified almost
+    nothing reads as a run that filtered hard. The caller counts them apart.
+    """
+    refused = rec.get('refused') or {}
+    for rule, val in rules.items():
+        letter = CANSLIM_RULES[rule]
+        if letter in refused:
+            return None, f'{letter.upper()} refused: {refused[letter]}'
+        got = rec.get(letter)
+        if not isinstance(got, dict):
+            return None, f'{letter.upper()} missing'
+
+        if rule == 'm_status':
+            want = [val] if isinstance(val, str) else list(val)
+            if got.get('status') not in want:
+                return False, f'M is {got.get("status")}'
+        elif rule == 'l_pct_min':
+            pct = got.get('group_pct')
+            if pct is None:
+                return None, 'L has no group percentile'
+            if pct < float(val):
+                return False, f'L group pct {pct} < {val}'
+        elif rule == 'rs_min':
+            rs = rec.get('rs')
+            if rs is None:
+                return None, 'no RS rating'
+            if rs < float(val):
+                return False, f'RS {rs:.0f} < {val}'
+        elif rule in ('c_eps_chg_min', 'c_sales_chg_min'):
+            key = 'eps_chg' if rule == 'c_eps_chg_min' else 'sales_chg'
+            v = (got.get('latest') or {}).get(key)
+            # None here is O'Neil's own refusal — a percentage from a loss or
+            # a zero base is arithmetic without meaning (see edgar.pct_change),
+            # so it is unverifiable and NOT a fail.
+            if v is None:
+                return None, f'C {key} is n/a for this quarter'
+            if v < float(val):
+                return False, f'C {key} {v} < {val}'
+        elif rule == 'a_growth_min':
+            v = got.get('growth_3yr_pct')
+            if v is None:
+                return None, 'A has no 3-year growth rate by this date'
+            if v < float(val):
+                return False, f'A 3yr growth {v} < {val}'
+        elif rule == 'a_roe_min':
+            v = got.get('roe_pct')
+            if v is None:
+                return None, 'A has no usable ROE'
+            if v < float(val):
+                return False, f'A ROE {v} < {val}'
+        elif rule == 'i_direction':
+            want = [val] if isinstance(val, str) else list(val)
+            if got.get('direction') not in want:
+                return False, f'I is {got.get("direction")}'
+        elif rule == 'i_share_pct_min':
+            v = got.get('share_pct')
+            if v is None:
+                return None, 'I has no share of filers for that quarter'
+            if v < float(val):
+                return False, f'I share {v}% < {val}'
+    return True, None
+
+
 def _rvol_at(sym: str, day: str, feed: str, view: str, ref_hhmm: int,
              length: int = 20) -> float | None:
     """SMB-style In-Play RVOL for (sym, day), read causally AT `ref_hhmm` ET.
@@ -1057,6 +1183,24 @@ def run(spec: dict, progress_cb=None) -> dict:
         cov['rvol_below'] = 0
         cov['rvol_unknown'] = 0
         cov['rvol_samples'] = []
+
+    # THE CANSLIM GATE (opt-in), read AS OF THE DAY — see `_canslim_spec`,
+    # which raises before a single pair is evaluated if a rule names a letter
+    # that cannot be reconstructed. Counted exactly like the rvol filter above,
+    # and for the same reason: an exclusion nobody can see is a filter that
+    # makes a thin run look like a selective one.
+    #
+    # THE FIRST DAY OF A RUN IS SLOW. Rebuilding the group ranks for one date
+    # takes about twenty seconds, and every pair on that date then reads the
+    # cached answer — so a 60-day run pays about twenty minutes once and
+    # nothing afterwards. That cost is why the gate is opt-in.
+    cs_rules, cs_letters = _canslim_spec(spec)
+    if cs_rules:
+        cov['canslim'] = dict(cs_rules)
+        cov['canslim_letters'] = list(cs_letters)
+        cov['canslim_blocked'] = 0
+        cov['canslim_unknown'] = 0
+        cov['canslim_samples'] = []
     bar_counts = []
     for i, (day, sym, rctx) in enumerate(pairs):
         _src = by_src.get((rctx or {}).get('source') or 'symbols')
@@ -1082,6 +1226,30 @@ def run(spec: dict, progress_cb=None) -> dict:
             # the HONEST number rides with every trade of the pair, next to
             # the register's snapshot ctx_rvol, so reports can compare them
             rctx = {**(rctx or {}), 'rvol_day': round(rv, 2)}
+        if cs_rules:
+            from chart import canslim as _cs
+            try:
+                _rec = _cs.asof(sym, day, want=cs_letters)
+                _pass, _why = _canslim_ok(_rec, cs_rules)
+            except Exception as e:                        # noqa: BLE001
+                # A FAILED READ IS UNVERIFIABLE, NEVER A PASS. Letting the pair
+                # through on an exception would turn every outage into a
+                # relaxed screen, and the run would report the wide result as
+                # though the gate had been applied.
+                _pass, _why = None, f'canslim read failed: {str(e)[:120]}'
+            if _pass is not True:
+                cov['canslim_unknown' if _pass is None
+                    else 'canslim_blocked'] += 1
+                if len(cov['canslim_samples']) < 12:
+                    cov['canslim_samples'].append(f'{day} {sym} {_why}')
+                if progress_cb:
+                    progress_cb((i + 1) / len(pairs))
+                continue
+            # WHAT THE GATE SAW, on the pair, so a report can show the reading
+            # a trade was taken on rather than only that one was allowed.
+            rctx = {**(rctx or {}),
+                    'canslim_asof': {k: _rec.get(k) for k in cs_letters
+                                     if k in _rec}}
         # EVERY strategy in the run is evaluated on this pair. One run can
         # carry a long book and a short book so that a per-day ranking sees
         # the whole day — "top 2 across the entire universe" is not the same

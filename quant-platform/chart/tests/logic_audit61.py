@@ -24,16 +24,27 @@ So `chart/canslim.py` is built on a refusal:
 What this file checks is that the refusal cannot be walked around — that no
 path through the module hands back a value for a letter it has just said it
 cannot reconstruct.
+
+C, A AND I REFUSED OUTRIGHT UNTIL 2026-09-03, all three because a date was
+never stored: the EDGAR cache dropped `filed` and the 13F file recorded which
+quarters it used but not when any of them became public. Both are stored now
+(edgar.SCHEMA 5, f13's `published_by`), so the second half of this file checks
+the thing the refusal was standing in for — that a figure filed AFTER the
+as-of date is invisible, and that a record with no dates in it still refuses
+FOR THAT TICKER rather than falling back to the newest row on file.
 """
 
+import json
+import os
 import pathlib
 import sys
+import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 import pandas as _pd                                       # noqa: E402
 
-from chart import canslim, oneil                           # noqa: E402
+from chart import canslim, edgar, f13, oneil               # noqa: E402
 
 PASS = FAIL = 0
 
@@ -66,14 +77,12 @@ ok('L can be — RS is recomputed from the price cache, which is stored per '
    'session', canslim.unavailable('l') is None)
 ok('N and S can be — they are read from the stock\'s own bars',
    canslim.unavailable('n') is None and canslim.unavailable('s') is None)
+ok('C and A can be, now that every EDGAR row carries the date it was filed',
+   canslim.unavailable('c') is None and canslim.unavailable('a') is None)
+ok('I can be, now that each 13F quarter carries when it became public',
+   canslim.unavailable('i') is None)
 
-for _k, _what in (('c', 'filing dates'), ('a', 'filing dates'),
-                  ('i', 'became public')):
-    _why = canslim.unavailable(_k)
-    ok(f'{_k.upper()} refuses, and the reason names the missing fact',
-       _why is not None and _what in _why, _why)
-
-ok('an unknown letter refuses too, rather than being quietly allowed',
+ok('an unknown letter refuses, rather than being quietly allowed',
    canslim.unavailable('z') is not None)
 ok('...and so does an empty one', canslim.unavailable('') is not None)
 
@@ -82,34 +91,68 @@ ok('...and so does an empty one', canslim.unavailable('') is not None)
 # drift, and the drift would show up as a backtest that ran when it should
 # have refused — which is the failure this whole file is about.
 ok('refusals() and unavailable() answer from the same table',
-   set(canslim.refusals('canslim')) == {'c', 'a', 'i'},
-   sorted(canslim.refusals('canslim')))
-ok('a set with nothing refused is empty, which is what "backtestable" means',
+   canslim.refusals('canslim') == {} and canslim.refusals(('c', 'z'))
+   == {'z': canslim.unavailable('z')}, canslim.refusals(('c', 'z')))
+ok('the whole word is backtestable, which is what an empty refusal set means',
    canslim.refusals(('m', 'l', 'n', 's')) == {})
+
+# THE TABLE IS STILL THE SWITCH. Flipping a letter back must refuse it again
+# through every path — otherwise POINT_IN_TIME is documentation, not a gate.
+_keep = dict(canslim.POINT_IN_TIME)
+try:
+    canslim.POINT_IN_TIME['c'] = False
+    canslim.WHY_NOT['c'] = 'the dates were never stored'
+    _off = canslim.asof('AAPL', '2026-03-13', want=('c',))
+    ok('a letter switched off in POINT_IN_TIME refuses again, and returns no '
+       'value — the table is the gate, not a comment',
+       'c' not in _off and _off['refused'].get('c')
+       == 'the dates were never stored', _off)
+finally:
+    canslim.POINT_IN_TIME.clear()
+    canslim.POINT_IN_TIME.update(_keep)
+    canslim.WHY_NOT.pop('c', None)
+ok('...and the table is restored', canslim.refusals('canslim') == {})
 
 
 # ── 2. THE REFUSAL CANNOT BE WALKED AROUND ─────────────────────────────
 #
-# This is the one that matters. It is not enough for the module to SAY C is
-# unavailable; no path through it may hand back a C.
+# This is the one that matters. It is not enough for the module to SAY a
+# letter is unavailable; no path through it may hand back a value for one.
 print()
 print('== a refused letter comes back with no value at all ==')
 
-_r = canslim.asof('AAPL', '2026-03-13', want=('c', 'a', 'i'))
-ok('asking for only refused letters returns none of them',
-   not ({'c', 'a', 'i'} & set(_r)), sorted(_r))
-ok('...and names all three in `refused`',
-   set(_r['refused']) == {'c', 'a', 'i'}, _r['refused'])
-# NOT None, NOT an empty dict, NOT ANY KEY. A key holding None reads as "this
-# stock has no C", which is a claim about the company. The absence of the key
-# is the only shape that says "this question was not answered".
-ok('the key is ABSENT, not present-and-empty — a None C would read as "this '
-   'company has no earnings", which is a different claim',
-   'c' not in _r and 'a' not in _r and 'i' not in _r)
+# NO EDGAR RECORD AND NO 13F FILE FOR THIS NAME — the per-ticker refusal,
+# which is a different claim from the letter being unreconstructable and has
+# to behave the same way at the boundary: no key, and a reason.
+_saved_cache = edgar.CACHE
+_saved_shared = f13.SHARED
+_tmp = pathlib.Path(tempfile.mkdtemp())
+try:
+    edgar.CACHE = _tmp / 'oneil'
+    f13.SHARED = _tmp / 'no-such-13f.json'
 
-_mix = canslim.asof('AAPL', '2026-03-13', want=('m', 'c'))
-ok('a mixed request answers what it can and refuses the rest',
-   'm' in _mix and 'c' not in _mix and list(_mix['refused']) == ['c'], _mix)
+    _r = canslim.asof('NOSUCH', '2026-03-13', want=('c', 'a', 'i'))
+    ok('a stock with no record returns none of the three letters',
+       not ({'c', 'a', 'i'} & set(_r)), sorted(_r))
+    ok('...and names all three in `refused`',
+       set(_r['refused']) == {'c', 'a', 'i'}, _r['refused'])
+    # NOT None, NOT an empty dict, NOT ANY KEY. A key holding None reads as
+    # "this stock has no C", which is a claim about the company. The absence of
+    # the key is the only shape that says "this question was not answered".
+    ok('the key is ABSENT, not present-and-empty — a None C would read as "this '
+       'company has no earnings", which is a different claim',
+       'c' not in _r and 'a' not in _r and 'i' not in _r)
+    # AND THE REASON SAYS WHAT WOULD HAVE BEEN WRONG, not just that it failed.
+    ok('the reason rules out the fallback explicitly, because falling back to '
+       'the newest row IS the bug',
+       'is not an answer' in _r['refused']['c'], _r['refused']['c'])
+
+    _mix = canslim.asof('NOSUCH', '2026-03-13', want=('c',))
+    ok('a request for one unreadable letter refuses only it',
+       list(_mix['refused']) == ['c'] and 'c' not in _mix, _mix)
+finally:
+    edgar.CACHE = _saved_cache
+    f13.SHARED = _saved_shared
 
 ok('asking for nothing refuses nothing and returns nothing',
    canslim.asof('AAPL', '2026-03-13', want=())['refused'] == {})
@@ -209,6 +252,224 @@ ok('the rotation\'s prior date is picked from cached sessions, not by '
    'subtracting days', 'cached_days()' in SRC and 'weekend or a holiday' in SRC)
 ok('...and a history too short to have one says so rather than guessing',
    'if len(days) <= back' in SRC and 'return None' in SRC)
+
+
+# ── 5. C AND A: A FIGURE FILED AFTER THE DATE IS NOT VISIBLE ────────────
+#
+# The whole reason C and A refused for a fortnight. A quarter ENDS six weeks
+# before anybody reads it, so dating the row by its period rather than by its
+# filing hands a backtest the number that moved the stock, on the day before
+# it moved.
+print()
+print('== the quarter you could read, not the quarter that had ended ==')
+
+_saved_cache = edgar.CACHE
+_saved_shared = f13.SHARED
+_tmp = pathlib.Path(tempfile.mkdtemp())
+try:
+    edgar.CACHE = _tmp / 'oneil'
+    edgar.CACHE.mkdir(parents=True, exist_ok=True)
+    _rec = {
+        'ticker': 'TSTA', 'schema': edgar.SCHEMA, 'ok': True,
+        'built_at': '2026-06-01T00:00:00+00:00',
+        'c': {'rows': [
+            # Q1 ended 31 March and was filed on 5 May. On 13 March neither
+            # had happened; on 1 June both had.
+            {'quarter': '2026-03-31', 'filed': '2026-05-05', 'eps': 2.0,
+             'eps_chg': 60.0},
+            {'quarter': '2025-12-31', 'filed': '2026-02-10', 'eps': 1.8,
+             'eps_chg': 40.0},
+            {'quarter': '2025-09-30', 'filed': '2025-11-05', 'eps': 1.5,
+             'eps_chg': 20.0},
+            {'quarter': '2025-06-30', 'filed': '2025-08-05', 'eps': 1.2,
+             'eps_chg': 30.0},
+        ]},
+        'a': {'rows': [
+            {'fy': '2025-12-31', 'filed': '2026-02-20', 'eps': 6.0,
+             'eps_chg': 50.0, 'roe_pct': 22.0},
+            {'fy': '2024-12-31', 'filed': '2025-02-20', 'eps': 4.0,
+             'eps_chg': 33.0, 'roe_pct': 20.0},
+        ]},
+    }
+    (edgar.CACHE / 'TSTA.json').write_text(json.dumps(_rec))
+
+    _mar = canslim.asof('TSTA', '2026-03-13', want=('c', 'a'))
+    _jun = canslim.asof('TSTA', '2026-06-01', want=('c', 'a'))
+
+    ok('in March the newest quarter is the one filed in February, NOT the one '
+       'that ended in March', _mar['c']['latest']['quarter'] == '2025-12-31',
+       _mar['c']['latest']['quarter'])
+    ok('...and in June it is the March quarter, because by then it had been '
+       'filed', _jun['c']['latest']['quarter'] == '2026-03-31',
+       _jun['c']['latest']['quarter'])
+    # AND THE CUT IS NOT A NO-OP. A filter that quietly kept every row would
+    # pass the June check and be exactly the bug.
+    ok('the March reading really is shorter — the cut removed a row rather '
+       'than passing by doing nothing',
+       len(_mar['c']['rows']) == 3 and len(_jun['c']['rows']) == 4,
+       (len(_mar['c']['rows']), len(_jun['c']['rows'])))
+
+    # THE VERDICTS ARE RECOMPUTED, NOT COPIED. This is the subtler half:
+    # trimming the rows while keeping the stored "accelerating" would be a true
+    # statement about a table nobody could see. 20 → 40 → 60 accelerates over
+    # three quarters; the March reading has 40 → 20 → 30 and does not.
+    ok('the verdicts are recomputed over what was visible, not carried over '
+       'from the full table',
+       _jun['c']['accelerating'] is True and _mar['c']['accelerating'] is False,
+       (_jun['c']['accelerating'], _mar['c']['accelerating']))
+    ok('...and the count they were computed over travels with them, so a '
+       'verdict over two quarters cannot pass for one over eight',
+       _mar['c']['accelerating_of'] == 3 and _jun['c']['beat_25_of'] == 4,
+       (_mar['c']['accelerating_of'], _jun['c']['beat_25_of']))
+    # THROUGH edgar's OWN SUMMARY, not a copy of the arithmetic here.
+    ok('the recomputation goes through edgar.c_summary — one implementation, '
+       'so the card and the as-of reading cannot disagree',
+       _mar['c']['beat_25'] == edgar.c_summary(_mar['c']['rows'])['beat_25'])
+
+    ok('A works the same way: the 2025 year is invisible before its 10-K',
+       _mar['a']['latest']['fy'] == '2025-12-31'
+       and canslim.asof('TSTA', '2026-02-01', want=('a',))['a']['latest']['fy']
+       == '2024-12-31')
+
+    # NOTHING FILED YET IS A REFUSAL, NOT AN EMPTY TABLE.
+    _early = canslim.asof('TSTA', '2024-01-01', want=('c', 'a'))
+    ok('before the record starts, both letters refuse rather than returning an '
+       'empty table — an empty C reads as a company with no earnings',
+       'c' not in _early and 'a' not in _early
+       and set(_early['refused']) == {'c', 'a'}, _early)
+
+    # A RECORD WITH NO DATES IN IT. `cached` already rejects an older schema,
+    # so this is the case where the schema matches and the rows are dateless.
+    (edgar.CACHE / 'TSTB.json').write_text(json.dumps({
+        'ticker': 'TSTB', 'schema': edgar.SCHEMA, 'ok': True,
+        'c': {'rows': [{'quarter': '2026-03-31', 'eps': 2.0, 'eps_chg': 60.0}]},
+        'a': {'rows': []}}))
+    _nod = canslim.asof('TSTB', '2026-06-01', want=('c',))
+    ok('a row with no filing date is refused, NOT read as "filed long ago" — '
+       'the newest row on file is the one answer that must never be given',
+       'c' not in _nod and 'nothing on it can be placed' in _nod['refused']['c'],
+       _nod)
+
+    # ── I: THE QUARTER THE MARKET COULD SEE ────────────────────────────
+    print()
+    print('== the 13F quarter that was public, not the one that had ended ==')
+
+    f13.SHARED = _tmp / '13f.json'
+    f13.SHARED.write_text(json.dumps({
+        'ok': True, 'holder_unit': 'manager',
+        'quarters': ['2025Q3', '2025Q4', '2026Q1'],
+        'published_by': {'2025Q3': '2025-11-14', '2025Q4': '2026-02-14',
+                         '2026Q1': '2026-05-15'},
+        'published_measured': {'2025Q3': True, '2025Q4': True,
+                               '2026Q1': False},
+        'stocks': {'TSTA': {'quarters': [
+            {'q': '2025Q3', 'funds': 100, 'of': 1000, 'share_pct': 10.0},
+            {'q': '2025Q4', 'funds': 120, 'of': 1000, 'share_pct': 12.0},
+            {'q': '2026Q1', 'funds': 200, 'of': 1000, 'share_pct': 20.0}]}}}))
+
+    _i_mar = canslim.asof('TSTA', '2026-03-13', want=('i',))['i']
+    _i_jun = canslim.asof('TSTA', '2026-06-01', want=('i',))['i']
+    ok('on 13 March the newest 13F quarter is 2025Q4 — 2026Q1 holdings were as '
+       'of 31 March and not filed until May',
+       _i_mar['newest'] == '2025Q4' and _i_mar['funds'] == 120, _i_mar['newest'])
+    ok('...and by June it is 2026Q1', _i_jun['newest'] == '2026Q1')
+    ok('the direction is recomputed over the visible quarters only',
+       _i_mar['quarters_counted'] == 2 and _i_jun['quarters_counted'] == 3,
+       (_i_mar['quarters_counted'], _i_jun['quarters_counted']))
+    ok('the history stays a LIST — `trend` is merged into a dict that already '
+       'holds one, and it clobbered it once',
+       isinstance(_i_mar['quarters'], list) and len(_i_mar['quarters']) == 2)
+    ok('a quarter dated by the statutory deadline says so, since a legal '
+       'deadline is not an observation',
+       _i_mar['published_measured'] is True
+       and _i_jun['published_measured'] is False)
+    ok('before any quarter was public, I refuses rather than reporting zero '
+       'holders — zero managers is a claim about the company',
+       'i' not in canslim.asof('TSTA', '2025-01-01', want=('i',)))
+
+    # A 13F FILE FROM BEFORE THE DATES WERE RECORDED.
+    f13.SHARED.write_text(json.dumps({
+        'ok': True, 'quarters': ['2026Q1'],
+        'stocks': {'TSTA': {'quarters': [{'q': '2026Q1', 'funds': 200}]}}}))
+    _old = canslim.asof('TSTA', '2026-06-01', want=('i',))
+    ok('a 13F file with no `published_by` refuses, rather than treating every '
+       'quarter as always having been public',
+       'i' not in _old and 'published_by' in _old['refused']['i'], _old)
+finally:
+    edgar.CACHE = _saved_cache
+    f13.SHARED = _saved_shared
+
+
+# ── 6. WHERE THE DATES COME FROM ────────────────────────────────────────
+print()
+print('== the dates themselves ==')
+
+_rows = [{'start': '2025-01-01', 'end': '2025-03-31', 'val': 1.0,
+          'filed': '2025-05-05'},
+         {'start': '2025-04-01', 'end': '2025-06-30', 'val': 1.2,
+          'filed': '2025-08-05'},
+         {'start': '2025-07-01', 'end': '2025-09-30', 'val': 1.3,
+          'filed': '2025-11-05'},
+         {'start': '2025-01-01', 'end': '2025-12-31', 'val': 5.0,
+          'filed': '2026-02-20'}]
+_v, _f = edgar._series(_rows, 60, 120)
+_y, _yf = edgar._series(_rows, 300, 400)
+ok('the value map and the filed map are built in one pass, so their keys '
+   'cannot disagree', set(_v) == set(_f) and set(_y) == set(_yf))
+ok('...and the quarterly and annual spans still separate the same way',
+   len(_v) == 3 and len(_y) == 1)
+
+_out, _der = edgar._fill_q4(_v, _y, _f, _yf)
+ok('a derived Q4 is dated by the LAST filing it needed — the 10-K, not the '
+   'year end and not the earliest quarter',
+   _f['2025-12-31'] == '2026-02-20', _f.get('2025-12-31'))
+ok('...which is the whole point: the subtraction was not knowable until the '
+   'annual report existed', '2025-12-31' in _der)
+
+_v2, _f2 = dict(_v), dict(_f)
+_f2['2025-06-30'] = None                       # one contributor with no date
+edgar._fill_q4(_v2, _y, _f2, _yf)
+ok('a derived Q4 whose contributors are not all dated is DATELESS, so it '
+   'refuses rather than being dated by the ones that happen to have a date',
+   _f2['2025-12-31'] is None, _f2.get('2025-12-31'))
+
+ok('a 13F quarter is dated by the MEDIAN filing, not the first — one early '
+   'manager is not the market seeing the quarter',
+   f13.published_by({'2026-05-10': 10, '2026-05-14': 40, '2026-05-15': 50},
+                    2026, 1) == '2026-05-14',
+   f13.published_by({'2026-05-10': 10, '2026-05-14': 40, '2026-05-15': 50},
+                    2026, 1))
+ok('with no filing dates it falls back to quarter end plus the statutory 45 '
+   'days, which is LATE rather than early on purpose',
+   f13.published_by({}, 2026, 1) == '2026-05-15'
+   and f13.published_by({}, 2025, 4) == '2026-02-14',
+   (f13.published_by({}, 2026, 1), f13.published_by({}, 2025, 4)))
+ok('the SEC\'s several date spellings all read back the same, and a '
+   'nonsense one reads back as nothing',
+   f13._isodate('03-31-2026') == '2026-03-31'
+   and f13._isodate('2026-03-31') == '2026-03-31'
+   and f13._isodate('') is None and f13._isodate('n/a') is None)
+# SORTABLE, because every comparison it feeds is a string comparison.
+ok('...and the form it returns sorts as a date',
+   sorted([f13._isodate('12-01-2026'), f13._isodate('01-02-2026')])
+   == ['2026-01-02', '2026-12-01'])
+
+_c, _p, _fl = f13.parse_submissions([
+    'ACCESSION_NUMBER\tCIK\tSUBMISSIONTYPE\tPERIODOFREPORT\tFILING_DATE',
+    'a1\t100\t13F-HR\t03-31-2026\t05-10-2026',
+    'a2\t200\t13F-HR\t03-31-2026\t05-14-2026',
+    'a3\t200\t13F-HR/A\t03-31-2026\t05-20-2026'])
+ok('the submissions parse still counts MANAGERS by CIK, not filings — an '
+   'amendment is one manager filing twice',
+   len(set(_c.values())) == 2 and len(_c) == 3)
+ok('...and now also reports when they filed', _fl == {'2026-05-10': 1,
+                                                      '2026-05-14': 1,
+                                                      '2026-05-20': 1}, _fl)
+_c0, _p0, _f0 = f13.parse_submissions(['ACCESSION_NUMBER\tCIK\tPERIODOFREPORT',
+                                       'a1\t100\t03-31-2026'])
+ok('a dataset with no FILING_DATE column parses without one, rather than '
+   'failing — the caller falls back to the deadline and says which it used',
+   _f0 == {} and _c0 == {'a1': '100'})
 
 
 print()

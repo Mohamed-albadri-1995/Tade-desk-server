@@ -179,21 +179,53 @@ def _days(row) -> int | None:
         return None
 
 
+def _series(rows, lo: int, hi: int):
+    """({end: value}, {end: filed}) for facts covering `lo`..`hi` days.
+
+    TWO MAPS BUILT IN ONE PASS, SO THEIR KEYS CANNOT DISAGREE.
+
+    The value map is what every calculation in this file has always used. The
+    filed map is what tells a BACKTEST whether the number existed yet: a
+    quarter ending 31 March is not public on 1 April, it is public when the
+    10-Q lands six weeks later, and a strategy gated on "EPS up 25%" in
+    mid-April was reading a figure nobody had.
+
+    `_facts` already resolves overlapping periods BY `filed` (see its second
+    resolution), so the date is in hand at this point and was simply being
+    dropped on the floor. Keeping it costs one dict.
+
+    Two maps rather than one map of dicts, deliberately: every arithmetic
+    site downstream — `_fill_q4`'s subtraction, `_year_ago`, `pct_change`,
+    `_year_quarters`' sum — reads these values directly, and changing what a
+    value IS would mean editing each of them and getting every one right. The
+    keys are identical by construction because both are written in the same
+    loop.
+    """
+    vals: dict = {}
+    filed: dict = {}
+    for r in rows:
+        if not (r.get('start') and r.get('end') and r.get('val') is not None):
+            continue
+        d = _days(r) or 0
+        if not d or not lo <= d <= hi:
+            continue
+        vals[r['end']] = r['val']
+        filed[r['end']] = r.get('filed')
+    return vals, filed
+
+
 def _quarterly(rows) -> dict:
     """end-date → value, for facts covering roughly one quarter."""
-    return {r['end']: r['val'] for r in rows
-            if r.get('start') and r.get('end') and r.get('val') is not None
-            and (_days(r) or 0) and 60 <= _days(r) <= 120}
+    return _series(rows, 60, 120)[0]
 
 
 def _annual(rows) -> dict:
     """end-date → value, for facts covering roughly one year."""
-    return {r['end']: r['val'] for r in rows
-            if r.get('start') and r.get('end') and r.get('val') is not None
-            and (_days(r) or 0) and 300 <= _days(r) <= 400}
+    return _series(rows, 300, 400)[0]
 
 
-def _fill_q4(quarters: dict, years: dict) -> dict:
+def _fill_q4(quarters: dict, years: dict, filed: dict | None = None,
+             y_filed: dict | None = None) -> dict:
     """Derive the missing fourth quarter as FY minus the first three.
 
     A 10-K reports the full year, so for most filers Q4 is never tagged as a
@@ -209,6 +241,15 @@ def _fill_q4(quarters: dict, years: dict) -> dict:
     IMPLEMENTATION DETAIL: subtraction is exact for dollars and only
     conditionally valid for anything per-share, so the caller has to be able
     to tell the two apart. See the reconciliation in c_table.
+
+    WHEN A DERIVED Q4 BECAME KNOWABLE. `filed`, if given, is updated in place
+    for each derived key with the LATEST of the four filings it was computed
+    from — the three quarters and the 10-K. Not the earliest and not the
+    year-end: this quarter is a subtraction, and a subtraction is not knowable
+    until its last term is. Taking the year-end date instead would hand a
+    backtest a Q4 six to ten weeks before the annual report existed, which is
+    the exact look-ahead the field is here to prevent. Any of the four with no
+    date leaves the result dateless, so it refuses rather than guesses.
     """
     derived: set = set()
     out = dict(quarters)
@@ -228,11 +269,15 @@ def _fill_q4(quarters: dict, years: dict) -> dict:
             except Exception:                             # noqa: BLE001
                 continue
             if end - _dt.timedelta(days=350) <= qd <= end - _dt.timedelta(days=45):
-                inside.append((qd, q_val))
+                inside.append((qd, q_val, q_end))
         inside.sort()
         if len(inside) == 3:
-            out[fy_end] = round(fy_val - sum(v for _, v in inside), 6)
+            out[fy_end] = round(fy_val - sum(v for _, v, _k in inside), 6)
             derived.add(fy_end)
+            if filed is not None:
+                stamps = [(filed or {}).get(k) for _d, _v, k in inside]
+                stamps.append((y_filed or {}).get(fy_end))
+                filed[fy_end] = (max(stamps) if all(stamps) else None)
     return {k: v for k, v in out.items() if not str(k).startswith('_')}, derived
 
 
@@ -312,12 +357,21 @@ def _margin(ni, rev):
 
 def c_table(cf: dict, quarters: int = 8) -> dict:
     """C — the last eight quarters, each against the SAME quarter a year ago."""
-    eps_q, eps_derived = _fill_q4(_quarterly(_facts(cf, EPS_TAGS, 'shares')),
-                                  _annual(_facts(cf, EPS_TAGS, 'shares')))
-    rev_q, _ = _fill_q4(_quarterly(_facts(cf, REVENUE_TAGS, 'USD')),
-                        _annual(_facts(cf, REVENUE_TAGS, 'USD')))
-    ni_q, ni_derived = _fill_q4(_quarterly(_facts(cf, NET_INCOME_TAGS, 'USD')),
-                                _annual(_facts(cf, NET_INCOME_TAGS, 'USD')))
+    eps_rows = _facts(cf, EPS_TAGS, 'shares')
+    rev_rows = _facts(cf, REVENUE_TAGS, 'USD')
+    ni_rows = _facts(cf, NET_INCOME_TAGS, 'USD')
+
+    _eq, eps_filed = _series(eps_rows, 60, 120)
+    _ey, eps_y_filed = _series(eps_rows, 300, 400)
+    _rq, rev_filed = _series(rev_rows, 60, 120)
+    _ry, rev_y_filed = _series(rev_rows, 300, 400)
+    _nq, ni_filed = _series(ni_rows, 60, 120)
+    _ny, ni_y_filed = _series(ni_rows, 300, 400)
+
+    # `_fill_q4` extends the filed maps in place for the quarters it derives.
+    eps_q, eps_derived = _fill_q4(_eq, _ey, eps_filed, eps_y_filed)
+    rev_q, _ = _fill_q4(_rq, _ry, rev_filed, rev_y_filed)
+    ni_q, ni_derived = _fill_q4(_nq, _ny, ni_filed, ni_y_filed)
 
     # EPS IS A RATIO, AND A RATIO IS NOT ADDITIVE.
     #
@@ -352,8 +406,21 @@ def c_table(cf: dict, quarters: int = 8) -> dict:
         rev_then = _year_ago(rev_q, end)
         eps_chg, eps_lab = pct_change(eps, eps_then)
         rev_chg, rev_lab = pct_change(rev, rev_then, kind='sales')
+        # WHEN THIS ROW BECAME PUBLIC. The LATEST of the filings its figures
+        # came from, never the earliest: a row is not knowable until its last
+        # component is, and taking the earliest would let a backtest read a
+        # quarter's sales weeks before they were reported. None means the date
+        # was not recorded, and a caller asking "as of" must refuse the row
+        # rather than assume the quarter-end — a quarter ends six weeks before
+        # anybody sees it, which is exactly the gap that flatters a backtest.
+        # A PRESENT VALUE WITH NO DATE MAKES THE WHOLE ROW DATELESS. Taking the
+        # max of the dates that happen to exist would date the row by its
+        # earlier components and hide the one that had not been filed yet.
+        _st = [m.get(end) for v, m in ((eps, eps_filed), (rev, rev_filed),
+                                       (ni, ni_filed)) if v is not None]
         rows.append({
             'quarter': end,
+            'filed': (max(_st) if _st and all(_st) else None),
             'eps': eps,
             # THE NUMBER THE COMPARISON WAS MADE AGAINST, on the row.
             #
@@ -391,9 +458,20 @@ def c_table(cf: dict, quarters: int = 8) -> dict:
             'margin_pct': _margin(ni, rev),
         })
 
+    return {'rows': rows, **c_summary(rows)}
+
+
+def c_summary(rows) -> dict:
+    """C's verdicts over a list of quarter rows. Newest first.
+
+    SPLIT OUT SO THE AS-OF PATH CANNOT DRIFT FROM THE CARD. `chart/canslim.py`
+    answers "what was C on 14 March" by taking the rows filed by then and
+    asking this the same question — the alternative was a second copy of the
+    arithmetic below, which is how two readings of one stock start disagreeing.
+    """
     # ACCELERATION IS INVISIBLE IN ANY SINGLE NUMBER, and O'Neil weights it
     # heavily: each of the last quarters growing FASTER than the one before.
-    chgs = [r['eps_chg'] for r in rows if r['eps_chg'] is not None]
+    chgs = [r['eps_chg'] for r in rows if r.get('eps_chg') is not None]
     # None, NOT False, when there is nothing to measure. "Accelerating: no"
     # over ZERO quarters is a verdict on evidence that does not exist, and it
     # reads on a card as though the test ran and the stock failed it. A
@@ -401,7 +479,6 @@ def c_table(cf: dict, quarters: int = 8) -> dict:
     # judgement about every one of them.
     accelerating = ((chgs[0] > chgs[1] > chgs[2]) if len(chgs) >= 3 else None)
     return {
-        'rows': rows,
         'accelerating': accelerating,
         'accelerating_of': min(3, len(chgs)),
         'beat_25': sum(1 for c in chgs if c >= QUARTER_BAR),
@@ -483,15 +560,47 @@ def _year_quarters(quarters: dict, fy_end: str):
     return round(sum(inside), 2), 4
 
 
+def _yr(end: str) -> int | None:
+    try:
+        return _dt.date.fromisoformat(end).year
+    except Exception:                                     # noqa: BLE001
+        return None
+
+
+def _days_apart(a: str, b: str) -> int | None:
+    try:
+        return (_dt.date.fromisoformat(a) - _dt.date.fromisoformat(b)).days
+    except Exception:                                     # noqa: BLE001
+        return None
+
+
+def _apart(a: str, b: str, years: int = 1) -> bool:
+    """Are these two fiscal year-ends `years` apart?
+
+    MEASURED IN DAYS, NOT CALENDAR YEARS. Subtracting the year numbers looks
+    equivalent and is not: a filer whose year ends 31 January files 2026-01-31
+    against 2024-12-31 — thirteen months apart, which the year numbers call TWO
+    years and the table then refused to compare. Fiscal year-ends drift; a
+    52/53-week filer moves by up to a week, a changed year-end moves by a month
+    or more, and none of that stops it being the next year. The window is wide
+    enough for that drift and far too narrow to reach the year beside it.
+    """
+    d = _days_apart(a, b)
+    return d is not None and abs(d - years * 365) <= 75
+
+
 def a_table(cf: dict, years: int = 5) -> dict:
     """A — annual EPS over 3-5 years, the growth rate, stability and ROE."""
-    eps_y = _annual(_facts(cf, EPS_TAGS, 'shares'))
-    ni_y = _annual(_facts(cf, NET_INCOME_TAGS, 'USD'))
+    eps_rows = _facts(cf, EPS_TAGS, 'shares')
+    eps_y, eps_y_filed = _series(eps_rows, 300, 400)
+    ni_rows = _facts(cf, NET_INCOME_TAGS, 'USD')
+    ni_y, ni_y_filed = _series(ni_rows, 300, 400)
     eq = _facts(cf, EQUITY_TAGS, 'USD')
     eq_by_end = {r['end']: r['val'] for r in eq if r.get('val') is not None}
+    eq_filed = {r['end']: r.get('filed') for r in eq if r.get('val') is not None}
     # THE QUARTERS THAT MAKE UP EACH YEAR, so the two tables can be read
     # against each other. See `_year_quarters` below.
-    eps_q_only = _quarterly(_facts(cf, EPS_TAGS, 'shares'))
+    eps_q_only = _quarterly(eps_rows)
 
     ends = sorted(eps_y, reverse=True)[:years]
 
@@ -501,34 +610,9 @@ def a_table(cf: dict, years: int = 5) -> dict:
     # with the next one printed 2023 against 2018 and called the result a
     # year-over-year change. It was +2914%, over five years, labelled as one.
     # A comparison is only a year-over-year comparison when the two ends are
-    # about a year apart; anything else says so instead of pretending.
-    def _yr(end: str) -> int | None:
-        try:
-            return _dt.date.fromisoformat(end).year
-        except Exception:                                 # noqa: BLE001
-            return None
-
-    def _days_apart(a: str, b: str) -> int | None:
-        try:
-            return (_dt.date.fromisoformat(a) - _dt.date.fromisoformat(b)).days
-        except Exception:                                 # noqa: BLE001
-            return None
-
-    def _apart(a: str, b: str, years: int = 1) -> bool:
-        """Are these two fiscal year-ends `years` apart?
-
-        MEASURED IN DAYS, NOT CALENDAR YEARS. Subtracting the year numbers
-        looks equivalent and is not: a filer whose year ends 31 January files
-        2026-01-31 against 2024-12-31 — thirteen months apart, which the year
-        numbers call TWO years and the table then refused to compare. Fiscal
-        year-ends drift; a 52/53-week filer moves by up to a week, a changed
-        year-end moves by a month or more, and none of that stops it being the
-        next year. The window is wide enough for that drift and far too narrow
-        to reach the year beside it.
-        """
-        d = _days_apart(a, b)
-        return d is not None and abs(d - years * 365) <= 75
-
+    # about a year apart; anything else says so instead of pretending. See
+    # `_apart` above — lifted out of this function so the as-of path in
+    # `chart/canslim.py` measures a year the same way this does.
     rows = []
     for i, end in enumerate(ends):
         nxt = ends[i + 1] if i + 1 < len(ends) else None
@@ -539,8 +623,17 @@ def a_table(cf: dict, years: int = 5) -> dict:
             chg, lab = pct_change(eps_y.get(end), eps_y.get(prev) if prev else None)
         ni, equity = ni_y.get(end), eq_by_end.get(end)
         q_sum, q_of = _year_quarters(eps_q_only, end)
+        # WHEN THIS YEAR BECAME PUBLIC — the same rule as C's row date: the
+        # latest of the filings behind the figures on the row, and dateless if
+        # any figure that IS on the row has no date. A fiscal year ends weeks
+        # or months before the 10-K, and a backtest that reads the year on its
+        # last day is reading a report that had not been written.
+        _st = [m.get(end) for v, m in ((eps_y.get(end), eps_y_filed),
+                                       (ni, ni_y_filed), (equity, eq_filed))
+               if v is not None]
         rows.append({
             'fy': end,
+            'filed': (max(_st) if _st and all(_st) else None),
             'eps': eps_y.get(end),
             # THE SAME YEAR ADDED UP FROM THE C TABLE, so the two tables can
             # be checked against each other on the card rather than looking
@@ -558,6 +651,18 @@ def a_table(cf: dict, years: int = 5) -> dict:
                          else None),
         })
 
+    return {'rows': rows, **a_summary(rows)}
+
+
+def a_summary(rows) -> dict:
+    """A's verdicts over a list of annual rows. Newest first.
+
+    SPLIT OUT FOR THE SAME REASON AS `c_summary`: the as-of path recomputes
+    these over the years that had actually been filed by a past date, and it
+    must arrive at them through this code and not a copy of it. A 3-year growth
+    rate is exactly the kind of number that reads fine while being computed
+    over the wrong three years.
+    """
     # 3-YEAR GROWTH RATE as a compound annual rate, not an average of the
     # yearly changes: averaging +100% and -50% gives +25% for a company that
     # ended where it started.
@@ -595,10 +700,9 @@ def a_table(cf: dict, years: int = 5) -> dict:
             stability = int(round(min(99, (sum(r * r for r in resid) / n) ** 0.5
                                       / scale * 100)))
 
-    roes = [r['roe_pct'] for r in rows if r['roe_pct'] is not None]
+    roes = [r['roe_pct'] for r in rows if r.get('roe_pct') is not None]
     roe = roes[0] if roes else None
     return {
-        'rows': rows,
         'growth_3yr_pct': growth3,
         'stability': stability,
         'stability_note': 'how much the earnings series wobbles around its own '
@@ -754,7 +858,12 @@ def supply(cf: dict) -> dict:
 #      fiscal year and its own fourth quarter END ON THE SAME DATE, so the C
 #      and A tables printed one date against two numbers and neither said
 #      which span it meant
-SCHEMA = 4
+#   5  2026-09-03 — `filed` on every C and A row: the date the figure became
+#      public, which the parse had in hand and threw away. Without it there is
+#      no way to tell what a reader knew on a past day, so a backtest gated on
+#      C or A was using earnings that had not been reported — see
+#      chart/canslim.py, which refused those letters outright until this
+SCHEMA = 5
 
 
 def tables(cf: dict) -> dict:

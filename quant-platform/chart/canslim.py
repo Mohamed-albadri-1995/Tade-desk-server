@@ -31,15 +31,22 @@ WHAT CAN BE RECONSTRUCTED, AND HOW.
               which is already stored per session
     N   yes   read from this stock's own bars, truncated at D
     S   yes   the same
-    C   NO    the EDGAR cache holds PARSED TABLES, not raw filings, so it
-              carries no filing dates and there is no way to tell what had
-              been filed by D. See edgar.build's own docstring.
-    A   NO    the same cache, the same reason
-    I   NO    oneil-13f.json records which quarters it used but not when each
-              became public, so "the newest quarter as of D" is unanswerable
+    C   yes   every row of the EDGAR c_table now carries `filed`, the date the
+              figure became public; rows filed after D are dropped and the
+              verdicts recomputed over what is left
+    A   yes   the same, per fiscal year
+    I   yes   oneil-13f.json now carries `published_by` per quarter — the
+              median 13F filing date for it — so "the newest quarter as of D"
+              is a date comparison
 
-The three NOs are all the same fault — a date that was never stored — and all
-three are fixable by storing it. Until they are, they refuse.
+C, A and I refused outright until 2026-09-03, all three for the same fault: a
+date that was never stored. Storing it is what this file was waiting for.
+
+THEY STILL REFUSE PER TICKER, and that is not a leftover. A record written by
+older code has no dates in it, and there is no way to date it after the fact —
+so the letter comes back under `refused` FOR THAT SYMBOL with the reason,
+rather than falling back to the newest row on file. Falling back is the exact
+behaviour this module exists to prevent; it is what "today's value" means.
 
 EXPENSIVE ONCE, FREE AFTERWARDS. Rebuilding the group ranks for one date takes
 about twenty seconds on the box this runs on, and a register backtest asks for
@@ -71,31 +78,39 @@ POINT_IN_TIME = {
     'l': True,
     'n': True,
     's': True,
-    'c': False,
-    'a': False,
-    'i': False,
+    # These three were False until the dates behind them were stored — see
+    # this module's docstring, edgar.SCHEMA note 5, and f13's `published_by`.
+    'c': True,
+    'a': True,
+    'i': True,
 }
 
-WHY_NOT = {
-    'c': ('the EDGAR cache holds parsed tables, not raw filings, so it '
-          'carries no filing dates — there is no way to know what had been '
-          'filed by this date'),
-    'a': ('the EDGAR cache holds parsed tables, not raw filings, so it '
-          'carries no filing dates — there is no way to know what had been '
-          'filed by this date'),
-    'i': ('the 13F file records which quarters it used but not when each one '
-          'became public, so "the newest quarter as of this date" cannot be '
-          'answered'),
-}
+WHY_NOT: dict[str, str] = {}
+
+
+# THE PER-TICKER REFUSALS. A letter being reconstructable IN PRINCIPLE (above)
+# is a different claim from it being reconstructable FOR THIS SYMBOL ON THIS
+# DAY, and conflating the two is how a stock with an old cache record would
+# quietly get today's earnings dated to March. Held as data for the same reason
+# POINT_IN_TIME is: the caller has to be able to read back exactly why.
+NO_RECORD = ('no EDGAR record for this ticker, or one written before filing '
+             'dates were stored — there is no way to tell what had been filed '
+             'by this date, and the newest row on file is not an answer')
+NO_ROWS = ('the EDGAR record has no {t} rows carrying a filing date, so '
+           'nothing on it can be placed before or after this date')
+NOT_YET = ('nothing had been filed by this date — the record starts later')
+NO_13F = ('no 13F file, or one written before `published_by` was recorded, so '
+          '"the newest quarter as of this date" cannot be answered')
+NOT_HELD = ('this ticker has no 13F quarter that was public by this date')
 
 
 def unavailable(letter: str) -> str | None:
     """Why this letter cannot be had as of a date, or None if it can.
 
-    THE ONE PLACE THAT DECIDES. A caller that wants to know whether a setup is
-    backtestable asks here; a caller that wants the values asks `asof`. Two
-    lists would drift, and the drift would show up as a backtest that ran when
-    it should have refused.
+    THE ONE PLACE THAT DECIDES, and it answers about the LETTER, not about a
+    particular stock — a symbol whose own record cannot support the letter is
+    refused by `asof` instead, with a reason naming the record. A caller that
+    wants to know whether a setup is backtestable at all asks here.
     """
     return None if POINT_IN_TIME.get(str(letter or '').lower()) else \
         WHY_NOT.get(str(letter or '').lower(), f'unknown letter {letter!r}')
@@ -222,6 +237,112 @@ def day(date: str, rebuild: bool = False, log=lambda _m: None) -> dict:
     return rec
 
 
+# A BACKTEST WANTS WHATEVER IS ON DISK, however old. The age of the cache is
+# not the question `asof` asks — every row in it is stamped with the day it
+# became public, and rows filed after the as-of date are dropped by date. An
+# old record can only hold FEWER quarters than a fresh one, which understates
+# and never flatters, so there is nothing to protect against here.
+_ANY_AGE = 36500.0
+
+
+def _visible(rows, date: str, kind: str):
+    """(rows public by `date`, why not) — newest first, or None and a reason.
+
+    UNDATED ROWS ARE DROPPED, NOT ASSUMED. A row with no `filed` cannot be
+    placed on either side of the date; keeping it would risk look-ahead and
+    dropping it can only lose a quarter the reader might have had. Losing one
+    understates the stock, which is the safe direction and the only one of the
+    two that cannot manufacture a trade.
+    """
+    dated = [r for r in (rows or []) if r.get('filed')]
+    if not dated:
+        return None, NO_ROWS.format(t=kind)
+    out = [r for r in dated if str(r['filed']) <= str(date)]
+    if not out:
+        return None, NOT_YET
+    return out, None
+
+
+def _fundamentals(sym: str, date: str, usable, out: dict, log) -> None:
+    """C and A as of `date`, from the per-ticker EDGAR record.
+
+    THE ROWS ARE FILTERED AND THE VERDICTS RECOMPUTED, through `edgar`'s own
+    `c_summary`/`a_summary`. Keeping the record's stored verdicts and only
+    trimming the rows would be the subtler version of the bug this module is
+    about: "accelerating" computed over three quarters, one of which had not
+    been reported, is a true statement about a table nobody could see.
+    """
+    from chart import edgar
+    try:
+        rec = edgar.cached(sym, max_age_days=_ANY_AGE)
+    except Exception as e:                                # noqa: BLE001
+        log(f'  EDGAR cache failed for {sym}: {e}')
+        rec = None
+    # A record from before SCHEMA 5 has no filing dates at all, and `cached`
+    # already treats a schema mismatch as absent — so this one branch covers
+    # both "never walked" and "walked by code that dropped the date".
+    if not rec or not rec.get('ok'):
+        for k in usable:
+            out['refused'][k] = NO_RECORD
+        return
+    for k in usable:
+        rows, why = _visible(((rec.get(k) or {}).get('rows')), date,
+                             'quarterly' if k == 'c' else 'annual')
+        if rows is None:
+            out['refused'][k] = why
+            continue
+        summary = edgar.c_summary(rows) if k == 'c' else edgar.a_summary(rows)
+        out[k] = {'rows': rows, 'latest': rows[0], **summary}
+
+
+def _sponsorship(sym: str, date: str, out: dict, log) -> None:
+    """I as of `date`, from the quarters that were public by then.
+
+    The direction is recomputed by `f13.trend` over the visible quarters, not
+    read from the file: the file's trend is over four quarters ending in the
+    newest one, and on a past day the newest one had not been filed.
+    """
+    from chart import f13
+    try:
+        doc = json.loads(f13.SHARED.read_text())
+    except Exception as e:                                # noqa: BLE001
+        log(f'  13F read failed: {e}')
+        out['refused']['i'] = NO_13F
+        return
+    pub = doc.get('published_by') or {}
+    row = ((doc.get('stocks') or {}).get(sym) or {})
+    hist = row.get('quarters')
+    if not pub or not isinstance(hist, list) or not hist:
+        out['refused']['i'] = NO_13F if not pub else NOT_HELD
+        return
+    seen = [h for h in hist
+            if pub.get(h.get('q')) and str(pub[h['q']]) <= str(date)]
+    if not seen:
+        out['refused']['i'] = NOT_HELD
+        return
+    seen.sort(key=lambda h: h.get('q') or '')
+    out['i'] = {
+        'quarters': seen,
+        'newest': seen[-1].get('q'),
+        'funds': seen[-1].get('funds'),
+        'of': seen[-1].get('of'),
+        'share_pct': seen[-1].get('share_pct'),
+        # WHETHER THE DATE WAS MEASURED OR THE STATUTORY DEADLINE. A quarter
+        # dated by the 45-day rule rather than by its filings is still usable
+        # and is not evidence, and a reader has to be able to tell.
+        'published_by': pub.get(seen[-1].get('q')),
+        'published_measured': bool((doc.get('published_measured') or {})
+                                   .get(seen[-1].get('q'))),
+        'holder_unit': doc.get('holder_unit'),
+        **f13.trend([h.get('funds') for h in seen],
+                    [h.get('of') for h in seen]),
+    }
+    # THE SAME COLLISION `f13.build` GUARDS AGAINST. `trend` is merged into a
+    # dict that already holds a `quarters` history, and it returned a key by
+    # that name once — silently replacing the list with a count.
+    assert isinstance(out['i']['quarters'], list), 'trend clobbered the history'
+
+
 def asof(symbol: str, date: str, want=('m', 'l'), log=lambda _m: None) -> dict:
     """The CANSLIM letters for one symbol as they were KNOWN on `date`.
 
@@ -273,5 +394,17 @@ def asof(symbol: str, date: str, want=('m', 'l'), log=lambda _m: None) -> dict:
             log(f'  bars failed for {sym} @ {date}: {e}')
             for k in ({'n', 's'} & set(usable)):
                 out[k] = {'ok': False, 'error': str(e)[:200]}
+
+    # C AND A come from the per-ticker EDGAR record, filtered by filing date.
+    _fund = [k for k in ('c', 'a') if k in usable]
+    if _fund:
+        _fundamentals(sym, date, _fund, out, log)
+
+    # I comes from the shared 13F file, filtered by when each quarter became
+    # public. Both may add to `refused` — a letter this module can reconstruct
+    # in principle is still refused for a stock whose own record cannot
+    # support it, and the key stays ABSENT either way.
+    if 'i' in usable:
+        _sponsorship(sym, date, out, log)
 
     return out
