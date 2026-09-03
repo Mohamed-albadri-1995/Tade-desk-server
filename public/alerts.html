@@ -3167,6 +3167,14 @@ async function loadLog() {
         </div>
         ${g.staleNames && g.staleNames.length
           ? `<div class="note">stale: ${g.staleNames.map(esc).join(', ')}</div>` : ''}
+        ${/* THE FEED'S AGE, NOT JUST ITS COVERAGE. A delayed feed has 100%
+              coverage of a market fifteen minutes ago, which reads here as a
+              perfectly healthy run — and is the one failure that looks exactly
+              like a quiet market. */''}
+        ${g.lagBars
+          ? `<div class="lg-prob">FEED ${g.lagMaxMin} MIN BEHIND on ${g.lagBars}
+             of ${g.runs} runs${g.lagFeed ? ` (${esc(g.lagFeed)})` : ''} — the
+             decision was about an older bar than the one asked for</div>` : ''}
         ${(g.problems || []).length
           ? `<div class="lg-prob">${g.problems.map(esc).join('<br>')}</div>` : ''}
         ${(byId[id] || []).map(lgRun).join('')}

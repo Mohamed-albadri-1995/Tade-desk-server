@@ -68,6 +68,18 @@ const path = require('path');
 const DIR = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const LOG_DIR = process.env.SESSION_LOG_DIR || path.join(DIR, 'history');
 
+/*
+ * HOW LATE A BAR MAY BE AND STILL BE THE ONE THE DECISION IS ABOUT.
+ *
+ * The same one-bar tolerance the runner already applies to a pick, and for the
+ * same reason: the desk's own order lands a bar late by construction, so one
+ * minute is the feed publishing late rather than the desk reading the wrong
+ * market. Two or more is a different bar, and on a one-minute strategy a
+ * different trade. Kept beside `runner.FEED_LAG_WARN_MIN`, which decides when
+ * the run says so; this decides when the DAY says so.
+ */
+const LAG_BAD_MIN = 2;
+
 /** `session-2026-08.jsonl` — by month, so a day's review is one grep. */
 function fileFor(date) {
   const month = String(date || '').slice(0, 7) || 'unknown';
@@ -276,6 +288,15 @@ function runOf({
       // because the ranking is over the universe.
       missing: (data.missing || []).length ? data.missing : undefined,
       coverage: num(data.coverage),
+      /*
+       * WHICH BAR THE ANSWER WAS ABOUT. Coverage says how many symbols had
+       * bars; it says nothing about WHEN those bars were. A delayed feed has
+       * 100% coverage of a market fifteen minutes ago, and that reads on this
+       * page as a perfectly healthy run.
+       */
+      askedBar: data.askedBar || undefined,
+      lastBar: data.lastBar || undefined,
+      lagMin: num(data.lagMin),
     } : undefined,
   };
 }
@@ -430,6 +451,23 @@ function summaryOf(date) {
         else g.ordersFailed += 1;
       }
     }
+    /*
+     * THE WORST LAG OF THE DAY, and how many bars had one.
+     *
+     * The single fact that separates "the market was quiet" from "the desk was
+     * looking at the market fifteen minutes ago". It belongs in the summary
+     * rather than only on each run, because on a delayed feed EVERY run has it
+     * and the reader needs one line, not ninety.
+     */
+    const lag = (r.feed || {}).lagMin;
+    if (typeof lag === 'number') {
+      g.lagMaxMin = Math.max(g.lagMaxMin || 0, lag);
+      if (lag >= LAG_BAD_MIN) {
+        g.lagBars = (g.lagBars || 0) + 1;
+        g.lagFeed = (r.feed || {}).used || g.lagFeed || null;
+      }
+    }
+
     const note = (s) => { if (s && !g.problems.includes(s)) g.problems.push(s); };
     if (r.error) note(r.error);
     if ((r.routing || {}).error) note(r.routing.error);
@@ -437,6 +475,23 @@ function summaryOf(date) {
     if ((r.risk || {}).legacy) note(r.risk.legacy);
     if ((r.rank || {}).ignoredTopN) {
       note(`"top ${r.rank.ignoredTopN}" ignored — no ranking metric is set`);
+    }
+  }
+
+  /*
+   * SAID ONCE PER SETUP, AFTER THE WHOLE DAY IS READ.
+   *
+   * Not inside the loop: the worst lag grows as more runs are counted, so the
+   * sentence would change and the deduping — which matches on the exact string
+   * — would let three near-identical lines through. One line, with the final
+   * number, is the point of a summary.
+   */
+  for (const g of Object.values(out)) {
+    if (g.lagBars) {
+      g.problems.push(`the '${g.lagFeed || 'feed'}' feed ran up to `
+        + `${g.lagMaxMin} minutes behind on ${g.lagBars} of ${g.runs} runs — `
+        + 'the levels came from an older bar, and any signal found on one is '
+        + 'refused as stale. A one-minute setup cannot run on a delayed feed.');
     }
   }
   return out;

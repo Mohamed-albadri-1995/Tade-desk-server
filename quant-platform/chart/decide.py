@@ -25,6 +25,7 @@ pick can never be ranked by two different definitions of the same number.
 
 from __future__ import annotations
 
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -54,6 +55,19 @@ def _hhmm(ts_seconds: int) -> str:
             .tz_convert(_ET).strftime('%H:%M'))
 
 
+def _hhmm_of(stamp) -> str | None:
+    """'2026-09-03 09:41 ET' → '09:41'. None when there is no stamp.
+
+    `evaluate` formats its newest bar for a person to read; the desk compares
+    it against a bar it names as HH:MM. Parsed rather than reformatted from a
+    timestamp because that string is what `evaluate` already returns, and
+    asking it for a second representation of the same fact is how two readings
+    of one bar start to disagree.
+    """
+    m = re.search(r'(\d{2}):(\d{2})', str(stamp or ''))
+    return f'{m.group(1)}:{m.group(2)}' if m else None
+
+
 def _et_date(ts_seconds: int) -> str:
     return (pd.Timestamp(int(ts_seconds), unit='s', tz='UTC')
             .tz_convert(_ET).strftime('%Y-%m-%d'))
@@ -70,6 +84,19 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
 
     Failures are returned as rows rather than raised. One unreachable symbol
     must not stop a decision that is about to be taken over thirty-nine others.
+
+    EVERY ROW CARRIES THE NEWEST BAR THIS SYMBOL HAD, under `last_bar`. It is
+    the one fact that separates a live decision from a decision taken on old
+    prices, and nothing reported it.
+
+    A delayed feed does not fail. `evaluate` reads whatever bars exist and
+    answers about those, so at 09:42 on a fifteen-minute feed it decides the
+    09:26 bar and says "nothing qualified" — which is indistinguishable from a
+    quiet market. Twenty minutes later the 09:41 bar arrives, the entry appears,
+    and the desk refuses it as stale. Seen live on 2026-09-03: two signals,
+    stamped 09:41 and 09:45, both first visible on the 10:00 run, both dropped.
+    The desk could not tell, because the answer never said which bar it was
+    about.
     """
     out = []
     for s in strategies:
@@ -103,6 +130,16 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
             out.append({'symbol': symbol, 'strategy': s.get('name'),
                         'error': res.get('error') or 'evaluate failed'})
             continue
+
+        # `evaluate` already stamps the newest bar it saw; it was simply never
+        # passed on. HH:MM is what the desk compares against — it asks about a
+        # bar by that name.
+        last_bar = _hhmm_of(res.get('last'))
+        # ON A RUN THAT PRODUCES NO PICK TOO. A quiet bar is exactly when the
+        # question matters: "nothing qualified" and "nothing had printed yet"
+        # are the same sentence from the outside and opposite facts.
+        out.append({'symbol': symbol, 'strategy': s.get('name'),
+                    'seen': True, 'last_bar': last_bar})
 
         # A trade that OPENED on the date asked for. The strategy's own
         # window_start/window_end already pin the minute; this only rejects
@@ -291,11 +328,21 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
         return evaluate_symbol(strategies, sym, date, tf, feed, days=days,
                                fill=fill, view=view)
 
+    # THREE BUCKETS, NOT TWO. A `seen` row is neither a signal nor a failure —
+    # it is the symbol reporting the newest bar it had. Routing it with the
+    # candidates would turn every evaluated symbol into a pick.
+    seen_bars = []
     if symbols:
         with ThreadPoolExecutor(max_workers=max(1, min(workers, len(symbols)))) as pool:
             for rows in pool.map(one, symbols):
                 for row in rows:
-                    (errors if row.get('error') else candidates).append(row)
+                    if row.get('seen'):
+                        if row.get('last_bar'):
+                            seen_bars.append(row['last_bar'])
+                    elif row.get('error'):
+                        errors.append(row)
+                    else:
+                        candidates.append(row)
 
     # ── ranking ────────────────────────────────────────────────────────────
     #
@@ -378,6 +425,21 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
         'date': date,
         'feed': feed,
         'tf': tf,
+        # THE NEWEST BAR THIS DECISION ACTUALLY SAW, and the oldest any symbol
+        # had. The caller asks about a bar by name; if the answer is about an
+        # older one, the decision is not the one the backtest measured and no
+        # amount of correct arithmetic downstream makes it so.
+        #
+        # A DELAYED FEED DOES NOT FAIL — it answers, about the past. Yahoo's
+        # free intraday data is roughly fifteen minutes behind, so a desk on it
+        # decides 09:26 at 09:42 and reports "nothing qualified". Both numbers
+        # are here because they answer different questions: `last_bar` says how
+        # current the freshest symbol is, `oldest_bar` says whether the universe
+        # is ragged — one name lagging is a data hole, all of them lagging is
+        # the feed.
+        'last_bar': (max(seen_bars) if seen_bars else None),
+        'oldest_bar': (min(seen_bars) if seen_bars else None),
+        'bars_seen': len(seen_bars),
         # The decision has a deadline, so how long it took is part of the
         # answer. A run that names the right two names at 10:01 is a run that
         # missed.

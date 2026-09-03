@@ -63,6 +63,41 @@ function staleBy(entryAt, bar) {
   return Math.max(0, b - a);
 }
 
+/*
+ * HOW MANY MINUTES BEHIND THE ANSWER IS, or null when it cannot be told.
+ *
+ * `asked` is the bar this run decided; `answered` is the newest bar qp
+ * actually had. On a live feed they are the same minute. On a delayed one the
+ * second is older, and every number in the decision — the close, the VWAP, the
+ * ATR, the stop — belongs to that older bar rather than to the market.
+ *
+ * NULL, NOT ZERO, when either side is missing. qp before this change reported
+ * no bar at all, and a lag of zero on a desk that cannot measure one is the
+ * most reassuring wrong answer available.
+ */
+function feedLagMin(asked, answered) {
+  const mins = (hhmm) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const a = mins(asked);
+  const b = mins(answered);
+  if (a === null || b === null) return null;
+  // Clamped at zero: a bar NEWER than the one asked about is not negative lag,
+  // it is the fetch having rolled onto the next minute mid-run.
+  return Math.max(0, a - b);
+}
+
+/*
+ * HOW LATE IS TOO LATE TO BE THE SAME DECISION.
+ *
+ * One bar is normal and already tolerated everywhere else here — see
+ * STALE_TOLERANCE_MIN, and the reason it exists. Two or more means the
+ * decision is being taken on a bar the market has moved past, and on a
+ * one-minute strategy that is a different trade.
+ */
+const FEED_LAG_WARN_MIN = 2;
+
 /** The minute before the decision — the last bar that must have closed. */
 function lastWantedBar(decisionTime) {
   const [h, m] = String(decisionTime).split(':').map(Number);
@@ -378,6 +413,28 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
     used: [decided.feed], feed: decided.feed, mixed: false,
     coverage: list.length ? 1 - ((decided.errors || []).length / list.length) : 1,
     waitedMs: 0, attempts: 1,
+    /*
+     * HOW FAR BEHIND THE FEED IS, in minutes, on this decision.
+     *
+     * THE ONE MEASUREMENT THAT WAS MISSING. A delayed feed does not fail — qp
+     * reads whatever bars exist and answers about those. So on a fifteen-minute
+     * feed the desk asks about the 09:41 bar at 09:42, is answered about 09:26,
+     * and publishes "nothing qualified" — which is the same sentence a quiet
+     * market produces. Twenty minutes later the 09:41 bar arrives, the entry
+     * appears, and the stale guard refuses it because it is now nineteen
+     * minutes old.
+     *
+     * That is what 2026-09-03 was: two signals, stamped 09:41 and 09:45, both
+     * first visible on the 10:00 run, both dropped, zero orders. Every part of
+     * the desk behaved correctly and nothing could say why, because nothing
+     * compared the bar asked about with the bar answered about.
+     *
+     * `null` when qp did not report one — an unmeasured lag must not read as
+     * a lag of zero, which is the most reassuring wrong answer available.
+     */
+    lastBar: decided.last_bar || null,
+    oldestBar: decided.oldest_bar || null,
+    lagMin: feedLagMin(bar, decided.last_bar),
   };
 
   /*
@@ -1000,6 +1057,13 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
       degraded: data.degraded,
       waitedMs: data.waitedMs,
       attempts: data.attempts,
+      // The bar asked about, the bar answered about, and the gap. See
+      // `feedLagMin` — this is the difference between a live decision and a
+      // correct decision about a market that has moved on.
+      askedBar: bar || null,
+      lastBar: data.lastBar,
+      oldestBar: data.oldestBar,
+      lagMin: data.lagMin,
     },
     tookMs: Date.now() - started,
     // Picks that fired on an earlier bar and were refused. Carried out of the
@@ -1010,7 +1074,26 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
   };
   console.log(`[Setups] ${setup.id}: ${out.picks.length} pick(s) from ${list.length} cards `
     + `on ${data.feed || data.used.join('+') || 'no feed'} `
-    + `(${Math.round(data.coverage * 100)}% had bars, waited ${Math.round(data.waitedMs / 1000)}s)`);
+    + `(${Math.round(data.coverage * 100)}% had bars, waited ${Math.round(data.waitedMs / 1000)}s`
+    + (data.lastBar ? `, newest bar ${data.lastBar}` : '') + ')');
+  /*
+   * A LAGGING FEED IS A LOUD FACT, not a field on a report nobody opens.
+   *
+   * This is the failure that looks exactly like a quiet market: the desk asks
+   * about a bar, is answered about an older one, and publishes "nothing
+   * qualified" every minute. It cost 2026-09-03 entirely — two signals, both
+   * seen twenty minutes late, both correctly refused, no orders.
+   *
+   * Said once per run and not per pick, because on a delayed feed EVERY run of
+   * the day has it and a line per name would bury the one thing to read.
+   */
+  if (data.lagMin !== null && data.lagMin >= FEED_LAG_WARN_MIN) {
+    console.warn(`[Setups] ${setup.id}: THE FEED IS ${data.lagMin} MINUTES BEHIND `
+      + `— asked about the ${bar} bar, '${data.feed}' answered about `
+      + `${data.lastBar}. Every level in this decision belongs to that older `
+      + 'bar, and any signal it finds will be refused as stale. A one-minute '
+      + 'setup cannot run on a delayed feed.');
+  }
   return result;
 }
 
@@ -1142,4 +1225,9 @@ async function runDue(decisionTime, opts = {}) {
 
 module.exports = {
   runSetup, runDue, universe, describePick, lastWantedBar, orderLine, unmanagedLine, borrowNote,
+  // Exported to be TESTED, not to be called elsewhere. "null when it cannot be
+  // told, never zero" is a sentence until something executes it — and a lag of
+  // zero on a desk that cannot measure one would have shown a clean feed on
+  // the day the feed was the problem.
+  feedLagMin, FEED_LAG_WARN_MIN,
 };

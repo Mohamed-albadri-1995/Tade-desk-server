@@ -270,10 +270,17 @@ def test_an_open_trade_is_picked_up_from_its_own_timestamp_field(monkeypatch):
     monkeypatch.setattr(dec.strat, 'evaluate', fake_evaluate)
     rows = dec.evaluate_symbol([{'name': 'S', 'side': 'long'}], 'LIFE',
                                '2026-08-06', '1m', 'yahoo')
-    assert len(rows) == 1, 'the live signal was dropped'
-    assert rows[0]['entry'] == 29.05
-    assert rows[0]['entry_at'] == '10:00'
-    assert rows[0].get('open') is True
+    # THREE KINDS OF ROW NOW: a signal, a failure, and a `seen` row carrying
+    # the newest bar this symbol had. The last is what lets the desk tell a
+    # live decision from one taken on a delayed feed's older prices, and it is
+    # emitted on EVERY evaluated symbol — including the quiet ones, which is
+    # exactly when the question matters.
+    signals = [r for r in rows if not r.get('seen') and not r.get('error')]
+    assert len(signals) == 1, 'the live signal was dropped'
+    assert signals[0]['entry'] == 29.05
+    assert signals[0]['entry_at'] == '10:00'
+    assert signals[0].get('open') is True
+    assert any(r.get('seen') for r in rows), 'no bar was reported for the symbol'
 
 
 def test_an_open_trade_with_no_timestamp_is_an_error_not_a_silent_drop(monkeypatch):
@@ -287,8 +294,9 @@ def test_an_open_trade_with_no_timestamp_is_an_error_not_a_silent_drop(monkeypat
     monkeypatch.setattr(dec.strat, 'evaluate', fake_evaluate)
     rows = dec.evaluate_symbol([{'name': 'S', 'side': 'long'}], 'LIFE',
                                '2026-08-06', '1m', 'yahoo')
-    assert len(rows) == 1
-    assert 'no timestamp' in rows[0]['error']
+    errors = [r for r in rows if r.get('error')]
+    assert len(errors) == 1
+    assert 'no timestamp' in errors[0]['error']
 
 
 def test_an_open_trade_from_another_session_is_not_taken(monkeypatch):
@@ -301,8 +309,14 @@ def test_an_open_trade_from_another_session_is_not_taken(monkeypatch):
                                'entry': 29.05, 'stop': 27.68}}
 
     monkeypatch.setattr(dec.strat, 'evaluate', fake_evaluate)
-    assert dec.evaluate_symbol([{'name': 'S', 'side': 'long'}], 'LIFE',
-                               '2026-08-06', '1m', 'yahoo') == []
+    rows = dec.evaluate_symbol([{'name': 'S', 'side': 'long'}], 'LIFE',
+                               '2026-08-06', '1m', 'yahoo')
+    # NO SIGNAL — but the symbol was still looked at, and says so. "Evaluated
+    # and found nothing" and "never evaluated" are the two cases the whole
+    # session log exists to separate, and the `seen` row is what keeps them
+    # apart here.
+    assert [r for r in rows if not r.get('seen')] == []
+    assert any(r.get('seen') for r in rows)
 
 
 _ET_TZ = 'America/New_York'
@@ -716,3 +730,96 @@ def test_it_is_the_default_when_polygon_is_configured(monkeypatch):
     monkeypatch.setattr(cs, 'default_feed_override', lambda: 'yahoo')
     monkeypatch.setenv('POLYGON_API_KEY', 'x')
     assert cs._feed_status()['default_feed'] == 'yahoo'
+
+
+# ── WHICH BAR THE ANSWER WAS ABOUT ───────────────────────────────────────────
+#
+# The failure that looks exactly like a quiet market, and it cost the whole of
+# 2026-09-03.
+#
+# A DELAYED FEED DOES NOT FAIL. `evaluate` reads whatever bars exist and
+# answers about those, so on Yahoo's free intraday data — roughly fifteen
+# minutes behind — a desk asks about the 09:41 bar at 09:42, is answered about
+# 09:26, and reports "nothing qualified". That is the same sentence a quiet
+# market produces. Twenty minutes later the 09:41 bar arrives, the entry
+# appears, and the desk refuses it as stale.
+#
+#     09:49  cards 7  evaluated 7  signalled 0
+#     10:00  cards 9  evaluated 9  signalled 2   stale: GEO@09:45, IBKR@09:41
+#
+# Both signals showed up on exactly the run where a fifteen-minute delay would
+# first expose them. Every part of the desk behaved correctly and none of it
+# could say why, because the answer never said which bar it was about.
+
+def _quiet(last):
+    def fake(strategy, symbol, tf, days, feed, view, asof, fill='close'):
+        return {'ok': True, 'side': 'long', 'trades': [], 'open_trade': None,
+                'last': last}
+    return fake
+
+
+def test_a_quiet_symbol_still_reports_the_newest_bar_it_had(monkeypatch):
+    """The quiet run is exactly when the question matters."""
+    from chart import decide as dec
+    monkeypatch.setattr(dec.strat, 'evaluate',
+                        _quiet('2026-09-03 09:26 ET'))
+    rows = dec.evaluate_symbol([{'name': 'S', 'side': 'long'}], 'LIFE',
+                               '2026-09-03', '1m', 'yahoo')
+    seen = [r for r in rows if r.get('seen')]
+    assert len(seen) == 1
+    assert seen[0]['last_bar'] == '09:26'
+
+
+def test_the_decision_reports_the_newest_and_the_oldest_bar(monkeypatch):
+    """One name lagging is a data hole; all of them lagging is the feed."""
+    from chart import decide as dec
+
+    def fake(strategy, symbol, tf, days, feed, view, asof, fill='close'):
+        return {'ok': True, 'side': 'long', 'trades': [], 'open_trade': None,
+                'last': {'AAA': '2026-09-03 09:26 ET',
+                         'BBB': '2026-09-03 09:24 ET'}[symbol]}
+
+    monkeypatch.setattr(dec.strat, 'evaluate', fake)
+    out = dec.decide([{'name': 'S', 'side': 'long',
+                       'entry': {'logic': 'AND', 'rules': []}}],
+                     ['AAA', 'BBB'], '2026-09-03', tf='1m', feed='yahoo',
+                     fill='live')
+    assert out['ok'] is True
+    assert out['last_bar'] == '09:26'
+    assert out['oldest_bar'] == '09:24'
+    assert out['bars_seen'] == 2
+    # AND THE `seen` ROWS ARE NOT PICKS. Routed with the candidates, every
+    # evaluated symbol would have become a signal.
+    assert out['picks'] == []
+    assert out['errors'] == []
+
+
+def test_a_symbol_that_failed_reports_no_bar_rather_than_a_wrong_one(monkeypatch):
+    from chart import decide as dec
+
+    def fake(strategy, symbol, tf, days, feed, view, asof, fill='close'):
+        raise RuntimeError('no bars')
+
+    monkeypatch.setattr(dec.strat, 'evaluate', fake)
+    out = dec.decide([{'name': 'S', 'side': 'long',
+                       'entry': {'logic': 'AND', 'rules': []}}],
+                     ['AAA'], '2026-09-03', tf='1m', feed='yahoo', fill='live')
+    # NOTHING WAS SEEN, so there is no bar to report. None — never a guess, and
+    # never the date asked for, which would read as a perfectly live feed.
+    assert out['last_bar'] is None
+    assert out['oldest_bar'] is None
+    assert out['bars_seen'] == 0
+    assert len(out['errors']) == 1
+
+
+def test_the_bar_is_read_out_of_the_stamp_evaluate_already_writes():
+    """Not reformatted from a timestamp — two representations of one bar are
+    two things that can disagree."""
+    from chart import decide as dec
+    assert dec._hhmm_of('2026-09-03 09:41 ET') == '09:41'
+    assert dec._hhmm_of('2026-09-03 16:00 ET') == '16:00'
+    # ABSENT, NOT ZERO. An older evaluate carries no stamp, and '00:00' would
+    # read as a feed that is behind by the whole session.
+    assert dec._hhmm_of(None) is None
+    assert dec._hhmm_of('') is None
+    assert dec._hhmm_of('no time here') is None
