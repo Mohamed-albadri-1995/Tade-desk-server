@@ -720,22 +720,38 @@ SHARED = Path(os.environ.get('ONEIL_MARKET_FILE')
               or (Path(__file__).resolve().parents[2] / 'data' / 'oneil-market.json'))
 
 
-def build(days: int = 500, feed: str = 'yahoo') -> dict:
+def build(days: int = 500, feed: str = 'yahoo',
+          asof: str | None = None) -> dict:
     """Fetch both indexes and run the model. The only network call here.
 
     500 sessions ≈ two years, which is enough to have found a follow-through
     day and to have walked the state machine into a real state rather than the
     conservative 'correction' it seeds with.
+
+    `asof` GIVES THE MODEL AS IT STOOD ON A PAST DAY, which a backtest needs
+    and a card never does. The model is pure over its frames — `market_model`
+    takes them and returns the state — so cutting the frames at that date is
+    the whole of it, and the state machine then walks forward from the same
+    seed over the same bars it would have seen. No separate historical model,
+    for the same reason there is no separate backtest evaluator: two of them
+    could disagree.
     """
     from chart import data_manager
     frames = {}
     errors = {}
     for sym in INDEXES:
         try:
-            frames[sym] = data_manager.load_bars(sym, '1d', days, feed)
+            f = data_manager.load_bars(sym, '1d', days, feed)
+            if asof is not None and f is not None and len(f):
+                # INCLUSIVE of the date itself: the model for 14 March is the
+                # one a reader had after 14 March closed.
+                f = f[f.index.astype(str).str.slice(0, 10) <= str(asof)]
+            frames[sym] = f
         except Exception as e:                            # noqa: BLE001
             errors[sym] = str(e)[:200]
     out = market_model(frames)
+    if asof is not None:
+        out['asof'] = str(asof)
     if errors:
         # NEVER SILENT. One index missing changes the answer — the status is
         # the worse of the two — so a partial model says which half it saw.

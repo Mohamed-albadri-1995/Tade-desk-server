@@ -73,6 +73,7 @@ PARTS = [
     ('logic_audit58.py',    'C and A are waiting before the name is screened'),
     ('logic_audit59.py',    'true arithmetic, false readings'),
     ('logic_audit60.py',    'history to compare, and the newest data to compare'),
+    ('logic_audit61.py',    'the letters as they were known on the day'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They
