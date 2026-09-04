@@ -866,28 +866,50 @@ app.get('/api/setups/:id/rehearse', async (req, res) => {
         + 'ranked and there is nothing to rehearse. Assign it to a tool in qp.'));
     }
     const reg = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools.config.json'), 'utf8'));
-    const want = String(req.query.tool || owners[0]);
-    const tool = (reg.tools || []).find(t => t.id === want);
-    if (!tool) {
-      return res.json(blank(`${setup.name} belongs to ${want}, which is not in `
-        + 'tools.config.json — there is no port to ask.'));
-    }
-    if (tool.enabled === false) {
-      return res.json(blank(`${setup.name} belongs to ${tool.id}, which is switched `
-        + 'off. A sleeping tool collects no cards, so the setup has nothing to rank.'));
-    }
     /*
-     * A LONG TIMEOUT ON PURPOSE. qp gets two attempts of eighteen seconds
-     * inside the runner, and a cold platform uses most of them. Cutting this
-     * off at the usual four seconds would report "did not answer" for a
-     * decision that was on its way — which is the wrong answer twice over.
+     * EVERY TOOL THAT OWNS IT, not the first. A setup can run on two tools and
+     * they are two different card lists: the first version asked owners[0]
+     * only, and for a setup on T10 and T11 reported "no cards" from T10 while
+     * T11 had five — and the scheduled run, which runs in BOTH, was never what
+     * the button described. Sequential, because they share one qp.
      */
-    const r = await fetch(`http://127.0.0.1:${tool.port}/api/setups/`
-      + `${encodeURIComponent(setup.id)}/rehearse`,
-    { signal: AbortSignal.timeout(90000) });
-    if (!r.ok) return res.json(blank(`${tool.id} answered ${r.status}.`));
-    const out = await r.json();
-    res.json({ ...out, tool: tool.id, toolName: tool.name });
+    const targets = req.query.tool ? [String(req.query.tool)] : owners;
+    const reports = [];
+    for (const want of targets) {
+      const tool = (reg.tools || []).find(t => t.id === want);
+      if (!tool) {
+        reports.push({ ...blank(`${setup.name} names ${want}, which is not in `
+          + 'tools.config.json — there is no port to ask.'), tool: want, toolName: want });
+        continue;
+      }
+      if (tool.enabled === false) {
+        reports.push({ ...blank(`${tool.id} is switched off. A sleeping tool collects `
+          + 'no cards, so the setup has nothing to rank there.'), tool: tool.id, toolName: tool.name });
+        continue;
+      }
+      try {
+        /*
+         * A LONG TIMEOUT ON PURPOSE. qp gets two attempts of eighteen seconds
+         * inside the runner, and a cold platform uses most of them. Cutting
+         * this off at the usual four seconds would report "did not answer" for
+         * a decision that was on its way — the wrong answer twice over.
+         */
+        const r = await fetch(`http://127.0.0.1:${tool.port}/api/setups/`
+          + `${encodeURIComponent(setup.id)}/rehearse`,
+        { signal: AbortSignal.timeout(90000) });
+        if (!r.ok) {
+          reports.push({ ...blank(`${tool.id} answered ${r.status}.`), tool: tool.id, toolName: tool.name });
+          continue;
+        }
+        reports.push({ ...(await r.json()), tool: tool.id, toolName: tool.name });
+      } catch (err) {
+        reports.push({ ...blank(`Could not reach ${tool.id}: ${err.message}`),
+                       tool: tool.id, toolName: tool.name });
+      }
+    }
+    // The first report at the top level keeps the shape older readers expect;
+    // `reports` carries all of them.
+    res.json({ ...(reports[0] || blank('nothing to rehearse')), reports });
   } catch (err) {
     res.json(blank(`Could not reach the tool that owns this setup: ${err.message}`));
   }

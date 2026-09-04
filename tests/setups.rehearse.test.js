@@ -389,8 +389,16 @@ describe('it is reachable, and it decides on the current bar', () => {
     expect(server).toMatch(/verdict: null/);
   });
 
+  /*
+   * A SLEEPING TOOL IS REFUSED WITH THE REASON. It is skipped rather than
+   * abandoning the whole rehearsal, because a setup can run on two tools and
+   * one of them being asleep says nothing about the other — see the
+   * every-owner loop in tests/setups.canary.test.js.
+   */
   test('a sleeping tool is refused with the reason, rather than timing out', () => {
-    expect(readSrc('src', 'alerts', 'server.js')).toMatch(/which is switched/);
+    const server = readSrc('src', 'alerts', 'server.js');
+    expect(server).toMatch(/is switched off\. A sleeping tool collects/);
+    expect(server).toMatch(/continue;/);
   });
 
   test('there is a button on the setup card', () => {

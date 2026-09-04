@@ -468,3 +468,70 @@ describe('it is wired in where it can see both halves', () => {
     expect(page).toContain('.lg-ctl.none');
   });
 });
+
+/*
+ * JUDGED AGAINST THE NEWEST BAR THE FEED HAD, not against the clock.
+ *
+ * The control fires on alternate bars, and any feed is one bar behind the
+ * clock at :00 — the bar that just closed has not been published yet. Judged
+ * against the asked bar, the one bar the feed HAS is the "off" bar half the
+ * time, and the control cried wolf on half its checks: 16:00 on 2026-09-04,
+ * "did not fire on the 15:59 bar although yahoo was current (newest 15:58)".
+ */
+describe('fired means "on the newest bar the feed had, or the one before"', () => {
+  beforeEach(() => canary._reset());
+
+  test('a pick on the bar BEFORE the newest one is a fire — the alternate rhythm', async () => {
+    const r = await canary.run({ bar: '15:59', day: '2026-09-04', rows: rows('AAA'),
+      deps: { decide: decideWith(answer({ last_bar: '15:58',
+        picks: [{ symbol: 'AAA', entry_at: '15:57' }] })) } });
+    expect(r.fired).toBe(true);
+    expect(r.lagMin).toBe(1);
+    expect(canary.verdict(r, [{ setupId: 'S', picks: [], ok: true }]).level).toBe('info');
+  });
+
+  test('a pick two bars before the newest is NOT a fire', async () => {
+    const r = await canary.run({ bar: '15:59', day: '2026-09-04', rows: rows('AAA'),
+      deps: { decide: decideWith(answer({ last_bar: '15:58',
+        picks: [{ symbol: 'AAA', entry_at: '15:56' }] })) } });
+    expect(r.fired).toBe(false);
+  });
+
+  /*
+   * THE FEED IS JUDGED FIRST. A pick on the 09:19 bar with the feed fifteen
+   * minutes behind is a working chain and a useless decision — nothing could
+   * fire on 09:34 — and the sentence has to say the feed, not "fired".
+   */
+  test('a pick on an old newest bar still reports the FEED, not a pass', async () => {
+    const r = await canary.run({ bar: '09:34', day: '2026-09-04', rows: rows('AAA'),
+      deps: { decide: decideWith(answer({ last_bar: '09:19',
+        picks: [{ symbol: 'AAA', entry_at: '09:19' }] })) } });
+    expect(r.fired).toBe(true);                 // the chain did produce a pick
+    const v = canary.verdict(r, [{ setupId: 'S', picks: [], ok: true }]);
+    expect(v.level).toBe('warn');
+    expect(v.detail).toMatch(/15 minutes behind/);
+    expect(v.detail).not.toMatch(/CONTROL FIRED/);
+  });
+});
+
+describe('Rehearse asks EVERY tool that owns the setup', () => {
+  test('the proxy loops over the owners and returns one report each', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const s = fs.readFileSync(path.join(__dirname, '..', 'src', 'alerts', 'server.js'), 'utf8');
+    expect(s).toContain("const targets = req.query.tool ? [String(req.query.tool)] : owners;");
+    expect(s).toContain('for (const want of targets) {');
+    expect(s).toContain('res.json({ ...(reports[0] || blank(\'nothing to rehearse\')), reports });');
+    // owners[0] alone is exactly the bug: a setup on T10 and T11 reported "no
+    // cards" from T10 while T11 had five.
+    expect(s).not.toContain('req.query.tool || owners[0]');
+  });
+
+  test('the page renders one block per tool, named', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const page = fs.readFileSync(path.join(__dirname, '..', 'public', 'alerts.html'), 'utf8');
+    expect(page).toContain("const reports = (d.reports && d.reports.length) ? d.reports : [d];");
+    expect(page).toContain('<b>on ${esc(d.tool)}</b>');
+  });
+});

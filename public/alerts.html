@@ -2862,9 +2862,8 @@ async function rehearseSetup(id, i) {
   const out = document.getElementById(`st-reh-${i}`);
   if (!out) return;
   out.innerHTML = '<div class="empty">Running the whole chain — cards, filter, qp, '
-    + 'ranking, sizing, routing. This can take up to a minute.</div>';
-  try {
-    const d = await (await fetch(`/api/setups/${encodeURIComponent(id)}/rehearse`)).json();
+    + 'ranking, sizing, routing — on every tool this setup runs on. This can take a minute per tool.</div>';
+  const one = (d) => {
     const legs = (d.legs || []).map((l) => {
       const cls = l.ok === true ? 'pass' : l.ok === false ? 'fail' : 'untested';
       const word = l.ok === true ? 'answered' : l.ok === false ? 'broken' : 'not reached';
@@ -2878,12 +2877,19 @@ async function rehearseSetup(id, i) {
       // NEVER FOLDED INTO THE ANSWERED COUNT. A leg nothing reached — because
       // nothing qualified on this bar — has proven nothing at all.
       + (d.untested ? ` · ${d.untested} not reached` : '');
-    out.innerHTML = `<div class="st-reh-head">${head}${
+    // ONE BLOCK PER TOOL. A setup on two tools is two card lists, and the
+    // scheduled run happens in both — so the rehearsal shows both, named.
+    return `<div class="st-reh-head">${d.tool ? `<b>on ${esc(d.tool)}</b> · ` : ''}${head}${
       d.bar ? ` · decided the <b>${esc(d.bar)}</b> bar` : ''}${
       d.decidesOn && d.decidesOn !== d.bar
         ? ` <span class="note">(this setup normally decides ${esc(d.decidesOn)})</span>` : ''
-    }</div>${legs || `<div class="empty">${esc(d.note || 'Nothing came back.')}</div>`}
-      ${legs ? `<div class="note st-reh-note">${esc(d.note || '')}</div>` : ''}`;
+    }</div>${legs || `<div class="empty">${esc(d.note || 'Nothing came back.')}</div>`}`;
+  };
+  try {
+    const d = await (await fetch(`/api/setups/${encodeURIComponent(id)}/rehearse`)).json();
+    const reports = (d.reports && d.reports.length) ? d.reports : [d];
+    out.innerHTML = reports.map(one).join('')
+      + `<div class="note st-reh-note">${esc(reports[0].note || '')}</div>`;
   } catch (e) {
     out.innerHTML = `<div class="empty"><b class="warn">${esc(e.message)}</b></div>`;
   }

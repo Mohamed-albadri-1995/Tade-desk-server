@@ -276,9 +276,21 @@ async function run({ bar, day, rows, setups, deps = {} } = {}) {
      * working chain off a five-hour-old bar, which is the exact failure this
      * desk keeps having.
      */
+    /*
+     * JUDGED AGAINST THE NEWEST BAR THE FEED HAD, not against the clock.
+     *
+     * The control fires on alternate bars, and any feed is one bar behind the
+     * clock at :00 — the bar that just closed has not been published yet. So
+     * judged against the asked bar, the one bar the feed HAS is the "off" bar
+     * half the time, and the control cries wolf on half its checks. Seen at
+     * 16:00 on 2026-09-04: "did not fire on the 15:59 bar although yahoo was
+     * current (newest 15:58)". Whether the feed is late is a separate fact,
+     * measured as lagMin and judged first in verdict().
+     */
+    const anchor = out.lastBar || bar;
     const near = (d.picks || [])
       .map(p => p.entry_at)
-      .filter(at => { const n = apart(at, bar); return n !== null && n <= TOLERANCE_MIN; });
+      .filter(at => { const n = apart(at, anchor); return n !== null && n <= TOLERANCE_MIN; });
     out.fired = near.length > 0;
     out.pickAt = near[0] || ((d.picks || [])[0] || {}).entry_at || null;
   } catch (err) {
@@ -318,22 +330,23 @@ function verdict(control, runs) {
         + 'was decided blind or not at all.' };
   }
 
+  /*
+   * THE FEED FIRST. A feed fifteen minutes behind is what a fifteen-minute
+   * feed looks like from the inside: the platform answers, the answer is about
+   * a bar from a quarter of an hour ago, and NOTHING can fire on the bar being
+   * asked about — whether or not the control found a pick on that older bar.
+   * It is the single most likely reason a clock setup takes nothing, and until
+   * now it produced the same silence a quiet market does.
+   */
+  if (control.lagMin !== null && control.lagMin > TOLERANCE_MIN) {
+    return { level: 'warn', key: 'control-lag',
+      detail: `CONTROL DID NOT FIRE on the ${control.bar} bar — the newest bar `
+        + `${control.feed} had was ${control.lastBar}, ${control.lagMin} minutes `
+        + 'behind. Nothing could have fired on that bar, including any setup '
+        + 'deciding on it. This is the feed, not the rules.' };
+  }
+
   if (!control.fired) {
-    /*
-     * THE DELAYED FEED, NAMED. This is what a fifteen-minute feed looks like
-     * from the inside: the platform answers, the answer is about a bar from a
-     * quarter of an hour ago, and NOTHING can fire on the bar being asked
-     * about — the control included. It is the single most likely reason a
-     * clock setup takes nothing, and until now it produced the same silence a
-     * quiet market does.
-     */
-    if (control.lagMin !== null && control.lagMin > TOLERANCE_MIN) {
-      return { level: 'warn', key: 'control-lag',
-        detail: `CONTROL DID NOT FIRE on the ${control.bar} bar — the newest bar `
-          + `${control.feed} had was ${control.lastBar}, ${control.lagMin} minutes `
-          + 'behind. Nothing could have fired on that bar, including any setup '
-          + 'deciding on it. This is the feed, not the rules.' };
-    }
     return { level: 'warn', key: 'control-quiet',
       detail: `CONTROL DID NOT FIRE on the ${control.bar} bar although `
         + `${control.feed} was current${control.lastBar ? ` (newest ${control.lastBar})` : ''}. `
