@@ -32,11 +32,15 @@ function buildSource(file) {
     const ins = db.prepare('INSERT OR REPLACE INTO r1_frozen (date,ticker,data,captured_at) VALUES (?,?,?,?)');
     const r3  = db.prepare('INSERT OR REPLACE INTO r3a (date,ticker,entry_price_a,captured_at) VALUES (?,?,?,?)');
     const mk = (t, keys) => JSON.stringify({ ticker: t, stock: { price: 10 }, screenerKeys: keys });
-    ins.run('2026-08-01','AAA',mk('AAA',['canslim']),1);
-    ins.run('2026-08-02','BBB',mk('BBB',['canslim']),1);
-    ins.run('2026-08-01','CCC',mk('CCC',['canslim-pullback']),1);
-    ins.run('2026-08-03','DDD',mk('DDD',['canslim','canslim-pullback']),1);
-    ins.run('2026-08-04','EEE',mk('EEE',['canslim-universe']),1);
+    // DISPLAY NAMES, because that is what merge.js writes into screenerKeys
+    // despite the field's name — the fault the first dry run caught.
+    ins.run('2026-08-01','AAA',mk('AAA',['CANSLIM']),1);
+    ins.run('2026-08-02','BBB',mk('BBB',['CANSLIM']),1);
+    ins.run('2026-08-01','CCC',mk('CCC',['CANSLIM Pullback']),1);
+    ins.run('2026-08-03','DDD',mk('DDD',['CANSLIM','CANSLIM Pullback']),1);
+    ins.run('2026-08-04','EEE',mk('EEE',['CANSLIM Universe']),1);
+    // ...and one row written with the KEY, since older rows may carry either.
+    ins.run('2026-08-05','FFF',mk('FFF',['canslim']),1);
     r3.run('2026-08-01','AAA',10.5,1);
     r3.run('2026-08-03','DDD',20.5,1);
     const s = db.prepare('INSERT OR REPLACE INTO screeners (key,name,enabled,filters,limit_n,label_only,updated_at) VALUES (?,?,?,?,?,?,?)');
@@ -82,7 +86,7 @@ afterEach(() => { fs.rmSync(DIR, { recursive: true, force: true }); });
 describe('each tool gets its own screener\'s rows', () => {
   test('the breakout tool gets the breakout rows', () => {
     run();
-    expect(tickers('t10.db')).toEqual(['AAA', 'BBB', 'DDD']);
+    expect(tickers('t10.db')).toEqual(['AAA', 'BBB', 'DDD', 'FFF']);
   });
 
   test('the pullback tool gets the pullback rows', () => {
@@ -137,14 +141,14 @@ describe('it cannot damage what it reads', () => {
     run();
     const after = open('t8.db').prepare('SELECT COUNT(*) c FROM r1_frozen').get().c;
     expect(after).toBe(before);
-    expect(after).toBe(5);
+    expect(after).toBe(6);
     expect(open('t8.db').prepare('SELECT COUNT(*) c FROM screeners').get().c).toBe(3);
   });
 
   test('--dry-run writes nothing at all', () => {
     const out = run(['--dry-run']);
     expect(out).toMatch(/DRY RUN/);
-    expect(out).toMatch(/3 R1 rows over 3 dates/);
+    expect(out).toMatch(/4 R1 rows over 4 dates/);
     expect(fs.existsSync(path.join(DIR, 'data', 't10.db'))).toBe(false);
     expect(fs.existsSync(path.join(DIR, 'data', 't11.db'))).toBe(false);
   });
@@ -158,13 +162,13 @@ describe('it cannot damage what it reads', () => {
     run();
     const out = run();
     expect(out).toMatch(/REFUSED/);
-    expect(tickers('t10.db')).toEqual(['AAA', 'BBB', 'DDD']);   // not six
+    expect(tickers('t10.db')).toEqual(['AAA', 'BBB', 'DDD', 'FFF']);   // not six
   });
 
   test('--force replaces rather than appends', () => {
     run();
     run(['--force']);
-    expect(tickers('t10.db')).toEqual(['AAA', 'BBB', 'DDD']);
+    expect(tickers('t10.db')).toEqual(['AAA', 'BBB', 'DDD', 'FFF']);
     expect(tickers('t11.db')).toEqual(['CCC', 'DDD']);
   });
 });
@@ -172,8 +176,8 @@ describe('it cannot damage what it reads', () => {
 describe('it says what it is about to do', () => {
   test('the dry run reports counts per tool, per table', () => {
     const out = run(['--dry-run']);
-    expect(out).toMatch(/T10 ← canslim\b/);
-    expect(out).toMatch(/T11 ← canslim-pullback/);
+    expect(out).toMatch(/T10 ← canslim \/ CANSLIM/);
+    expect(out).toMatch(/T11 ← canslim-pullback \/ CANSLIM Pullback/);
     expect(out).toMatch(/2 r3a/);
   });
 
@@ -198,9 +202,15 @@ describe('it says what it is about to do', () => {
     () => {
       const f = path.join(DIR, 'scripts', 'split-tool-history.js');
       fs.writeFileSync(f, fs.readFileSync(f, 'utf8')
-        .replace("screener: 'canslim',", "screener: 'not-a-key',"));
+        .replace("screener: 'canslim', label: 'CANSLIM',",
+                 "screener: 'not-a-key', label: 'Also Not A Name',"));
       const out = run(['--dry-run']);
-      expect(out).toMatch(/no R1 row carries this key/);
+      expect(out).toMatch(/no R1 row carries 'not-a-key' or 'Also Not A Name'/);
+      // AND IT SHOWS WHAT IS ACTUALLY THERE, so the mismatch answers itself
+      // rather than costing another trip to the box. This is how the
+      // key-versus-name confusion was found in the first place.
+      expect(out).toMatch(/The source actually holds these labels:/);
+      expect(out).toMatch(/'CANSLIM'/);
       expect(out).toMatch(/no screener row with key 'not-a-key'/);
     });
 });
@@ -210,7 +220,8 @@ describe('the mapping is one place', () => {
     () => {
       const src = fs.readFileSync(
         path.join(ROOT, 'scripts', 'split-tool-history.js'), 'utf8');
-      expect(src).toMatch(/is the KEY as stored in the database, not the display/);
+      expect(src).toMatch(/which is what the frozen R1 rows actually/);
+      expect(src).toMatch(/despite that field's name/);
       const { SPLITS, DROPPED } = require('../scripts/split-tool-history');
       expect(SPLITS.map(s => s.screener)).toEqual(['canslim', 'canslim-pullback']);
       expect(SPLITS.map(s => s.tool)).toEqual(['T10', 'T11']);
