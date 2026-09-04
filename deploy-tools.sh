@@ -534,6 +534,16 @@ fi
 # mentioned. Never fatal: qp not being installed is a normal way to run the
 # screeners, and a failure here must not fail a deploy that otherwise worked.
 echo
+echo "[6a/6] qp feed keys..."
+# The desk holds the Alpaca pair once; qp reads it from quant-platform/.env.
+# Copied here on every deploy so the two can never disagree, and never printed.
+# Exit 3 means .env changed and qp must restart to see it.
+QP_FORCE_RESTART=""
+if [ -d quant-platform ]; then
+  node scripts/sync-qp-env.js; SYNC_RC=$?
+  if [ "$SYNC_RC" = "3" ]; then QP_FORCE_RESTART=1; fi
+fi
+
 echo "[6b/6] Chart platform (qp)..."
 if [ -d quant-platform ]; then
   QP_PORT="${QP_PORT:-8765}"
@@ -545,10 +555,14 @@ if [ -d quant-platform ]; then
   if [ -z "$RUNNING" ]; then
     echo "  not answering on :${QP_PORT} — the manager cannot evaluate exit rules"
     echo "  or move trailing stops without it."
-  elif [ "$RUNNING" = "$WANT" ]; then
+  elif [ "$RUNNING" = "$WANT" ] && [ -z "$QP_FORCE_RESTART" ]; then
     echo "  OK — running ${RUNNING}, which is this checkout"
   else
-    echo "  STALE — running ${RUNNING}, this checkout is ${WANT}"
+    if [ -n "$QP_FORCE_RESTART" ]; then
+      echo "  RESTART NEEDED — its .env changed (running ${RUNNING}, checkout ${WANT})"
+    else
+      echo "  STALE — running ${RUNNING}, this checkout is ${WANT}"
+    fi
     if systemctl list-unit-files 2>/dev/null | grep -q '^qp-chart.service'; then
       echo "  restarting qp-chart…"
       sudo systemctl restart qp-chart 2>/dev/null || echo "  could not restart it — do it by hand"
@@ -558,6 +572,16 @@ if [ -d quant-platform ]; then
             try{process.stdout.write(String(JSON.parse(s).build||''))}catch{process.stdout.write('')}});" 2>/dev/null)
       if [ "$AFTER" = "$WANT" ]; then
         echo "  now running ${AFTER}"
+        # WHICH FEEDS qp CAN ACTUALLY USE, read from qp itself rather than
+        # from the file we just wrote — a key in .env that the process did not
+        # load is a key that does nothing.
+        curl -s --max-time 5 "http://127.0.0.1:${QP_PORT}/api/health" 2>/dev/null \
+          | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              try{const h=JSON.parse(s);const f=h.feeds||h;
+                const y=k=>(f[k]===true?'ok':'no key');
+                console.log('  feeds: alpaca '+y('alpaca')+' · polygon '+y('polygon')+' · yahoo ok');
+                if(f.alpaca!==true)console.log('  alpaca is NOT available to qp — a setup on polygon will decide on yahoo');
+              }catch{console.log('  feeds: could not read')}});" 2>/dev/null
       else
         echo "  STILL ${AFTER:-not answering} — the manager will keep failing. Look at:"
         echo "    sudo journalctl -u qp-chart -n 50"

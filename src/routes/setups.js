@@ -32,6 +32,8 @@ router.get('/', async (req, res) => {
       describe: s.describe,
       caution: s.caution,
       liveFeed: s.liveFeed || null,
+      chosenFeed: s.chosenFeed || null,
+      feedNote: s.feedNote || null,
       topN: (s.rank || {}).topN || 0,
       rankMetric: (s.rank || {}).metric || null,
       rankDirection: (s.rank || {}).direction || null,
@@ -118,7 +120,17 @@ router.get('/backtest-defaults', async (req, res) => {
             direction: s.rank.direction || null }
         : null,
       tf: s.tf || '1m',
+      /*
+       * THE FEED THE DESK WILL DECIDE ON, not the one written in the
+       * preference. A backtest is evidence about the desk only if it ran on
+       * the desk's bars: a preference of polygon backtests a year and cannot
+       * decide this morning, so the desk substitutes (setups/feeds.js) and the
+       * form has to open on the substitute — or the numbers describe a feed
+       * that will never trade. The choice and the reason travel beside it.
+       */
       feed: s.feed || null,
+      chosenFeed: s.chosenFeed || null,
+      feedNote: s.feedNote || null,
       view: s.view || 'all',
       /*
        * THE FILL MODEL A BACKTEST OF THIS SETUP MUST USE.

@@ -25,6 +25,9 @@ const RISK = path.join(os.tmpdir(), `risk-btd-${process.pid}.json`);
 process.env.SETUP_PREFS_FILE = PREFS;
 process.env.RISK_FILE = RISK;
 process.env.BROKER_FILE = path.join(os.tmpdir(), `broker-btd-${process.pid}.json`);
+// No Alpaca pair anywhere, so a polygon preference substitutes to yahoo here
+// deterministically — on a box with keys it would substitute to alpaca.
+process.env.SHARED_KEYS_FILE = path.join(os.tmpdir(), `keys-btd-${process.pid}.json`);
 process.env.BROKER_LEDGER = path.join(os.tmpdir(), `broker-btd-${process.pid}.jsonl`);
 afterAll(() => {
   for (const f of [PREFS, RISK, process.env.BROKER_FILE, process.env.BROKER_LEDGER]) {
@@ -162,7 +165,18 @@ describe('the execution settings', () => {
   test('timeframe, feed and session view come across', async () => {
     const { body } = await get(`?setup=${encodeURIComponent(ID)}`);
     expect(body.spec.tf).toBe('1m');
-    expect(body.spec.feed).toBe('polygon');
+    /*
+     * THE PREFERENCE SAYS POLYGON; THE FORM OPENS ON WHAT WILL TRADE.
+     *
+     * polygon cannot decide a live bar — a day behind on the free plan, five
+     * requests a minute — so the desk decides on alpaca when it has keys and
+     * on yahoo otherwise (setups/feeds.js). A backtest run on polygon would be
+     * evidence about a feed that will never place the order. The substitute is
+     * what comes across, with the choice and the reason beside it.
+     */
+    expect(body.spec.feed).toBe('yahoo');
+    expect(body.spec.chosenFeed).toBe('polygon');
+    expect(body.spec.feedNote).toMatch(/cannot decide a live bar/);
     // Matches chart/backtest.py's own default. 'regular' changes every rolling
     // indicator's warm-up and removes the 09:29 decision bar entirely.
     expect(body.spec.view).toBe('all');

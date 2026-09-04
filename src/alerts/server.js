@@ -62,6 +62,8 @@ app.get('/api/setups', async (req, res) => {
         id: s.id, name: s.name, tools: s.tools,
         decisionTime: s.decisionTime, universeScanAt: s.universeScanAt || null,
         describe: s.describe, caution: s.caution, liveFeed: s.liveFeed || null,
+        // The preference as stored and, when the live feed differs, why.
+        chosenFeed: s.chosenFeed || null, feedNote: s.feedNote || null,
         sides: s.sides, strategies: s.strategies, strategyIds: s.strategyIds,
         topN: (s.rank || {}).topN || 0,
         rankMetric: (s.rank || {}).metric || null,

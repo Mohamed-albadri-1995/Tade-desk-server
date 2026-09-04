@@ -35,6 +35,7 @@
 
 const qp = require('./qpClient');
 const prefs = require('./prefs');
+const feeds = require('./feeds');
 
 /** 1000 → '10:00'. qp stores the window as an integer HHMM. */
 function hhmm(windowStart) {
@@ -313,6 +314,13 @@ async function list() {
   // The parts qp cannot hold, merged on top.
   return [...groups.values()].map(g => {
     const p = prefs.settingsFor(g.id);
+    /*
+     * THE FEED A LIVE DECISION CAN USE, which is not always the one chosen.
+     * polygon is the right feed to backtest a year against and cannot decide
+     * this morning's bar — a day behind, five requests a minute. See feeds.js;
+     * the substitution is said on the setup rather than done quietly.
+     */
+    const live = feeds.liveFeedFor(p.feed);
     const { raw, ...rest } = g;
     const pairing = pairingNote(g, groups);
     // Needed BEFORE the object literal: the bar the desk evaluates is derived
@@ -401,7 +409,10 @@ async function list() {
               direction: p.rankDirection || null,
               topN: p.topN || 0 },
       tf,
-      feed: p.feed || 'yahoo',
+      feed: live.feed,
+      // The preference as stored, and why the live feed differs when it does.
+      chosenFeed: live.chosen,
+      feedNote: live.note,
       // Matches chart/backtest.py's own default, so live and backtest evaluate
       // the same frame unless a preference deliberately says otherwise.
       view: p.view || 'all',
@@ -419,7 +430,7 @@ async function list() {
        * model deliberately.
        */
       fill,
-      liveFeed: p.feed || 'yahoo',
+      liveFeed: live.feed,
       caution: p.caution
         || 'Backtest it in qp before trusting it live. Trade small until the sample grows.',
       describe: [

@@ -26,6 +26,50 @@ from pathlib import Path
 # qp + the shared compute engine
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
+
+
+def _load_dotenv(path: Path = _ROOT / '.env') -> int:
+    """Read quant-platform/.env into the environment, for keys not already set.
+
+    THE PROCESS READS ITS OWN KEYS, however it was launched. The systemd units
+    for the daily jobs source .env with `set -a; . ./.env`; the chart service
+    on the box was started some other way, and a key written to .env for it
+    was a key it never saw. Every feed check here asks os.environ, so this is
+    the one place that makes "the file has the key" and "qp has the key" the
+    same statement.
+
+    Existing environment wins — a value the launcher set on purpose is not
+    overwritten by the file. Nothing is printed: the values are secrets and
+    the count is all a log needs.
+    """
+    import os
+    n = 0
+    try:
+        text = path.read_text()
+    except OSError:
+        return 0
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('export '):
+            line = line[len('export '):].strip()
+        if '=' not in line:
+            continue
+        key, val = line.split('=', 1)
+        key = key.strip()
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+            val = val[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = val
+            n += 1
+    return n
+
+
+_ENV_LOADED = _load_dotenv()
+if _ENV_LOADED:
+    print(f'[env] loaded {_ENV_LOADED} value(s) from .env', flush=True)
 # compare_server imports qp at load; keep argv clean during that import, then
 # RESTORE it so our own --host/--port parser in main() still sees the flags.
 _ORIG_ARGV = list(sys.argv)

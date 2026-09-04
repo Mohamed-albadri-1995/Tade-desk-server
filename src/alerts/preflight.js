@@ -50,6 +50,16 @@ const LAG_BAD_MIN = 2;
  */
 const DELAYED_FEEDS = new Set(['yahoo']);
 
+/*
+ * FEEDS THAT CANNOT DECIDE A LIVE BAR AT ALL. Not delayed — absent: polygon's
+ * free plan is a day behind and allows five requests a minute, so a
+ * forty-symbol decision cannot finish inside a clock setup's minute. On
+ * 2026-09-04 that was the whole of "MISSED THE 09:35 WINDOW". The catalog now
+ * substitutes a usable feed (see setups/feeds.js), so a setup still reporting
+ * one of these here has slipped past that — and is a fault, not a warning.
+ */
+const LIVE_UNUSABLE_FEEDS = new Set(['polygon']);
+
 /** How long a card list may go unrefreshed before it is not "today's list". */
 const CARDS_STALE_MIN = 30;
 
@@ -133,7 +143,12 @@ function legFeed(setups, summary) {
     const feed = s.liveFeed || 'yahoo';
     const delayed = DELAYED_FEEDS.has(String(feed).toLowerCase());
     const lag = g && typeof g.lagMaxMin === 'number' ? g.lagMaxMin : null;
-    if (lag !== null && lag >= LAG_BAD_MIN) {
+    if (LIVE_UNUSABLE_FEEDS.has(String(feed).toLowerCase())) {
+      detail.push({ setup: s.id, ok: false, feed, lagMaxMin: lag,
+        note: `'${feed}' cannot decide a live bar — a day behind on the free plan `
+          + 'and five requests a minute. Every decision on it times out or reads '
+          + 'yesterday. Change the setup\'s feed.' });
+    } else if (lag !== null && lag >= LAG_BAD_MIN) {
       detail.push({ setup: s.id, ok: false, feed, lagMaxMin: lag, lagBars: g.lagBars,
         note: `'${feed}' ran up to ${lag} min behind on ${g.lagBars} of ${g.runs} `
           + 'runs — any signal found on those bars is refused as stale' });
@@ -440,5 +455,5 @@ module.exports = {
   // the whole report is a leg whose failure mode is only ever seen alongside
   // six others.
   legCards, legFeed, legDecision, legRouting, legHooks, legFeedback, legJournal,
-  verdict, LAG_BAD_MIN, DELAYED_FEEDS, CARDS_STALE_MIN,
+  verdict, LAG_BAD_MIN, DELAYED_FEEDS, LIVE_UNUSABLE_FEEDS, CARDS_STALE_MIN,
 };

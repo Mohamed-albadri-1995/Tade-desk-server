@@ -1313,7 +1313,11 @@ async function loadSetups() {
             ['ranked by', s.rankMetric
               ? `${esc(s.rankMetric)}${s.topN ? `, top ${esc(s.topN)}` : ', all'}`
               : 'nothing — all signals'],
-            ['feed', esc(s.liveFeed || 'default')],
+            // The feed the decision USES. When that is not the one chosen — a
+            // polygon preference cannot decide a live bar — the reason is on
+            // the line, not in a log.
+            ['feed', esc(s.liveFeed || 'default')
+              + (s.feedNote ? ` <span class="warn">(${esc(s.chosenFeed)} chosen — ${esc(s.feedNote)})</span>` : '')],
             ...(s.universeScanAt ? [['extra scan', esc(s.universeScanAt)]] : []),
             ...(s.maxTradesPerDay ? [['max/day', `${esc(s.maxTradesPerDay)} order(s)`]] : []),
             ...(s.riskPerTrade ? [['risk', `$${esc(s.riskPerTrade)}/trade`]] : []),

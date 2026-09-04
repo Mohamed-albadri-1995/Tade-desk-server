@@ -139,24 +139,39 @@ describe('the feed', () => {
   });
 
   test('a real-time feed with a measured lag of zero passes', () => {
-    const l = pf.legFeed([okSetup({ liveFeed: 'polygon' })], {
+    const l = pf.legFeed([okSetup({ liveFeed: 'alpaca' })], {
       'T8 Test@09:30': { lagMaxMin: 0, lagBars: 0, runs: 40 },
     });
     expect(l.ok).toBe(true);
   });
 
   test('a real-time feed nobody has measured yet is UNKNOWN', () => {
-    expect(pf.legFeed([okSetup({ liveFeed: 'polygon' })], {}).ok).toBeNull();
+    expect(pf.legFeed([okSetup({ liveFeed: 'alpaca' })], {}).ok).toBeNull();
   });
 
   test('one bar of lag is tolerated — the same tolerance the stale guard uses',
     () => {
-      const l = pf.legFeed([okSetup({ liveFeed: 'polygon' })], {
+      const l = pf.legFeed([okSetup({ liveFeed: 'alpaca' })], {
         'T8 Test@09:30': { lagMaxMin: 1, lagBars: 0, runs: 40 },
       });
       expect(l.ok).toBe(true);
       expect(pf.LAG_BAD_MIN).toBe(2);
     });
+
+  /*
+   * POLYGON CANNOT DECIDE A LIVE BAR. A day behind on the free plan, five
+   * requests a minute: forty symbols cannot finish inside a clock setup's
+   * minute. On 2026-09-04 that was the whole of "MISSED THE 09:35 WINDOW",
+   * and it was reported as the platform being slow. It FAILS here even with
+   * no measurement, because the measurement can only ever be a timeout.
+   */
+  test('polygon as the live feed FAILS outright, measured or not', () => {
+    const l = pf.legFeed([okSetup({ liveFeed: 'polygon' })], {});
+    expect(l.ok).toBe(false);
+    expect(l.note).toMatch(/cannot decide a live bar/);
+    expect(l.note).toMatch(/five requests a minute/);
+    expect(pf.LIVE_UNUSABLE_FEEDS.has('polygon')).toBe(true);
+  });
 });
 
 /* ── leg 3: the decision ─────────────────────────────────────────────────── */
