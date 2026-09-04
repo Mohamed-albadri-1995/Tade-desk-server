@@ -1,18 +1,21 @@
 {
-  "_comment": "The registry of tools. Everything reads this one file \u2014 the deploy script, the landing page, and the seeder \u2014 so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
+  "_comment": "The registry of tools. Everything reads this one file — the deploy script, the landing page, and the seeder — so adding a tool means adding an entry here and nothing else. Ports go up in tens; each tool needs its app port open in the AWS security group.",
+  "_flags_comment": "THREE FLAGS, AND THEY ARE NOT THE SAME QUESTION. `enabled: false` means the deploy does not start the tool — it stops SCANNING. `archive: true` means the read-only archive process serves that tool's stored registers on its own port, so qp can still chart, print and backtest everything it ever collected — it keeps READING. A tool can be both: stopped and still readable, which is the whole point. `scorer: false` means no Python scoring process for it, and every card's _score comes back null rather than a number nobody computed. Absent means true for enabled and scorer, false for archive — so an entry written before these existed behaves exactly as it did.",
   "tools": [
     {
       "id": "T1",
-      "name": "Screener",
+      "name": "Swing trades after huge volume",
       "port": 3000,
       "scorerPort": 3001,
+      "enabled": true,
+      "scorer": false,
       "accent": "#4a9eff",
-      "desc": "The original: big movers, pre-market volume and trend continuation.",
+      "desc": "The original: big movers, pre-market volume and trend continuation. Also serves the landing page — stopping this one takes the front door with it.",
       "captureAt": {
         "r1": "09:36",
         "entryA": "09:37",
         "entryB": "09:40",
-        "why": "Kept exactly as it always was. T1 is the control the other tools are measured against, and its one proven edge \u2014 Big Move + Pre-Mkt, 54% win against 13% \u2014 is read off the 09:36 photo. Moving it would make old cards and new cards no longer comparable."
+        "why": "Kept exactly as it always was. T1 is the control the other tools are measured against, and its one proven edge — Big Move + Pre-Mkt, 54% win against 13% — is read off the 09:36 photo. Moving it would make old cards and new cards no longer comparable."
       }
     },
     {
@@ -20,6 +23,8 @@
       "name": "Momentum",
       "port": 3010,
       "scorerPort": 3011,
+      "enabled": true,
+      "scorer": false,
       "accent": "#a78bfa",
       "desc": "Daily moving averages stacked fast-over-slow, breaking the monthly high.",
       "captureAt": {
@@ -35,13 +40,16 @@
       "name": "Gappers",
       "port": 3020,
       "scorerPort": 3021,
+      "enabled": false,
+      "scorer": false,
+      "archive": true,
       "accent": "#fb923c",
       "desc": "Pre-market gaps on heavy volume in a small float.",
       "captureAt": {
         "r1": "09:36",
         "entryA": "09:37",
         "entryB": "09:40",
-        "why": "A gap is an opening trade. The photo goes at 09:36 and entries at 09:37 and 09:40, which is where a gap either continues or fails \u2014 waiting longer would measure something that had already resolved."
+        "why": "A gap is an opening trade. The photo goes at 09:36 and entries at 09:37 and 09:40, which is where a gap either continues or fails — waiting longer would measure something that had already resolved."
       }
     },
     {
@@ -49,6 +57,9 @@
       "name": "VWAP Reclaim",
       "port": 3030,
       "scorerPort": 3031,
+      "enabled": false,
+      "scorer": false,
+      "archive": true,
       "accent": "#34d399",
       "desc": "Price crossing back through VWAP with volume behind it.",
       "captureAt": {
@@ -63,8 +74,11 @@
       "name": "20-Day Break",
       "port": 3040,
       "scorerPort": 3041,
+      "enabled": false,
+      "scorer": false,
+      "archive": true,
       "accent": "#f472b6",
-      "desc": "A break of the 20-day high, or of the 20-day low. Pair it with a catalyst filter on the setup \u2014 the news half is a card field, not a screener column.",
+      "desc": "A break of the 20-day high, or of the 20-day low. Pair it with a catalyst filter on the setup — the news half is a card field, not a screener column.",
       "captureAt": {
         "r1": "09:46",
         "entryA": "09:47",
@@ -77,6 +91,8 @@
       "name": "Unexplained Move",
       "port": 3050,
       "scorerPort": 3051,
+      "enabled": true,
+      "scorer": false,
       "accent": "#facc15",
       "desc": "A 15% move in two hours with no news behind it, expected to correct back. The six-month trend is a safety layer: a spike that agrees with it is not unexplained. Needs a \"catalyst is empty\" filter on the setup.",
       "captureAt": {
@@ -91,13 +107,15 @@
       "name": "Liquid Movers",
       "port": 3060,
       "scorerPort": 3061,
+      "enabled": true,
+      "scorer": false,
       "accent": "#22d3ee",
-      "desc": "Heavy real volume and real range \u2014 gapping before the open, then trading 10M+ shares after it.",
+      "desc": "Heavy real volume and real range — gapping before the open, then trading 10M+ shares after it.",
       "captureAt": {
         "r1": "09:36",
         "entryA": "09:37",
         "entryB": "09:40",
-        "why": "The pre-market screener is what feeds training here, and its candidates are all in by the bell \u2014 so the photo goes at 09:36. The after-open screener finds tradable stocks all day, but they arrive after the photo and do not train the model."
+        "why": "The pre-market screener is what feeds training here, and its candidates are all in by the bell — so the photo goes at 09:36. The after-open screener finds tradable stocks all day, but they arrive after the photo and do not train the model."
       }
     },
     {
@@ -106,28 +124,70 @@
       "port": 3070,
       "scorerPort": 3071,
       "accent": "#c084fc",
-      "desc": "O'Neil growth criteria: earnings accelerating, at a 52-week high, leading the market. Its names are tagged wherever else they appear.",
+      "desc": "Retired 2026-09-04 — split into T10 (breakout) and T11 (pullback) so each screener's results can be judged on their own. Kept readable so the split can be checked against its source.",
       "captureAt": {
         "r1": "09:46",
         "entryA": "09:47",
         "entryB": "09:51",
-        "why": "CANSLIM names are position candidates rather than day trades, so the exact minute matters less here than anywhere else. It shares T2's timing \u2014 fifteen minutes past the open, once the first spike has settled \u2014 so the two breakout tools stay directly comparable."
+        "why": "CANSLIM names are position candidates rather than day trades, so the exact minute matters less here than anywhere else. It shares T2's timing — fifteen minutes past the open, once the first spike has settled — so the two breakout tools stay directly comparable."
       },
-      "stage": "valid"
+      "stage": "valid",
+      "enabled": false,
+      "scorer": false,
+      "archive": true
     },
     {
       "id": "T9",
       "name": "Stocks in Play",
       "port": 3080,
       "scorerPort": 3081,
+      "enabled": false,
+      "scorer": false,
+      "archive": true,
       "accent": "#94a3b8",
-      "desc": "The benchmark. Liquid stocks over $5, ranked by unusual volume, top 20 \u2014 no pattern, no direction. Every other tool has to beat this.",
+      "desc": "The benchmark. Liquid stocks over $5, ranked by unusual volume, top 20 — no pattern, no direction. Every other tool has to beat this.",
       "captureAt": {
         "r1": "09:36",
         "entryA": "09:37",
         "entryB": "09:40",
-        "why": "Identical to T1's timing on purpose. This tool exists to be compared against, so it has to be photographed and measured at exactly the same moment as the tools it is benchmarking \u2014 a different capture time would make every comparison partly a comparison of clocks."
+        "why": "Identical to T1's timing on purpose. This tool exists to be compared against, so it has to be photographed and measured at exactly the same moment as the tools it is benchmarking — a different capture time would make every comparison partly a comparison of clocks."
       }
+    },
+    {
+      "id": "T10",
+      "name": "CANSLIM Breakout",
+      "port": 3110,
+      "scorerPort": 3111,
+      "enabled": true,
+      "scorer": false,
+      "accent": "#c084fc",
+      "desc": "O'Neil growth names breaking to a 52-week high. One half of the old T8, carrying its own history so its results stand on their own.",
+      "captureAt": {
+        "r1": "09:46",
+        "entryA": "09:47",
+        "entryB": "09:51",
+        "why": "Inherited from T8 unchanged. The two halves were one tool until today, and moving the capture minute would make their own history no longer comparable with what comes next — which is the entire question the split exists to answer."
+      },
+      "stage": "valid",
+      "splitFrom": "T8"
+    },
+    {
+      "id": "T11",
+      "name": "CANSLIM Pullback",
+      "port": 3120,
+      "scorerPort": 3121,
+      "enabled": true,
+      "scorer": false,
+      "accent": "#f0abfc",
+      "desc": "O'Neil growth names holding above the 50-day but back under the 20-day — a pullback inside an uptrend. The other half of the old T8.",
+      "captureAt": {
+        "r1": "09:46",
+        "entryA": "09:47",
+        "entryB": "09:51",
+        "why": "Inherited from T8 unchanged. The two halves were one tool until today, and moving the capture minute would make their own history no longer comparable with what comes next — which is the entire question the split exists to answer."
+      },
+      "stage": "valid",
+      "splitFrom": "T8"
     }
   ],
   "_apps_comment": "Whole applications on this box, as opposed to the screener tools above. The landing page lists these first: they are different programs with different jobs, not nine variants of one. Added here rather than hardcoded in the page so a new app means one entry and nothing else.",
@@ -146,7 +206,7 @@
       "port": 3000,
       "path": "/",
       "accent": "#4a9eff",
-      "desc": "Nine screeners side by side, each keeping its own history \u2014 plus the shortlist and the CANSLIM list that all of them read.",
+      "desc": "The screener tools side by side, each keeping its own history — plus the shared shortlist. Stopped tools stay readable: the archive process serves their stored registers on their own ports, so qp can still chart and backtest them.",
       "isSelf": true,
       "suitePath": "/screeners"
     },
@@ -164,7 +224,7 @@
       "port": 3090,
       "path": "/",
       "accent": "#fbbf24",
-      "desc": "The execution desk: setups deciding on their own bar, sizing from their own backtest, routing to their own account \u2014 with the alerts, the orders and the reconciliation beside them."
+      "desc": "The execution desk: setups deciding on their own bar, sizing from their own backtest, routing to their own account — with the alerts, the orders and the reconciliation beside them."
     }
   ]
 }

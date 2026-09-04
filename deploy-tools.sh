@@ -110,14 +110,42 @@ fi
 # by the PREVIOUS deploy — so a rename showed the old name, and a port or a new
 # tool would have started the wrong set entirely while the code on disk was
 # current. It looked exactly like a deploy that had not taken.
+#
+# ONLY WHAT IS ENABLED, and the flags travel with the tool.
+#
+# `enabled: false` means the deploy does not start it. Before this the only
+# ways to run fewer tools were `--only` — which is per-deploy AND skips the
+# alerts app — or deleting the registry entry, which loses its ports, its
+# capture times and the reasoning written beside them. So a routine
+# `./deploy-tools.sh` silently brought all nine back, which on a 912 MB box is
+# how you end up locked out of your own machine.
+#
+# ABSENT MEANS ON, for enabled and scorer both: an entry written before these
+# flags existed behaves exactly as it always did.
 mapfile -t TOOLS < <(node -e "
   const t = require('./tools.config.json').tools;
-  t.forEach(x => console.log([x.id, x.name, x.port, x.scorerPort].join('|')));
+  t.filter(x => x.enabled !== false)
+   .forEach(x => console.log([x.id, x.name, x.port, x.scorerPort,
+                              x.scorer === false ? 'noscorer' : 'scorer'].join('|')));
+")
+mapfile -t OFF < <(node -e "
+  const t = require('./tools.config.json').tools;
+  t.filter(x => x.enabled === false)
+   .forEach(x => console.log(x.id + (x.archive ? ' (archived, still readable)'
+                                               : ' (stopped)')));
 ")
 if [ ${#TOOLS[@]} -eq 0 ]; then
-  echo "No tools found in tools.config.json"; exit 1
+  echo "No ENABLED tools in tools.config.json — every entry is enabled:false."
+  echo "That is almost certainly not what you meant; nothing would scan."
+  exit 1
 fi
-echo "  tools: ${#TOOLS[@]}"
+echo "  tools: ${#TOOLS[@]} enabled"
+# NAMED, NOT JUST COUNTED. "6 enabled" leaves you counting on your fingers to
+# work out which three are missing, on the morning you are wondering why a
+# register is empty.
+if [ ${#OFF[@]} -gt 0 ]; then
+  echo "  not started: ${OFF[*]}"
+fi
 
 # A neighbour whose files moved is now stale ON DISK while its process still
 # runs the old code from memory. Everything looks fine until the next restart or
@@ -192,7 +220,7 @@ done
 echo
 echo "[4/6] Stopping existing PM2 processes..."
 for entry in "${TOOLS[@]}"; do
-  IFS='|' read -r id name port sport <<< "$entry"
+  IFS='|' read -r id name port sport scoreflag <<< "$entry"
   [ -n "$ONLY" ] && [ "$ONLY" != "$id" ] && continue
   pm2 delete "tool-${id}" 2>/dev/null || true
   pm2 delete "scorer-${id}" 2>/dev/null || true
@@ -255,6 +283,10 @@ echo "[5/6] Starting tools..."
 TOOL_MAX_MEM="${TOOL_MAX_MEM:-140M}"      # tools sit at ~60
 SCORER_MAX_MEM="${SCORER_MAX_MEM:-180M}"  # scorers reach ~90 while training
 ALERTS_MAX_MEM="${ALERTS_MAX_MEM:-180M}"  # alerts sits at ~72
+# The archive holds several SQLite handles open and does nothing else. It has
+# no scanner, no scheduler and no model, so it should never approach this —
+# if it trips, something is reading far more than a register at a time.
+ARCHIVE_MAX_MEM="${ARCHIVE_MAX_MEM:-120M}"
 
 # ── SWAP, WHICH THE MEMORY CAPS ASSUME ────────────────────────────────────
 #
@@ -284,7 +316,7 @@ if [ "$_mem_mb" -lt 2048 ] && [ "$_swap_kb" -lt 1024 ]; then
 fi
 mkdir -p data
 for entry in "${TOOLS[@]}"; do
-  IFS='|' read -r id name port sport <<< "$entry"
+  IFS='|' read -r id name port sport scoreflag <<< "$entry"
   [ -n "$ONLY" ] && [ "$ONLY" != "$id" ] && continue
 
   # T1 keeps the original paths so its existing history is picked up untouched.
@@ -296,10 +328,21 @@ for entry in "${TOOLS[@]}"; do
   fi
   mkdir -p "$out" "$tmp"
 
-  echo "  ${id} (${name}) — app :${port}  scorer :${sport}"
-  pm2 start src/scoring/server.py --name "scorer-${id}" --interpreter "$PY" \
-    --max-memory-restart "$SCORER_MAX_MEM" \
-    -- --output "$out" --port "$sport" >/dev/null
+  # THE SCORER IS OPTIONAL, AND ITS ABSENCE IS NOT A FAILURE.
+  #
+  # Side E is already a soft stage: a missing scorer leaves `_score: null` on
+  # every card, with a note on the scan report saying which. So switching them
+  # off degrades by design rather than by luck — but it is not free, and the
+  # cost is stated where it is paid: nothing can rank or filter on _score any
+  # more, including a setup using the `reg_score` metric.
+  if [ "$scoreflag" = "noscorer" ]; then
+    echo "  ${id} (${name}) — app :${port}  (no scorer: _score will be null)"
+  else
+    echo "  ${id} (${name}) — app :${port}  scorer :${sport}"
+    pm2 start src/scoring/server.py --name "scorer-${id}" --interpreter "$PY" \
+      --max-memory-restart "$SCORER_MAX_MEM" \
+      -- --output "$out" --port "$sport" >/dev/null
+  fi
 
   TOOL_ID="$id" TOOL_NAME="$name" PORT="$port" \
   DB_PATH="$db" MODEL_OUTPUT_ROOT="$out" TMP_DIR="$tmp" \
@@ -307,6 +350,29 @@ for entry in "${TOOLS[@]}"; do
     pm2 start src/index.js --name "tool-${id}" --update-env \
     --max-memory-restart "$TOOL_MAX_MEM" >/dev/null
 done
+
+# ── THE ARCHIVE ────────────────────────────────────────────────────────────
+#
+# A stopped tool serves NOTHING, and qp reads every tool over HTTP —
+# chart/screener.py builds its source URLs from this same registry and calls
+# /api/warehouse/*. So stopping T3, T4, T5, T8 and T9 would take every chart,
+# print and backtest of their history with them.
+#
+# One read-only process answers for all of them, on their own ports, with the
+# same API. qp cannot tell the difference and needs no change. ~45 MB once,
+# against ~290 MB for five tools and their scorers.
+if [ -z "$ONLY" ]; then
+  ARCHIVED=$(node -e "
+    const t = require('./tools.config.json').tools;
+    process.stdout.write(t.filter(x => x.archive).map(x => x.id).join(','));
+  ")
+  if [ -n "$ARCHIVED" ]; then
+    echo "  ARCHIVE — read-only registers for ${ARCHIVED//,/ }"
+    pm2 delete archive 2>/dev/null || true
+    pm2 start src/archive/server.js --name "archive" --update-env \
+      --max-memory-restart "$ARCHIVE_MAX_MEM" >/dev/null
+  fi
+fi
 
 # The alerts service. One process, not nine: the rules and the fires are shared
 # files, and it does not evaluate anything — the screeners already do that on
@@ -350,23 +416,40 @@ wait_up() {  # wait_up <url> <attempts>
   return 1
 }
 
-printf "  waiting for %s process(es) to come up" "$(( ${#TOOLS[@]} * 2 ))"
+# Counted from what was actually STARTED. Waiting for two processes per tool
+# when half of them have no scorer would spend the whole timeout on a port
+# nothing is listening to, and then print a row of dots that means nothing.
+_expect=0
 for entry in "${TOOLS[@]}"; do
-  IFS='|' read -r id name port sport <<< "$entry"
+  IFS='|' read -r id name port sport scoreflag <<< "$entry"
+  [ -n "$ONLY" ] && [ "$ONLY" != "$id" ] && continue
+  _expect=$(( _expect + 1 ))
+  [ "$scoreflag" = "noscorer" ] || _expect=$(( _expect + 1 ))
+done
+printf "  waiting for %s process(es) to come up" "$_expect"
+for entry in "${TOOLS[@]}"; do
+  IFS='|' read -r id name port sport scoreflag <<< "$entry"
   [ -n "$ONLY" ] && [ "$ONLY" != "$id" ] && continue
   wait_up "http://localhost:${port}/health" >/dev/null 2>&1 || true
-  wait_up "http://127.0.0.1:${sport}/health" >/dev/null 2>&1 || true
+  [ "$scoreflag" = "noscorer" ] \
+    || wait_up "http://127.0.0.1:${sport}/health" >/dev/null 2>&1 || true
   printf "."
 done
 echo
 
 for entry in "${TOOLS[@]}"; do
-  IFS='|' read -r id name port sport <<< "$entry"
+  IFS='|' read -r id name port sport scoreflag <<< "$entry"
   [ -n "$ONLY" ] && [ "$ONLY" != "$id" ] && continue
-  printf "  %-3s %-10s app: " "$id" "$name"
+  printf "  %-3s %-32s app: " "$id" "$name"
   curl -s --max-time 4 "http://localhost:${port}/health" >/dev/null 2>&1 && printf "OK   " || printf "FAIL "
-  printf "scorer: "
-  curl -s --max-time 4 "http://127.0.0.1:${sport}/health" 2>/dev/null | python3 -c "
+  # OFF IS NOT FAIL. A scorer nobody started reporting "FAIL" is the same
+  # confusion this whole week has been about — a deliberate absence rendered
+  # as a fault, on the line you read to decide whether the deploy worked.
+  if [ "$scoreflag" = "noscorer" ]; then
+    echo "scorer: off (by config)"
+  else
+    printf "scorer: "
+    curl -s --max-time 4 "http://127.0.0.1:${sport}/health" 2>/dev/null | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -376,7 +459,26 @@ try:
 except Exception:
     print('FAIL')
 " 2>/dev/null || echo "FAIL"
+  fi
 done
+
+# The archive, checked on one of the ports it claims to answer for. A process
+# that is "online" in pm2 and serving nothing is the failure mode worth
+# catching here, since qp will not complain — it will just find no data.
+if [ -z "$ONLY" ] && [ -n "${ARCHIVED:-}" ]; then
+  _first=${ARCHIVED%%,*}
+  _aport=$(node -e "
+    const t = require('./tools.config.json').tools.find(x => x.id === '$_first');
+    process.stdout.write(String(t ? t.port : ''));
+  ")
+  printf "  ARCHIVE %-32s " "(${ARCHIVED//,/ })"
+  if [ -n "$_aport" ] && curl -s --max-time 4 \
+       "http://127.0.0.1:${_aport}/api/warehouse/available-dates" >/dev/null 2>&1; then
+    echo "serving on :${_aport} and the rest"
+  else
+    echo "NOT ANSWERING on :${_aport} — qp will find no history for these"
+  fi
+fi
 
 # ── qp, which this deploy does not own but the desk depends on ─────────────
 #

@@ -6,14 +6,36 @@ const config = require('../config');
 // registers, shortlists, training rows and settings stay entirely separate.
 const DB_PATH = config.dbPath;
 
-require('fs').mkdirSync(path.dirname(DB_PATH), { recursive: true });
+/*
+ * READ-ONLY MODE, for the archive.
+ *
+ * `src/archive/server.js` serves a stopped tool's stored registers so qp can
+ * still chart and backtest them. It must not be able to change what it is
+ * serving — and "must not" has to be enforced by the handle, not by which
+ * routes happen to be mounted. better-sqlite3 in readonly mode refuses a write
+ * outright, so a mistake is an exception at the moment it is made rather than
+ * a quietly altered archive found months later.
+ *
+ * Everything below that WRITES is therefore skipped: no directory is created,
+ * no journal mode is set, no table is created and no column is migrated. All
+ * of those are correct for a tool that owns its database and wrong for a
+ * reader of somebody else's — a CREATE TABLE against an archive would be this
+ * process inventing history rather than reading it.
+ */
+const READONLY = process.env.DB_READONLY === '1';
 
-const db = new Database(DB_PATH);
+if (!READONLY) require('fs').mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const db = READONLY
+  ? new Database(DB_PATH, { readonly: true, fileMustExist: true })
+  : new Database(DB_PATH);
 
-db.exec(`
+if (!READONLY) {
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+}
+
+if (!READONLY) db.exec(`
   CREATE TABLE IF NOT EXISTS shortlist (
     date TEXT PRIMARY KEY,
     items TEXT NOT NULL DEFAULT '[]',
@@ -139,6 +161,9 @@ db.exec(`
 // This crashed T2 and T3 on every start — a screeners table with no run_from,
 // and code that had started reading it.
 function ensureColumns(table, columns) {
+  // An archive migrates nothing. A reader that ALTERs somebody else's database
+  // is not a reader, and on a readonly handle it would throw on every start.
+  if (READONLY) return;
   let existing;
   try {
     existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
@@ -218,12 +243,18 @@ const defaults = [
   ['aiApiKey', ''],
   ['aiModel', 'anthropic/claude-haiku-4-5'],
 ];
-const insertSetting = db.prepare(
-  'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'
-);
-for (const [k, v] of defaults) insertSetting.run(k, v);
+// SEEDING DEFAULTS IS A WRITE, and an archive does none. A reader that filled
+// in another tool's missing settings would be changing the thing it was asked
+// only to read — and on a readonly handle it throws at require time, taking
+// the whole archive process down before it serves a single register.
+if (!READONLY) {
+  const insertSetting = db.prepare(
+    'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'
+  );
+  for (const [k, v] of defaults) insertSetting.run(k, v);
 
-// Force-update aiModel if it still has the old OpenAI default
-db.prepare("UPDATE settings SET value = 'anthropic/claude-haiku-4-5' WHERE key = 'aiModel' AND value = 'gpt-4o-mini'").run();
+  // Force-update aiModel if it still has the old OpenAI default
+  db.prepare("UPDATE settings SET value = 'anthropic/claude-haiku-4-5' WHERE key = 'aiModel' AND value = 'gpt-4o-mini'").run();
+}
 
 module.exports = db;

@@ -159,8 +159,24 @@ describe('every tool at once', () => {
 
   test('a tool with no day count still appears', () => {
     const all = stages.all({});
-    expect(all).toHaveLength(9);
+    // COUNTED FROM THE REGISTRY, not written down here. This asserted `9` and
+    // broke the day T8 was split into T10 and T11 — a test that has to be
+    // edited every time a tool is added or retired is one that teaches people
+    // to edit tests rather than to read them. What matters is that EVERY tool
+    // appears, not how many there happen to be.
+    const registry = require('../tools.config.json').tools;
+    expect(all).toHaveLength(registry.length);
+    expect(all.map(t => t.id).sort()).toEqual(registry.map(t => t.id).sort());
     for (const t of all) expect(stages.STAGES).toContain(t.stage);
+  });
+
+  test('a stopped tool still appears — it has a history worth reading even '
+    + 'though it is no longer collecting', () => {
+    const registry = require('../tools.config.json').tools;
+    const off = registry.filter(t => t.enabled === false).map(t => t.id);
+    if (!off.length) return;               // nothing archived on this branch
+    const ids = stages.all({}).map(t => t.id);
+    for (const id of off) expect(ids).toContain(id);
   });
 
   test('every stage carries a label a person can read', () => {

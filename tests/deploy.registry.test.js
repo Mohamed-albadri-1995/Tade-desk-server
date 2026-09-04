@@ -48,8 +48,46 @@ describe('deploy-tools.sh reads the registry after the pull', () => {
 
   test('an empty registry still stops the deploy rather than starting nothing', () => {
     expect(SRC).toMatch(/if \[ \$\{#TOOLS\[@\]\} -eq 0 \]/);
-    expect(SRC).toMatch(/No tools found in tools\.config\.json/);
+    expect(SRC).toMatch(/No ENABLED tools in tools\.config\.json/);
   });
+
+  /*
+   * THE FLAG THAT MAKES A FULL DEPLOY SAFE ON A SMALL BOX.
+   *
+   * Before it, the only ways to run fewer tools were `--only` — per-deploy, and
+   * it skips the alerts app — or deleting the registry entry, which loses its
+   * ports and its capture times. So a routine `./deploy-tools.sh` silently
+   * brought all nine back, which on a 912 MB box is how you end up locked out
+   * of your own machine.
+   */
+  test('only enabled tools are started', () => {
+    expect(SRC).toMatch(/x\.enabled !== false/);
+  });
+
+  test('ABSENT MEANS ON — an entry written before the flag existed behaves '
+    + 'exactly as it did', () => {
+    // `!== false`, not `=== true`: a tool with no `enabled` key still runs.
+    expect(SRC).not.toMatch(/x\.enabled === true/);
+  });
+
+  test('the tools that were NOT started are named, not just counted', () => {
+    // "6 enabled" leaves you counting on your fingers to work out which three
+    // are missing, on the morning you are wondering why a register is empty.
+    expect(SRC).toMatch(/not started:/);
+    expect(SRC).toMatch(/archived, still readable/);
+  });
+
+  test('a tool with no scorer says so rather than reporting FAIL', () => {
+    // A deliberate absence rendered as a fault, on the line you read to decide
+    // whether the deploy worked, is the confusion this week has been about.
+    expect(SRC).toMatch(/scorer: off \(by config\)/);
+  });
+
+  test('the archive is started, or stopped tools take their history with them',
+    () => {
+      expect(SRC).toMatch(/src\/archive\/server\.js/);
+      expect(SRC).toMatch(/x\.archive/);
+    });
 
   /*
    * The registry is read ONCE. Reading it twice — once for the banner, once for
