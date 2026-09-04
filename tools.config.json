@@ -124,7 +124,7 @@
       "port": 3070,
       "scorerPort": 3071,
       "accent": "#c084fc",
-      "desc": "Retired 2026-09-04 — split into T10 (breakout) and T11 (pullback) so each screener's results can be judged on their own. Kept readable so the split can be checked against its source.",
+      "desc": "Retired 2026-09-04 — split into T10 (breakout) and T11 (pullback) so each screener can be judged on its own. Kept readable so the split can be checked against its source.",
       "captureAt": {
         "r1": "09:46",
         "entryA": "09:47",
@@ -155,13 +155,13 @@
     },
     {
       "id": "T10",
-      "name": "CANSLIM Breakout",
+      "name": "Growth Stock Breakout",
       "port": 3110,
       "scorerPort": 3111,
       "enabled": true,
       "scorer": false,
       "accent": "#c084fc",
-      "desc": "O'Neil growth names breaking to a 52-week high. One half of the old T8, carrying its own history so its results stand on their own.",
+      "desc": "Growth names breaking to a 52-week high. One half of the old T8, carrying its own history so its results stand or fall on their own.",
       "captureAt": {
         "r1": "09:46",
         "entryA": "09:47",
@@ -173,13 +173,13 @@
     },
     {
       "id": "T11",
-      "name": "CANSLIM Pullback",
+      "name": "Growth Stock Pullback",
       "port": 3120,
       "scorerPort": 3121,
       "enabled": true,
       "scorer": false,
       "accent": "#f0abfc",
-      "desc": "O'Neil growth names holding above the 50-day but back under the 20-day — a pullback inside an uptrend. The other half of the old T8.",
+      "desc": "Growth names holding above the 50-day but back under the 20-day — a pullback inside an uptrend. The other half of the old T8.",
       "captureAt": {
         "r1": "09:46",
         "entryA": "09:47",
