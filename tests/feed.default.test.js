@@ -66,9 +66,33 @@ describe('the default', () => {
    * "chosen" and "fell back" are different facts and a page that showed them
    * identically would present a guess as a decision — which is the whole bug.
    */
+  /*
+   * AND IT NAMES THE FEED, rather than a word written once. This test used to
+   * require the sentence "falling back to yahoo" — which is what the page said
+   * whatever the fallback actually was. The fallback above prefers
+   * hybrid_yahoo whenever a Polygon key exists, so on a box with one the note
+   * contradicted the dropdown three centimetres above it: the control read
+   * hybrid_yahoo and the note said yahoo. The test was enforcing the bug.
+   */
   test('it says whether it was chosen or fallen back to', () => {
     expect(QP).toMatch(/'default_chosen'/);
-    expect(PAGE).toMatch(/not chosen — falling back to yahoo/);
+    expect(PAGE).toMatch(/not chosen — falling back to <b>\$\{esc\(d\.defaultFeed\)\}<\/b>/);
+    expect(PAGE).toMatch(/chosen — <b>\$\{esc\(d\.defaultFeed\)\}<\/b>/);
+    // …and never as a literal again. (The phrase survives in the comment that
+    // records why, which is not what the page prints.)
+    expect(PAGE).not.toMatch(/falling back to yahoo\./);
+  });
+
+  /*
+   * WHICH SETTING THIS IS. The trader asked where "the real setup data feed"
+   * lives and whether it is in qp or on the desk, and the honest answer is
+   * that this control is neither: it is the CHART's and the BACKTEST's. A live
+   * setup decides on the feed on its own card. Saying so here is cheaper than
+   * discovering it from a morning that did not fire.
+   */
+  test('and says that a live setup does not read it', () => {
+    expect(PAGE).toMatch(/feed for CHARTS and BACKTESTS/);
+    expect(PAGE).toMatch(/its own card, which is a separate setting/);
   });
 
   test('the reason is written down where the code is', () => {

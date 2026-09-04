@@ -1315,9 +1315,14 @@ async function loadSetups() {
               : 'nothing — all signals'],
             // The feed the decision USES. When that is not the one chosen — a
             // polygon preference cannot decide a live bar — the reason is on
-            // the line, not in a log.
+            // the line, not in a log. And when NOTHING was chosen, the note
+            // says which default is deciding: `${esc(null)}` would otherwise
+            // have printed the word "null" where a feed name belongs.
             ['feed', esc(s.liveFeed || 'default')
-              + (s.feedNote ? ` <span class="warn">(${esc(s.chosenFeed)} chosen — ${esc(s.feedNote)})</span>` : '')],
+              + (s.feedNote
+                ? ` <span class="warn">(${s.chosenFeed ? `${esc(s.chosenFeed)} chosen — ` : ''}`
+                  + `${esc(s.feedNote)})</span>`
+                : '')],
             ...(s.universeScanAt ? [['extra scan', esc(s.universeScanAt)]] : []),
             ...(s.maxTradesPerDay ? [['max/day', `${esc(s.maxTradesPerDay)} order(s)`]] : []),
             ...(s.riskPerTrade ? [['risk', `$${esc(s.riskPerTrade)}/trade`]] : []),
@@ -1700,10 +1705,25 @@ function paintFeed(d) {
   const names = Object.keys(d.feeds).filter(k => d.feeds[k]);
   sel.innerHTML = names.map(n =>
     `<option value="${esc(n)}"${n === d.defaultFeed ? ' selected' : ''}>${esc(n)}</option>`).join('');
-  note.textContent = d.chosen
-    ? 'chosen'
-    : 'not chosen — falling back to yahoo. Polygon is NOT picked automatically:'
-      + ' a key being present does not mean the plan includes 1-minute data.';
+  /*
+   * NAME THE FEED THAT IS ACTUALLY IN FORCE, not a word written once.
+   *
+   * This said "falling back to yahoo" no matter what the fallback was. qp
+   * falls back to hybrid_yahoo whenever a Polygon key exists, so on this box
+   * the sentence contradicted the dropdown three centimetres above it: the
+   * control read hybrid_yahoo and the note said yahoo. A default nobody chose
+   * is worth flagging; misnaming it is worse than not mentioning it.
+   *
+   * AND IT SAYS WHAT THIS SETTING GOVERNS. It is the CHART and the BACKTEST.
+   * A live setup decides on its own feed (each setup card, "feed"), so
+   * changing this one does not change what fires at 09:35.
+   */
+  note.innerHTML = (d.chosen
+    ? `chosen — <b>${esc(d.defaultFeed)}</b>.`
+    : `not chosen — falling back to <b>${esc(d.defaultFeed)}</b>. Polygon is NOT picked `
+      + 'automatically: a key being present does not mean the plan includes 1-minute data.')
+    + ' This is the feed for CHARTS and BACKTESTS. A live setup decides on the feed on '
+    + 'its own card, which is a separate setting.';
 }
 
 async function loadFeed() {

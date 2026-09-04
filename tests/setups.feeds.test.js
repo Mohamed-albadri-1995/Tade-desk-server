@@ -37,9 +37,12 @@ const write = (name, obj) => fs.writeFileSync(path.join(DIR, name), JSON.stringi
 
 /* ── the substitution ────────────────────────────────────────────────────── */
 
-describe('polygon is never the live feed', () => {
+const withKeys = () =>
+  write('keys.json', { alpacaApiKey: 'PKFAKEACCOUNTAAAAAAA', alpacaApiSecret: 'fakesecretAAAA' });
+
+describe('no Polygon-backed feed is ever the live feed', () => {
   test('with Alpaca keys on the desk, polygon becomes alpaca — and says so', () => {
-    write('keys.json', { alpacaApiKey: 'PKFAKEACCOUNTAAAAAAA', alpacaApiSecret: 'fakesecretAAAA' });
+    withKeys();
     const r = feeds().liveFeedFor('polygon');
     expect(r.feed).toBe('alpaca');
     expect(r.substituted).toBe(true);
@@ -49,27 +52,95 @@ describe('polygon is never the live feed', () => {
     expect(r.note).toMatch(/Deciding on alpaca instead/);
   });
 
+  /*
+   * THE TWO THAT WERE MISSED, and they fail the same way for the same reason.
+   * `hybrid` and `hybrid_yahoo` are Polygon's history with a second source
+   * appended for the minutes Polygon has not published — so both call
+   * polygon.load ONCE PER SYMBOL before they reach the part that is current.
+   * Forty symbols at five requests a minute is the timeout that has been
+   * printed as "MISSED THE 09:35 WINDOW" every morning, and a setup left on
+   * either of them would have gone on printing it.
+   *
+   * They are the right feeds for the CHART — deep history, consolidated volume
+   * on both sides of the seam. That is a different job.
+   */
+  test('hybrid and hybrid_yahoo are substituted too — the Polygon leg is per symbol',
+    () => {
+      withKeys();
+      for (const f of ['hybrid', 'hybrid_yahoo']) {
+        const r = feeds().liveFeedFor(f);
+        expect(r.feed).toBe('alpaca');
+        expect(r.substituted).toBe(true);
+        expect(r.chosen).toBe(f);
+        expect(r.note).toMatch(/Polygon history for every symbol/);
+        expect(r.note).toMatch(/five requests a minute/);
+      }
+    });
+
   test('without keys it becomes yahoo, and says what would make it alpaca', () => {
     const r = feeds().liveFeedFor('polygon');
     expect(r.feed).toBe('yahoo');
     expect(r.note).toMatch(/add Alpaca keys/);
   });
 
-  test('every other choice stands, with no note', () => {
-    for (const f of ['yahoo', 'alpaca', 'hybrid', 'hybrid_yahoo']) {
+  test('a feed that can decide live stands, with no note', () => {
+    for (const f of ['yahoo', 'alpaca']) {
       const r = feeds().liveFeedFor(f);
       expect(r).toEqual({ feed: f, note: null, substituted: false, chosen: f });
     }
   });
 
-  test('no preference at all is yahoo — the desk\'s own default', () => {
-    expect(feeds().liveFeedFor(null).feed).toBe('yahoo');
-    expect(feeds().liveFeedFor(undefined).feed).toBe('yahoo');
+  test('case does not matter', () => {
+    withKeys();
+    expect(feeds().liveFeedFor('Polygon').feed).toBe('alpaca');
+    expect(feeds().liveFeedFor('Hybrid_Yahoo').feed).toBe('alpaca');
+  });
+});
+
+/* ── the default nobody chose ────────────────────────────────────────────── */
+
+/*
+ * A setup with no feed preference decided on yahoo, whose intraday lag is
+ * variable — 0 to 15 minutes, measured. A setup whose definition is "the 09:34
+ * bar" cannot decide on a feed that has not published 09:34, so the runner's
+ * stale gate skipped it, correctly and silently. That silence is the thing
+ * this desk has spent a week explaining.
+ */
+describe('what decides when nobody has chosen', () => {
+  test('with Alpaca keys it is alpaca, and the card says the default is deciding', () => {
+    withKeys();
+    for (const none of [null, undefined, '', '  ']) {
+      const r = feeds().liveFeedFor(none);
+      expect(r.feed).toBe('alpaca');
+      // NOT a substitution — nothing was overridden. `chosen: null` is what
+      // tells the card to say "no feed chosen" instead of naming one.
+      expect(r.substituted).toBe(false);
+      expect(r.chosen).toBeNull();
+      expect(r.note).toMatch(/no feed chosen for this setup/);
+    }
   });
 
-  test('case does not matter', () => {
-    write('keys.json', { alpacaApiKey: 'PKFAKEACCOUNTAAAAAAA', alpacaApiSecret: 'fakesecretAAAA' });
-    expect(feeds().liveFeedFor('Polygon').feed).toBe('alpaca');
+  /*
+   * THE COST IS ON THE CARD, NOT IN THIS FILE. Alpaca's free tier is IEX only,
+   * so its volume is a few percent of the tape and every volume-weighted
+   * number from it — session VWAP above all — is measured on that slice. The
+   * trade is deliberate: a level slightly off can still be traded, a bar that
+   * does not exist cannot. Saying so is the condition of taking it.
+   */
+  test('and it says what alpaca costs, rather than presenting it as free', () => {
+    withKeys();
+    const note = feeds().liveFeedFor(null).note;
+    expect(note).toMatch(/IEX only/);
+    expect(note).toMatch(/VWAP/);
+    expect(note).toMatch(/backtest on alpaca/i);
+  });
+
+  test('with no keys it is still yahoo, and says what would change that', () => {
+    const r = feeds().liveFeedFor(null);
+    expect(r.feed).toBe('yahoo');
+    expect(r.chosen).toBeNull();
+    expect(r.note).toMatch(/0–15 minutes behind/);
+    expect(r.note).toMatch(/Add Alpaca keys/);
   });
 });
 
@@ -212,5 +283,30 @@ describe('it is wired in where the feed is read', () => {
   test('the page says which feed is chosen and which is used', () => {
     expect(src('public', 'alerts.html')).toContain('s.chosenFeed');
     expect(src('src', 'alerts', 'server.js')).toContain('feedNote: s.feedNote || null');
+  });
+
+  /*
+   * `esc(null)` PRINTS THE WORD "null". With no preference chosenFeed is null
+   * and there is still a note, so the unguarded template would have put
+   * "(null chosen — …)" on the card where a feed name belongs.
+   */
+  test('the card only names a chosen feed when one was chosen', () => {
+    expect(src('public', 'alerts.html'))
+      .toContain('${s.chosenFeed ? `${esc(s.chosenFeed)} chosen — ` : \'\'}');
+  });
+
+  /*
+   * THE SETTINGS NOTE NAMED THE WRONG FEED. It read "falling back to yahoo"
+   * whatever the fallback was, and qp falls back to hybrid_yahoo whenever a
+   * Polygon key exists — so the sentence contradicted the dropdown directly
+   * above it. It now names the feed actually in force, and says that this
+   * setting is the CHART's, not the one a live setup decides on.
+   */
+  test('the settings note names the feed in force, and says what it governs', () => {
+    const a = src('public', 'alerts.html');
+    expect(a).toContain('falling back to <b>${esc(d.defaultFeed)}</b>');
+    expect(a).not.toContain("'not chosen — falling back to yahoo.");
+    expect(a).toMatch(/feed for CHARTS and BACKTESTS/);
+    expect(a).toMatch(/live setup decides on the feed on \n?\s*'?\s*\+?\s*'?its own card/);
   });
 });

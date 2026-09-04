@@ -211,6 +211,34 @@
               border-right:1px solid var(--border); overflow-y:auto;
               overflow-x:hidden; }
   #leftRail::-webkit-scrollbar { width:0; }
+  /* ── THE RAIL, DOCKED UNDER THE CHART ──
+     The same seven buttons, moved below the time axis. Taken OUT of main's
+     flex row rather than wrapped into it: <main> also holds the side panel,
+     which on a wide screen sits BESIDE the chart, and a wrapping row would
+     push it onto a line of its own. Absolute inside main (which is already
+     position:relative), with main reserving the height so the time axis is
+     never underneath it.
+
+     Both layouts are kept because they answer different questions: the rail
+     on the left costs chart WIDTH, at the bottom it costs HEIGHT, and which
+     of those you have to spare depends on the phone and on the chart. */
+  #leftRail { --railH:46px; }
+  body.rail-bottom main { padding-bottom:var(--railH); }
+  body.rail-bottom #leftRail {
+    position:absolute; left:0; right:0; bottom:0; z-index:6;
+    flex:0 0 auto; flex-direction:row; justify-content:space-around;
+    align-items:center; gap:2px; padding:3px 6px; height:var(--railH);
+    border-right:none; border-top:1px solid var(--border);
+    overflow-x:auto; overflow-y:hidden; }
+  body.rail-bottom #leftRail .railBtn { flex:0 0 auto; min-width:52px; padding:3px 2px; }
+  /* The drawer is position:fixed at the bottom of the VIEWPORT, so with it
+     open the rail has to climb above it or it is simply covered. */
+  body.rail-bottom.drawer-open main { padding-bottom:calc(var(--drawerH, 42vh) + var(--railH)); }
+  body.rail-bottom.drawer-open #leftRail { bottom:var(--drawerH, 42vh); }
+  @media (max-width:820px){
+    body.rail-bottom #leftRail { --railH:44px; }
+    body.rail-bottom #leftRail .railBtn { min-width:46px; }
+  }
   .railBtn { display:flex; flex-direction:column; align-items:center; gap:1px;
              background:transparent; border:1px solid transparent; color:var(--text2);
              border-radius:7px; padding:6px 2px; cursor:pointer; line-height:1.1;
@@ -503,6 +531,18 @@
     <div class="frow">
       <label class="fld"><span>Type</span><select id="ctype"><option value="candles">Candles</option><option value="bars">Bars</option><option value="line">Line</option><option value="area">Area</option><option value="heikin">Heikin Ashi</option></select></label>
       <label class="fld"><span>Scale</span><select id="scaleMode"><option value="0">Linear</option><option value="1">Log</option><option value="2">%</option></select></label>
+    </div>
+    <!-- HOW MUCH THE CHART SAYS, and where the tools sit. Two questions that
+         only matter on a phone, which is where this is read. -->
+    <div class="frow">
+      <label class="fld"><span>Labels</span><select id="labelMode">
+        <option value="clean">Clean — price only</option>
+        <option value="full">Every indicator tagged</option>
+      </select></label>
+      <label class="fld"><span>Tools</span><select id="railPos">
+        <option value="left">Left of the chart</option>
+        <option value="bottom">Under the time axis</option>
+      </select></label>
     </div>
     <div class="frow">
       <label class="fld"><span>Days</span><input id="days" type="number" value="5" min="1" max="730"></label>
@@ -1175,7 +1215,8 @@ function drawSnapshot(j){
     // price-scale overlays (MAs, VWAPs, LEVELS) must NOT expand the candles'
     // scale — otherwise a far level (R3, monthly, prev-year) compresses the
     // candles. Candles alone drive the price scale; overlays draw where they are.
-    const line=addLine({color:s.color,lineWidth:s.step?2:3,priceLineVisible:false,title:s.name,lineStyle:s.style||0,lineType:lt,lastValueVisible:true,priceScaleId:scaleId,...(onPrice?{autoscaleInfoProvider:()=>null}:{})});
+    const _clean=document.body.classList.contains('labels-clean');
+    const line=addLine({color:s.color,lineWidth:s.step?2:3,priceLineVisible:false,title:_clean?'':s.name,lineStyle:s.style||0,lineType:lt,lastValueVisible:!_clean,priceScaleId:scaleId,...(onPrice?{autoscaleInfoProvider:()=>null}:{})});
     line.setData(vals);
     if(s.markers&&s.markers.length&&typeof line.setMarkers==='function'){ try{line.setMarkers(s.markers);}catch(_){} }
     line._ov={name:s.name,color:s.color}; line._last=vals.length?vals[vals.length-1].value:null; LINES.push(line);
@@ -1188,6 +1229,44 @@ function drawSnapshot(j){
   updateLegend();
 }
 function _fmtN(v){ if(v==null||v!==v)return '—'; const a=Math.abs(v); return a>=1000?Math.round(v).toLocaleString():(a>=1?v.toFixed(2):v.toFixed(4)); }
+/* Overlay names are typed by hand in the Indicators panel, so they reach the
+   legend as untrusted strings and are written straight into innerHTML. */
+function _esc(x){ return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+/*
+ * HOW MUCH THE CHART SAYS, and where the seven tools sit.
+ *
+ * Both are read on a phone, where a 390px chart carried four coloured
+ * last-value tags — one per overlay, each with its full call — over the price
+ * it was there to show. Clean keeps the PRICE tag, which is the one number
+ * being read, and drops the overlays'; their values are still in the legend.
+ *
+ * Remembered per browser: it is a preference about this screen, not about the
+ * chart, and nothing on the server has an opinion about it.
+ */
+function applyLabelMode(){
+  const clean=(document.getElementById('labelMode')||{}).value!=='full';
+  localStorage.setItem('qpc_labels', clean?'clean':'full');
+  document.body.classList.toggle('labels-clean', clean);
+  // LINES and STRATLINES are `let` bindings, which are NOT properties of
+  // window — reading them through `window.` would silently iterate nothing and
+  // the tags would never come off.
+  for(const ln of [...LINES,...STRATLINES]){
+    try{ ln.applyOptions({lastValueVisible:!clean, title:clean?'':(ln._ov&&ln._ov.name)||''}); }catch(_){}
+  }
+  // The legend carries the same names, so it is repainted with the same rule.
+  try{ updateLegend(); }catch(_){}
+}
+
+function applyRailPos(){
+  const bottom=(document.getElementById('railPos')||{}).value==='bottom';
+  localStorage.setItem('qpc_rail', bottom?'bottom':'left');
+  document.body.classList.toggle('rail-bottom', bottom);
+  // The chart's box just changed shape; lightweight-charts does not notice on
+  // its own, and a chart measured for the old box draws its axis off-screen.
+  try{ _resizeChart(); }catch(_){}
+}
 function updateLegend(param){
   const leg=document.getElementById('legend'); if(!leg||!PRICE)return;
   const has=param&&param.time&&param.seriesData;
@@ -1198,7 +1277,15 @@ function updateLegend(param){
   let html='';
   if(c!=null&&o!=null){ const up=c>=o; html+=`<b>${sym}</b> <span style="color:${up?'var(--accent)':'var(--red)'}">O ${_fmtN(o)}  H ${_fmtN(h)}  L ${_fmtN(l)}  C ${_fmtN(c)}</span>`; if(vol!=null)html+=`  <span class="muted">V ${_fmtN(vol)}</span>`; }
   else if(c!=null){ html+=`<b>${sym}</b> <span style="color:var(--text)">${_fmtN(c)}</span>`; if(vol!=null)html+=`  <span class="muted">V ${_fmtN(vol)}</span>`; }
-  for(const ln of [...LINES,...STRATLINES]){ if(!ln._ov)continue; let v=ln._last; if(has){ const d=param.seriesData.get(ln); v=d?d.value:undefined; } if(v!=null&&v===v) html+=`  <span style="color:${ln._ov.color||'#94a3b8'}"><span class="pill" style="background:${ln._ov.color||'#94a3b8'}"></span>${ln._ov.name} ${_fmtN(v)}</span>`; }
+  /*
+   * THE NAME, NOT THE EXPRESSION. An overlay is stored under the call that
+   * built it — `swing_hh(lookback=25,rth_only=True)` — and three of those wrap
+   * the legend over the top third of a phone screen. Clean shows the primitive
+   * and hides the arguments; they are still in the title, one tap away, and
+   * still whole in the Indicators panel that set them.
+   */
+  const clean=document.body.classList.contains('labels-clean');
+  for(const ln of [...LINES,...STRATLINES]){ if(!ln._ov)continue; let v=ln._last; if(has){ const d=param.seriesData.get(ln); v=d?d.value:undefined; } if(v!=null&&v===v){ const full=ln._ov.name||''; const shown=clean?String(full).split('(')[0]:full; html+=`  <span style="color:${ln._ov.color||'#94a3b8'}" title="${_esc(full)}"><span class="pill" style="background:${ln._ov.color||'#94a3b8'}"></span>${_esc(shown)} ${_fmtN(v)}</span>`; } }
   leg.innerHTML=html;
 }
 
@@ -1731,7 +1818,8 @@ function drawStratSeries(series){
   for(const s of (series||[])){ const vals=s.values||[]; if(!vals.length)continue;
     let sLo=Infinity,sHi=-Infinity; for(const v of vals){ if(v.value<sLo)sLo=v.value; if(v.value>sHi)sHi=v.value; }
     const onPrice=(sHi>=pLo-0.5*span)&&(sLo<=pHi+0.5*span); if(!onPrice)usedOsc=true;
-    const ln=addLine({color:s.color,lineWidth:2,priceLineVisible:false,title:s.name,lineStyle:s.style||0,lineType:s.step?1:0,lastValueVisible:true,priceScaleId:onPrice?'right':'osc',...(onPrice?{autoscaleInfoProvider:()=>null}:{})});
+    const _clean2=document.body.classList.contains('labels-clean');
+    const ln=addLine({color:s.color,lineWidth:2,priceLineVisible:false,title:_clean2?'':s.name,lineStyle:s.style||0,lineType:s.step?1:0,lastValueVisible:!_clean2,priceScaleId:onPrice?'right':'osc',...(onPrice?{autoscaleInfoProvider:()=>null}:{})});
     ln.setData(vals); if(s.markers&&s.markers.length&&typeof ln.setMarkers==='function'){try{ln.setMarkers(s.markers);}catch(_){}}
     ln._ov={name:s.name,color:s.color}; ln._last=vals.length?vals[vals.length-1].value:null; STRATLINES.push(ln);
   }
@@ -2818,6 +2906,10 @@ window.addEventListener('load',async()=>{
   document.getElementById('scaleMode').value=localStorage.getItem('qpc_scale')||'0';
   const applyScale=()=>{ const m=parseInt(document.getElementById('scaleMode').value,10)||0; localStorage.setItem('qpc_scale',m); try{CHART.priceScale('right').applyOptions({mode:m});}catch(_){} };
   document.getElementById('scaleMode').addEventListener('change',applyScale); applyScale();
+  document.getElementById('labelMode').value=localStorage.getItem('qpc_labels')||'clean';
+  document.getElementById('labelMode').addEventListener('change',applyLabelMode); applyLabelMode();
+  document.getElementById('railPos').value=localStorage.getItem('qpc_rail')||'left';
+  document.getElementById('railPos').addEventListener('change',applyRailPos); applyRailPos();
   document.getElementById('fitBtn').onclick=()=>{ try{CHART.priceScale('right').applyOptions({autoScale:true});}catch(_){} try{CHART.priceScale('osc').applyOptions({autoScale:true});}catch(_){} try{CHART.timeScale().fitContent();}catch(_){} };
   const closeSide=()=>{ document.getElementById('side').classList.add('hide'); document.body.classList.remove('side-open'); setTimeout(_resizeChart,60); };
   const openSide=()=>{ document.getElementById('side').classList.remove('hide'); document.body.classList.add('side-open'); setTimeout(_resizeChart,60); };
