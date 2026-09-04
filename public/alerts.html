@@ -521,6 +521,13 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .pf.fail .v { color:#ef4444; }
 .pf.untested .v { color:#9ca3af; }
 .pf .why { font-size:11.5px; color:var(--dim); margin-top:4px; line-height:1.6; }
+/* The rehearsal reuses the preflight's three states — same rule, same colours,
+   because they are answering the same kind of question about different scopes
+   and two vocabularies for one idea is how a page stops being readable. */
+.st-reh { margin:8px 0 4px; }
+.st-reh-head { font-size:12px; color:var(--text2); margin-bottom:4px; }
+.st-reh-head b { font-family:var(--mono); }
+.st-reh-note { margin-top:6px; line-height:1.6; }
 .lg-run { border-left:2px solid var(--border); padding:6px 0 6px 10px;
   margin:6px 0; font-size:11.5px; color:var(--text2); line-height:1.6; }
 .lg-run.bad { border-left-color:var(--red); }
@@ -1233,7 +1240,16 @@ async function loadSetups() {
             : `${esc(s.decisionTime)} ET`}</span>
           <button class="btn${on ? ' on' : ''}" onclick="toggleSetup('${esc(s.id)}', ${!on})">
             ${on ? 'On' : 'Off'}</button>
+          <!-- Runs the whole chain NOW: cards, filter, qp, ranking, sizing,
+               routing. Publishes nothing, places nothing. Here rather than in
+               the preflight section because the question is about THIS setup,
+               and because a setup deciding at 09:35 could otherwise only be
+               tested at 09:35. -->
+          <button class="btn" onclick="rehearseSetup('${esc(s.id)}', ${i})"
+                  title="Run this setup's whole chain on the current bar. Nothing is published or placed.">
+            Rehearse</button>
         </div>
+        <div class="st-reh" id="st-reh-${i}"></div>
         <!-- The tools stay editable after the first one is picked. A setup that
              could be assigned once and never changed made adding a second tool,
              or moving it to the right one, a trip back to the chart tool — the
@@ -2800,6 +2816,55 @@ async function runPreflight() {
         <div class="why">${esc(l.note || '')}</div>
       </div>`;
     }).join('') || '<div class="empty">Nothing to check.</div>';
+  } catch (e) {
+    out.innerHTML = `<div class="empty"><b class="warn">${esc(e.message)}</b></div>`;
+  }
+}
+
+/*
+ * REHEARSING ONE SETUP, AT WHATEVER TIME IT IS NOW.
+ *
+ * The preflight above checks the desk. This checks ONE STRATEGY end to end:
+ * its tool's cards, its own filter, the qp decision, the ranking, the sizing,
+ * the routing, and the order it would have sent. Nothing is published and
+ * nothing is placed.
+ *
+ * IT DECIDES ON THE CURRENT BAR, not the setup's. That is what makes it usable
+ * at two in the afternoon — and it is also why it proves the machine rather
+ * than the edge, which the panel says in as many words rather than leaving to
+ * be inferred from a green row.
+ *
+ * The feed lag is reported as its own leg. On Yahoo it will read as broken,
+ * with the reason: fifteen minutes behind is not a fault in the plumbing, it
+ * is the plumbing working correctly on stale bars — and it is the single most
+ * likely reason a 09:35 setup takes nothing.
+ */
+async function rehearseSetup(id, i) {
+  const out = document.getElementById(`st-reh-${i}`);
+  if (!out) return;
+  out.innerHTML = '<div class="empty">Running the whole chain — cards, filter, qp, '
+    + 'ranking, sizing, routing. This can take up to a minute.</div>';
+  try {
+    const d = await (await fetch(`/api/setups/${encodeURIComponent(id)}/rehearse`)).json();
+    const legs = (d.legs || []).map((l) => {
+      const cls = l.ok === true ? 'pass' : l.ok === false ? 'fail' : 'untested';
+      const word = l.ok === true ? 'answered' : l.ok === false ? 'broken' : 'not reached';
+      return `<div class="pf ${cls}">
+        <b>${esc(l.title || l.id)}</b><span class="v">${word}</span>
+        <div class="why">${esc(l.note || '')}</div>
+      </div>`;
+    }).join('');
+    const head = `${d.passed || 0} answered`
+      + (d.failed ? ` · <b class="warn">${d.failed} broken</b>` : '')
+      // NEVER FOLDED INTO THE ANSWERED COUNT. A leg nothing reached — because
+      // nothing qualified on this bar — has proven nothing at all.
+      + (d.untested ? ` · ${d.untested} not reached` : '');
+    out.innerHTML = `<div class="st-reh-head">${head}${
+      d.bar ? ` · decided the <b>${esc(d.bar)}</b> bar` : ''}${
+      d.decidesOn && d.decidesOn !== d.bar
+        ? ` <span class="note">(this setup normally decides ${esc(d.decidesOn)})</span>` : ''
+    }</div>${legs || `<div class="empty">${esc(d.note || 'Nothing came back.')}</div>`}
+      ${legs ? `<div class="note st-reh-note">${esc(d.note || '')}</div>` : ''}`;
   } catch (e) {
     out.innerHTML = `<div class="empty"><b class="warn">${esc(e.message)}</b></div>`;
   }

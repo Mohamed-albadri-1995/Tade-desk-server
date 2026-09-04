@@ -407,6 +407,37 @@ function startScheduler() {
       }
     });
 
+  /*
+   * ── the morning rehearsal ──
+   *
+   * Every setup this tool owns, run end to end before the open: cards, filter,
+   * qp, the ranking, the sizing, the routing. It publishes nothing and places
+   * nothing — it decides on the current bar and reports leg by leg.
+   *
+   * WHY IT IS SCHEDULED RATHER THAN LEFT AS A BUTTON. A setup deciding at 09:35
+   * could only be tested at 09:35, and when it failed the next chance was the
+   * following morning. Nobody can be at the phone for one exact minute every
+   * day, so the check reports itself and the morning's question becomes
+   * something you read.
+   *
+   * 09:25, not 09:00: the pre-market scans have run by then, so the card list
+   * is a real one, and there are still ten minutes to do something about a leg
+   * that did not come back.
+   *
+   * It also WARMS qp. The decision budget is two attempts of eighteen seconds,
+   * and a platform answering its first request of the day cold can spend most
+   * of that — which is the leading suspect for the 09:35 timeouts.
+   */
+  registerJob('Setup Rehearsal 09:25', '25 9 * * 1-5', 'America/New_York',
+    async () => {
+      const { rehearseAll } = require('./setups/rehearse');
+      const reports = await rehearseAll();
+      if (!reports.length) return;
+      const bad = reports.filter(r => r.failed);
+      console.log(`[Rehearsal] ${reports.length} setup(s) rehearsed, `
+        + `${bad.length} with a leg that did not come back`);
+    });
+
   // Job identity comes from the name, so renaming a job leaves its old row
   // behind holding a schedule nothing reads any more. Harmless until someone
   // opens the table to work out why a change had no effect.

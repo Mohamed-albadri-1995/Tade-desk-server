@@ -835,6 +835,62 @@ app.get('/api/preflight', async (req, res) => {
   }
 });
 
+/*
+ * GET /api/setups/:id/rehearse — run one setup's whole chain, right now.
+ *
+ * PROXIED, because this process cannot run a setup. It has no database and no
+ * card list; the universe a setup ranks belongs to the tool that found it. So
+ * the desk asks the owning tool, on its own port, and hands back what it says.
+ *
+ * WHY THE PAGE DOES NOT ASK THE TOOL DIRECTLY: a different port is a different
+ * origin, and the tools only allow cross-origin reads on a short fixed list of
+ * paths. One server-side hop keeps that list closed.
+ *
+ * A SETUP WITH NO TOOL IS UNTESTED, NOT PASSED. It comes back with every leg
+ * null and a sentence saying why — a rehearsal that quietly reported "fine"
+ * for a setup nothing can run would be the exact failure this is built against.
+ */
+app.get('/api/setups/:id/rehearse', async (req, res) => {
+  const blank = (note) => ({
+    ok: false, rehearsal: true, setupId: req.params.id, at: Date.now(),
+    legs: [], passed: 0, failed: 0, untested: 0, verdict: null, note,
+  });
+  try {
+    const setup = await require('../setups/catalog').get(req.params.id);
+    if (!setup) return res.status(404).json(blank('No such setup.'));
+    const owners = setup.tools || [];
+    if (!owners.length) {
+      return res.json(blank(`${setup.name} names no tool, so no card list can be `
+        + 'ranked and there is nothing to rehearse. Assign it to a tool in qp.'));
+    }
+    const reg = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools.config.json'), 'utf8'));
+    const want = String(req.query.tool || owners[0]);
+    const tool = (reg.tools || []).find(t => t.id === want);
+    if (!tool) {
+      return res.json(blank(`${setup.name} belongs to ${want}, which is not in `
+        + 'tools.config.json — there is no port to ask.'));
+    }
+    if (tool.enabled === false) {
+      return res.json(blank(`${setup.name} belongs to ${tool.id}, which is switched `
+        + 'off. A sleeping tool collects no cards, so the setup has nothing to rank.'));
+    }
+    /*
+     * A LONG TIMEOUT ON PURPOSE. qp gets two attempts of eighteen seconds
+     * inside the runner, and a cold platform uses most of them. Cutting this
+     * off at the usual four seconds would report "did not answer" for a
+     * decision that was on its way — which is the wrong answer twice over.
+     */
+    const r = await fetch(`http://127.0.0.1:${tool.port}/api/setups/`
+      + `${encodeURIComponent(setup.id)}/rehearse`,
+    { signal: AbortSignal.timeout(90000) });
+    if (!r.ok) return res.json(blank(`${tool.id} answered ${r.status}.`));
+    const out = await r.json();
+    res.json({ ...out, tool: tool.id, toolName: tool.name });
+  } catch (err) {
+    res.json(blank(`Could not reach the tool that owns this setup: ${err.message}`));
+  }
+});
+
 // Where a tool lives, so the page can deep-link a fire back to its card.
 app.get('/api/tools', (req, res) => {
   try {

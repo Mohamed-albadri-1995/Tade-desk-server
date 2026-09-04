@@ -98,6 +98,13 @@ function feedLagMin(asked, answered) {
  */
 const FEED_LAG_WARN_MIN = 2;
 
+/** The market's clock, in minutes-of-day form the rest of this file speaks. */
+function nowBarET() {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date());
+}
+
 /** The minute before the decision — the last bar that must have closed. */
 function lastWantedBar(decisionTime) {
   const [h, m] = String(decisionTime).split(':').map(Number);
@@ -282,14 +289,34 @@ function unmanagedLine(plan) {
  * endpoint uses, so a setup can be inspected on a past date without putting
  * yesterday's trades into today's alert feed.
  */
-async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = null } = {}) {
+async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = null,
+                                  rehearsal = false } = {}) {
   const day = date || toETDate(Date.now());
+  /*
+   * A REHEARSAL ASKS ABOUT NOW, AND PUBLISHES NOTHING.
+   *
+   * A setup deciding at 09:35 could only be tested at 09:35, which is not a
+   * workable way to check a machine — and when it failed, the next chance was
+   * the following morning. A rehearsal runs the whole chain at any minute of
+   * the day: cards, filter, qp, ranking, sizing, routing.
+   *
+   * IT IS ABOUT THE PLUMBING, NOT THE EDGE. Asked at 14:00, a 09:35 setup
+   * decides on the 14:00 bar — so what it proves is that every leg answers,
+   * not that the strategy would have taken this trade. The alternative, asking
+   * about 09:35 from 14:00, would report a lag of five hours and read as a
+   * failure: a true number about a question nobody asked.
+   *
+   * dryRun is forced rather than expected. A rehearsal that published would
+   * be indistinguishable, afterwards, from the setup having fired.
+   */
+  if (rehearsal) dryRun = true;
   // Which bar this run is answering for. The scheduler knows it; a direct call
   // (preview, a test) does not, and for a clock setup there is only ever one.
   // THE BAR EVALUATED, not the minute the entry lands in. They differ by one
   // bar for every fill model that enters at the next open — which is now the
   // default, because it is what the backtests were run on.
-  const decisionBar = bar || setup.decidesOnBar || setup.decisionTime;
+  const decisionBar = bar
+    || (rehearsal ? nowBarET() : setup.decidesOnBar || setup.decisionTime);
   const started = Date.now();
 
   // A setup names the tools it belongs to — the qp strategy carries them — so a
@@ -434,7 +461,17 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
      */
     lastBar: decided.last_bar || null,
     oldestBar: decided.oldest_bar || null,
-    lagMin: feedLagMin(bar, decided.last_bar),
+    /*
+     * `bar`, not `decisionBar`, on a scheduled run: the lag is the gap between
+     * the minute the desk ASKED about and the minute it was answered about, and
+     * a run that was never told which bar it is deciding cannot measure one.
+     *
+     * A rehearsal is the exception, because it asks about the current minute on
+     * purpose — so it can measure the lag, and that measurement is most of what
+     * it is for. This is the number that says "the feed is fifteen minutes
+     * behind" at two in the afternoon, without waiting for 09:35 to find out.
+     */
+    lagMin: feedLagMin(rehearsal ? decisionBar : bar, decided.last_bar),
   };
 
   /*
@@ -566,7 +603,16 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
    * Dropped LOUDLY. A stale pick is not noise — it means the setup found
    * something on a bar it could not act on, which is worth seeing.
    */
-  if (decisionBar) {
+  /*
+   * A REHEARSAL DOES NOT APPLY THIS GATE, and that is not it being lenient.
+   *
+   * The gate asks "is this pick tradeable on the bar being decided". A
+   * rehearsal is not asking that — it is asking whether the machine answers —
+   * and on a feed running fifteen minutes behind it would drop every pick, on
+   * every rehearsal, for a reason that has nothing to do with the plumbing
+   * being checked. The lag itself is reported instead, in minutes, as a fact.
+   */
+  if (decisionBar && !rehearsal) {
     const stale = out.picks.filter(p => staleBy(p.decisionAt, decisionBar) > STALE_TOLERANCE_MIN);
     if (stale.length) {
       const drop = new Set(stale.map(p => p.ticker));
@@ -1060,7 +1106,10 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
       // The bar asked about, the bar answered about, and the gap. See
       // `feedLagMin` — this is the difference between a live decision and a
       // correct decision about a market that has moved on.
-      askedBar: bar || null,
+      // `decisionBar`, so a rehearsal — which is never told a bar and asks
+      // about the current minute — reports what it actually asked rather than
+      // nothing at all.
+      askedBar: decisionBar || null,
       lastBar: data.lastBar,
       oldestBar: data.oldestBar,
       lagMin: data.lagMin,
@@ -1116,9 +1165,14 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
 async function runSetup(setup, opts = {}) {
   const started = Date.now();
   const day = opts.date || toETDate(Date.now());
-  const bar = opts.bar || setup.decidesOnBar || setup.decisionTime;
+  const bar = opts.bar
+    || (opts.rehearsal ? nowBarET() : setup.decidesOnBar || setup.decisionTime);
   const base = { date: day, setupId: setup.id, setupName: setup.name, bar,
-                 dryRun: !!opts.dryRun };
+                 // A rehearsal is always dry, whatever the caller passed, and
+                 // is marked as one: a rehearsal indistinguishable from a real
+                 // run in the log is a run that never happened being counted.
+                 dryRun: !!(opts.dryRun || opts.rehearsal),
+                 rehearsal: !!opts.rehearsal };
   let res;
   try {
     res = await _runSetup(setup, opts);

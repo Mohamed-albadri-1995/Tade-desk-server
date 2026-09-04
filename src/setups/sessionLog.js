@@ -176,7 +176,8 @@ function passOf({ at, date, positions = [], held = null, acted = [] }) {
  * the last few, because by then a name is specific enough to go and look at.
  */
 function runOf({
-  at, date, setupId, setupName, bar, dryRun = false, ok = true, error = null,
+  at, date, setupId, setupName, bar, dryRun = false, rehearsal = false,
+  ok = true, error = null,
   ms = null, universe = null, gate = null, counts = null, rank = null,
   picks = [], dropped = null, orders = null, routing = null, riskCfg = null,
   data = null, quiet = false,
@@ -196,6 +197,13 @@ function runOf({
     error: error || undefined,
     ms: num(ms),
     dryRun: dryRun || undefined,
+    /*
+     * A REHEARSAL IS NOT A RUN OF THE STRATEGY, and the day's review must not
+     * read it as one. It decides on the current minute rather than the setup's,
+     * publishes nothing and places nothing — so counted as a run it would show
+     * a setup that "ran and found nothing" on a bar it was never asked about.
+     */
+    rehearsal: rehearsal || undefined,
     // Nothing to say on this bar of a watch window — recorded rather than
     // returned silently, because "asked and answered nothing" and "never asked"
     // are the two cases this file exists to tell apart.
@@ -390,7 +398,19 @@ function passesOn(date) {
  */
 function summaryOf(date) {
   const out = {};
-  for (const r of runsOn(date)) {
+  /*
+   * REHEARSALS ARE RECORDED AND NOT COUNTED.
+   *
+   * A rehearsal is a check of the machine, taken on the current minute rather
+   * than the setup's, publishing nothing. Summed in with the day's runs it
+   * would show extra runs on bars the setup was never asked about, and — since
+   * a rehearsal at 14:00 on a delayed feed measures a large lag by design — it
+   * would report the feed as broken on a day it was fine.
+   *
+   * They stay in the log, because "I pressed Rehearse at 14:02 and it answered"
+   * is exactly the thing worth being able to look up afterwards.
+   */
+  for (const r of runsOn(date).filter(x => !x.rehearsal)) {
     const g = out[r.setupId] || (out[r.setupId] = {
       setup: r.setup || r.setupId, runs: 0, failed: 0, quiet: 0,
       // The last bar it was asked about, so "it stopped running at 09:52" is

@@ -194,6 +194,31 @@ router.get('/:id/run', async (req, res) => {
 });
 
 /*
+ * GET /api/setups/:id/rehearse — run the whole chain now, trade nothing.
+ *
+ * The difference from `/run` above: `/run` returns the setup's own result and
+ * is for looking at a ranking. This returns a LEG-BY-LEG verdict — cards,
+ * filter, qp, feed lag, ranking, sizing, routing, what would have been sent —
+ * and is for answering "does this machine work" at a minute that is not 09:35.
+ *
+ * It decides on the CURRENT bar rather than the setup's, which is why it can be
+ * pressed at two in the afternoon. See src/setups/rehearse.js.
+ *
+ * A GET, and it stays a GET: it publishes no alert, places no order and changes
+ * nothing except one line in the session log marked `rehearsal`.
+ */
+router.get('/:id/rehearse', async (req, res) => {
+  const setup = await catalog.get(req.params.id);
+  if (!setup) return res.status(404).json({ ok: false, error: 'No such setup' });
+  try {
+    res.json(await require('../setups/rehearse').rehearse(setup));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message, legs: [],
+                           passed: 0, failed: 0, untested: 0 });
+  }
+});
+
+/*
  * POST /api/setups/:id/fire — run it for real, now.
  *
  * The scheduled run is the one that matters; this exists for the morning the
