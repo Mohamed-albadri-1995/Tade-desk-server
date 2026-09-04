@@ -523,6 +523,26 @@ def _one_overlay(bars: pd.DataFrame, ts: list, ov: dict, ctx: dict,
     return out
 
 
+def is_live_asof(asof) -> bool:
+    """True when `asof` names TODAY in New York — a replay that is not a replay.
+
+    One definition, used by prepare_bars for the fetch window and by the
+    strategy engine for its reference-symbol cache, so the two cannot disagree
+    about which day is still being written."""
+    if not asof:
+        return False
+    return str(asof)[:10] == pd.Timestamp.now(tz=_ET).strftime('%Y-%m-%d')
+
+
+def _accepts_live(loader) -> bool:
+    """Whether loader.load takes `live=` — the stubs in the audits do not."""
+    import inspect
+    try:
+        return 'live' in inspect.signature(loader.load).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def prepare_bars(symbol: str, tf: str, days: int, feed: str = 'alpaca',
                  view: str = 'all', asof: str | None = None):
     """Fetch + session-filter bars and return (bars, ts, ctx) — the shared
@@ -536,17 +556,35 @@ def prepare_bars(symbol: str, tf: str, days: int, feed: str = 'alpaca',
     loader = _LOADERS.get(feed)
     if loader is None:
         raise ValueError(f'unknown feed {feed!r} (have: {sorted(_LOADERS)})')
-    if asof:
+    # A REPLAY OF TODAY IS LIVE. The desk always names the date it is deciding
+    # — asof=today, every call — and until now that made every live decision
+    # a "historical" one: the window ended at tomorrow's midnight, a constant
+    # for the whole day, and the loaders keyed their cache on it. So the FIRST
+    # fetch of a symbol each day was served back unchanged until midnight.
+    # 2026-09-04, 15:44 ET: "the newest bar yahoo had was 14:14, 90 minutes
+    # behind" — not Yahoo's delay, the time that symbol was first asked about.
+    live_today = is_live_asof(asof)
+    if asof and not live_today:
         # End of the selected ET day (next ET midnight) → includes that day's
         # full RTH + extended session, then converted to a true UTC instant.
         end = (pd.Timestamp(asof, tz=_ET) + pd.Timedelta(days=1)).tz_convert('UTC')
+    elif live_today:
+        # The bar that has just closed is the last one wanted; the one still
+        # forming is cut below with the replay's own `< end` rule.
+        end = pd.Timestamp.now(tz='UTC').floor('min')
     else:
         end = pd.Timestamp.now(tz='UTC').floor('5min')
     if tf == '1m' and feed == 'alpaca':
         days = min(int(days), 7)   # Alpaca IEX 1m history cap
     days = int(days)
     start = end - pd.Timedelta(days=days)
-    bars = loader.load(symbol, tf, start, end)
+    # NOT FROM THE CACHE when the day is today. The loaders that know the
+    # word skip their parquet on the way in and out; a loader that does not
+    # (a test stub, hybrid) is called exactly as before.
+    if live_today and _accepts_live(loader):
+        bars = loader.load(symbol, tf, start, end, live=True)
+    else:
+        bars = loader.load(symbol, tf, start, end)
 
     # Daily (and coarser) bars are timestamped at the session date, not inside
     # 09:30-16:00, so the RTH filter would drop every one of them → 0 bars.

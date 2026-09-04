@@ -55,16 +55,19 @@ def _cache_path(symbol: str, tf: str, start: pd.Timestamp, end: pd.Timestamp) ->
 
 
 def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
-         feed: str = 'iex') -> pd.DataFrame:
+         feed: str = 'iex', live: bool = False) -> pd.DataFrame:
     """Return a tz-aware UTC DataFrame with columns
-    [open, high, low, close, volume] indexed by bar timestamp."""
+    [open, high, low, close, volume] indexed by bar timestamp.
+
+    `live`: the session is still being written — neither read nor write the
+    parquet cache. See compare_server.prepare_bars."""
     if timeframe not in _TF_MAP:
         raise ValueError(f'unsupported timeframe {timeframe!r}')
     start = pd.Timestamp(start).tz_convert('UTC') if pd.Timestamp(start).tz else pd.Timestamp(start, tz='UTC')
     end   = pd.Timestamp(end).tz_convert('UTC')   if pd.Timestamp(end).tz   else pd.Timestamp(end,   tz='UTC')
 
     cache = _cache_path(symbol, timeframe, start, end)
-    if cache.exists():
+    if not live and cache.exists():
         return pd.read_parquet(cache)
 
     rows: list[dict] = []
@@ -104,6 +107,8 @@ def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
                              'l': 'low', 'c': 'close', 'v': 'volume'})
              .set_index('time').sort_index())
     df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+    if live:
+        return df
     try:
         df.to_parquet(cache)
     except Exception:

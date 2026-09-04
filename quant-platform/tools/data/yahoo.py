@@ -162,7 +162,7 @@ def _fetch(symbol: str, params: dict) -> dict:
 
 
 def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
-         feed: str = 'yahoo', prepost: bool = False) -> pd.DataFrame:
+         feed: str = 'yahoo', prepost: bool = False, live: bool = False) -> pd.DataFrame:
     """Return a tz-aware UTC DataFrame with columns
     [open, high, low, close, volume] indexed by bar timestamp.
 
@@ -180,8 +180,12 @@ def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
     start = start.tz_convert('UTC') if start.tz else start.tz_localize('UTC')
     end = end.tz_convert('UTC') if end.tz else end.tz_localize('UTC')
 
+    # `live`: NEITHER READ NOR WRITTEN. A frame for the session still being
+    # written is stale the minute after it is fetched, and a file per minute
+    # per symbol would be hundreds of megabytes a day on a small disk. The
+    # cache is for replays of days that are over. See compare_server.prepare_bars.
     cache = _cache_path(symbol, timeframe, start, end, prepost)
-    if cache.exists():
+    if not live and cache.exists():
         return pd.read_parquet(cache)
 
     result = _fetch(symbol, {
@@ -218,6 +222,8 @@ def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
         df = df.set_index('t').sort_index()
         df = df[(df.index >= start) & (df.index <= end)]
 
+    if live:
+        return df
     try:
         df.to_parquet(cache)
     except Exception:

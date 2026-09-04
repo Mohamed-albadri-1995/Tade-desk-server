@@ -823,3 +823,157 @@ def test_the_bar_is_read_out_of_the_stamp_evaluate_already_writes():
     assert dec._hhmm_of(None) is None
     assert dec._hhmm_of('') is None
     assert dec._hhmm_of('no time here') is None
+
+
+# ── a replay of today is live, and live is never served from the cache ─────
+#
+# The desk names the date it is deciding on every call — asof=today — and
+# that made every live decision a "historical" one: the fetch window ended at
+# tomorrow's midnight, a constant for the whole day, and the loaders keyed
+# their parquet on it. The FIRST fetch of a symbol each day was served back
+# unchanged until midnight. 2026-09-04, 15:44 ET: "the newest bar yahoo had was
+# 14:14, 90 minutes behind" — not Yahoo's delay, the minute that symbol was
+# first asked about. A 09:25 rehearsal would have handed the 09:35 decision
+# ten-minute-old bars.
+
+def _today_et():
+    return pd.Timestamp.now(tz='America/New_York').strftime('%Y-%m-%d')
+
+
+def test_today_is_live_and_yesterday_is_a_replay():
+    from tools import compare_server as cs
+    assert cs.is_live_asof(_today_et()) is True
+    assert cs.is_live_asof('2024-01-09') is False
+    assert cs.is_live_asof(None) is False
+    assert cs.is_live_asof('') is False
+
+
+def test_a_replay_of_today_ends_at_the_current_minute_not_at_midnight():
+    """The window's end IS the cache key, so a constant end is a frozen feed."""
+    from tools import compare_server as cs
+    seen = {}
+
+    class Stub:
+        def load(self, sym, tf, start, end):
+            seen['end'] = end
+            df = pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
+            df.index = pd.DatetimeIndex([], tz='UTC', name='t')
+            return df
+
+    cs._LOADERS['stub_live'] = Stub()
+    try:
+        cs.prepare_bars('X', '1m', 2, feed='stub_live', view='all', asof=_today_et())
+        now = pd.Timestamp.now(tz='UTC')
+        # within a minute of now, not tomorrow's midnight
+        assert abs((now - seen['end']).total_seconds()) < 120, seen['end']
+        assert seen['end'] == seen['end'].floor('min')
+    finally:
+        cs._LOADERS.pop('stub_live', None)
+
+
+def test_a_replay_of_yesterday_still_ends_at_its_midnight():
+    """Historical replays are untouched — the register backtests depend on it."""
+    from tools import compare_server as cs
+    seen = {}
+
+    class Stub:
+        def load(self, sym, tf, start, end):
+            seen['end'] = end
+            df = pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
+            df.index = pd.DatetimeIndex([], tz='UTC', name='t')
+            return df
+
+    cs._LOADERS['stub_hist'] = Stub()
+    try:
+        cs.prepare_bars('X', '1m', 2, feed='stub_hist', view='all', asof='2024-01-09')
+        want = (pd.Timestamp('2024-01-09', tz='America/New_York')
+                + pd.Timedelta(days=1)).tz_convert('UTC')
+        assert seen['end'] == want
+    finally:
+        cs._LOADERS.pop('stub_hist', None)
+
+
+def test_a_loader_that_knows_live_is_told_and_one_that_does_not_is_not():
+    """The audits' stub loaders take four arguments and must keep working."""
+    from tools import compare_server as cs
+    seen = {}
+
+    class Knows:
+        def load(self, symbol, timeframe, start, end, live=False):
+            seen['knows'] = live
+            df = pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
+            df.index = pd.DatetimeIndex([], tz='UTC', name='t')
+            return df
+
+    class DoesNot:
+        def load(self, symbol, timeframe, start, end):
+            seen['doesnot'] = True
+            df = pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
+            df.index = pd.DatetimeIndex([], tz='UTC', name='t')
+            return df
+
+    cs._LOADERS['knows'] = Knows()
+    cs._LOADERS['doesnot'] = DoesNot()
+    try:
+        cs.prepare_bars('X', '1m', 2, feed='knows', view='all', asof=_today_et())
+        assert seen['knows'] is True
+        cs.prepare_bars('X', '1m', 2, feed='knows', view='all', asof='2024-01-09')
+        assert seen['knows'] is False
+        cs.prepare_bars('X', '1m', 2, feed='doesnot', view='all', asof=_today_et())
+        assert seen['doesnot'] is True
+    finally:
+        cs._LOADERS.pop('knows', None)
+        cs._LOADERS.pop('doesnot', None)
+
+
+def test_the_live_loaders_accept_the_word():
+    """yahoo and alpaca are the two feeds a live decision can run on."""
+    import inspect
+    from tools.data import yahoo, alpaca
+    for mod in (yahoo, alpaca):
+        assert 'live' in inspect.signature(mod.load).parameters, mod.__name__
+
+
+def test_yahoo_live_neither_reads_nor_writes_the_cache(monkeypatch, tmp_path):
+    """Stubbed at the parquet boundary — this box has no parquet engine, and the
+    property is about WHETHER the cache is touched, not about parquet."""
+    from tools.data import yahoo
+    monkeypatch.setattr(yahoo, '_CACHE_DIR', tmp_path)
+    monkeypatch.setattr(yahoo._cache, 'after_write', lambda: None)
+    end = pd.Timestamp('2026-09-04 19:44', tz='UTC')
+    start = end - pd.Timedelta(days=2)
+    # A poisoned cache: the file exists, and reading it yields a bar an hour old.
+    yahoo._cache_path('X', '1m', start, end, False).write_bytes(b'poison')
+    stale = pd.DataFrame({'open': [1.0], 'high': [1.0], 'low': [1.0], 'close': [1.0],
+                          'volume': [1.0]},
+                         index=pd.DatetimeIndex([end - pd.Timedelta(hours=1)], tz='UTC', name='t'))
+    reads, writes, calls = [], [], []
+    monkeypatch.setattr(yahoo.pd, 'read_parquet', lambda path: (reads.append(path), stale)[1])
+    monkeypatch.setattr(pd.DataFrame, 'to_parquet', lambda self, path, *a, **k: writes.append(path))
+    fresh_ts = int(end.timestamp())
+
+    def fake_fetch(symbol, params):
+        calls.append(params)
+        return {'timestamp': [fresh_ts],
+                'indicators': {'quote': [{'open': [2.0], 'high': [2.0], 'low': [2.0],
+                                          'close': [2.0], 'volume': [5.0]}]}}
+
+    monkeypatch.setattr(yahoo, '_fetch', fake_fetch)
+
+    # not live: the poisoned cache is what comes back, and nothing is fetched
+    df = yahoo.load('X', '1m', start, end)
+    assert len(reads) == 1 and len(calls) == 0 and float(df['close'].iloc[0]) == 1.0
+
+    # live: fetched fresh, the cache neither read nor written — a file per
+    # minute per symbol is a disk full by lunch
+    df = yahoo.load('X', '1m', start, end, live=True)
+    assert len(reads) == 1 and len(calls) == 1 and float(df['close'].iloc[0]) == 2.0
+    assert writes == []
+
+
+def test_the_reference_symbol_cache_is_off_for_today():
+    """A SPY frame fetched at 09:25 must not gate a 09:35 decision."""
+    import inspect
+    from chart import strategy as S
+    src = inspect.getsource(S._preload_ref_bars)
+    assert 'cs.is_live_asof(asof)' in src

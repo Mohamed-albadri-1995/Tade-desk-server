@@ -597,7 +597,11 @@ def _preload_ref_bars(strategy_like: dict, symbol: str, bars, ctx,
     for rs in ref_syms:
         if rs in refs:
             continue
-        key = (feed, rs, tf, int(days), view, asof) if asof else None
+        # A replay of TODAY is live, and live is never cached — a SPY frame
+        # fetched at 09:25 must not gate a 09:35 decision. Same rule as
+        # prepare_bars, from the same function.
+        key = ((feed, rs, tf, int(days), view, asof)
+               if asof and not cs.is_live_asof(asof) else None)
         rb = _REF_CACHE.get(key) if key else None
         if rb is None:
             try:
