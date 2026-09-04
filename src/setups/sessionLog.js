@@ -388,6 +388,17 @@ function passesOn(date) {
   return read(date).filter(isPass);
 }
 
+/*
+ * THE CONTROL'S OWN ROWS.
+ *
+ * A separate kind rather than a run, because it is not one: it is a second
+ * strategy asked the same question on the same bar to tell "the chain is
+ * broken" apart from "the rules did not match". Counted among the runs it
+ * would inflate every funnel on the page with decisions nobody took.
+ */
+function isCanary(row) { return row && row.kind === 'canary'; }
+function canariesOn(date) { return read(date).filter(isCanary); }
+
 /**
  * The day in one object: what each setup was asked, and where the names went.
  *
@@ -519,5 +530,5 @@ function summaryOf(date) {
 
 module.exports = {
   record, passOf, runOf, read, trackOf, symbolsOn,
-  runsOn, passesOn, summaryOf, isRun, isPass, fileFor, LOG_DIR,
+  runsOn, passesOn, canariesOn, summaryOf, isRun, isPass, isCanary, fileFor, LOG_DIR,
 };

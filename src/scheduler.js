@@ -381,6 +381,9 @@ function startScheduler() {
        * Filtering on the entry window here asked the setup about a bar it does
        * not trade from, and after this tick moved it would never fire at all.
        */
+      // Captured, because the control below reads them: the pairing is between
+      // what the setups did on this bar and what the control did on the same one.
+      let ran = [];
       const firing = due.filter(s => s.enabled !== false
         && catalog.withinWindow(decidedOn,
                                 s.decidesOnBar || s.decisionTime,
@@ -399,11 +402,38 @@ function startScheduler() {
          * look and not.
          */
         try {
-          await runDue(decidedOn);
+          ran = await runDue(decidedOn);
         } catch (err) {
           console.error(`[Setups] the ${decidedOn} bar was not decided for `
             + `${firing.map(s => s.id).join(', ')}:`, err.stack || err.message);
         }
+      }
+
+      /*
+       * ── the control ──
+       *
+       * A second strategy, asked the same question on the SAME bar with a rule
+       * that is true of every bar that exists. It separates the two reasons a
+       * setup takes nothing, which from the outside are the same sentence:
+       *
+       *     control fires, setup does not   the chain works — it is the rules
+       *     neither fires                   it is the chain, and the reason
+       *                                     comes with it (the feed was N
+       *                                     minutes behind, qp did not answer)
+       *
+       * AFTER the setups, never beside them. There is one qp on this box and a
+       * clock setup has sixty seconds; a control competing for the platform
+       * inside that minute could cause the timeout it exists to diagnose.
+       *
+       * Wrapped, because the control is a diagnostic and must never be the
+       * reason a tick fails.
+       */
+      try {
+        await require('./setups/canary').tick({
+          now, bar: decidedOn, rows: r0.getTodayRows(), setups: due, ran,
+        });
+      } catch (err) {
+        console.warn('[Control] did not run:', err.stack || err.message);
       }
     });
 

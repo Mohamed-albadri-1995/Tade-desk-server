@@ -76,6 +76,8 @@ PARTS = [
     ('logic_audit61.py',    'the letters as they were known on the day'),
     ('logic_audit62.py',    'the CANSLIM gate: refuse, block, or say you could '
                             'not read'),
+    ('logic_audit63.py',    'the control: a rule that must fire on every bar '
+                            'that exists'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They

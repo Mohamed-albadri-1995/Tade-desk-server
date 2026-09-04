@@ -528,6 +528,16 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .st-reh-head { font-size:12px; color:var(--text2); margin-bottom:4px; }
 .st-reh-head b { font-family:var(--mono); }
 .st-reh-note { margin-top:6px; line-height:1.6; }
+/* The control strip. Green is not "a good day" — it is "the chain answered",
+   which is a smaller and more useful claim, so it is stated in the text rather
+   than left to the colour. */
+.lg-ctl { border-left:3px solid var(--border); padding:8px 10px; margin:0 0 10px;
+  background:#ffffff06; border-radius:0 4px 4px 0; font-size:12.5px; }
+.lg-ctl.ok { border-left-color:#22c55e; }
+.lg-ctl.part { border-left-color:#f5a623; }
+.lg-ctl.bad { border-left-color:#ef4444; background:#ef444410; }
+.lg-ctl.none { border-left-style:dashed; border-left-color:#9ca3af; color:var(--dim); }
+.lg-ctl .why { font-size:11.5px; color:var(--dim); margin-top:4px; line-height:1.6; }
 .lg-run { border-left:2px solid var(--border); padding:6px 0 6px 10px;
   margin:6px 0; font-size:11.5px; color:var(--text2); line-height:1.6; }
 .lg-run.bad { border-left-color:var(--red); }
@@ -3253,6 +3263,46 @@ function lgRun(r) {
     — ${bits.join(' · ') || 'ran'}</div>`;
 }
 
+/*
+ * THE CONTROL STRIP.
+ *
+ * One line above the day: how often a strategy that asks for `close > 0` — true
+ * of every bar that exists — actually fired. It is the difference between the
+ * two readings of a day with no trades:
+ *
+ *     control fired all day     the chain works; nothing matched the rules
+ *     control did not fire      the chain, and the row says which part
+ *
+ * It leads the panel because it is the first question, and because on the days
+ * this desk has had it was the unanswered one.
+ */
+function lgControl(rows) {
+  if (!rows || !rows.length) {
+    return `<div class="lg-ctl none">Control: not run today. It answers on every
+      fifth minute and on every bar a setup decides, so an empty line means the
+      scheduler did not reach it.</div>`;
+  }
+  const fired = rows.filter(r => r.fired).length;
+  const last = rows[0];                     // newest first
+  const bad = rows.filter(r => !r.fired);
+  const lag = rows.filter(r => (r.lagMin || 0) > 1);
+  const cls = fired === rows.length ? 'ok' : fired ? 'part' : 'bad';
+  return `<div class="lg-ctl ${cls}">
+    <b>Control</b> fired on ${fired} of ${rows.length} check${rows.length === 1 ? '' : 's'}
+    · last ${esc(last.bar || '–')} ${last.fired ? 'fired' : 'no signal'}${
+      last.lastBar ? ` · ${esc(last.feed || 'feed')} newest bar ${esc(last.lastBar)}` : ''}${
+      last.lagMin ? ` <b class="warn">(${last.lagMin} min behind)</b>` : ''}
+    ${bad.length ? `<div class="why">Did not fire on ${bad.slice(0, 8).map(r =>
+        esc(r.bar)).join(', ')}${bad.length > 8 ? ` +${bad.length - 8}` : ''}${
+        lag.length ? ` — the feed was behind on ${lag.length} of them` : ''}.
+      A control that asks for close &gt; 0 and gets nothing means the bar was not
+      there, so no setup deciding on it could have fired either.</div>` : ''}
+    ${!bad.length ? `<div class="why">Every check answered on the bar it asked
+      about. On those bars the chain — cards, qp, the ranking, the plan — was
+      working, so a setup that took nothing did not match its own rules.</div>` : ''}
+  </div>`;
+}
+
 async function loadLog() {
   const sum = document.getElementById('log-summary');
   const runs = document.getElementById('log-runs');
@@ -3264,8 +3314,11 @@ async function loadLog() {
       `/api/session-log${want ? `?date=${encodeURIComponent(want)}` : ''}`)).json();
     if (picker && !picker.value && d.date) picker.value = d.date;
     const setups = Object.entries(d.summary || {});
+    const control = lgControl(d.canaries || []);
     if (!setups.length) {
-      sum.innerHTML = `<div class="empty">Nothing recorded for ${esc(d.date || 'today')}.
+      // THE CONTROL STILL SHOWS. A day where no setup was due is exactly when
+      // "was the desk even alive" is the question, and the control answers it.
+      sum.innerHTML = control + `<div class="empty">Nothing recorded for ${esc(d.date || 'today')}.
         A setup writes a line here every time it is asked — so an empty day means
         none was due, or the scheduler did not run.</div>`;
       runs.innerHTML = '';
@@ -3273,7 +3326,7 @@ async function loadLog() {
     }
     const byId = {};
     for (const r of d.runs || []) (byId[r.setupId] = byId[r.setupId] || []).push(r);
-    sum.innerHTML = setups.map(([id, g]) => `
+    sum.innerHTML = control + setups.map(([id, g]) => `
       <div class="lg-set">
         <h4>${esc(g.setup || id)}
           <span class="when">${g.runs} run${g.runs === 1 ? '' : 's'}${

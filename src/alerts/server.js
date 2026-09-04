@@ -942,6 +942,12 @@ app.get('/api/session-log', (req, res) => {
       out.passes = sessionLog.passesOn(date).reverse().slice(0, limit);
       out.symbols = sessionLog.symbolsOn(date);
     }
+    /*
+     * THE CONTROL, ALWAYS. It is the line that says whether a quiet day was a
+     * quiet market or a broken chain, and it is the first thing worth reading —
+     * so it is not behind the `kind` filter that splits runs from passes.
+     */
+    out.canaries = sessionLog.canariesOn(date).reverse().slice(0, limit);
     res.json(out);
   } catch (err) {
     res.json({ ok: false, error: err.message, runs: [], passes: [], summary: {} });
