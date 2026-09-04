@@ -583,7 +583,29 @@ const T7 = [PREMARKET_GAP, AFTER_OPEN_VOLUME];
 // T8 is the CANSLIM tool. Its matches are also written to a shared member list
 // that every other tool reads, so a CANSLIM name turning up in an unrelated
 // screener is tagged there — see canslim.js.
+//
+// RETIRED 2026-09-04. It ran all three against one database, so "which of these
+// actually produces results" could not be answered — every register mixed them.
+// The two that remain are T10 and T11 below, one screener each.
 const T8 = [CANSLIM_UNIVERSE, CANSLIM_BASE, CANSLIM_PULLBACK];
+
+/*
+ * T8's two halves, each now a tool of its own.
+ *
+ * ONE SCREENER EACH, AND THAT IS THE POINT. Together they produced one set of
+ * registers and one win rate, which belonged to neither of them. Apart, each
+ * tool's numbers are about the screener whose name is on the door.
+ *
+ * THE KEYS AND NAMES DO NOT CHANGE. The tools are called Growth Stock Breakout
+ * and Growth Stock Pullback — that is what shows on the page — but the screener
+ * inside keeps `canslim` / `CANSLIM`, because every frozen R1 row carried over
+ * from T8 is tagged with that exact string (see scripts/split-tool-history.js,
+ * and merge.js for which of the two strings a row actually holds). Renaming the
+ * screener would start a second series that no longer joins up with the history
+ * the split exists to preserve.
+ */
+const T10 = [CANSLIM_BASE];
+const T11 = [CANSLIM_PULLBACK];
 
 // T9 is the benchmark, and it is deliberately the dumbest screener here: liquid
 // stocks over $5, ranked by how unusually active they are, top 20. No pattern,
@@ -618,7 +640,20 @@ const STOCKS_IN_PLAY = {
 // which is not the other side of this setup, it is the absence of it.
 const T9 = [STOCKS_IN_PLAY];
 
-const BY_TOOL = { T1, T2, T3, T4, T5, T6, T7, T8, T9 };
+/*
+ * WHICH SCREENERS EACH TOOL STARTS WITH.
+ *
+ * A TOOL MISSING FROM HERE USED TO BECOME A COPY OF T1 — the fallback in
+ * seedScreeners() read `BY_TOOL[toolId] || T1`. T10 and T11 shipped without
+ * entries, came up running Trend / Pre-Mkt / Big Move, and collected two days
+ * of cards that were T1's answers under another tool's name. Nothing failed
+ * and nothing warned: two brand-new tools looked like they were working.
+ *
+ * So this map has to hold every tool in tools.config.json, and a test asserts
+ * exactly that — see tests/screeners.seedByTool.test.js. Adding a tool to the
+ * registry without adding it here now fails the suite rather than the desk.
+ */
+const BY_TOOL = { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11 };
 
 // Available to add to any tool from the builder.
 const SESSION_SCREENERS = [PREMARKET_GAP, AFTER_OPEN_VOLUME];
@@ -944,10 +979,25 @@ function seedScreeners() {
     tightenLiquidMovers();
     addCanslimUniverse();
     installNewScanners();
+    fixMisseededSplitTools();
     return { seeded: 0, reason: 'already has screeners' };
   }
 
-  const defs = BY_TOOL[config.toolId] || T1;
+  /*
+   * NO FALLBACK. This read `BY_TOOL[config.toolId] || T1`, and a tool with no
+   * entry silently came up as a second copy of T1 — see the note on BY_TOOL.
+   *
+   * An empty tool is visibly empty: no screeners on its page, no cards, nothing
+   * to mistake for a result. A copy of T1 is a tool that looks like it works.
+   * Between a gap you can see and a wrong answer you cannot, the gap wins.
+   */
+  const defs = BY_TOOL[config.toolId];
+  if (!defs) {
+    console.warn(`[Screeners] ${config.toolId} has no screener set in `
+      + 'seedScreeners.js — seeded NOTHING rather than a copy of T1. Add it to '
+      + 'BY_TOOL, or build its screeners in the Screeners tab.');
+    return { seeded: 0, reason: `no screener set for ${config.toolId}` };
+  }
   let seeded = 0;
   for (const def of defs) {
     try {
@@ -1031,6 +1081,61 @@ function installNewScanners() {
   replaceScanner('T6', 'overextended', 'Overextended (archived)', T6);
 }
 
+/*
+ * THE TOOLS THAT CAME UP AS COPIES OF T1.
+ *
+ * T10 and T11 started before they had entries in BY_TOOL, so the old `|| T1`
+ * fallback seeded them Trend, Pre-Mkt and Big Move. On the box that is what you
+ * see: two growth-stock tools running the swing-trade screener and finding the
+ * same names as T1.
+ *
+ * Seeding cannot fix them — seedScreeners() returns the moment the table has a
+ * row — so this is the migration, in the same shape as the repairs above:
+ * keyed, idempotent, and it DELETES NOTHING.
+ *
+ * The wrong screeners are switched off and renamed rather than removed. They
+ * collected a couple of days of cards, those cards are frozen in the registers
+ * under their keys, and a register whose definition has vanished is a day of
+ * rows nothing can explain. Off, they stop scanning and stay readable.
+ *
+ * The guard is strict on purpose: it only acts when the tool has NONE of its
+ * own screeners. A tool where the right screener already exists is somebody's
+ * deliberate arrangement, and this must not tidy it away.
+ */
+function fixMisseededSplitTools() {
+  const entry = (config.tools || []).find(t => t.id === config.toolId);
+  if (!entry || !entry.splitFrom) return { changed: 0 };     // T10 and T11 only
+
+  const defs = BY_TOOL[config.toolId] || [];
+  if (!defs.length) return { changed: 0 };
+  const has = key => db.prepare('SELECT id FROM screeners WHERE key = ?').get(key);
+  const mine = defs.map(d => store.slugify(d.key || d.name));
+  if (mine.some(has)) return { changed: 0 };                 // already correct
+
+  let changed = 0;
+  for (const def of T1) {
+    const key = store.slugify(def.key || def.name);
+    const row = db.prepare('SELECT id, name, enabled FROM screeners WHERE key = ?').get(key);
+    if (!row || !row.enabled) continue;
+    db.prepare('UPDATE screeners SET enabled = 0, name = ?, updated_at = ? WHERE id = ?')
+      .run(`${row.name} (seeded by mistake)`, Date.now(), row.id);
+    console.log(`[Screeners] ${config.toolId}: "${row.name}" was T1's screener, `
+      + 'seeded here by a bug — switched off. Its frozen days stay readable.');
+    changed++;
+  }
+  for (const def of defs) {
+    try {
+      store.create(def);
+      console.log(`[Screeners] ${config.toolId}: added "${def.name}" — `
+        + `the screener it inherits from ${entry.splitFrom}`);
+      changed++;
+    } catch (err) {
+      console.warn(`[Screeners] could not add "${def.name}": ${err.message}`);
+    }
+  }
+  return { changed };
+}
+
 function addCanslimUniverse() {
   if (config.toolId !== 'T8') return;
   const exists = db.prepare('SELECT id FROM screeners WHERE key = ?').get('canslim-universe');
@@ -1047,7 +1152,7 @@ function addCanslimUniverse() {
 module.exports = {
   seedScreeners, renameLegacyScreeners, applyDefaultWindows, repairOversoldMirror,
   tightenAfterOpenVolume, backfillMirrorLinks, linkMirrorsByFilters, tightenLiquidMovers,
-  applyCheckWindows, retimeT2Breakout, addCanslimUniverse,
+  applyCheckWindows, retimeT2Breakout, addCanslimUniverse, fixMisseededSplitTools,
   WINDOW_NOTES,
   // Screeners that hunt NEGLECTED names and so keep the price floor but lose
   // the liquidity legs of the tradability floor — see tradable.serverFilters.
