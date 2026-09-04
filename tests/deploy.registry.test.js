@@ -90,6 +90,52 @@ describe('deploy-tools.sh reads the registry after the pull', () => {
     });
 
   /*
+   * A DISABLED TOOL MUST STILL BE STOPPED.
+   *
+   * The stop phase read the same filtered list the start phase does, so the
+   * first deploy after disabling a tool skipped it and left it running for
+   * ever. Seen on the deploy that shipped the flag:
+   *
+   *     saving pm2 process list (journal, tool-T8, tool-T1, tool-T2, …)
+   *
+   * tool-T8 was disabled and still up — and T8 is also archived, so the live
+   * process held :3070 and the archive could not bind it. A tool that was
+   * meant to be off served live pages while the archive meant to replace it
+   * served nothing.
+   *
+   * Stopping is about what EXISTS. Starting is about what is WANTED.
+   */
+  test('the stop phase reads EVERY tool, not just the enabled ones', () => {
+    const stopAt = SRC.indexOf('Stopping existing PM2 processes');
+    const after = SRC.slice(stopAt, stopAt + 2000);
+    expect(after).toMatch(/for entry in "\$\{ALL_TOOLS\[@\]\}"/);
+    // and the start phase still reads the FILTERED one — measured by position
+    // rather than by a fixed window, since the memory ceilings and the swap
+    // check sit between the heading and the loop.
+    const startAt = SRC.indexOf('Starting tools...');
+    const startLoop = SRC.indexOf('for entry in "${TOOLS[@]}"', startAt);
+    expect(startLoop).toBeGreaterThan(startAt);
+    // ...and it is the START loop, not something later: no other unfiltered
+    // loop may sit between the heading and it.
+    expect(SRC.slice(startAt, startLoop))
+      .not.toMatch(/for entry in "\$\{ALL_TOOLS\[@\]\}"/);
+  });
+
+  test('ALL_TOOLS really is unfiltered', () => {
+    const m = SRC.match(/mapfile -t ALL_TOOLS < <\(node -e "([\s\S]*?)"\)/);
+    expect(m).toBeTruthy();
+    expect(m[1]).not.toMatch(/enabled/);
+  });
+
+  test('the archive is removed from pm2 BEFORE the port sweep, or pm2 restarts '
+    + 'it mid-deploy onto ports the tools are about to claim', () => {
+    const del = SRC.indexOf('pm2 delete archive');
+    const sweep = SRC.indexOf('lsof -t -i:');
+    expect(del).toBeGreaterThan(-1);
+    expect(del).toBeLessThan(sweep);
+  });
+
+  /*
    * The registry is read ONCE. Reading it twice — once for the banner, once for
    * the launch — would let the two disagree across a pull, which is the same
    * bug wearing a different shape.

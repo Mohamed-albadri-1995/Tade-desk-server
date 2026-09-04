@@ -134,6 +134,15 @@ mapfile -t OFF < <(node -e "
    .forEach(x => console.log(x.id + (x.archive ? ' (archived, still readable)'
                                                : ' (stopped)')));
 ")
+# EVERY tool, enabled or not — what the STOP phase works from. Stopping is
+# about what exists on the box; starting is about what is wanted. See the note
+# at [4/6]: reading one list for both left a disabled tool running for ever,
+# holding the port its own archive needed.
+mapfile -t ALL_TOOLS < <(node -e "
+  const t = require('./tools.config.json').tools;
+  t.forEach(x => console.log([x.id, x.name, x.port, x.scorerPort,
+                              x.scorer === false ? 'noscorer' : 'scorer'].join('|')));
+")
 if [ ${#TOOLS[@]} -eq 0 ]; then
   echo "No ENABLED tools in tools.config.json — every entry is enabled:false."
   echo "That is almost certainly not what you meant; nothing would scan."
@@ -219,7 +228,32 @@ done
 
 echo
 echo "[4/6] Stopping existing PM2 processes..."
-for entry in "${TOOLS[@]}"; do
+#
+# EVERY TOOL IN THE REGISTRY, NOT JUST THE ENABLED ONES.
+#
+# This iterated `TOOLS`, which is now filtered to what will be STARTED — so
+# the first deploy after disabling a tool skipped it here and left it running
+# for ever. Seen immediately, on the deploy that shipped the flag:
+#
+#     saving pm2 process list (journal, tool-T8, tool-T1, tool-T2, …)
+#
+# tool-T8 had been disabled and was still up. Worse than untidy: T8 is also
+# ARCHIVED, and the archive wants T8's own port — so the live process held
+# :3070 and the archive could not bind it. The result would have been a tool
+# that was supposed to be off, serving live pages, while the archive that was
+# supposed to replace it silently served nothing.
+#
+# Stopping is about what EXISTS; starting is about what is wanted. Reading one
+# list for both is what made a disabled tool immortal.
+#
+# THE ARCHIVE GOES FIRST, and it has to be pm2 DELETE rather than a kill.
+#
+# It listens on several ports at once, so the port sweep below would kill it —
+# and pm2 would immediately restart it, mid-deploy, onto ports the tools are
+# about to claim. Removing it from pm2 first means the sweep finds nothing to
+# resurrect.
+if [ -z "$ONLY" ]; then pm2 delete archive 2>/dev/null || true; fi
+for entry in "${ALL_TOOLS[@]}"; do
   IFS='|' read -r id name port sport scoreflag <<< "$entry"
   [ -n "$ONLY" ] && [ "$ONLY" != "$id" ] && continue
   pm2 delete "tool-${id}" 2>/dev/null || true
