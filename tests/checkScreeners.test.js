@@ -1,0 +1,215 @@
+/*
+ * EVERY SCREENER, MEASURED — and the judgement that makes the measurement
+ * worth reading.
+ *
+ * The screeners live in each tool's database, edited by hand. The probe asks
+ * every live tool to validate and run each one; the part that can lie is the
+ * JUDGEMENT over what comes back, so that is what is tested here against
+ * fixtures — the network half cannot run in a test, and mocking it would only
+ * prove the mock.
+ *
+ * The rule inherited from everywhere else on this desk: an error is never a
+ * zero. A definition the tool REFUSES, a request TradingView refused, and a
+ * screener that matched nothing are three different facts.
+ */
+
+const chk = require('../scripts/check-screeners');
+
+const scr = (over = {}) => ({
+  key: 'k', name: 'Screener', enabled: true, labelOnly: false, mirrorOf: null,
+  runFrom: '09:30', runTo: '16:00', filters: 3, valid: true, count: 12,
+  error: null, ms: 400, ...over,
+});
+const tool = (over = {}) => ({
+  id: 'T2', name: 'Momentum', port: 3010, reachable: true, paused: false,
+  pausedReason: null,
+  scan: { lastRun: Date.now() - 5 * 60000, lastRowCount: 12, error: null },
+  screeners: [scr()], ...over,
+});
+const AT = { hhmm: '10:15', now: Date.now() };
+
+describe('a healthy tool has nothing said about it', () => {
+  test('no problems', () => {
+    expect(chk.problemsOf(tool(), AT)).toEqual([]);
+  });
+});
+
+describe('the things a hand edit can break', () => {
+  /*
+   * THE ONE THIS EXISTS FOR. A filter with a field TradingView does not know
+   * is rejected on every scan, silently, and the tool looks like a tool whose
+   * setup did not occur today.
+   */
+  test('a definition the tool REJECTS is named, with the reason', () => {
+    const out = chk.problemsOf(tool({ screeners: [scr({ valid: false, count: null,
+      error: 'filter 2: unknown field "prce"' })] }), AT);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/REJECTED by the tool: filter 2: unknown field "prce"/);
+    expect(out[0]).toMatch(/producing nothing on every scan/);
+  });
+
+  test('a mirror of a screener that was deleted is named', () => {
+    const out = chk.problemsOf(tool({ screeners: [
+      scr({ name: 'Trend' }),
+      scr({ name: 'Trend (mirror)', mirrorOf: 'Gone' }),
+    ] }), AT);
+    expect(out.join(' ')).toMatch(/mirrors "Gone", which no longer exists/);
+  });
+
+  test('every screener switched off is a tool that collects nothing', () => {
+    const out = chk.problemsOf(tool({ screeners: [scr({ enabled: false }), scr({ enabled: false })],
+                                      scan: null }), AT);
+    expect(out.join(' ')).toMatch(/every one of its 2 screener\(s\) is switched off/);
+  });
+
+  test('no screeners at all', () => {
+    expect(chk.problemsOf(tool({ screeners: [], scan: null }), AT).join(' '))
+      .toMatch(/NO screeners at all/);
+  });
+
+  test('a screener with no filters is only the floor', () => {
+    expect(chk.problemsOf(tool({ screeners: [scr({ filters: 0 })] }), AT).join(' '))
+      .toMatch(/has no filters/);
+  });
+});
+
+describe('zero, refused, and not asked are three different facts', () => {
+  test('zero inside its window points at why-empty', () => {
+    const out = chk.problemsOf(tool({ screeners: [scr({ count: 0 })] }), AT);
+    expect(out.join(' ')).toMatch(/matches nothing right now, inside its window \(09:30–16:00\)/);
+    expect(out.join(' ')).toMatch(/why-empty\.js k/);
+  });
+
+  /*
+   * A ZERO OUTSIDE ITS WINDOW IS NOT A FINDING. A pre-market screener at 10:15
+   * has nothing to match by design — reporting it would teach the reader to
+   * ignore the list.
+   */
+  test('zero outside its window is not a problem', () => {
+    const out = chk.problemsOf(tool({ screeners: [scr({ count: 0, runFrom: '04:00', runTo: '09:30' })] }), AT);
+    expect(out).toEqual([]);
+  });
+
+  test('TradingView refusing the request is an error, never a zero', () => {
+    const out = chk.problemsOf(tool({ screeners: [scr({ count: null, error: 'HTTP 429' })] }), AT);
+    expect(out.join(' ')).toMatch(/could not be run: HTTP 429/);
+    expect(out.join(' ')).not.toMatch(/matches nothing/);
+  });
+
+  test('a screener switched off is not run, and not judged', () => {
+    const out = chk.problemsOf(tool({ screeners: [scr(), scr({ enabled: false, count: null })] }), AT);
+    expect(out).toEqual([]);
+  });
+});
+
+describe('the tool itself', () => {
+  test('a tool that does not answer is one line, and nothing else is guessed', () => {
+    const out = chk.problemsOf({ id: 'T6', reachable: false, error: 'ECONNREFUSED', screeners: [] }, AT);
+    expect(out).toEqual(['T6: did not answer (ECONNREFUSED) — is it running?']);
+  });
+
+  test('paused is said as a choice, not a fault', () => {
+    const out = chk.problemsOf(tool({ paused: true, pausedReason: 'testing' }), AT);
+    expect(out.join(' ')).toMatch(/is PAUSED — testing/);
+  });
+
+  test('a failed last scan is named', () => {
+    const out = chk.problemsOf(tool({ scan: { lastRun: Date.now(), lastRowCount: 0, error: 'TV 503' } }), AT);
+    expect(out.join(' ')).toMatch(/last scan FAILED: TV 503/);
+  });
+
+  test('a card list older than half an hour during the session is a finding', () => {
+    const out = chk.problemsOf(tool({ scan: { lastRun: Date.now() - 45 * 60000, lastRowCount: 9, error: null } }), AT);
+    expect(out.join(' ')).toMatch(/45 minutes old during the session/);
+  });
+
+  test('...and the same age outside the session is not', () => {
+    const out = chk.problemsOf(tool({ scan: { lastRun: Date.now() - 45 * 60000, lastRowCount: 9, error: null } }),
+      { hhmm: '17:00', now: Date.now() });
+    expect(out).toEqual([]);
+  });
+
+  test('a scan that produced no cards is said in terms of what it costs', () => {
+    const out = chk.problemsOf(tool({ scan: { lastRun: Date.now(), lastRowCount: 0, error: null } }), AT);
+    expect(out.join(' ')).toMatch(/NO cards — a setup on this tool has nothing to rank/);
+  });
+
+  test('never scanned is not the same as scanned and found nothing', () => {
+    const out = chk.problemsOf(tool({ scan: { lastRun: null, lastRowCount: null, error: null } }), AT);
+    expect(out.join(' ')).toMatch(/never completed a scan/);
+    expect(out.join(' ')).not.toMatch(/NO cards/);
+  });
+});
+
+describe('the probe reduces each tool to plain facts', () => {
+  /** A fake tool that answers the four endpoints. */
+  const fakeFetch = (answers) => async (url, init) => {
+    const p = new URL(url).pathname;
+    if (init && init.method === 'POST') {
+      const body = JSON.parse(init.body);
+      const a = answers.test[body.name];
+      return a || { status: 500, json: { ok: false, error: 'no fixture' }, error: null };
+    }
+    return answers[p] || { status: 404, json: null, error: null };
+  };
+
+  test('a rejected definition comes back valid:false with the tool\'s reason', async () => {
+    const t = await chk.probeTool({ id: 'T2', name: 'Momentum', port: 3010 }, {
+      fetchJson: fakeFetch({
+        '/api/tool': { status: 200, json: { ok: true, paused: false }, error: null },
+        '/api/scan/status': { status: 200, json: { lastRun: 1, lastRowCount: 3 }, error: null },
+        '/api/screeners': { status: 200, json: { ok: true, screeners: [
+          { key: 'a', name: 'Good', enabled: true, filters: [{}], sort: {}, limit: 20 },
+          { key: 'b', name: 'Bad', enabled: true, filters: [{}], sort: {}, limit: 20 },
+          { key: 'c', name: 'Off', enabled: false, filters: [{}] },
+        ] }, error: null },
+        test: {
+          Good: { status: 200, json: { ok: true, count: 7, ms: 300 }, error: null },
+          Bad: { status: 400, json: { ok: false, error: 'filter 1: unknown field "x"' }, error: null },
+        },
+      }),
+    });
+    expect(t.reachable).toBe(true);
+    const by = Object.fromEntries(t.screeners.map(s => [s.name, s]));
+    expect(by.Good).toMatchObject({ valid: true, count: 7 });
+    expect(by.Bad).toMatchObject({ valid: false, error: 'filter 1: unknown field "x"' });
+    // a screener switched off is not run — no request, nothing to judge
+    expect(by.Off).toMatchObject({ enabled: false, valid: null, count: null });
+  });
+
+  test('a tool that does not answer is unreachable, and nothing else is asked', async () => {
+    let asked = 0;
+    const t = await chk.probeTool({ id: 'T6', name: 'X', port: 3050 }, {
+      fetchJson: async () => { asked += 1; return { status: null, json: null, error: 'ECONNREFUSED' }; },
+    });
+    expect(t.reachable).toBe(false);
+    expect(t.error).toBe('ECONNREFUSED');
+    expect(asked).toBe(1);
+  });
+
+  test('a request that never answered is an error on the row, not a zero', async () => {
+    const t = await chk.probeTool({ id: 'T2', name: 'M', port: 3010 }, {
+      fetchJson: fakeFetch({
+        '/api/tool': { status: 200, json: { ok: true }, error: null },
+        '/api/scan/status': { status: 200, json: {}, error: null },
+        '/api/screeners': { status: 200, json: { screeners: [
+          { key: 'a', name: 'Slow', enabled: true, filters: [{}] }] }, error: null },
+        test: { Slow: { status: null, json: null, error: 'timeout' } },
+      }),
+    });
+    expect(t.screeners[0]).toMatchObject({ valid: null, count: null, error: 'timeout' });
+  });
+});
+
+describe('the window rule', () => {
+  test('no window means always open', () => {
+    expect(chk.windowOpen({}, '03:00')).toBe(true);
+  });
+  test('inside and outside', () => {
+    const s = { runFrom: '09:30', runTo: '16:00' };
+    expect(chk.windowOpen(s, '09:30')).toBe(true);
+    expect(chk.windowOpen(s, '15:59')).toBe(true);
+    expect(chk.windowOpen(s, '16:00')).toBe(false);
+    expect(chk.windowOpen(s, '09:29')).toBe(false);
+  });
+});
