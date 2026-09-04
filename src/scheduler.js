@@ -429,6 +429,9 @@ function startScheduler() {
        * reason a tick fails.
        */
       try {
+        // `setups: due` is THIS tool's list. A tool that owns none returns
+        // at once — see canary.ownsSetup — so the five tools with nothing to
+        // pair against no longer put a control on qp every five minutes.
         await require('./setups/canary').tick({
           now, bar: decidedOn, rows: r0.getTodayRows(), setups: due, ran,
         });

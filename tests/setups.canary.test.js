@@ -237,14 +237,17 @@ describe('the sentence it puts on the feed', () => {
 describe('it does not become the loudest thing on the feed', () => {
   const store = () => ({ out: [], publishFires(f) { this.out.push(...f); } });
 
+  const MINE = [{ id: 'S', enabled: true, decisionTime: '09:35', decidesOnBar: '09:34' }];
   const tick = (bar, alertStore, out, ran = [{ setupId: 'S', picks: [], ok: true }]) =>
     canary.tick({ now: bar, bar, day: '2026-09-04', rows: rows('AAA'), ran,
+                  setups: MINE, all: MINE,
                   deps: { alertStore, decide: decideWith(out) } });
 
   test('it says nothing at all when it is not due', async () => {
     const s = store();
     const r = await canary.tick({ now: '09:31', bar: '09:30', day: '2026-09-04',
-      rows: rows('AAA'), ran: [], deps: { alertStore: s, decide: decideWith(answer()) } });
+      rows: rows('AAA'), ran: [], setups: MINE, all: MINE,
+      deps: { alertStore: s, decide: decideWith(answer()) } });
     expect(r).toBeNull();
     expect(s.out).toEqual([]);
   });
@@ -283,13 +286,116 @@ describe('it does not become the loudest thing on the feed', () => {
     await tick('09:35', s, answer({ last_bar: '09:20', picks: [] }));
     expect(s.out[0].ruleId).toBe('__control__');
     expect(s.out[0].ticker).toBeNull();
+    // …and flagged, so the desk's headline does not count a diagnostic as a
+    // fire. "17 fired today · 5 errors" on 2026-09-04 was mostly this.
+    expect(s.out[0].control).toBe(true);
+  });
+});
+
+/*
+ * WHERE IT RUNS, AND WHERE IT MUST NOT.
+ *
+ * The first version ran in every tool: six processes, one control each, every
+ * five minutes, all at :00 seconds, on one qp. 14:45:22 on 2026-09-04: four
+ * identical "CONTROL DID NOT ANSWER" lines at the same second — the controls
+ * had timed out each other and reported it as the platform being down. And at
+ * 09:35:00 five tools with no setup would have fired while T2 ran the real
+ * decision: the control competing for qp in the one minute it exists to
+ * protect.
+ */
+describe('one control, in the tool that owns a setup, never beside a decision', () => {
+  const store = () => ({ out: [], publishFires(f) { this.out.push(...f); } });
+  const S = { id: 'S', enabled: true, decisionTime: '09:35', decidesOnBar: '09:34' };
+  const OTHER = { id: 'X', enabled: true, decisionTime: '10:00', decidesOnBar: '09:59' };
+
+  test('a tool that owns no setup does not run it at all', async () => {
+    const s = store();
+    const decide = jest.fn(() => Promise.resolve(answer()));
+    const r = await canary.tick({ now: '09:40', bar: '09:39', day: '2026-09-04',
+      rows: rows('AAA'), ran: [], setups: [], all: [S],
+      deps: { alertStore: s, decide } });
+    expect(r).toBeNull();
+    expect(decide).not.toHaveBeenCalled();
+    expect(s.out).toEqual([]);
+  });
+
+  test('a setup switched off does not count as owning one', () => {
+    expect(canary.ownsSetup([{ id: 'S', enabled: false }])).toBe(false);
+    expect(canary.ownsSetup([S])).toBe(true);
+    expect(canary.ownsSetup([])).toBe(false);
+  });
+
+  /*
+   * THE MINUTE THAT MATTERS. Another tool's setup decides on the 09:59 bar at
+   * 10:00 — a cadence minute. This tool must NOT put a control on qp then; the
+   * owning tool covers that bar with its paired run.
+   */
+  test('the cadence run is skipped in a minute any setup anywhere decides', async () => {
+    const s = store();
+    const decide = jest.fn(() => Promise.resolve(answer()));
+    const r = await canary.tick({ now: '10:00', bar: '09:59', day: '2026-09-04',
+      rows: rows('AAA'), ran: [], setups: [S], all: [S, OTHER],
+      deps: { alertStore: s, decide } });
+    expect(r).toBeNull();
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  test('...but the PAIRED run on that bar still happens, in the owning tool', async () => {
+    const s = store();
+    const decide = jest.fn(() => Promise.resolve(answer({ last_bar: '09:59',
+      picks: [{ symbol: 'AAA', entry_at: '09:59' }] })));
+    const r = await canary.tick({ now: '10:00', bar: '09:59', day: '2026-09-04',
+      rows: rows('AAA'), ran: [{ setupId: 'X', picks: [], ok: true }],
+      setups: [OTHER], all: [S, OTHER], deps: { alertStore: s, decide } });
+    expect(r).toBeTruthy();
+    expect(decide).toHaveBeenCalledTimes(1);
+  });
+
+  test('a cadence minute nobody decides in still runs', async () => {
+    const s = store();
+    const decide = jest.fn(() => Promise.resolve(answer()));
+    const r = await canary.tick({ now: '09:40', bar: '09:39', day: '2026-09-04',
+      rows: rows('AAA'), ran: [], setups: [S], all: [S, OTHER],
+      deps: { alertStore: s, decide } });
+    expect(r).toBeTruthy();
+    expect(decide).toHaveBeenCalledTimes(1);
+  });
+
+  test('someoneDecides uses the same window rule the scheduler uses', () => {
+    const watch = { id: 'W', enabled: true, decisionTime: '09:40', windowEnd: '10:10',
+                    decidesOnBar: '09:39', decidesUntilBar: '10:09' };
+    expect(canary.someoneDecides('09:59', [watch])).toBe(true);    // inside the window
+    expect(canary.someoneDecides('10:30', [watch])).toBe(false);
+    expect(canary.someoneDecides('09:34', [S])).toBe(true);
+    expect(canary.someoneDecides('09:35', [S])).toBe(false);
+    // a setup switched off decides nothing
+    expect(canary.someoneDecides('09:34', [{ ...S, enabled: false }])).toBe(false);
+  });
+
+  test('the tick hands the control THIS tool\'s setups, so the check has teeth', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const s = fs.readFileSync(path.join(__dirname, '..', 'src', 'scheduler.js'), 'utf8');
+    const at = s.indexOf("require('./setups/canary').tick(");
+    expect(s.slice(at, at + 200)).toMatch(/setups: due/);
+  });
+
+  test('the page does not count control rows as fires or errors', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const page = fs.readFileSync(path.join(__dirname, '..', 'public', 'alerts.html'), 'utf8');
+    expect(page).toContain("const today = (FIRES || []).filter(f => !f.control);");
+    expect(page).toContain("f.control ? '<span class=\"su-tag\">CONTROL</span>'");
   });
 
   test('a broken alert store does not take the control — or the tick — down',
     async () => {
       const bad = { publishFires() { throw new Error('disk full'); } };
-      await expect(tick('09:35', bad, answer({ last_bar: '09:20', picks: [] })))
-        .resolves.toBeTruthy();
+      await expect(canary.tick({ now: '09:35', bar: '09:34', day: '2026-09-04',
+        rows: rows('AAA'), ran: [{ setupId: 'S', picks: [], ok: true }],
+        setups: [S], all: [S],
+        deps: { alertStore: bad, decide: decideWith(answer({ last_bar: '09:20', picks: [] })) },
+      })).resolves.toBeTruthy();
     });
 });
 
@@ -334,7 +440,7 @@ describe('it is wired in where it can see both halves', () => {
   test('a failing control cannot take the tick down with it', () => {
     const s = readSrc('src', 'scheduler.js');
     const at = s.indexOf("require('./setups/canary').tick(");
-    expect(s.slice(at - 200, at)).toContain('try {');
+    expect(s.slice(at - 500, at)).toContain('try {');
     expect(s.slice(at, at + 400)).toContain('[Control] did not run');
   });
 

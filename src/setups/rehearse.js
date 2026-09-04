@@ -127,7 +127,18 @@ function legDecision(res, err, ms) {
  * the test itself being broken.
  */
 function legFeed(setup, res) {
-  const d = res.data || {};
+  /*
+   * NOT REACHED IS NOT "ANSWERED WITHOUT A STAMP". A run that ended before qp
+   * was asked — no cards, or the filter removed every one — has no `data` at
+   * all, and the first version fell through to the setup's configured feed and
+   * said "yahoo answered, but not with a bar stamp". Yahoo had not been asked.
+   * Seen on the Test setup's rehearsal, 2026-09-04.
+   */
+  if (!res.data) {
+    return unreached('feed', 'How current the bars are',
+      'not reached — the run ended before qp was asked, so no feed answered');
+  }
+  const d = res.data;
   const feed = d.feed || setup.feed || setup.liveFeed || null;
   if (!feed) {
     return unreached('feed', 'How current the bars are',

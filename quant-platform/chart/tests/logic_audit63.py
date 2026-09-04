@@ -81,6 +81,16 @@ ok("entry_mode is 'level', NOT the default 'edge'",
 ok("it carries a stop, so a pick has a real entry/stop/target",
    SPEC['risk']['sl']['type'] == 'pct' and SPEC['risk']['sl']['value'] > 0)
 
+# THE EXIT RULE, which is what makes it deterministic. In level mode a new
+# trade can only open once the previous one closed, and a stop alone closes it
+# only if the price moves. An always-true exit closes it on the next bar
+# whatever the price does — so the next bar can open a new one.
+ok("the exit rule is close > 0 — the position closes on the next bar, always",
+   SPEC['exit']['rules'] == [{'left': {'kind': 'price', 'field': 'close'},
+                              'op': 'gt',
+                              'right': {'kind': 'const', 'value': 0}}],
+   json.dumps(SPEC['exit']['rules']))
+
 ok("the window spans premarket to the close — a control answers whenever the "
    "desk asks", (SPEC['risk']['window_start'], SPEC['risk']['window_end'])
    == (400, 1600))
@@ -90,13 +100,18 @@ ok("the window spans premarket to the close — a control answers whenever the "
 _ET = 'America/New_York'
 
 
+# QUIET BARS, ON PURPOSE. The low never dips below the previous close, so the
+# 0.05% stop is NEVER hit and nothing closes a trade by price. The first
+# version of this audit used bars whose low always hit the stop — and passed a
+# control that, live over SPY on 2026-09-04, could not fire twice in a row: on
+# a quiet stock its one trade stayed open all day. A control has to fire on
+# the bars where nothing happens, because those are most bars.
 def bars1m(n, day, start='09:30', px=10.0):
     idx = [pd.Timestamp(f'{day} {start}', tz=_ET) + pd.Timedelta(minutes=i)
            for i in range(n)]
     return pd.DataFrame(
-        {'open': [px] * n, 'high': [px + .1] * n, 'low': [px - .1] * n,
-         'close': [px + (i % 3) * 0.01 for i in range(n)],
-         'volume': [1e5] * n},
+        {'open': [px] * n, 'high': [px + .1] * n, 'low': [px] * n,
+         'close': [px] * n, 'volume': [1e5] * n},
         index=pd.DatetimeIndex(idx).tz_convert('UTC'))
 
 
@@ -121,15 +136,26 @@ ok("the spec is valid and evaluates", r.get('ok') and r.get('bars'),
    str(r.get('error') or ''))
 
 trades = r.get('trades') or []
-ok("it opens a position on EVERY bar of the day — 60 bars, 60 trades",
-   len(trades) == 60, f"got {len(trades)}")
+# 120 bars over two days. Entry at the close of bar j, exit at bar j+1, entry
+# again at j+2: one trade per TWO bars, so 60. The first version of this line
+# read "60 bars, 60 trades" and was true of a different frame — an
+# arithmetically correct number about the wrong thing.
+ok("a trade opens on EVERY OTHER bar, whatever the price does — 120 quiet "
+   "bars, 60 trades", len(trades) == 60, f"got {len(trades)}")
 
-# ── the trap, demonstrated rather than described ───────────────────────────
+# ── the traps, demonstrated rather than described ──────────────────────────
 edge = json.loads(json.dumps(SPEC))
 edge['risk']['entry_mode'] = 'edge'
 re_ = run(edge)
-ok("EDGE MODE would fire once for the whole day — the bug this spec avoids",
+ok("EDGE MODE would fire once for the whole span — the first bug this spec avoids",
    len(re_.get('trades') or []) == 1, f"got {len(re_.get('trades') or [])}")
+
+noexit = json.loads(json.dumps(SPEC))
+noexit['exit']['rules'] = []
+rn = run(noexit)
+ok("WITHOUT THE EXIT RULE the one trade never closes on quiet bars — the "
+   "second bug, the one seen live over SPY",
+   len(rn.get('trades') or []) <= 1, f"got {len(rn.get('trades') or [])}")
 
 # ── what the desk actually receives ────────────────────────────────────────
 out = dec.decide([SPEC], ['AAA'], '2024-01-09', tf='1m', feed='control',
@@ -139,11 +165,19 @@ ok("decide() answers ok with the newest bar stamped",
    f"last_bar={out.get('last_bar')!r}")
 
 picks = out.get('picks') or []
-ok("every pick carries an entry, a stop and a target — the desk sizes off "
-   "these, so a control with no plan would prove less than it claims",
-   bool(picks) and all(p.get('entry') and p.get('stop') and p.get('target')
-                       for p in picks),
+ok("every pick carries an entry and a stop — the two numbers the desk reads "
+   "off a pick",
+   bool(picks) and all(p.get('entry') and p.get('stop') for p in picks),
    json.dumps(picks[:1])[:200])
+
+# UNORDERABLE BY CONSTRUCTION. The always-true exit rule makes qp classify the
+# control as a rule-exit strategy — no target, order_ok false — which is the
+# right answer twice over: a control must never reach a broker, and now it
+# cannot, whatever the desk-side code does or does not check.
+ok("qp marks the control as NOT orderable — it can never be sent to a broker",
+   bool(picks) and all((p.get('exit_plan') or {}).get('order_ok') is False
+                       for p in picks),
+   json.dumps((picks[0].get('exit_plan') if picks else {}))[:200])
 
 ok("every pick is stamped with the bar it fired on",
    all(re.match(r'^\d{2}:\d{2}$', str(p.get('entry_at') or '')) for p in picks))

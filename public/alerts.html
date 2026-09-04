@@ -1869,6 +1869,7 @@ function setupFire(f, fresh) {
     return `<div class="fire setup lvl-${esc(f.level || 'info')}${fresh}">
       <div class="su-head">
         <span class="su-tag">${esc((f.level || 'info').toUpperCase())}</span>
+        ${f.control ? '<span class="su-tag">CONTROL</span>' : ''}
         ${tickerLink(f)}<span class="tool">${esc(f.rule || '')}</span>
         <span class="when">${esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
       </div>
@@ -2246,7 +2247,11 @@ function paintStrip() {
 
   // Today's fires, split — three alerts and three errors are different days.
   // The endpoint is scoped to today, so no date filter belongs here.
-  const today = FIRES || [];
+  // THE CONTROL IS NOT A FIRE. It is a diagnostic that writes to the same feed,
+  // and on 2026-09-04 "17 fired today · 5 errors" was mostly it — a check of
+  // the machine read as a trading day. Its rows stay on the feed; they do not
+  // count here.
+  const today = (FIRES || []).filter(f => !f.control);
   const bad = today.filter(f => f.level === 'error').length;
   out.push(cell('fired today', String(today.length)));
   out.push(cell('errors', String(bad), bad ? 'bad' : 'off', bad ? 'alarm' : ''));

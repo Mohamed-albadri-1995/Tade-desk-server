@@ -91,9 +91,12 @@ const TIMEOUT_MS = 12000;
  * produces a trade on every bar, edge mode exactly one. See
  * chart/tests/logic_audit63.py.
  *
- * The 0.05% stop is what makes the position close again immediately, so the
- * next bar can open a new one. It is never traded — it exists so the pick
- * carries a real entry, stop and target, which is what a pick has to look like.
+ * The 0.05% stop exists so the pick carries a real entry and stop, which is
+ * what a pick has to look like; the always-true exit rule below is what closes
+ * the position on the next bar so a new one can open. Between them qp
+ * classifies this as a rule-exit strategy — no target, order_ok false — and
+ * that is the right answer twice over: a control must never reach a broker,
+ * and now it cannot, whatever the desk-side code does or does not check.
  */
 const SPEC = {
   name: '__control__',
@@ -109,7 +112,29 @@ const SPEC = {
       right: { kind: 'const', value: 0 },
     }],
   },
-  exit: { logic: 'AND', rules: [], window: 1 },
+  /*
+   * AN EXIT RULE THAT IS ALWAYS TRUE, and it is not decoration.
+   *
+   * Without it the shipped control was NOT deterministic. In level mode a new
+   * trade can only open once the previous one has closed, and with only a
+   * 0.05% stop the previous one closes only if the next bar's low dips that far
+   * under entry. On a quiet stock it never does — the first trade of the day
+   * stayed open all day and the control reported "did not fire although the
+   * feed was current" on bar after bar. Seen live on 2026-09-04 over SPY at
+   * 14:15, and proven against qp's engine: on flat bars the old spec produced
+   * ZERO picks; with this rule it produces one every other bar, whatever the
+   * price does. That alternate-bar rhythm is why TOLERANCE_MIN is one.
+   */
+  exit: {
+    logic: 'AND',
+    k: 1,
+    window: 1,
+    rules: [{
+      left: { kind: 'price', field: 'close' },
+      op: 'gt',
+      right: { kind: 'const', value: 0 },
+    }],
+  },
   risk: {
     sl: { type: 'pct', value: 0.05 },
     tp: { type: '', value: null },
@@ -342,10 +367,61 @@ function verdict(control, runs) {
  * a message goes out when the answer CHANGES: the first failure, each recovery
  * and the next failure after it, and one pairing line per bar.
  */
-async function tick({ now, bar, day, rows, setups = [], ran = [], deps = {} } = {}) {
+/*
+ * WHERE IT RUNS, AND WHERE IT MUST NOT.
+ *
+ * The first version ran in every tool. Six processes, one control each, every
+ * five minutes, all at :00 seconds, each a qp decide — on one qp, on a 912 MB
+ * box. 2026-09-04 14:45:22: four identical "CONTROL DID NOT ANSWER" lines at
+ * the same second. The controls had timed out EACH OTHER, and reported it as
+ * the platform being down. Worse, at 09:35:00 the five tools with no setup
+ * would have fired their cadence run while T2 ran the real decision — the
+ * control competing for the platform in the one minute it exists to protect.
+ *
+ * So, two rules:
+ *
+ *   ONLY A TOOL THAT OWNS A SETUP RUNS IT. A tool with nothing to pair against
+ *   has nothing to say — and its control was pure load plus a SPY fallback
+ *   line on the feed. That is also what makes the feed read once per bar:
+ *   there is one control now, not six each dedupeing only itself.
+ *
+ *   NEVER ON THE CADENCE IN A MINUTE ANY SETUP ANYWHERE DECIDES. The paired
+ *   run — after runDue, in the owning tool — still covers that bar, which is
+ *   the only place it should be covered from.
+ *
+ * `all` is every setup the catalog knows, across tools. `setups` is this
+ * tool's own. Both are what the scheduler already has in hand.
+ */
+function ownsSetup(setups) {
+  return (setups || []).some(s => s && s.enabled !== false);
+}
+
+function someoneDecides(bar, all, deps = {}) {
+  const within = deps.withinWindow || require('./catalog').withinWindow;
+  return (all || []).some(s => s && s.enabled !== false
+    && within(bar, s.decidesOnBar || s.decisionTime, s.decidesUntilBar || s.windowEnd));
+}
+
+async function tick({ now, bar, day, rows, setups = [], all = null, ran = [],
+                      deps = {} } = {}) {
   const date = day || toETDate(Date.now());
   resetIfNewDay(date);
-  if (!due(now, (ran || []).length > 0)) return null;
+  if (!ownsSetup(setups)) return null;
+
+  const paired = (ran || []).length > 0;
+  if (!due(now, paired)) return null;
+  if (!paired) {
+    /*
+     * A cadence run. `all` is read only here, and only in a tool that got
+     * this far — one catalog read every five minutes in one or two processes,
+     * not one every minute in six.
+     */
+    let everyone = all;
+    if (!everyone) {
+      try { everyone = await (deps.catalog || require('./catalog')).list(); } catch { everyone = []; }
+    }
+    if (someoneDecides(bar, everyone, deps)) return null;
+  }
 
   const control = await run({ bar, day: date, rows, setups, deps });
   const v = verdict(control, ran);
@@ -366,6 +442,10 @@ async function tick({ now, bar, day, rows, setups = [], ran = [], deps = {} } = 
     alertStore.publishFires([{
       ruleId: '__control__', rule: 'Control', ticker: null, toolId: config.toolId,
       date, at: Date.now(), kind: 'setup', level: v.level, detail: v.detail,
+      // MARKED, so the desk's headline does not count it. "17 fired today,
+      // 5 errors" on 2026-09-04 was mostly this — a diagnostic read as a
+      // trading day. The page skips `control` rows in those two numbers.
+      control: true,
     }], date);
   } catch (err) {
     console.warn('[Control] could not publish:', err.message);
@@ -374,7 +454,8 @@ async function tick({ now, bar, day, rows, setups = [], ran = [], deps = {} } = 
 }
 
 module.exports = {
-  run, tick, verdict, due, symbolsFor, feedFor, firedOn, resultOn,
+  run, tick, verdict, due, ownsSetup, someoneDecides, symbolsFor, feedFor,
+  firedOn, resultOn,
   SPEC, CADENCE_MIN, MAX_SYMBOLS, FALLBACK_SYMBOLS, TOLERANCE_MIN, TIMEOUT_MS,
   // Test-only: the day's memory has to be resettable, or one test's bar leaks
   // into the next one's pairing.

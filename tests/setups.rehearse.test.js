@@ -123,6 +123,13 @@ describe('a quiet bar proves the first half and NOTHING about the second', () =>
     expect(l.filter.ok).toBe(false);
     expect(l.decision.ok).toBeNull();
     expect(l.feed.ok).toBeNull();
+    /*
+     * AND THE FEED LEG MUST NOT SAY THE FEED ANSWERED. It said "yahoo answered,
+     * but not with a bar stamp" on the Test setup's rehearsal, 2026-09-04 —
+     * yahoo had never been asked. A leg that was not reached says so.
+     */
+    expect(l.feed.note).toMatch(/not reached/);
+    expect(l.feed.note).not.toMatch(/answered, but/);
   });
 });
 
