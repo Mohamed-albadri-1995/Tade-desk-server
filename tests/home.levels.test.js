@@ -36,7 +36,7 @@ const server = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.js'), 'u
 const NOT_ON_LANDING = ['id="cards"', 'id="uni-out"', 'id="cs-out"', 'id="cmp-out"',
                         'id="now-bar"', 'class="tool-card', 'cmp-btn'];
 /** …and the subset the suite page itself still owns. */
-const SUITE_OWNS = ['id="cards"', 'id="uni-out"', 'id="now-bar"', 'class="tool-card'];
+const SUITE_OWNS = ['id="cards"', 'id="now-bar"', 'class="tool-card'];
 
 describe('the landing page', () => {
   test('has the app grid and nothing from the suite', () => {
@@ -106,133 +106,128 @@ test('the server serves all three levels', () => {
 });
 
 /*
- * THE THREE SHARED PANELS, after the design pass.
+ * THE THREE PANELS THAT CAME OFF THIS PAGE.
  *
- * Shortlist, CANSLIM and the comparison were three centred blocks of prose
- * running into each other with no edges — and the explanation was set larger
- * than the data it explained. Four lines of centred text about the shortlist,
- * above a shortlist rendered in 13px chips. The prose is not the product.
+ * Shortlist, CANSLIM and "Compare screeners" sat under the tool cards. On
+ * 2026-09-04 the trader asked for all three gone: the page answers "which
+ * screener?", and three panels answering other questions were in the way of it.
+ *
+ * THE FEATURES ARE NOT DELETED, and that distinction is the whole point of
+ * these tests. Starring a card still shortlists it, the union is still
+ * published, and both lists still have pages of their own. What went is the
+ * front doors — so this checks that the doors are gone AND that the rooms are
+ * still standing, because deleting a panel and deleting a feature look
+ * identical from the landing page and are not remotely the same thing.
  */
-describe('the shared lists read like data', () => {
-  test('the palette is linked, not copied', () => {
-    // Four pages with four private copies of one palette is exactly how they
-    // came apart the first time.
-    expect(suite).toContain('href="/desk.css"');
-    expect(suite).not.toContain(':root {');
+describe('the three panels are off the suite page', () => {
+  test('the shortlist panel is gone, markup and code', () => {
+    expect(suite).not.toContain('id="uni-wrap"');
+    expect(suite).not.toContain('id="uni-out"');
+    expect(suite).not.toContain('function loadUnifiedShortlist(');
+    expect(suite).not.toContain('copyShortlistForTV');
   });
 
-  test('prose is left-aligned and capped at a readable measure', () => {
-    // A centred paragraph is read by hunting for the start of each line in a
-    // different place every time. Headings may centre; prose does not.
-    const at = suite.indexOf('.cmp-hint {');
-    const rule = suite.slice(at, suite.indexOf('}', at));
-    expect(rule).toContain('text-align:left');
-    expect(rule).toMatch(/max-width:\d+ch/);
-    // …and the panel that holds it no longer centres everything inside it.
-    const at2 = suite.indexOf('.cmp-wrap {');
-    expect(suite.slice(at2, suite.indexOf('}', at2))).toContain('text-align:left');
+  test('the CANSLIM and Compare doors are gone', () => {
+    expect(suite).not.toContain('href="/screeners/canslim"');
+    expect(suite).not.toContain('href="/screeners/compare"');
+    expect(suite).not.toContain('function loadCanslim(');
+    expect(suite).not.toContain('class="shelf-card"');
   });
 
-  test('each panel has an edge of its own', () => {
-    const at = suite.indexOf('.cmp-wrap {');
-    const rule = suite.slice(at, suite.indexOf('}', at));
-    expect(rule).toContain('background:var(--panel)');
-    expect(rule).toContain('border:1px solid var(--line)');
-    expect(rule).toContain('border-radius');
-  });
-
-  test('the list comes before the paragraph about the list', () => {
-    // Heading, then the names, then the reasoning — not heading, four lines of
-    // prose, and only then the thing you came for.
-    const panel = suite.slice(suite.indexOf('id="uni-wrap"'), suite.indexOf('id="cs-wrap"'));
-    expect(panel.indexOf('id="uni-out"')).toBeLessThan(panel.indexOf('details class="why"'));
-  });
-
-  test('a ticker is bigger than the sentence describing tickers', () => {
-    const at = suite.indexOf('.uni-tkr {');
-    expect(suite.slice(at, suite.indexOf('}', at))).toContain('font-size:var(--f-md)');
-    const at2 = suite.indexOf('.cmp-hint {');
-    expect(suite.slice(at2, suite.indexOf('}', at2))).toContain('font-size:var(--f-xs)');
-  });
-
-  test('every explanation folds, and none starts open', () => {
-    // Two left with CANSLIM and the comparison; the shortlist keeps its own.
-    const opens = [...suite.matchAll(/<details class="why"/g)].length;
-    expect(opens).toBeGreaterThanOrEqual(2);
-    for (const page of [suite, canslim, compare]) {
-      expect(page).not.toMatch(/<details class="why" open/);
+  /*
+   * DEAD CODE THAT STILL FETCHES IS WORSE THAN DEAD CODE. A loader whose panel
+   * no longer exists keeps making requests, keeps failing, and keeps being read
+   * in review as if it ran. The CSS is checked too — three hundred lines of
+   * rules for elements nothing renders is where the next reader loses an hour.
+   */
+  test('nothing is left painting a panel that no longer exists', () => {
+    for (const dead of ['.sl-row', '.shelf-card', '.cmp-wrap', '.uni-chip', '.cs-summary']) {
+      expect({ dead, on: suite.includes(dead) }).toEqual({ dead, on: false });
     }
   });
 
-  test('the type face is the screener\'s, from the shared sheet', () => {
-    // The screener is monospace throughout and it is the page that reads best
-    // on this phone. What was wrong was never the face — it was four of them.
-    const desk = read('desk.css');
-    expect(desk).toMatch(/--ui:'SF Mono'/);
-    expect(desk).toMatch(/body \{[^}]*font-family:var\(--ui\)/);
+  test('...but the features themselves are untouched', () => {
+    // The endpoints still answer, from any tool.
+    expect(server).toContain("app.use('/api/shortlist'");
+    expect(server).toContain("app.use('/api/canslim'");
+    // Both lists still have their own page, still reachable by URL.
+    expect(server).toContain("app.get('/screeners/canslim'");
+    expect(server).toContain("app.get('/screeners/compare'");
+    expect(compare).toContain('function loadComparison(');
+    expect(canslim).toContain('class="cs-card');
+  });
+
+  test('the palette is still linked, not copied', () => {
+    expect(suite).toContain('href="/desk.css"');
+    expect(suite).not.toContain(':root {');
   });
 });
 
 /*
- * THE SUITE PAGE, ORDERED BY URGENCY.
+ * THE SLEEPING SCANNERS.
  *
- * Shortlist, CANSLIM and the comparison were three strips at the bottom of the
- * page, under the nine tool cards, in the order they happened to be written.
- * They answer questions of completely different urgency: the shortlist is what
- * to look at this morning and changes hourly; CANSLIM turns over on the
- * earnings calendar; the comparison is a month-end question. Putting them in
- * one scroll made the daily one the hardest to reach.
- *
- *   /screeners            the shortlist, then two doors, then the nine tools
- *   /screeners/canslim    a card per member
- *   /screeners/compare    the table, with room for it
+ * Five tools are `enabled: false` — stopped, with the read-only archive serving
+ * their history on the same ports. Left in the main list they were five
+ * permanently red OFFLINE cards among six working ones, because the probe hits
+ * /health and the archive does not serve it. A deliberate decision rendered as
+ * five faults, in the colour of a fault.
  */
+describe('the tools that are switched off have their own section', () => {
+  test('there is a section, written from the registry', () => {
+    expect(suite).toContain('id="sleeping"');
+    expect(suite).toContain('function renderSleeping(');
+    expect(suite).toContain('Sleeping scanners');
+  });
 
-describe('the suite page puts today first', () => {
   /*
-   * REVERSED, deliberately, on 2026-08-19.
-   *
-   * The shortlist led the page on the reasoning that it is what today is
-   * about. But the page is titled "Which screener?", and the nine screeners
-   * began roughly eight hundred pixels down it — below a subtitle, a status
-   * bar, the shortlist panel and two shelf cards. On a phone that is the whole
-   * first screen and none of it answers the question in the title.
-   *
-   * The shortlist is still here and still worth having. It answers a DIFFERENT
-   * question, so it follows the one that was asked.
+   * AWAKE OR ASLEEP IS A FACT ABOUT THE CONFIG, not about whether a port
+   * answers. `enabled !== false`, matching the deploy — absent means on, so a
+   * registry entry written before the flag existed still renders as a live tool.
    */
-  test('the nine tool cards come before the shortlist', () => {
-    expect(suite.indexOf('id="cards"')).toBeLessThan(suite.indexOf('id="uni-wrap"'));
+  test('the split is on the registry flag, and absent means awake', () => {
+    expect(suite).toContain('function isAwake(t) { return t.enabled !== false; }');
+    expect(suite).not.toContain('t.enabled === true');
   });
 
-  test('CANSLIM and the comparison are doors, not panels', () => {
-    expect(suite).toContain('href="/screeners/canslim"');
-    expect(suite).toContain('href="/screeners/compare"');
-    // …and their content is not also rendered here
-    expect(suite).not.toContain('id="cmp-out"');
-    expect(suite).not.toContain('function loadComparison(');
+  test('a sleeping tool is NOT probed — the archive has no /health', () => {
+    // Five failed requests every thirty seconds, to report a state the registry
+    // already stated, and each one paints the card red on the way.
+    expect(suite).toMatch(/const live = TOOLS\.filter\(isAwake\)/);
+    expect(suite).toMatch(/live\.forEach\(probe\)/);
+    expect(suite).not.toMatch(/TOOLS\.forEach\(probe\)/);
   });
 
-  test('the CANSLIM door still carries its count', () => {
-    // The number is the reason to open it, so it has to be legible while shut.
-    expect(suite).toContain('id="cs-count"');
-    expect(suite).toContain('function loadCanslim(');
+  test('and it says "sleeping" rather than "offline"', () => {
+    expect(suite).toContain('>sleeping<');
+    expect(suite).toContain('.status.asleep');
   });
 
-  test('a shortlist name is a row, not a pill', () => {
-    /*
-     * It was a 30px chip with the ticker, a count and three tool ids pressed
-     * together — the same information made hard to read and impossible to hit
-     * accurately. The ticker is the biggest thing on the row now, and the
-     * tools that picked it are their own links underneath.
-     */
-    expect(suite).toContain('class="sl-row');
-    expect(suite).toContain('class="sl-tkr"');
-    const at = suite.indexOf('.sl-tkr {');
-    expect(suite.slice(at, suite.indexOf('}', at))).toContain('var(--f-lg)');
-    // Agreement between tools is marked, since it is why nine lists are merged.
-    expect(suite).toContain('tools agree');
-    expect(suite).toContain('.sl-row.agreed');
+  /*
+   * FOLDED, NOT HIDDEN. A tool that vanished would leave months of frozen days
+   * with no visible owner, and "where did T3's gappers go?" would have no
+   * answer on the screen that used to hold it.
+   */
+  test('it is folded away, and says the history is still readable', () => {
+    expect(suite).toContain('<details class="sleep-wrap">');
+    expect(suite).toContain('still readable in qp');
+    expect(suite).toMatch(/t\.archive/);
+  });
+
+  test('the section is not drawn at all when every tool is awake', () => {
+    // An empty "Sleeping scanners" heading is a section about nothing.
+    expect(suite).toMatch(/if \(!asleep\.length\) \{ el\.innerHTML = ''; return; \}/);
+  });
+
+  /*
+   * THE COUNT IS COUNTED. "Nine of them" was written into the page, and stayed
+   * there for a week after there stopped being nine — a sentence that was true
+   * once and is now simply wrong, on the first line of the page.
+   */
+  test('nothing on the page claims a fixed number of screeners', () => {
+    expect(suite).not.toMatch(/[Nn]ine of them/);
+    expect(suite).not.toContain('The nine screeners');
+    expect(suite).toContain("id=\"section-head\"");
+    expect(suite).toMatch(/The \$\{ordered\.length\} screeners/);
   });
 });
 

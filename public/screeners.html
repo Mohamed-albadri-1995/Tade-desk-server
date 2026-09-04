@@ -26,8 +26,7 @@
  */
 
 /* Tickers, counts, clocks and tables stay monospace — they are compared. */
-.uni-tkr, .uni-by, .uni-n, .check, .card-port, .nb-clock,
-.cmp-tbl, .tv-fallback, .sc-tag { font-family:var(--mono); }
+.check, .card-port, .nb-clock, .sc-tag { font-family:var(--mono); }
 
 /* ── the why, folded away ──
  * Same pattern as the alerts page. The reasoning is worth keeping; printed at
@@ -147,6 +146,11 @@
 .status.down { color:var(--red); }
 .status.wait .dot { background:var(--amber); }
 .status.wait { color:var(--amber); }
+/* SLEEPING IS NOT OFFLINE, and must not be red. Red means something broke;
+   these were switched off on purpose and their history is still being served.
+   See the sleeping section below. */
+.status.asleep .dot { background:var(--text3); }
+.status.asleep { color:var(--text3); }
 
 .stats { display:flex; gap:10px; flex-wrap:wrap; margin-top:2px; }
 .stat { font-size:10.5px; color:var(--text2); background:var(--bg3);
@@ -181,173 +185,31 @@
   display:block; margin-bottom:4px; letter-spacing:.05em; }
 .now-bar .nb-next { color:var(--text2); }
 
-/* Group headings inside the card grid. Full width so the flex row breaks on
-   them, which is what turns a shuffled-looking list into a grouped one. */
-.group-head { width:100%; font-size:11px; font-weight:700; letter-spacing:.14em;
-  text-transform:uppercase; color:var(--text3); margin:10px 0 -4px; padding-left:2px; }
-.group-head:first-child { margin-top:0; }
-
-/* ── THE THREE SHARED PANELS ──
+/* ── THE SLEEPING SCANNERS ──
  *
- * Shortlist, CANSLIM and the comparison were three centred blocks of prose
- * running into each other with no edges, the explanation set larger than the
- * data. They are cards now: a heading, the thing itself, and the reasoning
- * folded behind a "why".
- */
-.cmp-wrap { margin-top:var(--s5); width:100%; max-width:1000px; text-align:left;
-  background:var(--panel); border:1px solid var(--line); border-radius:14px;
-  padding:var(--s4); }
-.cmp-btn { font:600 var(--f-sm)/1 var(--ui); padding:11px 18px; border-radius:9px;
-  cursor:pointer; background:var(--accent); color:#04121f; border:none; min-height:38px; }
-.cmp-btn:hover { filter:brightness(1.08); }
-.cmp-btn:disabled { opacity:.5; cursor:default; }
-.cmp-sel { font:600 var(--f-sm)/1 var(--ui); padding:11px 12px; border-radius:9px;
-  margin-left:var(--s2); background:var(--panel2); color:var(--text);
-  border:1px solid var(--line2); cursor:pointer; min-height:38px; }
-/* Two buttons that do the same job in two ways. They wrap on a narrow phone —
-   "Copy all for TradingView" will not share 390px with anything — so they are
-   given equal basis and allowed to grow, which makes the wrap look chosen
-   rather than like one button that fell off the end. */
-.cmp-row { display:flex; flex-wrap:wrap; gap:var(--s2); align-items:stretch;
-  margin-top:var(--s3); }
-.cmp-row > .cmp-btn, .cmp-row > .cmp-sel { flex:1 1 170px; margin-left:0; }
-.pair-wrap { margin-top:var(--s5); }
-.pair-title { font-size:13px; font-weight:700; margin-bottom:4px; }
-/* Left-aligned and capped at a readable measure. Centred paragraphs are read
-   by hunting for the start of every line in a different place. */
-.cmp-hint { font-size:var(--f-xs); color:var(--text2); margin-top:var(--s2);
-  line-height:1.65; text-align:left; max-width:72ch; }
-.cmp-hint b { color:var(--text); font-weight:600; }
-/* Shown only when neither clipboard route worked. Monospace and wrapping, so a
-   long list is still something you can select all of on a phone. */
-.tv-fallback { width:100%; margin-top:10px; padding:10px; border-radius:6px;
-  background:var(--bg3); color:var(--text); border:1px solid var(--accent);
-  font:12px/1.6 ui-monospace,Menlo,monospace; resize:vertical; word-break:break-all; }
-/* The panel's name, and the count beside it — which is the part worth seeing
-   before deciding whether to read the rest. */
-.uni-title { font-size:var(--f-lg); font-weight:700; margin-bottom:var(--s1);
-  letter-spacing:-.01em; display:flex; align-items:baseline; gap:var(--s2);
-  flex-wrap:wrap; }
-/* THE DATA, left-aligned and bigger than the prose about it. It was 13px
-   chips centred under four lines of centred explanation — the one arrangement
-   that makes a list of tickers harder to scan than a paragraph. */
-.uni-grid { display:flex; flex-wrap:wrap; gap:var(--s2); justify-content:flex-start;
-  margin-top:var(--s3); }
-
-/* ── THE SHORTLIST ROW ──
+ * Five tools are switched off in tools.config.json and their history is served
+ * by the read-only archive on the same ports. Left in the main list they were
+ * five permanently red cards among six working ones — and worse, red is the
+ * colour of a fault, so a deliberate decision read as five things broken.
  *
- * This is the thing the page is for, so it gets the room. It was a 30px pill
- * with the ticker, a count and three tool ids pressed together — the same
- * information, made hard to read and impossible to hit accurately.
- *
- * One row per name. The ticker is the biggest thing on it and it is the link
- * to the card; the tools that picked it are their own links underneath,
- * because their cards differ — same stock, different screeners, different
- * score. Names more than one tool picked are marked, since independent
- * agreement is the entire reason these nine lists are merged into one.
- */
-.sl-list { display:flex; flex-direction:column; gap:var(--s2); margin-top:var(--s3); }
-.sl-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--s2) var(--s3);
-  background:var(--panel2); border:1px solid var(--line); border-left:3px solid var(--line2);
-  border-radius:10px; padding:var(--s3) var(--s4); }
-.sl-row.agreed { border-left-color:var(--amber); background:#fbbf240d; }
-.sl-tkr { font:700 var(--f-lg)/1 var(--mono); letter-spacing:.02em; color:var(--text);
-  text-decoration:none; }
-.sl-tkr:hover { color:var(--accent); }
-.sl-badge { font-size:var(--f-xs); font-weight:700; color:#1c1403; background:var(--amber);
-  border-radius:99px; padding:3px 9px; }
-.sl-tv { margin-left:auto; font:600 var(--f-xs)/1 var(--ui); text-decoration:none;
-  color:var(--text2); background:var(--panel3); border:1px solid var(--line2);
-  border-radius:7px; padding:7px 10px; white-space:nowrap; }
-.sl-tv:hover { color:var(--accent); border-color:var(--accent); }
-.sl-tools { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
-.sl-lbl { font-size:var(--f-xs); color:var(--text3); margin-right:2px; }
-.sl-tool { font:700 var(--f-xs)/1 var(--mono); text-decoration:none; color:var(--text2);
-  background:var(--panel); border:1px solid var(--line2); border-radius:6px; padding:5px 9px; }
-.sl-tool:hover { color:var(--accent); border-color:var(--accent); }
-.sl-tool.off { opacity:.5; }
+ * Folded away, because they are still real: their cards, registers and frozen
+ * days are all still there to chart and backtest in qp. One line when shut,
+ * the whole shelf when opened. */
+.sleep-wrap { width:100%; max-width:1000px; margin-top:var(--s5);
+  border-top:1px solid var(--line); padding-top:var(--s3); }
+.sleep-sum { cursor:pointer; list-style:none; display:flex; align-items:baseline;
+  gap:10px; flex-wrap:wrap; color:var(--text3); font-size:12px; min-height:30px; }
+.sleep-sum::-webkit-details-marker { display:none; }
+.sleep-sum::before { content:'▸'; transition:transform .15s; }
+.sleep-wrap[open] .sleep-sum::before { transform:rotate(90deg); }
+.sleep-sum b { font-size:13px; font-weight:700; letter-spacing:.02em; color:var(--text2); }
+.sleep-note { width:100%; max-width:1000px; font-size:var(--f-xs); color:var(--text3);
+  line-height:1.7; margin:var(--s2) 0 var(--s3); }
 
-/* ── THE SHELF ──
- * The two lists that are not about today's tape. Doors, not panels: CANSLIM
- * turns over on the earnings calendar and the comparison is a month-end
- * question, and neither belongs in the same scroll as "what is shortlisted
- * right now". */
-.shelf { display:flex; flex-wrap:wrap; gap:var(--s3); width:100%; max-width:1000px;
-  margin-top:var(--s4); }
-.shelf-card { flex:1 1 300px; background:var(--panel); border:1px solid var(--line);
-  border-radius:14px; padding:var(--s4); text-decoration:none; color:inherit;
-  display:flex; flex-direction:column; gap:var(--s2);
-  transition:border-color .15s, transform .15s; }
-.shelf-card:hover { border-color:var(--accent); transform:translateY(-2px); }
-.shelf-name { font-size:var(--f-lg); font-weight:700; letter-spacing:-.01em;
-  display:flex; align-items:baseline; gap:var(--s2); }
-.shelf-n { font:400 var(--f-sm)/1 var(--ui); color:var(--text2); }
-.shelf-n b { color:var(--amber); font-weight:600; }
-.shelf-desc { font-size:var(--f-xs); color:var(--text2); line-height:1.6; }
-.shelf-go { font-size:var(--f-xs); font-weight:600; color:var(--accent); margin-top:auto; }
-.uni-chip { display:flex; align-items:center; gap:var(--s2); background:var(--panel2);
-  border:1px solid var(--line2); border-radius:9px; padding:9px 12px; }
-.uni-chip.multi { border-color:#eab30877; background:#eab30814; }
-/* The CANSLIM panel is a <details>. Its headline has to look like the other
-   panel titles rather than like a browser disclosure widget, so the native
-   marker is replaced with one that sits on the same baseline as the text. */
-.cs-summary { cursor:pointer; list-style:none; display:flex; align-items:baseline;
-  gap:var(--s2); flex-wrap:wrap; min-height:34px; }
-.cs-summary::-webkit-details-marker { display:none; }
-.cs-summary::before { content:'▸'; color:#c084fc; font-size:.8em; transition:transform .15s; }
-#cs-wrap[open] .cs-summary::before { transform:rotate(90deg); }
-/* The count is the reason to open it, so it is legible while shut. Amber only
-   when something is about to drop off — that is the change that turns a badge
-   off on every other tool's cards, which reads as a bug if it is a surprise. */
-.cs-count { font-size:var(--f-sm); font-weight:400; color:var(--text2); }
-.cs-count b { color:#facc15; font-weight:600; }
-
-/* Same purple the CANSLIM badge uses on a card, so the two read as one thing.
-   Scoped to the CANSLIM panel: an unscoped .uni-chip rule here would sit after
-   .uni-chip.multi and recolour the shortlist's chips as a side effect. The
-   amber variant marks a name about to expire — its badge is about to turn off
-   everywhere else. */
-#cs-out .uni-chip { border-color:#c084fc55; background:#c084fc12; }
-#cs-out .uni-chip.cs-soon { border-color:#eab30877; background:#eab30812; }
-/* The days-left pill inherits the shortlist's amber, which on a name with 90
-   days to run reads as a warning about nothing. Neutral by default; amber only
-   where it means something. */
-#cs-out .uni-n { background:#c084fc1c; color:#d8b4fe; border-color:#c084fc44; }
-/* Out to TradingView. Small and quiet on both lists: on a shortlist chip the
-   ticker already opens the card that explains why the name is there, so this
-   sits beside it rather than replacing it. */
-.tv-link { font-size:10px; font-weight:700; letter-spacing:.04em; text-decoration:none;
-  color:var(--text3); border:1px solid var(--border); border-radius:4px;
-  padding:2px 6px; white-space:nowrap; }
-.tv-link:hover { color:var(--accent); border-color:var(--accent); }
-#cs-out .cs-soon .uni-n { background:#eab30822; color:#facc15; border-color:#eab30866; }
-/* The ticker is the thing being read. It was the same size as the sentence
-   above it saying that tickers would appear below. */
-.uni-tkr { font-weight:700; font-size:var(--f-md); letter-spacing:.02em; }
-.uni-by { font-size:10.5px; color:var(--text3); font-family:ui-monospace,Menlo,monospace; }
-.uni-n { font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px;
-  background:#eab30822; color:#facc15; border:1px solid #eab30844; }
-.uni-link { color:inherit; text-decoration:none; border-bottom:1px dotted var(--text3); }
-.uni-link:hover { color:var(--accent); border-bottom-color:var(--accent); }
-.uni-empty { font-size:12px; color:var(--text3); margin-top:14px; }
-.cmp-scroll { overflow-x:auto; margin-top:18px; }
-.cmp-tbl { width:100%; border-collapse:collapse; font-size:12px; min-width:600px; text-align:right; }
-.cmp-tbl th { font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--text3);
-  padding:7px 8px; border-bottom:1px solid var(--border); white-space:nowrap; font-weight:600; }
-.cmp-tbl td { padding:8px; border-bottom:1px solid #1b1f2b; font-variant-numeric:tabular-nums;
-  white-space:nowrap; }
-.cmp-tbl th:first-child, .cmp-tbl td:first-child,
-.cmp-tbl th:nth-child(2), .cmp-tbl td:nth-child(2) { text-align:left; }
-.cmp-tool { color:var(--text3); font-size:11px; }
-.cmp-mark { background:#94a3b81a; }
-.cmp-mark td { border-top:1px solid #94a3b855; border-bottom:1px solid #94a3b855; font-weight:700; }
-.cmp-v { font-size:10px; font-weight:700; padding:2px 7px; border-radius:3px; }
-.cmp-beat { background:#22c55e22; color:#4ade80; border:1px solid #22c55e44; }
-.cmp-same { background:#eab30822; color:#facc15; border:1px solid #eab30844; }
-.cmp-lose { background:#ef444422; color:#f87171; border:1px solid #ef444444; }
-.cmp-none { background:#ffffff0d; color:var(--text3); border:1px solid var(--border); }
-.cmp-foot { font-size:11.5px; color:var(--text3); margin-top:12px; line-height:1.7; text-align:left;
-  max-width:80ch; margin-left:auto; margin-right:auto; }
+/* The stylesheet for the shortlist panel, the shelf cards and the CANSLIM
+   list used to sit here — around a hundred and thirty lines of it. It went with
+   the markup it dressed; /screeners/canslim and /screeners/compare carry their
+   own. */
 .note { margin-top:var(--s5); font-size:var(--f-xs); color:var(--text3);
         width:100%; max-width:1000px; line-height:1.7; }
 .version { margin-top:22px; font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
@@ -372,80 +234,36 @@
 
 
 
-<div class="subtitle">Nine of them. Each screens differently and learns from its own history.</div>
+<!-- The count is written by render(), because it changes: tools sleep and wake
+     from tools.config.json, and a page that says "nine" while six are running
+     is wrong every day until somebody edits it. It said nine for a week. -->
+<div class="subtitle" id="subtitle">Each screens differently and learns from its own history.</div>
 
 <!-- ── THE ANSWER FIRST ──
-     This page is called "Which screener?" and the nine screeners used to
-     begin roughly eight hundred pixels down it, below a subtitle, a status
-     bar, the shortlist panel and two shelf cards. On a phone that is the
-     whole first screen and none of it answers the question in the title.
-     The shortlist, CANSLIM and the comparison are all real and all worth
-     having — they are just answers to DIFFERENT questions, so they follow
-     the one that was asked. -->
-<div class="section-head">The nine screeners</div>
+     This page is called "Which screener?" and the screeners used to begin
+     roughly eight hundred pixels down it, below a subtitle, a status bar, the
+     shortlist panel and two shelf cards. On a phone that is the whole first
+     screen and none of it answers the question in the title. -->
+<div class="section-head" id="section-head">The screeners</div>
 <div id="stage-strip"></div>
 <div class="cards" id="cards"></div>
 
 <div class="now-bar" id="now-bar">Checking which tools are live…</div>
 
-<div class="cmp-wrap" id="uni-wrap">
-  <!-- Heading, then the LIST, then the reasoning. It used to be heading, four
-       lines of centred prose, and only then the names — the explanation set
-       larger than the thing it explained. -->
-  <div class="uni-title">Shortlist
-    <span class="cs-count" id="sl-count">every tool</span></div>
-  <div id="uni-out"><div class="cmp-hint">Loading…</div></div>
+<!-- Written by render() when there is something to put in it, and left empty
+     otherwise — an empty "Sleeping scanners" heading is a section about
+     nothing. -->
+<div id="sleeping"></div>
 
-  <!-- Hidden until there is something to send. A pair of dead buttons over an
-       empty list is worse than no buttons. -->
-  <div id="uni-tv" style="display:none">
-    <!-- One control group. They were two block buttons of different widths on
-         separate lines, which reads as two unrelated features. -->
-    <div class="cmp-row">
-      <button class="cmp-btn" onclick="copyShortlistForTV(this)">Copy all for TradingView</button>
-      <button class="cmp-sel" onclick="downloadShortlistForTV()">Download .txt</button>
-    </div>
-    <!-- The last resort, hidden until the two automatic routes have both
-         failed. Real and selectable rather than a message about failing. -->
-    <textarea id="uni-tv-text" class="tv-fallback" readonly rows="3"
-              style="display:none" onclick="this.select()"></textarea>
-    <details class="why"><summary>getting these into TradingView</summary>
-      <div class="why-body">Every tool's picks in one list, exchange-qualified.
-        <b>Copy</b> then paste into TradingView's watchlist symbol box, or
-        <b>Download</b> and use Watchlist → ⋮ → <b>Import list…</b> — TradingView has no
-        public way to write a watchlist from outside, so the import is the whole route in.</div>
-    </details>
-  </div>
-  <!-- Outside #uni-tv, which is hidden until there is something to export.
-       "How is this list built" is a question you can have on an empty
-       morning — arguably the morning you are most likely to have it. -->
-  <details class="why"><summary>how this list is built</summary>
-    <div class="why-body">Anything shortlisted on any tool appears here, by design.
-      Names picked by more than one tool sort to the top: independent agreement is a
-      different proposition from one list's opinion.</div>
-  </details>
-</div>
+<!-- The Shortlist panel, the CANSLIM door and the Compare-screeners door were
+     here. Removed 2026-09-04 at the trader's request: three panels answering
+     questions he was not asking, on the page that answers "which screener?".
 
-<!-- The two lists that are not about today's tape get their own pages.
-     CANSLIM turns over on the earnings calendar and the comparison is a
-     month-end question; neither belongs in the same scroll as "what is
-     shortlisted right now", and both are worth more room than a strip at the
-     bottom of a page about something else. -->
-<div class="shelf">
-  <a class="shelf-card" href="/screeners/canslim">
-    <div class="shelf-name">CANSLIM<span class="shelf-n" id="cs-count">—</span></div>
-    <div class="shelf-desc">The growth list every tool tags its cards from.
-      Membership turns over on the earnings calendar, not on the tape.</div>
-    <span class="shelf-go">Open &rarr;</span>
-  </a>
-  <a class="shelf-card" href="/screeners/compare">
-    <div class="shelf-name">Compare screeners</div>
-    <div class="shelf-desc">Rank all nine against <b>Stocks in Play</b> — the plain
-      list that does nothing clever.</div>
-    <span class="shelf-go">Open &rarr;</span>
-  </a>
-</div>
-
+     THE FEATURES THEMSELVES ARE UNTOUCHED. Starring a card still shortlists it
+     and the union is still published; /api/shortlist, /api/canslim and
+     /screeners/compare all still answer, and compare.html is still there at its
+     URL. This removed the front doors, not the rooms — so putting a panel back
+     is markup, not a rebuild. -->
 
 <div class="note">
   Every tool runs its own screeners, keeps its own registers and shortlist, and trains
@@ -811,6 +629,22 @@ const STAGE_SECTION = {
   unknown:    ['Unstaged',       'no stage recorded'],
 };
 
+/*
+ * AWAKE OR ASLEEP, from the registry rather than from a probe.
+ *
+ * `enabled: false` in tools.config.json means the deploy does not start the
+ * tool — it stops SCANNING. `archive: true` means the read-only archive serves
+ * its stored registers on the same port, so everything it ever collected is
+ * still chartable and backtestable in qp. A tool can be both, and five of them
+ * are: stopped and still readable, which is the entire point of the flags.
+ *
+ * The distinction cannot come from the probe. The archive answers
+ * /api/warehouse/* and has no /health, so probing a sleeping tool fails and the
+ * card renders OFFLINE — a deliberate state reported as a fault, in red, five
+ * times. Absent means true, exactly as the deploy reads it.
+ */
+function isAwake(t) { return t.enabled !== false; }
+
 function render(states) {
   const now = etClock();
   const timeOf = (t) => {
@@ -820,8 +654,21 @@ function render(states) {
     return c.from > now ? 1 : 2;
   };
 
-  const ordered = TOOLS.slice().sort(byWhenItMatters(states));
+  const awake = TOOLS.filter(isAwake);
+  const asleep = TOOLS.filter(t => !isAwake(t));
+  const ordered = awake.slice().sort(byWhenItMatters(states));
   const html = [];
+
+  // The page named a fixed count in its own subtitle, and went on saying it for
+  // a week after that many tools stopped running.
+  const head = document.getElementById('section-head');
+  if (head) head.textContent = ordered.length === 1
+    ? 'The screener' : `The ${ordered.length} screeners`;
+  const sub = document.getElementById('subtitle');
+  if (sub) {
+    sub.textContent = 'Each screens differently and learns from its own history.'
+      + (asleep.length ? ` ${asleep.length} more are asleep, at the bottom.` : '');
+  }
 
   const STAGES = ['valid', 'study', 'collecting', 'unknown'];
   const inStage = {};
@@ -883,6 +730,55 @@ function render(states) {
   }
   document.getElementById('cards').innerHTML = html.join('');
   renderNowBar(states);
+  renderSleeping(asleep);
+}
+
+/*
+ * The tools that are switched off, folded away at the bottom.
+ *
+ * NOT HIDDEN, and the difference matters. A tool that vanished from the page
+ * would leave months of frozen days with no visible owner, and the next
+ * question — "where did T3's gappers go?" — would have no answer on the screen
+ * that used to hold it. So: one line saying how many and that they are still
+ * readable, and the cards underneath when you want them.
+ *
+ * They are not probed and they carry no live status. `archive: true` is what
+ * says the history is being served; it is read from the registry rather than
+ * guessed from a port that answers.
+ */
+function renderSleeping(asleep) {
+  const el = document.getElementById('sleeping');
+  if (!el) return;
+  if (!asleep.length) { el.innerHTML = ''; return; }
+
+  const rows = asleep.map(t => `
+    <div class="tool-card asleep"
+         style="border-top-color:var(--text3)">
+      <a class="tc-open" href="${baseFor(t)}/scanner">
+        <div class="card-top">
+          <div>
+            <div class="card-name">${esc(t.name)}</div>
+            <div class="card-port">${t.id} · PORT ${t.port}${
+              t.archive ? ' · history readable' : ''}</div>
+          </div>
+          <div class="status asleep"><span class="dot"></span>sleeping</div>
+        </div>
+        <div class="card-desc">${esc(t.desc || '')}</div>
+      </a>
+    </div>`).join('');
+
+  const archived = asleep.filter(t => t.archive).length;
+  el.innerHTML = `
+    <details class="sleep-wrap">
+      <summary class="sleep-sum"><b>Sleeping scanners</b>
+        <span>${asleep.length} not scanning${
+          archived ? ` · ${archived} still readable in qp` : ''}</span></summary>
+      <div class="sleep-note">Switched off in <b>tools.config.json</b>, so the deploy
+        does not start them and they collect nothing new. Everything they already
+        collected is served by the archive on the same ports — charts, printing and
+        backtests in qp all still work. Turning one back on is one line and a deploy.</div>
+      <div class="cards">${rows}</div>
+    </details>`;
 }
 
 const states = {};
@@ -937,329 +833,30 @@ async function start() {
       '<div class="note">Could not load the tool list.</div>';
     return;
   }
-  TOOLS.forEach(t => { states[t.id] = { state:'wait', info:null, check:null }; });
+  /*
+   * ONLY THE AWAKE ONES ARE PROBED. A sleeping tool's port is held by the
+   * archive, which serves the registers and has no /health — so probing it
+   * would fail, every thirty seconds, and paint it as offline. Five failed
+   * requests to report a state the registry already stated.
+   */
+  const live = TOOLS.filter(isAwake);
+  live.forEach(t => { states[t.id] = { state:'wait', info:null, check:null }; });
   render(states);
-  TOOLS.forEach(probe);
-  setInterval(() => TOOLS.forEach(probe), 30000);
+  live.forEach(probe);
+  setInterval(() => live.forEach(probe), 30000);
 }
 start();
 
-// ═══════════════ UNIFIED SHORTLIST ═══════════════
-// Every tool publishes its own shortlist to a shared file whenever it changes,
-// so this is a read of the union rather than a poll of nine tools — one request
-// to whichever tool is serving this page, not nine that fail one at a time.
-// Where a ticker's card lives: the tool that shortlisted it, on its own port,
-// deep-linked. The tool opens the card itself — see openCardFromUrl there.
-// There is no sensible default port here. Guessing one sends the reader to a
-// tool that never saw the stock, which reads as "this stock has never been on
-// this list" — a wrong answer that looks like a real one. So an unknown tool
-// returns null and the caller renders plain text instead of a broken link.
 /*
- * Out to TradingView itself.
+ * The shortlist, the CANSLIM list and the month-end comparison were rendered
+ * here — about three hundred and thirty lines of it. Their panels came off the
+ * page above, and code that paints something nothing shows is the worst kind of
+ * dead code: it still fetches, still fails, and still gets read as if it ran.
  *
- * Both lists on this page name stocks, and the thing you want next after
- * reading a name is usually the chart. The ticker on a shortlist chip already
- * has a job — it opens the card on the tool that found it, which is the answer
- * to "why is this here" — so this is a separate target rather than a hijack of
- * that one.
- *
- * Only the bare ticker is available here: neither the shortlist file nor the
- * member list carries the exchange. TradingView resolves a bare symbol itself,
- * which is right nearly always and ambiguous for a dual-listed name. The
- * scanner's own cards do have the qualified symbol and use it.
+ * The endpoints all still answer, and /screeners/canslim and /screeners/compare
+ * still render the lists on their own pages.
  */
-function tvUrl(ticker) {
-  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`;
-}
 
-function cardUrl(tool, ticker, date) {
-  const t = TOOLS.find(x => x.id === tool.id);
-  if (!t) return null;
-  return `${baseFor(t)}/scanner?ticker=${encodeURIComponent(ticker)}&date=${encodeURIComponent(date)}`;
-}
-
-async function loadUnifiedShortlist() {
-  const out = document.getElementById('uni-out');
-  if (!out) return;
-  try {
-    // The ports come from /api/tools, and a link built before that lands is a
-    // link to nowhere. Wait for it — this is the first paint, so it is the one
-    // the reader actually clicks.
-    if (TOOLS_READY) { try { await TOOLS_READY; } catch { /* start() reports it */ } }
-    const d = await (await fetch('/api/shortlist/all-tools')).json();
-    const rows = (d && d.rows) || [];
-    const tvBox = document.getElementById('uni-tv');
-    if (tvBox) tvBox.style.display = rows.length ? '' : 'none';
-    if (!rows.length) {
-      out.innerHTML = `<div class="uni-empty">Nothing shortlisted yet today. Star a card on any
-        tool, or wait for the auto-rule, and it appears here.</div>`;
-      return;
-    }
-    // This page cannot render a card — it has no registry of its own — so each
-    // chip hands off to a tool that actually holds the data, deep-linked to the
-    // ticker. Every tool that picked the name is its own link, because their
-    // cards differ: same stock, different screeners, different score.
-    // A tool in the shortlist file that is not in tools.config.json has no port
-    // to link to. That is a configuration problem, and saying so beats sending
-    // the reader to whichever tool happens to answer.
-    const n = document.getElementById('sl-count');
-    if (n) {
-      const agreed = rows.filter(r => r.count > 1).length;
-      n.innerHTML = `${rows.length} name${rows.length === 1 ? '' : 's'}`
-        + (agreed ? ` · <b>${agreed} picked by more than one tool</b>` : '');
-    }
-    /*
-     * A CARD PER NAME, not a chip.
-     *
-     * This page holds no registry, so it cannot render the real card — but a
-     * ticker crammed against three tool ids in a 30px pill is not a summary
-     * either, it is the same information made hard to read. Each name gets a
-     * row: the ticker at a size you can hit with a thumb, who picked it, and
-     * the ways out. Names more than one tool picked come first and are marked,
-     * because independent agreement is the whole reason this list is merged.
-     */
-    // Anything painted after load folds too — foldWhy on DOMContentLoaded
-    // only ever sees the markup that was in the file.
-    setTimeout(deskFoldWhy, 0);
-    out.innerHTML = `<div class="sl-list">${rows.map(r => {
-      const url = (tool) => cardUrl(tool, r.ticker, d.date);
-      const toolLink = (t) => url(t)
-        ? `<a class="sl-tool" href="${url(t)}" title="Open ${r.ticker} on ${t.name}">${t.id}</a>`
-        : `<span class="sl-tool off" title="${t.id} is not in tools.config.json — no port to open">${t.id}</span>`;
-      return `
-      <div class="sl-row${r.count > 1 ? ' agreed' : ''}">
-        <a class="sl-tkr" href="${url(r.tools[0]) || tvUrl(r.ticker)}"
-           title="Open ${r.ticker} on ${r.tools[0].name}">${r.ticker}</a>
-        ${r.count > 1 ? `<span class="sl-badge">${r.count} tools agree</span>` : ''}
-        <a class="sl-tv" href="${tvUrl(r.ticker)}" target="_blank" rel="noopener"
-           title="Open ${r.ticker} on TradingView">TV&nbsp;↗</a>
-        <div class="sl-tools"><span class="sl-lbl">picked by</span>
-          ${r.tools.map(toolLink).join('')}</div>
-      </div>`; }).join('')}</div>`;
-  } catch (e) {
-    out.innerHTML = `<div class="uni-empty">Could not load: ${e.message}</div>`;
-  }
-}
-/*
- * Out to a TradingView watchlist, in one action.
- *
- * There is no public API for writing one, and obtaining the credentials that
- * would allow it is not a trade worth making for a list of ticker symbols. The
- * import is the supported route, so both of its forms are offered: the
- * clipboard for a paste, and a file for "Import list…". Nine tools' worth in
- * one go — the per-tool export inside each scanner still exists, and merging
- * nine of those by hand was the thing worth removing.
- *
- * Fetched fresh rather than rebuilt from what is on screen: the panel may have
- * been rendered minutes ago and a stale watchlist is a worse failure than a
- * slow button.
- */
-/*
- * `r.ok` is not enough to trust a response body.
- *
- * The server's catch-all used to serve the landing page for any unmatched path,
- * so calling this endpoint against a server that had not been restarted yet
- * returned HTTP 200 and a page of HTML — which the clipboard duly received.
- * That is fixed on the server, but the client should not have believed it
- * either: a status code says the request arrived somewhere, not that the
- * somewhere was right.
- *
- * So the payload is checked against what it claims to be. A symbol is letters,
- * digits, dots and dashes, optionally exchange-qualified. Anything else is not
- * a watchlist and must not reach the clipboard, where a wrong paste looks
- * exactly like a right one.
- */
-const SYMBOL_RE = /^[A-Z0-9][A-Z0-9._-]*(:[A-Z0-9][A-Z0-9._-]*)?$/i;
-
-async function tvSymbols(format) {
-  const r = await fetch(`/api/shortlist/all-tools/export?format=${format}`);
-  if (!r.ok) throw new Error(`export failed (${r.status})`);
-  const text = (await r.text()).trim();
-  if (!text) return '';
-  const parts = text.split(format === 'csv' ? ',' : '\n').map(x => x.trim()).filter(Boolean);
-  const bad = parts.find(x => !SYMBOL_RE.test(x));
-  if (bad) {
-    throw new Error(`that is not a symbol list — got "${String(bad).slice(0, 40)}". `
-      + 'The server may be running older code; redeploy and try again.');
-  }
-  return parts.join(format === 'csv' ? ',' : '\n');
-}
-
-/*
- * Copy, on a page served over plain http.
- *
- * navigator.clipboard does not exist outside a secure context, and this page is
- * http://<ip>:3000. The first version used it alone, caught the failure and
- * changed the button text — which was still a button that did not copy, and the
- * paste that followed produced whatever had been on the clipboard beforehand.
- * A stale paste is the worst outcome of the three: it looks like it worked.
- *
- * So three attempts, in descending order of how modern they are, and the last
- * one cannot fail because it stops trying to copy and shows the text instead.
- */
-async function writeClipboard(text) {
-  // 1. The real API. Present only on https or localhost.
-  if (navigator.clipboard && window.isSecureContext) {
-    try { await navigator.clipboard.writeText(text); return true; } catch { /* fall through */ }
-  }
-  // 2. The old way, which predates secure contexts and still works over http in
-  //    every browser this page is likely to meet. The textarea has to be in the
-  //    document and selectable, hence positioned off-screen rather than hidden —
-  //    display:none cannot be selected, so it would silently copy nothing.
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, text.length);      // iOS ignores select() alone
-    const ok = document.execCommand('copy');
-    ta.remove();
-    if (ok) return true;
-  } catch { /* fall through */ }
-  return false;
-}
-
-async function copyShortlistForTV(btn) {
-  const original = btn.textContent;
-  const out = document.getElementById('uni-tv-text');
-  let text;
-  try {
-    text = await tvSymbols('csv');
-  } catch (e) {
-    // Say what went wrong rather than "could not read the list". The likely
-    // cause is a server that has not been restarted, and that is fixable in one
-    // command by someone who is told which one.
-    btn.textContent = 'Not a symbol list — redeploy';
-    const out = document.getElementById('uni-tv-text');
-    if (out) { out.style.display = ''; out.value = String(e.message || e); }
-    setTimeout(() => { btn.textContent = original; }, 4000);
-    return;
-  }
-  if (!text) {
-    btn.textContent = 'Nothing to copy';
-    setTimeout(() => { btn.textContent = original; }, 1800);
-    return;
-  }
-
-  if (await writeClipboard(text)) {
-    btn.textContent = `Copied ${text.split(',').length} symbols`;
-    if (out) out.style.display = 'none';
-    setTimeout(() => { btn.textContent = original; }, 2500);
-    return;
-  }
-
-  // 3. Neither worked. Show the symbols, selected, so a long-press and Copy
-  //    finishes the job by hand — rather than reporting a failure and leaving
-  //    the reader with nothing to act on.
-  if (out) {
-    out.style.display = '';
-    out.value = text;
-    out.focus();
-    out.select();
-    out.setSelectionRange(0, text.length);
-  }
-  btn.textContent = 'Select the text below and copy';
-  setTimeout(() => { btn.textContent = original; }, 3500);
-}
-
-function downloadShortlistForTV() {
-  const a = document.createElement('a');
-  a.href = '/api/shortlist/all-tools/export';
-  a.download = '';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-loadUnifiedShortlist();
-
-// ═══════════════ CANSLIM MEMBERS ═══════════════
-// One shared file, so this is a single read from whichever tool serves the
-// page rather than a poll of nine.
-/*
- * On THIS page CANSLIM is a door, so only the count is drawn — the number is
- * the reason to open it. The list itself lives at /screeners/canslim, which
- * has room to show each member properly.
- */
-async function loadCanslim() {
-  const out = document.getElementById('cs-out');   // absent here; present on the list page
-  // The headline stays shut, so it has to carry enough for the reader to decide
-  // whether opening it is worth it — the count, and anything expiring.
-  const head = (txt) => {
-    const el = document.getElementById('cs-count');
-    if (el) el.innerHTML = txt;
-  };
-  try {
-    const d = await (await fetch('/api/canslim')).json();
-    const rows = (d && d.members) || [];
-    if (!rows.length) {
-      head('· empty');
-      // An empty list is a real answer — before the day's first Universe scan,
-      // or because nothing currently clears all six rules. Saying which is
-      // possible is what stops it reading as a broken panel.
-      if (out) out.innerHTML = `<div class="cmp-hint">
-        Nobody on the list. Either T8 has not run its Universe screener yet today
-        (09:30–09:45 ET, weekdays), or no stock currently meets all six criteria.</div>`;
-      return;
-    }
-    // Expiry is the fact with a consequence somewhere else: when a name goes,
-    // its badge turns off on every other tool's cards, and a change nobody was
-    // warned about reads as a bug.
-    const soon = rows.filter(r => r.expiresIn <= 14);
-    head(`· ${rows.length} name${rows.length === 1 ? '' : 's'}`
-      + (soon.length ? ` · <b>${soon.length} expiring</b>` : ''));
-    if (!out) return;
-    out.innerHTML = `<div class="uni-grid">${rows.map(r => `
-      <div class="uni-chip${r.expiresIn <= 14 ? ' cs-soon' : ''}"
-           title="First qualified ${r.held} day(s) ago · last qualified ${
-             r.lastSeenDays === 0 ? 'today' : `${r.lastSeenDays} day(s) ago`
-           } · confirmed ${r.confirmations}x · drops off in ${r.expiresIn} day(s)">
-        <a class="uni-tkr uni-link" href="${tvUrl(r.ticker)}" target="_blank" rel="noopener"
-           >${r.ticker}</a>
-        <span class="uni-by">${r.held}d held</span>
-        <span class="uni-n">${r.expiresIn}d left</span>
-        <a class="tv-link" href="${tvUrl(r.ticker)}" target="_blank" rel="noopener"
-           title="Open ${r.ticker} on TradingView">TV&nbsp;↗</a>
-      </div>`).join('')}</div>
-      <div class="cmp-hint">${rows.length} member(s)${
-        d.updatedAt ? ` · list written ${Math.floor((Date.now() - d.updatedAt) / 60000)} min ago` : ''
-      }${soon.length ? ` · <b>${soon.map(r => r.ticker).join(', ')}</b> expiring within two weeks` : ''}</div>`;
-  } catch {
-    head('· could not load');
-    if (out) out.innerHTML = '<div class="cmp-hint">Could not read the CANSLIM list.</div>';
-  }
-}
-loadCanslim();
-
-
-setInterval(loadUnifiedShortlist, 60000);
-
-// ═══════════════ MONTH-END COMPARISON ═══════════════
-// Every tool holds its own scorecard, which is right — they are separate
-// experiments. But the question at the end of the month is a comparison, and
-// answering it by opening nine tabs and reading numbers off each is how the
-// comparison quietly stops being made. So this pulls all of them into one table
-// and does the only sum that matters: did this screener beat the plain list?
-const BENCH_TOOL = 'T9';
-const BENCH_NAME = 'Stocks in Play';
-
-// Beating the benchmark by less than this is not beating it. A month gives a
-// few dozen cards per screener, and a couple of points on a sample that size is
-// noise wearing a verdict's clothes.
-const MARGIN = 5;
-
-// ── the mirror question ────────────────────────────────────────────────────
-// Five tools ship a screener and its mirror, and the pair exists to answer one
-// thing: is the edge DIRECTIONAL, or does this screener simply find stocks that
-// move? Nothing reported it until now, so the reason the mirrors were built was
-// the one question a month of data could not be asked.
-//
-// This is also the CLEANER of the two comparisons on this page. A screener and
-// its own twin run in the same window over the same universe by construction,
-// so the difference between them is direction and little else — where a
-// comparison against the plain list is partly a comparison of universes.
 </script>
 
 </body>
