@@ -23,10 +23,17 @@ const scr = (over = {}) => ({
 const tool = (over = {}) => ({
   id: 'T2', name: 'Momentum', port: 3010, reachable: true, paused: false,
   pausedReason: null, uptimeSec: 3600,
-  scan: { lastRun: Date.now() - 5 * 60000, lastRowCount: 12, error: null },
+  scan: { lastRun: NOW - 5 * 60000, lastRowCount: 12, error: null },
   screeners: [scr()], ...over,
 });
-const AT = { hhmm: '10:15', now: Date.now() };
+/*
+ * A FIXED FRIDAY. The judgement now asks whether the tools scan at this hour at
+ * all — weekdays 04:00–16:00 — so a fixture built on `NOW` passes on a
+ * Tuesday and fails on a Sunday, for reasons that have nothing to do with the
+ * code. Every relative time below is measured from this instant.
+ */
+const NOW = Date.parse('2026-09-04T14:15:00Z');        // Friday, 10:15 ET
+const AT = { hhmm: '10:15', now: NOW };
 
 describe('a healthy tool has nothing said about it', () => {
   test('no problems', () => {
@@ -114,23 +121,23 @@ describe('the tool itself', () => {
   });
 
   test('a failed last scan is named', () => {
-    const out = chk.problemsOf(tool({ scan: { lastRun: Date.now(), lastRowCount: 0, error: 'TV 503' } }), AT);
+    const out = chk.problemsOf(tool({ scan: { lastRun: NOW, lastRowCount: 0, error: 'TV 503' } }), AT);
     expect(out.join(' ')).toMatch(/last scan FAILED: TV 503/);
   });
 
   test('a card list older than half an hour during the session is a finding', () => {
-    const out = chk.problemsOf(tool({ scan: { lastRun: Date.now() - 45 * 60000, lastRowCount: 9, error: null } }), AT);
+    const out = chk.problemsOf(tool({ scan: { lastRun: NOW - 45 * 60000, lastRowCount: 9, error: null } }), AT);
     expect(out.join(' ')).toMatch(/45 minutes old during the session/);
   });
 
   test('...and the same age outside the session is not', () => {
-    const out = chk.problemsOf(tool({ scan: { lastRun: Date.now() - 45 * 60000, lastRowCount: 9, error: null } }),
-      { hhmm: '17:00', now: Date.now() });
+    const out = chk.problemsOf(tool({ scan: { lastRun: NOW - 45 * 60000, lastRowCount: 9, error: null } }),
+      { hhmm: '17:00', now: NOW });
     expect(out).toEqual([]);
   });
 
   test('a scan that produced no cards is said in terms of what it costs', () => {
-    const out = chk.problemsOf(tool({ scan: { lastRun: Date.now(), lastRowCount: 0, error: null } }), AT);
+    const out = chk.problemsOf(tool({ scan: { lastRun: NOW, lastRowCount: 0, error: null } }), AT);
     expect(out.join(' ')).toMatch(/NO cards — a setup on this tool has nothing to rank/);
   });
 
@@ -269,5 +276,81 @@ describe('the window rule', () => {
     expect(chk.windowOpen(s, '15:59')).toBe(true);
     expect(chk.windowOpen(s, '16:00')).toBe(false);
     expect(chk.windowOpen(s, '09:29')).toBe(false);
+  });
+});
+
+/*
+ * OUTSIDE SCANNING HOURS, AN IDLE TOOL IS DOING AS IT WAS TOLD.
+ *
+ * The discovery jobs run 04:00–16:00 ET on weekdays and the card registry is
+ * in memory, so after the close a tool has no scan and no cards by
+ * construction. Run at 17:48 on a Friday, the first version of this check
+ * called four tools "never scanned" and six "no cards" — ten lines of alarm
+ * about a desk that was working, around the one line that mattered.
+ */
+describe('the market being shut is not a fault', () => {
+  const FRI_EVENING = { hhmm: '17:48', now: Date.parse('2026-09-04T21:48:00Z') };
+  const FRI_MIDDAY = { hhmm: '11:00', now: Date.parse('2026-09-04T15:00:00Z') };
+  const idle = () => tool({ uptimeSec: 7200,
+    scan: { lastRun: null, lastRowCount: 0, error: null },
+    screeners: [scr({ count: 0, sample: [] })] });
+
+  test('after the close: no scan, no cards, no zero-match — nothing is said', () => {
+    expect(chk.problemsOf(idle(), FRI_EVENING)).toEqual([]);
+  });
+
+  test('...but the same tool at eleven in the morning is a real finding', () => {
+    const out = chk.problemsOf(idle(), FRI_MIDDAY).join(' ');
+    expect(out).toMatch(/never completed a scan/);
+    expect(out).toMatch(/NO cards/);
+    expect(out).toMatch(/matches nothing right now/);
+  });
+
+  test('a scan that FAILED is still reported after hours — an error is not idleness', () => {
+    const out = chk.problemsOf(tool({ uptimeSec: 7200,
+      scan: { lastRun: NOW, lastRowCount: 0, error: 'TV 503' } }), FRI_EVENING);
+    expect(out.join(' ')).toMatch(/last scan FAILED: TV 503/);
+  });
+
+  test('a REJECTED definition is still reported after hours — it is broken at any hour', () => {
+    const out = chk.problemsOf(tool({ uptimeSec: 7200,
+      screeners: [scr({ valid: false, count: null, error: 'unknown field "prce"' })] }),
+    FRI_EVENING);
+    expect(out.join(' ')).toMatch(/REJECTED by the tool/);
+  });
+
+  test('scanning hours are the scheduler\'s own: weekdays, 04:00 to 16:00', () => {
+    const fri = new Date('2026-09-04T15:00:00Z');
+    const sat = new Date('2026-09-05T15:00:00Z');
+    expect(chk.scanningHours('04:00', fri)).toBe(true);
+    expect(chk.scanningHours('15:59', fri)).toBe(true);
+    expect(chk.scanningHours('16:00', fri)).toBe(false);
+    expect(chk.scanningHours('03:59', fri)).toBe(false);
+    // A Saturday scans at no hour at all.
+    expect(chk.scanningHours('11:00', sat)).toBe(false);
+  });
+});
+
+/*
+ * THE PAGE IS NOT THE POPULATION. A screener asks TradingView for a page of
+ * rows, so the row count saturates at the limit: a rule matching four thousand
+ * stocks and one matching fifty both come back "50 live". The probe ladder read
+ * that way reported "97" for six different filters — arithmetically correct,
+ * about a question nobody asked.
+ */
+describe('how many matched, not how many were fetched', () => {
+  test('the table shows both when they differ', () => {
+    const lines = chk.table(tool({ screeners: [scr({ count: 50, totalCount: 4021 })] }), '11:00');
+    expect(lines.join('\n')).toMatch(/50 live of 4021 matched/);
+  });
+
+  test('and only one when they do not', () => {
+    const lines = chk.table(tool({ screeners: [scr({ count: 7, totalCount: 7 })] }), '11:00');
+    expect(lines.join('\n')).toMatch(/7 live(?! of)/);
+  });
+
+  test('a tool that does not report a total still renders', () => {
+    const lines = chk.table(tool({ screeners: [scr({ count: 7, totalCount: null })] }), '11:00');
+    expect(lines.join('\n')).toMatch(/7 live/);
   });
 });

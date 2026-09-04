@@ -50,6 +50,9 @@ router.post('/test', express.json(), async (req, res) => {
     res.json({
       ok: true,
       count: result.count,
+      // How many MATCHED, not how many came back in the page. See
+      // tvScanner.runScreener — the row count saturates at the limit.
+      totalCount: result.totalCount,
       ms: result.ms,
       // a short preview so the trader can sanity-check what matched
       sample: result.rows.slice(0, 10).map(r => ({

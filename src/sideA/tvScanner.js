@@ -373,20 +373,34 @@ async function runScreener(screener) {
     timeout: 15000,
   });
   const rawRows = resp.data.data || [];
+  /*
+   * HOW MANY MATCHED, as opposed to how many were RETURNED.
+   *
+   * `range` asks for a page — 50 rows for a screener, and whatever the caller
+   * wants for a probe — so the row count saturates at the limit and stops
+   * being a measure of anything. A leave-one-out probe read that way reports
+   * "97" for a rule that matches four thousand stocks and "97" for one that
+   * matches ninety-eight, which is an arithmetically correct number about the
+   * wrong question. TradingView returns the true total beside the page.
+   */
+  const totalCount = Number.isFinite(resp.data.totalCount) ? resp.data.totalCount : null;
   if (rawRows.length > 0 && !columnsAligned(rawRows[0])) {
-    return { name: screener.name, key: screener.key, rows: [], floorDropped: 0, misaligned: true };
+    return { name: screener.name, key: screener.key, rows: [], floorDropped: 0,
+             totalCount, misaligned: true };
   }
   if (rawRows.length > 0) validateTVStructure(rawRows[0]);
   const mapped = rawRows.map(mapTVRow).filter(r => r.ticker);
   if (screener.labelOnly) {
-    return { name: screener.name, key: screener.key, rows: mapped, floorDropped: 0, labelOnly: true };
+    return { name: screener.name, key: screener.key, rows: mapped, floorDropped: 0,
+             totalCount, labelOnly: true };
   }
   checkWindowsDiffer(mapped, screener.name);
   const { kept, dropped } = tradable.applyLocal(mapped, t, { liquidity });
   if (dropped) {
     console.log(`[TV Scanner] "${screener.name}": ${dropped} row(s) below ${t.minAtrPct}% ADR`);
   }
-  return { name: screener.name, key: screener.key, rows: kept, floorDropped: dropped };
+  return { name: screener.name, key: screener.key, rows: kept, floorDropped: dropped,
+           totalCount };
 }
 
 /**
@@ -395,14 +409,18 @@ async function runScreener(screener) {
  */
 async function testScreener(def) {
   const started = Date.now();
-  const { rows } = await runScreener({
+  const { rows, totalCount } = await runScreener({
     name: def.name || 'test',
     key: 'test',
     filters: def.filters,
     sort: def.sort || { sortBy: 'change', sortOrder: 'desc' },
     limit: Number.isFinite(def.limit) ? def.limit : 20,
   });
-  return { count: rows.length, ms: Date.now() - started, rows };
+  // `count` is the page — what this screener would actually collect.
+  // `totalCount` is how many stocks matched, which is the only one of the two
+  // that measures a rule's selectivity. They differ the moment a rule matches
+  // more than the limit, which for a single filter is most of the time.
+  return { count: rows.length, totalCount, ms: Date.now() - started, rows };
 }
 
 /**

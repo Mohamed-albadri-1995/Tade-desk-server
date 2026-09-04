@@ -58,7 +58,15 @@ function describe(f) {
 async function count(def) {
   try {
     const r = await testScreener(def);
-    return { n: r.count, ms: r.ms, error: null };
+    /*
+     * THE TOTAL, NOT THE PAGE. `count` is how many rows came back, and the
+     * request asks for a page — so it saturates at the limit and stops being a
+     * measure of anything. The first run of this ladder reported "97" for six
+     * different filters on a box where the page was 100: a number that was
+     * arithmetically correct and answered a question nobody asked.
+     */
+    const n = Number.isFinite(r.totalCount) ? r.totalCount : r.count;
+    return { n, page: r.count, ms: r.ms, error: null };
   } catch (err) {
     // A REFUSAL IS NOT A ZERO. "TradingView rejected this field" and "no stock
     // matched" are opposite facts and they must never print the same way.
@@ -198,6 +206,8 @@ async function main() {
   //     own rules. If this is small, nothing downstream is surprising.
   const floor = await count({ ...base, filters: [] });
   console.log(`tradable universe (floor only) ......... ${show(floor)}`);
+  console.log('  (counts below are how many stocks MATCHED, from TradingView\'s own '
+    + 'total — not the page of rows fetched)');
 
   // 2 · everything — what the screener actually returns today
   const all = await count({ ...base, filters });

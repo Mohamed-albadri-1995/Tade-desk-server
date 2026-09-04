@@ -56,6 +56,22 @@ function etNow(now = new Date()) {
   }).format(now);
 }
 
+/*
+ * WHEN THE TOOLS SCAN AT ALL — the scheduler's discovery jobs, 04:00 to 16:00
+ * on a weekday (src/scheduler.js). Outside that, a tool with no scan and no
+ * cards is a tool doing exactly what it was told: the card registry is in
+ * memory and the day's scans are over. Reported at 17:48 on a Friday, the
+ * first version of this called four tools "never scanned" and six "no cards" —
+ * ten lines of alarm about a desk that was working.
+ */
+function scanningHours(hhmm, now = new Date()) {
+  const day = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', weekday: 'short',
+  }).format(now);
+  if (day === 'Sat' || day === 'Sun') return false;
+  return hhmm >= '04:00' && hhmm < '16:00';
+}
+
 /** Is the screener's run window open at `hhmm`? No window means always. */
 function windowOpen(s, hhmm) {
   if (!s.runFrom || !s.runTo) return true;
@@ -112,7 +128,8 @@ async function probeTool(tool, { base = `http://127.0.0.1:${tool.port}`, fetchJs
                   labelOnly: !!s.labelOnly, mirrorOf: s.mirrorOf || null,
                   runFrom: s.runFrom || null, runTo: s.runTo || null,
                   filters: (s.filters || []).length,
-                  valid: null, count: null, error: null, ms: null, sample: [] };
+                  valid: null, count: null, totalCount: null, error: null,
+                  ms: null, sample: [] };
     if (row.enabled) {
       const t = await fetchJson(`${base}/api/screeners/test`, {
         method: 'POST',
@@ -132,6 +149,7 @@ async function probeTool(tool, { base = `http://127.0.0.1:${tool.port}`, fetchJs
         row.valid = true;
         row.count = Number(t.json.count) || 0;
         row.ms = t.json.ms || null;
+        row.totalCount = Number.isFinite(t.json.totalCount) ? t.json.totalCount : null;
         // The first names it matched — enough to tell a mirror that mirrors
         // from one that returns its base's list under another name.
         row.sample = (t.json.sample || []).map(x => String(x.ticker || '').toUpperCase())
@@ -157,6 +175,11 @@ async function probeTool(tool, { base = `http://127.0.0.1:${tool.port}`, fetchJs
 function problemsOf(t, { hhmm = etNow(), now = Date.now() } = {}) {
   const out = [];
   const say = (s) => out.push(`${t.id}: ${s}`);
+  // Both clock facts, read once and before anything uses them. The first
+  // version declared `scanning` below the screener loop that reads it — a
+  // temporal dead zone, and the loop threw rather than judging.
+  const session = hhmm >= '09:30' && hhmm < '16:00';
+  const scanning = scanningHours(hhmm, new Date(now));
   if (!t.reachable) { say(`did not answer (${t.error}) — is it running?`); return out; }
   if (t.paused) say(`is PAUSED${t.pausedReason ? ` — ${t.pausedReason}` : ''}. It scans nothing until resumed.`);
 
@@ -192,15 +215,22 @@ function problemsOf(t, { hhmm = etNow(), now = Date.now() } = {}) {
       continue;
     }
     if (s.error) { say(`"${s.name}" could not be run: ${s.error}`); continue; }
-    if (s.count === 0 && windowOpen(s, hhmm)) {
+    /*
+     * A ZERO IS ONLY WORTH SAYING WHILE THE MARKET IS OPEN, and even then it is
+     * a question rather than a fault: `Big Move` asks for ten times normal
+     * volume and has produced 96 rows in 49 days — about two a day, and none
+     * on a quiet one. why-empty.js is what tells a rare screen from a broken
+     * rule, and it is named here rather than guessed at.
+     */
+    if (s.count === 0 && windowOpen(s, hhmm) && scanning) {
       say(`"${s.name}" matches nothing right now, inside its window`
         + `${s.runFrom ? ` (${s.runFrom}–${s.runTo})` : ''}`
-        + ` — run scripts/why-empty.js ${s.key} against this tool's database.`);
+        + ` — rare screen or broken rule? run scripts/why-empty.js ${s.key} `
+        + "against this tool's database.");
     }
   }
 
   const sc = t.scan;
-  const session = hhmm >= '09:30' && hhmm < '16:00';
   /*
    * JUST STARTED IS NOT BROKEN. The card registry is in memory, so a tool
    * restarted by the deploy a minute ago has no scan and no cards until its
@@ -211,11 +241,12 @@ function problemsOf(t, { hhmm = etNow(), now = Date.now() } = {}) {
   if (sc) {
     if (sc.error) say(`the last scan FAILED: ${sc.error}`);
     const age = minsSince(sc.lastRun, now);
-    if (age === null && !justStarted) say('has never completed a scan since it started.');
-    else if (age !== null && session && age > STALE_MIN) {
+    if (age === null && !justStarted && scanning) {
+      say('has never completed a scan since it started.');
+    } else if (age !== null && session && age > STALE_MIN) {
       say(`the card list is ${age} minutes old during the session.`);
     }
-    if (sc.lastRowCount === 0 && !t.paused && on.length && !justStarted) {
+    if (sc.lastRowCount === 0 && !t.paused && on.length && !justStarted && scanning) {
       say('the last scan produced NO cards — a setup on this tool has nothing to rank.');
     }
   }
@@ -244,7 +275,11 @@ function table(t, hhmm) {
     if (!s.enabled) live = '—';
     else if (s.valid === false) live = `REJECTED: ${s.error}`;
     else if (s.error) live = `ERROR: ${s.error}`;
-    else live = `${s.count} live`;
+    // The page AND the total: "50 live" out of four thousand matches is a
+    // screener at its limit, which is a different fact from fifty matches.
+    else live = `${s.count} live`
+      + (Number.isFinite(s.totalCount) && s.totalCount !== s.count
+        ? ` of ${s.totalCount} matched` : '');
     lines.push(`   ${(s.enabled ? 'on ' : 'off').padEnd(4)}${s.name.padEnd(30)} ${win.padEnd(18)} ${live}`
       + `${s.labelOnly ? '  (label only)' : ''}${s.mirrorOf ? `  (mirror of ${s.mirrorOf})` : ''}`);
   }
@@ -261,6 +296,10 @@ async function main() {
   const hhmm = etNow();
   console.log(`Checking ${tools.length} live tool(s) at ${hhmm} ET.`
     + (asleep.length ? ` Asleep, not checked: ${asleep.join(' ')}.` : ''));
+  if (!scanningHours(hhmm)) {
+    console.log('The tools do not scan now (they run 04:00–16:00 ET on weekdays), '
+      + 'so an empty card list is expected and is not reported below.');
+  }
   console.log('Each enabled screener is validated by its tool and run once against TradingView.');
 
   const problems = [];
@@ -287,5 +326,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { probeTool, problemsOf, table, windowOpen, minsSince, STALE_MIN,
-                   JUST_STARTED_SEC };
+module.exports = { probeTool, problemsOf, table, windowOpen, scanningHours,
+                   minsSince, STALE_MIN, JUST_STARTED_SEC };
