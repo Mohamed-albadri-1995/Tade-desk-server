@@ -40,6 +40,7 @@
 
 const prefs = require('./prefs');
 const risk = require('./risk');
+const { liveFeedFor } = require('./feeds');
 
 /** '09:35' from qp's integer HHMM. Null stays null — absent is not midnight. */
 function hhmm(n) {
@@ -220,7 +221,39 @@ function compare({ setup, spec, strategy } = {}) {
     btUni.kind === 'tools' ? (btUni.tools || []).join(',') || null
       : (btUni.kind === 'register' ? btUni.register : btUni.kind) || null));
   rows.push(row('timeframe', p.tf || s.tf || '1m', bt.tf || null));
-  rows.push(row('feed', p.feed || s.feed || null, bt.feed || null));
+  /*
+   * THE FEED, AND WHEN A DIFFERENCE IS NOT A DIVERGENCE.
+   *
+   * A backtest is run on polygon because polygon is the only feed here with
+   * years of history; a live decision cannot be, because the free plan is a
+   * day behind and allows five requests a minute. So an adopted setup will
+   * ALWAYS read differently from the run that produced it, and reporting that
+   * as a divergence would leave every correctly configured setup permanently
+   * red — the same trap the fill-model row above sidesteps.
+   *
+   * What actually has to hold is that both feeds report the SAME TAPE. polygon
+   * and yahoo are both consolidated — the whole market — and measured against
+   * each other on one morning they agree on VWAP to within 0.06%
+   * (tools/data/yahoo.py:22). hybrid_yahoo is the two of them joined, so it is
+   * consolidated on both sides of its seam.
+   *
+   * alpaca is NOT, and that is the entire point of drawing the line here
+   * rather than waving the row through: its free tier is IEX, a few percent of
+   * the volume, so a strategy backtested on alpaca and run live on yahoo is
+   * measuring one VWAP and trading another. That stays a divergence.
+   */
+  const CONSOLIDATED = new Set(['polygon', 'yahoo', 'hybrid_yahoo']);
+  const liveFeed = p.feed || s.feed || null;
+  const feedRow = row('feed', liveFeed, bt.feed || null,
+    'a backtest runs on polygon for the history and a live decision cannot — '
+    + 'what has to match is the TAPE, and polygon and yahoo are both '
+    + 'consolidated (VWAP within 0.06%). alpaca is IEX only');
+  if (feedRow.status === 'differ'
+      && CONSOLIDATED.has(String(liveFeed).toLowerCase())
+      && CONSOLIDATED.has(String(bt.feed).toLowerCase())) {
+    feedRow.status = 'match';
+  }
+  rows.push(feedRow);
   /*
    * WHICH BARS ARE IN THE FRAME. Not cosmetic: a rolling indicator's window
    * differs between them, so the same strategy reads a different ATR at 09:35
@@ -325,7 +358,26 @@ function planAdopt({ setup, spec, strategy } = {}) {
     rankDirection: (rank && rank.direction) || null,
     topN: (rank && rank.top_n) || null,
     tf: bt.tf || null,
-    feed: bt.feed || null,
+    /*
+     * THE FEED IS TRANSLATED, NOT COPIED — the same rule as the fill model
+     * below, and the reason this desk stopped firing.
+     *
+     * On 2026-08-27 `OR + VWAP 09:35` had NO feed preference, decided on
+     * yahoo, and fired: three shorts at 09:36:15, one of them filled. A
+     * backtest was adopted on 08-31, and a backtest is run on polygon because
+     * polygon is the only feed here with years of history. `bt.feed` was
+     * copied straight onto the live setup — and polygon is a day behind on the
+     * free plan and allows five requests a minute, so from 09-01 every morning
+     * timed out and printed "MISSED THE 09:35 WINDOW". Nothing had broken. A
+     * setting right for one job had been copied onto the other.
+     *
+     * feeds.js already knows which feeds cannot decide a live bar, so the
+     * question is asked there rather than answered again here.
+     */
+    // A backtest that named no feed still names none — writing the default in
+    // here would turn "nobody chose" into "somebody chose", which is a
+    // different fact and the one the card reports.
+    feed: bt.feed ? liveFeedFor(bt.feed).feed : null,
     view: bt.view || 'all',
     /*
      * THE FILL MODEL IS TRANSLATED, NOT COPIED. A backtest runs 'desk' or
@@ -370,7 +422,12 @@ function planAdopt({ setup, spec, strategy } = {}) {
   note('rank metric', curPrefs.rankMetric, setupPatch.rankMetric);
   note('rank top N', curPrefs.topN, setupPatch.topN);
   note('timeframe', curPrefs.tf, setupPatch.tf);
-  note('feed', curPrefs.feed, setupPatch.feed);
+  note('feed', curPrefs.feed, setupPatch.feed,
+    bt.feed && setupPatch.feed !== bt.feed
+      ? `the backtest ran on '${bt.feed}', which cannot decide a live bar — `
+        + `'${setupPatch.feed}' is its live twin. Numbers measured on '${bt.feed}' `
+        + 'are not guaranteed to repeat on it; re-run the backtest there to check'
+      : null);
   note('view', curPrefs.view || 'all', setupPatch.view);
   note('fill model', curPrefs.fill || 'live', setupPatch.fill,
     bt.fill && setupPatch.fill !== bt.fill

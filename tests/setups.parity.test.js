@@ -147,6 +147,51 @@ describe('the desk as it IS — the default live fill', () => {
     expect(find(res(), 'rank top N').status).toBe('match');
   });
 
+  /*
+   * THE FEED, AND WHERE THE LINE BETWEEN THE TWO JOBS FALLS.
+   *
+   * A backtest runs on polygon because polygon is the only feed here with
+   * years of history; a live decision cannot, because the free plan is a day
+   * behind and allows five requests a minute. So an adopted setup will ALWAYS
+   * read differently from the run that produced it, and calling that a
+   * divergence leaves a correctly configured desk permanently red — the same
+   * trap the fill-model row sidesteps two tests up.
+   *
+   * What has to hold is that both report the SAME TAPE. polygon and yahoo are
+   * both consolidated and agree on VWAP to within 0.06%. alpaca is IEX — a
+   * few percent of the volume — so a strategy tested on alpaca and traded on
+   * yahoo is measuring one VWAP and trading another, and THAT is a real
+   * divergence. The whole value of this row is that it can tell the two
+   * situations apart.
+   */
+  // The live side is PINNED here rather than inherited from whatever an
+  // earlier test in this file happened to leave in the prefs. A row that
+  // compares yahoo against yahoo would pass both of these and prove nothing.
+  const feedRow = (live, backtest) => {
+    require('../src/setups/prefs').saveSettings(SETUP.id, { feed: live });
+    const r = find(parity.compare({ setup: SETUP, spec: { ...SPEC_349, feed: backtest },
+                                    strategy: STRATEGY }), 'feed');
+    expect([r.live, r.backtest]).toEqual([live, backtest]);
+    return r;
+  };
+
+  test('polygon tested against yahoo live is not counted as a difference', () => {
+    const r = feedRow('yahoo', 'polygon');
+    expect(r.status).toBe('match');
+    expect(r.note).toMatch(/0\.06%/);
+  });
+
+  test('...but an alpaca backtest against a yahoo desk IS one', () => {
+    const r = feedRow('yahoo', 'alpaca');
+    expect(r.status).toBe('differ');
+    expect(r.note).toMatch(/alpaca is IEX only/);
+  });
+
+  test('...and so is a yahoo backtest against an alpaca desk — either way round',
+    () => {
+      expect(feedRow('alpaca', 'yahoo').status).toBe('differ');
+    });
+
   // What is still outstanding on #349, and it is configuration rather than
   // timing: the run compounded a percentage and took no position cap.
   test('risk model still differs: flat dollars live, compounding percent tested', () => {
@@ -315,13 +360,56 @@ describe('adopting a winning backtest', () => {
     expect(p.setupPatch.fill).toBe('close');
   });
 
-  test('the ranking, timeframe, feed and view come across', () => {
+  test('the ranking, timeframe and view come across', () => {
     const p = plan().setupPatch;
     expect(p.rankMetric).toBe('vwap_extension');
     expect(p.topN).toBe(3);
     expect(p.tf).toBe('1m');
-    expect(p.feed).toBe('polygon');
     expect(p.view).toBe('all');
+  });
+
+  /*
+   * THE FEED IS TRANSLATED, NOT COPIED — and this test used to assert the
+   * opposite, which is how the desk stopped firing.
+   *
+   * On 2026-08-27 `OR + VWAP 09:35` had NO feed preference, decided on yahoo,
+   * and fired: three shorts at 09:36:15, one filled. A backtest was adopted on
+   * 08-31, and a backtest runs on polygon because polygon is the only feed
+   * here with years of history. `feed: bt.feed` copied polygon onto the LIVE
+   * setup — a day behind on the free plan, five requests a minute — and from
+   * 09-01 every morning timed out and printed "MISSED THE 09:35 WINDOW".
+   * Nothing had broken. A setting right for one job had been copied onto the
+   * other, and this file signed it off.
+   *
+   * The fill model two tests above is translated for exactly this reason. The
+   * feed needed the same rule and nobody had applied it.
+   */
+  test('a polygon backtest is adopted as its live twin, not as polygon', () => {
+    const p = plan();
+    expect(p.setupPatch.feed).toBe('yahoo');
+    const c = p.changes.find(x => x.what === 'feed');
+    expect(c.to).toBe('yahoo');
+    expect(c.why).toMatch(/cannot decide a live bar/);
+    expect(c.why).toMatch(/re-run the backtest there/);
+  });
+
+  test('a feed that CAN decide live is adopted unchanged', () => {
+    for (const f of ['yahoo', 'alpaca']) {
+      const p = parity.planAdopt({ setup: SETUP, strategy: STRATEGY,
+                                   spec: { ...SPEC_349, feed: f } });
+      expect(p.setupPatch.feed).toBe(f);
+    }
+  });
+
+  /*
+   * AND A BACKTEST THAT NAMED NO FEED STILL NAMES NONE. Writing the default in
+   * would turn "nobody chose" into "somebody chose" — a different fact, and
+   * the one the setup card reports.
+   */
+  test('no feed in the run means no preference on the setup', () => {
+    const p = parity.planAdopt({ setup: SETUP, strategy: STRATEGY,
+                                 spec: { ...SPEC_349, feed: null } });
+    expect(p.setupPatch.feed).toBeNull();
   });
 
   test('every change is listed with what it was and what it becomes', () => {
