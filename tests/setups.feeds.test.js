@@ -189,6 +189,15 @@ describe('it is wired in where the feed is read', () => {
     expect(d).toContain('node scripts/sync-qp-env.js');
     expect(d.indexOf('sync-qp-env.js')).toBeLessThan(d.indexOf('[6b/6] Chart platform'));
     expect(d).toContain('QP_FORCE_RESTART=1');
+    /*
+     * `|| SYNC_RC=$?`, NOT `; SYNC_RC=$?`. The script runs under `set -e`, and
+     * the first deploy of this step wrote the keys, exited 3 to ask for a
+     * restart, and the deploy stopped dead before [6b/6] — qp kept running
+     * without them. An exit code that is a message must be read, not obeyed.
+     */
+    expect(d).toContain('node scripts/sync-qp-env.js || SYNC_RC=$?');
+    expect(d).not.toContain('node scripts/sync-qp-env.js; SYNC_RC=$?');
+    expect(d.slice(0, 200)).toContain('set -e');
     expect(d).toMatch(/\[ "\$RUNNING" = "\$WANT" \] && \[ -z "\$QP_FORCE_RESTART" \]/);
   });
 

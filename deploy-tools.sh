@@ -540,7 +540,13 @@ echo "[6a/6] qp feed keys..."
 # Exit 3 means .env changed and qp must restart to see it.
 QP_FORCE_RESTART=""
 if [ -d quant-platform ]; then
-  node scripts/sync-qp-env.js; SYNC_RC=$?
+  # `|| SYNC_RC=$?` and not `; SYNC_RC=$?`: this script runs under `set -e`,
+  # and a bare non-zero exit ENDS THE DEPLOY. The first run of this step did
+  # exactly that — it wrote the keys, exited 3 to ask for a restart, and the
+  # deploy stopped dead before [6b/6], so qp kept running without them. An
+  # exit code that is a message must be read, not obeyed.
+  SYNC_RC=0
+  node scripts/sync-qp-env.js || SYNC_RC=$?
   if [ "$SYNC_RC" = "3" ]; then QP_FORCE_RESTART=1; fi
 fi
 

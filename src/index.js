@@ -193,6 +193,11 @@ app.get('/health', (req, res) => {
     paused: identity ? identity.paused : false,
     pausedAt: identity ? identity.pausedAt : null,
     pausedReason: identity ? identity.pausedReason : null,
+    // HOW LONG THIS PROCESS HAS BEEN UP. The card registry is in memory, so a
+    // tool restarted a minute ago has no scan and no cards by construction —
+    // and a check that cannot see the restart reports six tools as broken
+    // straight after every deploy. See scripts/check-screeners.js.
+    uptimeSec: Math.round(process.uptime()),
     ts: Date.now(), check, summary,
   });
 });

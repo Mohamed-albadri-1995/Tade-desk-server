@@ -18,11 +18,11 @@ const chk = require('../scripts/check-screeners');
 const scr = (over = {}) => ({
   key: 'k', name: 'Screener', enabled: true, labelOnly: false, mirrorOf: null,
   runFrom: '09:30', runTo: '16:00', filters: 3, valid: true, count: 12,
-  error: null, ms: 400, ...over,
+  error: null, ms: 400, sample: ['AAA', 'BBB'], ...over,
 });
 const tool = (over = {}) => ({
   id: 'T2', name: 'Momentum', port: 3010, reachable: true, paused: false,
-  pausedReason: null,
+  pausedReason: null, uptimeSec: 3600,
   scan: { lastRun: Date.now() - 5 * 60000, lastRowCount: 12, error: null },
   screeners: [scr()], ...over,
 });
@@ -138,6 +138,64 @@ describe('the tool itself', () => {
     const out = chk.problemsOf(tool({ scan: { lastRun: null, lastRowCount: null, error: null } }), AT);
     expect(out.join(' ')).toMatch(/never completed a scan/);
     expect(out.join(' ')).not.toMatch(/NO cards/);
+  });
+
+  /*
+   * JUST STARTED IS NOT BROKEN. The first run of this check, straight after a
+   * deploy, reported all six tools as "never scanned, no cards" — true, and a
+   * finding about nothing: the registry is in memory and the next scan had
+   * not happened yet. Twelve lines of noise around the two that mattered.
+   */
+  test('a tool up for a minute with no scan yet is NOT a problem', () => {
+    const out = chk.problemsOf(tool({ uptimeSec: 70,
+      scan: { lastRun: null, lastRowCount: 0, error: null } }), AT);
+    expect(out).toEqual([]);
+  });
+
+  test('...but after ten minutes it is', () => {
+    const out = chk.problemsOf(tool({ uptimeSec: 900,
+      scan: { lastRun: null, lastRowCount: 0, error: null } }), AT);
+    expect(out.join(' ')).toMatch(/never completed a scan/);
+    expect(chk.JUST_STARTED_SEC).toBe(600);
+  });
+
+  test('a tool that does not report uptime is judged as before', () => {
+    const out = chk.problemsOf(tool({ uptimeSec: null,
+      scan: { lastRun: null, lastRowCount: 0, error: null } }), AT);
+    expect(out.join(' ')).toMatch(/never completed a scan/);
+  });
+});
+
+/*
+ * A MIRROR IS THE OPPOSITE SETUP. One returning its base's own names is the
+ * same screen twice under two labels — the pair then tests one side twice and
+ * the direction question it exists for is never asked. Judged on the NAMES:
+ * two opposite screens can match seven each; they cannot match the same seven.
+ */
+describe('a mirror that is not a mirror', () => {
+  test('the same names as its base is called out, with the names', () => {
+    const out = chk.problemsOf(tool({ screeners: [
+      scr({ name: 'Move', count: 7, sample: ['A', 'B', 'C'] }),
+      scr({ name: 'Move (mirror)', mirrorOf: 'Move', count: 7, sample: ['C', 'A', 'B'] }),
+    ] }), AT);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/returns the SAME names as "Move" \(A, B, C\)/);
+  });
+
+  test('the same COUNT with different names is fine', () => {
+    const out = chk.problemsOf(tool({ screeners: [
+      scr({ name: 'Move', count: 7, sample: ['A', 'B', 'C'] }),
+      scr({ name: 'Move (mirror)', mirrorOf: 'Move', count: 7, sample: ['X', 'Y', 'Z'] }),
+    ] }), AT);
+    expect(out).toEqual([]);
+  });
+
+  test('nothing is said when either side returned no names', () => {
+    const out = chk.problemsOf(tool({ screeners: [
+      scr({ name: 'Move', count: 0, sample: [], runFrom: '04:00', runTo: '09:00' }),
+      scr({ name: 'Move (mirror)', mirrorOf: 'Move', count: 0, sample: [], runFrom: '04:00', runTo: '09:00' }),
+    ] }), AT);
+    expect(out).toEqual([]);
   });
 });
 

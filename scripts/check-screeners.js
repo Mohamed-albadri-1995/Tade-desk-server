@@ -39,6 +39,9 @@ const ROOT = path.join(__dirname, '..');
 /** How stale a card list may be during the session before it is a finding. */
 const STALE_MIN = 30;
 
+/** Under this uptime a tool with no scan has simply not had one yet. */
+const JUST_STARTED_SEC = 10 * 60;
+
 /** Minutes since a timestamp, or null when there is none. */
 function minsSince(ts, now = Date.now()) {
   const n = Number(ts);
@@ -88,6 +91,13 @@ async function probeTool(tool, { base = `http://127.0.0.1:${tool.port}`, fetchJs
   out.paused = !!ident.json.paused;
   out.pausedReason = ident.json.pausedReason || null;
 
+  // HOW LONG THE PROCESS HAS BEEN UP. A tool restarted a minute ago has an
+  // empty card list and no scan by construction — the registry is in memory —
+  // and the first run of this check, straight after a deploy, reported all six
+  // tools as "never scanned, no cards". True, and a finding about nothing.
+  const h = await fetchJson(`${base}/health`);
+  out.uptimeSec = h.json && Number.isFinite(h.json.uptimeSec) ? h.json.uptimeSec : null;
+
   const st = await fetchJson(`${base}/api/scan/status`);
   out.scan = st.json ? {
     lastRun: st.json.lastRun || null,
@@ -102,7 +112,7 @@ async function probeTool(tool, { base = `http://127.0.0.1:${tool.port}`, fetchJs
                   labelOnly: !!s.labelOnly, mirrorOf: s.mirrorOf || null,
                   runFrom: s.runFrom || null, runTo: s.runTo || null,
                   filters: (s.filters || []).length,
-                  valid: null, count: null, error: null, ms: null };
+                  valid: null, count: null, error: null, ms: null, sample: [] };
     if (row.enabled) {
       const t = await fetchJson(`${base}/api/screeners/test`, {
         method: 'POST',
@@ -122,6 +132,10 @@ async function probeTool(tool, { base = `http://127.0.0.1:${tool.port}`, fetchJs
         row.valid = true;
         row.count = Number(t.json.count) || 0;
         row.ms = t.json.ms || null;
+        // The first names it matched — enough to tell a mirror that mirrors
+        // from one that returns its base's list under another name.
+        row.sample = (t.json.sample || []).map(x => String(x.ticker || '').toUpperCase())
+          .filter(Boolean);
       } else {
         row.valid = true;                            // the definition passed
         row.error = (t.json && t.json.error) || `HTTP ${t.status}`;
@@ -150,10 +164,26 @@ function problemsOf(t, { hhmm = etNow(), now = Date.now() } = {}) {
   if (!t.screeners.length) say('has NO screeners at all.');
   else if (!on.length) say(`every one of its ${t.screeners.length} screener(s) is switched off — it collects nothing.`);
 
-  const names = new Set(t.screeners.map(s => s.name));
+  const byName = Object.fromEntries(t.screeners.map(s => [s.name, s]));
   for (const s of t.screeners) {
-    if (s.mirrorOf && !names.has(s.mirrorOf)) {
+    if (s.mirrorOf && !byName[s.mirrorOf]) {
       say(`"${s.name}" mirrors "${s.mirrorOf}", which no longer exists.`);
+    }
+    /*
+     * A MIRROR IS THE OPPOSITE SETUP. One that returns its base's own names is
+     * the same screen twice under two labels — the pair then tests one side
+     * twice and the direction question it exists for is never asked. Seen
+     * once already on this desk (the oversold twin, tests/screeners.newScanners).
+     * Judged on the names, not the count: two opposite screens can match seven
+     * each; they cannot match the same seven.
+     */
+    const base = s.mirrorOf ? byName[s.mirrorOf] : null;
+    if (s.enabled && base && base.enabled && s.sample.length && base.sample.length) {
+      const shared = s.sample.filter(x => base.sample.includes(x)).sort();
+      if (shared.length === s.sample.length && shared.length === base.sample.length) {
+        say(`"${s.name}" returns the SAME names as "${base.name}" (${shared.slice(0, 5).join(', ')}`
+          + `${shared.length > 5 ? ', …' : ''}) — it is not a mirror, it is the same screen twice.`);
+      }
     }
     if (!s.enabled) continue;
     if (!s.filters) say(`"${s.name}" has no filters — it is the floor and nothing else.`);
@@ -171,12 +201,21 @@ function problemsOf(t, { hhmm = etNow(), now = Date.now() } = {}) {
 
   const sc = t.scan;
   const session = hhmm >= '09:30' && hhmm < '16:00';
+  /*
+   * JUST STARTED IS NOT BROKEN. The card registry is in memory, so a tool
+   * restarted by the deploy a minute ago has no scan and no cards until its
+   * next scheduled scan matches something. Reported as a fact, not a problem.
+   */
+  const justStarted = t.uptimeSec !== null && t.uptimeSec !== undefined
+    && t.uptimeSec < JUST_STARTED_SEC;
   if (sc) {
     if (sc.error) say(`the last scan FAILED: ${sc.error}`);
     const age = minsSince(sc.lastRun, now);
-    if (age === null) say('has never completed a scan since it started.');
-    else if (session && age > STALE_MIN) say(`the card list is ${age} minutes old during the session.`);
-    if (sc.lastRowCount === 0 && !t.paused && on.length) {
+    if (age === null && !justStarted) say('has never completed a scan since it started.');
+    else if (age !== null && session && age > STALE_MIN) {
+      say(`the card list is ${age} minutes old during the session.`);
+    }
+    if (sc.lastRowCount === 0 && !t.paused && on.length && !justStarted) {
       say('the last scan produced NO cards — a setup on this tool has nothing to rank.');
     }
   }
@@ -191,7 +230,10 @@ function table(t, hhmm) {
   if (!t.reachable) { lines.push(`   did not answer: ${t.error}`); return lines; }
   if (t.scan) {
     const age = minsSince(t.scan.lastRun);
-    lines.push(`   last scan ${age === null ? 'never' : `${age} min ago`}`
+    const up = t.uptimeSec === null || t.uptimeSec === undefined ? ''
+      : ` · up ${t.uptimeSec < 120 ? `${t.uptimeSec}s` : `${Math.round(t.uptimeSec / 60)} min`}`;
+    lines.push(`   last scan ${age === null ? (t.uptimeSec !== null && t.uptimeSec < JUST_STARTED_SEC
+      ? 'not yet (just started)' : 'never') : `${age} min ago`}${up}`
       + ` · ${t.scan.lastRowCount === null ? '?' : t.scan.lastRowCount} cards`
       + `${t.scan.error ? ` · ERROR ${t.scan.error}` : ''}`);
   }
@@ -245,4 +287,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { probeTool, problemsOf, table, windowOpen, minsSince, STALE_MIN };
+module.exports = { probeTool, problemsOf, table, windowOpen, minsSince, STALE_MIN,
+                   JUST_STARTED_SEC };
