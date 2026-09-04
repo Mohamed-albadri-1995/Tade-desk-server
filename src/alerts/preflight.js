@@ -57,8 +57,15 @@ const DELAYED_FEEDS = new Set(['yahoo']);
  * 2026-09-04 that was the whole of "MISSED THE 09:35 WINDOW". The catalog now
  * substitutes a usable feed (see setups/feeds.js), so a setup still reporting
  * one of these here has slipped past that — and is a fault, not a warning.
+ *
+ * READ FROM feeds.js, NOT RETYPED. This was `new Set(['polygon'])`, a copy of
+ * a list that has since grown: `hybrid` and `hybrid_yahoo` fetch Polygon's
+ * history once per symbol before reaching the source that is current, so they
+ * hit the same five-a-minute ceiling. The copy did not grow with it, and a
+ * check that holds a stale copy of the thing it is checking reports "fine"
+ * about a case it has never heard of.
  */
-const LIVE_UNUSABLE_FEEDS = new Set(['polygon']);
+const LIVE_UNUSABLE_FEEDS = new Set(Object.keys(require('../setups/feeds').LIVE_UNUSABLE));
 
 /** How long a card list may go unrefreshed before it is not "today's list". */
 const CARDS_STALE_MIN = 30;
@@ -140,7 +147,18 @@ function legFeed(setups, summary) {
   const detail = [];
   for (const s of setups) {
     const g = summary[s.id];
-    const feed = s.liveFeed || 'yahoo';
+    /*
+     * NOT `|| 'yahoo'`. The catalog sets liveFeed on every setup, so a missing
+     * one is a fact about the catalog and naming yahoo in its place would
+     * report a feed nobody is on — the exact shape of mistake this file
+     * exists to catch.
+     */
+    const feed = s.liveFeed || null;
+    if (!feed) {
+      detail.push({ setup: s.id, ok: null, feed: null,
+        note: 'the desk did not say which feed this setup decides on' });
+      continue;
+    }
     const delayed = DELAYED_FEEDS.has(String(feed).toLowerCase());
     const lag = g && typeof g.lagMaxMin === 'number' ? g.lagMaxMin : null;
     if (LIVE_UNUSABLE_FEEDS.has(String(feed).toLowerCase())) {
@@ -169,8 +187,21 @@ function legFeed(setups, summary) {
         note: `'${feed}', worst lag ${lag} min` });
     }
   }
+  /*
+   * SETUPS ON DIFFERENT FEEDS ARE NOT TESTING THE SAME THING, and the desk
+   * showed one on alpaca and one on yahoo without ever saying so out loud. It
+   * is not a fault — a setup may be pinned to a feed on purpose — but it means
+   * a green rehearsal on one setup says NOTHING about the other: they are
+   * reading different tapes, with different delays, and the prices will not
+   * agree to the cent. Named, not judged.
+   */
+  const used = [...new Set(detail.map(d => d.feed).filter(Boolean))].sort();
+  const mixed = used.length > 1
+    ? ` These setups are not all on one feed (${used.join(', ')}) — a check that `
+      + 'passes on one of them does not cover the others.'
+    : '';
   return leg('feed', 'The feed is current', verdict(detail),
-    summarise(detail, 'setup'), detail);
+    summarise(detail, 'setup') + mixed, detail);
 }
 
 /* ── 3. the decision ─────────────────────────────────────────────────────── */

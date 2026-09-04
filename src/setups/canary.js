@@ -216,7 +216,14 @@ function feedFor(setups) {
     const f = s && (s.liveFeed || s.feed);
     if (f) return String(f);
   }
-  return 'yahoo';
+  /*
+   * AND WHEN NO SETUP NAMES ONE, the same default a setup with no preference
+   * gets — not the word 'yahoo' typed here. Those were the same thing until
+   * the default became alpaca, and then the Control would have gone on
+   * measuring yahoo's delay while every setup decided on a real-time feed:
+   * a control reporting honestly about a market nobody is trading.
+   */
+  return require('./feeds').liveFeedFor(null).feed;
 }
 
 /** Minutes between two HH:MM stamps, or null when either is unreadable. */

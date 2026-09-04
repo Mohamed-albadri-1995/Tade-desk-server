@@ -172,6 +172,62 @@ describe('the feed', () => {
     expect(l.note).toMatch(/five requests a minute/);
     expect(pf.LIVE_UNUSABLE_FEEDS.has('polygon')).toBe(true);
   });
+
+  /*
+   * AND THE LIST IS NOT A COPY. This was `new Set(['polygon'])`, typed here,
+   * while the list it mirrors grew two entries: `hybrid` and `hybrid_yahoo`
+   * fetch Polygon's history once per symbol before reaching the source that is
+   * current, so they hit the identical five-a-minute ceiling. A check holding
+   * a stale copy of the thing it checks reports "fine" about a case it has
+   * never heard of — and this one would have passed a setup that times out
+   * every morning.
+   */
+  test('hybrid and hybrid_yahoo fail it too, from feeds.js\'s own list', () => {
+    const { LIVE_UNUSABLE } = require('../src/setups/feeds');
+    for (const f of ['hybrid', 'hybrid_yahoo']) {
+      expect(pf.LIVE_UNUSABLE_FEEDS.has(f)).toBe(true);
+      expect(pf.legFeed([okSetup({ liveFeed: f })], {}).ok).toBe(false);
+    }
+    expect([...pf.LIVE_UNUSABLE_FEEDS].sort()).toEqual(Object.keys(LIVE_UNUSABLE).sort());
+  });
+
+  /*
+   * A MISSING FEED IS NOT YAHOO. This read `s.liveFeed || 'yahoo'`, so a setup
+   * the catalog had failed to describe was reported, in full sentences, as
+   * being on a feed nobody had put it on — an absence printed where an answer
+   * belongs, in the file written to stop exactly that.
+   */
+  test('a setup with no feed at all is UNKNOWN, and is not called yahoo', () => {
+    const l = pf.legFeed([okSetup({ liveFeed: null })], {});
+    expect(l.ok).toBeNull();
+    expect(l.detail[0].feed).toBeNull();
+    expect(l.note).toMatch(/did not say which feed/);
+    expect(l.note).not.toMatch(/yahoo/);
+  });
+
+  /*
+   * WHAT THE TRADER SPOTTED ON THE PAGE: one setup on alpaca, one on yahoo,
+   * and nothing anywhere saying so. It is not a fault — a setup can be pinned
+   * deliberately — but it means a rehearsal that passes on one of them covers
+   * nothing about the other: different tapes, different delays, prices that do
+   * not agree to the cent.
+   */
+  test('setups on different feeds are named as such', () => {
+    const l = pf.legFeed([
+      okSetup({ id: 'a', liveFeed: 'alpaca' }),
+      okSetup({ id: 'b', liveFeed: 'yahoo' }),
+    ], { a: { lagMaxMin: 0, lagBars: 0, runs: 10 } });
+    expect(l.note).toMatch(/not all on one feed \(alpaca, yahoo\)/);
+    expect(l.note).toMatch(/does not cover the others/);
+  });
+
+  test('…and one feed across every setup says nothing about mixing', () => {
+    const l = pf.legFeed([
+      okSetup({ id: 'a', liveFeed: 'alpaca' }),
+      okSetup({ id: 'b', liveFeed: 'alpaca' }),
+    ], {});
+    expect(l.note).not.toMatch(/not all on one feed/);
+  });
 });
 
 /* ── leg 3: the decision ─────────────────────────────────────────────────── */

@@ -91,8 +91,20 @@ describe('what it asks, and of whom', () => {
     expect(canary.feedFor([{}, { feed: 'polygon' }])).toBe('polygon');
   });
 
-  test('...and yahoo only when nothing names one — the desk\'s own default', () => {
-    expect(canary.feedFor([])).toBe('yahoo');
+  /*
+   * AND WHEN NOTHING NAMES ONE, the DESK'S default — read from feeds.js, not
+   * the word 'yahoo' typed a second time. Those were the same answer until the
+   * default for an unchosen setup became alpaca, and a hard-coded 'yahoo' here
+   * would then have had the Control measuring a delayed feed's lag while every
+   * real setup decided on a real-time one: a control reporting honestly about
+   * a market nobody was trading.
+   */
+  test('...and the desk\'s own default when nothing names one', () => {
+    const { liveFeedFor } = require('../src/setups/feeds');
+    expect(canary.feedFor([])).toBe(liveFeedFor(null).feed);
+    expect(require('fs')
+      .readFileSync(require('path').join(__dirname, '..', 'src', 'setups', 'canary.js'), 'utf8'))
+      .toContain("require('./feeds').liveFeedFor(null).feed");
   });
 
   test('one attempt and a short budget: a timeout IS the finding', async () => {
