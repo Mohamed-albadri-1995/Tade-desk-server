@@ -41,15 +41,31 @@ const withKeys = () =>
   write('keys.json', { alpacaApiKey: 'PKFAKEACCOUNTAAAAAAA', alpacaApiSecret: 'fakesecretAAAA' });
 
 describe('no Polygon-backed feed is ever the live feed', () => {
-  test('with Alpaca keys on the desk, polygon becomes alpaca — and says so', () => {
+  test('polygon becomes yahoo — and says so', () => {
     withKeys();
     const r = feeds().liveFeedFor('polygon');
-    expect(r.feed).toBe('alpaca');
+    expect(r.feed).toBe('yahoo');
     expect(r.substituted).toBe(true);
     expect(r.chosen).toBe('polygon');
     expect(r.note).toMatch(/day behind/);
     expect(r.note).toMatch(/five requests a minute/);
-    expect(r.note).toMatch(/Deciding on alpaca instead/);
+    expect(r.note).toMatch(/Deciding on yahoo instead/);
+  });
+
+  /*
+   * A CONSOLIDATED FEED IS REPLACED BY A CONSOLIDATED FEED, and having Alpaca
+   * keys on the desk does not change that. All three unusable feeds are
+   * Polygon-based and whole-market; substituting alpaca would fix the timeout
+   * and quietly change what every volume-weighted number in the strategy
+   * MEANS — and both live setups stop at the session VWAP.
+   */
+  test('and having Alpaca keys does not change that', () => {
+    withKeys();
+    const withThem = feeds().liveFeedFor('polygon');
+    jest.resetModules();
+    fs.rmSync(path.join(DIR, 'keys.json'));
+    expect(feeds().liveFeedFor('polygon')).toEqual(withThem);
+    expect(withThem.note).toMatch(/same consolidated tape/);
   });
 
   /*
@@ -66,10 +82,9 @@ describe('no Polygon-backed feed is ever the live feed', () => {
    */
   test('hybrid and hybrid_yahoo are substituted too — the Polygon leg is per symbol',
     () => {
-      withKeys();
       for (const f of ['hybrid', 'hybrid_yahoo']) {
         const r = feeds().liveFeedFor(f);
-        expect(r.feed).toBe('alpaca');
+        expect(r.feed).toBe('yahoo');
         expect(r.substituted).toBe(true);
         expect(r.chosen).toBe(f);
         expect(r.note).toMatch(/Polygon history for every symbol/);
@@ -77,12 +92,11 @@ describe('no Polygon-backed feed is ever the live feed', () => {
       }
     });
 
-  test('without keys it becomes yahoo, and says what would make it alpaca', () => {
-    const r = feeds().liveFeedFor('polygon');
-    expect(r.feed).toBe('yahoo');
-    expect(r.note).toMatch(/add Alpaca keys/);
-  });
-
+  /*
+   * ALPACA IS CHOSEN, NEVER DEFAULTED TO. It is right for a setup that is not
+   * volume-weighted and does need the exact minute, and it stands when someone
+   * picks it — the desk does not second-guess a deliberate choice.
+   */
   test('a feed that can decide live stands, with no note', () => {
     for (const f of ['yahoo', 'alpaca']) {
       const r = feeds().liveFeedFor(f);
@@ -91,27 +105,41 @@ describe('no Polygon-backed feed is ever the live feed', () => {
   });
 
   test('case does not matter', () => {
-    withKeys();
-    expect(feeds().liveFeedFor('Polygon').feed).toBe('alpaca');
-    expect(feeds().liveFeedFor('Hybrid_Yahoo').feed).toBe('alpaca');
+    expect(feeds().liveFeedFor('Polygon').feed).toBe('yahoo');
+    expect(feeds().liveFeedFor('Hybrid_Yahoo').feed).toBe('yahoo');
   });
 });
 
 /* ── the default nobody chose ────────────────────────────────────────────── */
 
 /*
- * A setup with no feed preference decided on yahoo, whose intraday lag is
- * variable — 0 to 15 minutes, measured. A setup whose definition is "the 09:34
- * bar" cannot decide on a feed that has not published 09:34, so the runner's
- * stale gate skipped it, correctly and silently. That silence is the thing
- * this desk has spent a week explaining.
+ * THE DEFAULT IS YAHOO, AND THIS IS A CORRECTION.
+ *
+ * For part of 2026-09-04 it was alpaca, on the reasoning that a real-time feed
+ * beats a delayed one because a bar that does not exist cannot be traded. That
+ * ignored three measurements already written down in the platform:
+ *
+ *   alpaca's free tier is IEX — 0.17M shares of AAPL on a morning the
+ *   consolidated tape carried 4.2M (tools/data/yahoo.py:16)
+ *   yahoo IS consolidated, agreeing with polygon on VWAP to within 0.06%
+ *   yahoo is "the only feed here that can serve a decision taken DURING the
+ *   session" (chart/data_manager.py:25)
+ *
+ * BOTH LIVE SETUPS STOP AT THE SESSION VWAP. qp already refuses to report a
+ * backtest of a VWAP-stopped strategy run on alpaca — "the numbers below are
+ * not this strategy". Putting the LIVE desk on that feed is the same error
+ * without the warning.
+ *
+ * The two failure modes are not comparable, and that is the argument:
+ * yahoo too slow → the stale gate SKIPS, visibly. Alpaca on a VWAP setup → a
+ * stop drawn from four percent of the tape, silently, and it trades.
  */
 describe('what decides when nobody has chosen', () => {
-  test('with Alpaca keys it is alpaca, and the card says the default is deciding', () => {
+  test('yahoo, whether or not the desk holds Alpaca keys', () => {
     withKeys();
     for (const none of [null, undefined, '', '  ']) {
       const r = feeds().liveFeedFor(none);
-      expect(r.feed).toBe('alpaca');
+      expect(r.feed).toBe('yahoo');
       // NOT a substitution — nothing was overridden. `chosen: null` is what
       // tells the card to say "no feed chosen" instead of naming one.
       expect(r.substituted).toBe(false);
@@ -120,27 +148,27 @@ describe('what decides when nobody has chosen', () => {
     }
   });
 
-  /*
-   * THE COST IS ON THE CARD, NOT IN THIS FILE. Alpaca's free tier is IEX only,
-   * so its volume is a few percent of the tape and every volume-weighted
-   * number from it — session VWAP above all — is measured on that slice. The
-   * trade is deliberate: a level slightly off can still be traded, a bar that
-   * does not exist cannot. Saying so is the condition of taking it.
-   */
-  test('and it says what alpaca costs, rather than presenting it as free', () => {
-    withKeys();
+  test('and the card says WHY yahoo, in the terms that decided it', () => {
     const note = feeds().liveFeedFor(null).note;
-    expect(note).toMatch(/IEX only/);
-    expect(note).toMatch(/VWAP/);
-    expect(note).toMatch(/backtest on alpaca/i);
+    expect(note).toMatch(/consolidated tape/);
+    expect(note).toMatch(/0\.06%/);
+    // The failure mode, so a skipped morning is recognisable when it happens.
+    expect(note).toMatch(/skipped rather than taken on a stale bar/);
   });
 
-  test('with no keys it is still yahoo, and says what would change that', () => {
-    const r = feeds().liveFeedFor(null);
-    expect(r.feed).toBe('yahoo');
-    expect(r.chosen).toBeNull();
-    expect(r.note).toMatch(/0–15 minutes behind/);
-    expect(r.note).toMatch(/Add Alpaca keys/);
+  /*
+   * THE REASONING IS IN THE FILE, not only in a commit nobody will re-read.
+   * The next person to reach for "real-time must be better" needs the three
+   * measurements in front of them.
+   */
+  test('the reversal is written down where the code is', () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'setups', 'feeds.js'), 'utf8');
+    expect(src).toMatch(/0\.17M shares of AAPL/);
+    expect(src).toMatch(/BOTH LIVE SETUPS STOP AT THE SESSION VWAP/);
+    expect(src).toMatch(/A visible skip beats a silent wrong number/);
+    // …and what is NOT known: yahoo's true lag, which the cache bug hid.
+    expect(src).toMatch(/never been\s+\*?\s*measured on this desk/);
   });
 });
 
