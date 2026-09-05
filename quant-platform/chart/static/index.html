@@ -2895,7 +2895,11 @@ function restore(){
 }
 
 window.addEventListener('load',async()=>{
-  restore(); await initHealth(); await loadPrimitives();
+  // GUARDED FOR THE SAME REASON. These two run before the chart exists, so a
+  // rejection here took the whole page down, not just its own feature.
+  restore();
+  await initHealth().catch(e=>banner('Health check failed: '+e.message));
+  await loadPrimitives().catch(e=>banner('Indicator list unavailable: '+e.message));
   renderOverlays(); renderSelected();
   if(typeof LightweightCharts==='undefined'){ banner('Chart library did not load (/static/lightweight-charts.js).'); return; }
   try{ initChart(); }catch(e){ banner('Chart init failed: '+e.message); return; }
@@ -2903,14 +2907,23 @@ window.addEventListener('load',async()=>{
   window.addEventListener('resize', _syncViewportHeight);
   window.addEventListener('orientationchange', ()=>setTimeout(_syncViewportHeight,150));
   if(window.visualViewport)window.visualViewport.addEventListener('resize', _syncViewportHeight);
-  loadChart();
-  await loadSources();          // must fill the register pickers FIRST
-  loadRegDates();
-  // strategy builder
-  seedTemplate(); renderStrat(); loadStrategies();
-  document.getElementById('addBtn').onclick=addOverlay;
-  document.getElementById('liveBtn').onclick=toggleLive;
-  // pro chart controls
+  /*
+   * THE CHART'S OWN CONTROLS, WIRED BEFORE ANYTHING IS FETCHED.
+   *
+   * These sat AFTER `await loadSources()`. loadSources fills the register
+   * pickers from the server, and an await that rejects — or simply never
+   * settles on a phone with a poor signal — ends the handler where it stands.
+   * loadChart() is called before it and is not awaited, so the CHART DRAWS and
+   * then Type, Scale, Labels, Tools and Fit are silently never attached: the
+   * dropdown moves, the page does nothing, and the feature looks broken rather
+   * than unwired. That was the report — "when I put tools under time scale …
+   * this is not happening" — and it was true of the Scale control too, which
+   * has been on this page for weeks.
+   *
+   * They need the DOM and CHART and nothing else, so they are wired the moment
+   * both exist. Applying the label preference here also means the FIRST draw
+   * is already clean, instead of drawing tagged and untagging afterwards.
+   */
   document.getElementById('ctype').value=CHARTTYPE;
   document.getElementById('ctype').addEventListener('change',e=>setChartType(e.target.value));
   document.getElementById('scaleMode').value=localStorage.getItem('qpc_scale')||'0';
@@ -2921,6 +2934,15 @@ window.addEventListener('load',async()=>{
   document.getElementById('railPos').value=localStorage.getItem('qpc_rail')||'left';
   document.getElementById('railPos').addEventListener('change',applyRailPos); applyRailPos();
   document.getElementById('fitBtn').onclick=()=>{ try{CHART.priceScale('right').applyOptions({autoScale:true});}catch(_){} try{CHART.priceScale('osc').applyOptions({autoScale:true});}catch(_){} try{CHART.timeScale().fitContent();}catch(_){} };
+  loadChart();
+  // NOT FATAL. One endpoint that does not answer must cost its own pickers,
+  // not every control below it — which is what an unguarded await did.
+  await loadSources().catch(e=>banner('Register list unavailable: '+e.message));
+  loadRegDates();
+  // strategy builder
+  seedTemplate(); renderStrat(); loadStrategies();
+  document.getElementById('addBtn').onclick=addOverlay;
+  document.getElementById('liveBtn').onclick=toggleLive;
   const closeSide=()=>{ document.getElementById('side').classList.add('hide'); document.body.classList.remove('side-open'); setTimeout(_resizeChart,60); };
   const openSide=()=>{ document.getElementById('side').classList.remove('hide'); document.body.classList.add('side-open'); setTimeout(_resizeChart,60); };
   document.getElementById('sideBtn').onclick=()=>{ document.getElementById('side').classList.contains('hide')?openSide():closeSide(); };

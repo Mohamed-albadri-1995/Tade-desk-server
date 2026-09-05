@@ -192,6 +192,50 @@ describe('the controls exist and are wired', () => {
   });
 
   /*
+   * THE CONTROLS ARE WIRED BEFORE ANYTHING IS FETCHED — the bug that made all
+   * of this look broken on the phone.
+   *
+   * The wiring sat after `await loadSources()` inside the load handler.
+   * loadChart() runs before it and is NOT awaited, so the chart DREW and then
+   * an endpoint that rejected — or simply never settled on a poor signal —
+   * ended the handler where it stood. Type, Scale, Labels, Tools and Fit were
+   * never attached. Selecting "Under the time axis" did nothing at all, which
+   * reads as a broken feature rather than an unwired one, and it was equally
+   * true of the Scale control that had been there for weeks.
+   *
+   * Reproduced in a real browser before fixing: with the page served over HTTP
+   * and every /api/* call failing, the old build reported bodyClass '' and
+   * localStorage null after selecting bottom — the rail did not move. With the
+   * awaits guarded it reports rail-bottom, the rail at y871 full width, and
+   * the chart shrunk from 868px to 824px.
+   */
+  /* CODE ONLY. The comments explaining this very fix quote `await
+     loadSources()`, and the first version of these two tests matched the
+     COMMENT — reporting the wiring as still misordered on a file where it is
+     not. A checker that reads prose is measuring the wrong text. */
+  const code = (from, to) => HTML.slice(HTML.indexOf(from), HTML.indexOf(to))
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  test('the chart controls are attached before the first fetch is awaited', () => {
+    const region = code("window.addEventListener('load'", "document.getElementById('addBtn')");
+    const wiring = region.indexOf("addEventListener('change',applyRailPos)");
+    const sources = region.indexOf('await loadSources()');
+    expect(wiring).toBeGreaterThan(-1);
+    expect(sources).toBeGreaterThan(-1);
+    expect(wiring).toBeLessThan(sources);
+  });
+
+  test('and no await in that handler can end it — each carries its own catch', () => {
+    const region = code("window.addEventListener('load'", "document.getElementById('addBtn')");
+    const awaits = [...region.matchAll(/await\s+(\w+)\(([^)]*)\)(\.catch\()?/g)];
+    expect(awaits.length).toBeGreaterThan(0);
+    for (const a of awaits) {
+      // `await foo()` with nothing after it takes the whole page down with it.
+      expect(`${a[1]} guarded: ${!!a[3]}`).toBe(`${a[1]} guarded: true`);
+    }
+  });
+
+  /*
    * THE RAIL AT THE BOTTOM SITS INSIDE <main>, WHICH RESERVES ITS HEIGHT. The
    * drawer is position:fixed to the viewport, so with the drawer open the rail
    * has to climb above it or it is simply covered by it.
