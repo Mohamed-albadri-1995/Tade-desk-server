@@ -192,6 +192,37 @@ describe('the desk as it IS — the default live fill', () => {
       expect(feedRow('alpaca', 'yahoo').status).toBe('differ');
     });
 
+  /*
+   * THE FEED THAT DECIDES, NOT THE ONE ON FILE — and on the live desk on
+   * 2026-09-04 these were different.
+   *
+   * `OR + VWAP 09:35` still carries `feed: polygon` in setup-prefs.json, left
+   * by the 08-31 adopt; the desk substitutes yahoo on every run. Reading the
+   * stored preference here printed "live polygon · backtest polygon · MATCH" —
+   * a parity report certifying agreement about a feed nothing was using. It
+   * was the same shape of mistake as the one that stopped the desk, inside the
+   * check meant to catch it.
+   */
+  test('a substituted feed is reported as the feed that DECIDES', () => {
+    require('../src/setups/prefs').saveSettings(SETUP.id, { feed: 'polygon' });
+    const r = find(parity.compare({ setup: SETUP, spec: { ...SPEC_349, feed: 'polygon' },
+                                    strategy: STRATEGY }), 'feed');
+    expect(r.live).toBe('yahoo');          // NOT 'polygon', which is what is stored
+    expect(r.backtest).toBe('polygon');
+    expect(r.note).toMatch(/set to 'polygon', which cannot decide a live bar/);
+    // Still a match on the thing that matters: both sides are the same tape.
+    expect(r.status).toBe('match');
+  });
+
+  test('and a catalog setup that already resolved it is believed', () => {
+    require('../src/setups/prefs').saveSettings(SETUP.id, { feed: null });
+    const r = find(parity.compare({
+      setup: { ...SETUP, chosenFeed: 'polygon', liveFeed: 'yahoo' },
+      spec: { ...SPEC_349, feed: 'polygon' }, strategy: STRATEGY }), 'feed');
+    expect(r.live).toBe('yahoo');
+    expect(r.note).toMatch(/it decides on 'yahoo'/);
+  });
+
   // What is still outstanding on #349, and it is configuration rather than
   // timing: the run compounded a percentage and took no position cap.
   test('risk model still differs: flat dollars live, compounding percent tested', () => {

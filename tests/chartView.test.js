@@ -202,6 +202,36 @@ describe('the controls exist and are wired', () => {
   });
 
   /*
+   * AND --railH IS DECLARED WHERE `main` CAN SEE IT — the assertion above is
+   * true of the broken version too, which is how this shipped.
+   *
+   * It was `#leftRail { --railH:46px; }`. A custom property inherits DOWN the
+   * tree and <main> is the rail's PARENT, so `padding-bottom:var(--railH)` on
+   * main was invalid at computed-value time and fell back to 0. main reserved
+   * nothing, the absolutely-positioned rail landed on top of the time axis,
+   * and the trader's report was exact: "the time scale should go up and create
+   * space… this is not happening". The rail's own `height:var(--railH)`
+   * resolved fine, which is why it looked half-built rather than unbuilt.
+   *
+   * Checking the DECLARATION SITE rather than the usage is the whole lesson: a
+   * `var()` that cannot resolve is silent, so the string being present proves
+   * nothing about the value arriving.
+   */
+  test('every element that reads --railH is a descendant of where it is declared',
+    () => {
+      // Each `--railH:` declaration, with the selector it sits on.
+      const decls = [...HTML.matchAll(/([^{}]+)\{[^{}]*--railH\s*:/g)]
+        .map(m => m[1].trim().split('\n').pop().trim());
+      expect(decls.length).toBeGreaterThan(0);
+      // :root/html/body are ancestors of everything on the page. Anything else
+      // — #leftRail above all — cannot be seen by <main>.
+      for (const sel of decls) {
+        expect(sel).toMatch(/^(:root|html|body)\b/);
+      }
+      expect(HTML).not.toContain('#leftRail { --railH');
+    });
+
+  /*
    * Overlay names are typed by hand in the Indicators panel and go straight
    * into innerHTML.
    */

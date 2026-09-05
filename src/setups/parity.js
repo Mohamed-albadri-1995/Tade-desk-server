@@ -243,9 +243,26 @@ function compare({ setup, spec, strategy } = {}) {
    * measuring one VWAP and trading another. That stays a divergence.
    */
   const CONSOLIDATED = new Set(['polygon', 'yahoo', 'hybrid_yahoo']);
-  const liveFeed = p.feed || s.feed || null;
+  /*
+   * THE FEED THAT DECIDES, NOT THE ONE ON FILE — and they are not the same on
+   * this desk right now.
+   *
+   * `OR + VWAP 09:35` still carries `feed: polygon` in setup-prefs.json, left
+   * there by the 08-31 adopt. The desk substitutes yahoo for it on every run.
+   * Reading the stored preference here printed "live polygon · backtest
+   * polygon · MATCH" — a parity report certifying agreement about a feed
+   * nothing was using, which is precisely the failure this file was written to
+   * end. The catalog has already resolved it (`liveFeed`); when a bare setup
+   * is passed in, the preference is resolved the same way rather than trusted.
+   */
+  const resolved = liveFeedFor(p.feed || s.chosenFeed || s.feed || null);
+  const liveFeed = s.liveFeed || resolved.feed || null;
   const feedRow = row('feed', liveFeed, bt.feed || null,
-    'a backtest runs on polygon for the history and a live decision cannot — '
+    (resolved.substituted || (s.chosenFeed && s.chosenFeed !== liveFeed)
+      ? `the setup is set to '${s.chosenFeed || p.feed}', which cannot decide a `
+        + `live bar, so it decides on '${liveFeed}'. `
+      : '')
+    + 'a backtest runs on polygon for the history and a live decision cannot — '
     + 'what has to match is the TAPE, and polygon and yahoo are both '
     + 'consolidated (VWAP within 0.06%). alpaca is IEX only');
   if (feedRow.status === 'differ'
