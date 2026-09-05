@@ -232,8 +232,20 @@
      looked half-right. */
   :root { --railH:46px; }
   body.rail-bottom main { padding-bottom:var(--railH); }
+  /* FIXED TO THE VIEWPORT, NOT ABSOLUTE INSIDE <main> — and that is the whole
+     of "it's visible left side but not visible down side".
+
+     On Android Chrome the body can be taller than what you can actually see
+     while the URL bar is showing (the note on body height above). <main>
+     stretches to the bottom of the BODY, so its bottom edge is under the fold,
+     and a rail anchored to it is drawn in that dead strip: present, correct,
+     and off the screen. The time axis stayed readable because
+     _keepAxisOnScreen measures it separately and shortens the chart until it
+     is back — a correction that knew nothing about the rail below it.
+
+     The drawer solved this long ago by being position:fixed. Same here. */
   body.rail-bottom #leftRail {
-    position:absolute; left:0; right:0; bottom:0; z-index:6;
+    position:fixed; left:0; right:0; bottom:0; z-index:6;
     flex:0 0 auto; flex-direction:row; justify-content:space-around;
     align-items:center; gap:2px; padding:3px 6px; height:var(--railH);
     border-right:none; border-top:1px solid var(--border);
@@ -2802,8 +2814,19 @@ function _keepAxisOnScreen(){
   if(!rows.length) return;
   const axis = rows[rows.length-1].getBoundingClientRect();
   if(axis.height < 1) return;                       // no axis row drawn yet
-  const visible = (window.visualViewport && window.visualViewport.height)
+  let visible = (window.visualViewport && window.visualViewport.height)
                   || window.innerHeight;
+  /*
+   * THE DOCKED RAIL EATS INTO WHAT IS VISIBLE. It is fixed to the bottom of
+   * the viewport, so "the axis is above the fold" is not enough — it has to be
+   * above the RAIL, or the dates sit behind seven buttons. Measured off the
+   * element rather than assumed from --railH: the media query changes that
+   * value, and a constant here would be right on one screen size only.
+   */
+  const _rail = document.getElementById('leftRail');
+  if(document.body.classList.contains('rail-bottom') && _rail){
+    visible -= _rail.getBoundingClientRect().height;
+  }
   // +1 so the last row of pixels is inside the fold rather than exactly on it:
   // sub-pixel layout and a rounded device pixel ratio put the final line of the
   // date text under the edge often enough to be the whole complaint again.

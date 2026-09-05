@@ -240,6 +240,42 @@ describe('the controls exist and are wired', () => {
    * drawer is position:fixed to the viewport, so with the drawer open the rail
    * has to climb above it or it is simply covered by it.
    */
+  /*
+   * THE DOCKED RAIL IS FIXED TO THE VIEWPORT, NOT ABSOLUTE INSIDE <main> —
+   * "it's visible left side but not visible down side".
+   *
+   * On Android Chrome the body can be taller than what is actually visible
+   * while the URL bar shows. <main> stretches to the bottom of the BODY, so a
+   * rail anchored to it is drawn under the fold: present, correct, invisible.
+   * The time axis stayed readable because _keepAxisOnScreen measures it
+   * separately and shortens the chart until it is back — a correction that
+   * knew nothing about the rail beneath it, which is why exactly one of the
+   * two was on screen.
+   *
+   * Reproduced in a real browser at 412x915 with the body forced 120px taller
+   * than the viewport:
+   *   absolute (shipped)  rail top 991, bottom 1035 — entirely below the fold
+   *   fixed               rail top 871, bottom 915; axis at 869, above it
+   */
+  test('the docked rail is fixed to the viewport', () => {
+    expect(HTML).toMatch(/body\.rail-bottom #leftRail \{\s*position:fixed;/);
+    expect(HTML).not.toMatch(/body\.rail-bottom #leftRail \{\s*position:absolute;/);
+  });
+
+  /*
+   * AND THE AXIS CORRECTION KNOWS THE RAIL IS THERE. "Above the fold" is not
+   * enough once seven buttons are fixed over the bottom of it — the dates
+   * would sit behind them. Measured off the element, because the media query
+   * changes --railH and a constant would be right on one screen size only.
+   */
+  test('the axis correction subtracts the docked rail from what is visible', () => {
+    const fn = fnSource('_keepAxisOnScreen');
+    expect(fn).toMatch(/rail-bottom/);
+    expect(fn).toMatch(/visible -= _rail\.getBoundingClientRect\(\)\.height/);
+    // `const visible` could not be reduced — the correction would not compile.
+    expect(fn).toMatch(/let visible =/);
+  });
+
   test('main reserves the rail\'s height, and the rail clears an open drawer', () => {
     expect(HTML).toContain('body.rail-bottom main { padding-bottom:var(--railH); }');
     expect(HTML).toContain('body.rail-bottom.drawer-open #leftRail { bottom:var(--drawerH, 42vh); }');
