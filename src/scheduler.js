@@ -188,8 +188,55 @@ function getJobRegistry() {
 
 const pad = n => String(n).padStart(2, '0');
 
+/*
+ * IS THE TOOL SUPPOSED TO BE LOOKING RIGHT NOW — weekdays, 04:00 to 16:00 ET.
+ * The same span the discovery jobs below cover, so a scan on startup can never
+ * ask TradingView something the cron would not have asked a few minutes later.
+ */
+function scanningNow(ts = Date.now()) {
+  const et = new Date(new Date(ts).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const dow = et.getDay();
+  if (dow === 0 || dow === 6) return false;
+  const h = et.getHours();
+  return h >= 4 && h < 16;
+}
+
 function startScheduler() {
   console.log('[Scheduler] Starting...');
+
+  /*
+   * ── SCAN AS SOON AS THE PROCESS COMES UP, IF THE MARKET IS OPEN ──
+   *
+   * r0 IS AN IN-MEMORY MAP (src/r0/registry.js). A restart empties it, and
+   * nothing here used to refill it until the next cron tick — which between
+   * 10:00 and 16:00 is every FIFTEEN MINUTES. So every deploy taken during the
+   * session blinded all six tools for up to a quarter of an hour, and any
+   * setup deciding inside that gap published
+   *
+   *     "No cards on the list at the decision — nothing to rank."
+   *
+   * which reads as a quiet market and is nothing of the kind. It is the desk
+   * having been restarted. Seen exactly that way on 2026-09-08: a deploy at
+   * 11:22, and every tool reporting `last scan not yet · 0 cards` three
+   * minutes later while their screeners matched 13, 4, 10 and 3 names.
+   *
+   * A week of deploying during market hours is a week of this.
+   *
+   * FIRE AND FORGET, and it must never delay startup or take the process down
+   * with it: the tool has to answer /health and serve its pages whether or not
+   * TradingView is reachable this second. The cron below is still the schedule;
+   * this only closes the gap a restart opens.
+   */
+  if (scanningNow()) {
+    console.log('[Scheduler] market hours — scanning now, so a restart does not '
+      + 'leave this tool with an empty card list');
+    Promise.resolve()
+      .then(() => runFullScan())
+      .catch(err => console.warn('[Scheduler] the startup scan failed — the next '
+        + 'scheduled scan will refill the list:', err.message));
+  } else {
+    console.log('[Scheduler] outside 04:00–16:00 ET — no startup scan');
+  }
 
   // ── discovery ──
   // A screener only runs inside its own window, so these say how OFTEN the tool
@@ -488,4 +535,4 @@ function startScheduler() {
   console.log('[Scheduler] All jobs registered:', jobRegistry.length);
 }
 
-module.exports = { startScheduler, getJobRegistry, toggleJob, rescheduleJob, resetJobSchedule };
+module.exports = { startScheduler, scanningNow, getJobRegistry, toggleJob, rescheduleJob, resetJobSchedule };
