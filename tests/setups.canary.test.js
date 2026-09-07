@@ -58,6 +58,68 @@ describe('it runs every five minutes, and on any bar a setup decided', () => {
   });
 });
 
+/*
+ * IT NEVER ASKS ABOUT A BAR IT COULD NOT ENTER ON — a correction paid for by
+ * the control crying wolf on the live desk.
+ *
+ * 2026-09-08, 04:00:01: "CONTROL DID NOT FIRE on the 03:59 bar although yahoo
+ * was current … so this is the chain rather than any strategy." It was not the
+ * chain. The window opens at 04:00 and it had been asked about 03:59 — one
+ * minute before its own window. No strategy produces an entry outside its
+ * entry window, so the control worked perfectly and reported a fault.
+ *
+ * Structural, not a one-off: the five-minute cadence lands on 04:00 every day,
+ * so the first thing the desk said each morning was a false alarm. A control
+ * that cries wolf daily is worse than none — the morning it means it, you have
+ * already learned to scroll past it.
+ */
+describe('it never asks about a bar outside its own entry window', () => {
+  test('03:59 is out — the window opens at 04:00, and that was the live alarm', () => {
+    expect(canary.inWindow('03:59')).toBe(false);
+    expect(canary.SPEC.risk.window_start).toBe(400);
+  });
+
+  test('the first bar it can enter on, and the last, are both in', () => {
+    expect(canary.inWindow('04:00')).toBe(true);
+    expect(canary.inWindow('15:59')).toBe(true);
+    expect(canary.inWindow('16:00')).toBe(true);
+  });
+
+  test('after the close is out too', () => {
+    expect(canary.inWindow('16:01')).toBe(false);
+    expect(canary.inWindow('19:59')).toBe(false);
+  });
+
+  /*
+   * READ FROM SPEC. minuteOf returns the minute of the HOUR — it is the
+   * cadence test — so a window check built on it would call 03:59 and 15:59
+   * the same minute and be right by accident half the time.
+   */
+  test('it reads the window off SPEC rather than a second copy of the hours', () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '..', 'src', 'setups', 'canary.js'), 'utf8');
+    expect(src).toContain('SPEC.risk.window_start');
+    expect(src).toContain('SPEC.risk.window_end');
+  });
+
+  test('an unreadable bar is out, not in', () => {
+    for (const b of [null, '', 'soon', undefined]) expect(canary.inWindow(b)).toBe(false);
+  });
+
+  /* And tick() skips BEFORE the qp call, so a false alarm costs nothing. */
+  test('tick returns without asking qp on a bar outside the window', async () => {
+    const asked = [];
+    const out = await canary.tick({
+      now: '04:00', bar: '03:59', day: '2026-09-08', rows: [],
+      setups: [{ id: 'S', enabled: true }], ran: [],
+      deps: { qp: { decide: async (...a) => { asked.push(a); return {}; } },
+              catalog: { list: async () => [] } },
+    });
+    expect(out).toBeNull();
+    expect(asked).toEqual([]);
+  });
+});
+
 /* ── what it asks about ──────────────────────────────────────────────────── */
 
 describe('what it asks, and of whom', () => {

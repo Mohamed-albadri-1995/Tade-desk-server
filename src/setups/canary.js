@@ -181,6 +181,37 @@ function minuteOf(hhmm) {
   return m ? Number(m[2]) : null;
 }
 
+/** Minutes since midnight — NOT minuteOf, which is the minute of the hour. */
+function barMinutes(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/*
+ * IS THE BAR INSIDE THE CONTROL'S OWN ENTRY WINDOW — and this is a correction
+ * paid for by the control crying wolf on the live desk.
+ *
+ * 2026-09-08, 04:00:01: "CONTROL DID NOT FIRE on the 03:59 bar although yahoo
+ * was current … so this is the chain rather than any strategy." It was not the
+ * chain. The control's window opens at 04:00 (window_start below), and it had
+ * just been asked about 03:59 — one minute BEFORE its own window. No strategy
+ * can produce an entry on a bar outside its entry window, so the control was
+ * working perfectly and reporting a fault.
+ *
+ * It is structural, not a one-off: the cadence lands on 04:00 every single
+ * day, so the first thing the desk said every morning was a false alarm. A
+ * control that cries wolf once a day is worse than no control, because the
+ * morning it means it you have already learned to scroll past it.
+ *
+ * Read from SPEC, so a change to the window cannot leave this behind.
+ */
+function inWindow(bar) {
+  const m = barMinutes(bar);
+  if (m === null) return false;
+  const hhmm = (n) => Math.floor(n / 100) * 60 + (n % 100);
+  return m >= hhmm(SPEC.risk.window_start) && m <= hhmm(SPEC.risk.window_end);
+}
+
 /**
  * Due on a five-minute mark, or on any bar a real setup just decided.
  *
@@ -430,6 +461,13 @@ async function tick({ now, bar, day, rows, setups = [], all = null, ran = [],
 
   const paired = (ran || []).length > 0;
   if (!due(now, paired)) return null;
+  /*
+   * NOT OUTSIDE ITS OWN WINDOW. Asking about a bar the strategy could never
+   * enter on and then reporting the empty answer as a broken chain is a false
+   * alarm, and the cadence lands on 04:00 every day — see inWindow. Skipped
+   * before the qp call, so it costs nothing either.
+   */
+  if (!inWindow(bar)) return null;
   if (!paired) {
     /*
      * A cadence run. `all` is read only here, and only in a tool that got
@@ -474,7 +512,7 @@ async function tick({ now, bar, day, rows, setups = [], all = null, ran = [],
 }
 
 module.exports = {
-  run, tick, verdict, due, ownsSetup, someoneDecides, symbolsFor, feedFor,
+  run, tick, verdict, due, inWindow, ownsSetup, someoneDecides, symbolsFor, feedFor,
   firedOn, resultOn,
   SPEC, CADENCE_MIN, MAX_SYMBOLS, FALLBACK_SYMBOLS, TOLERANCE_MIN, TIMEOUT_MS,
   // Test-only: the day's memory has to be resettable, or one test's bar leaks
