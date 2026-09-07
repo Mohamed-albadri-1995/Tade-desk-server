@@ -61,6 +61,30 @@ app.get('/api/setups', async (req, res) => {
       setups: list.map(s => ({
         id: s.id, name: s.name, tools: s.tools,
         decisionTime: s.decisionTime, universeScanAt: s.universeScanAt || null,
+        /*
+         * THE WHOLE WINDOW, NOT JUST THE MINUTE IT OPENS.
+         *
+         * A setup whose qp strategy has window_start != window_end fires on
+         * ANY bar in between, and the scheduler has always evaluated it that
+         * way (catalog.withinWindow). The PAGE has always had the markup to
+         * say so — `s.watch ? '09:30–16:00 ET' : '09:30 ET'` — and this
+         * payload sent neither field, so `s.watch` was undefined on every
+         * setup and every one of them rendered as a one-minute clock setup.
+         *
+         * That is not cosmetic. Asked "does Test run all day or once at
+         * 09:30", the desk showed "09:30 ET" whatever the answer was, and the
+         * only place the truth existed was the qp strategy. A trader cannot
+         * check a window the desk refuses to print.
+         *
+         * decidesOnBar/decidesUntilBar are the BARS evaluated, which is the
+         * window shifted by the fill model — carried too, because "fires at
+         * 09:35" and "decided on the 09:34 bar" is the distinction this desk
+         * has been bitten by more than once.
+         */
+        windowEnd: s.windowEnd || s.decisionTime,
+        watch: !!s.watch,
+        decidesOnBar: s.decidesOnBar || null,
+        decidesUntilBar: s.decidesUntilBar || null,
         describe: s.describe, caution: s.caution, liveFeed: s.liveFeed || null,
         // The preference as stored and, when the live feed differs, why.
         chosenFeed: s.chosenFeed || null, feedNote: s.feedNote || null,

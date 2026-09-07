@@ -28,6 +28,13 @@ router.get('/', async (req, res) => {
       strategies: s.strategies,
       strategyIds: s.strategyIds,
       decisionTime: s.decisionTime,
+      // The whole window, for the same reason as in src/alerts/server.js: a
+      // setup that fires on any bar between two times must not be printed as
+      // though it fired once.
+      windowEnd: s.windowEnd || s.decisionTime,
+      watch: !!s.watch,
+      decidesOnBar: s.decidesOnBar || null,
+      decidesUntilBar: s.decidesUntilBar || null,
       universeScanAt: s.universeScanAt || null,
       describe: s.describe,
       caution: s.caution,
