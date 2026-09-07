@@ -399,8 +399,19 @@ async function runScreener(screener) {
   if (dropped) {
     console.log(`[TV Scanner] "${screener.name}": ${dropped} row(s) below ${t.minAtrPct}% ADR`);
   }
+  /*
+   * `rawRows` GOES BACK TOO, UNTOUCHED. Every other consumer reads `rows`,
+   * which mapTVRow has already interpreted — and interpretation is exactly
+   * what a diagnostic must not inherit. `stock.rvol` is a BLEND
+   * (`intraday > 0 ? intraday : tenDay`), so a screener filtering on
+   * relative_volume_10d_calc could match nothing because that column had gone
+   * empty while every mapped row still showed a healthy rvol from the
+   * intraday one. Asked "is TradingView still returning this field", the
+   * mapped row answers about a different field. scripts/field-values.js reads
+   * these by column position instead.
+   */
   return { name: screener.name, key: screener.key, rows: kept, floorDropped: dropped,
-           totalCount };
+           totalCount, rawRows };
 }
 
 /**
@@ -409,7 +420,7 @@ async function runScreener(screener) {
  */
 async function testScreener(def) {
   const started = Date.now();
-  const { rows, totalCount } = await runScreener({
+  const { rows, totalCount, rawRows } = await runScreener({
     name: def.name || 'test',
     key: 'test',
     filters: def.filters,
@@ -420,7 +431,7 @@ async function testScreener(def) {
   // `totalCount` is how many stocks matched, which is the only one of the two
   // that measures a rule's selectivity. They differ the moment a rule matches
   // more than the limit, which for a single filter is most of the time.
-  return { count: rows.length, totalCount, ms: Date.now() - started, rows };
+  return { count: rows.length, totalCount, ms: Date.now() - started, rows, rawRows };
 }
 
 /**
