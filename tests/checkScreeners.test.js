@@ -18,7 +18,11 @@ const chk = require('../scripts/check-screeners');
 const scr = (over = {}) => ({
   key: 'k', name: 'Screener', enabled: true, labelOnly: false, mirrorOf: null,
   runFrom: '09:30', runTo: '16:00', filters: 3, valid: true, count: 12,
-  error: null, ms: 400, sample: ['AAA', 'BBB'], ...over,
+  error: null, ms: 400, sample: ['AAA', 'BBB'],
+  // What the tool reports about this screener's own past. Default: it fired
+  // yesterday, which is the ordinary case.
+  history: { rows: 96, days: 43, lastDate: '2026-09-04' }, historyDays: 50,
+  ...over,
 });
 const tool = (over = {}) => ({
   id: 'T2', name: 'Momentum', port: 3010, reachable: true, paused: false,
@@ -33,7 +37,7 @@ const tool = (over = {}) => ({
  * code. Every relative time below is measured from this instant.
  */
 const NOW = Date.parse('2026-09-04T14:15:00Z');        // Friday, 10:15 ET
-const AT = { hhmm: '10:15', now: NOW };
+const AT = { hhmm: '10:15', now: NOW, today: '2026-09-05' };
 
 describe('a healthy tool has nothing said about it', () => {
   test('no problems', () => {
@@ -81,10 +85,45 @@ describe('the things a hand edit can break', () => {
 });
 
 describe('zero, refused, and not asked are three different facts', () => {
-  test('zero inside its window points at why-empty', () => {
+  /*
+   * A ZERO IS ONLY NEWS IF THE ARCHIVE SAYS SO — and this test used to demand
+   * the opposite.
+   *
+   * A screener that finds two names a day reads ZERO most of the time it is
+   * asked. On 2026-09-08 this check flagged T1's "Big Move" at 11:34 while its
+   * archive held 96 rows across 43 of 50 days, the last of them on the
+   * PREVIOUS TRADING DAY. It was working. A day went into chasing it, and a
+   * check that cries wolf daily is one you learn to scroll past — the same
+   * lesson the 04:00 control alarm taught.
+   */
+  test('zero, but it fired recently — nothing to report', () => {
     const out = chk.problemsOf(tool({ screeners: [scr({ count: 0 })] }), AT);
-    expect(out.join(' ')).toMatch(/matches nothing right now, inside its window \(09:30–16:00\)/);
+    expect(out).toEqual([]);
+  });
+
+  test('zero and NEVER produced a row — the real finding, and it says so', () => {
+    const out = chk.problemsOf(tool({ screeners: [scr({
+      count: 0, history: { rows: 0, days: 0, lastDate: null } })] }), AT);
+    expect(out.join(' ')).toMatch(/has NEVER produced a row — 50 recorded day/);
     expect(out.join(' ')).toMatch(/why-empty\.js k/);
+  });
+
+  test('zero and quiet for longer than a working week — named, with the date', () => {
+    const out = chk.problemsOf(tool({ screeners: [scr({
+      count: 0, history: { rows: 96, days: 43, lastDate: '2026-08-20' } })] }), AT);
+    expect(out.join(' ')).toMatch(/no row since 2026-08-20/);
+    expect(out.join(' ')).toMatch(/96 row\(s\) across 43 of 50 day\(s\)/);
+  });
+
+  /*
+   * A TOOL THAT CANNOT REPORT ITS HISTORY IS NOT A TOOL WITH NO HISTORY.
+   * Treating the error as "never fired" would condemn every screener on it.
+   */
+  test('zero and the tool could not answer — said as the unknown it is', () => {
+    const out = chk.problemsOf(tool({ screeners: [scr({
+      count: 0, history: null, historyDays: null })] }), AT);
+    expect(out.join(' ')).toMatch(/could not report its history/);
+    expect(out.join(' ')).not.toMatch(/NEVER produced/);
   });
 
   /*
@@ -303,7 +342,14 @@ describe('the market being shut is not a fault', () => {
     const out = chk.problemsOf(idle(), FRI_MIDDAY).join(' ');
     expect(out).toMatch(/never completed a scan/);
     expect(out).toMatch(/NO cards/);
-    expect(out).toMatch(/matches nothing right now/);
+    /*
+     * AND THE SCREENER'S OWN ZERO IS NOT ADDED TO THAT. It fired on the last
+     * recorded day, so a zero this minute is what a screener finding a couple
+     * of names a day looks like at any given minute — and repeating it beside
+     * a real fault is how the real one stops being read. The tool not having
+     * scanned is the finding; the screener is fine.
+     */
+    expect(out).not.toMatch(/matches nothing right now/);
   });
 
   test('a scan that FAILED is still reported after hours — an error is not idleness', () => {

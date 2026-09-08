@@ -38,6 +38,64 @@ router.get('/', (req, res) => {
   }
 });
 
+/*
+ * GET /api/screeners/history — how often each screener has EVER produced a row.
+ *
+ * WHY A CHECK NEEDS THIS. check-screeners probes every screener once and calls
+ * a zero inside its window a problem. That is a false alarm for most of them,
+ * and it cost a day of chasing ghosts:
+ *
+ *     T1 "Big Move"  0 live at 11:34  →  flagged as a problem
+ *     its archive    96 rows across 43 of 50 days, last on 2026-09-04
+ *
+ * It fires about twice a day and had fired on the previous trading day. A
+ * screener that produces two names a day reads ZERO most of the time it is
+ * asked, so a snapshot cannot tell "rare by design" from "broken" — and a
+ * check that cries wolf daily is worse than no check, because the morning it
+ * means it you have already learned to scroll past it. That is the same
+ * lesson the 04:00 control alarm taught.
+ *
+ * The archive answers it, and only the tool can read its own database — which
+ * is why this is an endpoint rather than check-screeners opening files.
+ *
+ * PARSED, NOT PATTERN-MATCHED. Rows record the screener's DISPLAY NAME in
+ * screenerKeys (src/sideA/merge.js), and `LIKE '%CANSLIM%'` would count every
+ * "CANSLIM Pullback" row as a CANSLIM one — the same trap why-empty.js and
+ * split-tool-history.js already avoid.
+ */
+router.get('/history', (req, res) => {
+  try {
+    const db = require('../db');
+    const totalDays = db.prepare('SELECT COUNT(DISTINCT date) n FROM r1_frozen').get().n;
+    const byName = new Map();
+    for (const row of db.prepare('SELECT date, data FROM r1_frozen').all()) {
+      let keys;
+      try { keys = (JSON.parse(row.data) || {}).screenerKeys; } catch { continue; }
+      if (!Array.isArray(keys)) continue;
+      for (const k of keys) {
+        if (!byName.has(k)) byName.set(k, { rows: 0, days: new Set(), lastDate: null });
+        const h = byName.get(k);
+        h.rows += 1;
+        h.days.add(row.date);
+        if (!h.lastDate || row.date > h.lastDate) h.lastDate = row.date;
+      }
+    }
+    const history = {};
+    for (const [name, h] of byName) {
+      history[name] = { rows: h.rows, days: h.days.size, lastDate: h.lastDate };
+    }
+    res.json({ ok: true, totalDays, history });
+  } catch (err) {
+    /*
+     * AN ERROR IS NOT "NO HISTORY". A caller told `{}` would read every
+     * screener as one that has never produced a row and report the whole tool
+     * as broken — which is the exact substitution this endpoint exists to
+     * stop, made one level up.
+     */
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // POST /api/screeners/test — run a definition without saving it
 router.post('/test', express.json(), async (req, res) => {
   const def = req.body || {};

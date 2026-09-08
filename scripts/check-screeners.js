@@ -42,6 +42,27 @@ const STALE_MIN = 30;
 /** Under this uptime a tool with no scan has simply not had one yet. */
 const JUST_STARTED_SEC = 10 * 60;
 
+/*
+ * HOW LONG A SCREENER MAY GO QUIET BEFORE IT IS WORTH SAYING.
+ *
+ * A screener that finds two names a day reads ZERO most of the time it is
+ * asked, so a single probe cannot tell "rare by design" from "broken". On
+ * 2026-09-08 this check flagged T1's "Big Move" at 11:34 while its archive
+ * held 96 rows across 43 of 50 days, the last on the PREVIOUS TRADING DAY —
+ * and a day went into chasing that. Five sessions is generous for a screener
+ * that fires on more than half of them, and short enough that a rule which
+ * genuinely stopped working is named the week it happens.
+ */
+const QUIET_DAYS = 5;
+
+/** Whole days between two YYYY-MM-DD stamps, or 0 when either is unreadable. */
+function staleBy(lastDate, today) {
+  const a = Date.parse(`${lastDate}T00:00:00Z`);
+  const b = Date.parse(`${today}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
 /** Minutes since a timestamp, or null when there is none. */
 function minsSince(ts, now = Date.now()) {
   const n = Number(ts);
@@ -50,6 +71,11 @@ function minsSince(ts, now = Date.now()) {
 }
 
 /** HH:MM in New York. */
+/** Today's date in New York, YYYY-MM-DD — the archive's own key. */
+function etDate(now = Date.now()) {
+  return new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
 function etNow(now = new Date()) {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
@@ -121,6 +147,23 @@ async function probeTool(tool, { base = `http://127.0.0.1:${tool.port}`, fetchJs
     error: st.json.error || null,
   } : null;
 
+  /*
+   * HOW OFTEN EACH SCREENER HAS EVER PRODUCED A ROW.
+   *
+   * A screener that finds two names a day reads ZERO most of the time it is
+   * asked, so a single probe cannot tell "rare by design" from "broken". On
+   * 2026-09-08 this check flagged T1's "Big Move" as a problem at 11:34 while
+   * its archive held 96 rows across 43 of 50 days, the last of them on the
+   * PREVIOUS TRADING DAY. A day went into chasing that.
+   *
+   * `null` when the tool cannot answer, and null is carried as null: an error
+   * turned into "no history" would report every screener on that tool as one
+   * that has never produced a row, which is the same substitution one level up.
+   */
+  const hist = await fetchJson(`${base}/api/screeners/history`);
+  out.history = hist.json && hist.json.ok ? hist.json.history : null;
+  out.historyDays = hist.json && hist.json.ok ? hist.json.totalDays : null;
+
   const list = await fetchJson(`${base}/api/screeners`);
   const defs = (list.json && list.json.screeners) || [];
   for (const s of defs) {
@@ -129,7 +172,11 @@ async function probeTool(tool, { base = `http://127.0.0.1:${tool.port}`, fetchJs
                   runFrom: s.runFrom || null, runTo: s.runTo || null,
                   filters: (s.filters || []).length,
                   valid: null, count: null, totalCount: null, error: null,
-                  ms: null, sample: [] };
+                  ms: null, sample: [],
+                  // Keyed by DISPLAY NAME, which is what screenerKeys records.
+                  history: out.history ? (out.history[s.name] || { rows: 0, days: 0, lastDate: null })
+                                       : null,
+                  historyDays: out.historyDays };
     if (row.enabled) {
       const t = await fetchJson(`${base}/api/screeners/test`, {
         method: 'POST',
@@ -172,7 +219,7 @@ async function probeTool(tool, { base = `http://127.0.0.1:${tool.port}`, fetchJs
  * `hhmm` is the market clock the probe ran at; `now` the wall clock. Both are
  * passed in so a fixture can be judged as if it were 10:15 on a trading day.
  */
-function problemsOf(t, { hhmm = etNow(), now = Date.now() } = {}) {
+function problemsOf(t, { hhmm = etNow(), now = Date.now(), today = etDate(now) } = {}) {
   const out = [];
   const say = (s) => out.push(`${t.id}: ${s}`);
   // Both clock facts, read once and before anything uses them. The first
@@ -223,10 +270,39 @@ function problemsOf(t, { hhmm = etNow(), now = Date.now() } = {}) {
      * rule, and it is named here rather than guessed at.
      */
     if (s.count === 0 && windowOpen(s, hhmm) && scanning) {
-      say(`"${s.name}" matches nothing right now, inside its window`
-        + `${s.runFrom ? ` (${s.runFrom}–${s.runTo})` : ''}`
-        + ` — rare screen or broken rule? run scripts/why-empty.js ${s.key} `
-        + "against this tool's database.");
+      /*
+       * THE ARCHIVE DECIDES WHETHER THIS IS NEWS.
+       *
+       * A screener that produces two names a day is zero most of the time it
+       * is asked, and reporting that as a problem every run is how a check
+       * gets ignored. Three different findings, and only one of them is a
+       * fault:
+       *
+       *   has fired recently        not news at all — stay quiet
+       *   fired, but not for a while  worth a line, with the last date
+       *   NEVER produced a row      the real one, and much stronger than a
+       *                             quiet afternoon
+       */
+      const h = s.history;
+      if (h === null) {
+        say(`"${s.name}" matches nothing right now, inside its window`
+          + `${s.runFrom ? ` (${s.runFrom}–${s.runTo})` : ''}`
+          + ' — and this tool could not report its history, so there is no way '
+          + `to tell a rare screen from a broken rule. Run scripts/why-empty.js ${s.key}.`);
+      } else if (!s.historyDays) {
+        say(`"${s.name}" matches nothing right now, and this tool has no archive `
+          + 'yet, so nothing here can say whether that is normal for it.');
+      } else if (!h.days) {
+        say(`"${s.name}" has NEVER produced a row — ${s.historyDays} recorded day(s), `
+          + 'not one card. That is stronger than a quiet afternoon: run '
+          + `scripts/why-empty.js ${s.key} against this tool's database.`);
+      } else if (staleBy(h.lastDate, today) > QUIET_DAYS) {
+        say(`"${s.name}" matches nothing now and has produced no row since `
+          + `${h.lastDate} — ${h.rows} row(s) across ${h.days} of ${s.historyDays} `
+          + `day(s) before that. Run scripts/why-empty.js ${s.key}.`);
+      }
+      // Fired recently: zero right now is what a screener that finds a couple
+      // of names a day looks like at any given minute. Nothing to report.
     }
   }
 
