@@ -84,6 +84,41 @@
    */
   var fillsByDate = {};
 
+  /*
+   * THE ACCOUNTS THE DESK HAS, not the ones today's trades happen to mention.
+   *
+   * Asked once and cached. Fetched in the background: the filter must draw
+   * immediately from what the trades show, and grow when the answer arrives —
+   * a control that waits on a request is a control that is missing whenever
+   * the alerts process is restarting.
+   *
+   * A FAILED REQUEST LEAVES THE LIST EMPTY, which falls back to the accounts
+   * present in the trades. Never an error rendered as "this desk has one
+   * account", which would remove the filter for a reason that has nothing to
+   * do with accounts.
+   */
+  var acctsKnown = [];
+  function loadAccountsKnown() {
+    var url = location.protocol + '//' + location.hostname + ':' + ALERTS_PORT
+      // GET /api/broker — verified against src/alerts/server.js:510, which
+      // answers { ok, broker: publicSettings(), … }. The first version of this
+      // called /api/broker/settings, a route that does not exist: a guessed
+      // endpoint fails silently here, because the catch below treats any
+      // failure as "no accounts known" and the filter quietly narrows back to
+      // whatever the trades show.
+      + '/api/broker';
+    fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      var names = (((d || {}).broker || {}).destinations || [])
+        .map(function (x) { return x && (x.name || x.id); })
+        .filter(Boolean).map(String);
+      if (!names.length) return;
+      var before = acctsKnown.join(',');
+      acctsKnown = names.sort();
+      if (acctsKnown.join(',') !== before) { try { accountBar(); } catch (e) {} }
+    }).catch(function () { /* leave it empty — the trades still answer */ });
+  }
+  function accountsKnown() { return acctsKnown.slice(); }
+
   function fillsFor(date) {
     if (fillsByDate[date]) return fillsByDate[date];
     var url = location.protocol + '//' + location.hostname + ':' + ALERTS_PORT
@@ -561,6 +596,33 @@
     }
   }
 
+  /*
+   * WHERE THE CONTROL BELONGS — beside the page's own two filters, not floating
+   * above the list.
+   *
+   * "the journal is not good first I can't filter using accounts in the main
+   * existing filters". Right on both halves. The bar was inserted above the
+   * cards, so it read as a banner rather than a filter, and it was nowhere near
+   * the two dropdowns the eye goes to.
+   *
+   * The row is found by its CONTENTS rather than by an id, because the page
+   * belongs to another codebase and any id here would be a guess that breaks
+   * silently the day it is renamed: the parent of the page's own <select>
+   * elements IS the filter row, whatever it is called. Falling back to the old
+   * position if the page ever stops having selects — a control in the wrong
+   * place still filters; a control that failed to attach does nothing.
+   */
+  function filterRow() {
+    var sel = document.querySelector('select');
+    // Not one of ours: the setup pickers live inside the cards.
+    while (sel && sel.closest && sel.closest('#' + CONTAINER)) {
+      var all = Array.prototype.slice.call(document.querySelectorAll('select'));
+      sel = all.filter(function (s) { return !s.closest('#' + CONTAINER); })[0] || null;
+      break;
+    }
+    return sel && sel.parentNode ? sel.parentNode : null;
+  }
+
   function accountBar() {
     var host = document.getElementById(CONTAINER);
     if (!host || !host.parentNode) return;
@@ -568,22 +630,39 @@
     var bar = document.getElementById('jnl-acct-bar');
 
     /*
-     * NOTHING IS DRAWN FOR ONE ACCOUNT. A filter with a single option is a
-     * control that can only do nothing, and on a one-account desk the trades
-     * carry no account at all — so there is genuinely nothing to choose
-     * between, and a chooser would imply there is.
+     * ONE ACCOUNT ON SCREEN IS NOT ONE ACCOUNT ON THE DESK — and removing the
+     * control on that reading is why it was not there when it was wanted.
+     *
+     * accountsPresent() reads the trades CURRENTLY LOADED. On 2026-09-08 the
+     * desk sent two orders to alpaca1 and both of Test's to alpaca2 were
+     * refused for buying power, so only one account had rows and the filter
+     * deleted itself on the day there were two accounts to tell apart. A
+     * control that disappears exactly when the data gets interesting is worse
+     * than one that sits there greyed.
+     *
+     * So it is kept as long as the DESK knows of more than one account, from
+     * the broker's own destinations (accountsKnown), and only genuinely
+     * single-account desks — where trades carry no account at all — see
+     * nothing.
      */
-    if (accts.length < 2) {
+    var known = accountsKnown();
+    if (known.length < 2 && accts.length < 2) {
       if (bar) bar.remove();
       return;
     }
+    // Every account the desk has, plus any the trades mention that it does not
+    // (an imported row, a renamed destination) — dropping those would hide
+    // trades behind a filter that never offers their account.
+    accts = known.concat(accts.filter(function (a) { return known.indexOf(a) === -1; })).sort();
 
     if (!bar) {
       bar = document.createElement('div');
       bar.id = 'jnl-acct-bar';
       bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;'
         + 'margin:0 0 8px';
-      host.parentNode.insertBefore(bar, host);
+      var row = filterRow();
+      if (row) { bar.style.margin = '0'; row.appendChild(bar); }
+      else host.parentNode.insertBefore(bar, host);
     }
     // Rebuilt only when the set of accounts changed, so a re-render does not
     // throw away the choice that is currently applied.
@@ -707,6 +786,9 @@
   }
 
   function start() {
+    // Asked once, in the background — see loadAccountsKnown. The filter draws
+    // from the trades straight away and widens when the desk answers.
+    loadAccountsKnown();
     document.addEventListener('click', onDeleteClick, true);   // capture
     var host = document.getElementById(CONTAINER);
     if (host) new MutationObserver(decorate).observe(host, { childList: true });
