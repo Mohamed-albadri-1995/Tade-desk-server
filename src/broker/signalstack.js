@@ -2126,7 +2126,30 @@ function setupBySymbol(date) {
  * closing leg by leg would leave a resting target able to fill against a
  * position that no longer exists.
  */
-async function closePosition(symbol, date, cfg = settings()) {
+/**
+ * Close a position, and SAY WHO CLOSED IT AND WHY.
+ *
+ * `source` was hardcoded to 'end of session' on every row this wrote, and the
+ * manager calls this function too. So every close the manager made — acting on
+ * a strategy's exit rule, mid-morning — was filed in the ledger as a 15:50
+ * flatten. Read back, 2026-09-08 to 09-11 looked like this:
+ *
+ *     2026-09-08 09:55:45 PL   flatten  end of session
+ *     2026-09-09 09:45:47 AXTI flatten  end of session
+ *     2026-09-10 11:50:47 SIG  flatten  end of session
+ *
+ * None of those is an end of session. The manager was working the whole time
+ * and the record credited the flattener, which cost two wrong diagnoses: first
+ * that the manager had stopped running, then that it was closing things early.
+ * Neither could be checked, because the one field that would have answered it
+ * said the same thing on every row.
+ *
+ * `reason` is now the caller's to give. It is NOT defaulted to 'end of session'
+ * — a default that is a lie for every caller but one is how this started. A
+ * caller that says nothing is recorded as 'unstated', which is visible, wrong
+ * in an obvious way, and impossible to mistake for a fact.
+ */
+async function closePosition(symbol, date, cfg = settings(), { reason = null } = {}) {
   /*
    * WHICH ACCOUNT WAS CLOSED is part of the record, not a detail.
    *
@@ -2143,7 +2166,7 @@ async function closePosition(symbol, date, cfg = settings()) {
   const base = { at: Date.now(), date, symbol, kind: 'flatten', action: 'close',
                  destination: cfg.destinationId || null,
                  broker: cfg.destinationName || null,
-                 source: 'end of session' };
+                 source: reason || 'unstated' };
   /*
    * THE TWO REASONS NOTHING IS SENT ARE NOT THE SAME REASON, and saying the
    * wrong one sends you to the wrong setting at 15:50 with ten minutes left.
@@ -2220,7 +2243,8 @@ async function flattenAll(date, cfg = settings()) {
       // The account's OWN hook and dialect. Falling back to `cfg` only for a
       // row that names no account at all.
       const use = dest ? (destinationCfg(dest) || cfg) : cfg;
-      out.push({ ...(await closePosition(sym, date, use)),
+      out.push({ ...(await closePosition(sym, date, use,
+                                         { reason: 'end of session' })),
                  destination: dest, broker: use.destinationName || null });
     }
   }

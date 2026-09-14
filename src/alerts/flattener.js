@@ -120,7 +120,9 @@ async function check(at = Date.now()) {
     const dests = (p.destinations || []).length ? p.destinations : [null];
     for (const d of dests) {
       results.push(await broker.closePosition(sym, day,
-        (d && broker.destinationCfg(d)) || cfg));
+        (d && broker.destinationCfg(d)) || cfg,
+        // The one caller for which this really IS the end of the session.
+        { reason: 'end of session' }));
     }
   }
 

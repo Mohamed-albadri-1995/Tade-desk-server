@@ -395,7 +395,15 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
           continue;
         }
         const cfg = broker.destinationCfg(dest) || cfgAll;
-        results.push(await broker.closePosition(pos.symbol, day, cfg));
+        /*
+         * `why` ON THE LEDGER ROW, not only in the alert. The manager has known
+         * exactly why it was closing since the line above — "the exit rule
+         * fired 2 bar(s) ago", "the trailing stop at 39.27 was breached" — and
+         * the row it wrote said 'end of session' regardless. Every manager
+         * close in the record read as the 15:50 flattener's work.
+         */
+        results.push(await broker.closePosition(pos.symbol, day, cfg,
+                                                { reason: why }));
       }
       const sent = results.filter(r => r.sent).length;
 
