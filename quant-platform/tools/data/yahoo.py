@@ -23,8 +23,11 @@ on VWAP to within 0.06% — which matters because the setup this exists for
 places its stop AT the VWAP.
 
 It is not a replacement for polygon in backtests. Polygon reaches back years;
-this reaches back about a month at 1-minute resolution, which is the range
-Yahoo serves. Use it for live and recent-session work, and polygon for history.
+this reaches back FIVE TRADING DAYS at 1-minute resolution — see the measured
+table beside _RANGE_TOKENS, which is the authority. An earlier version of this
+paragraph said "about a month", and that sentence cost a wrong recommendation:
+a backtest was proposed over a week of 1-minute bars that Yahoo cannot serve.
+Use it for live and the last few sessions, and polygon for anything longer.
 
 Not a qp primitive. Lives under tools/ because it is a data adapter, not maths.
 """
@@ -61,7 +64,12 @@ _TF_MAP = {'1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
 
 # How far back each interval is actually served. Requesting beyond it returns a
 # short frame, so the range is chosen to match rather than to hope.
-_MAX_DAYS = {'1m': 30, '5m': 60, '15m': 60, '30m': 60, '1h': 730, '1d': 3650}
+# The reach per interval, DERIVED from the measured token table below rather
+# than written twice. The old table said 1m reached 30 days; the measurement
+# says 5, and a second number that disagrees with the first is how the wrong
+# one gets used.
+def _reach_days(tf: str) -> int:
+    return _RANGE_TOKENS.get(tf, _RANGE_TOKENS['1d'])[-1][0]
 
 
 def _cache_path(symbol: str, tf: str, start: pd.Timestamp, end: pd.Timestamp,
@@ -101,7 +109,7 @@ def _range_for(tf: str, start: pd.Timestamp, end: pd.Timestamp) -> str:
     and anything needing real history uses polygon.
     """
     span = max(1, int((end - start).total_seconds() // 86400) + 1)
-    days = min(span + 2, _MAX_DAYS.get(tf, 30))   # +2 so a weekend cannot eat it
+    days = min(span + 2, _reach_days(tf))         # +2 so a weekend cannot eat it
     tokens = _RANGE_TOKENS.get(tf, _RANGE_TOKENS['1d'])
     for limit, token in tokens:
         if days <= limit:
@@ -160,6 +168,48 @@ def _fetch(symbol: str, params: dict) -> dict:
     asked = f"interval={params.get('interval')} range={params.get('range')}"
     raise RuntimeError(f'Yahoo returned no chart for {symbol} ({asked}): {last}')
 
+
+
+# How much further back than the reach a window may start before it is refused.
+# Yahoo's range tokens count TRADING days and a caller asks in calendar ones, so
+# five trading days is about seven calendar days; the slack is the weekend plus
+# a holiday. Generous on purpose — this exists to catch a window that is plainly
+# out of reach, not to arbitrate a day either way.
+_CAL_PER_TRADING = 1.5
+
+
+def _refuse_if_out_of_reach(symbol, tf, start, end, df) -> None:
+    """A window Yahoo cannot serve must fail loudly, not come back short.
+
+    `_range_for` falls through to the largest token when the request exceeds it,
+    so asking for a 1-minute week returns FIVE DAYS and nothing says so. The
+    frame is then filtered to the requested window and handed back looking
+    exactly like a complete one — a backtest missing its earliest sessions, with
+    a P&L that reads as the answer to the question that was asked.
+
+    That is the same substitution this desk keeps paying for: a short answer
+    read as a full one. So it is refused, with the measured reach in the
+    message, and the caller is told which loader does have the history.
+
+    Only when the window is STRUCTURALLY too long. A frame that starts late
+    because the symbol was halted, or listed mid-window, is a fact about the
+    symbol and is returned untouched.
+    """
+    reach = _reach_days(tf)
+    span_days = (end - start).total_seconds() / 86400.0
+    if span_days <= reach * _CAL_PER_TRADING:
+        return
+    # It is only a lie if the answer really did come back short.
+    if not df.empty and df.index[0] <= start + pd.Timedelta(days=1):
+        return
+    first = None if df.empty else df.index[0].tz_convert('UTC').date()
+    raise ValueError(
+        f'yahoo serves about {reach} trading day(s) of {tf} bars; the window asked '
+        f'for spans {span_days:.0f} calendar day(s) from {start.date()} and the '
+        f'answer came back starting {first or "empty"}. That is a SHORT answer, '
+        f'not a quiet market — {symbol} has no {tf} data here for the earlier part '
+        f'of this window. Use polygon for history; yahoo is for live and the last '
+        f'few sessions.')
 
 def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
          feed: str = 'yahoo', prepost: bool = False, live: bool = False) -> pd.DataFrame:
@@ -221,6 +271,8 @@ def load(symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
     else:
         df = df.set_index('t').sort_index()
         df = df[(df.index >= start) & (df.index <= end)]
+
+    _refuse_if_out_of_reach(symbol, timeframe, start, end, df)
 
     if live:
         return df
