@@ -1063,7 +1063,23 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
     fires.push({
       ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
       date: day, at: Date.now(), kind: 'setup', level: 'warn',
-      detail: `No ${setup.decidesOnBar || lastWantedBar(setup.decisionTime)} bar for `
+      /*
+       * THE BAR THAT ACTUALLY FAILED, not the first bar of the window.
+       *
+       * This read `setup.decidesOnBar`, which for a WATCH setup is the one bar
+       * its window opens on and never changes. `Test` runs 09:30-11:30, so
+       * every gap all morning was reported as
+       *
+       *     11:30:00  No 09:29 bar for XNCR, NTNX, PAY, WDAY, TECK, RBRK …
+       *
+       * on a run that had asked about 11:29. The names are right and the bar is
+       * an hour and a half wrong, which sends you looking at the open for a
+       * problem that happened at the moment you were reading.
+       *
+       * `decisionBar` is the bar this run was given — for a clock setup it is
+       * still decidesOnBar, so nothing changes there.
+       */
+      detail: `No ${decisionBar || lastWantedBar(setup.decisionTime)} bar for `
         + `${data.missing.slice(0, 8).join(', ')}`
         + `${data.missing.length > 8 ? ` +${data.missing.length - 8} more` : ''}`
         + ' — these were ranked against nothing and could not be picked.',

@@ -400,11 +400,29 @@ function verdict(control, runs) {
     && !(Array.isArray(r.picks) ? r.picks.length : r.picks));
   if (!quiet.length) return null;
 
+  /*
+   * A SENTENCE WITH A HOLE IN IT IS WORSE THAN NO SENTENCE.
+   *
+   * A run carrying neither setupId nor setup mapped to `undefined`, and join
+   * renders that as nothing at all — so the feed read
+   *
+   *     …the ranking and the plan all answered.  found nothing on the same
+   *     bar, so what did not match is the strategy's own rules, not the desk.
+   *
+   * beside an identical line that did name Test@09:30. Two control lines a
+   * minute, one of them making a claim about a strategy it could not name, on
+   * the one message whose whole job is to say WHICH side of the chain is at
+   * fault. Named runs only; if none of them can be named there is nothing here
+   * worth publishing.
+   */
+  const named = quiet.map(r => r.setupId || r.setup).filter(Boolean);
+  if (!named.length) return null;
+
   return { level: 'info', key: `control-fired-${control.bar}`,
     detail: `CONTROL FIRED on the ${control.bar} bar `
       + `(${control.feed}, newest bar ${control.lastBar}) — cards, qp, the `
       + 'ranking and the plan all answered. '
-      + `${quiet.map(r => r.setupId || r.setup).join(', ')} found nothing on the `
+      + `${named.join(', ')} found nothing on the `
       + 'same bar, so what did not match is the strategy\'s own rules, not the desk.' };
 }
 
