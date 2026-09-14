@@ -33,6 +33,7 @@ import pandas as pd
 
 import tools.compare_server as cs
 from chart import store
+from tools.data import borrow as _borrow
 from chart import strategy as strat
 
 
@@ -843,7 +844,26 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     peak = equity0
     maxdd = 0.0
     fees_tot = pnl_tot = 0.0
-    unsized = capped = no_capital = pos_capped = 0
+    unsized = capped = no_capital = pos_capped = no_borrow = 0
+    # CAN THE ACCOUNT ACTUALLY SHORT THIS?
+    #
+    # Backtest #354 made +$1,345.43 across twelve trades, of which XE - a short
+    # - was +$1,408.60. Live: `asset "XE" cannot be sold short`. Without it the
+    # run is -$63.17, so the whole result was one trade the broker refuses to
+    # place. STKH and LBGJ went the same way on 2026-08-14.
+    #
+    # MODELLED WHERE LIVE REFUSES IT: after the ranking, not before. XE was
+    # ranked second of three and the refusal came at order time, so it SPENT a
+    # top-3 slot and produced no position. Filtering it out earlier would hand
+    # that slot to a fourth name the desk never saw, which is a different
+    # strategy with a better result.
+    #
+    # TODAY'S FLAG ON A PAST DAY. Alpaca reports borrow as it stands now and
+    # keeps no history, so this cannot know what XE was on the 9th. The summary
+    # says so; see tools/data/borrow.py.
+    no_borrow_names: list = []
+    borrow_unchecked: list = []
+    check_borrow = bool(spec.get('check_shortable'))
     max_concurrent = 0
     wins = 0
     sized_n = 0
@@ -867,6 +887,21 @@ def _account_block(closed: list, spec: dict) -> dict | None:
             unsized += 1
             t.setdefault('ctx', {})['acct_note'] = 'no stop — not sized'
             continue
+        if check_borrow and t['side'] == 'short':
+            b = _borrow.shortable(t['symbol'])
+            if b.get('shortable') is False:
+                no_borrow += 1
+                no_borrow_names.append(t['symbol'])
+                t.setdefault('ctx', {})['acct_note'] = (
+                    b.get('reason') or 'cannot be sold short at this broker')
+                continue
+            if b.get('shortable') is None:
+                # AN UNANSWERABLE CHECK IS NOT A REFUSAL. The trade stands and
+                # the row says the check did not run, exactly as the live desk
+                # warns and sends rather than silently dropping the order.
+                borrow_unchecked.append(t['symbol'])
+                t.setdefault('ctx', {})['acct_borrow_unchecked'] = (
+                    b.get('reason') or 'borrow was not checked')
         # WHOLE SHARES, because that is what the broker fills. The screener
         # floors the count before it sends an order (src/setups/risk.js) and
         # the bridge REFUSES a fractional quantity outright, so a fraction here
@@ -1012,6 +1047,16 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         'size_capped_by_leverage': capped,
         'size_capped_by_position': pos_capped,
         'skipped_no_capital': no_capital,
+        # Shorts the broker will not lend — counted and NAMED, because "3
+        # refused" sends you looking and "XE, STKH, LBGJ" tells you which part
+        # of the book cannot be traded at all.
+        'refused_no_borrow': no_borrow,
+        'refused_no_borrow_names': sorted(set(no_borrow_names)) or None,
+        'borrow_checked': check_borrow,
+        # Shorts kept because the broker could not be asked. Not a pass — an
+        # unanswered question, and a result that leans on them is softer than
+        # it looks.
+        'borrow_unchecked_names': sorted(set(borrow_unchecked)) or None,
         'max_concurrent_positions': max_concurrent,
         'fee_per_share': fps,
         'fee_min_per_order': fmin,
