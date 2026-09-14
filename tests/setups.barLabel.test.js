@@ -43,7 +43,7 @@ const code = (src) => src
 
 describe('the missing-bar warning names the bar that failed', () => {
   test('it is built from the bar this run was given', () => {
-    expect(code(RUNNER)).toMatch(/detail: `No \$\{decisionBar \|\| lastWantedBar/);
+    expect(code(RUNNER)).toMatch(/on the \$\{decisionBar \|\| lastWantedBar\(setup\.decisionTime\)\} bar/);
   });
 
   /*
@@ -52,9 +52,9 @@ describe('the missing-bar warning names the bar that failed', () => {
    */
   test('and no longer from setup.decidesOnBar', () => {
     const c = code(RUNNER);
-    const at = c.indexOf('bar for `');
+    const at = c.indexOf('Nothing evaluated on the ');
     expect(at).toBeGreaterThan(-1);
-    expect(c.slice(at - 120, at)).not.toMatch(/setup\.decidesOnBar/);
+    expect(c.slice(at, at + 200)).not.toMatch(/setup\.decidesOnBar/);
   });
 
   /*
@@ -113,5 +113,95 @@ describe('the control never claims something about a setup it cannot name', () =
 
   test('a run that failed is not called quiet either', () => {
     expect(verdict(control, [{ ok: false, setupId: 'Test@09:30' }])).toBeNull();
+  });
+});
+
+/* ── and the warning says WHY, which qp always knew ───────────────────────── */
+
+/*
+ * 2026-09-14. Test had nine cards on the 11:29 bar and evaluated none of them:
+ *
+ *   11:30:00  WARN  Test  No 09:29 bar for XNCR, NTNX, PAY, WDAY, TECK, RBRK,
+ *                         AVT, P +1 more …
+ *   11:30:00  INFO  Test  Nothing qualified. 9 evaluated, 0 had a direction,
+ *                         0 invalidated, 9 short of bars.
+ *
+ * Nine of nine failed, and the only record of the cause was a sentence written
+ * before anyone knew it. chart/decide.py attaches the exception text to every
+ * error row — `{symbol, error}` — and runner.js kept the symbol and dropped the
+ * error. So a rate limit, a delisted name, a bad strategy id and a genuinely
+ * absent bar all printed the same words.
+ *
+ * Third one this week, after `source: 'end of session'` and `No 09:29 bar`:
+ * a field that says the same thing whatever happened.
+ */
+describe('the warning carries the reason qp gave', () => {
+  const { byReason } = require('../src/setups/runner');
+
+  test("qp's own message reaches the line", () => {
+    expect(byReason([{ symbol: 'PAY', error: 'no bars returned for 2026-09-14' }]))
+      .toBe('PAY: no bars returned for 2026-09-14');
+  });
+
+  /*
+   * ONE SENTENCE FOR ONE FAULT. Nine names that failed identically are a feed
+   * being down, not nine market facts, and printing them nine times hides that.
+   */
+  test('names that failed the same way are grouped into one fact', () => {
+    const out = byReason(['XNCR', 'NTNX', 'PAY'].map(
+      symbol => ({ symbol, error: 'HTTP 429 from the feed' })));
+    expect(out).toBe('XNCR, NTNX, PAY: HTTP 429 from the feed');
+    expect(out.match(/HTTP 429/g)).toHaveLength(1);
+  });
+
+  test('and names that failed differently are kept apart', () => {
+    const out = byReason([
+      { symbol: 'PAY', error: 'no bars returned' },
+      { symbol: 'WDAY', error: 'unknown strategy 36' },
+    ]);
+    expect(out).toMatch(/PAY: no bars returned/);
+    expect(out).toMatch(/WDAY: unknown strategy 36/);
+  });
+
+  /*
+   * LARGEST GROUP FIRST. On the day everything breaks one way, the first
+   * sentence is the one worth reading — and a phone shows the first sentence.
+   */
+  test('the biggest group is named first', () => {
+    const out = byReason([
+      { symbol: 'AVT', error: 'delisted' },
+      { symbol: 'PAY', error: 'no bars returned' },
+      { symbol: 'WDAY', error: 'no bars returned' },
+    ]);
+    expect(out.indexOf('no bars returned')).toBeLessThan(out.indexOf('delisted'));
+  });
+
+  test('a long group is truncated like the name list always was', () => {
+    const many = 'ABCDEFGHIJ'.split('').map(
+      symbol => ({ symbol, error: 'no bars returned' }));
+    const out = byReason(many);
+    expect(out).toMatch(/^A, B, C, D, E, F, G, H \+2 more: no bars returned$/);
+  });
+
+  /*
+   * AN ERROR WITH NO TEXT IS STILL NOT A SILENCE. qp answering with an empty
+   * message is a different fact from qp not being asked, and "" rendered into
+   * the sentence would read as the second.
+   */
+  test('an empty message says so rather than rendering as nothing', () => {
+    expect(byReason([{ symbol: 'PAY', error: '' }])).toBe('PAY: qp gave no reason');
+    expect(byReason([{ symbol: 'PAY' }])).toBe('PAY: qp gave no reason');
+  });
+
+  test('no errors at all is said in words, not as an empty string', () => {
+    expect(byReason([])).toBe('qp named no reason for any of them.');
+    expect(byReason(null)).toBe('qp named no reason for any of them.');
+  });
+
+  /* The reasons have to survive the trip out of qpClient to get here at all. */
+  test('the run keeps the message beside the symbol', () => {
+    const c = code(RUNNER);
+    expect(c).toMatch(/errors: \(decided\.errors \|\| \[\]\)\.map\(e => \(\{/);
+    expect(c).toMatch(/error: String\(e\.error \|\| ''\)\.trim\(\) \|\| 'qp gave no reason'/);
   });
 });

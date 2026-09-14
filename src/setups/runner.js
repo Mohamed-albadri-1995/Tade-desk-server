@@ -112,6 +112,32 @@ function lastWantedBar(decisionTime) {
   return `${String(Math.floor(prev / 60)).padStart(2, '0')}:${String(prev % 60).padStart(2, '0')}`;
 }
 
+/*
+ * THE REASONS, GROUPED — because nine names that failed the same way are one
+ * fact, and nine names that failed nine different ways are nine.
+ *
+ * "XNCR, NTNX, PAY, WDAY, TECK, RBRK, AVT, P +1 more" reads as a market event.
+ * "9 names — no bars returned for 2026-09-14" reads as a feed that is down, and
+ * "1 name — unknown strategy 36" reads as a setting. They are the same list.
+ *
+ * Largest group first: on a run where everything failed identically, the one
+ * sentence that matters is the first one.
+ */
+function byReason(errors) {
+  const groups = new Map();
+  for (const e of errors || []) {
+    const why = String(e.error || '').trim() || 'qp gave no reason';
+    if (!groups.has(why)) groups.set(why, []);
+    groups.get(why).push(e.symbol);
+  }
+  if (!groups.size) return 'qp named no reason for any of them.';
+  return [...groups.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([why, syms]) => `${syms.slice(0, 8).join(', ')}`
+      + `${syms.length > 8 ? ` +${syms.length - 8} more` : ''}: ${why}`)
+    .join(' · ');
+}
+
 /** This tool's card list for today — the rows, not just the tickers. */
 function universeRows() {
   return r0.getTodayRows().filter(r => r && r.ticker);
@@ -436,6 +462,24 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
   const data = {
     sources: Object.fromEntries((decided.picks || []).map(p => [p.symbol, decided.feed])),
     missing: (decided.errors || []).map(e => e.symbol),
+    /*
+     * WHY EACH ONE FAILED, which qp has always said and this file threw away.
+     *
+     * Every error row from chart/decide.py carries the exception text — "no
+     * bars returned", "HTTP 429", "unknown strategy", "open_trade carried no
+     * timestamp". Only the symbol was kept, and the alert then asserted a
+     * cause of its own ("No 11:29 bar for ...") whatever the cause had been.
+     *
+     * That is the same fault as `source: 'end of session'` on every close and
+     * `No 09:29 bar` on every gap: a field that says the same thing whatever
+     * happened. It cost a whole session — 2026-09-14, nine cards, nine errors,
+     * nothing fired, and the only record of why was a sentence written before
+     * the reason was known.
+     */
+    errors: (decided.errors || []).map(e => ({
+      symbol: e.symbol,
+      error: String(e.error || '').trim() || 'qp gave no reason',
+    })),
     degraded: decided.feed === 'alpaca' ? (decided.picks || []).map(p => p.symbol) : [],
     used: [decided.feed], feed: decided.feed, mixed: false,
     coverage: list.length ? 1 - ((decided.errors || []).length / list.length) : 1,
@@ -1078,11 +1122,18 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
        *
        * `decisionBar` is the bar this run was given — for a clock setup it is
        * still decidesOnBar, so nothing changes there.
+       *
+       * AND THE REASON, WHICH IS NOT ALWAYS A MISSING BAR. The old sentence
+       * said "No 11:29 bar for ..." for every failure qp could have — a bad
+       * strategy id, a rate limit, a delisted symbol, a timestamp qp refused —
+       * because it was written once and the actual message was discarded. On
+       * 2026-09-14 nine of nine cards failed and the feed could only repeat the
+       * guess. Now the run says what qp said, grouped so nine identical
+       * failures read as one fact rather than nine names.
        */
-      detail: `No ${decisionBar || lastWantedBar(setup.decisionTime)} bar for `
-        + `${data.missing.slice(0, 8).join(', ')}`
-        + `${data.missing.length > 8 ? ` +${data.missing.length - 8} more` : ''}`
-        + ' — these were ranked against nothing and could not be picked.',
+      detail: `Nothing evaluated on the ${decisionBar || lastWantedBar(setup.decisionTime)} bar `
+        + `for ${data.missing.length} of ${list.length} card(s) — ranked against `
+        + `nothing, so they could not be picked. ${byReason(data.errors)}`,
     });
   }
 
@@ -1300,4 +1351,8 @@ module.exports = {
   // zero on a desk that cannot measure one would have shown a clean feed on
   // the day the feed was the problem.
   feedLagMin, FEED_LAG_WARN_MIN,
+  // Same reason. A substring search can prove the reason text is passed in; only
+  // executing this can prove nine identical failures collapse to one sentence
+  // and nine different ones do not.
+  byReason,
 };
