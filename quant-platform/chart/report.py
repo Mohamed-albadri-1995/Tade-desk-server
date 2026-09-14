@@ -339,6 +339,57 @@ def _group(pnl: list, key, keep_order: bool = False) -> dict:
     return {k: v for k, v in sorted(g.items(), key=lambda kv: -kv[1]['net'])}
 
 
+def _avg_exit(t: dict):
+    """The single exit price that reproduces a scaled-out trade's real P&L.
+
+    A journal row has one `exit $` column and a scale-out has no single exit, so
+    the column shows the LAST part's price — the runner's. That is not what the
+    position averaged, and on a winner the runner usually left at the best price
+    of the trade, so the row reads better than the trade was.
+
+    Measured, on OR + VWAP 09:35 short from 17.66: half banked at 17.30, the
+    runner left at 17.16. Read as a whole position that is +0.50 a share; the
+    trade made +0.43. This column is the 17.23 that makes the row honest.
+
+    None when there is nothing to average differently — no exit yet, or no legs.
+    """
+    legs = t.get('legs') or []
+    if t.get('exit') is None or t.get('entry') is None:
+        return None
+    entry = float(t['entry'])
+    if not legs:
+        return round(float(t['exit']), 4)
+    sgn = 1.0 if str(t.get('side')).lower() == 'long' else -1.0
+    used = 0.0
+    pnl = 0.0
+    for g in legs:
+        fr = float(g.get('fraction') or 0.0)
+        used += fr
+        pnl += fr * sgn * (float(g['price']) - entry)
+    runner = max(0.0, 1.0 - used)
+    pnl += runner * sgn * (float(t['exit']) - entry)
+    # Invert: the price which, over the whole position, gives this P&L.
+    return round(entry + sgn * pnl, 4)
+
+
+def _exit_shape(t: dict):
+    """How the position actually left — '50% @ T1 + 50% runner', or ''.
+
+    `scale_out_legs: 1` reads as "one leg, one exit". It means one BANKED leg
+    and a runner that left somewhere else, and the difference is the whole
+    question of whether the live trade did the same thing.
+    """
+    legs = t.get('legs') or []
+    if not legs:
+        return None
+    parts = [f"{round(float(g.get('fraction') or 0) * 100)}% @ {g.get('reason') or 'target'}"
+             for g in legs]
+    runner = 1.0 - sum(float(g.get('fraction') or 0.0) for g in legs)
+    if runner > 1e-9:
+        parts.append(f"{round(runner * 100)}% runner ({t.get('reason') or 'exit'})")
+    return ' + '.join(parts)
+
+
 # ── the per-trade journal ─────────────────────────────────────────────────
 # One row per trade with every field a trading journal is expected to carry, so
 # a losing run can be audited trade by trade without opening the database.
@@ -348,7 +399,16 @@ JOURNAL_COLUMNS = [
     ('decided_price', 'decided $'), ('slip_per_share', 'slip/sh'),
     ('stop_price', 'stop $'), ('risk_per_share', 'risk/sh'),
     ('planned_risk_per_share', 'planned risk/sh'),
-    ('exit_time', 'exit'), ('exit_price', 'exit $'), ('exit_reason', 'why'),
+    ('exit_time', 'exit'), ('exit_price', 'exit $'),
+    # WHAT THE WHOLE POSITION AVERAGED, beside the price the last part left at.
+    # A scaled-out trade has no single exit and this row has one column for it,
+    # so the row reads as one entry and one exit — and the price shown is the
+    # RUNNER's, which is not what the trade made. OR + VWAP 09:35 banks half at
+    # 2R and rides the rest: on a measured case the runner left at 17.16, which
+    # read as a whole position is +0.50 a share, and the trade made +0.43.
+    # Reading the row as an entry and an exit overstated it by 16%.
+    ('avg_exit_price', 'avg exit $'),
+    ('exit_reason', 'why'), ('exit_shape', 'shape'),
     ('hold_min', 'held (min)'),
     ('shares', 'shares'), ('position_usd', 'position $'),
     ('risk_usd', 'risk $'), ('gross_usd', 'gross $'), ('fees_usd', 'fees $'),
@@ -460,7 +520,13 @@ def journal(trades: list, summary: dict) -> list:
                                        if planned_risk is not None else None),
             'exit_time': _hhmm(t.get('exit_ts')),
             'exit_price': (round(float(t['exit']), 4) if t.get('exit') is not None else None),
+            # The one price that, applied to the WHOLE position, reproduces what
+            # this trade actually made — legs and runner together. Equal to
+            # exit_price on a trade that left in one piece, which is most of
+            # them; different exactly where the single column was misleading.
+            'avg_exit_price': _avg_exit(t),
             'exit_reason': t.get('reason'),
+            'exit_shape': _exit_shape(t),
             'hold_min': (round(hold, 1) if hold is not None else None),
             'shares': (round(float(sh), 2) if sh is not None else None),
             'position_usd': c.get('acct_notional_usd'),
