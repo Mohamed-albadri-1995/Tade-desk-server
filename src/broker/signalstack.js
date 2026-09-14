@@ -2502,32 +2502,90 @@ function orphanIntents(date = null) {
 }
 
 /** Orders with whatever the callbacks later said about them. */
+/*
+ * WRITE DOWN WHAT THE BROKER SAYS IT PAID.
+ *
+ * `reconcile.confirmed()` asks Alpaca for the real prints and matches them to
+ * this side's orders. It has always returned that in memory and thrown it away.
+ * The consequence, read off the desk's own ledger for 2026-09-08 to 09-11:
+ *
+ *     PL   |2702|17.75 |17.935|-|SENT|1351@17.38=acc 1351@runner=acc
+ *     DOCU | 791|65.71 |66.275|-|SENT| 395@64.58=acc  396@runner=acc
+ *     AXTI | 263|73.17 |71.273|-|SENT| 131@76.97=acc  132@runner=acc
+ *     QCOM | 204|179.61|177.17|-|SENT| 102@184.49=acc 102@runner=acc
+ *
+ * Every fill price a dash. Four sessions of real orders and the desk cannot say
+ * what a single one of them cost. On a paper account SignalStack sends no
+ * callback at all, so the ONLY record of the price is Alpaca's, and Alpaca's
+ * activities endpoint does not keep it forever — so this is not a gap that can
+ * be filled in later. It has to be written down while it can still be asked
+ * for.
+ *
+ * Without it there is no comparing live to a backtest: the backtest knows
+ * exactly what it paid and the desk knows only what it hoped to pay.
+ *
+ * A SEPARATE ROW, never a rewrite of the order. The ledger is append-only and
+ * the order row is what this side INTENDED — editing it in place would destroy
+ * the one number that makes slip measurable. Merged on read, exactly like a
+ * callback.
+ */
+function recordFill({ orderId, symbol, date, fillPrice, filledQty = null,
+                      prints = null, by = 'alpaca', at = Date.now() }) {
+  if (!orderId || !Number.isFinite(Number(fillPrice))) return null;
+  const row = { at, date: date || null, kind: 'fill', symbol: symbol || null,
+                orderId: String(orderId), fillPrice: Number(fillPrice),
+                filledQty, prints, confirmedBy: by };
+  record(row);
+  return row;
+}
+
+/** Order ids this ledger already has a stored fill for. */
+function fillsRecorded() {
+  return new Set(orders()
+    .filter(o => o.kind === 'fill' && o.orderId)
+    .map(o => String(o.orderId)));
+}
+
 function reconciled(date = null) {
   // Read whole, then split: a callback can arrive after midnight ET for an
   // order placed before it, and filtering by date first would orphan it.
   const all = orders();
   // Intents are not orders. Each one has an outcome row beside it carrying the
-  // same id, and counting both would report every trade twice.
+  // same id, and counting both would report every trade twice. A stored fill is
+  // not an order either — it is the broker's answer about one.
   const placed = all.filter(o => o.kind !== 'callback' && o.kind !== 'intent'
+                                 && o.kind !== 'fill'
                                  && (!date || o.date === date));
   const backs = all.filter(o => o.kind === 'callback');
+  const saved = all.filter(o => o.kind === 'fill');
   return placed.map(o => {
     const later = backs
       .filter(c => c.orderId && o.orderId && c.orderId === String(o.orderId))
       .sort((a, b) => (a.at || 0) - (b.at || 0));
     const last = later[later.length - 1] || null;
+    /*
+     * A STORED FILL IS THE BROKER'S OWN RECORD and outranks nothing — it fills
+     * the gap where there was no callback at all, which on a paper account is
+     * every order. When both exist the callback is left in place: it is the
+     * direct reply to this order, and two sources disagreeing is worth seeing
+     * rather than silently resolving.
+     */
+    const stored = last ? null
+      : saved.find(f => o.orderId && String(f.orderId) === String(o.orderId)) || null;
     return {
       ...o,
       // The final word when there is one, and visibly the immediate reply when
       // there is not — "accepted, never heard from again" is information.
-      finalStatus: last ? last.status : null,
-      finalPrice: last && last.fillPrice != null ? last.fillPrice : null,
-      confirmed: !!last,
+      finalStatus: last ? last.status : (stored ? 'filled' : null),
+      finalPrice: last && last.fillPrice != null ? last.fillPrice
+        : (stored ? stored.fillPrice : null),
+      confirmed: !!(last || stored),
       // WHO answered. A callback is SignalStack's word; `confirmFromFills`
       // below can answer the same question from the broker's own record, and a
       // row that says neither was never answered at all.
-      confirmedBy: last ? 'signalstack' : null,
+      confirmedBy: last ? 'signalstack' : (stored ? (stored.confirmedBy || 'alpaca') : null),
       callbacks: later.length,
+      filledQty: stored && stored.filledQty != null ? stored.filledQty : undefined,
       /*
        * WHAT THE DECISION ASSUMED versus WHAT IT GOT.
        *
@@ -2544,10 +2602,10 @@ function reconciled(date = null) {
        * at 5.42 that you priced at 5.39 is three cents BETTER. An unsigned
        * difference would report those two identically.
        */
-      ...slipOf(o, last),
+      ...slipOf(o, last || stored),
       // And said in words when it moved the trade, because "slipR: 1.27" is a
       // number somebody has to already understand to act on.
-      slipNote: slipNote(slipOf(o, last)),
+      slipNote: slipNote(slipOf(o, last || stored)),
     };
   });
 }
@@ -2655,6 +2713,7 @@ module.exports = {
   orders, committed, remaining, tradesToday, sentAlready, positionsToday,
   // The account's own balance, and a way to forget it between tests.
   liveBuyingPower, _forgetBuyingPower,
+  recordFill, fillsRecorded,
   fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,
