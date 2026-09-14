@@ -873,10 +873,94 @@ function sentAlready(date, setupId, symbol, destination = null) {
     && (!destination || (o.destination || LEGACY_ID) === destination));
 }
 
+/*
+ * THE BROKER'S OWN BUYING POWER, rather than the number somebody typed.
+ *
+ * `buyingPower` in the settings is entered by hand and never changes by itself.
+ * That is fine as a self-imposed ceiling and useless as a fact, and for four
+ * sessions running it was the difference between a desk that traded and one
+ * that did not:
+ *
+ *     09:47  LONG UMAC 2131 sh @ 24.30   alpaca2: FAILED — insufficient buying power
+ *     10:21  LONG U    1127 sh @ 41.56   alpaca2: FAILED — insufficient buying power
+ *     10:12  LONG WDAY  511 sh @ 186.10  alpaca2: FAILED — insufficient buying power
+ *     10:06  LONG GEO  3142 sh @ 31.82   alpaca2: FAILED — insufficient buying power
+ *
+ * Every one of those is around $50,000–$100,000 of stock sized against a typed
+ * figure the account had long since stopped matching. Nothing on this side was
+ * wrong arithmetically; the number was simply about a different account than
+ * the one the order was going to. So it is READ, per account, from the account
+ * itself, and the typed number stays as what it always was — a ceiling the
+ * trader chose, not a claim about a balance.
+ *
+ * CACHED FOR A FEW SECONDS, because one decision bar can produce three legs
+ * across two accounts in the same second and the balance does not move between
+ * them. Short enough that a fill in the previous minute is already in it.
+ *
+ * A FAILED READ IS NOT A ZERO. If Alpaca cannot be reached this returns why,
+ * and sizing falls back to the typed number — the state the desk was already
+ * in. Refusing to trade because a balance check timed out would replace one
+ * silent failure with another.
+ */
+const POWER_TTL_MS = 20000;
+const POWER_CACHE = new Map();          // destinationId -> { at, buyingPower }
+
+function _forgetBuyingPower() { POWER_CACHE.clear(); }
+
+async function liveBuyingPower(cfg = settings(), now = Date.now()) {
+  if (!cfg || cfg.dialect !== 'alpaca') {
+    return { ok: false, reason: 'not an Alpaca account — it has no balance this box can read' };
+  }
+  const id = cfg.destinationId || LEGACY_ID;
+  const hit = POWER_CACHE.get(id);
+  if (hit && now - hit.at < POWER_TTL_MS) {
+    return { ok: true, buyingPower: hit.buyingPower, cached: true };
+  }
+  let r;
+  try {
+    const alpaca = require('../alpaca/account');
+    r = await alpaca.account({ timeoutMs: 6000, account: alpaca.credsOf(cfg) });
+  } catch (err) {
+    return { ok: false, reason: `could not read the account: ${err.message}` };
+  }
+  if (!r || !r.ok) {
+    return { ok: false, reason: (r && (r.reason || r.error)) || 'the account did not answer' };
+  }
+  const bp = Number(r.account && r.account.buyingPower);
+  if (!Number.isFinite(bp) || bp < 0) {
+    return { ok: false, reason: 'the account answered without a buying power' };
+  }
+  POWER_CACHE.set(id, { at: now, buyingPower: bp });
+  return {
+    ok: true,
+    buyingPower: bp,
+    number: r.account.number || null,
+    // An account can be blocked without a single order being rejected until one
+    // is sent, so it is carried rather than discovered at 09:35.
+    blocked: !!(r.account.tradingBlocked || r.account.accountBlocked),
+  };
+}
+
+/**
+ * How much this account can still spend today — the SMALLER of the two answers.
+ *
+ * The typed ceiling keeps its own tally (what this box has sent today), because
+ * it is a limit this side invented and only this side can count against it. The
+ * broker's figure is used AS IT STANDS: Alpaca reserves buying power the moment
+ * it accepts an order, so subtracting our tally from it as well would charge
+ * every fill twice and shrink the next position for no reason.
+ */
 function remaining(date, cfg = settings()) {
-  if (!cfg.buyingPower) return null;
-  // This destination's balance, spent by this destination's orders.
-  return Math.max(0, cfg.buyingPower - committed(date, cfg.destinationId || null));
+  const tally = cfg.buyingPower
+    // This destination's ceiling, spent by this destination's orders.
+    ? Math.max(0, cfg.buyingPower - committed(date, cfg.destinationId || null))
+    : null;
+  const live = Number.isFinite(cfg.liveBuyingPower)
+    ? Math.max(0, cfg.liveBuyingPower)
+    : null;
+  if (tally === null) return live;
+  if (live === null) return tally;
+  return Math.min(tally, live);
 }
 
 // ── sizing the order ───────────────────────────────────────────────────────
@@ -923,7 +1007,14 @@ function fitQuantity({ quantity, price, date = null, cfg = settings() }) {
   if (left !== null) {
     const byPower = Math.floor(left / price);
     if (byPower < qty) {
-      notes.push(`reduced to fit $${left.toFixed(0)} of buying power left `
+      // WHICH number bit. "the account says" and "your ceiling says" are two
+      // different things to do something about, and a note that does not say
+      // which sends you to the wrong screen.
+      const source = Number.isFinite(cfg.liveBuyingPower)
+          && Math.max(0, cfg.liveBuyingPower) === left
+        ? "the broker's own buying power"
+        : 'the buying power you set';
+      notes.push(`reduced to fit $${left.toFixed(0)} of ${source} left `
         + `(${byPower} shares)`);
       qty = byPower;
     }
@@ -1577,6 +1668,34 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
     asked: Math.floor(Number(quantity) || 0),
   };
 
+  /*
+   * ASK THE ACCOUNT WHAT IT CAN AFFORD, BEFORE SIZING ANYTHING.
+   *
+   * Not after the refusal: a rejection at 09:47:02 cannot be retried into the
+   * bar it was decided on, and four sessions of "FAILED — insufficient buying
+   * power" are four sessions with no trade at all. See liveBuyingPower.
+   *
+   * The read cannot block the order. When it fails the reason is carried onto
+   * the row and sizing falls back to the typed number, which is exactly where
+   * the desk already was.
+   */
+  const power = await liveBuyingPower(cfg);
+  if (power.ok) {
+    cfg = { ...cfg, liveBuyingPower: power.buyingPower };
+    base.liveBuyingPower = power.buyingPower;
+    if (power.blocked) {
+      const out = { ...base, quantity: 0, sent: false,
+        skipped: `${cfg.destinationName || 'this account'} is blocked at the broker `
+          + '— nothing was sent' };
+      record(out); return out;
+    }
+  } else if (cfg.dialect === 'alpaca') {
+    // Carried, not swallowed: an order sized against a typed number when the
+    // balance could not be read looks identical to one sized against the real
+    // balance, and that is how this went unnoticed for four sessions.
+    base.powerUnchecked = power.reason;
+  }
+
   const plan = planOrder({ symbol, signal, quantity, price, stop, target, date,
                            setupId, maxPerDay, plan: exitPlan, cfg });
 
@@ -1693,29 +1812,73 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
    * POSITIONS were taken, and letting a three-leg strategy spend three of them
    * would make a cap of four mean "one and a bit trades".
    *
-   * No halve-and-retry here, unlike the single-order path. Halving one leg of a
-   * tested scale-out does not make it smaller, it makes it a different shape —
-   * so a refusal stops the rest and is reported with exactly what did go in.
+   * HALVING ONE LEG IS NOT ALLOWED; HALVING THE POSITION IS.
+   *
+   * The single-order path halves and retries when the broker says the account
+   * cannot afford it. This path used to do nothing at all, on the grounds that
+   * a smaller leg is a different shape — which is right about the LEG and was
+   * the wrong conclusion. The answer is to shrink the whole position and split
+   * it again, so the fractions the strategy was tested with are preserved and
+   * only the capital behind them is smaller.
+   *
+   * ONLY WHEN NOTHING WENT IN. If a later leg is refused, earlier legs are
+   * already live at the broker and re-planning the whole position would place
+   * them a second time. Every live failure so far has been the first leg —
+   * "only 0 of 3 legs went in — From Alpaca: insufficient buying power" — which
+   * is exactly the case this repairs.
    */
   if (plan.orders && plan.orders.length > 1) {
-    const results = [];
-    for (const body of plan.orders) {
-      if (!Number.isInteger(body.quantity) || body.quantity < 1) continue;
-      let r;
-      try {
-        r = await post(cfg.webhookUrl, body);
-      } catch (err) {
-        results.push({ quantity: body.quantity, sent: false, error: err.message });
-        break;                        // see the note above about retries
+    const sendLegs = async (bodies) => {
+      const out = [];
+      for (const body of bodies) {
+        if (!Number.isInteger(body.quantity) || body.quantity < 1) continue;
+        let r;
+        try {
+          r = await post(cfg.webhookUrl, body);
+        } catch (err) {
+          out.push({ quantity: body.quantity, sent: false, error: err.message });
+          break;                      // a network failure is never retried
+        }
+        out.push({ quantity: body.quantity, target: body.take_profit_price || null,
+                   sent: r.ok, status: r.status, orderId: r.orderId,
+                   httpStatus: r.httpStatus, body: r.body,
+                   fillPrice: r.fillPrice, message: r.message });
+        if (!r.ok) break;
       }
-      results.push({ quantity: body.quantity, target: body.take_profit_price || null,
-                     sent: r.ok, status: r.status, orderId: r.orderId,
-                     fillPrice: r.fillPrice, message: r.message });
-      if (!r.ok) break;
+      return out;
+    };
+
+    let attempt = plan;
+    let results = await sendLegs(attempt.orders);
+    const shrunk = [];
+
+    for (let i = 0; i < 2; i += 1) {
+      const done = results.filter(r => r.sent);
+      const refused = results.find(r => !r.sent);
+      // Something is live at the broker, or the refusal was not about money.
+      if (!refused || done.length > 0) break;
+      if (!(cfg.retryOnBuyingPower && isBuyingPowerRejection({
+        ok: false, httpStatus: refused.httpStatus, message: refused.message,
+        body: refused.body,
+      }))) break;
+
+      const smaller = Math.floor((attempt.fit ? attempt.fit.quantity : 0) / 2);
+      if (smaller < 1) break;
+      const next = planOrder({ symbol, signal, quantity: smaller, price, stop, target,
+                               date, setupId, maxPerDay, plan: exitPlan, cfg });
+      if (next.blocked || !next.orders || !next.orders.length) break;
+
+      shrunk.push(`broker refused ${attempt.fit.quantity} (${refused.message
+        || 'no buying power'}) — the whole position halved to ${next.fit.quantity}, `
+        + 'legs re-split so the shape is unchanged');
+      attempt = next;
+      results = await sendLegs(attempt.orders);
     }
+
     const done = results.filter(r => r.sent);
     const out = {
       ...base,
+      shrunk: shrunk.length ? shrunk : undefined,
       action,
       borrowUnchecked: unchecked,
       hardToBorrow: hardToBorrow || undefined,
@@ -1730,10 +1893,13 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
       status: (done[0] || {}).status || null,
       sent: done.length > 0,
       partial: done.length > 0 && done.length < results.length,
-      unplaceable: (plan.unplaceable || []).length || undefined,
-      reduced: fit.quantity !== fit.asked ? fit.reason : null,
+      unplaceable: (attempt.unplaceable || []).length || undefined,
+      reduced: [
+        fit.quantity !== fit.asked ? fit.reason : null,
+        ...shrunk,
+      ].filter(Boolean).join('; ') || null,
       error: done.length === results.length ? null
-        : `only ${done.length} of ${plan.orders.length} legs went in — `
+        : `only ${done.length} of ${attempt.orders.length} legs went in — `
           + `${(results.find(r => !r.sent) || {}).message || 'refused'}`,
     };
     record(out);
@@ -2410,6 +2576,8 @@ module.exports = {
   destinations, destinationCfg, accountsFor, autoRoute, manualCfg,
   DIALECTS, LEGACY_ID, MODES,
   orders, committed, remaining, tradesToday, sentAlready, positionsToday,
+  // The account's own balance, and a way to forget it between tests.
+  liveBuyingPower, _forgetBuyingPower,
   fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
   planOrder, previewOrder, placeOrder, test,
