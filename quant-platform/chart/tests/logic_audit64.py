@@ -168,5 +168,67 @@ ok('avg_exit_price is a journal column', 'avg_exit_price' in cols)
 ok('exit_shape is a journal column', 'exit_shape' in cols)
 ok('and exit_price is still there, beside it', 'exit_price' in cols)
 
+# ── and the legs must survive the DATABASE ───────────────────────────────────
+#
+# MEASURED ON A REAL SAVED RUN. Backtest #354, the 2026-09-08 PL short: entry
+# 17.76, stop 17.94, exit 17.51. The whole position from 17.76 to 17.51 is 0.25
+# a share; the run reported pnl_per_share 0.305, which is exactly half banked at
+# the 2R target of 17.40 plus half out at 17.51. The simulator scaled out and
+# the money was right.
+#
+# Every one of its twelve rows also reported scale_out_legs: null — because
+# add_bt_trades wrote date, symbol, side, times, prices, ret, reason and ctx,
+# and dropped `legs` on the way into the table. So a run READ BACK is one entry
+# and one exit at the runner's price, which on a winner is the best price of the
+# trade. The journal read better than the trade was, and nothing said the
+# position came off in two pieces.
+import os                                                            # noqa: E402
+import tempfile                                                      # noqa: E402
+
+os.environ['QP_DB'] = os.path.join(tempfile.mkdtemp(), 'audit64.db')
+import importlib                                                     # noqa: E402
+from chart import store as _store                                    # noqa: E402
+importlib.reload(_store)
+
+_bid = _store.create_backtest('audit64', {'x': 1})
+_store.add_bt_trades(_bid, [{
+    'date': '2026-09-08', 'symbol': 'PL', 'side': 'short',
+    'entry_ts': 1, 'exit_ts': 2, 'entry': 17.76, 'exit': 17.51,
+    'ret': 0.0171, 'reason': 'exit', 'ctx': {'acct_pnl_per_share': 0.305},
+    'legs': [{'fraction': 0.5, 'price': 17.40, 'reason': 'T1', 'exit_ts': 2}]}])
+_back = dict(_store.get_backtest(_bid)['trades'][0], side='short')
+
+ok('a saved trade keeps its scale-out legs', len(_back.get('legs') or []) == 1,
+   str(_back.get('legs')))
+ok('...with the fraction and the price intact',
+   bool(_back.get('legs')) and _back['legs'][0]['fraction'] == 0.5
+   and abs(_back['legs'][0]['price'] - 17.40) < 1e-9)
+ok('so scale_out_legs is 1 and not null',
+   (len(_back.get('legs') or []) or None) == 1)
+#
+# AND THE AVERAGE MATCHES THE MONEY THE RUN ALREADY REPORTED. 17.455 against an
+# entry of 17.76 is 0.305 a share — the pnl_per_share the account block
+# computed from the same legs before they were dropped. If these two ever
+# disagree, one of them is describing a different trade.
+_avg = _avg_exit(_back)
+ok('avg_exit_price reproduces the run\'s own pnl_per_share',
+   abs((17.76 - _avg) - _back['ctx']['acct_pnl_per_share']) < 1e-6,
+   f'avg {_avg} implies {17.76 - _avg:.4f}, run said '
+   f'{_back["ctx"]["acct_pnl_per_share"]}')
+ok('...and it is not the runner\'s exit price',
+   abs(_avg - 17.51) > 1e-9, str(_avg))
+ok('the shape survives too', _exit_shape(_back) == '50% @ T1 + 50% runner (exit)',
+   str(_exit_shape(_back)))
+
+# A TRADE THAT REALLY HAD NO LEGS still stores and reads as one, rather than
+# growing an empty list that reads as a scale-out of nothing.
+_store.add_bt_trades(_bid, [{
+    'date': '2026-09-08', 'symbol': 'ZZ', 'side': 'long',
+    'entry_ts': 3, 'exit_ts': 4, 'entry': 10.0, 'exit': 11.0,
+    'ret': 0.1, 'reason': 'TP', 'ctx': {}}])
+_plain = [t for t in _store.get_backtest(_bid)['trades'] if t['symbol'] == 'ZZ'][0]
+ok('a trade with no legs reads back with none',
+   not _plain.get('legs') and (len(_plain.get('legs') or []) or None) is None)
+
 print(f'\n{PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

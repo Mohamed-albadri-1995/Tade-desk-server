@@ -578,16 +578,45 @@ def update_backtest(bt_id: int, status: str | None = None, progress: float | Non
 
 
 def add_bt_trades(bt_id: int, trades: list) -> None:
-    """trades: [{date, symbol, side, entry_ts, exit_ts, entry, exit, ret, reason}]"""
+    """trades: [{date, symbol, side, entry_ts, exit_ts, entry, exit, ret, reason}]
+
+    THE SCALE-OUT LEGS TRAVEL IN ctx, because this table has no column for them
+    and losing them here made every saved run unreadable.
+
+    Backtest #354, the 2026-09-08 PL short: entry 17.76, stop 17.94, exit 17.51.
+    The whole position from 17.76 to 17.51 is 0.25 a share. The run reported
+    `pnl_per_share: 0.305`, which is exactly half banked at the 2R target of
+    17.40 plus half out at 17.51 — so the simulator DID scale out and the money
+    was right. But every row also reported `scale_out_legs: null`, because the
+    legs were computed, used for the P&L, and then dropped at this line on the
+    way into the database.
+
+    The consequence is not cosmetic. Read back, each trade is one entry and one
+    exit at the runner's price — which on a winner is the best price of the
+    trade — so the journal reads better than the trade was, and nothing says the
+    position came off in two pieces. Live sends those two pieces as two
+    different orders with two different fates: the leg is a resting limit the
+    broker fills by itself, and the runner needs the desk to notice its exit
+    rule. A comparison that cannot see the split cannot see that difference.
+    """
     if not trades:
         return
+
+    def _ctx_with_legs(t):
+        ctx = dict(t.get('ctx') or {})
+        legs = t.get('legs')
+        if legs:
+            ctx['legs'] = legs
+        return ctx or None
+
     rows = [(bt_id, t['date'], t['symbol'], t['side'], int(t['entry_ts']),
              (int(t['exit_ts']) if t.get('exit_ts') is not None else None),
              float(t['entry']),
              (float(t['exit']) if t.get('exit') is not None else None),
              (float(t['ret']) if t.get('ret') is not None else None),
              t.get('reason'),
-             (json.dumps(t['ctx']) if t.get('ctx') else None)) for t in trades]
+             (lambda c: json.dumps(c) if c else None)(_ctx_with_legs(t)))
+            for t in trades]
     with _lock:
         _db().executemany(
             'INSERT INTO backtest_trades (bt_id, date, symbol, side, entry_ts, exit_ts, '
@@ -611,6 +640,11 @@ def get_backtest(bt_id: int, with_trades: bool = True) -> dict | None:
         for r in tr:
             d = dict(r)
             d['ctx'] = json.loads(d['ctx']) if d.get('ctx') else {}
+            # Put the legs back where every reader already looks for them, so a
+            # trade read from the database has the same shape as one straight
+            # out of the simulator.
+            if d['ctx'].get('legs'):
+                d['legs'] = d['ctx']['legs']
             out['trades'].append(d)
     return out
 
