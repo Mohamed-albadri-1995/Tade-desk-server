@@ -34,6 +34,8 @@ jest.mock('../src/broker/reconcile', () => ({ confirmed: jest.fn() }));
 const reconcile = require('../src/broker/reconcile');
 const broker = require('../src/broker/signalstack');
 const { saveDay } = require('../scripts/save-fills');
+const SAVE_SRC = fs.readFileSync(
+  path.join(__dirname, '..', 'scripts', 'save-fills.js'), 'utf8');
 
 /* PL as it really went out: decided 17.75, stop 17.935, never confirmed. */
 const PL = { at: 1, date: '2026-09-08', symbol: 'PL', action: 'sell', sent: true,
@@ -167,6 +169,27 @@ describe('an unanswerable day keeps its dashes', () => {
    * A CALLBACK IS THE DIRECT REPLY TO THIS ORDER and is left in place. Two
    * sources disagreeing is worth seeing rather than silently resolving.
    */
+  /*
+   * AN EXIT FILL IS NOT AN ENTRY WITH A MISSING PRICE. A flatten has no decided
+   * price — nothing decided it, the clock did — so the line used to read
+   * "decided NaN … slip —", which looks like a broken entry. It is the price
+   * the position CLOSED at: AXTI on 2026-09-09 came back 71.2765, its stop to
+   * four places, and that is the other half of every comparison against a
+   * backtest's exit.
+   */
+  test('a flatten is still saved, and printed as a close rather than a slip',
+       async () => {
+    write([{ ...PL, kind: 'flatten', price: undefined, stop: undefined,
+             orderId: 'o-FLAT' }]);
+    answers([{ ...PL, kind: 'flatten', price: undefined, orderId: 'o-FLAT',
+               confirmed: true, confirmedBy: 'alpaca', finalPrice: 71.2765 }]);
+    const out = await saveDay('2026-09-08');
+    expect(out.wrote).toHaveLength(1);
+    expect(broker.slipOf(out.wrote[0], { fillPrice: 71.2765 }).slip).toBeNull();
+    expect(SAVE_SRC).toMatch(/CLOSED at/);
+    expect(SAVE_SRC).toMatch(/AN EXIT FILL IS NOT AN ENTRY WITH A MISSING PRICE/);
+  });
+
   test('a real callback still wins over a stored fill', async () => {
     write([PL, { at: 2, kind: 'callback', orderId: 'o-PL',
                  status: 'filled', fillPrice: 17.60 }]);

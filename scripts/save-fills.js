@@ -104,10 +104,28 @@ async function main() {
       continue;
     }
     for (const x of r.wrote) {
-      const s = broker.slipOf(x, { fillPrice: Number(x.finalPrice) });
+      /*
+       * AN EXIT FILL IS NOT AN ENTRY WITH A MISSING PRICE.
+       *
+       * A flatten carries no decided price — nothing decided it, the clock did
+       * — so slipOf has nothing to measure against and the line printed
+       * "decided NaN … slip —", which reads as a broken entry. It is not: it
+       * is the price the position CLOSED at, which is the other half of every
+       * comparison against a backtest's exit. AXTI, 2026-09-09: paid 71.2765,
+       * which is its stop to four places.
+       */
+      const paid = Number(x.finalPrice);
+      const isExit = x.kind === 'flatten' || !Number.isFinite(Number(x.price));
+      if (isExit) {
+        console.log(`  ${date}  ${String(x.symbol).padEnd(6)} `
+          + `CLOSED at ${String(r4(paid)).padStart(9)}`
+          + `${x.kind === 'flatten' ? '   (flatten)' : ''}`);
+        continue;
+      }
+      const s = broker.slipOf(x, { fillPrice: paid });
       console.log(`  ${date}  ${String(x.symbol).padEnd(6)} `
         + `decided ${String(r4(Number(x.price))).padStart(9)}  `
-        + `paid ${String(r4(Number(x.finalPrice))).padStart(9)}  `
+        + `paid ${String(r4(paid)).padStart(9)}  `
         + `slip ${String(s.slip == null ? '—' : r4(s.slip)).padStart(8)}  `
         + `${s.slipR == null ? '' : r4(s.slipR) + 'R'}`);
     }
