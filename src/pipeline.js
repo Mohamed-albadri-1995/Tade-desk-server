@@ -196,6 +196,22 @@ async function runFullScan() {
       return si.fill(r0.getAll());
     });
 
+    /*
+     * CAN THIS NAME BE SHORTED, and is it on the threshold list.
+     *
+     * Two readings that answer two different questions, frozen onto the card so
+     * a real borrow history exists tomorrow. Alpaca keeps none: the backtest's
+     * own check is today's flag applied to a past day, and the only way out of
+     * that is to write the flag down while it is true.
+     *
+     * SOFT, beside shortInterest and for the same reason — neither the broker
+     * nor an exchange file may cost a scan.
+     */
+    await stageWrapSoft(report, 'borrow', async () => {
+      const bw = require('./sideC/borrow');
+      return bw.fill(r0.getAll());
+    });
+
     // THE CANSLIM READING, ONTO THE ROW. Every letter reaches the card from
     // a different shared file, and all of them arrive in the browser — so the
     // card knew seven letters and the dataset knew none. This puts the same
