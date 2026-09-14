@@ -192,8 +192,16 @@ ok("2-day VWAP gets the multi-session floor", d2v >= 40, f'{d2v}d')
 # so every indicator adds something — but a 9-bar SMA must add a token amount,
 # not a multi-session block like the 5-day MA does.
 _sma9 = _dm.required_days([{'key': 'ma.sma', 'params': {'length': 9}}], '5m', 3)
+# THE UPPER BOUND MOVED 6 -> 7, and only because a requirement was added that
+# this assertion could not have known about. required_days now guarantees the
+# PREVIOUS SESSION is in the frame on any intraday timeframe (logic_audit69):
+# at 09:34 there are four bars of today, so every warm-up comes from yesterday,
+# and one calendar day reaches Sunday from a Monday. _PREV_SESSION_DAYS is 4 —
+# the smallest number that reaches a previous session from every weekday — so
+# a 3-day window floors at 7. The thing this test exists to catch is unchanged:
+# a 9-bar SMA must not pull a multi-session BLOCK the way the 5-day MA does.
 ok("a plain 9-SMA adds only a token warm-up, never a multi-session block",
-   3 < _sma9 <= 6, f'{_sma9}d for a 3-day window')
+   3 < _sma9 <= 3 + _dm._PREV_SESSION_DAYS, f'{_sma9}d for a 3-day window')
 ok("...and far less than the 5-day MA needs",
    _sma9 < _dm.required_days([{'key': 'ma.pine_5day', 'params': {}}], '5m', 3),
    f'{_sma9} vs {_dm.required_days([{"key": "ma.pine_5day", "params": {}}], "5m", 3)}')
