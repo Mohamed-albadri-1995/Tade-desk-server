@@ -281,8 +281,26 @@ ok('with no account $, the panel says how to get a dollar figure',
  * decision taken behind one: btRun() reads the fields, so what is on screen is
  * what runs.
  */
+/*
+ * btFill IS 'desk' AND NOT 'next_open', AND THAT CHANGED ON PURPOSE.
+ *
+ * next_open fills at open[j+1] and then measures the stop and every target
+ * FROM THAT FILL. The live desk cannot: the bracket is priced from close[j] at
+ * the moment of deciding and sent to SignalStack as absolute prices, with no
+ * way to amend it. So next_open silently restores the exact R the strategy was
+ * designed for, every trade, whatever the fill did.
+ *
+ * PL, 2026-09-08: decided 17.75, stop 17.935, filled 17.515. 1.27R gone before
+ * the trade began, and the "2R" target the broker was holding was 0.32R from
+ * the price actually paid. The backtest showed +$611 on that name; the account
+ * showed roughly +$69.
+ *
+ * 'desk' takes the fill from open[j+1] and every LEVEL from close[j] — the two
+ * prices doing the two jobs they do live. It is what the option has always
+ * been labelled: what you really get.
+ */
 const BT_WANT = {
-  btUni: 'R1', btFill: 'next_open', btTf: '1m', btFeed: 'polygon',
+  btUni: 'R1', btFill: 'desk', btTf: '1m', btFeed: 'polygon',
   btEquity: '50000', btRiskPct: '0.5',
   btRankMetric: 'vwap_extension', btTopN: '3',
   btPreset: 'ttp', btShares: '100',
@@ -329,7 +347,7 @@ try {
   ok('btSettingsRestore() runs', true);
 } catch (e) { ok('btSettingsRestore() runs', false, e.message); }
 ok('...and the form now holds them', els.btEquity.value === '50000'
-   && els.btTopN.value === '3' && els.btFill.value === 'next_open',
+   && els.btTopN.value === '3' && els.btFill.value === 'desk',
    [els.btEquity.value, els.btTopN.value, els.btFill.value].join('/'));
 ok('...including the checkboxes, by the table not by el.type',
    els.btRules.checked === true && els.btScanGate.checked === true);

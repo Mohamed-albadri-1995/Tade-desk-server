@@ -826,7 +826,7 @@
             <select id="btUni"><option value="symbols">Symbols</option><option value="R1" selected>Register R1</option><option value="Shortlist">Shortlist</option></select></label>
           <label class="fld"><span>Fill model
             <b class="q" title="desk = what this desk really gets: the order fills at the NEXT bar's open, but the stop and every target were priced from the DECISION bar's close and sent to the broker before the fill existed. Use this one. · next open = the entry is honest, then the levels are re-measured from it, which hands the trade back the exact R it was tested at. · close = the signal bar's own close, a price no order can reach; for eyeballing only.">?</b></span>
-            <select id="btFill"><option value="desk">desk (what you really get)</option><option value="next_open" selected>next open</option><option value="close">close</option></select></label>
+            <select id="btFill"><option value="desk" selected>desk — what the live desk really gets</option><option value="next_open">next open (re-prices R from the fill — the desk cannot)</option><option value="close">close</option></select></label>
         </div>
         <div class="frow one">
           <label class="fld"><span>Symbols</span>
@@ -1927,7 +1927,7 @@ let BT_POLL=null, BT_LAST=null, BT_FILTERS=[];
  * — or after "reset". A backtest form that forgets is a form you retype.
  */
 const BT_DEFAULTS = {
-  btUni: 'R1', btFill: 'next_open', btSyms: '',
+  btUni: 'R1', btFill: 'desk', btSyms: '',
   btTf: '1m', btFeed: 'polygon', btView: 'all',
   btEquity: '50000', btRiskPct: '0.5', btRiskUsd: '',
   btMaxPos: '', btCost: '',
