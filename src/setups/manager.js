@@ -99,7 +99,11 @@ function openPositions(date) {
   const by = new Map();
   for (const o of rows) {
     if (!o.sent || !o.symbol || !o.setupId) continue;
-    if (o.kind === 'flatten' || o.kind === 'callback') continue;
+    // A FILL IS THE BROKER ANSWERING ABOUT AN ORDER, not an order. Stored fills
+    // carry no setupId so they are already skipped above; named here as well,
+    // because the next kind added to the ledger must be a deliberate decision
+    // rather than something that quietly becomes a position.
+    if (o.kind === 'flatten' || o.kind === 'callback' || o.kind === 'fill') continue;
     const sym = String(o.symbol).toUpperCase();
     if (closed.has(sym)) continue;
     const key = `${o.setupId}|${sym}`;
@@ -273,7 +277,33 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
   }
 
   const positions = openPositions(day);
-  if (!positions.length) return { ran: true, positions: 0, acted: [], held: stillHeld };
+  /*
+   * A PASS WITH NOTHING TO WATCH IS STILL A PASS, and it must be written down.
+   *
+   * This used to return here, BEFORE sessionLog.record at the end of the
+   * function. So a pass that found no position left no row, and the day's log
+   * could not tell these two apart:
+   *
+   *     the manager ran every minute and had nothing to do
+   *     the manager stopped running
+   *
+   * 2026-09-08 reads "36 passes, 09:35:45 to about 10:11" and then silence, on
+   * a session whose positions were not closed until the 15:50 flatten. Five
+   * hours of a runner that needed its exit rule watched, and no way to tell
+   * from the record whether anything was watching it. It cost a day of
+   * guessing, and the answer had to come from reading this line rather than
+   * from the log — which is the whole thing the log exists to prevent.
+   *
+   * `heldAtBroker` is carried on the empty pass too, because "the ledger says
+   * nothing is open AND Alpaca agrees" and "the ledger says nothing is open and
+   * Alpaca was never asked" are different mornings.
+   */
+  if (!positions.length) {
+    sessionLog.record(sessionLog.passOf({
+      at, date: day, positions: [], held: stillHeld, acted: [],
+    }));
+    return { ran: true, positions: 0, acted: [], held: stillHeld };
+  }
 
   const acted = [];
   const looked = [];

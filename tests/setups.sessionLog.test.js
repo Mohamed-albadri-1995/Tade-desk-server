@@ -315,11 +315,37 @@ describe('the manager writes to it', () => {
   /*
    * LAST IN THE PASS. The log is an observer; writing it before the closes go
    * out would put a disk between a breached stop and the order that answers it.
+   *
+   * THERE ARE NOW TWO record SITES and only one of them is about this rule. A
+   * pass that finds NOTHING open returns early, and it must write a row too —
+   * otherwise the log cannot tell "ran every minute with nothing to do" from
+   * "stopped running", which is what 2026-09-08's "36 passes then silence"
+   * turned out to be. That early write has no close to come after; it is
+   * checked separately below.
+   *
+   * So this reads the LAST one: the write that ends a pass which actually
+   * looked at positions.
    */
   test('it is written after the loop, not inside it', () => {
-    const write = SRC.indexOf('sessionLog.record');
+    const write = SRC.lastIndexOf('sessionLog.record');
     expect(write).toBeGreaterThan(SRC.indexOf('await broker.closePosition'));
     expect(write).toBeLessThan(SRC.indexOf('return { ran: true, positions: positions.length'));
+  });
+
+  /*
+   * AND THE QUIET PASS IS WRITTEN TOO — see tests/setups.managerQuietPass for
+   * the behaviour. Pinned here as well because it is the reason the assertion
+   * above had to change: if someone deletes the early write to make that test
+   * simpler again, the day goes back to being unreadable.
+   */
+  test('a pass with nothing open is recorded as well', () => {
+    const early = SRC.indexOf('sessionLog.record');
+    expect(early).toBeLessThan(SRC.lastIndexOf('sessionLog.record'));
+    expect(early).toBeGreaterThan(SRC.indexOf('const positions = openPositions(day)'));
+    expect(early).toBeLessThan(SRC.indexOf('return { ran: true, positions: 0'));
+    // carrying whether the broker was asked, because null and [] are different
+    // mornings even when the position list is empty either way.
+    expect(SRC).toMatch(/positions: \[\], held: stillHeld, acted: \[\]/);
   });
 
   test('the ledger fill price is carried through, since qp does not return it', () => {
