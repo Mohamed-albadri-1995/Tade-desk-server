@@ -33,6 +33,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import threading
+
 import numpy as np
 import pandas as pd
 
@@ -543,6 +545,57 @@ def _accepts_live(loader) -> bool:
         return False
 
 
+# ── one minute's live frames, shared across the strategies of one decision ───
+#
+# A LIVE FETCH IS NOT CACHED ON DISK, deliberately: the parquet is keyed on the
+# window, a live window ends at "now", and reusing it across minutes is what
+# served a 14:14 bar at 15:44. But the same rule made a SINGLE decision fetch
+# the same symbol once per strategy.
+#
+# `OR + VWAP 09:35` is two books, long and short, over one card list. Twenty
+# three names became forty six Yahoo requests through eight workers, and the
+# run took 19.4 seconds on 2026-09-08 and 24.4 on 09-09 — on a setup whose
+# order has to reach the tape inside the 09:35 minute. `Test`, one book over
+# nine names, answered in under four seconds. decide.py's own note says the
+# second strategy should hit the cache the first filled; on the live path there
+# was no cache to hit.
+#
+# This is not that cache. It is keyed on the EXACT window, `end` is already
+# floored to the minute, and anything from an earlier minute is dropped — so a
+# hit is not an approximation of the question, it is the identical question
+# asked twice in the same second. Live only: a replay still goes to parquet.
+_LIVE_MEMO: dict = {}
+_LIVE_MEMO_LOCK = threading.Lock()
+
+
+def _live_memo(key, end, make):
+    """The frame for `key`, fetched once per minute however often it is asked.
+
+    The loader runs OUTSIDE the lock: holding it across an HTTP call would
+    serialise the eight workers into one, which is the opposite of the point.
+    Two threads racing the same symbol both fetch, and the second overwrites
+    with an identical frame — a wasted request on the first pass, never a wrong
+    answer.
+    """
+    with _LIVE_MEMO_LOCK:
+        hit = _LIVE_MEMO.get(key)
+    if hit is not None:
+        return hit.copy()
+    got = make()
+    with _LIVE_MEMO_LOCK:
+        # EVICT EVERY OTHER MINUTE. Without this the dict grows all session and
+        # a stale frame could outlive the minute it describes.
+        for k in [k for k in _LIVE_MEMO if k[-1] != end]:
+            del _LIVE_MEMO[k]
+        _LIVE_MEMO[key] = got.copy()
+    return got
+
+
+def _forget_live_memo():
+    with _LIVE_MEMO_LOCK:
+        _LIVE_MEMO.clear()
+
+
 def prepare_bars(symbol: str, tf: str, days: int, feed: str = 'alpaca',
                  view: str = 'all', asof: str | None = None):
     """Fetch + session-filter bars and return (bars, ts, ctx) — the shared
@@ -582,7 +635,9 @@ def prepare_bars(symbol: str, tf: str, days: int, feed: str = 'alpaca',
     # word skip their parquet on the way in and out; a loader that does not
     # (a test stub, hybrid) is called exactly as before.
     if live_today and _accepts_live(loader):
-        bars = loader.load(symbol, tf, start, end, live=True)
+        # Shared across the strategies of one decision — see _live_memo.
+        bars = _live_memo((symbol, tf, days, feed, view, str(end)), str(end),
+                          lambda: loader.load(symbol, tf, start, end, live=True))
     else:
         bars = loader.load(symbol, tf, start, end)
 
