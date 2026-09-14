@@ -927,7 +927,7 @@
         <div class="frow">
           <label class="fld"><span>Preset
             <b class="q" title="Fills the fields below; everything stays editable.">?</b></span>
-            <select id="btPreset"><option value="">custom</option><option value="ttp" selected>Trade The Pool</option></select></label>
+            <select id="btPreset"><option value="">custom</option><option value="ttp" selected>Trade The Pool</option><option value="alpaca">Alpaca (commission-free)</option></select></label>
           <label class="fld"><span>Fixed shares
             <b class="q" title="Fixed share size for $ P&L and per-share fees.">?</b></span>
             <input id="btShares" type="number" value="100" placeholder="100"></label>
@@ -3041,7 +3041,39 @@ window.addEventListener('load',async()=>{
      silently changed an execution assumption, and the report gave no sign
      which one had been chosen or why. Fill model is its own visible control
      with its own default; a commission preset has no business moving it. */
-  document.getElementById('btPreset').addEventListener('change',e=>{ if(e.target.value==='ttp'){ document.getElementById('btFee').value='0.005'; document.getElementById('btFeeMin').value='0.75'; document.getElementById('btMinPs').value='0.10'; document.getElementById('btShares').value=document.getElementById('btShares').value||'100'; document.getElementById('btRules').checked=true; btSettingsSave(); } });
+  /* ONE ENTRY PER BROKER, so adding the next one is a line rather than
+     another branch. `shares` is only touched where a FIXED-SIZE view is part
+     of the schedule: Trade The Pool's min-profit rule is per share and is read
+     at a fixed size, and Alpaca has no such rule, so forcing 100 shares there
+     would put a prop-firm frame around an account that does not have one.
+
+     ALPACA IS ZEROS, NOT SMALL NUMBERS. US equities are commission-free and
+     there is no minimum per order and no min-profit-per-share rule — that rule
+     is a prop firm's, not a broker's. With all three blank the account block
+     charges nothing AND _ttp_block returns None, so an Alpaca run does not grow
+     a prop-firm panel describing rules it is not trading under.
+
+     WHAT IS DELIBERATELY NOT MODELLED: on a LIVE Alpaca account the SEC fee and
+     FINRA TAF are passed through on SELLS only (TAF $0.000166/share capped at
+     $8.30; SEC about $27.80 per $1M sold). This fee model is per-share and
+     symmetric, so entering them here would charge them on the buy side too —
+     double, and on the wrong side. On the paper account these orders are
+     going to, they are zero. Slippage is a separate field and stays separate:
+     cost bps is where execution goes, and a commission schedule has no business
+     pretending to cover it. */
+  const BT_PRESETS = {
+    ttp:    { fee:'0.005', feeMin:'0.75', minPs:'0.10', shares:'100', rules:true },
+    alpaca: { fee:'',      feeMin:'',     minPs:'',     rules:true },
+  };
+  document.getElementById('btPreset').addEventListener('change',e=>{
+    const p=BT_PRESETS[e.target.value]; if(!p)return;
+    document.getElementById('btFee').value=p.fee;
+    document.getElementById('btFeeMin').value=p.feeMin;
+    document.getElementById('btMinPs').value=p.minPs;
+    if(p.shares)document.getElementById('btShares').value=document.getElementById('btShares').value||p.shares;
+    document.getElementById('btRules').checked=!!p.rules;
+    btSettingsSave();
+  });
   document.getElementById('btReport').onclick=()=>{ if(BT_LAST&&BT_LAST.id)window.open('/api/backtest/'+BT_LAST.id+'/report','_blank'); };
   document.getElementById('btUni').addEventListener('change',e=>{ document.getElementById('btSyms').style.display=e.target.value==='symbols'?'':'none'; });
 

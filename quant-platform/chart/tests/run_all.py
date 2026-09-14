@@ -80,6 +80,7 @@ PARTS = [
                             'that exists'),
     ('logic_audit64.py',    'a scale-out is not one entry and one exit'),
     ('logic_audit65.py',    'a window yahoo cannot serve fails loudly'),
+    ('logic_audit66.py',    'the cost schedule is the one the orders go to'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They
