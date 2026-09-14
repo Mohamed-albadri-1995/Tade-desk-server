@@ -2375,19 +2375,92 @@ function receiveCallback(payload) {
  * would be indistinguishable from a perfect one, which is the worst possible
  * answer to "how much is this costing me".
  */
+/*
+ * PERCENT OF PRICE IS THE WRONG UNIT, and using it is why this number never
+ * explained anything.
+ *
+ * PL, 2026-09-08. Decided on the 09:34 close at 17.75, stop 17.935 — so one R
+ * is 18.5 cents. The run took 19.4 seconds and the market order filled at
+ * 17.515.
+ *
+ *     in dollars   0.235 worse
+ *     in percent   1.32%   — looks like nothing
+ *     in R         1.27R   — the trade started more than a whole R behind
+ *
+ * The same slip also re-prices everything downstream of it. The bracket was
+ * built from 17.75, so the 2R target went out at 17.38; measured from the
+ * price actually paid, 17.38 is 0.32R, not 2R. Half the position was banked at
+ * what the strategy calls a third of the way to its first target, and the
+ * remaining half carried 2.3x the intended risk because R was really 0.42.
+ *
+ * That is the whole distance between a backtest showing +$611 on this name and
+ * an account showing +$69, and none of it was visible on any screen — because
+ * the only figure reported was the 1.32%.
+ *
+ * So slip is reported in R whenever the row carries a stop to measure it
+ * against. Percent stays: it is the right unit for comparing two symbols.
+ */
 function slipOf(o, callback) {
   const paid = callback && callback.fillPrice != null ? Number(callback.fillPrice) : null;
   const want = o && o.price != null ? Number(o.price) : null;
   if (!Number.isFinite(paid) || !Number.isFinite(want) || want === 0) {
-    return { slip: null, slipPct: null };
+    return { slip: null, slipPct: null, slipR: null };
   }
   // Positive = worse than the decision assumed, whichever way the trade faces.
   const raw = paid - want;
   const signed = String(o.action || '').toLowerCase() === 'sell' ? -raw : raw;
+
+  /*
+   * One R as the DECISION priced it — the distance the bracket was actually
+   * built from. Not the distance from the fill: that is the risk the position
+   * ended up carrying, and dividing by it would shrink the very number that
+   * says the risk moved.
+   */
+  const stop = o && o.stop != null ? Number(o.stop) : null;
+  const rdist = Number.isFinite(stop) ? Math.abs(want - stop) : null;
+  const slipR = rdist > 0 ? Math.round((signed / rdist) * 1000) / 1000 : null;
+
   return {
     slip: Math.round(signed * 10000) / 10000,
     slipPct: Math.round((signed / want) * 1e6) / 1e4,
+    // How much of the trade's own risk unit was spent before it began.
+    slipR,
+    /*
+     * WHAT THE TRADE IS NOW, as opposed to what was tested. The stop did not
+     * move — it is an absolute price at the broker — so a fill that came in
+     * against you widened the real risk and shrank every target with it.
+     */
+    realR: Number.isFinite(stop) && Number.isFinite(paid)
+      ? Math.round(Math.abs(paid - stop) * 10000) / 10000 : null,
+    plannedR: rdist != null ? Math.round(rdist * 10000) / 10000 : null,
   };
+}
+
+/**
+ * The sentence a trader needs when the slip moved the trade, and nothing when
+ * it did not.
+ *
+ * A quarter of an R is the line: under it the fill is the ordinary cost of a
+ * market order, over it the position on the books is not the position that was
+ * tested and every number derived from the entry is about a different trade.
+ */
+const SLIP_R_LOUD = 0.25;
+
+function slipNote(s) {
+  if (!s || !Number.isFinite(s.slipR) || Math.abs(s.slipR) < SLIP_R_LOUD) return null;
+  const worse = s.slipR > 0;
+  const head = `filled ${Math.abs(s.slip).toFixed(4)} ${worse ? 'against' : 'in favour of'} `
+    + `the decision — ${Math.abs(s.slipR).toFixed(2)}R before the trade started`;
+  if (!worse || !Number.isFinite(s.realR) || !Number.isFinite(s.plannedR)
+      || !(s.plannedR > 0)) {
+    return head;
+  }
+  const mult = s.realR / s.plannedR;
+  return `${head}. The stop did not move, so this position risks `
+    + `${s.realR.toFixed(2)} a share instead of ${s.plannedR.toFixed(2)} `
+    + `(${mult.toFixed(1)}x), and every target went out priced off the decision: `
+    + `what the bracket calls 2R is really ${(2 * s.plannedR / s.realR).toFixed(2)}R `
+    + 'from the price you paid';
 }
 
 /*
@@ -2472,6 +2545,9 @@ function reconciled(date = null) {
        * difference would report those two identically.
        */
       ...slipOf(o, last),
+      // And said in words when it moved the trade, because "slipR: 1.27" is a
+      // number somebody has to already understand to act on.
+      slipNote: slipNote(slipOf(o, last)),
     };
   });
 }
@@ -2563,6 +2639,7 @@ function confirmFromFills(rows, fills) {
       filledQty: qty,
       prints: prints.length,
       ...slipOf(row, { fillPrice }),
+      slipNote: slipNote(slipOf(row, { fillPrice })),
     });
   }
 
@@ -2583,7 +2660,7 @@ module.exports = {
   planOrder, previewOrder, placeOrder, test,
   openSymbols, openByDestination, setupBySymbol, closePosition, flattenAll,
   orphanIntents,
-  slipOf,
+  slipOf, slipNote, SLIP_R_LOUD,
   callbackToken, callbackUrl, tokenMatches, receiveCallback, callbackIsBadNews,
   reconciled, confirmFromFills,
 };
