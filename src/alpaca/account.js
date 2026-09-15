@@ -76,6 +76,19 @@ const { getAccountBaseUrl, authHeaders } = require('./client');
 const PAPER_URL = 'https://paper-api.alpaca.markets';
 const LIVE_URL = 'https://api.alpaca.markets';
 
+/**
+ * The API this account's requests actually go to.
+ *
+ * ONE RULE, IN ONE PLACE. `get()` picks the URL from the same two inputs; a
+ * second copy of the choice is how the reported base and the real one drifted
+ * apart in the first place.
+ */
+function baseUrlFor(account) {
+  const own = credsFor(account);
+  if (own) return own.baseUrl;
+  return getAccountBaseUrl();
+}
+
 function credsFor(account) {
   if (!account || !account.keyId || !account.secret) return null;
   return {
@@ -276,9 +289,22 @@ async function account({ timeoutMs = 10000, account: acct = null } = {}) {
        * whichever one the keys point at. So it says which, every time.
        */
       number: a.account_number || null,
-      // Paper and live are different accounts with the same shape, and telling
-      // them apart from the numbers alone is not possible.
-      base: getAccountBaseUrl(),
+      /*
+       * THE URL THIS ANSWER CAME FROM — not the desk's default.
+       *
+       * Paper and live are different accounts with the same shape, so this
+       * field is the only thing that tells them apart. It read
+       * getAccountBaseUrl(), which is the ENV-WIDE default, while the request
+       * had gone to the per-account URL chosen from that destination's own
+       * `alpacaPaper` flag. So for every caller that names an account — which
+       * is every caller on a two-account desk — the field that exists to say
+       * "paper or live" reported something else entirely, and reported the
+       * same thing for both accounts.
+       *
+       * Asked while diagnosing exactly this: an account whose balance is read
+       * from paper while its orders may be going somewhere else.
+       */
+      base: baseUrlFor(acct),
       equity: Number(a.equity),
       cash: Number(a.cash),
       buyingPower: Number(a.buying_power),
@@ -314,4 +340,4 @@ function credsOf(dest) {
   };
 }
 
-module.exports = { positions, orders, fills, account, get, credsOf };
+module.exports = { positions, orders, fills, account, get, credsOf, baseUrlFor };
