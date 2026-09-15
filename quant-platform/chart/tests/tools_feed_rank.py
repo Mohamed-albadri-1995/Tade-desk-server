@@ -37,6 +37,7 @@ counts line says how many of each, per feed, before any of the rows.
 import argparse
 import json
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -45,6 +46,11 @@ DEFAULT_HOST = '127.0.0.1:8765'
 # The two strategies behind `OR + VWAP 09:35` — long and short are ranked
 # together, because the setup takes the top N of BOTH.
 DEFAULT_STRATEGIES = [31, 30]
+
+# What each feed will actually serve per minute, so the wait can be PREDICTED
+# rather than discovered. Only the ones that throttle are listed; a feed absent
+# here is assumed fast and no estimate is printed for it.
+RATE_LIMITED = {'polygon': 5, 'hybrid': 5, 'hybrid_yahoo': 5}
 
 
 def post(host, path, body, timeout):
@@ -117,7 +123,10 @@ def main():
     ap.add_argument('--tf', default='1m')
     ap.add_argument('--view', default='all')
     ap.add_argument('--host', default=DEFAULT_HOST)
-    ap.add_argument('--timeout', type=float, default=240.0)
+    # POLYGON'S FREE PLAN IS FIVE REQUESTS A MINUTE. Thirty symbols is six
+    # minutes before qp has even finished fetching, so a four-minute timeout
+    # killed the run every time and looked like the tool hanging.
+    ap.add_argument('--timeout', type=float, default=1200.0)
     a = ap.parse_args()
 
     try:
@@ -138,13 +147,29 @@ def main():
 
     table, order = {}, {}
     for feed in a.feeds:
+        # SAY IT BEFORE IT HAPPENS, not after.
+        #
+        # This printed nothing between feeds, so a run that was working
+        # correctly showed one line and then a dead terminal for six minutes —
+        # reported as "Hang". A tool that goes silent during the slow part is
+        # the same failure as a check that logs nothing when it passes: the
+        # working case and the broken case look identical.
+        rate = RATE_LIMITED.get(feed)
+        wait = (f' — {feed} allows about {rate} request(s) a minute on the free '
+                f'plan, so up to ~{max(1, round(len(symbols) / rate))} min'
+                if rate else '')
+        print(f'{feed:<9} asking for {len(symbols)} symbol(s){wait} …',
+              flush=True)
+        t0 = time.time()
         rows, errors, seen = rank_on(a.host, feed, symbols, a.date, a.strategies,
                                      a.metric, a.tf, a.view, a.timeout)
         if rows is None:
-            print(f'{feed:<9} DID NOT ANSWER — {"; ".join(errors)}')
+            print(f'{feed:<9} DID NOT ANSWER after {time.time() - t0:.0f}s — '
+                  f'{"; ".join(errors)}', flush=True)
             continue
         print(f'{feed:<9} {seen} evaluated · {len(rows)} signalled · '
-              f'{len(errors)} could not be read')
+              f'{len(errors)} could not be read  ({time.time() - t0:.0f}s)',
+              flush=True)
         # NAMED, not counted. On 2026-09-14 every symbol errored for the same
         # reason and the count alone said nothing about which reason it was.
         for e in errors[:4]:
