@@ -814,6 +814,35 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         max_pos_pct = 0.0
     if max_pos_pct <= 0:
         max_pos_pct = 0.0               # absent = no per-trade cap (unchanged)
+    # THE ACCOUNT'S SHARE OF THE STANDARD SIZE — `ratio` in data/broker.json,
+    # applied by src/setups/risk.js as
+    #
+    #     shares = Math.floor(standard.shares * ratio)
+    #
+    # It is how the desk runs one signal into two accounts at different sizes,
+    # and how a trader takes a deliberate margin off every position.
+    #
+    # WHY IT HAS TO BE HERE. 2026-09-15, ratio 0.9 on alpaca1: the desk sized
+    # FTAI at 384 shares and sent 345 — floor(384 x 0.9) = 345, exactly. The
+    # backtest of the same morning has no idea the setting exists and reports
+    # 384. Every position off by ten percent, on every comparison, for a reason
+    # that appears nowhere in the run. That is not a small discrepancy to chase
+    # later: it is the difference between "same shares" and "nearly".
+    #
+    # NOT THE SAME AS A SMALLER ACCOUNT. account_equity 90,000 would scale the
+    # capital caps and leave the risk-based share count at 384, because
+    # risk_usd is a flat dollar that does not read equity. The ratio scales the
+    # SHARES. The two knobs are not substitutes and reading one as the other
+    # gives a number that is arithmetically fine about the wrong thing.
+    #
+    # BEFORE BOTH CAPS, because that is where live applies it: risk.js scales,
+    # then the broker fits what is left of the buying power.
+    try:
+        size_ratio = float(spec.get('size_ratio', 1) or 1)
+    except (TypeError, ValueError):
+        size_ratio = 1.0
+    if size_ratio <= 0:
+        size_ratio = 1.0                # absent or nonsense = full size
     fps = float(spec.get('fee_per_share', 0) or 0)
     # the panel posts `fee_min`; `fee_min_per_order` is the block's own output
     # name. Accept BOTH or the per-order minimum silently reads as $0 here
@@ -845,6 +874,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     maxdd = 0.0
     fees_tot = pnl_tot = 0.0
     unsized = capped = no_capital = pos_capped = no_borrow = 0
+    ratio_scaled = ratio_unsized = 0
     # CAN THE ACCOUNT ACTUALLY SHORT THIS?
     #
     # Backtest #354 made +$1,345.43 across twelve trades, of which XE - a short
@@ -929,6 +959,25 @@ def _account_block(closed: list, spec: dict) -> dict | None:
                    else f'{risk_pct}% of equity ({budget:,.0f})')
                 + ' this trade may lose')
             continue
+        # THE ACCOUNT'S RATIO, on the STANDARD count and floored — the same two
+        # operations, in the same order, as src/setups/risk.js:279. Floored
+        # rather than rounded, because rounding up sends more risk than the
+        # trade was sized for, and the bridge refuses a fraction outright.
+        if size_ratio != 1.0:
+            scaled = math.floor(shares * size_ratio)
+            if scaled < 1:
+                # A REAL ANSWER, not an error: the account is too small a share
+                # of the standard to take this name at all. risk.js says the
+                # same thing in the same words, and it must not be filed under
+                # "no stop" — that would send you to change the wrong setting.
+                ratio_unsized += 1
+                t.setdefault('ctx', {})['acct_note'] = (
+                    f'{shares} shares at the standard x {size_ratio} is '
+                    f'{shares * size_ratio:.2f} — under one whole share')
+                continue
+            if scaled < shares:
+                ratio_scaled += 1
+            shares = scaled
         # PER-TRADE CAP, applied BEFORE the portfolio one. Order matters: cap
         # this trade first, then measure what is left for the rest of the day.
         # Reversed, the first name would still swallow the balance and the cap
@@ -1046,6 +1095,13 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         'unsized_no_stop': unsized,
         'size_capped_by_leverage': capped,
         'size_capped_by_position': pos_capped,
+        # SAID OUT LOUD, ALWAYS — including when it is 1.0. A run whose sizes
+        # are 10% under another run's has to carry the reason in the run, or
+        # the next person to compare live against it re-derives it from
+        # arithmetic, as this one was.
+        'size_ratio': size_ratio,
+        'size_scaled_by_ratio': ratio_scaled,
+        'unsized_under_one_share_after_ratio': ratio_unsized,
         'skipped_no_capital': no_capital,
         # Shorts the broker will not lend — counted and NAMED, because "3
         # refused" sends you looking and "XE, STKH, LBGJ" tells you which part

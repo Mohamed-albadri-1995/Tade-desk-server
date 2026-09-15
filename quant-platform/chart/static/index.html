@@ -880,6 +880,11 @@
             <b class="q" title="Transaction cost per side in basis points: spread + slippage + commission. A round trip pays it twice. 0 = frictionless (lies).">?</b></span>
             <input id="btCost" type="number" step="any" placeholder="e.g. 5"></label>
         </div>
+        <div class="frow">
+          <label class="fld"><span>Account size ×
+            <b class="q" title="The account's share of the standard size — `ratio` in data/broker.json, applied live by src/setups/risk.js as floor(standard shares × ratio). 1 = full size. 0.9 on 2026-09-15 is why the desk sized FTAI at 384 and sent 345. It scales the SHARES, which is NOT the same as a smaller account equity: a flat risk-per-trade does not read equity, so a 90k account still sizes 384. Set this to whatever the account you are comparing against is set to, or live will read 10% under the backtest on every position.">?</b></span>
+            <input id="btRatio" type="number" step="any" placeholder="1" value="1"></label>
+        </div>
       </div>
 
       <div class="grp"><h4>Ranking</h4>
@@ -1941,7 +1946,7 @@ const BT_DEFAULTS = {
   btUni: 'R1', btFill: 'desk', btSyms: '',
   btTf: '1m', btFeed: 'polygon', btView: 'all',
   btEquity: '50000', btRiskPct: '0.5', btRiskUsd: '',
-  btMaxPos: '', btCost: '',
+  btMaxPos: '', btCost: '', btRatio: '1',
   btRankMetric: 'vwap_extension', btTopN: '3', btMinRvol: '',
   btTarget: '', btMaxDD: '', btDDBasis: 'start',
   btPreset: 'ttp', btShares: '100',
@@ -2001,6 +2006,7 @@ function btDeskFields(spec){
   const out = {};
   const put = (id, v) => { if(v !== null && v !== undefined && v !== '') out[id] = String(v); };
   put('btEquity', spec.account_equity);
+  put('btRatio', spec.size_ratio || 1);
   // FLAT DOLLARS, and the percentage cleared with it. Leaving a stale 0.5 in
   // the percent box while the dollar box is filled makes the server refuse the
   // run — the two are mutually exclusive on purpose.
@@ -2009,6 +2015,9 @@ function btDeskFields(spec){
   // 0 means NO cap on both sides, so it must land as an empty box rather than
   // as the number zero.
   out.btMaxPos = spec.max_position_pct ? String(spec.max_position_pct) : '';
+  // 1 when a saved run predates the field — never blank, which would post 0
+  // and be read as "no ratio" by a reader who cannot tell it from unset.
+  out.btRatio = spec.size_ratio ? String(spec.size_ratio) : '1';
   const rank = spec.rank_per_day;
   out.btRankMetric = (rank && rank.metric) || '';
   out.btTopN = (rank && rank.top_n) ? String(rank.top_n) : '';
@@ -2382,6 +2391,10 @@ function btRenderCore(g,extra){
     if(_ac.skipped_no_capital)flags.push(`${_pl(_ac.skipped_no_capital,'trade')} skipped — no buying power left`);
     if(_ac.size_capped_by_leverage)flags.push(`${_pl(_ac.size_capped_by_leverage,'trade')} sized down to the cash available`);
     if(_ac.size_capped_by_position)flags.push(`${_pl(_ac.size_capped_by_position,'trade')} sized down to the ${_ac.max_position_pct}% per-position cap`);
+    // SAID EVEN WHEN NOTHING WAS CUT BY IT. A run at 0.9 and a run at 1.0
+    // differ by ten percent on every position, and the only place that
+    // shows is a share count nobody compares until live disagrees.
+    if(_ac.size_ratio&&_ac.size_ratio!==1)flags.push(`every size \u00d7 ${_ac.size_ratio} for the account's share of the standard`+(_ac.unsized_under_one_share_after_ratio?`, and ${_pl(_ac.unsized_under_one_share_after_ratio,'trade')} fell under one whole share because of it`:''));
     if(_ac.no_credit_wins)flags.push(`${_pl(_ac.no_credit_wins,'win')} earn no prop credit — under $${_ac.min_profit_ps}/share`);
   }
   const cov=s.coverage;
@@ -2420,6 +2433,7 @@ function btRenderCore(g,extra){
           +`size = (equity × ${_ac.risk_pct}%) ÷ (entry − stop), compounding in trade order`)
       +(_ac.max_leverage>1?`, capped at ${_ac.max_leverage}× equity across all open positions`:`, cash only`)
       +(_ac.max_position_pct?`, and at ${_ac.max_position_pct}% of equity per position`:'')+`. `
+      +(_ac.size_ratio&&_ac.size_ratio!==1?`Every position is \u00d7 ${_ac.size_ratio} of the standard size, as the live account is. `:'')
       +`${_ac.trades_sized} of ${s.trades} trades were sized`
       +(_ac.max_concurrent_positions?`, up to ${_ac.max_concurrent_positions} held at once`:'')+`.`
       +(_ac.fee_per_share||_ac.fee_min_per_order
@@ -2588,6 +2602,9 @@ async function btRun(){
     // the server refuses both rather than silently preferring one.
     risk_usd:parseFloat(document.getElementById('btRiskUsd').value)||0,
     max_position_pct:parseFloat(document.getElementById('btMaxPos').value)||0,
+    // ||1, not ||0: an empty box means FULL SIZE, and a 0 here would
+    // scale every position to nothing.
+    size_ratio:parseFloat(document.getElementById('btRatio').value)||1,
     // BOTH numbers or no verdict: a target with no limit, or a limit with no
     // target, cannot answer "which came first" — the only question asked here.
     challenge:(function(){ const t=parseFloat(document.getElementById('btTarget').value);
