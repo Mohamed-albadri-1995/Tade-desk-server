@@ -97,7 +97,27 @@
    * account", which would remove the filter for a reason that has nothing to
    * do with accounts.
    */
-  var acctsKnown = [];
+  /*
+   * KEYED ON THE ID, LABELLED WITH THE NAME — and getting that backwards is
+   * what put four buttons on a two-account desk, half of them inert.
+   *
+   * "the filters are double and they don't even work". Both halves, and the
+   * same cause. This read `x.name || x.id`, so the desk contributed
+   * "Alpaca100ktest" and "alpaca100k935" while the trades contributed
+   * "alpaca1" and "alpaca2" — src/alerts/server.js:483 stamps the ID onto
+   * every row (`tradesFrom(r.fills, id)`). The two lists have no member in
+   * common, so the merge below could not collapse them: two accounts, four
+   * buttons, and the two named ones matched no trade at all and emptied the
+   * page when pressed.
+   *
+   * So the id is what is compared and the name is what is read. They are
+   * different jobs and one string cannot do both.
+   */
+  var acctsKnown = [];              // [{ id, name }]
+  function acctSig(list) {
+    return list.map(function (a) { return a.id + '|' + a.name; }).join(',');
+  }
+  function byAcct(a, b) { return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0); }
   function loadAccountsKnown() {
     var url = location.protocol + '//' + location.hostname + ':' + ALERTS_PORT
       // GET /api/broker — verified against src/alerts/server.js:510, which
@@ -108,13 +128,17 @@
       // whatever the trades show.
       + '/api/broker';
     fetch(url).then(function (r) { return r.json(); }).then(function (d) {
-      var names = (((d || {}).broker || {}).destinations || [])
-        .map(function (x) { return x && (x.name || x.id); })
-        .filter(Boolean).map(String);
-      if (!names.length) return;
-      var before = acctsKnown.join(',');
-      acctsKnown = names.sort();
-      if (acctsKnown.join(',') !== before) { try { accountBar(); } catch (e) {} }
+      var rows = (((d || {}).broker || {}).destinations || [])
+        .map(function (x) {
+          // NO ID, NO BUTTON. A destination the trades cannot be matched
+          // against is a filter that can only ever show nothing.
+          if (!x || !x.id) return null;
+          return { id: String(x.id), name: String(x.name || x.id) };
+        }).filter(Boolean);
+      if (!rows.length) return;
+      var before = acctSig(acctsKnown);
+      acctsKnown = rows.sort(byAcct);
+      if (acctSig(acctsKnown) !== before) { try { accountBar(); } catch (e) {} }
     }).catch(function () { /* leave it empty — the trades still answer */ });
   }
   function accountsKnown() { return acctsKnown.slice(); }
@@ -650,10 +674,17 @@
       if (bar) bar.remove();
       return;
     }
-    // Every account the desk has, plus any the trades mention that it does not
-    // (an imported row, a renamed destination) — dropping those would hide
-    // trades behind a filter that never offers their account.
-    accts = known.concat(accts.filter(function (a) { return known.indexOf(a) === -1; })).sort();
+    // Every account the desk has, plus any ID the trades mention that it does
+    // not (an imported row, a retired destination) — dropping those would hide
+    // trades behind a filter that never offers their account. Matched on the
+    // ID, which is the only thing both sides speak; an unknown one is labelled
+    // with its id because that is the whole of what is known about it.
+    accts = known.concat(accts
+      .filter(function (id) {
+        return !known.some(function (k) { return k.id === id; });
+      })
+      .map(function (id) { return { id: id, name: id }; }))
+      .sort(byAcct);
 
     if (!bar) {
       bar = document.createElement('div');
@@ -666,7 +697,7 @@
     }
     // Rebuilt only when the set of accounts changed, so a re-render does not
     // throw away the choice that is currently applied.
-    var signature = accts.join(',');
+    var signature = acctSig(accts);
     if (bar.getAttribute('data-accts') === signature) { applyAccountFilter(); return; }
     bar.setAttribute('data-accts', signature);
     bar.innerHTML = '';
@@ -690,7 +721,12 @@
     // ALL FIRST, and it is the default: the combined book is the one you look
     // at to answer "how is the desk doing", and one account is the exception.
     mk('all', 'All accounts');
-    accts.forEach(function (a) { mk(a, a); });
+    // THE NAME, AND THE ID BESIDE IT WHEN THEY DIFFER. The cards badge the id,
+    // so a button that showed only "Alpaca100ktest" would be a control whose
+    // label appears nowhere on anything it filters.
+    accts.forEach(function (a) {
+      mk(a.id, a.name === a.id ? a.id : a.name + ' · ' + a.id);
+    });
 
     var count = document.createElement('span');
     count.id = 'jnl-acct-count';
@@ -698,7 +734,8 @@
     bar.appendChild(count);
 
     // A remembered choice that no longer exists would hide every trade.
-    if (accountFilter !== 'all' && accts.indexOf(accountFilter) === -1) {
+    if (accountFilter !== 'all'
+        && !accts.some(function (a) { return a.id === accountFilter; })) {
       accountFilter = 'all';
     }
     paintAccountButtons();

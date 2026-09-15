@@ -80,6 +80,27 @@ function mkEl(tag) {
       return out;
     },
   };
+  /*
+   * innerHTML = '' EMPTIES THE ELEMENT, as it does in a browser.
+   *
+   * It was a plain string field, so a rebuild that clears itself and redraws
+   * left the OLD children in place and appended beside them. Every count in
+   * this file then measured one render or two depending on whether anything
+   * had triggered a second one — and the account bar is rebuilt exactly once,
+   * when the desk's answer arrives. A stub that quietly keeps what the code
+   * deleted cannot be used to count anything.
+   */
+  let html = '';
+  Object.defineProperty(el, 'innerHTML', {
+    get() { return html; },
+    set(v) {
+      html = String(v === null || v === undefined ? '' : v);
+      if (html === '') {
+        el.children.forEach((c) => { c.parentNode = null; });
+        el.children.length = 0;
+      }
+    },
+  });
   return el;
 }
 
@@ -87,7 +108,7 @@ function mkEl(tag) {
  * A page with `trades` rendered as cards, then the patch evaluated over it.
  * Returns the handles the assertions need.
  */
-function page(trades) {
+function page(trades, destinations = null) {
   const root = mkEl('div');
   const container = mkEl('div');
   container.id = 'jnl-cards-container';
@@ -137,7 +158,22 @@ function page(trades) {
     // The patch fetches fills, setups and a status probe. None of that is what
     // this file is about, so every request answers "nothing", which is a real
     // answer the patch already has to handle.
-    fetch: () => Promise.resolve({ json: () => Promise.resolve({ ok: false }) }),
+    /*
+     * EVERY REQUEST ANSWERS "nothing" BY DEFAULT — fills, setups, the status
+     * probe — which is a real answer the patch already has to handle.
+     *
+     * EXCEPT /api/broker, when a test supplies destinations. Every test in
+     * this file used to answer ok:false here, so `acctsKnown` was always empty
+     * and the desk's own account list was NEVER EXERCISED. That is the blind
+     * spot the four-button bar grew in: the merge between what the desk knows
+     * and what the trades show only ever ran on one of its two inputs.
+     */
+    fetch: (url) => Promise.resolve({
+      json: () => Promise.resolve(
+        (destinations && String(url).indexOf('/api/broker') !== -1)
+          ? { ok: true, broker: { destinations } }
+          : { ok: false }),
+    }),
     MutationObserver: function () { this.observe = () => {}; },
     setTimeout, clearTimeout, console,
     // The chart button builds a query string; not what this file is about, but
@@ -295,5 +331,139 @@ describe('the source contract the desk depends on', () => {
                             price: 10, at: '2026-09-01T13:36:00Z', type: 'fill' }])[0];
     expect(t.extId).toBe('alpaca:f1');
     expect(t.account).toBeNull();
+  });
+});
+
+/* ── the desk's own account list, which was never exercised ──────────────── */
+
+/*
+ * "the filters are double and they don't even work"
+ *
+ * Two Alpaca accounts. Four buttons:
+ *
+ *     All accounts · Alpaca100ktest · alpaca1 · alpaca100k935 · alpaca2
+ *
+ * Each account twice — once under its NAME, once under its ID — and the two
+ * named ones emptied the page when pressed.
+ *
+ * ONE CAUSE FOR BOTH HALVES. loadAccountsKnown read `x.name || x.id`, so the
+ * desk contributed names while the trades contributed ids: src/alerts/
+ * server.js:483 stamps the ID on every row (`tradesFrom(r.fills, id)`). The
+ * two lists had no member in common, so the merge could not collapse them, and
+ * the name buttons compared a name against an id on every card and matched
+ * none.
+ *
+ * The id is what is COMPARED; the name is what is READ. One string cannot do
+ * both jobs, and using it for both is what made a two-account desk look like a
+ * four-account one with half its controls dead.
+ */
+describe('the accounts the DESK knows, merged with the ones the trades show', () => {
+  // The real shape of data/broker.json on this desk.
+  const DESK = [{ id: 'alpaca1', name: 'alpaca100k935' },
+                { id: 'alpaca2', name: 'Alpaca100ktest' }];
+
+  // loadAccountsKnown answers on a promise; the bar is rebuilt when it lands.
+  const settled = () => new Promise((r) => setTimeout(r, 0));
+
+  test('two accounts give two buttons, not four', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
+    await settled();
+    const ids = p.bar().querySelectorAll('button[data-acct]')
+      .map(b => b.getAttribute('data-acct'));
+    expect(ids).toEqual(['all', 'alpaca1', 'alpaca2']);
+  });
+
+  test('every button is keyed on the id the trades carry', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
+    await settled();
+    const ids = p.bar().querySelectorAll('button[data-acct]')
+      .map(b => b.getAttribute('data-acct')).filter(x => x !== 'all');
+    expect(ids.every(id => ['alpaca1', 'alpaca2'].includes(id))).toBe(true);
+  });
+
+  /*
+   * AND IT FILTERS. The half of the old bar that was labelled with names
+   * matched nothing at all — pressing one emptied the page. This is the
+   * assertion that a button does what its label says.
+   */
+  test('pressing one shows that account and hides the other', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
+    await settled();
+    p.bar().querySelectorAll('button[data-acct]')
+      .find(b => b.getAttribute('data-acct') === 'alpaca2')
+      .listeners.click[0]();
+    expect(p.cards.map(c => c.style.display)).toEqual(['none', '']);
+  });
+
+  test('and the count says how many are left, not zero', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
+    await settled();
+    p.bar().querySelectorAll('button[data-acct]')
+      .find(b => b.getAttribute('data-acct') === 'alpaca1')
+      .listeners.click[0]();
+    const count = p.bar().children.find(c => c.id === 'jnl-acct-count');
+    expect(count.textContent).toBe('1 trade(s) in alpaca1');
+  });
+
+  /*
+   * THE NAME IS STILL READABLE. It is the only word that means anything to the
+   * person reading — but the cards badge the ID, so a button showing only the
+   * name would be a control whose label appears nowhere on what it filters.
+   */
+  test('the label carries the name AND the id', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
+    await settled();
+    const label = p.bar().querySelectorAll('button[data-acct]')
+      .find(b => b.getAttribute('data-acct') === 'alpaca2').textContent;
+    expect(label).toBe('Alpaca100ktest · alpaca2');
+  });
+
+  test('an account whose name IS its id is not written twice', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')],
+                   [{ id: 'alpaca1', name: 'alpaca1' }, { id: 'alpaca2', name: 'alpaca2' }]);
+    await settled();
+    const label = p.bar().querySelectorAll('button[data-acct]')
+      .find(b => b.getAttribute('data-acct') === 'alpaca1').textContent;
+    expect(label).toBe('alpaca1');
+  });
+
+  /*
+   * AN ACCOUNT THE DESK HAS NOT TRADED YET still gets a button — that is what
+   * asking the desk is for, and it is why the bar survives a morning where one
+   * account had every order refused.
+   */
+  test('a known account with no trades on screen still appears', async () => {
+    const p = page([T('1', 'alpaca1')], DESK);
+    await settled();
+    const ids = p.bar().querySelectorAll('button[data-acct]')
+      .map(b => b.getAttribute('data-acct'));
+    expect(ids).toEqual(['all', 'alpaca1', 'alpaca2']);
+  });
+
+  /*
+   * AND AN ID THE DESK DOES NOT KNOW is still offered, labelled with itself —
+   * an imported row or a retired destination must not become trades hidden
+   * behind a filter that never lists their account.
+   */
+  test('an id only the trades know is offered under its id', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'ttp5k')], DESK);
+    await settled();
+    const btns = p.bar().querySelectorAll('button[data-acct]');
+    expect(btns.map(b => b.getAttribute('data-acct')))
+      .toEqual(['all', 'alpaca1', 'alpaca2', 'ttp5k']);
+    expect(btns.find(b => b.getAttribute('data-acct') === 'ttp5k').textContent)
+      .toBe('ttp5k');
+  });
+
+  /*
+   * A DESTINATION WITH NO ID IS NOT A BUTTON. It could only ever be compared
+   * against an account no row carries, so it can only ever show nothing.
+   */
+  test('a destination carrying no id is dropped, not rendered as undefined', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')],
+                   DESK.concat([{ name: 'a name with no id' }]));
+    await settled();
+    expect(p.bar().querySelectorAll('button[data-acct]')
+      .map(b => b.getAttribute('data-acct'))).toEqual(['all', 'alpaca1', 'alpaca2']);
   });
 });
