@@ -51,6 +51,14 @@ DEFAULT_STRATEGIES = [31, 30]
 # rather than discovered. Only the ones that throttle are listed; a feed absent
 # here is assumed fast and no estimate is printed for it.
 RATE_LIMITED = {'polygon': 5, 'hybrid': 5, 'hybrid_yahoo': 5}
+# Seconds between batches for those feeds. 61 rather than 60 because a window
+# that starts counting on the first request does not end when a wall clock says
+# it should.
+PACE_SECONDS = 61
+# How much of the list a feed may fail before its column is thrown away rather
+# than ranked. A fifth is already generous: the ranking decides three names out
+# of thirty, so a handful of missing rows can move the cut on its own.
+MAX_UNREAD = 0.2
 
 
 def post(host, path, body, timeout):
@@ -85,23 +93,36 @@ def rank_on(host, feed, symbols, date, strategies, metric, tf, view, timeout):
     absent. Asking qp to cut would hide the very rows worth reading.
     """
     rows, errors, seen = [], [], 0
+    # SENT IN BATCHES THE FEED WILL ACTUALLY SERVE.
+    #
+    # Thirty symbols in one request to polygon returned 429 for twenty-five of
+    # them, and the run still printed a ranking — five names read as the whole
+    # market. Every symbol is scored independently, so splitting the list
+    # changes no number; it only stops the feed refusing most of it.
+    rate = RATE_LIMITED.get(feed)
+    batches = ([symbols[i:i + rate] for i in range(0, len(symbols), rate)]
+               if rate else [symbols])
     for sid in strategies:
-        body = {'strategy_id': sid, 'symbols': symbols, 'date': date, 'tf': tf,
-                'feed': feed, 'view': view, 'fill': 'live', 'top_n': 0,
-                'metric': metric, 'target_r': 2.0}
-        try:
-            d = post(host, '/api/setup/decide', body, timeout)
-        except urllib.error.URLError as e:
-            return None, [f'strategy {sid}: {e}'], 0
-        if not d.get('ok'):
-            return None, [f"strategy {sid}: {d.get('error')}"], 0
-        for p in (d.get('picks') or []):
-            rows.append({'symbol': p.get('symbol'), 'side': p.get('side'),
-                         'metric': p.get('metric'), 'entry': p.get('entry'),
-                         'at': p.get('entry_at'), 'strategy': sid})
-        for e in (d.get('errors') or []):
-            errors.append(f"{e.get('symbol')}: {str(e.get('error') or '').strip()[:90]}")
-        seen += int((d.get('counts') or {}).get('evaluated') or 0)
+        for n, batch in enumerate(batches):
+            if n:
+                time.sleep(PACE_SECONDS)
+            body = {'strategy_id': sid, 'symbols': batch, 'date': date, 'tf': tf,
+                    'feed': feed, 'view': view, 'fill': 'live', 'top_n': 0,
+                    'metric': metric, 'target_r': 2.0}
+            try:
+                d = post(host, '/api/setup/decide', body, timeout)
+            except urllib.error.URLError as e:
+                return None, [f'strategy {sid}: {e}'], 0
+            if not d.get('ok'):
+                return None, [f"strategy {sid}: {d.get('error')}"], 0
+            for p in (d.get('picks') or []):
+                rows.append({'symbol': p.get('symbol'), 'side': p.get('side'),
+                             'metric': p.get('metric'), 'entry': p.get('entry'),
+                             'at': p.get('entry_at'), 'strategy': sid})
+            for e in (d.get('errors') or []):
+                errors.append(
+                    f"{e.get('symbol')}: {str(e.get('error') or '').strip()[:90]}")
+            seen += int((d.get('counts') or {}).get('evaluated') or 0)
     # DESCENDING, which is vwap_extension's own default direction — the same
     # table the live path reads. A None metric sorts last rather than crashing:
     # "could not be scored" is a real outcome and decide.py reports it.
@@ -145,7 +166,7 @@ def main():
     print(f'{a.date}  ·  {len(symbols)} card(s)  ·  rank by {a.metric}  ·  '
           f'setup takes the top {a.top}\n')
 
-    table, order = {}, {}
+    table, order, unusable = {}, {}, {}
     for feed in a.feeds:
         # SAY IT BEFORE IT HAPPENS, not after.
         #
@@ -176,12 +197,26 @@ def main():
             print(f'          ! {e}')
         if len(errors) > 4:
             print(f'          ! +{len(errors) - 4} more')
+        # UNREAD IS NOT UNQUALIFIED, and a ranking built from the difference
+        # is worse than no ranking: on 2026-09-10 polygon answered for five of
+        # thirty names and this printed "polygon takes BKNG, MXL, VRT" — a
+        # confident sentence about twenty-five symbols nobody had seen.
+        unread = len({e.split(':')[0] for e in errors})
+        if unread and unread > len(symbols) * MAX_UNREAD:
+            print(f'          → {unread} of {len(symbols)} could not be read. '
+                  f'That is not a ranking, it is a gap. {feed} is EXCLUDED '
+                  'from the comparison below.', flush=True)
+            unusable[feed] = unread
+            continue
         table[feed] = {r['symbol']: r for r in rows}
         order[feed] = [r['symbol'] for r in rows]
 
     live = [f for f in a.feeds if f in table]
     if len(live) < 2:
-        print('\nOnly one feed answered — nothing to compare.')
+        print('\nFewer than two feeds answered well enough to compare.')
+        for f, n in unusable.items():
+            print(f'  {f}: {n} symbol(s) unread — try  --symbols A B C  on a '
+                  'few names, or run it again when the feed is not throttled.')
         return 1
 
     print()
