@@ -88,8 +88,15 @@ UNASKABLE = lambda s: {'shortable': None, 'reason': 'could not ask the broker'} 
 t, b = run(BASE, NO_XE)
 ok('with the check off, nothing is refused', b['refused_no_borrow'] == 0)
 ok('...and no note is added to the trade', t[0]['ctx'].get('acct_note') is None)
-ok('...and the summary says the check did not run',
-   b['borrow_checked'] is False, str(b['borrow_checked']))
+# `borrow_checked` SPLIT INTO TWO FIELDS (logic_audit71). It reported the spec
+# flag, so it said True for a run answered about every name and for a run
+# answered about none — which is what backtest #355 did above a trade the
+# broker refuses. `borrow_asked` is the setting; `borrow_answered` is the count
+# that actually got a yes or a no.
+ok('...and the summary says the check was never asked for',
+   b['borrow_asked'] is False, str(b.get('borrow_asked')))
+ok('...and nothing was answered about', b['borrow_answered'] == 0,
+   str(b.get('borrow_answered')))
 
 # ── on, and the broker says no ───────────────────────────────────────────────
 t, b = run(dict(BASE, check_shortable=True), NO_XE)
@@ -105,7 +112,10 @@ ok('...with the broker\'s own reason on the row',
 # longs would be a far worse bug than the one it replaces.
 ok('the long beside it is still sized', 'acct_note' not in t[1]['ctx'],
    str(t[1]['ctx'].get('acct_note')))
-ok('the run reports that the check ran', b['borrow_checked'] is True)
+# ASKED *AND* ANSWERED — the two the old single field could not separate.
+ok('the run reports the check was asked for', b['borrow_asked'] is True)
+ok('and that the broker actually answered about it',
+   b['borrow_answered'] >= 1, str(b.get('borrow_answered')))
 
 # ── on, and the broker cannot be asked ───────────────────────────────────────
 t, b = run(dict(BASE, check_shortable=True), UNASKABLE)

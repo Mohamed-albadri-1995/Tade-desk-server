@@ -85,6 +85,7 @@ PARTS = [
     ('logic_audit68.py',    'only short what the broker will lend'),
     ('logic_audit69.py',    'the warm-up floor belongs to the anchor'),
     ('logic_audit70.py',    "the account's share of the standard size"),
+    ('logic_audit71.py',    'a borrow check that did not happen is not a pass'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They

@@ -893,6 +893,9 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     # says so; see tools/data/borrow.py.
     no_borrow_names: list = []
     borrow_unchecked: list = []
+    # How many shorts got a real yes-or-no out of the broker. Counted rather
+    # than assumed: see the note beside borrow_asked in the summary.
+    borrow_answered = 0
     check_borrow = bool(spec.get('check_shortable'))
     max_concurrent = 0
     wins = 0
@@ -919,6 +922,8 @@ def _account_block(closed: list, spec: dict) -> dict | None:
             continue
         if check_borrow and t['side'] == 'short':
             b = _borrow.shortable(t['symbol'])
+            if b.get('shortable') is not None:
+                borrow_answered += 1
             if b.get('shortable') is False:
                 no_borrow += 1
                 no_borrow_names.append(t['symbol'])
@@ -1108,7 +1113,24 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         # of the book cannot be traded at all.
         'refused_no_borrow': no_borrow,
         'refused_no_borrow_names': sorted(set(no_borrow_names)) or None,
-        'borrow_checked': check_borrow,
+        # WAS IT ASKED, AND DID IT ANSWER — two facts, two fields.
+        #
+        # This was one field, `borrow_checked`, set to the SPEC FLAG. So a run
+        # with the box ticked reported borrow_checked: True whether Alpaca had
+        # answered about every name or about none of them. Backtest #355:
+        #
+        #     borrow_checked = True
+        #     borrow_unchecked_names = ['BLSH', 'FTAI', 'MMED']
+        #
+        # Every name unchecked, and the summary above it saying the check ran.
+        # It took MMED for -$449.71 — a name Alpaca, asked directly the same
+        # morning, called `shortable: False`.
+        #
+        # A field that says the same thing whatever happened, in the code
+        # written to stop exactly that. `borrow_asked` is the setting;
+        # `borrow_answered` is how many names actually got a yes or a no.
+        'borrow_asked': check_borrow,
+        'borrow_answered': borrow_answered,
         # Shorts kept because the broker could not be asked. Not a pass — an
         # unanswered question, and a result that leans on them is softer than
         # it looks.

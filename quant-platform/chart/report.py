@@ -304,6 +304,39 @@ def compute(trades: list, summary: dict, spec: dict) -> dict:
         out['warnings'].append(
             ('cost_bps = 0 — commissions charged, spread and slippage not',
              'On 1-minute momentum names that is optimistic.'))
+    # ── the borrow check that was asked for and did not happen ────────────
+    #
+    # THE LOUDEST SILENCE IN THE RUN. Ticking "check shortable" and getting no
+    # answer produces a result identical to one where every name came back
+    # borrowable — the same trades, the same P&L, the same confident numbers.
+    # Backtest #355 had the box ticked, was answered about NONE of its three
+    # shorts, and reported borrow_checked: True above a -$449.71 trade in MMED
+    # that the live desk could not place at all.
+    #
+    # It does not refuse the run: a backtest that cannot reach the broker is
+    # still worth reading, and refusing would make the tool unusable offline.
+    # But it must be impossible to read the result as "borrow was checked".
+    if acct and acct.get('borrow_asked'):
+        unchecked = acct.get('borrow_unchecked_names') or []
+        answered = acct.get('borrow_answered')
+        if unchecked and not answered:
+            out['warnings'].append(
+                (f'borrow was NOT checked — the broker answered about none of '
+                 f'{len(unchecked)} short(s)',
+                 'The run holds every short it found, including ones the '
+                 'account cannot borrow. Backtest #355 kept MMED for -$449.71 '
+                 'and live could not place it at all. Unchecked: '
+                 + ', '.join(unchecked[:12])
+                 + (f' +{len(unchecked) - 12} more' if len(unchecked) > 12 else '')
+                 + '.'))
+        elif unchecked:
+            out['warnings'].append(
+                (f'borrow unchecked on {len(unchecked)} of '
+                 f'{len(unchecked) + int(answered or 0)} short(s)',
+                 'Those are held whatever the account could actually borrow: '
+                 + ', '.join(unchecked[:12])
+                 + (f' +{len(unchecked) - 12} more' if len(unchecked) > 12 else '')
+                 + '.'))
     return out
 
 
