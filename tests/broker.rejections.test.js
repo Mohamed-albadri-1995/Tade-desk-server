@@ -87,7 +87,17 @@ describe('a short in a name the broker will not borrow', () => {
     expect(out.sent).toBe(false);
     expect(out.skipped).toMatch(/not shortable/i);
     expect(global.fetch).not.toHaveBeenCalled();
-    expect(alpaca.checkShortable).toHaveBeenCalledWith('STKH');
+    /*
+     * THE SYMBOL, AND THE ACCOUNT'S OWN CREDENTIALS BESIDE IT.
+     *
+     * The second argument is the fix for a 401: without it the lookup used the
+     * desk-wide profile, which is not authorised, so the check answered "could
+     * not ask" on every short and sent anyway. See tests/broker.borrowCreds.
+     * It is null HERE only because this fixture's destination carries no keys —
+     * what matters is that the argument is passed at all.
+     */
+    expect(alpaca.checkShortable.mock.calls[0][0]).toBe('STKH');
+    expect(alpaca.checkShortable.mock.calls[0]).toHaveLength(2);
   });
 
   test('a shortable name goes out exactly as before', async () => {

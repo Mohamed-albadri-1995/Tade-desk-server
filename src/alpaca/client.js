@@ -353,19 +353,74 @@ async function fetchAccountEquity() {
  */
 const _assetCache = new Map();
 
-async function fetchAsset(symbol) {
+/**
+ * THE ACCOUNT'S OWN KEYS WHEN IT HAS THEM, the desk-wide ones otherwise.
+ *
+ * 2026-09-16, asked for MMED:
+ *
+ *     {"ok":true,"checked":false,
+ *      "reason":"Alpaca asset MMED 401: {\"message\": \"unauthorized.\"}"}
+ *
+ * 401. Not a rate limit, not a delisted symbol — the credentials this used
+ * were not accepted at all. authHeaders() reads getCredentials(): the old
+ * desk-wide profile from the trading_brokers table. The accounts that actually
+ * trade keep their keys in data/broker.json and are read through
+ * src/alpaca/account.js, which answers for both of them fine.
+ *
+ * So the borrow check had been returning "could not ask" on EVERY short, and
+ * checkShortable's contract is that an unanswerable check never blocks: it
+ * warned to a PM2 log and sent. The protection has never once run. 2026-09-15:
+ *
+ *     SHORT MMED 1886 sh · alpaca1: FAILED — asset "MMED" cannot be sold short
+ *
+ * The check exists precisely to catch that before the order goes out, and it
+ * was the failure its own comments describe — "a protective check that
+ * silently did not happen looks exactly like one that passed".
+ */
+function assetAuth(creds) {
+  if (creds && creds.keyId && creds.secret) {
+    return {
+      headers: {
+        'APCA-API-KEY-ID': String(creds.keyId),
+        'APCA-API-SECRET-KEY': String(creds.secret),
+        'Content-Type': 'application/json',
+      },
+      // Paper and live list different assets; asking the wrong one is a
+      // different question, not a slower route to the same answer.
+      base: require('./account').baseUrlFor(creds),
+      /*
+       * WHOSE ANSWER THIS IS. The cache was keyed on the SYMBOL alone, so one
+       * account's reply would have been served to the other — and "can I short
+       * this" is a question about an account, not about a ticker.
+       *
+       * HASHED, not truncated. The first attempt used the leading eight
+       * characters of the key and two accounts collided on them in the test
+       * that was written to prove they do not: Alpaca keys share a prefix, so
+       * a slice is a near-miss waiting for the day it matters. Hashed rather
+       * than used whole so the secret is not sitting in a Map key either.
+       */
+      who: require('crypto').createHash('sha1')
+        .update(String(creds.keyId)).digest('hex').slice(0, 12),
+    };
+  }
+  return { headers: authHeaders(), base: getAccountBaseUrl(), who: 'desk' };
+}
+
+async function fetchAsset(symbol, creds = null) {
   const sym = String(symbol || '').trim().toUpperCase();
   if (!sym) return null;
-  const hit = _assetCache.get(sym);
+  const auth = assetAuth(creds);
+  const key = `${auth.who}:${sym}`;
+  const hit = _assetCache.get(key);
   if (hit && Date.now() - hit.at < 6 * 60 * 60 * 1000) return hit.asset;
-  const url = `${getAccountBaseUrl()}/v2/assets/${encodeURIComponent(sym)}`;
-  const res = await fetch(url, { headers: authHeaders() });
+  const url = `${auth.base}/v2/assets/${encodeURIComponent(sym)}`;
+  const res = await fetch(url, { headers: auth.headers });
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Alpaca asset ${sym} ${res.status}: ${body.slice(0, 200)}`);
   }
   const asset = await res.json();
-  _assetCache.set(sym, { at: Date.now(), asset });
+  _assetCache.set(key, { at: Date.now(), asset });
   return asset;
 }
 
@@ -378,7 +433,7 @@ async function fetchAsset(symbol) {
  * short on the box, which is a far worse failure than the emails this exists to
  * prevent. Unknown means send it and let the broker answer.
  */
-async function checkShortable(symbol) {
+async function checkShortable(symbol, creds = null) {
   try {
     /*
      * ASKED TWICE before giving up.
@@ -396,10 +451,10 @@ async function checkShortable(symbol) {
      */
     let a = null;
     try {
-      a = await fetchAsset(symbol);
+      a = await fetchAsset(symbol, creds);
     } catch (first) {
       await new Promise(r => setTimeout(r, 250));
-      a = await fetchAsset(symbol);            // a second failure throws, below
+      a = await fetchAsset(symbol, creds);      // a second failure throws, below
       if (a) console.warn(`[Alpaca] asset ${symbol} answered on the second ask `
         + `(first: ${first.message})`);
     }

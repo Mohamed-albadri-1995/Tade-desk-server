@@ -1741,7 +1741,13 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
    * question. An unanswerable check never blocks — see checkShortable.
    */
   if (action === 'sell' && cfg.dialect === 'alpaca') {
-    const borrow = await require('../alpaca/client').checkShortable(symbol);
+    /*
+     * WITH THIS ACCOUNT'S OWN KEYS. Without them the lookup used the desk-wide
+     * profile, which answers 401 — so the check reported "could not ask" on
+     * every short and sent anyway, for as long as it has existed.
+     */
+    const borrow = await require('../alpaca/client').checkShortable(
+      symbol, require('../alpaca/account').credsOf(cfg));
     if (!borrow.ok) {
       const out = { ...base, quantity: 0, sent: false, skipped: borrow.reason };
       record(out); return out;
