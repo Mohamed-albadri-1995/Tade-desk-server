@@ -969,7 +969,7 @@ app.get('/api/tools', (req, res) => {
  */
 const sessionLog = require('../setups/sessionLog');
 
-app.get('/api/session-log', (req, res) => {
+app.get('/api/session-log', async (req, res) => {
   // NEVER 500. This is the page someone opens BECAUSE something went wrong,
   // and a reader that fails when the day was bad is a reader that is never
   // there when it is needed.
@@ -979,7 +979,28 @@ app.get('/api/session-log', (req, res) => {
     const setupId = String(req.query.setup || '') || null;
     const kind = String(req.query.kind || '');
     const limit = Math.min(Math.max(Number(req.query.limit) || 400, 1), 5000);
-    const out = { ok: true, date, summary: sessionLog.summaryOf(date) };
+    /*
+     * THE CATALOG IS PASSED IN so the summary can name a setup that was due
+     * and never ran — which writes no row, so a log-only reader cannot see it.
+     * On 2026-09-16 the 09:35 setup was absent from this page entirely because
+     * its owning tool was restarting at 09:34, and an absent setup reads like
+     * a quiet one.
+     *
+     * AND IT NEVER COSTS THE LOG. A catalog that cannot be read must not stop
+     * the page that is open because something went wrong; the day's rows are
+     * the point, and the missing-setup list is the extra.
+     */
+    let catalog = null;
+    try {
+      catalog = await require('../setups/catalog').list();
+    } catch (err) {
+      catalog = null;
+    }
+    const out = { ok: true, date, summary: sessionLog.summaryOf(date, catalog) };
+    if (!catalog) {
+      out.dueUnknown = 'The setup list could not be read, so a setup that was '
+        + 'due and never ran cannot be named here — only the runs that exist.';
+    }
     if (kind !== 'pass') {
       // NEWEST FIRST. The file is append-only and oldest-first, which is the
       // right order to write and the wrong one to open: what just happened is

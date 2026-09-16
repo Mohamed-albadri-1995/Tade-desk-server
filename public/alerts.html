@@ -3364,11 +3364,17 @@ async function loadLog() {
     sum.innerHTML = control + setups.map(([id, g]) => `
       <div class="lg-set">
         <h4>${esc(g.setup || id)}
-          <span class="when">${g.runs} run${g.runs === 1 ? '' : 's'}${
+          <span class="when">${g.neverRan
+            ? `NEVER RAN · due ${esc(g.dueBar || '')}`
+            : `${g.runs} run${g.runs === 1 ? '' : 's'}`}${
             g.firstBar ? ` · ${esc(g.firstBar)}${g.lastBar && g.lastBar !== g.firstBar
               ? `–${esc(g.lastBar)}` : ''}` : ''}${
             g.msMax ? ` · slowest ${g.msMax}ms` : ''}</span></h4>
-        ${lgFunnel({ cards: null, kept: null, evaluated: g.evaluated,
+        ${/* NO FUNNEL FOR A SETUP THAT NEVER RAN. "0 evaluated · 0 signalled ·
+              0 taken" is the picture of a setup that looked and found nothing,
+              which is the exact misreading this entry exists to prevent. It
+              did not look. */''}
+        ${g.neverRan ? '' : lgFunnel({ cards: null, kept: null, evaluated: g.evaluated,
                      signalled: g.signalled, picked: g.picked })}
         ${/* THE TILES ARE TOTALS ACROSS RUNS, and for a watch setup that is
               not the number of things it found. Said here rather than left to
@@ -3378,7 +3384,7 @@ async function loadLog() {
              ${g.signalledBars} bar${g.signalledBars === 1 ? '' : 's'}, and qp
              re-reports a session's entries on every bar it is asked about</div>`
           : ''}
-        <div class="note">
+        ${g.neverRan ? '' : `<div class="note">
           ${g.ordersSent} order(s) sent${g.ordersFailed ? `, ${g.ordersFailed} failed` : ''}${
             g.ordersSkipped ? `, ${g.ordersSkipped} skipped` : ''}${
             /* THE DISTINCT NAMES, and the repeat said separately. qp
@@ -3391,7 +3397,7 @@ async function loadLog() {
                 g.staleRepeats === 1 ? '' : 's'})` : ''}` : ''}${
             g.latched ? ` · ${g.latched} held by the latch` : ''}${
             g.failed ? ` · ${g.failed} run(s) FAILED` : ''}
-        </div>
+        </div>`}
         ${g.staleNames && g.staleNames.length
           ? `<div class="note">stale: ${g.staleNames.map(esc).join(', ')}</div>` : ''}
         ${/* THE FEED'S AGE, NOT JUST ITS COVERAGE. A delayed feed has 100%

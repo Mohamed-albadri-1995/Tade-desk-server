@@ -407,7 +407,64 @@ function canariesOn(date) { return read(date).filter(isCanary); }
  * because the alerts are only the names that survived every stage, and the
  * stages are where a strategy stops being the one that was tested.
  */
-function summaryOf(date) {
+/**
+ * The setups that were DUE on `date` and wrote no line at all.
+ *
+ * 2026-09-16. The 09:35 OR+VWAP setup has one row in the whole day's log: a
+ * rehearsal at 09:25, pressed by hand. Nothing at 09:34, its only decision
+ * bar. Not "no cards", not "nothing qualified", not a failure — nothing.
+ *
+ * `runSetup` writes a row even when the decision throws, on purpose, so an
+ * absent row can only mean it was never called. It was never called because
+ * the process that calls it was dead: tool-T2 had restarted 292 times that
+ * morning, and a setup's decision is scheduled inside the tool that owns it. A
+ * crash-looping owner takes its setups' whole trading day with it, silently.
+ *
+ * AND THE DAY READ AS QUIET. `summaryOf` is keyed on rows that exist, so a
+ * setup that never ran is simply absent from it — which on the page looks
+ * exactly like a setup that ran and found nothing. The same absence for the
+ * day the desk was down and the day the market was dull. A silence read as a
+ * pass, and the most expensive kind: it is the setup that makes the money.
+ *
+ * Nothing here can know WHY, and it does not guess. It says the setup was due,
+ * name the bar, and name the tool that owed the answer.
+ *
+ * `setups` comes from catalog.list() — passed in rather than required, because
+ * this file is read by the tools AND by the alerts box, and a log reader that
+ * loads the catalog to read a log is a log reader that can fail to read a log.
+ */
+function missingOn(date, setups, nowAt = Date.now()) {
+  const { toETDate, toETTime } = require('../utils/time');
+  const ran = new Set(runsOn(date).filter(r => !r.rehearsal).map(r => r.setupId));
+  const today = toETDate(nowAt);
+  // A future date is not late. Today is late only past the bar itself; any
+  // earlier date is over, so every bar in it has passed.
+  if (date > today) return [];
+  const nowHHMM = date === today ? toETTime(nowAt) : '23:59';
+  const out = [];
+  for (const s of setups || []) {
+    if (!s || s.enabled === false) continue;
+    if (ran.has(s.id)) continue;
+    const bar = s.decidesOnBar || s.decisionTime;
+    // No decision bar is not a missing run — there was no appointment to miss.
+    if (!bar || bar > nowHHMM) continue;
+    const tools = (s.tools || []).join(', ');
+    out.push({
+      setupId: s.id,
+      setup: s.name || s.id,
+      bar,
+      tools: s.tools || [],
+      reason: `Due on the ${bar} bar and never asked — no line was written at `
+        + `all, which is not "nothing qualified". The decision runs inside `
+        + `${tools ? `the tool that owns it (${tools})` : 'its owning tool'}, `
+        + 'so the usual cause is that the tool was down or restarting at that '
+        + 'minute. Check `pm2 list` for its restart count.',
+    });
+  }
+  return out;
+}
+
+function summaryOf(date, setups = null, nowAt = Date.now()) {
   const out = {};
   /*
    * REHEARSALS ARE RECORDED AND NOT COUNTED.
@@ -525,10 +582,34 @@ function summaryOf(date) {
         + 'refused as stale. A one-minute setup cannot run on a delayed feed.');
     }
   }
+
+  /*
+   * THE SETUPS THAT WERE DUE AND WROTE NOTHING, folded in with the ones that
+   * ran — because the reader is asking "did the desk do what I set it up to
+   * do today", and a setup that was never asked is the loudest possible No.
+   *
+   * It is added as a normal entry with `runs: 0` so every reader already
+   * written — the page, the CSV, anything counting setups — shows it without
+   * knowing this case exists. `neverRan` marks it for anything that cares.
+   */
+  for (const m of missingOn(date, setups, nowAt)) {
+    if (out[m.setupId]) continue;
+    out[m.setupId] = {
+      setup: m.setup, runs: 0, failed: 0, quiet: 0,
+      firstBar: m.bar, lastBar: null, msMax: 0,
+      evaluated: 0, signalled: 0, picked: 0,
+      staleDropped: 0, latched: 0, signalledBars: 0,
+      staleNames: [], staleRepeats: 0,
+      ordersSent: 0, ordersFailed: 0, ordersSkipped: 0,
+      neverRan: true, dueBar: m.bar, tools: m.tools,
+      problems: [`NEVER RAN. ${m.reason}`],
+    };
+  }
   return out;
 }
 
 module.exports = {
   record, passOf, runOf, read, trackOf, symbolsOn,
-  runsOn, passesOn, canariesOn, summaryOf, isRun, isPass, isCanary, fileFor, LOG_DIR,
+  runsOn, passesOn, canariesOn, summaryOf, missingOn,
+  isRun, isPass, isCanary, fileFor, LOG_DIR,
 };
