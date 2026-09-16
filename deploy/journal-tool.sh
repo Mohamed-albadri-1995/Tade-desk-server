@@ -287,11 +287,83 @@ app.get('/_patch.js', (req, res) => {
   if (!PATCH) return res.type('js').send('/* no patch configured */');
   res.type('js').sendFile(PATCH);
 });
+/*
+ * ── THE CALENDAR GRID, FIXED IN PLACE ────────────────────────────────────
+ *
+ * The Calendar tab is a 6-column grid: Mon Tue Wed Thu Fri Week. It had TWO
+ * faults, and together they put the wrong number under the wrong day for most
+ * of the year.
+ *
+ * 1. THE WEEK TOTAL WAS WRITTEN TWICE. `if (dw===4) flushWeek()` closes the
+ *    week on Friday, and `if (dw>4){if(dw===5)flushWeek();continue;}` closed
+ *    it AGAIN on Saturday. Every full week therefore emitted two Week cells,
+ *    and each extra cell shoves the rest of the month one column left. On
+ *    September 2026 that is what put Sep 15 — a Tuesday — under Thursday.
+ *
+ * 2. THE LAST WEEK OF THE MONTH WAS NEVER PADDED. A month ending on a
+ *    Wednesday emits three day cells and then the Week total, so the total
+ *    lands in column 4 rather than under 'Week'. Fixing (1) alone leaves this
+ *    one visible, which is how it was found.
+ *
+ * 3. AND THE LAST WEEK WAS ONLY CLOSED IF IT CONTAINED A TRADE. The final
+ *    `if (weekHas) flushWeek()` reads `weekHas`, which is set only when a day
+ *    has a RECORD — so a month whose last few days were quiet ended with an
+ *    unclosed row: no padding, no Week cell, a grid that is not a multiple of
+ *    six. Whether a week TRADED and whether its row is OPEN are two different
+ *    questions, and one flag was answering both. `weekHas` still decides
+ *    whether the cell shows a total or an em-dash; the row closes because it
+ *    is open.
+ *
+ *    This one was invisible to reading. It only appears when the last week of
+ *    the month has no trades in it, which is why it survived (1) and (2) being
+ *    found and was caught by running the real function over 48 months.
+ *
+ * WHY HERE. journal.html is 1,079 lines on a branch with no shared history
+ * with this repo; forking it would put two copies in circulation and guarantee
+ * they drift, which is the reason the add-ons are injected rather than merged.
+ * A patch.js override would have to restate the whole 60-line render function
+ * — the same fork, in a different file. This replaces two expressions in the
+ * source string and nothing else.
+ *
+ * AND IT IS LOUD WHEN IT MISSES. If that branch ever moves and these needles
+ * stop matching, a silent no-op would put the bug back with nothing to read.
+ * The page is still served — a mislaid week total is not worth a blank
+ * journal — and the miss is printed and counted.
+ */
+const CAL_FIXES = [
+  { what: 'the Saturday double-flush',
+    find: 'if (dw>4){if(dw===5)flushWeek();continue;}',
+    put:  'if (dw>4){continue;}' },
+  { what: 'padding the last week to the Week column',
+    find: 'function flushWeek(){',
+    put:  'function flushWeek(){while(cells.length%6!==5)cells.push('
+          + '\'<div></div>\');' },
+  { what: 'closing a final week that had no trades in it',
+    find: 'if (weekHas) flushWeek();',
+    put:  'if (cells.length%6) flushWeek();' },
+];
+function fixCalendar(html) {
+  const missed = [];
+  for (const f of CAL_FIXES) {
+    if (!html.includes(f.find)) { missed.push(f.what); continue; }
+    html = html.replace(f.find, f.put);
+  }
+  if (missed.length) {
+    console.warn('[journal] calendar NOT patched (' + missed.join('; ')
+      + ') — journal.html has changed. The week totals will sit in the wrong'
+      + ' column until the needles in deploy/journal-tool.sh are updated.');
+  }
+  return html;
+}
+
 app.get('/', (req, res) => {
   const file = path.join(__dirname, 'public', 'journal.html');
-  if (!PATCH) return res.sendFile(file);
   fs.readFile(file, 'utf8', (err, html) => {
-    if (err) return res.status(500).send(String(err));
+    // The calendar fix applies whether or not the add-ons are configured: it
+    // is a correction to the page's own arithmetic, not an add-on.
+    if (err) return PATCH ? res.status(500).send(String(err)) : res.sendFile(file);
+    html = fixCalendar(html);
+    if (!PATCH) return res.type('html').send(html);
     const tag = '<script src="/_patch.js"></script>';
     // If </body> is ever missing, append rather than silently drop the tag —
     // a page that quietly loses the delete fix is the failure being fixed.
