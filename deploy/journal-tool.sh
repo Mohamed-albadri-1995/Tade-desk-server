@@ -31,6 +31,63 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "→ repo=$REPO  app=$APP_DIR  port=$PORT"
 
+# ── IS THIS SCRIPT ITSELF CURRENT? ────────────────────────────────────────
+#
+# THE TRAP, walked into the day the calendar fix shipped. This script fetches
+# the JOURNAL APP branch and nothing else — it never pulls the repo it lives
+# in. So a fix landing in this file is not on the box until somebody runs `git
+# pull` for an unrelated reason, and running `./deploy/journal-tool.sh` from a
+# stale checkout re-deploys the OLD launcher while reporting a clean deploy:
+# three green 200s, "patch injected into / : 1", and the bug still in the page.
+#
+# deploy-tools.sh already carries the same lesson at its top — "A deploy script
+# that only takes effect on the NEXT deploy is a trap with no floor" — but it
+# pulls first, so it cannot happen there. This one does not pull, and must not:
+# pulling the desk repo would rewrite tool code on disk without restarting the
+# tools, which is a worse surprise than stopping.
+#
+# So it STOPS, and says the command. It does not pull on your behalf.
+#
+# A LOCAL EDIT IS NOT STALENESS. If the file differs from HEAD as well, it is
+# being worked on — that is said and the run continues, because refusing to
+# deploy your own edit would be the more annoying failure.
+DESK_BRANCH="$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+SELF_REL="deploy/$(basename "${BASH_SOURCE[0]}")"
+if [ -n "$DESK_BRANCH" ] && [ "$DESK_BRANCH" != "HEAD" ]; then
+  git -C "$REPO" fetch origin "$DESK_BRANCH" --quiet 2>/dev/null || true
+  _here=$(git -C "$REPO" hash-object "$REPO/$SELF_REL" 2>/dev/null || echo '')
+  # --verify --quiet, NOT a bare rev-parse. A bare `git rev-parse bad-ref`
+  # ECHOES THE REF BACK ON STDOUT and then exits non-zero, so `$(… || echo '')`
+  # captures the ref string rather than an empty answer — and a repo with no
+  # remote read as "behind origin/master" and refused to deploy. --verify
+  # prints nothing and fails cleanly, which is the only way the emptiness test
+  # below means what it says.
+  _head=$(git -C "$REPO" rev-parse --verify --quiet "HEAD:$SELF_REL" || echo '')
+  _there=$(git -C "$REPO" rev-parse --verify --quiet "origin/$DESK_BRANCH:$SELF_REL" || echo '')
+  # NOTHING TO BE BEHIND. No remote, an unfetched branch, or a launcher that
+  # has never been pushed — the comparison has no other side, so there is no
+  # staleness to report. Blocking here would stop the deploy on a fresh box
+  # with a message about being behind an origin that does not exist.
+  if [ -z "$_there" ] || [ -z "$_here" ]; then
+    :
+  elif [ "$_here" != "$_there" ]; then
+    if [ "$_here" != "$_head" ]; then
+      echo "→ note: $SELF_REL has uncommitted local edits — running them"
+    else
+      echo
+      echo "  STOPPED: this checkout's $SELF_REL is behind origin/$DESK_BRANCH."
+      echo
+      echo "  This script fetches the journal app branch only — it never pulls"
+      echo "  this repo. Running it now would re-deploy the OLD launcher and"
+      echo "  report a clean deploy over it."
+      echo
+      echo "    git -C $REPO pull && $REPO/$SELF_REL"
+      echo
+      exit 1
+    fi
+  fi
+fi
+
 # ── the code, as a worktree ────────────────────────────────────────────────
 # A worktree rather than a clone: it shares this repo's object store, so it
 # costs no extra download and cannot drift to a different commit than the one
@@ -401,6 +458,28 @@ curl -sS "localhost:$PORT/api/trading/setups" \
   2>/dev/null || echo '? (alerts app unreachable)'
 echo -n 'patch injected into / : '
 curl -sS "localhost:$PORT/" | grep -c '_patch.js' || true
+
+# ── AND THE CALENDAR FIX, CHECKED IN THE PAGE THAT IS SERVED ──────────────
+#
+# "patch injected into / : 1" answered 1 on a page with the calendar bug still
+# in it, because it asks whether the <script> tag is there — which it always
+# is. A verification that cannot fail is not one. This asks the served HTML for
+# the thing the fix actually puts in it, so a launcher that silently stopped
+# patching is caught here rather than in the Calendar tab a week later.
+echo -n 'calendar grid fixed  : '
+_page=$(curl -sS "localhost:$PORT/" 2>/dev/null || true)
+if [ -z "$_page" ]; then
+  echo "COULD NOT CHECK — the page did not answer"
+elif printf '%s' "$_page" | grep -q 'while(cells.length%6!==5)'; then
+  # The marker is the padding fix; it only exists if fixCalendar ran.
+  echo 'yes — week totals sit under Week'
+elif printf '%s' "$_page" | grep -q 'if(dw===5)flushWeek()'; then
+  echo 'NO — the page still has the double week total. Week totals will sit'
+  echo '                       in the wrong column. See fixCalendar in this script.'
+else
+  echo 'UNKNOWN — journal.html no longer looks like either version.'
+  echo '                       Check the needles in CAL_FIXES against the app branch.'
+fi
 echo
 echo "Landing page tile: already registered in tools.config.json (JOURNAL, port $PORT)."
 echo "Remaining step, in the AWS console: open port $PORT in the security group."
