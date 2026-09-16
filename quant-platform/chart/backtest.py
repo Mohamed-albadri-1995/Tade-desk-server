@@ -843,6 +843,15 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         size_ratio = 1.0
     if size_ratio <= 0:
         size_ratio = 1.0                # absent or nonsense = full size
+    # Cost per SIDE as a fraction — spread + slippage, the same number
+    # chart/backtest.py's percentage basis charges. Read here so the dollars
+    # and the percentages cannot drift apart; see the note beside `slip` below.
+    try:
+        cost_side = float(spec.get('cost_bps', 0) or 0) / 10000.0
+    except (TypeError, ValueError):
+        cost_side = 0.0
+    if cost_side < 0:
+        cost_side = 0.0
     fps = float(spec.get('fee_per_share', 0) or 0)
     # the panel posts `fee_min`; `fee_min_per_order` is the block's own output
     # name. Accept BOTH or the per-order minimum silently reads as $0 here
@@ -872,7 +881,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     equity = equity0
     peak = equity0
     maxdd = 0.0
-    fees_tot = pnl_tot = 0.0
+    fees_tot = pnl_tot = slip_tot = 0.0
     unsized = capped = no_capital = pos_capped = no_borrow = 0
     ratio_scaled = ratio_unsized = 0
     # CAN THE ACCOUNT ACTUALLY SHORT THIS?
@@ -1024,8 +1033,34 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         for fr, pps in _fills(t, True):
             gross += shares * fr * pps
             fee += order_fee(shares * fr)
-        net = gross - fee
+        # SPREAD AND SLIPPAGE, IN DOLLARS — the setting that did nothing here.
+        #
+        # `cost_bps` was subtracted from the percentage return and from nothing
+        # else, so the ACCOUNT P&L — the dollars this desk actually reads —
+        # ignored it completely. Backtest #358, cost_bps 50:
+        #
+        #     FTAI  gross_usd 777.98  fees_usd 0.00  net_usd 777.98
+        #
+        # byte-identical to the same run at cost_bps 0, while return_pct moved
+        # by exactly 1.5%. The knob appeared to work, was stored in the spec,
+        # changed a number on screen — and left the headline untouched. Every
+        # account-sized run ever made reported P&L with no transaction cost,
+        # whatever the box said.
+        #
+        # SAME MODEL AS THE PERCENTAGE BASIS, deliberately: cost per SIDE on
+        # the position, entry plus every exit fill (2 + nlegs). Two bases that
+        # charge differently would be a worse fault than the one being fixed.
+        # EVERY SHARE PAYS IT TWICE — once in, once out — and no more than
+        # twice however many pieces the exit is cut into. `(2 + nlegs)` charged
+        # a half-size leg the spread on the WHOLE position, so a two-leg
+        # scale-out paid double what it trades. `realized` is the fraction of
+        # the position that actually closed, so entry (1.0) plus exits (its
+        # sum) is 2.0 for a completed trade and less for a partial one.
+        _realized = sum(fr for fr, _ in _fills(t, True))
+        slip = shares * entry * (1.0 + _realized) * cost_side
+        net = gross - fee - slip
         fees_tot += fee
+        slip_tot += slip
         pnl_tot += net
         sized_n += 1
         if net > 0:
@@ -1042,6 +1077,10 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         _c['acct_risk_usd'] = round(shares * per_share_risk, 2)
         _c['acct_pnl_usd'] = round(net, 2)
         _c['acct_fees_usd'] = round(fee, 2)
+        # SEPARATE FROM FEES. A commission is what the broker charges; this is
+        # what the market takes. Alpaca is commission-free and the slippage is
+        # most of the cost, so adding them together would read as "no cost".
+        _c['acct_slip_usd'] = round(slip, 2)
         _c['acct_equity_before'] = round(equity, 2)
         _c['acct_notional_usd'] = round(shares * entry, 2)
         _c['acct_r_multiple'] = (round(gross / (shares * per_share_risk), 2)
@@ -1093,6 +1132,11 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         'net_pnl_usd': round(pnl_tot, 2),
         'return_pct': round((equity / equity0 - 1.0) * 100.0, 2),
         'fees_usd': round(fees_tot, 2),
+        # WHAT THE MARKET TOOK, beside what the broker charged. On a
+        # commission-free account the fees are zero and this is the whole cost;
+        # summing them into one number would hide that.
+        'slippage_usd': round(slip_tot, 2),
+        'cost_bps_per_side': round(cost_side * 10000.0, 4),
         'trades_sized': sized_n,
         'win_rate_pct': round(100.0 * wins / sized_n, 1) if sized_n else None,
         'avg_pnl_usd': round(pnl_tot / sized_n, 2) if sized_n else None,
@@ -1431,7 +1475,14 @@ def run(spec: dict, progress_cb=None) -> dict:
                                    'entry_ts': t['entry_ts'], 'exit_ts': t['exit_ts'],
                                    'entry': t['entry'], 'exit': t['exit'],
                                    'stop': t.get('stop'),
-                                   'ret': t['ret'] - (2.0 + nlegs) * cost,
+                                   # ONE COST MODEL, NOT TWO. This charged
+                                   # (2 + nlegs) — the whole position's spread
+                                   # for every partial — while the account
+                                   # block charged nothing at all. Both now
+                                   # charge each SHARE twice, in and out; `ret`
+                                   # is already weighted across the legs, so a
+                                   # scale-out exits once in aggregate.
+                                   'ret': t['ret'] - 2.0 * cost,
                                    'reason': t['reason'],
                                    # diagnostics ride in ctx (no schema change)
                                    # THE PRICE THE DECISION USED, beside the
