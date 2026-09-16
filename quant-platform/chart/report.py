@@ -186,15 +186,24 @@ def compute(trades: list, summary: dict, spec: dict) -> dict:
     out['max_consec_wins'], out['max_consec_losses'] = _streaks(vals)
 
     # ── R-multiples: the size-independent view of the same trades ──────────
+    # R READS FROM NET, so it is the same money as net_profit. It used to read
+    # from gross: #363 printed r.total 3.12 beside net_profit $507.46, which on
+    # $500 a trade claims $1,560. The gross total is carried alongside — the
+    # rule's own result, before the fill — never in its place.
     rs = [float((t.get('ctx') or {}).get('acct_r_multiple'))
           for t, _ in pnl if (t.get('ctx') or {}).get('acct_r_multiple') is not None]
     if rs:
+        gs = [float((t.get('ctx') or {}).get('acct_r_multiple_gross'))
+              for t, _ in pnl
+              if (t.get('ctx') or {}).get('acct_r_multiple_gross') is not None]
         out['r'] = {
             'n': len(rs), 'total': round(sum(rs), 2),
             'avg': round(sum(rs) / len(rs), 3),
             'best': round(max(rs), 2), 'worst': round(min(rs), 2),
             # the shape of the distribution, not just its mean
             'buckets': _r_buckets(rs),
+            'basis': 'net',
+            'total_gross': (round(sum(gs), 2) if gs else None),
         }
 
     # ── holding time ───────────────────────────────────────────────────────
@@ -445,7 +454,8 @@ JOURNAL_COLUMNS = [
     ('hold_min', 'held (min)'),
     ('shares', 'shares'), ('position_usd', 'position $'),
     ('risk_usd', 'risk $'), ('gross_usd', 'gross $'), ('fees_usd', 'fees $'),
-    ('net_usd', 'net $'), ('r_multiple', 'R'), ('return_pct', 'move %'),
+    ('net_usd', 'net $'), ('r_multiple', 'R'), ('r_multiple_gross', 'R gross'),
+    ('return_pct', 'move %'),
     ('equity_before', 'equity before'), ('equity_after', 'equity after'),
     ('open_notional_usd', 'exposure at entry $'),
     ('scale_out_legs', 'legs'),
@@ -566,6 +576,7 @@ def journal(trades: list, summary: dict) -> list:
             'risk_usd': c.get('acct_risk_usd'),
             'gross_usd': gross, 'fees_usd': fee, 'net_usd': net,
             'r_multiple': c.get('acct_r_multiple'),
+            'r_multiple_gross': c.get('acct_r_multiple_gross'),
             # The prop-firm minimum is per SHARE, so this is the number that
             # decides whether the profit counts — and it is invisible in a
             # percent column: +2.70% on a $1.93 stock is five cents.

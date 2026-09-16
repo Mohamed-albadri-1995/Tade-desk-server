@@ -121,8 +121,15 @@ ok("position notional $50,000", abs(c.get('acct_notional_usd', 0) - 50000) < 1e-
    f"{c.get('acct_notional_usd')}")
 ok("P&L -$550 (loss + $50 fees)", abs(c.get('acct_pnl_usd', 0) + 550) < 1e-6,
    f"{c.get('acct_pnl_usd')}")
-ok("R-multiple -1.0 on a stop-out", c.get('acct_r_multiple') == -1.0,
-   f"{c.get('acct_r_multiple')}")
+# R READS FROM NET — so on a stop-out it is worse than -1R by exactly the
+# commissions. This asserted -1.0 while the same block reported net -$550 on
+# $500 of risk: R and the dollars describing two different results, which is
+# the fault logic_audit73 exists for. The strategy's own -1.00 is kept beside
+# it, because "the stop did what it was told" is still worth reading.
+ok("R-multiple -1.1 on a stop-out — the fees come out of R too",
+   c.get('acct_r_multiple') == -1.1, f"{c.get('acct_r_multiple')}")
+ok("and the strategy's own R is exactly -1.0",
+   c.get('acct_r_multiple_gross') == -1.0, f"{c.get('acct_r_multiple_gross')}")
 ok("equity before the trade = 100,000",
    abs(c.get('acct_equity_before', 0) - 100000) < 1e-6, f"{c.get('acct_equity_before')}")
 rows2 = [T(10.00, 11.00, None)]

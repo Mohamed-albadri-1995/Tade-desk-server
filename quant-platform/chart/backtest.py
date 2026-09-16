@@ -1083,8 +1083,24 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         _c['acct_slip_usd'] = round(slip, 2)
         _c['acct_equity_before'] = round(equity, 2)
         _c['acct_notional_usd'] = round(shares * entry, 2)
-        _c['acct_r_multiple'] = (round(gross / (shares * per_share_risk), 2)
+        # R IS WHAT THE ACCOUNT KEPT, DIVIDED BY WHAT IT PUT AT RISK. It was
+        # computed from `gross`, so the moment the cost model started charging
+        # real dollars the two numbers on the same screen stopped agreeing:
+        # backtest #363 reported r.total 3.12 beside net_profit $507.46 — on
+        # $500 of risk a trade, 3.12R reads as $1,560. Three times the money,
+        # in the headline, from the same run.
+        #
+        # The risk denominator stays GROSS on purpose: the stop is a price, and
+        # the dollars it protects are the dollars actually committed. Charging
+        # the cost to the denominator too would net it out twice.
+        _risk_usd = shares * per_share_risk
+        _c['acct_r_multiple'] = (round(net / _risk_usd, 2)
                                  if per_share_risk > 0 else None)
+        # AND THE STRATEGY'S OWN NUMBER, KEPT BESIDE IT. Net R answers "what
+        # did this account make"; gross R answers "was the rule any good".
+        # Collapsing them would hide a strategy that works at a better fill.
+        _c['acct_r_multiple_gross'] = (round(gross / _risk_usd, 2)
+                                       if per_share_risk > 0 else None)
         _c['acct_open_notional_usd'] = round(open_notional + shares * entry, 2)
         # PROP-FIRM MIN-PROFIT, AT THE ACCOUNT'S OWN SIZE. The rule is per
         # SHARE, so whether a win clears it does not depend on size at all —

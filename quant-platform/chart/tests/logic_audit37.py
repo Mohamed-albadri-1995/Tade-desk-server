@@ -245,8 +245,13 @@ a_sc = bt._account_block(SCALE, {'account_equity': 100000, 'risk_pct': 1.0,
 ok('every leg is priced at its own exit, not at the runner\'s',
    a_sc['net_pnl_usd'], 5500.0 - 10.0)
 ok('one commission per ORDER — entry plus three exits', a_sc['fees_usd'], 10.0)
-ok('R multiple over the whole position = 5500 / 1000',
-   SCALE[0]['ctx']['acct_r_multiple'], 5.5)
+# R READS FROM NET, so the $10 of commission above comes out of it: 5490/1000.
+# This asserted 5.5 beside a net of $5,490 — R and the dollars disagreeing on
+# the same trade. The gross 5.5 is still reported, next to it.
+ok('R multiple over the whole position = 5490 / 1000, net of the commission',
+   SCALE[0]['ctx']['acct_r_multiple'], 5.49)
+ok('and the strategy\'s own R, before the commission, = 5500 / 1000',
+   SCALE[0]['ctx']['acct_r_multiple_gross'], 5.5)
 
 # The fractions must be honoured exactly: a leg list that does not reach 1.0
 # leaves a runner, and one that exceeds it must not invent shares.
