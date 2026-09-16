@@ -125,7 +125,31 @@ function page(trades, destinations = null) {
     return card;
   });
 
-  const byId = { 'jnl-cards-container': container };
+  /*
+   * THE PAGE'S OWN ACCOUNT FILTER — public/journal.html:101. It is the whole
+   * point of this file now: the patch no longer draws a control of its own, it
+   * adds the desk's accounts to this one.
+   *
+   * `options` is the live list of <option> children, as a browser's is.
+   */
+  const select = mkEl('select');
+  select.id = 'filter-account';
+  Object.defineProperty(select, 'options', { get() { return select.children; } });
+  const opt = (value, text) => {
+    const o = mkEl('option');
+    o.value = value;
+    o.textContent = text;
+    select.appendChild(o);
+    return o;
+  };
+  // The page fills it from the accounts the TRADES carry, exactly as
+  // journal.html does, before the patch ever runs.
+  opt('', 'All accounts');
+  [...new Set(trades.map(t => t && t.account).filter(Boolean))].sort()
+    .forEach(a => opt(a, a));
+  root.appendChild(select);
+
+  const byId = { 'jnl-cards-container': container, 'filter-account': select };
   const doc = {
     getElementById: (id) => byId[id] || null,
     createElement: (tag) => mkEl(tag),
@@ -186,110 +210,138 @@ function page(trades, destinations = null) {
   ctx.window = ctx;
   vm.createContext(ctx);
   vm.runInContext(SRC, ctx, { filename: 'patch.js' });
-  return { ctx, doc, container, cards, bar: () => byId['jnl-acct-bar'] || null };
+  return {
+    ctx, doc, container, cards, select,
+    /** [value, label] for every option, in order. */
+    options: () => select.children.map(o => [o.value, o.textContent]),
+  };
 }
 
 const T = (id, account) => ({ id, ticker: 'WULF', date: '2026-09-01', account });
 
-describe('the account bar', () => {
+/*
+ * THE PATCH NO LONGER DRAWS AN ACCOUNT FILTER, and these tests changed with it.
+ *
+ * They used to drive `#jnl-acct-bar` — a row of buttons this file added above
+ * the trades list. It is gone. public/journal.html:101 has always carried
+ *
+ *     <select id="filter-account">
+ *
+ * populated from every trade's `account`, and on change it runs applyScope()
+ * and renderAll() — so it filters the calendar, the stats, the risk tab and
+ * the setups tab as well as the cards. The bar filtered only the cards, by
+ * hiding them, on one tab.
+ *
+ * Two controls for one question, one of them weaker, in the same header. The
+ * report was exactly that: "the filters are double and they don't even work".
+ *
+ * The one thing the bar had that the select does not is the accounts the DESK
+ * knows — the select is built from trades on screen, so an account that has
+ * not traded today is missing from it, and that is precisely the morning worth
+ * looking at (2026-09-08: every order to alpaca2 refused, one account with
+ * rows and two to tell apart). So those are merged INTO the select.
+ */
+
+describe('the desk\'s accounts are added to the page\'s own filter', () => {
+  const DESK = [{ id: 'alpaca1', name: 'alpaca100k935' },
+                { id: 'alpaca2', name: 'Alpaca100ktest' }];
+  const settled = () => new Promise((r) => setTimeout(r, 0));
+
+  test('no second control is drawn', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
+    await settled();
+    expect(p.doc.getElementById('jnl-acct-bar')).toBeNull();
+  });
+
   /*
-   * NOTHING IS DRAWN FOR ONE ACCOUNT. A filter with a single option can only do
-   * nothing, and on a one-account desk the trades carry no account at all — so
-   * a chooser would imply there is something to choose between.
+   * ONE ENTRY PER ACCOUNT. Two accounts and four options was the original
+   * complaint, and it came from keying on the NAME while trades carry the ID.
    */
-  test('one account: no bar at all', () => {
-    const p = page([T('1', null), T('2', null)]);
-    expect(p.bar()).toBeNull();
+  test('two accounts give two entries beside All, not four', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
+    await settled();
+    expect(p.options().map(o => o[0])).toEqual(['', 'alpaca1', 'alpaca2']);
   });
 
-  test('two accounts: a bar appears', () => {
-    const p = page([T('1', 'paperA'), T('2', 'paperB')]);
-    expect(p.bar()).not.toBeNull();
-  });
-
-  test('it offers ALL plus one button per account, all first', () => {
-    const p = page([T('1', 'paperB'), T('2', 'paperA')]);
-    const labels = p.bar().querySelectorAll('button[data-acct]')
-      .map(b => b.getAttribute('data-acct'));
-    // 'all' leads: the combined book answers "how is the desk doing", and one
-    // account is the exception you ask for.
-    expect(labels).toEqual(['all', 'paperA', 'paperB']);
-  });
-
-  // BUILT FROM THE TRADES ON SCREEN. Add an account at the desk and it appears
-  // the first time it trades — nothing to register in the journal as well.
-  test('an account nobody traded gets no button', () => {
-    const p = page([T('1', 'paperA')]);
-    expect(p.bar()).toBeNull();
-  });
-});
-
-describe('what the filter actually does', () => {
-  test('everything is visible to begin with', () => {
-    const p = page([T('1', 'paperA'), T('2', 'paperB')]);
-    expect(p.cards.map(c => c.style.display)).toEqual(['', '']);
-  });
-
-  test('picking one account hides the other', () => {
-    const p = page([T('1', 'paperA'), T('2', 'paperB')]);
-    const btn = p.bar().querySelectorAll('button[data-acct]')
-      .find(b => b.getAttribute('data-acct') === 'paperB');
-    btn.click();
-    expect(p.cards[0].style.display).toBe('none');
-    expect(p.cards[1].style.display).toBe('');
-  });
-
-  test('and ALL brings them back', () => {
-    const p = page([T('1', 'paperA'), T('2', 'paperB')]);
-    const by = (id) => p.bar().querySelectorAll('button[data-acct]')
-      .find(b => b.getAttribute('data-acct') === id);
-    by('paperA').click();
-    expect(p.cards[1].style.display).toBe('none');
-    by('all').click();
-    expect(p.cards.map(c => c.style.display)).toEqual(['', '']);
-  });
-
-  test('the count says how many are showing, and where', () => {
-    const p = page([T('1', 'paperA'), T('2', 'paperA'), T('3', 'paperB')]);
-    const by = (id) => p.bar().querySelectorAll('button[data-acct]')
-      .find(b => b.getAttribute('data-acct') === id);
-    by('paperA').click();
-    const count = p.bar().children.find(c => c.id === 'jnl-acct-count');
-    expect(count.textContent).toBe('2 trade(s) in paperA');
-    by('all').click();
-    expect(count.textContent).toBe('3 trade(s)');
-  });
-
-  // A trade with NO account — typed in by hand, or imported before accounts
-  // existed — belongs to no account and must not vanish from the combined view.
-  test('an untagged trade shows under ALL and under neither account', () => {
-    const p = page([T('1', 'paperA'), T('2', 'paperB'), T('3', null)]);
-    const by = (id) => p.bar().querySelectorAll('button[data-acct]')
-      .find(b => b.getAttribute('data-acct') === id);
-    expect(p.cards[2].style.display).toBe('');
-    by('paperA').click();
-    expect(p.cards[2].style.display).toBe('none');
-    by('all').click();
-    expect(p.cards[2].style.display).toBe('');
-  });
-});
-
-describe('where the bar lives', () => {
   /*
-   * OUTSIDE THE CONTAINER, like the status line and for the same reason: the
-   * list replaces its own innerHTML on every filter, sort and delete, so a
-   * control inside it would survive exactly until the first keystroke.
+   * THE ID IS THE VALUE. It is what every trade carries and what the page
+   * compares against; the name is only what a person reads.
    */
-  test('it is a sibling of the card list, not a child of it', () => {
-    const p = page([T('1', 'paperA'), T('2', 'paperB')]);
-    expect(p.container.children.some(c => c.id === 'jnl-acct-bar')).toBe(false);
-    expect(p.bar().parentNode).toBe(p.container.parentNode);
+  test('the value is the id and the label carries the name', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
+    await settled();
+    expect(p.options()).toEqual([
+      ['', 'All accounts'],
+      ['alpaca1', 'alpaca100k935 \u00b7 alpaca1'],
+      ['alpaca2', 'Alpaca100ktest \u00b7 alpaca2'],
+    ]);
   });
 
-  test('and it is drawn BEFORE the list', () => {
-    const p = page([T('1', 'paperA'), T('2', 'paperB')]);
-    const kids = p.container.parentNode.children;
-    expect(kids.indexOf(p.bar())).toBeLessThan(kids.indexOf(p.container));
+  test('an account whose name IS its id is not written twice', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')],
+                   [{ id: 'alpaca1', name: 'alpaca1' }, { id: 'alpaca2', name: 'alpaca2' }]);
+    await settled();
+    expect(p.options()[1]).toEqual(['alpaca1', 'alpaca1']);
+  });
+
+  /*
+   * THE ACCOUNT THAT HAS NOT TRADED TODAY. The page cannot know about it — it
+   * builds the list from trades — and it is the one the desk most needs on a
+   * morning where that account's orders were all refused.
+   */
+  test('a known account with no trades on screen is added', async () => {
+    const p = page([T('1', 'alpaca1')], DESK);
+    await settled();
+    expect(p.options().map(o => o[0])).toEqual(['', 'alpaca1', 'alpaca2']);
+  });
+
+  /*
+   * AND AN ACCOUNT ONLY THE TRADES KNOW IS LEFT ALONE. An imported row or a
+   * retired destination must keep its entry, or its trades hide behind a
+   * filter that never lists them.
+   */
+  test('an id only the trades know keeps its own entry', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'ttp5k')], DESK);
+    await settled();
+    expect(p.options().map(o => o[0])).toEqual(['', 'alpaca1', 'ttp5k', 'alpaca2']);
+  });
+
+  /*
+   * NEVER REBUILT, ONLY ADDED TO. The page fills this select itself on every
+   * load and keeps the current selection. Replacing its contents here would be
+   * a second writer to one control.
+   */
+  test('the options the page made are kept, not replaced', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
+    const before = p.select.children[0];
+    await settled();
+    expect(p.select.children[0]).toBe(before);
+    expect(p.options()[0]).toEqual(['', 'All accounts']);
+  });
+
+  test('a destination carrying no id is not added', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')],
+                   DESK.concat([{ name: 'a name with no id' }]));
+    await settled();
+    expect(p.options().map(o => o[0])).toEqual(['', 'alpaca1', 'alpaca2']);
+  });
+
+  /*
+   * A ONE-ACCOUNT DESK IS LEFT COMPLETELY ALONE. There is nothing to tell
+   * apart, and relabelling a lone entry is noise.
+   */
+  test('one account at the desk changes nothing', async () => {
+    const p = page([T('1', null), T('2', null)], [{ id: 'alpaca1', name: 'only' }]);
+    await settled();
+    expect(p.options()).toEqual([['', 'All accounts']]);
+  });
+
+  test('a desk that did not answer leaves the page untouched', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], null);
+    await settled();
+    expect(p.options()).toEqual([
+      ['', 'All accounts'], ['alpaca1', 'alpaca1'], ['alpaca2', 'alpaca2'],
+    ]);
   });
 });
 
@@ -331,139 +383,5 @@ describe('the source contract the desk depends on', () => {
                             price: 10, at: '2026-09-01T13:36:00Z', type: 'fill' }])[0];
     expect(t.extId).toBe('alpaca:f1');
     expect(t.account).toBeNull();
-  });
-});
-
-/* ── the desk's own account list, which was never exercised ──────────────── */
-
-/*
- * "the filters are double and they don't even work"
- *
- * Two Alpaca accounts. Four buttons:
- *
- *     All accounts · Alpaca100ktest · alpaca1 · alpaca100k935 · alpaca2
- *
- * Each account twice — once under its NAME, once under its ID — and the two
- * named ones emptied the page when pressed.
- *
- * ONE CAUSE FOR BOTH HALVES. loadAccountsKnown read `x.name || x.id`, so the
- * desk contributed names while the trades contributed ids: src/alerts/
- * server.js:483 stamps the ID on every row (`tradesFrom(r.fills, id)`). The
- * two lists had no member in common, so the merge could not collapse them, and
- * the name buttons compared a name against an id on every card and matched
- * none.
- *
- * The id is what is COMPARED; the name is what is READ. One string cannot do
- * both jobs, and using it for both is what made a two-account desk look like a
- * four-account one with half its controls dead.
- */
-describe('the accounts the DESK knows, merged with the ones the trades show', () => {
-  // The real shape of data/broker.json on this desk.
-  const DESK = [{ id: 'alpaca1', name: 'alpaca100k935' },
-                { id: 'alpaca2', name: 'Alpaca100ktest' }];
-
-  // loadAccountsKnown answers on a promise; the bar is rebuilt when it lands.
-  const settled = () => new Promise((r) => setTimeout(r, 0));
-
-  test('two accounts give two buttons, not four', async () => {
-    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
-    await settled();
-    const ids = p.bar().querySelectorAll('button[data-acct]')
-      .map(b => b.getAttribute('data-acct'));
-    expect(ids).toEqual(['all', 'alpaca1', 'alpaca2']);
-  });
-
-  test('every button is keyed on the id the trades carry', async () => {
-    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
-    await settled();
-    const ids = p.bar().querySelectorAll('button[data-acct]')
-      .map(b => b.getAttribute('data-acct')).filter(x => x !== 'all');
-    expect(ids.every(id => ['alpaca1', 'alpaca2'].includes(id))).toBe(true);
-  });
-
-  /*
-   * AND IT FILTERS. The half of the old bar that was labelled with names
-   * matched nothing at all — pressing one emptied the page. This is the
-   * assertion that a button does what its label says.
-   */
-  test('pressing one shows that account and hides the other', async () => {
-    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
-    await settled();
-    p.bar().querySelectorAll('button[data-acct]')
-      .find(b => b.getAttribute('data-acct') === 'alpaca2')
-      .listeners.click[0]();
-    expect(p.cards.map(c => c.style.display)).toEqual(['none', '']);
-  });
-
-  test('and the count says how many are left, not zero', async () => {
-    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
-    await settled();
-    p.bar().querySelectorAll('button[data-acct]')
-      .find(b => b.getAttribute('data-acct') === 'alpaca1')
-      .listeners.click[0]();
-    const count = p.bar().children.find(c => c.id === 'jnl-acct-count');
-    expect(count.textContent).toBe('1 trade(s) in alpaca1');
-  });
-
-  /*
-   * THE NAME IS STILL READABLE. It is the only word that means anything to the
-   * person reading — but the cards badge the ID, so a button showing only the
-   * name would be a control whose label appears nowhere on what it filters.
-   */
-  test('the label carries the name AND the id', async () => {
-    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK);
-    await settled();
-    const label = p.bar().querySelectorAll('button[data-acct]')
-      .find(b => b.getAttribute('data-acct') === 'alpaca2').textContent;
-    expect(label).toBe('Alpaca100ktest · alpaca2');
-  });
-
-  test('an account whose name IS its id is not written twice', async () => {
-    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')],
-                   [{ id: 'alpaca1', name: 'alpaca1' }, { id: 'alpaca2', name: 'alpaca2' }]);
-    await settled();
-    const label = p.bar().querySelectorAll('button[data-acct]')
-      .find(b => b.getAttribute('data-acct') === 'alpaca1').textContent;
-    expect(label).toBe('alpaca1');
-  });
-
-  /*
-   * AN ACCOUNT THE DESK HAS NOT TRADED YET still gets a button — that is what
-   * asking the desk is for, and it is why the bar survives a morning where one
-   * account had every order refused.
-   */
-  test('a known account with no trades on screen still appears', async () => {
-    const p = page([T('1', 'alpaca1')], DESK);
-    await settled();
-    const ids = p.bar().querySelectorAll('button[data-acct]')
-      .map(b => b.getAttribute('data-acct'));
-    expect(ids).toEqual(['all', 'alpaca1', 'alpaca2']);
-  });
-
-  /*
-   * AND AN ID THE DESK DOES NOT KNOW is still offered, labelled with itself —
-   * an imported row or a retired destination must not become trades hidden
-   * behind a filter that never lists their account.
-   */
-  test('an id only the trades know is offered under its id', async () => {
-    const p = page([T('1', 'alpaca1'), T('2', 'ttp5k')], DESK);
-    await settled();
-    const btns = p.bar().querySelectorAll('button[data-acct]');
-    expect(btns.map(b => b.getAttribute('data-acct')))
-      .toEqual(['all', 'alpaca1', 'alpaca2', 'ttp5k']);
-    expect(btns.find(b => b.getAttribute('data-acct') === 'ttp5k').textContent)
-      .toBe('ttp5k');
-  });
-
-  /*
-   * A DESTINATION WITH NO ID IS NOT A BUTTON. It could only ever be compared
-   * against an account no row carries, so it can only ever show nothing.
-   */
-  test('a destination carrying no id is dropped, not rendered as undefined', async () => {
-    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')],
-                   DESK.concat([{ name: 'a name with no id' }]));
-    await settled();
-    expect(p.bar().querySelectorAll('button[data-acct]')
-      .map(b => b.getAttribute('data-acct'))).toEqual(['all', 'alpaca1', 'alpaca2']);
   });
 });

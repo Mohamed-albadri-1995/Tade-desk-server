@@ -124,7 +124,9 @@ describe('what it leaves alone', () => {
    * is the interesting one, and overwriting the number hides the finding.
    */
   test('it appends a line and writes nothing back', () => {
-    expect(SRC).toMatch(/card\.appendChild\(fillLine\(g, t\)\)/);
+    // fillLine now also takes the DESK's ledger row, for the decided price —
+    // see tests/broker.plannedPrice.test.js. It still only appends.
+    expect(SRC).toMatch(/card\.appendChild\(fillLine\(g, t, desk\)\)/);
     expect(SRC).not.toMatch(/t\.entryPrice\s*=[^=]/);
     /*
      * The file DOES write now — the setup tag does, and only that. So this

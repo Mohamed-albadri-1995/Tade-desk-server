@@ -138,7 +138,9 @@
       if (!rows.length) return;
       var before = acctSig(acctsKnown);
       acctsKnown = rows.sort(byAcct);
-      if (acctSig(acctsKnown) !== before) { try { accountBar(); } catch (e) {} }
+      if (acctSig(acctsKnown) !== before) {
+        try { mergeAccountsIntoFilter(); } catch (e) { /* the page's own list still works */ }
+      }
     }).catch(function () { /* leave it empty — the trades still answer */ });
   }
   function accountsKnown() { return acctsKnown.slice(); }
@@ -357,8 +359,12 @@
       });
   }
 
-  /* One line, appended to a card, saying what the account really did. */
-  function fillLine(g, t) {
+  /* One line, appended to a card, saying what the account really did.
+   *
+   * `desk` is the desk's own ledger row for this name on this day, when there
+   * is one — see plannedOf().
+   */
+  function fillLine(g, t, desk) {
     var el = document.createElement('div');
     el.className = 'jnl-fill-line';
     el.style.cssText = 'font-size:11px;color:#94a3b8;margin-top:4px;'
@@ -371,17 +377,49 @@
     else bits.push('STILL OPEN at Alpaca');
 
     /*
-     * The comparison, and the reason this exists. Shown only when the journal
-     * has an entry price to compare against — and never as a correction: the
-     * journal's number is what was intended and Alpaca's is what happened, and
-     * both are worth keeping.
+     * THE COMPARISON, AND THE PRICE IT HAS TO BE AGAINST.
+     *
+     * This read `t.entryPrice` — the JOURNAL's entry — and the journal's entry
+     * is computed FROM the Alpaca fill (src/broker/journalTrades.js:
+     * entryCost / entryQty). So for every trade the desk placed it compared
+     * the fill against itself and printed
+     *
+     *     vs 174.21 planned: +0.00
+     *
+     * on every card, every day, whatever happened. The one mismatch this desk
+     * accepts between live and a backtest is execution delay, and this is the
+     * only thing that measures it.
+     *
+     * The planned price is the DESK's: pick.plan.entry, the decision bar's
+     * close, written to the ledger when the order was sent and now carried out
+     * by /api/broker/setups. 2026-09-15: BLSH decided at 36.03, filled at
+     * 35.86 — seventeen cents, which this used to call zero.
+     *
+     * A HAND-TYPED TRADE STILL USES ITS OWN. There the journal's entry really
+     * is what was intended, typed by a person before the fill existed, so the
+     * comparison is real. `origin` says which, because two numbers with the
+     * same label and different provenance is how this went wrong.
      */
-    var want = Number(t.entryPrice);
+    var planned = desk && desk.planned > 0 ? Number(desk.planned) : null;
+    var want = planned != null ? planned : Number(t.entryPrice);
+    var origin = planned != null ? 'decided' : 'planned';
     var got = Number(g.avgBuy != null && t.side !== 'short' ? g.avgBuy : g.avgSell);
     if (want > 0 && got > 0) {
       var raw = got - want;
       var slip = t.side === 'short' ? -raw : raw;      // + is worse, either way
-      bits.push('vs ' + want + ' planned: ' + money(slip));
+      var line = 'vs ' + want + ' ' + origin
+        + (desk && desk.decisionBar ? ' on ' + desk.decisionBar : '')
+        + ': ' + money(slip);
+      /*
+       * IN R, WHEN THE STOP IS KNOWN. Seventeen cents is meaningless until you
+       * know the stop was twenty-four away — that is two thirds of the risk on
+       * the trade, and the same seventeen cents on a $2 stop is nothing.
+       */
+      var stop = desk && desk.plannedStop > 0 ? Number(desk.plannedStop) : null;
+      if (stop != null && Math.abs(want - stop) > 1e-9) {
+        line += ' (' + (slip / Math.abs(want - stop)).toFixed(2) + 'R)';
+      }
+      bits.push(line);
     }
 
     /*
@@ -557,199 +595,75 @@
         btn.style.color = '#f59e0b';
       });
   }
-
-  /* ── ONE ACCOUNT, OR ALL OF THEM ──────────────────────────────────────
+  /* ── ONE ACCOUNT, OR ALL OF THEM — AND THE PAGE ALREADY HAD IT ────────
    *
-   * Two Alpaca paper accounts run one setup each, so "how is this strategy
-   * doing" and "how is this account doing" are the same question asked twice —
-   * and a single undifferentiated list answers neither. Every imported trade
-   * now carries the account that made it (src/broker/journalTrades.js), and
-   * this is the control that reads it.
+   * This file used to add a row of account buttons above the trades list.
+   * Deleted, because the page has its own account filter and always did:
    *
-   * BUILT FROM THE TRADES ON SCREEN, not from a list typed in here. Add an
-   * account at the desk and it appears the first time it trades; nothing to
-   * register twice, which is the whole point of the desk being the one place
-   * accounts are configured.
+   *     public/journal.html:101   <select id="filter-account">
    *
-   * OUTSIDE THE CONTAINER, like the status line and for the same reason: the
-   * list replaces its own innerHTML on every filter, sort and delete, so a
-   * control inside it would survive exactly until the first keystroke.
+   * It is populated from every trade's `account`, and on change it calls
+   * applyScope() + renderAll() — so it filters the CALENDAR, the stats, the
+   * risk tab and the setups tab as well as the cards. The bar added here
+   * filtered only the cards on one tab, by hiding them.
    *
-   * The filter HIDES cards rather than re-fetching. The page owns the data and
-   * its own render; reaching in to re-query would be a second source of truth
-   * for the list, and the two would disagree the first time a filter changed.
+   * So the desk had two account filters stacked in the same header, one of
+   * them weaker, and the report was exactly that: "the filters are double and
+   * they don't even work". Two controls for one question is the bug; making
+   * the second one correct would only have made it a tidier bug.
+   *
+   * WHY IT WAS ADDED AT ALL, so it does not come back. The complaint was "I
+   * can't filter using accounts in the main existing filters" — and that was
+   * true, but not because the control was missing. Trades carried no account:
+   * src/alerts/server.js stamps one only when the desk can read more than one
+   * account (`readable.length > 1 ? id : null`), so with a single readable
+   * account every row said nothing and the dropdown had one entry. The empty
+   * control was a DATA problem wearing a UI problem's clothes, and the fix
+   * belonged where the data is written.
+   *
+   * WHAT IS KEPT is accountsKnown(): the accounts the DESK has, from
+   * /api/broker. The page's dropdown is built from trades on screen, so an
+   * account that has not traded today is missing from it — and that is exactly
+   * the morning you want to look: 2026-09-08, every order to alpaca2 refused
+   * for buying power, one account with rows and two accounts to tell apart.
+   * Those are merged INTO the page's own select below, rather than beside it.
    */
-  var accountFilter = 'all';
-
-  function tradesOnScreen() {
-    return (window.__allTrades && window.__allTrades.length)
-      ? window.__allTrades : (window.__trades || []);
-  }
-
-  /* The accounts that actually appear, in a stable order. */
-  function accountsPresent() {
-    var seen = {};
-    var out = [];
-    tradesOnScreen().forEach(function (t) {
-      var a = (t && t.account) ? String(t.account) : null;
-      if (!a || seen[a]) return;
-      seen[a] = 1;
-      out.push(a);
-    });
-    return out.sort();
-  }
-
-  function applyAccountFilter() {
-    var host = document.getElementById(CONTAINER);
-    if (!host) return;
-    var shown = 0;
-    host.querySelectorAll('.jnl-del-btn').forEach(function (del) {
-      var card = del.closest('.jnl-card') || del.parentNode.parentNode;
-      if (!card) return;
-      var t = findTrade(del.getAttribute('data-id'));
-      var acct = (t && t.account) ? String(t.account) : null;
-      var show = accountFilter === 'all' || acct === accountFilter;
-      card.style.display = show ? '' : 'none';
-      if (show) shown += 1;
-    });
-    var count = document.getElementById('jnl-acct-count');
-    if (count) {
-      count.textContent = accountFilter === 'all'
-        ? shown + ' trade(s)'
-        : shown + ' trade(s) in ' + accountFilter;
-    }
-  }
 
   /*
-   * WHERE THE CONTROL BELONGS — beside the page's own two filters, not floating
-   * above the list.
+   * Every account the desk has, added to the page's own account filter.
    *
-   * "the journal is not good first I can't filter using accounts in the main
-   * existing filters". Right on both halves. The bar was inserted above the
-   * cards, so it read as a banner rather than a filter, and it was nowhere near
-   * the two dropdowns the eye goes to.
-   *
-   * The row is found by its CONTENTS rather than by an id, because the page
-   * belongs to another codebase and any id here would be a guess that breaks
-   * silently the day it is renamed: the parent of the page's own <select>
-   * elements IS the filter row, whatever it is called. Falling back to the old
-   * position if the page ever stops having selects — a control in the wrong
-   * place still filters; a control that failed to attach does nothing.
+   * ADDED, NEVER REBUILT. The page fills that select itself on every load and
+   * keeps the current selection; replacing its innerHTML here would be a
+   * second writer to one control, and the two would disagree the first time a
+   * trade arrived. So this only appends the ids the select is missing, and
+   * labels them with the desk's name for the account.
    */
-  function filterRow() {
-    var sel = document.querySelector('select');
-    // Not one of ours: the setup pickers live inside the cards.
-    while (sel && sel.closest && sel.closest('#' + CONTAINER)) {
-      var all = Array.prototype.slice.call(document.querySelectorAll('select'));
-      sel = all.filter(function (s) { return !s.closest('#' + CONTAINER); })[0] || null;
-      break;
-    }
-    return sel && sel.parentNode ? sel.parentNode : null;
-  }
-
-  function accountBar() {
-    var host = document.getElementById(CONTAINER);
-    if (!host || !host.parentNode) return;
-    var accts = accountsPresent();
-    var bar = document.getElementById('jnl-acct-bar');
-
-    /*
-     * ONE ACCOUNT ON SCREEN IS NOT ONE ACCOUNT ON THE DESK — and removing the
-     * control on that reading is why it was not there when it was wanted.
-     *
-     * accountsPresent() reads the trades CURRENTLY LOADED. On 2026-09-08 the
-     * desk sent two orders to alpaca1 and both of Test's to alpaca2 were
-     * refused for buying power, so only one account had rows and the filter
-     * deleted itself on the day there were two accounts to tell apart. A
-     * control that disappears exactly when the data gets interesting is worse
-     * than one that sits there greyed.
-     *
-     * So it is kept as long as the DESK knows of more than one account, from
-     * the broker's own destinations (accountsKnown), and only genuinely
-     * single-account desks — where trades carry no account at all — see
-     * nothing.
-     */
+  function mergeAccountsIntoFilter() {
+    var sel = document.getElementById('filter-account');
+    if (!sel) return;
     var known = accountsKnown();
-    if (known.length < 2 && accts.length < 2) {
-      if (bar) bar.remove();
-      return;
-    }
-    // Every account the desk has, plus any ID the trades mention that it does
-    // not (an imported row, a retired destination) — dropping those would hide
-    // trades behind a filter that never offers their account. Matched on the
-    // ID, which is the only thing both sides speak; an unknown one is labelled
-    // with its id because that is the whole of what is known about it.
-    accts = known.concat(accts
-      .filter(function (id) {
-        return !known.some(function (k) { return k.id === id; });
-      })
-      .map(function (id) { return { id: id, name: id }; }))
-      .sort(byAcct);
-
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = 'jnl-acct-bar';
-      bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;'
-        + 'margin:0 0 8px';
-      var row = filterRow();
-      if (row) { bar.style.margin = '0'; row.appendChild(bar); }
-      else host.parentNode.insertBefore(bar, host);
-    }
-    // Rebuilt only when the set of accounts changed, so a re-render does not
-    // throw away the choice that is currently applied.
-    var signature = acctSig(accts);
-    if (bar.getAttribute('data-accts') === signature) { applyAccountFilter(); return; }
-    bar.setAttribute('data-accts', signature);
-    bar.innerHTML = '';
-
-    var mk = function (id, label) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = label;
-      b.setAttribute('data-acct', id);
-      b.style.cssText = 'font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;'
-        + 'border:1px solid #334155;background:#0f172a;color:#94a3b8';
-      b.addEventListener('click', function () {
-        accountFilter = id;
-        paintAccountButtons();
-        applyAccountFilter();
-      });
-      bar.appendChild(b);
-      return b;
-    };
-
-    // ALL FIRST, and it is the default: the combined book is the one you look
-    // at to answer "how is the desk doing", and one account is the exception.
-    mk('all', 'All accounts');
-    // THE NAME, AND THE ID BESIDE IT WHEN THEY DIFFER. The cards badge the id,
-    // so a button that showed only "Alpaca100ktest" would be a control whose
-    // label appears nowhere on anything it filters.
-    accts.forEach(function (a) {
-      mk(a.id, a.name === a.id ? a.id : a.name + ' · ' + a.id);
+    if (known.length < 2) return;        // nothing to tell apart
+    var have = {};
+    Array.prototype.slice.call(sel.options).forEach(function (o) {
+      have[o.value] = o;
     });
-
-    var count = document.createElement('span');
-    count.id = 'jnl-acct-count';
-    count.style.cssText = 'font-size:11px;color:#64748b;margin-left:2px';
-    bar.appendChild(count);
-
-    // A remembered choice that no longer exists would hide every trade.
-    if (accountFilter !== 'all'
-        && !accts.some(function (a) { return a.id === accountFilter; })) {
-      accountFilter = 'all';
-    }
-    paintAccountButtons();
-    applyAccountFilter();
-  }
-
-  function paintAccountButtons() {
-    var bar = document.getElementById('jnl-acct-bar');
-    if (!bar) return;
-    bar.querySelectorAll('button[data-acct]').forEach(function (b) {
-      var on = b.getAttribute('data-acct') === accountFilter;
-      b.style.background = on ? '#1d4ed8' : '#0f172a';
-      b.style.color = on ? '#e2e8f0' : '#94a3b8';
-      b.style.borderColor = on ? '#1d4ed8' : '#334155';
+    known.forEach(function (a) {
+      /*
+       * THE ID IS THE VALUE, because that is what every trade carries
+       * (src/alerts/server.js: tradesFrom(r.fills, id)) and what the page
+       * compares against. The NAME is only the label. Keying on the name is
+       * what produced four buttons for two accounts, half of them inert.
+       */
+      var label = a.name === a.id ? a.id : a.name + ' \u00b7 ' + a.id;
+      if (have[a.id]) {
+        // Already there, built from a trade — give it the readable name.
+        if (have[a.id].textContent !== label) have[a.id].textContent = label;
+        return;
+      }
+      var o = document.createElement('option');
+      o.value = a.id;
+      o.textContent = label;
+      sel.appendChild(o);
     });
   }
 
@@ -809,15 +723,24 @@
         var mine = t.account
           ? groups.filter(function (g) { return g.account === t.account; })
           : groups;
-        (mine.length ? mine : groups).forEach(function (g) {
-          card.appendChild(fillLine(g, t));
+        var show = mine.length ? mine : groups;
+        // THE DESK'S LEDGER ROW for this name and day, for the planned price.
+        // Already cached per date, so this costs no extra request. A trade the
+        // desk did not place resolves to nothing and the line falls back to
+        // the journal's own entry, which for a typed trade is correct.
+        deskSetupsFor(t.date).then(function (bySym) {
+          var desk = bySym[String(t.ticker).toUpperCase()] || null;
+          if (card.querySelector('.jnl-fill-line')) return;
+          show.forEach(function (g) {
+            card.appendChild(fillLine(g, t, desk));
+          });
         });
       });
     });
 
     autoTag(host);
     statusLine();
-    accountBar();
+    mergeAccountsIntoFilter();
     importButton();
     fixDashboardLink();
   }

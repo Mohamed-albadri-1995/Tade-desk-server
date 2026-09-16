@@ -2089,6 +2089,20 @@ function openSymbols(date) {
  * another strategy's record. Both ids come back with `ambiguous` set, and the
  * caller is expected to leave the field alone and say why.
  */
+/**
+ * A price from a ledger row, or null — never a zero.
+ *
+ * `Number(null)` is 0 and 0 is finite, so a row written before `stop` existed
+ * reported a stop of $0.00 — which renders as a slip the size of the whole
+ * share price and an R multiple against a stop the entire way to zero. "This
+ * row has no stop" and "the stop was zero" are opposite facts.
+ */
+function _price(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function setupBySymbol(date) {
   const out = {};
   for (const o of orders(date)) {
@@ -2105,6 +2119,28 @@ function setupBySymbol(date) {
         // The EARLIEST send is the entry. A later row for the same name is
         // another account's half of the same signal, or a second leg.
         at: o.at || null,
+        /*
+         * THE PRICE THE DECISION WAS TAKEN AT — the one number that makes
+         * slippage measurable, and the one that was missing.
+         *
+         * The journal's entry price is computed FROM the Alpaca fill
+         * (src/broker/journalTrades.js: entryCost / entryQty), so the journal
+         * card's "vs X planned" compared the fill against itself and read
+         * +0.00 on every desk trade, always. 2026-09-15: the desk decided BLSH
+         * at 36.03 and filled at 35.86 — seventeen cents, reported as zero by
+         * the field whose whole job is to report it.
+         *
+         * Execution delay is the ONE mismatch this desk is willing to accept
+         * between live and a backtest, and it was the one thing nothing could
+         * measure.
+         *
+         * `price` is what placeOrder was given — pick.plan.entry, the decision
+         * bar's close. Carried with the stop beside it so R can be worked out
+         * from the same row rather than joined from somewhere else.
+         */
+        planned: _price(o.price),
+        plannedStop: _price(o.stop),
+        decisionBar: o.decisionBar || null,
         ambiguous: false,
       };
       continue;
@@ -2114,7 +2150,19 @@ function setupBySymbol(date) {
       was.ambiguous = true;
       was.setupId = null;                 // no guess is better than a wrong one
     }
-    if ((o.at || 0) < (was.at || Infinity)) was.at = o.at;
+    /*
+     * THE EARLIEST ROW OWNS THE PRICE TOO. Two accounts get the same signal at
+     * the same decided price, so this normally changes nothing — but if a
+     * later row carries a different one it is a second decision, and the entry
+     * is the first. Moved together with `at` so the two can never describe
+     * different rows.
+     */
+    if ((o.at || 0) < (was.at || Infinity)) {
+      was.at = o.at;
+      was.planned = _price(o.price);
+      was.plannedStop = _price(o.stop);
+      was.decisionBar = o.decisionBar || null;
+    }
   }
   return out;
 }
