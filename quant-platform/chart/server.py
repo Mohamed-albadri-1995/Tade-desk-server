@@ -590,6 +590,59 @@ def datacheck(symbol: str = 'SPY'):
                 'checks': [], 'summary': f'the check itself failed: {str(e)[:200]}'}
 
 
+@app.get('/api/feedcheck')
+def feedcheck(symbol: str = 'SPY'):
+    """Which feeds ANSWERED, as opposed to which feeds have a key in a file.
+
+    THE LINE THIS REPLACES. deploy-tools.sh printed, on every deploy:
+
+        feeds: alpaca ok · polygon ok · yahoo ok
+
+    read from /api/health, whose `feeds` block is `_feed_status()` — an
+    inventory of CREDENTIALS. Its own docstring says why that is not enough:
+    "A key being PRESENT is not evidence that the plan behind it includes the
+    data being asked for."
+
+    So it said "alpaca ok" every day while the desk's Alpaca key was being
+    refused outright:
+
+        Alpaca asset MMED 401: {"message": "unauthorized."}
+
+    A 401 is not a plan limit, it is the credential not being accepted at all —
+    and the deploy that ran minutes earlier had called it ok. That is the whole
+    fault: a field that says the same thing whatever happened. It is also why
+    the short-borrow check never ran once, which is how MMED reached the wire
+    on 2026-09-15 as an order the broker could not fill.
+
+    WHY NOT /api/datacheck. That one is the honest full answer — every loader,
+    both indexes, and cross-source agreement — and it is slow by design,
+    documented as a button rather than a step. A deploy needs one small fetch
+    per feed, so this reuses datacheck's OWN check_feed and judge_bars rather
+    than growing a second opinion about what a working feed looks like. Two
+    definitions of "ok" is how this started.
+
+    NEVER RAISES, and never a 4xx. The caller is a shell script inside a
+    deploy: an exception here would read as "the feed is down", which is a
+    different and much worse answer than "the check could not run".
+    """
+    from chart import datacheck as dc
+    from chart import data_manager
+    out = []
+    for feed in sorted(data_manager.LOADERS):
+        try:
+            c = dc.check_feed(feed, symbol)
+        except Exception as e:                      # noqa: BLE001
+            c = {'name': f'{feed}:{symbol}', 'ok': False, 'severity': 'down',
+                 'detail': f'the check itself failed: {str(e)[:160]}'}
+        out.append({'feed': feed, 'ok': bool(c.get('ok')),
+                    'severity': c.get('severity') or ('ok' if c.get('ok') else 'down'),
+                    'ms': c.get('ms'),
+                    'detail': str(c.get('detail') or '')[:200],
+                    'fix': str(c.get('fix') or '')[:200] or None})
+    return {'ok': True, 'symbol': symbol, 'feeds': out,
+            'answered': sum(1 for f in out if f['ok']), 'total': len(out)}
+
+
 @app.get('/api/oneil/ratings')
 def oneil_ratings(symbols: str = '', feed: str = 'yahoo', index: str = '^GSPC'):
     """Phase 4: U/D volume, Accumulation/Distribution, the RS line, divergence.

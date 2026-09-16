@@ -627,16 +627,24 @@ if [ -d quant-platform ]; then
             try{process.stdout.write(String(JSON.parse(s).build||''))}catch{process.stdout.write('')}});" 2>/dev/null)
       if [ "$AFTER" = "$WANT" ]; then
         echo "  now running ${AFTER}"
-        # WHICH FEEDS qp CAN ACTUALLY USE, read from qp itself rather than
-        # from the file we just wrote — a key in .env that the process did not
-        # load is a key that does nothing.
-        curl -s --max-time 5 "http://127.0.0.1:${QP_PORT}/api/health" 2>/dev/null \
-          | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
-              try{const h=JSON.parse(s);const f=h.feeds||h;
-                const y=k=>(f[k]===true?'ok':'no key');
-                console.log('  feeds: alpaca '+y('alpaca')+' · polygon '+y('polygon')+' · yahoo ok');
-                if(f.alpaca!==true)console.log('  alpaca is NOT available to qp — a setup on polygon will decide on yahoo');
-              }catch{console.log('  feeds: could not read')}});" 2>/dev/null
+        # WHICH FEEDS ANSWERED, which is not which feeds have a key.
+        #
+        # This read /api/health, whose feeds block is an inventory of
+        # CREDENTIALS, and printed "alpaca ok" on every deploy while the key
+        # was being refused outright:
+        #
+        #     Alpaca asset MMED 401: {"message": "unauthorized."}
+        #
+        # A 401 is not a plan limit — the credential was not accepted at all —
+        # and the deploy minutes earlier had called it ok. A field that says
+        # the same thing whatever happened, in the one line anybody reads to
+        # decide whether the morning is safe to trade. It is also why the
+        # short-borrow check never ran once, which is how MMED reached the wire
+        # on 2026-09-15 as an order the broker could not fill.
+        #
+        # /api/feedcheck FETCHES from each loader and judges what came back,
+        # reusing datacheck's own check_feed rather than growing a second
+        # opinion about what a working feed looks like.
       else
         echo "  STILL ${AFTER:-not answering} — the manager will keep failing. Look at:"
         echo "    sudo journalctl -u qp-chart -n 50"
@@ -648,6 +656,62 @@ if [ -d quant-platform ]; then
       echo "  the position manager will keep getting 404s from an old process."
     fi
   fi
+fi
+
+# ── WHICH FEEDS ANSWERED, WHICH IS NOT WHICH FEEDS HAVE A KEY ─────────────
+#
+# This used to read /api/health, whose `feeds` block is `_feed_status()` — an
+# inventory of CREDENTIALS. Its own docstring says why that is not enough: "A
+# key being PRESENT is not evidence that the plan behind it includes the data
+# being asked for." So the deploy printed
+#
+#     feeds: alpaca ok · polygon ok · yahoo ok
+#
+# every single day while the desk's Alpaca key was being refused outright:
+#
+#     Alpaca asset MMED 401: {"message": "unauthorized."}
+#
+# A 401 is not a plan limit — the credential was not accepted at all — and the
+# deploy minutes earlier had called it ok. A field that says the same thing
+# whatever happened, in the one line anybody reads to decide whether the
+# morning is safe to trade. It is also why the short-borrow check never ran
+# once, which is how MMED reached the wire on 2026-09-15 as an order the broker
+# could not fill.
+#
+# AND IT RAN ONLY WHEN qp WAS RESTARTED. The check lived inside the "qp was
+# stale, restarted it, it came back" branch, so on every deploy where qp was
+# already current it printed nothing at all — the exact fault stated thirty
+# lines above it about the staleness warning itself: "A warning about an event
+# cannot detect a STATE." It is its own step now and runs whenever qp answers.
+if [ -d quant-platform ]; then
+  echo
+  echo "[6c/6] Feeds — fetched, not inventoried..."
+  # /api/feedcheck FETCHES from each loader and judges what came back, reusing
+  # datacheck's own check_feed rather than growing a second opinion about what
+  # a working feed looks like. Two definitions of "ok" is how this started.
+  # The timeout is generous because it is real network work, one small daily
+  # bar request per feed.
+  curl -s --max-time 60 "http://127.0.0.1:${QP_PORT:-8765}/api/feedcheck" 2>/dev/null \
+    | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+        let j;try{j=JSON.parse(s)}catch{
+          // NOT 'ok'. A check that could not run is its own answer, and the
+          // one thing it must never be reported as is a pass.
+          console.log('  COULD NOT CHECK — no answer from qp on :${QP_PORT:-8765}');
+          console.log('  Nothing here says the feeds are bad. It says nobody asked.');
+          return}
+        const f=j.feeds||[];
+        if(!f.length){console.log('  COULD NOT CHECK — qp listed no feeds');return}
+        console.log('  '+f.map(x=>x.feed+' '+(x.ok?'ANSWERED':'FAILED')
+          +(x.ms!=null?' ('+x.ms+'ms)':'')).join(' · '));
+        for(const x of f){ if(x.ok) continue;
+          console.log('    '+x.feed+': '+(x.detail||'no reason given'));
+          if(x.fix)console.log('      fix: '+x.fix); }
+        // THE CONSEQUENCE, NOT JUST THE STATUS. A feed being down is a fact; a
+        // setup deciding on a different feed than it was tested on is what it
+        // costs, and that is the sentence worth reading at 04:00.
+        if(!f.some(x=>x.feed==='alpaca'&&x.ok))
+          console.log('    a setup set to alpaca will decide on whatever it falls back to');
+      });" 2>/dev/null || echo "  COULD NOT CHECK — the request itself failed"
 fi
 
 # ── WHAT HAS BEEN BOUNCING, WHICH NOTHING WAS SAYING ──────────────────────
@@ -666,7 +730,7 @@ fi
 # NOT FATAL. A tool that restarts is still serving, and a deploy that failed
 # over a counter would be a worse tool than one that says so and carries on.
 echo
-echo "[6c/6] Restart counts..."
+echo "[6d/6] Restart counts..."
 pm2 jlist 2>/dev/null | node -e "
   let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
     let j;try{j=JSON.parse(s)}catch{console.log('  could not read pm2');return}
