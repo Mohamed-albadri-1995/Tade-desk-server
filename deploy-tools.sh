@@ -423,14 +423,27 @@ for entry in "${TOOLS[@]}"; do
   else
     echo "  ${id} (${name}) — app :${port}  scorer :${sport}"
     pm2 start src/scoring/server.py --name "scorer-${id}" --interpreter "$PY" \
-      --max-memory-restart "$SCORER_MAX_MEM" \
+      --time --max-memory-restart "$SCORER_MAX_MEM" \
       -- --output "$out" --port "$sport" >/dev/null
   fi
 
+  # ── --time: A LOG LINE WITH NO DATE ON IT ANSWERS NOTHING ───────────────
+  #
+  # 2026-09-16, tool-T2 restarted once and `pm2 logs tool-T2 --err` was asked
+  # why. It returned sixty identical lines with no timestamps on any of them —
+  # so there was no way to tell whether they came from before the restart,
+  # after it, or from the previous week. The pm2 log FILE persists across
+  # restarts and deploys; `--lines 60` is the tail of an accumulated file, not
+  # a window on the last hour, and without a date the difference is invisible.
+  #
+  # The question that matters about this desk is always "what happened at
+  # 09:34", and an undated line cannot be part of the answer. pm2 stamps every
+  # line when started with --time. The journal was already started this way;
+  # the tools — the processes that own the trading decisions — were not.
   TOOL_ID="$id" TOOL_NAME="$name" PORT="$port" \
   DB_PATH="$db" MODEL_OUTPUT_ROOT="$out" TMP_DIR="$tmp" \
   SCORER_URL="http://127.0.0.1:${sport}" \
-    pm2 start src/index.js --name "tool-${id}" --update-env \
+    pm2 start src/index.js --name "tool-${id}" --update-env --time \
     --max-memory-restart "$(tool_max_mem "$id")" >/dev/null
 done
 
@@ -452,7 +465,7 @@ if [ -z "$ONLY" ]; then
   if [ -n "$ARCHIVED" ]; then
     echo "  ARCHIVE — read-only registers for ${ARCHIVED//,/ }"
     pm2 delete archive 2>/dev/null || true
-    pm2 start src/archive/server.js --name "archive" --update-env \
+    pm2 start src/archive/server.js --name "archive" --update-env --time \
       --max-memory-restart "$ARCHIVE_MAX_MEM" >/dev/null
   fi
 fi
@@ -468,7 +481,7 @@ if [ -z "$ONLY" ]; then
   ALERTS_PORT=$(node -e "const a=require('./tools.config.json').apps.find(x=>x.id==='ALERTS');process.stdout.write(String(a?a.port:3090))")
   echo "  ALERTS — app :${ALERTS_PORT}"
   ALERTS_PORT="$ALERTS_PORT" pm2 start src/alerts/server.js --name "alerts" \
-    --update-env --max-memory-restart "$ALERTS_MAX_MEM" >/dev/null
+    --update-env --time --max-memory-restart "$ALERTS_MAX_MEM" >/dev/null
 fi
 # pm2 save rewrites the startup list from whatever is running RIGHT NOW, so a
 # process that happened to be stopped at this moment would be dropped from it
