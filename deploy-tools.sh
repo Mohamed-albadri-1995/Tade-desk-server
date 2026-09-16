@@ -314,7 +314,56 @@ echo "[5/6] Starting tools..."
 # Set well above each process's working size and well below what would starve
 # its neighbours: a limit that trips in normal use is a restart loop, which is
 # worse than no limit. Override per box with the env vars if yours differs.
-TOOL_MAX_MEM="${TOOL_MAX_MEM:-140M}"      # tools sit at ~60
+TOOL_MAX_MEM="${TOOL_MAX_MEM:-140M}"      # most tools sit at ~50-65
+# ── AND THE CEILING THAT TRIPPED IS THE FAILURE THIS BLOCK WARNS ABOUT ─────
+#
+# 2026-09-16, `pm2 list`:
+#
+#     | 240 | tool-T2  | fork | 292 | online | 103.4mb |
+#     | 242 | tool-T7  | fork |  87 | online |  51.8mb |
+#     | everything else       |   0 | online |         |
+#
+# 292 restarts in one morning, against 0 for every other tool, and no stack
+# trace anywhere — `pm2 logs tool-T2 --err` holds sixty lines of "[TV Scanner]
+# No screeners are due to run right now" and nothing else. Because a
+# --max-memory-restart kill is not a crash: pm2 stops the process and starts a
+# new one, and neither writes a line.
+#
+# "tools sit at ~60" was true of the tools measured. It is not true of T2,
+# which was already resident at 103 MB and peaks over the 140 as it scans. So
+# the cap tripped in ORDINARY USE, which is the exact thing four lines up says
+# must not happen: "a limit that trips in normal use is a restart loop, which
+# is worse than no limit."
+#
+# AND IT COST A TRADING DAY. A setup's decision is scheduled inside the tool
+# that owns it, and the 09:35 OR+VWAP setup is owned by T2. At 09:34 T2 was
+# restarting, so the decision was never taken — no cards ranked, no orders, and
+# no line in the session log, because the process that writes the line was the
+# one that died.
+#
+# ONE NUMBER FOR ALL TOOLS WAS THE MISTAKE. They are not the same size: T2 runs
+# the TV scanner over 39 tickers with its own model, T6 polls a handful. A cap
+# high enough for the biggest is no cap at all for the smallest, and a cap
+# right for the smallest is a restart loop for the biggest. Per tool, then —
+# overridable one at a time with TOOL_MAX_MEM_T2=220M.
+#
+# THE HEADROOM IS AFFORDABLE. The arithmetic above assumed nine tools AND nine
+# scorers; the box now runs six tools, no scorers, plus alerts, archive and
+# journal — ~520 MB total on 2026-09-16, not ~730. Giving T2 80 MB more stays
+# well inside what the swapfile below already covers.
+tool_max_mem() {                          # tool_max_mem <TOOL_ID>
+  local var="TOOL_MAX_MEM_$1"
+  if [ -n "${!var:-}" ]; then echo "${!var}"; return; fi
+  case "$1" in
+    # Measured at 103 MB resident while scanning, so 140 was under its peak.
+    T2) echo "240M" ;;
+    # 87 restarts on the same morning at 51.8 MB — nowhere near 140 when it was
+    # looked at, but it is the only other tool restarting at all, so it gets
+    # room too rather than another morning of guessing.
+    T7) echo "180M" ;;
+    *)  echo "$TOOL_MAX_MEM" ;;
+  esac
+}
 SCORER_MAX_MEM="${SCORER_MAX_MEM:-180M}"  # scorers reach ~90 while training
 ALERTS_MAX_MEM="${ALERTS_MAX_MEM:-180M}"  # alerts sits at ~72
 # The archive holds several SQLite handles open and does nothing else. It has
@@ -382,7 +431,7 @@ for entry in "${TOOLS[@]}"; do
   DB_PATH="$db" MODEL_OUTPUT_ROOT="$out" TMP_DIR="$tmp" \
   SCORER_URL="http://127.0.0.1:${sport}" \
     pm2 start src/index.js --name "tool-${id}" --update-env \
-    --max-memory-restart "$TOOL_MAX_MEM" >/dev/null
+    --max-memory-restart "$(tool_max_mem "$id")" >/dev/null
 done
 
 # ── THE ARCHIVE ────────────────────────────────────────────────────────────
@@ -600,6 +649,48 @@ if [ -d quant-platform ]; then
     fi
   fi
 fi
+
+# ── WHAT HAS BEEN BOUNCING, WHICH NOTHING WAS SAYING ──────────────────────
+#
+# A restart count is the only trace a --max-memory-restart kill leaves. It
+# writes no stack trace, no exit line, nothing to either pm2 log — so tool-T2
+# restarting 292 times on 2026-09-16 was visible ONLY as a number in a column
+# of `pm2 list` that nobody has a reason to read on a day that looks normal.
+# It cost the 09:35 setup its entire trading day.
+#
+# A deploy is exactly when this is worth saying: it is the one moment somebody
+# is already watching the output. The count is read AFTER the restarts above,
+# so a freshly started process reads 0 and only a process that has been bouncing
+# since — or that pm2 kept across the deploy — shows a number.
+#
+# NOT FATAL. A tool that restarts is still serving, and a deploy that failed
+# over a counter would be a worse tool than one that says so and carries on.
+echo
+echo "[6c/6] Restart counts..."
+pm2 jlist 2>/dev/null | node -e "
+  let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+    let j;try{j=JSON.parse(s)}catch{console.log('  could not read pm2');return}
+    // THE THRESHOLD IS LOW ON PURPOSE. Restarting twice in a session is not
+    // normal for a process that is meant to run from 04:00 to 20:00, and a
+    // number that only speaks at 50 would have said nothing for the first two
+    // hundred of T2's.
+    const bad=j.filter(p=>((p.pm2_env||{}).restart_time||0)>=3)
+               .sort((a,b)=>(b.pm2_env.restart_time)-(a.pm2_env.restart_time));
+    if(!bad.length){console.log('  nothing has restarted more than twice');return}
+    for(const p of bad){
+      const mb=Math.round(((p.monit||{}).memory||0)/1048576);
+      const cap=(p.pm2_env||{}).max_memory_restart;
+      const capmb=cap?Math.round(cap/1048576):null;
+      console.log('  '+p.name+' — '+p.pm2_env.restart_time+' restarts, now '+mb+' MB'
+        +(capmb?' of a '+capmb+' MB ceiling':' with no ceiling'));
+    }
+    // A RESTART LOOP AND A CRASH LOOP NEED DIFFERENT LOOKING-AT, and the
+    // memory against the ceiling is what separates them.
+    console.log('  A tool that restarts at its decision minute takes that');
+    console.log('  setup\'s whole day with it. If the MB is near the ceiling');
+    console.log('  raise it (TOOL_MAX_MEM_<ID>); if it is not, read:');
+    console.log('    pm2 logs <name> --err --lines 200 --nostream');
+  });" 2>/dev/null || echo "  could not read pm2"
 
 echo
 IP=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || echo localhost)

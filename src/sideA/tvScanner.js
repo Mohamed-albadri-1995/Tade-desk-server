@@ -453,7 +453,24 @@ async function runAllScanners() {
   const asleep = all.length - screeners.length;
 
   if (!screeners.length) {
-    console.warn(`[TV Scanner] No screeners are due to run right now` +
+    /*
+     * console.log, NOT console.warn — AND THAT IS NOT A COSMETIC CHOICE.
+     *
+     * pm2 routes stderr to <name>-error.log. This line is the ORDINARY path:
+     * a screener with a run window is asleep for most of the day by design,
+     * and the tool scans every few minutes regardless, so this printed to the
+     * error log once per scan, all day, every day.
+     *
+     * On 2026-09-16 tool-T2 restarted 292 times and the error log was asked
+     * what killed it. It held sixty lines of THIS, and nothing else — the
+     * routine chatter had pushed whatever else was there out of reach. An
+     * error log that is mostly not errors is an error log you cannot read on
+     * the day you need it.
+     *
+     * A screener outside its window is a fact, not a fault. It goes to stdout
+     * with the rest of the scan narration.
+     */
+    console.log(`[TV Scanner] No screeners are due to run right now` +
       (asleep ? ` (${asleep} outside their window).` : ' — none are defined for this tool.'));
     // THE SAME SHAPE AS THE SUCCESSFUL RETURN, which this used to break by
     // returning a bare {}. The caller destructures `{ candidates, labels }`,
