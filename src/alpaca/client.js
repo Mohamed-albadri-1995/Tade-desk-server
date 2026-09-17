@@ -424,9 +424,93 @@ async function fetchAsset(symbol, creds = null) {
   return asset;
 }
 
+/*
+ * ── CAN THIS ACCOUNT SHORT AT ALL ─────────────────────────────────────────
+ *
+ * 2026-09-17, the first morning the 09:35 setup ran after the restart loop was
+ * fixed. It evaluated 30, signalled 13, picked 2, and both orders came back:
+ *
+ *     SHORT CIFR 2089 sh · alpaca1: FAILED
+ *       — From Alpaca: account is not allowed to short
+ *
+ * Read that carefully. Not "this asset cannot be sold short" — THE ACCOUNT is
+ * not permitted to short, at all, for any symbol.
+ *
+ * checkShortable asked `/v2/assets/CIFR` and got `shortable: true`, which is
+ * the truth about the ticker and says nothing about whether this account may
+ * act on it. So the check passed the order straight through to a rejection it
+ * exists to prevent. It was answering the wrong question — the same shape of
+ * fault as every other one this week, and in the code written to stop them.
+ *
+ * AND IT IS NOT ABOUT CIFR. The 09:35 setup shorts constantly: on 2026-09-15
+ * all three of its picks were shorts. An account that cannot short makes every
+ * short in the backtest unreachable in live, so the two can never agree — the
+ * one thing this desk exists to achieve.
+ *
+ * ASKED ONCE PER ACCOUNT, NOT PER SYMBOL. It is a property of the account, and
+ * a decision ranks thirty names in the same second.
+ *
+ * A SHORTER TTL THAN THE ASSET CACHE. An asset's shortability is a fact about
+ * the market; this is a setting somebody can change at the broker, and the
+ * whole point is that they change it and the desk picks it up the same morning
+ * rather than the next day.
+ */
+const _acctShortCache = new Map();
+const ACCOUNT_SHORT_TTL_MS = 10 * 60 * 1000;
+
+async function accountMayShort(creds = null) {
+  /*
+   * ASSETAUTH ITSELF CAN THROW. With no credentials it falls back to
+   * authHeaders(), which throws when the box has no Alpaca profile at all —
+   * and that throw used to land inside checkShortable's try, where it became
+   * "could not ask" and the order went out. Moving the account question ahead
+   * of that try put the throw OUTSIDE it, so a desk with no keys stopped
+   * degrading and started REJECTING THE PROMISE: a protective check that
+   * crashes the caller, which is worse than the hole it was closing. Caught by
+   * tests/alpaca.shortable.test.js, which holds exactly that contract.
+   */
+  let auth;
+  try {
+    auth = assetAuth(creds);
+  } catch (err) {
+    return { checked: false, reason: err.message };
+  }
+  const hit = _acctShortCache.get(auth.who);
+  if (hit && Date.now() - hit.at < ACCOUNT_SHORT_TTL_MS) return hit.answer;
+  let answer;
+  try {
+    const res = await fetch(`${auth.base}/v2/account`, { headers: auth.headers });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Alpaca account ${res.status}: ${body.slice(0, 160)}`);
+    }
+    const a = await res.json();
+    /*
+     * null IS NEVER false. An older API, a field Alpaca stops sending, or a
+     * shape this does not expect must read as "could not ask" — which sends
+     * the order — and never as "not allowed", which would silently stop every
+     * short on the box. Only an explicit `false` is a refusal.
+     */
+    const enabled = a.shorting_enabled;
+    answer = enabled === false
+      ? { checked: true, enabled: false, account: a.account_number || null }
+      : (enabled === true
+        ? { checked: true, enabled: true, account: a.account_number || null }
+        : { checked: false, reason: 'Alpaca did not say whether this account may short' });
+  } catch (err) {
+    answer = { checked: false, reason: err.message };
+  }
+  _acctShortCache.set(auth.who, { at: Date.now(), answer });
+  return answer;
+}
+
 /**
  * `{ ok, shortable, easyToBorrow, reason }` — or `{ ok: true, checked: false }`
  * when the question could not be asked.
+ *
+ * TWO QUESTIONS, NOT ONE: may this ACCOUNT short, and is this ASSET shortable.
+ * Only the second was ever asked, and CIFR was refused on 2026-09-17 by the
+ * first — see accountMayShort above.
  *
  * A check that cannot run must NOT block the order. No credentials, a network
  * blip or a symbol Alpaca does not list would otherwise silently stop every
@@ -434,6 +518,23 @@ async function fetchAsset(symbol, creds = null) {
  * prevent. Unknown means send it and let the broker answer.
  */
 async function checkShortable(symbol, creds = null) {
+  /*
+   * THE ACCOUNT FIRST, because its answer is about every symbol. A refusal
+   * here names the ACCOUNT: "MMED cannot be sold short" sends you to look at
+   * the ticker, and the ticker is fine — the setting is not.
+   */
+  const acct = await accountMayShort(creds);
+  if (acct.checked && acct.enabled === false) {
+    return {
+      ok: false,
+      checked: true,
+      shortable: false,
+      accountEnabled: false,
+      reason: `this Alpaca account${acct.account ? ` (${acct.account})` : ''} is not `
+        + 'permitted to short — no symbol can be sold short from it until that is '
+        + 'enabled at the broker',
+    };
+  }
   try {
     /*
      * ASKED TWICE before giving up.
@@ -465,6 +566,10 @@ async function checkShortable(symbol, creds = null) {
       checked: true,
       shortable,
       easyToBorrow: a.easy_to_borrow === true,
+      // Carried so a caller can tell "the account is fine and this ticker is
+      // not" from "the account was never asked" — different facts, and the
+      // second is the state this check spent a week in.
+      accountEnabled: acct.checked ? acct.enabled : null,
       reason: shortable ? null
         : `Alpaca will not short ${String(symbol).toUpperCase()} — the asset is not shortable`,
     };
@@ -478,6 +583,10 @@ module.exports = {
   fetchClosesBefore,
   fetchAsset,
   checkShortable,
+  // Exported so the desk can state, before the open, whether the account it is
+  // about to trade from may short at all — rather than discovering it from a
+  // rejection at 09:34.
+  accountMayShort,
   fetchDailyBars,
   computeATR14,
   fetchAccount,

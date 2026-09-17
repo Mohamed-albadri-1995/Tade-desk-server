@@ -314,6 +314,29 @@ async function account({ timeoutMs = 10000, account: acct = null } = {}) {
       // being rejected until one is sent.
       tradingBlocked: !!a.trading_blocked,
       accountBlocked: !!a.account_blocked,
+      /*
+       * THE THIRD ONE THAT SILENTLY STOPS EVERYTHING — and it stops exactly
+       * half of it, which is worse, because the account looks perfectly
+       * healthy until a short is sent.
+       *
+       * 2026-09-17: SHORT CIFR · alpaca1: FAILED — "account is not allowed to
+       * short". Nothing on this desk could say that before the order went out.
+       * The borrow check asked whether the ASSET was shortable, which it was.
+       *
+       * It is the difference between a strategy that can be traded here and
+       * one that cannot: the 09:35 setup shorts constantly — all three of its
+       * 2026-09-15 picks were shorts — so an account with this off can never
+       * reproduce its backtest, however correct everything else is.
+       *
+       * null RATHER THAN false when Alpaca does not say. An absent field must
+       * not read as a refusal; see accountMayShort in ../alpaca/client.js.
+       */
+      shortingEnabled: (typeof a.shorting_enabled === 'boolean'
+        ? a.shorting_enabled : null),
+      // What the account may borrow against: 1 is a cash account, which cannot
+      // short at all and cannot be made to. Reported beside the flag because
+      // it says whether "enable it at the broker" is even possible.
+      multiplier: (a.multiplier == null ? null : Number(a.multiplier)),
       patternDayTrader: !!a.pattern_day_trader,
       status: a.status,
     },
