@@ -914,7 +914,7 @@ async function liveBuyingPower(cfg = settings(), now = Date.now()) {
   const id = cfg.destinationId || LEGACY_ID;
   const hit = POWER_CACHE.get(id);
   if (hit && now - hit.at < POWER_TTL_MS) {
-    return { ok: true, buyingPower: hit.buyingPower, cached: true };
+    return { ...hit.answer, cached: true };
   }
   let r;
   try {
@@ -930,15 +930,92 @@ async function liveBuyingPower(cfg = settings(), now = Date.now()) {
   if (!Number.isFinite(bp) || bp < 0) {
     return { ok: false, reason: 'the account answered without a buying power' };
   }
-  POWER_CACHE.set(id, { at: now, buyingPower: bp });
-  return {
+  const answer = {
     ok: true,
     buyingPower: bp,
     number: r.account.number || null,
+    /*
+     * WHETHER THIS ACCOUNT MAY SHORT AT ALL, carried beside the balance
+     * because they are the two facts a broker refusal contradicts. See
+     * mismatchNote: an order refused for "no buying power" by an account this
+     * box just measured at $197,691 did not come from that account, and the
+     * same goes for "not allowed to short" from one whose flag reads true.
+     *
+     * null when Alpaca did not say — never false. An absent field must not
+     * manufacture a contradiction out of nothing.
+     */
+    shortingEnabled: (typeof r.account.shortingEnabled === 'boolean'
+      ? r.account.shortingEnabled : null),
     // An account can be blocked without a single order being rejected until one
     // is sent, so it is carried rather than discovered at 09:35.
     blocked: !!(r.account.tradingBlocked || r.account.accountBlocked),
   };
+  POWER_CACHE.set(id, { at: now, answer });
+  return answer;
+}
+
+/*
+ * ── THE ORDER WENT SOMEWHERE THIS BOX CANNOT SEE ──────────────────────────
+ *
+ * 2026-09-17, the first morning the 09:35 setup ran after the restart loop was
+ * fixed. It evaluated 30 names, signalled 13, picked 2, and both were refused:
+ *
+ *     LONG  BETA 1470 sh @ 21.24 — From Alpaca: insufficient buying power
+ *     SHORT CIFR 2089 sh @ 17.88 — From Alpaca: account is not allowed to short
+ *
+ * Minutes later, the account this box reads for that destination answered:
+ *
+ *     PA3D8KLCRNFN | BP $197,691 | cash $98,845 | shorting: true | ACTIVE
+ *
+ * $197,691 of buying power refusing a $31,222 order, and an account with
+ * shorting enabled saying it is not allowed to short. Neither refusal can be
+ * true of that account. And its own order list proves it: nothing at all since
+ * 2026-09-15, while those two orders were certainly sent.
+ *
+ * THE ORDERS GO SOMEWHERE ELSE. Orders travel desk → SignalStack → Alpaca, and
+ * SignalStack holds its own copy of the credentials. The desk READS one account
+ * and TRADES another, and nothing anywhere compared the two.
+ *
+ * AND EVERY PROTECTION IS SIZED AGAINST THE WRONG ACCOUNT. liveBuyingPower
+ * reduces a position to fit a balance — the right rule, applied to a balance
+ * belonging to an account that is not receiving the order. Same for the borrow
+ * check, same for the blocked check. All correct, all about the wrong account.
+ *
+ * NOTHING HERE GUESSES WHERE IT WENT. It cannot know. It states the
+ * contradiction, which is a fact, and names the one thing that explains it.
+ *
+ * ONLY ON AN EXPLICIT CONTRADICTION. A refusal this box has no reading to
+ * contradict says nothing — an unproven accusation on an ordinary rejection
+ * would teach the reader to skip the line, and this line has to be read on the
+ * morning it appears.
+ */
+function mismatchNote({ message, cfg = {}, liveBuyingPower = null,
+                        accountNumber = null, shortingEnabled = null,
+                        notional = null } = {}) {
+  const m = String(message || '').toLowerCase();
+  const who = `${cfg.destinationName || cfg.destinationId || 'this destination'}`
+    + `${accountNumber ? ` (${accountNumber})` : ''}`;
+  const tail = ' — so this refusal did not come from it. The order reached a '
+    + 'DIFFERENT account: check which Alpaca account this destination\'s '
+    + 'SignalStack hook is connected to.';
+
+  if (/buying power|insufficient funds/.test(m)
+      && Number.isFinite(liveBuyingPower) && Number.isFinite(notional)
+      && notional > 0 && liveBuyingPower >= notional) {
+    return `${who} had $${Math.round(liveBuyingPower).toLocaleString()} of buying `
+      + `power against a $${Math.round(notional).toLocaleString()} order${tail}`;
+  }
+  /*
+   * "ACCOUNT is not allowed to short" ONLY. "asset cannot be sold short" is a
+   * fact about the ticker and contradicts nothing — treating the two alike
+   * would cry wolf on every hard-to-borrow small cap, which is most of what
+   * these screeners find.
+   */
+  if (/account is not allowed to short|not (?:approved|permitted|allowed) (?:to|for) short/.test(m)
+      && shortingEnabled === true) {
+    return `${who} has shorting enabled${tail}`;
+  }
+  return null;
 }
 
 /**
@@ -1683,6 +1760,11 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
   if (power.ok) {
     cfg = { ...cfg, liveBuyingPower: power.buyingPower };
     base.liveBuyingPower = power.buyingPower;
+    // WHICH ACCOUNT THIS READING IS ABOUT. Carried so a broker refusal can be
+    // checked against it — see mismatchNote. Without the number the
+    // contradiction is unattributable and the reader has nothing to go and fix.
+    base.accountNumber = power.number || null;
+    base.accountShorting = power.shortingEnabled;
     if (power.blocked) {
       const out = { ...base, quantity: 0, sent: false,
         skipped: `${cfg.destinationName || 'this account'} is blocked at the broker `
@@ -1908,6 +1990,24 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
         : `only ${done.length} of ${attempt.orders.length} legs went in — `
           + `${(results.find(r => !r.sent) || {}).message || 'refused'}`,
     };
+    /*
+     * DID THAT REFUSAL CONTRADICT WHAT THIS BOX JUST READ? If so the order did
+     * not reach the account this destination is configured for, and that is
+     * worth far more than the broker's own message. On the row AND folded into
+     * the error, because the error is what the alert and the session log show.
+     */
+    const note = mismatchNote({
+      message: (results.find(r => !r.sent) || {}).message,
+      cfg,
+      liveBuyingPower: base.liveBuyingPower,
+      accountNumber: base.accountNumber,
+      shortingEnabled: base.accountShorting,
+      notional: (fit.quantity || 0) * (Number(price) || 0),
+    });
+    if (note) {
+      out.destinationMismatch = note;
+      out.error = `${out.error} — BUT ${note}`;
+    }
     record(out);
     return out;
   }
@@ -1984,6 +2084,24 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
     error: res && res.ok ? null
       : `${(res && res.status) || 'no answer'}: ${(res && res.message) || 'order refused'}`,
   };
+  // The same contradiction check as the scale-out path above. Both, because a
+  // one-leg order and a three-leg one are refused by the same broker for the
+  // same reason, and a check on only one of them is a check that is usually
+  // not there.
+  if (!(res && res.ok)) {
+    const note = mismatchNote({
+      message: res && res.message,
+      cfg,
+      liveBuyingPower: base.liveBuyingPower,
+      accountNumber: base.accountNumber,
+      shortingEnabled: base.accountShorting,
+      notional: out.quantity * (Number(price) || 0),
+    });
+    if (note) {
+      out.destinationMismatch = note;
+      out.error = `${out.error} — BUT ${note}`;
+    }
+  }
   record(out);
   return out;
 }
@@ -2790,7 +2908,7 @@ module.exports = {
   DIALECTS, LEGACY_ID, MODES,
   orders, committed, remaining, tradesToday, sentAlready, positionsToday,
   // The account's own balance, and a way to forget it between tests.
-  liveBuyingPower, _forgetBuyingPower,
+  liveBuyingPower, _forgetBuyingPower, mismatchNote,
   recordFill, fillsRecorded,
   fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
