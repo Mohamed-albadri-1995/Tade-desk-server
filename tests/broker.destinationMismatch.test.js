@@ -237,8 +237,15 @@ describe('the cached answer is the whole answer', () => {
   const SRC = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'broker', 'signalstack.js'), 'utf8');
 
+  /*
+   * THE PROPERTY, NOT THE LINE. The first version of this pinned the exact
+   * return statement and broke the moment `readAt` was added beside `cached` —
+   * a test failing on a change that was not a regression teaches the next
+   * person to edit the test rather than read it. What matters is that the
+   * cached path hands back the WHOLE answer, not the balance alone.
+   */
   test('the cache stores the answer, not just the number', () => {
     expect(SRC).toMatch(/POWER_CACHE\.set\(id, \{ at: now, answer \}\)/);
-    expect(SRC).toMatch(/return \{ \.\.\.hit\.answer, cached: true \}/);
+    expect(SRC).toMatch(/\.\.\.hit\.answer/);
   });
 });

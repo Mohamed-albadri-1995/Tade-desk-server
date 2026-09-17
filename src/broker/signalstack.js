@@ -814,6 +814,52 @@ function committed(date, destination = null) {
 }
 
 /**
+ * What this box has sent to one destination SINCE a moment — the orders the
+ * broker's own figure cannot yet include.
+ *
+ * WHY NOT THE WHOLE DAY. Alpaca reserves buying power the moment it accepts an
+ * order, so a balance read at 09:35 already has 09:30's position in it.
+ * Subtracting the day's tally from it as well would charge every fill twice
+ * and shrink the next position for no reason. Only what was sent AFTER the
+ * reading is invisible to it.
+ *
+ * WHY IT IS NEEDED AT ALL. The reading is cached for twenty seconds, and one
+ * decision bar sends several picks to the same account inside that window. The
+ * runner sends them one at a time on purpose — "each order is sized against
+ * what the previous one actually committed in THAT account" — but the second
+ * pick was handed a CACHED balance taken before the first one existed, so the
+ * two were sized against the same money.
+ *
+ * 2026-09-17: BETA $31,222 and CIFR $37,361, one bar, one account, both
+ * measured against the same $197,691. They fitted. On a smaller account, or
+ * with the setup's `top 3` filled, they would not have.
+ *
+ * The typed ceiling never had this problem — it subtracts `committed()`, which
+ * is read from the ledger every time. Only the live figure was stale.
+ */
+function committedSince(sinceTs, destination = null, date = null) {
+  /*
+   * null IS NOT A TIMESTAMP, AND Number(null) IS 0 — which is finite, and a
+   * reading time of 0 counts EVERY order ever sent. So a missing
+   * `liveBuyingPowerAt` would have subtracted the whole day from the live
+   * balance, double-charging everything the broker had already reserved and
+   * shrinking every position after the first. `Number.isFinite(Number(x))`
+   * alone does not catch it; nor does it catch '' or false.
+   *
+   * Nothing to compare against means subtract nothing, which is exactly the
+   * behaviour this code had before the subtraction existed.
+   */
+  if (sinceTs === null || sinceTs === undefined || sinceTs === ''
+      || typeof sinceTs === 'boolean') return 0;
+  const since = Number(sinceTs);
+  if (!Number.isFinite(since)) return 0;
+  return orders(date)
+    .filter(o => o.sent && Number.isFinite(Number(o.at)) && Number(o.at) > since)
+    .filter(o => !destination || (o.destination || LEGACY_ID) === destination)
+    .reduce((sum, o) => sum + (o.quantity * o.price || 0), 0);
+}
+
+/**
  * How many orders actually went out today — all of them, or one setup's.
  *
  * Only SENT ones. A refusal placed no trade, and counting it would spend the
@@ -914,7 +960,10 @@ async function liveBuyingPower(cfg = settings(), now = Date.now()) {
   const id = cfg.destinationId || LEGACY_ID;
   const hit = POWER_CACHE.get(id);
   if (hit && now - hit.at < POWER_TTL_MS) {
-    return { ...hit.answer, cached: true };
+    // WHEN THIS BALANCE WAS TRUE, carried with it. A cached figure is a
+    // statement about a moment that has passed, and anything this box has sent
+    // since is not in it — see committedSince.
+    return { ...hit.answer, readAt: hit.at, cached: true };
   }
   let r;
   try {
@@ -951,7 +1000,7 @@ async function liveBuyingPower(cfg = settings(), now = Date.now()) {
     blocked: !!(r.account.tradingBlocked || r.account.accountBlocked),
   };
   POWER_CACHE.set(id, { at: now, answer });
-  return answer;
+  return { ...answer, readAt: now };
 }
 
 /*
@@ -1032,8 +1081,27 @@ function remaining(date, cfg = settings()) {
     // This destination's ceiling, spent by this destination's orders.
     ? Math.max(0, cfg.buyingPower - committed(date, cfg.destinationId || null))
     : null;
+  /*
+   * THE BROKER'S FIGURE, MINUS WHAT IT CANNOT YET KNOW ABOUT.
+   *
+   * It is used as it stands for everything sent BEFORE the reading — Alpaca
+   * reserves buying power on acceptance, so that is already in the number, and
+   * subtracting it again would charge every fill twice.
+   *
+   * But the reading is cached for twenty seconds and one decision bar sends
+   * several picks to the same account inside that window. Without this the
+   * second pick is sized against a balance taken before the first one existed,
+   * which is the whole thing the runner's one-at-a-time loop exists to prevent
+   * — its own comment says each order must be "sized against what the previous
+   * one actually committed in THAT account". That held for the typed ceiling,
+   * which re-reads the ledger every time, and not for the live figure.
+   *
+   * On a fresh reading the subtraction is zero by construction: nothing can
+   * have been sent after a moment that is now.
+   */
   const live = Number.isFinite(cfg.liveBuyingPower)
-    ? Math.max(0, cfg.liveBuyingPower)
+    ? Math.max(0, cfg.liveBuyingPower
+      - committedSince(cfg.liveBuyingPowerAt, cfg.destinationId || null, date))
     : null;
   if (tally === null) return live;
   if (live === null) return tally;
@@ -1758,7 +1826,11 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
    */
   const power = await liveBuyingPower(cfg);
   if (power.ok) {
-    cfg = { ...cfg, liveBuyingPower: power.buyingPower };
+    // WITH THE MOMENT IT WAS TRUE. Without it a cached balance is sized
+    // against as though it were current, and the second pick of a bar spends
+    // the first one's money — see committedSince.
+    cfg = { ...cfg, liveBuyingPower: power.buyingPower,
+            liveBuyingPowerAt: power.readAt };
     base.liveBuyingPower = power.buyingPower;
     // WHICH ACCOUNT THIS READING IS ABOUT. Carried so a broker refusal can be
     // checked against it — see mismatchNote. Without the number the
@@ -2908,7 +2980,7 @@ module.exports = {
   DIALECTS, LEGACY_ID, MODES,
   orders, committed, remaining, tradesToday, sentAlready, positionsToday,
   // The account's own balance, and a way to forget it between tests.
-  liveBuyingPower, _forgetBuyingPower, mismatchNote,
+  liveBuyingPower, _forgetBuyingPower, mismatchNote, committedSince,
   recordFill, fillsRecorded,
   fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,
