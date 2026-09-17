@@ -6,290 +6,6 @@
     {
       "derived": true,
       "id": "1",
-      "name": "OR + VWAP 09:35 (Long)",
-      "order_errors": [],
-      "order_ok": true,
-      "shape": "1 SL / 1 TP + runner (50%)",
-      "sides": {
-        "long": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": true,
-          "legs": [
-            {
-              "anchored": false,
-              "fraction": 0.5,
-              "price": 52.0,
-              "r_multiple": 2.0,
-              "stop": 49.0,
-              "stop_kind": "fixed",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [],
-          "order_ok": true,
-          "protocol": 1,
-          "runner": 0.5,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP + runner (50%)",
-          "stop_anchored": false,
-          "stop_kind": "fixed",
-          "trail": null,
-          "warnings": [
-            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it",
-            "50% is a runner with no target \u2014 it rides the stop until the end-of-session close"
-          ]
-        },
-        "short": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": true,
-          "legs": [
-            {
-              "anchored": false,
-              "fraction": 0.5,
-              "price": 48.0,
-              "r_multiple": 2.0,
-              "stop": 51.0,
-              "stop_kind": "fixed",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [],
-          "order_ok": true,
-          "protocol": 1,
-          "runner": 0.5,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP + runner (50%)",
-          "stop_anchored": false,
-          "stop_kind": "fixed",
-          "trail": null,
-          "warnings": [
-            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it",
-            "50% is a runner with no target \u2014 it rides the stop until the end-of-session close"
-          ]
-        }
-      },
-      "tools": [
-        "T2"
-      ]
-    },
-    {
-      "derived": true,
-      "id": "10",
-      "name": "T2 10:00 VWAP Extension (Long)",
-      "order_errors": [],
-      "order_ok": true,
-      "shape": "1 SL / 1 TP",
-      "sides": {
-        "long": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": false,
-          "legs": [
-            {
-              "anchored": false,
-              "fraction": 1.0,
-              "price": 52.0,
-              "r_multiple": 2.0,
-              "stop": 49.0,
-              "stop_kind": "fixed",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [],
-          "order_ok": true,
-          "protocol": 1,
-          "runner": 0.0,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP",
-          "stop_anchored": false,
-          "stop_kind": "fixed",
-          "trail": null,
-          "warnings": []
-        },
-        "short": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": false,
-          "legs": [
-            {
-              "anchored": false,
-              "fraction": 1.0,
-              "price": 48.0,
-              "r_multiple": 2.0,
-              "stop": 51.0,
-              "stop_kind": "fixed",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [],
-          "order_ok": true,
-          "protocol": 1,
-          "runner": 0.0,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP",
-          "stop_anchored": false,
-          "stop_kind": "fixed",
-          "trail": null,
-          "warnings": []
-        }
-      },
-      "tools": [
-        "T2"
-      ]
-    },
-    {
-      "derived": true,
-      "id": "11",
-      "name": "T2 10:00 VWAP Extension (Short)",
-      "order_errors": [],
-      "order_ok": true,
-      "shape": "1 SL / 1 TP",
-      "sides": {
-        "long": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": false,
-          "legs": [
-            {
-              "anchored": false,
-              "fraction": 1.0,
-              "price": 52.0,
-              "r_multiple": 2.0,
-              "stop": 49.0,
-              "stop_kind": "fixed",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [],
-          "order_ok": true,
-          "protocol": 1,
-          "runner": 0.0,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP",
-          "stop_anchored": false,
-          "stop_kind": "fixed",
-          "trail": null,
-          "warnings": []
-        },
-        "short": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": false,
-          "legs": [
-            {
-              "anchored": false,
-              "fraction": 1.0,
-              "price": 48.0,
-              "r_multiple": 2.0,
-              "stop": 51.0,
-              "stop_kind": "fixed",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [],
-          "order_ok": true,
-          "protocol": 1,
-          "runner": 0.0,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP",
-          "stop_anchored": false,
-          "stop_kind": "fixed",
-          "trail": null,
-          "warnings": []
-        }
-      },
-      "tools": [
-        "T2"
-      ]
-    },
-    {
-      "derived": true,
-      "id": "12",
-      "name": "PML breakout",
-      "order_errors": [
-        "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
-      ],
-      "order_ok": false,
-      "shape": "1 SL / 1 TP",
-      "sides": {
-        "long": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": true,
-          "legs": [
-            {
-              "anchored": true,
-              "fraction": 1.0,
-              "price": null,
-              "r_multiple": null,
-              "stop": 49.0,
-              "stop_kind": "anchored",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [
-            "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
-          ],
-          "order_ok": false,
-          "protocol": 1,
-          "runner": 0.0,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP",
-          "stop_anchored": true,
-          "stop_kind": "anchored",
-          "trail": null,
-          "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
-          ]
-        },
-        "short": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": true,
-          "legs": [
-            {
-              "anchored": true,
-              "fraction": 1.0,
-              "price": null,
-              "r_multiple": null,
-              "stop": 51.0,
-              "stop_kind": "anchored",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [
-            "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
-          ],
-          "order_ok": false,
-          "protocol": 1,
-          "runner": 0.0,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP",
-          "stop_anchored": true,
-          "stop_kind": "anchored",
-          "trail": null,
-          "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
-          ]
-        }
-      },
-      "tools": []
-    },
-    {
-      "derived": true,
-      "id": "13",
       "name": "Test",
       "order_errors": [],
       "order_ok": true,
@@ -376,13 +92,364 @@
           ]
         }
       },
-      "tools": [
-        "T2"
-      ]
+      "tools": []
+    },
+    {
+      "derived": true,
+      "id": "10",
+      "name": "PM Breakout (2m)",
+      "order_errors": [
+        "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
+      ],
+      "order_ok": false,
+      "shape": "1 SL / 1 TP",
+      "sides": {
+        "long": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": true,
+          "legs": [
+            {
+              "anchored": true,
+              "fraction": 1.0,
+              "price": null,
+              "r_multiple": null,
+              "stop": 49.0,
+              "stop_kind": "fixed",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [
+            "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
+          ],
+          "order_ok": false,
+          "protocol": 1,
+          "runner": 0.0,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP",
+          "stop_anchored": false,
+          "stop_kind": "fixed",
+          "trail": null,
+          "warnings": [
+            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
+          ]
+        },
+        "short": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": true,
+          "legs": [
+            {
+              "anchored": true,
+              "fraction": 1.0,
+              "price": null,
+              "r_multiple": null,
+              "stop": 51.0,
+              "stop_kind": "fixed",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [
+            "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
+          ],
+          "order_ok": false,
+          "protocol": 1,
+          "runner": 0.0,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP",
+          "stop_anchored": false,
+          "stop_kind": "fixed",
+          "trail": null,
+          "warnings": [
+            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
+          ]
+        }
+      },
+      "tools": []
+    },
+    {
+      "derived": true,
+      "id": "11",
+      "name": "T2 10:00 VWAP Extension (Long)",
+      "order_errors": [],
+      "order_ok": true,
+      "shape": "1 SL / 1 TP",
+      "sides": {
+        "long": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": false,
+          "legs": [
+            {
+              "anchored": false,
+              "fraction": 1.0,
+              "price": 52.0,
+              "r_multiple": 2.0,
+              "stop": 49.0,
+              "stop_kind": "fixed",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [],
+          "order_ok": true,
+          "protocol": 1,
+          "runner": 0.0,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP",
+          "stop_anchored": false,
+          "stop_kind": "fixed",
+          "trail": null,
+          "warnings": []
+        },
+        "short": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": false,
+          "legs": [
+            {
+              "anchored": false,
+              "fraction": 1.0,
+              "price": 48.0,
+              "r_multiple": 2.0,
+              "stop": 51.0,
+              "stop_kind": "fixed",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [],
+          "order_ok": true,
+          "protocol": 1,
+          "runner": 0.0,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP",
+          "stop_anchored": false,
+          "stop_kind": "fixed",
+          "trail": null,
+          "warnings": []
+        }
+      },
+      "tools": []
+    },
+    {
+      "derived": true,
+      "id": "12",
+      "name": "T2 10:00 VWAP Extension (Short)",
+      "order_errors": [],
+      "order_ok": true,
+      "shape": "1 SL / 1 TP",
+      "sides": {
+        "long": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": false,
+          "legs": [
+            {
+              "anchored": false,
+              "fraction": 1.0,
+              "price": 52.0,
+              "r_multiple": 2.0,
+              "stop": 49.0,
+              "stop_kind": "fixed",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [],
+          "order_ok": true,
+          "protocol": 1,
+          "runner": 0.0,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP",
+          "stop_anchored": false,
+          "stop_kind": "fixed",
+          "trail": null,
+          "warnings": []
+        },
+        "short": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": false,
+          "legs": [
+            {
+              "anchored": false,
+              "fraction": 1.0,
+              "price": 48.0,
+              "r_multiple": 2.0,
+              "stop": 51.0,
+              "stop_kind": "fixed",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [],
+          "order_ok": true,
+          "protocol": 1,
+          "runner": 0.0,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP",
+          "stop_anchored": false,
+          "stop_kind": "fixed",
+          "trail": null,
+          "warnings": []
+        }
+      },
+      "tools": []
+    },
+    {
+      "derived": true,
+      "id": "13",
+      "name": "PML breakout",
+      "order_errors": [
+        "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
+      ],
+      "order_ok": false,
+      "shape": "1 SL / 1 TP",
+      "sides": {
+        "long": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": true,
+          "legs": [
+            {
+              "anchored": true,
+              "fraction": 1.0,
+              "price": null,
+              "r_multiple": null,
+              "stop": 49.0,
+              "stop_kind": "anchored",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [
+            "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
+          ],
+          "order_ok": false,
+          "protocol": 1,
+          "runner": 0.0,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP",
+          "stop_anchored": true,
+          "stop_kind": "anchored",
+          "trail": null,
+          "warnings": [
+            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
+          ]
+        },
+        "short": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": true,
+          "legs": [
+            {
+              "anchored": true,
+              "fraction": 1.0,
+              "price": null,
+              "r_multiple": null,
+              "stop": 51.0,
+              "stop_kind": "anchored",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [
+            "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
+          ],
+          "order_ok": false,
+          "protocol": 1,
+          "runner": 0.0,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP",
+          "stop_anchored": true,
+          "stop_kind": "anchored",
+          "trail": null,
+          "warnings": [
+            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
+          ]
+        }
+      },
+      "tools": []
     },
     {
       "derived": true,
       "id": "2",
+      "name": "OR + VWAP 09:35 (Long)",
+      "order_errors": [],
+      "order_ok": true,
+      "shape": "1 SL / 1 TP + runner (50%)",
+      "sides": {
+        "long": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": true,
+          "legs": [
+            {
+              "anchored": false,
+              "fraction": 0.5,
+              "price": 52.0,
+              "r_multiple": 2.0,
+              "stop": 49.0,
+              "stop_kind": "fixed",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [],
+          "order_ok": true,
+          "protocol": 1,
+          "runner": 0.5,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP + runner (50%)",
+          "stop_anchored": false,
+          "stop_kind": "fixed",
+          "trail": null,
+          "warnings": [
+            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it",
+            "50% is a runner with no target \u2014 it rides the stop until the end-of-session close"
+          ]
+        },
+        "short": {
+          "breakeven_after_leg": false,
+          "errors": [],
+          "exit_rule": true,
+          "legs": [
+            {
+              "anchored": false,
+              "fraction": 0.5,
+              "price": 48.0,
+              "r_multiple": 2.0,
+              "stop": 51.0,
+              "stop_kind": "fixed",
+              "trail": null
+            }
+          ],
+          "ok": true,
+          "order_errors": [],
+          "order_ok": true,
+          "protocol": 1,
+          "runner": 0.5,
+          "runner_manage": "eod",
+          "shape": "1 SL / 1 TP + runner (50%)",
+          "stop_anchored": false,
+          "stop_kind": "fixed",
+          "trail": null,
+          "warnings": [
+            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it",
+            "50% is a runner with no target \u2014 it rides the stop until the end-of-session close"
+          ]
+        }
+      },
+      "tools": []
+    },
+    {
+      "derived": true,
+      "id": "3",
       "name": "OR + VWAP 09:35 (Short)",
       "order_errors": [],
       "order_ok": true,
@@ -449,13 +516,11 @@
           ]
         }
       },
-      "tools": [
-        "T2"
-      ]
+      "tools": []
     },
     {
       "derived": true,
-      "id": "3",
+      "id": "4",
       "name": "RubberBand Scalp",
       "order_errors": [],
       "order_ok": true,
@@ -568,7 +633,7 @@
     },
     {
       "derived": true,
-      "id": "4",
+      "id": "5",
       "name": "RubberBand Scalp (Short)",
       "order_errors": [],
       "order_ok": true,
@@ -681,7 +746,7 @@
     },
     {
       "derived": true,
-      "id": "5",
+      "id": "6",
       "name": "Second Chance Scalp",
       "order_errors": [],
       "order_ok": true,
@@ -754,7 +819,7 @@
     },
     {
       "derived": true,
-      "id": "6",
+      "id": "7",
       "name": "Back$ide Scalp",
       "order_errors": [],
       "order_ok": true,
@@ -827,7 +892,7 @@
     },
     {
       "derived": true,
-      "id": "7",
+      "id": "8",
       "name": "HitchHiker Scalp",
       "order_errors": [],
       "order_ok": true,
@@ -900,7 +965,7 @@
     },
     {
       "derived": true,
-      "id": "8",
+      "id": "9",
       "name": "Fashionably Late Scalp",
       "order_errors": [
         "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
@@ -969,81 +1034,6 @@
           "trail": null,
           "warnings": [
             "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
-          ]
-        }
-      },
-      "tools": []
-    },
-    {
-      "derived": true,
-      "id": "9",
-      "name": "PM Breakout (2m)",
-      "order_errors": [
-        "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
-      ],
-      "order_ok": false,
-      "shape": "1 SL / 1 TP",
-      "sides": {
-        "long": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": true,
-          "legs": [
-            {
-              "anchored": true,
-              "fraction": 1.0,
-              "price": null,
-              "r_multiple": null,
-              "stop": 49.0,
-              "stop_kind": "fixed",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [
-            "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
-          ],
-          "order_ok": false,
-          "protocol": 1,
-          "runner": 0.0,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP",
-          "stop_anchored": false,
-          "stop_kind": "fixed",
-          "trail": null,
-          "warnings": [
-            "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
-          ]
-        },
-        "short": {
-          "breakeven_after_leg": false,
-          "errors": [],
-          "exit_rule": true,
-          "legs": [
-            {
-              "anchored": true,
-              "fraction": 1.0,
-              "price": null,
-              "r_multiple": null,
-              "stop": 51.0,
-              "stop_kind": "fixed",
-              "trail": null
-            }
-          ],
-          "ok": true,
-          "order_errors": [
-            "this strategy exits on a RULE, not at a price \u2014 no broker can watch for that. It alerts correctly; it must not be auto-traded unless you give it a target, or the order would be a different strategy from the one that was tested"
-          ],
-          "order_ok": false,
-          "protocol": 1,
-          "runner": 0.0,
-          "runner_manage": "eod",
-          "shape": "1 SL / 1 TP",
-          "stop_anchored": false,
-          "stop_kind": "fixed",
-          "trail": null,
-          "warnings": [
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         }

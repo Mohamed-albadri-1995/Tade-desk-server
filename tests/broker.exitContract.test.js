@@ -198,6 +198,25 @@ describe.each(NAMED)('%s', (_label, strat) => {
     // `target` argument — which is 99.99 precisely so a fallback to it shows.
     const targets = bodies.map(b => b.take_profit_price).filter(v => v != null);
     expect(targets).toEqual(priced.map(l => Math.round(l.price * 100) / 100));
+
+    /*
+     * AND EACH LEG'S SHARES GO OUT WITH ITS OWN TARGET.
+     *
+     * The line above proves the PRICES are in order. It says nothing about
+     * which share count is attached to each of them, and that pairing is the
+     * whole trade: `Test` books 10% at 3R and 80% at 6R, and the same two
+     * numbers swapped is a completely different strategy — most of the
+     * position leaving at the near target instead of waiting for the far one.
+     * Both versions place the same shares against the same prices and sum
+     * identically, so every assertion here passed either way.
+     *
+     * Asked on 2026-09-17 of the live SMCI order — 115 @ 39.89, 924 @ 41.06 —
+     * and the answer had to be traced through three files to be sure. It is a
+     * property, so it belongs in a test.
+     */
+    const withTarget = bodies.filter(b => b.take_profit_price != null);
+    expect(withTarget.map(b => b.quantity))
+      .toEqual(priced.map(l => Math.floor(100 * l.fraction)));
     expect(targets).not.toContain(99.99);
 
     // The runner is the one with no target, and it is last.
@@ -238,9 +257,25 @@ describe.each(NAMED)('%s', (_label, strat) => {
  * place real money on a strategy nobody tested.
  */
 describe('the drift these tests exist to catch', () => {
-  // "1 SL / 1 TP + runner (50%)" — the commonest shape, and the one that was
-  // once silently placed as "all at 2R" for exactly this reason.
-  const withRunner = CONTRACT.strategies.find(s => /\+ runner/.test(s.shape));
+  /*
+   * "1 SL / 1 TP + runner (50%)" — the commonest shape, and the one that was
+   * once silently placed as "all at 2R" for exactly this reason.
+   *
+   * NAMED BY ITS SHAPE, not by being the first thing matching `+ runner`. The
+   * loose match picked whichever strategy happened to come first, so when the
+   * platform renumbered its strategies on 2026-09-17 this silently switched to
+   * `Test` — "1 SL / 2 TP + runner (10%)" — and the assertions below, written
+   * for a one-target strategy, started failing on a strategy they were never
+   * about. A test that quietly changes what it is testing is worse than one
+   * that breaks: this one broke, which is how it was found.
+   */
+  const RUNNER_SHAPE = '1 SL / 1 TP + runner (50%)';
+  const withRunner = CONTRACT.strategies.find(s => s.shape === RUNNER_SHAPE);
+
+  test('the fixture still holds the shape these cases are about', () => {
+    expect(withRunner).toBeDefined();
+    expect(withRunner.shape).toBe(RUNNER_SHAPE);
+  });
 
   test('the shape is placed correctly to begin with', () => {
     const { bodies } = wire(withRunner.sides.long);
