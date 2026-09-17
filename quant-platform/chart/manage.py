@@ -158,6 +158,7 @@ def manage(strategy: dict, symbol: str, side: str, entry: float,
         stop_kind = 'fixed' if frozen else ('anchored' if sl_spec.get('type') == 'prim'
                                             else 'trailing')
 
+    anchor_at_entry = None
     if frozen or sl_arr is None:
         # Nothing to follow. The level the broker already holds IS the stop, and
         # saying so is not a non-answer: it is the reason this strategy needs no
@@ -179,11 +180,19 @@ def manage(strategy: dict, symbol: str, side: str, entry: float,
         # `stop_at_entry` is still reported, so a disagreement is VISIBLE rather
         # than resolved in silence.
         eff = None
+        # THE ANCHOR AS IT STOOD ON THE ENTRY BAR, kept separately from the
+        # ratcheted level. It is the only number that can answer "was this stop
+        # already past the fill when the trade opened" — see the wrong-side note
+        # below, which was reading the RATCHETED level and getting a different
+        # question's answer.
+        anchor_at_entry = None
         for j in range(ei, last + 1):
             v = sl_arr[j]
             if v is None or v != v:                   # NaN in warm-up → hold
                 continue
             v = float(v)
+            if j == ei:
+                anchor_at_entry = v
             eff = v if eff is None else (max(eff, v) if side == 'long' else min(eff, v))
         # Nothing formed yet — the anchor is still in warm-up. The level the
         # broker holds is all there is, and it is better than nothing.
@@ -205,9 +214,37 @@ def manage(strategy: dict, symbol: str, side: str, entry: float,
     # that should never happen automatically without somebody having seen it.
     #
     # So it is REPORTED and not resolved. The caller decides.
-    wrong_side = (stop_now is not None
-                  and ((side == 'long' and stop_now >= float(entry))
-                       or (side == 'short' and stop_now <= float(entry))))
+    #
+    # ── MEASURED AT THE ENTRY BAR, NOT NOW ──────────────────────────────────
+    #
+    # This tested `stop_now`, the RATCHETED level, and so answered a different
+    # question from the one above it. A trailing stop that has climbed past the
+    # entry is the ordinary healthy case — it is a stop that has moved into
+    # profit, which is the entire purpose of a trail — and it was being
+    # reported as broken.
+    #
+    # 2026-09-17, P, long from 102.20 with its stop at 101.45:
+    #
+    #     stop 102.57 → 102.64, stopMoved true, wrongSide true,
+    #     breached true, exitNow FALSE, every pass from 11:50
+    #
+    # VWAP rose through the entry while price fell below it. The trail did
+    # exactly what a trail is for; the stop was breached; and the desk refused
+    # to close, published an error alert, and did it again sixty seconds later.
+    # Eight alerts, four errors, and a position the backtest would have closed
+    # still open — the divergence this whole system exists to prevent.
+    #
+    # The hazard the note describes is a stop that was ALREADY past the fill
+    # when the trade opened. That is a fact about the entry bar, and the entry
+    # bar is where it is now read. `stop_at_entry` is the fallback rather than
+    # the primary: it is what the BROKER was told, and the ratchet is seeded
+    # from the anchor instead precisely so the two can be seen to disagree.
+    _ref = anchor_at_entry
+    if _ref is None:
+        _ref = float(stop_at_entry) if stop_at_entry is not None else stop_now
+    wrong_side = (_ref is not None
+                  and ((side == 'long' and _ref >= float(entry))
+                       or (side == 'short' and _ref <= float(entry))))
 
     moved = (stop_now is not None and stop_at_entry is not None
              and abs(stop_now - float(stop_at_entry)) > 1e-9)
