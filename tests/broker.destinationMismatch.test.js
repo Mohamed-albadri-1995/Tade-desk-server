@@ -194,12 +194,49 @@ describe('it is wired into both send paths', () => {
    * same reason. A check on only one of them is a check that is usually not
    * there — the 09:35 setup scales out, so its orders take the multi-leg path.
    */
-  test('called from the scale-out path and the single-order path', () => {
+  /**
+   * A named function's body, so a region can be asserted about rather than the
+   * file as a whole.
+   */
+  function bodyOf(name) {
+    const i = SRC.indexOf(name);
+    expect(i).toBeGreaterThan(-1);
+    const j = SRC.indexOf('\n}\n', i);
+    return SRC.slice(i, j);
+  }
+
+  /*
+   * EVERY PLACE THAT REPORTS A REFUSAL RUNS IT — asserted as three regions,
+   * not as a count. The first version of this said "exactly 2 call sites" and
+   * broke the moment a third legitimate one was added, which is the same
+   * brittleness as pinning a line of source: a test that fails on a change
+   * that is not a regression gets edited instead of read.
+   */
+  test('the scale-out path runs it', () => {
+    expect(SRC).toMatch(/only \$\{done\.length\} of[\s\S]{0,900}= mismatchNote\(\{/);
+  });
+
+  test('the single-order path runs it', () => {
+    expect(SRC).toMatch(/order refused'\}`,[\s\S]{0,900}= mismatchNote\(\{/);
+  });
+
+  /*
+   * AND THE TEST BUTTON, which is the place it matters most: it is what
+   * somebody runs when they already suspect something is wrong. On 2026-09-17
+   * one share of AAPL through alpaca1's live hook came back "insufficient
+   * buying power" from an account holding $197,691, and the button reported
+   * the broker's message and nothing else.
+   */
+  test('the one-share test button runs it', () => {
+    expect(bodyOf('async function test({')).toMatch(/= mismatchNote\(\{/);
+  });
+
+  test('and there is still exactly one definition of it', () => {
     // CALL SITES, not mentions: `function mismatchNote({` matches the bare
     // name too, and counting the definition as a call site would let a version
-    // with ONE call site pass.
-    expect(SRC.split('= mismatchNote({').length - 1).toBe(2);
+    // with no call sites at all pass.
     expect(SRC.split('function mismatchNote(').length - 1).toBe(1);
+    expect(SRC.split('= mismatchNote({').length - 1).toBeGreaterThanOrEqual(3);
   });
 
   test('the note is folded into the error the alert shows', () => {

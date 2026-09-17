@@ -2539,6 +2539,49 @@ async function test({ symbol = 'AAPL', useTestHook = true, destination = null } 
     sent: res.ok, status: res.status, httpStatus: res.httpStatus,
     orderId: res.orderId, fillPrice: res.fillPrice, message: res.message,
   };
+  /*
+   * THE SAME CONTRADICTION CHECK AS A REAL ORDER — and this is the place it
+   * matters most, because this button IS the diagnostic.
+   *
+   * 2026-09-17, one share of AAPL through alpaca1's LIVE hook:
+   *
+   *     "hook":"live", "sent":false,
+   *     "message":"From Alpaca: insufficient buying power"
+   *
+   * while the account this box reads for that destination held $197,691. One
+   * share of AAPL is about $250. An account with $197,691 cannot refuse it, so
+   * the order did not reach that account — which is the entire question the
+   * button was pressed to answer, and it answered with the broker's message
+   * and nothing else.
+   *
+   * placeOrder had gained this check; test() had not, and test() is what
+   * someone runs when they already suspect something is wrong.
+   */
+  if (!res.ok) {
+    const power = await liveBuyingPower(cfg);
+    if (power.ok) {
+      const note = mismatchNote({
+        message: res.message,
+        cfg,
+        liveBuyingPower: power.buyingPower,
+        accountNumber: power.number,
+        shortingEnabled: power.shortingEnabled,
+        // The price is not known here — one share of anything liquid is small
+        // beside a funded account, and the comparison only has to be true, not
+        // tight. A balance that cannot cover ONE share is not a mismatch.
+        notional: 1,
+      });
+      if (note) out.destinationMismatch = note;
+      out.accountRead = {
+        number: power.number, buyingPower: power.buyingPower,
+        shortingEnabled: power.shortingEnabled,
+      };
+    } else {
+      // Said, not swallowed: "could not check" and "checked and agreed" are
+      // different results, and this button exists to tell them apart.
+      out.accountUnread = power.reason;
+    }
+  }
   record(out);
   return { ...out, requestBody: body };
 }
