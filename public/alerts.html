@@ -147,6 +147,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
    end of it, never wrapped underneath where it reads as the first item of the
    list it is supposed to add to. */
 .sec > button, .sec > select { flex:0 0 auto; margin-left:auto; align-self:center; }
+/* Only the FIRST control claims the right edge. `margin-left:auto` on each of
+   them makes every one push itself right, so a picker and a Reload beside it
+   ended up on two lines with a gap between — two controls that belong to one
+   another, reading as two unrelated things. */
+.sec > select + button, .sec > button + button { margin-left:var(--s2); }
 
 /* ── THE WHY, folded away ──
  *
@@ -674,10 +679,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      and six words you can already read, and an emoji font draws them
      differently on every device. -->
 <aside class="al-side" aria-label="sections">
-  <button class="tb on" data-t="today">Today</button>
-  <button class="tb" data-t="history">History</button>
+  <button class="tb on" data-t="today">Live</button>
+  <button class="tb" data-t="history">Day</button>
   <button class="tb" data-t="setups">Setups</button>
-  <button class="tb" data-t="log">Log</button>
   <button class="tb" data-t="rules">Rules</button>
   <button class="tb" data-t="settings">Settings</button>
 </aside>
@@ -712,25 +716,39 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      alone for weeks. Nothing is removed and no ids change — the same DOM,
      shown a quarter at a time. -->
 <div class="tabs" id="tabs">
-  <button class="tb on" data-t="today">Today</button>
+  <button class="tb on" data-t="today">Live</button>
   <!-- HISTORY is its own tab, not the bottom of TODAY.
        They answer opposite questions. Today is "what do I do in the next few
        minutes"; history is "was this setup any good last week". Sharing a
        scroll meant every glance at the morning's fires ended up somewhere in
        last Tuesday, and the send button lived down there with it. -->
-  <button class="tb" data-t="history">History</button>
+  <button class="tb" data-t="history">Day</button>
   <button class="tb" data-t="setups">Setups</button>
   <!-- LOG answers the question the feed structurally cannot.
        Every other tab here shows what FIRED. A name that was dropped produces
        no alert, by definition — so "why did it take two and not five" had no
        answer on this page at all, and the reasons are exactly where a strategy
        stops being the one that was backtested. -->
-  <button class="tb" data-t="log">Log</button>
   <button class="tb" data-t="rules">Rules</button>
   <button class="tb" data-t="settings">Settings</button>
 </div>
 
 <div class="pane" data-t="today">
+<!-- The sound and notification switches were here, above the morning's
+     alerts, on the screen this desk is monitored from. Two settings touched
+     once a month, given the top of the one tab that is watched live. They are
+     in Settings now, with the other things you set and leave alone.
+     The state is not lost by moving: an alerting page whose sound is off
+     without saying so is worse than one with no sound, so the strip above
+     still carries it on every tab. -->
+
+</div><!-- /today -->
+
+<div class="pane" data-t="settings" hidden>
+<div class="sec">
+  <span>Alerts</span>
+  <span class="note">How this page tells you something happened.</span>
+</div>
 <div class="noise">
   <button class="btn" id="snd" onclick="toggleSound()">🔊 Sound: off</button>
   <button class="btn" id="ntf" onclick="askNotify()">🔔 Notifications</button>
@@ -749,10 +767,6 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <span class="note" id="next-decision" hidden></span>
   <span class="note" id="algo-state" hidden></span>
 </div>
-
-</div><!-- /today -->
-
-<div class="pane" data-t="settings" hidden>
 <!-- THE PIPELINE, stated once at the top of the tab.
      Three numbered sections follow it in the same order. The complaint this
      answers is that the tab was a pile of controls with no order to them: you
@@ -974,10 +988,28 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      last Tuesday, and at what second" — which is the question that decides
      whether a setup is worth keeping. Nothing here is ever trimmed. -->
 <div class="pane" data-t="history" hidden>
+<!-- ── ONE DAY, WHOLE ──
+     History and Log were two tabs, each with its own date picker, and neither
+     answered the question on its own. The log says "575 evaluated, 0
+     signalled"; the history says "here are the 0". You need both, at the same
+     moment, for the same day — and two pickers can disagree about which day
+     that is, which is the worst possible way to read a record.
+     So: the funnel first, because "did the desk work" comes before "what did
+     it say", then every alert it published. One picker drives both. -->
 <div class="sec">
-  <span>Signal history</span>
-  <select id="hist-date" onchange="loadHistory()"></select>
+  <span>The day</span>
+  <span class="note">What the desk did, including what it decided not to do.</span>
+  <select id="hist-date" onchange="loadDay()"></select>
+  <button class="btn" onclick="loadDay()">Reload</button>
 </div>
+<!-- The log's own date input stays, hidden, because loadLog() reads it and a
+     second way of holding "which day" is a second thing that can be wrong.
+     The select above is what a person touches; this is what the loader reads,
+     and loadDay() is the one place that keeps them equal. -->
+<input type="date" id="log-date" hidden>
+<div id="log-summary"></div>
+<div id="log-runs"></div>
+<div class="sec"><span>Alerts published</span></div>
 <div id="history"><div class="empty">Pick a session.</div></div>
 </div><!-- /history -->
 
@@ -995,17 +1027,6 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      that took it (or did not), and the sweeps that managed it out. The funnel
      is at the top because it is the answer to the question people arrive with
      — "it took two names, out of how many, and what removed the rest". -->
-<div class="pane" data-t="log" hidden>
-<div class="sec">
-  <span>Session log</span>
-  <span class="note">What the desk did, including what it decided not to do.</span>
-  <input type="date" id="log-date" onchange="loadLog()">
-  <button class="btn" onclick="loadLog()">Reload</button>
-</div>
-<div id="log-summary"></div>
-<div id="log-runs"></div>
-</div><!-- /log -->
-
 </div><!-- /al-main -->
 </div><!-- /al-shell -->
 
@@ -3242,7 +3263,13 @@ let HIST_DATES = [];
  * worse bug than the scrolling this replaces.
  */
 function showTab(name) {
-  const want = name || 'today';
+  /*
+   * 'log' WAS A TAB AND IS NOW HALF OF 'history'. The chosen tab is remembered
+   * in localStorage, so every browser that last sat on Log has 'log' saved —
+   * and an unknown name hides every pane and shows none, which is a blank page
+   * on the next visit rather than an error anybody could act on.
+   */
+  const want = (name === 'log' ? 'history' : name) || 'today';
   document.querySelectorAll('.pane').forEach(p => {
     p.hidden = p.getAttribute('data-t') !== want;
   });
@@ -3259,7 +3286,14 @@ function showTab(name) {
    * hidden pane current, and the one moment it needs to be current is the
    * moment somebody taps the tab. There is a Reload button for the rest.
    */
-  if (want === 'log') loadLog();
+  /*
+   * FETCHED WHEN OPENED, not on a timer. Live is kept current because it is
+   * answering a question about the next few minutes. This one is a record of
+   * what already happened — polling it would add a request every few seconds
+   * all morning to keep a hidden pane fresh, and the one moment it needs to be
+   * fresh is the moment somebody taps the tab.
+   */
+  if (want === 'history') loadDay();
   window.scrollTo(0, 0);
 }
 
@@ -3691,6 +3725,28 @@ async function loadLog() {
     sum.innerHTML = `<div class="empty">Could not read the log — ${esc(e.message)}</div>`;
     runs.innerHTML = '';
   }
+}
+
+/*
+ * ONE DAY, BOTH HALVES.
+ *
+ * The funnel and the alerts were two tabs with two date pickers. Neither
+ * answers "was that day normal" on its own — the funnel says 575 evaluated and
+ * 0 signalled, the alerts say here are the 0 — and two pickers holding the same
+ * question can disagree about which day is on screen, which is the one thing a
+ * record must never do.
+ *
+ * The select is what a person touches. The log's own date input is still in the
+ * DOM because loadLog() reads it, and this is the single place that keeps the
+ * two equal; anything else is a second copy of "which day", and a second copy
+ * is a thing that can be wrong.
+ */
+function loadDay() {
+  const pick = document.getElementById('hist-date');
+  const log = document.getElementById('log-date');
+  if (pick && log && pick.value) log.value = pick.value;
+  loadLog();
+  loadHistory(pick ? pick.value : '');
 }
 
 /*

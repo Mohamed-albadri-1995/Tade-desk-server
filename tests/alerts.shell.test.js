@@ -57,8 +57,15 @@ describe('one navigation, in two shapes', () => {
     expect(RAIL()).toEqual(ROW());
   });
 
-  test('and there are six of them, Today first', () => {
-    expect(RAIL()).toEqual(['today', 'history', 'setups', 'log', 'rules', 'settings']);
+  test('and they are the five, Live first', () => {
+    /*
+     * Six, until History and Log were merged. They were two halves of one
+     * question — the log says "575 evaluated, 0 signalled", the history says
+     * "here are the 0" — read at the same moment, for the same day, from two
+     * separate date pickers that could disagree about which day that was.
+     * Split by TIME now: Live is the monitor, Day is the record.
+     */
+    expect(RAIL()).toEqual(['today', 'history', 'setups', 'rules', 'settings']);
   });
 
   test('both are the same control — one class, one handler, one memory', () => {
