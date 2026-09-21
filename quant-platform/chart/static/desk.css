@@ -287,19 +287,29 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
  * two empty cells that look like data nobody loaded. Cells that draw their own
  * edges simply stop where they stop.
  */
-.strip-cell { background:var(--bg2); padding:10px 12px; min-width:0;
-  flex:1 1 112px;
+/*
+ * TWO ACROSS ON A PHONE, AND THE VALUE IS BIG.
+ *
+ * It was five or six cells to a row at 112px each, which put a 19px number
+ * over a 9.5px label in a box barely wider than the label — a strip of facts
+ * that read as a strip. These are the six things that decide what the morning
+ * is; the value is the thing being read and it should be the thing you see.
+ * Two across leaves room for the number to be a number.
+ */
+.strip-cell { background:var(--bg2); padding:14px 16px; min-width:0;
+  flex:1 1 calc(50% - 1px);
   border-right:1px solid var(--border); border-bottom:1px solid var(--border); }
+@media (min-width:700px) { .strip-cell { flex-basis:150px; } }
 .strip-v {
-  font-family:var(--mono); font-size:19px; font-weight:700; letter-spacing:-.02em;
+  font-family:var(--mono); font-size:25px; font-weight:700; letter-spacing:-.02em;
   color:var(--text); line-height:1.15;
   /* Long values shrink rather than breaking the grid — a ticker list or an
      account name must not push the cell wider than its neighbours. */
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .strip-k {
-  font-size:9.5px; letter-spacing:.11em; text-transform:uppercase;
-  color:var(--text3); margin-top:3px; white-space:nowrap;
+  font-size:10px; letter-spacing:.13em; text-transform:uppercase;
+  color:var(--text3); margin-top:6px; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis;
 }
 /* The four things a value can mean. Anything else stays --text. */
@@ -313,9 +323,7 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
 .strip-cell.armed { background:color-mix(in srgb, var(--green) 12%, var(--bg2)); }
 .strip-cell.alarm { background:color-mix(in srgb, var(--red) 14%, var(--bg2)); }
 
-@media (max-width:560px) { .strip-v { font-size:16px; } }
-/* A narrow phone gets two across rather than three squeezed ones. */
-@media (max-width:380px) { .strip-cell { flex-basis:calc(50% - 1px); } }
+@media (max-width:380px) { .strip-v { font-size:21px; } }
 
 /* ── TABS THAT DO NOT GET CUT OFF ──
  * "Settin…" on a 420px phone is a tab nobody knows is there. The row scrolls

@@ -121,21 +121,32 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
    These were flex-between on one row, and a heading of three words beside a
    note of fifteen turned both into narrow columns of wrapped capitals — the
    most emphasised text on the page and the least readable. */
-.sec { margin:var(--s5) 0 var(--s2); padding-bottom:var(--s2);
-  border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap;
-  align-items:baseline; gap:var(--s1) var(--s3); }
-.sec > span:first-child { font-size:var(--f-xs); font-weight:700; letter-spacing:.12em;
-  text-transform:uppercase; color:var(--text); flex:1 0 100%; }
-/* The note beside a heading is a status, not a heading. Sentence case, normal
-   weight, its own line — it was inheriting the small caps and the tracking. */
+/* ── A KICKER AND A LINE ───────────────────────────────────────────────────
+ *
+ * The heading names the machinery — SETUP ENGINE, SESSION LOG, LIVE QUEUE —
+ * and the line under it says in ordinary words what that is. Two registers,
+ * and they have to LOOK like two: the kicker small, tracked and in the accent,
+ * the line at reading size in reading colour.
+ *
+ * Both were the same 11.5px grey, the line pushed to the right-hand end of the
+ * row where it read as a status rather than as the explanation of the heading
+ * it belongs to. A sentence nobody can tell from a label is a sentence nobody
+ * reads — which is how a page ends up looking like it is all headings.
+ *
+ * No rule under it. The kicker's colour and the gap already separate the
+ * section from what came before; a line as well was a box being drawn around
+ * something that was not a box. */
+.sec { margin:var(--s5) 0 var(--s3); display:flex; flex-wrap:wrap;
+  align-items:flex-start; gap:2px var(--s3); }
+.sec > span:first-child { font-size:11px; font-weight:700; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--accent); flex:1 0 100%; }
 .sec > span:not(:first-child), .sec .note {
-  flex:1 1 100%; font-size:var(--f-xs); font-weight:400; letter-spacing:0;
-  text-transform:none; color:var(--text2); }
-.sec > button { flex:0 0 auto; margin-left:auto; }
-@media (min-width:560px) {
-  .sec > span:first-child { flex:0 0 auto; }
-  .sec > span:not(:first-child), .sec .note { flex:1 1 auto; text-align:right; }
-}
+  flex:1 1 220px; font-size:var(--f-md); font-weight:400; letter-spacing:0;
+  line-height:1.45; text-transform:none; color:var(--text); }
+/* An action belongs to the section, so it sits on the section's line — at the
+   end of it, never wrapped underneath where it reads as the first item of the
+   list it is supposed to add to. */
+.sec > button, .sec > select { flex:0 0 auto; margin-left:auto; align-self:center; }
 
 /* ── THE WHY, folded away ──
  *
@@ -530,7 +541,19 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .chip { font-size:11px; padding:5px 9px; border-radius:5px; cursor:pointer;
   background:var(--bg3); color:var(--text2); border:1px solid var(--border); user-select:none; }
 .chip.on { background:var(--blue); color:#08111f; border-color:var(--blue); }
+/* ── NOTHING HERE, SAID PROPERLY ───────────────────────────────────────────
+ * "Nothing has fired today." in 12px grey, flush left, is indistinguishable
+ * from a caption under something that failed to load — and on the tab you
+ * open at 09:35 those two states could not be further apart. A dashed box is
+ * a shape that says "this is the list, and it is empty", which is a fact,
+ * where a grey line says nothing and could mean anything. */
 .empty { font-size:12px; color:var(--text3); margin-top:12px; line-height:1.7; }
+.empty.none { border:1px dashed var(--line2); border-radius:12px;
+  padding:var(--s5) var(--s4); text-align:center; }
+.empty.none b { display:block; font-size:var(--f-lg); font-weight:700;
+  color:var(--text2); margin-bottom:var(--s2); letter-spacing:-.01em; }
+.empty.none span { display:block; max-width:44ch; margin:0 auto;
+  font-size:var(--f-sm); color:var(--text3); }
 
 /* ── THE SESSION LOG ──
  *
@@ -1940,7 +1963,7 @@ async function loadFires() {
       ? `${real} today${ctrl ? ` · ${ctrl} control` : ''}` : '';
     // Also on the tab, so a fire is visible from Setups or Settings.
     tabBadge('today', real);
-    if (!fires.length) { out.innerHTML = '<div class="empty">Nothing has fired today.</div>'; return; }
+    if (!fires.length) { out.innerHTML = emptyFeed(); return; }
 
     // Only what arrived since the last poll is announced. On the first load
     // everything is "new", and announcing a morning's worth of alerts at once
@@ -1973,6 +1996,35 @@ async function loadFires() {
   } catch {
     out.innerHTML = '<div class="empty">Could not read the fires.</div>';
   }
+}
+
+/*
+ * AN EMPTY FEED IS TWO COMPLETELY DIFFERENT DAYS.
+ *
+ * "Nothing has fired today" was the answer whether the desk had watched all
+ * morning and found nothing, or had been switched off since Tuesday. Those are
+ * opposite facts wearing the same sentence — and the second one is the whole
+ * reason you would ever look.
+ *
+ * So the state is READ, not assumed, and the line says which day this is. It
+ * comes from the same BROKER object the status strip is painted from, so the
+ * two cannot disagree; when it has not arrived yet the line says that rather
+ * than guessing, because a wrong reassurance here costs a morning.
+ */
+function emptyFeed() {
+  const b = (BROKER && BROKER.broker) || null;
+  let why;
+  if (!b) why = 'The desk has not said whether it is armed yet.';
+  else if (!b.enabled) why = 'Algo trading is OFF — nothing would have been sent.';
+  else if (!b.armed) why = 'The desk is on but not armed, so nothing would have been sent.';
+  else {
+    const live = (b.destinations || []).filter(d => d.enabled !== false && d.hasWebhook);
+    const auto = live.filter(d => d.mode === 'auto' && (d.setups || []).length);
+    why = auto.length
+      ? 'The desk is armed and watching — no setup has produced a signal.'
+      : 'The desk is armed, but no account is on auto with a setup.';
+  }
+  return `<div class="empty none"><b>No alerts today</b><span>${esc(why)}</span></div>`;
 }
 
 /*
@@ -2536,6 +2588,20 @@ function paintStrip() {
 
 function paintAlgoState() {
   paintStrip();
+  /*
+   * AND THE EMPTY FEED, which is the other thing that reads the armed state.
+   *
+   * loadFires() runs before /api/broker answers, so on a quiet morning the
+   * first paint says "the desk has not said whether it is armed yet" — true
+   * at the time, and it would have stayed on screen until the next poll,
+   * which is thirty seconds of the one question the reader came to ask going
+   * unanswered while the strip above it already knew.
+   *
+   * Only when the feed is EMPTY. Rewriting a feed with alerts in it from here
+   * would throw away the rows the loader just drew.
+   */
+  const feed = document.getElementById('fires');
+  if (feed && feed.querySelector('.empty.none')) feed.innerHTML = emptyFeed();
   const algo = document.getElementById('algo-state');
   if (!algo) return;
   const b = (BROKER && BROKER.broker) || {};
