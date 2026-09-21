@@ -24,6 +24,13 @@ jest.mock('../src/broker/reconcile', () => ({
   // Unasked by default: the flatten then behaves exactly as it did before the
   // broker was consulted at all — today's ledger and nothing else.
   carriedOver: jest.fn(async () => ({ ok: false, error: 'not asked' })),
+  /*
+   * The AFTER picture, which is a different question from carriedOver's
+   * before. Flat by default, because that is the normal end of a normal day —
+   * a default of "still held" would make every test below assert on an error
+   * path none of them are about.
+   */
+  heldNow: jest.fn(async () => ({ ok: true, verifiable: true, positions: [] })),
   alpacaDestinations: jest.fn(() => ['alp']),
 }));
 
@@ -53,8 +60,22 @@ beforeEach(() => {
   });
   reconcile.carriedOver.mockReset();
   reconcile.carriedOver.mockResolvedValue({ ok: false, error: 'not asked' });
+  reconcile.heldNow.mockReset();
+  reconcile.heldNow.mockResolvedValue({ ok: true, verifiable: true, positions: [] });
 });
 afterAll(() => { fs.rmSync(DIR, { recursive: true, force: true }); });
+
+/*
+ * THE CLOCK IS THE ONLY THING STUBBED.
+ *
+ * The flatten waits four, six and ten seconds before deciding a close did not
+ * land, stopping at the first look that comes back flat — which is right on a
+ * desk and is twenty seconds per test here. `sleep` is replaced and the three
+ * ATTEMPTS are kept, so what is exercised is the real polling, not a shortcut
+ * past it.
+ */
+const check = (at, over = {}) => flattener.check(at,
+  { verify: { sleep: async () => {}, ...over } });
 
 const buy = (symbol, over = {}) => broker.placeOrder({
   symbol, signal: 'LONG', quantity: 10, price: 29.05, stop: 27.68,
@@ -126,7 +147,7 @@ test('it closes everything at the configured minute', async () => {
   await buy('LIFE'); await buy('LSCC');
   sent = [];
 
-  const out = await flattener.check(AT_1550);
+  const out = await check(AT_1550);
   expect(out.closed.sort()).toEqual(['LIFE', 'LSCC']);
   expect(sent).toEqual([
     { symbol: 'LIFE', action: 'close' }, { symbol: 'LSCC', action: 'close' },
@@ -138,7 +159,7 @@ test('it does nothing at any other minute', async () => {
   armed();
   await buy('LIFE');
   sent = [];
-  expect((await flattener.check(AT_1500)).ran).toBe(false);
+  expect((await check(AT_1500)).ran).toBe(false);
   expect(sent).toEqual([]);
 });
 
@@ -146,7 +167,7 @@ test('it does not run at the weekend', async () => {
   armed();
   await buy('LIFE');
   sent = [];
-  expect((await flattener.check(SATURDAY)).ran).toBe(false);
+  expect((await check(SATURDAY)).ran).toBe(false);
 });
 
 /* A minute tick can fire twice inside the same minute. Closing twice is not
@@ -155,9 +176,9 @@ test('it does not run at the weekend', async () => {
 test('it runs once a session', async () => {
   armed();
   await buy('LIFE');
-  await flattener.check(AT_1550);
+  await check(AT_1550);
   sent = [];
-  expect((await flattener.check(AT_1550)).ran).toBe(false);
+  expect((await check(AT_1550)).ran).toBe(false);
   expect(sent).toEqual([]);
 });
 
@@ -165,7 +186,7 @@ test('it can be switched off, and then nothing closes', async () => {
   armed({ flatten: false });
   await buy('LIFE');
   sent = [];
-  expect((await flattener.check(AT_1550)).ran).toBe(false);
+  expect((await check(AT_1550)).ran).toBe(false);
 });
 
 test('the time is configurable and must look like a time', () => {
@@ -180,7 +201,7 @@ test('the time is configurable and must look like a time', () => {
 test('a clean close is reported, not silent', async () => {
   armed();
   await buy('LIFE');
-  await flattener.check(AT_1550);
+  await check(AT_1550);
   const f = store.recentFires(DAY).find(x => x.rule === 'End of session');
   expect(f.level).toBe('info');
   expect(f.detail).toMatch(/Closed at 15:50: LIFE/);
@@ -198,7 +219,7 @@ test('a close that fails is an error alert naming the symbol', async () => {
     ok: false, status: 400,
     text: async () => '{"status":"ExecutionError","message":"TradeThePool: no position"}',
   }));
-  const out = await flattener.check(AT_1550);
+  const out = await check(AT_1550);
   expect(out.failed).toHaveLength(1);
 
   const f = store.recentFires(DAY).find(x => x.rule === 'End of session');
@@ -209,7 +230,7 @@ test('a close that fails is an error alert naming the symbol', async () => {
 
 test('a quiet day closes nothing and says nothing', async () => {
   armed();
-  const out = await flattener.check(AT_1550);
+  const out = await check(AT_1550);
   expect(out.closed).toEqual([]);
   expect(store.recentFires(DAY)).toHaveLength(0);
 });
@@ -238,7 +259,7 @@ describe('a position carried in from an earlier session', () => {
   test('is closed, even though today\'s ledger is empty', async () => {
     armed();
     reconcile.carriedOver.mockResolvedValue(carried());
-    const out = await flattener.check(AT_1550);
+    const out = await check(AT_1550);
     expect(out.ran).toBe(true);
     expect(sent.map(b => b.symbol)).toEqual(['VIK']);
     expect(sent[0].action).toBe('close');
@@ -247,7 +268,7 @@ describe('a position carried in from an earlier session', () => {
   test('and the alert says it came from an earlier day', async () => {
     armed();
     reconcile.carriedOver.mockResolvedValue(carried());
-    await flattener.check(AT_1550);
+    await check(AT_1550);
     const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
     expect(said.detail).toMatch(/EARLIER session/);
     expect(said.detail).toMatch(/VIK/);
@@ -261,7 +282,7 @@ describe('a position carried in from an earlier session', () => {
       carried: [{ symbol: 'LIFE', qty: 10, openedOn: DAY, destinations: ['alp'] }],
     });
     sent.length = 0;
-    await flattener.check(AT_1550);
+    await check(AT_1550);
     expect(sent.filter(b => b.symbol === 'LIFE' && b.action === 'close')).toHaveLength(1);
   });
 
@@ -275,7 +296,7 @@ describe('a position carried in from an earlier session', () => {
       ok: true, running: [], carried: [],
       foreign: [{ symbol: 'NVDA', qty: 50, why: 'nothing in this ledger ever opened it' }],
     });
-    const out = await flattener.check(AT_1550);
+    const out = await check(AT_1550);
     expect(out.ran).toBe(true);
     expect(sent).toHaveLength(0);
     const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
@@ -294,7 +315,7 @@ describe('a position carried in from an earlier session', () => {
     await buy('LIFE');
     reconcile.carriedOver.mockResolvedValue({ ok: false, error: 'timed out' });
     sent.length = 0;
-    await flattener.check(AT_1550);
+    await check(AT_1550);
     expect(sent.map(b => b.symbol)).toEqual(['LIFE']);
     const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
     expect(said.detail).toMatch(/could not ask Alpaca what is really open \(timed out\)/);
@@ -303,7 +324,7 @@ describe('a position carried in from an earlier session', () => {
   test('nothing anywhere is still nothing to do', async () => {
     armed();
     reconcile.carriedOver.mockResolvedValue({ ok: true, carried: [], foreign: [], running: [] });
-    const out = await flattener.check(AT_1550);
+    const out = await check(AT_1550);
     expect(out.closed).toEqual([]);
     expect(sent).toHaveLength(0);
   });
@@ -516,5 +537,286 @@ describe('with named accounts and no desk-wide hook', () => {
     sent.length = 0;
     const out = await broker.flattenAll(DAY, broker.destinationCfg('pa'));
     expect(out.find(r => r.symbol === 'OLDX').sent).toBe(true);
+  });
+});
+
+/*
+ * ══ AND THEN IT ASKS WHETHER IT WORKED ════════════════════════════════════
+ *
+ * 2026-09-21, 15:57 ET, found by opening the broker's app: 1,045 shares of U
+ * still on, seven minutes after the flatten ran. The desk's own alert, sent at
+ * 15:50:04, read "Closed at 15:50: U" at level INFO — the level that means
+ * nothing failed.
+ *
+ * It could not have known. `sent` is SignalStack's answer to the webhook,
+ * taken in the same second it was posted. What the BROKER does with it happens
+ * afterwards. SignalStack accepted this close and then emailed:
+ *
+ *     Request:  {"symbol":"U","action":"close"}
+ *     Response: From Alpaca: insufficient qty available for order
+ *               (requested: 1045, available: 0)
+ *
+ * available: 0 with 1,045 held is the position's own protective stop holding
+ * every share. None of that reaches this process — the only place it appeared
+ * was an inbox.
+ *
+ * So the flatten asks Alpaca again after it sends. The line it has to get
+ * right is the difference between three answers that were all one answer
+ * before:
+ *
+ *     Alpaca says flat            the close worked
+ *     Alpaca says still held      IT DID NOT — act, now
+ *     Alpaca did not answer       nobody knows, and that is not "flat"
+ */
+describe('the close is confirmed, not assumed', () => {
+  const held = (over = {}) => ({
+    ok: true, verifiable: true,
+    positions: [{ symbol: 'LIFE', qty: 1045, side: 'long', account: 'alp', ...over }],
+  });
+
+  test('still held after the close is an ERROR, by name and share count', async () => {
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockResolvedValue(held());
+    const out = await check(AT_1550);
+
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.level).toBe('error');
+    expect(said.detail).toMatch(/STILL HELD AFTER THE CLOSE/);
+    expect(said.detail).toContain('LIFE 1045 sh');
+    expect(said.detail).toContain('alp');
+    // The position count is what you act on, so it is in the alert and not
+    // only in a log line on a box you are not looking at.
+    expect(out.stillHeld.map(p => p.symbol)).toEqual(['LIFE']);
+  });
+
+  test('and the alert does NOT lead with "closed"', async () => {
+    /*
+     * "Closed at 15:50: LIFE" with "still held" further down the same
+     * paragraph reads as a success on a phone, which is where it is read.
+     */
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockResolvedValue(held());
+    await check(AT_1550);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.detail.startsWith('STILL HELD')).toBe(true);
+    expect(said.detail).not.toMatch(/^Closed at/);
+  });
+
+  test('it names the cause it has actually seen', async () => {
+    // Not a guess: Alpaca's own words were "insufficient qty available for
+    // order (requested: 1045, available: 0)" while 1,045 were held, which is
+    // the stop order reserving them. The instruction is cancel, then close.
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockResolvedValue(held());
+    await check(AT_1550);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.detail).toMatch(/cancel the working order first/i);
+  });
+
+  test('a clean close says Alpaca confirmed it, and stays INFO', async () => {
+    armed();
+    await buy('LIFE');
+    const out = await check(AT_1550);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.level).toBe('info');
+    expect(said.detail).toMatch(/Alpaca confirms it is flat/);
+    expect(out.verified).toBe(true);
+    expect(out.stillHeld).toEqual([]);
+  });
+
+  test('it stops looking as soon as the position is gone', async () => {
+    // A market order at 15:50 fills in seconds, and three round trips on every
+    // clean day is three requests for nothing.
+    armed();
+    await buy('LIFE');
+    await check(AT_1550);
+    expect(reconcile.heldNow).toHaveBeenCalledTimes(1);
+  });
+
+  test('a slow fill is not an alert — it looks again', async () => {
+    /*
+     * An alert that cries wolf on every slow fill is one that stops being
+     * read, which is the same outcome as not having it at all. Held on the
+     * first look, flat on the second.
+     */
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow
+      .mockResolvedValueOnce(held())
+      .mockResolvedValue({ ok: true, verifiable: true, positions: [] });
+    const out = await check(AT_1550);
+    expect(reconcile.heldNow).toHaveBeenCalledTimes(2);
+    expect(out.stillHeld).toEqual([]);
+    expect(store.recentFires(DAY).find(f => f.rule === 'End of session').level)
+      .toBe('info');
+  });
+
+  test('it gives up after the third look, not the first', async () => {
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockResolvedValue(held());
+    await check(AT_1550);
+    expect(reconcile.heldNow).toHaveBeenCalledTimes(3);
+  });
+
+  test('a cached answer from BEFORE the close would be the old picture', async () => {
+    // heldNow caches for eight seconds and the flatten already called it
+    // (through carriedOver) moments earlier. A cached read here confirms the
+    // state the close was meant to change.
+    armed();
+    await buy('LIFE');
+    await check(AT_1550);
+    expect(reconcile.heldNow).toHaveBeenCalledWith({ maxAgeMs: 0 });
+  });
+
+  test('a broker that did not answer is NOT "it is flat"', async () => {
+    /*
+     * AN ERROR IS NEVER A ZERO, and on this alert the zero is an overnight
+     * position. "Alpaca says you hold nothing" and "Alpaca did not say" are
+     * opposite facts.
+     */
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockResolvedValue({ ok: false, error: '401 unauthorized' });
+    const out = await check(AT_1550);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(out.verified).toBe(false);
+    expect(said.detail).toMatch(/could not confirm the close landed/);
+    expect(said.detail).toContain('401 unauthorized');
+    expect(said.detail).not.toMatch(/confirms it is flat/);
+  });
+
+  test('a throw on the way to Alpaca is the same kind of unknown', async () => {
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockRejectedValue(new Error('socket hang up'));
+    const out = await check(AT_1550);
+    expect(out.verified).toBe(false);
+    expect(store.recentFires(DAY).find(f => f.rule === 'End of session').detail)
+      .toContain('socket hang up');
+  });
+
+  test('a desk with no Alpaca account says so, once, and is not an error', async () => {
+    // TTP5k is behind TraderEvolution with no position feed. That is a fact
+    // about the desk, not a failure of tonight's close.
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockResolvedValue({
+      ok: true, verifiable: false, reason: 'no Alpaca account configured',
+      positions: null });
+    const out = await check(AT_1550);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(out.verified).toBe(false);
+    expect(said.level).toBe('info');
+    expect(said.detail).toContain('no Alpaca account configured');
+  });
+
+  test('a day with nothing to close does not ask at all', async () => {
+    // No position, no close, no question — and no twenty seconds spent on it.
+    armed();
+    const out = await check(AT_1550);
+    expect(out.closed).toEqual([]);
+    expect(reconcile.heldNow).not.toHaveBeenCalled();
+  });
+
+  test('it only reports names this flatten actually closed', async () => {
+    /*
+     * The account may hold something else entirely — a trade taken by hand.
+     * Reporting it here as "still held after the close" would blame this
+     * flatten for a position it never touched, and `foreign` is the line that
+     * already says the true thing about it.
+     */
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockResolvedValue(held({ symbol: 'NVDA' }));
+    const out = await check(AT_1550);
+    expect(out.stillHeld).toEqual([]);
+    expect(store.recentFires(DAY).find(f => f.rule === 'End of session').level)
+      .toBe('info');
+  });
+
+  test('a zero-quantity row is not a held position', async () => {
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockResolvedValue(held({ qty: 0 }));
+    const out = await check(AT_1550);
+    expect(out.stillHeld).toEqual([]);
+  });
+
+  test('a short that did not close is still held, and the size reads positive', async () => {
+    // A short is a negative quantity. "-1045 sh" in an alert is a share count
+    // that reads as a direction, on the line that says how much trouble you
+    // are in.
+    armed();
+    await buy('LIFE');
+    reconcile.heldNow.mockResolvedValue(held({ qty: -1045, side: 'short' }));
+    await check(AT_1550);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.detail).toContain('LIFE 1045 sh');
+    expect(said.detail).not.toContain('-1045');
+  });
+});
+
+/*
+ * A CLOSE THAT WAS SENT AND DID NOT TAKE IS THIS DESK'S TO FINISH.
+ *
+ * carriedOver() used to return those inside `foreign` — the bucket the flatten
+ * reports and never touches, under a sentence reading "nothing here opened
+ * it". Both halves were wrong about U on 2026-09-21: this desk opened it, and
+ * closing it is the most obviously correct thing to do with it.
+ */
+describe('a close that did not take', () => {
+  const notClosed = (symbol = 'VIK') => ({
+    ok: true, carried: [], foreign: [], running: [],
+    notClosed: [{ symbol, qty: 1045, side: 'long', openedOn: '2026-08-07',
+                  closedOn: '2026-08-07', destinations: ['alp'],
+                  why: 'this desk closed it and it is still on — the close did not take' }],
+  });
+
+  test('is closed, not merely mentioned', async () => {
+    armed();
+    reconcile.carriedOver.mockResolvedValue(notClosed());
+    await check(AT_1550);
+    expect(sent.filter(b => b.symbol === 'VIK' && b.action === 'close')).toHaveLength(1);
+  });
+
+  test('and is not described as somebody else\'s trade', async () => {
+    armed();
+    reconcile.carriedOver.mockResolvedValue(notClosed());
+    await check(AT_1550);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.detail).not.toMatch(/nothing here opened it/);
+    expect(said.detail).toMatch(/the first one did not take/);
+    expect(said.detail).toContain('VIK');
+  });
+
+  test('a carried-over position keeps its own, different sentence', async () => {
+    // "Left open from an earlier session" points at the 15:50 that did not
+    // run. "A close was sent and it is still on" points at the broker. One
+    // sentence covering both sends you to the wrong place.
+    armed();
+    reconcile.carriedOver.mockResolvedValue({
+      ok: true, foreign: [], running: [], notClosed: [],
+      carried: [{ symbol: 'VIK', qty: 100, openedOn: '2026-08-07',
+                  destinations: ['alp'] }],
+    });
+    await check(AT_1550);
+    const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
+    expect(said.detail).toMatch(/EARLIER session/);
+    expect(said.detail).not.toMatch(/did not take/);
+  });
+
+  test('one already in today\'s ledger is not closed twice in one run', async () => {
+    // flattenAll already covers today's ledger. A second close on the same
+    // symbol in the same run is two sells of one position.
+    armed();
+    await buy('LIFE');
+    reconcile.carriedOver.mockResolvedValue(notClosed('LIFE'));
+    sent.length = 0;
+    await check(AT_1550);
+    expect(sent.filter(b => b.symbol === 'LIFE' && b.action === 'close')).toHaveLength(1);
   });
 });

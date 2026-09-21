@@ -387,18 +387,41 @@ describe('positions that survived their own session', () => {
   });
 
   /*
-   * Closed here and still on means the close did not take. Also foreign — this
-   * desk did its part, and re-sending a close that already failed once without
-   * a person looking is how a loop starts.
+   * CLOSED HERE AND STILL ON IS NOT FOREIGN.
+   *
+   * It was, and the argument for it was: this desk did its part, and re-sending
+   * a close that already failed once without a person looking is how a loop
+   * starts. The first half is wrong and the second half has been answered.
+   *
+   * Wrong, because `foreign` means "nothing here opened it" — the flattener
+   * prints that sentence, and it was printing it about a position this desk
+   * opened, sized and sent. And `foreign` is never closed, so the name most
+   * obviously this desk's to finish was the one name it would not touch.
+   *
+   * Answered, because a person now looks: the flatten asks Alpaca AFTER it
+   * sends and raises an ERROR naming anything still held. And it is not a
+   * loop — the flatten runs once per session, and within one run a symbol
+   * already in today's ledger is excluded from this path, so nothing is ever
+   * closed twice in one go.
+   *
+   * 2026-09-21 is what it costs to get this wrong: U, 1,045 shares, close
+   * refused by Alpaca because the position's own stop held every share, and
+   * the desk's own alert reading "Closed at 15:50: U" at level INFO.
    */
-  test('closed here and still held is foreign, worded for it', async () => {
+  test('closed here and still held is notClosed — this desk\'s to finish', async () => {
     rows([{ date: YESTERDAY },
            { date: YESTERDAY, kind: 'flatten', action: 'close',
              at: Date.parse('2026-08-17T19:50:00Z') }]);
     holds([{}]);
     const r = await reconcile.carriedOver(DAY);
     expect(r.carried).toEqual([]);
-    expect(r.foreign[0].why).toMatch(/the close did not take/);
+    // NOT in the bucket that is reported and never touched.
+    expect(r.foreign).toEqual([]);
+    expect(r.notClosed).toHaveLength(1);
+    expect(r.notClosed[0].why).toMatch(/the close did not take/);
+    // And it carries the account to send to, or the re-close goes nowhere.
+    expect(r.notClosed[0]).toHaveProperty('destinations');
+    expect(r.notClosed[0].closedOn).toBe(YESTERDAY);
   });
 
   /*
@@ -430,7 +453,7 @@ describe('positions that survived their own session', () => {
     rows([{ date: YESTERDAY }]);
     holds([{ qty: 0 }]);
     const r = await reconcile.carriedOver(DAY);
-    expect(r).toEqual({ ok: true, carried: [], foreign: [], running: [] });
+    expect(r).toEqual({ ok: true, carried: [], foreign: [], running: [], notClosed: [] });
   });
 
   /*

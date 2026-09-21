@@ -332,18 +332,31 @@ async function compare(date, { timeoutMs = 10000 } = {}) {
  *                                                         hand, or before this
  *                                                         ledger existed.
  *
- * The last distinction is the one that decides what may be done automatically.
- * A carried-over position is this desk's own mess and closing it is finishing a
- * job it started. A position it never opened may be a trade taken by hand for
- * reasons no algorithm here knows, and closing that would be the worst thing in
- * this file. It is reported, loudly, and left alone.
+ *   a close AFTER the last entry, and still held          THE CLOSE DID NOT
+ *                                                         TAKE.
+ *
+ * The distinction that decides what may be done automatically is whether THIS
+ * DESK opened it. A carried-over position is this desk's own mess and closing
+ * it is finishing a job it started. A position it never opened may be a trade
+ * taken by hand for reasons no algorithm here knows, and closing that would be
+ * the worst thing in this file. It is reported, loudly, and left alone.
+ *
+ * THE LAST CASE WAS ON THE WRONG SIDE OF THAT LINE. A name this desk opened,
+ * sent a close for, and is still holding was being returned as `foreign` — the
+ * bucket the flattener reports and never touches, under a sentence reading
+ * "nothing here opened it". Both halves were wrong: this desk DID open it, and
+ * closing it is the most obviously correct thing to do with it. It has its own
+ * bucket now, `notClosed`, and the flattener closes it and says so in its own
+ * words.
  */
 async function carriedOver(today, { timeoutMs = 10000 } = {}) {
   const r = await alpaca.positions({ timeoutMs });
   if (!r.ok) return { ok: false, error: r.error };
 
   const holding = r.positions.filter(p => p.qty !== 0);
-  if (!holding.length) return { ok: true, carried: [], foreign: [], running: [] };
+  if (!holding.length) {
+    return { ok: true, carried: [], foreign: [], running: [], notClosed: [] };
+  }
 
   /*
    * The last thing this desk did to each name, over the whole ledger. Not
@@ -360,20 +373,13 @@ async function carriedOver(today, { timeoutMs = 10000 } = {}) {
     if (!was || (o.at || 0) > (was.at || 0)) into.set(sym, o);
   }
 
-  const out = { ok: true, carried: [], foreign: [], running: [] };
+  const out = { ok: true, carried: [], foreign: [], running: [], notClosed: [] };
   for (const p of holding) {
     const open = lastOpen.get(p.symbol);
     const shut = lastClose.get(p.symbol);
 
     if (!open) {
       out.foreign.push({ ...p, why: 'nothing in this ledger ever opened it' });
-      continue;
-    }
-    // A close AFTER the last entry means the desk did its part; whatever is
-    // there now was opened by something else, or the close did not take.
-    if (shut && (shut.at || 0) > (open.at || 0)) {
-      out.foreign.push({ ...p, openedOn: open.date, closedOn: shut.date,
-        why: 'this desk closed it and it is still on — the close did not take' });
       continue;
     }
     const row = {
@@ -387,6 +393,17 @@ async function carriedOver(today, { timeoutMs = 10000 } = {}) {
                   && String(o.symbol || '').toUpperCase() === p.symbol)
         .map(o => o.destination))].filter(d => alpacaDestinations().includes(d)),
     };
+    /*
+     * A close AFTER the last entry, and Alpaca is still holding it. `sent` on
+     * a flatten row means SignalStack ACCEPTED the webhook — not that the
+     * broker moved anything. So this is a close that did not take, on a name
+     * this desk opened, which makes it this desk's to finish.
+     */
+    if (shut && (shut.at || 0) > (open.at || 0)) {
+      out.notClosed.push({ ...row, closedOn: shut.date,
+        why: 'this desk closed it and it is still on — the close did not take' });
+      continue;
+    }
     if (open.date === today) out.running.push(row);
     else out.carried.push(row);
   }
