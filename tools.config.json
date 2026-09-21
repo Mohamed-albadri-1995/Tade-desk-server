@@ -158,10 +158,11 @@
       "name": "Growth Stock Breakout",
       "port": 3110,
       "scorerPort": 3111,
-      "enabled": true,
+      "enabled": false,
       "scorer": false,
+      "archive": true,
       "accent": "#c084fc",
-      "desc": "Growth names breaking to a 52-week high. One half of the old T8, carrying its own history so its results stand or fall on their own.",
+      "desc": "Stopped 2026-09-21 — the breakout half of the old T8 is no longer scanned, and the growth setup runs on T11's pullback list alone. Kept readable: the archive serves its stored registers on its own port, so everything it ever collected can still be charted and backtested.",
       "captureAt": {
         "r1": "09:46",
         "entryA": "09:47",
