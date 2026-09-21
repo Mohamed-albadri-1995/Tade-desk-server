@@ -315,12 +315,63 @@ describe('it is wired in where the feed is read', () => {
 
   /*
    * `esc(null)` PRINTS THE WORD "null". With no preference chosenFeed is null
-   * and there is still a note, so the unguarded template would have put
-   * "(null chosen — …)" on the card where a feed name belongs.
+   * and there is still a note, so an unguarded template would put "(null
+   * chosen — …)" where a feed name belongs. The long form moved behind the
+   * card's fold when the card stopped printing sixty words about the feed, and
+   * the guard moved with it.
    */
   test('the card only names a chosen feed when one was chosen', () => {
     expect(src('public', 'alerts.html'))
-      .toContain('${s.chosenFeed ? `${esc(s.chosenFeed)} chosen — ` : \'\'}');
+      .toContain('${s.chosenFeed ? `${esc(s.chosenFeed)} chosen — ` : \'\'}${esc(s.feedNote)}');
+  });
+
+  /*
+   * AND THE CARD ITSELF SAYS FIVE WORDS, NOT SIXTY.
+   *
+   * It printed the whole note inline, under a heading three characters long,
+   * on every setup — "no feed chosen for this setup — deciding on yahoo, which
+   * reports the consolidated tape (its VWAP is within 0.06% of polygon's) and
+   * is the only free feed that answers during the session. If it runs late the
+   * decision is skipped rather than taken on a stale bar." Reported as "too
+   * much useless text", and it is: the same paragraph, every card, every time.
+   *
+   * RUN, not grepped. The whole point is what the string comes out as.
+   */
+  test('the card reduces the feed note to the part that changes a trade', () => {
+    const html = src('public', 'alerts.html');
+    const js = (html.match(/<script>([\s\S]*?)<\/script>/) || [])[1] || '';
+    const from = js.indexOf('function feedShort(');
+    expect({ found: from >= 0 }).toEqual({ found: true });
+    // eslint-disable-next-line no-new-func
+    const feedShort = new Function(`${js.slice(from, js.indexOf('\n}', from) + 2)}
+      ; return feedShort;`)();
+
+    const LONG = 'no feed chosen for this setup — deciding on yahoo, which reports '
+      + 'the consolidated tape (its VWAP is within 0.06% of polygon\'s) and is the '
+      + 'only free feed that answers during the session.';
+
+    // No preference set: the card says so, and does not explain yahoo again.
+    const none = feedShort({ liveFeed: 'yahoo', chosenFeed: null, feedNote: LONG });
+    expect(none).toBe('(no feed set for this setup)');
+    expect(none.length).toBeLessThan(40);
+
+    // A preference that cannot decide a live bar — the fact that matters.
+    expect(feedShort({ liveFeed: 'yahoo', chosenFeed: 'polygon', feedNote: LONG }))
+      .toBe('(polygon cannot decide a live bar)');
+
+    // Nothing to say is nothing printed — no empty brackets on the card.
+    expect(feedShort({ liveFeed: 'yahoo', chosenFeed: null, feedNote: null })).toBe('');
+    expect(feedShort({ liveFeed: 'yahoo', chosenFeed: 'yahoo', feedNote: LONG })).toBe('');
+    expect(feedShort(null)).toBe('');
+  });
+
+  test('and the long form is kept, behind the fold that was already there', () => {
+    // Moved, not deleted. It is the answer to "why is it deciding on yahoo",
+    // which is read once, on the day the setup is built.
+    const html = src('public', 'alerts.html');
+    expect(html).toContain('class="st-feednote"');
+    const fold = html.slice(html.indexOf('what this setup does'));
+    expect(fold.slice(0, 600)).toContain('st-feednote');
   });
 
   /*

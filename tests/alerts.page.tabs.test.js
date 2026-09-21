@@ -603,8 +603,76 @@ describe('the setup card', () => {
 
   test('two warnings show and the rest fold', () => {
     // A setup with six warnings has a problem a longer card does not help with.
-    expect(warn).toContain('lines.slice(0, 2)');
-    expect(warn).toContain('lines.slice(2)');
+    // Counted AFTER the per-leg collapse, or two copies of one sentence use up
+    // the whole allowance and push a second, different fact behind the fold.
+    expect(warn).toContain('const folded = collapseLegs(lines);');
+    expect(warn).toContain('folded.slice(0, 2)');
+    expect(warn).toContain('folded.slice(2)');
+  });
+
+  /*
+   * ONE SENTENCE, SAID ONCE, WITH THE COUNT.
+   *
+   * A two-leg exit produced two warnings differing only in a number:
+   *
+   *     leg 1 stop follows an indicator — it goes out as a fixed level and
+   *       will not trail
+   *     leg 2 stop follows an indicator — it goes out as a fixed level and
+   *       will not trail
+   *
+   * One fact, printed twice, on a card already long enough that the second
+   * copy pushed something else behind a fold. Reported as "too much useless
+   * text". RUN, not grepped: the whole question is what comes out.
+   */
+  describe('the same sentence about two legs is one line', () => {
+    const collapse = () => {
+      const from = script.indexOf('function collapseLegs(');
+      expect({ found: from >= 0 }).toEqual({ found: true });
+      // eslint-disable-next-line no-new-func
+      return new Function(`${script.slice(from, script.indexOf('\n}', from) + 2)}
+        ; return collapseLegs;`)();
+    };
+    const TRAIL = 'stop follows an indicator — it goes out as a fixed level and '
+      + 'will not trail';
+
+    test('two legs saying the same thing collapse, with the count', () => {
+      const out = collapse()([`leg 1 ${TRAIL}`, `leg 2 ${TRAIL}`]);
+      expect(out).toHaveLength(1);
+      expect(out[0]).toBe('all 2 legs: stop follows an indicator — they go out '
+        + 'as fixed levels and will not trail');
+    });
+
+    test('and the sentence is made plural, not left reading "it"', () => {
+      // "all 2 legs: … it goes out as a fixed level" is a sentence that
+      // disagrees with itself, on a card that exists to be read quickly.
+      const out = collapse()([`leg 1 ${TRAIL}`, `leg 2 ${TRAIL}`])[0];
+      expect(out).not.toMatch(/\bit goes\b/);
+      expect(out).not.toMatch(/\bit will\b/);
+    });
+
+    test('two legs warning about DIFFERENT things stay two lines', () => {
+      // That is two facts. Collapsing them would hide one, which is the
+      // opposite of the problem being fixed.
+      const out = collapse()([`leg 1 ${TRAIL}`, 'leg 2 has no target at all']);
+      expect(out).toHaveLength(2);
+      expect(out[0]).toBe(`leg 1 ${TRAIL}`);
+      expect(out[1]).toBe('leg 2 has no target at all');
+    });
+
+    test('a single leg keeps its own number', () => {
+      expect(collapse()([`leg 1 ${TRAIL}`])).toEqual([`leg 1 ${TRAIL}`]);
+    });
+
+    test('a warning that is not about a leg is untouched, and keeps its place', () => {
+      const other = 'this strategy also leaves on a RULE.';
+      const out = collapse()([`leg 1 ${TRAIL}`, other, `leg 2 ${TRAIL}`]);
+      expect(out).toEqual(['all 2 legs: stop follows an indicator — they go out '
+        + 'as fixed levels and will not trail', other]);
+    });
+
+    test('nothing in, nothing out', () => {
+      expect(collapse()([])).toEqual([]);
+    });
   });
 
   test('what the setup IS folds; how it is DEPLOYED does not', () => {

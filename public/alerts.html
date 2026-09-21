@@ -287,6 +287,17 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .ua-row:first-of-type { border-top:0; }
 .ua-name { font-size:12.5px; font-weight:600; flex:1 1 160px; min-width:0;
   overflow-wrap:anywhere; }
+/* THE TIME DOES NOT WRAP AWAY FROM THE NAME. "HitchHiker Scalp 09:30" broke
+   after the name and left "ET" alone on the next line, on the one row where
+   the time is what you are sorting by. */
+.ua-name .su-tag { white-space:nowrap; }
+/* The picker, folded: a decision taken once per strategy and then never again,
+   eight rows deep. It is an action, so it does not wear the "?" that marks an
+   explanation. */
+.ua-pick { margin:0; }
+.ua-pick > summary::before { content:none; }
+.ua-pick > summary { color:var(--accent); border-color:var(--accent); }
+.ua-pick[open] > summary { color:var(--text2); border-color:var(--border); }
 .ua-tools { display:flex; gap:5px; flex-wrap:wrap; }
 /* A tap target, not a checkbox: this is used from a phone with one thumb. */
 .ua-tool { font-size:11px; font-weight:700; border:1px solid var(--border);
@@ -530,6 +541,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .su-size.dim { font-weight:400; color:var(--text3); }
 .su-warn { font-size:11px; color:#fb923c; margin-top:6px; }
 .su-caution { font-size:10.5px; color:var(--text3); margin-top:5px; font-style:italic; }
+/* Under the group heading it is a note about the whole group, so it sits where
+   the heading does rather than indented into the first card. */
+.su-group + .su-caution { margin:-2px 0 var(--s2); }
+.st-feednote { margin-top:var(--s2); padding-top:var(--s2);
+  border-top:1px solid var(--border); color:var(--text3); }
 .su-links { margin-top:8px; display:flex; gap:6px; }
 
 .rule { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--bg2);
@@ -1312,14 +1328,41 @@ let SETUPS = [], SETUP_FIELDS = [], SETUP_OPS = [];
 /* The configured tools, fetched once. Both lists draw a row of them, so this
  * has to be in hand BEFORE either renders — a setup drawn with an empty tool
  * row looks like a setup that cannot be reassigned. */
+/*
+ * THE TOOLS A SETUP CAN ACTUALLY BE GIVEN.
+ *
+ * ELEVEN, and six of them are asleep. `enabled: false` in tools.config.json
+ * means the tool has stopped SCANNING — it collects no cards, so a setup
+ * assigned to it ranks an empty list every morning and reports "no cards",
+ * which is the same words a running tool says on a quiet day. Offering those
+ * six as choices is offering to assign a strategy to nothing.
+ *
+ * It is also most of the page. Eleven chips, twice, on every setup card and on
+ * every unassigned row — eighty-eight of them on one screen, for a decision
+ * whose answer is one tool. Reported as "too much useless text", and the text
+ * is a picker rendered permanently open.
+ *
+ * A tool already assigned is kept in the list whatever its state: a setup
+ * pointing at a sleeping tool is a fact about that setup, and hiding the chip
+ * would make it unassignable as well as invisible.
+ */
 let TOOL_IDS = [];
+let TOOLS_ON = [];
 async function ensureTools() {
   if (TOOL_IDS.length) return TOOL_IDS;
   try {
     const t = await (await fetch('/api/tools')).json();
-    TOOL_IDS = (t.tools || []).map(x => x.id).filter(Boolean);
-  } catch { TOOL_IDS = []; }
+    const all = (t.tools || []).filter(x => x && x.id);
+    TOOL_IDS = all.map(x => x.id);
+    TOOLS_ON = all.filter(x => x.enabled !== false).map(x => x.id);
+  } catch { TOOL_IDS = []; TOOLS_ON = []; }
   return TOOL_IDS;
+}
+
+/** The running tools, plus any this setup already names. */
+function toolChoices(mine = []) {
+  const on = TOOLS_ON.length ? TOOLS_ON : TOOL_IDS;
+  return TOOL_IDS.filter(t => on.includes(t) || mine.includes(t));
 }
 
 async function loadSetups() {
@@ -1368,9 +1411,22 @@ async function loadSetups() {
       const stage = s.stage === 'ready' ? 'ready' : 'dev';
       // A heading each time the group changes, so the order explains itself
       // rather than looking like the list has been shuffled.
+      /*
+       * THE HEADING CARRIES THE GROUP'S CAUTION, once.
+       *
+       * Every unfinished setup carried the identical sentence — "Backtest it
+       * in qp before trusting it live. Trade small until the sample grows." —
+       * at the bottom of its own card. It is true, it is worth saying, and it
+       * is a property of the GROUP, not of any one setup: printed per card it
+       * is the same words twice on one screen and the reader stops seeing it,
+       * which is the one outcome a caution must not have.
+       */
       const head = stage !== lastStage
         ? `<div class="su-group">${(lastStage = stage) === 'ready'
-            ? 'Ready' : 'Under development'}</div>` : '';
+            ? 'Ready' : 'Under development'}</div>`
+          + (stage === 'dev' && cautionFor(ordered)
+            ? `<div class="su-caution">${esc(cautionFor(ordered))}</div>` : '')
+        : '';
       return head + `<div class="setup-def${on ? '' : ' off'}${stage === 'dev' ? ' dev' : ''}">
         <div class="su-head">
           <span class="t">${esc(s.name)}</span>
@@ -1403,8 +1459,8 @@ async function loadSetups() {
         ${accountChips(s)}
 
         <div class="st-tools">
-          <span class="ua-label">runs on</span>
-          <div class="ua-tools">${TOOL_IDS.map(t => `<span
+          <span class="ua-label">cards from</span>
+          <div class="ua-tools">${toolChoices(s.tools || []).map(t => `<span
             class="ua-tool${(s.tools || []).includes(t) ? ' on' : ''}"
             onclick="setSetupTool(${i}, '${esc(t)}')">${esc(t)}</span>`).join('')}</div>
         </div>
@@ -1430,10 +1486,13 @@ async function loadSetups() {
              day it is set up — not every time you open the tab to switch it
              off. The card used to be at its longest on the day you knew it
              best. -->
-        ${(s.describe || []).length ? `<details class="why">
+        ${((s.describe || []).length || s.feedNote) ? `<details class="why">
           <summary>what this setup does</summary>
           <div class="why-body"><ul class="st-rules">${
-            (s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul></div>
+            (s.describe || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
+            ${s.feedNote ? `<div class="st-feednote">`
+              + `${s.chosenFeed ? `${esc(s.chosenFeed)} chosen — ` : ''}${esc(s.feedNote)}</div>` : ''}
+          </div>
         </details>` : ''}
         ${s.universe ? `<div class="st-gate">Only cards where ${esc(s.universe)}</div>` : ''}
         <!-- HOW IT IS DEPLOYED, as labelled values rather than a run-on
@@ -1450,11 +1509,24 @@ async function loadSetups() {
             // the line, not in a log. And when NOTHING was chosen, the note
             // says which default is deciding: `${esc(null)}` would otherwise
             // have printed the word "null" where a feed name belongs.
+            /*
+             * THE FEED, AND FIVE WORDS ABOUT IT — not sixty.
+             *
+             * This printed the whole feedNote inline: "no feed chosen for this
+             * setup — deciding on yahoo, which reports the consolidated tape
+             * (its VWAP is within 0.06% of polygon's) and is the only free
+             * feed that answers during the session. If it runs late the
+             * decision is skipped rather than taken on a stale bar." Sixty
+             * words, on every card, saying the same thing every time, under a
+             * heading three characters long.
+             *
+             * The card keeps what changes the trade — WHICH feed decides, and
+             * whether that is the one you picked. The paragraph explaining why
+             * moves behind "what this setup does", which is already there and
+             * already folded.
+             */
             ['feed', esc(s.liveFeed || 'default')
-              + (s.feedNote
-                ? ` <span class="warn">(${s.chosenFeed ? `${esc(s.chosenFeed)} chosen — ` : ''}`
-                  + `${esc(s.feedNote)})</span>`
-                : '')],
+              + (s.feedNote ? ` <span class="warn">${esc(feedShort(s))}</span>` : '')],
             ...(s.universeScanAt ? [['extra scan', esc(s.universeScanAt)]] : []),
             ...(s.maxTradesPerDay ? [['max/day', `${esc(s.maxTradesPerDay)} order(s)`]] : []),
             ...(s.riskPerTrade ? [['risk', `$${esc(s.riskPerTrade)}/trade`]] : []),
@@ -1468,7 +1540,9 @@ async function loadSetups() {
           <button class="lnk" onclick="editSetup(${i})">edit filter</button>
         </div>
         <div class="st-edit" id="st-edit-${i}" style="display:none"></div>
-        ${s.caution ? `<div class="su-caution">${esc(s.caution)}</div>` : ''}
+        <!-- s.caution is NOT printed here. It is the same sentence on every
+             unfinished setup — "Backtest it in qp before trusting it live" —
+             so it went under the group heading, once. See cautionFor(). -->
       </div>`;
     }).join('');
     // Both halves are in hand now, whichever fetch landed first.
@@ -1518,7 +1592,24 @@ async function loadUnassigned() {
     for (const m of s.missing) g.missing.add(m);
     if (!g.at) g.at = s.decisionTime;
   }
-  const waiting = [...groups.values()].filter(g => !g.tools.length);
+  /*
+   * BY DECISION TIME, like everything else on this tab.
+   *
+   * This was `[...groups.values()]` — whatever order qp happened to return the
+   * strategies in, which is insertion order in its database and means nothing
+   * here. Eight rows reading 10:00, 09:30, 10:00, 09:30, 10:00, 09:59, 10:00,
+   * 09:40 is a list you have to read all of to find anything, directly under a
+   * list that IS ordered by time. Reported as: "it's still random".
+   *
+   * One with no entry window sorts last: it cannot be assigned at all until it
+   * has one, so it is not a candidate for "what runs next" — and it has no
+   * time to sort by.
+   */
+  const waiting = [...groups.values()].filter(g => !g.tools.length)
+    .sort((a, b) =>
+      (Number(!a.at) - Number(!b.at))
+      || String(a.at || '').localeCompare(String(b.at || ''))
+      || String(a.base || '').localeCompare(String(b.base || '')));
   if (!waiting.length) { out.innerHTML = ''; return; }
 
   UNASSIGNED = waiting;
@@ -1530,9 +1621,17 @@ async function loadUnassigned() {
       ${g.missing.has('entry window')
         ? `<span class="ua-blocked">no entry window — set one in the chart tool
              first, it is the decision time</span>`
-        : `<div class="ua-tools">${TOOL_IDS.map(t =>
-             `<span class="ua-tool" onclick="assignTool(${i}, '${esc(t)}')">${esc(t)}</span>`
-           ).join('')}</div>`}
+        /*
+         * FOLDED. Eight strategies each drawing the whole picker is the same
+         * eleven chips eight times — the longest thing on the tab, for a
+         * decision taken once per strategy and then never again. Open on a
+         * tap, which is the moment the choice is actually being made.
+         */
+        : `<details class="why ua-pick"><summary>assign to a screener</summary>
+            <div class="ua-tools">${toolChoices().map(t =>
+              `<span class="ua-tool" onclick="assignTool(${i}, '${esc(t)}')">${esc(t)}</span>`
+            ).join('')}</div>
+          </details>`}
     </div>`).join('')}
   </div>`;
 }
@@ -1754,6 +1853,75 @@ async function saveSetup(i) {
  * Two are shown; the rest fold. A setup with six warnings has a problem that a
  * longer card does not help with.
  */
+/*
+ * ONE SENTENCE, SAID ONCE, WITH THE COUNT.
+ *
+ * A two-leg exit produced two warnings differing only in a number —
+ *
+ *     leg 1 stop follows an indicator — it goes out as a fixed level and will
+ *       not trail
+ *     leg 2 stop follows an indicator — it goes out as a fixed level and will
+ *       not trail
+ *
+ * — which is one fact printed twice, on a card already long enough that the
+ * second copy pushed something else behind a fold. Reported as "too much
+ * useless text", and it is: the reader learns nothing from the second line
+ * that the first did not tell them, except how many legs, which is a number.
+ *
+ * Grouped on the sentence AFTER the leg number, so two legs warning about
+ * DIFFERENT things stay two lines — that is two facts, and collapsing them
+ * would hide one.
+ */
+function collapseLegs(lines) {
+  const seen = new Map();          // body -> [leg numbers]
+  const order = [];
+  for (const line of lines) {
+    const m = /^leg (\d+) (.+)$/.exec(line);
+    const body = m ? m[2] : line;
+    if (!seen.has(body)) { seen.set(body, []); order.push(body); }
+    if (m) seen.get(body).push(Number(m[1]));
+  }
+  return order.map((body) => {
+    const legs = seen.get(body);
+    if (!legs.length) return body;
+    if (legs.length === 1) return `leg ${legs[0]} ${body}`;
+    // "both legs" beats "legs 1, 2" when that is all of them, and the plural
+    // body reads correctly either way because the subject is now the legs.
+    return `all ${legs.length} legs: ${body
+      .replace(/\bit goes out as a fixed level\b/, 'they go out as fixed levels')
+      .replace(/\bit goes\b/, 'they go').replace(/\bit will\b/, 'they will')}`;
+  });
+}
+
+/*
+ * FIVE WORDS ABOUT THE FEED, for the card.
+ *
+ * The long form says why, and why is read once. The card has to answer the
+ * only question that changes a trade: is the feed deciding this the feed you
+ * picked?
+ */
+function feedShort(s) {
+  if (!s || !s.feedNote) return '';
+  if (!s.chosenFeed) return '(no feed set for this setup)';
+  if (s.chosenFeed === s.liveFeed) return '';
+  return `(${s.chosenFeed} cannot decide a live bar)`;
+}
+
+/*
+ * THE CAUTION THAT BELONGS TO A GROUP, NOT TO A CARD.
+ *
+ * Returned only when every unfinished setup carries the SAME one — which is
+ * the case that made it repetition. If two of them warn about different
+ * things, that is two facts and neither is hoisted: null here, and the caller
+ * leaves them where they are.
+ */
+function cautionFor(list) {
+  const said = [...new Set((list || [])
+    .filter(s => s && s.stage !== 'ready' && s.caution)
+    .map(s => s.caution))];
+  return said.length === 1 ? said[0] : null;
+}
+
 function setupWarnings(s) {
   const raw = [...(((s.readiness || {}).warnings) || []), ...(s.pairing || [])];
   if (!raw.length) return '';
@@ -1768,8 +1936,9 @@ function setupWarnings(s) {
   const lines = [...bySide.entries()].map(([body, sides]) =>
     // Both sides, or neither named: the fact is about the setup, so no prefix.
     (sides.size === 0 || sides.size === 2) ? body : `${[...sides][0]} only: ${body}`);
-  const head = lines.slice(0, 2);
-  const rest = lines.slice(2);
+  const folded = collapseLegs(lines);
+  const head = folded.slice(0, 2);
+  const rest = folded.slice(2);
   return `<div class="su-warns">${head.map(w => `<div class="su-w">${esc(w)}</div>`).join('')}
     ${rest.length ? `<details class="why"><summary>${rest.length} more</summary>
       <div class="why-body">${rest.map(w => `<div class="su-w">${esc(w)}</div>`).join('')}</div>
@@ -1799,7 +1968,10 @@ function accountChips(s) {
   }
   const word = { alert: 'alert only', manual: 'by hand', auto: 'FULL AUTO' };
   return `<div class="st-tools">
-    <span class="ua-label">runs in</span>
+    <!-- "runs in" and "runs on" sat four lines apart and both began with the
+         same word, so the only way to tell which was the account and which was
+         the screener was to read the values. -->
+    <span class="ua-label">orders to</span>
     <div class="ua-tools">${mine.map(a => `<span class="bchip${
       a.mode === 'auto' ? ' live' : ' on'}">${esc(a.name)} · ${esc(word[a.mode] || a.mode)}</span>`).join('')}
     </div>
