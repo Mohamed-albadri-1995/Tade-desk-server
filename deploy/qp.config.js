@@ -21,11 +21,20 @@
  * chart/server.py now refuses to print its banner before it owns the port, so
  * the log says why in one line. This is the other half: pm2 stops pretending.
  *
+ * THE HANDOVER. `pm2 delete qp` followed immediately by a start finds the port
+ * still held by the copy being replaced — told to stop, not yet finished
+ * letting go. chart/server.py waits up to twenty seconds for it rather than
+ * failing on the first try, so a restart is a restart and a port genuinely
+ * held by something else is still a named failure. That waiting is why
+ * min_uptime is ten seconds and not thirty.
+ *
  * Usage, from the repo root:
  *
  *     pm2 delete qp                      # if it is already registered
  *     pm2 start deploy/qp.config.js
  *     pm2 save
+ *
+ * After that, `pm2 restart qp` is enough — the config is remembered.
  *
  * `cwd` is absolute and derived, not typed: qp is started as `-m chart.server`
  * and that only resolves from quant-platform/.

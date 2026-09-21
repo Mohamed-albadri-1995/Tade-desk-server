@@ -3129,34 +3129,68 @@ def main():
     import argparse
     import errno
     import socket
+    import time
     # uvicorn is imported AFTER the port check, down beside the call: a start
     # that cannot possibly succeed should not spend time loading a web server
     # first, and the check has no need of it.
     p = argparse.ArgumentParser()
     p.add_argument('--host', default='0.0.0.0')
     p.add_argument('--port', type=int, default=8766)
+    # Long enough for a handover, short enough that a port held by something
+    # else is a failure inside half a minute rather than a hang.
+    p.add_argument('--port-wait', type=float, default=20.0,
+                   help='seconds to wait for the port to come free')
     args = p.parse_args()
 
-    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        # NOT SO_REUSEADDR. It would let this bind succeed beside a socket in
-        # TIME_WAIT, which is the one case worth tolerating — and the check is
-        # for a LISTENING server, which SO_REUSEADDR does not let past either
-        # way. Left off so the probe answers the question actually asked.
-        probe.bind((args.host, args.port))
-    except OSError as err:
-        if err.errno == errno.EADDRINUSE:
-            print(f'qp DID NOT START: port {args.port} is already in use on '
-                  f'{args.host}. Something else is serving it — most likely an '
-                  f'older copy of this server started outside the process '
-                  f'manager. Find it with `ss -ltnp | grep {args.port}`, stop '
-                  f'that one, then start this.', flush=True)
-            raise SystemExit(3)
-        print(f'qp DID NOT START: cannot bind {args.host}:{args.port} — {err}',
-              flush=True)
-        raise SystemExit(3)
-    finally:
-        probe.close()
+    # IT WAITS, IT DOES NOT GIVE UP ON THE FIRST TRY.
+    #
+    # The first version failed instantly, and that turned every restart into a
+    # coin toss: `pm2 delete qp` followed by a start found the port still held
+    # by the copy that was being replaced — it had been told to stop and had
+    # not finished letting go. Ten failures, one a second, and pm2 marked it
+    # `errored` while the port came free moments later. The check meant to make
+    # a restart honest was making it fail.
+    #
+    # A handover takes a moment. A port genuinely held by another server does
+    # not come free at all. Waiting tells those two apart, which failing
+    # immediately cannot, and the only cost is the wait on the day it IS
+    # occupied — a day this is not going to start on anyway.
+    deadline = time.monotonic() + max(0.0, args.port_wait)
+    waited = False
+    while True:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            # NOT SO_REUSEADDR. It would let this bind succeed beside a socket
+            # in TIME_WAIT — and the check is for a LISTENING server, which
+            # SO_REUSEADDR does not let past either way. Left off so the probe
+            # answers the question actually asked.
+            probe.bind((args.host, args.port))
+            break
+        except OSError as err:
+            if err.errno != errno.EADDRINUSE:
+                print(f'qp DID NOT START: cannot bind {args.host}:{args.port} '
+                      f'— {err}', flush=True)
+                raise SystemExit(3)
+            if time.monotonic() >= deadline:
+                print(f'qp DID NOT START: port {args.port} is still in use on '
+                      f'{args.host} after waiting {args.port_wait:g}s. That is '
+                      f'not a restart handing over — something else is serving '
+                      f'it, most likely an older copy of this server started '
+                      f'outside the process manager. Find it with '
+                      f'`ss -ltnp | grep {args.port}`, stop that one, then '
+                      f'start this.', flush=True)
+                raise SystemExit(3)
+            if not waited:
+                # ONCE, not once per attempt. Said at all because a start that
+                # takes fifteen seconds with no output is a start you assume
+                # has hung.
+                waited = True
+                print(f'waiting for port {args.port} to come free '
+                      f'(up to {args.port_wait:g}s) — the previous instance is '
+                      f'still letting go', flush=True)
+            time.sleep(0.5)
+        finally:
+            probe.close()
 
     import uvicorn
     print(f'qp charting platform on http://{args.host}:{args.port} — '

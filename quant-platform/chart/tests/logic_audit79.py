@@ -28,6 +28,7 @@ import io
 import pathlib
 import socket
 import sys
+import time
 import types
 import contextlib
 
@@ -75,11 +76,26 @@ def main_fn():
 MAIN = main_fn()
 
 
-def run(port, host='127.0.0.1'):
+class _Ran(Exception):
+    """uvicorn.run reached — the only way to prove the banner came first."""
+
+
+def _make_stub():
+    m = types.ModuleType('uvicorn')
+
+    def _run(*_a, **_k):
+        raise _Ran()
+
+    m.run = _run
+    return m
+
+
+def run(port, host='127.0.0.1', wait=0):
     """main() with those args, returning (exit code or None, everything printed)."""
     out = io.StringIO()
     argv = sys.argv
-    sys.argv = ['chart.server', '--host', host, '--port', str(port)]
+    sys.argv = ['chart.server', '--host', host, '--port', str(port),
+                '--port-wait', str(wait)]
     code = None
     try:
         with contextlib.redirect_stdout(out):
@@ -100,7 +116,9 @@ held.bind(('127.0.0.1', 0))
 held.listen(1)
 BUSY = held.getsockname()[1]
 
-code, said = run(BUSY)
+# --port-wait 0: the waiting is checked separately below. Here the question is
+# what it SAYS and what it returns when the port never comes free.
+code, said = run(BUSY, wait=0)
 
 ok('it does not start', code == 3, f'exit {code!r}')
 # THE POINT. Fourteen thousand of these were printed for a server that never
@@ -109,7 +127,9 @@ ok('and it does NOT print the banner', 'qp charting platform' not in said,
    said.strip()[:120])
 ok('it says it did not start', 'qp DID NOT START' in said, said.strip()[:120])
 ok('it names the port', str(BUSY) in said)
-ok('and it names the likely cause', 'already in use' in said)
+ok('and it names the likely cause', 'still in use' in said)
+ok('and says it waited rather than merely tried once',
+   'after waiting' in said, said.strip()[:200])
 # The next command a person runs, in the message that told them they need one.
 ok('and how to find what is holding it', 'ss -ltnp' in said, said.strip()[:200])
 
@@ -117,21 +137,11 @@ ok('and how to find what is holding it', 'ss -ltnp' in said, said.strip()[:200])
 print('\n── a port that is free ───────────────────────────────────────────')
 
 
-class _Ran(Exception):
-    """uvicorn.run reached — the only way to prove the banner came first."""
-
-
-def _fake_uvicorn_run(*_a, **_k):
-    raise _Ran()
-
-
 # A stand-in module, so this runs on a box with no uvicorn installed AND so
-# reaching `run` is observable. It is put in sys.modules rather than patched
-# into a namespace because main() imports it by name, at call time.
-_stub = types.ModuleType('uvicorn')
-_stub.run = _fake_uvicorn_run
+# reaching `run` is observable. It goes in sys.modules rather than into a
+# namespace because main() imports it by name, at call time.
 _had = sys.modules.get('uvicorn')
-sys.modules['uvicorn'] = _stub
+sys.modules['uvicorn'] = _make_stub()
 
 free = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 free.bind(('127.0.0.1', 0))
@@ -153,6 +163,39 @@ ok('with the port it bound', f':{FREE}' in said)
 ok('and nothing claims a failure', 'DID NOT START' not in said)
 
 held.close()
+
+
+print('\n── a port that is busy and then comes free ───────────────────────')
+
+# THE CASE THAT BROKE THE FIRST VERSION. `pm2 delete qp` then start: the copy
+# being replaced has been told to stop and has not finished letting go. Failing
+# on the first try turned every restart into a coin toss — ten failures, one a
+# second, `errored`, and the port free moments later.
+import threading                                                    # noqa: E402
+
+slow = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+slow.bind(('127.0.0.1', 0))
+slow.listen(1)
+LATE = slow.getsockname()[1]
+threading.Timer(1.5, slow.close).start()
+
+sys.modules['uvicorn'] = _make_stub()
+t0 = time.monotonic()
+code, said = run(LATE, wait=10)
+took = time.monotonic() - t0
+del sys.modules['uvicorn']
+
+ok('it waits instead of giving up', code is not None and '_Ran' in str(code),
+   f'{code!r} / {said.strip()[:140]}')
+ok('and it actually waited for it', 1.0 < took < 9.0, f'{took:.1f}s')
+ok('it says it is waiting, ONCE', said.count('waiting for port') == 1,
+   f"{said.count('waiting for port')}")
+ok('and does not claim a failure it then recovered from',
+   'DID NOT START' not in said)
+ok('the banner still comes after the port is ours',
+   said.find('waiting for port') < said.find('qp charting platform'))
+
+slow.close()
 
 
 print('\n── the order is the fix, so the order is what is pinned ──────────')

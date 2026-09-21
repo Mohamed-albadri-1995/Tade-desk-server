@@ -113,3 +113,34 @@ test('the server it starts refuses to lie about having started', () => {
   expect(main.indexOf('probe.bind(')).toBeLessThan(main.indexOf("print(f'qp charting platform"));
   expect(main).toContain('raise SystemExit(3)');
 });
+
+test('min_uptime outlasts the port wait, or a restart can never succeed', () => {
+  /*
+   * THE TWO NUMBERS HAVE TO AGREE. chart/server.py waits for the port to come
+   * free — a restart hands over, and the copy being replaced takes a moment to
+   * let go. If pm2 counted anything shorter than that wait as a failed start,
+   * a start that spent its time waiting and then succeeded would be marked
+   * unstable for having been patient.
+   *
+   * Read from the Python rather than written here twice: two numbers that have
+   * to agree, kept in two files, agree until somebody changes one.
+   */
+  const py = fs.readFileSync(path.join(ROOT, 'quant-platform', 'chart', 'server.py'), 'utf8');
+  const wait = /'--port-wait',\s*type=float,\s*default=([\d.]+)/.exec(py);
+  expect({ found: !!wait }).toEqual({ found: true });
+  expect({ waitSeconds: Number(wait[1]) }).toEqual({ waitSeconds: 20 });
+  // pm2 counts in milliseconds.
+  expect(app.min_uptime).toBeLessThanOrEqual(Number(wait[1]) * 1000);
+  // …and ten tries a second apart still outlast a twenty second handover only
+  // if pm2 is not killing them first, which max_restarts alone would.
+  expect(app.max_restarts).toBeGreaterThanOrEqual(10);
+});
+
+test('the port it waits for is the port it serves', () => {
+  const py = fs.readFileSync(path.join(ROOT, 'quant-platform', 'chart', 'server.py'), 'utf8');
+  const main = py.slice(py.indexOf('def main():'));
+  // One variable, used by the probe, the message and uvicorn — not a literal
+  // repeated three times that can drift into three ports.
+  expect(main).toContain('probe.bind((args.host, args.port))');
+  expect(main).toContain('uvicorn.run(app, host=args.host, port=args.port');
+});
