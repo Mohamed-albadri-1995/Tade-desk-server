@@ -444,6 +444,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .fire.lvl-warn { border-left-color:#fb923c; }
 .fire.lvl-error { border-left-color:var(--red, #ef4444); }
 .su-detail { font-size:13px; line-height:1.55; margin-top:7px; overflow-wrap:anywhere; }
+/* The names one grouped row stands for. Monospace and dimmer than a single
+   ticker link: four symbols in a row are a LIST, and styling them like the one
+   big tappable ticker would make four things look like four buttons. */
+.su-many { font-family:var(--mono); font-size:12px; color:var(--text2);
+  letter-spacing:.04em; overflow-wrap:anywhere; }
 .fire.lvl-info .su-detail { font-size:12px; color:var(--text2); }
 /* Loud. The stop is computed from volume, and on the IEX feed that volume is a
    few percent of the tape — so this stop is not the line a chart would draw. */
@@ -1839,9 +1844,26 @@ async function loadFires() {
     const fires = d.fires || [];
     FIRES = fires;
     paintStrip();
-    document.getElementById('fire-count').textContent = fires.length ? `${fires.length} today` : '';
+    /*
+     * ONE DEFINITION OF "FIRED TODAY", on both things that print it.
+     *
+     * The strip said 4 and this line said 5, three hundred pixels apart, under
+     * the same three words. The strip is the one that is right, and it says
+     * why: THE CONTROL IS NOT A FIRE. It is a diagnostic that writes to the
+     * same feed, and a morning of "17 fired today" that was mostly the control
+     * is a check of the machine being read as a trading day.
+     *
+     * Its rows stay on the feed — it is the one alert that proves the feed
+     * itself is alive — so when there is one it is named separately rather
+     * than quietly subtracted. A number that dropped with no explanation is
+     * how you end up counting rows by hand to find out which one lied.
+     */
+    const real = fires.filter(f => !f.control).length;
+    const ctrl = fires.length - real;
+    document.getElementById('fire-count').textContent = fires.length
+      ? `${real} today${ctrl ? ` · ${ctrl} control` : ''}` : '';
     // Also on the tab, so a fire is visible from Setups or Settings.
-    tabBadge('today', fires.length);
+    tabBadge('today', real);
     if (!fires.length) { out.innerHTML = '<div class="empty">Nothing has fired today.</div>'; return; }
 
     // Only what arrived since the last poll is announced. On the first load
@@ -1852,7 +1874,7 @@ async function loadFires() {
     if (!FIRST_LOAD) announce(fresh);
     FIRST_LOAD = false;
 
-    out.innerHTML = fires.map(f => {
+    out.innerHTML = groupSameSentence(fires).map(f => {
       const fresh = Date.now() - (f.at || 0) < 10 * 60000 ? ' fresh' : '';
       // A setup does not fit the rule row. Its message is a trade — a side, a
       // stop and a target — and a row built for "TICKER crossed pmHigh" would
@@ -1875,6 +1897,61 @@ async function loadFires() {
   } catch {
     out.innerHTML = '<div class="empty">Could not read the fires.</div>';
   }
+}
+
+/*
+ * THE SAME SENTENCE, SAID ONCE.
+ *
+ * The morning of 2026-09-17 opened with this, four times in a row, once per
+ * name, each one five lines long and every one of them the same five lines:
+ *
+ *     REHEARSAL — 1 leg(s) did not come back: Cards on the list: the tool has
+ *     no cards today, so there is nothing for the setup to rank. Check the
+ *     tool is scanning and not paused. Nothing was published or placed; this
+ *     was a check of the chain, taken on the current bar.
+ *
+ * Twenty lines carrying one fact. That is not a feed, it is traffic, and the
+ * cost is not the pixels: a reader who learns that the top of this page is
+ * repetition stops reading the top of this page, and the alert that matters
+ * arrives into that habit.
+ *
+ * ONE FACT, ONE ROW, and the row says how many it stands for. Nothing is
+ * dropped — every ticker it covers is named on the row.
+ *
+ * ONLY THE PLAIN-SENTENCE FIRES GROUP. A trade card is a different trade every
+ * time even when the words match: different entry, different stop, different
+ * share count, its own send button. Two of those are two things to do, and
+ * merging them would hide one.
+ */
+function groupSameSentence(fires) {
+  const out = [];
+  const at = new Map();
+  for (const f of fires) {
+    if (f.kind !== 'setup' || f.setup) { out.push(f); continue; }
+    // The LEVEL is part of the key. The same words at `error` and at `info`
+    // are not the same alert, and folding them together would quietly
+    // downgrade one of them.
+    const key = `${f.level || 'info'}|${f.rule || ''}|${f.control ? 'c' : ''}|${f.detail || ''}`;
+    const seen = at.get(key);
+    if (seen !== undefined) {
+      const g = out[seen];
+      g.alsoCount += 1;
+      if (f.ticker && !g.alsoTickers.includes(f.ticker)) g.alsoTickers.push(f.ticker);
+      /*
+       * THE NEWEST TIME, taken explicitly rather than by trusting the feed's
+       * order. "5m ago" on a group means "the last time this happened", and a
+       * group stamped with its OLDEST member would say the thing had stopped
+       * when it is still going.
+       */
+      if ((f.at || 0) > (g.at || 0)) g.at = f.at;
+      continue;
+    }
+    at.set(key, out.length);
+    // A copy: FIRES is what the strip counts and what announce() dedupes on,
+    // and a grouped row is a thing this renderer invented.
+    out.push({ ...f, alsoCount: 1, alsoTickers: f.ticker ? [f.ticker] : [] });
+  }
+  return out;
 }
 
 /*
@@ -1906,16 +1983,43 @@ async function loadFires() {
 function setupFire(f, fresh) {
   const t = f.setup;
   if (!t) {
-    // "Nothing qualified", "bars missing", "it crashed" — a real answer with no
-    // trade in it. The sentence IS the content, so it is shown plainly.
+    /*
+     * "Nothing qualified", "bars missing", "it crashed" — a real answer with
+     * no trade in it.
+     *
+     * THE FIRST SENTENCE IS THE ANSWER; the rest is why and what to do about
+     * it. Printed whole, at the same weight, these ran to five lines each and
+     * were the first thing on the page every morning — so the page trained you
+     * to skip its own top. The answer stays on the row; the rest is one tap
+     * away, in the same fold every explanation on this desk uses.
+     *
+     * NOTHING IS TRUNCATED WITH AN ELLIPSIS. The two halves are split on a
+     * sentence boundary and the second half is complete — see deskFirstSentence
+     * in /desk.js. A "…" is a claim that the rest was not worth reading, and
+     * this is the page you open BECAUSE something went wrong.
+     */
+    const head = deskFirstSentence(f.detail);
+    const rest = deskRestOfIt(f.detail);
+    const many = f.alsoCount > 1;
     return `<div class="fire setup lvl-${esc(f.level || 'info')}${fresh}">
       <div class="su-head">
         <span class="su-tag">${esc((f.level || 'info').toUpperCase())}</span>
         ${f.control ? '<span class="su-tag">CONTROL</span>' : ''}
-        ${tickerLink(f)}<span class="tool">${esc(f.rule || '')}</span>
-        <span class="when">${esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
+        ${many
+          // Every name it stands for, so grouping hides nothing. The count is
+          // there because "the same thing happened four times" is itself the
+          // finding when a setup is failing on every name it looked at.
+          ? `<span class="su-many">${esc((f.alsoTickers || []).join(' '))
+              || `${f.alsoCount} times`}</span>
+             <span class="su-tag">&times;${f.alsoCount}</span>`
+          : tickerLink(f)}
+        <span class="tool">${esc(f.rule || '')}</span>
+        <span class="when" title="${esc(clockET(f.at))} ET">${
+          many ? 'last ' : ''}${esc(clockET(f.at))} · ${ago(f.at || 0)}</span>
       </div>
-      <div class="su-detail">${esc(f.detail || '')}</div></div>`;
+      <div class="su-detail">${esc(head)}</div>
+      ${rest ? `<details class="why"><summary>why</summary>
+        <div class="why-body">${esc(rest)}</div></details>` : ''}</div>`;
   }
   const n = (v, d = 2) => (v === null || v === undefined ? '—' : Number(v).toFixed(d));
   const sz = t.size;

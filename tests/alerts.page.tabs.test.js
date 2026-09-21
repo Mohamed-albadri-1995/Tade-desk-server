@@ -121,7 +121,16 @@ describe('the alert card', () => {
      */
     const withTrade = card.slice(card.indexOf('const n = (v, d = 2)'));
     expect(withTrade).not.toContain('esc(f.detail');
-    expect(card).toContain('esc(f.detail || \'\')');   // the "nothing qualified" branch
+    /*
+     * The "nothing qualified" branch still shows the sentence, and since
+     * 2026-09-21 shows it in two parts: the first sentence on the row and the
+     * rest behind a fold. Printed whole these ran to five lines each and were
+     * the first thing on the page every morning. Checked by the split
+     * functions rather than by one exact expression — what matters is that the
+     * branch renders the detail, not how the string is spelled.
+     */
+    expect(card).toContain('deskFirstSentence(f.detail)');
+    expect(card).toContain('deskRestOfIt(f.detail)');
   });
 
   test('warnings are their own block, not a clause', () => {
