@@ -325,3 +325,97 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
   scroll-snap-type:x proximity; }
 .tabs::-webkit-scrollbar { display:none; }
 .tabs > .tb { scroll-snap-align:start; flex:0 0 auto; }
+
+/* ── THE APP BAR ───────────────────────────────────────────────────────────
+ *
+ * WHAT WAS MISSING: a way to be somewhere.
+ *
+ * Four programs, and the only route between any two of them was the browser's
+ * back button and a landing page that had to be returned to each time. The
+ * screener suite in particular reads as a dead end — you arrive, and the only
+ * exit is backwards — which is what makes it feel like a "middle page" rather
+ * than one of the four places you work.
+ *
+ * So the four names are always on screen, the current one is marked, and every
+ * other one is a link. That is the whole idea, and it is why the bar carries
+ * no status: a door that also reports health is a door you have to read.
+ *
+ * NO ICONS. Four glyphs that have to be learned are four things between you
+ * and a name you can already read — and picked from an emoji font they render
+ * differently on every device, which is how ⚡ ended up meaning both "Algo"
+ * and "the page is loading" on the same screen. Identity is carried by the
+ * accent underline, which is the same colour the program uses everywhere else.
+ *
+ * HORIZONTAL, NOT A SIDEBAR. Most of this desk is read on a phone. A 245px
+ * sidebar there is a hamburger that never gets opened; this bar is the same
+ * shape on both, and scrolls rather than collapsing.
+ */
+.dk-bar { display:flex; align-items:center; gap:var(--s3); margin:-4px 0 var(--s4);
+  padding-bottom:var(--s2); border-bottom:1px solid var(--border);
+  overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.dk-bar::-webkit-scrollbar { display:none; }
+.dk-bar-home { flex:0 0 auto; font:700 var(--f-xs)/1 var(--ui); letter-spacing:.18em;
+  color:var(--text3); text-decoration:none; padding:8px 0; }
+.dk-bar-home:hover { color:var(--text2); }
+.dk-bar-apps { display:flex; gap:2px; flex:1 1 auto; min-width:0; }
+.dk-app { flex:0 0 auto; font:600 var(--f-sm)/1 var(--ui); color:var(--text3);
+  text-decoration:none; padding:9px 12px; border-bottom:2px solid transparent;
+  white-space:nowrap; border-radius:6px 6px 0 0; }
+.dk-app:hover { color:var(--text); background:var(--bg2); }
+/* The current program. Its own accent, so "where am I" is answered by a colour
+   that means the same thing on every page of that program. */
+.dk-app.on { color:var(--text); border-bottom-color:var(--dk-accent, var(--accent)); }
+.dk-bar-end { flex:0 0 auto; margin-left:auto; display:flex; align-items:center;
+  gap:var(--s2); }
+
+/* ── A DOOR ────────────────────────────────────────────────────────────────
+ *
+ * A card that opens a program. It carries a NAME, ONE line saying what the
+ * program is for, and where it goes — and nothing else.
+ *
+ * It used to carry a paragraph. Three sentences about registers and archive
+ * processes, on the page whose only question is "which program", read before
+ * you have chosen the program they describe. Nobody reads a card twice, so the
+ * second and third sentences were never read at all; they were only ever in
+ * the way of the name.
+ */
+.dk-doors { display:grid; gap:var(--s3); grid-template-columns:repeat(2,minmax(0,1fr)); }
+.dk-door { display:flex; flex-direction:column; gap:var(--s1);
+  background:var(--bg2); border:1px solid var(--border);
+  border-left:3px solid var(--dk-accent, var(--accent)); border-radius:10px;
+  padding:var(--s4); text-decoration:none; color:inherit; }
+.dk-door:hover { background:var(--bg3); }
+.dk-door:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.dk-door-name { font:700 var(--f-lg)/1.2 var(--ui); color:var(--dk-accent, var(--text)); }
+.dk-door-one { color:var(--text2); }
+.dk-door-at { margin-top:var(--s2); font-size:var(--f-xs); color:var(--text3); }
+@media (max-width:640px) { .dk-doors { grid-template-columns:1fr; } }
+
+/* ── A LIST ROW ────────────────────────────────────────────────────────────
+ * One thing per line, aligned down the page, so twelve of them can be compared
+ * by running an eye down a column instead of reading twelve cards. */
+.dk-rows { border:1px solid var(--border); border-radius:10px; overflow:hidden;
+  background:var(--bg2); }
+.dk-row { display:grid; align-items:center; gap:var(--s3);
+  grid-template-columns:minmax(0,1fr) auto; padding:var(--s3) var(--s4);
+  border-top:1px solid var(--border); text-decoration:none; color:inherit; }
+.dk-row:first-child { border-top:0; }
+.dk-row:hover { background:var(--bg3); }
+.dk-row-name { font-weight:700; color:var(--text); }
+.dk-row-sub { font-size:var(--f-xs); color:var(--text3); margin-top:2px; }
+.dk-row-end { display:flex; align-items:center; gap:var(--s3);
+  font-size:var(--f-xs); color:var(--text2); white-space:nowrap; }
+.dk-num { font-weight:700; color:var(--text); }
+.dk-num.zero { color:var(--text3); font-weight:600; }
+@media (max-width:560px) {
+  .dk-row { grid-template-columns:1fr; gap:var(--s2); }
+  .dk-row-end { justify-content:flex-start; }
+}
+
+/* A heading that groups rows, with the reason for the group beside it rather
+   than in a paragraph underneath. */
+.dk-group { display:flex; align-items:baseline; gap:var(--s2); flex-wrap:wrap;
+  margin:var(--s5) 0 var(--s2); }
+.dk-group b { font:700 var(--f-xs)/1 var(--ui); letter-spacing:.1em;
+  text-transform:uppercase; }
+.dk-group span { font-size:var(--f-xs); color:var(--text3); }

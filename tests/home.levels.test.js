@@ -56,10 +56,18 @@ describe('the landing page', () => {
      * The suite card used to be an inert "you are here" marker, because this
      * page WAS the suite. Now it is a door to level 2, and an inert card there
      * would be a dead end where the main path should be.
+     *
+     * The card is `.dk-door` from /desk.css since the redesign, and the address
+     * is built by deskAppHref() in /desk.js rather than here — three pages were
+     * each assembling the same URL, and the alerts page's copy had to correct
+     * its own scheme by hand. The behaviour of that one builder is checked by
+     * running it, in tests/desk.appbar.test.js.
      */
-    expect(home).toContain('<a class="app-card"');
+    expect(home).toContain('<a class="dk-door"');
     expect(home).not.toContain('is-self');
-    expect(home).toContain("a.suitePath || '/screeners'");
+    expect(home).toContain('deskAppHref(a, true)');
+    const shared = read('desk.js');
+    expect(shared).toContain("a.suitePath || '/screeners'");
   });
 
   test('it still renders when the app list cannot be read', () => {
@@ -80,9 +88,19 @@ describe('the screener suite page', () => {
     expect(suite).not.toContain('function appCard(');
   });
 
-  test('has a way back that does not rely on the browser', () => {
-    // On a phone, the back button is not where a person looks for it.
-    expect(suite).toMatch(/class="crumb" href="\/"/);
+  test('has a way OUT that does not rely on the browser', () => {
+    /*
+     * On a phone, the back button is not where a person looks for it — and one
+     * crumb pointing backwards is not navigation either. That crumb was the
+     * whole reason this page read as a corridor between two others: you could
+     * only ever return the way you came.
+     *
+     * The app bar names all four programs and marks this one. Which page it
+     * marks, and where each name points from here, is checked in
+     * tests/desk.appbar.test.js.
+     */
+    expect(suite).toContain('<nav class="dk-bar" id="deskbar"');
+    expect(suite).toContain("deskAppBar('SCR'");
   });
 
   test('is a complete document — the split did not eat the stylesheet', () => {
@@ -141,7 +159,15 @@ describe('the three panels are off the suite page', () => {
    * rules for elements nothing renders is where the next reader loses an hour.
    */
   test('nothing is left painting a panel that no longer exists', () => {
-    for (const dead of ['.sl-row', '.shelf-card', '.cmp-wrap', '.uni-chip', '.cs-summary']) {
+    /*
+     * `.app-card` and `.crumb` joined the list with the redesign. The app grid
+     * moved back to the landing page months ago and left a hundred and thirty
+     * lines of stylesheet behind; the crumb was replaced by the app bar. Rules
+     * for elements nothing renders read, in review, exactly like rules for
+     * elements something renders.
+     */
+    for (const dead of ['.sl-row', '.shelf-card', '.cmp-wrap', '.uni-chip', '.cs-summary',
+                        '.app-card', '.app-desc', '.crumb']) {
       expect({ dead, on: suite.includes(dead) }).toEqual({ dead, on: false });
     }
   });

@@ -43,9 +43,9 @@ body { font-variant-numeric:tabular-nums; }
 .wrap { max-width:900px; margin:0 auto; }
 .top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
 h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
-.home { font-size:11px; color:var(--text3); text-decoration:none; border:1px solid var(--border);
-  border-radius:5px; padding:4px 9px; }
-.home:hover { color:var(--blue); border-color:var(--blue); }
+/* The .home pill went with the "← all tools" link it dressed — the app bar
+   above the heading is the way out now, and it names all four programs rather
+   than the one page you came from. */
 /* The page's own explanation gets the same treatment as every other one: a
    line you can read at a glance, and the reasoning one tap away. Eight lines
    of prose above the tabs is eight lines between you and the alert. */
@@ -551,15 +551,23 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <body>
 <div class="wrap">
 
-<div class="top">
-  <h1>⚡ Algo</h1>
-  <a class="home" id="home-link" href="/">← all tools</a>
-  <!-- The screener has treated high contrast as the NORMAL case since someone
-       tried to read a card at a bus stop. Same button, same corner, every
-       page — see desk.js. -->
+<!-- ── THE FOUR PROGRAMS, and this one marked ──
+     What was here: an h1 reading "⚡ Algo" and a small "← all tools" link.
+     The bolt was decoration that had to be learned — on this desk ⚡ already
+     meant "loading" on another page, which is the trouble with an icon picked
+     from an emoji font — and one link backwards is not navigation.
+     The screener has treated high contrast as the NORMAL case since someone
+     tried to read a card at a bus stop; the button is in the bar on every page
+     now, moved there by deskAppBar(). -->
+<nav class="dk-bar" id="deskbar" aria-label="programs">
   <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
+          style="margin-left:auto"
           title="high contrast, for reading the screen outdoors">☀</button>
-</div>
+</nav>
+<!-- The heading stays, without the bolt. The bar says which PROGRAM you are
+     in; this says what the page is, and a document with no h1 is a document a
+     screen reader cannot outline. -->
+<div class="top"><h1>Algo</h1></div>
 <!-- ── THE STATE OF THE DESK, before anything else ──
      Six facts decide what this morning is: is it armed, has anything fired,
      is anything open, how much has been spent, when is the next decision, and
@@ -927,14 +935,19 @@ async function meta() {
   return META;
 }
 
-fetch('/api/tools').then(r => r.json()).then(d => {
-  TOOLS = d.tools || [];
-  // Back to whichever app serves the landing page, on its own port.
-  const scr = (d.apps || []).find(a => a.id === 'SCR');
-  // Same reason as cardUrl: the screener suite serves http on its own port.
-  if (scr) document.getElementById('home-link').href =
-    `${TOOL_SCHEME}//${location.hostname}:${scr.port}/`;
-}).catch(() => {});
+fetch('/api/tools').then(r => r.json()).then(d => { TOOLS = d.tools || []; })
+  .catch(() => {});
+
+/*
+ * The four programs, marked at ALERTS — this page.
+ *
+ * `self: false`: this page is served by the alerts process, so every other
+ * program is a hop to another origin and "/" here means this page, not the
+ * landing page. That is what the old "← all tools" link had to work around by
+ * rewriting its own href; deskAppHref does it for all four at once, and for
+ * the same reason as cardUrl below — never over this page's protocol.
+ */
+deskAppBar('ALERTS', { self: false });
 
 const toolPort = id => (TOOLS.find(t => t.id === id) || {}).port;
 /*

@@ -4,63 +4,44 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trade Desk</title>
+<!-- The design system, not a fifth palette. This page had its own :root, its
+     own type scale and no sunlight mode, which is how the landing page ended
+     up being the only screen on the desk you could not read outdoors. -->
+<link rel="stylesheet" href="/desk.css">
+<script src="/desk.js"></script>
 <style>
-:root {
-  --bg:#0d0f14; --bg2:#13161e; --bg3:#1a1e28; --border:#2a2f3f;
-  --text:#e2e6f0; --text2:#8b92a5; --text3:#5a6175;
-  --accent:#4a9eff; --green:#4ade80; --red:#f87171; --amber:#fbbf24;
-}
-* { box-sizing:border-box; }
-body {
-  margin:0; min-height:100vh; background:var(--bg); color:var(--text);
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  display:flex; flex-direction:column; align-items:center;
-  padding:48px 20px 40px;
-}
-.logo { font-size:13px; letter-spacing:.28em; color:var(--accent); font-weight:700; }
-.title { font-size:28px; font-weight:700; margin:14px 0 6px; letter-spacing:-.02em; text-align:center; }
-.subtitle { font-size:13px; color:var(--text2); margin-bottom:32px; text-align:center; }
-/* The applications. Bigger than a tool card on purpose — the choice between
-   charting and screening is made before the choice of which screener, and the
-   page should read in that order. */
-.apps { display:flex; flex-wrap:wrap; gap:16px; justify-content:center;
-        width:100%; max-width:1000px; margin:20px 0 8px; }
-.app-card {
-  position:relative; flex:1 1 320px; max-width:480px; background:var(--bg2);
-  border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:12px;
-  padding:22px 24px; text-decoration:none; color:inherit; display:flex;
-  flex-direction:column; gap:9px; transition:border-color .15s, transform .15s;
-}
-.app-card:hover { transform:translateY(-2px); }
-.app-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.app-name { font-size:19px; font-weight:700; letter-spacing:-.01em; }
-.app-desc { font-size:12.5px; color:var(--text2); line-height:1.6; }
-.app-foot { display:flex; align-items:center; gap:8px; margin-top:2px;
-            font-size:11px; color:var(--text3); }
-.app-arrow { margin-left:auto; font-size:16px; color:var(--text3); }
-.app-card:hover .app-arrow { color:var(--accent); }
-.note { margin-top:30px; font-size:11px; color:var(--text3); text-align:center;
-        max-width:56ch; line-height:1.7; }
-.version { margin-top:22px; font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
-@media (max-width:580px) {
-  body { padding:32px 14px; }
-  .title { font-size:22px; }
+/* Only the things that are this page's own shape. Everything with a colour or
+   a size in it comes from /desk.css. */
+body { max-width:860px; margin:0 auto; padding:26px 16px 56px; }
+.head { display:flex; align-items:flex-start; gap:var(--s3); margin-bottom:var(--s5); }
+.logo { font:700 var(--f-xs)/1.6 var(--ui); letter-spacing:.28em; color:var(--text3); }
+.title { font-size:var(--f-xl); font-weight:700; letter-spacing:-.02em; margin:var(--s1) 0 0; }
+.head .dk-sun { margin-left:auto; flex:0 0 auto; }
+.note { margin-top:var(--s5); font-size:var(--f-xs); color:var(--text3); line-height:1.7; }
+.version { margin-top:var(--s2); font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
 </style>
 </head>
 <body>
 
-<div class="logo">TRADE DESK</div>
-<div class="title">What are you doing today?</div>
+<div class="head">
+  <div>
+    <div class="logo">TRADE DESK</div>
+    <h1 class="title">What are you doing today?</h1>
+  </div>
+  <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
+          title="high contrast, for reading the screen outdoors">☀</button>
+</div>
 
 <!-- The whole box, from one address. These are different programs with
      different jobs — charting and backtesting on one side, screening on the
-     other — and they used to be two port numbers to remember. -->
-<div class="apps" id="apps"></div>
+     other — and they used to be two port numbers to remember.
 
-<div class="note">
-  Four programs, one box. Each keeps its own data — nothing is shared between
-  them, so what one learns never leaks into another.
-</div>
+     NO APP BAR HERE. Every other page carries one so it is never a dead end;
+     on this page the doors ARE the bar, and a second copy of the same four
+     names above them is one list too many. -->
+<div class="dk-doors" id="apps"></div>
+
+<div class="note">Four programs on one box. Each keeps its own data.</div>
 <div class="version">v2.0 · multi-tool</div>
 
 <script>
@@ -83,54 +64,50 @@ body {
  * public/screeners.html, unchanged. Nothing was deleted; it was filed.
  */
 
-/* App names and descriptions come from tools.config.json, which is edited by
-   hand, so they reach this page as strings and go into innerHTML. */
-function esc(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+/*
+ * A DOOR: a name, ONE line, and where it goes.
+ *
+ * It used to carry a paragraph — three sentences about registers and archive
+ * processes, on the page whose only question is "which program", read before
+ * you have chosen the program they describe. Nobody reads a card twice, so the
+ * second and third sentences were never read at all; they were only ever in
+ * the way of the name. The long `desc` is still in tools.config.json for the
+ * places that have room for it, and is the fallback here for an app added
+ * without a `one`, cut at its first sentence rather than printed whole.
+ *
+ * IT CARRIES NO STATUS. These are separate programs. The chart platform does
+ * not serve this page's /health and has no reason to send CORS headers for it,
+ * so asking "is it up" from here gets a network error whether it is up or not
+ * — and claiming "offline" on that basis would be a lie the page cannot back
+ * up.
+ *
+ * NO ICONS. Four glyphs that have to be learned are four things between you
+ * and a name you can already read, and picked from an emoji font they render
+ * differently on every device. Identity is the accent stripe, which is the
+ * same colour that program uses everywhere else.
+ */
+/* Written with indexOf rather than a lookbehind. An unsupported regex feature
+   is a SyntaxError when the file is PARSED, which empties the whole page on an
+   older phone — the one device this desk is most read on. */
+function firstSentence(s) {
+  s = String(s == null ? '' : s).trim();
+  const i = s.indexOf('. ');
+  return i > 0 ? s.slice(0, i + 1) : s;
 }
 
-/*
- * A card is a door, and it carries no status.
- *
- * These are separate programs. The chart platform does not serve this page's
- * /health and has no reason to send CORS headers for it, so asking "is it up"
- * from here gets a network error whether it is up or not — and claiming
- * "offline" on that basis would be a lie the page cannot back up.
- */
-function appCard(a) {
-  /*
-   * An app may declare its own address, and then that wins over host:port.
-   *
-   * The alerts app is why: it sits behind https on a real domain, and it has
-   * to, because a browser refuses notification permission to a page served
-   * over plain http. Building its link from this page's protocol and host
-   * would send every visit back to the http origin where the prompt is
-   * refused — the one thing the certificate was obtained to prevent. See
-   * deploy/setup-https.sh, which writes the address after issuing it.
-   */
-  const url = a.url
-    ? a.url.replace(/\/$/, '') + (a.path && a.path !== '/' ? a.path : '')
-    /*
-     * The screener suite is served by THIS process, so its door is a path on
-     * this host rather than a hop to a port. That is what makes it level 2 of
-     * three rather than a fourth peer.
-     */
-    : (a.isSelf ? (a.suitePath || '/screeners')
-       : `${location.protocol}//${location.hostname}:${a.port}${a.path || '/'}`);
+function appDoor(a) {
+  // `self` is true: this page and the screener suite are the same process.
+  const url = deskAppHref(a, true);
   // Say where it actually goes. "port 3090" under a card that opens an https
   // domain is a wrong answer to "which port do I open in AWS".
   const where = a.url ? new URL(url, location.href).host
     : (a.isSelf ? 'this server' : `port ${a.port}`);
+  const one = a.one || firstSentence(a.desc);
   return `
-    <a class="app-card" href="${esc(url)}" style="border-left-color:${esc(a.accent || '#4a9eff')}">
-      <div class="app-name" style="color:${esc(a.accent || 'var(--text)')}">${esc(a.name)}</div>
-      <div class="app-desc">${esc(a.desc || '')}</div>
-      <div class="app-foot">
-        <span>${esc(where)}</span>
-        <span class="app-arrow">&rarr;</span>
-      </div>
+    <a class="dk-door" href="${deskEsc(url)}" style="--dk-accent:${deskEsc(a.accent || '#3b82f6')}">
+      <div class="dk-door-name">${deskEsc(a.name)}</div>
+      <div class="dk-door-one">${deskEsc(one)}</div>
+      <div class="dk-door-at">${deskEsc(where)} &rarr;</div>
     </a>`;
 }
 
@@ -140,12 +117,12 @@ async function start() {
     const d = await (await fetch('/api/tools')).json();
     const apps = d.apps || [];
     if (!apps.length) throw new Error('the app list came back empty');
-    el.innerHTML = apps.map(appCard).join('');
+    el.innerHTML = apps.map(appDoor).join('');
   } catch (e) {
     // A landing page with no doors is worse than one that says why it has none.
-    el.innerHTML = `<div class="app-card" style="border-left-color:#f87171">
-      <div class="app-name">Could not read the app list</div>
-      <div class="app-desc">${esc(e.message)} — this page reads
+    el.innerHTML = `<div class="dk-door" style="--dk-accent:var(--red)">
+      <div class="dk-door-name">Could not read the app list</div>
+      <div class="dk-door-one">${deskEsc(e.message)} — this page reads
         tools.config.json through /api/tools.</div>
     </div>`;
   }

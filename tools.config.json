@@ -191,6 +191,7 @@
     }
   ],
   "_apps_comment": "Whole applications on this box, as opposed to the screener tools above. The landing page lists these first: they are different programs with different jobs, not nine variants of one. Added here rather than hardcoded in the page so a new app means one entry and nothing else.",
+  "_one_comment": "`one` is what the landing page prints under the name: ONE short line, no second sentence. `desc` is the long form, kept for anywhere that has room for it and as the fallback when a new app is added without a `one`. The landing page's only question is 'which program', and a three-sentence paragraph is read before the program it describes has been chosen — so the second and third sentences were never read, they were only ever in the way of the name.",
   "apps": [
     {
       "id": "QP",
@@ -198,6 +199,7 @@
       "port": 8765,
       "path": "/?v=4",
       "accent": "#a78bfa",
+      "one": "Charts, backtests and Universe R1 runs.",
       "desc": "The quant platform: price charts, strategy backtests and Universe R1 runs over frozen screener days."
     },
     {
@@ -206,6 +208,7 @@
       "port": 3000,
       "path": "/",
       "accent": "#4a9eff",
+      "one": "The running screeners, each with its own history.",
       "desc": "The screener tools side by side, each keeping its own history — plus the shared shortlist. Stopped tools stay readable: the archive process serves their stored registers on their own ports, so qp can still chart and backtest them.",
       "isSelf": true,
       "suitePath": "/screeners"
@@ -216,6 +219,7 @@
       "port": 3100,
       "path": "/",
       "accent": "#34d399",
+      "one": "Every trade after the fact: R, MAE/MFE, expectancy.",
       "desc": "Every trade after the fact: entry and exit, R-multiple, MAE/MFE, notes, and per-setup expectancy. Imports fills from TradingView, Trade The Pool and DXtrade."
     },
     {
@@ -224,6 +228,7 @@
       "port": 3090,
       "path": "/",
       "accent": "#fbbf24",
+      "one": "Setups deciding, sizing and routing on their own bar.",
       "desc": "The execution desk: setups deciding on their own bar, sizing from their own backtest, routing to their own account — with the alerts, the orders and the reconciliation beside them."
     }
   ]

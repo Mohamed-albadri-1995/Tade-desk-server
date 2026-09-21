@@ -28,13 +28,11 @@
 /* Tickers, counts, clocks and tables stay monospace — they are compared. */
 .check, .card-port, .nb-clock, .sc-tag { font-family:var(--mono); }
 
-/* ── the why, folded away ──
- * Same pattern as the alerts page. The reasoning is worth keeping; printed at
- * the same weight as the data it is a wall, and a wall does not get read. */
-.crumb { align-self:flex-start; font-size:12px; color:var(--text2); text-decoration:none;
-  padding:6px 10px; margin:-34px 0 20px -8px; border-radius:6px; }
-.crumb:hover { color:var(--accent); background:var(--bg2); }
-.logo { font-size:13px; letter-spacing:.28em; color:var(--accent); font-weight:700; }
+/* The app bar spans the page, above the 1000px column, so the four programs
+   are in the same place here as on every other page — see .dk-bar in
+   /desk.css. The lone "← Trade Desk" crumb that used to sit here went with it:
+   one way out, backwards, is exactly what made this page read as a middle. */
+#deskbar { width:100%; max-width:1000px; }
 /* ── ONE COLUMN, ONE EDGE ──
    The title and subtitle were centred across the full window while everything
    below them sat in a 1000px column starting at the left. Three alignments on
@@ -48,29 +46,11 @@
 .subtitle { font-size:var(--f-sm); color:var(--text2); margin-bottom:var(--s4);
   width:100%; max-width:1000px; }
 
-/* The applications. Bigger than a tool card on purpose — the choice between
-   charting and screening is made before the choice of which screener, and the
-   page should read in that order. */
-.apps { display:flex; flex-wrap:wrap; gap:16px; justify-content:center;
-        width:100%; max-width:1000px; margin:20px 0 8px; }
-.app-card {
-  position:relative; flex:1 1 320px; max-width:480px; background:var(--bg2);
-  border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:12px;
-  padding:22px 24px; text-decoration:none; color:inherit; display:flex;
-  flex-direction:column; gap:9px; transition:border-color .15s, transform .15s;
-}
-.app-card:hover { transform:translateY(-2px); }
-.app-card.is-self { cursor:default; opacity:.82; }
-.app-card.is-self:hover { transform:none; }
-.app-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.app-name { font-size:19px; font-weight:700; letter-spacing:-.01em; }
-.app-desc { font-size:12.5px; color:var(--text2); line-height:1.6; }
-.app-foot { display:flex; align-items:center; gap:8px; margin-top:2px;
-            font-size:11px; color:var(--text3); }
-.app-here { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
-            color:var(--text3); border:1px solid var(--border); border-radius:4px; padding:1px 6px; }
-.app-arrow { margin-left:auto; font-size:16px; color:var(--text3); }
-.app-card:hover .app-arrow { color:var(--accent); }
+/* The app-card rules were here — a hundred and thirty pixels of stylesheet for
+   a grid this page has not rendered since the landing page took it back. Three
+   hundred lines of rules for elements nothing draws is where the next reader
+   loses an hour, so they go with the markup. The four programs are in the app
+   bar at the top now, which is one list on every page instead of two on two. */
 
 .section-head { font-size:var(--f-xs); font-weight:700; letter-spacing:.13em;
   text-transform:uppercase; color:var(--text2); margin:var(--s5) 0 var(--s2);
@@ -223,13 +203,17 @@
 <body>
 
 <!-- Level 2 of three. Level 1 is "which program", level 3 is the screener
-     itself. The way back has to be on the page: a phone browser's back button
-     is not where a person looks for it. -->
-<a class="crumb" href="/">&larr; Trade Desk</a>
-<button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
-        style="position:absolute;top:14px;right:14px"
-        title="high contrast, for reading the screen outdoors">☀</button>
-<div class="logo">SCREENER SUITE</div>
+     itself. The way on has to be on the page, not just the way back: a lone
+     "← Trade Desk" crumb is one exit, backwards, which is exactly what made
+     this page read as a corridor between two others rather than one of the
+     four places you work. The bar names all four and marks this one.
+     The sunlight button is moved INTO the bar by deskAppBar() — one control,
+     one handler, and the same corner on every page. -->
+<nav class="dk-bar" id="deskbar" aria-label="programs">
+  <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
+          style="margin-left:auto"
+          title="high contrast, for reading the screen outdoors">☀</button>
+</nav>
 <div class="title">Which screener?</div>
 
 
@@ -846,6 +830,20 @@ async function start() {
   setInterval(() => live.forEach(probe), 30000);
 }
 start();
+
+/*
+ * The four programs, marked at SCR — this page.
+ *
+ * `self: true` because this page is served by the same process that serves the
+ * landing page, so the suite's own door is a path here rather than a hop to a
+ * port. It is stated rather than guessed: the suite is served by whichever
+ * screener tool is the front one, on whatever port that tool uses, so
+ * `location.port` cannot answer it.
+ *
+ * Its own request, not folded into start()'s: the bar is how you LEAVE a page
+ * that failed to load, so it must not be downstream of the thing that failed.
+ */
+deskAppBar('SCR', { self: true });
 
 /*
  * The shortlist, the CANSLIM list and the month-end comparison were rendered
