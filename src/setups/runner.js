@@ -1307,14 +1307,55 @@ async function runDue(decisionTime, opts = {}) {
    * slow one would have spent the fast one's window instead, and the fast one
    * would have placed a market order most of a minute after its decision bar.
    *
-   * They are independent questions asked of the same platform, so they are
-   * asked at the same time. `allSettled`, not `all`: one setup failing must not
-   * cancel the others, which is the whole reason each had its own try/catch.
-   * Order is preserved, so the returned array still lines up with `mine`.
+   * THEY ARE ASKED ONE AT A TIME, and that is a reversal.
+   *
+   * They were asked together, on the reasoning above: independent questions,
+   * so ask them at once and let the platform overlap the waiting. That is
+   * right for a platform whose time goes on the network. Measured on the box
+   * 2026-09-21, this one's does not:
+   *
+   *     %CPU during a decision   106.7      one core, pinned
+   *     nproc                    2
+   *     47 cards, 8 workers      12114ms
+   *
+   * The cost is the MATHS, and Python's GIL holds it to about one core. Two
+   * decisions at once on a two-core box do not overlap — they contend, and
+   * BOTH get slower. The same morning shows it plainly: `Test` answers in
+   * ~900ms on a normal bar and took 4268ms on 09:34, the one bar `OR + VWAP`
+   * also decided on. It was not busy. It was waiting for a core.
+   *
+   * Serially, the same two are 0.9s and then 12.1s — thirteen seconds, both
+   * inside the minute. In parallel neither has a core to itself and the slow
+   * one runs out of budget, which is a whole session for a setup that decides
+   * on one bar.
+   *
+   * ── THE ONE THAT CANNOT BE ASKED AGAIN GOES FIRST ──────────────────────
+   *
+   * Serial means order decides who gets the clean core, and the comment above
+   * already names the hazard: "had the order been reversed, the slow one would
+   * have spent the fast one's window". A WATCH setup is asked again in sixty
+   * seconds, so being late costs it a bar. A CLOCK setup decides on one bar
+   * and the scheduler's window for it is one minute wide — late is the whole
+   * day. So clock setups run first, and among them the cheapest universe
+   * first, which frees the core soonest for whatever is behind it.
+   *
+   * Still every failure caught per setup: one throwing must not stop the rest,
+   * which is what `allSettled` was doing and is now the try/catch below.
    */
   const day = opts.date || toETDate(Date.now());
-  const settled = await Promise.allSettled(
-    mine.map(setup => runSetup(setup, { ...opts, bar: decisionTime })));
+  const order = mine
+    .map((setup, i) => ({ setup, i }))
+    .sort((a, b) => (Number(!!a.setup.watch) - Number(!!b.setup.watch))
+      || ((a.setup.universe?.length || 0) - (b.setup.universe?.length || 0)));
+
+  const settled = new Array(mine.length);
+  for (const { setup, i } of order) {
+    try {
+      settled[i] = { status: 'fulfilled', value: await runSetup(setup, { ...opts, bar: decisionTime }) };
+    } catch (reason) {
+      settled[i] = { status: 'rejected', reason };
+    }
+  }
   return settled.map((r, i) => {
     if (r.status === 'fulfilled') return r.value;
     const setup = mine[i];

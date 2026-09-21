@@ -283,19 +283,41 @@ describe('a run that finds nothing still says so', () => {
 });
 
 /*
- * ONE SETUP'S MINUTE IS NOT ANOTHER'S TO SPEND.
+ * ONE SETUP'S MINUTE IS NOT ANOTHER'S TO SPEND — AND ASKING AT ONCE WAS NOT
+ * THE ANSWER.
  *
  * 2026-09-03, both deciding on the 09:34 bar:
  *
  *     Test              1744ms
  *     OR + VWAP 09:35  45050ms   FAILED — timeout
  *
- * Run in turn, the slow one holds the tick for forty-five seconds — and a
- * setup entering on the 09:35 open has sixty in total. Reverse the order and
- * the fast one places a market order most of a minute after its decision bar.
+ * The conclusion drawn then was that running them in turn lets the slow one
+ * hold the tick, so they should be asked together. That is right for a
+ * platform whose time goes on the network. Measured 2026-09-21, this one's
+ * does not:
+ *
+ *     %CPU during a decision   106.7      one core, pinned
+ *     nproc                    2
+ *     47 cards, 8 workers      12114ms    of an 18000ms budget
+ *
+ * The cost is the maths, and the GIL holds it to about one core. Asked
+ * together on a two-core box they do not overlap — they contend, and both get
+ * slower. The same morning proves it: `Test` answers in ~900ms on a normal bar
+ * and took 4268ms on 09:34, the one bar `OR + VWAP` also decided on.
+ *
+ * So they are asked ONE AT A TIME, and the one that cannot be asked again goes
+ * first — see tests/setups.runOrder.test.js, which owns that ordering. What
+ * this block still owns is the part that did not change: a failure must not
+ * take the others with it, and the results must line up with the setups.
  */
-describe('setups on the same bar do not queue behind each other', () => {
-  test('they are asked at the same time, not one after the other', async () => {
+describe('setups on the same bar are asked one at a time', () => {
+  test('the second does not start until the first is done', async () => {
+    /*
+     * The reverse of what this asserted until 2026-09-21. Two decisions
+     * overlapping on one core is not concurrency — it is each halving the
+     * other, and the slow one running out of a budget that costs it the
+     * session.
+     */
     const OTHER = { ...SETUP, id: 'Other@10:00', name: 'Other',
                     strategyId: 'Other' };
     catalog.forTool.mockResolvedValue([SETUP, OTHER]);
@@ -304,17 +326,16 @@ describe('setups on the same bar do not queue behind each other', () => {
     const held = new Promise((r) => { release = r; });
     qp.decide.mockImplementation(async (args) => {
       started.push(args.strategyId || args.strategies);
-      // The FIRST call blocks. If the second only starts after it resolves,
-      // `started` holds one entry when we look — which is the bug.
       if (started.length === 1) await held;
       return { ok: true, picks: [], counts: {} };
     });
     const run = runner.runDue('10:00', { date: DATE });
-    // Let the microtask queue drain so a concurrent second call can be made.
     await new Promise(r => setImmediate(r));
-    expect(started).toHaveLength(2);
+    // ONE, not two: the second is still waiting for the first to finish.
+    expect(started).toHaveLength(1);
     release();
     await run;
+    expect(started).toHaveLength(2);
   });
 
   test('one setup failing does not stop the other from being decided',
@@ -330,9 +351,10 @@ describe('setups on the same bar do not queue behind each other', () => {
       expect(out).toHaveLength(2);
       expect(out[0].ok).toBe(false);
       expect(out[1].ok).toBe(true);
-      // AND IN THE ORDER THEY WERE ASKED. `allSettled` preserves it; the
-      // returned array has to line up with the setups or a caller reading
-      // out[i] for setup i gets another setup's result.
+      // AND LINED UP WITH THE SETUPS, not with the order they ran in. They
+      // run clock-first now, so those two are no longer the same thing — and
+      // a caller reading out[i] for setup i would otherwise name the wrong
+      // strategy in every failure alert.
       expect(out[0].setupId).toBe(SETUP.id);
     });
 });
