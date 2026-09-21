@@ -69,6 +69,38 @@ function deskEsc(s) {
 }
 
 /*
+ * THE FIRST SENTENCE, and the rest kept separately.
+ *
+ * Both the landing page's doors and the suite's tool cards print a description
+ * written for a registry entry rather than for a card — two or three sentences,
+ * six of them on one screen. The first one says what the thing is; the rest
+ * qualifies it, and is read at the moment you are choosing WHICH thing, which
+ * is before any qualification can mean anything.
+ *
+ * Nothing is thrown away: the caller gets both halves and decides where the
+ * second one goes. On the cards it goes behind the expander that is already
+ * there, so a card still has exactly one thing to open.
+ *
+ * WRITTEN WITH indexOf, NOT A LOOKBEHIND. A regex lookbehind assertion is a
+ * SyntaxError when the file is PARSED on an older phone, not when the line
+ * runs — so the whole script would never execute, on the device this desk is
+ * most read on. The literal is not even written in this comment: a test greps
+ * for it, and a mention in prose would read as a use.
+ */
+function deskFirstSentence(s) {
+  s = String(s == null ? '' : s).trim();
+  const i = s.indexOf('. ');
+  return i > 0 ? s.slice(0, i + 1) : s;
+}
+
+/** Everything after that first sentence, or '' when there is nothing more. */
+function deskRestOfIt(s) {
+  s = String(s == null ? '' : s).trim();
+  const i = s.indexOf('. ');
+  return i > 0 ? s.slice(i + 2).trim() : '';
+}
+
+/*
  * WHERE A PROGRAM LIVES, from wherever you are standing.
  *
  * `self` is "this page is served by the process that serves the landing page

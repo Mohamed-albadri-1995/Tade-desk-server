@@ -86,15 +86,6 @@ body { max-width:860px; margin:0 auto; padding:26px 16px 56px; }
  * differently on every device. Identity is the accent stripe, which is the
  * same colour that program uses everywhere else.
  */
-/* Written with indexOf rather than a lookbehind. An unsupported regex feature
-   is a SyntaxError when the file is PARSED, which empties the whole page on an
-   older phone — the one device this desk is most read on. */
-function firstSentence(s) {
-  s = String(s == null ? '' : s).trim();
-  const i = s.indexOf('. ');
-  return i > 0 ? s.slice(0, i + 1) : s;
-}
-
 function appDoor(a) {
   // `self` is true: this page and the screener suite are the same process.
   const url = deskAppHref(a, true);
@@ -102,7 +93,7 @@ function appDoor(a) {
   // domain is a wrong answer to "which port do I open in AWS".
   const where = a.url ? new URL(url, location.href).host
     : (a.isSelf ? 'this server' : `port ${a.port}`);
-  const one = a.one || firstSentence(a.desc);
+  const one = a.one || deskFirstSentence(a.desc);
   return `
     <a class="dk-door" href="${deskEsc(url)}" style="--dk-accent:${deskEsc(a.accent || '#3b82f6')}">
       <div class="dk-door-name">${deskEsc(a.name)}</div>

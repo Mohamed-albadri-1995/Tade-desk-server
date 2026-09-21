@@ -94,6 +94,11 @@
 .screens[open] > summary::before { transform:rotate(90deg); }
 .sc-body { border-left:2px solid var(--border); padding:2px 0 2px 10px;
   margin:2px 0 4px 3px; display:flex; flex-direction:column; gap:9px; }
+/* The other half of the tool's description, at the top of the expander. It is
+   prose, so it is not monospace and it is not bold — it must not compete with
+   the screener names under it. */
+.sc-lead { font-size:11.5px; color:var(--text2); line-height:1.6;
+  padding-bottom:6px; border-bottom:1px dashed var(--border); }
 .sc-name { font-size:11px; font-weight:700; color:var(--text);
   display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 .sc-tag { font-size:9.5px; font-weight:600; color:var(--text3); background:var(--bg3);
@@ -115,7 +120,10 @@
 .card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
 .card-name { font-size:var(--f-lg); font-weight:700; letter-spacing:-.01em; }
 .card-port { font-size:var(--f-xs); color:var(--text3); letter-spacing:.04em; }
-.card-desc { font-size:var(--f-xs); color:var(--text2); line-height:1.6; min-height:3.2em; }
+/* min-height keeps the rows below it on the same line across a row of cards.
+   It was 3.2em, sized for the two-and-three-sentence descriptions that are now
+   one sentence — which left a third of it as a hole under every card. */
+.card-desc { font-size:var(--f-xs); color:var(--text2); line-height:1.6; min-height:2.2em; }
 
 .status { display:flex; align-items:center; gap:6px; font-size:10.5px;
           letter-spacing:.06em; text-transform:uppercase; }
@@ -403,8 +411,23 @@ function renderNowBar(states) {
  * which the rules never do: "breaking the monthly high" is the intent, "Price
  * (close) above Monthly high" is the mechanism.
  */
-function screensBlock(t, summary) {
-  if (!summary || !summary.screeners || !summary.screeners.length) return '';
+/*
+ * `rest` is everything after the first sentence of the tool's description —
+ * the qualifying half that used to be printed on the face of the card. It is
+ * carried here rather than dropped, and when a tool has no screener summary to
+ * show it gets a small expander of its own, because text that vanishes because
+ * an unrelated request came back empty is text that was deleted by accident.
+ */
+function screensBlock(t, summary, rest) {
+  rest = String(rest || '');
+  if (!summary || !summary.screeners || !summary.screeners.length) {
+    return rest
+      ? `<details class="screens" onclick="event.stopPropagation()">
+           <summary>more about this tool</summary>
+           <div class="sc-body"><div class="sc-lead">${esc(rest)}</div></div>
+         </details>`
+      : '';
+  }
   const list = summary.screeners;
   const n = list.length;
 
@@ -449,6 +472,7 @@ function screensBlock(t, summary) {
       <summary>${n} screener${n === 1 ? '' : 's'} · ${scans === 'all day'
         ? 'scans all day' : `scans ${esc(scans)} ET`}</summary>
       <div class="sc-body">
+        ${rest ? `<div class="sc-lead">${esc(rest)}</div>` : ''}
         ${body}${floor}
         ${cadence ? `<div class="sc-cadence">Looks ${cadence}</div>` : ''}
       </div>
@@ -515,9 +539,14 @@ function card(t, state, info, check, summary, timeLabel, live) {
           <div class="status ${state}"><span class="dot"></span>${label}</div>
         </div>
         ${checkLine(check)}
-        <div class="card-desc">${esc(t.desc || '')}</div>
+        <!-- ONE SENTENCE. The registry description is written for the registry:
+             two or three sentences, and six of them on one screen is the wall
+             this page was. The rest is not thrown away — it goes inside the
+             expander below, which is already there, so a card still has exactly
+             one thing to open. -->
+        <div class="card-desc">${esc(deskFirstSentence(t.desc))}</div>
       </a>
-      ${screensBlock(t, summary)}
+      ${screensBlock(t, summary, deskRestOfIt(t.desc))}
       <div class="stats">${stats.map(s => `<span class="stat">${s}</span>`).join('')}</div>
       <span class="arrow">→</span>
     </div>`;

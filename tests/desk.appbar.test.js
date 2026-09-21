@@ -205,14 +205,17 @@ describe('the doors carry a name and one line', () => {
   });
 
   test('the landing page prints the one-liner and falls back to a sentence', () => {
-    expect(home).toContain('a.one || firstSentence(a.desc)');
+    expect(home).toContain('a.one || deskFirstSentence(a.desc)');
     /*
      * A LOOKBEHIND WOULD HAVE EMPTIED THE PAGE. `(?<=\.)\s` is a SyntaxError
      * when the file is parsed on an older phone, not when the line runs — so
      * the whole script, doors included, would never execute. This is the desk's
      * most-read device.
      */
-    expect(home).not.toContain('(?<=');
+    for (const [name, src] of [['home.html', home], ['desk.js', js]]) {
+      expect({ name, lookbehind: src.includes('(?<=') })
+        .toEqual({ name, lookbehind: false });
+    }
   });
 
   test('a door is a link, and there is no inert "you are here" card', () => {
@@ -331,6 +334,80 @@ describe('the bar, drawn', () => {
       [{ id: 'X', name: '"><script>bad()</script>', port: 1, accent: '#fff' }]);
     expect(html).not.toContain('<script>');
     expect(html).toContain('&quot;&gt;&lt;script&gt;');
+  });
+});
+
+/*
+ * A DESCRIPTION WRITTEN FOR A REGISTRY, PRINTED ON A CARD.
+ *
+ * tools.config.json's `desc` is two or three sentences — "A 15% move in two
+ * hours with no news behind it, expected to correct back. The six-month trend
+ * is a safety layer: a spike that agrees with it is not unexplained. Needs a
+ * 'catalyst is empty' filter on the setup." That is the right text for the
+ * registry and the wrong text for a card, and there are six of them on one
+ * screen. The first sentence says what the tool is; the rest qualifies it, and
+ * is read at the moment you are choosing WHICH tool, which is before any
+ * qualification can mean anything.
+ *
+ * SPLIT, NOT TRUNCATED. The two halves have to add back up to the original —
+ * a card that quietly drops two thirds of what the registry says is a card
+ * that deleted it.
+ */
+describe('the first sentence, and the rest kept', () => {
+  function split() {
+    const from = js.indexOf('function deskFirstSentence');
+    const to = js.indexOf('/*\n * WHERE A PROGRAM LIVES');
+    if (from < 0 || to < 0) throw new Error('public/desk.js does not split a description');
+    // eslint-disable-next-line no-new-func
+    return new Function(`${js.slice(from, to)}; `
+      + 'return { deskFirstSentence, deskRestOfIt };')();
+  }
+
+  test('the halves add back up to the whole, for every real description', () => {
+    const { deskFirstSentence, deskRestOfIt } = split();
+    const all = [...cfg.tools, ...cfg.apps].map(t => (t.desc || '').trim()).filter(Boolean);
+    expect(all.length).toBeGreaterThan(8);
+    for (const d of all) {
+      const head = deskFirstSentence(d);
+      const rest = deskRestOfIt(d);
+      expect({ d, rejoined: rest ? `${head} ${rest}` : head }).toEqual({ d, rejoined: d });
+    }
+  });
+
+  test('a one-sentence description has no remainder to fold away', () => {
+    const { deskFirstSentence, deskRestOfIt } = split();
+    const one = 'Daily moving averages stacked fast-over-slow.';
+    expect(deskFirstSentence(one)).toBe(one);
+    expect(deskRestOfIt(one)).toBe('');
+  });
+
+  test('a decimal or an abbreviation does not end the sentence', () => {
+    /*
+     * The split is on ". " and not on "." for exactly this: "a 1.5% move" and
+     * "T10 vs. T11" both contain a full stop, and cutting at the first one
+     * would leave a card reading "a 1." — a number that is arithmetically a
+     * full stop and is not the end of anything.
+     */
+    const { deskFirstSentence } = split();
+    expect(deskFirstSentence('A 1.5% move on 2.2x volume.'))
+      .toBe('A 1.5% move on 2.2x volume.');
+  });
+
+  test('nothing is not a crash', () => {
+    const { deskFirstSentence, deskRestOfIt } = split();
+    for (const v of [undefined, null, '', '   ']) {
+      expect({ v, head: deskFirstSentence(v), rest: deskRestOfIt(v) })
+        .toEqual({ v, head: '', rest: '' });
+    }
+  });
+
+  test('the suite prints one sentence and folds the rest into the expander', () => {
+    expect(suite).toContain('esc(deskFirstSentence(t.desc))');
+    expect(suite).toContain('deskRestOfIt(t.desc)');
+    expect(suite).toContain('sc-lead');
+    // …and it is not simply dropped when a tool has no screener summary.
+    expect(suite).toContain('more about this tool');
+    expect(suite).not.toContain('<div class="card-desc">${esc(t.desc || \'\')}</div>\n      </a>\n      ${screensBlock(t, summary)}');
   });
 });
 
