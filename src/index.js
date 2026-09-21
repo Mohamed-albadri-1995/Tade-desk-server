@@ -22,7 +22,10 @@ app.use(express.json());
  * The page is small and the answer is almost always a 304, so the cost is one
  * round trip and the benefit is that a deploy is a deploy.
  *
- * Assets keep normal caching — they are what caching is for.
+ * Assets keep normal caching — they are what caching is for. The two
+ * exceptions are desk.js and desk.css: they carry the navigation of every
+ * page, they are shared by four servers, and a stale copy of them is a bar
+ * full of addresses that no longer exist. See src/utils/sharedAssets.js.
  */
 app.use((req, res, next) => {
   if (req.method === 'GET' && (req.path === '/' || !path.extname(req.path)
@@ -31,6 +34,7 @@ app.use((req, res, next) => {
   }
   next();
 });
+app.use(require('./utils/sharedAssets').noCacheShared);
 
 // Serve frontend
 app.use(express.static(path.join(__dirname, '../public'), { index: false }));

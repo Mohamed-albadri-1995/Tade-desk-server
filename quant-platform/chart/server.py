@@ -90,6 +90,25 @@ _STATIC = Path(__file__).resolve().parent / 'static'
 app = FastAPI(title='qp charting platform')
 app.mount('/static', StaticFiles(directory=str(_STATIC)), name='static')
 
+# The two files that carry the navigation of the whole desk. StaticFiles sends
+# an ETag and a Last-Modified and NO Cache-Control, which leaves the browser
+# free to guess a freshness lifetime from the file's age — for a file last
+# touched a week ago that guess is hours, during which it never asks. Every
+# link out of this page is a string desk.js computes, so a copy from before the
+# deploy is a chart with exits that go to the wrong program. See
+# src/utils/sharedAssets.js, which says the same thing for the Node servers.
+_SHARED_ASSETS = ('/static/desk.js', '/static/desk.css')
+
+
+@app.middleware('http')
+async def _no_cache_shared(request, call_next):
+    response = await call_next(request)
+    if request.url.path in _SHARED_ASSETS:
+        # no-cache is not no-store: the file is kept and revalidated, and the
+        # answer is a 304 nearly every time.
+        response.headers['Cache-Control'] = 'no-cache, must-revalidate'
+    return response
+
 try:
     # An EMPTY database means something was lost, not that this is a fresh
     # install with nothing in it — a fresh install is also empty, and both want

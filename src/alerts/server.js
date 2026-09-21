@@ -1100,6 +1100,13 @@ app.get('/health', (req, res) => {
   });
 });
 
+/*
+ * The shared navigation is asked for rather than assumed fresh. This page is
+ * the one that stays open all morning, so it is the one most likely to still
+ * be running a desk.js from before the deploy — and every link out of it is a
+ * string that file computes. See src/utils/sharedAssets.js.
+ */
+app.use(require('../utils/sharedAssets').noCacheShared);
 app.use(express.static(path.join(ROOT, 'public'), { index: false }));
 app.get('/{*path}', (req, res) => res.sendFile(path.join(ROOT, 'public', 'alerts.html')));
 

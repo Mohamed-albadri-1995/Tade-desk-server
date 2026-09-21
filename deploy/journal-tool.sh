@@ -378,10 +378,20 @@ function deskbarCss() {
   }
   return roots.join('\n').replace(/:root/g, '.dk-bar') + '\n' + src.slice(a, b);
 }
-app.get('/deskbar.css', (req, res) => res.type('css').send(deskbarCss()));
+/*
+ * ASKED FOR, NOT ASSUMED FRESH. Both of these are read out of the repo on
+ * every request, so a git pull is enough to update them on the server — and
+ * that is worth nothing if the browser is still using the copy it has. Every
+ * link out of this page is a string desk.js computes. See
+ * src/utils/sharedAssets.js in the desk repo.
+ */
+const SHARED_NO_CACHE = 'no-cache, must-revalidate';
+app.get('/deskbar.css', (req, res) =>
+  res.set('Cache-Control', SHARED_NO_CACHE).type('css').send(deskbarCss()));
 
 // The shared script, served from this repo rather than copied into the app.
 app.get('/desk.js', (req, res) => {
+  res.set('Cache-Control', SHARED_NO_CACHE);
   if (!DESK) return res.type('js').send('/* desk repo not configured */');
   res.type('js').sendFile(path.join(DESK, 'public', 'desk.js'));
 });
