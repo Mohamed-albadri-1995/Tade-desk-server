@@ -12,7 +12,17 @@
 <style>
 /* Only the things that are this page's own shape. Everything with a colour or
    a size in it comes from /desk.css. */
-body { max-width:860px; margin:0 auto; padding:26px 16px 56px; }
+/* THE COLUMN IS NOT THE BODY ANY MORE.
+   It was: `body { max-width:860px; margin:0 auto }`, which made the page one
+   centred column — and the header band, which reaches the edges of whatever
+   box it is in, reached the edges of an 860px column with two hundred and
+   seventy pixels of page either side of it and the rule under it stopping in
+   mid air. The column moved onto .col; the body is the full width again, so
+   the band spans it. --dk-pad-x/-t are what body's padding is made of and the
+   band cancels exactly them — both zero here, because there is nothing to
+   cancel. See .dk-bar in desk.css. */
+body { padding:0 0 56px; --dk-pad-x:0; --dk-pad-t:0; }
+.col { max-width:860px; margin:0 auto; padding:0 16px; }
 .head { display:flex; align-items:flex-start; gap:var(--s3); margin-bottom:var(--s5); }
 .title { font-size:var(--f-xl); font-weight:700; letter-spacing:-.02em; margin:0; }
 .note { margin-top:var(--s5); font-size:var(--f-xs); color:var(--text3); line-height:1.7; }
@@ -35,6 +45,7 @@ body { max-width:860px; margin:0 auto; padding:26px 16px 56px; }
           title="high contrast, for reading the screen outdoors">☀</button>
 </nav>
 
+<div class="col">
 <div class="head">
   <div>
     <h1 class="title">What are you doing today?</h1>
@@ -53,6 +64,7 @@ body { max-width:860px; margin:0 auto; padding:26px 16px 56px; }
 
 <div class="note">Four programs on one box. Each keeps its own data.</div>
 <div class="version">v2.0 · multi-tool</div>
+</div><!-- /col -->
 
 <script>
 /*

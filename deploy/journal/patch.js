@@ -257,6 +257,16 @@
     nav.className = 'dk-bar';
     nav.id = 'deskbar';
     nav.setAttribute('aria-label', 'programs');
+    /*
+     * THE BAND DOES NOT PULL ON A LAYOUT THAT IS NOT OURS. On the desk's own
+     * pages .dk-bar cancels the page gutter with a negative margin so it
+     * reaches the glass — --dk-pad-x and --dk-pad-t are exactly what body's
+     * padding is made of there. This is someone else's app: its body padding
+     * is whatever it is, and cancelling fourteen pixels it never had would
+     * hang the header off the side. Zeroed, so the bar sits in flow.
+     */
+    nav.style.setProperty('--dk-pad-x', '0');
+    nav.style.setProperty('--dk-pad-t', '0');
     // Above everything the page draws, including its own title row.
     document.body.insertBefore(nav, document.body.firstChild);
     deskAppBar('JOURNAL', { self: false });

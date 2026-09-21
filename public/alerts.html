@@ -640,9 +640,13 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 </style>
 </head>
 <body>
-<div class="wrap">
 
 <!-- ── THE FOUR PROGRAMS, and this one marked ──
+     OUTSIDE .wrap, and that is the point of it being here rather than three
+     lines down. .wrap is a 1180px column centred on the page; a header inside
+     it starts where the text starts and ends where the text ends, which is the
+     description of a row ON the page. The header is the thing the page is
+     UNDER, so it goes above the column and reaches the glass.
      What was here: an h1 reading "⚡ Algo" and a small "← all tools" link.
      The bolt was decoration that had to be learned — on this desk ⚡ already
      meant "loading" on another page, which is the trouble with an icon picked
@@ -655,6 +659,8 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
           style="margin-left:auto"
           title="high contrast, for reading the screen outdoors">☀</button>
 </nav>
+
+<div class="wrap">
 <!-- The heading stays and is not drawn. The bar already says "Algo", forty
      pixels above; the word twice in one glance is exactly the clutter this
      page was full of. Deleting it would leave the document with no outline for

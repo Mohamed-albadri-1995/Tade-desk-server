@@ -135,6 +135,14 @@ body.sunlight .sig, body.sunlight .badge { font-weight: 700; }
 :root {
   --f-xs:11.5px; --f-sm:13px; --f-md:14.5px; --f-lg:17px; --f-xl:21px;
   --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px;
+  /* THE PAGE'S OWN GUTTER, named so the header can undo it.
+     A header that starts at the same x as the text under it reads as the
+     first ROW OF THE PAGE. It has to reach the glass on both sides to read as
+     the thing the page is under. These two are what body's padding is made
+     of, so .dk-bar can cancel exactly that much and nothing else — and a page
+     that sets its own body padding sets these to match, or the bar is pulled
+     off the side of a layout it does not own. See .dk-bar. */
+  --dk-pad-x:14px; --dk-pad-t:18px;
   --mono:'SF Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --ui:'SF Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   /* Aliases, so the rules written against the later pages' names keep working
@@ -154,7 +162,7 @@ body.sunlight .sig, body.sunlight .badge { font-weight: 700; }
 body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
   font-family:var(--ui); font-size:var(--f-sm); line-height:1.5;
   font-variant-numeric:tabular-nums; -webkit-text-size-adjust:100%;
-  padding:18px 14px 72px; }
+  padding:var(--dk-pad-t) var(--dk-pad-x) 72px; }
 
 /* ── SURFACES ──────────────────────────────────────────────────────────────
    Three levels, and the difference between them is visible in daylight: the
@@ -382,9 +390,33 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
  * Filled against outlined is a difference you see before you have read
  * anything, which an underline two pixels tall is not.
  */
-.dk-bar { display:flex; align-items:center; gap:var(--s2); margin:0 0 var(--s4);
-  padding:5px 6px; background:var(--bg2); border:1px solid var(--border);
-  border-radius:12px;
+/*
+ * IT HAS TO BE THE PAGE'S HEADER, NOT A ROW ON THE PAGE.
+ *
+ * Said as: "the header give you feeling like it's part of the page not the
+ * biggest header". It was a rounded box with a border, inset by the same
+ * gutter as the text beneath it and sitting on the same background — which is
+ * the description of a PANEL. A panel is something the page contains; a header
+ * is the thing the page is under, and the difference is entirely whether it
+ * reaches the glass.
+ *
+ * So: a band, edge to edge, on its own surface, with a rule and a shadow under
+ * it. `--dk-pad-x` / `--dk-pad-t` are exactly what body's padding is made of,
+ * so this cancels the gutter it is inset by and nothing else. A page that sets
+ * its own body padding sets those two to match — the scanner and qp run
+ * full-bleed and set them to 0, where this then adds no margin at all and the
+ * band is already the full width.
+ *
+ * NOT STICKY. Two pages already carry a sticky row of their own at top:0 — the
+ * Algo tabs and the suite's — and a second sticky element above them is either
+ * an overlap or a number that has to be kept equal to this bar's height in
+ * three files. The header is read on arrival; those rows are read all morning.
+ */
+.dk-bar { display:flex; align-items:center; gap:var(--s2);
+  margin:calc(-1 * var(--dk-pad-t)) calc(-1 * var(--dk-pad-x)) var(--s4);
+  padding:6px 14px; background:var(--bg3); border:none;
+  border-bottom:1px solid var(--border); border-radius:0;
+  box-shadow:0 10px 20px -16px rgba(0,0,0,.9);
   overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .dk-bar::-webkit-scrollbar { display:none; }
 /*
@@ -400,14 +432,16 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
  * somewhere. It is still smaller and still behind a divider, so it does not
  * read as a fifth program.
  */
-.dk-bar-home { flex:0 0 auto; font:700 10px/1 var(--ui); letter-spacing:.2em;
-  color:var(--text2); text-decoration:none; padding:9px 10px 9px 8px;
-  border-right:1px solid var(--border); border-radius:8px 0 0 8px; }
-.dk-bar-home:hover, .dk-bar-home:active { color:var(--text); background:var(--bg3); }
+.dk-bar-home { flex:0 0 auto; font:800 12px/1 var(--ui); letter-spacing:.16em;
+  color:var(--text); text-decoration:none; padding:10px 14px 10px 4px;
+  margin-right:var(--s1); border-right:1px solid var(--border); }
+/* --bg4, not --bg3: the band itself is --bg3 now, and a hover the same
+   colour as the thing under it is not a hover. */
+.dk-bar-home:hover, .dk-bar-home:active { color:var(--text); background:var(--bg4); }
 .dk-bar-apps { display:flex; gap:2px; flex:1 1 auto; min-width:0; }
 .dk-app { flex:0 0 auto; font:600 var(--f-sm)/1 var(--ui); color:var(--text2);
   text-decoration:none; padding:9px 13px; border-radius:8px; white-space:nowrap; }
-.dk-app:hover { color:var(--text); background:var(--bg3); }
+.dk-app:hover { color:var(--text); background:var(--bg4); }
 /*
  * color-mix gives one rule for four accents instead of four hand-mixed hexes
  * that drift the first time a program changes colour. The fallback above it is
@@ -435,11 +469,13 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
  * there. So the names get a line of their own, and the wordmark and the button
  * keep theirs. */
 @media (max-width:640px) {
-  .dk-bar { flex-wrap:wrap; gap:0; overflow:visible; padding:4px 6px; }
+  /* The band keeps its margins — it is still edge to edge, still the thing
+     the page is under. Only the inner gutter tightens. */
+  .dk-bar { flex-wrap:wrap; gap:0; overflow:visible; padding:4px 10px; }
   /* Row one is the wordmark and the button; row two is the four programs,
      edge to edge, with a hairline between so the bar still reads as one
      surface rather than two stacked strips. */
-  .dk-bar-home { order:1; border-right:none; padding-left:6px; }
+  .dk-bar-home { order:1; border-right:none; padding:9px 4px; margin-right:0; }
   .dk-bar-end { order:2; }
   .dk-bar-apps { order:3; flex:1 0 100%; gap:2px; margin-top:3px;
     padding-top:4px; border-top:1px solid var(--border);

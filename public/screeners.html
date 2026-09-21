@@ -31,8 +31,13 @@
 /* The app bar spans the page, above the 1000px column, so the four programs
    are in the same place here as on every other page — see .dk-bar in
    /desk.css. The lone "← Trade Desk" crumb that used to sit here went with it:
-   one way out, backwards, is exactly what made this page read as a middle. */
-#deskbar { width:100%; max-width:1000px; }
+   one way out, backwards, is exactly what made this page read as a middle.
+
+   IT IS NOT IN THE COLUMN. `#deskbar { width:100%; max-width:1000px }` used to
+   be here, which said the opposite of the comment above it: the band stopped
+   at the column's right edge and, once it was a header rather than a strip,
+   left four hundred pixels of page beside it on a desktop with the rule under
+   it running out in mid air. A header stops at the glass. */
 /* ── ONE COLUMN, ONE EDGE ──
    The title and subtitle were centred across the full window while everything
    below them sat in a 1000px column starting at the left. Three alignments on
@@ -202,7 +207,11 @@
         width:100%; max-width:1000px; line-height:1.7; }
 .version { margin-top:22px; font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
 @media (max-width:580px) {
-  body { padding:32px 14px; }
+  /* The gutter restated, and the two tokens it is made of with it. The app
+     bar cancels exactly these to reach the glass; a page that changes its
+     padding and not these gets a header inset by the difference, or hung
+     off the side of the screen. See .dk-bar in desk.css. */
+  body { padding:32px 14px; --dk-pad-x:14px; --dk-pad-t:32px; }
   .title { font-size:22px; }
   .tool-card { width:100%; max-width:340px; }
 }

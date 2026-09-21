@@ -117,8 +117,12 @@ body.sunlight .sig, body.sunlight .badge { font-weight: 700; }
 .mag-3 { color: var(--m-size-3); font-weight: 700; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 /* margin/padding restated: desk.css gives every page a 14px gutter, and this
-   one is full-bleed — its header and tab strip run to the edge of the glass. */
-body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; min-height: 100vh; margin: 0; padding: 0; }
+   one is full-bleed — its header and tab strip run to the edge of the glass.
+   --dk-pad-x/-t RESTATED WITH IT. The app bar cancels the page's gutter with a
+   negative margin so it reaches the glass; a page that zeroes its padding and
+   not those two gets the bar pulled 14px off the left of a layout that never
+   had a gutter to give back. Set them wherever body's padding is set. */
+body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; min-height: 100vh; margin: 0; padding: 0; --dk-pad-x: 0; --dk-pad-t: 0; }
 
 /* ── HEADER ── */
 /* Wraps rather than overflowing: on a phone the buttons plus the check badge
@@ -1170,8 +1174,7 @@ body.sunlight .fold .fold > .fold-head { background: none; }
      rather than inside it: the header switches which TOOL this is (T1…T11),
      the bar switches which PROGRAM — two different questions, and putting the
      second one in the same row as the first is how they get confused. -->
-<nav class="dk-bar" id="deskbar" aria-label="programs"
-     style="margin:12px 14px 0"></nav>
+<nav class="dk-bar" id="deskbar" aria-label="programs"></nav>
 
 <div class="header">
   <div class="tool-switch">

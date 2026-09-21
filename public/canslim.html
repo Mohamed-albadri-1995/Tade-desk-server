@@ -330,7 +330,11 @@
         text-align:center; max-width:60ch; line-height:1.7; }
 .version { margin-top:22px; font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
 @media (max-width:580px) {
-  body { padding:32px 14px; }
+  /* The gutter restated, and the two tokens it is made of with it. The app
+     bar cancels exactly these to reach the glass; a page that changes its
+     padding and not these gets a header inset by the difference, or hung
+     off the side of the screen. See .dk-bar in desk.css. */
+  body { padding:32px 14px; --dk-pad-x:14px; --dk-pad-t:32px; }
   .title { font-size:22px; }
   .tool-card { width:100%; max-width:340px; }
 }

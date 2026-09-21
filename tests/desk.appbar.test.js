@@ -401,12 +401,26 @@ describe('the bar, drawn', () => {
     expect(html).toContain('title="the landing page');
     const rule = css.slice(css.indexOf('\n.dk-bar-home {'),
                            css.indexOf('}', css.indexOf('\n.dk-bar-home {')));
-    expect(rule).toContain('color:var(--text2)');
+    // Full strength now that it is the wordmark on a header band rather than a
+    // caption on a strip: --text, not the two dimmer greys.
+    expect(rule).toContain('color:var(--text)');
     expect(rule).not.toContain('color:var(--text3)');
-    // It takes the same background the program pills take, so it belongs to
+    expect(rule).not.toContain('color:var(--text2)');
+    // It takes a background the band itself does not have, so it belongs to
     // the row of things that go somewhere — on touch as well as on hover,
     // because a phone has no hover.
     expect(css).toContain('.dk-bar-home:hover, .dk-bar-home:active');
+    const hov = css.slice(css.indexOf('.dk-bar-home:hover'),
+                          css.indexOf('}', css.indexOf('.dk-bar-home:hover')));
+    const band = css.slice(css.indexOf('\n.dk-bar {'), css.indexOf('}', css.indexOf('\n.dk-bar {')));
+    const surface = /background:(var\(--bg\d\))/.exec(band);
+    expect({ band: !!surface }).toEqual({ band: true });
+    // A HOVER THE COLOUR OF THE THING UNDER IT IS NOT A HOVER. The band moved
+    // from --bg2 to --bg3 and both hovers were --bg3, which is invisible.
+    expect({ hover: hov.includes(surface[1]) }).toEqual({ hover: false });
+    const pill = css.slice(css.indexOf('.dk-app:hover'),
+                           css.indexOf('}', css.indexOf('.dk-app:hover')));
+    expect({ pillHover: pill.includes(surface[1]) }).toEqual({ pillHover: false });
   });
 
   test('exactly one program is marked, and it is the current one', async () => {
@@ -662,10 +676,10 @@ describe('the bar looks like one control', () => {
 
   test('it is a surface, not four words on the page background', () => {
     const bar = rule('.dk-bar');
-    expect(bar).toContain('background:var(--bg2)');
-    expect(bar).toContain('border-radius');
-    // The hairline it used to hang from is gone with it.
-    expect(bar).not.toContain('border-bottom:1px solid');
+    expect(bar).toMatch(/background:var\(--bg[234]\)/);
+    // Not the page's own background — a band the colour of the page is four
+    // words floating on it, which is what this replaced.
+    expect(bar).not.toContain('background:var(--bg)');
   });
 
   test('the current program is FILLED, not underlined', () => {
@@ -700,6 +714,137 @@ describe('the bar looks like one control', () => {
 });
 
 /*
+ * AND IT IS THE PAGE'S HEADER, NOT A ROW ON THE PAGE.
+ *
+ * Said as: "the header give you feeling like it's part of the page not the
+ * biggest header". It was a rounded box with a border, inset by the same
+ * gutter as the text under it, sitting on the page — which is the description
+ * of a PANEL. A panel is something the page contains. A header is the thing
+ * the page is under, and the whole difference is whether it reaches the glass.
+ *
+ * THE HAZARD IS THE NEGATIVE MARGIN. The band cancels the page's gutter to get
+ * to the edge, and "the page's gutter" is not a constant: two pages run
+ * full-bleed and set body's padding to zero. Cancelling fourteen pixels that
+ * were never there hangs the header off the left of the screen — on a phone,
+ * silently, because the bar scrolls.
+ */
+describe('the header reaches the glass', () => {
+  test('the gutter is a token, so the band can cancel exactly it', () => {
+    // Written out as `padding:18px 14px` it is a number the bar has to guess,
+    // and a guess that is right today is wrong the first time it changes.
+    const body = css.slice(css.indexOf('\nbody {'), css.indexOf('}', css.indexOf('\nbody {')));
+    expect(body).toContain('padding:var(--dk-pad-t) var(--dk-pad-x)');
+    // The :root that holds the scale, not the one that holds the palette —
+    // there are two, and the gutter belongs with the spacing steps.
+    const at = css.lastIndexOf(':root {', css.indexOf('--s4:'));
+    const root = css.slice(at, css.indexOf('\n}', at));
+    expect(root).toMatch(/--dk-pad-x:\s*14px/);
+    expect(root).toMatch(/--dk-pad-t:\s*18px/);
+  });
+
+  test('the band pulls out of the gutter, on both sides and the top', () => {
+    const bar = css.slice(css.indexOf('\n.dk-bar {'), css.indexOf('}', css.indexOf('\n.dk-bar {')));
+    expect(bar).toContain('margin:calc(-1 * var(--dk-pad-t)) calc(-1 * var(--dk-pad-x))');
+    // A band with rounded corners and a border on all four sides is a panel
+    // however wide it is.
+    expect(bar).toContain('border-radius:0');
+    expect(bar).toContain('border-bottom:1px solid var(--border)');
+    expect(bar).toContain('border:none');
+  });
+
+  test('and it keeps an inner gutter of its own', () => {
+    /*
+     * Cancelling the page's padding without adding any back puts the wordmark
+     * against the edge of the glass, which on a phone is where a thumb rests.
+     * The padding is a NUMBER rather than the token: the token is zero on the
+     * full-bleed pages and the band still needs its gutter there.
+     */
+    const bar = css.slice(css.indexOf('\n.dk-bar {'), css.indexOf('}', css.indexOf('\n.dk-bar {')));
+    const pad = /padding:(\d+)px (\d+)px/.exec(bar);
+    expect({ found: !!pad }).toEqual({ found: true });
+    expect({ inner: Number(pad[2]) >= 10 }).toEqual({ inner: true });
+  });
+
+  test('every page that sets its own body padding sets the tokens with it', () => {
+    /*
+     * THE BUG THIS EXISTS FOR, and it is a bug a reader cannot see: the rule
+     * lives in desk.css and the thing that breaks it lives in another file.
+     * Read from the DIRECTORY, so a page written next month is covered.
+     */
+    const dir = path.join(__dirname, '..', 'public');
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.html'))
+      .map(f => [f, fs.readFileSync(path.join(dir, f), 'utf8')]);
+    files.push(['qp/index.html',
+      read('quant-platform', 'chart', 'static', 'index.html')]);
+    let checked = 0;
+    for (const [name, src] of files) {
+      // Its own <style>, not desk.css: a body rule that names padding.
+      const own = [...src.matchAll(/(?:^|[\s,])body\s*\{([^}]*)\}/g)]
+        .map(m => m[1]).filter(b => /(?:^|[;{\s])padding\s*:/.test(b));
+      if (!own.length) continue;
+      checked++;
+      const all = own.join(' ');
+      expect({ page: name, sets: /--dk-pad-x\s*:/.test(all) && /--dk-pad-t\s*:/.test(all) })
+        .toEqual({ page: name, sets: true });
+    }
+    // If this drops to zero the test has stopped looking rather than started
+    // passing — the two full-bleed pages are why it exists.
+    expect({ pagesWithOwnPadding: checked >= 2 }).toEqual({ pagesWithOwnPadding: true });
+  });
+
+  test('the two full-bleed pages no longer inline a margin over the band', () => {
+    // `style="margin:12px 14px 0"` on the <nav> wins over every rule in
+    // desk.css, so the band was a floating strip on exactly the two pages the
+    // token work was for.
+    for (const [name, src] of [['index.html', read('public', 'index.html')],
+                               ['qp', read('quant-platform', 'chart', 'static', 'index.html')]]) {
+      const nav = src.slice(src.indexOf('id="deskbar"'));
+      expect({ name, inline: /^[^>]*style="[^"]*margin:/.test(nav) })
+        .toEqual({ name, inline: false });
+    }
+  });
+
+  test('the Algo page puts it OUTSIDE its centred column', () => {
+    /*
+     * .wrap is a 1180px column centred on the page. A header inside it starts
+     * where the text starts and ends where the text ends — a row ON the page,
+     * which is the thing being fixed. It has to come first in the body.
+     */
+    expect(alerts.indexOf('id="deskbar"'))
+      .toBeLessThan(alerts.indexOf('<div class="wrap">'));
+    expect(alerts).toContain('<div class="wrap">');
+    // Still exactly one column, opened once and closed once.
+    expect((alerts.match(/<div class="wrap">/g) || []).length).toBe(1);
+  });
+
+  test('the journal does not pull on a layout that is not ours', () => {
+    /*
+     * The bar is injected into someone else's app, whose body padding is
+     * whatever it is. Cancelling fourteen pixels it never had would hang the
+     * header off the side of it.
+     */
+    const patch = read('deploy', 'journal', 'patch.js');
+    const fn = patch.slice(patch.indexOf('function appBar()'),
+                           patch.indexOf('\n  }', patch.indexOf('function appBar()')));
+    expect(fn).toContain("setProperty('--dk-pad-x', '0')");
+    expect(fn).toContain("setProperty('--dk-pad-t', '0')");
+    // Set BEFORE it is put in the document, so it never paints pulled over.
+    expect(fn.indexOf('--dk-pad-x')).toBeLessThan(fn.indexOf('insertBefore'));
+  });
+
+  test('the wordmark is a wordmark, not a caption', () => {
+    const rule = css.slice(css.indexOf('\n.dk-bar-home {'),
+                           css.indexOf('}', css.indexOf('\n.dk-bar-home {')));
+    const font = /font:(\d+) (\d+(?:\.\d+)?)px/.exec(rule);
+    expect({ found: !!font }).toEqual({ found: true });
+    // It was 700/10px in the dimmest grey on the page — a caption's weight and
+    // a caption's size, on the one element that names the whole desk.
+    expect({ weight: Number(font[1]) >= 800, size: Number(font[2]) >= 12 })
+      .toEqual({ weight: true, size: true });
+  });
+});
+
+/*
  * ONE IMPLEMENTATION OF SUNLIGHT.
  *
  * desk.js was extracted FROM the scanner page, and the scanner page kept its
@@ -712,6 +857,8 @@ test('the scanner page no longer carries its own sunlight code', () => {
   expect(scanner).not.toContain('function toggleSunlight()');
   expect(scanner).not.toContain('function restoreSunlight()');
   // Its own layout still wins: desk.css gives every page a gutter and this
-  // page is full-bleed.
-  expect(scanner).toMatch(/body \{[^}]*margin: 0; padding: 0; \}/);
+  // page is full-bleed — and it zeroes the two tokens that gutter is made of
+  // with it, or the header band would cancel a gutter this page never had.
+  expect(scanner).toMatch(/body \{[^}]*margin: 0; padding: 0;/);
+  expect(scanner).toMatch(/body \{[^}]*--dk-pad-x: 0; --dk-pad-t: 0; \}/);
 });

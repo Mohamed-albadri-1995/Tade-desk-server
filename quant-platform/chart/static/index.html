@@ -55,8 +55,13 @@
      indicator, which is drawn OVER the bottom of the viewport — and the bottom
      of this viewport is the chart's time axis. Reserving the inset is the
      second half of the same fix. */
+  /* --dk-pad-x/-t RESTATED WITH THE PADDING. The app bar cancels the page's
+     gutter with a negative margin so it reaches the glass; this page has no
+     gutter to give back, so both are zero here. Set them wherever body's
+     padding is set. See .dk-bar in desk.css. */
   body { display:flex; flex-direction:column; height:100vh; height:100dvh;
     overflow:hidden; padding:0 0 env(safe-area-inset-bottom, 0px);
+    --dk-pad-x:0; --dk-pad-t:0;
     font-size:var(--f-sm); }
   /* ── THE TOP BAR ──
      What a charting screen needs within reach at all times: which symbol, what
@@ -524,7 +529,7 @@
      this server answers rather than the page hardcoding a list that goes stale
      the first time a program moves.
      It also carries the sunlight toggle, which this page never had at all. -->
-<nav class="dk-bar" id="deskbar" aria-label="programs" style="margin:10px 12px 0">
+<nav class="dk-bar" id="deskbar" aria-label="programs">
   <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
           style="margin-left:auto"
           title="high contrast, for reading the screen outdoors">☀</button>
