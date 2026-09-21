@@ -50,8 +50,41 @@ function baseUrl() {
  * the order, and a platform that is briefly busy — the nightly walk, a heavy
  * scan — no longer costs a session.
  */
-const DECIDE_TIMEOUT_MS = 18000;
-const DECIDE_ATTEMPTS = 2;
+/*
+ * ── 30 SECONDS, ONE GO, measured 2026-09-21 ──────────────────────────────
+ *
+ * Eighteen was too tight and two goes made it worse. The decision itself was
+ * never the problem:
+ *
+ *     47 cards, measured on the box   12114ms
+ *     the budget                      18000ms      a 1.5x margin
+ *     two attempts                    36000ms      of a 60s minute, spent
+ *                                                  before the order is built
+ *
+ * `OR + VWAP 09:35` failed EVERY attempt that day and did not trade at all.
+ * The card list had grown from 30 to 47 — 30 cards cost 7825ms and fitted,
+ * 47 did not. Nothing in the code had changed.
+ *
+ * THE CARD COUNT IS NOT OURS TO CHOOSE. It is whatever the screener found that
+ * morning, and capping it with a filter would change which names the strategy
+ * can pick — live would stop matching the backtest, which is the one rule this
+ * desk has. So the patience changes and the strategy does not.
+ *
+ * WHY NOT 45, WHICH WAS TRIED BEFORE. An answer arriving at 09:35:44 is three
+ * quarters of the way through the bar it was meant to open on, and that is a
+ * worse fill than the backtest assumed. Thirty keeps the fill inside the first
+ * half of the minute even in the worst case, and covers the measured 12.1s
+ * with two and a half times over.
+ *
+ * ONE ATTEMPT, NOT TWO. The retry was cover for a platform that is briefly
+ * busy. It was not: qp's decide endpoint is synchronous, so a timed-out
+ * attempt KEEPS COMPUTING after the client hangs up, and the second attempt
+ * competes with the first for the one core the box can give it. Two 18s goes
+ * were not two chances, they were one chance made slower. A single 30s attempt
+ * is more patient than both of them together were useful.
+ */
+const DECIDE_TIMEOUT_MS = 30000;
+const DECIDE_ATTEMPTS = 1;
 
 /*
  * NETWORK CODES ONLY — a second attempt must be the SAME question.

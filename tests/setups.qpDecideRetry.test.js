@@ -30,16 +30,44 @@ function timeout() {
 
 afterEach(() => { jest.restoreAllMocks(); });
 
+/*
+ * ── THE BUDGET WAS RAISED AND THE RETRY REMOVED, 2026-09-21 ──────────────
+ *
+ * Eighteen seconds twice was the wrong shape, and measurement showed why:
+ *
+ *     47 cards, measured on the box   12114ms      the real cost
+ *     the budget                      18000ms      a 1.5x margin
+ *     two attempts                    36000ms      of a 60s minute
+ *
+ * `OR + VWAP 09:35` failed every attempt that day and did not trade at all.
+ * The card list had grown from 30 to 47 — 30 cost 7825ms and fitted. No code
+ * had changed.
+ *
+ * And the retry was not a second chance. qp's decide endpoint is SYNCHRONOUS,
+ * so an attempt that times out keeps computing after the client hangs up; the
+ * second attempt then competes with the first for the one core the box has.
+ * Two 18s goes were one chance made slower.
+ */
 describe('the budget', () => {
-  test('one attempt cannot spend the whole minute it has to act inside', () => {
-    // The window is sixty seconds and the order still has to be placed after
-    // the answer. Two attempts plus the order must fit inside one minute.
-    expect(qp.DECIDE_TIMEOUT_MS).toBeLessThanOrEqual(20000);
-    expect(qp.DECIDE_TIMEOUT_MS * qp.DECIDE_ATTEMPTS).toBeLessThan(60000);
+  test('it covers the measured cost with real room, not a sliver', () => {
+    // 12114ms is what 47 cards actually cost. A budget under twice that is a
+    // deadline that a normal morning walks into.
+    expect(qp.DECIDE_TIMEOUT_MS).toBeGreaterThanOrEqual(24000);
   });
 
-  test('and there is more than one attempt', () => {
-    expect(qp.DECIDE_ATTEMPTS).toBeGreaterThanOrEqual(2);
+  test('and still cannot spend the minute it has to act inside', () => {
+    /*
+     * The window is sixty seconds and the order still has to be placed after
+     * the answer. 45s was tried once and rejected for that reason: a fill at
+     * 09:35:44 is three quarters of the way through the bar it was meant to
+     * open on, which is worse than the backtest assumed.
+     */
+    expect(qp.DECIDE_TIMEOUT_MS).toBeLessThanOrEqual(30000);
+    expect(qp.DECIDE_TIMEOUT_MS * qp.DECIDE_ATTEMPTS).toBeLessThanOrEqual(30000);
+  });
+
+  test('one attempt, because the second one competed with the first', () => {
+    expect(qp.DECIDE_ATTEMPTS).toBe(1);
   });
 
   test('the per-attempt timeout is what reaches axios, not the total budget',
@@ -51,6 +79,13 @@ describe('the budget', () => {
 });
 
 describe('what may be asked again', () => {
+  /*
+   * neverAnswered() STAYS, and is still exercised, even though decide() no
+   * longer retries. It is the difference between "qp did not answer" and "qp
+   * answered something unwelcome", and that distinction is what the alert text
+   * and the session log are written from. Deleting it with the retry would
+   * have taken the vocabulary with the mechanism.
+   */
   test('a timeout never got an answer', () => {
     expect(qp.neverAnswered(timeout())).toBe(true);
   });
@@ -95,18 +130,23 @@ describe('what may be asked again', () => {
 });
 
 describe('what decide actually does with that rule', () => {
-  test('a timeout is asked again, and the second answer is returned',
-    async () => {
-      jest.spyOn(axios, 'post')
-        .mockRejectedValueOnce(timeout())
-        .mockResolvedValueOnce({ data: { ok: true, picks: [{ ticker: 'AAA' }] } });
-      const out = await qp.decide(ARGS);
-      expect(axios.post).toHaveBeenCalledTimes(2);
-      expect(out.picks).toHaveLength(1);
-      // SAID OUT LOUD. A decision that needed a retry nearly did not happen,
-      // and that is worth seeing before the day it does not.
-      expect(out.attempts).toBe(2);
-    });
+  test('a timeout is NOT asked again', async () => {
+    /*
+     * The reverse of what this asserted until 2026-09-21, and the reason is
+     * that the second ask was never a second chance. qp's decide endpoint is
+     * synchronous: an attempt that times out keeps computing after the client
+     * hangs up, so the retry competed with the attempt it was covering for, on
+     * the one core the box has. Two 18s goes were one chance made slower.
+     *
+     * The budget is 30s in one go instead — more patient than both of them
+     * together were useful, and it leaves half the minute for the order.
+     */
+    jest.spyOn(axios, 'post')
+      .mockRejectedValueOnce(timeout())
+      .mockResolvedValueOnce({ data: { ok: true, picks: [{ ticker: 'AAA' }] } });
+    await expect(qp.decide(ARGS)).rejects.toThrow(/timeout/);
+    expect(axios.post).toHaveBeenCalledTimes(1);
+  });
 
   test('an answer on the first ask does not claim an attempt count', async () => {
     jest.spyOn(axios, 'post').mockResolvedValue({ data: { ok: true, picks: [] } });
@@ -115,7 +155,7 @@ describe('what decide actually does with that rule', () => {
     expect(out.attempts).toBeUndefined();
   });
 
-  test('two timeouts give up — a third ask would be a different minute',
+  test('a timeout gives up — a second ask would be a different minute',
     async () => {
       jest.spyOn(axios, 'post').mockRejectedValue(timeout());
       await expect(qp.decide(ARGS)).rejects.toThrow(/timeout/);
@@ -137,16 +177,21 @@ describe('what decide actually does with that rule', () => {
     expect(axios.post).toHaveBeenCalledTimes(1);
   });
 
-  test('the retry asks the SAME question — a second body would be a second '
-    + 'strategy wearing the first one\'s name', async () => {
-    jest.spyOn(axios, 'post')
-      .mockRejectedValueOnce(timeout())
-      .mockResolvedValueOnce({ data: { ok: true, picks: [] } });
-    await qp.decide({ ...ARGS, tf: '1m', feed: 'yahoo' });
-    const [urlA, bodyA] = axios.post.mock.calls[0];
-    const [urlB, bodyB] = axios.post.mock.calls[1];
-    expect(urlB).toBe(urlA);
-    expect(bodyB).toEqual(bodyA);
+  test('the body is built once and sent as given', () => {
+    /*
+     * This checked that a RETRY sent the same body — a second ask with a
+     * different question would be a second strategy wearing the first one's
+     * name. There is no retry now, so what is left to guard is that the one
+     * request carries what the caller asked for and nothing invented.
+     */
+    const fn = require('fs').readFileSync(
+      require('path').join(__dirname, '..', 'src', 'setups', 'qpClient.js'), 'utf8');
+    const body = fn.slice(fn.indexOf('const body = {'), fn.indexOf('const tries'));
+    expect(body).toContain('symbols, date, tf, feed');
+    expect(body).toContain('metric, direction, ctx');
+    // strategy_id OR strategies, never both, never neither.
+    expect(body).toContain('if (strategies) body.strategies = strategies;');
+    expect(body).toContain('else body.strategy_id = strategyId;');
   });
 
   test('attempts can be pinned to one by the caller, and then a timeout is '
