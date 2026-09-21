@@ -119,10 +119,24 @@ function deskAppHref(a, self) {
    */
   if (a.url) return a.url.replace(/\/$/, '') + (a.path && a.path !== '/' ? a.path : '');
   /*
-   * The screener suite is served by THIS process, so its door is a path on
-   * this host rather than a hop to a port — but only when this IS that process.
+   * THE SUITE'S DOOR IS ITS OWN PATH, FROM EVERYWHERE.
+   *
+   * `path` for the suite's entry is "/", because the process that serves the
+   * suite ALSO serves the landing page, and "/" is the landing page. So the
+   * Screeners chip on every page outside that process — the Algo page, the
+   * chart, the journal — pointed at http://host:3000/, and pressing "Screeners"
+   * opened the front door instead of the screeners. Reported exactly that way:
+   * "when I press in the header in screener it took me to land page".
+   *
+   * `suitePath` is where the suite actually is. It is used whether or not this
+   * page is that process; `self` only decides whether it needs a host and port
+   * in front of it.
    */
-  if (a.isSelf && self) return a.suitePath || '/screeners';
+  if (a.isSelf) {
+    const p = a.suitePath || '/screeners';
+    if (self) return p;
+    return `http://${location.hostname}:${a.port}${p}`;
+  }
   /*
    * NEVER this page's protocol. The alerts page is reached over https through
    * duckdns; the other programs listen on plain http on their own ports and
@@ -187,7 +201,8 @@ async function deskAppBar(currentId, opts) {
 
   // AN ERROR IS NEVER A ZERO. With no list there are no names to show, and
   // saying so beats an empty strip that reads as "there is nowhere to go".
-  el.innerHTML = `<a class="dk-bar-home" href="${deskEsc(home)}">TRADE DESK</a>`
+  el.innerHTML = `<a class="dk-bar-home" href="${deskEsc(home)}"`
+    + ' title="the landing page — every program on this desk">TRADE DESK</a>'
     + `<div class="dk-bar-apps">${links || '<span class="dk-app">app list unreadable</span>'}</div>`
     + '<div class="dk-bar-end"></div>';
   if (sun) el.querySelector('.dk-bar-end').appendChild(sun);

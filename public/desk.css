@@ -387,13 +387,23 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
   border-radius:12px;
   overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .dk-bar::-webkit-scrollbar { display:none; }
-/* The wordmark is a door home and is not one of the four — it is set apart by
-   a divider rather than by being a fifth pill, because "Trade Desk" is not a
-   program and a pill would say it was. */
+/*
+ * The wordmark is a door home and is not one of the four — it is set apart by
+ * a divider rather than by being a fifth pill, because "Trade Desk" is not a
+ * program and a pill would say it was.
+ *
+ * BUT IT HAS TO LOOK PRESSABLE. At --text3 it was the dimmest thing in the
+ * bar, which is how a label is drawn, not a link: it was pressed by accident
+ * and the landing page arriving read as the page having thrown you out. Same
+ * weight of colour as the programs beside it now, and it takes the same
+ * background on hover and on touch, so it belongs to the row of things that go
+ * somewhere. It is still smaller and still behind a divider, so it does not
+ * read as a fifth program.
+ */
 .dk-bar-home { flex:0 0 auto; font:700 10px/1 var(--ui); letter-spacing:.2em;
-  color:var(--text3); text-decoration:none; padding:9px 10px 9px 8px;
-  border-right:1px solid var(--border); }
-.dk-bar-home:hover { color:var(--text); }
+  color:var(--text2); text-decoration:none; padding:9px 10px 9px 8px;
+  border-right:1px solid var(--border); border-radius:8px 0 0 8px; }
+.dk-bar-home:hover, .dk-bar-home:active { color:var(--text); background:var(--bg3); }
 .dk-bar-apps { display:flex; gap:2px; flex:1 1 auto; min-width:0; }
 .dk-app { flex:0 0 auto; font:600 var(--f-sm)/1 var(--ui); color:var(--text2);
   text-decoration:none; padding:9px 13px; border-radius:8px; white-space:nowrap; }

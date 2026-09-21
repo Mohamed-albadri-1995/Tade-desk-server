@@ -115,7 +115,44 @@ describe('where a program lives, from wherever you are standing', () => {
      */
     expect(D.deskAppHref(app('SCR'), true)).toBe('/screeners');
     expect(D.deskAppHref(app('SCR'), false))
-      .toBe(`http://${HOST}:${app('SCR').port}/`);
+      .toBe(`http://${HOST}:${app('SCR').port}/screeners`);
+  });
+
+  test('"Screeners" opens the screeners, not the landing page', () => {
+    /*
+     * THE BUG THIS EXISTS FOR, reported as: "when I press in the header in
+     * screener it took me to land page".
+     *
+     * The suite's registry entry carries `path: "/"`, and that is correct —
+     * the process that serves the suite ALSO serves the landing page, so "/"
+     * on port 3000 IS the landing page. Which made the Screeners chip on every
+     * page outside that process a link to the front door. It looked right in
+     * the source and right in the config; it was only wrong in a browser, and
+     * only from three of the four programs, which is why it survived.
+     *
+     * `suitePath` is the one field that says where the suite actually is, so
+     * it is what the chip uses from EITHER side. `self` only decides whether
+     * it needs a host and a port in front of it.
+     */
+    const scr = app('SCR');
+    expect(scr.suitePath).toBe('/screeners');
+    for (const self of [true, false]) {
+      const href = D.deskAppHref(scr, self);
+      expect({ self, endsAtSuite: href.endsWith(scr.suitePath) })
+        .toEqual({ self, endsAtSuite: true });
+      // …and specifically NOT the front door.
+      expect({ self, landing: href === '/' || href === `http://${HOST}:${scr.port}/` })
+        .toEqual({ self, landing: false });
+    }
+  });
+
+  test('an entry with no suitePath still lands somewhere that exists', () => {
+    // AN ERROR IS NEVER A ZERO: a registry edited to drop the field must not
+    // silently go back to pointing the chip at the landing page.
+    const bare = { ...app('SCR') };
+    delete bare.suitePath;
+    expect(D.deskAppHref(bare, true)).toBe('/screeners');
+    expect(D.deskAppHref(bare, false)).toBe(`http://${HOST}:${bare.port}/screeners`);
   });
 
   test('a missing app is a link home, not a crash', () => {
@@ -334,6 +371,42 @@ describe('the bar, drawn', () => {
     expect(html).toContain('<a class="dk-bar-home" href="/"');
     // …and its own door is a path on this host, not a hop to a port.
     expect(html).toContain('href="/screeners"');
+  });
+
+  test('home and the Screeners chip are not the same address', async () => {
+    /*
+     * They were, from every program that is not the suite: the wordmark went
+     * to http://host:3000/ and so did the chip labelled "Screeners". Two
+     * controls, one destination, and the destination was the one neither of
+     * them said — which is exactly what "I pressed screener and it took me to
+     * land page" describes.
+     */
+    const { html } = await renderBar('ALERTS', false, APPS);
+    const [homeHref] = hrefs(html);
+    const chip = /<a class="dk-app"[^>]*title="Screener Suite"[^>]*href="([^"]*)"/.exec(html)
+      || /<a class="dk-app"[^>]*href="([^"]*)"[^>]*title="Screener Suite"/.exec(html);
+    expect({ found: !!chip }).toEqual({ found: true });
+    expect(chip[1]).toBe(`http://${HOST}:${app('SCR').port}/screeners`);
+    expect(homeHref).toBe(`http://${HOST}:${app('SCR').port}/`);
+    expect(chip[1]).not.toBe(homeHref);
+  });
+
+  test('the wordmark says where it goes, and is drawn as something pressable', async () => {
+    /*
+     * It navigates, and at --text3 it was the dimmest thing in the bar — which
+     * is how a LABEL is drawn. Pressed by accident, the landing page arriving
+     * reads as the page having thrown you out rather than as a link you took.
+     */
+    const { html } = await renderBar('ALERTS', false, APPS);
+    expect(html).toContain('title="the landing page');
+    const rule = css.slice(css.indexOf('\n.dk-bar-home {'),
+                           css.indexOf('}', css.indexOf('\n.dk-bar-home {')));
+    expect(rule).toContain('color:var(--text2)');
+    expect(rule).not.toContain('color:var(--text3)');
+    // It takes the same background the program pills take, so it belongs to
+    // the row of things that go somewhere — on touch as well as on hover,
+    // because a phone has no hover.
+    expect(css).toContain('.dk-bar-home:hover, .dk-bar-home:active');
   });
 
   test('exactly one program is marked, and it is the current one', async () => {
