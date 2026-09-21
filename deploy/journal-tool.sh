@@ -340,6 +340,66 @@ app.post('/api/journal/import-alpaca', (req, res) => {
  */
 const fs = require('fs');
 const PATCH = process.env.JOURNAL_PATCH_JS || '';
+
+/*
+ * ── THE APP BAR, ON A PAGE THIS REPO DOES NOT OWN ────────────────────────
+ *
+ * The journal was the last program with no way out of it: a page, and the
+ * browser's back button. Every other page on this desk carries the same bar
+ * naming all four programs.
+ *
+ * IT CANNOT TAKE desk.css WHOLE. That file sets body's font, background and
+ * gutter, which would restyle a 1,079-line page from another branch that
+ * nobody here has read. So the launcher slices out ONLY the bar's own rules —
+ * between the two markers in desk.css — and re-scopes the token block from
+ * :root to .dk-bar, where the custom properties inherit to the bar's children
+ * and reach nothing else on the page.
+ *
+ * AND IT IS LOUD WHEN IT MISSES, for the same reason the calendar fix is: a
+ * silent no-op here is an unstyled strip of four links at the top of the
+ * journal, which looks like a bug in the page rather than a missing slice.
+ */
+const DESK = process.env.DESK_REPO || '';
+function deskbarCss() {
+  if (!DESK) return '';
+  let src;
+  try { src = fs.readFileSync(path.join(DESK, 'public', 'desk.css'), 'utf8'); }
+  catch (e) { console.warn('[journal] no desk.css: ' + e.message); return ''; }
+  const a = src.indexOf('/* >>> DESKBAR START');
+  const b = src.indexOf('/* <<< DESKBAR END */');
+  // `:root {` with a space and a brace — so the sunlight block, which is
+  // `:root.sunlight, body.sunlight {`, is deliberately not taken. The journal
+  // has no sunlight toggle, and half a theme is worse than none.
+  const roots = src.match(/:root \{[\s\S]*?\n\}/g) || [];
+  if (a < 0 || b < 0 || !roots.length) {
+    console.warn('[journal] desk.css has no DESKBAR markers — the app bar will '
+      + 'render unstyled. See the markers in public/desk.css.');
+    return '';
+  }
+  return roots.join('\n').replace(/:root/g, '.dk-bar') + '\n' + src.slice(a, b);
+}
+app.get('/deskbar.css', (req, res) => res.type('css').send(deskbarCss()));
+
+// The shared script, served from this repo rather than copied into the app.
+app.get('/desk.js', (req, res) => {
+  if (!DESK) return res.type('js').send('/* desk repo not configured */');
+  res.type('js').sendFile(path.join(DESK, 'public', 'desk.js'));
+});
+
+/*
+ * The registry, so the bar reads the SAME four programs as every other page
+ * rather than the journal carrying a copy that goes stale. Never raises: the
+ * bar is how you leave a page, and a typo in a JSON file must not take the
+ * exits off the journal.
+ */
+app.get('/api/tools', (req, res) => {
+  try {
+    const reg = JSON.parse(fs.readFileSync(path.join(DESK, 'tools.config.json'), 'utf8'));
+    res.json({ ok: true, tools: reg.tools || [], apps: reg.apps || [] });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, tools: [], apps: [] });
+  }
+});
 app.get('/_patch.js', (req, res) => {
   if (!PATCH) return res.type('js').send('/* no patch configured */');
   res.type('js').sendFile(PATCH);
@@ -421,7 +481,15 @@ app.get('/', (req, res) => {
     if (err) return PATCH ? res.status(500).send(String(err)) : res.sendFile(file);
     html = fixCalendar(html);
     if (!PATCH) return res.type('html').send(html);
-    const tag = '<script src="/_patch.js"></script>';
+    /*
+     * desk.js BEFORE _patch.js, because the patch calls deskAppBar(). Both
+     * before </body> rather than in <head>: this page's own script runs at the
+     * end of the body, and a bar drawn before it would be wiped by whatever
+     * that script does to the top of the page.
+     */
+    const tag = '<link rel="stylesheet" href="/deskbar.css">'
+      + '<script src="/desk.js"></script>'
+      + '<script src="/_patch.js"></script>';
     // If </body> is ever missing, append rather than silently drop the tag —
     // a page that quietly loses the delete fix is the failure being fixed.
     res.type('html').send(html.includes('</body>')
@@ -440,6 +508,7 @@ pm2 delete journal >/dev/null 2>&1 || true
 # The add-ons live in THIS repo, not in the worktree, so they are versioned
 # with everything else here and the checked-out branch stays pristine.
 PORT="$PORT" JOURNAL_PATCH_JS="$REPO/deploy/journal/patch.js" \
+  DESK_REPO="$REPO" \
   pm2 start journal-only.js --name journal --time
 pm2 save >/dev/null
 

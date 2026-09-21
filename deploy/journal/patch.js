@@ -222,8 +222,44 @@
     var a = document.querySelector('a[href="/"]');
     if (!a || a.dataset.jnlFixed) return;
     a.dataset.jnlFixed = '1';
+    /*
+     * The bar below replaces this link, and does it better: four programs
+     * instead of one, in the same place as on every other page. It is REMOVED
+     * rather than left beside the bar, because two ways home in one header is
+     * the clutter the bar exists to end — but only once the bar is actually
+     * drawn, so a browser where that failed keeps the only exit it has.
+     */
+    var bar = document.getElementById('deskbar');
+    if (bar && bar.querySelector('.dk-app')) { a.remove(); return; }
     a.href = location.protocol + '//' + location.hostname + ':' + LANDING_PORT + '/';
     a.textContent = '← Trade Desk';
+  }
+
+  /*
+   * ── THE APP BAR ──────────────────────────────────────────────────────
+   *
+   * The journal was the last program with no way out of it. Every other page
+   * on this desk carries the same strip naming all four, with the current one
+   * marked — see deskAppBar in public/desk.js, which the launcher serves at
+   * /desk.js, and the sliced rules it serves at /deskbar.css.
+   *
+   * `self: false`: this is its own process on its own port, so "/" here is the
+   * journal and home has to be built from the registry, not assumed.
+   *
+   * IT IS NOT DRAWN TWICE. This page re-renders its container on every filter
+   * change and decorate() runs again each time; an id check is what keeps one
+   * bar rather than one per redraw.
+   */
+  function appBar() {
+    if (document.getElementById('deskbar')) return;
+    if (typeof deskAppBar !== 'function') return;   // /desk.js did not load
+    var nav = document.createElement('nav');
+    nav.className = 'dk-bar';
+    nav.id = 'deskbar';
+    nav.setAttribute('aria-label', 'programs');
+    // Above everything the page draws, including its own title row.
+    document.body.insertBefore(nav, document.body.firstChild);
+    deskAppBar('JOURNAL', { self: false });
   }
 
   /* ── pulling the account's own trades in ──────────────────────────────
@@ -738,6 +774,7 @@
       });
     });
 
+    appBar();
     autoTag(host);
     statusLine();
     mergeAccountsIntoFilter();

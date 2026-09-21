@@ -358,6 +358,15 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
  * sidebar there is a hamburger that never gets opened; this bar is the same
  * shape on both, and scrolls rather than collapsing.
  */
+/* >>> DESKBAR START — read by deploy/journal-tool.sh ─────────────────────
+ * The journal runs from a different branch with no shared history, and its
+ * page cannot take this whole stylesheet: desk.css sets body's font, gutter
+ * and background, which would restyle a page this repo does not own. So the
+ * launcher slices out exactly the block between these two markers and serves
+ * it with the tokens re-scoped from :root to .dk-bar, where they inherit to
+ * the bar's children and reach nothing else.
+ * They are markers, not decoration — moving them moves what the journal gets,
+ * and the launcher says so loudly if it cannot find them. */
 /*
  * A BAR, NOT A ROW OF LINKS UNDER A LINE.
  *
@@ -428,6 +437,8 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
   .dk-bar-apps::-webkit-scrollbar { display:none; }
   .dk-app { padding:9px 11px; }
 }
+
+/* <<< DESKBAR END */
 
 /* ── A HEADING THE BAR ALREADY SAID ─────────────────────────────────────────
  * The Algo page opened with a bar chip reading "Algo" and, forty pixels below
