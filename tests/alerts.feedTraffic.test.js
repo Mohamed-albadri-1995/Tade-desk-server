@@ -186,3 +186,57 @@ describe('the page counts fires the same way twice', () => {
     expect(script).toContain("f.control ? '<span class=\"su-tag\">CONTROL</span>' : ''");
   });
 });
+
+/*
+ * A HUNDRED PHONE SCREENS OF SCROLL.
+ *
+ * Measured in a browser rather than read: opening History rendered 500 rows
+ * and 103,448 pixels into one pane. Nobody reaches the bottom of that, and
+ * there is nothing at the bottom worth reaching — so the tab that keeps the
+ * record was, in practice, a tab that did not.
+ *
+ * Most of it was the same few sentences once per name, which is the traffic
+ * the live feed had just been rid of: the grouper was only ever wired to
+ * Today, so the tab holding the MOST copies was the one still printing all of
+ * them. After grouping and a cap the same session is 10,150 pixels.
+ *
+ * A CAP IS NOT A TRUNCATION, and that is what these check: the count is said
+ * out loud and the rest is one tap away.
+ */
+describe('history is one screen, not a hundred', () => {
+  const hist = script.slice(script.indexOf('async function loadHistory('),
+                            script.indexOf('/* ── the rules ── */'));
+
+  test('the same grouper runs here, not a second one', () => {
+    // Two implementations of "these say the same thing" would eventually
+    // disagree, and the one that drifts is the tab you look at least.
+    expect(hist).toContain('groupSameSentence(fires)');
+  });
+
+  test('it renders a page, and says how many there are', () => {
+    expect(hist).toContain('HIST_PAGE');
+    expect(hist).toContain('show the other ');
+    expect(script).toContain('function showAllHistory()');
+  });
+
+  test('a count that shrank explains itself', () => {
+    /*
+     * "500 records, shown as 353" — a number that drops with no explanation
+     * is how you end up counting rows by hand to find out which one lied.
+     */
+    expect(hist).toContain('rows.length < fires.length');
+    expect(hist).toContain('records, shown as');
+  });
+
+  test('choosing another day starts folded again', () => {
+    // "Show the other 313" was a decision about the day it was asked of.
+    // Carried over, picking any other session drops a hundred screens on you
+    // without being asked — the thing the cap exists to stop.
+    expect(hist).toContain('if (want !== HIST_SHOWN) { HIST_ALL = false; HIST_SHOWN = want; }');
+  });
+
+  test('the page size is one screenful, not a token gesture', () => {
+    const n = Number(/const HIST_PAGE = (\d+)/.exec(script)[1]);
+    expect({ n, sane: n >= 20 && n <= 100 }).toEqual({ n, sane: true });
+  });
+});

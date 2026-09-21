@@ -3693,11 +3693,32 @@ async function loadLog() {
   }
 }
 
+/*
+ * One screen of history, not a hundred. See the note inside loadHistory().
+ * HIST_ALL is reset whenever a different day is chosen: "show the other 450"
+ * is a decision about the day you asked it of, not a preference.
+ */
+const HIST_PAGE = 40;
+let HIST_ALL = false;
+let HIST_SHOWN = null;
+
+function showAllHistory() {
+  HIST_ALL = true;
+  loadHistory(document.getElementById('hist-date').value);
+}
+
 async function loadHistory(date) {
   const out = document.getElementById('history');
   const picker = document.getElementById('hist-date');
   if (!out) return;
   const want = date || picker.value || '';
+  /*
+   * A NEW DAY STARTS FOLDED AGAIN. "Show the other 450" was a decision about
+   * the day it was asked of — carried over, picking any other session would
+   * drop a hundred screens on you without being asked, which is the thing this
+   * cap exists to stop.
+   */
+  if (want !== HIST_SHOWN) { HIST_ALL = false; HIST_SHOWN = want; }
   try {
     const d = await (await fetch(`/api/alerts/history${want ? `?date=${encodeURIComponent(want)}` : ''}`)).json();
     if (!d.ok) throw new Error(d.error || 'could not read');
@@ -3732,7 +3753,37 @@ async function loadHistory(date) {
      * of object, so it gets the same zones. `.hist` keeps the tighter spacing —
      * a week of these is a list, and a list wants less air than an alert.
      */
-    out.innerHTML = fires.map(f => `<div class="hist">${setupFire(f, '')}</div>`).join('');
+    /*
+     * GROUPED AND CAPPED, and both for the same reason Today is.
+     *
+     * Measured in a browser: one session rendered 500 rows and 103,448 pixels
+     * into this pane — a hundred phone screens of scroll, in one list, with no
+     * way to reach the bottom of it and nothing at the bottom worth reaching.
+     * Most of it was the same few sentences repeated once per name, which is
+     * the same traffic the live feed had; the grouper was only ever wired to
+     * Today, so the tab that holds the MOST of these was the one still
+     * printing every copy.
+     *
+     * A CAP IS NOT A TRUNCATION. The count says how many there are and the
+     * button shows them, so nothing is hidden — what changes is that opening
+     * the tab costs one screen instead of a hundred. A history you cannot get
+     * to the end of is a history nobody reads, which is the same outcome as
+     * not keeping one.
+     */
+    const rows = groupSameSentence(fires);
+    const shown = HIST_ALL ? rows : rows.slice(0, HIST_PAGE);
+    const hidden = rows.length - shown.length;
+    out.innerHTML = shown.map(f => `<div class="hist">${setupFire(f, '')}</div>`).join('')
+      + (hidden
+        ? `<button class="btn" style="margin-top:var(--s3)" onclick="showAllHistory()">`
+          + `show the other ${hidden}</button>`
+        : '')
+      + (rows.length < fires.length
+        // Said out loud: a count that shrank with no explanation is how you
+        // end up counting rows by hand to find out which one lied.
+        ? `<div class="empty">${fires.length} records, shown as ${rows.length} — `
+          + 'alerts carrying the same sentence are on one row.</div>'
+        : '');
   } catch (e) {
     out.innerHTML = `<div class="empty">Could not read the history: ${esc(e.message)}</div>`;
   }
