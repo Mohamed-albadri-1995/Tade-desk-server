@@ -3101,12 +3101,64 @@ async def ws_live(ws: WebSocket):
 
 
 def main():
+    """Start the platform, or say plainly why it did not.
+
+    THE BANNER USED TO PRINT BEFORE THE BIND.
+
+    2026-09-21: pm2 reported qp `online` with 14,502 restarts and an uptime of
+    one second. The log, fourteen thousand times over:
+
+        [env] loaded 1 value(s) from .env
+        qp charting platform on http://0.0.0.0:8765 — build de8139b
+
+    and then nothing, because the process was gone. The port was already held
+    by another copy of this server, uvicorn could not bind, and the only line
+    anyone reads said it had started. A message that is printed whether or not
+    the thing happened is the same as no message — and this one was printed on
+    the process every live decision goes through.
+
+    So: the port is checked FIRST, the banner comes after, and a port that is
+    already taken is a named failure with a non-zero exit rather than a banner
+    and a silent death. pm2 counts a non-zero exit; it cannot count a lie.
+
+    The probe binds and closes, which leaves a gap before uvicorn binds for
+    real. That race is not the failure being fixed — a port held by a
+    long-running server is still held a millisecond later — and uvicorn still
+    reports the real error if it loses it.
+    """
     import argparse
-    import uvicorn
+    import errno
+    import socket
+    # uvicorn is imported AFTER the port check, down beside the call: a start
+    # that cannot possibly succeed should not spend time loading a web server
+    # first, and the check has no need of it.
     p = argparse.ArgumentParser()
     p.add_argument('--host', default='0.0.0.0')
     p.add_argument('--port', type=int, default=8766)
     args = p.parse_args()
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        # NOT SO_REUSEADDR. It would let this bind succeed beside a socket in
+        # TIME_WAIT, which is the one case worth tolerating — and the check is
+        # for a LISTENING server, which SO_REUSEADDR does not let past either
+        # way. Left off so the probe answers the question actually asked.
+        probe.bind((args.host, args.port))
+    except OSError as err:
+        if err.errno == errno.EADDRINUSE:
+            print(f'qp DID NOT START: port {args.port} is already in use on '
+                  f'{args.host}. Something else is serving it — most likely an '
+                  f'older copy of this server started outside the process '
+                  f'manager. Find it with `ss -ltnp | grep {args.port}`, stop '
+                  f'that one, then start this.', flush=True)
+            raise SystemExit(3)
+        print(f'qp DID NOT START: cannot bind {args.host}:{args.port} — {err}',
+              flush=True)
+        raise SystemExit(3)
+    finally:
+        probe.close()
+
+    import uvicorn
     print(f'qp charting platform on http://{args.host}:{args.port} — '
           f'build {cs._BUILD} — {len(cs.REGISTRY)} primitives')
     uvicorn.run(app, host=args.host, port=args.port, log_level='info')
