@@ -65,7 +65,7 @@ describe('one navigation, in two shapes', () => {
      * separate date pickers that could disagree about which day that was.
      * Split by TIME now: Live is the monitor, Day is the record.
      */
-    expect(RAIL()).toEqual(['today', 'history', 'setups', 'rules', 'settings']);
+    expect(RAIL()).toEqual(['today', 'history', 'setups', 'settings']);
   });
 
   test('both are the same control — one class, one handler, one memory', () => {

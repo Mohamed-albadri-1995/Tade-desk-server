@@ -214,6 +214,10 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   border:1px solid var(--border); border-radius:3px; padding:1px 6px; }
 .fire .what { font-size:12px; color:var(--text2); }
 .fire .when { font:11px ui-monospace,Menlo,monospace; color:var(--text3); margin-left:auto; }
+/* The open P&L on a position row. Green and red are DIRECTION on this desk and
+   nothing else — money made and money lost is exactly that. */
+.when.ok { color:var(--m-up); font-weight:700; }
+.when.bad { color:var(--m-down); font-weight:700; }
 /* Written for <a>, used on <button> too — and a button with no background
    declared takes the browser's own light grey, which on a dark page is a white
    pill nobody designed. Everything is stated. */
@@ -682,7 +686,6 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <button class="tb on" data-t="today">Live</button>
   <button class="tb" data-t="history">Day</button>
   <button class="tb" data-t="setups">Setups</button>
-  <button class="tb" data-t="rules">Rules</button>
   <button class="tb" data-t="settings">Settings</button>
 </aside>
 
@@ -691,17 +694,10 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 
 <!-- One line, and the reasoning behind a tap. Eight lines of prose above the
      tabs is eight lines between you and this morning's alert. -->
-<div class="sub">
-  <details class="why"><summary>what the two kinds of alert are</summary>
-    <div class="why-body">
-      <b>Rules</b> are evaluated inside every screener on its own scan, so they need no
-      separate data feed — and <b>see the market roughly every five minutes</b>. A break
-      that happens and fails inside one interval is never seen.<br>
-      <b>Setups</b> wake once at a fixed time, pull <b>1-minute bars</b> for the whole card
-      list and rank it. They are not watching all day; they answer one question at one
-      moment.
-    </div>
-  </details></div>
+<!-- "What the two kinds of alert are" was here: a fold explaining that Rules
+     watch all day and Setups wake once. With Rules gone there is one kind, and
+     an explanation of a distinction that no longer exists is worse than none —
+     it describes a page that is not this one. -->
 
 <!-- WHY TABS.
      Seven sections in one scroll: notifications, position size, calculator,
@@ -729,7 +725,6 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
        no alert, by definition — so "why did it take two and not five" had no
        answer on this page at all, and the reasons are exactly where a strategy
        stops being the one that was backtested. -->
-  <button class="tb" data-t="rules">Rules</button>
   <button class="tb" data-t="settings">Settings</button>
 </div>
 
@@ -848,44 +843,17 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      chart at 11:20 — and for checking one it did before acting on it. It uses
      the SERVER's sizing, the same code the automatic order obeys, so it cannot
      give a different answer from the one that would be sent. -->
-<div class="sec"><span>1b · Calculator</span><span class="note">entry · stop · target → shares</span></div>
-<div class="risk">
-  <label>Side
-    <select id="cl-side"><option value="LONG">long</option><option value="SHORT">short</option></select>
-  </label>
-  <label>Entry <input id="cl-entry" type="number" step="0.01" placeholder="29.05"></label>
-  <label>Stop <input id="cl-stop" type="number" step="0.01" placeholder="27.68"></label>
-  <label>Target <span class="note">optional</span>
-    <input id="cl-target" type="number" step="0.01" placeholder="31.79">
-  </label>
-  <label>Symbol <span class="note">to send</span>
-    <input id="cl-symbol" placeholder="LIFE" style="width:90px; text-transform:uppercase">
-  </label>
-  <button class="btn primary" onclick="calcSize()">Work it out</button>
-  <!-- The order this would actually become, which is not the same number as the
-       one above: buying power already spent, the per-order ceiling and the day's
-       caps all sit between them. -->
-  <button class="btn" onclick="calcSize(true)">Show the real order</button>
-  <button class="btn" id="cl-send" onclick="sendManual()">Send it…</button>
-  <div class="note risk-hint" id="cl-out">
-    Worked out against the <b>standard account</b> above. Pressing
-    <b>Send it…</b> asks which broker account to send to and re-prices it for
-    that one — the share count is not the same in a half-size account.
-  </div>
-</div>
+<!-- 1b · CALCULATOR WAS HERE — entry/stop/target typed by hand, turned into
+     a share count, with a Send button beside it.
+     It is a second answer to the one question this desk exists to answer
+     automatically. A setup sizes from its own backtest; a number typed into a
+     box does not, and an order sent from it is a trade with no test behind it
+     on a desk whose whole rule is that live must match the backtest. Two
+     sizers means the two can disagree, and the one that is wrong is always the
+     one somebody used in a hurry.
+     The sizing that remains is "1 · Standard account", which is the input the
+     setups actually read. -->
 
-<!-- ── 2 · THE BROKER ACCOUNTS ───────────────────────────────────────────
-     Everything about real money lives on an account, in one direction:
-
-         hook + broker type       where it goes and what shape the JSON is
-         size, as a multiple      of the standard above
-         mode                     alert only / by hand / full auto
-         setups                   which strategies run here
-
-     A setup knows nothing about brokers. It used to carry a flag saying
-     whether it traded and a list of the brokers it traded at, while the
-     account carried the capital — two objects describing one decision, which
-     is how they came to disagree. The arrow points one way now. -->
 <div class="sec">
   <span>2 · Broker accounts</span>
   <span class="note" id="broker-state">off</span>
@@ -978,6 +946,17 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 </div><!-- /setups -->
 
 <div class="pane" data-t="today">
+<!-- ── WHAT IS AT RISK RIGHT NOW ──
+     The page counted open positions and never showed one. "3 OPEN NOW" is not
+     a monitor; on a desk whose stops trail an indicator and whose positions
+     are flattened at 15:50, what is held and what it is doing is the first
+     question of the afternoon and the page could not answer it.
+     THE ACCOUNT'S OWN NUMBERS, not the ledger's. The ledger knows what was
+     sent; only the broker knows what is still held and what it is worth — a
+     position closed by its own stop leaves no trace on this side. -->
+<div class="sec"><span>Open now</span><span class="note" id="pos-note"></span></div>
+<div id="positions"><div class="empty">Loading…</div></div>
+
 <div class="sec"><span>Fired today</span><span class="note" id="fire-count"></span></div>
 <div id="fires"><div class="empty">Loading…</div></div>
 </div><!-- /today -->
@@ -1013,14 +992,19 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <div id="history"><div class="empty">Pick a session.</div></div>
 </div><!-- /history -->
 
-<div class="pane" data-t="rules" hidden>
-<div class="sec">
-  <span>Rules</span>
-  <button class="btn primary" onclick="toggleForm()">+ New rule</button>
-</div>
-<div id="form" class="form" style="display:none"></div>
-<div id="rules"></div>
-</div><!-- /rules -->
+<!-- THE RULES TAB WAS HERE.
+     A rule is a condition evaluated inside each screener's own scan — "price
+     crosses above pmHigh", seen roughly every five minutes. It is the design
+     that came before setups, and on this desk it never became anything: both
+     rules that exist are switched OFF, and no rule has ever fired. A tab that
+     costs a glance every morning and has never once had anything in it is a
+     tab that is teaching you to ignore the row it sits in.
+     THE ENGINE IS UNTOUCHED. /api/alerts/rules still answers, the screeners
+     still evaluate whatever is stored, and a rule that is enabled still fires
+     and still appears on Live and in the Day record. This removed the front
+     door, not the room. -->
+
+
 
 <!-- THE SESSION LOG.
      Two halves of a day, in the order they happen to a trade: the decision
@@ -1039,7 +1023,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
  * they already hold the data, and a second evaluator here would eventually
  * disagree with them about what "crossed" means.
  */
-let META = null, TOOLS = [], SEEN = new Set(), FIRST_LOAD = true;
+let TOOLS = [], SEEN = new Set(), FIRST_LOAD = true;
 /* Today's fires, kept so the status strip can count them without a second
    request. /api/alerts/fires is already scoped to today, so everything in
    here is today's by construction. */
@@ -1060,10 +1044,9 @@ let AC = null;
 
 const qs = new URLSearchParams(location.search);
 
-async function meta() {
-  if (!META) META = await (await fetch('/api/alerts/meta')).json();
-  return META;
-}
+/* meta() — the operator vocabulary — went with the rule builder that was its
+   only caller. The setups editor has its own SETUP_FIELDS and SETUP_OPS. */
+
 
 fetch('/api/tools').then(r => r.json()).then(d => { TOOLS = d.tools || []; })
   .catch(() => {});
@@ -2281,121 +2264,20 @@ function readyButtons(f, t) {
     ? `<button class="h-send" onclick='reviewOrder(${plan()})'>review order…</button>` : '';
 }
 
-/* ── the calculator ──
+/* ── THE CALCULATOR'S CODE WAS HERE ──
  *
- * Every number comes back from the server. Working the share count out here
- * would be a second implementation of the one rule that decides how much money
- * is at stake, and the two would disagree the first time either the cap or the
- * rounding changed — with the page's answer being the one a person acted on.
- */
-async function calcSize(withOrder) {
-  const out = document.getElementById('cl-out');
-  const v = id => document.getElementById(id).value;
-  if (withOrder) return previewOrder();
-  try {
-    const d = await (await fetch('/api/alerts/size', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        side: v('cl-side'), entry: v('cl-entry'),
-        stop: v('cl-stop'), target: v('cl-target') || null,
-      }),
-    })).json();
-    if (!d.ok) throw new Error(d.error);
-
-    const sz = d.size;
-    const money = n => `$${Number(n).toFixed(2)}`;
-    out.innerHTML = `
-      <b class="calc-big">${sz && sz.shares > 0 ? `${sz.shares} shares` : 'no size'}</b>
-      ${sz && sz.shares > 0
-        ? ` · ${money(sz.positionValue)} position · risks ${money(sz.riskDollars)} if stopped`
-        : ` — ${esc((sz && sz.reason) || 'set account size and risk per trade above')}`}
-      <br>${money(d.riskPerShare)} a share (${d.riskPct.toFixed(2)}% of price)
-      ${d.rr ? ` · reward:risk <b>${d.rr.toFixed(2)}R</b>` : ''}
-      ${!d.target ? ` · 2R would be <b>${money(d.twoRTarget)}</b>` : ''}
-      ${sz && sz.capped ? `<br><span class="warn">${esc(sz.capped)}</span>` : ''}`;
-  } catch (e) {
-    out.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
-  }
-}
-
-/*
- * What would actually be sent.
+ * calcSize(), previewOrder() and sendManual() — a hand-typed entry/stop turned
+ * into a share count, and a send path for it.
  *
- * The number above answers "how many shares does my risk allow". This one
- * answers "how many would leave the box", and they are different questions:
- * buying power already spent today, the per-order ceiling, the account's and
- * the setup's daily caps, and whole-share flooring all sit between them.
+ * It went with its panel. A setup sizes from its own backtest; a number typed
+ * into a box does not, and an order placed from one is a trade with no test
+ * behind it on a desk whose single rule is that live must match the backtest.
+ * Two sizers can disagree, and the one that is wrong is the one somebody used
+ * in a hurry.
  *
- * It comes from the server, from the same function the 10:00 order uses. A
- * preview computed separately would eventually be wrong, and a wrong preview is
- * worse than none because it is believed.
+ * reviewOrder() STAYS — it is how every real signal is checked and which
+ * account is chosen, and the calculator was only one of its callers.
  */
-async function previewOrder() {
-  const out = document.getElementById('cl-out');
-  const v = id => document.getElementById(id).value;
-  try {
-    const d = await (await fetch('/api/broker/preview', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        symbol: v('cl-symbol') || 'SYMBOL', side: v('cl-side'),
-        entry: v('cl-entry'), stop: v('cl-stop'), target: v('cl-target') || null,
-      }),
-    })).json();
-    if (!d.ok) throw new Error(d.error);
-    const p = d.preview;
-
-    const capline = [
-      p.remaining !== null ? `$${p.remaining.toFixed(0)} buying power left` : null,
-      p.maxTradesPerDay ? `${p.tradesUsed}/${p.maxTradesPerDay} trades used`
-                        : `${p.tradesUsed} trade(s) today`,
-    ].filter(Boolean).join(' · ');
-
-    out.innerHTML = p.body
-      ? `<b class="calc-big">${p.body.quantity} shares would be sent</b>`
-        + (p.asked !== p.body.quantity
-            ? ` <span class="warn">— risk allows ${p.asked}, ${esc(p.reason || 'capped')}</span>`
-            : ' · the full size your risk allows')
-        + `<br><code class="cburl">${esc(JSON.stringify(p.body))}</code>`
-        + `<br>${esc(capline)}`
-        + (p.bracket ? '' : ' · <span class="warn">no stop attached — place it yourself</span>')
-        + (p.armed ? '' : '<br><span class="warn">The broker is not armed, so nothing '
-            + 'would leave the box. These are the numbers it would use.</span>')
-      : `<b class="warn">Nothing would be sent — ${esc(p.reason || 'blocked')}.</b>`
-        + `<br>${esc(capline)}`;
-  } catch (e) {
-    out.innerHTML = `<b class="warn">${esc(e.message)}</b>`;
-  }
-}
-
-/*
- * Place it by hand, through every guard the automatic path uses.
- *
- * Not a shortcut around the safeguards: the same planOrder decides it, so the
- * buying power, both caps, the whole-share rule and the bracket apply exactly
- * as they would at 10:00.
- */
-/*
- * The calculator's send goes through the SAME review, so it gets the same
- * picker. It used to post straight to the order endpoint, which with two
- * accounts would mean a real order into whichever one the server happened to
- * resolve — the one path where "which account" was never asked.
- */
-async function sendManual() {
-  const out = document.getElementById('cl-out');
-  const v = id => document.getElementById(id).value;
-  const symbol = (v('cl-symbol') || '').trim().toUpperCase();
-  if (!symbol) { out.innerHTML = '<b class="warn">Enter the symbol first.</b>'; return; }
-  const entry = Number(v('cl-entry')), stop = Number(v('cl-stop'));
-  if (!(entry > 0) || !(stop > 0)) {
-    out.innerHTML = '<b class="warn">Enter an entry and a stop first.</b>'; return;
-  }
-  // Straight into the review, which is where the account is chosen and where
-  // the order is priced FOR that account. No second send path.
-  out.innerHTML = 'opening the review…';
-  reviewOrder({ symbol, side: v('cl-side'), entry, stop,
-                target: Number(v('cl-target')) > 0 ? Number(v('cl-target')) : null,
-                setupId: 'manual' });
-}
 
 /* ── live orders ──
  *
@@ -2607,8 +2489,88 @@ function paintStrip() {
   el.innerHTML = out.join('');
 }
 
+/*
+ * ── WHAT IS AT RISK RIGHT NOW ────────────────────────────────────────────
+ *
+ * The strip COUNTED open positions and the page never showed one. On a desk
+ * whose stops trail an indicator — sent to the broker as a fixed level that
+ * will not follow — and whose positions are flattened at 15:50, "what am I
+ * holding and what is it doing" is the first question of every afternoon, and
+ * there was nowhere on the page that answered it.
+ *
+ * THE ACCOUNT'S NUMBERS, NOT THE LEDGER'S. The ledger knows what was sent;
+ * only the broker knows what is still held. A position closed by its own stop
+ * leaves no trace on this side, so a ledger-built list over-reports by design —
+ * which is right for deciding what to flatten and wrong for a number on a
+ * screen. `held` comes from /v2/positions on each readable account.
+ *
+ * "YOU HOLD NOTHING" AND "I COULD NOT ASK" MUST NOT RENDER THE SAME. heldNow()
+ * returns a REASON rather than an empty list when it could not reach an
+ * account, and that reason is printed. A flat desk and a blind one look
+ * identical otherwise, and only one of them is safe to walk away from.
+ */
+function paintPositions() {
+  const out = document.getElementById('positions');
+  const note = document.getElementById('pos-note');
+  if (!out) return;
+  const held = (BROKER && BROKER.held) || null;
+
+  if (!held || !held.ok) {
+    const why = held && held.reason ? held.reason : 'the broker has not answered yet';
+    if (note) note.textContent = '';
+    out.innerHTML = `<div class="empty none"><b>Not verified</b><span>${
+      esc(why)} — this is not "you hold nothing".</span></div>`;
+    return;
+  }
+  const rows = held.positions || [];
+  if (!rows.length) {
+    if (note) note.textContent = 'checked at the broker';
+    out.innerHTML = '<div class="empty none"><b>Flat</b>'
+      + '<span>No position open at any account this desk can read.</span></div>';
+    return;
+  }
+
+  const n = (v, d = 2) => (v === null || v === undefined || Number.isNaN(Number(v))
+    ? '—' : Number(v).toFixed(d));
+  // Risk first: the biggest loser is the one you want to see without scrolling.
+  const sorted = rows.slice().sort((a, b) => (a.unrealised || 0) - (b.unrealised || 0));
+  const total = rows.reduce((t, p) => t + (Number(p.unrealised) || 0), 0);
+  if (note) {
+    note.textContent = `${rows.length} position${rows.length === 1 ? '' : 's'} · `
+      + `${total >= 0 ? '+' : '-'}$${Math.abs(total).toFixed(0)} open`;
+  }
+
+  out.innerHTML = sorted.map((p) => {
+    const short = String(p.side || '').toLowerCase() === 'short'
+      || Number(p.qty) < 0;
+    const up = Number(p.unrealised) >= 0;
+    // Percent from the account's own two numbers, so it cannot disagree with
+    // the dollars beside it.
+    const pct = (p.avgEntry && p.current)
+      ? ((p.current - p.avgEntry) / p.avgEntry) * 100 * (short ? -1 : 1) : null;
+    return `<div class="fire setup lvl-trade">
+      <div class="su-head">
+        <span class="su-tag ${short ? 'sell' : 'buy'}">${short ? 'SHORT' : 'LONG'}</span>
+        ${tickerLink(p)}
+        <span class="tool">${esc(Math.abs(Number(p.qty)))} sh · ${esc(p.account || '')}</span>
+        <span class="when ${up ? 'ok' : 'bad'}">${up ? '+' : '-'}$${
+          Math.abs(Number(p.unrealised) || 0).toFixed(0)}${
+          pct === null ? '' : ` · ${up ? '+' : ''}${n(pct)}%`}</span>
+      </div>
+      <div class="lv">
+        <div class="lv-c"><span class="lv-k">entry</span><span class="lv-v">${n(p.avgEntry)}</span></div>
+        <div class="lv-c"><span class="lv-k">now</span><span class="lv-v">${n(p.current)}</span></div>
+        <div class="lv-c"><span class="lv-k">value</span><span class="lv-v sm">$${n(p.marketValue, 0)}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function paintAlgoState() {
   paintStrip();
+  // Same answer, same moment: the strip's OPEN NOW count and the list under it
+  // are the same `held` object, so the two cannot disagree.
+  paintPositions();
   /*
    * AND THE EMPTY FEED, which is the other thing that reads the armed state.
    *
@@ -3262,14 +3224,24 @@ let HIST_DATES = [];
  * pane is on screen or not. A tab that quietly stopped refreshing would be a
  * worse bug than the scrolling this replaces.
  */
+/*
+ * TABS THAT USED TO EXIST, and where their readers should land.
+ *
+ * The chosen tab is remembered in localStorage, so a browser that last sat on
+ * a removed tab has its name saved — and an unknown name hides every pane and
+ * shows none, which is a blank page on the next visit with nothing on it to
+ * act on. Each retired name points at whatever absorbed it.
+ */
+const MOVED = { log: 'history', rules: 'today' };
+
 function showTab(name) {
   /*
-   * 'log' WAS A TAB AND IS NOW HALF OF 'history'. The chosen tab is remembered
+   * 'log' WAS A TAB AND IS NOW HALF OF 'history'; 'rules' is gone entirely. The chosen tab is remembered
    * in localStorage, so every browser that last sat on Log has 'log' saved —
    * and an unknown name hides every pane and shows none, which is a blank page
    * on the next visit rather than an error anybody could act on.
    */
-  const want = (name === 'log' ? 'history' : name) || 'today';
+  const want = MOVED[name] || name || 'today';
   document.querySelectorAll('.pane').forEach(p => {
     p.hidden = p.getAttribute('data-t') !== want;
   });
@@ -3846,145 +3818,24 @@ async function loadHistory(date) {
 }
 
 /* ── the rules ── */
-async function loadRules() {
-  const out = document.getElementById('rules');
-  const m = await meta();
-  const opLabel = v => (m.operators.find(o => o.value === v) || {}).label || v;
-  try {
-    const d = await (await fetch('/api/alerts/rules')).json();
-    const rules = d.rules || [];
-    if (!rules.length) {
-      out.innerHTML = `<div class="empty">No rules yet. A first one:
-        <b>price crosses above pmHigh</b> with no scope — every tool, every stock.</div>`;
-      return;
-    }
-    out.innerHTML = rules.map(r => {
-      const tools = (r.scope?.tools || []).join(' ');
-      const tks = (r.scope?.tickers || []).join(' ');
-      // An unscoped rule says "all tools · any stock" in words. A blank reads
-      // as a missing value rather than the deliberate "everything" it is.
-      const scope = `${tools ? 'tools: ' + tools : 'all tools'} · ${tks ? 'only ' + tks : 'any stock'}`;
-      return `<div class="rule${r.enabled === false ? ' off' : ''}">
-        <b>${r.name}</b>
-        <span class="cond">${r.left} ${opLabel(r.operator)} ${r.right}</span>
-        <span class="scope">${scope}</span>
-        <span class="spacer"></span>
-        <button class="btn" onclick="toggleRule(${r.id}, ${r.enabled === false})">${
-          r.enabled === false ? 'Enable' : 'Disable'}</button>
-        <button class="btn" onclick="delRule(${r.id})">Delete</button>
-      </div>`;
-    }).join('');
-  } catch {
-    out.innerHTML = '<div class="empty">Could not read the rules.</div>';
-  }
-}
-
-/*
- * The level is a SELECT, not an input with a datalist.
+/* ── THE RULES UI WAS HERE ──
  *
- * It was a datalist, and on mobile Chrome that is a text box with no dropdown
- * at all — the suggestions simply never appear, so the field looked broken and
- * the only way to use it was to know the field names by heart. A select is
- * plain, works everywhere, and cannot be typed wrong.
+ * loadRules(), toggleForm(), saveRule(), delRule() — the list, the builder and
+ * the editor for alert rules.
  *
- * A number is still allowed, through an explicit "a number…" option that
- * reveals a numeric input. Two controls rather than one, but each does one
- * thing: the alternative is a text box that means a field name sometimes and a
- * price other times, which is the kind of field people get wrong under time
- * pressure.
+ * A rule is a condition evaluated inside each screener's own scan. It is the
+ * design that came before setups, and on this desk it never became anything:
+ * both rules that exist are switched off, and none has ever fired. The tab
+ * cost a glance every morning and returned nothing, which is how a row of tabs
+ * teaches you to stop reading it.
+ *
+ * THE ENGINE IS UNTOUCHED. /api/alerts/rules still answers, the screeners
+ * still evaluate whatever is stored, and an enabled rule still fires and still
+ * shows on Live and in the Day record — loadFires() renders a rule fire with
+ * its own row shape, which is why that branch stays. This removed the front
+ * door, not the room.
  */
-function onLevelKind() {
-  const isNum = document.getElementById('f-right-kind').value === '__num';
-  document.getElementById('f-num-wrap').style.display = isNum ? '' : 'none';
-  if (isNum) document.getElementById('f-right-num').focus();
-}
 
-function levelValue() {
-  const kind = document.getElementById('f-right-kind').value;
-  return kind === '__num' ? document.getElementById('f-right-num').value : kind;
-}
-
-let PICKED = new Set();
-function pickTool(id, el) {
-  PICKED.has(id) ? PICKED.delete(id) : PICKED.add(id);
-  el.className = 'chip' + (PICKED.has(id) ? ' on' : '');
-}
-
-async function toggleForm(prefill) {
-  const box = document.getElementById('form');
-  if (!prefill && box.style.display !== 'none') { box.style.display = 'none'; return; }
-  const m = await meta();
-  PICKED = new Set();
-  box.style.display = '';
-  box.innerHTML = `
-    <label>Name<input id="f-name" placeholder="Break PM high" size="15"></label>
-    <label>When<select id="f-left">${m.fields.map(f => `<option>${f}</option>`).join('')}</select></label>
-    <label>&nbsp;<select id="f-op">${m.operators.map(o =>
-      `<option value="${o.value}">${o.label}</option>`).join('')}</select></label>
-    <label>Level<select id="f-right-kind" onchange="onLevelKind()">${
-      m.fields.map(f => `<option value="${f}">${f}</option>`).join('')
-      }<option value="__num">a number…</option></select></label>
-    <label id="f-num-wrap" style="display:none">Value
-      <input id="f-right-num" type="number" step="any" inputmode="decimal" placeholder="5" size="7"></label>
-    <label style="flex:1 1 100%">Tools — none selected means every tool
-      <div class="chips">${m.tools.map(t =>
-        `<span class="chip" onclick="pickTool('${t.id}', this)">${t.id}</span>`).join('')}</div></label>
-    <label style="flex:1 1 240px">Stocks — blank means any stock
-      <input id="f-tickers" placeholder="AAPL TSLA" style="text-transform:uppercase"></label>
-    <button class="btn primary" onclick="saveRule()">Save rule</button>
-    <div class="err" id="f-err"></div>`;
-  document.getElementById('f-left').value = 'price';
-  document.getElementById('f-right-kind').value = 'pmHigh';
-  onLevelKind();
-  if (prefill && prefill.ticker) {
-    document.getElementById('f-tickers').value = prefill.ticker;
-    document.getElementById('f-name').value = `${prefill.ticker} — break PM high`;
-  }
-  // Tapping a select on a phone needs room; the form is at the bottom of a
-  // long page and the picker opens off-screen without this.
-  document.getElementById('f-name').focus({ preventScroll: true });
-  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-const list = id => (document.getElementById(id).value || '')
-  .split(/[\s,]+/).map(x => x.trim().toUpperCase()).filter(Boolean);
-
-async function saveRule() {
-  const err = document.getElementById('f-err');
-  err.textContent = '';
-  const r = await fetch('/api/alerts/rules', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: document.getElementById('f-name').value,
-      left: document.getElementById('f-left').value,
-      operator: document.getElementById('f-op').value,
-      right: levelValue(),
-      scope: { tools: [...PICKED], tickers: list('f-tickers') },
-    }),
-  });
-  const d = await r.json();
-  // The server names the offending field and lists the options; replacing that
-  // with "invalid" would throw away the only thing that makes it fixable.
-  if (!d.ok) { err.textContent = d.error || 'could not save'; return; }
-  document.getElementById('form').style.display = 'none';
-  loadRules();
-}
-
-async function toggleRule(id, enable) {
-  const d = await (await fetch('/api/alerts/rules')).json();
-  const r = (d.rules || []).find(x => String(x.id) === String(id));
-  if (!r) return;
-  await fetch('/api/alerts/rules', { method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...r, enabled: !!enable }) });
-  loadRules();
-}
-
-async function delRule(id) {
-  if (!confirm('Delete this rule?')) return;
-  await fetch('/api/alerts/rules/' + id, { method: 'DELETE' });
-  loadRules();
-}
 
 paintNoise();
 /*
@@ -4009,7 +3860,6 @@ showTab((() => {
 })());
 
 loadFires();
-loadRules();
 loadRisk();
 loadFeed();
 // The broker banner counts the setups that will trade, so the setups have to be

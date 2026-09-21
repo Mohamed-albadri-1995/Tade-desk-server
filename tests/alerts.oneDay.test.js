@@ -33,9 +33,9 @@ const sections = (open, close) => {
 describe('five tabs, split by time', () => {
   test('Log is gone as a tab, in both navigations', () => {
     expect(sections('<aside class="al-side"', '</aside>')).toEqual(
-      ['today', 'history', 'setups', 'rules', 'settings']);
+      ['today', 'history', 'setups', 'settings']);
     expect(sections('<div class="tabs" id="tabs">', '</div>')).toEqual(
-      ['today', 'history', 'setups', 'rules', 'settings']);
+      ['today', 'history', 'setups', 'settings']);
     expect(html).not.toContain('data-t="log"');
   });
 
@@ -52,7 +52,11 @@ describe('five tabs, split by time', () => {
      * sat on Log has 'log' saved. An unknown name hides every pane and shows
      * none — a blank page on the next visit, with nothing on it to act on.
      */
-    expect(script).toContain("const want = (name === 'log' ? 'history' : name) || 'today';");
+    // A TABLE now, because 'rules' joined 'log' in being retired. Each dead
+    // name points at whatever absorbed it; an unknown name hides every pane
+    // and shows none, which is a blank page with nothing on it to act on.
+    expect(script).toContain("const MOVED = { log: 'history', rules: 'today' };");
+    expect(script).toContain("const want = MOVED[name] || name || 'today';");
   });
 });
 

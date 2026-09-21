@@ -88,7 +88,10 @@ test('the functions the boot sequence calls are declared at the top level', () =
   // These are called by top-level statements at the end of the script. One of
   // them being nested is what emptied the page: the throw stopped every loader
   // that came after it.
-  const boot = ['showTab', 'paintNoise', 'loadFires', 'loadRules', 'loadRisk',
+  // loadRules went with the Rules tab, and loadHistory is reached through
+  // loadDay() now — the Day tab loads the funnel and the alerts together off
+  // one date picker, so the boot calls the pair rather than either half.
+  const boot = ['showTab', 'paintNoise', 'loadFires', 'loadRisk', 'loadDay',
                 'loadSetups', 'loadHistory', 'loadUnassigned', 'subscribePush'];
   const top = topLevelNames();
   expect(boot.filter(n => !top.has(n))).toEqual([]);

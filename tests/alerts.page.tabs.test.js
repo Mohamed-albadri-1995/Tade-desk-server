@@ -56,7 +56,7 @@ test('every tab button has a pane and every pane has a tab button', () => {
   const panes = [...markup.matchAll(/<div class="pane" data-t="([a-z]+)"/g)].map(m => m[1]);
   // 'log' was a tab until it became the top half of 'history' — see
   // tests/alerts.oneDay.test.js for why the two were one question.
-  expect(tabs).toEqual(['today', 'history', 'setups', 'rules', 'settings']);
+  expect(tabs).toEqual(['today', 'history', 'setups', 'settings']);
   // A pane may appear more than once (two blocks of "today"); what must not
   // happen is a pane nobody can reach, or a tab that shows nothing.
   expect([...new Set(panes)].sort()).toEqual([...tabs].sort());
@@ -333,7 +333,10 @@ test('the settings tab is the three layers, in order — then the preflight, '
   + 'which configures nothing and only reads', () => {
   const pane = markup.slice(markup.indexOf('<div class="pane" data-t="settings"'));
   const heads = [...pane.matchAll(/<span>(\d[^<]*)<\/span>/g)].map(m => m[1].trim());
-  expect(heads).toEqual(['1 · Standard account', '1b · Calculator',
+  // '1b · Calculator' was between these two: a hand-typed entry and stop
+  // turned into a share count, with a Send beside it. A second answer to the
+  // one question a setup answers from its own backtest.
+  expect(heads).toEqual(['1 · Standard account',
                          '2 · Broker accounts', '3 · This machine',
                          '4 · Preflight']);
 });
@@ -440,15 +443,28 @@ test('the send picker lists every account, always', () => {
   expect(body).not.toMatch(/dests\.length > 1/);
 });
 
-test('the calculator sends through the same review, not its own path', () => {
-  // It used to POST straight to the order endpoint — the one path where
-  // "which account" was never asked, which with two accounts is a real order
-  // into whichever one the server happened to resolve.
-  const at = script.indexOf('async function sendManual()');
-  const body = script.slice(at, script.indexOf('\n}\n', at));
-  expect(body).toContain('reviewOrder(');
-  expect(body).not.toContain("fetch('/api/broker/order'");
+test('there is ONE send path, and it is the review', () => {
+  /*
+   * The calculator and its sendManual() are gone. It let an entry and a stop
+   * be typed in and turned into a share count with a Send beside it — a second
+   * answer to the one question this desk exists to answer from a backtest, on
+   * a desk whose single rule is that live must match the backtest.
+   *
+   * What it used to be checked FOR still holds and matters more now: every
+   * order goes through reviewOrder(), which is where the account is chosen and
+   * where the order is priced for that account. The calculator once posted
+   * straight to the order endpoint, which with two accounts meant a real order
+   * into whichever one the server happened to resolve.
+   */
+  expect(script).not.toContain('function sendManual(');
+  expect(script).not.toContain('function calcSize(');
+  expect(script).toContain('function reviewOrder(');
+  // No caller reaches the order endpoint except through the review.
+  const direct = [...script.matchAll(/fetch\('\/api\/broker\/order'/g)];
+  expect({ direct: direct.length, hint: 'every send goes through reviewOrder' })
+    .toEqual({ direct: 1, hint: 'every send goes through reviewOrder' });
 });
+
 
 test('arming names the accounts that will trade by themselves', () => {
   const at = script.indexOf('async function toggleArm()');

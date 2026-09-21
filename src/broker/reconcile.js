@@ -587,7 +587,25 @@ async function heldNow({ maxAgeMs = 8000, timeoutMs = 6000 } = {}) {
     anyOk = true;
     for (const p of r.positions) {
       if (p.qty === 0) continue;
-      positions.push({ symbol: p.symbol, qty: p.qty, account: d.id });
+      /*
+       * THE WHOLE POSITION, not just its name and size.
+       *
+       * This kept `{symbol, qty, account}` and dropped the rest, because the
+       * only caller counted rows and matched symbols. The Algo page then had
+       * no way to say what is at risk right now — it could print "3 OPEN NOW"
+       * and nothing else — while the entry, the last price and the open P&L
+       * were being fetched from Alpaca on every sweep and discarded one line
+       * before they reached it.
+       *
+       * These are the ACCOUNT's numbers, not the ledger's. The ledger knows
+       * what was sent; only the account knows what is held and what it is
+       * worth, which is the distinction this function exists for.
+       */
+      positions.push({
+        symbol: p.symbol, qty: p.qty, account: d.id,
+        side: p.side, avgEntry: p.avgEntry, current: p.current,
+        unrealised: p.unrealised, marketValue: p.marketValue,
+      });
     }
   }
 
