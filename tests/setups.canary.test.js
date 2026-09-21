@@ -537,9 +537,14 @@ describe('it is wired in where it can see both halves', () => {
     expect(page).toContain('function lgControl(');
     expect(page).toContain('sum.innerHTML = control +');
     // "Not run" must read as unknown, not as a pass — the same rule as
-    // everywhere else on this desk.
-    expect(page).toContain('Control: not run today');
+    // everywhere else on this desk. It is on the SUMMARY line now, because
+    // the section is shut by default and a fold that hides the one fact it
+    // was cheapest to show is worse than no fold.
+    expect(page).toContain('<span class="when">NOT RUN</span>');
+    expect(page).toContain('the scheduler did not\n        reach it');
     expect(page).toContain('.lg-ctl.none');
+    // …and the shut state of a day that DID run carries the count.
+    expect(page).toContain('fired on ${fired} of ${rows.length} check');
   });
 });
 

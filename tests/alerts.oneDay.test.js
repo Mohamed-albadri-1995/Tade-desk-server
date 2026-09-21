@@ -40,10 +40,18 @@ describe('five tabs, split by time', () => {
   });
 
   test('and the names say what they are for', () => {
-    // "Today" and "History" are both about time and neither says which
-    // question it answers. Live is the monitor; Day is the record.
+    /*
+     * "Today" and "History" are both about time and neither says which
+     * question it answers. Live is the monitor.
+     *
+     * The other one was "Day" for a while, and: "what you named it day I
+     * don't know what the name mean". Fair — "Day" says WHEN, and the tab is
+     * not about when. It is about going back over a session that has already
+     * happened, which is a thing you DO, so the name is the verb.
+     */
     expect(html).toContain('data-t="today">Live<');
-    expect(html).toContain('data-t="history">Day<');
+    expect(html).toContain('data-t="history">Review<');
+    expect(html).not.toContain('data-t="history">Day<');
   });
 
   test('a browser that remembers "log" is not left staring at nothing', () => {

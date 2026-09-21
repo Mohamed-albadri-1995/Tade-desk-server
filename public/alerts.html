@@ -540,6 +540,44 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .su-size { font-size:12px; font-weight:700; color:var(--green); margin-top:6px; }
 .su-size.dim { font-weight:400; color:var(--text3); }
 .su-warn { font-size:11px; color:#fb923c; margin-top:6px; }
+/* ══ THE REVIEW TAB'S FOLDS ════════════════════════════════════════════════
+ *
+ * "it's not organized and also every section of it need to be collapsed by
+ * default".
+ *
+ * It was one scroll: the control, then every setup, then 242 rows of "nothing
+ * on this bar (window still open)", then the day's alerts — all open, all the
+ * same weight, and the 242 rows were most of it. A record you have to scroll
+ * past to reach the next fact is a record nobody opens twice.
+ *
+ * Every section is shut, and the SUMMARY CARRIES THE ANSWER: how many checks
+ * came back, how many runs and how many trades, how many alerts. Shut, the tab
+ * is five lines that answer "was that day normal". Open, it is everything it
+ * was before.
+ */
+.lg-fold { border:1px solid var(--border); border-radius:8px;
+  background:var(--bg2); margin:0 0 var(--s2); }
+.lg-fold > summary { list-style:none; cursor:pointer; padding:10px 12px;
+  display:flex; align-items:baseline; gap:var(--s2); font-size:var(--f-sm);
+  min-height:38px; }
+.lg-fold > summary::-webkit-details-marker { display:none; }
+/* A caret rather than a word: the row is already carrying a name and a count,
+   and it turns, so the state is visible without reading. */
+.lg-fold > summary::before { content:'\25B8'; color:var(--text3);
+  transition:transform .12s; flex:0 0 auto; }
+.lg-fold[open] > summary::before { transform:rotate(90deg); }
+.lg-fold > summary .when { margin-left:auto; text-align:right; }
+.lg-fold > summary:hover { background:var(--bg3); border-radius:8px; }
+.lg-fold-b { padding:0 12px 12px; }
+/* Nested: every bar, inside a setup. Flat, so two borders do not stack. */
+.lg-fold .lg-fold { background:none; border:0; border-top:1px solid var(--border);
+  border-radius:0; margin:var(--s2) -12px 0; }
+.lg-fold .lg-fold > summary { color:var(--text3); }
+/* The one that went wrong keeps its edge while it is shut. */
+.lg-set.bad { border-color:var(--red); }
+.lg-ctl.bad > summary .when, .lg-set.bad > summary .when { color:var(--red); }
+.lg-ctl.part > summary .when { color:var(--yellow); }
+
 .su-caution { font-size:10.5px; color:var(--text3); margin-top:5px; font-style:italic; }
 /* Under the group heading it is a note about the whole group, so it sits where
    the heading does rather than indented into the first card. */
@@ -706,7 +744,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      differently on every device. -->
 <aside class="al-side" aria-label="sections">
   <button class="tb on" data-t="today">Live</button>
-  <button class="tb" data-t="history">Day</button>
+  <button class="tb" data-t="history">Review</button>
   <button class="tb" data-t="setups">Setups</button>
   <button class="tb" data-t="settings">Settings</button>
 </aside>
@@ -740,7 +778,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
        minutes"; history is "was this setup any good last week". Sharing a
        scroll meant every glance at the morning's fires ended up somewhere in
        last Tuesday, and the send button lived down there with it. -->
-  <button class="tb" data-t="history">Day</button>
+  <button class="tb" data-t="history">Review</button>
   <button class="tb" data-t="setups">Setups</button>
   <!-- LOG answers the question the feed structurally cannot.
        Every other tab here shows what FIRED. A name that was dropped produces
@@ -997,9 +1035,14 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      that is, which is the worst possible way to read a record.
      So: the funnel first, because "did the desk work" comes before "what did
      it say", then every alert it published. One picker drives both. -->
+<!-- THE NAME. It was "Day", and: "what you named it day I don't know what the
+     name mean". Fair — "Day" says WHEN, and the tab is not about when, it is
+     about going back over a session that has already happened. "Review" says
+     what you came here to do, which is the only thing a tab name can usefully
+     say. The line under it says what is in it. -->
 <div class="sec">
-  <span>The day</span>
-  <span class="note">What the desk did, including what it decided not to do.</span>
+  <span>Review a session</span>
+  <span class="note">One day in full, including what it decided not to do.</span>
   <select id="hist-date" onchange="loadDay()"></select>
   <button class="btn" onclick="loadDay()">Reload</button>
 </div>
@@ -1010,8 +1053,12 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <input type="date" id="log-date" hidden>
 <div id="log-summary"></div>
 <div id="log-runs"></div>
-<div class="sec"><span>Alerts published</span></div>
-<div id="history"><div class="empty">Pick a session.</div></div>
+<!-- CLOSED, like everything else on this tab. The count is in the summary, so
+     the shut state still answers "how many fired" without opening it. -->
+<details class="lg-fold" id="hist-fold">
+  <summary><b>Alerts published</b> <span id="hist-count" class="when"></span></summary>
+  <div id="history"><div class="empty">Pick a session.</div></div>
+</details>
 </div><!-- /history -->
 
 <!-- THE RULES TAB WAS HERE.
@@ -3769,29 +3816,45 @@ function lgRun(r) {
  */
 function lgControl(rows) {
   if (!rows || !rows.length) {
-    return `<div class="lg-ctl none">Control: not run today. It answers on every
-      fifth minute and on every bar a setup decides, so an empty line means the
-      scheduler did not reach it.</div>`;
+    return `<details class="lg-fold lg-ctl none">
+      <summary><b>Did the desk run</b> <span class="when">NOT RUN</span></summary>
+      <div class="lg-fold-b">The control answers on every fifth minute and on
+        every bar a setup decides, so nothing here means the scheduler did not
+        reach it.</div>
+    </details>`;
   }
   const fired = rows.filter(r => r.fired).length;
   const last = rows[0];                     // newest first
   const bad = rows.filter(r => !r.fired);
   const lag = rows.filter(r => (r.lagMin || 0) > 1);
   const cls = fired === rows.length ? 'ok' : fired ? 'part' : 'bad';
-  return `<div class="lg-ctl ${cls}">
-    <b>Control</b> fired on ${fired} of ${rows.length} check${rows.length === 1 ? '' : 's'}
-    · last ${esc(last.bar || '–')} ${last.fired ? 'fired' : 'no signal'}${
-      last.lastBar ? ` · ${esc(last.feed || 'feed')} newest bar ${esc(last.lastBar)}` : ''}${
-      last.lagMin ? ` <b class="warn">(${last.lagMin} min behind)</b>` : ''}
-    ${bad.length ? `<div class="why">Did not fire on ${bad.slice(0, 8).map(r =>
-        esc(r.bar)).join(', ')}${bad.length > 8 ? ` +${bad.length - 8}` : ''}${
-        lag.length ? ` — the feed was behind on ${lag.length} of them` : ''}.
-      A control that asks for close &gt; 0 and gets nothing means the bar was not
-      there, so no setup deciding on it could have fired either.</div>` : ''}
-    ${!bad.length ? `<div class="why">Every check answered on the bar it asked
-      about. On those bars the chain — cards, qp, the ranking, the plan — was
-      working, so a setup that took nothing did not match its own rules.</div>` : ''}
-  </div>`;
+  /*
+   * A FOLD WHOSE SHUT STATE IS THE ANSWER.
+   *
+   * "Was the desk alive" is one number — how many of its checks came back —
+   * and that number belongs on the line you can see without opening anything.
+   * The paragraph explaining what a control IS is read once, on the first day,
+   * and was on screen every day after it.
+   */
+  return `<details class="lg-fold lg-ctl ${cls}">
+    <summary><b>Did the desk run</b>
+      <span class="when">fired on ${fired} of ${rows.length} check${
+        rows.length === 1 ? '' : 's'}${
+        last.lagMin ? ` · ${last.lagMin} min behind` : ''}</span></summary>
+    <div class="lg-fold-b">
+      last ${esc(last.bar || '–')} ${last.fired ? 'fired' : 'no signal'}${
+        last.lastBar ? ` · ${esc(last.feed || 'feed')} newest bar ${esc(last.lastBar)}` : ''}${
+        last.lagMin ? ` <b class="warn">(${last.lagMin} min behind)</b>` : ''}
+      ${bad.length ? `<div class="why">Did not fire on ${bad.slice(0, 8).map(r =>
+          esc(r.bar)).join(', ')}${bad.length > 8 ? ` +${bad.length - 8}` : ''}${
+          lag.length ? ` — the feed was behind on ${lag.length} of them` : ''}.
+        A control that asks for close &gt; 0 and gets nothing means the bar was not
+        there, so no setup deciding on it could have fired either.</div>` : ''}
+      ${!bad.length ? `<div class="why">Every check answered on the bar it asked
+        about. On those bars the chain — cards, qp, the ranking, the plan — was
+        working, so a setup that took nothing did not match its own rules.</div>` : ''}
+    </div>
+  </details>`;
 }
 
 async function loadLog() {
@@ -3818,14 +3881,21 @@ async function loadLog() {
     const byId = {};
     for (const r of d.runs || []) (byId[r.setupId] = byId[r.setupId] || []).push(r);
     sum.innerHTML = control + setups.map(([id, g]) => `
-      <div class="lg-set">
-        <h4>${esc(g.setup || id)}
+      <details class="lg-fold lg-set${g.neverRan || g.failed ? ' bad' : ''}">
+        ${/* THE SUMMARY IS THE VERDICT. Shut, this line has to answer "was
+              that day normal" for this setup: how many times it was asked and
+              how many trades came out. Everything under it is why. */''}
+        <summary><b>${esc(g.setup || id)}</b>
           <span class="when">${g.neverRan
             ? `NEVER RAN · due ${esc(g.dueBar || '')}`
-            : `${g.runs} run${g.runs === 1 ? '' : 's'}`}${
-            g.firstBar ? ` · ${esc(g.firstBar)}${g.lastBar && g.lastBar !== g.firstBar
-              ? `–${esc(g.lastBar)}` : ''}` : ''}${
-            g.msMax ? ` · slowest ${g.msMax}ms` : ''}</span></h4>
+            : `${g.runs} run${g.runs === 1 ? '' : 's'} · ${g.picked || 0} taken`}${
+            g.failed ? ` · ${g.failed} FAILED` : ''}${
+            g.lagBars ? ' · FEED BEHIND' : ''}</span></summary>
+        <div class="lg-fold-b">
+        ${g.neverRan ? '' : `<div class="note">${
+          g.firstBar ? `${esc(g.firstBar)}${g.lastBar && g.lastBar !== g.firstBar
+            ? `–${esc(g.lastBar)}` : ''}` : ''}${
+          g.msMax ? ` · slowest ${g.msMax}ms` : ''}</div>`}
         ${/* NO FUNNEL FOR A SETUP THAT NEVER RAN. "0 evaluated · 0 signalled ·
               0 taken" is the picture of a setup that looked and found nothing,
               which is the exact misreading this entry exists to prevent. It
@@ -3866,8 +3936,17 @@ async function loadLog() {
              decision was about an older bar than the one asked for</div>` : ''}
         ${(g.problems || []).length
           ? `<div class="lg-prob">${g.problems.map(esc).join('<br>')}</div>` : ''}
-        ${(byId[id] || []).map(lgRun).join('')}
-      </div>`).join('');
+        ${/* EVERY BAR, BEHIND ITS OWN FOLD. 242 rows of "nothing on this
+              bar (window still open)" is the whole tab — and it is the last
+              thing anybody needs, because the counts above already say what
+              happened. Kept, because when a morning is wrong this is where
+              the wrongness is; shut, because most mornings are not. */''}
+        ${(byId[id] || []).length ? `<details class="lg-fold lg-bars">
+          <summary>every bar <span class="when">${(byId[id] || []).length}</span></summary>
+          <div class="lg-fold-b">${(byId[id] || []).map(lgRun).join('')}</div>
+        </details>` : ''}
+        </div>
+      </details>`).join('');
     runs.innerHTML = '';
   } catch (e) {
     // The page someone opens BECAUSE something went wrong must not be the next
@@ -3913,6 +3992,22 @@ function showAllHistory() {
   loadHistory(document.getElementById('hist-date').value);
 }
 
+/*
+ * What the shut "Alerts published" fold says.
+ *
+ * Both numbers when they differ, because they answer different questions:
+ * `fires` is how many alerts the desk published, `rows` is how many lines you
+ * will see — the ones carrying the same sentence are one row. A single number
+ * that silently meant sometimes one and sometimes the other is how you end up
+ * counting rows by hand to find out which.
+ */
+function setHistCount(fires, rows) {
+  const el = document.getElementById('hist-count');
+  if (!el) return;
+  if (!fires) { el.textContent = 'none'; return; }
+  el.textContent = rows < fires ? `${fires} · ${rows} rows` : `${fires}`;
+}
+
 async function loadHistory(date) {
   const out = document.getElementById('history');
   const picker = document.getElementById('hist-date');
@@ -3942,6 +4037,7 @@ async function loadHistory(date) {
 
     const fires = d.fires || [];
     if (!fires.length) {
+      setHistCount(0, 0);
       out.innerHTML = `<div class="empty">Nothing recorded${
         want ? ` for ${esc(want)}` : ''}. The record starts from the first fire
         after this was deployed — it cannot recover days that were never kept.</div>`;
@@ -3977,6 +4073,10 @@ async function loadHistory(date) {
      * not keeping one.
      */
     const rows = groupSameSentence(fires);
+    // THE COUNT ON THE CLOSED FOLD. The section is shut by default, so the
+    // summary has to answer "how many fired that day" without being opened —
+    // or the fold has hidden the one fact it was cheapest to show.
+    setHistCount(fires.length, rows.length);
     const shown = HIST_ALL ? rows : rows.slice(0, HIST_PAGE);
     const hidden = rows.length - shown.length;
     out.innerHTML = shown.map(f => `<div class="hist">${setupFire(f, '')}</div>`).join('')
@@ -3991,6 +4091,10 @@ async function loadHistory(date) {
           + 'alerts carrying the same sentence are on one row.</div>'
         : '');
   } catch (e) {
+    // AN ERROR IS NEVER A ZERO. The shut fold must not read "none" when the
+    // question could not be asked.
+    const c = document.getElementById('hist-count');
+    if (c) c.textContent = 'could not read';
     out.innerHTML = `<div class="empty">Could not read the history: ${esc(e.message)}</div>`;
   }
 }
