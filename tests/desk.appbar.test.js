@@ -77,6 +77,8 @@ const D = {
 };
 const APPS = cfg.apps;
 const app = id => APPS.find(a => a.id === id);
+/** What the BAR prints: the short name, falling back to the full one. */
+const label = a => a.short || a.name;
 
 describe('where a program lives, from wherever you are standing', () => {
   test('a hop to another port is http, never this page\'s protocol', () => {
@@ -297,17 +299,17 @@ describe('the bar, drawn', () => {
     for (const id of APPS.map(a => a.id)) {
       const { html } = await renderBar(id, false, APPS);
       const marked = [...html.matchAll(/<a class="dk-app on"[^>]*>([^<]+)</g)].map(m => m[1]);
-      // The NAME AS IT IS WRITTEN INTO THE MARKUP — "Chart &amp; Backtest".
-      // Comparing against the raw config string would fail on the one app whose
-      // name has an ampersand in it, which is the escaping working.
-      expect({ id, marked }).toEqual({ id, marked: [D.deskEsc(app(id).name)] });
+      // THE SHORT NAME, as the bar writes it, escaped. Comparing against the
+      // raw config string would fail on the one app whose name has an
+      // ampersand in it, which is the escaping working.
+      expect({ id, marked }).toEqual({ id, marked: [D.deskEsc(label(app(id)))] });
       expect((html.match(/aria-current="page"/g) || []).length).toBe(1);
     }
   });
 
   test('every program is in the bar, current one included', async () => {
     const { html } = await renderBar('SCR', true, APPS);
-    for (const a of APPS) expect(html).toContain(`>${D.deskEsc(a.name)}</a>`);
+    for (const a of APPS) expect(html).toContain(`>${D.deskEsc(label(a))}</a>`);
   });
 
   test('the sunlight button is adopted, not drawn over', async () => {
@@ -335,6 +337,87 @@ describe('the bar, drawn', () => {
     expect(html).not.toContain('<script>');
     expect(html).toContain('&quot;&gt;&lt;script&gt;');
   });
+});
+
+/*
+ * TWO OF THE FOUR PROGRAMS WERE NOT ON THE SCREEN.
+ *
+ * Measured in a browser at 430px — the phone this desk is read on — the four
+ * full names came to 539px of row. The bar scrolls horizontally, so nothing
+ * overlapped and nothing looked broken: Journal and Algo were simply not
+ * visible, behind a hidden scrollbar, on the one strip that exists so you can
+ * reach them. The sunlight button sat on top of the last name still showing.
+ *
+ * A scrolling row is right for tabs WITHIN a page, where the first is the
+ * default and the rest are variations. It is wrong for whole programs — an
+ * item you have to know is there in order to find it is an item that is not
+ * there.
+ *
+ * Two changes, and this pins both: the bar prints a SHORT name, and on a phone
+ * it WRAPS so the names get a line to themselves.
+ */
+describe('the bar fits on a phone', () => {
+  test('every app has a short name, and it is actually short', () => {
+    for (const a of APPS) {
+      expect({ id: a.id, short: typeof a.short }).toEqual({ id: a.id, short: 'string' });
+      // Four of these plus a wordmark and a button share 430px.
+      expect({ id: a.id, fits: a.short.length <= 12 }).toEqual({ id: a.id, fits: true });
+    }
+    // Their total is what actually has to fit, so it is what is measured.
+    const total = APPS.reduce((n, a) => n + a.short.length, 0);
+    expect({ chars: total, under: total <= 40 }).toEqual({ chars: total, under: true });
+  });
+
+  test('the bar prints the short name and keeps the full one', async () => {
+    const { html } = await renderBar('QP', false, APPS);
+    // The full name is still reachable — a pointer gets it, and the landing
+    // page's door carries it in full.
+    expect(html).toContain('>Chart</a>');
+    expect(html).toContain('title="Chart &amp; Backtest"');
+    expect(html).not.toContain('>Chart &amp; Backtest</a>');
+  });
+
+  test('an app with no short name still gets a label', async () => {
+    // AN ERROR IS NEVER A ZERO: a registry entry written before `short`
+    // existed must render its name, not an empty chip.
+    const { html } = await renderBar('X', false,
+      [{ id: 'X', name: 'Some Program', port: 1, accent: '#fff' }]);
+    expect(html).toContain('>Some Program</a>');
+  });
+
+  test('the landing page door keeps the FULL name', () => {
+    // Opposite requirement, same registry: the bar is a label you glance at,
+    // the door is the thing you are choosing.
+    expect(home).toContain('deskEsc(a.name)');
+    expect(home).not.toContain('a.short');
+  });
+
+  test('on a phone the bar wraps instead of hiding its tail', () => {
+    const phone = css.slice(css.indexOf('@media (max-width:640px)', css.indexOf('.dk-bar-end')));
+    expect(phone).toContain('.dk-bar { flex-wrap:wrap');
+    // The names take a full-width line of their own.
+    expect(phone).toContain('.dk-bar-apps { order:3; flex:1 0 100%');
+  });
+});
+
+/*
+ * A HEADING THE BAR ALREADY SAID.
+ *
+ * The Algo page opened with a bar chip reading "Algo" and, forty pixels below,
+ * an <h1> reading "Algo". Deleting the h1 would leave the document with no
+ * outline, so it is kept and not drawn — and NOT with display:none, which
+ * takes it out of the accessibility tree as well and so removes the only
+ * reason it is still there.
+ */
+test('the Algo page has a heading, and does not print it twice', () => {
+  expect(alerts).toContain('<h1 class="dk-sr">Algo</h1>');
+  expect(css).toContain('.dk-sr {');
+  const rule = css.slice(css.indexOf('.dk-sr {'), css.indexOf('}', css.indexOf('.dk-sr {')));
+  expect(rule).toContain('clip:rect(0 0 0 0)');
+  expect(rule).not.toContain('display:none');
+  // The row that held the heading, the back-link and the button is gone with
+  // them — a class nothing carries is a rule the next reader has to rule out.
+  expect(alerts).not.toContain('class="top"');
 });
 
 /*

@@ -165,11 +165,24 @@ async function deskAppBar(currentId, opts) {
   const suite = apps.find(a => a.isSelf);
   const home = (self || !suite) ? '/' : deskAppHref({ port: suite.port, path: '/' }, false);
 
+  /*
+   * THE SHORT NAME IN THE BAR, the full one on the landing page's doors.
+   *
+   * MEASURED, not guessed. At 430px — the phone this desk is read on — the
+   * four full names came to 539px of row. The bar scrolls, so nothing
+   * overlapped and nothing looked broken; Journal and Algo were simply not on
+   * the screen, behind a hidden scrollbar. Two of the four programs, invisible,
+   * on the one strip that exists so you can reach them.
+   *
+   * `title` keeps the full name for a pointer, and the door on the landing
+   * page still carries it in full.
+   */
   const links = apps.map((a) => {
     const on = a.id === currentId;
     return `<a class="dk-app${on ? ' on' : ''}" href="${deskEsc(deskAppHref(a, self))}"`
-      + `${on ? ' aria-current="page"' : ''}`
-      + ` style="--dk-accent:${deskEsc(a.accent || '#3b82f6')}">${deskEsc(a.name)}</a>`;
+      + `${on ? ' aria-current="page"' : ''} title="${deskEsc(a.name)}"`
+      + ` style="--dk-accent:${deskEsc(a.accent || '#3b82f6')}">`
+      + `${deskEsc(a.short || a.name)}</a>`;
   }).join('');
 
   // AN ERROR IS NEVER A ZERO. With no list there are no names to show, and

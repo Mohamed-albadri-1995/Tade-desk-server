@@ -368,6 +368,39 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
 .dk-bar-end { flex:0 0 auto; margin-left:auto; display:flex; align-items:center;
   gap:var(--s2); }
 
+/* ── ON A PHONE THE BAR WRAPS, it does not scroll ──
+ *
+ * MEASURED at 430px: the four names ran to 539px of row. The bar scrolls, so
+ * nothing overlapped and nothing looked broken — Journal and Algo were simply
+ * not on the screen, behind a hidden scrollbar, on the one strip that exists so
+ * you can reach them. The sunlight button sat on top of the last visible name.
+ *
+ * A row that scrolls is fine for tabs WITHIN a page, where the first one is the
+ * default and the rest are variations. It is not fine for whole programs: an
+ * item you have to know is there in order to find it is an item that is not
+ * there. So the names get a line of their own, and the wordmark and the button
+ * keep theirs. */
+@media (max-width:640px) {
+  .dk-bar { flex-wrap:wrap; gap:0 var(--s3); overflow:visible; }
+  .dk-bar-home { order:1; }
+  .dk-bar-end { order:2; }
+  .dk-bar-apps { order:3; flex:1 0 100%; gap:0;
+    overflow-x:auto; scrollbar-width:none; }
+  .dk-bar-apps::-webkit-scrollbar { display:none; }
+  .dk-app { padding:9px 10px; }
+  .dk-app:first-child { padding-left:0; }
+}
+
+/* ── A HEADING THE BAR ALREADY SAID ─────────────────────────────────────────
+ * The Algo page opened with a bar chip reading "Algo" and, forty pixels below
+ * it, an <h1> reading "Algo". The word twice in one glance is the clutter this
+ * redesign is about, and deleting the h1 outright would leave the document
+ * with no outline for a screen reader. So it is kept and not drawn.
+ * Not `display:none` — that removes it from the accessibility tree too, which
+ * is the one thing it is still there for. */
+.dk-sr { position:absolute; width:1px; height:1px; margin:-1px; padding:0;
+  overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+
 /* ── A DOOR ────────────────────────────────────────────────────────────────
  *
  * A card that opens a program. It carries a NAME, ONE line saying what the

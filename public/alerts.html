@@ -41,7 +41,9 @@ input[type=number], .risk input, .dest input, .calc-big { font-family:var(--mono
    of them lines up without being monospace. */
 body { font-variant-numeric:tabular-nums; }
 .wrap { max-width:900px; margin:0 auto; }
-.top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+/* .top went with the row it held — a heading, a back-link and a button, all
+   three now in or above the app bar. h1 keeps its rule because the heading
+   still exists; it is simply not drawn (see .dk-sr). */
 h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 /* The .home pill went with the "← all tools" link it dressed — the app bar
    above the heading is the way out now, and it names all four programs rather
@@ -564,10 +566,13 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
           style="margin-left:auto"
           title="high contrast, for reading the screen outdoors">☀</button>
 </nav>
-<!-- The heading stays, without the bolt. The bar says which PROGRAM you are
-     in; this says what the page is, and a document with no h1 is a document a
-     screen reader cannot outline. -->
-<div class="top"><h1>Algo</h1></div>
+<!-- The heading stays and is not drawn. The bar already says "Algo", forty
+     pixels above; the word twice in one glance is exactly the clutter this
+     page was full of. Deleting it would leave the document with no outline for
+     a screen reader, so it is kept and hidden — see .dk-sr in desk.css. The
+     status strip below is what the page is actually for, and it now starts at
+     the top of the screen. -->
+<h1 class="dk-sr">Algo</h1>
 <!-- ── THE STATE OF THE DESK, before anything else ──
      Six facts decide what this morning is: is it armed, has anything fired,
      is anything open, how much has been spent, when is the next decision, and

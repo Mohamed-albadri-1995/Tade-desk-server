@@ -196,6 +196,7 @@
     {
       "id": "QP",
       "name": "Chart & Backtest",
+      "short": "Chart",
       "port": 8765,
       "path": "/?v=4",
       "accent": "#a78bfa",
@@ -205,6 +206,7 @@
     {
       "id": "SCR",
       "name": "Screener Suite",
+      "short": "Screeners",
       "port": 3000,
       "path": "/",
       "accent": "#4a9eff",
@@ -216,6 +218,7 @@
     {
       "id": "JOURNAL",
       "name": "Journal",
+      "short": "Journal",
       "port": 3100,
       "path": "/",
       "accent": "#34d399",
@@ -225,6 +228,7 @@
     {
       "id": "ALERTS",
       "name": "Algo",
+      "short": "Algo",
       "port": 3090,
       "path": "/",
       "accent": "#fbbf24",
