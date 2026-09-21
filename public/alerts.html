@@ -40,7 +40,44 @@ input[type=number], .risk input, .dest input, .calc-big { font-family:var(--mono
 /* Tabular figures everywhere else digits appear in running text, so a column
    of them lines up without being monospace. */
 body { font-variant-numeric:tabular-nums; }
-.wrap { max-width:900px; margin:0 auto; }
+.wrap { max-width:1180px; margin:0 auto; }
+
+/* ══ THE SHELL ═════════════════════════════════════════════════════════════
+ *
+ * A column of section names down the left, the work to the right of it.
+ *
+ * WHY, on a page that already had tabs. A tab row is a control: you read it
+ * when you want to move. A rail is a PLACE — it is on screen the whole time,
+ * so "which part of the desk am I looking at" is answered without asking, and
+ * the six sections stop being a thing to remember and become a thing to see.
+ * On a 1400px screen the tab row was six words on an otherwise empty line and
+ * four hundred pixels of margin either side of the content.
+ *
+ * ONE NAVIGATION, NOT TWO. The rail's items ARE the tabs — same `.tb` class,
+ * same `data-t`, same click handler, same remembered state. A reference design
+ * this was built from had a sidebar AND a tab row showing the same six names,
+ * which is two controls that can disagree about where you are. Below 980px the
+ * rail goes and the tab row comes back: a 245px column on a phone is a
+ * hamburger that never gets opened.
+ */
+.al-shell { display:grid; grid-template-columns:200px minmax(0,1fr); gap:var(--s5); }
+.al-side { position:sticky; top:12px; align-self:start; display:flex;
+  flex-direction:column; gap:2px; }
+.al-side .tb { display:block; width:100%; text-align:left; padding:9px 12px;
+  border-bottom:none; border-radius:8px; min-height:36px; }
+/* The mark is a filled row, not an underline: an underline under a left-aligned
+   word in a vertical list reads as a link, not as where you are. */
+.al-side .tb.on { color:var(--text); background:var(--panel2);
+  box-shadow:inset 2px 0 0 var(--accent); }
+.al-side .tb:hover:not(.on) { background:var(--panel); color:var(--text); }
+.al-foot { margin-top:var(--s4); padding:var(--s3) 12px; border-top:1px solid var(--line);
+  font-size:var(--f-xs); color:var(--text3); line-height:1.6; }
+.al-foot b { display:block; color:var(--text2); font-weight:600; }
+/* Below this the rail is hidden and .tabs does the work it always did. */
+@media (max-width:980px) {
+  .al-shell { display:block; }
+  .al-side { display:none; }
+}
 /* .top went with the row it held — a heading, a back-link and a button, all
    three now in or above the app bar. h1 keeps its rule because the heading
    still exists; it is simply not drawn (see .dk-sr). */
@@ -56,9 +93,14 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 
 /* The noise controls. Deliberately at the top and stateful: an alerting page
    whose sound is off without saying so is worse than one with no sound. */
+/* A ROW, NOT A BOX. It was a panel with two large buttons in it, sitting above
+   the morning's alerts on the tab you open at 09:35 — the two settings you
+   touch once a month, given more weight than the thing you came for. Same
+   controls, same place, a third of the height: state still says itself out
+   loud, which is the only thing about this block that was load-bearing. */
 .noise { display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap;
-  padding:var(--s3) var(--s4); border:1px solid var(--line); border-radius:12px;
-  background:var(--panel); margin-bottom:var(--s3); }
+  margin-bottom:var(--s3); }
+.noise .btn { padding:6px 10px; min-height:30px; font-size:var(--f-xs); }
 /* 34px tall, because this is a phone and the alternative is missing. */
 .btn { font:600 var(--f-sm)/1 var(--ui); padding:10px 14px; border-radius:8px;
   cursor:pointer; background:var(--panel2); color:var(--text);
@@ -284,6 +326,16 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
     radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.45), transparent) right / 14px 100% no-repeat scroll,
     var(--bg2); }
 .tabs::-webkit-scrollbar { display:none }
+/* ── ONE NAVIGATION AT A TIME ──
+ * The tab row is the PHONE's copy of the rail. Two of them on one screen are
+ * two controls that can disagree about where you are — which is what the
+ * reference design this was built from had, a sidebar and a tab row showing
+ * the same six names.
+ * It sits HERE, after the rule it overrides, and not up beside .al-shell where
+ * it was written first: `display:none` in a media query loses to a plain
+ * `display:flex` further down the same stylesheet, and the row went on showing
+ * at 1400px looking exactly as intended to anyone reading the source. */
+@media (min-width:981px) { .tabs { display:none } }
 .tb { flex:0 0 auto; padding:10px 16px; font:600 var(--f-sm)/1 var(--ui);
   cursor:pointer; color:var(--text2); background:none; border:none;
   border-bottom:2px solid transparent; white-space:nowrap; min-height:38px }
@@ -587,6 +639,27 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      paragraph explaining what a rule is.
      Outside the tabs on purpose: it is true on every tab, so it should not
      disappear when you go to look at the rules. -->
+<div class="al-shell">
+
+<!-- ── THE SECTIONS, AS A PLACE RATHER THAN A CONTROL ──
+     Same buttons as the tab row below, same class, same data-t, same click
+     handler, same remembered tab — this is the tab row standing up, not a
+     second copy of it. On a phone it is hidden and the row does the work; over
+     980px the row is hidden and this does. Two of them on one screen would be
+     two controls that can disagree about where you are.
+     No icons beside the names: six glyphs to learn are six things between you
+     and six words you can already read, and an emoji font draws them
+     differently on every device. -->
+<aside class="al-side" aria-label="sections">
+  <button class="tb on" data-t="today">Today</button>
+  <button class="tb" data-t="history">History</button>
+  <button class="tb" data-t="setups">Setups</button>
+  <button class="tb" data-t="log">Log</button>
+  <button class="tb" data-t="rules">Rules</button>
+  <button class="tb" data-t="settings">Settings</button>
+</aside>
+
+<div class="al-main">
 <div class="strip" id="deskstrip" aria-label="desk status"></div>
 
 <!-- One line, and the reasoning behind a tap. Eight lines of prose above the
@@ -909,6 +982,9 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <div id="log-summary"></div>
 <div id="log-runs"></div>
 </div><!-- /log -->
+
+</div><!-- /al-main -->
+</div><!-- /al-shell -->
 
 </div>
 <script>
@@ -3121,12 +3197,20 @@ function showTab(name) {
   window.scrollTo(0, 0);
 }
 
-/* A count on the tab, so "6 fired" is visible from any other tab. */
+/*
+ * A count on the tab, so "6 fired" is visible from any other tab.
+ *
+ * ALL of them, not the first one. There are two navigations in the DOM — the
+ * rail for a wide screen and the row for a phone — and only one is ever
+ * visible. `querySelector` wrote the count onto whichever came first in the
+ * markup, so on a phone the badge was being painted onto a hidden rail and the
+ * row you were actually looking at said nothing had fired.
+ */
 function tabBadge(name, n) {
-  const b = document.querySelector(`.tb[data-t="${name}"]`);
-  if (!b) return;
-  const base = b.textContent.replace(/\s*\(\d+\)$/, '').trim();
-  b.innerHTML = n ? `${base} <span class="n">(${n})</span>` : base;
+  for (const b of document.querySelectorAll(`.tb[data-t="${name}"]`)) {
+    const base = b.textContent.replace(/\s*\(\d+\)$/, '').trim();
+    b.innerHTML = n ? `${base} <span class="n">(${n})</span>` : base;
+  }
 }
 
 /*

@@ -44,7 +44,15 @@ function paneOf(id) {
 }
 
 test('every tab button has a pane and every pane has a tab button', () => {
-  const tabs = [...markup.matchAll(/class="tb[^"]*" data-t="([a-z]+)"/g)].map(m => m[1]);
+  /*
+   * DEDUPED, because there are two navigations in the markup and only ever one
+   * on screen: the rail for a wide screen and the row for a phone. They are
+   * the same control in two shapes — same class, same data-t, same handler —
+   * and that the two lists MATCH is checked in alerts.shell.test.js, which is
+   * where the hazard of having two of them belongs.
+   */
+  const tabs = [...new Set(
+    [...markup.matchAll(/class="tb[^"]*" data-t="([a-z]+)"/g)].map(m => m[1]))];
   const panes = [...markup.matchAll(/<div class="pane" data-t="([a-z]+)"/g)].map(m => m[1]);
   expect(tabs).toEqual(['today', 'history', 'setups', 'log', 'rules', 'settings']);
   // A pane may appear more than once (two blocks of "today"); what must not
@@ -515,7 +523,19 @@ test('long explanations fold behind a why, from the shared script', () => {
 
 test('the tabs are the screener\'s underlines, not filled pills', () => {
   // A filled pill at 390px is a button competing with the buttons below it.
-  const at = html.indexOf('.tb {');
+  /*
+   * THE BASE `.tb` RULE, anchored at the start of its line. `indexOf('.tb {')`
+   * also matches inside `.al-side .tb {` — the same buttons wearing the rail's
+   * shape on a wide screen — and that rule is written first, so this was
+   * reading the wrong one and asking a vertical list to be underlined.
+   *
+   * The rail's mark is deliberately a filled row rather than an underline: an
+   * underline under a left-aligned word in a vertical list reads as a link,
+   * not as where you are. Different shape, same control, and the row's own
+   * shape is what this test is about.
+   */
+  const at = html.indexOf('\n.tb {');
+  expect(at).toBeGreaterThan(-1);
   const rule = html.slice(at, html.indexOf('}', at));
   expect(rule).toContain('border-bottom:2px solid transparent');
   expect(rule).toContain('background:none');
