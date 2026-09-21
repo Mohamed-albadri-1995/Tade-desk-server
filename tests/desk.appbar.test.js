@@ -143,15 +143,56 @@ describe('the bar is on every page, and says which one', () => {
     }
   });
 
-  test('the two pages behind the landing page render one', () => {
+  test('EVERY page renders one — no exceptions', () => {
     /*
-     * The landing page does not: there the doors ARE the bar, and a second
-     * copy of the same four names above them is one list too many.
+     * The landing page was the exception, on the argument that there the doors
+     * ARE the four programs so a bar above them is the same list twice. True,
+     * and it made the landing page the one screen where the bar was missing —
+     * so the one screen where the habit breaks. A control in the same place on
+     * five pages and absent on the sixth is not a control you can reach for
+     * without looking, and not looking is the whole point of it.
+     *
+     * Read from the DIRECTORY, not from a list written here: a page added next
+     * month is a page this test already covers, which is the only way a rule
+     * like "on every page" survives contact with a new file.
      */
-    for (const [name, src] of [['screeners.html', suite], ['alerts.html', alerts]]) {
-      expect({ name, bar: src.includes('id="deskbar"') }).toEqual({ name, bar: true });
+    const dir = path.join(__dirname, '..', 'public');
+    const pages = fs.readdirSync(dir).filter(f => f.endsWith('.html'));
+    expect(pages.length).toBeGreaterThanOrEqual(6);
+    for (const f of pages) {
+      const src = fs.readFileSync(path.join(dir, f), 'utf8');
+      expect({ f, bar: src.includes('id="deskbar"'), boots: /deskAppBar\(/.test(src),
+               js: src.includes('/desk.js') })
+        .toEqual({ f, bar: true, boots: true, js: true });
     }
-    expect(home).not.toContain('id="deskbar"');
+  });
+
+  test('the chart platform carries it too, from its own copy', () => {
+    /*
+     * qp is a separate program in a separate language on a separate port, and
+     * it was the one place on this desk with no way out: a chart, and the
+     * browser's back button.
+     */
+    const qp = read('quant-platform', 'chart', 'static', 'index.html');
+    expect(qp).toContain('id="deskbar"');
+    expect(qp).toContain("deskAppBar('QP', { self: false })");
+    expect(qp).toContain('src="/static/desk.js"');
+    // And it answers the registry itself rather than the page hardcoding four
+    // names that go stale the first time a program moves.
+    const server = read('quant-platform', 'chart', 'server.py');
+    expect(server).toContain("@app.get('/api/tools')");
+    expect(server).toContain("'tools.config.json'");
+  });
+
+  test('a page that cannot read the registry still draws a way out', () => {
+    // The bar is how you LEAVE a page. qp's route returns ok:false rather than
+    // raising, so a typo in a JSON file cannot take the exits off a chart.
+    const server = read('quant-platform', 'chart', 'server.py');
+    const fn = server.slice(server.indexOf('def tools_registry()'),
+                            server.indexOf('@app.post', server.indexOf('def tools_registry()')));
+    expect(fn).toContain('except Exception');
+    expect(fn).toContain("'ok': False");
+    expect(fn).not.toContain('raise');
   });
 
   test('each marks ITS OWN program, with the right idea of home', () => {
@@ -528,4 +569,76 @@ test('the landing page is on the design system, not a fifth palette', () => {
   expect(home).not.toContain(':root {');
   expect(home).not.toContain('--accent:#4a9eff');
   expect(home).toContain('id="sun-btn"');
+});
+
+/*
+ * A BAR, NOT A ROW OF LINKS UNDER A LINE.
+ *
+ * Four plain words over a hairline, with the current one UNDERLINED — which is
+ * how a link is drawn, so the thing saying "you are here" was wearing the one
+ * decoration that means "this goes somewhere else". And four unequal words
+ * floating on the page background do not read as one control; they read as
+ * four, which is the opposite of what a bar is for.
+ */
+describe('the bar looks like one control', () => {
+  const rule = (sel) => {
+    const at = css.indexOf(`\n${sel} {`);
+    expect({ sel, found: at >= 0 }).toEqual({ sel, found: true });
+    return css.slice(at, css.indexOf('}', at));
+  };
+
+  test('it is a surface, not four words on the page background', () => {
+    const bar = rule('.dk-bar');
+    expect(bar).toContain('background:var(--bg2)');
+    expect(bar).toContain('border-radius');
+    // The hairline it used to hang from is gone with it.
+    expect(bar).not.toContain('border-bottom:1px solid');
+  });
+
+  test('the current program is FILLED, not underlined', () => {
+    /*
+     * Filled against outlined is a difference you see before you have read
+     * anything. An underline two pixels tall is not, and it is the wrong
+     * signal besides.
+     */
+    const on = css.slice(css.indexOf('.dk-app.on {'));
+    expect(on).toContain('background:color-mix');
+    expect(on).not.toContain('border-bottom-color');
+  });
+
+  test('and it is filled in ITS OWN colour, from one rule', () => {
+    // color-mix over the program's accent: one rule for four programs, rather
+    // than four hand-mixed hexes that drift the first time a colour changes.
+    expect(css).toContain('var(--dk-accent, var(--accent)) 16%');
+  });
+
+  test('a browser without color-mix still marks something', () => {
+    /*
+     * AN ERROR IS NEVER A ZERO, in CSS too. The plain rule above the tinted
+     * one is what such a browser paints: still a filled pill, just not tinted.
+     * A bar that degrades to plain is fine; one that degrades to "nothing is
+     * marked" is a bar that has stopped answering its only question.
+     */
+    const first = css.indexOf('.dk-app.on {');
+    const plain = css.slice(first, css.indexOf('}', first));
+    expect(plain).toContain('background:var(--bg4)');
+    expect(plain).not.toContain('color-mix');
+  });
+});
+
+/*
+ * ONE IMPLEMENTATION OF SUNLIGHT.
+ *
+ * desk.js was extracted FROM the scanner page, and the scanner page kept its
+ * copy — two functions doing the same job, and the copy set the class on
+ * <body> only, so its palette landed one paint later than the shared one's.
+ */
+test('the scanner page no longer carries its own sunlight code', () => {
+  const scanner = read('public', 'index.html');
+  expect(scanner).toContain('src="/desk.js"');
+  expect(scanner).not.toContain('function toggleSunlight()');
+  expect(scanner).not.toContain('function restoreSunlight()');
+  // Its own layout still wins: desk.css gives every page a gutter and this
+  // page is full-bleed.
+  expect(scanner).toMatch(/body \{[^}]*margin: 0; padding: 0; \}/);
 });

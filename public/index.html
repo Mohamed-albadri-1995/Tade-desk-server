@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trade Desk</title>
+<!-- The shared design system and the app bar. Loaded BEFORE this page's own
+     <style>, so every rule below still wins on a tie — this page is where the
+     palette came from, and it keeps its own layout. -->
+<link rel="stylesheet" href="/desk.css">
+<script src="/desk.js"></script>
 <style>
 :root {
   --bg: #0d0f14;
@@ -111,7 +116,9 @@ body.sunlight .sig, body.sunlight .badge { font-weight: 700; }
 .mag-2 { color: var(--m-size-2); }
 .mag-3 { color: var(--m-size-3); font-weight: 700; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; min-height: 100vh; }
+/* margin/padding restated: desk.css gives every page a 14px gutter, and this
+   one is full-bleed — its header and tab strip run to the edge of the glass. */
+body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; min-height: 100vh; margin: 0; padding: 0; }
 
 /* ── HEADER ── */
 /* Wraps rather than overflowing: on a phone the buttons plus the check badge
@@ -1159,6 +1166,13 @@ body.sunlight .fold .fold > .fold-head { background: none; }
 </head>
 <body>
 
+<!-- The four programs, on every page of every one of them. Above the header
+     rather than inside it: the header switches which TOOL this is (T1…T11),
+     the bar switches which PROGRAM — two different questions, and putting the
+     second one in the same row as the first is how they get confused. -->
+<nav class="dk-bar" id="deskbar" aria-label="programs"
+     style="margin:12px 14px 0"></nav>
+
 <div class="header">
   <div class="tool-switch">
     <button class="tool-btn" id="tool-btn" onclick="toggleToolMenu(event)" aria-haspopup="true" aria-expanded="false">
@@ -2039,14 +2053,11 @@ function anExportCSV(register) {
 }
 
 
-// Sunlight mode. Applied before first paint further down the file, so the page
-// does not flash the dark palette on load when it is already switched on.
-function toggleSunlight() {
-  const on = document.body.classList.toggle('sunlight');
-  try { localStorage.setItem('sunlight', on ? '1' : '0'); } catch { /* private mode */ }
-  const b = document.getElementById('sun-btn');
-  if (b) { b.classList.toggle('on', on); b.title = on ? 'back to normal contrast' : 'high contrast, for reading the screen outdoors'; }
-}
+// Sunlight mode lives in /desk.js now — one implementation for six pages,
+// and it was extracted FROM this page, so the behaviour is the one this page
+// already had: on unless it was switched off. Its version also sets the class
+// on <html>, which this one did not, so the palette lands before <body> exists
+// instead of one paint later.
 
 function toggleScoreBreakdown(ticker) {
   const el = document.getElementById('sb-' + ticker);
@@ -7130,19 +7141,17 @@ loadOneil();
 loadGroups();
 loadF13();
 
-// Sunlight is ON unless it has been explicitly switched off. This tool is read
-// on a phone, outdoors, at the open — that is the normal case, not the
-// exception, so it is the default and the darker palette is the opt-out.
-// Runs at the end of the script, before the first data arrives, so the page
-// comes up readable rather than flashing the low-contrast palette first.
-(function restoreSunlight() {
-  let on = true;
-  try { on = localStorage.getItem('sunlight') !== '0'; } catch { /* private mode */ }
-  if (!on) return;
-  document.body.classList.add('sunlight');
-  const b = document.getElementById('sun-btn');
-  if (b) { b.classList.add('on'); b.title = 'back to normal contrast'; }
-})();
+// Sunlight is ON unless it has been explicitly switched off — this tool is
+// read on a phone, outdoors, at the open, so that is the normal case and the
+// darker palette is the opt-out. Restored by deskSunlight() in /desk.js, which
+// runs from <head> and so lands before the first paint rather than at the end
+// of this file, one paint later.
+
+/* The four programs, marked at SCR — this tool IS the screener suite, and its
+   own process serves the landing page, hence `self: true`. It also moves the
+   sunlight button into the bar, so the control is in the same corner here as
+   on every other page. */
+deskAppBar('SCR', { self: true });
 
 </script>
 </body>

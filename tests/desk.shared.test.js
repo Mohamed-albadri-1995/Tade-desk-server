@@ -30,3 +30,27 @@ test('and it is the real system, not a stub', () => {
     expect({ token: t, on: b.includes(t) }).toEqual({ token: t, on: true });
   }
 });
+
+/*
+ * AND THE SAME SCRIPT. qp now carries the app bar, so it needs deskAppBar and
+ * the two href builders — the same file, for the same reason the stylesheet is
+ * the same file: a second copy is a fork that nobody notices until the bar on
+ * one program starts pointing somewhere the others do not.
+ */
+const JS_A = path.join(__dirname, '..', 'public', 'desk.js');
+const JS_B = path.join(__dirname, '..', 'quant-platform', 'chart', 'static', 'desk.js');
+
+test('qp carries the same shared script, byte for byte', () => {
+  const a = fs.readFileSync(JS_A, 'utf8');
+  const b = fs.readFileSync(JS_B, 'utf8');
+  expect({ same: a === b, fix: a === b ? 'ok'
+    : 'run: cp public/desk.js quant-platform/chart/static/desk.js' })
+    .toEqual({ same: true, fix: 'ok' });
+});
+
+test('and it is the real script, not a stub', () => {
+  const b = fs.readFileSync(JS_B, 'utf8');
+  for (const t of ['function deskAppBar', 'function deskAppHref', 'function toggleSunlight']) {
+    expect({ fn: t, on: b.includes(t) }).toEqual({ fn: t, on: true });
+  }
+});

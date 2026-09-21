@@ -145,6 +145,29 @@ def health():
             **cs._feed_status()}
 
 
+@app.get('/api/tools')
+def tools_registry():
+    """The four programs on this box, so this page can carry the same app bar.
+
+    IT READS THE ONE REGISTRY, rather than the page hardcoding four names. qp
+    is a separate program on a separate port, and the alternative to this route
+    was a copy of the app list inside the chart page — which is a copy that
+    goes stale the first time a program moves, on the page least likely to be
+    the one you notice it from.
+
+    NEVER RAISES. The bar is how you LEAVE a page; a 500 here would take the
+    exits off a chart because a JSON file had a typo in it. The page already
+    draws a bar that says the list could not be read, which is the honest
+    answer and still gets you home.
+    """
+    try:
+        with open(_ROOT.parent / 'tools.config.json', encoding='utf-8') as fh:
+            reg = json.load(fh)
+        return {'ok': True, 'tools': reg.get('tools', []), 'apps': reg.get('apps', [])}
+    except Exception as exc:                                      # noqa: BLE001
+        return {'ok': False, 'error': str(exc), 'tools': [], 'apps': []}
+
+
 @app.post('/api/settings/default-feed')
 def set_default_feed(payload: dict = Body(...)):
     """Choose which feed everything defaults to.

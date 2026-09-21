@@ -358,23 +358,50 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
  * sidebar there is a hamburger that never gets opened; this bar is the same
  * shape on both, and scrolls rather than collapsing.
  */
-.dk-bar { display:flex; align-items:center; gap:var(--s3); margin:-4px 0 var(--s4);
-  padding-bottom:var(--s2); border-bottom:1px solid var(--border);
+/*
+ * A BAR, NOT A ROW OF LINKS UNDER A LINE.
+ *
+ * It was four plain words over a hairline, with the current one underlined —
+ * which is how a LINK is drawn, so the thing saying "you are here" was wearing
+ * the one decoration that means "this goes somewhere else". And four unequal
+ * words floating on the page background do not read as one control; they read
+ * as four, which is the opposite of what a bar is for.
+ *
+ * So: one surface, with the programs as pills inside it. The current one is
+ * FILLED, in its own accent — the same colour that program uses on every page
+ * of itself, so "where am I" is answered by a colour rather than by reading.
+ * Filled against outlined is a difference you see before you have read
+ * anything, which an underline two pixels tall is not.
+ */
+.dk-bar { display:flex; align-items:center; gap:var(--s2); margin:0 0 var(--s4);
+  padding:5px 6px; background:var(--bg2); border:1px solid var(--border);
+  border-radius:12px;
   overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .dk-bar::-webkit-scrollbar { display:none; }
-.dk-bar-home { flex:0 0 auto; font:700 var(--f-xs)/1 var(--ui); letter-spacing:.18em;
-  color:var(--text3); text-decoration:none; padding:8px 0; }
-.dk-bar-home:hover { color:var(--text2); }
+/* The wordmark is a door home and is not one of the four — it is set apart by
+   a divider rather than by being a fifth pill, because "Trade Desk" is not a
+   program and a pill would say it was. */
+.dk-bar-home { flex:0 0 auto; font:700 10px/1 var(--ui); letter-spacing:.2em;
+  color:var(--text3); text-decoration:none; padding:9px 10px 9px 8px;
+  border-right:1px solid var(--border); }
+.dk-bar-home:hover { color:var(--text); }
 .dk-bar-apps { display:flex; gap:2px; flex:1 1 auto; min-width:0; }
-.dk-app { flex:0 0 auto; font:600 var(--f-sm)/1 var(--ui); color:var(--text3);
-  text-decoration:none; padding:9px 12px; border-bottom:2px solid transparent;
-  white-space:nowrap; border-radius:6px 6px 0 0; }
-.dk-app:hover { color:var(--text); background:var(--bg2); }
-/* The current program. Its own accent, so "where am I" is answered by a colour
-   that means the same thing on every page of that program. */
-.dk-app.on { color:var(--text); border-bottom-color:var(--dk-accent, var(--accent)); }
+.dk-app { flex:0 0 auto; font:600 var(--f-sm)/1 var(--ui); color:var(--text2);
+  text-decoration:none; padding:9px 13px; border-radius:8px; white-space:nowrap; }
+.dk-app:hover { color:var(--text); background:var(--bg3); }
+/*
+ * color-mix gives one rule for four accents instead of four hand-mixed hexes
+ * that drift the first time a program changes colour. The fallback above it is
+ * what a browser without color-mix paints — still a filled pill, still legible,
+ * just not tinted: a bar that degrades to plain is fine, one that degrades to
+ * "nothing is marked" is not.
+ */
+.dk-app.on { color:var(--text); background:var(--bg4); }
+.dk-app.on { color:var(--dk-accent, var(--accent));
+  background:color-mix(in srgb, var(--dk-accent, var(--accent)) 16%, transparent);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--dk-accent, var(--accent)) 32%, transparent); }
 .dk-bar-end { flex:0 0 auto; margin-left:auto; display:flex; align-items:center;
-  gap:var(--s2); }
+  gap:var(--s2); padding-left:var(--s2); }
 
 /* ── ON A PHONE THE BAR WRAPS, it does not scroll ──
  *
@@ -389,14 +416,17 @@ details.why .why-body { font-size:var(--f-xs); color:var(--text2); line-height:1
  * there. So the names get a line of their own, and the wordmark and the button
  * keep theirs. */
 @media (max-width:640px) {
-  .dk-bar { flex-wrap:wrap; gap:0 var(--s3); overflow:visible; }
-  .dk-bar-home { order:1; }
+  .dk-bar { flex-wrap:wrap; gap:0; overflow:visible; padding:4px 6px; }
+  /* Row one is the wordmark and the button; row two is the four programs,
+     edge to edge, with a hairline between so the bar still reads as one
+     surface rather than two stacked strips. */
+  .dk-bar-home { order:1; border-right:none; padding-left:6px; }
   .dk-bar-end { order:2; }
-  .dk-bar-apps { order:3; flex:1 0 100%; gap:0;
+  .dk-bar-apps { order:3; flex:1 0 100%; gap:2px; margin-top:3px;
+    padding-top:4px; border-top:1px solid var(--border);
     overflow-x:auto; scrollbar-width:none; }
   .dk-bar-apps::-webkit-scrollbar { display:none; }
-  .dk-app { padding:9px 10px; }
-  .dk-app:first-child { padding-left:0; }
+  .dk-app { padding:9px 11px; }
 }
 
 /* ── A HEADING THE BAR ALREADY SAID ─────────────────────────────────────────

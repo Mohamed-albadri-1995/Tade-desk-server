@@ -14,31 +14,41 @@
    a size in it comes from /desk.css. */
 body { max-width:860px; margin:0 auto; padding:26px 16px 56px; }
 .head { display:flex; align-items:flex-start; gap:var(--s3); margin-bottom:var(--s5); }
-.logo { font:700 var(--f-xs)/1.6 var(--ui); letter-spacing:.28em; color:var(--text3); }
-.title { font-size:var(--f-xl); font-weight:700; letter-spacing:-.02em; margin:var(--s1) 0 0; }
-.head .dk-sun { margin-left:auto; flex:0 0 auto; }
+.title { font-size:var(--f-xl); font-weight:700; letter-spacing:-.02em; margin:0; }
 .note { margin-top:var(--s5); font-size:var(--f-xs); color:var(--text3); line-height:1.7; }
 .version { margin-top:var(--s2); font-size:10.5px; color:var(--text3); letter-spacing:.06em; }
 </style>
 </head>
 <body>
 
+<!-- THE BAR IS HERE TOO, and it was not.
+     The argument for leaving it off was that on this page the doors ARE the
+     four programs, so a bar above them is the same list twice. True, and it
+     made this the one page where the bar was missing — which means the one
+     page where the habit breaks. A control that is in the same place on five
+     pages and absent on the sixth is not a control you can rely on without
+     looking, and not looking is the entire point of it.
+     No program is marked: you are not in one yet. -->
+<nav class="dk-bar" id="deskbar" aria-label="programs">
+  <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
+          style="margin-left:auto"
+          title="high contrast, for reading the screen outdoors">☀</button>
+</nav>
+
 <div class="head">
   <div>
-    <div class="logo">TRADE DESK</div>
     <h1 class="title">What are you doing today?</h1>
   </div>
-  <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
-          title="high contrast, for reading the screen outdoors">☀</button>
 </div>
 
 <!-- The whole box, from one address. These are different programs with
      different jobs — charting and backtesting on one side, screening on the
      other — and they used to be two port numbers to remember.
 
-     NO APP BAR HERE. Every other page carries one so it is never a dead end;
-     on this page the doors ARE the bar, and a second copy of the same four
-     names above them is one list too many. -->
+     The doors and the bar above them are the same four names, and that is the
+     point: the bar is how you move once you are inside one, the doors are how
+     you choose when you are not. A door carries what the program is FOR; a
+     pill in a bar cannot. -->
 <div class="dk-doors" id="apps"></div>
 
 <div class="note">Four programs on one box. Each keeps its own data.</div>
@@ -119,6 +129,9 @@ async function start() {
   }
 }
 start();
+
+/* The bar, with NOTHING marked — you are not in a program yet. */
+deskAppBar(null, { self: true });
 </script>
 </body>
 </html>

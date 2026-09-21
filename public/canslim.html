@@ -33,8 +33,8 @@
 /* ── the why, folded away ──
  * Same pattern as the alerts page. The reasoning is worth keeping; printed at
  * the same weight as the data it is a wall, and a wall does not get read. */
-.crumb { align-self:flex-start; font-size:12px; color:var(--text2); text-decoration:none;
-  padding:6px 10px; margin:-34px 0 20px -8px; border-radius:6px; }
+.crumb { align-self:flex-start; font-size:12px; color:var(--text2);
+  text-decoration:none; padding:4px 0; margin:0 0 var(--s3); border-radius:6px; }
 .crumb:hover { color:var(--accent); background:var(--bg2); }
 .logo { font-size:13px; letter-spacing:.28em; color:var(--accent); font-weight:700; }
 .title { font-size:var(--f-xl); font-weight:700; margin:var(--s3) 0 var(--s1);
@@ -383,10 +383,16 @@
 </style>
 </head>
 <body>
+<!-- The four programs, on every page of every one of them — see .dk-bar in
+     /desk.css. The crumb below it is a different question: the bar says WHICH
+     PROGRAM, the crumb says UP ONE LEVEL inside it, and this page is two
+     levels down. -->
+<nav class="dk-bar" id="deskbar" aria-label="programs">
+  <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
+          style="margin-left:auto"
+          title="high contrast, for reading the screen outdoors">☀</button>
+</nav>
 <a class="crumb" href="/screeners">&larr; Screener Suite</a>
-<button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
-        style="position:absolute;top:14px;right:14px"
-        title="high contrast, for reading the screen outdoors">☀</button>
 <div class="logo">CANSLIM</div>
 <div class="title">The growth list</div>
 <div class="subtitle">Who is a growth company, decided once a day on earnings and
@@ -463,6 +469,10 @@ async function load() {
   }
 }
 load();
+
+/* The four programs, marked at SCR: these pages are the suite, two levels
+   down. `self: true` — same process as the landing page. */
+deskAppBar('SCR', { self: true });
 </script>
 </body>
 </html>

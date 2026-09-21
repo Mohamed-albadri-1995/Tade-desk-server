@@ -19,6 +19,47 @@ const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/scri
   .map(m => m[1]);
 if (!scripts.length) { console.log('  FAIL no inline script found'); process.exit(1); }
 
+/*
+ * THE SCRIPTS THE PAGE LOADS BY src, FIRST — in the order the browser runs
+ * them, which is the order they appear in the markup and before the inline
+ * block that calls into them.
+ *
+ * This read the inline block ALONE, which was right while the page had no
+ * dependencies of its own. It now loads /static/desk.js for the app bar, and
+ * the harness reported `deskAppBar is not defined` for a page that works
+ * perfectly in a browser — a failure of the model, not of the page.
+ *
+ * The opposite mistake is the one worth guarding: had the harness quietly
+ * ignored the missing name instead, the ONE bug class this file exists to
+ * catch — an identifier that is not there at click time — would have been
+ * switched off for every name the page gets from a shared file.
+ *
+ * Only this repository's own local files are loaded. A vendored bundle is not
+ * one of them: lightweight-charts.js is 160KB of minified library that reaches
+ * for `navigator` at its top level, and it is already stubbed below to exactly
+ * the calls the page makes. Evaluating it would be testing somebody else's
+ * code against a DOM this file has no intention of building.
+ */
+const STUBBED = ['lightweight-charts.js'];
+const loaded = [...html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)]
+  .map(m => m[1])
+  .filter(src => src.startsWith('/static/')
+                 && !STUBBED.some(name => src.endsWith(name)))
+  .map((src) => {
+    const file = path.join(__dirname, '..', 'static', src.replace('/static/', ''));
+    /*
+     * A MISSING FILE IS A FAILURE, not a file to skip. The page asks the
+     * browser for it by name; if it is not on disk the page is broken in
+     * production and silently "fine" here — which is the shape of every bug
+     * this harness exists to catch.
+     */
+    if (!fs.existsSync(file)) {
+      console.log(`  FAIL the page loads ${src}, which is not in static/`);
+      process.exit(1);
+    }
+    return fs.readFileSync(file, 'utf8');
+  });
+
 let PASS = 0, FAIL = 0;
 const ok = (name, cond, extra) => {
   if (cond) { PASS++; console.log('  ok   ' + name); }
@@ -113,7 +154,7 @@ console.log('='.repeat(64));
 console.log('index.html evaluates and its click handlers RUN (no ReferenceError)');
 console.log('='.repeat(64));
 try {
-  vm.runInContext(scripts.join('\n;\n'), ctx, { filename: 'index.html' });
+  vm.runInContext(loaded.concat(scripts).join('\n;\n'), ctx, { filename: 'index.html' });
   ok('the page script evaluates end to end', true);
 } catch (e) {
   ok('the page script evaluates end to end', false, e.message);

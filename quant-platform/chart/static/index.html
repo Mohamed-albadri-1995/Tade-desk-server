@@ -9,6 +9,10 @@
 <title>qp — live charting platform</title>
 <script src="/static/lightweight-charts.js"></script>
 <link rel="stylesheet" href="/static/desk.css">
+<!-- The app bar and sunlight mode, the same file every other page loads. qp is
+     a separate program on a separate port, so it gets its own copy — byte for
+     byte, and a test in the screener repo fails if the two ever drift. -->
+<script src="/static/desk.js"></script>
 <style>
 /* ── qp's own shell, on the desk's tokens ────────────────────────────────
  *
@@ -512,6 +516,20 @@
 </style>
 </head>
 <body>
+
+<!-- ── THE FOUR PROGRAMS ──
+     qp was the one place on this desk with no way out of it: a chart, and the
+     browser's back button. The bar names all four and marks this one, and it
+     reads the SAME tools.config.json the others do — through /api/tools, which
+     this server answers rather than the page hardcoding a list that goes stale
+     the first time a program moves.
+     It also carries the sunlight toggle, which this page never had at all. -->
+<nav class="dk-bar" id="deskbar" aria-label="programs" style="margin:10px 12px 0">
+  <button class="dk-sun" id="sun-btn" onclick="toggleSunlight()"
+          style="margin-left:auto"
+          title="high contrast, for reading the screen outdoors">☀</button>
+</nav>
+
 <!-- ── WHAT STAYS WITHIN REACH ──
      Which symbol, what timeframe, is it live, and the way into everything else.
      The old header was ONE horizontally-scrolling row of twelve controls: on a
@@ -3580,6 +3598,10 @@ document.getElementById('printR1Btn').onclick = async () => {
     setTimeout(() => { b.textContent = was; b.disabled = false; }, 4000);
   };
 };
+
+/* The four programs, marked at QP. `self: false` — this is its own program
+   on its own port, so "/" here is this page and home is the suite's address. */
+deskAppBar('QP', { self: false });
 </script>
 </body>
 </html>
