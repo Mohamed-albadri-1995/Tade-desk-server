@@ -51,69 +51,59 @@ def ok(name, cond, extra=''):
 BUDGET_MS = 18000          # DECIDE_TIMEOUT_MS in src/setups/qpClient.js
 MEASURED_CARDS = 47
 
-# ONE SYMBOL'S LATENCY, not the throughput per symbol.
+# WHAT WAS MEASURED, not a model of it.
 #
-# 12114ms / 47 = 258ms is what each symbol COST on average, and it is the wrong
-# number to build on: the symbols run side by side, so the wall clock is how
-# many WAVES the list divides into times how long ONE symbol takes. Dividing by
-# the count silently assumes they ran one after another.
+# A waves model was built here first — (cards / workers) x (one symbol) — and
+# it predicted that tripling the workers would cut 12.1s to 4s. The box said
+# otherwise, three runs each, and the model was discarded:
 #
-# Derived from the measurement rather than guessed: 47 cards at 8 workers is 6
-# waves, and 12114 / 6 = 2019ms. Confirmed against a second, independent run —
-# 30 symbols at 8 workers took 7825ms, which is 4 waves at 1956ms. Two
-# different lists, two different days' worth of caching, the same ~2s.
-ONE_SYMBOL_MS = 2019
+#     8 workers, 47 cards     12114ms
+#     24 workers, 47 cards    14422, 15941, 14293ms
+#
+# MORE THREADS WAS SLOWER. %CPU during a decision is 106.7 — one core, pinned —
+# so the cost is the maths and the GIL, not the network the module comment
+# claims. Threads cannot beat one core on that, and past a handful they only
+# add context switching.
+#
+# So this file no longer predicts. It holds the numbers that were observed and
+# fails if the setting drifts away from the best one measured.
+MEASURED = {8: 12114, 24: 14422}
+BEST_WORKERS = 8
 
 
 print('\n── the measured cost, against the budget it has to fit ────────────')
 
-# A WAVE COSTS WHAT ONE SYMBOL COSTS, because the symbols in it run side by
-# side and the time is spent waiting on the network, not on a core. So the
-# whole decision is (number of waves) x (one symbol), and the only lever is how
-# few waves the list divides into.
-def cost_ms(cards, workers):
-    waves = -(-cards // workers)                   # ceil
-    return waves * ONE_SYMBOL_MS, waves
+ok('the worker count is the best one measured',
+   D._WORKERS == BEST_WORKERS,
+   f'{D._WORKERS} — measured: ' + ', '.join(
+       f'{w}->{ms}ms' for w, ms in sorted(MEASURED.items())))
 
+ok('and raising it was tried and was WORSE',
+   MEASURED[24] > MEASURED[8],
+   'threads cannot beat one core on CPU-bound work')
 
-est_ms, waves = cost_ms(MEASURED_CARDS, D._WORKERS)
+print('\n── the cost is still over budget once the list is cold ────────────')
 
-ok('the day it failed would now fit in one third of the budget',
-   est_ms < BUDGET_MS / 3,
-   f'{MEASURED_CARDS} cards -> {waves} wave(s) ~ {est_ms:.0f}ms of {BUDGET_MS}')
+# THIS IS NOT FIXED, and the test says so rather than pretending. 12.1s of an
+# 18s budget is a 1.5x margin, measured warm, mid-session, with nothing else
+# deciding. At 09:34 the list is cold, yahoo is at its busiest, and Test is
+# deciding in the same minute on the same one core.
+ok('47 cards still costs most of the budget',
+   MEASURED[8] > BUDGET_MS * 0.6,
+   f'{MEASURED[8]}ms of {BUDGET_MS}ms — a 1.5x margin on a deadline that '
+   f'costs a whole session when missed')
 
-print('\n── and it has to survive the list GROWING ─────────────────────────')
+print('\n── and it is CPU, so threads are not the lever ───────────────────')
 
-# The card count is whatever the screener found. 47 was not a ceiling.
-for cards in (30, 47, 60, 96):
-    est, w = cost_ms(cards, D._WORKERS)
-    ok(f'{cards:>3} cards fit inside the budget',
-       est < BUDGET_MS,
-       f'{w} wave(s) ~ {est:.0f}ms')
-
-print('\n── eight workers is what lost the session ─────────────────────────')
-
-# THE MODEL IS CHECKED AGAINST THE MEASUREMENT, not just used. If (waves x
-# one symbol) does not reproduce the 12114ms actually seen on the box, the
-# arithmetic every other line here rests on is wrong.
-old_est, old_waves = cost_ms(MEASURED_CARDS, 8)
-ok('the model reproduces the 12.1s that was measured at 8 workers',
-   abs(old_est - 12114) < 500,
-   f'8 workers -> {old_waves} waves ~ {old_est:.0f}ms vs measured 12114ms')
-ok('...which was over the budget once the list was cold',
-   old_est > BUDGET_MS * 0.6, f'{old_est:.0f}ms of {BUDGET_MS}ms')
-
-ok('and the new setting is strictly faster', D._WORKERS > 8)
-
-
-print('\n── but not so many that the feed is asked to flood ────────────────')
-
-# Each worker holds a yahoo request. Forty-seven at once invites the rate
-# limiting that makes the NEXT decision slower — the opposite of the fix.
-ok('workers stay below one-per-card for a normal list',
-   D._WORKERS < MEASURED_CARDS,
-   str(D._WORKERS))
-ok('and below fifty in any case', D._WORKERS <= 48, str(D._WORKERS))
+# %CPU 106.7 during a decision: one core, pinned. numpy and pandas release the
+# GIL for parts of their work, which is why it is a little over 100 rather than
+# a lot — but it is nowhere near the 800% that eight genuinely parallel workers
+# would show. Anything that spends its time in Python cannot be made faster by
+# adding threads to it.
+ok('the pool stays small, because the work is not I/O',
+   D._WORKERS <= 8,
+   f'{D._WORKERS} — raising it was measured at {MEASURED[24]}ms vs '
+   f'{MEASURED[8]}ms')
 
 
 print('\n── the pool never opens more threads than there is work ───────────')

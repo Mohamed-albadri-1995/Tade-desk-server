@@ -48,49 +48,33 @@ _ET = 'America/New_York'
 # maths. Both strategies for one symbol run in the same worker so the second
 # hits the parquet cache the first just filled instead of fetching twice.
 #
-# ── WHY 24 AND NOT 8, measured on the box 2026-09-21 ──────────────────────
+# ── WHY 8 AND NOT MORE, measured on the box 2026-09-21 ───────────────────
 #
-# Eight lost a session. `OR + VWAP 09:35` failed EVERY attempt that day —
-# 09:25, 09:34, 09:39, 09:43 — each one "timeout of 18000ms exceeded", and a
-# clock setup decides on one bar, so there is no later attempt. The desk had
-# been calling it an intermittent fault for weeks.
+# THE COMMENT ABOVE IS WRONG, and it sent a day's debugging the wrong way.
+# The time does NOT go on the network. Measured during a real decision:
 #
-# Nothing was broken. Everything was just slightly too slow:
-#
-#     qp at rest              0% CPU, /api/health in 3ms
+#     %CPU while deciding     106.7      <- one core, pinned
+#     qp at rest              0% CPU
 #     yahoo, one symbol       26ms
-#     alerts -> qp            14ms
 #     manage, one symbol      18ms
-#     decide, 47 real cards   12114ms   <-- against an 18000ms budget
 #
-# ONE SYMBOL TAKES ABOUT TWO SECONDS, and they run side by side — so the wall
-# clock is (how many waves the list divides into) x (one symbol), not the sum.
-# 47 cards over eight workers is SIX waves: 6 x 2019ms = 12114ms, which is the
-# number measured. A second run agrees — 30 symbols is 4 waves, 4 x 1956ms =
-# 7825ms, also measured.
+# It is the MATHS, and Python's GIL means threads cannot exceed about one core
+# on it. So concurrency past a handful buys nothing and costs context
+# switching. Raising this to 24 was tried and made it measurably WORSE, three
+# runs each:
 #
-# Dividing 12114 by 47 gives 258ms and is the wrong number to reason from: it
-# is the throughput per symbol and it quietly assumes they ran one at a time.
-# Building on it says 47 cards cost 1.5s, which would leave this bug invisible.
+#     8 workers, 47 cards     12114ms
+#     24 workers, 47 cards    14422 / 15941 / 14293ms
 #
-# Mid-session, with every name already cached by the scanner, 12.1s fits inside
-# the budget. At 09:34 the list is cold — the first fetch of the day for all 47
-# — and it does not.
+# Eight stays because it is the best of the measured settings, not because the
+# reasoning above it was right. The few hundred ms of real yahoo wait per
+# symbol is the only part threads help with.
 #
-# A 1.5x margin on a deadline that costs a whole trading day when missed is not
-# a margin. Twenty-four makes it two waves, about 4s, and leaves room for the
-# list to grow: the card count is whatever the screener found that morning, and
-# nothing caps it. It was 30 on 2026-09-17, when this last worked.
-#
-# Why not one wave of 47: these threads each hold a yahoo request, and forty-
-# seven at once invites the rate limiting that would make the next decision
-# slower, not faster. Two waves is the compromise that buys 4x headroom without
-# asking the feed for anything it has not already shown it can serve.
-#
-# The retry is worth keeping now. Two attempts of 18s were both doomed while
-# one attempt cost 12s; at 4s a second go is what it was always meant to be —
-# cover for a blip, inside the same minute.
-_WORKERS = 24
+# THE ACTUAL PROBLEM IS UNSOLVED. 47 cards cost 12.1s against an 18s budget,
+# and at 09:34 — cold, at the open, with Test deciding in the same minute on
+# the same one core — it goes over and the setup loses the day. Fixing it means
+# less work per symbol, fewer symbols, or more cores. Not more threads.
+_WORKERS = 8
 
 
 def _hhmm(ts_seconds: int) -> str:
