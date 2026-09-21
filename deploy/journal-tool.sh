@@ -528,6 +528,59 @@ curl -sS "localhost:$PORT/api/trading/setups" \
 echo -n 'patch injected into / : '
 curl -sS "localhost:$PORT/" | grep -c '_patch.js' || true
 
+# ── AND THE APP BAR, WHICH THIS SCRIPT NOW SERVES ─────────────────────────
+#
+# Three routes were added for it — the sliced stylesheet, the shared script and
+# the registry — and none of them was checked. A deploy that reports success
+# without testing the thing it just added is the trap this file warns about at
+# the top, and it caught nobody because nothing looked.
+#
+# Each one can fail on its own and each fails invisibly: no stylesheet is an
+# unstyled row of four links, no script is no bar at all, no registry is a bar
+# saying "app list unreadable". So they are asked for by name, and the
+# stylesheet is checked for CONTENT rather than for a 200 — deskbarCss()
+# returns the empty string, with a 200, when it cannot find its markers.
+echo -n 'app bar stylesheet   : '
+_css=$(curl -sS "localhost:$PORT/deskbar.css" 2>/dev/null || true)
+if printf '%s' "$_css" | grep -q '\.dk-app'; then
+  echo "yes — $(printf '%s' "$_css" | wc -c) bytes, scoped to the bar"
+elif [ -z "$_css" ]; then
+  echo 'NO — empty. The DESKBAR markers in public/desk.css have moved;'
+  echo '                       the bar will render unstyled. See deskbarCss.'
+else
+  echo 'NO — served something without .dk-app in it'
+fi
+
+echo -n 'app bar script       : '
+# One request, not two. Printing the status code beside this added nothing —
+# a 200 serving the wrong file passes it, and the body check below catches
+# that and every other way it can be wrong.
+_js=$(curl -sS "localhost:$PORT/desk.js" 2>/dev/null || true)
+if printf '%s' "$_js" | grep -q 'function deskAppBar'; then
+  echo "yes — $(printf '%s' "$_js" | wc -c) bytes, deskAppBar present"
+else
+  echo 'NO — DESK_REPO is wrong, or public/desk.js has moved.'
+fi
+
+# Captured first, then parsed — the same shape as the two checks above. A
+# curl piped straight into a multi-line `python3 -c` puts the guard several
+# lines away from the command it guards, which is unreadable and was wrong
+# once already.
+_reg=$(curl -sS "localhost:$PORT/api/tools" 2>/dev/null || true)
+echo -n 'app bar programs     : '
+printf '%s' "$_reg" | python3 -c 'import json,sys
+try:
+    apps = (json.load(sys.stdin) or {}).get("apps") or []
+except Exception:
+    apps = None
+if apps is None:
+    print("? — the registry did not answer with JSON")
+elif not apps:
+    print("NONE — the bar will say the app list is unreadable")
+else:
+    print(", ".join(a.get("short") or a.get("name") or "?" for a in apps))' \
+  || echo '? (could not read the registry)'
+
 # ── AND THE CALENDAR FIX, CHECKED IN THE PAGE THAT IS SERVED ──────────────
 #
 # "patch injected into / : 1" answered 1 on a page with the calendar bug still

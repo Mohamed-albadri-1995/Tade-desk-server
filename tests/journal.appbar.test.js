@@ -199,3 +199,88 @@ describe('what the patch does on the page', () => {
     expect(start).toBeLessThan(patch.indexOf('fixDashboardLink();', start));
   });
 });
+
+/*
+ * A DEPLOY THAT DOES NOT CHECK ITS OWN WORK.
+ *
+ * This script added three routes for the bar — the sliced stylesheet, the
+ * shared script, the registry — and verified none of them. It printed three
+ * green 200s for the trades API, the patch tag and the calendar, said nothing
+ * about the bar, and reported a clean deploy. The file's own header warns
+ * about exactly this shape ("a deploy script that only takes effect on the
+ * NEXT deploy is a trap with no floor") and it caught nobody, because nothing
+ * looked.
+ *
+ * Each route fails differently and all three fail invisibly:
+ *
+ *     no stylesheet   an unstyled row of four links
+ *     no script       no bar at all
+ *     no registry     a bar reading "app list unreadable"
+ */
+describe('the deploy checks the bar it just installed', () => {
+  test('it asks for all three routes by name', () => {
+    for (const route of ['/deskbar.css', '/desk.js', '/api/tools']) {
+      expect({ route, checked: sh.includes(`localhost:$PORT${route}`) })
+        .toEqual({ route, checked: true });
+    }
+  });
+
+  test('the stylesheet is checked for CONTENT, not for a 200', () => {
+    /*
+     * deskbarCss() returns the empty string — with a 200 — when its markers
+     * have moved. A status check would pass on the exact failure it exists to
+     * catch, which is the same fault the calendar check was written to fix:
+     * "a verification that cannot fail is not one".
+     */
+    const block = sh.slice(sh.indexOf("echo -n 'app bar stylesheet"),
+                           sh.indexOf("echo -n 'app bar script"));
+    expect(block).toContain('.dk-app');
+    expect(block).toContain('-z "$_css"');
+    // …and it says which of the two went wrong, not just that something did.
+    expect(block).toContain('DESKBAR markers');
+  });
+
+  test('the script is checked for the function, not for bytes', () => {
+    const block = sh.slice(sh.indexOf("echo -n 'app bar script"),
+                           sh.indexOf("echo -n 'app bar programs"));
+    expect(block).toContain('function deskAppBar');
+    expect(block).toContain('DESK_REPO is wrong');
+  });
+
+  test('the registry check names the programs it found', () => {
+    // "ok" proves nothing here — an empty apps list is a 200 with ok:true.
+    const block = sh.slice(sh.indexOf("echo -n 'app bar programs"),
+                           sh.indexOf('# ── AND THE CALENDAR FIX'));
+    expect(block).toContain('apps');
+    expect(block).toContain('NONE');
+  });
+
+  test('none of it can fail the deploy', () => {
+    /*
+     * The journal is already running by this point; these are reports, not
+     * gates. A `set -e` script that exits on a failed curl would leave a
+     * working journal looking like a failed deploy.
+     */
+    const block = sh.slice(sh.indexOf("echo -n 'app bar stylesheet"),
+                           sh.indexOf('# ── AND THE CALENDAR FIX'));
+    /*
+     * STATEMENTS, NOT LINES. A `||` guard sits at the end of the whole
+     * pipeline, which may be three backslash-continued lines below the curl
+     * that starts it — reading line by line reports a guarded command as
+     * unguarded, which is a test that fails on correct code.
+     */
+    const statements = block
+      .replace(/\\\n\s*/g, ' ')            // join continuations
+      .split('\n')
+      // `curl` ANYWHERE in the statement, because half of these are
+      // `_x=$(curl …)` and a filter anchored at the start silently checks only
+      // the others — but NOT in a comment, which is prose about a command and
+      // not a command.
+      .filter(l => /\bcurl\b/.test(l) && !l.trim().startsWith('#'));
+    expect(statements.length).toBeGreaterThanOrEqual(3);
+    for (const c of statements) {
+      expect({ c: c.trim().slice(0, 48), guarded: /\|\|/.test(c) })
+        .toEqual({ c: c.trim().slice(0, 48), guarded: true });
+    }
+  });
+});
