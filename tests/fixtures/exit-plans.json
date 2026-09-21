@@ -46,8 +46,8 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 2 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "the stops on all 2 legs follow an indicator \u2014 the BOX follows them and closes on a breach; the broker only holds the levels it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
+            "that following happens HERE, not at the broker \u2014 if the box is not running, the position keeps only the level the broker was given at entry",
             "10% is a runner with no target \u2014 it rides the stop until the end-of-session close"
           ]
         },
@@ -86,8 +86,8 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 2 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "the stops on all 2 legs follow an indicator \u2014 the BOX follows them and closes on a breach; the broker only holds the levels it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
+            "that following happens HERE, not at the broker \u2014 if the box is not running, the position keeps only the level the broker was given at entry",
             "10% is a runner with no target \u2014 it rides the stop until the end-of-session close"
           ]
         }
@@ -337,7 +337,7 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "the stop follows an indicator \u2014 the BOX follows it and closes on a breach; the broker only holds the level it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         },
@@ -369,7 +369,7 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "the stop follows an indicator \u2014 the BOX follows it and closes on a breach; the broker only holds the level it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         }
@@ -570,10 +570,8 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 2 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 3 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 3 target follows an indicator \u2014 it cannot rest at a broker, so that part rides the stop",
+            "the stops on all 3 legs follow an indicator \u2014 the BOX follows them and closes on a breach; the broker only holds the levels it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
+            "the target follows an indicator and cannot rest at a broker, so that part rides the stop",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         },
@@ -621,10 +619,8 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 2 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 3 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 3 target follows an indicator \u2014 it cannot rest at a broker, so that part rides the stop",
+            "the stops on all 3 legs follow an indicator \u2014 the BOX follows them and closes on a breach; the broker only holds the levels it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
+            "the target follows an indicator and cannot rest at a broker, so that part rides the stop",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         }
@@ -683,10 +679,8 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 2 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 3 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 3 target follows an indicator \u2014 it cannot rest at a broker, so that part rides the stop",
+            "the stops on all 3 legs follow an indicator \u2014 the BOX follows them and closes on a breach; the broker only holds the levels it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
+            "the target follows an indicator and cannot rest at a broker, so that part rides the stop",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         },
@@ -734,10 +728,8 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 2 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 3 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 3 target follows an indicator \u2014 it cannot rest at a broker, so that part rides the stop",
+            "the stops on all 3 legs follow an indicator \u2014 the BOX follows them and closes on a breach; the broker only holds the levels it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
+            "the target follows an indicator and cannot rest at a broker, so that part rides the stop",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         }
@@ -778,7 +770,7 @@
           "stop_kind": "fixed",
           "trail": null,
           "warnings": [
-            "leg 1 target follows an indicator \u2014 it cannot rest at a broker, so that part rides the stop",
+            "the target follows an indicator and cannot rest at a broker, so that part rides the stop",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it",
             "50% is a runner with no target \u2014 it rides the stop until the end-of-session close"
           ]
@@ -809,7 +801,7 @@
           "stop_kind": "fixed",
           "trail": null,
           "warnings": [
-            "leg 1 target follows an indicator \u2014 it cannot rest at a broker, so that part rides the stop",
+            "the target follows an indicator and cannot rest at a broker, so that part rides the stop",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it",
             "50% is a runner with no target \u2014 it rides the stop until the end-of-session close"
           ]
@@ -851,8 +843,8 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 1 target follows an indicator \u2014 it cannot rest at a broker, so that part rides the stop",
+            "the stop follows an indicator \u2014 the BOX follows it and closes on a breach; the broker only holds the level it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
+            "the target follows an indicator and cannot rest at a broker, so that part rides the stop",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         },
@@ -882,8 +874,8 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
-            "leg 1 target follows an indicator \u2014 it cannot rest at a broker, so that part rides the stop",
+            "the stop follows an indicator \u2014 the BOX follows it and closes on a breach; the broker only holds the level it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
+            "the target follows an indicator and cannot rest at a broker, so that part rides the stop",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         }
@@ -924,7 +916,7 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "the stop follows an indicator \u2014 the BOX follows it and closes on a breach; the broker only holds the level it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it",
             "50% is a runner with no target \u2014 it rides the stop until the end-of-session close"
           ]
@@ -955,7 +947,7 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "the stop follows an indicator \u2014 the BOX follows it and closes on a breach; the broker only holds the level it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it",
             "50% is a runner with no target \u2014 it rides the stop until the end-of-session close"
           ]
@@ -1001,7 +993,7 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "the stop follows an indicator \u2014 the BOX follows it and closes on a breach; the broker only holds the level it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         },
@@ -1033,7 +1025,7 @@
           "stop_kind": "anchored",
           "trail": null,
           "warnings": [
-            "leg 1 stop follows an indicator \u2014 it goes out as a fixed level and will not trail",
+            "the stop follows an indicator \u2014 the BOX follows it and closes on a breach; the broker only holds the level it was given at entry. It fills at the NEXT bar rather than at the level, so it gives up more than the backtest assumed, and far more on a gap",
             "this strategy also leaves on a RULE. No broker can watch for that, so the box closes the position itself \u2014 if the box is not running, the position is not managed and only the stop is protecting it"
           ]
         }

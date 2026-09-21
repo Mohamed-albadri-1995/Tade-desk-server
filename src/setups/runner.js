@@ -273,8 +273,26 @@ function borrowNote(o) {
  *
  * A stop that follows an indicator — the 9 EMA, session VWAP — is wherever that
  * line sits on each bar. No broker-side trailing stop can follow it, so what
- * goes out is the frozen level and the trade needs managing by hand. Saying so
- * on the alert is the difference between knowing that and finding out.
+ * goes out is the frozen level.
+ *
+ * WHAT THIS USED TO SAY, AND WHY IT WAS WRONG: "the stop trails an indicator —
+ * sent as a fixed level, so it will NOT follow. Manage it yourself."
+ *
+ * The box follows it. src/setups/manager.js closes the position when
+ * `breached && stop_kind === 'anchored'`, on every bar, and its own header
+ * names this exact case as the reason it was written: "Test has a stop that
+ * MOVES and RATCHETS — up with the lower VWAP band, never down. A broker is
+ * handed one price. Neither can be sent. Both can be watched. This is the
+ * watching." qp agrees — manage.py returns `managed` for an unfrozen anchored
+ * stop. So the alert was telling a person to take the wheel from a machine
+ * that was already steering, which is the one instruction here that could make
+ * things worse rather than better.
+ *
+ * The true cost is the one manage.py states: a synthetic stop fills at the
+ * NEXT OBSERVATION, not at the level. The backtest fills a within-bar touch AT
+ * the stop; this side cannot see inside a bar. That is a measurable gap
+ * between live and tested on every trade — which is a number to watch, not a
+ * reason to intervene.
  */
 function unmanagedLine(plan) {
   if (!plan) return '';
@@ -293,8 +311,9 @@ function unmanagedLine(plan) {
       + 'the position itself; the broker only holds the stop and the targets');
   }
   if (plan.stop_anchored) {
-    notes.push('the stop trails an indicator — sent as a fixed level, so it will '
-      + 'NOT follow. Manage it yourself');
+    notes.push('the stop follows an indicator — the box follows it and closes on '
+      + 'a breach; the broker holds only the level below. It fills on the NEXT '
+      + 'bar, not at the level, so expect worse than the backtest on a gap');
   }
   if (plan.breakeven_after_leg) {
     notes.push('moves to breakeven after the first leg — the broker will not do '

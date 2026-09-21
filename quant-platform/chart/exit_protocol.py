@@ -266,13 +266,7 @@ def validate(protocol: dict) -> dict:
     for i, leg in enumerate(legs, 1):
         if leg.get('sl_kind') == 'none':
             errors.append(f'leg {i} has no stop — it cannot be sized or ranked')
-        elif leg.get('sl_kind') == 'anchored':
-            warnings.append(f'leg {i} stop follows an indicator — it goes out as a '
-                            'fixed level and will not trail')
-        if leg.get('tp_kind') == 'anchored':
-            warnings.append(f'leg {i} target follows an indicator — it cannot rest '
-                            'at a broker, so that part rides the stop')
-        elif leg.get('tp_kind') == 'none':
+        if leg.get('tp_kind') == 'none':
             errors.append(f'leg {i} has no target and is not the runner')
         elif leg.get('tp_kind') == 'default_r':
             warnings.append('no target in the strategy — the screener supplies 2R')
@@ -283,15 +277,83 @@ def validate(protocol: dict) -> dict:
                 'unless you give it a target, or the order would be a different '
                 'strategy from the one that was tested')
 
+    # ── WHAT AN ANCHORED STOP ACTUALLY DOES ─────────────────────────────────
+    #
+    # THE OLD SENTENCE WAS WRONG, and it was wrong in the direction that gets a
+    # person to intervene against their own machine. It read:
+    #
+    #     leg 1 stop follows an indicator — it goes out as a fixed level and
+    #       will not trail
+    #
+    # and the order alert's version ended "Manage it yourself". Neither is
+    # true. chart/manage.py returns `managed: has_rules or (stop_kind ==
+    # 'anchored' and not frozen)`, and src/setups/manager.js closes the
+    # position when `breached and stop_kind == 'anchored'`. The box has
+    # followed these stops bar by bar since the manager was written — its own
+    # header names this strategy as the reason it exists: "Test has a stop that
+    # MOVES and RATCHETS — up with the lower VWAP band, never down. A broker is
+    # handed one price. Neither can be sent. Both can be watched."
+    #
+    # So two files in one platform said opposite things about the same stop,
+    # and the one on the card said the false one.
+    #
+    # WHAT IS TRUE, and it is the part worth knowing, from manage.py's own
+    # note: a synthetic stop fills at the NEXT OBSERVATION, not at the level.
+    # The backtest fills a within-bar touch AT the stop; this cannot see inside
+    # a bar. That is a real difference between live and tested, on every trade
+    # this setup takes — which is a cost to measure, not an instruction to take
+    # the wheel.
+    #
+    # ONCE, not per leg. Three legs anchored to the same line is one fact and a
+    # number; printed three times it filled the card and pushed the rule
+    # warning below it out of sight.
+    anchored_sl = [i for i, leg in enumerate(legs, 1)
+                   if leg.get('sl_kind') == 'anchored']
+    if anchored_sl:
+        # Two whole sentences rather than one with a fragment swapped in: a
+        # subject that changes number changes the verb after it too, and
+        # "the stops on all 2 legs follow an indicator — the box follows IT"
+        # is a sentence disagreeing with itself on a card read at 09:35.
+        n = len(anchored_sl)
+        warnings.append(
+            (f'the stops on all {n} legs follow an indicator — the BOX follows '
+             'them and closes on a breach; the broker only holds the levels it '
+             'was given at entry.' if n > 1 else
+             'the stop follows an indicator — the BOX follows it and closes on '
+             'a breach; the broker only holds the level it was given at entry.')
+            + ' It fills at the NEXT bar rather than at the level, so it gives '
+              'up more than the backtest assumed, and far more on a gap')
+
+    anchored_tp = [i for i, leg in enumerate(legs, 1)
+                   if leg.get('tp_kind') == 'anchored']
+    if anchored_tp:
+        n = len(anchored_tp)
+        warnings.append(
+            (f'{n} targets follow an indicator and cannot rest at a broker, so '
+             'those parts ride the stop' if n > 1 else
+             'the target follows an indicator and cannot rest at a broker, so '
+             'that part rides the stop'))
+
     # See the note in normalise(). Said out loud on every order, because a
     # position whose exit lives on this side rather than at the broker is one
     # that stops being managed the moment this side stops running — and that
     # failure is otherwise completely silent.
+    #
+    # It covers the anchored stop too: that exit also lives here, and "if the
+    # box is not running" is the one thing both have in common.
     if protocol.get('has_exit_rule'):
         warnings.append('this strategy also leaves on a RULE. No broker can '
                         'watch for that, so the box closes the position itself '
                         '— if the box is not running, the position is not '
                         'managed and only the stop is protecting it')
+    elif anchored_sl:
+        # The same consequence, for the setup that has no exit rule and is
+        # still managed here because its stop moves. Said in its own words, or
+        # the only warning about a box-managed exit would be one that never
+        # appears for half the setups that have one.
+        warnings.append('that following happens HERE, not at the broker — if '
+                        'the box is not running, the position keeps only the '
+                        'level the broker was given at entry')
 
     if r_fraction > 0:
         if runner.get('manage') == 'manual':

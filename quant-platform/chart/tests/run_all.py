@@ -92,6 +92,7 @@ PARTS = [
     ('logic_audit75.py',    'a trail that reached profit is not a broken stop'),
     ('logic_audit76.py',    'the decision fits in the minute it decides for'),
     ('logic_audit77.py',    'the shared navigation is asked for, not assumed fresh'),
+    ('logic_audit78.py',    'the card does not tell you to fight the machine'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They
