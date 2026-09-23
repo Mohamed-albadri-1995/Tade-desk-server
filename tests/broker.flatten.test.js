@@ -228,11 +228,56 @@ test('a close that fails is an error alert naming the symbol', async () => {
   expect(f.detail).toMatch(/before the bell/);
 });
 
-test('a quiet day closes nothing and says nothing', async () => {
+/*
+ * A QUIET DAY CLOSES NOTHING AND SAYS SO.
+ *
+ * This used to assert SILENCE — `recentFires(DAY)` empty — which is what the
+ * code did, and it was wrong in a way only a real day showed.
+ *
+ * 2026-09-22: the manager closed all five positions during the session, 15:50
+ * arrived with nothing to do, the early return fired, and the record for that
+ * day contains no End of session line at all. From a phone that is
+ * indistinguishable from the flatten never having run — on the one process
+ * standing between this desk and an overnight position in an account that may
+ * not hold one. Which is the failure of 2026-09-21, one step further back.
+ *
+ * "Nothing was open" is a RESULT. It is the result on most days, and a result
+ * only reported when it is interesting is a result nobody can rely on. The
+ * flattener's own comment already said so, four lines below the early return:
+ * "from a phone the two must not look the same as each other OR AS SILENCE."
+ */
+test('a quiet day closes nothing and says so', async () => {
   armed();
   const out = await check(AT_1550);
   expect(out.closed).toEqual([]);
-  expect(store.recentFires(DAY)).toHaveLength(0);
+
+  const f = store.recentFires(DAY).find(x => x.rule === 'End of session');
+  expect({ published: !!f }).toEqual({ published: true });
+  // INFO: nothing went wrong. It is a receipt, not an alarm.
+  expect(f.level).toBe('info');
+  expect(f.detail).toMatch(/nothing was open/);
+  // And it must not claim a broker confirmation it never asked for.
+  expect(f.detail).not.toMatch(/confirms it is flat/);
+  expect(f.detail).not.toMatch(/could not confirm/);
+});
+
+test('and it sends nothing while saying it', async () => {
+  // The receipt costs one line to read. It must not cost an order.
+  armed();
+  sent.length = 0;
+  await check(AT_1550);
+  expect(sent).toEqual([]);
+});
+
+test('a quiet day does not spend twenty seconds asking Alpaca', async () => {
+  /*
+   * stillHeld([]) returns immediately — there is nothing to verify when
+   * nothing was closed. Otherwise the commonest day of all would pay the full
+   * verification budget for an answer that cannot be anything but empty.
+   */
+  armed();
+  await check(AT_1550);
+  expect(reconcile.heldNow).not.toHaveBeenCalled();
 });
 
 // ── the hole that let two positions sit in the account ─────────────────────

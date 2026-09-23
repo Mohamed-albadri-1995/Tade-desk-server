@@ -195,8 +195,27 @@ async function check(at = Date.now(), opts = {}) {
   const fromEarlier = extra.filter(s => carried.some(p => p.symbol === s));
   const closeMissed = extra.filter(s => !fromEarlier.includes(s));
 
-  if (!open.length && !extra.length && !foreign.length) return { ran: true, closed: [] };
-
+  /*
+   * A QUIET DAY IS STILL PUBLISHED.
+   *
+   * There was an early return here — nothing open, nothing carried, nothing
+   * foreign, so nothing to say — and it sat directly above a comment reading
+   * "Always published, including the successful case… from a phone the two
+   * must not look the same as each other OR AS SILENCE."
+   *
+   * The code did the opposite of its own comment, and 2026-09-22 is what that
+   * costs: the manager closed all five positions during the session, 15:50
+   * arrived with nothing to do, and the record for that day contains no End of
+   * session line at all. Which is indistinguishable from the flatten never
+   * having run — on the one process that stands between this desk and an
+   * overnight position, in an account that may not hold one.
+   *
+   * "Nothing was open" is a RESULT. It is the result on most days, and a
+   * result that is only reported when it is interesting is a result nobody can
+   * rely on. Falling through costs one alert a day and one sentence to read;
+   * `flattenAll` over an empty list sends nothing, and stillHeld([]) asks
+   * nothing.
+   */
   const results = await broker.flattenAll(day, cfg);
   for (const sym of extra) {
     /*
