@@ -1087,6 +1087,26 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 if sl_required and (e_sl is None or e_sl != e_sl):
                     _drop('unpriceable_stop')
                     continue                       # stop unpriceable → no trade
+                # THE BROKER REFUSES A STOP THE PRICE HAS ALREADY PASSED.
+                #
+                # 2026-09-24, OR + VWAP 09:35: MAZE short, stop 28.04, and by
+                # the time the order reached Alpaca the price was above it —
+                # "stop_loss.stop_price must be >= base_price + 0.01". Refused:
+                # no position, no loss. This engine used to fill it at the
+                # open anyway and stop it out on the same bar, booking a loss
+                # on a trade live can never take — the backtest was worse than
+                # reality by exactly those trades, and never matched it.
+                #
+                # So an entry whose FILL is at or through its own stop (within
+                # the broker's one cent) is not taken, and counted. Only the
+                # fill models that fill at a later price than the decision
+                # can meet it; 'close' and 'live' fill at the decision price,
+                # where the stop was measured to be on the right side.
+                if next_open and e_sl is not None and e_sl == e_sl:
+                    room = (ep - e_sl) if side == 'long' else (e_sl - ep)
+                    if room < 0.01 - 1e-9:
+                        _drop('stop_through_fill')
+                        continue
                 # MAX RISK CAP: refuse an entry whose stop is absurdly far. A
                 # scalp's stop is meant to be tight (RubberBand: ".02 below the
                 # low of the day", because the snapback candle marks the LoD).
