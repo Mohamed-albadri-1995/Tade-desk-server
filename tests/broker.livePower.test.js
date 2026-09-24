@@ -126,49 +126,29 @@ describe('what the account says it can afford', () => {
 
 /* ── which of the two numbers decides ────────────────────────────────────── */
 
-describe('the smaller of the two answers is what is left', () => {
-  test('the broker\'s number wins when it is the smaller', () => {
-    const c = { ...cfg(), liveBuyingPower: 4000 };
-    expect(broker.remaining('2026-09-08', c)).toBe(4000);
+/*
+ * SINCE 2026-09-24 THE ORDER PATH DOES NOT ASK. Trade The Pool, reached only
+ * through SignalStack, can never be asked for a balance, so the Alpaca account
+ * is sized the way TTP will be: the account size it is given, less what is
+ * still open (tests/broker.capital.test.js). liveBuyingPower() above is kept
+ * for the Test button, which explains a refusal after it happened.
+ */
+describe('the order path never asks the broker for its balance', () => {
+  test('placeOrder sends without reading the account', async () => {
+    answers(9000);
+    global.fetch.mockImplementation(() => Promise.resolve({
+      ok: true, status: 200, text: async () => JSON.stringify({ id: 'o1', status: 'accepted' }) }));
+    const out = await broker.placeOrder({
+      symbol: 'UMAC', signal: 'long', quantity: 100, price: 24.30, stop: 24.06,
+      target: 26.0, date: '2026-09-08', setupId: 'test', cfg: cfg() });
+    expect(out.sent).toBe(true);
+    expect(alpacaAccount.account).not.toHaveBeenCalled();
+    expect(out.liveBuyingPower).toBeUndefined();
   });
 
-  test('the typed ceiling still wins when IT is the smaller', () => {
-    const c = { ...cfg(), buyingPower: 2500, liveBuyingPower: 90000 };
-    expect(broker.remaining('2026-09-08', c)).toBe(2500);
-  });
-
-  /*
-   * AND THE BROKER'S NUMBER IS NOT CHARGED TWICE. Alpaca reserves buying power
-   * the moment it accepts an order, so subtracting this box's own tally from it
-   * as well would shrink every position after the first for no reason.
-   */
-  test('the broker\'s number is used as it stands, not minus our own tally', () => {
-    const c = { ...cfg(), buyingPower: null, liveBuyingPower: 4000 };
-    expect(broker.remaining('2026-09-08', c)).toBe(4000);
-  });
-
-  test('with no live read it behaves exactly as before', () => {
-    expect(broker.remaining('2026-09-08', cfg())).toBe(100000);
-  });
-});
-
-/* ── the size that actually goes out ─────────────────────────────────────── */
-
-describe('the order is cut to what the account holds', () => {
-  test('2131 shares of a $24.30 stock against $9,000 becomes 370', () => {
-    const c = { ...cfg(), liveBuyingPower: 9000 };
-    const fit = broker.fitQuantity({ quantity: 2131, price: 24.30, date: '2026-09-08', cfg: c });
-    expect(fit.asked).toBe(2131);
-    expect(fit.quantity).toBe(370);
-    // And it names WHICH number bit, because "the account says" and "your
-    // ceiling says" send you to two different screens.
-    expect(fit.reason).toMatch(/the broker's own buying power/);
-  });
-
-  test('when the typed ceiling is the one that bit, it says so instead', () => {
-    const c = { ...cfg(), buyingPower: 9000, liveBuyingPower: 500000 };
-    const fit = broker.fitQuantity({ quantity: 2131, price: 24.30, date: '2026-09-08', cfg: c });
-    expect(fit.reason).toMatch(/the buying power you set/);
+  test('a balance on the cfg is not what sizes the order', () => {
+    const c = { ...cfg(), buyingPower: 100000, liveBuyingPower: 9000 };
+    expect(broker.remaining('2026-09-08', c)).toBe(100000);
   });
 });
 
@@ -239,34 +219,5 @@ describe('a refused scale-out shrinks the position, not one leg', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  /*
-   * AND THE WHOLE POINT: with the balance read first, the order that goes out
-   * is one the account can take, so there is nothing to retry.
-   */
-  test('with the balance read first, the first send already fits', async () => {
-    answers(9000);
-    global.fetch.mockImplementation(() => accepted('o1'));
-    const out = await order();
-    expect(out.sent).toBe(true);
-    expect(out.quantity).toBeLessThanOrEqual(370);
-    expect(out.liveBuyingPower).toBe(9000);
-  });
 
-  test('a blocked account sends nothing at all', async () => {
-    answers(9000, { tradingBlocked: true });
-    global.fetch.mockImplementation(() => accepted('o1'));
-    const out = await order();
-    expect(out.sent).toBe(false);
-    expect(out.skipped).toMatch(/blocked at the broker/);
-    expect(global.fetch).not.toHaveBeenCalled();
-  });
-
-  test('a balance that could not be read is carried onto the row', async () => {
-    alpacaAccount.account.mockResolvedValue({ ok: false, reason: 'timed out' });
-    global.fetch.mockImplementation(() => accepted('o1'));
-    const out = await order();
-    expect(out.powerUnchecked).toMatch(/timed out/);
-    // It still trades, on the typed number — the state the desk was already in.
-    expect(out.sent).toBe(true);
-  });
 });

@@ -3420,9 +3420,13 @@ function paintDests(list) {
       <input class="d-ratio" type="number" min="0.0001" max="10" step="any"
         value="${d.ratio || ''}" placeholder="1" inputmode="decimal">
     </label>
-    <label title="What this account can spend today. A running tally this side keeps — SignalStack cannot be asked for a balance.">Buying power $
-      <input class="d-power" type="number" min="0" step="100"
-        value="${d.buyingPower || ''}" placeholder="e.g. 20000">
+    <!-- THIS ACCOUNT'S MONEY, calculated, not typed: the standard account size
+         × "Size vs standard". The broker is never asked (TTP cannot be), and
+         money comes back when a trade closes, as in the backtest. -->
+    <label title="The standard account size × Size vs standard. Money comes back when a trade closes, as in the backtest. Change it with Size vs standard or the standard account size.">Money
+      <span class="d-capital">${d.capital
+        ? `$${Math.round(d.capital.amount).toLocaleString()} <small class="note">(${esc(d.capital.source)})</small>`
+        : '<span class="bad">no account size set</span>'}</span>
     </label>
     <label>Max trades / day
       <input class="d-maxtrades" type="number" min="1" step="1"
@@ -3594,8 +3598,7 @@ function readDests() {
       enabled: el.getAttribute('data-off') !== '1',
       name: f('d-name') || el.getAttribute('data-id'),
     };
-    for (const [cls, key] of [['d-power', 'buyingPower'],
-                              ['d-maxtrades', 'maxTradesPerDay'], ['d-ratio', 'ratio']]) {
+    for (const [cls, key] of [['d-maxtrades', 'maxTradesPerDay'], ['d-ratio', 'ratio']]) {
       const v = f(cls);
       d[key] = v === '' ? null : v;
     }
@@ -3715,9 +3718,6 @@ function addDest() {
       <input id="nd-ratio" type="number" min="0.0001" max="10" step="any"
         placeholder="0.05" inputmode="decimal" required>
     </label>
-    <label>Buying power $
-      <input id="nd-power" type="number" min="0" step="100" placeholder="e.g. 20000" required>
-    </label>
     <label>Max trades / day
       <input id="nd-maxtrades" type="number" min="1" step="1" placeholder="e.g. 4">
     </label>
@@ -3755,7 +3755,7 @@ async function createDest(ev) {
   await saveDests([...readDests(), {
     id, dialect: v('nd-dialect'), name: v('nd-name') || id,
     webhookUrl: v('nd-hook'), enabled: true, mode: v('nd-mode') || 'alert',
-    ratio: v('nd-ratio') || null, buyingPower: v('nd-power') || null,
+    ratio: v('nd-ratio') || null,
     maxTradesPerDay: v('nd-maxtrades') || null, setups: [],
   }], id);
   return false;

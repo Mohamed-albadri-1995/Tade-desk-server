@@ -1262,14 +1262,14 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
  * Five to six seconds an order, and the third went out twenty seconds after
  * the open, by which time MAZE had risen through its stop. The time was not
  * the orders — it was the questions before each one: the account's buying
- * power, and for a short whether the name can be borrowed, each a round trip
- * from Stockholm to the US.
+ * power (no longer asked, since 2026-09-24), and for a short whether the name
+ * can be borrowed, each a round trip from Stockholm to the US.
  *
  * The orders still go one at a time — each is sized against what the one
  * before it committed in that account, and firing them together would size
  * every one against the full balance. But the QUESTIONS do not depend on each
  * other, so they are asked here together, and every order then finds its
- * answers cached (buying power 20 s, the asset 60 s) and only has to send.
+ * answers cached (the asset, 60 s) and only has to send.
  *
  * Never blocks and never fails the run: a question that is not answered here
  * is simply asked again, as before, inside placeOrder.
@@ -1279,8 +1279,9 @@ async function warmBroker(picks, cfgs) {
   if (!alpaca.length || !(picks || []).length) return;
   const client = require('../alpaca/client');
   const account = require('../alpaca/account');
-  const jobs = alpaca.map(c => Promise.resolve()
-    .then(() => broker.liveBuyingPower(c)).catch(() => null));
+  // Buying power is no longer asked before an order (signalstack.capitalFor),
+  // so the only question left to ask ahead is the borrow check on shorts.
+  const jobs = [];
   for (const p of picks) {
     if (!/^(short|sell)/i.test(String(p.signal || p.side || ''))) continue;
     for (const c of alpaca) {

@@ -21,6 +21,7 @@ const fs = require('fs');
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'broker-'));
 process.env.BROKER_FILE = path.join(DIR, 'broker.json');
 process.env.BROKER_LEDGER = path.join(DIR, 'orders.jsonl');
+process.env.RISK_FILE = path.join(DIR, 'no-risk.json');
 
 const broker = require('../src/broker/signalstack');
 
@@ -89,10 +90,10 @@ test('nothing is sent until it is configured AND armed', async () => {
   expect((await place()).sent).toBe(true);
 });
 
-test('arming without a hook or without buying power is refused', () => {
+test('arming without a hook or without an account size is refused', () => {
   expect(() => broker.save({ armed: true })).toThrow(/webhook/i);
   broker.save({ webhookUrl: HOOK });
-  expect(() => broker.save({ armed: true })).toThrow(/buying power/i);
+  expect(() => broker.save({ armed: true })).toThrow(/no account size/i);
 });
 
 test('a URL that is not a SignalStack hook is refused', () => {

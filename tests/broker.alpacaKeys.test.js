@@ -100,10 +100,12 @@ describe('the destination form can give an account its own Alpaca keys', () => {
   test('the other fields still come through unchanged', () => {
     const [d] = liftReadDests([{
       ...ALPACA,
-      values: { ...ALPACA.values, 'd-maxtrades': '4', 'd-power': '20000' },
+      values: { ...ALPACA.values, 'd-maxtrades': '4', 'd-ratio': '0.9' },
     }]);
     expect(d).toMatchObject({ id: 'algo-a', dialect: 'alpaca', enabled: true,
-                              maxTradesPerDay: '4', buyingPower: '20000' });
+                              maxTradesPerDay: '4', ratio: '0.9' });
+    // The typed buying power box is gone: the account's money is calculated.
+    expect(d.buyingPower).toBeUndefined();
   });
 
   test('an account with no keys of its own is TOLD so, on the row', () => {

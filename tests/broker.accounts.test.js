@@ -24,6 +24,8 @@ const FILE = path.join(os.tmpdir(), `broker-acct-${process.pid}.json`);
 const LEDGER = path.join(os.tmpdir(), `broker-acct-ledger-${process.pid}.jsonl`);
 process.env.BROKER_FILE = FILE;
 process.env.BROKER_LEDGER = LEDGER;
+// No standard account size, whatever the machine running this has in data/.
+process.env.RISK_FILE = path.join(os.tmpdir(), `no-risk-${process.pid}.json`);
 
 const broker = require('../src/broker/signalstack');
 
@@ -201,9 +203,11 @@ describe('arming the box', () => {
     expect(() => broker.save({ armed: true })).toThrow(/every account is set to alert only/);
   });
 
-  test('refused when a sending account has no buying power, and names it', () => {
+  // Its money is an account size now (signalstack.capitalFor); with no
+  // standard size, no own size and no typed buying power it has none.
+  test('refused when a sending account has no money set, and names it', () => {
     setup([{ ...TTP, mode: 'auto', buyingPower: undefined }]);
-    expect(() => broker.save({ armed: true })).toThrow(/Trade The Pool has no buying power/);
+    expect(() => broker.save({ armed: true })).toThrow(/Trade The Pool has no account size/);
   });
 
   test('an alert-only account does not block arming the others', () => {

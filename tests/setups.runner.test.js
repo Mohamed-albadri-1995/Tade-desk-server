@@ -777,7 +777,9 @@ describe('which setups place orders', () => {
     await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' }, {});
     const firstOrder = order.findIndex(x => x.startsWith('order'));
     expect(firstOrder).toBeGreaterThan(0);
-    expect(order.slice(0, firstOrder).sort()).toEqual(['borrow BBB', 'power']);
+    // The borrow check only: the balance is not asked before an order since
+    // 2026-09-24 — the account is sized from its account size (capitalFor).
+    expect(order.slice(0, firstOrder).sort()).toEqual(['borrow BBB']);
   });
 
   /* A preview must never reach a broker. It is used to look at past dates. */

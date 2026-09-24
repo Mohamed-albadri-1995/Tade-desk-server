@@ -517,6 +517,9 @@ function publicSettings() {
         testWebhookUrl: mask(d.testWebhookUrl),
         hasWebhook: !!d.webhookUrl,
         hasTestWebhook: !!d.testWebhookUrl,
+        // This account's money as the desk sizes it — shown on the account
+        // card in place of the old typed buying power.
+        capital: capitalFor(d),
         alpacaKeyId: maskId(d.alpacaKeyId),
         // What the page actually needs to know: can this account be read?
         hasAlpacaKeys: !!(d.alpacaKeyId && d.alpacaSecret),
@@ -741,10 +744,13 @@ function save(patch = {}) {
         throw new Error('every account is set to alert only — arming would switch '
           + 'on a machine with nothing to switch on');
       }
-      const broke = sending.filter(d => !d.buyingPower).map(d => d.name);
+      // Its money: an account size (its own, or the standard × its "Size vs
+      // standard"), or the old typed buying power. See capitalFor.
+      const broke = sending.filter(d => !capitalFor(d)).map(d => d.name);
       if (broke.length) {
-        throw new Error(`${broke.join(', ')} has no buying power set — either give `
-          + 'it one or set it to alert only, or an order sent there will be refused');
+        throw new Error(`${broke.join(', ')} has no account size — set the standard `
+          + 'account size (Settings → 1 · Standard account) or set it to alert only, '
+          + 'or an order sent there will not be sized');
       }
     }
     next.armed = patch.armed === true;
@@ -813,51 +819,6 @@ function committed(date, destination = null) {
     .reduce((sum, o) => sum + (o.quantity * o.price || 0), 0);
 }
 
-/**
- * What this box has sent to one destination SINCE a moment — the orders the
- * broker's own figure cannot yet include.
- *
- * WHY NOT THE WHOLE DAY. Alpaca reserves buying power the moment it accepts an
- * order, so a balance read at 09:35 already has 09:30's position in it.
- * Subtracting the day's tally from it as well would charge every fill twice
- * and shrink the next position for no reason. Only what was sent AFTER the
- * reading is invisible to it.
- *
- * WHY IT IS NEEDED AT ALL. The reading is cached for twenty seconds, and one
- * decision bar sends several picks to the same account inside that window. The
- * runner sends them one at a time on purpose — "each order is sized against
- * what the previous one actually committed in THAT account" — but the second
- * pick was handed a CACHED balance taken before the first one existed, so the
- * two were sized against the same money.
- *
- * 2026-09-17: BETA $31,222 and CIFR $37,361, one bar, one account, both
- * measured against the same $197,691. They fitted. On a smaller account, or
- * with the setup's `top 3` filled, they would not have.
- *
- * The typed ceiling never had this problem — it subtracts `committed()`, which
- * is read from the ledger every time. Only the live figure was stale.
- */
-function committedSince(sinceTs, destination = null, date = null) {
-  /*
-   * null IS NOT A TIMESTAMP, AND Number(null) IS 0 — which is finite, and a
-   * reading time of 0 counts EVERY order ever sent. So a missing
-   * `liveBuyingPowerAt` would have subtracted the whole day from the live
-   * balance, double-charging everything the broker had already reserved and
-   * shrinking every position after the first. `Number.isFinite(Number(x))`
-   * alone does not catch it; nor does it catch '' or false.
-   *
-   * Nothing to compare against means subtract nothing, which is exactly the
-   * behaviour this code had before the subtraction existed.
-   */
-  if (sinceTs === null || sinceTs === undefined || sinceTs === ''
-      || typeof sinceTs === 'boolean') return 0;
-  const since = Number(sinceTs);
-  if (!Number.isFinite(since)) return 0;
-  return orders(date)
-    .filter(o => o.sent && Number.isFinite(Number(o.at)) && Number(o.at) > since)
-    .filter(o => !destination || (o.destination || LEGACY_ID) === destination)
-    .reduce((sum, o) => sum + (o.quantity * o.price || 0), 0);
-}
 
 /**
  * How many orders actually went out today — all of them, or one setup's.
@@ -960,9 +921,7 @@ async function liveBuyingPower(cfg = settings(), now = Date.now()) {
   const id = cfg.destinationId || LEGACY_ID;
   const hit = POWER_CACHE.get(id);
   if (hit && now - hit.at < POWER_TTL_MS) {
-    // WHEN THIS BALANCE WAS TRUE, carried with it. A cached figure is a
-    // statement about a moment that has passed, and anything this box has sent
-    // since is not in it — see committedSince.
+    // WHEN THIS BALANCE WAS TRUE, carried with it.
     return { ...hit.answer, readAt: hit.at, cached: true };
   }
   let r;
@@ -1068,44 +1027,95 @@ function mismatchNote({ message, cfg = {}, liveBuyingPower = null,
 }
 
 /**
- * How much this account can still spend today — the SMALLER of the two answers.
- *
- * The typed ceiling keeps its own tally (what this box has sent today), because
- * it is a limit this side invented and only this side can count against it. The
- * broker's figure is used AS IT STANDS: Alpaca reserves buying power the moment
- * it accepts an order, so subtracting our tally from it as well would charge
- * every fill twice and shrink the next position for no reason.
+ * How much this account can spend on the next order: its money (capitalFor)
+ * less what is still open (openNotional). Null when no size is set anywhere —
+ * the order is then not capped by money, as before.
  */
 function remaining(date, cfg = settings()) {
-  const tally = cfg.buyingPower
-    // This destination's ceiling, spent by this destination's orders.
-    ? Math.max(0, cfg.buyingPower - committed(date, cfg.destinationId || null))
-    : null;
-  /*
-   * THE BROKER'S FIGURE, MINUS WHAT IT CANNOT YET KNOW ABOUT.
-   *
-   * It is used as it stands for everything sent BEFORE the reading — Alpaca
-   * reserves buying power on acceptance, so that is already in the number, and
-   * subtracting it again would charge every fill twice.
-   *
-   * But the reading is cached for twenty seconds and one decision bar sends
-   * several picks to the same account inside that window. Without this the
-   * second pick is sized against a balance taken before the first one existed,
-   * which is the whole thing the runner's one-at-a-time loop exists to prevent
-   * — its own comment says each order must be "sized against what the previous
-   * one actually committed in THAT account". That held for the typed ceiling,
-   * which re-reads the ledger every time, and not for the live figure.
-   *
-   * On a fresh reading the subtraction is zero by construction: nothing can
-   * have been sent after a moment that is now.
-   */
-  const live = Number.isFinite(cfg.liveBuyingPower)
-    ? Math.max(0, cfg.liveBuyingPower
-      - committedSince(cfg.liveBuyingPowerAt, cfg.destinationId || null, date))
-    : null;
-  if (tally === null) return live;
-  if (live === null) return tally;
-  return Math.min(tally, live);
+  const capital = capitalFor(cfg);
+  if (capital === null) return null;
+  return Math.max(0, capital.amount - openNotional(date, cfg.destinationId || null));
+}
+
+/*
+ * THIS ACCOUNT'S MONEY, as the desk is told it — never as the broker reports.
+ *
+ *   the account's own "Account size", when it has one
+ *   else the standard account size (Settings → 1 · Standard account)
+ *        × this account's "Size vs standard"
+ *   else the old typed "Buying power $", for a config that predates both
+ *
+ * The backtest sizes against its account size and nothing else; Trade The
+ * Pool cannot be asked for a balance. Asked of Alpaca, the same strategy
+ * traded a different amount on each — decided 2026-09-24.
+ */
+function capitalFor(cfg = {}) {
+  if (cfg.accountSize > 0) {
+    return { amount: Number(cfg.accountSize), source: "this account's size" };
+  }
+  let standard = null;
+  try { standard = require('../setups/risk').settings().accountSize; } catch { standard = null; }
+  if (standard > 0) {
+    const ratio = cfg.ratio > 0 ? Number(cfg.ratio) : 1;
+    return { amount: standard * ratio,
+             source: `the account size ${standard} × ${ratio}` };
+  }
+  if (cfg.buyingPower > 0) {
+    return { amount: Number(cfg.buyingPower), source: 'the buying power you set' };
+  }
+  return null;
+}
+
+/*
+ * WHAT IS STILL OPEN in one account, in dollars at the entry price.
+ *
+ * MONEY COMES BACK WHEN A TRADE CLOSES — the backtest's rule ("credit
+ * everything that CLOSED before this entry"; room = equity − open positions).
+ * The old tally subtracted every order sent today and never gave any back:
+ * EXEL, 2026-09-24, got 54 shares of 1,757 because DINO's $41k still counted
+ * an hour after DINO had closed.
+ *
+ * CLOSED, by the desk's own records only — what Trade The Pool allows:
+ *   a close this desk SENT for the name, after the entry (manager or 15:50)
+ *   the backtest engine saying the trade is over (the manager asks it every
+ *   minute, and records `flat` on the pass) — a stop or target leg the broker
+ *   filled by itself is known this way, a minute later
+ * Alpaca's position list is never consulted: it does not exist on TTP.
+ */
+const NOT_ENTRY = new Set(['flatten', 'callback', 'fill', 'intent']);
+
+function openNotional(date, destination = null) {
+  const rows = orders(date);
+  const closedAt = new Map();                // SYMBOL -> time of the last sent close
+  for (const o of rows) {
+    if (o.kind !== 'flatten' || !o.sent || !o.symbol) continue;
+    if (destination && (o.destination || LEGACY_ID) !== destination) continue;
+    const sym = String(o.symbol).toUpperCase();
+    closedAt.set(sym, Math.max(closedAt.get(sym) || 0, o.at || 0));
+  }
+  const flat = engineFlat(date);
+  let sum = 0;
+  for (const o of rows) {
+    // Entries only: a close, a fill report, a callback or the intent row
+    // written before a send is not money put into a position.
+    if (!o.sent || NOT_ENTRY.has(o.kind)) continue;
+    if (destination && (o.destination || LEGACY_ID) !== destination) continue;
+    const sym = String(o.symbol || '').toUpperCase();
+    if (sym && (closedAt.get(sym) || 0) > (o.at || 0)) continue;
+    if (sym && flat.has(sym)) continue;
+    sum += (Number(o.quantity) * Number(o.price)) || 0;
+  }
+  return sum;
+}
+
+/** Symbols the manager's latest pass found the backtest engine flat on. */
+function engineFlat(date) {
+  try {
+    const passes = require('../setups/sessionLog').passesOn(date);
+    const last = passes[passes.length - 1];
+    return new Set(((last && last.positions) || [])
+      .filter(p => p.flat).map(p => String(p.symbol).toUpperCase()));
+  } catch { return new Set(); }
 }
 
 // ── sizing the order ───────────────────────────────────────────────────────
@@ -1152,15 +1162,10 @@ function fitQuantity({ quantity, price, date = null, cfg = settings() }) {
   if (left !== null) {
     const byPower = Math.floor(left / price);
     if (byPower < qty) {
-      // WHICH number bit. "the account says" and "your ceiling says" are two
-      // different things to do something about, and a note that does not say
-      // which sends you to the wrong screen.
-      const source = Number.isFinite(cfg.liveBuyingPower)
-          && Math.max(0, cfg.liveBuyingPower) === left
-        ? "the broker's own buying power"
-        : 'the buying power you set';
-      notes.push(`reduced to fit $${left.toFixed(0)} of ${source} left `
-        + `(${byPower} shares)`);
+      // WHICH number bit, so the note sends you to the right setting.
+      const cap = capitalFor(cfg);
+      notes.push(`reduced to fit $${left.toFixed(0)} left of ${cap ? cap.source : 'the account'}, `
+        + `after the trades still open (${byPower} shares)`);
       qty = byPower;
     }
   }
@@ -1814,41 +1819,16 @@ async function placeOrder({ symbol, signal, quantity, price, stop = null,
   };
 
   /*
-   * ASK THE ACCOUNT WHAT IT CAN AFFORD, BEFORE SIZING ANYTHING.
+   * THE BROKER IS NOT ASKED WHAT THE ACCOUNT CAN AFFORD — since 2026-09-24.
    *
-   * Not after the refusal: a rejection at 09:47:02 cannot be retried into the
-   * bar it was decided on, and four sessions of "FAILED — insufficient buying
-   * power" are four sessions with no trade at all. See liveBuyingPower.
-   *
-   * The read cannot block the order. When it fails the reason is carried onto
-   * the row and sizing falls back to the typed number, which is exactly where
-   * the desk already was.
+   * This read Alpaca's buying power before sizing. Trade The Pool, reached
+   * only through SignalStack, can never be asked, so an Alpaca run sized
+   * against a number a TTP evaluation will not have is not a rehearsal of it.
+   * The account's money is now what the desk is told it is — the standard
+   * account size × this account's "Size vs standard" — less what is still
+   * open, exactly as the backtest sizes (see remaining()). A refusal is still
+   * explained afterwards by mismatchNote, which is watching, not deciding.
    */
-  const power = await liveBuyingPower(cfg);
-  if (power.ok) {
-    // WITH THE MOMENT IT WAS TRUE. Without it a cached balance is sized
-    // against as though it were current, and the second pick of a bar spends
-    // the first one's money — see committedSince.
-    cfg = { ...cfg, liveBuyingPower: power.buyingPower,
-            liveBuyingPowerAt: power.readAt };
-    base.liveBuyingPower = power.buyingPower;
-    // WHICH ACCOUNT THIS READING IS ABOUT. Carried so a broker refusal can be
-    // checked against it — see mismatchNote. Without the number the
-    // contradiction is unattributable and the reader has nothing to go and fix.
-    base.accountNumber = power.number || null;
-    base.accountShorting = power.shortingEnabled;
-    if (power.blocked) {
-      const out = { ...base, quantity: 0, sent: false,
-        skipped: `${cfg.destinationName || 'this account'} is blocked at the broker `
-          + '— nothing was sent' };
-      record(out); return out;
-    }
-  } else if (cfg.dialect === 'alpaca') {
-    // Carried, not swallowed: an order sized against a typed number when the
-    // balance could not be read looks identical to one sized against the real
-    // balance, and that is how this went unnoticed for four sessions.
-    base.powerUnchecked = power.reason;
-  }
 
   const plan = planOrder({ symbol, signal, quantity, price, stop, target, date,
                            setupId, maxPerDay, plan: exitPlan, cfg });
@@ -3021,9 +3001,9 @@ module.exports = {
   // Where orders can go, and one of them as a cfg the order path already takes.
   destinations, destinationCfg, accountsFor, autoRoute, manualCfg,
   DIALECTS, LEGACY_ID, MODES,
-  orders, committed, remaining, tradesToday, sentAlready, positionsToday,
+  orders, committed, remaining, capitalFor, openNotional, tradesToday, sentAlready, positionsToday,
   // The account's own balance, and a way to forget it between tests.
-  liveBuyingPower, _forgetBuyingPower, mismatchNote, committedSince,
+  liveBuyingPower, _forgetBuyingPower, mismatchNote,
   recordFill, fillsRecorded,
   fitQuantity, actionFor, splitLegs,
   validateBody, tick, stopTick,

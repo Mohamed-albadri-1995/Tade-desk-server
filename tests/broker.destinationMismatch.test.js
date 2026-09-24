@@ -247,16 +247,6 @@ describe('it is wired into both send paths', () => {
     expect(SRC).toMatch(/out\.destinationMismatch = note;/);
   });
 
-  /*
-   * THE READING HAS TO REACH IT. The account number and the shorting flag are
-   * read once, by liveBuyingPower, and without them on the row there is
-   * nothing to compare the refusal against.
-   */
-  test('the account number and shorting flag are carried onto the row', () => {
-    expect(SRC).toMatch(/base\.accountNumber = power\.number/);
-    expect(SRC).toMatch(/base\.accountShorting = power\.shortingEnabled/);
-  });
-
   test('liveBuyingPower reports the shorting flag at all', () => {
     expect(SRC).toMatch(/shortingEnabled: \(typeof r\.account\.shortingEnabled/);
   });

@@ -148,6 +148,11 @@ function passOf({ at, date, positions = [], held = null, acted = [] }) {
       // "first target leg" before 09:35's 2R half). Shown on Live.
       legsBanked: (p.legs_banked || []).length || undefined,
       waitingFor: p.waiting_for || undefined,
+      // THE ENGINE SAYS THIS TRADE IS OVER (stop, target or exit rule) — asked
+      // for every position, managed or not. The desk's own "is it closed"
+      // for sizing, where the broker cannot be asked (see
+      // signalstack.openNotional).
+      flat: p.close_now ? true : undefined,
       // Only when there is one — an error every minute for a symbol qp cannot
       // price is the thing a review most needs to find, and it is invisible in
       // the alert feed because it never produced an order.

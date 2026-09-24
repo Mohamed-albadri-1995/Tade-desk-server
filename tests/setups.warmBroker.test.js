@@ -34,18 +34,20 @@ function track() {
   return { log, most: () => most };
 }
 
-test('all at once: the account\'s power and every short\'s borrow, in flight together', async () => {
+test('all at once: every short\'s borrow, in flight together', async () => {
   const t = track();
   await warmBroker(PICKS, [ALPACA]);
-  expect(t.most()).toBe(3);                          // power + CLDX + MAZE
-  expect(t.log.slice(0, 3).every(x => x.startsWith('start'))).toBe(true);
+  expect(t.most()).toBe(2);                          // CLDX + MAZE
+  // The balance is not asked before an order any more (capitalFor).
+  expect(broker.liveBuyingPower).not.toHaveBeenCalled();
+  expect(t.log.slice(0, 2).every(x => x.startsWith('start'))).toBe(true);
 });
 
 test('only what an order will ask: no borrow check for a long, nothing for a non-Alpaca account', async () => {
   track();
   await warmBroker(PICKS, [ALPACA, TTP]);
   expect(client.checkShortable.mock.calls.map(c => c[0]).sort()).toEqual(['CLDX', 'MAZE']);
-  expect(broker.liveBuyingPower.mock.calls.map(c => c[0].destinationId)).toEqual(['alpaca1']);
+  expect(broker.liveBuyingPower).not.toHaveBeenCalled();
 });
 
 test('a question that fails is not the run failing', async () => {
