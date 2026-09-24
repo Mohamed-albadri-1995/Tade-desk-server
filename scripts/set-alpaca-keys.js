@@ -51,6 +51,29 @@ if (!KEY || !SECRET) {
 
 const say = (...a) => console.log(...a);
 
+/*
+ * data/keys.json TOO — the one place this used to miss. It is the desk-wide
+ * pair: qp is given it FIRST (src/setups/feeds.js alpacaCreds), and every tool
+ * falls back to it (src/sharedKeys.js). On 2026-09-24 it held a dead pair
+ * while every database had been fixed: qp's alpaca feed refused, T6 could not
+ * read a bar all afternoon, and the deploy kept saying "rejected".
+ *
+ * The other keys in the file (Finnhub) are kept. A file that exists and does
+ * not parse is left alone and reported — overwriting it would lose them.
+ */
+function writeShared() {
+  const file = process.env.SHARED_KEYS_FILE || path.join(DATA, 'keys.json');
+  let j = {};
+  if (fs.existsSync(file)) {
+    try { j = JSON.parse(fs.readFileSync(file, 'utf8')) || {}; }
+    catch (err) { return `NOT CHANGED — it does not parse (${err.message}); fix it by hand`; }
+  }
+  j.alpacaApiKey = KEY;
+  j.alpacaApiSecret = SECRET;
+  fs.writeFileSync(file, `${JSON.stringify(j, null, 2)}\n`, { mode: 0o600 });
+  return 'updated';
+}
+
 /** Every SQLite database under data/ — one per tool, plus the shared default. */
 function databases() {
   let files = [];
@@ -124,6 +147,8 @@ function writeInto(file) {
   say(`Pointing every tool at ${LIVE ? 'LIVE' : 'PAPER'}  ${BASE}`);
   say(`key ${KEY.slice(0, 6)}…${KEY.slice(-4)}`);
   say('');
+
+  say(`  ${'keys.json'.padEnd(20)} ${writeShared()}`);
 
   const files = databases();
   if (!files.length) {

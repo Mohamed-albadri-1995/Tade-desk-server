@@ -317,10 +317,10 @@ def _key_fix(feed: str, names: str, verb: str = 'add') -> str:
     # accounts' own pairs worked, and following this line would have changed
     # nothing.
     if feed == 'alpaca':
-        return ('the desk-wide pair in data/keys.json (alpacaApiKey / '
-                'alpacaApiSecret) is the one refused — put a working pair '
-                'there, or remove those two entries so a broker account\'s own '
-                'pair (Algo → Settings) is used, then run ./deploy-tools.sh')
+        return ('the desk-wide pair in data/keys.json is the one refused, not '
+                'an account\'s own pair (Algo → Settings). Put a working pair '
+                'there: node scripts/set-alpaca-keys.js <key> <secret>, then '
+                'run ./deploy-tools.sh')
     return (f'{verb} {names} in quant-platform/.env, then: pm2 restart qp')
 
 
