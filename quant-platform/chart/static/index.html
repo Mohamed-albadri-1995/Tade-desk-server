@@ -1028,7 +1028,13 @@
            own timeframe, feed, fill model and strategy. The filter controls
            used to sit in this gap: a form nobody needs in the first minute,
            between the result and the evidence for it. They are folded now. -->
-      <div id="btTrades" style="max-height:38vh;overflow:auto;margin-top:var(--s2)"></div>
+      <!-- THE BUTTONS COME BEFORE THE LIST, and the list is uncapped. After
+           the list they sat at the bottom edge of a phone, behind a list that
+           scrolled inside a panel that also scrolled — reported 2026-09-24,
+           a screenshot with an arrow at "CSV / Full report", half cut off.
+           With the list LAST in its section, a cap is dead space and a second
+           scroll area (the same reasoning as #regList): it grows, and the
+           panel is the one thing that scrolls. -->
       <div id="btFilters" style="display:none;margin-top:var(--s2)">
         <div style="display:flex;gap:6px">
           <button id="btCsv" class="dk-btn" style="flex:1">CSV (filtered)</button>
@@ -1046,6 +1052,7 @@
           <div class="muted" style="font-size:10px;margin-top:5px">in = comma list (regime in STRONG_UP,UP) · has = contains · times are ET hhmm (935) · dur_min · dow = Mon…Fri</div>
         </details>
       </div>
+      <div id="btTrades" style="margin-top:var(--s2)"></div>
     </div>
     </div><!-- /psecBt -->
 

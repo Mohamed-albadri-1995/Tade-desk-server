@@ -979,7 +979,8 @@ const SCROLLERS = [
   ['the drawer',        /#drawer \{[^}]*max-height:42vh/,    /#drawer \.dscroll \{[^}]*overflow-y:auto/],
   // The register list is NOT in this table on purpose — see below.
   ['the alerts list',   /#side \{[^}]*flex:0 0 260px/,      /#side \{[^}]*overflow:auto/],
-  ['the trades list',   /id="btTrades"[^>]*max-height:38vh/, /id="btTrades"[^>]*overflow:auto/],
+  // The backtest's trades list is NOT here either, since 2026-09-24 — it is
+  // last in its section now and scrolls with the panel; see below.
   ['the print panel',   /max-height:calc\(100vh - 68px\)/,  /overflow-y:auto;'\s*\n\s*\+ 'overscroll/],
   ['the alert log',     /max-height:180px/,                 /overflow-y:auto/],
 ];
@@ -1016,13 +1017,18 @@ ok('the register list grows instead of capping itself',
    'it is the last thing in its section — a cap there is dead space, not a ceiling');
 
 /*
- * The trades list KEEPS its cap, and the difference is the reason: it is not
- * last. The CSV and full-report buttons come after it, and an uncapped list of
- * three hundred trades would put them a long scroll away.
+ * THE TRADES LIST, SAME REASONING. It used to keep a 38vh cap because the CSV
+ * and full-report buttons came AFTER it — and on a phone that put them at the
+ * bottom edge behind a list scrolling inside a scrolling panel (2026-09-24,
+ * a screenshot of the two buttons half cut off). The buttons come first now,
+ * the list is last in its section, and it grows: one scroll, the panel's.
  */
-ok('the trades list keeps its cap, because something comes after it',
-   /id="btTrades"[^>]*max-height:38vh/.test(html)
-   && html.indexOf('id="btFilters"') > html.indexOf('id="btTrades"'));
+ok('the backtest buttons come before the trades list',
+   html.indexOf('id="btFilters"') > 0
+   && html.indexOf('id="btFilters"') < html.indexOf('id="btTrades"'));
+ok('and the trades list is not a second scroll area',
+   !/id="btTrades"[^>]*(max-height|overflow)/.test(html)
+   && !/#btTrades \{[^}]*(max-height|overflow)/.test(html));
 
 // A toggle with no sign of its state is a button you press twice to find out
 // what it did.
