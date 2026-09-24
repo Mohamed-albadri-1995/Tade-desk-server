@@ -354,6 +354,12 @@ tool_max_mem() {                          # tool_max_mem <TOOL_ID>
   local var="TOOL_MAX_MEM_$1"
   if [ -n "${!var:-}" ]; then echo "${!var}"; return; fi
   case "$1" in
+    # 2026-09-24, ~pm2.log: "Process 346 restarted because it exceeds
+    # --max-memory-restart value (current_memory=174428160
+    # max_memory_limit=146800640)" — every 30 s, 52 times. T1 is resident at
+    # 173–185 MB doing nothing unusual: it serves the landing page and the
+    # screener suite beside its own scan. 140 was under its floor.
+    T1) echo "280M" ;;
     # Measured at 103 MB resident while scanning, so 140 was under its peak.
     T2) echo "240M" ;;
     # 87 restarts on the same morning at 51.8 MB — nowhere near 140 when it was

@@ -84,6 +84,21 @@ describe('the tool that was bouncing gets room above where it was measured', () 
   });
 });
 
+describe('T1 is resident above the default ceiling', () => {
+  /*
+   * 2026-09-24: pm2 killed tool-T1 every 30 s for an hour — 173–185 MB
+   * against a 140 MB cap, in ordinary use. It serves the landing page and the
+   * screener suite as well as its own scan, so it is the largest tool by
+   * design.
+   */
+  test('T1 gets room above what it measured', () => {
+    expect(memFor('T1')).toBe('280M');
+  });
+  test('and a per-tool override still wins for it', () => {
+    expect(memFor('T1', { TOOL_MAX_MEM_T1: '320M' })).toBe('320M');
+  });
+});
+
 describe('the tools that were fine are NOT raised', () => {
   /*
    * A CAP HIGH ENOUGH FOR THE BIGGEST IS NO CAP AT ALL FOR THE SMALLEST. The
@@ -93,7 +108,6 @@ describe('the tools that were fine are NOT raised', () => {
    * keep the number that produced that.
    */
   test('a tool with no history of restarting keeps the default', () => {
-    expect(memFor('T1')).toBe('140M');
     expect(memFor('T6')).toBe('140M');
     expect(memFor('T10')).toBe('140M');
     expect(memFor('T11')).toBe('140M');
@@ -121,11 +135,11 @@ describe('the box can still be overridden without editing the script', () => {
   });
 
   test('and it only moves the tool it names', () => {
-    expect(memFor('T1', { TOOL_MAX_MEM_T2: '512M' })).toBe('140M');
+    expect(memFor('T6', { TOOL_MAX_MEM_T2: '512M' })).toBe('140M');
   });
 
   test('the box-wide default still moves the tools that use it', () => {
-    expect(memFor('T1', { TOOL_MAX_MEM: '200M' })).toBe('200M');
+    expect(memFor('T6', { TOOL_MAX_MEM: '200M' })).toBe('200M');
   });
 
   /*

@@ -98,8 +98,16 @@ describe('the false alarms of 2026-09-24, each run', () => {
   });
   test('...but another tool\'s cards are a different list', () => {
     const r = find(parity.compare({ setup: { ...SETUP, tools: ['T11'] }, strategy: STRATEGY,
+      spec: { ...SPEC_349, universe: { kind: 'tools', tools: ['T2:R1'] } } }), 'universe');
+    expect([r.live, r.backtest, r.status]).toEqual(['T11', 'T2', 'differ']);
+  });
+  // T11 was split from T8 (tools.config.json `splitFrom`), and its other half
+  // T10 produced nothing — so Test's pre-split backtests on T8 are T11's list.
+  test('a tool split from the tested one is the same list, and says so', () => {
+    const r = find(parity.compare({ setup: { ...SETUP, tools: ['T11'] }, strategy: STRATEGY,
       spec: { ...SPEC_349, universe: { kind: 'tools', tools: ['T8:R1'] } } }), 'universe');
-    expect([r.live, r.backtest, r.status]).toEqual(['T11', 'T8', 'differ']);
+    expect([r.live, r.backtest, r.status]).toEqual(['T11', 'T8', 'match']);
+    expect(r.note).toMatch(/T11 was split from T8/);
   });
   test('a range window compares its bars instead of printing "?"', () => {
     const res = parity.compare({ setup: SETUP, spec: SPEC_349,

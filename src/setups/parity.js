@@ -92,6 +92,17 @@ function decisionBar(windowStart, windowEnd, fill) {
   return { bar: null, why: `unknown fill model ${JSON.stringify(fill)}` };
 }
 
+/** {T11: 'T8', …} from tools.config.json's `splitFrom`. Empty if unreadable. */
+function splitSources() {
+  try {
+    const reg = JSON.parse(require('fs').readFileSync(
+      require('path').join(__dirname, '..', '..', 'tools.config.json'), 'utf8'));
+    const out = {};
+    for (const t of reg.tools || []) if (t.splitFrom) out[t.id] = t.splitFrom;
+    return out;
+  } catch { return {}; }
+}
+
 /** One comparison: what live does, what the backtest did, and whether they agree. */
 function row(what, live, backtest, note) {
   const known = live !== null && live !== undefined
@@ -286,8 +297,25 @@ function compare({ setup, spec, strategy } = {}) {
   const btTools = btUni.kind === 'tools'
     ? (btUni.tools || []).map(t => String(t).replace(/:R1$/, '')).sort().join(',') || null
     : (btUni.kind === 'register' ? btUni.register : btUni.kind) || null;
-  rows.push(row('universe', (s.tools || []).slice().sort().join(',') || null, btTools,
-    'which cards the signals come from — a different list is a different set of stocks'));
+  const uniRow = row('universe', (s.tools || []).slice().sort().join(',') || null, btTools,
+    'which cards the signals come from — a different list is a different set of stocks');
+  /*
+   * A TOOL THAT CONTINUES ANOTHER. T8 was split into T10 (breakout) and T11
+   * (pullback), and T10 produced nothing in its weeks of running — so a run on
+   * T8's registers IS T11's list, and every backtest of Test from before the
+   * split read as a different universe. tools.config.json records the split
+   * (`splitFrom`), and that is what is read here, not a guess.
+   */
+  if (uniRow.status === 'differ') {
+    const split = splitSources();
+    const liveAsSource = (s.tools || []).map(t => split[t] || t).sort().join(',');
+    if (liveAsSource && liveAsSource === btTools) {
+      uniRow.status = 'match';
+      uniRow.note = `${(s.tools || []).join(',')} was split from ${btTools} `
+        + '(tools.config.json) — the same screener, continued';
+    }
+  }
+  rows.push(uniRow);
   rows.push(row('timeframe', p.tf || s.tf || '1m', bt.tf || null));
   /*
    * THE FEED, AND WHEN A DIFFERENCE IS NOT A DIVERGENCE.
