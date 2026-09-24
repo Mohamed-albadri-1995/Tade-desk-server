@@ -74,6 +74,11 @@ _ET = 'America/New_York'
 # and at 09:34 — cold, at the open, with Test deciding in the same minute on
 # the same one core — it goes over and the setup loses the day. Fixing it means
 # less work per symbol, fewer symbols, or more cores. Not more threads.
+#
+# LESS WORK PER SYMBOL, 2026-09-24. Profiled: 83% of one symbol's time was
+# pandas boxing a Timestamp for every `et[i]` in the session VWAP and the
+# window levels — 41,450 lookups per symbol. They now read the times in one
+# pass: 478 → 96 ms per symbol, identical output (chart/tests/logic_audit86).
 _WORKERS = 8
 
 

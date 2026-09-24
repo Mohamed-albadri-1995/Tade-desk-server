@@ -66,6 +66,7 @@ def avg_volume(bars: Bars, length: int = 20):
 def rel_volume(bars: Bars, length: int = 20):
     df = bars.df
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     vol = df['volume'].to_numpy(dtype=float)
     n = len(df)
     L = int(length)
@@ -79,7 +80,7 @@ def rel_volume(bars: Bars, length: int = 20):
     cum = 0.0
     last_date = None
     for i in range(n):
-        t = et[i]
+        t = etv[i]
         if not _in_rth(t):
             continue
         d = t.date()

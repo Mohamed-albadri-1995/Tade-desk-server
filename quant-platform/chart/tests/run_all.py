@@ -100,6 +100,7 @@ PARTS = [
     ('logic_audit83.py',    'tools/audit_0935.py reads a stored run correctly'),
     ('logic_audit84.py',    'a backtest can be found again, watched and stopped'),
     ('logic_audit85.py',    'a fill already through its own stop is refused, as Alpaca does'),
+    ('logic_audit86.py',    'the decision reads bar times once, and the levels did not move'),
     ('py39_guard.py',       'nothing needs a Python newer than the box (3.9)'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),

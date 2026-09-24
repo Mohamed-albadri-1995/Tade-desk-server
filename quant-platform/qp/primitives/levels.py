@@ -36,6 +36,7 @@ def _window_extreme(df, which: str, start_hhmm: int, end_hhmm: int):
     the rest of that calendar day — an opening-range / power-hour style level.
     NaN before the window has any bars. `end` exclusive; end<=start → empty."""
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     high = df['high'].to_numpy(dtype=float)
     low = df['low'].to_numpy(dtype=float)
     n = len(df)
@@ -45,7 +46,7 @@ def _window_extreme(df, which: str, start_hhmm: int, end_hhmm: int):
     cur_date = None
     hold = np.nan
     for i in range(n):
-        t = et[i]
+        t = etv[i]
         d = t.date()
         if d != cur_date:
             cur_date = d
@@ -69,6 +70,7 @@ def _running_session_extreme(df, session_pred, which: str):
     with no bars between sessions (RTH-only frames, daily frames), where
     yesterday's last bar and today's first are adjacent."""
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     high  = df['high'].to_numpy(dtype=float)
     low   = df['low'].to_numpy(dtype=float)
     openp = df['open'].to_numpy(dtype=float)
@@ -80,8 +82,8 @@ def _running_session_extreme(df, session_pred, which: str):
     cur_low  = np.nan
     cur_open = np.nan
     for i in range(n):
-        pred = session_pred(et[i])
-        d = et[i].date()
+        pred = session_pred(etv[i])
+        d = etv[i].date()
         if pred and (not in_sess or d != last_date):
             cur_high = high[i]
             cur_low  = low[i]
@@ -104,6 +106,7 @@ def _daily_agg(df: pd.DataFrame, session_pred, which: str, ago: int = 0):
     see the day's value early (display convenience); in live use the frame
     ends at "now" so nothing leaks from the future."""
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     high  = df['high'].to_numpy(dtype=float)
     low   = df['low'].to_numpy(dtype=float)
     openp = df['open'].to_numpy(dtype=float)
@@ -114,7 +117,7 @@ def _daily_agg(df: pd.DataFrame, session_pred, which: str, ago: int = 0):
     per_day: dict = {}
     order: list = []
     for i in range(n):
-        if not session_pred(et[i]):
+        if not session_pred(etv[i]):
             continue
         d = dates[i]
         if d not in per_day:
@@ -201,13 +204,14 @@ def today_vol_max(bars: Bars):
     df = bars.df
     pred = rth_pred(df)
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     vol = df['volume'].to_numpy(dtype=float)
     n = len(df)
     out = np.full(n, np.nan)
     cur_day = None
     cur_max = np.nan
     for i in range(n):
-        t = et[i]
+        t = etv[i]
         if t.date() != cur_day:
             cur_day = t.date()
             cur_max = np.nan
@@ -247,17 +251,18 @@ def window_low(bars: Bars, start: int, end: int):
 def _pm_level(bars: Bars, which: str) -> np.ndarray:
     df = bars.df
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     n = len(df)
     running = _running_session_extreme(df, _in_premarket, which)
     out = np.full(n, np.nan)
     last_val = np.nan
     last_date = None
     for i in range(n):
-        d = et[i].date()
+        d = etv[i].date()
         if d != last_date:
             last_val = np.nan
             last_date = d
-        if _in_premarket(et[i]):
+        if _in_premarket(etv[i]):
             last_val = running[i]
         out[i] = last_val
     return out
@@ -290,12 +295,13 @@ def _leading_extreme(df: pd.DataFrame, which: str, in_win):
       - overnight  (16:00 -> 04:00): the overnight part only (excl. premarket).
     (Premarket 04:00 -> 09:30 lives in pm_high / pm_low.)"""
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     high = df['high'].to_numpy(dtype=float)
     low  = df['low'].to_numpy(dtype=float)
     n = len(df)
     in_w, wdate = [], []
     for i in range(n):
-        t = et[i]
+        t = etv[i]
         w = bool(in_win(t))
         in_w.append(w)
         if w:
@@ -325,7 +331,7 @@ def _leading_extreme(df: pd.DataFrame, which: str, in_win):
             holds[wdate[i]] = running[i]
             out[i] = running[i]
         else:
-            d = et[i].date()
+            d = etv[i].date()
             if d in holds:
                 out[i] = holds[d]
     return out
@@ -419,6 +425,7 @@ def _period_agg(df: pd.DataFrame, which: str, period: str):
     `year`). RTH-only matches TV weekly/monthly equity bars; the current
     value is held on non-RTH bars once the period has RTH data."""
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     pred = rth_pred(df)
     high  = df['high'].to_numpy(dtype=float)
     low   = df['low'].to_numpy(dtype=float)
@@ -432,7 +439,7 @@ def _period_agg(df: pd.DataFrame, which: str, period: str):
         if keys[i] != cur_key:
             cur_key = keys[i]
             cur_high = np.nan; cur_low = np.nan; cur_open = np.nan
-        if pred(et[i]):
+        if pred(etv[i]):
             if np.isnan(cur_open):
                 cur_open = openp[i]
                 cur_high = high[i]
@@ -494,6 +501,7 @@ def _prev_period_val(df: pd.DataFrame, which: str, period: str) -> np.ndarray:
     previous period is finished by the time any current-period bar prints.
     The fetch window must reach back into the previous period."""
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     pred = rth_pred(df)
     high  = df['high'].to_numpy(dtype=float)
     low   = df['low'].to_numpy(dtype=float)
@@ -504,7 +512,7 @@ def _prev_period_val(df: pd.DataFrame, which: str, period: str) -> np.ndarray:
     per: dict = {}
     order: list = []
     for i in range(n):
-        if not pred(et[i]):
+        if not pred(etv[i]):
             continue
         k = keys[i]
         if k not in per:
@@ -556,6 +564,7 @@ def prev_year_open(bars: Bars):
 
 def _monday_extreme(df: pd.DataFrame, which: str) -> np.ndarray:
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     pred = rth_pred(df)
     iso = et.isocalendar()
     years = iso.year.to_numpy()
@@ -565,7 +574,7 @@ def _monday_extreme(df: pd.DataFrame, which: str) -> np.ndarray:
     n = len(df)
     per_week: dict = {}
     for i in range(n):
-        t = et[i]
+        t = etv[i]
         if t.dayofweek == 0 and pred(t):
             key = (int(years[i]), int(weeks[i]))
             v = high[i] if which == 'high' else low[i]

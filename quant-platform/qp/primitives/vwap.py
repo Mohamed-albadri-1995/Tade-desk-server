@@ -98,6 +98,7 @@ def _scatter(values: np.ndarray, positions: np.ndarray, n: int) -> np.ndarray:
 def session(bars: Bars):
     df = bars.df
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     pred = rth_pred(df)
     price, vol = _hlc3_vol(df)
     n = len(df)
@@ -106,7 +107,7 @@ def session(bars: Bars):
     cum_v  = 0.0
     last_date = None
     for i in range(n):
-        ts = et[i]
+        ts = etv[i]
         if not pred(ts):
             continue
         if ts.date() != last_date:
@@ -566,6 +567,7 @@ def _last_hour_anchored(bars: Bars, last_hour_start: int, side: str,
     after-hours on extended charts."""
     df, pos = _sub_frame(bars, rth_only)
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     high = df['high'].to_numpy(dtype=float)
     low  = df['low'].to_numpy(dtype=float)
     vol  = df['volume'].to_numpy(dtype=float)
@@ -582,7 +584,7 @@ def _last_hour_anchored(bars: Bars, last_hour_start: int, side: str,
     last_date = None
 
     for i in range(m):
-        ts = et[i]
+        ts = etv[i]
         if dates[i] != last_date:
             prev_price, prev_vol = lh_price, lh_vol
             lh_price = np.nan
@@ -662,6 +664,7 @@ def last_hour_ll(bars: Bars, last_hour_start: int, rth_only: bool = True):
 def stdev_bands(bars: Bars, mult: float):
     df = bars.df
     et = df.index.tz_convert(_ET)
+    etv = list(et)    # one pass; et[i] boxes a Timestamp per call (see _session.py)
     pred = rth_pred(df)
     price, vol = _hlc3_vol(df)
     n = len(df)
@@ -672,7 +675,7 @@ def stdev_bands(bars: Bars, mult: float):
     cum_v   = 0.0
     last_date = None
     for i in range(n):
-        ts = et[i]
+        ts = etv[i]
         if not pred(ts):
             continue
         if ts.date() != last_date:
