@@ -223,3 +223,36 @@ describe('credentials belong to the account, not the tool', () => {
     await expect(client.checkShortable(sym())).resolves.toHaveProperty('ok');
   });
 });
+
+/*
+ * KEPT FOR A MINUTE. The desk asks for every pick at once before the first
+ * order (runner.warmBroker); the order that follows must find the answer
+ * waiting, not make the same round trip again. 2026-09-24: three orders at
+ * 5–6 s each, and the third, MAZE, refused because the price had moved.
+ */
+describe('the asset answer is reused, briefly', () => {
+  beforeEach(() => client._forgetAssets());
+  test('a second check of the same name within a minute does not ask again', async () => {
+    const s = sym();
+    global.fetch = jest.fn(async (url) => (/\/v2\/account/.test(url)
+      ? { ok: true, status: 200, json: async () => ({ shorting_enabled: true }), text: async () => '{}' }
+      : asset({ symbol: s, shortable: true, easy_to_borrow: true })));
+    const a = await client.checkShortable(s);
+    const assetCalls = () => global.fetch.mock.calls.filter(c => /\/v2\/assets\//.test(c[0])).length;
+    const before = assetCalls();
+    const b = await client.checkShortable(s);
+    expect([a.ok, b.ok]).toEqual([true, true]);
+    expect(assetCalls()).toBe(before);
+  });
+  test('a failed lookup is not kept — the next check asks again', async () => {
+    const s = sym();
+    global.fetch = jest.fn(async (url) => (/\/v2\/account/.test(url)
+      ? { ok: true, status: 200, json: async () => ({ shorting_enabled: true }), text: async () => '{}' }
+      : boom));
+    await client.checkShortable(s);
+    const n1 = global.fetch.mock.calls.filter(c => /\/v2\/assets\//.test(c[0])).length;
+    await client.checkShortable(s);
+    const n2 = global.fetch.mock.calls.filter(c => /\/v2\/assets\//.test(c[0])).length;
+    expect(n2).toBeGreaterThan(n1);
+  });
+});

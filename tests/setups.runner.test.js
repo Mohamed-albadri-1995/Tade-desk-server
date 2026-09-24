@@ -756,6 +756,30 @@ describe('which setups place orders', () => {
     expect(out.fires[0].detail).toMatch(/ORDER FILLED/);
   });
 
+  // 2026-09-24: three picks at 5–6 s an order; the third was refused because
+  // the price had moved. The questions are asked together BEFORE any order.
+  test('the broker questions go out before the first order', async () => {
+    const order = [];
+    brokerMod.autoRoute.mockReturnValue({
+      cfgs: [{ destinationId: 'a1', destinationName: 'Alpaca', dialect: 'alpaca' }], error: null });
+    jest.spyOn(brokerMod, 'liveBuyingPower').mockImplementation(async () => { order.push('power'); return { ok: false }; });
+    jest.spyOn(require('../src/alpaca/client'), 'checkShortable')
+      .mockImplementation(async (s) => { order.push(`borrow ${s}`); return { ok: true }; });
+    jest.spyOn(brokerMod, 'placeOrder')
+      .mockImplementation(async (o) => { order.push(`order ${o.symbol}`); return { sent: true, quantity: 1 }; });
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 2, signalled: 2 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' },
+              { symbol: 'BBB', side: 'short', metric: 2, entry: 20, stop: 21,
+                risk: 1, risk_pct: 5, target: 18, target_r: 2, entry_at: '10:00' }],
+    });
+    await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' }, {});
+    const firstOrder = order.findIndex(x => x.startsWith('order'));
+    expect(firstOrder).toBeGreaterThan(0);
+    expect(order.slice(0, firstOrder).sort()).toEqual(['borrow BBB', 'power']);
+  });
+
   /* A preview must never reach a broker. It is used to look at past dates. */
   test('a dry run never places an order', async () => {
     const spy = jest.spyOn(brokerMod, 'placeOrder');

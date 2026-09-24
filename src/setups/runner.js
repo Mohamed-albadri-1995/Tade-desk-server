@@ -771,6 +771,8 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
   const readyFor = (broker.settings().armed && orderable)
     ? broker.accountsFor(setup.id, 'manual') : [];
   if (!dryRun && orderable && routing.cfgs.length) {
+    // Every question the broker needs answered, asked at once, first.
+    await warmBroker(out.picks, routing.cfgs);
     for (const pick of out.picks) {
       /*
        * THE TRADE IS ALREADY DECIDED before this loop begins.
@@ -1248,6 +1250,47 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
  * a decision. The caller's own exception is re-thrown untouched, because a log
  * that ate the error would turn a visible failure into a silent one.
  */
+/*
+ * THE BROKER'S QUESTIONS, ASKED ALL AT ONCE — BEFORE THE FIRST ORDER.
+ *
+ * 2026-09-24, OR + VWAP 09:35, three picks, one Alpaca account:
+ *
+ *     09:35:09  IMCC  sent
+ *     09:35:14  CLDX  sent
+ *     09:35:20  MAZE  refused — "stop_loss.stop_price must be >= base_price"
+ *
+ * Five to six seconds an order, and the third went out twenty seconds after
+ * the open, by which time MAZE had risen through its stop. The time was not
+ * the orders — it was the questions before each one: the account's buying
+ * power, and for a short whether the name can be borrowed, each a round trip
+ * from Stockholm to the US.
+ *
+ * The orders still go one at a time — each is sized against what the one
+ * before it committed in that account, and firing them together would size
+ * every one against the full balance. But the QUESTIONS do not depend on each
+ * other, so they are asked here together, and every order then finds its
+ * answers cached (buying power 20 s, the asset 60 s) and only has to send.
+ *
+ * Never blocks and never fails the run: a question that is not answered here
+ * is simply asked again, as before, inside placeOrder.
+ */
+async function warmBroker(picks, cfgs) {
+  const alpaca = (cfgs || []).filter(c => c && c.dialect === 'alpaca');
+  if (!alpaca.length || !(picks || []).length) return;
+  const client = require('../alpaca/client');
+  const account = require('../alpaca/account');
+  const jobs = alpaca.map(c => Promise.resolve()
+    .then(() => broker.liveBuyingPower(c)).catch(() => null));
+  for (const p of picks) {
+    if (!/^(short|sell)/i.test(String(p.signal || p.side || ''))) continue;
+    for (const c of alpaca) {
+      jobs.push(Promise.resolve()
+        .then(() => client.checkShortable(p.ticker, account.credsOf(c))).catch(() => null));
+    }
+  }
+  await Promise.all(jobs);
+}
+
 async function runSetup(setup, opts = {}) {
   const started = Date.now();
   const day = opts.date || toETDate(Date.now());
@@ -1405,6 +1448,7 @@ async function runDue(decisionTime, opts = {}) {
 }
 
 module.exports = {
+  warmBroker,
   runSetup, runDue, universe, describePick, lastWantedBar, orderLine, unmanagedLine, borrowNote,
   // Exported to be TESTED, not to be called elsewhere. "null when it cannot be
   // told, never zero" is a sentence until something executes it — and a lag of

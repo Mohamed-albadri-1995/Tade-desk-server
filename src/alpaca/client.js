@@ -517,6 +517,17 @@ async function accountMayShort(creds = null) {
  * short on the box, which is a far worse failure than the emails this exists to
  * prevent. Unknown means send it and let the broker answer.
  */
+/*
+ * THE ASSET ANSWER, KEPT FOR A MINUTE. Whether a name can be shorted does not
+ * change between 09:35:02 and 09:35:20, and the desk now asks for every pick
+ * at once BEFORE the first order (runner.js warmBroker) so that each order,
+ * sent one at a time, finds its answer waiting instead of spending a round
+ * trip to the US on it. Only an answer is kept; a failure is asked again.
+ */
+const ASSET_TTL_MS = 60 * 1000;
+const ASSET_CACHE = new Map();
+function _forgetAssets() { ASSET_CACHE.clear(); }
+
 async function checkShortable(symbol, creds = null) {
   /*
    * THE ACCOUNT FIRST, because its answer is about every symbol. A refusal
@@ -551,13 +562,20 @@ async function checkShortable(symbol, creds = null) {
      * which is what this failure looks like.
      */
     let a = null;
-    try {
-      a = await fetchAsset(symbol, creds);
-    } catch (first) {
-      await new Promise(r => setTimeout(r, 250));
-      a = await fetchAsset(symbol, creds);      // a second failure throws, below
-      if (a) console.warn(`[Alpaca] asset ${symbol} answered on the second ask `
-        + `(first: ${first.message})`);
+    const key = `${(creds && (creds.keyId || creds.key)) || 'desk'}|${String(symbol).toUpperCase()}`;
+    const hit = ASSET_CACHE.get(key);
+    if (hit && Date.now() - hit.at < ASSET_TTL_MS) {
+      a = hit.asset;
+    } else {
+      try {
+        a = await fetchAsset(symbol, creds);
+      } catch (first) {
+        await new Promise(r => setTimeout(r, 250));
+        a = await fetchAsset(symbol, creds);      // a second failure throws, below
+        if (a) console.warn(`[Alpaca] asset ${symbol} answered on the second ask `
+          + `(first: ${first.message})`);
+      }
+      if (a) ASSET_CACHE.set(key, { at: Date.now(), asset: a });
     }
     if (!a) return { ok: true, checked: false, reason: 'no answer from Alpaca' };
     const shortable = a.shortable === true;
@@ -583,6 +601,7 @@ module.exports = {
   fetchClosesBefore,
   fetchAsset,
   checkShortable,
+  _forgetAssets,
   // Exported so the desk can state, before the open, whether the account it is
   // about to trade from may short at all — rather than discovering it from a
   // rejection at 09:34.
