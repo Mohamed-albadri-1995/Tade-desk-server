@@ -107,9 +107,13 @@ describe('the three callers each say why', () => {
   test('the manager passes the reason it already computed', () => {
     const src = read('src/setups/manager.js');
     expect(src).toMatch(/closePosition\(pos\.symbol, day, cfg,[\s\S]{0,80}reason: why/);
-    // `why` is the sentence the alert has always carried — "the exit rule
-    // fired N bar(s) ago" / "the trailing stop at X was breached".
-    expect(src).toMatch(/const why = answer\.exit_now/);
+    // `why` is the sentence the alert carries — "the exit rule fired N
+    // bar(s) ago", "the trailing stop at X was breached", and now "the
+    // backtest's stop was hit". It comes from closeVerdict(), which reads
+    // qp's `close_now` — the backtest engine's answer — and falls back to the
+    // old `exit_now` contract for an older qp. The sentences themselves are
+    // run, not grepped, in tests/setups.manager.test.js.
+    expect(src).toMatch(/const \{ why, reason \} = closeVerdict\(answer\)/);
   });
 
   test('the flattener says end of session, and means it', () => {

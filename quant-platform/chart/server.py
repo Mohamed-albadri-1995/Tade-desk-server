@@ -1700,7 +1700,11 @@ def strategy_manage(payload: dict = Body(...)):
     managed by the strategy rather than by a second reading of it.
 
     Body: {name | strategy_id, symbol, side, entry, entry_iso, stop_at_entry,
-           tf, feed, days, asof, drop_last}
+           tf, feed, days, asof, drop_last, fill}
+
+    `fill` is the setup's fill model. It decides which bar an exit is booked
+    on, and the answer here is the backtest engine's — run with the model the
+    position was actually taken under, not whatever the engine defaults to.
     """
     try:
         st = None
@@ -1728,6 +1732,7 @@ def strategy_manage(payload: dict = Body(...)):
             asof=payload.get('asof') or None,
             stop_at_entry=(None if stop in (None, '') else float(stop)),
             drop_last=bool(payload.get('drop_last')),
+            fill=str(payload.get('fill') or 'live'),
         ))
     except Exception as e:                                # noqa: BLE001
         return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)

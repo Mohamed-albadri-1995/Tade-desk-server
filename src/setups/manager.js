@@ -163,6 +163,52 @@ async function strategyFor(pos) {
   return { name: hit || names[0], setup };
 }
 
+/*
+ * SHOULD THE BOX CLOSE THIS, AND WHY — read off qp's answer.
+ *
+ * qp now answers by running the BACKTEST ENGINE on this one open position and
+ * reporting whether that engine is flat by now (`close_now`) and why
+ * (`close_reason`). This used to be decided here, from `exit_now` and an
+ * anchored `breached`, and that pair was a second reading of the strategy: it
+ * closed OR + VWAP 09:35 on the first VWAP cross, before its 2R leg, on
+ * trades the backtest was still holding — the rule there manages only the
+ * runner. See chart/manage.py and chart/tests/logic_audit80.py.
+ *
+ * AN OLDER qp that does not send `close_now` is still read the old way, so a
+ * desk deployed ahead of its platform keeps managing positions rather than
+ * silently managing none.
+ */
+function closeVerdict(answer) {
+  const late = n => (n ? ` ${n} bar(s) ago` : '');
+  if (answer && Object.prototype.hasOwnProperty.call(answer, 'close_now')) {
+    if (!answer.close_now) return { why: null, reason: null };
+    const r = answer.close_reason;
+    const ago = late(answer.close_bars_ago);
+    if (r === 'exit') return { reason: r, why: `the exit rule fired${ago}` };
+    if (r === 'trail') {
+      return { reason: r,
+        why: `the trailing stop${answer.stop_now != null ? ` at ${answer.stop_now}` : ''} `
+          + `was breached${ago}` };
+    }
+    if (r === 'SL') {
+      return { reason: r,
+        why: `the backtest's stop was hit${ago} — the tested strategy is flat here` };
+    }
+    // A last target leg: the backtest scaled out completely.
+    return { reason: r || 'closed',
+      why: `the backtest took its last target (${r})${ago} — the tested strategy is flat here` };
+  }
+  // The contract before `close_now` existed.
+  if (answer && answer.exit_now) {
+    return { reason: 'exit',
+      why: `the exit rule fired${late(answer.exit_bars_ago)}` };
+  }
+  if (answer && answer.breached && answer.stop_kind === 'anchored') {
+    return { reason: 'trail', why: `the trailing stop at ${answer.stop_now} was breached` };
+  }
+  return { why: null, reason: null };
+}
+
 /**
  * One pass. Returns what it looked at and what it did, for the caller to log.
  *
@@ -323,6 +369,10 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
         stopAtEntry: pos.stop,
         tf: found.setup.tf || '1m',
         feed: found.setup.feed || 'yahoo',
+        // The model the position was taken under. qp answers by running the
+        // backtest engine on this one trade, and the fill decides which bar
+        // that engine books the exit on.
+        fill: found.setup.fill || 'live',
       });
 
       // `entry` is the ledger's fill price, not qp's — the session log compares
@@ -349,10 +399,7 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
        */
       if (!answer.managed) continue;
 
-      const why = answer.exit_now
-        ? `the exit rule fired${answer.exit_bars_ago ? ` ${answer.exit_bars_ago} bar(s) ago` : ''}`
-        : (answer.breached && answer.stop_kind === 'anchored'
-            ? `the trailing stop at ${answer.stop_now} was breached` : null);
+      const { why, reason } = closeVerdict(answer);
 
       if (!why) continue;
 
@@ -364,7 +411,7 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
        * that is obviously wrong. Reported loudly and left alone; a person can
        * decide in a way this loop should not.
        */
-      if (answer.stop_wrong_side && !answer.exit_now) {
+      if (answer.stop_wrong_side && reason !== 'exit') {
         store.publishFires([{
           ruleId: pos.setupId, rule: 'Manager', ticker: pos.symbol,
           toolId: 'ALERTS', date: day, at: Date.now(), kind: 'broker', level: 'error',
@@ -514,4 +561,5 @@ function start({ intervalMs = 60000 } = {}) {
   return { stop() { clearInterval(t); } };
 }
 
-module.exports = { start, check, openPositions, entryIsoOf, strategyFor, etNow, etWeekday };
+module.exports = { start, check, openPositions, entryIsoOf, strategyFor, etNow, etWeekday,
+  closeVerdict };

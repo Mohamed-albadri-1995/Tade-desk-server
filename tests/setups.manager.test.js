@@ -777,3 +777,128 @@ describe('the deploy re-runs itself when it changes', () => {
     expect(SH.slice(at, at + 40)).toMatch(/"\$@"/);
   });
 });
+
+/*
+ * ══ THE BOX CLOSES WHEN THE BACKTEST IS FLAT — NOT BEFORE ═══════════════════
+ *
+ * "Test and 935 are different on backtesting and live … like the 2 legs
+ * problem in 935."
+ *
+ * OR + VWAP 09:35 takes half off at 2R and lets the rest leave on a VWAP
+ * cross — `exit.scope: 'runner'`. The backtest arms that rule only once the 2R
+ * leg has banked. This loop decided from `exit_now`, which qp computed without
+ * reading `scope` at all, and so closed the whole position on the first cross
+ * — before 2R, on trades the backtest was still holding.
+ *
+ * qp now answers by running the backtest engine on the one open position and
+ * reporting `close_now`: is that engine flat by this bar. These pin the desk
+ * to that answer. chart/tests/logic_audit80.py pins qp to the backtest.
+ */
+describe('the desk acts on the engine\'s verdict', () => {
+  test('a runner-scoped rule that is not armed yet closes nothing', async () => {
+    /*
+     * THE BUG, as the desk sees it. The VWAP crossed; the rule is true; and
+     * the backtest is still holding, because the 2R leg has not banked. The
+     * old contract read `exit_now` here and would have closed. qp now says
+     * `close_now: false` and why.
+     */
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({
+      exit_now: false, close_now: false, close_reason: null,
+      exit_scope: 'runner', rule_armed: false,
+      waiting_for: 'the first target leg to bank — this exit rule manages only the runner',
+    }));
+    await manager.check(AT);
+    expect(sent).toEqual([]);
+  });
+
+  test('once the backtest leaves on the rule, the box closes it', async () => {
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({
+      exit_now: true, exit_bars_ago: 0,
+      close_now: true, close_reason: 'exit', close_bars_ago: 0,
+    }));
+    await manager.check(AT);
+    expect(sent.map(x => x.body)).toContainEqual(
+      expect.objectContaining({ symbol: 'CBRS', action: 'close' }));
+  });
+
+  test('a backtest that is flat by its STOP is flat here too', async () => {
+    /*
+     * The case the old contract could not express. The stop and the rule
+     * landed on one bar, the engine books the stop (it is checked first), and
+     * `exit_now` is false. If the broker's stop sat at a different level, or
+     * did not fill, this position is one the tested strategy no longer has.
+     */
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({
+      exit_now: false, close_now: true, close_reason: 'SL', close_bars_ago: 0,
+      backtest_closed: { reason: 'SL', bar: 6 },
+    }));
+    await manager.check(AT);
+    expect(sent.map(x => x.body)).toContainEqual(
+      expect.objectContaining({ symbol: 'CBRS', action: 'close' }));
+  });
+
+  test('the fill model travels with the question', async () => {
+    // qp books the exit on a bar that depends on the fill model. Asked with
+    // the engine's default instead of the setup's, the bar could differ.
+    catalog.list.mockResolvedValue([
+      { id: 'S@09:35', name: 'OR + VWAP 09:35', tf: '1m', feed: 'yahoo', fill: 'desk',
+        strategies: ['OR + VWAP 09:35 (Long)', 'OR + VWAP 09:35 (Short)'] },
+    ]);
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({ close_now: false }));
+    await manager.check(AT);
+    expect(qp.manage).toHaveBeenCalledWith(expect.objectContaining({ fill: 'desk' }));
+  });
+
+  test('and defaults to the desk\'s own model when the setup names none', async () => {
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({ close_now: false }));
+    await manager.check(AT);
+    expect(qp.manage).toHaveBeenCalledWith(expect.objectContaining({ fill: 'live' }));
+  });
+});
+
+describe('closeVerdict — the wording is the reason', () => {
+  const v = a => manager.closeVerdict(a);
+
+  test('no close, no words', () => {
+    expect(v({ close_now: false })).toEqual({ why: null, reason: null });
+  });
+
+  test('each reason says what actually happened', () => {
+    expect(v({ close_now: true, close_reason: 'exit', close_bars_ago: 0 }).why)
+      .toBe('the exit rule fired');
+    expect(v({ close_now: true, close_reason: 'exit', close_bars_ago: 2 }).why)
+      .toBe('the exit rule fired 2 bar(s) ago');
+    expect(v({ close_now: true, close_reason: 'trail', stop_now: 11.07 }).why)
+      .toBe('the trailing stop at 11.07 was breached');
+    expect(v({ close_now: true, close_reason: 'SL' }).why)
+      .toMatch(/the backtest's stop was hit — the tested strategy is flat here/);
+    expect(v({ close_now: true, close_reason: 'T2' }).why)
+      .toMatch(/took its last target \(T2\)/);
+  });
+
+  test('an older qp is still read the old way, not as "never close"', () => {
+    /*
+     * A desk deployed ahead of its platform must keep managing positions. An
+     * answer with no `close_now` key is the old contract, and reading its
+     * absence as `false` would quietly stop every managed exit on the desk.
+     */
+    expect(v({ exit_now: true, exit_bars_ago: 1 }))
+      .toEqual({ reason: 'exit', why: 'the exit rule fired 1 bar(s) ago' });
+    expect(v({ breached: true, stop_kind: 'anchored', stop_now: 9.8 }))
+      .toEqual({ reason: 'trail', why: 'the trailing stop at 9.8 was breached' });
+    expect(v({ breached: true, stop_kind: 'fixed' })).toEqual({ why: null, reason: null });
+  });
+
+  test('`close_now: false` is obeyed even when the old fields say close', () => {
+    // THE PRECISE REGRESSION. qp's new answer can say exit_now:false with the
+    // rule true on the bar (not armed), or even carry a stale exit_now — the
+    // new key is the authority when it is present.
+    expect(v({ close_now: false, exit_now: true, breached: true, stop_kind: 'anchored' }))
+      .toEqual({ why: null, reason: null });
+  });
+});
