@@ -581,18 +581,40 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
  * would each independently decide to close the same position.
  */
 let running = false;
+/*
+ * THE HEARTBEAT, for the Health view. "Is the manager running" had no answer
+ * short of reading pm2 logs: a pass that threw printed one line to a console
+ * nobody watches, and the next minute tried again, silently, for as long as
+ * it kept failing. These are the facts the page needs to say so.
+ */
+const beat = { startedAt: null, intervalMs: null, lastTick: null, lastOk: null,
+               lastError: null, lastErrorAt: null, lastActedAt: null, passes: 0,
+               skippedBusy: 0 };
+function heartbeat() { return { ...beat, running }; }
 function start({ intervalMs = 60000 } = {}) {
   console.log('[Manager] watching open positions for exit rules and trailing stops');
+  beat.startedAt = Date.now();
+  beat.intervalMs = intervalMs;
   const t = setInterval(() => {
-    if (running) return;
+    beat.lastTick = Date.now();
+    // A pass still running a minute later is a slow qp — counted, because a
+    // manager that is always busy is one that is never on time.
+    if (running) { beat.skippedBusy += 1; return; }
     running = true;
     check()
       .then(r => {
+        beat.lastOk = Date.now();
+        beat.passes += 1;
         if (r.acted && r.acted.length) {
+          beat.lastActedAt = Date.now();
           console.log(`[Manager] closed ${r.acted.map(a => a.symbol).join(', ')}`);
         }
       })
-      .catch(err => console.error('[Manager] pass failed:', err.message))
+      .catch(err => {
+        beat.lastError = err.message;
+        beat.lastErrorAt = Date.now();
+        console.error('[Manager] pass failed:', err.message);
+      })
       .finally(() => { running = false; });
   }, intervalMs);
   t.unref?.();
@@ -600,4 +622,4 @@ function start({ intervalMs = 60000 } = {}) {
 }
 
 module.exports = { start, check, openPositions, entryIsoOf, strategyFor, etNow, etWeekday,
-  closeVerdict };
+  closeVerdict, heartbeat };

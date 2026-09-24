@@ -56,7 +56,7 @@ test('every tab button has a pane and every pane has a tab button', () => {
   const panes = [...markup.matchAll(/<div class="pane" data-t="([a-z]+)"/g)].map(m => m[1]);
   // 'log' was a tab until it became the top half of 'history' — see
   // tests/alerts.oneDay.test.js for why the two were one question.
-  expect(tabs).toEqual(['today', 'history', 'setups', 'settings']);
+  expect(tabs).toEqual(['today', 'history', 'setups', 'health', 'settings']);
   // A pane may appear more than once (two blocks of "today"); what must not
   // happen is a pane nobody can reach, or a tab that shows nothing.
   expect([...new Set(panes)].sort()).toEqual([...tabs].sort());

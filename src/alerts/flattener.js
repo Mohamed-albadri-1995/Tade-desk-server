@@ -329,13 +329,26 @@ async function check(at = Date.now(), opts = {}) {
  * and no second dependency; the check is two string comparisons and a settings
  * read, which is nothing once a minute.
  */
+// For the Health view: is the clock being watched, and did today's close run.
+const beat = { startedAt: null, intervalMs: null, lastTick: null,
+               lastRanAt: null, lastRanDay: null, lastError: null, lastErrorAt: null };
+function heartbeat() { return { ...beat }; }
 function start({ intervalMs = 30000 } = {}) {
   const cfg = broker.settings();
   console.log(`[Flatten] end-of-session close at ${cfg.flattenAt} ET`
     + `${cfg.flatten ? '' : ' (switched off)'}`);
-  const t = setInterval(() => { check().catch(err => {
-    console.error('[Flatten] failed:', err.message);
-  }); }, intervalMs);
+  beat.startedAt = Date.now();
+  beat.intervalMs = intervalMs;
+  const t = setInterval(() => {
+    beat.lastTick = Date.now();
+    check().then((r) => {
+      if (r && r.ran !== false) { beat.lastRanAt = Date.now(); beat.lastRanDay = lastRun; }
+    }).catch(err => {
+      beat.lastError = err.message;
+      beat.lastErrorAt = Date.now();
+      console.error('[Flatten] failed:', err.message);
+    });
+  }, intervalMs);
   t.unref?.();
   return { stop() { clearInterval(t); } };
 }
@@ -343,4 +356,4 @@ function start({ intervalMs = 30000 } = {}) {
 /** Test seam — a new session must be able to run again. */
 function reset() { lastRun = null; }
 
-module.exports = { start, check, reset, etNow, etWeekday };
+module.exports = { start, check, reset, etNow, etWeekday, heartbeat };

@@ -33,9 +33,9 @@ const sections = (open, close) => {
 describe('five tabs, split by time', () => {
   test('Log is gone as a tab, in both navigations', () => {
     expect(sections('<aside class="al-side"', '</aside>')).toEqual(
-      ['today', 'history', 'setups', 'settings']);
+      ['today', 'history', 'setups', 'health', 'settings']);
     expect(sections('<div class="tabs" id="tabs">', '</div>')).toEqual(
-      ['today', 'history', 'setups', 'settings']);
+      ['today', 'history', 'setups', 'health', 'settings']);
     expect(html).not.toContain('data-t="log"');
   });
 

@@ -520,6 +520,23 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
    them onto one line and truncate the end — which is where the stop is. */
 .fire.setup { display:block; }
 .su-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.hl-sum { font-size:var(--f-sm, 13px); font-weight:700; padding:8px 12px; border-radius:6px;
+  border:1px solid var(--border); margin-bottom:var(--s3); }
+.hl-sum.ok { color:var(--m-up); border-color:#22c55e66; background:#22c55e14; }
+.hl-sum.warn { color:#fbbf24; border-color:#fbbf2466; background:#fbbf2414; }
+.hl-sum.bad { color:#fca5a5; border-color:#ef444466; background:#ef444418; }
+.hl-g { margin-bottom:var(--s3); }
+.hl-g h4 { margin:0 0 4px; font-size:var(--f-xs); letter-spacing:.06em; text-transform:uppercase;
+  color:var(--text3); }
+.hl-i { display:grid; grid-template-columns:14px minmax(90px, 180px) 1fr; gap:4px 10px;
+  align-items:baseline; padding:5px 0; border-top:1px solid var(--border); font-size:var(--f-xs); }
+.hl-i .dot { width:9px; height:9px; border-radius:50%; background:var(--text3); display:inline-block; }
+.hl-i.ok .dot { background:#22c55e; } .hl-i.warn .dot { background:#fbbf24; }
+.hl-i.bad .dot { background:#ef4444; }
+.hl-i .nm { font-weight:600; color:var(--text); overflow-wrap:anywhere; }
+.hl-i .dt { color:var(--text2); font-family:var(--mono); overflow-wrap:anywhere; }
+.hl-i.bad .dt { color:#fca5a5; } .hl-i.warn .dt { color:#fbbf24; }
+@media (max-width:560px) { .hl-i { grid-template-columns:14px 1fr; } .hl-i .dt { grid-column:2; } }
 .su-par { font-size:10.5px; font-weight:700; border-radius:99px; padding:2px 8px;
   border:1px solid var(--border); color:var(--text3); white-space:nowrap; cursor:pointer; }
 .su-par.match { color:var(--m-up); border-color:#22c55e66; background:#22c55e14; }
@@ -759,6 +776,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <button class="tb on" data-t="today">Live</button>
   <button class="tb" data-t="history">Review</button>
   <button class="tb" data-t="setups">Setups</button>
+  <button class="tb" data-t="health">Health</button>
   <button class="tb" data-t="settings">Settings</button>
 </aside>
 
@@ -798,6 +816,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
        no alert, by definition — so "why did it take two and not five" had no
        answer on this page at all, and the reasons are exactly where a strategy
        stops being the one that was backtested. -->
+  <button class="tb" data-t="health">Health</button>
   <button class="tb" data-t="settings">Settings</button>
 </div>
 
@@ -1073,6 +1092,20 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <div id="history"><div class="empty">Pick a session.</div></div>
 </details>
 </div><!-- /history -->
+
+<!-- HEALTH. Every part of the desk, one word each — processes, qp, the tools,
+     the manager, the flatten, today's decisions. What used to take Termux,
+     `pm2 list`, `pm2 logs` and a curl. Grey means NOT CHECKED, never fine.
+     Fetched when opened and every 30 s while open; see src/alerts/health.js. -->
+<div class="pane" data-t="health" hidden>
+<div class="sec">
+  <span>System health</span>
+  <span class="note" id="hl-at"></span>
+  <button class="lnk" onclick="loadHealth()">refresh</button>
+</div>
+<div id="hl-sum" class="hl-sum"></div>
+<div id="health"><div class="empty">Open to check.</div></div>
+</div><!-- /health -->
 
 <!-- THE RULES TAB WAS HERE.
      A rule is a condition evaluated inside each screener's own scan — "price
@@ -3559,6 +3592,50 @@ let HIST_DATES = [];
  */
 const MOVED = { log: 'history', rules: 'today' };
 
+/* ── health ──
+ * One word per part of the desk. A part that could not be checked is grey
+ * and says why — an unchecked part painted green is how a restart loop ran to
+ * 113,854 before anyone saw the number.
+ */
+let HEALTH_TIMER = null;
+const HL_WORD = {
+  ok: 'All systems working',
+  warn: 'Working — something is near a limit or recently restarted',
+  bad: 'Something is NOT working — see the red lines',
+  unknown: 'Working as far as checked — some parts could not be checked',
+};
+
+function paintHealth(d) {
+  const out = document.getElementById('health');
+  const sum = document.getElementById('hl-sum');
+  const at = document.getElementById('hl-at');
+  if (!out) return;
+  if (!d || d.ok === false) {
+    if (sum) { sum.className = 'hl-sum bad'; sum.textContent = 'The health check itself did not answer'; }
+    out.innerHTML = `<div class="empty">${esc((d && d.error) || 'no answer')}</div>`;
+    return;
+  }
+  if (sum) {
+    sum.className = `hl-sum ${d.status === 'unknown' ? '' : esc(d.status)}`;
+    const c = d.counts || {};
+    sum.textContent = HL_WORD[d.status] || HL_WORD.unknown;
+    if (c.bad || c.warn || c.unknown) {
+      sum.textContent += ` · ${c.bad || 0} not working · ${c.warn || 0} to watch · ${c.unknown || 0} not checked`;
+    }
+  }
+  if (at) at.textContent = d.at ? `checked ${new Date(d.at).toLocaleTimeString()}` : '';
+  out.innerHTML = (d.groups || []).map(g => `<div class="hl-g"><h4>${esc(g.title)}</h4>${
+    (g.items || []).map(i => `<div class="hl-i ${i.status === null ? 'unknown' : esc(i.status)}">
+      <span class="dot" title="${i.status === null ? 'not checked' : esc(i.status)}"></span>
+      <span class="nm">${esc(i.label)}</span><span class="dt">${esc(i.detail)}</span></div>`).join('')
+  }</div>`).join('');
+}
+
+async function loadHealth() {
+  try { paintHealth(await (await fetch('/api/health')).json()); }
+  catch (e) { paintHealth({ ok: false, error: e.message }); }
+}
+
 function showTab(name) {
   /*
    * 'log' WAS A TAB AND IS NOW HALF OF 'history'; 'rules' is gone entirely. The chosen tab is remembered
@@ -3591,6 +3668,9 @@ function showTab(name) {
    * fresh is the moment somebody taps the tab.
    */
   if (want === 'history') loadDay();
+  // Health is live while it is open and silent while it is not.
+  clearInterval(HEALTH_TIMER);
+  if (want === 'health') { loadHealth(); HEALTH_TIMER = setInterval(loadHealth, 30000); }
   window.scrollTo(0, 0);
 }
 

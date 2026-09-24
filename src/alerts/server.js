@@ -863,6 +863,18 @@ app.post('/api/broker/test', express.json(), async (req, res) => {
  * NEVER 500 — the same rule as the session log. This is the endpoint someone
  * opens BECAUSE something is wrong.
  */
+/*
+ * GET /api/health — every part of the desk, one word each: processes, qp, the
+ * tools, the manager, the flatten, today's decisions. See src/alerts/health.js.
+ */
+app.get('/api/health', async (req, res) => {
+  try {
+    res.json(await require('./health').report());
+  } catch (err) {
+    res.json({ ok: false, status: 'unknown', error: err.message, groups: [] });
+  }
+});
+
 app.get('/api/preflight', async (req, res) => {
   try {
     const { toETDate } = require('../utils/time');
