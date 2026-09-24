@@ -195,8 +195,12 @@ function compare({ setup, spec, strategy } = {}) {
   rows.push(row('account size', live.accountSize || null, bt.account_equity || null));
   // 100 live means NO cap, which is what an absent cap means in the backtest,
   // so the two must compare equal rather than as 100 against nothing.
-  const liveCap = eff.maxPositionPct === 100 ? null : (eff.maxPositionPct || null);
-  const btCap = bt.max_position_pct || null;
+  // Spelled 'none' on both sides, so "no cap here, no cap there" is a MATCH.
+  // As null it read "NOT COMPARED" on every uncapped setup — a permanent
+  // amber line about two settings that agree.
+  const liveCap = (!eff.maxPositionPct || eff.maxPositionPct === 100) ? 'none'
+    : eff.maxPositionPct;
+  const btCap = bt.max_position_pct || 'none';
   rows.push(row('max position %', liveCap, btCap,
     'absent on either side means NO cap — the first tight stop can take the '
     + 'balance and the rest of the day is skipped for lack of capital'));

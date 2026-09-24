@@ -143,6 +143,20 @@ app.post('/api/setups/:id/settings', express.json(), (req, res) => {
   }
 });
 
+/*
+ * GET /api/setups/:id/parity — does the live setup run what was backtested?
+ * The settings and the rules, against the newest finished run of its strategy.
+ * See src/setups/parityCheck.js. Reads only.
+ */
+app.get('/api/setups/:id/parity', async (req, res) => {
+  try {
+    const out = await require('../setups/parityCheck').check(req.params.id);
+    res.status(out.status || 200).json(out);
+  } catch (err) {
+    res.status(500).json({ ok: false, verdict: 'unknown', error: err.message });
+  }
+});
+
 // Switching one off is a shared file, so this process can do it even though it
 // cannot run a setup — running needs the owning tool's card list.
 app.post('/api/setups/:id/enabled', express.json(), async (req, res) => {

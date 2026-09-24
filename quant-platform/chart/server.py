@@ -810,6 +810,26 @@ def backtests_list():
     return {'ok': True, 'backtests': store.list_backtests()}
 
 
+@app.get('/api/parity')
+def parity_report(ids: str = ''):
+    """The newest backtest of these strategies, and every rule changed since.
+
+    `ids` is a comma list — a setup's long and short books are separate
+    strategies. Read by the desk's live-vs-backtest check; see chart/parity.py.
+    """
+    from chart import parity
+    try:
+        want = [int(x) for x in str(ids).split(',') if x.strip()]
+    except ValueError:
+        return {'ok': False, 'error': 'ids must be strategy numbers'}
+    if not want:
+        return {'ok': False, 'error': 'no strategy ids given'}
+    try:
+        return parity.report(want)
+    except Exception as e:  # noqa: BLE001 — a check that fails says so
+        return {'ok': False, 'error': str(e)}
+
+
 @app.get('/api/backtest/{bid}/csv')
 def backtest_csv(bid: int):
     """Full results as CSV — trade fields + every register (R1/Shortlist)

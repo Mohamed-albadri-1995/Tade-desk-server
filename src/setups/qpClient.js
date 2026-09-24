@@ -249,6 +249,18 @@ async function setTools(id, tools, timeoutMs = 10000) {
   return d.strategy;
 }
 
+/**
+ * The newest finished backtest of these strategies, and every rule that has
+ * changed in them since it ran. See quant-platform/chart/parity.py.
+ */
+async function parity(ids, timeoutMs = 10000) {
+  const res = await axios.get(`${baseUrl()}/api/parity`,
+    { params: { ids: (ids || []).join(',') }, timeout: timeoutMs });
+  const d = res.data || {};
+  if (!d.ok) throw new Error(d.error || 'qp could not answer the parity check');
+  return d;
+}
+
 /** Is the platform up? Asked before a decision so "down" is a distinct answer. */
 async function health(timeoutMs = 5000) {
   try {
@@ -260,7 +272,7 @@ async function health(timeoutMs = 5000) {
 }
 
 module.exports = {
-  decide, manage, strategies, setTools, health, baseUrl,
+  decide, manage, strategies, setTools, health, baseUrl, parity,
   // Exported so the retry rule can be tested against real error shapes rather
   // than trusted — "only a request that never got an answer may be repeated"
   // is a sentence until something executes it.

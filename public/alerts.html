@@ -520,6 +520,19 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
    them onto one line and truncate the end — which is where the stop is. */
 .fire.setup { display:block; }
 .su-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.su-par { font-size:10.5px; font-weight:700; border-radius:99px; padding:2px 8px;
+  border:1px solid var(--border); color:var(--text3); white-space:nowrap; cursor:pointer; }
+.su-par.match { color:var(--m-up); border-color:#22c55e66; background:#22c55e14; }
+.su-par.differ { color:#fbbf24; border-color:#fbbf2466; background:#fbbf2414; }
+.su-par.unknown { color:var(--text3); }
+.par-bt { font-size:var(--f-xs); color:var(--text2); margin-bottom:6px; }
+.par-tbl { width:100%; border-collapse:collapse; font-size:var(--f-xs); font-family:var(--mono); }
+.par-tbl td { padding:3px 6px; border-top:1px solid var(--border); vertical-align:top;
+  overflow-wrap:anywhere; }
+.par-tbl td:first-child { color:var(--text3); white-space:nowrap; }
+.par-tbl tr.differ td { color:#fbbf24; }
+.par-tbl tr.unknown td:not(:first-child) { color:var(--text3); }
+.par-rule { font-size:var(--f-xs); font-family:var(--mono); color:#fbbf24; margin:2px 0; }
 .su-tag { font-size:10px; font-weight:800; letter-spacing:.06em; border-radius:3px;
   padding:2px 7px; background:var(--bg3); color:var(--text2); border:1px solid var(--border); }
 .fire.lvl-trade { border-left-color:var(--amber, #fbbf24); }
@@ -1452,6 +1465,16 @@ async function loadSetups() {
       ((a.stage === 'ready' ? 0 : 1) - (b.stage === 'ready' ? 0 : 1))
       || String(a.decisionTime || '').localeCompare(String(b.decisionTime || ''))
       || String(a.name || '').localeCompare(String(b.name || '')));
+    /*
+     * THE CARDS ARE NUMBERED IN THIS ORDER, SO SETUPS MUST BE IN IT TOO.
+     *
+     * Every button on a card passes its position — editSetup(i), saveSetup(i),
+     * setSetupTool(i) — and those read SETUPS[i]. SETUPS was left in the order
+     * the API sent while the cards were drawn sorted, so on any list the sort
+     * moved, "edit filter" on one card opened ANOTHER setup's settings and
+     * Save wrote them there, and a tool chip reassigned the wrong strategy.
+     */
+    SETUPS = ordered;
     let lastStage = null;
     out.innerHTML = ordered.map((s, i) => {
       const on = s.enabled !== false;
@@ -1483,6 +1506,11 @@ async function loadSetups() {
           <span class="su-tag">${s.watch
             ? `${esc(s.decisionTime)}–${esc(s.windowEnd)} ET`
             : `${esc(s.decisionTime)} ET`}</span>
+          <!-- Does what trades match what was backtested? Filled in by
+               loadParity() once the list is on screen; tapping opens the
+               comparison below. -->
+          <span class="su-par" id="su-par-${i}" onclick="openParity(${i})"
+                title="Live settings and rules against the newest backtest">checking…</span>
           <button class="btn${on ? ' on' : ''}" onclick="toggleSetup('${esc(s.id)}', ${!on})">
             ${on ? 'On' : 'Off'}</button>
           <!-- Runs the whole chain NOW: cards, filter, qp, ranking, sizing,
@@ -1529,6 +1557,13 @@ async function loadSetups() {
           ? `<div class="st-alertonly">📣 Alerts only — will not place orders: ${
               (s.readiness.orderBlocking || []).map(esc).join('; ')}</div>` : ''}
         ${setupWarnings(s)}
+        <!-- LIVE AGAINST BACKTEST. The settings the desk runs with and the rules
+             the strategy has now, against the newest finished backtest of it.
+             A rule edited after that run is listed by name. -->
+        <details class="why" id="par-${i}">
+          <summary>live vs backtest</summary>
+          <div class="why-body" id="par-body-${i}">checking…</div>
+        </details>
         <!-- What the setup IS, folded. Three sentences you read once, on the
              day it is set up — not every time you open the tab to switch it
              off. The card used to be at its longest on the day you knew it
@@ -1594,6 +1629,7 @@ async function loadSetups() {
     }).join('');
     // Both halves are in hand now, whichever fetch landed first.
     paintAlgoState();
+    ordered.forEach((s, i) => loadParity(s.id, i));
     // Anything painted after load folds too; the DOMContentLoaded pass in
     // desk.js only ever sees the markup that was in the file.
     deskFoldWhy();
@@ -2023,6 +2059,70 @@ function accountChips(s) {
       a.mode === 'auto' ? ' live' : ' on'}">${esc(a.name)} · ${esc(word[a.mode] || a.mode)}</span>`).join('')}
     </div>
   </div>`;
+}
+
+/*
+ * LIVE AGAINST BACKTEST, per setup.
+ *
+ * Reported as: "some strategies like Test and 935 are different on
+ * backtesting and live". Two ways that happens, both checked by
+ * /api/setups/:id/parity — a SETTING that differs (fill model, ranking,
+ * sizing, feed…) and a RULE edited in the builder after the backtest ran.
+ * "Could not check" is its own grey answer and never reads as a match.
+ */
+const PAR_WORD = { match: '✓ matches backtest', differ: '⚠ differs from backtest',
+                   unknown: '? not checked' };
+
+function paintParity(i, d) {
+  const pill = document.getElementById(`su-par-${i}`);
+  const body = document.getElementById(`par-body-${i}`);
+  const v = (d && d.verdict) || 'unknown';
+  if (pill) {
+    pill.className = `su-par ${v}`;
+    pill.textContent = PAR_WORD[v] || PAR_WORD.unknown;
+  }
+  if (!body) return;
+  if (!d || d.ok === false) {
+    body.innerHTML = `<div class="warn">${esc((d && d.error) || 'The check did not answer.')}</div>`;
+    return;
+  }
+  const b = d.backtest;
+  if (!b) {
+    body.innerHTML = `<div>${esc((d.lines || [])[0] || 'No backtest to compare against.')}</div>`;
+    return;
+  }
+  const when = b.created_at ? new Date(b.created_at * 1000).toISOString().slice(0, 10) : '';
+  const stats = [
+    b.start && b.end ? `${esc(b.start)} → ${esc(b.end)}` : '',
+    b.trades !== null ? `${esc(b.trades)} trades` : '',
+    b.win_rate !== null ? `${esc(b.win_rate)}% win` : '',
+    b.avg_return_pct !== null ? `avg ${esc(b.avg_return_pct)}%` : '',
+  ].filter(Boolean).join(' · ');
+  const rules = (d.rules || []).map(r => {
+    if (!r.frozen) return `<div class="par-rule">${esc(r.name)}: ${esc(r.note || 'cannot tell')}</div>`;
+    if (!r.changed.length) return `<div class="note">${esc(r.name)}: rules unchanged since this backtest</div>`;
+    return `<div class="par-rule">${esc(r.name)}: changed since this backtest —</div>`
+      + r.changed.map(c => `<div class="par-rule">&nbsp;&nbsp;${esc(c.path)}: ${esc(c.then)} → ${esc(c.now)}</div>`).join('');
+  }).join('');
+  const rows = (d.settings || []).map(r => `<tr class="${esc(r.status)}"${r.note ? ` title="${esc(r.note)}"` : ''}>
+      <td>${esc(r.what)}</td><td>${esc(r.live ?? '—')}</td><td>${esc(r.backtest ?? '—')}</td>
+      <td>${r.status === 'match' ? '✓' : (r.status === 'differ' ? '⚠' : '?')}</td></tr>`).join('');
+  body.innerHTML = `<div class="par-bt">Backtest #${esc(b.id)} ${esc(b.name || '')}${when ? ` · run ${when}` : ''}${stats ? `<br>${stats}` : ''}</div>
+    ${rules}
+    <table class="par-tbl"><tr><td></td><td><b>live</b></td><td><b>backtest</b></td><td></td></tr>${rows}</table>`;
+}
+
+async function loadParity(id, i) {
+  try {
+    paintParity(i, await (await fetch(`/api/setups/${encodeURIComponent(id)}/parity`)).json());
+  } catch (e) {
+    paintParity(i, { ok: false, verdict: 'unknown', error: `The check did not answer: ${e.message}` });
+  }
+}
+
+function openParity(i) {
+  const d = document.getElementById(`par-${i}`);
+  if (d) { d.open = true; d.scrollIntoView({ block: 'nearest' }); }
 }
 
 async function toggleSetup(id, enabled) {

@@ -251,8 +251,10 @@ describe('the desk as it IS — the default live fill', () => {
   test('the position cap is live-only — the backtest ran uncapped', () => {
     const r = find(res(), 'max position %');
     expect(r.live).toBe(16.66);
-    expect(r.backtest).toBeNull();
-    expect(r.status).toBe('unknown');
+    // An uncapped run is a KNOWN setting — no cap — not a missing one. Capped
+    // live against uncapped backtest is two different books, so it differs.
+    expect(r.backtest).toBe('none');
+    expect(r.status).toBe('differ');
   });
 });
 
@@ -320,8 +322,9 @@ describe('a setup may override the account, and the override is what runs', () =
     write('risk.json', { accountSize: 50000, riskPerTrade: 500, maxPositionPct: 100 });
     const res = parity.compare({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
     const r = find(res, 'max position %');
-    expect(r.live).toBeNull();
-    expect(r.backtest).toBeNull();
+    expect(r.live).toBe('none');
+    expect(r.backtest).toBe('none');
+    expect(r.status).toBe('match');
   });
 });
 
