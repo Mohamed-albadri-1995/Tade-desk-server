@@ -1220,7 +1220,10 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   <select id="sl-src" onchange="loadSyslog()"><option value="">all sources</option></select>
   <input id="sl-q" type="search" placeholder="search…" oninput="slSearchSoon()">
   <label class="sl-live"><input type="checkbox" id="sl-live" onchange="slLiveToggle()"> live</label>
-  <button class="btn" onclick="copySyslog()">Copy for Claude</button>
+  <!-- A FILE, because copying is refused on a plain-http page — which this
+       desk is, on a phone. The link carries the filters on screen. -->
+  <a class="btn" id="sl-dl" href="/api/logs.txt?level=warn" download onclick="slDownloadHref()">Download log</a>
+  <button class="btn" onclick="copySyslog()">Copy</button>
 </div>
 <div id="sl-sum" class="sl-sum"></div>
 <div id="syslog" class="sl"><div class="sl-empty">Pick a session.</div></div>
@@ -4631,6 +4634,21 @@ async function loadSyslog() {
   if (pick && pick.value) qs.set('date', pick.value);
   try { paintSyslog(await (await fetch(`/api/logs?${qs}`)).json()); }
   catch (e) { paintSyslog({ ok: false, error: e.message }); }
+  slDownloadHref();
+}
+
+/* The download link, pointed at exactly what is on screen. */
+function slDownloadHref() {
+  const a = document.getElementById('sl-dl');
+  if (!a) return;
+  const pick = document.getElementById('hist-date');
+  const qs = new URLSearchParams({
+    level: (document.getElementById('sl-level') || {}).value || 'info',
+    src: (document.getElementById('sl-src') || {}).value || '',
+    q: (document.getElementById('sl-q') || {}).value || '',
+  });
+  if (pick && pick.value) qs.set('date', pick.value);
+  a.href = `/api/logs.txt?${qs}`;
 }
 
 function slSearchSoon() {
@@ -4667,7 +4685,7 @@ async function copySyslog() {
     const box = document.getElementById('syslog');
     box.parentNode.insertBefore(ta, box);
     ta.focus(); ta.select();
-    toast('Select all in the box above and copy', 'warn');
+    toast('Copying is blocked on this page — use Download log instead', 'warn');
   }
 }
 

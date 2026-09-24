@@ -140,8 +140,12 @@ const STAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?:?\s(.*
 
 function levelOf(text) {
   if (/"(GET|HEAD|POST) [^"]*" 200\b/.test(text)) return 'debug';       // routine access
+  // A refusal is an error whatever words surround it. "[Manager] could not
+  // verify positions with Alpaca: /v2/positions 401 unauthorized" was read as
+  // INFO on 2026-09-24 — the position manager blind, filed as routine.
+  if (/\b(401|403)\b|unauthori[sz]ed|forbidden|bad credentials/i.test(text)) return 'error';
   if (/\b(ERROR|CRITICAL|FATAL|Traceback|Unhandled)\b|Error:|\bfailed\b|DID NOT START|exceeds --max-memory|exited with code \[[1-9]/i.test(text)) return 'error';
-  if (/\bWARN(ING)?\b|\bwarn\b|stale|missing/i.test(text)) return 'warn';
+  if (/\bWARN(ING)?\b|\bwarn\b|stale|missing|could not|couldn't|cannot|timed? ?out|refused|rejected/i.test(text)) return 'warn';
   return 'info';
 }
 
@@ -202,7 +206,21 @@ function parseLog(text, src, keep = null, max = 0) {
   if (max && out.length > max) out.splice(0, out.length - max);
   // A stack trace makes its line an error whatever its first words said.
   for (const l of out) if (l.detail && /\n?\s*at\s|Traceback/.test(l.detail) && l.level !== 'error') l.level = 'error';
-  return out;
+  // A stamp with nothing after it (console.log of an object, a blank line):
+  // what follows is the message. Nothing at all is not a line worth showing.
+  const kept = [];
+  for (const l of out) {
+    if (l.msg.trim()) { kept.push(l); continue; }
+    if (!l.detail) continue;
+    const [first, ...rest] = l.detail.split('\n');
+    l.msg = first.trim();
+    l.detail = rest.join('\n') || undefined;
+    if (!l.detail) delete l.detail;
+    const lv = levelOf(l.msg);
+    if (LEVELS.indexOf(lv) > LEVELS.indexOf(l.level)) l.level = lv;
+    kept.push(l);
+  }
+  return kept;
 }
 
 function pm2Dir() {
@@ -313,4 +331,20 @@ function collect(q = {}, deps = {}) {
   return { ok: true, date, lines, sources, counts, truncated, notes };
 }
 
-module.exports = { collect, runLines, passLines, ledgerLine, parseLog, levelOf, processLines, LEVELS };
+/** The lines as plain text — the file the Review tab downloads. */
+function toText(r, { level = 'info' } = {}) {
+  const hhmmss = t => new Date(t).toLocaleTimeString('en-GB', { timeZone: 'America/New_York', hour12: false });
+  const tag = { error: 'ERR', warn: 'WRN', info: 'INF', debug: 'DBG' };
+  const c = r.counts || {};
+  const head = [
+    `Trade desk system log · ${r.date} (times ET) · level ${level}`,
+    `${c.error || 0} errors · ${c.warn || 0} warnings · ${c.info || 0} events`
+      + `${r.truncated ? ' · latest lines only' : ''} · ${(r.lines || []).length} lines`,
+    ...(r.notes || []).map(n => `note: ${n}`),
+    '',
+  ];
+  return head.concat((r.lines || []).map(l => `${hhmmss(l.t)}  ${String(l.src).padEnd(9)} ${tag[l.level] || ''}  ${l.msg}`
+    + (l.detail ? `\n${l.detail.split('\n').map(x => `      ${x}`).join('\n')}` : ''))).join('\n') + '\n';
+}
+
+module.exports = { collect, toText, runLines, passLines, ledgerLine, parseLog, levelOf, processLines, LEVELS };

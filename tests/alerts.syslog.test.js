@@ -254,3 +254,43 @@ describe('a box with large logs', () => {
     expect(r.lines.map(l => l.msg)).toEqual(['qp DID NOT START: port in use']);
   });
 });
+
+/* ── read off the box's own log, 2026-09-24 ─────────────────────────────── */
+describe('what the first real log showed', () => {
+  test('a 401 is an error, whatever surrounds it — the manager was blind', () => {
+    expect(S.levelOf('[Manager] could not verify positions with Alpaca: Alpaca /v2/positions 401: {"message": "unauthorized."}'))
+      .toBe('error');
+  });
+  test('"could not" is at least a warning', () => {
+    expect(S.levelOf('[Flatten] could not reach the broker')).toBe('warn');
+  });
+  test('a stamp with nothing after it takes its message from the next line', () => {
+    const ls = S.parseLog('2026-09-24T10:12:25: \n  { symbol: "DINO", note: "timed out" }\n2026-09-24T10:12:26: \n', 'alerts');
+    expect(ls).toHaveLength(1);
+    expect(ls[0].msg).toBe('{ symbol: "DINO", note: "timed out" }');
+    expect(ls[0].level).toBe('warn');
+  });
+});
+
+describe('the log as a file', () => {
+  test('toText: a header with the counts, then one line each', () => {
+    const txt = S.toText({ date: '2026-09-24', counts: { error: 1, warn: 0, info: 1 }, notes: [],
+      lines: [{ t: Date.parse('2026-09-24T14:12:25Z'), src: 'alerts', level: 'error',
+                msg: 'could not verify positions: 401', detail: 'at x' }] }, { level: 'warn' });
+    const L = txt.split('\n');
+    expect(L[0]).toBe('Trade desk system log · 2026-09-24 (times ET) · level warn');
+    expect(L[1]).toMatch(/^1 errors · 0 warnings · 1 events · 1 lines$/);
+    expect(L[3]).toBe('10:12:25  alerts    ERR  could not verify positions: 401');
+    expect(L[4]).toBe('      at x');
+  });
+  test('GET /api/logs.txt downloads, named for the day and level', async () => {
+    const request = require('supertest');
+    process.env.PM2_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pm2dl-'));
+    const app = require('../src/alerts/server');
+    const r = await request(app).get('/api/logs.txt?date=2026-09-24&level=warn');
+    expect(r.status).toBe(200);
+    expect(r.headers['content-type']).toMatch(/text\/plain/);
+    expect(r.headers['content-disposition']).toBe('attachment; filename="trade-desk-log-2026-09-24-warn.txt"');
+    expect(r.text).toMatch(/^Trade desk system log · 2026-09-24/);
+  });
+});

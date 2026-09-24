@@ -881,6 +881,25 @@ app.get('/api/health', async (req, res) => {
  * (debug|info|warn|error, the minimum), ?src=, ?q= (search), ?limit=.
  * See src/alerts/syslog.js. Never 500s.
  */
+/*
+ * GET /api/logs.txt — the same log as a file to save and send. Copying to the
+ * clipboard is refused on a plain-http page, which this desk is on a phone.
+ */
+app.get('/api/logs.txt', (req, res) => {
+  try {
+    const q = { date: String(req.query.date || ''), level: String(req.query.level || 'warn'),
+                src: String(req.query.src || ''), q: String(req.query.q || ''),
+                limit: req.query.limit || 5000 };
+    const sys = require('./syslog');
+    const r = sys.collect(q);
+    res.set('Content-Type', 'text/plain; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="trade-desk-log-${r.date}-${q.level}.txt"`);
+    res.send(sys.toText(r, q));
+  } catch (err) {
+    res.status(500).type('text/plain').send(`the log could not be read: ${err.message}\n`);
+  }
+});
+
 app.get('/api/logs', (req, res) => {
   try {
     res.json(require('./syslog').collect({
