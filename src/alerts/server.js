@@ -875,6 +875,24 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+/*
+ * GET /api/logs — the system log: decisions, orders, closes, the manager and
+ * every pm2 process's own lines, merged in time order. ?date= (ET), ?level=
+ * (debug|info|warn|error, the minimum), ?src=, ?q= (search), ?limit=.
+ * See src/alerts/syslog.js. Never 500s.
+ */
+app.get('/api/logs', (req, res) => {
+  try {
+    res.json(require('./syslog').collect({
+      date: String(req.query.date || ''), level: String(req.query.level || 'info'),
+      src: String(req.query.src || ''), q: String(req.query.q || ''),
+      limit: req.query.limit,
+    }));
+  } catch (err) {
+    res.json({ ok: false, error: err.message, lines: [], sources: [], counts: {} });
+  }
+});
+
 app.get('/api/preflight', async (req, res) => {
   try {
     const { toETDate } = require('../utils/time');

@@ -587,6 +587,38 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
  * is five lines that answer "was that day normal". Open, it is everything it
  * was before.
  */
+/* ── the system log (Review) — a terminal-style stream, Railway-like ── */
+.sl-bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:var(--s2) 0; }
+.sl-bar select, .sl-bar input[type=search] { font-size:12px; padding:5px 8px; border-radius:6px;
+  border:1px solid var(--border); background:var(--bg2); color:var(--text); }
+.sl-bar input[type=search] { flex:1; min-width:120px; }
+.sl-live { font-size:12px; color:var(--text2); display:inline-flex; gap:4px; align-items:center; }
+.sl-sum { font-size:12px; color:var(--text3); margin-bottom:6px; }
+.sl-sum b.e { color:#f87171; } .sl-sum b.w { color:#fbbf24; }
+.sl { background:#0b0f14; color:#cbd5e1; border:1px solid #1f2937; border-radius:8px;
+  font-family:var(--mono, ui-monospace, Menlo, monospace); font-size:12px; line-height:1.5;
+  max-height:70vh; overflow:auto; padding:6px 0; margin-bottom:var(--s3); }
+.sl-empty { padding:10px 12px; color:#64748b; }
+.sl-r { display:grid; grid-template-columns:62px 74px 38px 1fr; gap:0 8px; padding:1px 10px;
+  cursor:default; align-items:baseline; }
+.sl-r:hover { background:#111827; }
+.sl-r.has-d { cursor:pointer; }
+.sl-t { color:#64748b; }
+.sl-s { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sl-l { font-weight:700; font-size:10.5px; }
+.sl-m { white-space:pre-wrap; overflow-wrap:anywhere; }
+.sl-r.error { background:#2a0f12; } .sl-r.error .sl-l, .sl-r.error .sl-m { color:#fca5a5; }
+.sl-r.warn .sl-l, .sl-r.warn .sl-m { color:#fcd34d; }
+.sl-r.debug .sl-m, .sl-r.debug .sl-l { color:#64748b; }
+.sl-r.info .sl-l { color:#60a5fa; }
+.sl-d { grid-column:1 / -1; display:none; margin:2px 0 4px 70px; color:#94a3b8;
+  white-space:pre-wrap; overflow-wrap:anywhere; }
+.sl-r.open .sl-d { display:block; }
+@media (max-width:560px) {
+  .sl-r { grid-template-columns:54px 1fr; }
+  .sl-s { grid-column:2; } .sl-l { display:none; } .sl-m { grid-column:1 / -1; padding-left:6px; }
+  .sl-d { margin-left:6px; }
+}
 .lg-fold { border:1px solid var(--border); border-radius:8px;
   background:var(--bg2); margin:0 0 var(--s2); }
 .lg-fold > summary { list-style:none; cursor:pointer; padding:10px 12px;
@@ -1075,8 +1107,8 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      what you came here to do, which is the only thing a tab name can usefully
      say. The line under it says what is in it. -->
 <div class="sec">
-  <span>Review a session</span>
-  <span class="note">One day in full, including what it decided not to do.</span>
+  <span>System log</span>
+  <span class="note">Everything the desk and its programs did, in order. Tap a line with ▸ for detail.</span>
   <select id="hist-date" onchange="loadDay()"></select>
   <button class="btn" onclick="loadDay()">Reload</button>
 </div>
@@ -1085,8 +1117,32 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      The select above is what a person touches; this is what the loader reads,
      and loadDay() is the one place that keeps them equal. -->
 <input type="date" id="log-date" hidden>
+<!-- THE SYSTEM LOG. Asked for as "Review like a log for you — like Railway's
+     log". Every decision, order, close, manager action and every process's
+     own lines (qp, alerts, the tools, pm2's restarts) in ONE stream, in time
+     order. "Copy for Claude" puts exactly what is on screen on the clipboard
+     as plain text, ready to paste. See src/alerts/syslog.js. -->
+<div class="sl-bar">
+  <select id="sl-level" onchange="loadSyslog()" title="How much to show">
+    <option value="error">Errors only</option>
+    <option value="warn">Warnings and errors</option>
+    <option value="info" selected>Normal</option>
+    <option value="debug">Everything</option>
+  </select>
+  <select id="sl-src" onchange="loadSyslog()"><option value="">all sources</option></select>
+  <input id="sl-q" type="search" placeholder="search…" oninput="slSearchSoon()">
+  <label class="sl-live"><input type="checkbox" id="sl-live" onchange="slLiveToggle()"> live</label>
+  <button class="btn" onclick="copySyslog()">Copy for Claude</button>
+</div>
+<div id="sl-sum" class="sl-sum"></div>
+<div id="syslog" class="sl"><div class="sl-empty">Pick a session.</div></div>
+<!-- The per-setup funnel, kept, folded under the log: it is the same day
+     told by decision rather than by time. -->
+<details class="lg-fold" id="funnel-fold">
+  <summary><b>Decisions, setup by setup</b></summary>
 <div id="log-summary"></div>
 <div id="log-runs"></div>
+</details>
 <!-- CLOSED, like everything else on this tab. The count is in the summary, so
      the shut state still answers "how many fired" without opening it. -->
 <details class="lg-fold" id="hist-fold">
@@ -3693,8 +3749,9 @@ function showTab(name) {
    * fresh is the moment somebody taps the tab.
    */
   if (want === 'history') loadDay();
-  // Health is live while it is open and silent while it is not.
+  // Health is live while it is open and silent while it is not; so is the log.
   clearInterval(HEALTH_TIMER);
+  if (want !== 'history') { clearInterval(SL_TIMER); const lv = document.getElementById('sl-live'); if (lv) lv.checked = false; }
   if (want === 'health') { loadHealth(); HEALTH_TIMER = setInterval(loadHealth, 30000); }
   window.scrollTo(0, 0);
 }
@@ -4179,8 +4236,119 @@ function loadDay() {
   const pick = document.getElementById('hist-date');
   const log = document.getElementById('log-date');
   if (pick && log && pick.value) log.value = pick.value;
+  loadSyslog();
   loadLog();
   loadHistory(pick ? pick.value : '');
+}
+
+/* ── the system log ──
+ * One stream: decisions, orders, closes, the manager, and every process's own
+ * lines. Newest at the bottom, like any log. "live" re-reads every 5 s and
+ * follows the end while you are at the end; scroll up and it stops following.
+ */
+let SYSLOG = null, SL_TIMER = null, SL_SEARCH = null;
+const SL_LVL = { error: 'ERR', warn: 'WRN', info: 'INF', debug: 'DBG' };
+const SL_COLORS = ['#60a5fa', '#a78bfa', '#34d399', '#f472b6', '#fb923c', '#22d3ee',
+                   '#facc15', '#c084fc', '#4ade80', '#f87171'];
+
+function slColor(src) {
+  if (src === 'desk') return '#e2e8f0';
+  let h = 0;
+  for (const c of String(src)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return SL_COLORS[h % SL_COLORS.length];
+}
+
+function slTime(t) {
+  try {
+    return new Date(t).toLocaleTimeString('en-GB', { timeZone: 'America/New_York', hour12: false });
+  } catch { return ''; }
+}
+
+function paintSyslog(d) {
+  const box = document.getElementById('syslog');
+  const sum = document.getElementById('sl-sum');
+  if (!box) return;
+  SYSLOG = d;
+  if (!d || d.ok === false) {
+    box.innerHTML = `<div class="sl-empty">The log could not be read: ${esc((d && d.error) || 'no answer')}</div>`;
+    if (sum) sum.textContent = '';
+    return;
+  }
+  const sel = document.getElementById('sl-src');
+  if (sel) {
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">all sources</option>'
+      + (d.sources || []).map(x => `<option value="${esc(x)}"${x === keep ? ' selected' : ''}>${esc(x)}</option>`).join('');
+  }
+  const c = d.counts || {};
+  if (sum) {
+    sum.innerHTML = `${esc(d.date || '')} · <b class="e">${c.error || 0} errors</b> · `
+      + `<b class="w">${c.warn || 0} warnings</b> · ${c.info || 0} events · ${c.debug || 0} routine`
+      + (d.truncated ? ' · showing the latest lines' : '')
+      + ((d.notes || []).length ? ` · ${esc(d.notes.join(' · '))}` : '');
+  }
+  const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.innerHTML = (d.lines || []).length
+    ? d.lines.map(l => `<div class="sl-r ${esc(l.level)}${l.detail ? ' has-d' : ''}"${l.detail ? ' onclick="this.classList.toggle(\'open\')"' : ''}>
+        <span class="sl-t">${esc(slTime(l.t))}</span>
+        <span class="sl-s" style="color:${slColor(l.src)}">${esc(l.src)}</span>
+        <span class="sl-l">${SL_LVL[l.level] || ''}</span>
+        <span class="sl-m">${esc(l.msg)}${l.detail ? ' ▸' : ''}</span>
+        ${l.detail ? `<pre class="sl-d">${esc(l.detail)}</pre>` : ''}
+      </div>`).join('')
+    : '<div class="sl-empty">Nothing at this level for this day.</div>';
+  if (atEnd || !box.dataset.painted) box.scrollTop = box.scrollHeight;
+  box.dataset.painted = '1';
+}
+
+async function loadSyslog() {
+  const pick = document.getElementById('hist-date');
+  const qs = new URLSearchParams({
+    level: (document.getElementById('sl-level') || {}).value || 'info',
+    src: (document.getElementById('sl-src') || {}).value || '',
+    q: (document.getElementById('sl-q') || {}).value || '',
+  });
+  if (pick && pick.value) qs.set('date', pick.value);
+  try { paintSyslog(await (await fetch(`/api/logs?${qs}`)).json()); }
+  catch (e) { paintSyslog({ ok: false, error: e.message }); }
+}
+
+function slSearchSoon() {
+  clearTimeout(SL_SEARCH);
+  SL_SEARCH = setTimeout(loadSyslog, 350);
+}
+
+function slLiveToggle() {
+  clearInterval(SL_TIMER);
+  const on = (document.getElementById('sl-live') || {}).checked;
+  if (on) { loadSyslog(); SL_TIMER = setInterval(loadSyslog, 5000); }
+}
+
+/* Plain text of exactly what is on screen — for pasting into a chat. */
+function syslogText(d) {
+  if (!d || !(d.lines || []).length) return '';
+  const lvl = (document.getElementById('sl-level') || {}).value || 'info';
+  const head = `Trade desk log ${d.date || ''} (ET) · level ${lvl}`
+    + `${d.truncated ? ' · latest lines only' : ''} · ${(d.lines || []).length} lines`;
+  return [head, ...d.lines.map(l => `${slTime(l.t)}  ${String(l.src).padEnd(9)} ${SL_LVL[l.level] || ''}  ${l.msg}`
+    + (l.detail ? `\n${l.detail.split('\n').map(x => `      ${x}`).join('\n')}` : ''))].join('\n');
+}
+
+async function copySyslog() {
+  const text = syslogText(SYSLOG);
+  if (!text) { toast('Nothing to copy', 'warn'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`Copied ${SYSLOG.lines.length} lines — paste them to Claude`);
+  } catch {
+    // Some phone browsers refuse the clipboard: put it where it can be selected.
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.width = '100%'; ta.rows = 10;
+    const box = document.getElementById('syslog');
+    box.parentNode.insertBefore(ta, box);
+    ta.focus(); ta.select();
+    toast('Select all in the box above and copy', 'warn');
+  }
 }
 
 /*

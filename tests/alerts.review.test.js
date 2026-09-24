@@ -40,7 +40,8 @@ describe('the name says what you came to do', () => {
   });
 
   test('and the heading is not the old one either', () => {
-    expect(pane).toContain('<span>Review a session</span>');
+    // "System log" since 2026-09-24: "Review like a log — like Railway's".
+    expect(pane).toContain('<span>System log</span>');
     expect(pane).not.toContain('<span>The day</span>');
   });
 
