@@ -167,9 +167,8 @@ for dir in $NEIGHBOURS; do
   if [ -n "${BEFORE[$dir]}" ] && [ "${BEFORE[$dir]}" != "$after" ]; then
     echo
     echo "  NOTE: $dir/ changed on disk (${BEFORE[$dir]} → $after)."
-    echo "        Its running process still holds the OLD code in memory. Restart it"
-    echo "        when convenient so the two agree — for the chart tool that is:"
-    echo "          sudo systemctl restart qp-chart"
+    echo "        Its running process still holds the OLD code in memory. Step"
+    echo "        [6b/6] below restarts qp through pm2 — never through systemd."
     echo
   fi
 done
@@ -616,59 +615,10 @@ echo "[6b/6] Chart platform (qp)..."
 if [ -d quant-platform ]; then
   QP_PORT="${QP_PORT:-8765}"
   WANT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-  RUNNING=$(curl -s --max-time 4 "http://127.0.0.1:${QP_PORT}/api/health" 2>/dev/null \
-    | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
-        try{process.stdout.write(String(JSON.parse(s).build||''))}catch{process.stdout.write('')}});" 2>/dev/null)
-
-  if [ -z "$RUNNING" ]; then
-    echo "  not answering on :${QP_PORT} — the manager cannot evaluate exit rules"
-    echo "  or move trailing stops without it."
-  elif [ "$RUNNING" = "$WANT" ] && [ -z "$QP_FORCE_RESTART" ]; then
-    echo "  OK — running ${RUNNING}, which is this checkout"
-  else
-    if [ -n "$QP_FORCE_RESTART" ]; then
-      echo "  RESTART NEEDED — its .env changed (running ${RUNNING}, checkout ${WANT})"
-    else
-      echo "  STALE — running ${RUNNING}, this checkout is ${WANT}"
-    fi
-    if systemctl list-unit-files 2>/dev/null | grep -q '^qp-chart.service'; then
-      echo "  restarting qp-chart…"
-      sudo systemctl restart qp-chart 2>/dev/null || echo "  could not restart it — do it by hand"
-      sleep 4
-      AFTER=$(curl -s --max-time 5 "http://127.0.0.1:${QP_PORT}/api/health" 2>/dev/null \
-        | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
-            try{process.stdout.write(String(JSON.parse(s).build||''))}catch{process.stdout.write('')}});" 2>/dev/null)
-      if [ "$AFTER" = "$WANT" ]; then
-        echo "  now running ${AFTER}"
-        # WHICH FEEDS ANSWERED, which is not which feeds have a key.
-        #
-        # This read /api/health, whose feeds block is an inventory of
-        # CREDENTIALS, and printed "alpaca ok" on every deploy while the key
-        # was being refused outright:
-        #
-        #     Alpaca asset MMED 401: {"message": "unauthorized."}
-        #
-        # A 401 is not a plan limit — the credential was not accepted at all —
-        # and the deploy minutes earlier had called it ok. A field that says
-        # the same thing whatever happened, in the one line anybody reads to
-        # decide whether the morning is safe to trade. It is also why the
-        # short-borrow check never ran once, which is how MMED reached the wire
-        # on 2026-09-15 as an order the broker could not fill.
-        #
-        # /api/feedcheck FETCHES from each loader and judges what came back,
-        # reusing datacheck's own check_feed rather than growing a second
-        # opinion about what a working feed looks like.
-      else
-        echo "  STILL ${AFTER:-not answering} — the manager will keep failing. Look at:"
-        echo "    sudo journalctl -u qp-chart -n 50"
-      fi
-    else
-      # Started by hand rather than as a service. Say exactly what is wrong
-      # rather than guessing how it was launched.
-      echo "  no qp-chart service — it was started some other way. Restart it, or"
-      echo "  the position manager will keep getting 404s from an old process."
-    fi
-  fi
+  # Through pm2 ONLY. This block used to restart qp through systemd's
+  # qp-chart unit, the one whose second copy of qp caused 113,854 restarts on 2026-09-23.
+  # See deploy/qp-restart.sh.
+  QP_PORT="$QP_PORT" bash deploy/qp-restart.sh "$WANT" "$QP_FORCE_RESTART" || true
 fi
 
 # ── WHICH FEEDS ANSWERED, WHICH IS NOT WHICH FEEDS HAVE A KEY ─────────────

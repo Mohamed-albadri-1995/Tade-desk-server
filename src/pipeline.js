@@ -310,7 +310,7 @@ async function runFullScan() {
       const { checkScorer } = require('./sideE/score');
       const scorerAvailable = await checkScorer();
       const scorerNote = !scorerAvailable
-        ? 'Python scorer service is offline or reports ready:false — run `pm2 restart scorer` (or full deploy.sh) and check /api/analysis/status'
+        ? 'Python scorer service is offline or reports ready:false — run `./deploy-tools.sh` and check /api/analysis/status'
         : scored === 0 && withScores.length > 0
         ? 'Scorer online but returned no scores — model may not be trained. Retrain via the Analysis tab.'
         : null;

@@ -161,7 +161,7 @@ describe('the step runs on every deploy, not only when qp restarts', () => {
   test('it is its own step, outside the restart branch', () => {
     expect(SRC).toMatch(/\[6c\/6\] Feeds/);
     const step = SRC.indexOf('[6c/6] Feeds');
-    const restartBranch = SRC.indexOf('restarting qp-chart');
+    const restartBranch = SRC.indexOf('bash deploy/qp-restart.sh');
     expect(step).toBeGreaterThan(restartBranch);
     // Past the `fi` that closes the qp block — the step is at top level.
     expect(SRC.slice(restartBranch, step)).toMatch(/\nfi\n/);

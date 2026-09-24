@@ -22,12 +22,31 @@ the front door with it.
 `tools.config.json` is the registry every one of these reads — the ports above
 come from it, not from this table. If the two disagree, that file is right.
 
-## Day to day
+## Deploying
+
+**The deploy is `./deploy-tools.sh`.** It pulls the branch, installs
+dependencies, stops every tool and starts only the ones `tools.config.json`
+has enabled (so a retired tool like T10 stays off), starts `archive` and
+`alerts`, restarts qp through pm2 if it is not running this checkout
+(`deploy/qp-restart.sh` — never through systemd), then checks the feeds and
+lists anything that keeps restarting.
+
+```sh
+cd ~/Tade-desk-server && ./deploy-tools.sh
+```
+
+Run it outside market hours: it stops the tools while it works.
+
+For a small change during the day, a pull and a restart of just what changed:
 
 ```sh
 cd ~/Tade-desk-server && git pull
 pm2 restart alerts qp journal tool-T1 tool-T2 tool-T6 tool-T7 tool-T11
 ```
+
+**Never `pm2 restart all`.** It restarts STOPPED processes too, and brings a
+retired tool back to scanning. (`deploy.sh` at the root is retired and refuses
+to run — it deleted every pm2 process and deployed an August branch.)
 
 Add `archive` when `tools.config.json` changed. The journal is deployed by its
 own script and only when that script changes:

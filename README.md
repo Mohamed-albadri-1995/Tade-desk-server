@@ -24,11 +24,11 @@ npm install
 # Install Python dependencies
 pip3 install -r src/scoring/requirements.txt
 
-# Start (production via PM2)
-bash deploy.sh
+# Deploy on the box (production via pm2) — see deploy/README.md
+./deploy-tools.sh
 ```
 
-Server UI at `http://localhost:3000`. Scoring service at `http://127.0.0.1:3001`.
+Server UI at `http://localhost:3000`. The Algo desk at `:3090`, qp at `:8765`.
 
 ---
 

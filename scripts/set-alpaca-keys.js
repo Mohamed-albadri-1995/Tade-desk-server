@@ -164,5 +164,5 @@ function writeInto(file) {
   say('  That is the account number to compare against the one SignalStack is');
   say('  connected to. If they match, both sides are finally the same account.');
   say('');
-  say('  Restart so the running processes pick it up:  bash deploy.sh');
+  say('  Restart so the running processes pick it up:  ./deploy-tools.sh');
 })();

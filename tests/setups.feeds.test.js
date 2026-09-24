@@ -297,7 +297,11 @@ describe('it is wired in where the feed is read', () => {
     expect(d).toContain('node scripts/sync-qp-env.js || SYNC_RC=$?');
     expect(d).not.toContain('node scripts/sync-qp-env.js; SYNC_RC=$?');
     expect(d.slice(0, 200)).toContain('set -e');
-    expect(d).toMatch(/\[ "\$RUNNING" = "\$WANT" \] && \[ -z "\$QP_FORCE_RESTART" \]/);
+    // The flag is handed to deploy/qp-restart.sh, which restarts on it even
+    // when the build already matches (run in tests/deploy.qpRestart.test.js).
+    expect(d).toMatch(/qp-restart\.sh "\$WANT" "\$QP_FORCE_RESTART"/);
+    expect(src('deploy', 'qp-restart.sh'))
+      .toMatch(/\[ "\$RUNNING" = "\$WANT" \] && \[ -z "\$FORCE" \]/);
   });
 
   test('qp reads its own .env, whatever launched it', () => {

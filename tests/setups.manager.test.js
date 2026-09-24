@@ -711,14 +711,20 @@ describe('the deploy keeps qp in step', () => {
     expect(SH).toMatch(/A warning about an event cannot detect a STATE/);
   });
 
+  // The restart itself moved to deploy/qp-restart.sh, through pm2 — the
+  // systemd restart that lived here was the 09-23 restart loop waiting to
+  // happen again. It is RUN, with stub pm2/systemctl, in
+  // tests/deploy.qpRestart.test.js.
+  const QS = fs.readFileSync(path.join(__dirname, '..', 'deploy', 'qp-restart.sh'), 'utf8');
   test('a stale qp is restarted, not mentioned', () => {
-    expect(SH).toMatch(/sudo systemctl restart qp-chart/);
-    expect(SH).toMatch(/STALE — running/);
+    expect(SH).toMatch(/bash deploy\/qp-restart\.sh/);
+    expect(QS).toMatch(/pm2 restart qp/);
+    expect(QS).toMatch(/STALE — running/);
   });
 
   test('and the restart is verified rather than assumed', () => {
-    expect(SH).toMatch(/AFTER=/);
-    expect(SH).toMatch(/STILL \$\{AFTER:-not answering\}/);
+    expect(QS).toMatch(/AFTER=\$\(build\)/);
+    expect(QS).toMatch(/STILL \$\{AFTER:-not answering\}/);
   });
 
   /*
@@ -727,7 +733,7 @@ describe('the deploy keeps qp in step', () => {
    */
   test('no qp at all is not an error', () => {
     expect(SH).toMatch(/if \[ -d quant-platform \]; then/);
-    expect(SH).toMatch(/no qp-chart service/);
+    expect(SH).toMatch(/qp-restart\.sh "\$WANT" "\$QP_FORCE_RESTART" \|\| true/);
   });
 });
 
