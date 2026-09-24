@@ -222,6 +222,31 @@ for side in ('long', 'short'):
         if reason == 'SL' and abs(e['exit'] - ref.stop) > 1e-9:
             stats['gap_price'] += 1
 
+# ── THE BOX'S 09:35 HAS NO `freeze` ON ITS STOP ──────────────────────────
+#
+# tools/audit_0935.py, run on the box 2026-09-24, printed "stop prim moving"
+# for the strategy every stored run used — the seed says frozen. It should not
+# matter, and this says whether it does: `levels.window_low/high(930, 935)` is
+# the window [09:30, 09:35), and qp holds it flat for the rest of the day
+# once the window closes (qp/primitives/levels.py `_window_extreme`). So the
+# stop measured on every bar after the 09:34 decision is the same number.
+# Run, not argued: the same days, the stop un-frozen, identical trades.
+import copy                                                         # noqa: E402
+unfrozen_diff = []
+rng2 = np.random.default_rng(935)
+for side in ('long', 'short'):
+    frozen = BY_SIDE[side]
+    loose = copy.deepcopy(frozen)
+    loose['risk']['sl'].pop('freeze', None)
+    for day in DAYS:
+        df = day_frame(rng2, day.strftime('%Y-%m-%d'), side)
+        a, _ = engine(frozen, df)
+        b, _ = engine(loose, df)
+        key = lambda r: [(t['entry_ts'], t['exit_ts'], t['reason'], round(t['ret'], 12),  # noqa: E731
+                          t.get('stop')) for t in (r.get('trades') or [])]
+        if key(a) != key(b):
+            unfrozen_diff.append((str(day.date()), side))
+
 print('\n── 09:35 as seeded, real engine vs plain-rules reference ─────────')
 print(f'   {stats}')
 ok('the engine and the reference found trades on the same days',
@@ -245,6 +270,9 @@ ok('enough trades to mean something (≥ 40 shared, ≥ 10 runner exits, '
    '≥ 10 held through an early cross)',
    stats['both'] >= 40 and stats['runner_exit'] >= 10
    and stats['crossed_before_2R_and_held'] >= 10, stats)
+
+ok("the box's un-frozen stop trades identically to the seed's frozen one "
+   '(the opening range is held flat after 09:34)', not unfrozen_diff, unfrozen_diff[:5])
 
 print(f'\n{PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

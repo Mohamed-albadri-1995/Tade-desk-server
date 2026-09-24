@@ -333,8 +333,12 @@ try:
     d, fix = dc.diagnose_failure('polygon', 'POLYGON_API_KEY must be set')
     ok('no key at all is named as such, with the variable',
        'no key configured' in d and 'POLYGON_API_KEY' in d, d)
+    # qp reads quant-platform/.env and runs under pm2 since 2026-09-23. The
+    # old line said `sudo systemctl restart qp-chart` — the unit whose second
+    # copy of qp caused 113,854 restarts.
     ok('...and the fix names the env file and the restart',
-       'trade-desk.env' in fix and 'restart' in fix, fix)
+       'quant-platform/.env' in fix and 'pm2 restart qp' in fix, fix)
+    ok('...and never the retired systemd unit', 'qp-chart' not in fix, fix)
 
     _os.environ['APCA_API_KEY_ID'] = 'x'
     _os.environ['APCA_API_SECRET_KEY'] = 'y'
@@ -345,6 +349,10 @@ try:
     ok('...and it suggests the most likely cause: the key was regenerated',
        'regenerated' in d2, d2)
     ok('...and the HTML noise is gone', '<html' not in d2 and len(d2) < 90, d2)
+    # Alpaca is never typed into qp: the desk holds the pair and every deploy
+    # copies it over. The fix has to send you THERE, not to an env file.
+    ok('...and the Alpaca fix sends you to the desk and the deploy',
+       'Algo' in fix2 and './deploy-tools.sh' in fix2 and 'qp-chart' not in fix2, fix2)
 
     # Polygon's documented live failure: the key is fine, the PLAN is not.
     # A SERVER RESPONSE OUTRANKS A MISSING ENVIRONMENT VARIABLE. The key is

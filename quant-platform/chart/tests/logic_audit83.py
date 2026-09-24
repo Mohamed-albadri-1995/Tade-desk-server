@@ -116,5 +116,20 @@ ok('the edit since the run is listed: exit.scope runner → null',
 ok('runs_for finds both runs, newest first', A.runs_for('09:35') == [bid2, bid],
    A.runs_for('09:35'))
 
+runs = A.all_runs('09:35')
+ok('all_runs counts closed trades per run', {r['id']: r['trades'] for r in runs} == {bid: 6, bid2: 1},
+   runs)
+ok('the default audits the BIGGEST run, not the newest', A.pick_biggest(runs) == bid,
+   A.pick_biggest(runs))
+
+import contextlib, io                                               # noqa: E402,E401
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    rc = A.main([])
+out = buf.getvalue()
+ok('the command itself runs: lists both runs and audits the biggest',
+   rc == 0 and f'#{bid} ' in out and f'#{bid2} ' in out
+   and f'Auditing #{bid}' in out and 'RULE EXIT WITH NO TARGET' in out, out[-400:])
+
 print(f'\n{PASS} passed, {FAIL} failed')
 sys.exit(1 if FAIL else 0)

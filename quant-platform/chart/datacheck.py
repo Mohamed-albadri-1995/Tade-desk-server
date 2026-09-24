@@ -299,6 +299,24 @@ FEED_KEYS = {
 ENV_FILE = '~/trade-desk.env'
 
 
+def _key_fix(feed: str, names: str, verb: str = 'add') -> str:
+    """Where to put a key, and how to make qp read it — as the desk runs NOW.
+
+    These said `sudo systemctl restart qp-chart`. qp moved to pm2 on
+    2026-09-23 because that systemd unit's second copy of qp caused 113,854
+    restarts, and the deploy printed this line — telling you to start it
+    again — on every deploy while the Alpaca key was rejected.
+
+    Alpaca is not typed into qp at all: the desk holds the pair and every
+    deploy copies it into quant-platform/.env (scripts/sync-qp-env.js).
+    """
+    if feed == 'alpaca':
+        return ('enter the new Alpaca key pair on the desk (Algo → Settings → '
+                'broker account), then run ./deploy-tools.sh — it copies the '
+                'pair to qp and restarts it')
+    return (f'{verb} {names} in quant-platform/.env, then: pm2 restart qp')
+
+
 def diagnose_failure(feed: str, err: str) -> tuple:
     """Turn a raw fetch error into (detail, fix). THREE STATES, NOT TWO.
 
@@ -324,8 +342,7 @@ def diagnose_failure(feed: str, err: str) -> tuple:
     # anything, so it is unambiguous and goes first.
     if 'must be set' in low:
         names = ', '.join(FEED_KEYS.get(feed, ())) or 'the key'
-        return (f'no key configured ({names})',
-                f'add {names} to {ENV_FILE}, then: sudo systemctl restart qp-chart')
+        return (f'no key configured ({names})', _key_fix(feed, names, 'add'))
 
     # A SERVER RESPONSE OUTRANKS A MISSING ENVIRONMENT VARIABLE, and the order
     # here was wrong the first time. If the source answered 401 or
@@ -339,8 +356,7 @@ def diagnose_failure(feed: str, err: str) -> tuple:
     if '401' in low or 'unauthorized' in low or 'authorization required' in low:
         names = ', '.join(FEED_KEYS.get(feed, ())) or 'the key'
         return (f'the key is SET but was REJECTED (401) — regenerated?',
-                f'update {names} in {ENV_FILE}, then: '
-                f'sudo systemctl restart qp-chart')
+                _key_fix(feed, names, 'update'))
 
     if '403' in low or 'forbidden' in low:
         return ('the key is set but was refused (403)',
@@ -352,8 +368,7 @@ def diagnose_failure(feed: str, err: str) -> tuple:
     # No recognised response, and this process cannot see the keys either.
     if missing:
         names = ', '.join(missing)
-        return (f'no key configured ({names})',
-                f'add {names} to {ENV_FILE}, then: sudo systemctl restart qp-chart')
+        return (f'no key configured ({names})', _key_fix(feed, names, 'add'))
 
     # Anything else: keep it, but keep it SHORT. An HTML page is not a message.
     clean = ' '.join((err or '').split())

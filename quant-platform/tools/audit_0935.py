@@ -1,9 +1,14 @@
 """Audit the 09:35 backtests you actually ran: what did they really do?
 
     cd ~/Tade-desk-server/quant-platform
-    python3 tools/audit_0935.py              # the 3 newest runs of 09:35
+    python3 tools/audit_0935.py              # list every 09:35 run, audit the BIGGEST
     python3 tools/audit_0935.py --bt 412     # one run
+    python3 tools/audit_0935.py --newest 3   # the 3 newest instead
     python3 tools/audit_0935.py --name "Test"   # another strategy, same checks
+
+The default is the run with the MOST TRADES, not the newest: on 2026-09-24
+the three newest were one-day reruns of 09-15 with three trades each, which
+say nothing about the backtest the strategy was chosen on.
 
 Read-only. It opens qp's own database and, for each run:
 
@@ -57,6 +62,32 @@ def runs_for(name, limit=3):
         if len(out) >= limit:
             break
     return out
+
+
+def all_runs(name):
+    """Every finished run of `name`: id, when, period, fill, closed trades."""
+    with store._lock:
+        rows = store._db().execute(
+            "SELECT b.id, b.spec, b.created_at, "
+            "  (SELECT COUNT(*) FROM backtest_trades t WHERE t.bt_id = b.id "
+            "     AND t.exit_ts IS NOT NULL) AS n "
+            "FROM backtests b WHERE b.status = 'done' ORDER BY b.id DESC").fetchall()
+    out = []
+    for r in rows:
+        try:
+            spec = json.loads(r['spec'])
+        except Exception:
+            continue
+        if _docs_matching(spec, name):
+            out.append({'id': r['id'], 'created_at': r['created_at'],
+                        'start': spec.get('start'), 'end': spec.get('end'),
+                        'fill': spec.get('fill'), 'trades': r['n']})
+    return out
+
+
+def pick_biggest(runs):
+    """The run with the most trades — newest on a tie."""
+    return max(runs, key=lambda r: (r['trades'], r['id']))['id'] if runs else None
 
 
 def shape(doc):
@@ -217,12 +248,30 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--bt', type=int)
     ap.add_argument('--name', default='09:35')
-    ap.add_argument('--runs', type=int, default=3)
+    ap.add_argument('--newest', type=int, default=0)
     a = ap.parse_args(argv)
-    ids = [a.bt] if a.bt else runs_for(a.name, a.runs)
-    if not ids:
+    runs = all_runs(a.name)
+    if not runs and not a.bt:
         print(f'No finished backtest kept a copy of a strategy named like "{a.name}".')
         return 1
+    import datetime as _dt
+    print(f'Every finished run of "{a.name}" ({len(runs)}), newest first:')
+    for r in runs[:25]:
+        when = _dt.datetime.fromtimestamp(r['created_at']).strftime('%Y-%m-%d') \
+            if r.get('created_at') else '?'
+        print(f"  #{r['id']:<5} run {when}  period {r['start']} → {r['end']}  "
+              f"fill {r['fill']}  {r['trades']} trades")
+    if len(runs) > 25:
+        print(f'  … and {len(runs) - 25} older')
+    print()
+    if a.bt:
+        ids = [a.bt]
+    elif a.newest:
+        ids = [r['id'] for r in runs[:a.newest]]
+    else:
+        ids = [pick_biggest(runs)]
+        print(f'Auditing #{ids[0]} — the run with the most trades. '
+              'Another: --bt <id>\n')
     for i in ids:
         print(render(audit(i, a.name)))
         print()
