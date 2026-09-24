@@ -215,3 +215,42 @@ describe('the log viewer', () => {
     expect(els.syslog.innerHTML).toMatch(/could not be read: ECONNREFUSED/);
   });
 });
+
+/*
+ * A REAL BOX'S LOGS. Reported 2026-09-24 as an empty Review tab: "Failed to
+ * fetch". Thirty pm2 log files of routine qp traffic made the reader build
+ * every line before filtering — 21 s and over a gigabyte — and gathering
+ * them with push(...all) overflowed the call stack outright.
+ */
+describe('a box with large logs', () => {
+  let home;
+  const DAY = require('../src/utils/time').toETDate(Date.now());
+  beforeAll(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'pm2big-'));
+    fs.mkdirSync(path.join(home, 'logs'));
+    const [y, m, d] = DAY.split('-');
+    let text = '';
+    for (let i = 0; i < 40000; i += 1) {
+      const hh = String(10 + (i % 6)).padStart(2, '0');
+      const mm = String(i % 60).padStart(2, '0');
+      text += `${y}-${m}-${d}T${hh}:${mm}:00: INFO:     127.0.0.1:1 - "GET /api/strategies HTTP/1.1" 200 OK\n`;
+    }
+    for (let k = 0; k < 12; k += 1) fs.writeFileSync(path.join(home, 'logs', `tool-T${k}-out.log`), text);
+    fs.writeFileSync(path.join(home, 'logs', 'qp-error-1.log'),
+      `${y}-${m}-${d}T12:00:00: qp DID NOT START: port in use\n`);
+  });
+  const deps = () => ({ sessionLog: { runsOn: () => [], passesOn: () => [] }, ledger: () => [],
+    processLines: (dir, keep, since, per) => S.processLines(path.join(home, 'logs'), keep, since, per) });
+
+  test('"everything" answers, bounded, quickly, without overflowing', () => {
+    const t = Date.now();
+    const r = S.collect({ date: DAY, level: 'debug', limit: 1500 }, deps());
+    expect(r.ok).toBe(true);
+    expect(r.lines.length).toBeLessThanOrEqual(1500);
+    expect(Date.now() - t).toBeLessThan(5000);
+  });
+  test('errors only finds the one error among the routine lines', () => {
+    const r = S.collect({ date: DAY, level: 'error' }, deps());
+    expect(r.lines.map(l => l.msg)).toEqual(['qp DID NOT START: port in use']);
+  });
+});

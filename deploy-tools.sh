@@ -370,7 +370,10 @@ tool_max_mem() {                          # tool_max_mem <TOOL_ID>
   esac
 }
 SCORER_MAX_MEM="${SCORER_MAX_MEM:-180M}"  # scorers reach ~90 while training
-ALERTS_MAX_MEM="${ALERTS_MAX_MEM:-180M}"  # alerts sits at ~72
+# alerts sat at ~72; since 2026-09-24 it also serves Health, the system log
+# and the Live board, which read logs and the broker on request — 240 so a
+# busy read is not a pm2 kill in the middle of it.
+ALERTS_MAX_MEM="${ALERTS_MAX_MEM:-240M}"
 # The archive holds several SQLite handles open and does nothing else. It has
 # no scanner, no scheduler and no model, so it should never approach this —
 # if it trips, something is reading far more than a register at a time.

@@ -27,7 +27,7 @@ const os = require('os');
 const path = require('path');
 
 const LEVELS = ['debug', 'info', 'warn', 'error'];
-const TAIL_BYTES = 512 * 1024;       // per log file — a day of any one process
+const TAIL_BYTES = 256 * 1024;       // per log file — the newest part is what is asked for
 
 const L = (t, src, level, msg, detail) => {
   const o = { t: Number(t) || 0, src, level, msg: String(msg) };
@@ -159,16 +159,27 @@ function tail(file, bytes = TAIL_BYTES) {
   } catch { return ''; }
 }
 
-/** Parse one pm2 log file into lines; continuation lines join their parent. */
-function parseLog(text, src) {
+/**
+ * Parse one pm2 log file into lines; continuation lines join their parent.
+ *
+ * `keep(t, level)` decides BEFORE a line becomes an object. Reported
+ * 2026-09-24 as an empty Review tab ("Failed to fetch"): a box's logs are
+ * hundreds of thousands of lines — mostly qp answering routine requests —
+ * and building every one of them into an object before filtering cost more
+ * memory than the alerts process is allowed, and gathering them with
+ * push(...all) overflowed the call stack outright. Filter first; build only
+ * what will be shown.
+ */
+function parseLog(text, src, keep = null, max = 0) {
   const out = [];
-  let last = null;
+  let last = null;          // the last line KEPT — a dropped line's trace is dropped too
+  let lastT = null;
   for (const raw of text.split('\n')) {
     if (!raw.trim()) continue;
     const m = STAMP.exec(raw);
     if (!m) {
       // A stack frame or a wrapped line: it belongs to the line above.
-      if (last) last.detail = (last.detail ? `${last.detail}\n` : '') + raw.trimEnd();
+      if (last && last.t === lastT) last.detail = (last.detail ? `${last.detail}\n` : '') + raw.trimEnd();
       continue;
     }
     const [, y, mo, d, h, mi, s, rest] = m;
@@ -176,13 +187,19 @@ function parseLog(text, src) {
     const t = new Date(+y, +mo - 1, +d, +h, +mi, +s).getTime();
     const msg = rest.replace(/^PM2 log:\s*/, '');
     // A stack frame that carries its own stamp is still part of its error.
-    if (last && last.t === t && /^\s*at\s|^\s*File "/.test(msg)) {
-      last.detail = (last.detail ? `${last.detail}\n` : '') + msg.trimEnd();
+    if (/^\s*at\s|^\s*File "/.test(msg)) {
+      if (last && last.t === t) last.detail = (last.detail ? `${last.detail}\n` : '') + msg.trimEnd();
       continue;
     }
-    last = L(t, src, levelOf(msg), msg.trimEnd());
+    lastT = t;
+    const level = levelOf(msg);
+    if (keep && !keep(t, level)) { last = null; continue; }
+    last = L(t, src, level, msg.trimEnd());
     out.push(last);
+    // Bounded as it goes, so memory stays flat however long the file is.
+    if (max && out.length > 2 * max) out.splice(0, out.length - max);
   }
+  if (max && out.length > max) out.splice(0, out.length - max);
   // A stack trace makes its line an error whatever its first words said.
   for (const l of out) if (l.detail && /\n?\s*at\s|Traceback/.test(l.detail) && l.level !== 'error') l.level = 'error';
   return out;
@@ -192,18 +209,45 @@ function pm2Dir() {
   return path.join(process.env.PM2_HOME || path.join(os.homedir(), '.pm2'), 'logs');
 }
 
-function processLines(dir = pm2Dir()) {
+/**
+ * @param dir   the pm2 logs directory
+ * @param keep  (t, level) => boolean, applied before a line is built
+ * @param since skip files not written since this time (ms) — the logs of
+ *              retired processes stay on disk for months
+ */
+/** [start, end) of an ET calendar day in ms, DST included. */
+function etDayBounds(date) {
+  const { toETDate } = require('../utils/time');
+  const at = (d) => {
+    for (const off of ['-04:00', '-05:00']) {
+      const t = Date.parse(`${d}T00:00:00${off}`);
+      if (toETDate(t) === d && toETDate(t - 1) !== d) return t;
+    }
+    return Date.parse(`${d}T00:00:00-05:00`);
+  };
+  const start = at(date);
+  const next = new Date(start + 36 * 3600 * 1000);
+  const nextDate = toETDate(next.getTime());
+  return [start, at(nextDate)];
+}
+
+function processLines(dir = pm2Dir(), keep = null, since = 0, perFile = 0) {
   const out = [];
   let names = [];
   try { names = fs.readdirSync(dir); } catch { return { lines: [], error: `no pm2 logs at ${dir}` }; }
   for (const f of names) {
     const m = /^(.+?)-(out|error)(?:-\d+)?\.log$/.exec(f);
     if (!m) continue;
-    out.push(...parseLog(tail(path.join(dir, f)), m[1]));
+    const file = path.join(dir, f);
+    try { if (since && fs.statSync(file).mtimeMs < since) continue; } catch { continue; }
+    // Only a file's newest `perFile` kept lines can be among the newest
+    // `perFile` of all of them — so nothing older is carried.
+    const got = parseLog(tail(file), m[1], keep, perFile);
+    for (const l of got) out.push(l);
   }
-  // pm2's own log: restarts and memory kills.
+  // pm2's own log: restarts and memory kills — kept whatever the level asked.
   const daemon = path.join(path.dirname(dir), 'pm2.log');
-  for (const l of parseLog(tail(daemon, 128 * 1024), 'pm2')) {
+  for (const l of parseLog(tail(daemon, 128 * 1024), 'pm2', keep ? (t) => keep(t, 'error') : null)) {
     if (/restarted|exited|Stopping|Starting execution|exceeds/i.test(l.msg)) {
       if (l.level === 'info' && /restarted|exited/i.test(l.msg)) l.level = 'warn';
       out.push(l);
@@ -225,23 +269,33 @@ function collect(q = {}, deps = {}) {
   const notes = [];
   let lines = [];
 
+  // One helper to append, never push(...big): a spread of a large array
+  // overflows the call stack.
+  const add = (arr) => { for (const x of arr || []) lines.push(x); };
   const safe = (what, fn) => {
     try { return fn(); } catch (e) { notes.push(`${what} could not be read: ${e.message}`); return []; }
   };
   const sessionLog = deps.sessionLog || require('../setups/sessionLog');
-  lines.push(...safe('the decisions', () => sessionLog.runsOn(date).flatMap(runLines)));
-  lines.push(...safe('the manager passes', () => sessionLog.passesOn(date).flatMap(passLines)));
+  add(safe('the decisions', () => sessionLog.runsOn(date).flatMap(runLines)));
+  add(safe('the manager passes', () => sessionLog.passesOn(date).flatMap(passLines)));
   const ledger = deps.ledger || (() => require('../broker/signalstack').orders(date));
-  lines.push(...safe('the broker ledger', () => ledger(date).map(ledgerLine)));
+  add(safe('the broker ledger', () => ledger(date).map(ledgerLine)));
   // `desk: true` — the desk's own records only. Live's timeline refreshes
   // every few seconds near a decision, and reading every process's log file
   // that often is work a 1 GB box should not be doing for it.
+  // Only today's lines at the asked level are ever built (see parseLog). The
+  // counts of what was skipped as routine are not known for process lines,
+  // which is why "routine" counts only the desk's own debug lines.
+  // The day's bounds in ms, worked out ONCE. Asking Intl for the ET date of
+  // every line cost 20 s on a real box's logs.
+  const [from, to] = etDayBounds(date);
+  const keep = (t, level) => t >= from && t < to && LEVELS.indexOf(level) >= minLevel;
   const procs = q.desk ? [] : safe('the process logs', () => {
-    const r = (deps.processLines || processLines)();
+    const r = (deps.processLines || processLines)(undefined, keep, from - 3600 * 1000, limit);
     if (r.error) notes.push(r.error);
     return r.lines;
   });
-  lines.push(...procs.filter(l => toETDate(l.t) === date));
+  add(procs.filter(l => l.t >= from && l.t < to));
 
   const sources = [...new Set(lines.map(l => l.src))].sort();
   const counts = { error: 0, warn: 0, info: 0, debug: 0 };
