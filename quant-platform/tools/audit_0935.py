@@ -4,6 +4,8 @@
     python3 tools/audit_0935.py              # list every 09:35 run, audit the BIGGEST
     python3 tools/audit_0935.py --bt 412     # one run
     python3 tools/audit_0935.py --newest 3   # the 3 newest instead
+    python3 tools/audit_0935.py --rerun 332  # run #332 AGAIN on today's engine
+                                             # and compare, trade by trade
     python3 tools/audit_0935.py --name "Test"   # another strategy, same checks
 
 The default is the run with the MOST TRADES, not the newest: on 2026-09-24
@@ -107,19 +109,11 @@ def shape(doc):
     }
 
 
-def audit(bt_id, name):
-    bt = store.get_backtest(bt_id, with_trades=True)
-    if not bt:
-        return {'ok': False, 'error': f'no backtest #{bt_id}'}
-    spec = bt['spec'] or {}
-    docs = _docs_matching(spec, name)
-    ids = {d.get('id') for d in docs}
+def classify(trades, docs, cost):
+    """How every closed trade of these strategies ended, and whether its
+    stored return adds up from its own prices. Shared by the stored audit and
+    the re-run, so both are judged by the same rules."""
     names = {d.get('name') for d in docs}
-    cost = float(spec.get('cost_bps', 0) or 0) / 10000.0
-
-    current = [s for s in (store.get_strategy(int(i)) for i in ids if i is not None) if s]
-    changed = parity.rules_diff(spec, current)
-
     g = {'trades': 0, 'open': 0, 'no_legs_stored': 0, 'banked': 0,
          'banked_then_rule': 0, 'banked_then_stop': 0, 'banked_then_other': 0,
          'stop_before_target': 0, 'rule_without_target': 0, 'eod_before_target': 0,
@@ -127,7 +121,7 @@ def audit(bt_id, name):
     money = {'target halves': 0.0, 'runners after target': 0.0,
              'stopped before target': 0.0, 'other': 0.0}
     bad_rule, bad_ret = [], []
-    for t in bt.get('trades') or []:
+    for t in trades or []:
         if t.get('side') and docs and not any(
                 (d.get('side') or 'long') == t['side'] for d in docs):
             continue
@@ -185,11 +179,77 @@ def audit(bt_id, name):
     if g['trades'] >= 10 and not g['banked'] and any(
             (d.get('risk') or {}).get('targets') for d in docs):
         g['no_legs_stored'] = g['trades']
+    return {'counts': g, 'money': money, 'bad_rule': bad_rule, 'bad_ret': bad_ret}
+
+
+def audit(bt_id, name):
+    bt = store.get_backtest(bt_id, with_trades=True)
+    if not bt:
+        return {'ok': False, 'error': f'no backtest #{bt_id}'}
+    spec = bt['spec'] or {}
+    docs = _docs_matching(spec, name)
+    ids = {d.get('id') for d in docs}
+    cost = float(spec.get('cost_bps', 0) or 0) / 10000.0
+    current = [s for s in (store.get_strategy(int(i)) for i in ids if i is not None) if s]
+    changed = parity.rules_diff(spec, current)
     return {'ok': True, 'id': bt_id, 'name': bt.get('name'),
             'start': spec.get('start'), 'end': spec.get('end'), 'fill': spec.get('fill'),
             'cost_bps': spec.get('cost_bps', 0), 'created_at': bt.get('created_at'),
             'ran': [shape(d) for d in docs], 'changed': changed,
-            'counts': g, 'money': money, 'bad_rule': bad_rule, 'bad_ret': bad_ret}
+            **classify(bt.get('trades'), docs, cost)}
+
+
+def _key(t):
+    return (t.get('date'), t.get('symbol'), t.get('side'), int(t.get('entry_ts') or 0))
+
+
+def rerun(bt_id, name, run_fn=None, progress=None):
+    """Run a stored backtest AGAIN — its settings, the EXACT strategy copy it
+    kept — on today's engine, save nothing, and compare trade by trade.
+
+    For runs saved before 2026-09-14 this is the only way to see the 2R half:
+    their rows kept one entry and one exit, though their returns included it.
+    """
+    bt = store.get_backtest(bt_id, with_trades=True)
+    if not bt:
+        return {'ok': False, 'error': f'no backtest #{bt_id}'}
+    spec = dict(bt['spec'] or {})
+    frozen = [d for d in (spec.get('_strategy_docs') or []) if isinstance(d, dict)]
+    if not frozen:
+        return {'ok': False, 'error': f'#{bt_id} kept no copy of its strategy, so it '
+                'cannot be re-run as it was (only as the strategy is now)'}
+    run_spec = {k: v for k, v in spec.items()
+                if k not in ('strategy_id', 'strategy_ids', 'strategy', '_strategy_docs')}
+    run_spec['strategies'] = frozen
+    if run_fn is None:
+        from chart import backtest as B
+        run_fn = B.run
+    res = run_fn(run_spec, progress)
+    fresh = [t for t in (res.get('trades') or []) if t.get('exit_ts') is not None]
+    docs = _docs_matching(spec, name)
+    cost = float(spec.get('cost_bps', 0) or 0) / 10000.0
+    out = {'ok': True, 'id': bt_id, 'name': bt.get('name'), 'rerun': True,
+           'start': spec.get('start'), 'end': spec.get('end'), 'fill': spec.get('fill'),
+           'cost_bps': spec.get('cost_bps', 0), 'created_at': bt.get('created_at'),
+           'ran': [shape(d) for d in docs], 'changed': [],
+           **classify(fresh, docs, cost)}
+    old = {_key(t): t for t in bt.get('trades') or [] if t.get('exit_ts') is not None}
+    new = {_key(t): t for t in fresh}
+    same, exit_diff, ret_diff = 0, [], []
+    for k in old.keys() & new.keys():
+        o, n = old[k], new[k]
+        if int(o.get('exit_ts') or 0) != int(n.get('exit_ts') or 0) or o.get('reason') != n.get('reason'):
+            exit_diff.append((k[0], k[1], o.get('reason'), n.get('reason')))
+        elif abs((o.get('ret') or 0) - (n.get('ret') or 0)) > 1e-6:
+            ret_diff.append((k[0], k[1], round(o.get('ret') or 0, 6), round(n.get('ret') or 0, 6)))
+        else:
+            same += 1
+    out['compare'] = {'stored': len(old), 'rerun': len(new), 'same': same,
+                      'exit_diff': exit_diff, 'ret_diff': ret_diff,
+                      'only_stored': sorted(k[:3] for k in old.keys() - new.keys()),
+                      'only_rerun': sorted(k[:3] for k in new.keys() - old.keys()),
+                      'errors': (res.get('summary') or {}).get('errors')}
+    return out
 
 
 def render(a):
@@ -197,7 +257,9 @@ def render(a):
         return a.get('error', 'failed')
     L = []
     pct = lambda x: f'{100 * x:+.2f}%'                                # noqa: E731
-    L.append(f"Backtest #{a['id']}  {a['name']}")
+    L.append((f"RE-RUN of backtest #{a['id']} on today's engine, with the strategy "
+              'copy it kept — nothing saved') if a.get('rerun')
+             else f"Backtest #{a['id']}  {a['name']}")
     L.append(f"  period {a['start']} → {a['end']} · fill {a['fill']} · costs {a['cost_bps']} bps/side")
     L.append('  STRATEGY IT RAN (the frozen copy):')
     for s in a['ran']:
@@ -241,6 +303,25 @@ def render(a):
              'target leg + rest at exit − costs')
     for b in a['bad_ret'][:5]:
         L.append(f"      differs: {b[0]} {b[1]} stored {b[2]} recomputed {b[3]}")
+    cp = a.get('compare')
+    if cp:
+        L.append(f"  AGAINST WHAT #{a['id']} STORED: {cp['stored']} stored · {cp['rerun']} re-run")
+        L.append(f"    same entry, exit, reason and return   {cp['same']}")
+        L.append(f"    same entry, DIFFERENT exit or reason  {len(cp['exit_diff'])}")
+        for d in cp['exit_diff'][:6]:
+            L.append(f"      {d[0]} {d[1]}: stored {d[2]} · now {d[3]}")
+        L.append(f"    same exit, DIFFERENT return           {len(cp['ret_diff'])}")
+        for d in cp['ret_diff'][:6]:
+            L.append(f"      {d[0]} {d[1]}: stored {d[2]} · now {d[3]}")
+        L.append(f"    only in the stored run                {len(cp['only_stored'])}")
+        for d in cp['only_stored'][:4]:
+            L.append(f"      {d[0]} {d[1]} {d[2]}")
+        L.append(f"    only in the re-run                    {len(cp['only_rerun'])}")
+        for d in cp['only_rerun'][:4]:
+            L.append(f"      {d[0]} {d[1]} {d[2]}")
+        if cp.get('errors'):
+            L.append(f"    !! {cp['errors']} symbol-day(s) could not be loaded this time — "
+                     'their trades will show as "only in the stored run"')
     return '\n'.join(L)
 
 
@@ -249,6 +330,7 @@ def main(argv=None):
     ap.add_argument('--bt', type=int)
     ap.add_argument('--name', default='09:35')
     ap.add_argument('--newest', type=int, default=0)
+    ap.add_argument('--rerun', type=int, help='re-run a stored backtest on today\'s engine')
     a = ap.parse_args(argv)
     runs = all_runs(a.name)
     if not runs and not a.bt:
@@ -264,6 +346,16 @@ def main(argv=None):
     if len(runs) > 25:
         print(f'  … and {len(runs) - 25} older')
     print()
+    if a.rerun:
+        print(f'Re-running #{a.rerun} — this can take several minutes…')
+        step = {'p': -1}
+
+        def _progress(p):
+            if int(p * 10) > step['p']:
+                step['p'] = int(p * 10)
+                print(f'  {int(p * 100)}%', flush=True)
+        print(render(rerun(a.rerun, a.name, progress=_progress)))
+        return 0
     if a.bt:
         ids = [a.bt]
     elif a.newest:

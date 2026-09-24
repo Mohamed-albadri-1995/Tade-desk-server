@@ -122,6 +122,45 @@ ok('all_runs counts closed trades per run', {r['id']: r['trades'] for r in runs}
 ok('the default audits the BIGGEST run, not the newest', A.pick_biggest(runs) == bid,
    A.pick_biggest(runs))
 
+print('\n── --rerun: the stored run again, on today\'s engine ────────────')
+seen = {}
+
+
+def fake_run(spec, progress=None):
+    seen['spec'] = spec
+    if progress:
+        progress(1.0)
+    return {'summary': {'errors': 2}, 'trades': [
+        row('AAA', 'long', 10.0, 10.20, 0.03, 'exit', leg(10.40)),      # identical
+        row('BBB', 'long', 10.0, 10.10, 0.01, 'exit'),                   # other exit
+        row('CCC', 'short', 20.0, 19.90, 0.0200, 'SL', leg(19.20)),      # other return
+        row('NEW', 'long', 10.0, 10.30, 0.03, 'eod'),                    # only now
+    ]}
+
+
+r = A.rerun(bid, '09:35', run_fn=fake_run)
+cp = r['compare']
+ok('it runs the EXACT copy the run kept, not the strategy as it is now',
+   seen['spec'].get('strategies') == docs and 'strategy_ids' not in seen['spec']
+   and '_strategy_docs' not in seen['spec'], sorted(seen['spec']))
+ok('...with the run\'s own settings', seen['spec'].get('fill') == 'desk'
+   and seen['spec'].get('start') == '2026-01-02', seen['spec'])
+ok('identical trades are counted as reproduced', cp['same'] == 1, cp)
+ok('a different exit is named', [d[1] for d in cp['exit_diff']] == ['BBB'], cp['exit_diff'])
+ok('a different return is named', [d[1] for d in cp['ret_diff']] == ['CCC'], cp['ret_diff'])
+ok('stored-only and re-run-only trades are listed',
+   {d[1] for d in cp['only_stored']} == {'DDD', 'EEE', 'ZZZ'}
+   and [d[1] for d in cp['only_rerun']] == ['NEW'], cp)
+ok('the fresh trades get the same audit: 1 target banked then rule',
+   r['counts']['banked_then_rule'] == 1, r['counts'])
+txt = A.render(r)
+ok('the report says it is a re-run, and that data failed to load',
+   txt.startswith('RE-RUN of backtest') and 'could not be loaded' in txt, txt[:300])
+nodocs = store.create_backtest('old', {'strategy_id': lid})
+store.update_backtest(nodocs, status='done', progress=1.0, summary={})
+ok('a run with no frozen copy refuses rather than re-running today\'s strategy',
+   A.rerun(nodocs, '09:35', run_fn=fake_run)['ok'] is False)
+
 import contextlib, io                                               # noqa: E402,E401
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
