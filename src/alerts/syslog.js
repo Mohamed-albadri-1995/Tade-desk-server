@@ -233,7 +233,10 @@ function collect(q = {}, deps = {}) {
   lines.push(...safe('the manager passes', () => sessionLog.passesOn(date).flatMap(passLines)));
   const ledger = deps.ledger || (() => require('../broker/signalstack').orders(date));
   lines.push(...safe('the broker ledger', () => ledger(date).map(ledgerLine)));
-  const procs = safe('the process logs', () => {
+  // `desk: true` — the desk's own records only. Live's timeline refreshes
+  // every few seconds near a decision, and reading every process's log file
+  // that often is work a 1 GB box should not be doing for it.
+  const procs = q.desk ? [] : safe('the process logs', () => {
     const r = (deps.processLines || processLines)();
     if (r.error) notes.push(r.error);
     return r.lines;

@@ -986,3 +986,15 @@ describe('a close that did not take', () => {
       expect.objectContaining({ symbol: 'HELD1', action: 'close' }));
   });
 });
+
+describe('the pass record keeps where the exit stands', () => {
+  test('target legs banked and what the rule waits for reach the session log', () => {
+    const sl = require('../src/setups/sessionLog');
+    const r = sl.passOf({ at: 1, date: '2026-09-24', positions: [
+      { symbol: 'A', legs_banked: [4], waiting_for: null },
+      { symbol: 'B', legs_banked: [], waiting_for: 'first target leg' }] });
+    expect(r.positions[0]).toMatchObject({ symbol: 'A', legsBanked: 1 });
+    expect(r.positions[1]).toMatchObject({ symbol: 'B', waitingFor: 'first target leg' });
+    expect(r.positions[1].legsBanked).toBeUndefined();
+  });
+});

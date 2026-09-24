@@ -886,7 +886,7 @@ app.get('/api/logs', (req, res) => {
     res.json(require('./syslog').collect({
       date: String(req.query.date || ''), level: String(req.query.level || 'info'),
       src: String(req.query.src || ''), q: String(req.query.q || ''),
-      limit: req.query.limit,
+      limit: req.query.limit, desk: req.query.desk === '1',
     }));
   } catch (err) {
     res.json({ ok: false, error: err.message, lines: [], sources: [], counts: {} });

@@ -29,7 +29,7 @@ const script = (html.match(/<script>([\s\S]*?)<\/script>/) || [])[1] || '';
 const reconcile = fs.readFileSync(path.join(ROOT, 'src', 'broker', 'reconcile.js'), 'utf8');
 
 /** paintPositions(), run against a stub DOM, returning what it drew. */
-function paint(broker) {
+function paint(broker, mgr = null, setups = []) {
   const from = script.indexOf('function paintPositions()');
   if (from < 0) {
     throw new Error('public/alerts.html no longer shows what is held — the page '
@@ -39,12 +39,18 @@ function paint(broker) {
   const els = {};
   const mk = () => ({ innerHTML: '', textContent: '' });
   const doc = { getElementById: id => (els[id] = els[id] || mk()) };
+  // The manager's line is drawn by its own function, lifted beside this one.
+  const mfrom = script.indexOf('function posManagerLine(');
+  const mline = script.slice(mfrom, script.indexOf('\n}', mfrom) + 2);
   // eslint-disable-next-line no-new-func
-  new Function('document', 'BROKER', 'esc', 'tickerLink',
-    `${script.slice(from, to)}; paintPositions();`)(
+  new Function('document', 'BROKER', 'esc', 'tickerLink', 'MGR', 'SETUPS',
+    `${mline}\n${script.slice(from, to)}; paintPositions();`)(
     doc, broker,
     s => String(s == null ? '' : s).replace(/</g, '&lt;'),
-    p => `<span class="t">${p.symbol}</span>`);
+    // The page's own contract: tickerLink draws `ticker` and nothing else. A
+    // stand-in that also accepted `symbol` hid, for weeks, that a broker
+    // position (which says `symbol`) was drawn with no name at all.
+    p => (p.ticker ? `<span class="t">${p.ticker}</span>` : ''), mgr, setups);
   return { out: els.positions.innerHTML, note: els['pos-note'].textContent };
 }
 
@@ -168,4 +174,34 @@ test('the count in the strip and the list below it are the same answer', () => {
   expect(fn).toContain('paintStrip()');
   expect(fn).toContain('paintPositions()');
   expect(script).toContain('const held = (BROKER && BROKER.held) || null;');
+});
+
+
+/*
+ * THE MANAGER'S HALF OF THE PICTURE. The broker knows what is held; only the
+ * manager knows where the stop is NOW and whether 09:35's 2R half has banked.
+ * Asked for as "Live should be a live monitor screen for me, the trader".
+ */
+describe('each position says what the manager is doing with it', () => {
+  const held = { held: { ok: true, positions: [POS()] } };
+  const pass = (x) => ({ at: Date.now() - 20000, positions: [{ symbol: 'VEEV', setupId: 'OR@09:35',
+    stop: 258.5, barsHeld: 23, ...x }] });
+  test('stop, time held, the setup, and how fresh the check is', () => {
+    const { out } = paint(held, pass({ stopMoved: true, waitingFor: 'first target leg' }),
+                          [{ id: 'OR@09:35', name: 'OR + VWAP 09:35' }]);
+    expect(out).toMatch(/stop <b>258.50<\/b> ↑moved · waiting for first target leg · 23 min · OR \+ VWAP 09:35 · checked 20s ago/);
+  });
+  test('after the 2R half banks, it says so', () => {
+    const { out } = paint(held, pass({ legsBanked: 1 }));
+    expect(out).toMatch(/✓ 1 target leg taken<\/span> · rest leaves on the exit rule/);
+  });
+  test('no manager record for the symbol draws no line, not a guess', () => {
+    const { out } = paint(held, { at: Date.now(), positions: [{ symbol: 'OTHER' }] });
+    expect(out).not.toMatch(/pos-mgr/);
+  });
+});
+
+test('THE CARD NAMES THE STOCK — a broker position says symbol, not ticker', () => {
+  const { out } = paint({ held: { ok: true, positions: [POS()] } });
+  expect(out).toMatch(/<span class="t">VEEV<\/span>/);
 });

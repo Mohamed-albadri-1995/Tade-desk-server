@@ -143,6 +143,11 @@ function passOf({ at, date, positions = [], held = null, acted = [] }) {
       // apart from "watched and held" is reading the wrong thing.
       managed: p.managed === undefined ? undefined : !!p.managed,
       barsHeld: p.bars_held === undefined ? null : p.bars_held,
+      // Where the exit stands, as the backtest engine sees it: which target
+      // legs have banked, and what the exit rule is still waiting for (e.g.
+      // "first target leg" before 09:35's 2R half). Shown on Live.
+      legsBanked: (p.legs_banked || []).length || undefined,
+      waitingFor: p.waiting_for || undefined,
       // Only when there is one — an error every minute for a symbol qp cannot
       // price is the thing a review most needs to find, and it is invisible in
       // the alert feed because it never produced an order.
