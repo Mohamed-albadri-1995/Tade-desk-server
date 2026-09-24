@@ -68,10 +68,82 @@ def _last_closed(bars) -> int:
     return len(bars) - 1
 
 
+_NEXT_OPEN_FILLS = ('next_open', 'desk')
+
+
+def _engine_from_entry(strategy: dict, side: str, bars, ts, ctx, ei: int,
+                       fill: str) -> dict:
+    """The backtest engine, run on exactly one entry — the one that is open.
+
+    `_pair_trades` is handed an entry mask with a single true bar: the bar this
+    position was decided on. Everything that decides whether and when the exit
+    RULE fires — `scope`, `min_hold_bars`, which target legs banked and when,
+    trade-aware operands, the fill model's timing — is then the engine's own
+    answer. Nothing about the rule is re-derived here.
+
+    THE ENTRY GATES ARE OFF, deliberately. The window, the session mask, the
+    stop-too-far and target-too-close filters decide whether the backtest would
+    TAKE a signal. This position is already taken; the question is what the
+    strategy does with it from here, and a gate that refused the entry would
+    turn "what does it do" into "nothing", which is not an answer.
+
+    Returns:
+      rule_fired_bar   the bar the exit rule fired on, or None
+      rule_armed       whether the rule is armed as of the last bar
+      waiting_for      why it is not, in words, or None
+      closed           {reason, bar} when the engine ended the trade some other
+                       way — a stop, the last target — so a position the
+                       backtest already closed is visible as such
+      legs_banked      [bar index, …] of the target legs that banked
+    """
+    n = len(bars)
+    risk = strategy.get('risk') or {}
+    exit_group = strategy.get('exit')
+    trade_aware = strat._uses_trade(exit_group or {})
+    exit_mask = (np.zeros(n, dtype=bool) if trade_aware
+                 else strat._eval_group(exit_group, bars, ctx))
+    entry_mask = np.zeros(n, dtype=bool)
+    entry_mask[ei] = True
+    trades, _sl, _tp, open_trade = strat._pair_trades(
+        bars, ts, entry_mask, exit_mask, side, risk, ctx,
+        exit_group=exit_group if trade_aware else None, fill=fill,
+        entry_ok=None, eod_close=None, max_per_day=None,
+        cooldown_bars=None, min_hold_bars=risk.get('min_hold_bars'),
+        entry_mode='edge', max_stop_pct=None, min_target_usd=None,
+        win_start=None, win_end=None,
+        exit_scope=(exit_group or {}).get('scope'),
+        entry_ok_fill=None, no_open_fill=None)
+
+    next_open = fill in _NEXT_OPEN_FILLS
+    out = {'rule_fired_bar': None, 'rule_armed': True, 'waiting_for': None,
+           'closed': None, 'legs_banked': []}
+    trade = trades[0] if trades else None
+    if trade is not None:
+        out['legs_banked'] = [int(l['xi']) for l in (trade.get('legs') or [])]
+        if trade.get('reason') == 'exit':
+            # Under a next-open fill the engine BOOKS the exit a bar after the
+            # rule fired. The bar that matters to "how late is this" is the one
+            # the rule was true on.
+            out['rule_fired_bar'] = int(trade['xi']) - (1 if next_open else 0)
+        else:
+            out['closed'] = {'reason': trade.get('reason'), 'bar': int(trade['xi'])}
+    elif open_trade is not None:
+        out['legs_banked'] = [int(l['xi']) for l in (open_trade.get('legs') or [])]
+        if open_trade.get('pending_exit'):
+            out['rule_fired_bar'] = n - 1
+        elif (exit_group or {}).get('scope') == 'runner' \
+                and not open_trade.get('legs') and open_trade.get('tgt_armed', 0):
+            out['rule_armed'] = False
+            out['waiting_for'] = ('the first target leg to bank — this exit rule '
+                                  'manages only the runner')
+    return out
+
+
 def manage(strategy: dict, symbol: str, side: str, entry: float,
            entry_iso: str | None = None, *, tf: str = '1m', feed: str = 'yahoo',
            days: int = 2, view: str = 'regular', asof: str | None = None,
-           stop_at_entry: float | None = None, drop_last: bool = False) -> dict:
+           stop_at_entry: float | None = None, drop_last: bool = False,
+           fill: str = 'live') -> dict:
     """Should this open position close now, and where is its stop now?
 
     `entry_iso` is the fill time. It matters for two reasons and both are
@@ -113,39 +185,75 @@ def manage(strategy: dict, symbol: str, side: str, entry: float,
     risk = strategy.get('risk') or {}
     exit_group = strategy.get('exit')
     has_rules = bool((exit_group or {}).get('rules'))
+    scope = (exit_group or {}).get('scope')
 
-    # ── the exit rule, as the backtest evaluates it ────────────────────────
+    # ── the exit rule, DECIDED BY THE BACKTEST ENGINE ───────────────────────
+    #
+    # THIS USED TO BE A SECOND IMPLEMENTATION, and it disagreed with the first.
+    #
+    # It evaluated the exit group from the entry bar forward and closed on the
+    # first bar it was true. The backtest does not do that, in two ways:
+    #
+    #   `scope: 'runner'`   the rule manages only the RUNNER. It is armed once a
+    #                       target leg has banked; until then the stop and the
+    #                       targets are the only exits. OR + VWAP 09:35 is
+    #                       written exactly this way — half off at 2R, then the
+    #                       remaining half leaves on the VWAP cross. The manager
+    #                       never read `scope`, so live closed the WHOLE
+    #                       position on the first VWAP cross, before 2R, on
+    #                       trades the backtest was still holding. The tested
+    #                       win rate came from one exit; the money went out on
+    #                       another.
+    #
+    #   the entry bar       is exempt from the rule in the backtest (a position
+    #                       booked at a bar's close cannot also leave on that
+    #                       bar). The manager scanned from it.
+    #
+    # The module docstring already named the principle — "a second
+    # implementation of 'has the VWAP crossed' would be exactly the divergence
+    # this platform spent a rewrite removing" — and then was one. So there is
+    # no scan here any more. The engine is run on ONE entry, the bar this
+    # position was decided on, and asked what it did. Scope, min-hold, which
+    # legs banked, trade-aware rules and the fill model's timing are all its
+    # answers, not this file's.
+    #
+    # AND THE QUESTION IS "IS THE BACKTEST FLAT BY NOW", not "did the rule
+    # fire". When the stop and the rule are true on the same bar the engine
+    # books the STOP — it is checked first — and a manager asking only about
+    # the rule would then hold a position the backtest had already closed,
+    # whenever the broker's stop sat at a different level from the engine's or
+    # simply had not filled. `close_now` is the engine's trade being over by
+    # this bar, for whatever reason; `exit_now` keeps its narrower meaning.
     exit_now = False
     exit_bar = None
-    if has_rules:
-        try:
-            trade = {'entry': float(entry), 'ei': ei, 'side': side}
-            em = strat._eval_group(exit_group, bars, ctx, trade=trade)
-
-            # EVERY BAR SINCE ENTRY, not just the newest one.
-            #
-            # A cross is an EDGE: `close crosses below VWAP` is true on the one
-            # bar it crosses and false on every bar after, while price stays
-            # below. Asked once a minute and reading only the latest bar, a
-            # manager that is late — a slow fetch, a restart, a minute the
-            # scheduler skipped — would never see it, and the exit that the
-            # backtested win rate was measured with would simply not happen.
-            #
-            # The position is still open, so if the rule was EVER true since
-            # entry the simulation would already have closed it. Scanning
-            # forward from the entry bar is therefore not a heuristic, it is
-            # the same answer arrived at late. `exit_bar` says how late.
-            # `min_hold_bars` defers the RULE (never the stop) for N bars after
-            # entry — the same deferral the simulation applies.
-            hold = int(risk.get('min_hold_bars') or 0)
-            first = max(ei + hold, ei)
-            for j in range(first, last + 1):
-                if bool(em[j]):
-                    exit_bar = j
-                    break
-            exit_now = exit_bar is not None
-        except Exception as e:                        # noqa: BLE001
+    close_now = False
+    close_reason = None
+    close_bar = None
+    sim = None
+    engine_error = None
+    # The engine is shown the same bars this function judges on — no more.
+    # `drop_last` withholds a possibly-forming bar, and a simulation that could
+    # still see it would decide on the bar the caller asked to be ignored.
+    e_bars, e_ts = (bars, ts) if last >= n - 1 else (bars.iloc[:last + 1], ts[:last + 1])
+    try:
+        sim = _engine_from_entry(strategy, side, e_bars, e_ts, ctx, ei, fill)
+    except Exception as e:                            # noqa: BLE001
+        # A strategy with an exit rule cannot be managed without this, and
+        # "hold" is not an answer to "I could not tell". One without a rule
+        # loses only the report, so it goes on and says so.
+        if has_rules:
             return {'ok': False, 'error': f'could not evaluate the exit rule: {e}'}
+        engine_error = str(e)
+    if sim is not None:
+        if has_rules and sim['rule_fired_bar'] is not None and sim['rule_fired_bar'] <= last:
+            exit_now = True
+            exit_bar = sim['rule_fired_bar']
+        if exit_now:
+            close_now, close_reason, close_bar = True, 'exit', exit_bar
+        elif sim['closed'] is not None and sim['closed']['bar'] <= last:
+            close_now = True
+            close_reason = sim['closed']['reason']
+            close_bar = sim['closed']['bar']
 
     # ── where the stop is now ──────────────────────────────────────────────
     sl_spec = risk.get('sl') if isinstance(risk.get('sl'), dict) else None
@@ -266,6 +374,27 @@ def manage(strategy: dict, symbol: str, side: str, entry: float,
         # belongs in the record rather than being rounded away.
         'exit_bar': (None if exit_bar is None else int(exit_bar)),
         'exit_bars_ago': (None if exit_bar is None else int(last - exit_bar)),
+        # WHY IT IS NOT CLOSING, when that is not obvious. A runner-scoped rule
+        # that is not armed yet looks, from outside, exactly like a rule that
+        # is broken: the VWAP crossed and nothing happened. Said here so the
+        # desk can say it too.
+        'exit_scope': scope,
+        'rule_armed': (None if sim is None else bool(sim['rule_armed'])),
+        'waiting_for': (None if sim is None else sim['waiting_for']),
+        'legs_banked': ([] if sim is None else list(sim['legs_banked'])),
+        # A trade the ENGINE has already closed another way — its stop, its
+        # last target. If the position is still open live, the broker did not
+        # do what the backtest assumed it would, and that is worth knowing.
+        'backtest_closed': (None if sim is None else sim['closed']),
+        # THE ONE THE CALLER ACTS ON. The backtest is flat by this bar — by its
+        # exit rule, its stop or its last target — so whatever is still open
+        # live is a position the tested strategy does not have.
+        'close_now': bool(close_now),
+        'close_reason': close_reason,
+        'close_bar': (None if close_bar is None else int(close_bar)),
+        'close_bars_ago': (None if close_bar is None else int(last - close_bar)),
+        'engine_error': engine_error,
+        'fill': fill,
 
         # Question two.
         'stop_kind': stop_kind,

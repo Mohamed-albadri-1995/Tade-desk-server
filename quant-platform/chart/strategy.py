@@ -1404,7 +1404,13 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                       'last': float(close[-1]), 'ret': float(realized + remaining * r),
                       'stop': (float(sl_at_entry) if sl_at_entry is not None
                                and sl_at_entry == sl_at_entry else None),
-                      'legs': list(legs), 'tgt_armed': len(tgt_fr)}
+                      'legs': list(legs), 'tgt_armed': len(tgt_fr),
+                      # An exit rule that fired on the LAST bar under a
+                      # next-open fill has decided, and is waiting for a bar
+                      # that has not printed. Reported, because the live manager
+                      # asks this engine "should it close now" — and the answer
+                      # to that is yes, even though no exit is booked yet.
+                      'pending_exit': bool(pending_exit)}
     return trades, sl_view, tp_view, open_trade
 
 

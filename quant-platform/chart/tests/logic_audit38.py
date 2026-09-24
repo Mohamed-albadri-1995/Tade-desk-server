@@ -74,8 +74,13 @@ print("=" * 64)
 # Up for five bars, then one bar that closes back under the 3-SMA at b6.
 cl = [10.0, 10.2, 10.4, 10.6, 10.8, 11.0, 10.2, 10.1]
 use(frame(cl))
-st = {'name': 'ruler', 'side': 'long', 'exit': RULE,
-      'risk': {'sl': dict(SMA, freeze=True)}}
+# A STOP THE RULE CANNOT COLLIDE WITH. These tests are about the rule's edge.
+# They used the 3-SMA frozen at entry (10.40) as the stop, and b6's low (10.15)
+# touches it on the very bar the rule crosses — so what they were really
+# exercising was which of the two the backtest books first. That question is
+# asked on purpose further down; here the stop sits 20% away.
+FAR = {'type': 'pct', 'value': 20}
+st = {'name': 'ruler', 'side': 'long', 'exit': RULE, 'risk': {'sl': FAR}}
 
 r = M.manage(st, 'X', 'long', entry=10.6, entry_iso='2024-01-09 10:03',
              stop_at_entry=10.0)
@@ -118,7 +123,7 @@ ok("a cross before the entry bar is not an exit",
 # min_hold defers the RULE — the same deferral the simulation applies.
 use(frame(cl))
 held = {'name': 'ruler', 'side': 'long', 'exit': RULE,
-        'risk': {'sl': dict(SMA, freeze=True), 'min_hold_bars': 10}}
+        'risk': {'sl': FAR, 'min_hold_bars': 10}}
 r4 = M.manage(held, 'X', 'long', entry=10.6, entry_iso='2024-01-09 10:03',
               stop_at_entry=10.0)
 ok("min_hold defers it", r4['exit_now'] is False, r4)
@@ -130,6 +135,94 @@ r5 = M.manage(norule, 'X', 'long', entry=10.6, entry_iso='2024-01-09 10:03',
               stop_at_entry=10.0)
 ok("no rules → has_exit_rule false, exit_now false",
    r5['has_exit_rule'] is False and r5['exit_now'] is False, r5)
+
+
+# ── THE STOP AND THE RULE ON THE SAME BAR ─────────────────────────────────
+#
+# The frozen 3-SMA stop is 10.40. b6 crosses under the SMA (the rule) AND its
+# low of 10.15 goes through 10.40 (the stop). The backtest checks the stop
+# first, so it books SL — not the rule.
+#
+# The old manager answered "the rule fired", which is the wrong reason, and in
+# this case happened to produce the right action. The right action is the one
+# that matters, and it has a precise name now: the backtest is FLAT on this bar.
+use(frame(cl[:7]))
+both = {'name': 'both', 'side': 'long', 'exit': RULE,
+        'risk': {'sl': dict(SMA, freeze=True)}}
+rb = M.manage(both, 'X', 'long', entry=10.6, entry_iso='2024-01-09 10:03',
+              stop_at_entry=10.0)
+ok("same bar: the backtest books the STOP, which is checked first",
+   rb.get('close_reason') == 'SL' and rb['exit_now'] is False, rb)
+ok("...and the position closes on that bar all the same",
+   rb.get('close_now') is True and rb.get('close_bar') == 6, rb)
+# The broker was told 10.00 and the backtest's stop is 10.40. Held live, that
+# position would be one the tested strategy no longer has.
+ok("...so a broker stop at a different level cannot leave it open",
+   rb.get('backtest_closed') == {'reason': 'SL', 'bar': 6}, rb)
+
+
+print("=" * 64)
+print("PART A2 — a rule that manages only the RUNNER")
+print("=" * 64)
+
+# THIS IS OR + VWAP 09:35. Half off at a target, then the remaining half
+# leaves on the rule — `exit.scope: 'runner'`. In the backtest the rule is not
+# armed until a leg has banked; before that the only exits are the stop and
+# the target.
+#
+# The manager never read `scope`. It closed the WHOLE position on the first
+# cross, before the target, on trades the backtest was still holding. The
+# tested win rate came from one exit and the money went out on another.
+#
+# Entry at b3 (10.60), stop 20% away, target at +1R... the target is priced in
+# R, so with a 20% stop 1R is ~2.12 and unreachable here. Use a 0.5% stop and a
+# 2R target so both are reachable on these bars:
+#   stop  = 10.60 × 0.995 = 10.547   1R = 0.053   2R target = 10.706
+# b4 highs at 10.85 → the 2R leg banks on b4. The rule crosses on b6.
+RUNNER = dict(RULE, scope='runner')
+half = {'name': 'half', 'side': 'long', 'exit': RUNNER,
+        'risk': {'sl': {'type': 'pct', 'value': 0.5},
+                 'targets': [{'fraction': 0.5, 'r_multiple': 2.0}]}}
+
+# FIRST: a path where price never reaches 2R, then crosses under the SMA.
+#   b3 10.60 entry · b4 10.62 · b5 10.64 · b6 10.58 (crosses under SMA 10.613)
+# 2R = 10.706, highs stay ≤ 10.69, lows stay above the 10.547 stop.
+flat = [10.0, 10.2, 10.4, 10.60, 10.62, 10.64, 10.58, 10.59]
+hi = [c + 0.05 for c in flat]
+lo = [c - 0.02 for c in flat]
+use(frame(flat, hi=hi, lo=lo))
+w = M.manage(half, 'X', 'long', entry=10.6, entry_iso='2024-01-09 10:03',
+             stop_at_entry=10.547)
+ok("before the leg banks, a cross does NOT close it",
+   w['exit_now'] is False and w.get('close_now') is False, w)
+ok("...and it says why, instead of looking broken",
+   w.get('rule_armed') is False and 'first target leg' in (w.get('waiting_for') or ''), w)
+ok("...the scope is reported", w.get('exit_scope') == 'runner', w)
+
+# SECOND: price reaches 2R on b4, THEN crosses under on b6. Now the rule is
+# armed and manages what is left.
+run = [10.0, 10.2, 10.4, 10.60, 10.80, 10.90, 10.60, 10.55]
+use(frame(run))
+g = M.manage(half, 'X', 'long', entry=10.6, entry_iso='2024-01-09 10:03',
+             stop_at_entry=10.547)
+ok("after the leg banks, the rule manages the runner",
+   g['exit_now'] is True and g.get('close_reason') == 'exit', g)
+ok("...the leg that armed it is reported", g.get('legs_banked') == [4], g)
+ok("...and it is armed", g.get('rule_armed') is True and g.get('waiting_for') is None, g)
+
+
+print("=" * 64)
+print("PART A3 — the entry bar is exempt, as in the backtest")
+print("=" * 64)
+
+# A position is booked at a bar's close; it cannot also leave on that bar. The
+# old scan started AT the entry bar. Here the rule crosses exactly on the
+# entry bar (b6) and on no bar after it.
+use(frame(cl[:7]))
+e0 = M.manage(st, 'X', 'long', entry=10.2, entry_iso='2024-01-09 10:06',
+              stop_at_entry=8.0)
+ok("a cross ON the entry bar is not an exit",
+   e0['entry_bar'] == 6 and e0['exit_now'] is False and e0.get('close_now') is False, e0)
 
 
 print("=" * 64)

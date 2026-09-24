@@ -94,6 +94,7 @@ PARTS = [
     ('logic_audit77.py',    'the shared navigation is asked for, not assumed fresh'),
     ('logic_audit78.py',    'the card does not tell you to fight the machine'),
     ('logic_audit79.py',    'a banner is not a server that started'),
+    ('logic_audit80.py',    'the live manager closes on the backtest\'s bar, for its reason'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
     # pytest-style parts, written by the scanner-tool side of this repo. They
