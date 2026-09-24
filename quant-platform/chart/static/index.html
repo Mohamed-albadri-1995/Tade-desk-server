@@ -1006,6 +1006,16 @@
         <div id="btDeskNote" class="muted" style="margin-bottom:6px;font-size:var(--f-xs)">Reading the desk’s settings…</div>
         <button id="btRun" class="dk-btn primary" style="width:100%">Run the backtest</button>
         <div id="btStat" class="muted" style="margin-top:6px">Runs on the timeframe and feed chosen above.</div>
+        <!-- EVERY RUN, NOT ONLY THE ONE THIS PAGE STARTED. The page used to
+             follow the run it launched and nothing else: close it and that
+             run's progress, its result and any way to stop it were gone —
+             reported 2026-09-24 as "the page closed, I could not see the old
+             backtest, it never finished, and I could not stop it or start a
+             new one". A run still going is picked up again on load. -->
+        <details id="btHist" class="why" style="margin-top:6px">
+          <summary>recent backtests</summary>
+          <div id="btList" class="muted" style="font-size:var(--f-xs)">loading…</div>
+        </details>
         <!-- The way back out of the page's memory. Every field above is
              remembered in this browser, so without this there is no route
              back to the shipped configuration except clearing site data. -->
@@ -2580,13 +2590,51 @@ async function btPoll(id){
     const j=await (await fetch('/api/backtest/'+id)).json();
     if(!j.ok||!j.backtest){ document.getElementById('btStat').textContent='backtest not found'; clearInterval(BT_POLL); return; }
     const g=j.backtest;
-    if(g.status==='running'){ document.getElementById('btStat').textContent=`running… ${(100*(g.progress||0)).toFixed(0)}%`; return; }
+    if(g.status==='running'){ document.getElementById('btStat').textContent=`running #${g.id}… ${(100*(g.progress||0)).toFixed(0)}%`; return; }
     clearInterval(BT_POLL); BT_POLL=null;
+    btLoadList();
+    if(g.status==='stopped'){ document.getElementById('btStat').textContent=`#${g.id} ${g.error||'stopped'}`; return; }
     if(g.status==='error'){ document.getElementById('btStat').textContent='error: '+(g.error||'').slice(0,160); return; }
     document.getElementById('btStat').textContent=`done ✓ (#${g.id})`;
     btRender(g);
   }catch(e){ document.getElementById('btStat').textContent='poll error: '+e.message; }
 }
+/* ── recent backtests: open one, watch it, stop it ── */
+function btFollow(id){
+  if(BT_POLL)clearInterval(BT_POLL);
+  BT_POLL=setInterval(()=>btPoll(id),2000); btPoll(id);
+}
+async function btStop(id){
+  document.getElementById('btStat').textContent=`stopping #${id}…`;
+  try{
+    const j=await (await fetch('/api/backtest/'+id+'/stop',{method:'POST'})).json();
+    if(!j.ok) document.getElementById('btStat').textContent='could not stop: '+(j.error||'');
+  }catch(e){ document.getElementById('btStat').textContent='could not stop: '+e.message; }
+  btLoadList(); btFollow(id);
+}
+async function btLoadList(){
+  const box=document.getElementById('btList'); if(!box)return null;
+  let rows;
+  try{
+    const j=await (await fetch('/api/backtests?brief=1')).json();
+    rows=(j.backtests||[]).slice(0,15);
+  }catch(e){ box.textContent='could not list the backtests: '+e.message; return null; }
+  if(!rows.length){ box.textContent='none yet'; return null; }
+  const word={running:'running',done:'done',error:'failed',stopped:'stopped'};
+  box.innerHTML=rows.map(r=>{
+    const sm=r.summary||{};
+    const st=r.status==='running'?`running ${(100*(r.progress||0)).toFixed(0)}%`+(r.live?'':' (no longer alive)'):(word[r.status]||r.status);
+    const res=r.status==='done'&&sm.trades!=null?` · ${sm.trades} trades${sm.win_rate!=null?` · ${sm.win_rate}% win`:''}`:'';
+    return `<div style="display:flex;gap:6px;align-items:baseline;padding:3px 0;border-top:1px solid var(--line,#333)">
+      <span style="flex:1;min-width:0;overflow-wrap:anywhere">#${r.id} ${escHtml(r.name||'')} · <b>${st}</b>${res}</span>
+      <button class="dk-btn" style="font-size:var(--f-xs)" onclick="btFollow(${r.id})">${r.status==='running'?'watch':'open'}</button>
+      ${r.status==='running'?`<button class="dk-btn" style="font-size:var(--f-xs)" onclick="btStop(${r.id})">stop</button>`:''}
+    </div>`;
+  }).join('');
+  return rows;
+}
+function escHtml(v){ return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
 async function btRun(){
   const sid=document.getElementById('btStrat').value;
   if(!sid){ document.getElementById('btStat').textContent='pick a saved strategy first (build + Save in ⚡ Strategy)'; return; }
@@ -2646,9 +2694,11 @@ async function btRun(){
   document.getElementById('btSummary').innerHTML=''; document.getElementById('btTrades').innerHTML='';
   try{
     const j=await (await fetch('/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(spec)})).json();
-    if(!j.ok){ document.getElementById('btStat').textContent='error: '+(j.error||'').slice(0,160); return; }
-    if(BT_POLL)clearInterval(BT_POLL);
-    BT_POLL=setInterval(()=>btPoll(j.id),2000); btPoll(j.id);
+    if(!j.ok){ document.getElementById('btStat').textContent='error: '+(j.error||'').slice(0,160);
+      // "still running" is answered by the list: the run, its progress, a stop.
+      if(/still running/.test(j.error||'')){ document.getElementById('btHist').open=true; btLoadList(); }
+      return; }
+    btLoadList(); btFollow(j.id);
   }catch(e){ document.getElementById('btStat').textContent='error: '+e.message; }
 }
 function loadStrategyById(id){ const s=SAVED.find(x=>String(x.id)===String(id)); if(!s)return; STRAT=JSON.parse(JSON.stringify(s)); STRAT.entry=STRAT.entry||{logic:'AND',rules:[]}; STRAT.exit=STRAT.exit||{logic:'AND',rules:[]}; STRAT.risk=STRAT.risk||{sl:{type:'',value:null},tp:{type:'',value:null}}; SIGMARKERS=[]; clearStratLines(); refreshMarkers(); renderStrat(); }
@@ -3076,6 +3126,11 @@ window.addEventListener('load',async()=>{
     document.getElementById(g+'K').addEventListener('change',e=>{ const k=parseInt(e.target.value,10); STRAT[g].k=Number.isFinite(k)?k:1; });
   }
   document.getElementById('btRun').onclick=btRun;
+  // A run still going when the page was closed is picked up again, visibly.
+  btLoadList().then(rows=>{
+    const live=(rows||[]).find(r=>r.status==='running'&&r.live);
+    if(live){ document.getElementById('btHist').open=true; btFollow(live.id); }
+  });
   /* THE FORM'S OWN VALUES, restored before anything else can overwrite them.
      The backtest TF used to be set from the CHART's timeframe on every load —
      so a 5m chart silently re-armed a 1m backtest as 5m, every time, and the

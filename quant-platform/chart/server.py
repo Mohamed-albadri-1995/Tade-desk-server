@@ -357,7 +357,8 @@ def backtest_start(payload: dict = Body(...)):
                 g = store.get_backtest(cur, with_trades=False)
                 if g and g['status'] == 'running':
                     return JSONResponse({'ok': False,
-                                         'error': f'backtest #{cur} is still running'},
+                                         'error': f'backtest #{cur} is still running — '
+                                                  'stop it from the list below, or wait'},
                                         status_code=200)
             bt._pairs(payload)                 # validate spec BEFORE creating a row
             bt._resolve_strategy(payload)
@@ -806,8 +807,40 @@ def oplog_read(limit: int = 200, op: str = '', day: str = '', summary: int = 0):
 
 
 @app.get('/api/backtests')
-def backtests_list():
-    return {'ok': True, 'backtests': store.list_backtests()}
+def backtests_list(brief: int = 0):
+    """Every run, newest first. `brief=1` keeps the headline numbers only —
+    the full summary carries an equity curve per run, which the page's list
+    of recent runs has no use for."""
+    rows = store.list_backtests()
+    if brief:
+        keep = ('trades', 'win_rate', 'total_return_pct', 'avg_return_pct')
+        for r in rows:
+            sm = r.get('summary') or {}
+            r['summary'] = {k: sm.get(k) for k in keep if k in sm} or None
+    running = _BT_RUNNING.get('id')
+    for r in rows:
+        # 'running' in the table and running IN THIS PROCESS are different
+        # facts; only the second can be stopped or waited for.
+        r['live'] = (r.get('status') == 'running' and r.get('id') == running)
+    return {'ok': True, 'backtests': rows}
+
+
+@app.post('/api/backtest/{bid}/stop')
+def backtest_stop(bid: int):
+    """Stop a backtest. A run of this process stops at its next symbol; a
+    'running' row no process is working on is marked interrupted at once."""
+    from chart import backtest as bt
+    g = store.get_backtest(bid, with_trades=False)
+    if not g:
+        return {'ok': False, 'error': f'no backtest #{bid}'}
+    if g['status'] != 'running':
+        return {'ok': True, 'status': g['status'], 'note': 'it is not running'}
+    if _BT_RUNNING.get('id') == bid:
+        bt.request_stop(bid)
+        return {'ok': True, 'status': 'stopping'}
+    store.update_backtest(bid, status='error',
+                          error='interrupted — no process was running it. Run it again.')
+    return {'ok': True, 'status': 'error'}
 
 
 @app.get('/api/parity')
@@ -3218,6 +3251,16 @@ def main():
             time.sleep(0.5)
         finally:
             probe.close()
+
+    # THIS process owns the port now, so any row still 'running' belongs to
+    # a process that is gone. Said, not silently fixed.
+    try:
+        n = store.mark_interrupted()
+        if n:
+            print(f'{n} backtest(s) were left running by the previous qp — '
+                  f'marked interrupted', flush=True)
+    except Exception as e:  # noqa: BLE001 — never stop a start over this
+        print(f'could not check for interrupted backtests: {e}', flush=True)
 
     import uvicorn
     print(f'qp charting platform on http://{args.host}:{args.port} — '

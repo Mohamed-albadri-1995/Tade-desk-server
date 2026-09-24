@@ -98,6 +98,7 @@ PARTS = [
     ('logic_audit81.py',    'what was backtested, against what trades now'),
     ('logic_audit82.py',    '09:35 as seeded: the engine vs the plain-rules reference, trade by trade'),
     ('logic_audit83.py',    'tools/audit_0935.py reads a stored run correctly'),
+    ('logic_audit84.py',    'a backtest can be found again, watched and stopped'),
     ('py39_guard.py',       'nothing needs a Python newer than the box (3.9)'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),

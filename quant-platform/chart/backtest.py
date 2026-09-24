@@ -1650,12 +1650,31 @@ def run(spec: dict, progress_cb=None) -> dict:
     return {'summary': summary, 'trades': closed + opens}
 
 
+class Stopped(BaseException):
+    """Raised from the progress callback when a stop was asked for.
+
+    A BaseException, not an Exception: run() catches Exception per pair so one
+    bad symbol cannot end a run — and a stop that one of those handlers
+    swallowed would be a stop button that does nothing.
+    """
+
+
+_STOP: set = set()
+
+
+def request_stop(bt_id: int) -> None:
+    """Ask a running backtest to stop at its next symbol."""
+    _STOP.add(int(bt_id))
+
+
 def run_and_store(bt_id: int, spec: dict) -> None:
     """Orchestrator for the API thread: runs, streams progress to the store,
     persists trades + summary, and never lets an exception escape unlogged."""
     last = {'p': 0.0}
 
     def _cb(p):
+        if bt_id in _STOP:
+            raise Stopped()
         if p - last['p'] >= 0.02 or p >= 1.0:   # throttle DB writes
             last['p'] = p
             store.update_backtest(bt_id, progress=p)
@@ -1684,9 +1703,15 @@ def run_and_store(bt_id: int, spec: dict) -> None:
                    # The counts that explain a small result without opening it.
                    no_data=_cov.get('no_data'),
                    before_scan=_cov.get('before_scan'))
+        except Stopped:
+            store.update_backtest(bt_id, status='stopped',
+                                  error=f"stopped by you at {100 * last['p']:.0f}%")
+            _t.add(ok=False, error='stopped')
         except Exception as e:  # noqa: BLE001
             store.update_backtest(bt_id, status='error',
                                   error=f'{e}\n{traceback.format_exc()[-300:]}')
             # Recorded as a failure and NOT re-raised: this is a background
             # thread, and the store already carries the error for the poller.
             _t.add(ok=False, error=str(e)[:400])
+        finally:
+            _STOP.discard(bt_id)

@@ -649,6 +649,26 @@ def get_backtest(bt_id: int, with_trades: bool = True) -> dict | None:
     return out
 
 
+def mark_interrupted() -> int:
+    """Runs left 'running' by a qp process that no longer exists.
+
+    A backtest runs in a thread of the server. Restart the server — a deploy,
+    a crash, a memory kill — and the thread dies with it, but the row stays
+    'running' at whatever progress it last wrote. Reported 2026-09-24: "it
+    never finished even after an hour, and I cannot see its progress or stop
+    it". Called once at startup, AFTER this process owns the port, so no live
+    run of this server can be among them.
+    """
+    with _lock:
+        db = _db()
+        cur = db.execute(
+            "UPDATE backtests SET status='error', updated_at=?, "
+            "error='interrupted — qp restarted while this ran. Run it again.' "
+            "WHERE status='running'", (time.time(),))
+        db.commit()
+    return cur.rowcount
+
+
 def list_backtests() -> list:
     with _lock:
         rows = _db().execute(
