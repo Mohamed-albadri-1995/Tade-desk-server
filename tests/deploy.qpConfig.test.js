@@ -128,7 +128,9 @@ test('min_uptime outlasts the port wait, or a restart can never succeed', () => 
   const py = fs.readFileSync(path.join(ROOT, 'quant-platform', 'chart', 'server.py'), 'utf8');
   const wait = /'--port-wait',\s*type=float,\s*default=([\d.]+)/.exec(py);
   expect({ found: !!wait }).toEqual({ found: true });
-  expect({ waitSeconds: Number(wait[1]) }).toEqual({ waitSeconds: 20 });
+  // 60 since 2026-09-24: the old copy held the port ~30 s after it said it
+  // had finished, and a 20 s wait made that a failed start.
+  expect({ waitSeconds: Number(wait[1]) }).toEqual({ waitSeconds: 60 });
   // pm2 counts in milliseconds.
   expect(app.min_uptime).toBeLessThanOrEqual(Number(wait[1]) * 1000);
   // …and ten tries a second apart still outlast a twenty second handover only

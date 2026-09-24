@@ -23,7 +23,7 @@
 WANT="${1:-}"
 FORCE="${2:-}"
 PORT="${QP_PORT:-8765}"
-WAIT="${QP_WAIT:-40}"            # qp itself waits up to 20 s for its port
+WAIT="${QP_WAIT:-90}"            # qp itself waits up to 60 s for its port
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 build() {

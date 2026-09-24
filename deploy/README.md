@@ -71,7 +71,7 @@ pm2 start deploy/qp.config.js
 pm2 save
 ```
 
-After that `pm2 restart qp` is enough. It waits up to twenty seconds for port
+After that `pm2 restart qp` is enough. It waits up to 60 seconds for port
 8765 to come free — a restart hands over and the old process takes a moment to
 let go — and refuses with a named reason if it does not.
 

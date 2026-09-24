@@ -3197,8 +3197,13 @@ def main():
     p.add_argument('--host', default='0.0.0.0')
     p.add_argument('--port', type=int, default=8766)
     # Long enough for a handover, short enough that a port held by something
-    # else is a failure inside half a minute rather than a hang.
-    p.add_argument('--port-wait', type=float, default=20.0,
+    # else is a failure inside a minute rather than a hang.
+    #
+    # 60, not 20: on 2026-09-24 the old qp logged "Finished server process" at
+    # 13:23:38 and still held :8765 until about 13:24:05. The new one gave up
+    # at 20 s, pm2 counted a failed start, and the deploy printed "STILL not
+    # answering" for a qp that came up on the next try.
+    p.add_argument('--port-wait', type=float, default=60.0,
                    help='seconds to wait for the port to come free')
     args = p.parse_args()
 

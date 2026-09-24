@@ -94,6 +94,14 @@ test('a changed .env forces a restart even on the right build', () => {
   expect(r.calls).toContain('pm2 restart qp --update-env');
 });
 
+test('the deploy waits longer than qp waits for its port', () => {
+  const sh = fs.readFileSync(SCRIPT, 'utf8');
+  const py = fs.readFileSync(path.join(__dirname, '..', 'quant-platform', 'chart', 'server.py'), 'utf8');
+  const deployWait = Number(/WAIT="\$\{QP_WAIT:-(\d+)\}"/.exec(sh)[1]);
+  const qpWait = Number(/'--port-wait',\s*type=float,\s*default=([\d.]+)/.exec(py)[1]);
+  expect(deployWait).toBeGreaterThan(qpWait);
+});
+
 test('deploy-tools.sh calls it, and no longer restarts qp-chart itself', () => {
   const sh = fs.readFileSync(path.join(__dirname, '..', 'deploy-tools.sh'), 'utf8');
   expect(sh).toMatch(/bash deploy\/qp-restart\.sh "\$WANT" "\$QP_FORCE_RESTART"/);
