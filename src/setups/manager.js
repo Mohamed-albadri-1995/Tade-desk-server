@@ -279,6 +279,8 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
     stale = { ok: false, error: err.message };
   }
   if (!stale.ok) console.warn(`[Manager] could not verify positions with Alpaca: ${stale.error}`);
+  // What Alpaca holds — recorded on the pass, for watching only. It no longer
+  // decides whether a close is sent (see the close loop below).
   // `notClosed` included: a close that was sent and did not take leaves the
   // position held, and a set that omitted it would answer "flat" about the one
   // position most in need of attention.
@@ -286,7 +288,6 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
     ? new Set([...stale.carried, ...stale.foreign, ...stale.running,
                ...(stale.notClosed || [])].map(p => p.symbol))
     : null;
-  const verifiable = new Set(reconcile.alpacaDestinations());
 
   /*
    * A POSITION THAT IS ALREADY WRONG, said the minute it is seen rather than at
@@ -466,19 +467,19 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
        * flattens the symbol, so one call per destination is one flat position
        * each — and a destination that is already flat ignores it.
        */
+      /*
+       * EVERY ACCOUNT THE DESK SENT IT TO, whatever Alpaca says it holds.
+       *
+       * This skipped an account Alpaca already showed flat. Trade The Pool can
+       * never be asked, so on TTP the close always goes — and since 2026-09-24
+       * the Alpaca account behaves the way the TTP evaluation will: which
+       * orders are sent depends on the desk's own records only. Alpaca's
+       * positions are still read, for watching (Live, the warnings above).
+       * A close to a position its own stop already closed is refused by the
+       * broker and says so; nothing is harmed.
+       */
       const results = [];
-      let skippedFlat = 0;
       for (const dest of pos.destinations) {
-        /*
-         * PER DESTINATION, because only some of them can be verified. A name
-         * held in both accounts and flat at Alpaca still has to be closed at
-         * Trade The Pool — dropping the whole position would leave the prop
-         * account holding it.
-         */
-        if (stillHeld && verifiable.has(dest) && !stillHeld.has(pos.symbol)) {
-          skippedFlat += 1;
-          continue;
-        }
         const cfg = broker.destinationCfg(dest) || cfgAll;
         /*
          * `why` ON THE LEDGER ROW, not only in the alert. The manager has known
@@ -492,17 +493,7 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
       }
       const sent = results.filter(r => r.sent).length;
 
-      /*
-       * Every account that held it was already flat. Nothing to send, and
-       * nothing to announce as a trade — the position ended when its stop or
-       * target filled, which is a fact the alert feed already carries from the
-       * broker's own callback.
-       */
-      if (!results.length && skippedFlat) {
-        acted.push({ ...pos, why, sent: 0, alreadyFlat: skippedFlat });
-        continue;
-      }
-      acted.push({ ...pos, why, sent, of: results.length, alreadyFlat: skippedFlat });
+      acted.push({ ...pos, why, sent, of: results.length });
 
       store.publishFires([{
         ruleId: pos.setupId, rule: 'Manager', ticker: pos.symbol,

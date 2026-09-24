@@ -216,22 +216,17 @@ async function check(at = Date.now(), opts = {}) {
    * `flattenAll` over an empty list sends nothing, and stillHeld([]) asks
    * nothing.
    */
+  /*
+   * WHAT IS CLOSED IS WHAT THE DESK ITSELF OPENED TODAY — nothing more.
+   *
+   * Names Alpaca still held from an earlier session, or after a close that did
+   * not take, used to be closed here too. Trade The Pool can never be asked
+   * what it holds, so there this could never happen; since 2026-09-24 the
+   * Alpaca account behaves as the TTP evaluation will, and which orders go out
+   * depends on the desk's own records only. They are REPORTED below, loudly,
+   * to close by hand.
+   */
   const results = await broker.flattenAll(day, cfg);
-  for (const sym of extra) {
-    /*
-     * To the accounts that OPENED it, not to today's default. A close sent to
-     * an account that never held it is a no-op there and leaves the position
-     * exactly where it was.
-     */
-    const p = mine.find(x => x.symbol === sym);
-    const dests = (p.destinations || []).length ? p.destinations : [null];
-    for (const d of dests) {
-      results.push(await broker.closePosition(sym, day,
-        (d && broker.destinationCfg(d)) || cfg,
-        // The one caller for which this really IS the end of the session.
-        { reason: 'end of session' }));
-    }
-  }
 
   const done = results.filter(r => r.sent).map(r => r.symbol);
   const failed = results.filter(r => !r.sent);
@@ -262,7 +257,7 @@ async function check(at = Date.now(), opts = {}) {
     date: day,
     at: Date.now(),
     kind: 'broker',
-    level: (failed.length || foreign.length || verify.held.length) ? 'error' : 'info',
+    level: (failed.length || foreign.length || extra.length || verify.held.length) ? 'error' : 'info',
     /*
      * THE VERIFIED ANSWER LEADS, when there is one. "Closed at 15:50: U" with
      * "still held" further down the same paragraph is a sentence that reads as
@@ -285,12 +280,14 @@ async function check(at = Date.now(), opts = {}) {
       // What was carried in from an earlier session, so it is visible that this
       // was not a normal day's close.
       + (fromEarlier.length
-        ? ` · ${fromEarlier.join(', ')} had been left open from an EARLIER session `
-          + 'and was closed too — find out why it survived its own day.'
+        ? ` · ${fromEarlier.join(', ')} IS STILL OPEN at Alpaca from an EARLIER session `
+          + 'and was NOT closed — the desk only closes what its own records say is '
+          + 'open, as it will on TTP. CLOSE IT YOURSELF, and find out why it survived its day.'
         : '')
       + (closeMissed.length
-        ? ` · ${closeMissed.join(', ')} had a close sent for it already and was `
-          + 'STILL HELD, so it was closed again — the first one did not take.'
+        ? ` · ${closeMissed.join(', ')} had a close sent for it already and is STILL `
+          + 'HELD at Alpaca — the close did not take. It was NOT sent again: CLOSE IT '
+          + 'YOURSELF (cancel its stop order first).'
         : '')
       /*
        * THE QUESTION WAS NOT PUT. Not the same as "it is flat", and on this

@@ -291,8 +291,10 @@ test('a quiet day does not spend twenty seconds asking Alpaca', async () => {
  * follows: the next day asks about a new date, finds nothing, closes nothing.
  * Not missed once. Missed for good.
  *
- * So it now also asks Alpaca what is actually held, and closes what THIS DESK
- * opened on an earlier day. What it did not open, it names and leaves.
+ * So it asks Alpaca what is actually held. Since 2026-09-24 it REPORTS what
+ * this desk opened on an earlier day and does not close it: Trade The Pool can
+ * never be asked, and the Alpaca account behaves as the TTP evaluation will —
+ * the orders sent depend on the desk's own records only.
  */
 describe('a position carried in from an earlier session', () => {
   const carried = (symbol = 'VIK', over = {}) => ({
@@ -301,22 +303,22 @@ describe('a position carried in from an earlier session', () => {
                 setupId: 'S@09:35', destinations: ['alp'], ...over }],
   });
 
-  test('is closed, even though today\'s ledger is empty', async () => {
+  test('is NOT closed — the desk sends only what its own records say', async () => {
     armed();
     reconcile.carriedOver.mockResolvedValue(carried());
     const out = await check(AT_1550);
     expect(out.ran).toBe(true);
-    expect(sent.map(b => b.symbol)).toEqual(['VIK']);
-    expect(sent[0].action).toBe('close');
+    expect(sent.filter(b => b.symbol === 'VIK')).toHaveLength(0);
   });
 
-  test('and the alert says it came from an earlier day', async () => {
+  test('and the alert says, at error level, to close it by hand', async () => {
     armed();
     reconcile.carriedOver.mockResolvedValue(carried());
     await check(AT_1550);
     const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
-    expect(said.detail).toMatch(/EARLIER session/);
-    expect(said.detail).toMatch(/VIK/);
+    expect(said.level).toBe('error');
+    expect(said.detail).toMatch(/VIK IS STILL OPEN at Alpaca from an EARLIER session/);
+    expect(said.detail).toMatch(/CLOSE IT YOURSELF/);
   });
 
   test('one already in today\'s ledger is not closed twice', async () => {
@@ -821,11 +823,11 @@ describe('a close that did not take', () => {
                   why: 'this desk closed it and it is still on — the close did not take' }],
   });
 
-  test('is closed, not merely mentioned', async () => {
+  test('is not sent again — reported, to close by hand', async () => {
     armed();
     reconcile.carriedOver.mockResolvedValue(notClosed());
     await check(AT_1550);
-    expect(sent.filter(b => b.symbol === 'VIK' && b.action === 'close')).toHaveLength(1);
+    expect(sent.filter(b => b.symbol === 'VIK' && b.action === 'close')).toHaveLength(0);
   });
 
   test('and is not described as somebody else\'s trade', async () => {
@@ -834,7 +836,8 @@ describe('a close that did not take', () => {
     await check(AT_1550);
     const said = store.recentFires(DAY).find(f => f.rule === 'End of session');
     expect(said.detail).not.toMatch(/nothing here opened it/);
-    expect(said.detail).toMatch(/the first one did not take/);
+    expect(said.detail).toMatch(/the close did not take/);
+    expect(said.detail).toMatch(/cancel its stop order first/);
     expect(said.detail).toContain('VIK');
   });
 

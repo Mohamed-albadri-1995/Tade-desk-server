@@ -402,27 +402,24 @@ describe('dry run', () => {
   });
 });
 
-// ── the closed loop ────────────────────────────────────────────────────────
+// ── Alpaca is watched, never consulted ─────────────────────────────────────
 /*
- * The ledger is what we SENT minus what we CLOSED. It cannot see a stop or a
- * target that filled, so it over-reports by design — safe for the 15:50
- * flatten, wrong here: a close sent for a position that ended an hour ago is a
- * per-order fee and an "exit" alert for a trade that was already out.
- *
- * Alpaca will simply say. These are about believing it exactly as far as it can
- * be believed, and no further.
+ * This used to skip a close for an account Alpaca showed flat. Trade The Pool
+ * can never be asked, so on TTP the close always goes; since 2026-09-24 the
+ * Alpaca account behaves exactly as the TTP evaluation will — which orders
+ * are sent depends on the desk's own records only.
  */
-describe('what the broker says is actually held', () => {
-  test('a position Alpaca is FLAT in is not closed again', async () => {
+describe('what the broker holds does not change what is sent', () => {
+  test('Alpaca FLAT: the close is sent anyway, as it would be at TTP', async () => {
     ledger([{}]);
     qp.manage.mockResolvedValue(answer({ exit_now: true }));
     reconcile.carriedOver.mockResolvedValue(holdsNothing());   // holding nothing
     const r = await manager.check(AT);
-    expect(sent).toHaveLength(0);
-    expect(r.acted[0].alreadyFlat).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(r.acted[0].alreadyFlat).toBeUndefined();
   });
 
-  test('a position Alpaca still holds IS closed', async () => {
+  test('Alpaca still holding it: the same close, the same once', async () => {
     ledger([{}]);
     qp.manage.mockResolvedValue(answer({ exit_now: true }));
     reconcile.carriedOver.mockResolvedValue(holds('CBRS'));
@@ -430,19 +427,12 @@ describe('what the broker says is actually held', () => {
     expect(sent).toHaveLength(1);
   });
 
-  /*
-   * PER DESTINATION. Only Alpaca can be asked; Trade The Pool is behind
-   * TraderEvolution and invisible. A name held in both and flat at Alpaca must
-   * STILL be closed at the prop account — dropping the whole position would
-   * leave that one holding it into the night.
-   */
-  test('an unverifiable account is still closed when Alpaca is flat', async () => {
+  test('both accounts get the close, whatever Alpaca says about one of them', async () => {
     ledger([{ destination: 'alp' }, { destination: 'ttp' }]);
     qp.manage.mockResolvedValue(answer({ exit_now: true }));
     reconcile.carriedOver.mockResolvedValue(holdsNothing());
     await manager.check(AT);
-    expect(sent).toHaveLength(1);                     // ttp only
-    expect(sent[0].url).toContain('TESTfake');        // the TTP hook
+    expect(sent).toHaveLength(2);
   });
 
   /*

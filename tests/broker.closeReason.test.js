@@ -116,9 +116,12 @@ describe('the three callers each say why', () => {
     expect(src).toMatch(/const \{ why, reason \} = closeVerdict\(answer\)/);
   });
 
-  test('the flattener says end of session, and means it', () => {
-    expect(read('src/alerts/flattener.js'))
-      .toMatch(/reason: 'end of session'/);
+  // The flattener no longer sends closes of its own (leftovers are reported,
+  // since 2026-09-24): every 15:50 close goes through flattenAll, below.
+  test('the flattener closes only through flattenAll', () => {
+    const src = read('src/alerts/flattener.js');
+    expect(src).toMatch(/broker\.flattenAll\(day, cfg\)/);
+    expect(src).not.toMatch(/broker\.closePosition\(/);
   });
 
   test('flattenAll says it too', () => {
