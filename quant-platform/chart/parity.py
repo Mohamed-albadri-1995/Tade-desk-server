@@ -19,6 +19,8 @@ This module answers two questions for the desk:
 It reads; it never edits a strategy or a run. A run too old to carry a frozen
 copy is reported as `frozen: False` — "cannot tell", never "unchanged".
 """
+from __future__ import annotations
+
 import json
 
 from chart import store
