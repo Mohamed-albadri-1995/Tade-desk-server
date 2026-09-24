@@ -40,6 +40,7 @@ function run(body, env) {
     ${lift('px')}
     ${lift('agoShort')}
     ${lift('tradeRow')}
+    ${lift('bySetup')}
     ${lift('paintBoard')}
     ${lift('runLine')}
     ${lift('paintUpNext')}
@@ -67,6 +68,32 @@ describe('trades today, by account', () => {
       { status: 'not sent', symbol: 'RGTI', side: 'short', setup: 'OR + VWAP 09:35', plannedEntry: 14.2,
         sl: 14.6, tp: 13.4, notSent: 'no shares to borrow', notSentLevel: 'warn' }] }] };
 
+  /*
+   * A LADDER, NOT A ROW OF EQUALS. Reported: "you are putting account and
+   * setup at the same level — Alpaca 100k and the 935 setup; build an
+   * organised ladder". The account on the box is literally called
+   * "OR+VWAP 935", so the levels have to be NAMED, not only indented.
+   */
+  test('ACCOUNT → SETUP → trades, each level labelled', () => {
+    const h = run('paintBoard(env.b)', { b: BOARD }).board.innerHTML;
+    const acct = h.indexOf('<span class="lvl">Account</span><b>OR+VWAP 935</b>');
+    const setup = h.indexOf('<span class="lvl">Setup</span><b>OR + VWAP 09:35</b>');
+    const trade = h.indexOf('NVTS');
+    expect(acct).toBeGreaterThanOrEqual(0);
+    expect(setup).toBeGreaterThan(acct);
+    expect(trade).toBeGreaterThan(setup);
+    // The setup is said once, as the level — not again on every trade row.
+    expect(h.split('OR + VWAP 09:35').length - 1).toBe(1);
+    expect(h).toMatch(/3 trades<\/span>/);
+  });
+  test('two setups on one account are two groups, each with its own P&L', () => {
+    const b = JSON.parse(JSON.stringify(BOARD));
+    b.accounts[0].trades.push({ status: 'closed', symbol: 'U', side: 'long', setup: 'Test',
+      shares: 10, entry: 10, exit: 11, pnl: 10 });
+    const h = run('paintBoard(env.b)', { b }).board.innerHTML;
+    expect(h.split('class="su-grp"').length - 1).toBe(2);
+    expect(h).toMatch(/<b>Test<\/b>[\s\S]*1 trade<\/span>[\s\S]*\+\$10\.00/);
+  });
   test('the account heads its trades, with its mode and both P&Ls', () => {
     const e = run('paintBoard(env.b)', { b: BOARD });
     expect(e.board.innerHTML).toMatch(/<b>OR\+VWAP 935<\/b><span class="bchip live">FULL AUTO/);
@@ -76,7 +103,7 @@ describe('trades today, by account', () => {
   test('an open trade: status, symbol, side, setup, P&L; shares, entry, SL now, TP, now; monitored', () => {
     const e = run('paintBoard(env.b)', { b: BOARD });
     const nv = e.board.innerHTML.split('class="tr ')[1];
-    expect(nv).toMatch(/st open">OPEN[\s\S]*NVTS[\s\S]*LONG[\s\S]*OR \+ VWAP 09:35[\s\S]*\+\$155 · \+3\.13%/);
+    expect(nv).toMatch(/st open">OPEN[\s\S]*NVTS[\s\S]*LONG[\s\S]*\+\$155 · \+3\.13%/);
     expect(nv).toMatch(/shares<\/span><b>420[\s\S]*entry<\/span><b>11\.84[\s\S]*SL<\/span><b>11\.62 <i class="mv">↑[\s\S]*TP<\/span><b>12\.28 <i class="mv">✓[\s\S]*now<\/span><b>12\.21/);
     expect(nv).toMatch(/in 09:35 · <span class="ok">✓ target half taken<\/span>[\s\S]*monitored 20s ago/);
   });

@@ -619,6 +619,17 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   .sl-s { grid-column:2; } .sl-l { display:none; } .sl-m { grid-column:1 / -1; padding-left:6px; }
   .sl-d { margin-left:6px; }
 }
+/* ── Live: the ladder — ACCOUNT → SETUP → TRADE ──
+   Three levels, each named on screen, each set in from the one above, so an
+   account called "OR+VWAP 935" can never be read as the setup it runs. */
+.lvl { font-size:9.5px; font-weight:800; letter-spacing:.1em; color:var(--text3);
+  text-transform:uppercase; }
+.su-grp { margin:0 0 0 12px; border-left:3px solid var(--accent, #3b82f6); }
+.su-grp + .su-grp { border-top:1px solid var(--border); }
+.su-grp-h { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; padding:8px 12px 4px; }
+.su-grp-h b { font-size:13px; }
+.su-grp-h .sum { margin-left:auto; font-family:var(--mono); font-size:12px; }
+.su-grp .tr { padding-left:14px; }
 /* ── Live: trades by account ── */
 .acct { border:1px solid var(--border); border-radius:10px; margin-bottom:var(--s3); overflow:hidden; }
 .acct-h { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; padding:9px 12px;
@@ -3149,8 +3160,7 @@ function tradeRow(t) {
   return `<div class="tr ${cls}">
     <div class="tr-h"><span class="st ${cls}">${ST_WORD[t.status] || esc(t.status)}</span>
       <b class="sym">${esc(t.symbol)}</b>
-      <span class="su-tag ${t.side === 'short' ? 'sell' : 'buy'}">${t.side === 'short' ? 'SHORT' : 'LONG'}</span>
-      <span class="setup">${esc(t.setup || '')}</span>${pnl}</div>
+      <span class="su-tag ${t.side === 'short' ? 'sell' : 'buy'}">${t.side === 'short' ? 'SHORT' : 'LONG'}</span>${pnl}</div>
     <div class="tr-g">
       <div><span>shares</span><b>${t.shares ?? '—'}</b></div>
       <div><span>entry</span><b>${px(t.entry ?? t.plannedEntry)}</b></div>
@@ -3160,6 +3170,22 @@ function tradeRow(t) {
     </div>
     <div class="tr-f">${foot}</div>
   </div>`;
+}
+
+/* The account's trades, grouped by the setup that placed them, in the order
+   the setups first traded. A trade with no setup is its own group, named. */
+function bySetup(trades) {
+  const groups = new Map();
+  for (const t of trades || []) {
+    const k = t.setup || 'no setup recorded';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(t);
+  }
+  return [...groups.entries()].map(([setup, ts]) => {
+    const priced = ts.filter(t => t.pnl != null);
+    return { setup, trades: ts,
+             pnl: priced.length ? priced.reduce((n, t) => n + t.pnl, 0) : null };
+  });
 }
 
 function paintBoard(d) {
@@ -3181,12 +3207,17 @@ function paintBoard(d) {
       : '';
   }
   box.innerHTML = accts.length ? accts.map(a => `<div class="acct">
-      <div class="acct-h"><b>${esc(a.name)}</b>${a.mode ? `<span class="bchip${a.mode === 'auto' ? ' live' : ''}">${
+      <div class="acct-h"><span class="lvl">Account</span><b>${esc(a.name)}</b>${a.mode ? `<span class="bchip${a.mode === 'auto' ? ' live' : ''}">${
         esc(a.mode === 'auto' ? 'FULL AUTO' : (a.mode === 'manual' ? 'by hand' : a.mode))}</span>` : ''}
         <span class="note">${a.open} open · ${a.closed} closed</span>
         <span class="sum">closed <span class="${a.closedPnl >= 0 ? 'pos' : 'neg'}">${money(a.closedPnl)}</span>
           · open <span class="${a.openPnl >= 0 ? 'pos' : 'neg'}">${money(a.openPnl)}</span></span></div>
-      ${a.trades.map(tradeRow).join('')}
+      ${bySetup(a.trades).map(g => `<div class="su-grp">
+        <div class="su-grp-h"><span class="lvl">Setup</span><b>${esc(g.setup)}</b>
+          <span class="note">${g.trades.length} trade${g.trades.length === 1 ? '' : 's'}</span>
+          ${g.pnl != null ? `<span class="sum ${g.pnl >= 0 ? 'pos' : 'neg'}">${money(g.pnl)}</span>` : ''}</div>
+        ${g.trades.map(tradeRow).join('')}
+      </div>`).join('')}
     </div>`).join('')
     : '<div class="lv-empty">No trades today yet.'
       + ((d.notes || []).length ? ` <span class="warn">${esc(d.notes.join(' · '))}</span>` : '') + '</div>';
