@@ -1,8 +1,11 @@
 /*
- * LIVE IS A MONITOR: WHAT IS HELD, WHAT IS NEXT, WHAT HAPPENED — AT A GLANCE.
+ * LIVE IS A MONITOR: TRADES BY ACCOUNT, SETUPS AND THEIR DECISIONS, ERRORS.
  *
- * Asked for 2026-09-24: "Live should be like a live monitor screen for me,
- * the trader." Run, not grepped: the page's own functions draw these.
+ * Asked for 2026-09-24: "a summary of the open and closed positions today —
+ * setup, account, side, symbol, shares, SL, TP, the last time it was
+ * monitored — clear visually, organised but not confusing; what setups are
+ * being evaluated now and since the beginning of the session; errors."
+ * Run, not grepped: the page's own functions draw these.
  */
 const fs = require('fs');
 const path = require('path');
@@ -14,10 +17,16 @@ const lift = (name) => {
   if (from < 0) throw new Error(`alerts.html no longer defines ${name}()`);
   return script.slice(from, script.indexOf('\n}', from) + 2);
 };
+const block = (start) => {
+  const i = script.indexOf(start);
+  return script.slice(i, script.indexOf(';\n', i) + 2);
+};
 
 function run(body, env) {
-  const els = { upnext: { innerHTML: '' }, 'next-note': { textContent: '' },
-                timeline: { innerHTML: '' }, 'tl-note': { textContent: '' } };
+  const els = {};
+  for (const id of ['upnext', 'next-note', 'errors', 'err-note', 'board', 'brd-note']) {
+    els[id] = { innerHTML: '', textContent: '' };
+  }
   // eslint-disable-next-line no-new-func
   new Function('els', 'env', `
     const document = { getElementById: (id) => els[id] || null };
@@ -26,8 +35,15 @@ function run(body, env) {
     ${lift('esc')}
     ${lift('toMinutes')}
     ${lift('slTime')}
+    ${block('const ST_WORD')}
+    ${lift('money')}
+    ${lift('px')}
+    ${lift('agoShort')}
+    ${lift('tradeRow')}
+    ${lift('paintBoard')}
+    ${lift('runLine')}
     ${lift('paintUpNext')}
-    ${lift('paintTimeline')}
+    ${lift('paintErrors')}
     ${body}`)(els, env);
   return els;
 }
@@ -36,50 +52,100 @@ const OR = { id: 'OR@09:35', name: 'OR + VWAP 09:35', decisionTime: '09:35', too
              accounts: [{ mode: 'auto' }] };
 const TEST = { id: 'Test@09:30', name: 'Test', decisionTime: '09:30', windowEnd: '11:30',
                watch: true, tools: ['T11'], accounts: [{ mode: 'auto' }] };
+const AT = (hm) => Date.parse(`2026-09-24T${hm}:10-04:00`);
 
-describe('coming up', () => {
-  test('before the minute: a countdown, in time order', () => {
-    const e = run('paintUpNext()', { now: 9 * 60 + 10, setups: [OR, TEST] });
-    const rows = e.upnext.innerHTML.split('lv-row').slice(1);
-    expect(rows[0]).toMatch(/09:30–11:30[\s\S]*Test[\s\S]*in 20 min/);
-    expect(rows[1]).toMatch(/09:35[\s\S]*OR \+ VWAP 09:35[\s\S]*T2 · auto[\s\S]*in 25 min/);
+describe('trades today, by account', () => {
+  const BOARD = { ok: true, notes: [], accounts: [{
+    id: 'a', name: 'OR+VWAP 935', mode: 'auto', open: 1, closed: 1, openPnl: 155.4, closedPnl: -42,
+    trades: [
+      { status: 'open', symbol: 'NVTS', side: 'long', setup: 'OR + VWAP 09:35', shares: 420,
+        entry: 11.84, sl: 11.60, stopNow: 11.62, stopMoved: true, tp: 12.28, now: 12.21,
+        legsBanked: 1, checkedAt: Date.now() - 20000, pnl: 155.4, pnlPct: 3.13, entryTime: '09:35:04' },
+      { status: 'closed', symbol: 'SOUN', side: 'short', setup: 'OR + VWAP 09:35', shares: 300,
+        entry: 5.10, sl: 5.25, tp: 4.80, exit: 5.24, exitTime: '10:12:40', pnl: -42, pnlPct: -2.75,
+        closeReason: "the backtest's stop was hit" },
+      { status: 'not sent', symbol: 'RGTI', side: 'short', setup: 'OR + VWAP 09:35', plannedEntry: 14.2,
+        sl: 14.6, tp: 13.4, notSent: 'no shares to borrow', notSentLevel: 'warn' }] }] };
+
+  test('the account heads its trades, with its mode and both P&Ls', () => {
+    const e = run('paintBoard(env.b)', { b: BOARD });
+    expect(e.board.innerHTML).toMatch(/<b>OR\+VWAP 935<\/b><span class="bchip live">FULL AUTO/);
+    expect(e.board.innerHTML).toMatch(/closed <span class="neg">−\$42\.00<\/span>[\s\S]*open <span class="pos">\+\$155/);
+    expect(e['brd-note'].innerHTML).toMatch(/1 open · 1 closed/);
   });
-  test('inside a watch window: watching now', () => {
-    const e = run('paintUpNext()', { now: 10 * 60, setups: [TEST] });
-    expect(e.upnext.innerHTML).toMatch(/lv-row now[\s\S]*watching now/);
+  test('an open trade: status, symbol, side, setup, P&L; shares, entry, SL now, TP, now; monitored', () => {
+    const e = run('paintBoard(env.b)', { b: BOARD });
+    const nv = e.board.innerHTML.split('class="tr ')[1];
+    expect(nv).toMatch(/st open">OPEN[\s\S]*NVTS[\s\S]*LONG[\s\S]*OR \+ VWAP 09:35[\s\S]*\+\$155 · \+3\.13%/);
+    expect(nv).toMatch(/shares<\/span><b>420[\s\S]*entry<\/span><b>11\.84[\s\S]*SL<\/span><b>11\.62 <i class="mv">↑[\s\S]*TP<\/span><b>12\.28 <i class="mv">✓[\s\S]*now<\/span><b>12\.21/);
+    expect(nv).toMatch(/in 09:35 · <span class="ok">✓ target half taken<\/span>[\s\S]*monitored 20s ago/);
   });
-  test('after it ran: runs and picks; a failed run is marked', () => {
-    const e = run('paintUpNext()', { now: 10 * 60, setups: [OR], runs: [
-      { setupId: 'OR@09:35', ok: true, picks: [{}, {}] },
-      { setupId: 'OR@09:35', ok: false, picks: [] }] });
-    expect(e.upnext.innerHTML).toMatch(/lv-row missed[\s\S]*2 runs · 2 picks · 1 failed/);
+  test('a closed trade says when and why, with its exit price', () => {
+    const so = run('paintBoard(env.b)', { b: BOARD }).board.innerHTML.split('class="tr ')[2];
+    expect(so).toMatch(/CLOSED[\s\S]*SOUN[\s\S]*SHORT[\s\S]*exit<\/span><b>5\.24/);
+    expect(so).toMatch(/closed 10:12 — the backtest&#39;s stop was hit|closed 10:12 — the backtest's stop was hit/);
   });
-  test('past its minute with no record at all: said, not left blank', () => {
-    const e = run('paintUpNext()', { now: 10 * 60, setups: [OR], runs: [] });
-    expect(e.upnext.innerHTML).toMatch(/no decision recorded/);
+  test('an order that never went out is on the board too, with the reason', () => {
+    const rg = run('paintBoard(env.b)', { b: BOARD }).board.innerHTML.split('class="tr ')[3];
+    expect(rg).toMatch(/NOT SENT[\s\S]*RGTI[\s\S]*not sent — no shares to borrow/);
   });
-  test('a rehearsal does not count as the decision', () => {
-    const e = run('paintUpNext()', { now: 10 * 60, setups: [OR], runs: [{ setupId: 'OR@09:35', ok: true, rehearsal: true }] });
-    expect(e.upnext.innerHTML).toMatch(/no decision recorded/);
+  test('an open trade the manager has not looked at says so, in red', () => {
+    const b = JSON.parse(JSON.stringify(BOARD));
+    b.accounts[0].trades = [{ ...b.accounts[0].trades[0], checkedAt: null }];
+    expect(run('paintBoard(env.b)', { b }).board.innerHTML).toMatch(/class="bad">not monitored yet/);
+  });
+  test('no trades is said, not an empty box', () => {
+    expect(run('paintBoard(env.b)', { b: { ok: true, accounts: [] } }).board.innerHTML)
+      .toMatch(/No trades today yet/);
   });
 });
 
-describe('today', () => {
-  const T = Date.parse('2026-09-24T13:35:20Z');
-  const D = { ok: true, counts: { error: 1 }, lines: [
-    { t: T, level: 'info', msg: 'OR decided on 09:34 in 8 s' },
-    { t: T + 5000, level: 'debug', msg: 'manager: holding 1' },
-    { t: T + 9000, level: 'error', msg: 'AAA: order FAILED — 422' }] };
-  test('newest first, one line each, routine left out, errors marked', () => {
-    const e = run('paintTimeline(env.d)', { d: D });
-    const rows = e.timeline.innerHTML.split('lv-row').slice(1);
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatch(/^ error[\s\S]*09:35[\s\S]*AAA: order FAILED/);
-    expect(rows[1]).toMatch(/OR decided/);
-    expect(e['tl-note'].textContent).toMatch(/1 error · full detail on Review/);
+describe('setups: evaluated now, and since the open', () => {
+  test('before the minute: a countdown, in time order', () => {
+    const e = run('paintUpNext()', { now: 9 * 60 + 10, setups: [OR, TEST] });
+    const rows = e.upnext.innerHTML.split('class="su-live"').slice(1);
+    expect(rows[0]).toMatch(/09:30–11:30[\s\S]*Test[\s\S]*in 20 min/);
+    expect(rows[1]).toMatch(/09:35[\s\S]*OR \+ VWAP 09:35[\s\S]*T2 · auto[\s\S]*in 25 min/);
   });
-  test('an unreadable day says so', () => {
-    expect(run('paintTimeline(env.d)', { d: { ok: false, error: 'down' } }).timeline.innerHTML)
-      .toMatch(/Could not read today: down/);
+  test('inside the window: watching now, and each decision so far with its picks', () => {
+    const e = run('paintUpNext()', { now: 10 * 60, setups: [TEST], runs: [
+      { setupId: 'Test@09:30', ok: true, at: AT('09:59'), ms: 2100,
+        funnel: { cards: 31, signalled: 1 }, picks: [{ ticker: 'RKLB' }] },
+      { setupId: 'Test@09:30', ok: false, at: AT('09:58'), error: 'timeout' }] });
+    expect(e.upnext.innerHTML).toMatch(/lv-row now[\s\S]*watching now · 2 runs · 1 pick · 1 failed/);
+    expect(e.upnext.innerHTML).toMatch(/09:59[\s\S]*31 cards → 1 signals → <span class="p">RKLB[\s\S]*2\.1s/);
+    expect(e.upnext.innerHTML).toMatch(/su-run bad"><span>09:58<\/span><span>FAILED — timeout/);
+  });
+  test('the latest three show; the rest fold', () => {
+    const runs = Array.from({ length: 7 }, (_, i) => ({ setupId: 'Test@09:30', ok: true,
+      at: AT(`10:0${i}`), funnel: {}, picks: [] }));
+    expect(run('paintUpNext()', { now: 10 * 60 + 10, setups: [TEST], runs }).upnext.innerHTML)
+      .toMatch(/<summary>4 earlier<\/summary>/);
+  });
+  test('past its minute with no record at all: said, not left blank', () => {
+    expect(run('paintUpNext()', { now: 10 * 60, setups: [OR], runs: [] }).upnext.innerHTML)
+      .toMatch(/no decision recorded/);
+  });
+  test('a rehearsal does not count as the decision', () => {
+    expect(run('paintUpNext()', { now: 10 * 60, setups: [OR],
+      runs: [{ setupId: 'OR@09:35', ok: true, rehearsal: true }] }).upnext.innerHTML)
+      .toMatch(/no decision recorded/);
+  });
+});
+
+describe('errors today', () => {
+  const T = Date.parse('2026-09-24T13:35:20Z');
+  test('newest first, with their source; nothing but errors', () => {
+    const e = run('paintErrors(env.d)', { d: { ok: true, lines: [
+      { t: T, level: 'error', src: 'qp', msg: 'Traceback boom' },
+      { t: T + 1000, level: 'warn', src: 'desk', msg: 'a warning' },
+      { t: T + 9000, level: 'error', src: 'desk', msg: 'AAA: order FAILED — 422' }] } });
+    const rows = e.errors.innerHTML.split('lv-row').slice(1);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatch(/AAA: order FAILED[\s\S]*desk/);
+    expect(e['err-note'].textContent).toMatch(/2 · full log on Review/);
+  });
+  test('none is said plainly', () => {
+    expect(run('paintErrors(env.d)', { d: { ok: true, lines: [] } }).errors.innerHTML).toMatch(/No errors today/);
   });
 });

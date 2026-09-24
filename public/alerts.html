@@ -619,15 +619,52 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
   .sl-s { grid-column:2; } .sl-l { display:none; } .sl-m { grid-column:1 / -1; padding-left:6px; }
   .sl-d { margin-left:6px; }
 }
+/* ── Live: trades by account ── */
+.acct { border:1px solid var(--border); border-radius:10px; margin-bottom:var(--s3); overflow:hidden; }
+.acct-h { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; padding:9px 12px;
+  background:var(--bg3); border-bottom:1px solid var(--border); }
+.acct-h b { font-size:14px; }
+.acct-h .sum { margin-left:auto; font-family:var(--mono); font-size:12px; }
+.pos { color:var(--m-up); } .neg { color:#f87171; }
+.tr { padding:9px 12px; border-top:1px solid var(--border); }
+.tr:first-of-type { border-top:0; }
+.tr-h { display:flex; flex-wrap:wrap; gap:4px 8px; align-items:center; }
+.tr-h .sym { font-size:15px; letter-spacing:.02em; }
+.tr-h .setup { color:var(--text2); font-size:12px; }
+.tr-h .pnl { margin-left:auto; font-family:var(--mono); font-weight:700; font-size:13px; }
+.st { font-size:10px; font-weight:800; letter-spacing:.06em; padding:2px 6px; border-radius:3px;
+  border:1px solid var(--border); color:var(--text2); }
+.st.open { background:#22c55e22; color:var(--m-up); border-color:#22c55e66; }
+.st.closed { background:var(--bg3); color:var(--text2); }
+.st.not-sent, .st.no-fill, .st.unknown { background:#fbbf2418; color:#fbbf24; border-color:#fbbf2455; }
+.tr-g { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:4px; margin-top:6px; }
+.tr-g div { display:flex; flex-direction:column; min-width:0; }
+.tr-g span { font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--text3); }
+.tr-g b { font-family:var(--mono); font-size:13px; font-weight:600; overflow-wrap:anywhere; }
+.tr-g .mv { color:var(--m-up); font-size:11px; }
+.tr-f { font-size:12px; color:var(--text2); margin-top:6px; overflow-wrap:anywhere; }
+.tr-f .bad { color:#f87171; } .tr-f .ok { color:var(--m-up); }
+.tr.not-sent .tr-g, .tr.no-fill .tr-g { opacity:.6; }
+@media (max-width:420px) { .tr-g { grid-template-columns:repeat(3, minmax(0, 1fr)); } }
+/* ── Live: setups and their decisions ── */
+.su-live { border:1px solid var(--border); border-radius:10px; margin-bottom:var(--s2); overflow:hidden; }
+.su-live .lv-row { border-top:0; }
+.su-runs { border-top:1px solid var(--border); font-size:12px; font-family:var(--mono); }
+.su-run { display:grid; grid-template-columns:50px 1fr auto; gap:0 8px; padding:4px 12px; color:var(--text2); }
+.su-run.bad { color:#fca5a5; background:#ef444410; }
+.su-run .p { color:var(--text); }
 /* ── Live: the monitor ── */
 .lv-list { border:1px solid var(--border); border-radius:8px; overflow:hidden; margin-bottom:var(--s3); }
-.lv-row { display:grid; grid-template-columns:56px 1fr auto; gap:0 10px; align-items:baseline;
+.lv-row { display:grid; grid-template-columns:56px minmax(0, 1fr) minmax(0, 42%); gap:0 10px; align-items:baseline;
   padding:7px 12px; border-top:1px solid var(--border); font-size:13px; }
 .lv-row:first-child { border-top:0; }
 .lv-row .t { color:var(--text3); font-family:var(--mono); font-size:12px; }
 .lv-row .m { overflow-wrap:anywhere; }
-.lv-row .r { font-family:var(--mono); font-size:12px; color:var(--text2); white-space:nowrap; }
+.lv-row .r { font-family:var(--mono); font-size:12px; color:var(--text2); text-align:right;
+  overflow-wrap:anywhere; }
 .lv-row.error { background:#ef444414; } .lv-row.error .m { color:#fca5a5; }
+/* An error's third column is only its source — short — so the message gets the width. */
+#errors .lv-row { grid-template-columns:48px minmax(0, 1fr) auto; }
 .lv-row.warn .m { color:#fbbf24; }
 .lv-row.now .r { color:var(--m-up); font-weight:700; }
 .lv-row.missed .r { color:#fbbf24; }
@@ -1097,22 +1134,25 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      THE ACCOUNT'S OWN NUMBERS, not the ledger's. The ledger knows what was
      sent; only the broker knows what is still held and what it is worth — a
      position closed by its own stop leaves no trace on this side. -->
-<div class="sec"><span>Open now</span><span class="note" id="pos-note"></span></div>
-<div id="positions"><div class="empty">Loading…</div></div>
+<!-- ── TRADES TODAY, BY ACCOUNT ──
+     Asked for 2026-09-24: "a summary of the open and closed positions today —
+     setup, account, side, symbol, shares, SL, TP, the last time it was
+     monitored — clear visually, organised but not confusing". One hierarchy:
+     ACCOUNT → TRADE. Setup, side and status are columns on the trade, not
+     more levels. Built by /api/live/board from the ledger (the plan), the
+     broker's fills (what happened), the positions (what is held) and the
+     manager (where the stop is now). -->
+<div class="sec"><span>Trades today</span><span class="note" id="brd-note"></span></div>
+<div id="board"><div class="lv-empty">Loading…</div></div>
 
-<!-- ── WHAT IS NEXT ──
-     Asked for: "Live should be a live monitor screen for me, the trader".
-     A monitor says what is about to happen as well as what is happening: each
-     setup's next decision with a countdown, or what it did today. -->
-<div class="sec"><span>Coming up</span><span class="note" id="next-note"></span></div>
-<div id="upnext" class="lv-list"></div>
+<!-- ── SETUPS: EVALUATED NOW, AND SINCE THE OPEN ── -->
+<div class="sec"><span>Setups</span><span class="note" id="next-note"></span></div>
+<div id="upnext"></div>
 
-<!-- ── TODAY, AS IT HAPPENED ──
-     The day's decisions, orders, fills and closes, newest first, one line
-     each — read from the same stream as the system log on Review, so the two
-     can never tell a different story. -->
-<div class="sec"><span>Today</span><span class="note" id="tl-note"></span></div>
-<div id="timeline" class="lv-list"></div>
+<!-- ── ERRORS TODAY ── every error line from the desk and its programs; the
+     full stream is on Review. -->
+<div class="sec"><span>Errors today</span><span class="note" id="err-note"></span></div>
+<div id="errors" class="lv-list"><div class="lv-empty">Loading…</div></div>
 
 <!-- The alert cards, whole: every plan, and the buttons that send an order by
      hand. Folded, because the lines above say the same thing shorter — and
@@ -3048,7 +3088,7 @@ function paintPositions() {
  * where the stop is NOW, whether the 2R half has banked and what the exit is
  * waiting for. From its latest pass (the session log), one line per position.
  */
-let MGR = null, LIVE_RUNS = [], LIVE_TL = null, LIVE_TL_AT = 0;
+let MGR = null, LIVE_RUNS = [];
 
 function posManagerLine(symbol) {
   const pass = MGR;
@@ -3066,7 +3106,105 @@ function posManagerLine(symbol) {
     + `${ago !== null ? ` · checked ${ago < 90 ? `${ago}s` : `${Math.round(ago / 60)}m`} ago` : ''}</div>`;
 }
 
-/* ── Live: coming up ── */
+/* ── Live: trades today, by account ── */
+let LIVE_BOARD_AT = 0, LIVE_ERR_AT = 0;
+const ST_WORD = { open: 'OPEN', closed: 'CLOSED', 'not sent': 'NOT SENT', 'no fill': 'NO FILL', unknown: '?' };
+
+function money(v) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  return `${n >= 0 ? '+' : '−'}$${Math.abs(n).toFixed(Math.abs(n) >= 100 ? 0 : 2)}`;
+}
+function px(v) {
+  return (v === null || v === undefined || Number.isNaN(Number(v))) ? '—' : Number(v).toFixed(2);
+}
+function agoShort(ms) {
+  if (!ms) return '';
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  return s < 90 ? `${s}s ago` : (s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`);
+}
+
+function tradeRow(t) {
+  const cls = String(t.status || 'unknown').replace(' ', '-');
+  const pnl = t.pnl == null ? '' : `<span class="pnl ${t.pnl >= 0 ? 'pos' : 'neg'}">${money(t.pnl)}${
+    t.pnlPct != null ? ` · ${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct.toFixed(2)}%` : ''}</span>`;
+  const sl = t.stopNow != null ? t.stopNow : t.sl;
+  let foot;
+  if (t.status === 'open') {
+    const exit = t.legsBanked ? `<span class="ok">✓ target half taken</span> — the rest leaves on the exit rule`
+      : (t.waitingFor ? `exit waits for ${esc(t.waitingFor)}` : 'held');
+    foot = `${exit} · ${t.checkedAt ? `monitored ${agoShort(t.checkedAt)}` : '<span class="bad">not monitored yet</span>'}`
+      + (t.managerError ? ` · <span class="bad">${esc(t.managerError)}</span>` : '');
+  } else if (t.status === 'closed') {
+    foot = `closed${t.exitTime ? ` ${esc(t.exitTime.slice(0, 5))}` : ''} — ${esc(t.closeReason || 'at the broker (stop or target)')}`;
+  } else if (t.status === 'not sent') {
+    foot = `<span class="${t.notSentLevel === 'error' ? 'bad' : ''}">not sent — ${esc(t.notSent || '')}</span>`;
+  } else if (t.status === 'no fill') {
+    foot = 'sent, but the broker shows no fill';
+  } else {
+    foot = 'the broker could not be asked';
+  }
+  if (t.closeProblem) foot += ` · <span class="bad">close: ${esc(t.closeProblem)}</span>`;
+  if (t.entryTime) foot = `in ${esc(t.entryTime.slice(0, 5))} · ${foot}`;
+  return `<div class="tr ${cls}">
+    <div class="tr-h"><span class="st ${cls}">${ST_WORD[t.status] || esc(t.status)}</span>
+      <b class="sym">${esc(t.symbol)}</b>
+      <span class="su-tag ${t.side === 'short' ? 'sell' : 'buy'}">${t.side === 'short' ? 'SHORT' : 'LONG'}</span>
+      <span class="setup">${esc(t.setup || '')}</span>${pnl}</div>
+    <div class="tr-g">
+      <div><span>shares</span><b>${t.shares ?? '—'}</b></div>
+      <div><span>entry</span><b>${px(t.entry ?? t.plannedEntry)}</b></div>
+      <div><span>SL</span><b>${px(sl)}${t.stopMoved ? ' <i class="mv">↑</i>' : ''}</b></div>
+      <div><span>TP</span><b>${px(t.tp)}${t.legsBanked ? ' <i class="mv">✓</i>' : ''}</b></div>
+      <div><span>${t.status === 'closed' ? 'exit' : 'now'}</span><b>${px(t.status === 'closed' ? t.exit : t.now)}</b></div>
+    </div>
+    <div class="tr-f">${foot}</div>
+  </div>`;
+}
+
+function paintBoard(d) {
+  const box = document.getElementById('board');
+  const note = document.getElementById('brd-note');
+  if (!box) return;
+  if (!d || d.ok === false) {
+    box.innerHTML = `<div class="lv-empty">Could not build the board: ${esc((d && d.error) || 'no answer')}</div>`;
+    return;
+  }
+  const accts = d.accounts || [];
+  const open = accts.reduce((n, a) => n + a.open, 0);
+  const closed = accts.reduce((n, a) => n + a.closed, 0);
+  const total = accts.reduce((n, a) => n + (a.openPnl || 0) + (a.closedPnl || 0), 0);
+  if (note) {
+    note.innerHTML = accts.length
+      ? `${open} open · ${closed} closed · <span class="${total >= 0 ? 'pos' : 'neg'}">${money(total)}</span>`
+        + ((d.notes || []).length ? ` · <span class="warn" title="${esc(d.notes.join(' · '))}">some data missing</span>` : '')
+      : '';
+  }
+  box.innerHTML = accts.length ? accts.map(a => `<div class="acct">
+      <div class="acct-h"><b>${esc(a.name)}</b>${a.mode ? `<span class="bchip${a.mode === 'auto' ? ' live' : ''}">${
+        esc(a.mode === 'auto' ? 'FULL AUTO' : (a.mode === 'manual' ? 'by hand' : a.mode))}</span>` : ''}
+        <span class="note">${a.open} open · ${a.closed} closed</span>
+        <span class="sum">closed <span class="${a.closedPnl >= 0 ? 'pos' : 'neg'}">${money(a.closedPnl)}</span>
+          · open <span class="${a.openPnl >= 0 ? 'pos' : 'neg'}">${money(a.openPnl)}</span></span></div>
+      ${a.trades.map(tradeRow).join('')}
+    </div>`).join('')
+    : '<div class="lv-empty">No trades today yet.'
+      + ((d.notes || []).length ? ` <span class="warn">${esc(d.notes.join(' · '))}</span>` : '') + '</div>';
+}
+
+/* ── Live: setups — evaluated now, and since the open ── */
+function runLine(r) {
+  const f = r.funnel || {};
+  const t = r.at ? new Date(r.at).toLocaleTimeString('en-GB', { timeZone: 'America/New_York', hour12: false }).slice(0, 5) : '';
+  if (!r.ok) {
+    return `<div class="su-run bad"><span>${esc(t)}</span><span>FAILED — ${esc(r.error || 'no reason')}</span><span></span></div>`;
+  }
+  const picks = (r.picks || []).map(p => p.ticker).filter(Boolean);
+  return `<div class="su-run"><span>${esc(t)}</span>
+    <span>${f.cards ?? '?'} cards → ${f.signalled ?? '?'} signals → <span class="p">${picks.length ? esc(picks.join(', ')) : 'none'}</span></span>
+    <span>${r.ms != null ? `${(r.ms / 1000).toFixed(1)}s` : ''}</span></div>`;
+}
+
 function paintUpNext() {
   const box = document.getElementById('upnext');
   if (!box) return;
@@ -3087,16 +3225,25 @@ function paintUpNext() {
       cls = 'now'; right = s.watch ? 'watching now' : 'deciding now';
     } else if (runs.length) {
       cls = failed ? 'missed' : '';
-      right = `${runs.length} run${runs.length > 1 ? 's' : ''} · ${picks} pick${picks === 1 ? '' : 's'}`
-        + (failed ? ` · ${failed} failed` : '');
+      right = 'done';
     } else {
       cls = 'missed'; right = 'no decision recorded';
     }
+    if (runs.length) {
+      right += ` · ${runs.length} run${runs.length > 1 ? 's' : ''} · ${picks} pick${picks === 1 ? '' : 's'}`
+        + (failed ? ` · ${failed} failed` : '');
+    }
     const when = s.watch ? `${s.decisionTime}–${s.windowEnd}` : s.decisionTime;
     const acc = (s.accounts || []).map(a => a.mode === 'auto' ? 'auto' : (a.mode === 'manual' ? 'by hand' : 'alert')).join(', ') || 'alert only';
-    return { from, html: `<div class="lv-row ${cls}"><span class="t">${esc(when)}</span>
-      <span class="m">${esc(s.name)} <span class="note">· ${esc((s.tools || []).join(', '))} · ${esc(acc)}</span></span>
-      <span class="r">${esc(right)}</span></div>` };
+    // Runs arrive newest first: the latest three show, the rest fold.
+    const head = runs.slice(0, 3).map(runLine).join('');
+    const rest = runs.slice(3);
+    return { from, html: `<div class="su-live">
+      <div class="lv-row ${cls}"><span class="t">${esc(when)}</span>
+        <span class="m">${esc(s.name)} <span class="note">· ${esc((s.tools || []).join(', '))} · ${esc(acc)}</span></span>
+        <span class="r">${esc(right)}</span></div>
+      ${runs.length ? `<div class="su-runs">${head}${rest.length ? `<details class="why"><summary>${rest.length} earlier</summary>${rest.map(runLine).join('')}</details>` : ''}</div>` : ''}
+    </div>` };
   }).sort((a, b) => a.from - b.from);
   box.innerHTML = rows.map(r => r.html).join('');
   const next = rows.find(r => r.from > now);
@@ -3104,42 +3251,41 @@ function paintUpNext() {
   if (nn) nn.textContent = next ? '' : 'nothing more to decide today';
 }
 
-/* ── Live: today's timeline ── */
-function paintTimeline(d) {
-  const box = document.getElementById('timeline');
-  const note = document.getElementById('tl-note');
+/* ── Live: errors today ── */
+function paintErrors(d) {
+  const box = document.getElementById('errors');
+  const note = document.getElementById('err-note');
   if (!box) return;
   if (!d || d.ok === false) {
-    box.innerHTML = `<div class="lv-empty">Could not read today: ${esc((d && d.error) || 'no answer')}</div>`;
+    box.innerHTML = `<div class="lv-empty">Could not read the log: ${esc((d && d.error) || 'no answer')}</div>`;
     return;
   }
-  const lines = (d.lines || []).filter(l => l.level !== 'debug').slice(-40).reverse();
-  if (note) {
-    const c = d.counts || {};
-    note.textContent = (c.error ? `${c.error} error${c.error > 1 ? 's' : ''} · ` : '')
-      + 'full detail on Review';
-  }
+  const lines = (d.lines || []).filter(l => l.level === 'error').slice(-30).reverse();
+  if (note) note.textContent = lines.length ? `${lines.length} · full log on Review` : '';
   box.innerHTML = lines.length
-    ? lines.map(l => `<div class="lv-row ${esc(l.level)}"><span class="t">${esc(slTime(l.t).slice(0, 5))}</span>
-        <span class="m">${esc(l.msg)}</span><span class="r"></span></div>`).join('')
-    : '<div class="lv-empty">Nothing yet today.</div>';
+    ? lines.map(l => `<div class="lv-row error"><span class="t">${esc(slTime(l.t).slice(0, 5))}</span>
+        <span class="m">${esc(l.msg)}</span><span class="r">${esc(l.src)}</span></div>`).join('')
+    : '<div class="lv-empty">No errors today.</div>';
 }
 
 async function loadLive() {
-  // The manager's latest pass and today's decisions: cheap, every call.
   try {
-    const d = await (await fetch('/api/session-log?limit=60')).json();
+    const d = await (await fetch('/api/session-log?limit=400')).json();
     MGR = (d.passes || [])[0] || null;
     LIVE_RUNS = d.runs || [];
-  } catch { /* the lines below say what could not be read */ }
-  paintPositions();
+  } catch { /* each section says what it could not read */ }
   paintUpNext();
-  // The timeline at most every 15 s — the poll runs every 3 s near a decision.
-  if (Date.now() - LIVE_TL_AT > 15000) {
-    LIVE_TL_AT = Date.now();
-    try { LIVE_TL = await (await fetch('/api/logs?desk=1&level=info&limit=200')).json(); }
-    catch (e) { LIVE_TL = { ok: false, error: e.message }; }
-    paintTimeline(LIVE_TL);
+  // The board asks the broker (cached server-side); every 10 s is plenty.
+  if (Date.now() - LIVE_BOARD_AT > 10000) {
+    LIVE_BOARD_AT = Date.now();
+    try { paintBoard(await (await fetch('/api/live/board')).json()); }
+    catch (e) { paintBoard({ ok: false, error: e.message }); }
+  }
+  // Errors read every process's log file — once a minute.
+  if (Date.now() - LIVE_ERR_AT > 60000) {
+    LIVE_ERR_AT = Date.now();
+    try { paintErrors(await (await fetch('/api/logs?level=error&limit=100')).json()); }
+    catch (e) { paintErrors({ ok: false, error: e.message }); }
   }
   // The cards carry the by-hand order buttons: open them when that is how a
   // trade gets placed.

@@ -893,6 +893,19 @@ app.get('/api/logs', (req, res) => {
   }
 });
 
+/*
+ * GET /api/live/board — today's trades by account: the plan the desk sent,
+ * what filled, what is held now, how the manager last saw it. See
+ * src/alerts/liveBoard.js. Never 500s.
+ */
+app.get('/api/live/board', async (req, res) => {
+  try {
+    res.json(await require('./liveBoard').board({ date: String(req.query.date || '') }));
+  } catch (err) {
+    res.json({ ok: false, error: err.message, accounts: [] });
+  }
+});
+
 app.get('/api/preflight', async (req, res) => {
   try {
     const { toETDate } = require('../utils/time');
