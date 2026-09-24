@@ -39,7 +39,7 @@ def _load_dotenv(path: Path = _ROOT / '.env') -> int:
     same statement.
 
     Existing environment wins — a value the launcher set on purpose is not
-    overwritten by the file. Nothing is printed: the values are secrets and
+    overwritten by the file — except for the desk-owned Alpaca pair (below). Nothing is printed: the values are secrets and
     the count is all a log needs.
     """
     import os
@@ -61,10 +61,21 @@ def _load_dotenv(path: Path = _ROOT / '.env') -> int:
         val = val.strip()
         if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
             val = val[1:-1]
-        if key and key not in os.environ:
+        # The desk's Alpaca pair is the exception: .env WINS. The deploy copies
+        # it there from the desk on every run (scripts/sync-qp-env.js), so the
+        # file is the current pair and anything inherited is older. 2026-09-24:
+        # the deploy replaced a refused pair, qp was restarted, and its feed
+        # was still refused — the old pair sat in the environment pm2 handed
+        # it ("loaded 1 value(s)" from a file holding 3), and won.
+        if key and (key not in os.environ
+                    or (key in _DESK_OWNED and os.environ[key] != val)):
             os.environ[key] = val
             n += 1
     return n
+
+
+# Written by the deploy from the desk's own pair; never set by hand.
+_DESK_OWNED = frozenset({'APCA_API_KEY_ID', 'APCA_API_SECRET_KEY'})
 
 
 _ENV_LOADED = _load_dotenv()

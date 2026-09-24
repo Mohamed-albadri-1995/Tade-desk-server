@@ -308,8 +308,11 @@ describe('it is wired in where the feed is read', () => {
     const s = src('quant-platform', 'chart', 'server.py');
     expect(s).toContain('def _load_dotenv(');
     expect(s).toContain('_ENV_LOADED = _load_dotenv()');
-    // existing environment wins — a launcher's deliberate value is not overwritten
-    expect(s).toContain('if key and key not in os.environ:');
+    // existing environment wins — except the desk-owned Alpaca pair, which the
+    // deploy writes and a stale inherited copy must not shadow. Run, not read:
+    // quant-platform/chart/tests/logic_audit87.py.
+    expect(s).toContain('if key and (key not in os.environ');
+    expect(s).toContain("_DESK_OWNED = frozenset({'APCA_API_KEY_ID', 'APCA_API_SECRET_KEY'})");
   });
 
   test('the page says which feed is chosen and which is used', () => {
