@@ -102,6 +102,16 @@ function credsFor(account) {
 }
 
 async function get(path, { timeoutMs = 10000, account = null } = {}) {
+  return request('GET', path, { timeoutMs, account });
+}
+
+/**
+ * One request to the trading API. GET for everything that reads; PATCH for
+ * the one thing this box changes at Alpaca directly — a bracket's stop leg,
+ * moved as the strategy's stop moves (src/broker/stopSync.js). Orders are
+ * still placed and closed through SignalStack.
+ */
+async function request(method, path, { timeoutMs = 10000, account = null, body = null } = {}) {
   let headers;
   let baseUrl;
   const own = credsFor(account);
@@ -124,8 +134,12 @@ async function get(path, { timeoutMs = 10000, account = null } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${baseUrl}${path}`,
-      { headers, signal: ctrl.signal });
+    const init = { method, headers, signal: ctrl.signal };
+    if (body != null) {
+      init.headers = { ...headers, 'Content-Type': 'application/json' };
+      init.body = JSON.stringify(body);
+    }
+    const res = await fetch(`${baseUrl}${path}`, init);
     const text = await res.text();
     if (!res.ok) return { ok: false, error: `Alpaca ${path} ${res.status}: ${text.slice(0, 200)}` };
     try {
@@ -363,4 +377,4 @@ function credsOf(dest) {
   };
 }
 
-module.exports = { positions, orders, fills, account, get, credsOf, baseUrlFor };
+module.exports = { positions, orders, fills, account, get, request, credsOf, baseUrlFor };

@@ -152,6 +152,8 @@ async function board({ date } = {}, deps = {}) {
       r.legsBanked = x.legsBanked || 0;
       r.waitingFor = x.waitingFor || null;
       r.managerError = x.error || null;
+      // The stop resting at Alpaca, when this pass moved it or could not.
+      r.brokerStop = x.brokerStop || null;
       r.checkedAt = pass.at || null;
     }
   }

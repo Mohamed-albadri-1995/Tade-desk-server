@@ -148,6 +148,9 @@ function passOf({ at, date, positions = [], held = null, acted = [] }) {
       // "first target leg" before 09:35's 2R half). Shown on Live.
       legsBanked: (p.legs_banked || []).length || undefined,
       waitingFor: p.waiting_for || undefined,
+      // The stop resting AT ALPACA, when this pass moved it (or could not):
+      // "broker stop moved 56.85 → 56.89". See src/broker/stopSync.js.
+      brokerStop: p.brokerStop || undefined,
       // Only when there is one — an error every minute for a symbol qp cannot
       // price is the thing a review most needs to find, and it is invisible in
       // the alert feed because it never produced an order.

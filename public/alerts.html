@@ -3149,7 +3149,9 @@ function tradeRow(t) {
     const exit = t.legsBanked ? `<span class="ok">✓ target half taken</span> — the rest leaves on the exit rule`
       : (t.waitingFor ? `exit waits for ${esc(t.waitingFor)}` : 'held');
     foot = `${exit} · ${t.checkedAt ? `monitored ${agoShort(t.checkedAt)}` : '<span class="bad">not monitored yet</span>'}`
-      + (t.managerError ? ` · <span class="bad">${esc(t.managerError)}</span>` : '');
+      + (t.managerError ? ` · <span class="bad">${esc(t.managerError)}</span>` : '')
+      // The stop AT ALPACA follows the strategy's stop (src/broker/stopSync.js).
+      + (t.brokerStop ? ` · <span class="${/could not/.test(t.brokerStop) ? 'bad' : ''}">${esc(t.brokerStop)}</span>` : '');
   } else if (t.status === 'closed') {
     foot = `closed${t.exitTime ? ` ${esc(t.exitTime.slice(0, 5))}` : ''} — ${esc(t.closeReason || 'at the broker (stop or target)')}`;
   } else if (t.status === 'not sent') {

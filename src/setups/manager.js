@@ -42,6 +42,7 @@ const catalog = require('./catalog');
 const qp = require('./qpClient');
 const store = require('../alerts/store');
 const sessionLog = require('./sessionLog');
+const stopSync = require('../broker/stopSync');
 const { toETDate } = require('../utils/time');
 
 /*
@@ -438,6 +439,31 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
       if (!answer.managed) continue;
 
       const { why, reason } = closeVerdict(answer);
+
+      /*
+       * STILL HELD: THE STOP AT ALPACA FOLLOWS THE STRATEGY'S STOP.
+       *
+       * The backtest books a stop the moment a bar touches it; this loop can
+       * only see it a bar later, and on Yahoo sometimes several (EXEL,
+       * 2026-09-24: hit 11:36, seen 11:40). An order resting at the broker is
+       * the only live equivalent, so the bracket's stop leg is moved — tighten
+       * only — every pass the strategy's stop has moved. This loop still
+       * closes on its own verdict as before; this is the faster path, not a
+       * replacement for it. See src/broker/stopSync.js.
+       */
+      if (!why && !dryRun && answer.stop_now != null && !answer.stop_wrong_side) {
+        try {
+          const rows = await stopSync.syncStop(pos, answer.stop_now);
+          const line = stopSync.summary(rows);
+          if (line) {
+            looked[looked.length - 1].brokerStop = line;
+            (rows.some(r => r.error) ? console.warn : console.log)(`[Manager] ${pos.symbol}: ${line}`);
+          }
+        } catch (err) {
+          looked[looked.length - 1].brokerStop = `could not move the broker stop — ${err.message}`;
+          console.warn(`[Manager] ${pos.symbol}: could not move the broker stop — ${err.message}`);
+        }
+      }
 
       if (!why) continue;
 
