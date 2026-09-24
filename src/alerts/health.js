@@ -65,14 +65,27 @@ function processes(pm2, now) {
     // 492 over three months is history, one in the last five minutes is a
     // process that may be crash-looping.
     const fresh = uptime !== null && uptime < 5 * 60 * 1000;
-    const status = !up ? 'bad' : (fresh ? 'warn' : 'ok');
+    /*
+     * MEMORY AGAINST ITS CEILING. The deploy starts every tool with
+     * --max-memory-restart, and pm2 kills a process that crosses it — which
+     * looks exactly like a crash loop and leaves nothing in the tool's own
+     * error log. tool-T1 on 2026-09-24: 31 restarts in 16 minutes under a
+     * 140 MB cap it was already at 101 MB of. Showing the two numbers side by
+     * side is what tells a memory kill from a real crash.
+     */
+    const memMB = p.monit && p.monit.memory ? Math.round(p.monit.memory / 1048576) : null;
+    const capMB = env.max_memory_restart ? Math.round(env.max_memory_restart / 1048576) : null;
+    const nearCap = memMB !== null && capMB && memMB >= 0.85 * capMB;
+    const status = !up ? 'bad' : ((fresh || nearCap) ? 'warn' : 'ok');
+    const mem = memMB === null ? '' : ` · ${memMB}${capMB ? ` of ${capMB}` : ''} MB`;
     const detail = !up
       ? `${env.status || 'unknown'} — not running`
-      : `up ${ago(uptime).replace(' ago', '')} · ${restarts} restart(s) in total`
-        + (fresh ? ' · restarted in the last 5 min — crash-looping if this keeps showing' : '');
+      : `up ${ago(uptime).replace(' ago', '')} · ${restarts} restart(s) in total${mem}`
+        + (fresh ? ' · restarted in the last 5 min — crash-looping if this keeps showing' : '')
+        + (nearCap ? ' · NEAR ITS MEMORY CEILING — pm2 restarts it when it crosses; '
+          + 'raise TOOL_MAX_MEM_<ID> in the deploy' : '');
     return item(`pm2:${p.name}`, p.name, status, detail, {
-      restarts, uptimeMs: uptime,
-      memMB: p.monit && p.monit.memory ? Math.round(p.monit.memory / 1048576) : null,
+      restarts, uptimeMs: uptime, memMB, capMB,
       cpu: p.monit ? p.monit.cpu : null,
     });
   });

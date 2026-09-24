@@ -27,6 +27,20 @@ describe('processes', () => {
   test('restarts long ago are history, not a fault', () => {
     expect(H.processes({ list: [p('tool-T1', 'online', 600, 492)] }, NOW)[0].status).toBe('ok');
   });
+  test('memory is shown against its ceiling, and near it is a warning', () => {
+    const near = { ...p('tool-T1', 'online', 600, 31),
+                   monit: { memory: 130 * 1048576 } };
+    near.pm2_env.max_memory_restart = 140 * 1048576;
+    const [r] = H.processes({ list: [near] }, NOW);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/130 of 140 MB/);
+    expect(r.detail).toMatch(/NEAR ITS MEMORY CEILING/);
+    const calm = { ...p('tool-T2', 'online', 600, 0), monit: { memory: 60 * 1048576 } };
+    calm.pm2_env.max_memory_restart = 240 * 1048576;
+    expect(H.processes({ list: [calm] }, NOW)[0]).toMatchObject({ status: 'ok' });
+    expect(H.processes({ list: [calm] }, NOW)[0].detail).toMatch(/60 of 240 MB/);
+  });
+
   test('pm2 unreadable is unknown with the reason, never ok', () => {
     const [r] = H.processes({ error: 'pm2 is not on this PATH' }, NOW);
     expect(r.status).toBeNull();
