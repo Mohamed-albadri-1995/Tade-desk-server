@@ -19,6 +19,7 @@
 const catalog = require('./catalog');
 const qp = require('./qpClient');
 const parity = require('./parity');
+const prefs = require('./prefs');
 
 /** '09:35' → 935, the integer qp stores a window in. */
 const toHHMM = (t) => {
@@ -32,7 +33,8 @@ async function check(setupId) {
 
   let report;
   try {
-    report = await qp.parity(setup.strategyIds || []);
+    report = await qp.parity(setup.strategyIds || [],
+      (prefs.settingsFor(setup.id) || {}).parityBacktest || null);
   } catch (err) {
     return { ok: false, setup: setup.id, verdict: 'unknown',
              error: `qp did not answer the check: ${err.message}` };
@@ -52,7 +54,7 @@ async function check(setupId) {
   const edited = rules.filter(r => r.frozen && r.changed.length);
   const unfrozen = rules.filter(r => !r.frozen);
 
-  const lines = [];
+  const lines = report.note ? [report.note] : [];
   for (const r of edited) {
     lines.push(`${r.name}: ${r.changed.length}${r.truncated ? '+' : ''} rule(s) changed `
       + `since backtest #${bt.id} — ${r.changed.slice(0, 3).map(c => c.path).join(', ')}`);
@@ -66,8 +68,12 @@ async function check(setupId) {
   const s = bt.summary || {};
   return {
     ok: true, setup: setup.id, verdict, lines,
+    pickedBy: report.picked_by || null,
+    note: report.note || null,
+    runs: (report.runs || []).map(r => ({ id: r.id, start: r.start, end: r.end,
+                                          fill: r.fill, trades: r.trades })),
     backtest: { id: bt.id, name: bt.name, created_at: bt.created_at,
-                trades: s.trades ?? null, win_rate: s.win_rate ?? null,
+                trades: s.trades ?? bt.trades ?? null, win_rate: s.win_rate ?? null,
                 avg_return_pct: s.avg_return_pct ?? null,
                 max_drawdown_pct: s.max_drawdown_pct ?? null,
                 start: bt.spec.start || null, end: bt.spec.end || null },

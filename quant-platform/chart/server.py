@@ -811,11 +811,13 @@ def backtests_list():
 
 
 @app.get('/api/parity')
-def parity_report(ids: str = ''):
+def parity_report(ids: str = '', bt: str = ''):
     """The newest backtest of these strategies, and every rule changed since.
 
     `ids` is a comma list — a setup's long and short books are separate
-    strategies. Read by the desk's live-vs-backtest check; see chart/parity.py.
+    strategies. `bt` pins the run to compare with; without it, the run with
+    the most trades. Read by the desk's live-vs-backtest check; see
+    chart/parity.py.
     """
     from chart import parity
     try:
@@ -825,7 +827,7 @@ def parity_report(ids: str = ''):
     if not want:
         return {'ok': False, 'error': 'no strategy ids given'}
     try:
-        return parity.report(want)
+        return parity.report(want, pin=(bt or None))
     except Exception as e:  # noqa: BLE001 — a check that fails says so
         return {'ok': False, 'error': str(e)}
 

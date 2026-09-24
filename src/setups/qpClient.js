@@ -253,9 +253,10 @@ async function setTools(id, tools, timeoutMs = 10000) {
  * The newest finished backtest of these strategies, and every rule that has
  * changed in them since it ran. See quant-platform/chart/parity.py.
  */
-async function parity(ids, timeoutMs = 10000) {
-  const res = await axios.get(`${baseUrl()}/api/parity`,
-    { params: { ids: (ids || []).join(',') }, timeout: timeoutMs });
+async function parity(ids, bt = null, timeoutMs = 10000) {
+  const params = { ids: (ids || []).join(',') };
+  if (bt) params.bt = bt;
+  const res = await axios.get(`${baseUrl()}/api/parity`, { params, timeout: timeoutMs });
   const d = res.data || {};
   if (!d.ok) throw new Error(d.error || 'qp could not answer the parity check');
   return d;

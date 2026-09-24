@@ -53,10 +53,68 @@ beforeEach(() => {
   write('risk.json', { accountSize: 50000, riskPerTrade: 500, maxPositionPct: 16.66 });
   write('setup-prefs.json', { setups: { [SETUP.id]: {
     rankMetric: 'vwap_extension', topN: 3, tf: '1m', feed: 'polygon',
-    // qp's cap is per strategy per symbol and the desk's is the whole day's
-    // budget, so this row is a prompt to look rather than a verdict — see the
-    // note it carries. Set here so the "matched" case has nothing outstanding.
-    maxTradesPerDay: 1 } } });
+    // The desk's whole-day budget. At or above top N it never binds, so live
+    // and the backtest take the same number of trades a day. (It was 1 here,
+    // under a top 3 — which really IS a difference: live takes one a day and
+    // the backtest took three. Pinned below.)
+    maxTradesPerDay: 3 } } });
+});
+
+describe('how many trades a day can actually happen', () => {
+  const day = (prefs, spec = SPEC_349) => {
+    write('setup-prefs.json', { setups: { [SETUP.id]: prefs } });
+    return find(parity.compare({ setup: SETUP, spec, strategy: STRATEGY }),
+                'trades per day (most)');
+  };
+  test('a desk budget BELOW top N is a live-only limit — a difference', () => {
+    const r = day({ rankMetric: 'vwap_extension', topN: 3, maxTradesPerDay: 1 });
+    expect([r.live, r.backtest, r.status]).toEqual([1, 3, 'differ']);
+  });
+  test('a budget at or above top N never binds — a match', () => {
+    expect(day({ rankMetric: 'vwap_extension', topN: 3, maxTradesPerDay: 5 }).status)
+      .toBe('match');
+  });
+  test('Test\'s case: a 3-a-day budget, no ranking, a run that took all', () => {
+    const r = day({ rankMetric: 'vwap_extension', maxTradesPerDay: 3 },
+                  { ...SPEC_349, rank_per_day: null });
+    expect([r.live, r.backtest, r.status]).toEqual([3, 'all', 'differ']);
+  });
+});
+
+describe('the false alarms of 2026-09-24, each run', () => {
+  test('0.5% of the set $100,000 IS a flat $500 — a match against a $500 run', () => {
+    write('risk.json', { accountSize: 100000, riskPct: 0.5 });
+    const res = parity.compare({ setup: SETUP, strategy: STRATEGY,
+      spec: { ...SPEC_349, account_equity: 100000, risk_pct: 0, risk_usd: 500 } });
+    expect(find(res, 'risk model').status).toBe('match');
+    const r = find(res, 'risk per trade');
+    expect([r.live, r.backtest, r.status]).toEqual(['$500', '$500', 'match']);
+    expect(r.note).toMatch(/0\.5% of the set account size 100000/);
+  });
+  test("'T2:R1' is the T2 card list", () => {
+    const r = find(parity.compare({ setup: { ...SETUP, tools: ['T2'] }, strategy: STRATEGY,
+      spec: { ...SPEC_349, universe: { kind: 'tools', tools: ['T2:R1'] } } }), 'universe');
+    expect(r.status).toBe('match');
+  });
+  test('...but another tool\'s cards are a different list', () => {
+    const r = find(parity.compare({ setup: { ...SETUP, tools: ['T11'] }, strategy: STRATEGY,
+      spec: { ...SPEC_349, universe: { kind: 'tools', tools: ['T8:R1'] } } }), 'universe');
+    expect([r.live, r.backtest, r.status]).toEqual(['T11', 'T8', 'differ']);
+  });
+  test('a range window compares its bars instead of printing "?"', () => {
+    const res = parity.compare({ setup: SETUP, spec: SPEC_349,
+      strategy: { risk: { window_start: 930, window_end: 1130 } } });
+    const r = find(res, 'decision bar');
+    expect(r.status).toBe('match');
+    expect(r.live).toMatch(/any bar 09:30–11:30, decides on the bar before/);
+  });
+  test('no ranking on either side is a match, not "?"', () => {
+    write('setup-prefs.json', { setups: { [SETUP.id]: {} } });
+    const res = parity.compare({ setup: SETUP, strategy: STRATEGY,
+      spec: { ...SPEC_349, rank_per_day: null } });
+    expect(find(res, 'rank metric').status).toBe('match');
+    expect(find(res, 'rank top N').status).toBe('match');
+  });
 });
 
 describe('which bar the decision is taken on', () => {
@@ -686,7 +744,7 @@ describe('only real ambiguity is surfaced by the comparison', () => {
     write('risk.json', { accountSize: 50000, riskPerTrade: 500, maxPositionPct: 16.66 });
     write('setup-prefs.json', { setups: { [SETUP.id]: {
       rankMetric: 'vwap_extension', topN: 3, tf: '1m', feed: 'polygon',
-      maxTradesPerDay: 1, riskPct: 0.5, maxPositionPct: 100 } } });
+      maxTradesPerDay: 3, riskPct: 0.5, maxPositionPct: 100 } } });
     const res = parity.compare({ setup: SETUP, spec: SPEC_349, strategy: STRATEGY });
     expect(res.rows.find(r => r.what === 'setting conflict')).toBeUndefined();
     // ...and the comparison passes, because the setup IS the backtest now.

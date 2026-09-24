@@ -57,7 +57,20 @@ test('toHHMM reads the catalogue\'s clock into qp\'s integer', () => {
 test('asks qp about BOTH books of the pair', async () => {
   qp.parity.mockResolvedValue(run());
   await check(ID);
-  expect(qp.parity).toHaveBeenLastCalledWith([1, 2]);
+  expect(qp.parity).toHaveBeenLastCalledWith([1, 2], null);
+});
+
+test('a pinned run is asked for by id, and the runs come back to choose from', async () => {
+  const cur = JSON.parse(fs.readFileSync(PREFS, 'utf8'));
+  cur.setups[ID].parityBacktest = 332;
+  fs.writeFileSync(PREFS, JSON.stringify(cur));
+  qp.parity.mockResolvedValue({ ...run(), picked_by: 'pinned',
+    runs: [{ id: 363, start: '2026-09-15', end: '2026-09-15', fill: 'desk', trades: 3 },
+           { id: 332, start: '2026-07-30', end: '2026-08-20', fill: 'next_open', trades: 171 }] });
+  const r = await check(ID);
+  expect(qp.parity).toHaveBeenLastCalledWith([1, 2], 332);
+  expect(r.pickedBy).toBe('pinned');
+  expect(r.runs.map(x => x.id)).toEqual([363, 332]);
 });
 
 test('an aligned setup reads match, with the run\'s numbers', async () => {

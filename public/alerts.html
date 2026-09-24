@@ -543,6 +543,8 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .su-par.differ { color:#fbbf24; border-color:#fbbf2466; background:#fbbf2414; }
 .su-par.unknown { color:var(--text3); }
 .par-bt { font-size:var(--f-xs); color:var(--text2); margin-bottom:6px; }
+.par-pick { display:block; margin-bottom:6px; }
+.par-pick select { max-width:100%; }
 .par-tbl { width:100%; border-collapse:collapse; font-size:var(--f-xs); font-family:var(--mono); }
 .par-tbl td { padding:3px 6px; border-top:1px solid var(--border); vertical-align:top;
   overflow-wrap:anywhere; }
@@ -2140,7 +2142,20 @@ function paintParity(i, d) {
   const rows = (d.settings || []).map(r => `<tr class="${esc(r.status)}"${r.note ? ` title="${esc(r.note)}"` : ''}>
       <td>${esc(r.what)}</td><td>${esc(r.live ?? '—')}</td><td>${esc(r.backtest ?? '—')}</td>
       <td>${r.status === 'match' ? '✓' : (r.status === 'differ' ? '⚠' : '?')}</td></tr>`).join('');
-  body.innerHTML = `<div class="par-bt">Backtest #${esc(b.id)} ${esc(b.name || '')}${when ? ` · run ${when}` : ''}${stats ? `<br>${stats}` : ''}</div>
+  /*
+   * WHICH RUN, CHOSEN HERE. The newest run was compared at first, and on
+   * 09-24 that was a one-day rerun with three trades. Now the default is the
+   * run with the most trades, and any other run of this strategy can be
+   * picked — only you know which run the setup was adopted on.
+   */
+  const runs = d.runs || [];
+  const pick = runs.length > 1 ? `<label class="note par-pick">compare with
+      <select id="par-run-${i}" onchange="setParityRun(${i}, '${esc(d.setup)}', this.value)">
+        <option value=""${d.pickedBy === 'pinned' ? '' : ' selected'}>the run with the most trades</option>
+        ${runs.map(r => `<option value="${esc(r.id)}"${d.pickedBy === 'pinned' && r.id === b.id ? ' selected' : ''}>#${esc(r.id)} · ${esc(r.start || '?')} → ${esc(r.end || '?')} · ${esc(r.trades)} trades</option>`).join('')}
+      </select></label>` : '';
+  body.innerHTML = `${pick}${d.note ? `<div class="warn">${esc(d.note)}</div>` : ''}
+    <div class="par-bt">Backtest #${esc(b.id)} ${esc(b.name || '')}${when ? ` · run ${when}` : ''}${stats ? `<br>${stats}` : ''}</div>
     ${rules}
     <table class="par-tbl"><tr><td></td><td><b>live</b></td><td><b>backtest</b></td><td></td></tr>${rows}</table>`;
 }
@@ -2151,6 +2166,16 @@ async function loadParity(id, i) {
   } catch (e) {
     paintParity(i, { ok: false, verdict: 'unknown', error: `The check did not answer: ${e.message}` });
   }
+}
+
+async function setParityRun(i, id, bt) {
+  try {
+    await fetch(`/api/setups/${encodeURIComponent(id)}/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parityBacktest: bt ? Number(bt) : null }),
+    });
+  } catch { /* the reload below shows what is in force */ }
+  loadParity(id, i);
 }
 
 function openParity(i) {

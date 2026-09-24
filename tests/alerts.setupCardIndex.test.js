@@ -86,6 +86,20 @@ describe('paintParity', () => {
     expect(r.body).toMatch(/qp did not answer/);
   });
 
+  test('the run can be chosen: most trades by default, a pinned one selected', () => {
+    const base = { ok: true, verdict: 'match', setup: 'OR@09:35', rules: [], settings: [],
+      backtest: { id: 332, name: 'bt', trades: 171, created_at: 1 },
+      runs: [{ id: 363, start: '2026-09-15', end: '2026-09-15', trades: 3 },
+             { id: 332, start: '2026-07-30', end: '2026-08-20', trades: 171 }] };
+    let r = paint({ ...base, pickedBy: 'most trades' });
+    expect(r.body).toMatch(/<option value="" selected>the run with the most trades/);
+    expect(r.body).toMatch(/#332 · 2026-07-30 → 2026-08-20 · 171 trades/);
+    expect(r.body).toMatch(/setParityRun\(0, 'OR@09:35', this.value\)/);
+    r = paint({ ...base, pickedBy: 'pinned' });
+    expect(r.body).toMatch(/<option value="332" selected>/);
+    expect(r.body).not.toMatch(/<option value="" selected>/);
+  });
+
   test('a changed rule is listed with both values', () => {
     const r = paint({ ok: true, verdict: 'differ',
       backtest: { id: 7, name: 'bt', trades: 80, win_rate: 51, avg_return_pct: 0.2,

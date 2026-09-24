@@ -134,6 +134,22 @@ function compare({ setup, spec, strategy } = {}) {
   const btBar = btFill ? decisionBar(wStart, wEnd, btFill) : { bar: null, why: 'the backtest spec names no fill model' };
 
   const rows = [];
+  const NEXT_OPEN = new Set(['next_open', 'desk', 'live']);
+  /*
+   * A RANGE WINDOW (Test: 09:30–11:30) has no single decision bar, so both
+   * sides used to print "—" and the row read NOT COMPARED forever. What CAN be
+   * compared is which bars the window decides on: the fill models that enter
+   * at the next open decide one bar earlier than 'close', across the whole
+   * window. Same family, same bars.
+   */
+  const family = f => (f === 'close' ? 'decides on the entry bar'
+    : (NEXT_OPEN.has(f) ? 'decides on the bar before' : null));
+  const at0 = hhmm(wStart);
+  const until0 = hhmm(wEnd);
+  if (at0 && until0 && at0 !== until0) {
+    liveBar.bar = family(liveFill) ? `any bar ${at0}–${until0}, ${family(liveFill)}` : null;
+    btBar.bar = btFill && family(btFill) ? `any bar ${at0}–${until0}, ${family(btFill)}` : null;
+  }
 
   /*
    * FIRST, because it is the one that changes which SIGNALS EXIST. Everything
@@ -149,10 +165,7 @@ function compare({ setup, spec, strategy } = {}) {
    * difference would leave a correctly aligned desk permanently red, which is
    * how a checker gets ignored.
    */
-  const sameDecision = (a, b) => {
-    const nextOpen = new Set(['next_open', 'desk', 'live']);
-    return a === b || (nextOpen.has(a) && nextOpen.has(b));
-  };
+  const sameDecision = (a, b) => a === b || (NEXT_OPEN.has(a) && NEXT_OPEN.has(b));
   const fillRow = row('fill model', liveFill, btFill,
     "'live' and 'desk'/'next_open' take the same decision from the same bar — "
     + "'close' books the signal bar's own close, a price no order can reach");
@@ -163,8 +176,10 @@ function compare({ setup, spec, strategy } = {}) {
 
   // RANKING — which of the day's signals are taken at all.
   const btRank = bt.rank_per_day || null;
-  rows.push(row('rank metric', p.rankMetric || null, (btRank && btRank.metric) || null));
-  rows.push(row('rank top N', p.topN || null, (btRank && btRank.top_n) || null));
+  // Absent on BOTH sides is a known setting — no ranking, take all — and it
+  // must read as a match rather than as "?" on every setup that does not rank.
+  rows.push(row('rank metric', p.rankMetric || 'none', (btRank && btRank.metric) || 'none'));
+  rows.push(row('rank top N', p.topN || 'all', (btRank && btRank.top_n) || 'all'));
 
   // SIZING — how big each one is, and how many the balance can carry.
   const btRiskUsd = bt.risk_usd || null;
@@ -180,18 +195,47 @@ function compare({ setup, spec, strategy } = {}) {
   const eff = risk.resolve(live, p);
   const liveRiskUsd = eff.riskPerTrade;
   const liveRiskPct = eff.riskPct;
-  rows.push(row('risk model',
+  /*
+   * THE DESK NEVER COMPOUNDS. A percentage live is taken of the account size
+   * SET on the desk (risk.js: accountSize × riskPct), not of the broker's
+   * balance — so 0.5% of 100,000 is $500 on every trade, exactly like a flat
+   * $500. It was reported as "% of equity vs fixed $ — DIFFERS" on 09:35,
+   * which was a naming difference, not a sizing one.
+   *
+   * What CAN differ is the BACKTEST compounding: run at a percentage it sizes
+   * each trade on the equity it has banked by then. So the model row asks
+   * one question — does the backtest compound — and the dollars are compared
+   * as dollars whenever the backtest was flat too.
+   */
+  const liveUsd = liveRiskUsd
+    || (liveRiskPct && eff.accountSize ? Math.round(eff.accountSize * liveRiskPct) / 100 : null);
+  const modelRow = row('risk model',
     eff.riskRule === 'fixed_usd' ? 'fixed $'
-      : (eff.riskRule === 'pct_of_equity' ? '% of equity' : null),
+      : (eff.riskRule === 'pct_of_equity' ? '% of the set account size — flat' : null),
     btRiskUsd ? 'fixed $' : (btRiskPct ? '% of equity' : null),
     'a percentage COMPOUNDS in the backtest and does not on the desk — they '
-    + 'agree on trade one and drift as the run banks P&L'));
+    + 'agree on trade one and drift as the run banks P&L');
+  // Flat backtest: the same sizing, whichever way the desk's figure was typed.
+  // Both percentages: the known, accepted drift adopt() sets up — kept as a
+  // match with the note, or every adopted setup would be red forever. A flat
+  // desk against a compounding backtest is a real difference.
+  if (modelRow.live && modelRow.backtest) {
+    modelRow.status = (btRiskUsd || (liveRiskPct && btRiskPct)) ? 'match' : 'differ';
+  }
+  rows.push(modelRow);
   // Compared in the unit the run was configured in, so a percentage is not
-  // silently turned into a dollar figure that then reads as a mismatch.
-  rows.push(row('risk per trade',
-    liveRiskUsd ? `$${liveRiskUsd}` : (liveRiskPct ? `${liveRiskPct}%` : null),
-    btRiskUsd ? `$${btRiskUsd}` : (btRiskPct ? `${btRiskPct}%` : null),
-    `set at ${eff.sources.risk} level`));
+  // silently turned into a dollar figure that then reads as a mismatch —
+  // EXCEPT that a flat backtest is compared in dollars, because the desk is
+  // flat whichever way its figure was typed.
+  const pctNote = liveRiskPct && eff.accountSize
+    ? ` · ${liveRiskPct}% of the set account size ${eff.accountSize}` : '';
+  rows.push(btRiskUsd
+    ? row('risk per trade', liveUsd ? `$${liveUsd}` : null, `$${btRiskUsd}`,
+      `set at ${eff.sources.risk} level${pctNote}`)
+    : row('risk per trade',
+      liveRiskUsd ? `$${liveRiskUsd}` : (liveRiskPct ? `${liveRiskPct}%` : null),
+      btRiskPct ? `${btRiskPct}%` : null,
+      `set at ${eff.sources.risk} level`));
   rows.push(row('account size', live.accountSize || null, bt.account_equity || null));
   // 100 live means NO cap, which is what an absent cap means in the backtest,
   // so the two must compare equal rather than as 100 against nothing.
@@ -214,16 +258,36 @@ function compare({ setup, spec, strategy } = {}) {
    * short book: qp's cap is per STRATEGY per symbol, the desk's is across the
    * whole day. Reported side by side rather than declared equal.
    */
-  rows.push(row('max entries / day',
-    p.maxTradesPerDay || null,
-    (bt.rules && bt.rules.max_entries_per_day) || r.max_entries_per_day || null,
-    "qp's cap is per strategy per symbol; the desk's is the whole day's budget"));
+  /*
+   * HOW MANY TRADES A DAY CAN ACTUALLY HAPPEN — not two caps with the same
+   * name. The run's `max_entries_per_day` and the strategy's are PER SYMBOL
+   * (strategy.evaluate runs one symbol at a time), and the engine applies
+   * them on both sides alike. The only whole-day limit a backtest has is its
+   * ranking's top N. Live has that AND the desk's own daily budget, so live
+   * takes the smaller of the two — and a budget below top N is a live-only
+   * restriction the backtest never had.
+   */
+  const liveTop = p.topN || null;
+  const liveDay = p.maxTradesPerDay && (!liveTop || p.maxTradesPerDay < liveTop)
+    ? p.maxTradesPerDay : (liveTop || 'all');
+  rows.push(row('trades per day (most)', liveDay,
+    (btRank && btRank.top_n) || 'all',
+    "live: the smaller of top N and the desk's daily budget · backtest: its "
+    + 'top N. The per-symbol cap is the strategy\'s and applies on both sides'));
 
   // THE UNIVERSE the signals are drawn from.
   const btUni = bt.universe || {};
-  rows.push(row('universe', (s.tools || []).join(',') || null,
-    btUni.kind === 'tools' ? (btUni.tools || []).join(',') || null
-      : (btUni.kind === 'register' ? btUni.register : btUni.kind) || null));
+  /*
+   * 'T2:R1' IS THE T2 CARD LIST. A backtest reads the tool's R1 register — the
+   * morning photo of the same cards the desk decides on — and spells it with
+   * the register. Any OTHER register is a different list and stays a
+   * difference.
+   */
+  const btTools = btUni.kind === 'tools'
+    ? (btUni.tools || []).map(t => String(t).replace(/:R1$/, '')).sort().join(',') || null
+    : (btUni.kind === 'register' ? btUni.register : btUni.kind) || null;
+  rows.push(row('universe', (s.tools || []).slice().sort().join(',') || null, btTools,
+    'which cards the signals come from — a different list is a different set of stocks'));
   rows.push(row('timeframe', p.tf || s.tf || '1m', bt.tf || null));
   /*
    * THE FEED, AND WHEN A DIFFERENCE IS NOT A DIVERGENCE.

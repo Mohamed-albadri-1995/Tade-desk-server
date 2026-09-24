@@ -135,18 +135,72 @@ def rules_diff(spec: dict, strategies: list, limit: int = 25) -> list:
     return out
 
 
-def report(ids) -> dict:
-    """What the desk's parity check asks for, in one answer."""
+def runs_for(ids) -> list:
+    """Every finished run of any of `ids`, newest first, with its size."""
+    want = set()
+    for i in ids or []:
+        try:
+            want.add(int(i))
+        except (TypeError, ValueError):
+            pass
+    if not want:
+        return []
+    with store._lock:
+        rows = store._db().execute(
+            "SELECT b.id, b.name, b.spec, b.created_at, "
+            "  (SELECT COUNT(*) FROM backtest_trades t WHERE t.bt_id = b.id "
+            "     AND t.exit_ts IS NOT NULL) AS n "
+            "FROM backtests b WHERE b.status = 'done' ORDER BY b.id DESC LIMIT ?",
+            (_SCAN,)).fetchall()
+    out = []
+    for r in rows:
+        try:
+            spec = json.loads(r['spec'])
+        except Exception:
+            continue
+        if _ids_in(spec) & want:
+            out.append({'id': r['id'], 'name': r['name'], 'created_at': r['created_at'],
+                        'start': spec.get('start'), 'end': spec.get('end'),
+                        'fill': spec.get('fill'), 'trades': r['n']})
+    return out
+
+
+def report(ids, pin=None) -> dict:
+    """What the desk's parity check asks for, in one answer.
+
+    WHICH RUN. It was the newest, and on 2026-09-24 the newest 09:35 run was
+    a one-day rerun of 09-15 with three trades — so the card compared the live
+    setup against the least representative run there was. Now: the run the
+    setup is PINNED to, if it names one of this strategy's runs; otherwise the
+    run with the MOST TRADES (newest on a tie). The list comes back too, so
+    the page can offer the choice.
+    """
     strategies = [s for s in (store.get_strategy(int(i)) for i in ids or [])
                   if s]
-    bt = latest_for(ids)
-    if not bt:
-        return {'ok': True, 'backtest': None,
+    runs = runs_for(ids)
+    if not runs:
+        return {'ok': True, 'backtest': None, 'runs': [],
                 'rules': [], 'note': 'no finished backtest has run this strategy'}
+    chosen, picked_by, note = None, 'most trades', None
+    if pin not in (None, '', 0):
+        try:
+            chosen = next((r for r in runs if r['id'] == int(pin)), None)
+        except (TypeError, ValueError):
+            chosen = None
+        if chosen:
+            picked_by = 'pinned'
+        else:
+            note = (f'#{pin} is not a finished run of this strategy — '
+                    'compared with the run with the most trades instead')
+    if not chosen:
+        chosen = max(runs, key=lambda r: (r['trades'], r['id']))
+    bt = store.get_backtest(chosen['id'], with_trades=False)
     rules = rules_diff(bt['spec'], strategies)
     spec = {k: v for k, v in bt['spec'].items() if k != '_strategy_docs'}
     return {'ok': True,
             'backtest': {'id': bt['id'], 'name': bt['name'],
                          'created_at': bt['created_at'], 'spec': spec,
-                         'summary': bt['summary']},
+                         'summary': bt['summary'], 'trades': chosen['trades']},
+            'picked_by': picked_by, 'note': note,
+            'runs': runs[:40],
             'rules': rules}

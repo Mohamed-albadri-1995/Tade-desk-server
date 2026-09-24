@@ -93,6 +93,28 @@ r = parity.report([sid])
 ok('no copy → frozen False, never "unchanged"',
    r['rules'][0]['frozen'] is False and r['rules'][0]['note'], r['rules'])
 
+print('\n── 4b · WHICH run: the biggest, or the one pinned ────────────')
+big = run({'strategy_id': sid, 'fill': 'desk', '_strategy_docs': [frozen]})
+store.add_bt_trades(big, [{'date': '2026-09-01', 'symbol': f'S{k}', 'side': 'long',
+                           'entry_ts': k, 'exit_ts': k + 1, 'entry': 10.0, 'exit': 10.1,
+                           'ret': 0.01, 'reason': 'exit'} for k in range(5)])
+tiny = run({'strategy_id': sid, 'fill': 'desk', '_strategy_docs': [frozen]})
+store.add_bt_trades(tiny, [{'date': '2026-09-15', 'symbol': 'T', 'side': 'long',
+                            'entry_ts': 1, 'exit_ts': 2, 'entry': 10.0, 'exit': 10.1,
+                            'ret': 0.01, 'reason': 'exit'}])
+r = parity.report([sid])
+ok('the run with the MOST trades, not the newest one-day rerun',
+   r['backtest']['id'] == big and r['picked_by'] == 'most trades'
+   and r['backtest']['trades'] == 5, (r['backtest']['id'], big, tiny))
+ok('every run is listed for the page to offer', {big, tiny} <= {x['id'] for x in r['runs']},
+   r['runs'])
+r = parity.report([sid], pin=tiny)
+ok('a pinned run is the one compared', r['backtest']['id'] == tiny
+   and r['picked_by'] == 'pinned', r['backtest']['id'])
+r = parity.report([sid], pin=999)
+ok('a pin that is not this strategy\'s run falls back, and says so',
+   r['backtest']['id'] == big and 'not a finished run' in (r['note'] or ''), r['note'])
+
 print('\n── 5 · a pair: either book finds the run ─────────────────────')
 ok('the other id alone does not find this strategy\'s run',
    parity.latest_for([other])['spec'].get('strategy_id') == other)

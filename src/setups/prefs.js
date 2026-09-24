@@ -109,6 +109,13 @@ function settingsFor(setupId) {
      */
     maxTradesPerDay: e.maxTradesPerDay || null,
     /*
+     * WHICH BACKTEST this setup is checked against on its card. Absent means
+     * the run with the most trades. A choice, because only you know which run
+     * the strategy was actually adopted on — the biggest is a guess at that.
+     */
+    parityBacktest: Number.isInteger(Number(e.parityBacktest)) && Number(e.parityBacktest) > 0
+      ? Number(e.parityBacktest) : null,
+    /*
      * Setup-level risk, overriding the account's for this setup alone.
      *
      * The account figure answers "what may a trade lose". This answers "what
@@ -147,7 +154,7 @@ function saveSettings(setupId, patch) {
   const next = { ...cur };
   for (const k of ['universe', 'topN', 'tf', 'feed', 'view', 'targetR', 'fill', 'caution',
                    'maxTradesPerDay', 'riskPerTrade', 'riskPct', 'maxPositionPct',
-                   'rankMetric', 'rankDirection']) {
+                   'rankMetric', 'rankDirection', 'parityBacktest']) {
     if (!(k in patch)) continue;
     const v = patch[k];
     if (v === null || v === '' || v === undefined) delete next[k];
