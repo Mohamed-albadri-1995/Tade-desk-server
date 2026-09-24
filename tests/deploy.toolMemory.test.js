@@ -108,8 +108,11 @@ describe('the tools that were fine are NOT raised', () => {
    * keep the number that produced that.
    */
   test('a tool with no history of restarting keeps the default', () => {
-    expect(memFor('T6')).toBe('140M');
     expect(memFor('T10')).toBe('140M');
+  });
+
+  test('T6 has a history now: 138 restarts at 169 MB once it could read bars again', () => {
+    expect(mb(memFor('T6'))).toBeGreaterThan(169);
   });
 
   test('T11 has a history now: killed at 151 MB inside Test\'s window', () => {
@@ -138,11 +141,11 @@ describe('the box can still be overridden without editing the script', () => {
   });
 
   test('and it only moves the tool it names', () => {
-    expect(memFor('T6', { TOOL_MAX_MEM_T2: '512M' })).toBe('140M');
+    expect(memFor('T10', { TOOL_MAX_MEM_T2: '512M' })).toBe('140M');
   });
 
   test('the box-wide default still moves the tools that use it', () => {
-    expect(memFor('T6', { TOOL_MAX_MEM: '200M' })).toBe('200M');
+    expect(memFor('T10', { TOOL_MAX_MEM: '200M' })).toBe('200M');
   });
 
   /*

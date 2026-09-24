@@ -370,6 +370,10 @@ tool_max_mem() {                          # tool_max_mem <TOOL_ID>
     # max_memory_limit=146800640" — T11 runs Test, and that kill was inside
     # Test's 09:30–11:30 window. 118 MB resident a minute after a start.
     T11) echo "200M" ;;
+    # 2026-09-24, evening: 138 restarts at 169 MB. T6 had been failing to read
+    # any bars since the desk-wide Alpaca key died at 11:30; once the key was
+    # replaced it read all fifty again, and 140 was under that.
+    T6) echo "240M" ;;
     *)  echo "$TOOL_MAX_MEM" ;;
   esac
 }
