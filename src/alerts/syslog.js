@@ -175,52 +175,44 @@ function tail(file, bytes = TAIL_BYTES) {
  * what will be shown.
  */
 function parseLog(text, src, keep = null, max = 0) {
+  // READ FROM THE END, AND STOP. Only the newest lines are ever shown, and a
+  // box's logs are hundreds of thousands of lines — building every one to
+  // keep the last 1500 took the alerts process past its memory cap
+  // (2026-09-24, measured: 264 MB for one download). Walking backwards, a
+  // file costs at most `max` kept lines however long it is.
+  const rows = text.split('\n');
   const out = [];
-  let last = null;          // the last line KEPT — a dropped line's trace is dropped too
-  let lastT = null;
-  for (const raw of text.split('\n')) {
+  let pending = [];         // unstamped lines seen (backwards) before their parent
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const raw = rows[i];
     if (!raw.trim()) continue;
     const m = STAMP.exec(raw);
-    if (!m) {
-      // A stack frame or a wrapped line: it belongs to the line above.
-      if (last && last.t === lastT) last.detail = (last.detail ? `${last.detail}\n` : '') + raw.trimEnd();
-      continue;
-    }
-    const [, y, mo, d, h, mi, s, rest] = m;
+    if (!m) { pending.unshift(raw.trimEnd()); continue; }
+    const [, y, mo, d, h, mi, s2, rest] = m;
     // pm2 stamps in the box's own local time.
-    const t = new Date(+y, +mo - 1, +d, +h, +mi, +s).getTime();
+    const t = new Date(+y, +mo - 1, +d, +h, +mi, +s2).getTime();
     const msg = rest.replace(/^PM2 log:\s*/, '');
-    // A stack frame that carries its own stamp is still part of its error.
-    if (/^\s*at\s|^\s*File "/.test(msg)) {
-      if (last && last.t === t) last.detail = (last.detail ? `${last.detail}\n` : '') + msg.trimEnd();
-      continue;
+    // A stack frame that carries its own stamp belongs to the line above it.
+    if (/^\s*at\s|^\s*File "/.test(msg)) { pending.unshift(msg.trimEnd()); continue; }
+    const trace = pending;
+    pending = [];
+    let text1 = msg.trimEnd();
+    let detail = trace.length ? trace.join('\n') : null;
+    // A stamp with nothing after it: what follows is the message.
+    if (!text1.trim()) {
+      if (!detail) continue;
+      const [first, ...more] = trace;
+      text1 = first.trim();
+      detail = more.length ? more.join('\n') : null;
     }
-    lastT = t;
-    const level = levelOf(msg);
-    if (keep && !keep(t, level)) { last = null; continue; }
-    last = L(t, src, level, msg.trimEnd());
-    out.push(last);
-    // Bounded as it goes, so memory stays flat however long the file is.
-    if (max && out.length > 2 * max) out.splice(0, out.length - max);
+    let level = levelOf(text1);
+    // A stack trace makes its line an error whatever its first words said.
+    if (detail && /(^|\n)\s*at\s|Traceback/.test(detail)) level = 'error';
+    if (keep && !keep(t, level)) continue;
+    out.push(L(t, src, level, text1, detail));
+    if (max && out.length >= max) break;
   }
-  if (max && out.length > max) out.splice(0, out.length - max);
-  // A stack trace makes its line an error whatever its first words said.
-  for (const l of out) if (l.detail && /\n?\s*at\s|Traceback/.test(l.detail) && l.level !== 'error') l.level = 'error';
-  // A stamp with nothing after it (console.log of an object, a blank line):
-  // what follows is the message. Nothing at all is not a line worth showing.
-  const kept = [];
-  for (const l of out) {
-    if (l.msg.trim()) { kept.push(l); continue; }
-    if (!l.detail) continue;
-    const [first, ...rest] = l.detail.split('\n');
-    l.msg = first.trim();
-    l.detail = rest.join('\n') || undefined;
-    if (!l.detail) delete l.detail;
-    const lv = levelOf(l.msg);
-    if (LEVELS.indexOf(lv) > LEVELS.indexOf(l.level)) l.level = lv;
-    kept.push(l);
-  }
-  return kept;
+  return out.reverse();
 }
 
 function pm2Dir() {
@@ -332,8 +324,11 @@ function collect(q = {}, deps = {}) {
 }
 
 /** The lines as plain text — the file the Review tab downloads. */
+const ET_CLOCK = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
 function toText(r, { level = 'info' } = {}) {
-  const hhmmss = t => new Date(t).toLocaleTimeString('en-GB', { timeZone: 'America/New_York', hour12: false });
+  const hhmmss = t => ET_CLOCK.format(new Date(t));
   const tag = { error: 'ERR', warn: 'WRN', info: 'INF', debug: 'DBG' };
   const c = r.counts || {};
   const head = [

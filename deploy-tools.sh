@@ -488,8 +488,15 @@ fi
 if [ -z "$ONLY" ]; then
   ALERTS_PORT=$(node -e "const a=require('./tools.config.json').apps.find(x=>x.id==='ALERTS');process.stdout.write(String(a?a.port:3090))")
   echo "  ALERTS — app :${ALERTS_PORT}"
+  # --max-old-space-size BELOW the pm2 cap. Node collects garbage lazily and
+  # pm2 kills on resident size, so without it a run of ordinary requests —
+  # each one's memory already garbage — grew the process to pm2's line and
+  # got it killed (2026-09-24: 195 MB against 180, twelve restarts in a
+  # morning). With the heap bounded, Node collects before pm2 has to act:
+  # 45 heavy log reads in a row stayed at 131 MB.
   ALERTS_PORT="$ALERTS_PORT" pm2 start src/alerts/server.js --name "alerts" \
-    --update-env --time --max-memory-restart "$ALERTS_MAX_MEM" >/dev/null
+    --update-env --time --max-memory-restart "$ALERTS_MAX_MEM" \
+    --node-args="--max-old-space-size=${ALERTS_HEAP_MB:-128}" >/dev/null
 fi
 # pm2 save rewrites the startup list from whatever is running RIGHT NOW, so a
 # process that happened to be stopped at this moment would be dropped from it

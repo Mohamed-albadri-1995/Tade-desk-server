@@ -206,3 +206,19 @@ describe('a restart loop is reported, since nothing else reports it', () => {
     expect(SRC).toMatch(/could not read pm2/);
   });
 });
+
+/*
+ * THE ALERTS PROCESS: A HEAP LIMIT BELOW ITS pm2 CAP. Node collects lazily
+ * and pm2 kills on resident size, so garbage alone reached the cap — 195 MB
+ * against 180 on 2026-09-24, twelve restarts in a morning.
+ */
+describe('the alerts process', () => {
+  const SH = fs.readFileSync(path.join(__dirname, '..', 'deploy-tools.sh'), 'utf8');
+  test('is started with a V8 heap limit well under its pm2 memory cap', () => {
+    const start = SH.slice(SH.indexOf('pm2 start src/alerts/server.js'));
+    const heap = Number(/--max-old-space-size=\$\{ALERTS_HEAP_MB:-(\d+)\}/.exec(start)[1]);
+    const cap = Number(/ALERTS_MAX_MEM="\$\{ALERTS_MAX_MEM:-(\d+)M\}"/.exec(SH)[1]);
+    expect(heap).toBeLessThan(cap * 0.7);
+    expect(cap).toBeGreaterThanOrEqual(240);
+  });
+});

@@ -889,7 +889,9 @@ app.get('/api/logs.txt', (req, res) => {
   try {
     const q = { date: String(req.query.date || ''), level: String(req.query.level || 'warn'),
                 src: String(req.query.src || ''), q: String(req.query.q || ''),
-                limit: req.query.limit || 5000 };
+                // Bounded like the page: a file of every routine line of
+                // every process is the download that cost 264 MB.
+                limit: Math.min(Number(req.query.limit) || 3000, 3000) };
     const sys = require('./syslog');
     const r = sys.collect(q);
     res.set('Content-Type', 'text/plain; charset=utf-8');
