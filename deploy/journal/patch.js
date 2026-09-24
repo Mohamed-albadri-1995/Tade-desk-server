@@ -688,7 +688,10 @@
     var sel = document.getElementById('filter-account');
     if (!sel) return;
     var known = accountsKnown();
-    if (known.length < 2) return;        // nothing to tell apart
+    // Nothing to tell apart: one account at the desk and none but "All" on
+    // the page. With two ids on the page — an account REMOVED from the desk
+    // still has its trades — the names still matter, so it carries on.
+    if (known.length < 2 && sel.options.length <= 2) return;
     var have = {};
     Array.prototype.slice.call(sel.options).forEach(function (o) {
       have[o.value] = o;
@@ -711,6 +714,116 @@
       o.textContent = label;
       sel.appendChild(o);
     });
+    /*
+     * AN ACCOUNT THE DESK NO LONGER HAS keeps its entry — its trades are
+     * still history worth filtering — and says so, rather than reading like
+     * a live account that has gone quiet.
+     */
+    // Only on an ANSWER: an empty list is "the desk did not say", and marking
+    // every account as gone on that would be a lie told by a timeout.
+    if (!known.length) return;
+    var ids = {};
+    known.forEach(function (a) { ids[a.id] = true; });
+    Array.prototype.slice.call(sel.options).forEach(function (o) {
+      if (!o.value || ids[o.value]) return;
+      var gone = o.value + ' \u00b7 not on the desk now';
+      if (o.textContent !== gone) o.textContent = gone;
+    });
+  }
+
+  /* ── filter by setup, and a filter row that follows the desk ───────────
+   *
+   * Asked 2026-09-24: "journal filters don't include filter by setup, and
+   * nothing adapts if I delete an account or add a new one".
+   *
+   * THE PAGE'S OWN SCOPE IS EXTENDED, NOT DUPLICATED. public/journal.html
+   * narrows `__allTrades` into `__trades` in applyScope() — account and
+   * source — and every tab (overview, calendar, risk, setups, the cards)
+   * renders `__trades`. So the setup choice is applied in the same place, by
+   * wrapping applyScope: one scope, every tab, no second control that only
+   * hides cards.
+   *
+   * populateFilters() REBUILDS the account select on every Refresh, which
+   * threw away the desk's names and accounts added here; it is wrapped too,
+   * so they are merged back each time. The desk's account list is re-read
+   * every minute and when the page comes back into view, so an account added
+   * or removed at the desk shows up without reloading.
+   */
+  var NO_SETUP = '__none';
+  function setupName(id) {
+    var list = window.__setups || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].id === id) return list[i].name || id;
+    }
+    return id;
+  }
+  function setupFilter() {
+    var sel = document.getElementById('filter-setup');
+    if (sel) return sel;
+    var acct = document.getElementById('filter-account');
+    if (!acct || !acct.parentNode) return null;
+    sel = document.createElement('select');
+    sel.id = 'filter-setup';
+    sel.title = 'Only the trades one setup placed';
+    acct.parentNode.insertBefore(sel, acct.nextSibling || null);
+    sel.addEventListener('change', function () {
+      try { window.applyScope(); window.renderAll(); } catch (e) { /* the page's own filters still work */ }
+    });
+    return sel;
+  }
+  function fillSetupFilter() {
+    var sel = setupFilter();
+    if (!sel) return;
+    var prev = sel.value || '';
+    var seen = {};
+    var untagged = false;
+    (window.__allTrades || []).forEach(function (t) {
+      if (!t) return;
+      if (t.setup_id) seen[String(t.setup_id)] = setupName(String(t.setup_id));
+      else untagged = true;
+    });
+    var keys = Object.keys(seen).sort(function (a, b) {
+      return seen[a] < seen[b] ? -1 : (seen[a] > seen[b] ? 1 : 0);
+    });
+    var sig = keys.join('|') + (untagged ? '|~' : '');
+    if (sel.getAttribute('data-sig') === sig) return;     // nothing new: leave it
+    sel.setAttribute('data-sig', sig);
+    sel.innerHTML = '';
+    var add = function (value, label) {
+      var o = document.createElement('option');
+      o.value = value;
+      o.textContent = label;
+      sel.appendChild(o);
+    };
+    add('', 'All setups');
+    keys.forEach(function (k) { add(k, seen[k]); });
+    if (untagged) add(NO_SETUP, 'No setup');
+    // A remembered choice that no longer exists would empty every tab.
+    sel.value = (prev === NO_SETUP ? untagged : seen[prev] !== undefined) ? prev : '';
+  }
+  function bySetup(t) {
+    var sel = document.getElementById('filter-setup');
+    var v = sel ? sel.value : '';
+    if (!v) return true;
+    if (v === NO_SETUP) return !t.setup_id;
+    return String(t.setup_id || '') === v;
+  }
+  function hookScope() {
+    if (window.__deskScopeHooked) return;
+    var scope = window.applyScope;
+    var populate = window.populateFilters;
+    if (typeof scope !== 'function' || typeof populate !== 'function') return;
+    window.__deskScopeHooked = true;
+    window.applyScope = function () {
+      scope.apply(this, arguments);
+      if (Array.isArray(window.__trades)) window.__trades = window.__trades.filter(bySetup);
+    };
+    window.populateFilters = function () {
+      populate.apply(this, arguments);
+      fillSetupFilter();
+      try { mergeAccountsIntoFilter(); } catch (e) { /* the page's list still works */ }
+    };
+    fillSetupFilter();
   }
 
   /* ── the button, added to every card ──────────────────────────────────
@@ -788,14 +901,22 @@
     autoTag(host);
     statusLine();
     mergeAccountsIntoFilter();
+    fillSetupFilter();
     importButton();
     fixDashboardLink();
   }
 
   function start() {
-    // Asked once, in the background — see loadAccountsKnown. The filter draws
-    // from the trades straight away and widens when the desk answers.
+    // In the background — see loadAccountsKnown. The filter draws from the
+    // trades straight away and widens when the desk answers; re-asked every
+    // minute and on coming back to the page, so an account added or removed
+    // at the desk appears without a reload.
     loadAccountsKnown();
+    if (typeof setInterval === 'function') setInterval(loadAccountsKnown, 60000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) loadAccountsKnown();
+    });
+    hookScope();
     document.addEventListener('click', onDeleteClick, true);   // capture
     var host = document.getElementById(CONTAINER);
     if (host) new MutationObserver(decorate).observe(host, { childList: true });

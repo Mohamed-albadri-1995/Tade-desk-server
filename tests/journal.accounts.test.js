@@ -108,7 +108,7 @@ function mkEl(tag) {
  * A page with `trades` rendered as cards, then the patch evaluated over it.
  * Returns the handles the assertions need.
  */
-function page(trades, destinations = null) {
+function page(trades, destinations = null, extra = {}) {
   const root = mkEl('div');
   const container = mkEl('div');
   container.id = 'jnl-cards-container';
@@ -207,6 +207,8 @@ function page(trades, destinations = null) {
     __trades: trades,
     __allTrades: trades,
   };
+  // The page's own globals a test needs present (applyScope, populateFilters…).
+  Object.assign(ctx, extra);
   ctx.window = ctx;
   vm.createContext(ctx);
   vm.runInContext(SRC, ctx, { filename: 'patch.js' });
@@ -383,5 +385,135 @@ describe('the source contract the desk depends on', () => {
                             price: 10, at: '2026-09-01T13:36:00Z', type: 'fill' }])[0];
     expect(t.extId).toBe('alpaca:f1');
     expect(t.account).toBeNull();
+  });
+});
+
+/*
+ * FILTER BY SETUP, AND A FILTER ROW THAT FOLLOWS THE DESK.
+ *
+ * Asked 2026-09-24: "journal filters don't include filter by setup, and nothing
+ * adapts if I delete an account or add a new one". The page's applyScope()
+ * narrows __allTrades into __trades, which EVERY tab renders — so the setup
+ * choice is applied there, by wrapping it, and these tests drive the wrapped
+ * functions exactly as journal.html calls them.
+ */
+describe('filter by setup', () => {
+  const settled = () => new Promise((r) => setTimeout(r, 0));
+  const TS = [
+    { id: '1', ticker: 'MGNI', date: '2026-09-24', account: 'alpaca2', setup_id: 'Test@09:30' },
+    { id: '2', ticker: 'IMCC', date: '2026-09-24', account: 'alpaca1', setup_id: 'S@09:35' },
+    { id: '3', ticker: 'CLDX', date: '2026-09-24', account: 'alpaca1', setup_id: 'S@09:35' },
+    { id: '4', ticker: 'AAPL', date: '2026-09-24', account: 'alpaca1', setup_id: null },
+  ];
+  // The page's own scope: account filter only, as journal.html:267 does.
+  function withPage(trades, destinations) {
+    const calls = { render: 0, populate: 0 };
+    const extra = {
+      __setups: [{ id: 'S@09:35', name: 'OR + VWAP 09:35' }],
+      applyScope() {
+        const acct = this.document.getElementById('filter-account').value || '';
+        this.__trades = this.__allTrades.filter(t => !acct || t.account === acct);
+      },
+      populateFilters() { calls.populate += 1; },
+      renderAll() { calls.render += 1; },
+    };
+    const p = page(trades, destinations, extra);
+    return { ...p, calls, sel: () => p.doc.getElementById('filter-setup') };
+  }
+
+  test('a setup filter appears beside the account filter, listing every setup', () => {
+    const p = withPage(TS);
+    const sel = p.sel();
+    expect(sel).not.toBeNull();
+    expect(sel.children.map(o => [o.value, o.textContent])).toEqual([
+      ['', 'All setups'],
+      ['S@09:35', 'OR + VWAP 09:35'],       // the journal's own name for it
+      ['Test@09:30', 'Test@09:30'],         // no name known: the id
+      ['__none', 'No setup'],
+    ]);
+  });
+
+  test('choosing one narrows __trades — the list every tab renders', () => {
+    const p = withPage(TS);
+    p.sel().value = 'S@09:35';
+    p.ctx.applyScope.call(p.ctx);
+    expect(p.ctx.__trades.map(t => t.id)).toEqual(['2', '3']);
+  });
+
+  test('"No setup" shows only the untagged trades', () => {
+    const p = withPage(TS);
+    p.sel().value = '__none';
+    p.ctx.applyScope.call(p.ctx);
+    expect(p.ctx.__trades.map(t => t.id)).toEqual(['4']);
+  });
+
+  test('and it combines with the page\'s account filter', () => {
+    const p = withPage(TS);
+    p.select.value = 'alpaca1';
+    p.sel().value = 'S@09:35';
+    p.ctx.applyScope.call(p.ctx);
+    expect(p.ctx.__trades.map(t => t.id)).toEqual(['2', '3']);
+    p.sel().value = 'Test@09:30';
+    p.ctx.applyScope.call(p.ctx);
+    expect(p.ctx.__trades).toEqual([]);
+  });
+
+  test('changing it re-scopes and re-renders every tab', () => {
+    const p = withPage(TS);
+    p.sel().value = 'Test@09:30';
+    p.sel().listeners.change[0]();
+    expect(p.calls.render).toBe(1);
+    expect(p.ctx.__trades.map(t => t.id)).toEqual(['1']);
+  });
+
+  test('a remembered setup that no longer exists falls back to All', () => {
+    const p = withPage(TS);
+    p.sel().value = 'Gone@10:00';
+    p.ctx.__allTrades = TS.slice(0, 1).concat([{ id: '9', setup_id: 'New@10:00' }]);
+    p.ctx.populateFilters.call(p.ctx);
+    expect(p.sel().value).toBe('');
+  });
+});
+
+describe('the account list follows the desk', () => {
+  const settled = () => new Promise((r) => setTimeout(r, 0));
+  const DESK = [{ id: 'alpaca1', name: 'alpaca100k935' },
+                { id: 'alpaca2', name: 'Alpaca100ktest' }];
+
+  test('an account removed from the desk keeps its entry, and says it is gone', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'ttp5k')], DESK);
+    await settled();
+    expect(p.options()).toContainEqual(['ttp5k', 'ttp5k · not on the desk now']);
+  });
+
+  test('down to ONE account at the desk, the removed one is still named', async () => {
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], [DESK[0]]);
+    await settled();
+    expect(p.options()).toEqual([
+      ['', 'All accounts'],
+      ['alpaca1', 'alpaca100k935 · alpaca1'],
+      ['alpaca2', 'alpaca2 · not on the desk now'],
+    ]);
+  });
+
+  test('the page rebuilding its list on Refresh does not lose the desk\'s names', async () => {
+    let rebuilt = 0;
+    const p = page([T('1', 'alpaca1'), T('2', 'alpaca2')], DESK, {
+      populateFilters() {
+        rebuilt += 1;
+        // journal.html:248 — innerHTML rebuilt from the trades alone
+        const sel = this.document.getElementById('filter-account');
+        sel.innerHTML = '';
+        for (const [v, l] of [['', 'All'], ['alpaca1', 'alpaca1'], ['alpaca2', 'alpaca2']]) {
+          const o = this.document.createElement('option'); o.value = v; o.textContent = l;
+          sel.appendChild(o);
+        }
+      },
+      applyScope() {}, renderAll() {},
+    });
+    await settled();
+    p.ctx.populateFilters.call(p.ctx);
+    expect(rebuilt).toBe(1);
+    expect(p.options()[1]).toEqual(['alpaca1', 'alpaca100k935 · alpaca1']);
   });
 });
