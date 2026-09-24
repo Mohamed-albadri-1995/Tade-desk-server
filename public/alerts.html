@@ -3299,7 +3299,7 @@ function paintErrors(d) {
   if (note) note.textContent = lines.length ? `${lines.length} · full log on Review` : '';
   box.innerHTML = lines.length
     ? lines.map(l => `<div class="lv-row error"><span class="t">${esc(slTime(l.t).slice(0, 5))}</span>
-        <span class="m">${esc(l.msg)}</span><span class="r">${esc(l.src)}</span></div>`).join('')
+        <span class="m">${esc(l.msg)}${l.repeat ? ` <b class="sl-x">×${l.repeat} · last ${esc(slTime(l.lastT).slice(0, 5))}</b>` : ''}</span><span class="r">${esc(l.src)}</span></div>`).join('')
     : '<div class="lv-empty">No errors today.</div>';
 }
 

@@ -342,6 +342,15 @@ describe('the scheduled rehearsal', () => {
     expect(f.detail).toMatch(/Nothing was published or placed/);
   });
 
+  test('the log line names the leg that did not come back, not just a count', async () => {
+    const d = deps([SETUP], good({ cards: 0 }));
+    const said = [];
+    const spy = jest.spyOn(console, 'log').mockImplementation((m) => said.push(String(m)));
+    try { await reh.rehearseAll({ deps: d }); } finally { spy.mockRestore(); }
+    const line = said.find(m => /\[Rehearsal\] .*failed/.test(m));
+    expect(line).toMatch(/1 failed.* — Cards on the list/);
+  });
+
   test('one setup throwing does not take the others with it', async () => {
     const d = deps([SETUP, { ...SETUP, id: 'second' }], good());
     let first = true;

@@ -110,7 +110,10 @@ describe('the tools that were fine are NOT raised', () => {
   test('a tool with no history of restarting keeps the default', () => {
     expect(memFor('T6')).toBe('140M');
     expect(memFor('T10')).toBe('140M');
-    expect(memFor('T11')).toBe('140M');
+  });
+
+  test('T11 has a history now: killed at 151 MB inside Test\'s window', () => {
+    expect(mb(memFor('T11'))).toBeGreaterThan(151);
   });
 
   test('an unknown tool gets the default rather than nothing', () => {

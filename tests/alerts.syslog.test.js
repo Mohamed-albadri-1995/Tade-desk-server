@@ -20,7 +20,8 @@ const T1_ERR = `2026-09-23T21:30:02: [Scheduler] Daily Backup 5:30 PM failed: Er
 2026-09-23T21:30:02:     at async pushBackup (/home/ec2-user/Tade-desk-server/src/backup/index.js:199:3)
 2026-09-23T21:35:01: [Scheduler] settings backup failed: push failed
 `;
-const PM2 = `2026-09-24T09:47:54: PM2 log: [PM2][WORKER] Process 346 restarted because it exceeds --max-memory-restart value (current_memory=178716672 max_memory_limit=146800640 [octets])
+const PM2 = `2026-09-24T09:40:00: PM2 log: App [tool-T1:346] starting in -fork mode-
+2026-09-24T09:47:54: PM2 log: [PM2][WORKER] Process 346 restarted because it exceeds --max-memory-restart value (current_memory=178716672 max_memory_limit=146800640 [octets])
 2026-09-24T09:48:00: PM2 log: Some unrelated daemon chatter
 `;
 
@@ -60,8 +61,12 @@ describe('the pm2 log directory', () => {
   test('from pm2\'s own log only restarts and kills are kept — the memory kill is there', () => {
     const pm2 = S.processLines(dir).lines.filter(l => l.src === 'pm2');
     expect(pm2).toHaveLength(1);
-    expect(pm2[0].msg).toMatch(/exceeds --max-memory-restart/);
     expect(pm2[0].level).toBe('error');
+  });
+  test('the memory kill names the process and its ceiling, not a pm2 id', () => {
+    const [k] = S.processLines(dir).lines.filter(l => l.src === 'pm2');
+    expect(k.msg).toBe('tool-T1 was restarted by pm2: over its 140 MB memory ceiling');
+    expect(k.detail).toMatch(/using 170 MB \(pm2 id 346\)/);
   });
   test('no pm2 directory is a note, not a crash', () => {
     expect(S.processLines('/nonexistent/logs').error).toMatch(/no pm2 logs/);
@@ -322,5 +327,34 @@ describe('the second pass over the real log', () => {
       processLines: () => ({ error: null, lines: [
         { t: at('09:00'), src: 'a', level: 'error', msg: 'x' }, { t: at('09:01'), src: 'a', level: 'error', msg: 'x' }] }) });
     expect(r.lines).toHaveLength(2);
+  });
+});
+
+describe('the Errors panel shows real errors once, with a count', () => {
+  const kill = (id, used) => ({ t: 1, src: 'pm2', level: 'error', detail: null,
+    msg: `[PM2][WORKER] Process ${id} restarted because it exceeds --max-memory-restart value (current_memory=${used} max_memory_limit=188743680 [octets])` });
+  test('an id pm2 never named is still said plainly', () => {
+    expect(S.memoryKill(kill(373, 219463680), {}).msg)
+      .toBe('pm2 process 373 was restarted by pm2: over its 180 MB memory ceiling');
+  });
+  test('ids are learned from pm2\'s own start lines, the newest winning', () => {
+    expect(S.pm2Names('x App [qp:345] exited\ny App [alerts:373] starting\nz App [T:373] online'))
+      .toEqual({ 345: 'qp', 373: 'T' });
+  });
+  test('kills at different sizes fold into one line', () => {
+    const lines = [kill(373, 219463680), kill(373, 656711680), kill(373, 194899968)]
+      .map((l, i) => ({ ...S.memoryKill(l, { 373: 'alerts' }), t: i + 1 }));
+    const r = S.collect({ level: 'error' }, {
+      sessionLog: { runsOn: () => [], passesOn: () => [] }, ledger: () => [],
+      processLines: () => ({ lines: lines.map(l => ({ ...l, t: Date.now() })), error: null }),
+    });
+    const k = r.lines.filter(l => /alerts was restarted/.test(l.msg));
+    expect(k).toHaveLength(1);
+    expect(k[0].repeat).toBe(3);
+  });
+  test('"0 failed" is a report that nothing failed, not an error', () => {
+    expect(S.levelOf('[Rehearsal] OR + VWAP 09:35@09:35: 6 answered, 0 failed, 2 untested')).toBe('info');
+    expect(S.levelOf('[Rehearsal] Test@09:30: 2 answered, 1 failed, 5 untested')).toBe('error');
+    expect(S.levelOf('2 failed, 10 failed')).toBe('error');
   });
 });

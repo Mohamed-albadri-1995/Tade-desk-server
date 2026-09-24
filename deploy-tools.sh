@@ -366,6 +366,10 @@ tool_max_mem() {                          # tool_max_mem <TOOL_ID>
     # looked at, but it is the only other tool restarting at all, so it gets
     # room too rather than another morning of guessing.
     T7) echo "180M" ;;
+    # 2026-09-24 10:00: "Process 371 restarted … current_memory=151420928
+    # max_memory_limit=146800640" — T11 runs Test, and that kill was inside
+    # Test's 09:30–11:30 window. 118 MB resident a minute after a start.
+    T11) echo "200M" ;;
     *)  echo "$TOOL_MAX_MEM" ;;
   esac
 }

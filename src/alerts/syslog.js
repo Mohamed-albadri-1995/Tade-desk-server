@@ -144,7 +144,10 @@ function levelOf(text) {
   // verify positions with Alpaca: /v2/positions 401 unauthorized" was read as
   // INFO on 2026-09-24 — the position manager blind, filed as routine.
   if (/\b(401|403)\b|unauthori[sz]ed|forbidden|bad credentials/i.test(text)) return 'error';
-  if (/\b(ERROR|CRITICAL|FATAL|Traceback|Unhandled)\b|Error:|\bfailed\b|DID NOT START|exceeds --max-memory|exited with code \[[1-9]/i.test(text)) return 'error';
+  // "6 answered, 0 failed" is a report that nothing failed — it filled the
+  // Errors panel on 2026-09-24 beside the real ones.
+  const t0 = text.replace(/\b0 failed\b/gi, '');
+  if (/\b(ERROR|CRITICAL|FATAL|Traceback|Unhandled)\b|Error:|\bfailed\b|DID NOT START|exceeds --max-memory|exited with code \[[1-9]/i.test(t0)) return 'error';
   // Routine reports that merely MENTION stale data are not warnings: on the
   // first real log (2026-09-24) "[Pipeline] Scan complete: 45 live, 3 stale"
   // and "[SideG] Refreshed 12/12 stale tickers" were 467 of 763 warnings.
@@ -245,6 +248,37 @@ function etDayBounds(date) {
   return [start, at(nextDate)];
 }
 
+/**
+ * pm2 ids → process names, as pm2's own log states them ("App [alerts:373]
+ * starting in -fork mode-"). Its memory-kill line names only the id, and an
+ * id means nothing a day later: 373 was alerts on 2026-09-24.
+ */
+function pm2Names(text) {
+  const names = {};
+  const re = /App \[([^\]:]+):(\d+)\]/g;
+  let m;
+  while ((m = re.exec(text))) names[m[2]] = m[1];
+  return names;
+}
+
+/**
+ * "[PM2][WORKER] Process 373 restarted because it exceeds
+ * --max-memory-restart value (current_memory=219463680
+ * max_memory_limit=188743680 [octets])" → "alerts was restarted by pm2: over
+ * its 180 MB memory ceiling", with what it was using in the detail. The
+ * message leaves the changing number out, so a morning of the same kill
+ * folds into one line with its count instead of thirteen.
+ */
+function memoryKill(l, names = {}) {
+  const m = /Process (\d+) restarted because it exceeds --max-memory-restart value \(current_memory=(\d+) max_memory_limit=(\d+)/.exec(l.msg);
+  if (!m) return l;
+  const mb = (b) => Math.round(Number(b) / 1048576);
+  const who = names[m[1]] || `pm2 process ${m[1]}`;
+  return { ...l,
+    msg: `${who} was restarted by pm2: over its ${mb(m[3])} MB memory ceiling`,
+    detail: `it was using ${mb(m[2])} MB (pm2 id ${m[1]})${l.detail ? `\n${l.detail}` : ''}` };
+}
+
 function processLines(dir = pm2Dir(), keep = null, since = 0, perFile = 0) {
   const out = [];
   let names = [];
@@ -261,10 +295,12 @@ function processLines(dir = pm2Dir(), keep = null, since = 0, perFile = 0) {
   }
   // pm2's own log: restarts and memory kills — kept whatever the level asked.
   const daemon = path.join(path.dirname(dir), 'pm2.log');
-  for (const l of parseLog(tail(daemon, 128 * 1024), 'pm2', keep ? (t) => keep(t, 'error') : null)) {
+  const text = tail(daemon, 128 * 1024);
+  const ids = pm2Names(text);
+  for (const l of parseLog(text, 'pm2', keep ? (t) => keep(t, 'error') : null)) {
     if (/restarted|exited|Stopping|Starting execution|exceeds/i.test(l.msg)) {
       if (l.level === 'info' && /restarted|exited/i.test(l.msg)) l.level = 'warn';
-      out.push(l);
+      out.push(memoryKill(l, ids));
     }
   }
   return { lines: out, error: null };
@@ -366,4 +402,5 @@ function toText(r, { level = 'info' } = {}) {
     + (l.detail ? `\n${l.detail.split('\n').map(x => `      ${x}`).join('\n')}` : ''))).join('\n') + '\n';
 }
 
-module.exports = { collect, toText, runLines, passLines, ledgerLine, parseLog, levelOf, processLines, LEVELS };
+module.exports = { collect, toText, runLines, passLines, ledgerLine, parseLog, levelOf, processLines,
+  pm2Names, memoryKill, LEVELS };

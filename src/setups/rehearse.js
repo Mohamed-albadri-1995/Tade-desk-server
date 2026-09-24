@@ -410,10 +410,14 @@ async function rehearseAll({ publish = true, day = null, deps = {} } = {}) {
                  note: `the rehearsal itself failed: ${err.message}` };
     }
     out.push(report);
-    console.log(`[Rehearsal] ${setup.id}: ${report.passed} answered, `
-      + `${report.failed} failed, ${report.untested} untested`);
-    if (!publish || !report.failed) continue;
+    // WHICH leg, in the log itself: "Test@09:30: 2 answered, 1 failed" was all
+    // the log said on 2026-09-24, and the answer was only on an alert card.
     const broken = (report.legs || []).filter(l => l.ok === false);
+    const why = broken.length ? ` — ${broken.map(l => `${l.title}: ${l.note}`).join(' · ')}`
+      : (report.failed && report.note ? ` — ${report.note}` : '');
+    console.log(`[Rehearsal] ${setup.id}: ${report.passed} answered, `
+      + `${report.failed} failed, ${report.untested} untested${why}`);
+    if (!publish || !report.failed) continue;
     alertStore.publishFires([{
       ruleId: setup.id, rule: setup.name, ticker: null, toolId: config.toolId,
       date, at: Date.now(), kind: 'setup', level: 'warn',
