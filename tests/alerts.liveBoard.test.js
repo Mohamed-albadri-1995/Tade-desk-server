@@ -27,8 +27,7 @@ const deps = (over = {}) => ({
     ],
   },
   sessionLog: { passesOn: () => [{ at: at('10:20'), positions: [
-    { symbol: 'NVTS', stop: 11.62, stopMoved: true, legsBanked: 1,
-      brokerStop: 'broker stop moved 11.5 → 11.62' }] }] },
+    { symbol: 'NVTS', stop: 11.62, stopMoved: true, legsBanked: 1 }] }] },
   alpacaTrades: async () => ({ problems: [], trades: [
     { account: 'a', ticker: 'NVTS', direction: 'Long', shares: 420, entryPrice: 11.84,
       entryTime: '09:35:04', exitPrice: null, status: 'open' },
@@ -53,8 +52,7 @@ test('an open trade: the plan, the real fill, the live price, the manager', asyn
   const t = a.trades.find(x => x.symbol === 'NVTS');
   expect(t).toMatchObject({ status: 'open', side: 'long', setup: 'OR + VWAP 09:35', shares: 420,
     entry: 11.84, sl: 11.6, tp: 12.28, now: 12.21, pnl: 155.4,
-    stopNow: 11.62, stopMoved: true, legsBanked: 1, checkedAt: at('10:20'),
-    brokerStop: 'broker stop moved 11.5 → 11.62' });
+    stopNow: 11.62, stopMoved: true, legsBanked: 1, checkedAt: at('10:20') });
 });
 
 test('a closed short: exit from the fills, P&L worked out, the close reason from the ledger', async () => {

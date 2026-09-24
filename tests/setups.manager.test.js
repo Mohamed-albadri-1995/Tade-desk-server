@@ -31,12 +31,6 @@ process.env.DATA_DIR = DIR;
 jest.mock('../src/setups/qpClient', () => ({ manage: jest.fn() }));
 jest.mock('../src/setups/catalog', () => ({ list: jest.fn() }));
 jest.mock('../src/alerts/store', () => ({ publishFires: jest.fn() }));
-// The stop at Alpaca is moved through stopSync; its own behaviour is tested in
-// tests/broker.stopSync.test.js. Here: WHEN the manager asks for it.
-jest.mock('../src/broker/stopSync', () => ({
-  syncStop: jest.fn(async () => []),
-  summary: jest.requireActual('../src/broker/stopSync').summary,
-}));
 jest.mock('../src/broker/reconcile', () => ({
   carriedOver: jest.fn(async () => ({ ok: false, error: 'not asked' })),
   flatSymbols: jest.fn(async () => null),
@@ -1002,78 +996,5 @@ describe('the pass record keeps where the exit stands', () => {
     expect(r.positions[0]).toMatchObject({ symbol: 'A', legsBanked: 1 });
     expect(r.positions[1]).toMatchObject({ symbol: 'B', waitingFor: 'first target leg' });
     expect(r.positions[1].legsBanked).toBeUndefined();
-  });
-});
-
-/*
- * THE STOP AT ALPACA FOLLOWS THE STRATEGY'S STOP — asked for on every pass the
- * position is still held, never on the pass that closes it.
- */
-describe('the broker\'s stop follows the strategy\'s stop', () => {
-  const stopSync = require('../src/broker/stopSync');
-  beforeEach(() => { stopSync.syncStop.mockReset(); stopSync.syncStop.mockResolvedValue([]); });
-
-  test('held, stop trailed: asked to move it, with the position and the stop now', async () => {
-    ledger([{ setupId: 'Test@09:30' }]);
-    qp.manage.mockResolvedValue(answer({ stop_kind: 'anchored', stop_now: 9.8, stop_moved: true }));
-    await manager.check(AT);
-    expect(stopSync.syncStop).toHaveBeenCalledTimes(1);
-    const [pos, stop] = stopSync.syncStop.mock.calls[0];
-    expect(pos).toMatchObject({ symbol: 'CBRS', side: 'long', destinations: ['alp'] });
-    expect(stop).toBe(9.8);
-    expect(sent).toHaveLength(0);                       // nothing closed
-  });
-
-  test('the pass that CLOSES does not move a stop first', async () => {
-    ledger([{}]);
-    qp.manage.mockResolvedValue(answer({ exit_now: true }));
-    await manager.check(AT);
-    expect(stopSync.syncStop).not.toHaveBeenCalled();
-    expect(sent).toHaveLength(1);
-  });
-
-  test('a stop on the wrong side of the entry is not sent to the broker', async () => {
-    ledger([{}]);
-    qp.manage.mockResolvedValue(answer({ stop_now: 10.5, stop_wrong_side: true }));
-    await manager.check(AT);
-    expect(stopSync.syncStop).not.toHaveBeenCalled();
-  });
-
-  test('a dry run moves nothing', async () => {
-    ledger([{}]);
-    qp.manage.mockResolvedValue(answer({ stop_now: 9.8, stop_moved: true }));
-    await manager.check(AT, { dryRun: true });
-    expect(stopSync.syncStop).not.toHaveBeenCalled();
-  });
-
-  test('a frozen stop the manager does not manage is not touched', async () => {
-    ledger([{}]);
-    qp.manage.mockResolvedValue(answer({ managed: false }));
-    await manager.check(AT);
-    expect(stopSync.syncStop).not.toHaveBeenCalled();
-  });
-
-  test('what was moved reaches the session log, for Live and the system log', async () => {
-    ledger([{ setupId: 'Test@09:30' }]);
-    qp.manage.mockResolvedValue(answer({ stop_now: 9.8, stop_moved: true }));
-    stopSync.syncStop.mockResolvedValue([{ dest: 'alp', moved: [{ id: 'sl', from: 9.5, to: 9.8 }], kept: 0 }]);
-    const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    // Its own moment: the day's file holds every other test's passes too,
-    // sorted by time, so "the last one" is not necessarily this one.
-    const mine = AT + 123;
-    try { await manager.check(mine); } finally { spy.mockRestore(); }
-    const sl = require('../src/setups/sessionLog');
-    const pass = sl.passesOn(DAY).filter(p => p.at === mine).slice(-1)[0];
-    expect(pass.positions[0].brokerStop).toBe('broker stop moved 9.5 → 9.8');
-  });
-
-  test('stopSync throwing does not stop the pass', async () => {
-    ledger([{ setupId: 'Test@09:30' }]);
-    qp.manage.mockResolvedValue(answer({ stop_now: 9.8, stop_moved: true }));
-    stopSync.syncStop.mockRejectedValue(new Error('boom'));
-    const spy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    let r;
-    try { r = await manager.check(AT); } finally { spy.mockRestore(); }
-    expect(r.ran).toBe(true);
   });
 });
