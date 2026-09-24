@@ -145,7 +145,11 @@ function levelOf(text) {
   // INFO on 2026-09-24 — the position manager blind, filed as routine.
   if (/\b(401|403)\b|unauthori[sz]ed|forbidden|bad credentials/i.test(text)) return 'error';
   if (/\b(ERROR|CRITICAL|FATAL|Traceback|Unhandled)\b|Error:|\bfailed\b|DID NOT START|exceeds --max-memory|exited with code \[[1-9]/i.test(text)) return 'error';
-  if (/\bWARN(ING)?\b|\bwarn\b|stale|missing|could not|couldn't|cannot|timed? ?out|refused|rejected/i.test(text)) return 'warn';
+  // Routine reports that merely MENTION stale data are not warnings: on the
+  // first real log (2026-09-24) "[Pipeline] Scan complete: 45 live, 3 stale"
+  // and "[SideG] Refreshed 12/12 stale tickers" were 467 of 763 warnings.
+  if (/Scan complete:|Refreshed \d+\/\d+ stale/.test(text)) return 'info';
+  if (/\bWARN(ING)?\b|\bwarn\b|\bstale\b|missing|could not|couldn't|cannot|timed? ?out|refused|rejected/i.test(text)) return 'warn';
   return 'info';
 }
 
@@ -318,6 +322,25 @@ function collect(q = {}, deps = {}) {
     lines = lines.filter(l => `${l.src} ${l.msg} ${l.detail || ''}`.toLowerCase().includes(needle));
   }
   lines.sort((a, b) => a.t - b.t);
+  /*
+   * THE SAME MESSAGE, ONCE, WITH ITS COUNT. The first real log was 1,553
+   * lines of which 608 were one Alpaca 401, once a minute since midnight —
+   * the other problems of the day were somewhere between them. Identical
+   * lines (same source, same words) fold into the first, which carries how
+   * many times it happened and when it last did. `group=0` turns it off.
+   */
+  if (q.group !== false && q.group !== '0') {
+    const firstOf = new Map();
+    const folded = [];
+    for (const l of lines) {
+      const k = `${l.src}\u0000${l.msg}`;
+      const f = firstOf.get(k);
+      if (f) { f.repeat = (f.repeat || 1) + 1; f.lastT = l.t; continue; }
+      firstOf.set(k, l);
+      folded.push(l);
+    }
+    lines = folded;
+  }
   const truncated = lines.length > limit;
   if (truncated) lines = lines.slice(-limit);
   return { ok: true, date, lines, sources, counts, truncated, notes };
@@ -339,6 +362,7 @@ function toText(r, { level = 'info' } = {}) {
     '',
   ];
   return head.concat((r.lines || []).map(l => `${hhmmss(l.t)}  ${String(l.src).padEnd(9)} ${tag[l.level] || ''}  ${l.msg}`
+    + (l.repeat ? `   [×${l.repeat}, last ${hhmmss(l.lastT)}]` : '')
     + (l.detail ? `\n${l.detail.split('\n').map(x => `      ${x}`).join('\n')}` : ''))).join('\n') + '\n';
 }
 

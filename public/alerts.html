@@ -602,6 +602,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .sl-r { display:grid; grid-template-columns:62px 74px 38px 1fr; gap:0 8px; padding:1px 10px;
   cursor:default; align-items:baseline; }
 .sl-r:hover { background:#111827; }
+.sl-x { font-weight:700; color:#e2e8f0; background:#334155; border-radius:3px; padding:0 5px; }
 .sl-r.has-d { cursor:pointer; }
 .sl-t { color:#64748b; }
 .sl-s { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -4616,7 +4617,7 @@ function paintSyslog(d) {
         <span class="sl-t">${esc(slTime(l.t))}</span>
         <span class="sl-s" style="color:${slColor(l.src)}">${esc(l.src)}</span>
         <span class="sl-l">${SL_LVL[l.level] || ''}</span>
-        <span class="sl-m">${esc(l.msg)}${l.detail ? ' ▸' : ''}</span>
+        <span class="sl-m">${esc(l.msg)}${l.repeat ? ` <b class="sl-x">×${l.repeat} · last ${esc(slTime(l.lastT).slice(0, 5))}</b>` : ''}${l.detail ? ' ▸' : ''}</span>
         ${l.detail ? `<pre class="sl-d">${esc(l.detail)}</pre>` : ''}
       </div>`).join('')
     : '<div class="sl-empty">Nothing at this level for this day.</div>';
@@ -4669,6 +4670,7 @@ function syslogText(d) {
   const head = `Trade desk log ${d.date || ''} (ET) · level ${lvl}`
     + `${d.truncated ? ' · latest lines only' : ''} · ${(d.lines || []).length} lines`;
   return [head, ...d.lines.map(l => `${slTime(l.t)}  ${String(l.src).padEnd(9)} ${SL_LVL[l.level] || ''}  ${l.msg}`
+    + (l.repeat ? `   [×${l.repeat}, last ${slTime(l.lastT)}]` : '')
     + (l.detail ? `\n${l.detail.split('\n').map(x => `      ${x}`).join('\n')}` : ''))].join('\n');
 }
 

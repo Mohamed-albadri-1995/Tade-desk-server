@@ -889,6 +889,7 @@ app.get('/api/logs.txt', (req, res) => {
   try {
     const q = { date: String(req.query.date || ''), level: String(req.query.level || 'warn'),
                 src: String(req.query.src || ''), q: String(req.query.q || ''),
+                group: req.query.group !== '0',
                 // Bounded like the page: a file of every routine line of
                 // every process is the download that cost 264 MB.
                 limit: Math.min(Number(req.query.limit) || 3000, 3000) };
@@ -907,7 +908,7 @@ app.get('/api/logs', (req, res) => {
     res.json(require('./syslog').collect({
       date: String(req.query.date || ''), level: String(req.query.level || 'info'),
       src: String(req.query.src || ''), q: String(req.query.q || ''),
-      limit: req.query.limit, desk: req.query.desk === '1',
+      limit: req.query.limit, desk: req.query.desk === '1', group: req.query.group !== '0',
     }));
   } catch (err) {
     res.json({ ok: false, error: err.message, lines: [], sources: [], counts: {} });

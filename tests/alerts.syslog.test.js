@@ -294,3 +294,33 @@ describe('the log as a file', () => {
     expect(r.text).toMatch(/^Trade desk system log · 2026-09-24/);
   });
 });
+
+describe('the second pass over the real log', () => {
+  test('routine scan reports that mention "stale" are not warnings', () => {
+    expect(S.levelOf('[Pipeline] Scan complete: 45 live, 3 stale')).toBe('info');
+    expect(S.levelOf('[SideG] Refreshed 12/12 stale tickers (0 skipped — no tvSymbol)')).toBe('info');
+    expect(S.levelOf('Test: dropped as STALE (bar too old): MPC@09:46')).toBe('warn');
+  });
+  test('one message repeated all day is ONE line, with its count and last time', () => {
+    const at = (m) => Date.parse(`2026-09-24T${m}:00-04:00`);
+    const msg = '[Manager] could not verify positions with Alpaca: 401';
+    const r = S.collect({ date: '2026-09-24', level: 'warn' }, {
+      sessionLog: { runsOn: () => [], passesOn: () => [] }, ledger: () => [],
+      processLines: () => ({ error: null, lines: [
+        { t: at('09:00'), src: 'alerts', level: 'error', msg },
+        { t: at('09:35'), src: 'desk', level: 'error', msg: 'MAZE: order FAILED' },
+        { t: at('09:01'), src: 'alerts', level: 'error', msg },
+        { t: at('10:17'), src: 'alerts', level: 'error', msg }] }) });
+    expect(r.lines.map(l => [l.msg, l.repeat || 1])).toEqual([[msg, 3], ['MAZE: order FAILED', 1]]);
+    expect(r.lines[0].lastT).toBe(at('10:17'));
+    expect(S.toText(r)).toMatch(/401 {3}\[×3, last 10:17:00\]/);
+  });
+  test('group=0 shows every line', () => {
+    const at = (m) => Date.parse(`2026-09-24T${m}:00-04:00`);
+    const r = S.collect({ date: '2026-09-24', level: 'warn', group: '0' }, {
+      sessionLog: { runsOn: () => [], passesOn: () => [] }, ledger: () => [],
+      processLines: () => ({ error: null, lines: [
+        { t: at('09:00'), src: 'a', level: 'error', msg: 'x' }, { t: at('09:01'), src: 'a', level: 'error', msg: 'x' }] }) });
+    expect(r.lines).toHaveLength(2);
+  });
+});
