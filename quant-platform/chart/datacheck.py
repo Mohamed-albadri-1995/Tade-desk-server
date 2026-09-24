@@ -310,10 +310,17 @@ def _key_fix(feed: str, names: str, verb: str = 'add') -> str:
     Alpaca is not typed into qp at all: the desk holds the pair and every
     deploy copies it into quant-platform/.env (scripts/sync-qp-env.js).
     """
+    # WHICH pair, said plainly. This used to send you to Algo → Settings →
+    # broker account — but the pair qp is given is data/keys.json's FIRST, and
+    # an account's own pair only when that file has none (src/setups/feeds.js
+    # alpacaCreds). On 2026-09-24 the keys.json pair was dead while both
+    # accounts' own pairs worked, and following this line would have changed
+    # nothing.
     if feed == 'alpaca':
-        return ('enter the new Alpaca key pair on the desk (Algo → Settings → '
-                'broker account), then run ./deploy-tools.sh — it copies the '
-                'pair to qp and restarts it')
+        return ('the desk-wide pair in data/keys.json (alpacaApiKey / '
+                'alpacaApiSecret) is the one refused — put a working pair '
+                'there, or remove those two entries so a broker account\'s own '
+                'pair (Algo → Settings) is used, then run ./deploy-tools.sh')
     return (f'{verb} {names} in quant-platform/.env, then: pm2 restart qp')
 
 

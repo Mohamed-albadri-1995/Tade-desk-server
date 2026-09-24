@@ -349,8 +349,38 @@ async function compare(date, { timeoutMs = 10000 } = {}) {
  * bucket now, `notClosed`, and the flattener closes it and says so in its own
  * words.
  */
+/*
+ * EVERY ALPACA ACCOUNT, EACH WITH ITS OWN KEYS — or no answer.
+ *
+ * carriedOver() and flatSymbols() asked with the desk-wide pair (data/keys.json)
+ * while every account had its own. On 2026-09-24 that pair was dead: 608
+ * minutes of "[Manager] could not verify positions with Alpaca: 401", the
+ * leftover-position check blind all day — while the accounts' own keys were
+ * placing orders and reading fills without a problem. And even alive, one pair
+ * answers for ONE account: with two, the other's positions were never asked
+ * about. heldNow() already did this right; these two now ask the same way.
+ *
+ * An account that cannot be read makes the whole answer unreadable, never a
+ * shorter list: "flat" in an account nobody asked is the overnight position.
+ */
+async function positionsEverywhere({ timeoutMs = 10000 } = {}) {
+  const dests = alpacaDests();
+  if (!dests.length) return alpaca.positions({ timeoutMs });
+  const scope = credentialScope();
+  if (scope.blind.length) return { ok: false, error: scope.reason };
+  const positions = [];
+  for (const d of dests) {
+    const { creds, error } = credsForDest(d);
+    if (error) return { ok: false, error };
+    const r = await alpaca.positions({ timeoutMs, account: creds });
+    if (!r || !r.ok) return { ok: false, error: `${d.name || d.id}: ${(r && r.error) || 'no answer'}` };
+    for (const p of r.positions) positions.push({ ...p, account: d.id });
+  }
+  return { ok: true, positions };
+}
+
 async function carriedOver(today, { timeoutMs = 10000 } = {}) {
-  const r = await alpaca.positions({ timeoutMs });
+  const r = await positionsEverywhere({ timeoutMs });
   if (!r.ok) return { ok: false, error: r.error };
 
   const holding = r.positions.filter(p => p.qty !== 0);
@@ -391,7 +421,10 @@ async function carriedOver(today, { timeoutMs = 10000 } = {}) {
       destinations: [...new Set(broker.orders(open.date)
         .filter(o => o.sent && o.kind !== 'flatten' && o.kind !== 'callback'
                   && String(o.symbol || '').toUpperCase() === p.symbol)
-        .map(o => o.destination))].filter(d => alpacaDestinations().includes(d)),
+        .map(o => o.destination))].filter(d => alpacaDestinations().includes(d))
+        // The account that HOLDS it, when the answer says — a name held in
+        // two accounts is two rows, each closed where it is.
+        .filter(d => !p.account || d === p.account),
     };
     /*
      * A close AFTER the last entry, and Alpaca is still holding it. `sent` on
@@ -419,7 +452,7 @@ async function carriedOver(today, { timeoutMs = 10000 } = {}) {
  * and a caller that cannot tell them apart will eventually act on the wrong one.
  */
 async function flatSymbols({ timeoutMs = 8000 } = {}) {
-  const r = await alpaca.positions({ timeoutMs });
+  const r = await positionsEverywhere({ timeoutMs });
   if (!r.ok) return null;
   return new Set(r.positions.filter(p => p.qty !== 0).map(p => p.symbol));
 }

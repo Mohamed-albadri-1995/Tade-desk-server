@@ -353,6 +353,10 @@ try:
     # copies it over. The fix has to send you THERE, not to an env file.
     ok('...and the Alpaca fix sends you to the desk and the deploy',
        'Algo' in fix2 and './deploy-tools.sh' in fix2 and 'qp-chart' not in fix2, fix2)
+    # …and names the pair that is actually used: data/keys.json wins over an
+    # account's own pair, so "change the account's key" fixed nothing.
+    ok('...and it names data/keys.json, the pair qp is actually given',
+       'data/keys.json' in fix2, fix2)
 
     # Polygon's documented live failure: the key is fine, the PLAN is not.
     # A SERVER RESPONSE OUTRANKS A MISSING ENVIRONMENT VARIABLE. The key is

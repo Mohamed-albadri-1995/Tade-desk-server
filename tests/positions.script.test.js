@@ -39,6 +39,9 @@ jest.mock('../src/alpaca/account', () => ({
   account: jest.fn(async () => mockAlpaca.account),
   orders: jest.fn(),
   fills: jest.fn(),
+  // Pure: a destination's own key pair or null. The real rule, not a stub —
+  // positions are read per account with it.
+  credsOf: jest.requireActual('../src/alpaca/account').credsOf,
 }));
 
 const broker = require('../src/broker/signalstack');
@@ -187,7 +190,8 @@ describe('what it says about each position', () => {
   test('an unreachable Alpaca says so and stops', async () => {
     mockAlpaca.positions = { ok: false, error: 'timed out' };
     const out = await run();
-    expect(out).toMatch(/Alpaca did not answer: timed out/);
+    // …and which account did not: positions are read per account now.
+    expect(out).toMatch(/Alpaca did not answer: Alpaca: timed out/);
     expect(out).toMatch(/Nothing below can be trusted/);
     expect(out).not.toMatch(/holding nothing/);
   });

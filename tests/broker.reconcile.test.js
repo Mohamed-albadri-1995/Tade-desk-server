@@ -467,3 +467,62 @@ describe('positions that survived their own session', () => {
     expect(r.carried).toBeUndefined();
   });
 });
+
+/*
+ * 2026-09-24: the desk-wide pair in data/keys.json was dead (401) while each
+ * account's own pair worked. carriedOver() asked with the dead one, every
+ * minute, all day — the leftover-position check blind, the orders fine. And a
+ * single pair only ever answered for one of two accounts anyway.
+ */
+describe('positions are read with each account\'s OWN keys', () => {
+  const two = () => broker.save({
+    destinations: [
+      { id: 'a1', name: 'OR+VWAP 935', dialect: 'alpaca', webhookUrl: HOOK,
+        alpacaKeyId: 'PKTESTAAAAAAAAAAAAAA', alpacaSecret: 'secretAAAAAAAAAAAAAAAAAA', buyingPower: 1, ratio: 1, mode: 'auto', setups: [] },
+      { id: 'a2', name: 'Alpaca100ktest', dialect: 'alpaca', webhookUrl: HOOK2,
+        alpacaKeyId: 'PKTESTBBBBBBBBBBBBBB', alpacaSecret: 'secretBBBBBBBBBBBBBBBBBB', buyingPower: 1, ratio: 1, mode: 'auto', setups: [] },
+    ],
+  });
+  const byKey = (m) => alpaca.positions.mockImplementation(async ({ account }) =>
+    m[account && account.keyId] || { ok: false, error: 'Alpaca /v2/positions 401: unauthorized' });
+
+  test('every account is asked, each with its own pair, never the shared one', async () => {
+    two();
+    byKey({ PKTESTAAAAAAAAAAAAAA: { ok: true, positions: [] }, PKTESTBBBBBBBBBBBBBB: { ok: true, positions: [] } });
+    const r = await reconcile.carriedOver(DAY);
+    expect(r.ok).toBe(true);
+    const asked = alpaca.positions.mock.calls.map(c => c[0].account && c[0].account.keyId);
+    expect(asked.sort()).toEqual(['PKTESTAAAAAAAAAAAAAA', 'PKTESTBBBBBBBBBBBBBB']);
+  });
+
+  test('a position in the SECOND account is seen, and closed where it is held', async () => {
+    two();
+    fs.writeFileSync(process.env.BROKER_LEDGER, [
+      { date: '2026-08-17', symbol: 'CBRS', destination: 'a1' },
+      { date: '2026-08-17', symbol: 'CBRS', destination: 'a2' },
+    ].map(r => JSON.stringify({ at: 1, sent: true, signal: 'LONG', action: 'buy',
+      price: 10, quantity: 20, setupId: 'S', ...r })).join('\n'));
+    byKey({ PKTESTAAAAAAAAAAAAAA: { ok: true, positions: [] },
+            PKTESTBBBBBBBBBBBBBB: { ok: true, positions: [{ symbol: 'CBRS', qty: 20, side: 'long' }] } });
+    const r = await reconcile.carriedOver(DAY);
+    expect(r.carried).toHaveLength(1);
+    expect(r.carried[0].account).toBe('a2');
+    expect(r.carried[0].destinations).toEqual(['a2']);
+  });
+
+  test('one account unreadable is no answer, not a shorter list', async () => {
+    two();
+    byKey({ PKTESTAAAAAAAAAAAAAA: { ok: true, positions: [] } });
+    const r = await reconcile.carriedOver(DAY);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/Alpaca100ktest: .*401/);
+    expect(await reconcile.flatSymbols()).toBeNull();
+  });
+
+  test('flatSymbols is the union over every account', async () => {
+    two();
+    byKey({ PKTESTAAAAAAAAAAAAAA: { ok: true, positions: [{ symbol: 'AAA', qty: 1 }] },
+            PKTESTBBBBBBBBBBBBBB: { ok: true, positions: [{ symbol: 'BBB', qty: -3 }] } });
+    expect([...(await reconcile.flatSymbols())].sort()).toEqual(['AAA', 'BBB']);
+  });
+});
