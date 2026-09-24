@@ -626,6 +626,9 @@ if [ -d quant-platform ]; then
   # exactly that — it wrote the keys, exited 3 to ask for a restart, and the
   # deploy stopped dead before [6b/6], so qp kept running without them. An
   # exit code that is a message must be read, not obeyed.
+  # A desk-wide pair Alpaca REFUSES is replaced with an account's own working
+  # pair first (any working paper pair serves; see the script). Never fatal.
+  node scripts/heal-alpaca-keys.js || true
   SYNC_RC=0
   node scripts/sync-qp-env.js || SYNC_RC=$?
   if [ "$SYNC_RC" = "3" ]; then QP_FORCE_RESTART=1; fi
