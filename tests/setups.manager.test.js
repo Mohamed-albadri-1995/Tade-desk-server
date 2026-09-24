@@ -902,3 +902,81 @@ describe('closeVerdict — the wording is the reason', () => {
       .toEqual({ why: null, reason: null });
   });
 });
+
+/*
+ * ══ A CLOSE THAT DID NOT TAKE ═══════════════════════════════════════════════
+ *
+ * This loop sends `close`, writes a flatten row, and from then on never looks
+ * at the symbol again. Its alert says CLOSED on SignalStack's acceptance —
+ * the same thing the 15:50 flatten said about U on 2026-09-21, while Alpaca
+ * refused the order because the position's own stop held every share.
+ *
+ * carriedOver() has reported that case as its own bucket, `notClosed`, since
+ * that day. It was split out of `foreign`, and this loop — which announced
+ * `foreign` — was not updated. From then until now the manager said nothing
+ * about a close that failed.
+ */
+describe('a close that did not take', () => {
+  const notClosed = (over = {}) => ({
+    ok: true, carried: [], foreign: [], running: [],
+    notClosed: [{ symbol: 'CBRS', qty: 1045, side: 'long', openedOn: DAY,
+                  closedOn: DAY, setupId: 'S@09:35', account: 'alp',
+                  why: 'this desk closed it and it is still on — the close did not take',
+                  ...over }],
+  });
+
+  test('is announced as an ERROR, with the share count', async () => {
+    reconcile.carriedOver.mockResolvedValue(notClosed());
+    await manager.check(AT);
+    const fire = (store.publishFires.mock.calls.flat(2))
+      .find(f => /A CLOSE WAS SENT/.test(f.detail || ''));
+    expect({ announced: !!fire }).toEqual({ announced: true });
+    expect(fire.level).toBe('error');
+    expect(fire.ticker).toBe('CBRS');
+    expect(fire.detail).toMatch(/ALPACA STILL HOLDS 1045 SHARES in alp/);
+    // What to DO about it, because this is read with the clock running.
+    expect(fire.detail).toMatch(/Cancel the working order and close it by hand/);
+  });
+
+  test('and is not described as a trade somebody else took', async () => {
+    // It was in `foreign` once, under "nothing here opened it" — which is
+    // false about a position this desk opened AND tried to close.
+    reconcile.carriedOver.mockResolvedValue(notClosed());
+    await manager.check(AT);
+    const all = store.publishFires.mock.calls.flat(2).map(f => f.detail || '');
+    expect(all.some(d => /NOTHING HERE OPENED IT/.test(d))).toBe(false);
+  });
+
+  test('once, not once a minute', async () => {
+    reconcile.carriedOver.mockResolvedValue(notClosed({ symbol: 'ONCE1' }));
+    await manager.check(AT);
+    await manager.check(AT + 60000);
+    const hits = store.publishFires.mock.calls.flat(2)
+      .filter(f => /A CLOSE WAS SENT/.test(f.detail || '') && f.ticker === 'ONCE1');
+    expect(hits).toHaveLength(1);
+  });
+
+  test('a short reports its size as a size, not a direction', async () => {
+    reconcile.carriedOver.mockResolvedValue(notClosed({ symbol: 'SHRT1', qty: -300 }));
+    await manager.check(AT);
+    const fire = store.publishFires.mock.calls.flat(2)
+      .find(f => f.ticker === 'SHRT1');
+    expect(fire.detail).toMatch(/STILL HOLDS 300 SHARES/);
+    expect(fire.detail).not.toMatch(/-300/);
+  });
+
+  test('it counts as HELD, so nothing reads it as flat', async () => {
+    /*
+     * stillHeld decides whether a close is skipped as already flat. A set that
+     * omitted notClosed would answer "flat" about the one position most in
+     * need of attention — and the desk would skip closing it again.
+     */
+    ledger([{ symbol: 'HELD1' }]);
+    reconcile.carriedOver.mockResolvedValue(notClosed({ symbol: 'HELD1' }));
+    qp.manage.mockResolvedValue(answer({ close_now: true, close_reason: 'exit',
+                                          exit_now: true }));
+    await manager.check(AT);
+    expect(sent.map(x => x.body)).toContainEqual(
+      expect.objectContaining({ symbol: 'HELD1', action: 'close' }));
+  });
+});

@@ -279,8 +279,12 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
     stale = { ok: false, error: err.message };
   }
   if (!stale.ok) console.warn(`[Manager] could not verify positions with Alpaca: ${stale.error}`);
+  // `notClosed` included: a close that was sent and did not take leaves the
+  // position held, and a set that omitted it would answer "flat" about the one
+  // position most in need of attention.
   const stillHeld = stale.ok
-    ? new Set([...stale.carried, ...stale.foreign, ...stale.running].map(p => p.symbol))
+    ? new Set([...stale.carried, ...stale.foreign, ...stale.running,
+               ...(stale.notClosed || [])].map(p => p.symbol))
     : null;
   const verifiable = new Set(reconcile.alpacaDestinations());
 
@@ -318,6 +322,40 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
             + (p.why ? ` — ${p.why}` : '')
             + '. It will NOT be closed automatically, because a position this desk '
             + 'did not open may be one you took by hand. Close it yourself if you want it flat.',
+      }], day);
+    }
+
+    /*
+     * A CLOSE THAT WAS SENT AND DID NOT TAKE — announced within one pass.
+     *
+     * This loop sends `close` and writes a flatten row, and from then on
+     * openPositions() excludes the symbol: it never looks at it again. Its
+     * alert says CLOSED on SignalStack's acceptance, which is the same thing
+     * the 15:50 flatten said about U on 2026-09-21 while Alpaca refused it —
+     * "insufficient qty available for order (requested: 1045, available: 0)",
+     * the position's own stop holding every share — and told nobody but an
+     * inbox.
+     *
+     * carriedOver() already knows this case: a close AFTER the last entry, and
+     * Alpaca still holding the name. It is its own bucket, `notClosed`, since
+     * 2026-09-21. It was split out of `foreign` that day — and this loop, which
+     * announced `foreign`, was not updated, so from then until this line the
+     * manager said nothing about a close that failed. Asking here costs
+     * nothing: carriedOver() is already called once per pass, above.
+     */
+    for (const p of (stale.notClosed || [])) {
+      const key = `notclosed:${p.symbol}:${p.closedOn || 'none'}`;
+      if (announced.has(key)) continue;
+      announced.add(key);
+      store.publishFires([{
+        ruleId: p.setupId || 'broker', rule: 'Manager', ticker: p.symbol,
+        toolId: 'ALERTS', date: day, at: Date.now(), kind: 'broker', level: 'error',
+        detail: `${p.symbol}: A CLOSE WAS SENT${p.closedOn ? ` on ${p.closedOn}` : ''} AND `
+          + `ALPACA STILL HOLDS ${Math.abs(Number(p.qty)) || '?'} SHARES`
+          + `${p.account ? ` in ${p.account}` : ''} — the close did not take. The usual `
+          + 'cause is the position\'s own stop order holding every share, which makes the '
+          + 'quantity available to sell zero. Cancel the working order and close it by '
+          + `hand. The ${cfgAll.flattenAt} flatten will try again.`,
       }], day);
     }
   }
