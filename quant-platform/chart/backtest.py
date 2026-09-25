@@ -1602,6 +1602,9 @@ def run(spec: dict, progress_cb=None) -> dict:
                                    'ctx': {**(rctx or {}),
                                            'decided': t.get('decided'),
                                            'signal_px': t.get('signal_px'),
+                                           # the bar DECIDED on — the live
+                                           # order's decisionBar (dayCheck.js)
+                                           'signal_ts': t.get('signal_ts'),
                                            'drop_pct': t.get('drop_pct'),
                                            'strategy': sname},
                                    'legs': t.get('legs') or []})
@@ -1628,6 +1631,7 @@ def run(spec: dict, progress_cb=None) -> dict:
                                   'ctx': {**(rctx or {}),
                                           'decided': ot.get('decided'),
                                           'signal_px': ot.get('signal_px'),
+                                          'signal_ts': ot.get('signal_ts'),
                                           'drop_pct': ot.get('drop_pct'),
                                           'strategy': sname},
                                   'legs': ot.get('legs') or []})

@@ -920,6 +920,39 @@ app.get('/api/logs', (req, res) => {
  * what filled, what is held now, how the manager last saw it. See
  * src/alerts/liveBoard.js. Never 500s.
  */
+/*
+ * THE DAILY CHECK — today's backtest against what live did, per enabled
+ * setup. Runs by itself at 16:10 New York (src/setups/dayCheck.js); these
+ * read a stored day and run one on demand. Reading only: nothing is sent.
+ */
+app.get('/api/daycheck', (req, res) => {
+  try {
+    const dc = require('../setups/dayCheck');
+    const { toETDate } = require('../utils/time');
+    const dates = dc.dates();
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '')
+      ? req.query.date : toETDate(Date.now());
+    res.json({ ok: true, date, dates, running: dc.isRunning(), runsAt: dc.RUN_AT,
+               report: dc.read(date) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/daycheck/run', express.json(), (req, res) => {
+  try {
+    const dc = require('../setups/dayCheck');
+    const { toETDate } = require('../utils/time');
+    const date = /^\d{4}-\d{2}-\d{2}$/.test((req.body || {}).date || '')
+      ? req.body.date : toETDate(Date.now());
+    // Minutes, not seconds — answered at once, and the page asks again.
+    dc.run(date).catch(() => {});
+    res.json({ ok: true, date, running: true });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/live/board', async (req, res) => {
   try {
     res.json(await require('./liveBoard').board({ date: String(req.query.date || '') }));
@@ -1210,6 +1243,8 @@ if (require.main === module) {
      * reversal.
      */
     require('../setups/manager').start();
+    // After the close: today's backtest against today's live trades.
+    require('../setups/dayCheck').start();
   });
 }
 

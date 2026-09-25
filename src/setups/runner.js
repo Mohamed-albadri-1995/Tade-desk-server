@@ -335,7 +335,7 @@ function unmanagedLine(plan) {
  * yesterday's trades into today's alert feed.
  */
 async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = null,
-                                  rehearsal = false } = {}) {
+                                  rehearsal = false, trace = null } = {}) {
   const day = date || toETDate(Date.now());
   /*
    * A REHEARSAL ASKS ABOUT NOW, AND PUBLISHES NOTHING.
@@ -391,6 +391,11 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
     gate = universeFilter.apply(rows, setup.universe);
     list = gate.kept.map(r => String(r.ticker).toUpperCase());
   }
+
+  // WHICH NAMES WERE ASKED ABOUT, for the run's log line — the daily live-vs-
+  // backtest check reads it to tell "live never looked at it" from "live
+  // looked and found nothing" (src/setups/dayCheck.js).
+  if (trace) trace.symbols = list;
 
   if (!list.length && gate.filtered && gate.dropped.length) {
     // Distinct from "no cards": the tool found stocks and the filter removed
@@ -1311,8 +1316,9 @@ async function runSetup(setup, opts = {}) {
                  dryRun: !!(opts.dryRun || opts.rehearsal),
                  rehearsal: !!opts.rehearsal };
   let res;
+  const trace = {};
   try {
-    res = await _runSetup(setup, opts);
+    res = await _runSetup(setup, { ...opts, trace });
   } catch (err) {
     sessionLog.record(sessionLog.runOf({
       ...base, ok: false, error: err.message, ms: Date.now() - started,
@@ -1340,6 +1346,7 @@ async function runSetup(setup, opts = {}) {
     routing: res.routing,
     riskCfg: res.riskCfg,
     data: res.data,
+    symbols: trace.symbols,
   }));
   return res;
 }

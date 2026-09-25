@@ -141,8 +141,10 @@ chkv('per-day ctx differs', ctxs[('2024-01-10', 'AAA')].get('regime'), 'CHOP')
 # close of the bar the strategy LOOKED at, and the ranker reads it so that
 # selection cannot depend on the fill model. Still a diagnostic of the run, not
 # a column from a screener — which is the only thing this check is about.
+# `signal_ts` (2026-09-25): WHEN that bar was — the live order's decisionBar,
+# read by the desk's daily live-vs-backtest check. A diagnostic too.
 chkv('symbols universe ctx has no register card (only diagnostics)',
-     all(set(t.get('ctx') or {}) <= {'drop_pct', 'strategy', 'decided', 'signal_px'}
+     all(set(t.get('ctx') or {}) <= {'drop_pct', 'strategy', 'decided', 'signal_px', 'signal_ts'}
          for t in out['trades']), True)
 chkv('every trade names the strategy that produced it',
      all((t.get('ctx') or {}).get('strategy') for t in out['trades']), True)

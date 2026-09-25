@@ -98,6 +98,13 @@ ok('sized at the decision price, as live: 99 shares, not 110',
    (by['AAA'].get('ctx') or {}).get('acct_shares') == 99.0,
    (by['AAA'].get('ctx') or {}).get('acct_shares'))
 
+ok('...and names the bar it was decided on, 09:40',
+   pd.Timestamp((by['AAA'].get('ctx') or {}).get('signal_ts') or 0, unit='s', tz='UTC')
+   .tz_convert('America/New_York').strftime('%H:%M') == '09:40')
+ok('each trade carries the exit plan live would have built',
+   ((by['AAA'].get('plan') or {}).get('legs') or [{}])[0].get('price') is not None,
+   by['AAA'].get('plan'))
+
 print('== 2. no register that day: the extras alone ==')
 REG.clear()
 out = call(SPEC)

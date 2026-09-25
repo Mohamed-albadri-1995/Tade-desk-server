@@ -263,6 +263,20 @@ async function parity(ids, bt = null, timeoutMs = 10000) {
   return d;
 }
 
+/**
+ * One day's backtest, answered in the request and stored nowhere — the daily
+ * live-vs-backtest check (src/setups/dayCheck.js). Minutes, not seconds: the
+ * whole card list is evaluated, after the close, on a two-core box.
+ */
+async function backtestDay(spec, timeoutMs = 600000) {
+  const res = await axios.post(`${baseUrl()}/api/backtest/day`, spec, {
+    timeout: timeoutMs, headers: { 'Content-Type': 'application/json' },
+  });
+  const d = res.data || {};
+  if (!d.ok) throw new Error(d.error || 'qp could not run the day\'s backtest');
+  return d;
+}
+
 /** Is the platform up? Asked before a decision so "down" is a distinct answer. */
 async function health(timeoutMs = 5000) {
   try {
@@ -274,7 +288,7 @@ async function health(timeoutMs = 5000) {
 }
 
 module.exports = {
-  decide, manage, strategies, setTools, health, baseUrl, parity,
+  decide, manage, strategies, setTools, health, baseUrl, parity, backtestDay,
   // Exported so the retry rule can be tested against real error shapes rather
   // than trusted — "only a request that never got an answer may be repeated"
   // is a sentence until something executes it.

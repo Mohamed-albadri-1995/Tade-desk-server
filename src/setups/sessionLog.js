@@ -190,7 +190,7 @@ function runOf({
   ok = true, error = null,
   ms = null, universe = null, gate = null, counts = null, rank = null,
   picks = [], dropped = null, orders = null, routing = null, riskCfg = null,
-  data = null, quiet = false,
+  data = null, quiet = false, symbols = null,
 } = {}) {
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   return {
@@ -218,6 +218,10 @@ function runOf({
     // returned silently, because "asked and answered nothing" and "never asked"
     // are the two cases this file exists to tell apart.
     quiet: quiet || undefined,
+    // THE NAMES qp WAS ASKED ABOUT on this bar — after the card filter. The
+    // funnel counts them; the daily live-vs-backtest check needs them by name
+    // to say whether live ever looked at a stock the backtest traded.
+    symbols: Array.isArray(symbols) && symbols.length ? symbols : undefined,
     funnel: {
       cards: num(universe && universe.cards),
       kept: num(universe && universe.kept),

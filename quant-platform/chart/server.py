@@ -434,6 +434,22 @@ def backtest_day(payload: dict = Body(...)):
         out = bt.run(spec)
         summary = {k: v for k, v in (out.get('summary') or {}).items()
                    if k != 'equity_curve'}
+        # EACH TRADE'S EXIT PLAN, from the function the live desk builds its
+        # bracket legs with (decide.exit_plan), at the decision price and the
+        # trade's stop — so the desk splits the backtest's shares into legs
+        # exactly as it split its own order, and a leg can be compared to a leg.
+        from chart.decide import exit_plan
+        by_name = {s.get('name'): s for s in bt._resolve_strategies(spec)}
+        for t in out.get('trades') or []:
+            c = t.get('ctx') or {}
+            st = by_name.get(c.get('strategy')) or next(iter(by_name.values()), None)
+            try:
+                px = float(c.get('signal_px') or t.get('entry'))
+                if st and t.get('stop') is not None:
+                    t['plan'] = exit_plan(st, t.get('side') or 'long', px, float(t['stop']),
+                                          float(spec.get('target_r') or 2.0))
+            except Exception as e:                    # noqa: BLE001 — reported, not fatal
+                t['plan_error'] = str(e)
         return JSONResponse({'ok': True, 'summary': summary,
                              'trades': out.get('trades') or []})
     except Exception as e:                                # noqa: BLE001

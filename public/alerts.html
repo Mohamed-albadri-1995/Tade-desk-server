@@ -551,6 +551,38 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .par-tbl td:first-child { color:var(--text3); white-space:nowrap; }
 .par-tbl tr.differ td { color:#fbbf24; }
 .par-tbl tr.unknown td:not(:first-child) { color:var(--text3); }
+/* ── the daily check ── */
+.dc-date { font:600 var(--f-xs)/1.4 var(--ui); background:var(--bg3); color:var(--text);
+  border:1px solid var(--border); border-radius:4px; padding:2px 4px; }
+.dc-card { border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+  margin:12px 0; background:var(--bg2); }
+.dc-card > summary { cursor:pointer; list-style:none; }
+.dc-card > summary::-webkit-details-marker { display:none; }
+.dc-h { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:baseline; }
+.dc-h b { font-size:var(--f-sm, 13px); }
+.dc-counts { font:var(--f-xs)/1.5 var(--mono); color:var(--text2); }
+.dc-set { font:var(--f-xs)/1.6 var(--mono); color:var(--text3); margin:6px 0; overflow-wrap:anywhere; }
+.dc-tbl { width:100%; border-collapse:collapse; font-size:var(--f-xs); font-family:var(--mono);
+  margin:6px 0; }
+.dc-tbl th { text-align:left; color:var(--text3); font-weight:600; padding:3px 6px; }
+.dc-tbl td { padding:3px 6px; border-top:1px solid var(--border); vertical-align:top;
+  overflow-wrap:anywhere; }
+.dc-tbl td:first-child { color:var(--text3); white-space:nowrap; }
+.dc-tbl tr.bad td { color:#fca5a5; }
+.dc-tbl tr.bad td:first-child { color:#fca5a5; font-weight:700; }
+.dc-tbl tr.warn td { color:#fbbf24; }
+.dc-tbl tr.leg td { color:var(--text); font-weight:700; background:var(--bg3); }
+.dc-tbl .sub { color:var(--text3); }
+.dc-tbl .nw { white-space:nowrap; }
+.dc-badge { font:800 10px/1 var(--ui); letter-spacing:.05em; border-radius:3px; padding:3px 6px;
+  border:1px solid; white-space:nowrap; }
+.dc-badge.ok { color:var(--m-up); border-color:#22c55e66; background:#22c55e14; }
+.dc-badge.warn { color:#fbbf24; border-color:#fbbf2466; background:#fbbf2414; }
+.dc-badge.bad { color:#fca5a5; border-color:#ef444466; background:#ef444418; }
+.dc-trade { border-top:1px solid var(--border); margin-top:8px; padding-top:6px; }
+.dc-trade > summary { cursor:pointer; font:600 var(--f-xs)/1.8 var(--mono); }
+.dc-why { margin:4px 0 6px 18px; padding:0; font-size:var(--f-xs); color:#fbbf24; line-height:1.6; }
+.dc-acct { font:700 var(--f-xs)/1.6 var(--ui); color:var(--text2); margin-top:6px; }
 .par-rule { font-size:var(--f-xs); font-family:var(--mono); color:#fbbf24; margin:2px 0; }
 .su-tag { font-size:10px; font-weight:800; letter-spacing:.06em; border-radius:3px;
   padding:2px 7px; background:var(--bg3); color:var(--text2); border:1px solid var(--border); }
@@ -875,6 +907,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 <aside class="al-side" aria-label="sections">
   <button class="tb on" data-t="today">Live</button>
   <button class="tb" data-t="history">Review</button>
+  <button class="tb" data-t="check">Check</button>
   <button class="tb" data-t="setups">Setups</button>
   <button class="tb" data-t="health">Health</button>
   <button class="tb" data-t="settings">Settings</button>
@@ -910,6 +943,8 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
        scroll meant every glance at the morning's fires ended up somewhere in
        last Tuesday, and the send button lived down there with it. -->
   <button class="tb" data-t="history">Review</button>
+  <!-- CHECK: today's backtest against what live did, after the close. -->
+  <button class="tb" data-t="check">Check</button>
   <button class="tb" data-t="setups">Setups</button>
   <!-- LOG answers the question the feed structurally cannot.
        Every other tab here shows what FIRED. A name that was dropped produces
@@ -1247,6 +1282,23 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
      the manager, the flatten, today's decisions. What used to take Termux,
      `pm2 list`, `pm2 logs` and a curl. Grey means NOT CHECKED, never fine.
      Fetched when opened and every 30 s while open; see src/alerts/health.js. -->
+<!-- THE DAILY CHECK. After the close the desk backtests today — every enabled
+     setup, with its live settings and its live feed — and lays it beside what
+     live did: which trades each side took, and for each trade the entry, the
+     size, every leg's exit and the P&L. Anything that differs is coloured and
+     says why. It runs by itself at 16:10 New York; "run now" asks again. -->
+<div class="pane" data-t="check" hidden>
+<div class="sec">
+  <span>Live vs backtest</span>
+  <span class="note" id="dc-at"></span>
+  <select id="dc-date" class="dc-date" onchange="loadDayCheck(this.value)" aria-label="day"></select>
+  <button class="lnk" onclick="dcRun()">run now</button>
+  <button class="lnk" onclick="loadDayCheck()">refresh</button>
+</div>
+<div id="dc-sum" class="hl-sum"></div>
+<div id="daycheck"><div class="empty">Open to check.</div></div>
+</div><!-- /check -->
+
 <div class="pane" data-t="health" hidden>
 <div class="sec">
   <span>System health</span>
@@ -4041,6 +4093,144 @@ async function loadHealth() {
   catch (e) { paintHealth({ ok: false, error: e.message }); }
 }
 
+/* ── THE DAILY CHECK ─────────────────────────────────────────────────────
+   Today's backtest beside today's live trades — see src/setups/dayCheck.js.
+   Everything shown comes from the stored report; nothing is recomputed here. */
+let DC_TIMER = null;
+const dcV = (v) => (v === null || v === undefined || v === '' ? '—'
+  : (typeof v === 'number' ? String(Math.round(v * 10000) / 10000) : String(v)));
+function dcDelta(b, l) {
+  if (typeof b !== 'number' || typeof l !== 'number') return '';
+  const d = Math.round((l - b) * 10000) / 10000;
+  return d === 0 ? '' : `${d > 0 ? '+' : ''}${d}`;
+}
+const DC_WORD = { ok: 'MATCH', warn: 'CLOSE', bad: 'DIFFERENT' };
+function dcRows(rows) {
+  return rows.map(r => `<tr class="${esc(r.level)}"><td>${esc(r.field)}</td>`
+    + `<td>${esc(dcV(r.bt))}</td><td>${esc(dcV(r.live))}</td>`
+    + `<td class="sub">${esc([dcDelta(r.bt, r.live), r.note].filter(Boolean).join(' · '))}</td></tr>`)
+    .join('');
+}
+function dcOneSide(t, label) {
+  if (!t) return '';
+  const legs = (t.legs || []).map((l, i) => `<tr><td>${l.runner ? 'runner' : `leg ${i + 1}`}</td>`
+    + `<td>${esc(dcV(l.qty))} sh${l.target ? ` · target ${esc(dcV(l.target))}` : ''}</td>`
+    + `<td>${esc(l.exit ? `${l.exit.kind}${l.exit.price != null ? ` @ ${dcV(l.exit.price)}` : ''}`
+                          + `${l.exit.at ? ` ${l.exit.at}` : ''}` : '—')}</td>`
+    + `<td class="sub">${l.pnl != null ? `P&L ${esc(dcV(l.pnl))}` : ''}</td></tr>`).join('');
+  const e = t.entry || {};
+  return `<table class="dc-tbl"><tr><th colspan="4">${esc(label)}</th></tr>`
+    + `<tr><td>decided</td><td>${esc(dcV(t.decisionBar))} @ ${esc(dcV(t.decisionPrice))}</td>`
+    + `<td>stop ${esc(dcV(t.stop))}</td><td></td></tr>`
+    + `<tr><td>entry</td><td>${esc(dcV(e.qty))} sh @ ${esc(dcV(e.price != null ? e.price : e.planned))}`
+    + `${e.price == null && e.planned != null ? ' (decided, no fill feed)' : ''}</td>`
+    + `<td>${esc(dcV(e.at || t.sentAt))}</td><td></td></tr>${legs}`
+    + `<tr><td>P&L</td><td>${esc(dcV(t.pnl))}</td><td></td><td></td></tr></table>`;
+}
+function dcAccount(a) {
+  if (a.status === 'both' && a.cmp) {
+    const legs = (a.cmp.legs || []).map(g => {
+      const b = (a.bt.legs || [])[g.n - 1] || {};
+      const l = (a.live.legs || [])[g.n - 1] || {};
+      const t = b.target || l.target;
+      return `<tr class="leg"><td colspan="4">${g.runner ? 'Runner' : `Leg ${g.n}`}`
+        + `${t ? ` — target ${esc(dcV(t))}` : ' — rides the stop'}</td></tr>${dcRows(g.rows)}`;
+    }).join('');
+    const main = a.cmp.rows.filter(r => r.field !== 'P&L');
+    const pnl = a.cmp.rows.filter(r => r.field === 'P&L');
+    return `<table class="dc-tbl"><tr><th></th><th>backtest</th><th>live</th><th>difference</th></tr>`
+      + `${dcRows(main)}${legs}<tr class="leg"><td colspan="4">Result</td></tr>${dcRows(pnl)}</table>`
+      + (a.live && a.live.source === 'ledger'
+        ? '<div class="note">This account has no fill feed: live prices are the decided ones, exits are the closes the desk sent.</div>' : '');
+  }
+  const why = (a.why || []).map(w => `<li>${esc(w)}</li>`).join('');
+  return `<ul class="dc-why">${why}</ul>`
+    + (a.bt ? dcOneSide(a.bt, 'what the backtest did') : '')
+    + (a.live ? dcOneSide(a.live, 'what live did') : '');
+}
+function dcSetup(s) {
+  const T = s.totals || {};
+  const bad = (T.backtestOnly || 0) + (T.liveOnly || 0);
+  const lvl = bad ? 'bad' : (T.mismatched ? 'warn' : 'ok');
+  const st = s.settings || {};
+  const accts = (s.accounts || []).map(a => `${a.name} ×${a.ratio}`
+    + `${a.fills ? ` (fills: ${a.fills})` : ''}${a.backtest && a.backtest.error ? ` — BACKTEST FAILED: ${a.backtest.error}` : ''}`).join(' · ');
+  const list = (s.trades || []).map(t => {
+    const a0 = t.accounts[0] || {};
+    const side = (x) => (x ? `${dcV(x.decisionBar)} ${dcV(x.entry && x.entry.qty)} sh` : '—');
+    return `<tr class="${t.worst === 'ok' ? '' : esc(t.worst)}"><td>${esc(t.symbol)}</td><td class="nw">${esc(t.side)}</td>`
+      + `<td>${esc(side(a0.bt))}</td><td>${esc(side(a0.live))}</td>`
+      + `<td><span class="dc-badge ${esc(t.worst)}">${esc(t.status === 'both' ? DC_WORD[t.worst] : t.status.toUpperCase())}</span></td></tr>`;
+  }).join('');
+  const trades = (s.trades || []).map(t => `<details class="dc-trade"${t.worst !== 'ok' ? ' open' : ''}>`
+    + `<summary>${esc(t.symbol)} · ${esc(t.side)} · ${esc(dcV(t.decisionBar))} `
+    + `<span class="dc-badge ${esc(t.worst)}">${esc(t.status === 'both' ? DC_WORD[t.worst] : t.status.toUpperCase())}</span></summary>`
+    + t.accounts.map(a => `${t.accounts.length > 1 ? `<div class="dc-acct">${esc(a.account)}</div>` : ''}${dcAccount(a)}`).join('')
+    + '</details>').join('');
+  return `<details class="dc-card"${lvl !== 'ok' ? ' open' : ''}><summary><div class="dc-h">`
+    + `<b>${esc(s.name)}</b><span class="dc-badge ${lvl}">${lvl === 'ok' ? 'ALL MATCH' : (bad ? `${bad} NOT ON BOTH` : `${T.mismatched} DIFFER`)}</span>`
+    + `<span class="dc-counts">backtest ${T.backtest || 0} · live ${T.live || 0} · both ${T.both || 0}`
+    + ` · P&L bt ${esc(dcV(T.pnlBacktest))} / live ${esc(dcV(T.pnlLive))}</span></div></summary>`
+    + `<div class="dc-set">feed ${esc(st.feed)} · ${esc(st.tf)} · fill ${esc(st.fill)} · `
+    + `risk ${st.riskUsd ? `$${esc(st.riskUsd)}` : `${esc(st.riskPct)}%`} of ${esc(st.accountSize)}`
+    + `${st.maxPositionPct ? ` · cap ${esc(st.maxPositionPct)}%` : ''}`
+    + `${st.rank ? ` · rank ${esc(st.rank.metric)} top ${esc(st.rank.top_n)}` : ''}`
+    + ` · ${esc(s.evaluated)} names evaluated live, ${esc(s.runs)} runs<br>${esc(accts)}</div>`
+    + (list ? `<table class="dc-tbl"><tr><th>stock</th><th>side</th><th>backtest</th><th>live</th><th></th></tr>${list}</table>`
+      : '<div class="empty">Neither side took a trade.</div>')
+    + trades + '</details>';
+}
+function paintDayCheck(d) {
+  const box = document.getElementById('daycheck');
+  const sum = document.getElementById('dc-sum');
+  const sel = document.getElementById('dc-date');
+  if (sel) {
+    const dates = (d.dates || []).slice();
+    if (d.date && !dates.includes(d.date)) dates.unshift(d.date);
+    sel.innerHTML = dates.map(x => `<option${x === d.date ? ' selected' : ''}>${esc(x)}</option>`).join('');
+  }
+  const r = d.report;
+  document.getElementById('dc-at').textContent = d.running ? 'running…'
+    : (r && r.ranAt ? `ran ${new Date(r.ranAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      + `${r.tookMs ? ` in ${Math.round(r.tookMs / 1000)}s` : ''}` : `runs at ${d.runsAt || '16:10'} New York`);
+  if (!d.ok) { sum.className = 'hl-sum bad'; sum.textContent = d.error || 'could not load'; box.innerHTML = ''; return; }
+  if (!r) {
+    sum.className = 'hl-sum'; sum.textContent = d.running ? 'Running the backtest for every enabled setup…'
+      : `No check for ${d.date} yet — it runs by itself at ${d.runsAt || '16:10'} New York, or press "run now". `
+        + `${(d.dates || []).length ? 'Earlier days are in the list above.' : ''}`;
+    box.innerHTML = '';
+    return;
+  }
+  if (!r.ok) { sum.className = 'hl-sum bad'; sum.textContent = `The check failed: ${r.error}`; box.innerHTML = ''; return; }
+  const all = r.setups || [];
+  const off = all.reduce((n, s) => n + ((s.totals || {}).backtestOnly || 0) + ((s.totals || {}).liveOnly || 0), 0);
+  const diff = all.reduce((n, s) => n + ((s.totals || {}).mismatched || 0), 0);
+  sum.className = `hl-sum ${off ? 'bad' : (diff ? 'warn' : 'ok')}`;
+  sum.textContent = !all.length ? 'No setup is enabled.'
+    : (off ? `${off} trade(s) taken by one side only${diff ? ` · ${diff} more with differences` : ''} — open them below`
+      : (diff ? `Same trades on both sides · ${diff} with differences in price, time or size`
+        : 'Live took exactly the backtest\'s trades, the same way.'));
+  box.innerHTML = all.map(dcSetup).join('') || '<div class="empty">No setup is enabled.</div>';
+}
+async function loadDayCheck(date) {
+  clearTimeout(DC_TIMER);
+  try {
+    const q = date ? `?date=${encodeURIComponent(date)}` : '';
+    const d = await (await fetch(`/api/daycheck${q}`)).json();
+    paintDayCheck(d);
+    if (d.running) DC_TIMER = setTimeout(() => loadDayCheck(d.date), 10000);
+  } catch (e) { paintDayCheck({ ok: false, error: e.message }); }
+}
+async function dcRun() {
+  const sel = document.getElementById('dc-date');
+  const date = sel && sel.value ? sel.value : undefined;
+  try {
+    await fetch('/api/daycheck/run', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(date ? { date } : {}) });
+  } catch { /* the next load says what happened */ }
+  loadDayCheck(date);
+}
+
 function showTab(name) {
   /*
    * 'log' WAS A TAB AND IS NOW HALF OF 'history'; 'rules' is gone entirely. The chosen tab is remembered
@@ -4077,6 +4267,7 @@ function showTab(name) {
   clearInterval(HEALTH_TIMER);
   if (want !== 'history') { clearInterval(SL_TIMER); const lv = document.getElementById('sl-live'); if (lv) lv.checked = false; }
   if (want === 'health') { loadHealth(); HEALTH_TIMER = setInterval(loadHealth, 30000); }
+  if (want === 'check') loadDayCheck();
   window.scrollTo(0, 0);
 }
 

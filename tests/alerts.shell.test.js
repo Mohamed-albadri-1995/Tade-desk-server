@@ -66,7 +66,7 @@ describe('one navigation, in two shapes', () => {
      * Split by TIME now: Live is the monitor, Day is the record.
      */
     // Health added 09-24: what took Termux and pm2 to answer.
-    expect(RAIL()).toEqual(['today', 'history', 'setups', 'health', 'settings']);
+    expect(RAIL()).toEqual(['today', 'history', 'check', 'setups', 'health', 'settings']);
   });
 
   test('both are the same control — one class, one handler, one memory', () => {

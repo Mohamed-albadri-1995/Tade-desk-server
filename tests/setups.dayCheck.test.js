@@ -1,0 +1,260 @@
+/*
+ * THE DAILY CHECK — today's backtest against what live did (2026-09-25).
+ *
+ * Built on fixtures shaped exactly like the three sources it reads: qp's
+ * one-day backtest, the desk's ledger, and Alpaca's nested orders. The day:
+ *
+ *   AAA  both sides took it. Two legs of 50: leg 1 hit its 102 target at
+ *        10:05 on both; leg 2 — the runner — left on the exit rule at 10:30 in
+ *        the backtest and by the manager's close at 10:30:40 live. Live paid
+ *        2 cents more to get in.
+ *   BBB  the backtest took it at 09:50; live evaluated BBB on that bar and qp
+ *        found nothing.
+ *   CCC  live took it; the backtest has no trade.
+ */
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+process.env.DAYCHECK_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'daycheck-'));
+
+const request = require('supertest');
+const { splitLegs } = require('../src/broker/signalstack');
+const risk = require('../src/setups/risk');
+const dc = require('../src/setups/dayCheck');
+
+const DAY = '2026-09-24';
+const ts = hhmm => Math.floor(Date.parse(`${DAY}T${hhmm}:00-04:00`) / 1000);
+const iso = hhmmss => new Date(`${DAY}T${hhmmss}-04:00`).toISOString();
+
+const SETUP = { id: 'S@09:35', name: 'OR + VWAP 09:35', feed: 'yahoo', tools: ['T2'],
+                strategyIds: [1, 2], targetR: 2 };
+const ACCT = { destinationId: 'alp', destinationName: 'Alpaca A', dialect: 'alpaca', ratio: 1 };
+
+const PLAN = { legs: [{ fraction: 0.5, price: 102, r_multiple: 2 }], runner: 0.5 };
+const BT = {
+  ok: true, summary: { coverage: {} },
+  trades: [
+    { symbol: 'AAA', side: 'long', entry_ts: ts('09:41'), entry: 100.00, stop: 99.00,
+      exit_ts: ts('10:30'), exit: 99.60, reason: 'exit',
+      legs: [{ exit_ts: ts('10:05'), price: 102.00, fraction: 0.5, reason: 'T1' }],
+      ctx: { acct_shares: 100, signal_px: 100.00, signal_ts: ts('09:40') }, plan: PLAN },
+    { symbol: 'BBB', side: 'long', entry_ts: ts('09:51'), entry: 50.00, stop: 49.50,
+      exit_ts: ts('11:00'), exit: 49.50, reason: 'SL', legs: [],
+      ctx: { acct_shares: 200, signal_px: 50.00, signal_ts: ts('09:50') },
+      plan: { legs: [{ fraction: 0.5, price: 51, r_multiple: 2 }], runner: 0.5 } },
+  ],
+};
+
+const LEDGER = [
+  { date: DAY, at: Date.parse(iso('09:41:02')), setupId: SETUP.id, destination: 'alp',
+    symbol: 'AAA', signal: 'LONG', price: 100.00, stop: 99.00, decisionBar: '09:40',
+    quantity: 100, sent: true,
+    legs: [{ quantity: 50, target: 102, sent: true }, { quantity: 50, target: null, sent: true }] },
+  { date: DAY, at: Date.parse(iso('10:30:35')), kind: 'flatten', destination: 'alp',
+    symbol: 'AAA', sent: true, source: 'the exit rule fired' },
+  { date: DAY, at: Date.parse(iso('10:12:01')), setupId: SETUP.id, destination: 'alp',
+    symbol: 'CCC', signal: 'SHORT', price: 20.00, stop: 20.20, decisionBar: '10:11',
+    quantity: 30, sent: true },
+];
+
+const order = (o) => ({ filledQty: 0, filledAvg: null, legs: [], ...o });
+const ORDERS = { ok: true, orders: [
+  order({ symbol: 'AAA', side: 'buy', type: 'market', filledQty: 50, filledAvg: 100.02,
+          submittedAt: iso('09:41:02'), filledAt: iso('09:41:03'), orderClass: 'bracket',
+          legs: [order({ side: 'sell', type: 'limit', limitPrice: 102, filledQty: 50,
+                         filledAvg: 102.00, filledAt: iso('10:05:10') }),
+                 order({ side: 'sell', type: 'stop', stopPrice: 99, status: 'canceled' })] }),
+  order({ symbol: 'AAA', side: 'buy', type: 'market', filledQty: 50, filledAvg: 100.02,
+          submittedAt: iso('09:41:03'), filledAt: iso('09:41:04'), orderClass: 'oto',
+          legs: [order({ side: 'sell', type: 'stop', stopPrice: 99, status: 'canceled' })] }),
+  order({ symbol: 'AAA', side: 'sell', type: 'market', filledQty: 50, filledAvg: 99.55,
+          submittedAt: iso('10:30:35'), filledAt: iso('10:30:40') }),
+  order({ symbol: 'CCC', side: 'sell', type: 'market', filledQty: 30, filledAvg: 19.98,
+          submittedAt: iso('10:12:01'), filledAt: iso('10:12:02'),
+          legs: [order({ side: 'buy', type: 'stop', stopPrice: 20.2, filledQty: 30,
+                         filledAvg: 20.21, filledAt: iso('10:40:00') })] }),
+] };
+
+const RUNS = [
+  { kind: 'run', bar: '09:40', ok: true, symbols: ['AAA', 'BBB'], picks: [{ ticker: 'AAA' }] },
+  { kind: 'run', bar: '09:50', ok: true, symbols: ['AAA', 'BBB', 'CCC'], picks: [] },
+  { kind: 'run', bar: '10:11', ok: true, symbols: ['CCC'], picks: [{ ticker: 'CCC' }] },
+];
+
+function deps(over = {}) {
+  const asked = [];
+  return {
+    asked,
+    catalog: { list: async () => [SETUP] },
+    prefs: { isEnabled: () => true },
+    broker: { orders: () => LEDGER, accountsFor: () => [ACCT], destinationCfg: () => null,
+              splitLegs },
+    qp: { backtestDay: async (spec) => { asked.push(spec); return BT; } },
+    sessionLog: { runsOn: () => RUNS },
+    risk: { settings: () => ({ accountSize: 100000 }), ratioOf: risk.ratioOf },
+    specFor: () => ({ account_equity: 100000, risk_usd: 100, tf: '1m', fill: 'desk',
+                      rules: { rth_entries: true, eod_close: true, one_per_symbol_day: true },
+                      universe: { kind: 'tools', register: 'R1', tools: ['T2'] } }),
+    alpacaOrders: async () => ORDERS,
+    ...over,
+  };
+}
+
+describe('the backtest it runs', () => {
+  test('the live settings, the live feed, one day, the names live evaluated, no costs', async () => {
+    const d = deps();
+    await dc.build(DAY, d);
+    const spec = d.asked[0];
+    expect(spec).toMatchObject({ start: DAY, end: DAY, feed: 'yahoo', fill: 'desk',
+      strategy_ids: [1, 2], size_ratio: 1, cost_bps: 0, check_shortable: true,
+      rules: { rth_entries: true, eod_close: true, one_per_symbol_day: true } });
+    expect(spec.universe).toMatchObject({ kind: 'tools', register: 'R1', tools: ['T2'] });
+    expect(spec.universe.extra_symbols.sort()).toEqual(['AAA', 'BBB', 'CCC']);
+  });
+
+  test('one backtest per account size, not per account', async () => {
+    const d = deps();
+    d.broker.accountsFor = () => [ACCT, { ...ACCT, destinationId: 'alp2', destinationName: 'B' }];
+    await dc.build(DAY, d);
+    expect(d.asked).toHaveLength(1);
+  });
+});
+
+describe('who took what', () => {
+  let setup;
+  beforeAll(async () => { setup = (await dc.build(DAY, deps())).setups[0]; });
+  const trade = sym => setup.trades.find(t => t.symbol === sym);
+
+  test('AAA both, BBB backtest only, CCC live only', () => {
+    expect(trade('AAA').status).toBe('both');
+    expect(trade('BBB').status).toBe('backtest only');
+    expect(trade('CCC').status).toBe('live only');
+    expect(setup.totals).toMatchObject({ backtest: 2, live: 2, both: 1, backtestOnly: 1, liveOnly: 1 });
+  });
+
+  test('why live has no BBB: it looked on that bar and qp found nothing', () => {
+    expect(trade('BBB').accounts[0].why.join(' ')).toMatch(/evaluated live at 09:50 and qp found no signal/);
+  });
+
+  test('why the backtest has no CCC', () => {
+    expect(trade('CCC').accounts[0].why[0]).toMatch(/backtest found no trade on CCC/);
+  });
+});
+
+describe('one trade, side by side', () => {
+  let a;
+  beforeAll(async () => {
+    a = (await dc.build(DAY, deps())).setups[0].trades.find(t => t.symbol === 'AAA').accounts[0];
+  });
+  const row = (rows, f) => rows.find(r => r.field === f);
+
+  test('entry: the real fill against the backtest\'s, and what it cost', () => {
+    expect(a.live.entry).toMatchObject({ price: 100.02, qty: 100, at: '09:41:03' });
+    expect(a.bt.entry).toMatchObject({ price: 100, qty: 100, at: '09:41' });
+    expect(row(a.cmp.rows, 'entry price').note).toMatch(/worse by \$0.02/);
+    expect(row(a.cmp.rows, 'decision bar').level).toBe('ok');
+    expect(row(a.cmp.rows, 'quantity').level).toBe('ok');
+  });
+
+  test('leg 1: the target, both sides, same price', () => {
+    const L = a.cmp.legs[0].rows;
+    expect(row(L, 'quantity')).toMatchObject({ bt: 50, live: 50, level: 'ok' });
+    expect(row(L, 'how it ended')).toMatchObject({ bt: 'target', live: 'target', level: 'ok' });
+    expect(row(L, 'exit price')).toMatchObject({ bt: 102, live: 102 });
+  });
+
+  test('leg 2: the runner, left on the exit rule — live by the manager\'s close, named', () => {
+    const L = a.cmp.legs[1].rows;
+    expect(a.cmp.legs[1].runner).toBe(true);
+    expect(row(L, 'how it ended')).toMatchObject({ bt: 'exit rule', live: 'exit rule', level: 'ok' });
+    expect(row(L, 'exit price')).toMatchObject({ bt: 99.6, live: 99.55 });
+    expect(row(L, 'exit time')).toMatchObject({ bt: '10:30', live: '10:30:40', level: 'ok' });
+  });
+
+  test('P&L: the backtest\'s legs and Alpaca\'s money', () => {
+    // backtest: 50 x 2.00 + 50 x -0.40 = 80. live: 50 x 101.9999... from fills:
+    // sells 5100 + 4977.5 - buys 10002 = 75.5
+    expect(a.bt.pnl).toBe(80);
+    expect(a.live.pnl).toBe(75.5);
+    expect(row(a.cmp.rows, 'P&L').note).toMatch(/live -4.5 vs the backtest/);
+  });
+
+  test('a different leg ending is a different trade', () => {
+    const bt = dc.backtestTrade(BT.trades[0], splitLegs);
+    const live = { ...bt, legs: bt.legs.map((l, i) => (i === 1
+      ? { ...l, exit: { ...l.exit, kind: 'stop' } } : l)) };
+    expect(dc.compare(bt, live).worst).toBe('bad');
+  });
+});
+
+describe('an account with no fill feed', () => {
+  test('the ledger\'s own record, said as such', async () => {
+    const d = deps();
+    d.broker.accountsFor = () => [{ ...ACCT, dialect: 'ttp', destinationName: 'TTP' }];
+    const s = (await dc.build(DAY, d)).setups[0];
+    const a = s.trades.find(t => t.symbol === 'AAA').accounts[0];
+    expect(a.live.source).toBe('ledger');
+    expect(a.live.entry).toMatchObject({ price: null, planned: 100, qty: 100 });
+    expect(a.live.legs[1].exit).toMatchObject({ kind: 'close sent', why: 'the exit rule fired' });
+    expect(s.accounts[0].fills).toMatch(/no fill feed/);
+  });
+});
+
+describe('why the backtest took a trade live did not', () => {
+  const runs = RUNS;
+  test('never on the card list', () => {
+    expect(dc.whyNotLive('ZZZ', '09:50', runs, [])[0]).toMatch(/not on the card list at 09:50 \(never evaluated/);
+  });
+  test('no run on that bar', () => {
+    expect(dc.whyNotLive('BBB', '09:45', runs, [])[0]).toMatch(/did not run on the 09:45 bar/);
+  });
+  test('dropped as stale', () => {
+    const r = [{ bar: '09:50', ok: true, symbols: ['BBB'], dropped: { stale: ['BBB'] }, feed: { lagMin: 2 } }];
+    expect(dc.whyNotLive('BBB', '09:50', r, [])[0]).toMatch(/stale.*2 min behind/);
+  });
+  test('refused by the broker comes first', () => {
+    expect(dc.whyNotLive('BBB', '09:50', runs,
+      [{ destination: 'alp', skipped: 'BBB cannot be sold short' }])[0]).toMatch(/cannot be sold short/);
+  });
+});
+
+describe('when it runs', () => {
+  const at = (hhmm, day = DAY) => Date.parse(`${day}T${hhmm}:00-04:00`);
+  test('16:10 on a weekday with no report', () => {
+    expect(dc.due(at('16:10'), null)).toBe(true);
+    expect(dc.due(at('16:09'), null)).toBe(false);
+  });
+  test('not again once it succeeded', () => {
+    expect(dc.due(at('16:25'), { ok: true })).toBe(false);
+  });
+  test('retried every 15 minutes until 18:00 after a failure', () => {
+    expect(dc.due(at('16:25'), { ok: false })).toBe(true);
+    expect(dc.due(at('16:26'), { ok: false })).toBe(false);
+    expect(dc.due(at('18:10'), { ok: false })).toBe(false);
+  });
+  test('never on a weekend', () => {
+    expect(dc.due(at('16:10', '2026-09-26'), null)).toBe(false);
+  });
+});
+
+describe('stored, and read back by the Algo page', () => {
+  afterAll(() => fs.rmSync(process.env.DAYCHECK_DIR, { recursive: true, force: true }));
+
+  test('a run is saved under its date and served by GET /api/daycheck', async () => {
+    const r = await dc.run(DAY, deps());
+    expect(r.ok).toBe(true);
+    expect(dc.dates()).toContain(DAY);
+    const app = require('../src/alerts/server');
+    const res = await request(app).get(`/api/daycheck?date=${DAY}`);
+    expect(res.body).toMatchObject({ ok: true, date: DAY, running: false, runsAt: '16:10' });
+    expect(res.body.report.setups[0].trades.map(t => t.symbol).sort()).toEqual(['AAA', 'BBB', 'CCC']);
+  });
+
+  test('a failed build is saved as a failure, not as an empty day', async () => {
+    const d = deps({ catalog: { list: async () => { throw new Error('qp is down'); } } });
+    const r = await dc.run('2026-09-23', d);
+    expect(r).toMatchObject({ ok: false, error: 'qp is down' });
+    expect(dc.read('2026-09-23').ok).toBe(false);
+  });
+});
