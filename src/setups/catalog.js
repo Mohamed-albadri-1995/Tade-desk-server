@@ -320,7 +320,9 @@ async function list() {
      * this morning's bar — a day behind, five requests a minute. See feeds.js;
      * the substitution is said on the setup rather than done quietly.
      */
-    const live = feeds.liveFeedFor(p.feed);
+    const needsPremarket = feeds.usesPremarket(g.raw);
+    const live = feeds.liveFeedFor(p.feed, { needsPremarket });
+    const session = feeds.sessionViewFor(live.feed, p.view, { needsPremarket });
     const { raw, ...rest } = g;
     const pairing = pairingNote(g, groups);
     // Needed BEFORE the object literal: the bar the desk evaluates is derived
@@ -416,9 +418,12 @@ async function list() {
       // THE BARS THE LIVE FEED HAS. A preference of 'all' on Yahoo — which is
       // fetched without premarket — is 'regular' in fact, and a backtest must
       // be told so (feeds.sessionViewFor).
-      view: feeds.sessionViewFor(live.feed, p.view).view,
+      view: session.view,
       chosenView: p.view || null,
-      viewNote: feeds.sessionViewFor(live.feed, p.view).note,
+      viewNote: session.note,
+      // Reads a premarket level (levels.pm_high/pm_low, vwap.gap) — so it
+      // decides on a feed with premarket and every backtest of it keeps them.
+      needsPremarket: needsPremarket || undefined,
       targetR: p.targetR || 2.0,
       /*
        * 'live' IS THE BACKTEST'S DECISION, TAKEN LIVE.

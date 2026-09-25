@@ -606,6 +606,7 @@
                    so a VWAP means the same thing either side of the seam —
                    which plain `hybrid` (Polygon + IEX-only Alpaca) cannot say. -->
               <option value="hybrid_yahoo">hybrid_yahoo (polygon + yahoo)</option>
+              <option value="yahoo_ext">yahoo_ext (yahoo + its own premarket)</option>
               <option>yahoo</option><option>alpaca</option><option>polygon</option><option>hybrid</option></select></label>
       <label class="fld"><span>As-of
         <b class="q" title="REPLAY cutoff: hide every bar after this date, so a setup is judged as it stood then. Blank = the full tape through today. Clicking a register stock does NOT set this — it loads everything and scrolls to that day.">?</b></span>
@@ -874,6 +875,7 @@
                  "unknown feed '' (have: [alpaca, hybrid, polygon, yahoo])". The list
                  that names the feeds was the one place that did not know about one. -->
               <option value="hybrid_yahoo">hybrid_yahoo (polygon + yahoo)</option>
+              <option value="yahoo_ext">yahoo_ext (yahoo + its own premarket)</option>
               <option>yahoo</option><option>alpaca</option><option selected>polygon</option><option>hybrid</option></select></label>
         </div>
         <div class="frow">

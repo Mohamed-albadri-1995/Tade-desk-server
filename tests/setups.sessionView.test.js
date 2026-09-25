@@ -35,3 +35,58 @@ describe('Parity reads the effective view', () => {
     expect(find(res, 'view').status).toBe('match');
   });
 });
+
+/*
+ * A STRATEGY THAT READS A PREMARKET LEVEL (2026-09-25): "what if I add one?"
+ * On plain yahoo its level is empty and it never fires. The desk moves it to
+ * yahoo_ext — Yahoo with its own premarket, one source — and keeps the
+ * premarket bars in every frame, live and backtest.
+ */
+describe('a strategy that reads a premarket level', () => {
+  const PM = { kind: 'primitive', key: 'levels.pm_high', source: 'close', params: {} };
+  const withPm = { name: 'PML breakout', entry: { logic: 'AND', rules: [
+    { left: { kind: 'price', field: 'close' }, op: 'gt', right: PM }] } };
+  const without = { name: 'OR', entry: { logic: 'AND', rules: [
+    { left: { kind: 'price', field: 'close' }, op: 'gt',
+      right: { kind: 'primitive', key: 'vwap.session', params: {} } }] } };
+
+  test('is recognised wherever the level sits in its rules', () => {
+    expect(feeds.usesPremarket([withPm])).toBe(true);
+    expect(feeds.usesPremarket([without])).toBe(false);
+    expect(feeds.usesPremarket([without, { risk: { sl: { type: 'prim',
+      anchor: { kind: 'primitive', key: 'levels.pm_low' } } } }])).toBe(true);
+    expect(feeds.usesPremarket([{ exit: { rules: [{ right: { key: 'vwap.gap' } }] } }])).toBe(true);
+  });
+
+  test('decides on yahoo_ext, and says why', () => {
+    const f = feeds.liveFeedFor(null, { needsPremarket: true });
+    expect(f.feed).toBe('yahoo_ext');
+    expect(f.note).toMatch(/premarket level/);
+    expect(feeds.liveFeedFor('yahoo', { needsPremarket: true }).feed).toBe('yahoo_ext');
+    // polygon cannot decide live: yahoo instead — and then yahoo_ext.
+    expect(feeds.liveFeedFor('polygon', { needsPremarket: true }).feed).toBe('yahoo_ext');
+  });
+
+  test('a feed that already has premarket is left alone', () => {
+    expect(feeds.liveFeedFor('alpaca', { needsPremarket: true }).feed).toBe('alpaca');
+  });
+
+  test('keeps the premarket bars in the frame, whatever the preference', () => {
+    expect(feeds.sessionViewFor('yahoo_ext', 'regular', { needsPremarket: true }))
+      .toMatchObject({ view: 'all', forced: true });
+    expect(feeds.sessionViewFor('yahoo_ext', undefined, { needsPremarket: true }).view).toBe('all');
+  });
+
+  test('every other setup is unchanged: yahoo, regular session', () => {
+    expect(feeds.liveFeedFor(null).feed).toBe('yahoo');
+    expect(feeds.sessionViewFor('yahoo', 'all').view).toBe('regular');
+  });
+
+  test('Parity: a Polygon backtest with premarket matches a yahoo_ext setup', () => {
+    const setup = { id: 'S', view: 'all', feed: 'yahoo_ext', fill: 'live', tf: '1m' };
+    const res = parity.compare({ setup, strategy: {}, spec: { feed: 'polygon', view: 'all', fill: 'desk' } });
+    const find = what => res.rows.find(r => r.what === what);
+    expect(find('feed').status).toBe('match');
+    expect(find('view').status).toBe('match');
+  });
+});

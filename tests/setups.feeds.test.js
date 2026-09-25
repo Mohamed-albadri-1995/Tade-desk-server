@@ -277,7 +277,8 @@ describe('it is wired in where the feed is read', () => {
 
   test('the catalog reads the live feed through it, and carries the note', () => {
     const c = src('src', 'setups', 'catalog.js');
-    expect(c).toContain('const live = feeds.liveFeedFor(p.feed)');
+    // …with whether its strategy reads a premarket level (2026-09-25).
+    expect(c).toContain('const live = feeds.liveFeedFor(p.feed, { needsPremarket })');
     expect(c).toContain('feed: live.feed,');
     expect(c).toContain('liveFeed: live.feed,');
     expect(c).toContain('feedNote: live.note,');

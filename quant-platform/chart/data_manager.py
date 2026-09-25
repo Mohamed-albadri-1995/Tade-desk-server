@@ -13,7 +13,7 @@ import math
 
 import pandas as pd
 
-from tools.data import alpaca, polygon, hybrid, hybrid_yahoo, yahoo
+from tools.data import alpaca, polygon, hybrid, hybrid_yahoo, yahoo, yahoo_ext
 
 LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid,
            # Polygon's deep history + Yahoo for the minutes Polygon has not
@@ -26,7 +26,9 @@ LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid,
            # session: polygon is a day behind on the free plan and alpaca's free
            # tier is IEX. Consolidated tape, and measured against polygon on the
            # same morning the two agree on VWAP to within 0.06%.
-           'yahoo': yahoo}
+           'yahoo': yahoo,
+           # The same, with Yahoo's own premarket (tools/data/yahoo_ext.py).
+           'yahoo_ext': yahoo_ext}
 
 # RTH minutes per trading day (09:30-16:00). Used to translate an indicator's
 # bar-lookback into how many calendar days of history to fetch.
@@ -43,7 +45,7 @@ def feed_ok(feed: str) -> bool:
     if feed == 'hybrid':
         return feed_ok('alpaca') and feed_ok('polygon')
     # No key to check — which is the point of having it as the live fallback.
-    if feed == 'yahoo':
+    if feed in ('yahoo', 'yahoo_ext'):
         return True
     return False
 

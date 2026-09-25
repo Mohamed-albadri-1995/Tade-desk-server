@@ -47,7 +47,7 @@ const LAG_BAD_MIN = 2;
  * merely reported. `yahoo` is what a setup gets by not choosing one, and its
  * fifteen minutes is why a 09:35 decision is taken on the 09:20 bar.
  */
-const DELAYED_FEEDS = new Set(['yahoo']);
+const DELAYED_FEEDS = new Set(['yahoo', 'yahoo_ext']);
 
 const leg = (id, title, ok, note, detail = undefined) =>
   ({ id, title, ok, note, ...(detail === undefined ? {} : { detail }) });

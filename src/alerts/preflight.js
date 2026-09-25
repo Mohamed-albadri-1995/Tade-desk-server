@@ -48,7 +48,7 @@ const LAG_BAD_MIN = 2;
  * is not the decision the backtest measured. `yahoo` is the default in both
  * `qpClient.decide` and `catalog`, so it is what a setup gets by not choosing.
  */
-const DELAYED_FEEDS = new Set(['yahoo']);
+const DELAYED_FEEDS = new Set(['yahoo', 'yahoo_ext']);
 
 /*
  * FEEDS THAT CANNOT DECIDE A LIVE BAR AT ALL. Not delayed — absent: polygon's

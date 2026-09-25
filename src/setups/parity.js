@@ -359,7 +359,7 @@ function compare({ setup, spec, strategy } = {}) {
    * the volume, so a strategy backtested on alpaca and run live on yahoo is
    * measuring one VWAP and trading another. That stays a divergence.
    */
-  const CONSOLIDATED = new Set(['polygon', 'yahoo', 'hybrid_yahoo']);
+  const CONSOLIDATED = new Set(['polygon', 'yahoo', 'yahoo_ext', 'hybrid_yahoo']);
   /*
    * THE FEED THAT DECIDES, NOT THE ONE ON FILE — and they are not the same on
    * this desk right now.

@@ -43,7 +43,7 @@ import qp  # noqa: E402  — populates REGISTRY via primitive decorators
 from qp.registry import REGISTRY, get_approval, save_approval
 from qp.primitives.bars import Bars
 from qp.primitives._session import in_rth as _in_rth, in_premarket as _in_premarket
-from tools.data import alpaca, polygon, hybrid, hybrid_yahoo, yahoo
+from tools.data import alpaca, polygon, hybrid, hybrid_yahoo, yahoo, yahoo_ext
 
 # Data feeds the compare tool can pull bars from. Each module exposes the
 # same load(symbol, tf, start, end) → tz-aware UTC OHLCV DataFrame.
@@ -54,7 +54,9 @@ from tools.data import alpaca, polygon, hybrid, hybrid_yahoo, yahoo
 # one and not the other gets you "unknown feed 'yahoo'" from the half you
 # forgot, which is exactly how yahoo shipped the first time.
 _LOADERS = {'alpaca': alpaca, 'polygon': polygon, 'hybrid': hybrid,
-            'hybrid_yahoo': hybrid_yahoo, 'yahoo': yahoo}
+            'hybrid_yahoo': hybrid_yahoo, 'yahoo': yahoo,
+            # Yahoo with its own premarket — for a strategy that reads one.
+            'yahoo_ext': yahoo_ext}
 
 
 def _load_dotenv() -> None:
@@ -89,7 +91,7 @@ _load_dotenv()
 
 
 _FEED_PREF = Path(__file__).resolve().parents[1] / '.default-feed'
-_VALID_FEEDS = ('yahoo', 'alpaca', 'polygon', 'hybrid', 'hybrid_yahoo')
+_VALID_FEEDS = ('yahoo', 'alpaca', 'polygon', 'hybrid', 'hybrid_yahoo', 'yahoo_ext')
 
 
 def default_feed_override() -> str:
@@ -153,6 +155,7 @@ def _feed_status() -> dict:
     have = {
         # No credential to check — if the process has a network it has yahoo.
         'yahoo':   True,
+        'yahoo_ext': True,
         'alpaca':  has_alpaca,
         'polygon': has_polygon,
         'hybrid':  has_alpaca and has_polygon,

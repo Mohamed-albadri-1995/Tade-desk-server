@@ -160,7 +160,25 @@ function deskHasAlpaca() { return alpacaCreds() !== null; }
    and a parameter that cannot change the result is a parameter that reads as
    though it could. `deskHasAlpaca` is still what scripts/sync-qp-env.js asks
    before writing qp's .env — alpaca remains a feed you can CHOOSE. */
-function liveFeedFor(chosen) {
+function liveFeedFor(chosen, { needsPremarket = false } = {}) {
+  const out = liveFeedChoice(chosen);
+  /*
+   * A STRATEGY THAT READS A PREMARKET LEVEL gets Yahoo WITH its premarket.
+   * On plain yahoo (regular session only) levels.pm_high is empty and the
+   * strategy never fires — live or in a backtest of the bars live has. Same
+   * source, more hours — not a second source spliced on, which was tried and
+   * gave awful results. A feed that already has premarket is left alone.
+   */
+  if (needsPremarket && out.feed === 'yahoo') {
+    return { ...out, feed: 'yahoo_ext', substituted: true,
+             note: `${out.note ? `${out.note} ` : ''}It reads a premarket level, so it decides `
+               + 'on yahoo_ext — Yahoo with its own premarket bars — and a backtest of it '
+               + 'must include premarket too.' };
+  }
+  return out;
+}
+
+function liveFeedChoice(chosen) {
   const raw = String(chosen || '').trim().toLowerCase();
   if (!raw) {
     return { feed: SUBSTITUTE, chosen: null, substituted: false, note: DEFAULT_NOTE };
@@ -201,10 +219,35 @@ function liveFeedFor(chosen) {
  * live Yahoo frame: that was tried and gave awful results, and neither live
  * setup uses a premarket level (levels.pm_high / pm_low, vwap.gap).
  */
-const HAS_PREMARKET = { yahoo: false, alpaca: true, polygon: true, hybrid: true, hybrid_yahoo: true };
+const HAS_PREMARKET = { yahoo: false, yahoo_ext: true, alpaca: true, polygon: true,
+                        hybrid: true, hybrid_yahoo: true };
 
-function sessionViewFor(liveFeed, chosenView) {
+/*
+ * THE PRIMITIVES THAT ONLY EXIST BEFORE 09:30. A strategy reading any of them
+ * needs a live feed with premarket bars — see liveFeedFor.
+ */
+const PREMARKET_KEYS = new Set(['levels.pm_high', 'levels.pm_low', 'vwap.gap']);
+
+/** Does any of these strategies read a premarket level, anywhere in its rules? */
+function usesPremarket(strategies) {
+  const seen = new Set();
+  const walk = (v) => {
+    if (!v || typeof v !== 'object' || seen.has(v)) return false;
+    seen.add(v);
+    if (typeof v.key === 'string' && PREMARKET_KEYS.has(v.key)) return true;
+    return Object.values(v).some(walk);
+  };
+  return (strategies || []).some(walk);
+}
+
+function sessionViewFor(liveFeed, chosenView, { needsPremarket = false } = {}) {
   const feed = String(liveFeed || '').toLowerCase();
+  // A premarket level needs the premarket bars in the frame, whatever the
+  // preference says — 'regular' would empty it (liveFeedFor gives the feed).
+  if (needsPremarket && HAS_PREMARKET[feed]) {
+    return { view: 'all', forced: (chosenView || 'all') !== 'all',
+             note: 'it reads a premarket level, so the premarket bars stay in the frame' };
+  }
   if (HAS_PREMARKET[feed] === false) {
     return { view: 'regular', forced: (chosenView || 'all') !== 'regular',
              note: `${feed} has no premarket bars live, so the setup reads the regular `
@@ -214,5 +257,6 @@ function sessionViewFor(liveFeed, chosenView) {
 }
 
 module.exports = { alpacaCreds, deskHasAlpaca, liveFeedFor, sessionViewFor, HAS_PREMARKET,
+                   usesPremarket, PREMARKET_KEYS,
                    LIVE_UNUSABLE, DEFAULT_NOTE,
                    KEYS_FILE, BROKER_FILE };
