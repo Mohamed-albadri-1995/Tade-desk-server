@@ -128,7 +128,7 @@ for name in WANT:
           f"   tools {d.get('tools') or '(none)'}"
           f"   [{'READY' if stage == 'ready' else 'under development'}]")
     print(f"exit shape: {p.get('shape')}   alertable={p.get('ok')} orderable={p.get('order_ok')}")
-    disc = {k: d.get(k) for k in ('attempts_per_day','cooldown','min_hold','max_stop_pct','min_target_usd') if d.get(k) not in (None,'',0)}
+    disc = {k: d.get(k) for k in ('attempts_per_day','cooldown','min_hold','max_stop_pct','min_stop_pct','min_target_usd') if d.get(k) not in (None,'',0)}
     if disc: print(f"discipline: {disc}")
     print()
     for l in rules(d.get('entry'), 'ENTRY'): print(l)

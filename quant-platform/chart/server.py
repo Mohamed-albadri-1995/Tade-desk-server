@@ -1085,7 +1085,11 @@ def backtest_report(bid: int):
                          "nearest profit target was under the strategy's "
                          "min_target_usd. target_unpriced_kept = an exit-RULE "
                          "strategy with no priced target, kept rather than "
-                         "guessed at."))
+                         "guessed at. stop_too_close = the stop sat closer "
+                         "than the strategy's min_stop_pct. stop_too_far = "
+                         "further than its max_stop_pct. stop_through_fill = "
+                         "the fill was already through the stop — the broker "
+                         "refuses that order."))
         if _clock:
             _cl = ', '.join(f'{k}={v:,}' for k, v in sorted(_clock.items(),
                                                             key=lambda kv: -kv[1]))

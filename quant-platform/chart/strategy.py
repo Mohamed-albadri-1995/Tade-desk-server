@@ -766,7 +766,7 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                  entry_ok=None, eod_close=None, max_per_day=None,
                  cooldown_bars=None, min_hold_bars=None, entry_mode='edge',
                  max_stop_pct=None, min_target_usd=None,
-                 win_start=None, win_end=None,
+                 win_start=None, win_end=None, min_stop_pct=None,
                  exit_scope: str | None = None, diag: dict | None = None,
                  entry_ok_fill=None, no_open_fill=None):
     """Preview pairing with STOP-LOSS and TAKE-PROFIT. Conditions are STATUS
@@ -830,6 +830,8 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
 
     SIZE GATES (`risk`, both optional, both drop the signal BEFORE it opens):
       max_stop_pct    — refuse an entry whose stop is further than N% away.
+      min_stop_pct    — refuse an entry whose stop is CLOSER than N% away: a
+                        stop inside the trade's own costs cannot pay for them.
       min_target_usd  — refuse an entry whose NEAREST profit target is less
                         than $X from the fill. Guards the other end of the same
                         problem: a stop so tight the trade cannot pay for its
@@ -1121,6 +1123,19 @@ def _pair_trades(bars, ts, entry_mask, exit_mask, side, risk, ctx,
                 if max_stop_pct and e_sl is not None and e_sl == e_sl and dp:
                     if abs(dp - e_sl) / dp * 100.0 > float(max_stop_pct):
                         _drop('stop_too_far')
+                        continue
+                # MIN STOP DISTANCE: the other end. A stop 0.4% from the entry
+                # risks less than the round trip costs — at 33 bps a side the
+                # spread and slippage alone are 0.66% of the position, so such
+                # a trade loses ~1.6R on a plain stop-out and hands most of a
+                # winner back (backtest #369, 2026-09-24: MAIR, 0.42% stop,
+                # +1.27R before costs, -0.31R after). Asked for the same day.
+                # Measured from the DECISION price, like the cap above, and in
+                # this one function, so a backtest and the live decision
+                # (chart/decide.py -> evaluate -> here) refuse the same trades.
+                if min_stop_pct and e_sl is not None and e_sl == e_sl and dp:
+                    if abs(dp - e_sl) / dp * 100.0 < float(min_stop_pct):
+                        _drop('stop_too_close')
                         continue
                 # arm scale-out legs for THIS trade. Each leg resolves to a
                 # FIXED level (R-multiple or fixed distance) or a per-bar ARRAY
@@ -1757,6 +1772,7 @@ def evaluate(strategy: dict, symbol: str, tf: str, days: int,
         cooldown_bars=cooldown, min_hold_bars=min_hold,
         entry_mode=(_risk.get('entry_mode') or 'edge'),
         max_stop_pct=_risk.get('max_stop_pct'),
+        min_stop_pct=_risk.get('min_stop_pct'),
         min_target_usd=_risk.get('min_target_usd'),
         win_start=_risk.get('window_start'), win_end=_risk.get('window_end'),
         entry_ok_fill=entry_ok_fill, no_open_fill=no_open_fill,
