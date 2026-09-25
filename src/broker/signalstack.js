@@ -477,8 +477,27 @@ function settings(pre = null) {
     // Reduce and retry when the BROKER says the order overbuys the account.
     // Bounded, and only for that answer — see placeOrder.
     retryOnBuyingPower: s.retryOnBuyingPower !== false,
+    settleSec: settleSecOf(s.settleSec),
     updatedAt: s.updatedAt || null,
   };
+}
+
+/*
+ * HOW MANY SECONDS AFTER THE MINUTE THE DESK DECIDES — and the manager judges.
+ *
+ * The first real Check (2026-09-25) found the live decision reading Yahoo's
+ * bar about one second after it closed, before Yahoo had finished it: SNX's
+ * 09:42 close was 279.37 live and 279.65 in the final data, TECK's 09:54
+ * signal only appeared in the data minutes later, TWST's stop moved 19 cents.
+ * Waiting lets the bar settle; it costs a later order. 10 by default, 0-40,
+ * and the Check measures the decision price live read against the final bar
+ * every day, so the number can be chosen from evidence.
+ */
+const SETTLE_DEFAULT = 10;
+function settleSecOf(v) {
+  const n = Number(v);
+  if (v === undefined || v === null || v === '' || !Number.isFinite(n)) return SETTLE_DEFAULT;
+  return Math.max(0, Math.min(40, Math.round(n)));
 }
 
 /** The same, with the URLs masked — this is what the page is allowed to see. */
@@ -718,6 +737,13 @@ function save(patch = {}) {
     else if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) {
       throw new Error('flattenAt must look like 15:50');
     } else next.flattenAt = v;
+  }
+  if ('settleSec' in patch) {
+    const v = patch.settleSec;
+    if (v === '' || v === null || v === undefined) delete next.settleSec;
+    else if (!Number.isFinite(Number(v)) || Number(v) < 0 || Number(v) > 40) {
+      throw new Error('settleSec must be between 0 and 40 seconds');
+    } else next.settleSec = Math.round(Number(v));
   }
   if ('bracket' in patch) next.bracket = patch.bracket !== false;
   if ('retryOnBuyingPower' in patch) {
@@ -3001,6 +3027,7 @@ module.exports = {
   // Where orders can go, and one of them as a cfg the order path already takes.
   destinations, destinationCfg, accountsFor, autoRoute, manualCfg,
   DIALECTS, LEGACY_ID, MODES,
+  settleSecOf, SETTLE_DEFAULT,
   orders, committed, remaining, capitalFor, openNotional, tradesToday, sentAlready, positionsToday,
   // The account's own balance, and a way to forget it between tests.
   liveBuyingPower, _forgetBuyingPower, mismatchNote,

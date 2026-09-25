@@ -212,6 +212,7 @@ function liveFromLedger(o, closes) {
             why: firstClose.source }
         : { kind: 'unknown', price: null, at: null } })),
     pnl: null,
+    reduced: o.reduced || null,
     source: 'ledger',
   };
 }
@@ -312,6 +313,7 @@ function liveFromAlpaca(o, orders, closes) {
     legs,
     pnl: net === 0 ? round(sells - buys, 2) : null,
     openQty: net === 0 ? 0 : Math.abs(net),
+    reduced: o.reduced || null,
     source: 'alpaca',
   };
 }
@@ -384,6 +386,90 @@ function compare(bt, live) {
   const worst = [...rows, ...legs.flatMap(g => g.rows)]
     .reduce((w, r) => (r.level === 'bad' ? 'bad' : (r.level === 'warn' && w !== 'bad' ? 'warn' : w)), 'ok');
   return { rows, legs, worst, pnlDiff };
+}
+
+// ── the cause of each difference ────────────────────────────────────────
+/*
+ * EVERY DIFFERENCE GETS A CAUSE, because "they differ" is not something that
+ * can be fixed and each cause has its own fix:
+ *
+ *   DATA       the bars live read were not the final bars (latency, a bar
+ *              Yahoo was still finishing) — the settle delay, the feed
+ *   EXECUTION  the fill: the price the order got against the model's
+ *   KNOCK-ON   a consequence of an earlier difference — less money left
+ *              because another trade was still open, or had closed early
+ *   BROKER     the broker said no where the backtest said yes (a borrow)
+ *   UNIVERSE   the stock was not on live's card list at that minute
+ *   SYSTEM     the setup did not run, or a run failed
+ *   LOGIC      the decision itself differs — a bug to fix
+ *
+ * DATA is only ever claimed when the logic check passed: the live decision,
+ * replayed on the final bars, took exactly the backtest's trades — so the
+ * same logic on the bars live read is what produced the difference.
+ */
+function causesOf(item, logicOk) {
+  const out = [];
+  const add = (kind, text) => out.push({ kind, text });
+  const data = logicOk ? 'DATA' : 'LOGIC';
+  if (item.status === 'both' && item.cmp) {
+    const row = f => item.cmp.rows.find(r => r.field === f) || {};
+    const b = item.bt;
+    const l = item.live;
+    const priceOff = row('decision price').level === 'warn';
+    const stopOff = row('stop').level === 'warn';
+    if (row('side').level === 'bad') add(data, 'a different side fired on the bars live read');
+    if (row('decision bar').level === 'bad') {
+      add(data, `the signal came on ${l.decisionBar} in the bars live read, on `
+        + `${b.decisionBar} in the final bars`);
+    }
+    if (priceOff) {
+      add('DATA', `live read the ${b.decisionBar} bar before it was final: close `
+        + `${l.decisionPrice} live, ${b.decisionPrice} final`);
+    }
+    if (stopOff && !priceOff) {
+      add('DATA', `the stop's level was computed from bars that changed after live read `
+        + `them: ${l.stop} live, ${b.stop} final`);
+    }
+    if (row('quantity').level === 'bad') {
+      if (priceOff || stopOff) add('DATA', 'the size follows the stop, and the stop moved with the data');
+      else if (l.reduced) add('KNOCK-ON', `live's order was cut: ${l.reduced}`);
+      else if (b.note) add('KNOCK-ON', `the backtest's size was cut: ${b.note}`);
+      else add('LOGIC', 'the same price and stop sized differently');
+    }
+    const ep = row('entry price');
+    if (ep.level === 'warn') add('EXECUTION', `the entry filled ${ep.note || 'away from the model'}`);
+    (item.cmp.legs || []).forEach((g) => {
+      const r = f => g.rows.find(x => x.field === f) || {};
+      const name = g.runner ? 'the runner' : `leg ${g.n}`;
+      if (r('how it ended').level === 'bad') {
+        add(data, `${name} ended by ${r('how it ended').live} live and by `
+          + `${r('how it ended').bt} in the backtest — the exit was judged on the bars live read`);
+      } else {
+        if (r('exit price').level === 'warn') {
+          add('EXECUTION', `${name} filled at ${r('exit price').live} against the model's `
+            + `${r('exit price').bt}`);
+        }
+        if (r('exit time').level === 'warn') {
+          add('DATA', `${name} left at ${r('exit time').live} live, ${r('exit time').bt} in the backtest`);
+        }
+      }
+    });
+    return out;
+  }
+  for (const w of item.why || []) {
+    const t = String(w);
+    if (/^open the chart/i.test(t)) continue;       // advice, not a cause
+    let kind = 'LOGIC';
+    if (/not shortable|cannot be sold short|borrow|refused|not sent/i.test(t)) kind = 'BROKER';
+    else if (/limit of \d+ position|already used/i.test(t)) kind = 'KNOCK-ON';
+    else if (/not on the card list|never evaluated/i.test(t)) kind = 'UNIVERSE';
+    else if (/never ran|did not run|run failed/i.test(t)) kind = 'SYSTEM';
+    else if (/stale|feed was late|found no signal|bars live|RANKED OUT|revised|chart:/i.test(t)) kind = data;
+    else if (/signalled it too and did not take it|signalled, not taken/i.test(t)) kind = 'KNOCK-ON';
+    else if (/found no trade on/i.test(t)) kind = data;
+    add(kind, t);
+  }
+  return out;
 }
 
 // ── why a trade is on one side only ───────────────────────────────────────
@@ -538,6 +624,9 @@ async function build(date = toETDate(Date.now()), deps = {}) {
         check_shortable: true, scan_gate: true,
         target_r: setup.targetR || 2.0,
         universe,
+        // The logic check, once per setup: the live decision replayed on
+        // these same final bars (chart/replay.py).
+        replay_live: btByRatio.size === 0,
       };
       let r;
       try { r = { ok: true, ...(await qp.backtestDay(spec)) }; }
@@ -624,6 +713,31 @@ async function build(date = toETDate(Date.now()), deps = {}) {
       return { ...r, status: statuses.size === 1 ? [...statuses][0] : 'mixed', worst,
                decisionBar: (first.bt || first.live || {}).decisionBar || null };
     }).sort((a, b) => (mins(a.decisionBar) || 0) - (mins(b.decisionBar) || 0));
+
+    const withReplay = [...btByRatio.values()].find(r => r && r.replay);
+    const rep = withReplay ? withReplay.replay : null;
+    out.logic = rep ? {
+      identical: rep.error ? null : !!rep.identical,
+      error: rep.error || null,
+      compared: rep.compared || 0,
+      minutes: rep.minutes || 0,
+      symbols: rep.symbols || 0,
+      mismatches: rep.mismatches || [],
+    } : null;
+    const logicOk = !!(out.logic && out.logic.identical);
+    for (const t of out.trades) {
+      for (const a of t.accounts) a.causes = causesOf(a, logicOk);
+      t.causes = [...new Set(t.accounts.flatMap(a => a.causes.map(c => c.kind)))];
+    }
+    const kinds = {};
+    for (const t of out.trades) for (const k of t.causes) kinds[k] = (kinds[k] || 0) + 1;
+    out.verdict = {
+      logicIdentical: out.logic ? out.logic.identical : null,
+      causes: kinds,
+      // THE QUESTION ASKED: is every difference latency or the fill?
+      onlyDataAndExecution: logicOk
+        && !Object.keys(kinds).some(k => !['DATA', 'EXECUTION', 'KNOCK-ON'].includes(k)),
+    };
 
     const sum = (pick) => {
       const vals = out.trades.flatMap(t => t.accounts.map(pick)).filter(v => v !== null && v !== undefined);
@@ -744,5 +858,5 @@ function isRunning() { return !!running; }
 module.exports = {
   build, run, read, isRunning, save, dates, due, start, RUN_AT,
   backtestTrade, liveFromAlpaca, liveFromLedger, ledgerEntries, ledgerCloses,
-  compare, whyNotLive, whyNotBacktest, btExitKind, closeKind, sameExit,
+  compare, whyNotLive, whyNotBacktest, btExitKind, closeKind, sameExit, causesOf,
 };

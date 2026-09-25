@@ -333,8 +333,16 @@ function startScheduler() {
    * read — and a name that appeared in those five minutes is exactly the kind a
    * setup is looking for.
    */
+  /** How long to wait, from `minuteStart`, for the bar to settle. */
+  function settleWaitMs(minuteStart, at = Date.now()) {
+    let sec = 10;
+    try { sec = require('./broker/signalstack').settings().settleSec; } catch { /* default */ }
+    return Math.max(0, minuteStart + sec * 1000 - at);
+  }
+
   registerJob('Setup Tick (every minute, 04:00–16:00)',
     '* 4-16 * * 1-5', 'America/New_York', async () => {
+      const minuteStart = Date.now() - (Date.now() % 60000);
       const now = new Intl.DateTimeFormat('en-US', {
         timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
       }).format(new Date());
@@ -448,6 +456,15 @@ function startScheduler() {
          * between those two lines is the difference between knowing where to
          * look and not.
          */
+        /*
+         * LET THE BAR SETTLE FIRST. Yahoo is still finishing the bar that
+         * closed a second ago — the 2026-09-25 Check found live reading a
+         * 09:42 close 28 cents from the final one. The wait is counted from
+         * the minute, so a slow pre-decision scan above is not added to it.
+         * See broker.settleSecOf.
+         */
+        const settleMs = settleWaitMs(minuteStart);
+        if (settleMs > 0) await new Promise(r => setTimeout(r, settleMs));
         try {
           ran = await runDue(decidedOn);
         } catch (err) {

@@ -439,7 +439,31 @@ def backtest_day(payload: dict = Body(...)):
         # trade's stop — so the desk splits the backtest's shares into legs
         # exactly as it split its own order, and a leg can be compared to a leg.
         from chart.decide import exit_plan
-        by_name = {s.get('name'): s for s in bt._resolve_strategies(spec)}
+        strategies = bt._resolve_strategies(spec)
+        by_name = {s.get('name'): s for s in strategies}
+        # THE LOGIC CHECK: the live decision replayed minute by minute on these
+        # same final bars, with the runner's gates (chart/replay.py). Same bars,
+        # so a difference here is the decision logic, never the data.
+        replay = None
+        if spec.get('replay_live'):
+            from chart import replay as rp
+            try:
+                tools = []
+                for st in strategies:
+                    tools += [t for t in (st.get('tools') or []) if t not in tools]
+                pairs = [p for p in bt._pairs(spec, {'tools': tools}) if p[0] == spec['start']]
+                syms = sorted({p[1] for p in pairs})
+                ctx = {p[1]: {'score': (p[2] or {}).get('score', (p[2] or {}).get('_score')),
+                              'rvol_day': (p[2] or {}).get('rvol_day')} for p in pairs}
+                rules = spec.get('rules') or {}
+                r = rp.replay_day(strategies, syms, spec['start'], tf=spec.get('tf') or '1m',
+                                  feed=spec.get('feed') or 'yahoo', view=spec.get('view') or 'all',
+                                  rank=spec.get('rank_per_day') or None,
+                                  max_per_day=int(rules.get('max_trades_per_day') or 0),
+                                  ctx=ctx, target_r=float(spec.get('target_r') or 2.0))
+                replay = {**r, **rp.compare(r['picks'], out.get('trades') or [])}
+            except Exception as e:                    # noqa: BLE001 — reported, not fatal
+                replay = {'error': str(e)}
         for t in out.get('trades') or []:
             c = t.get('ctx') or {}
             st = by_name.get(c.get('strategy')) or next(iter(by_name.values()), None)
@@ -451,7 +475,7 @@ def backtest_day(payload: dict = Body(...)):
             except Exception as e:                    # noqa: BLE001 — reported, not fatal
                 t['plan_error'] = str(e)
         return JSONResponse({'ok': True, 'summary': summary,
-                             'trades': out.get('trades') or []})
+                             'trades': out.get('trades') or [], 'replay': replay})
     except Exception as e:                                # noqa: BLE001
         return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
     finally:

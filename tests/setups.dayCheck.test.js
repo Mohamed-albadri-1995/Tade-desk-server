@@ -317,3 +317,51 @@ describe('the first real day', () => {
     expect(after.partial).toBe(false);
   });
 });
+
+/*
+ * THE QUESTION ASKED (2026-09-25): "confirm everything is identical to the
+ * backtest and the only reason for a mismatch is data latency." The check
+ * replays the live decision on the final bars (qp `replay_live`); when that is
+ * identical to the backtest, every difference is labelled with its cause.
+ */
+describe('the logic check and the cause of each difference', () => {
+  const REPLAY_OK = { identical: true, compared: 2, minutes: 120, symbols: 3, mismatches: [] };
+  // SNX: live read the 09:40 bar before it was final.
+  const snxLive = LEDGER.map(o => (o.symbol === 'AAA' && !o.kind ? { ...o, price: 99.72 } : o));
+
+  test('the replay is asked for once per setup, and its verdict is on the setup', async () => {
+    const d = deps({ qp: { backtestDay: async (spec) => { d.asked.push(spec);
+      return { ...BT, replay: REPLAY_OK }; } } });
+    d.broker.accountsFor = () => [ACCT, { ...ACCT, destinationId: 'b', destinationName: 'B', ratio: 0.5 }];
+    const s = (await dc.build(DAY, d)).setups[0];
+    expect(d.asked.map(x => x.replay_live)).toEqual([true, false]);
+    expect(s.logic).toMatchObject({ identical: true, compared: 2 });
+  });
+
+  test('an unfinished bar is DATA when the logic is identical — and that is the verdict', async () => {
+    const d = deps({ qp: { backtestDay: async () => ({ ...BT, replay: REPLAY_OK }) } });
+    d.broker.orders = () => snxLive;
+    const s = (await dc.build(DAY, d)).setups[0];
+    const a = s.trades.find(t => t.symbol === 'AAA').accounts[0];
+    expect(a.causes.map(c => c.kind)).toContain('DATA');
+    expect(a.causes.find(c => c.kind === 'DATA').text).toMatch(/before it was final: close 99.72 live, 100 final/);
+    expect(s.verdict.onlyDataAndExecution).toBe(true);
+  });
+
+  test('the same difference with the logic check failing is LOGIC, never DATA', async () => {
+    const d = deps({ qp: { backtestDay: async () => ({ ...BT, replay: { ...REPLAY_OK, identical: false,
+      mismatches: [{ symbol: 'AAA', ok: false, why: 'decision bar 09:40 vs 09:41' }] } }) } });
+    const s = (await dc.build(DAY, d)).setups[0];
+    expect(s.verdict).toMatchObject({ logicIdentical: false, onlyDataAndExecution: false });
+    expect(s.logic.mismatches[0].why).toMatch(/09:41/);
+  });
+
+  test('one-sided trades get a cause too', () => {
+    const k = (why, ok = true) => dc.causesOf({ status: 'backtest only', why: [why] }, ok)[0].kind;
+    expect(k('signalled at 09:34 and was RANKED OUT — live took the top 3')).toBe('DATA');
+    expect(k('the order was not sent to alpaca1: Alpaca will not short SECZ — the asset is not shortable')).toBe('BROKER');
+    expect(k('not on the card list at 09:34 (never evaluated live today)')).toBe('UNIVERSE');
+    expect(k('the setup did not run on the 09:45 bar')).toBe('SYSTEM');
+    expect(k('evaluated live at 09:50 and qp found no signal — the bars live read', false)).toBe('LOGIC');
+  });
+});

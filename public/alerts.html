@@ -583,6 +583,18 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
 .dc-trade > summary { cursor:pointer; font:600 var(--f-xs)/1.8 var(--mono); }
 .dc-why { margin:4px 0 6px 18px; padding:0; font-size:var(--f-xs); color:#fbbf24; line-height:1.6; }
 .dc-acct { font:700 var(--f-xs)/1.6 var(--ui); color:var(--text2); margin-top:6px; }
+.dc-logic { font:600 var(--f-xs)/1.6 var(--mono); margin:6px 0; padding:6px 8px; border-radius:6px;
+  border:1px solid var(--border); overflow-wrap:anywhere; }
+.dc-logic.ok { color:var(--m-up); border-color:#22c55e66; background:#22c55e14; }
+.dc-logic.bad { color:#fca5a5; border-color:#ef444466; background:#ef444418; }
+.dc-logic.warn { color:#fbbf24; border-color:#fbbf2466; background:#fbbf2414; }
+.dc-causes { margin:4px 0 6px; padding:0; list-style:none; font-size:var(--f-xs); line-height:1.6; }
+.dc-causes li { margin:2px 0; overflow-wrap:anywhere; }
+.dc-k { font:800 9px/1 var(--ui); letter-spacing:.05em; border-radius:3px; padding:2px 5px;
+  margin-right:6px; border:1px solid var(--border); color:var(--text2); background:var(--bg3); }
+.dc-k.LOGIC { color:#fca5a5; border-color:#ef444466; background:#ef444418; }
+.dc-k.DATA { color:#93c5fd; border-color:#3b82f666; background:#3b82f614; }
+.dc-k.EXECUTION { color:#fbbf24; border-color:#fbbf2466; background:#fbbf2414; }
 .par-rule { font-size:var(--f-xs); font-family:var(--mono); color:#fbbf24; margin:2px 0; }
 .su-tag { font-size:10px; font-weight:800; letter-spacing:.06em; border-radius:3px;
   padding:2px 7px; background:var(--bg3); color:var(--text2); border:1px solid var(--border); }
@@ -1099,6 +1111,11 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; }
        the session; a broker does not, and the account cannot hold overnight. -->
   <label>Close all at
     <input id="bk-flatten" placeholder="15:50" style="width:80px">
+  </label>
+  <!-- Seconds after each minute before deciding and managing: Yahoo is still
+       finishing the bar that just closed. The Check measures the result. -->
+  <label>Decide after (s)
+    <input id="bk-settle" type="number" min="0" max="40" placeholder="10" style="width:64px">
   </label>
   <label>Shorts
     <select id="bk-short"><option value="1">allowed</option><option value="0">no</option></select>
@@ -2878,6 +2895,7 @@ async function loadBroker() {
     const b = d.broker;
     paintDests(b.destinations || []);
     document.getElementById('bk-flatten').value = b.flatten ? (b.flattenAt || '') : '';
+    document.getElementById('bk-settle').value = b.settleSec != null ? String(b.settleSec) : '';
     document.getElementById('bk-short').value = b.allowShort ? '1' : '0';
     document.getElementById('bk-bracket').value = b.bracket ? '1' : '0';
 
@@ -3840,6 +3858,7 @@ async function saveBroker(patch) {
     flattenAt: v('bk-flatten') || undefined,
     allowShort: document.getElementById('bk-short').value === '1',
     bracket: document.getElementById('bk-bracket').value === '1',
+    settleSec: v('bk-settle') === '' ? '' : Number(v('bk-settle')),
     enabled: true,
   };
   try {
@@ -4127,6 +4146,11 @@ function dcOneSide(t, label) {
     + `<td>${esc(dcV(e.at || t.sentAt))}</td><td></td></tr>${legs}`
     + `<tr><td>P&L</td><td>${esc(dcV(t.pnl))}</td><td></td><td></td></tr></table>`;
 }
+function dcCauses(list) {
+  if (!list || !list.length) return '';
+  return `<ul class="dc-causes">${list.map(c => `<li><span class="dc-k ${esc(c.kind)}">${esc(c.kind)}</span>`
+    + `${esc(c.text)}</li>`).join('')}</ul>`;
+}
 function dcAccount(a) {
   if (a.status === 'both' && a.cmp) {
     const legs = (a.cmp.legs || []).map(g => {
@@ -4138,15 +4162,36 @@ function dcAccount(a) {
     }).join('');
     const main = a.cmp.rows.filter(r => r.field !== 'P&L');
     const pnl = a.cmp.rows.filter(r => r.field === 'P&L');
-    return `<table class="dc-tbl"><tr><th></th><th>backtest</th><th>live</th><th>difference</th></tr>`
+    return dcCauses(a.causes)
+      + `<table class="dc-tbl"><tr><th></th><th>backtest</th><th>live</th><th>difference</th></tr>`
       + `${dcRows(main)}${legs}<tr class="leg"><td colspan="4">Result</td></tr>${dcRows(pnl)}</table>`
       + (a.live && a.live.source === 'ledger'
         ? '<div class="note">This account has no fill feed: live prices are the decided ones, exits are the closes the desk sent.</div>' : '');
   }
-  const why = (a.why || []).map(w => `<li>${esc(w)}</li>`).join('');
-  return `<ul class="dc-why">${why}</ul>`
+  const why = (a.why || []).filter(w => !(a.causes || []).some(c => c.text === w))
+    .map(w => `<li>${esc(w)}</li>`).join('');
+  return dcCauses(a.causes) + (why ? `<ul class="dc-why">${why}</ul>` : '')
     + (a.bt ? dcOneSide(a.bt, 'what the backtest did') : '')
     + (a.live ? dcOneSide(a.live, 'what live did') : '');
+}
+/* THE LOGIC CHECK: live's decision replayed on the same final bars the
+   backtest read. Identical means every other difference is data or the fill. */
+function dcLogic(s) {
+  const L = s.logic;
+  if (!L) return '<div class="dc-logic warn">Logic check: not run for this day.</div>';
+  if (L.error) return `<div class="dc-logic warn">Logic check could not run: ${esc(L.error)}</div>`;
+  const V = s.verdict || {};
+  const kinds = Object.entries(V.causes || {}).map(([k, n]) => `${n} ${k}`).join(' · ');
+  if (L.identical) {
+    return `<div class="dc-logic ok">LOGIC IDENTICAL — live's decision, replayed minute by minute on the `
+      + `final bars, took exactly the backtest's trades (${esc(L.compared)} compared, `
+      + `${esc(L.minutes)} minutes × ${esc(L.symbols)} stocks).`
+      + (kinds ? ` Differences today: ${esc(kinds)}.` : ' No differences today.')
+      + (V.onlyDataAndExecution ? ' Every one is data or the fill.' : '') + '</div>';
+  }
+  return `<div class="dc-logic bad">LOGIC DIFFERS — replayed on the same final bars, live's decision `
+    + `did not take the backtest's trades: `
+    + esc((L.mismatches || []).map(m => `${m.symbol}: ${m.why}`).join(' · ')) + '</div>';
 }
 function dcSetup(s) {
   const T = s.totals || {};
@@ -4176,6 +4221,7 @@ function dcSetup(s) {
     + `${st.maxPositionPct ? ` · cap ${esc(st.maxPositionPct)}%` : ''}`
     + `${st.rank ? ` · rank ${esc(st.rank.metric)} top ${esc(st.rank.top_n)}` : ''}`
     + ` · ${esc(s.evaluated)} names evaluated live, ${esc(s.runs)} runs<br>${esc(accts)}</div>`
+    + dcLogic(s)
     + (list ? `<table class="dc-tbl"><tr><th>stock</th><th>side</th><th>backtest</th><th>live</th><th></th></tr>${list}</table>`
       : '<div class="empty">Neither side took a trade.</div>')
     + trades + '</details>';
@@ -4210,6 +4256,16 @@ function paintDayCheck(d) {
     : (off ? `${off} trade(s) taken by one side only${diff ? ` · ${diff} more with differences` : ''} — open them below`
       : (diff ? `Same trades on both sides · ${diff} with differences in price, time or size`
         : 'Live took exactly the backtest\'s trades, the same way.'));
+  const logicBad = all.filter(s => s.logic && s.logic.identical === false).map(s => s.name);
+  const onlyDE = all.length && all.every(s => s.verdict && s.verdict.onlyDataAndExecution);
+  if (logicBad.length) {
+    sum.className = 'hl-sum bad';
+    sum.textContent = `LOGIC DIFFERS in ${logicBad.join(', ')} — live's decision on the final bars is `
+      + 'not the backtest\'s. That is a bug to fix, not data. ' + sum.textContent;
+  } else if (onlyDE) {
+    sum.textContent = 'Logic identical in every setup — every difference below is data latency or '
+      + 'the fill. ' + sum.textContent;
+  }
   if (r.partial) {
     sum.className = 'hl-sum warn';
     sum.textContent = 'Run DURING the session — trades still open have no exit yet on either side, '

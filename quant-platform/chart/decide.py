@@ -129,7 +129,7 @@ def _et_date(ts_seconds: int) -> str:
 
 def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
                     feed: str, days: int = 2, fill: str = 'close',
-                    view: str = 'all') -> list:
+                    view: str = 'all', frame=None) -> list:
     """Every signal this symbol produced on `date`, across the strategies given.
 
     A setup is usually two strategies — a long and a short — and a symbol can
@@ -176,7 +176,7 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
             # does not care which bars are in the frame.
             res = strat.evaluate(s, symbol=symbol, tf=tf, days=days,
                                  feed=feed, view=view, asof=date, fill=fill,
-                                 rules=DESK_RULES)
+                                 rules=DESK_RULES, frame=frame)
         except Exception as e:                       # noqa: BLE001 — reported, not raised
             out.append({'symbol': symbol, 'strategy': s.get('name'),
                         'error': str(e)})
@@ -367,7 +367,7 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
            metric: str | None = None, direction: str | None = None,
            ctx: dict | None = None,
            days: int = 2, workers: int = _WORKERS, fill: str = 'close',
-           view: str = 'all') -> dict:
+           view: str = 'all', frames: dict | None = None) -> dict:
     """Run the strategies over the universe and return the ranked picks.
 
     Returns the picks AND every candidate that was considered, because "why is
@@ -385,7 +385,8 @@ def decide(strategies: list, symbols: list, date: str, *, tf: str = '1m',
     # names are taken — only how long it takes to name them.
     def one(sym):
         return evaluate_symbol(strategies, sym, date, tf, feed, days=days,
-                               fill=fill, view=view)
+                               fill=fill, view=view,
+                               frame=(frames or {}).get(sym))
 
     # THREE BUCKETS, NOT TWO. A `seen` row is neither a signal nor a failure —
     # it is the symbol reporting the newest bar it had. Routing it with the

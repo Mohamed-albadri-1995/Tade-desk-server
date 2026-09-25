@@ -595,7 +595,7 @@ function start({ intervalMs = 60000 } = {}) {
   console.log('[Manager] watching open positions for exit rules and trailing stops');
   beat.startedAt = Date.now();
   beat.intervalMs = intervalMs;
-  const t = setInterval(() => {
+  const tick = () => {
     beat.lastTick = Date.now();
     // A pass still running a minute later is a slow qp — counted, because a
     // manager that is always busy is one that is never on time.
@@ -616,9 +616,27 @@ function start({ intervalMs = 60000 } = {}) {
         console.error('[Manager] pass failed:', err.message);
       })
       .finally(() => { running = false; });
-  }, intervalMs);
-  t.unref?.();
-  return { stop() { clearInterval(t); } };
+  };
+  /*
+   * ON THE MINUTE, AFTER THE BAR SETTLES — not whenever the process started.
+   * A pass at hh:mm:03 read Yahoo's just-closed bar before Yahoo finished it,
+   * the same as the decision did (2026-09-25: SNX closed on a stop the final
+   * data never reached). The same settle as the decision (broker.settleSec).
+   */
+  let t = null;
+  let first = null;
+  if (intervalMs === 60000) {
+    let settle = 10;
+    try { settle = broker.settings().settleSec; } catch { /* default */ }
+    const now = Date.now();
+    const next = now - (now % 60000) + settle * 1000 + (now % 60000 >= settle * 1000 ? 60000 : 0);
+    first = setTimeout(() => { tick(); t = setInterval(tick, intervalMs); t.unref?.(); }, next - now);
+    first.unref?.();
+  } else {
+    t = setInterval(tick, intervalMs);
+    t.unref?.();
+  }
+  return { stop() { clearTimeout(first); clearInterval(t); } };
 }
 
 module.exports = { start, check, openPositions, entryIsoOf, strategyFor, etNow, etWeekday,

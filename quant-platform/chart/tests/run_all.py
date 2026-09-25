@@ -111,6 +111,7 @@ PARTS = [
     ('logic_audit94.py',    'a strategy\'s single target (risk.tp) is the order\'s target'),
     ('logic_audit95.py',    'the one-day backtest behind the daily live check; sized at the decision price'),
     ('logic_audit96.py',    'a premarket-level strategy decides on yahoo_ext, Yahoo with its own premarket'),
+    ('logic_audit97.py',    'the live decision replayed on the final bars takes exactly the backtest\'s trades'),
     ('py39_guard.py',       'nothing needs a Python newer than the box (3.9)'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),

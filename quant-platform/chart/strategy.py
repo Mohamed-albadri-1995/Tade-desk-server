@@ -1733,11 +1733,19 @@ def _fill_gates(bars, rules: dict | None, step):
 def evaluate(strategy: dict, symbol: str, tf: str, days: int,
              feed: str = 'polygon', view: str = 'all',
              asof: str | None = None, fill: str = 'close',
-             rules: dict | None = None) -> dict:
+             rules: dict | None = None, frame=None) -> dict:
+    """Run a strategy over one symbol's bars and report its trades.
+
+    `frame`: (bars, ts, ctx) already in hand — the daily check's replay
+    of the live decision hands each minute's cut of the final bars here rather
+    than patching the fetch, which a live decision in the same process uses."""
     from chart import data_manager as dm
     days_req = int(days)                   # what the CALLER asked to see
     days = dm.required_days(referenced_overlays(strategy), tf, days)
-    bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
+    if frame is not None:
+        bars, ts, ctx = frame
+    else:
+        bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
     n = len(bars)
     if n == 0:
         return {'ok': True, 'bars': 0, 'entries': [], 'exits': [], 'series': [],
