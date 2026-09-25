@@ -415,8 +415,12 @@ function causesOf(item, logicOk) {
     const row = f => item.cmp.rows.find(r => r.field === f) || {};
     const b = item.bt;
     const l = item.live;
-    const priceOff = row('decision price').level === 'warn';
-    const stopOff = row('stop').level === 'warn';
+    const n4 = v => (v === null || v === undefined ? '—' : String(Math.round(Number(v) * 10000) / 10000));
+    // EXACT, not within a tolerance: the size divides by the distance to the
+    // stop, so a stop 0.3 cents away is 54 shares on MGNI (2026-09-25).
+    const same = (x, y) => x == null || y == null || Math.abs(Number(x) - Number(y)) < 1e-6;
+    const priceOff = !same(b.decisionPrice, l.decisionPrice);
+    const stopOff = !same(b.stop, l.stop);
     if (row('side').level === 'bad') add(data, 'a different side fired on the bars live read');
     if (row('decision bar').level === 'bad') {
       add(data, `the signal came on ${l.decisionBar} in the bars live read, on `
@@ -424,36 +428,94 @@ function causesOf(item, logicOk) {
     }
     if (priceOff) {
       add('DATA', `live read the ${b.decisionBar} bar before it was final: close `
-        + `${l.decisionPrice} live, ${b.decisionPrice} final`);
+        + `${n4(l.decisionPrice)} live, ${n4(b.decisionPrice)} final`
+        + (stopOff ? `; the stop with it: ${n4(l.stop)} live, ${n4(b.stop)} final` : ''));
+    } else if (stopOff) {
+      add('DATA', `the stop's level came from bars that changed after live read them: `
+        + `${n4(l.stop)} live, ${n4(b.stop)} final`);
     }
-    if (stopOff && !priceOff) {
-      add('DATA', `the stop's level was computed from bars that changed after live read `
-        + `them: ${l.stop} live, ${b.stop} final`);
-    }
-    if (row('quantity').level === 'bad') {
-      if (priceOff || stopOff) add('DATA', 'the size follows the stop, and the stop moved with the data');
-      else if (l.reduced) add('KNOCK-ON', `live's order was cut: ${l.reduced}`);
-      else if (b.note) add('KNOCK-ON', `the backtest's size was cut: ${b.note}`);
-      else add('LOGIC', 'the same price and stop sized differently');
+    if (b.entry.qty !== l.entry.qty) {
+      const rpsB = Math.abs(Number(b.decisionPrice) - Number(b.stop));
+      const rpsL = Math.abs(Number(l.decisionPrice) - Number(l.stop));
+      // What live's count would be if the risk per share were the only
+      // difference: the backtest's count scaled by the two distances.
+      const expected = rpsL > 0 ? b.entry.qty * (rpsB / rpsL) : null;
+      const explained = expected !== null
+        && Math.abs(l.entry.qty - expected) <= Math.max(2, expected * 0.02);
+      if ((priceOff || stopOff) && explained) {
+        add('DATA', `the size follows the risk per share: ${n4(rpsL)} live, ${n4(rpsB)} final `
+          + `→ ${l.entry.qty} and ${b.entry.qty} shares`);
+      } else if (l.reduced) {
+        add('KNOCK-ON', `live's order was cut to the money left: ${l.reduced}`);
+      } else if (b.note) {
+        add('KNOCK-ON', `the backtest's size was cut: ${b.note}`);
+      } else if (!priceOff && !stopOff && !l.reduced) {
+        add('LOGIC', `the same price and stop sized differently: ${l.entry.qty} live, ${b.entry.qty} backtest`);
+      } else {
+        add('KNOCK-ON', `the money left differed — an earlier trade was still open on one side `
+          + `and not the other (${l.entry.qty} live, ${b.entry.qty} backtest)`);
+      }
     }
     const ep = row('entry price');
     if (ep.level === 'warn') add('EXECUTION', `the entry filled ${ep.note || 'away from the model'}`);
-    (item.cmp.legs || []).forEach((g) => {
+
+    // The legs, their causes grouped: "every leg: …" rather than three lines.
+    const perLeg = new Map();
+    const note = (kind, text, name) => {
+      const k = `${kind}|${text}`;
+      if (!perLeg.has(k)) perLeg.set(k, { kind, text, names: [] });
+      perLeg.get(k).names.push(name);
+    };
+    const legs = item.cmp.legs || [];
+    legs.forEach((g) => {
       const r = f => g.rows.find(x => x.field === f) || {};
       const name = g.runner ? 'the runner' : `leg ${g.n}`;
-      if (r('how it ended').level === 'bad') {
-        add(data, `${name} ended by ${r('how it ended').live} live and by `
-          + `${r('how it ended').bt} in the backtest — the exit was judged on the bars live read`);
-      } else {
-        if (r('exit price').level === 'warn') {
-          add('EXECUTION', `${name} filled at ${r('exit price').live} against the model's `
-            + `${r('exit price').bt}`);
-        }
-        if (r('exit time').level === 'warn') {
-          add('DATA', `${name} left at ${r('exit time').live} live, ${r('exit time').bt} in the backtest`);
-        }
+      const lLeg = (l.legs || [])[g.n - 1] || {};
+      const how = r('how it ended');
+      if (how.level === 'bad') {
+        note(data, `ended by ${how.live} live and by ${how.bt} in the backtest — `
+          + 'the exit was judged on the bars live read', name);
+        return;
       }
+      const px = r('exit price');
+      if (r('exit time').level === 'warn') {
+        // A different MINUTE is the cause; the price is its consequence.
+        note('DATA', `left at ${r('exit time').live} live, ${r('exit time').bt} in the backtest`
+          + (px.level === 'warn' ? ` (${n4(px.live)} against ${n4(px.bt)})` : '')
+          + ((lLeg.exit || {}).why ? ' — the manager judged it on the bars live read'
+            : ' — the level was reached at a different minute in the bars live read'), name);
+        return;
+      }
+      // Measured whatever the display tolerance: on 2,880 shares four cents
+      // is $115, which is not a rounding.
+      if (/stop/.test(String(how.live)) && l.stop != null && !(lLeg.exit || {}).why
+          && px.live != null && px.bt != null) {
+        // THE BROKER'S STOP. Each side is measured from its OWN level: how far
+        // past it the fill landed is the execution (the model also fills past
+        // it, at the open, when a bar gaps through — MGNI 23.98 under 24.04).
+        // Where the level itself sat is the data, said once above.
+        const sgn = b.side === 'short' ? -1 : 1;
+        const liveSlip = Math.max(0, sgn * (Number(l.stop) - Number(px.live)));
+        const btSlip = Math.max(0, sgn * (Number(b.stop) - Number(px.bt)));
+        if (Math.abs(liveSlip - btSlip) > 0.01) {
+          note('EXECUTION', `the stop filled ${n4(liveSlip)} past its level live (${n4(px.live)} `
+            + `against ${n4(l.stop)}), ${n4(btSlip)} in the model`, name);
+        }
+        return;
+      }
+      if (px.level !== 'warn') return;
+      if ((lLeg.exit || {}).why) {
+        note('EXECUTION', `closed at market by the manager at ${n4(px.live)}; the model's exit `
+          + `was ${n4(px.bt)}`, name);
+        return;
+      }
+      note('EXECUTION', `filled at ${n4(px.live)} against the model's ${n4(px.bt)}`, name);
     });
+    for (const v of perLeg.values()) {
+      const who = v.names.length === legs.length && legs.length > 1 ? 'every leg'
+        : v.names.join(', ');
+      add(v.kind, `${who}: ${v.text}`);
+    }
     return out;
   }
   for (const w of item.why || []) {

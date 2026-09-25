@@ -365,3 +365,84 @@ describe('the logic check and the cause of each difference', () => {
     expect(k('evaluated live at 09:50 and qp found no signal — the bars live read', false)).toBe('LOGIC');
   });
 });
+
+/*
+ * THE FOUR REAL TRADES OF 2026-09-25, with the numbers the Check showed. The
+ * first version called MGNI "LOGIC: the same price and stop sized
+ * differently" — its stop was 24.0388 live against 24.0416 final, inside a
+ * one-cent tolerance, and 0.3 cents of stop is 54 shares at that distance.
+ * It called SNX's exits EXECUTION when the manager closed at 09:48 on the
+ * bars it read and the final bars stop out at 10:14 — DATA. And it charged
+ * TWST's whole 80 cents to the fill when 19 of them were the stop's level.
+ */
+describe('the causes of the real day', () => {
+  const leg = (qty, target, kind, price, at, why = null) =>
+    ({ qty, target, runner: !target, exit: { kind, price, at, why }, pnl: null });
+  const T = (o) => ({ pnl: null, reduced: null, note: null, ...o });
+  const causes = (b, l) => dc.causesOf({ status: 'both', bt: b, live: l, cmp: dc.compare(b, l) }, true);
+  const kinds = c => c.map(x => x.kind);
+  const MGR = "the backtest's stop was hit 1 bar(s) ago — the tested strategy is flat here";
+
+  test('MGNI: a 0.3-cent stop is DATA, and the stop fills are EXECUTION — never LOGIC', () => {
+    const b = T({ side: 'long', decisionBar: '09:45', decisionPrice: 24.195, stop: 24.04163,
+      entry: { price: 24.14, at: '09:46', qty: 2934 },
+      legs: [leg(293, 24.6551, 'stop', 23.98, '09:59'), leg(2347, 25.1151, 'stop', 23.98, '09:59'),
+             leg(294, null, 'stop', 23.98, '09:59')] });
+    const l = T({ side: 'long', decisionBar: '09:45', decisionPrice: 24.195, stop: 24.0388,
+      entry: { price: 24.2207, at: '09:46:05', qty: 2880 },
+      legs: [leg(288, 24.66, 'stop', 23.94, '09:59:42'), leg(2304, 25.13, 'stop', 23.94, '09:59:43'),
+             leg(288, null, 'stop', 23.94, '09:59:41')] });
+    const c = causes(b, l);
+    expect(kinds(c)).not.toContain('LOGIC');
+    expect(c.find(x => /risk per share/.test(x.text)).text).toMatch(/→ 2880 and 2934 shares/);
+    expect(c.find(x => /every leg: the stop filled/.test(x.text)).kind).toBe('EXECUTION');
+  });
+
+  test('SNX: the manager closed on the bars it read — DATA, said once for every leg', () => {
+    const b = T({ side: 'long', decisionBar: '09:42', decisionPrice: 279.6519, stop: 272.2135,
+      entry: { price: 280, at: '09:43', qty: 60 },
+      legs: [leg(6, 301.9671, 'stop', 274.1642, '10:14'), leg(48, 324.2823, 'stop', 274.1642, '10:14'),
+             leg(6, null, 'stop', 274.1642, '10:14')] });
+    const l = T({ side: 'long', decisionBar: '09:42', decisionPrice: 279.37, stop: 271.6326,
+      entry: { price: 280.7891, at: '09:43:04', qty: 57 },
+      legs: [leg(5, 302.58, 'stop', 278.04, '09:48:16', MGR), leg(45, 325.79, 'stop', 278.04, '09:48:16', MGR),
+             leg(7, null, 'stop', 278.04, '09:48:16', MGR)] });
+    const c = causes(b, l);
+    expect(kinds(c)).not.toContain('LOGIC');
+    expect(c[0]).toMatchObject({ kind: 'DATA' });
+    expect(c[0].text).toMatch(/close 279.37 live, 279.6519 final; the stop with it/);
+    const exits = c.filter(x => /every leg/.test(x.text));
+    expect(exits).toHaveLength(1);
+    expect(exits[0]).toMatchObject({ kind: 'DATA' });
+    expect(exits[0].text).toMatch(/left at 09:48:16 live, 10:14 in the backtest.*manager judged it/);
+  });
+
+  test('TWST: 19 cents of stop level is DATA, 61 cents past it is EXECUTION', () => {
+    const b = T({ side: 'short', decisionBar: '09:34', decisionPrice: 180.375, stop: 183.1,
+      entry: { price: 180.475, at: '09:35', qty: 164 },
+      legs: [leg(82, 174.925, 'stop', 183.1, '10:26'), leg(82, null, 'stop', 183.1, '10:26')] });
+    const l = T({ side: 'short', decisionBar: '09:34', decisionPrice: 180.375, stop: 183.2875,
+      entry: { price: 180.4975, at: '09:35:19', qty: 153 },
+      legs: [leg(76, 174.55, 'stop', 183.9, '10:26:33'), leg(77, null, 'stop', 183.9, '10:26:33')] });
+    const c = causes(b, l);
+    expect(kinds(c)).not.toContain('LOGIC');
+    expect(c.find(x => /stop's level/.test(x.text))).toMatchObject({ kind: 'DATA' });
+    expect(c.find(x => /every leg: the stop filled 0.6125 past its level/.test(x.text)).kind).toBe('EXECUTION');
+  });
+
+  test('TECK: a later signal is DATA; 308 against 35 shares is the money left — KNOCK-ON', () => {
+    const b = T({ side: 'long', decisionBar: '09:54', decisionPrice: 65.98, stop: 65.9127,
+      entry: { price: 65.96, at: '09:55', qty: 35 },
+      legs: [leg(3, 66.1818, 'stop', 65.9129, '09:55'), leg(28, 66.3836, 'stop', 65.9129, '09:55'),
+             leg(4, null, 'stop', 65.9129, '09:55')] });
+    const l = T({ side: 'long', decisionBar: '09:56', decisionPrice: 65.96, stop: 65.9169,
+      entry: { price: 66.0081, at: '09:57:03', qty: 308 },
+      reduced: 'reduced to fit $20318 left of the account size 100000 × 0.9, after the trades still open (308 shares)',
+      legs: [leg(30, 66.09, 'stop', 65.91, '09:59:26'), leg(246, 66.22, 'stop', 65.91, '09:59:26'),
+             leg(32, null, 'stop', 65.91, '09:59:26')] });
+    const c = causes(b, l);
+    expect(kinds(c)).not.toContain('LOGIC');
+    expect(c.find(x => /signal came on 09:56/.test(x.text)).kind).toBe('DATA');
+    expect(c.find(x => /money left/.test(x.text)).kind).toBe('KNOCK-ON');
+  });
+});
