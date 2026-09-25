@@ -110,6 +110,20 @@ describe('the names that were dropped, and why', () => {
     expect(aRun().dropped.latched).toEqual(['BRUN']);
   });
 
+  /*
+   * SIGNALLED AND RANKED OUT (2026-09-25). WIX signalled at 09:34 and lost a
+   * top 3; the daily check could only say "no signal" without this.
+   */
+  test('a name cut by the ranking is named with its bar', () => {
+    const r = aRun({ dropped: { stale: [], latched: [], rankedOut: ['WIX@09:34'] } });
+    expect(r.dropped).toEqual({ stale: undefined, latched: undefined, rankedOut: ['WIX@09:34'] });
+  });
+
+  test('the names qp was asked about are kept by name', () => {
+    expect(aRun({ symbols: ['WULF', 'EYPT', 'CAPR'] }).symbols).toEqual(['WULF', 'EYPT', 'CAPR']);
+    expect(aRun().symbols).toBeUndefined();
+  });
+
   /* Nothing dropped is not an empty list to read past — it is nothing said. */
   test('a clean run carries no dropped block at all', () => {
     expect(aRun({ dropped: { stale: [], latched: [] } }).dropped).toBeUndefined();

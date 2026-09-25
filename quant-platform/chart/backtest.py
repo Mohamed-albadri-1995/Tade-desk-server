@@ -1681,10 +1681,19 @@ def run(spec: dict, progress_cb=None) -> dict:
     # which for a VWAP-anchored stop IS the distance from VWAP, the metric the
     # spec ranks on, computed from fields already on the trade.
     rank = spec.get('rank_per_day') or None
-    if rank and closed:
-        closed, cov['rank_per_day'] = select_by_rank(
-            closed, rank.get('metric'), rank.get('direction'),
+    if rank and (closed or opens):
+        # OPEN TRADES ARE RANKED WITH THE CLOSED ONES. The choice is made at the
+        # ENTRY, among the signals of that bar; whether a trade has closed by
+        # the end of the data has nothing to do with it. Ranking the closed
+        # ones only let every trade still open at the end skip the top-N cut:
+        # the desk's daily check, run at 11:14, kept 6 of 8 signals of a
+        # top-3 setup (2026-09-25) — and so did any backtest ending mid-trade.
+        _open_ids = {id(t) for t in opens}
+        _kept, cov['rank_per_day'] = select_by_rank(
+            closed + opens, rank.get('metric'), rank.get('direction'),
             int(rank.get('top_n') or 0))
+        closed = [t for t in _kept if id(t) not in _open_ids]
+        opens = [t for t in _kept if id(t) in _open_ids]
 
     # THE DESK'S OWN LIMITS, after the ranking and before any sizing — the same
     # place live applies them. See desk_caps.

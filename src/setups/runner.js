@@ -683,6 +683,20 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
    * every rehearsal, for a reason that has nothing to do with the plumbing
    * being checked. The lag itself is reported instead, in minutes, as a fact.
    */
+  /*
+   * SIGNALLED ON THIS BAR AND LOST THE RANKING — named, for the run's log line.
+   * "live evaluated it and found nothing" and "live found it and took three
+   * others" are different findings, and the daily check could only say the
+   * first (2026-09-25: WIX signalled at 09:34, ranked out of a top 3).
+   */
+  {
+    const took = new Set((decided.picks || []).map(p => `${p.symbol}|${p.entry_at}`));
+    out.rankedOut = (decided.candidates || [])
+      .filter(c => c && c.symbol && c.entry_at && !took.has(`${c.symbol}|${c.entry_at}`))
+      .filter(c => !decisionBar || staleBy(c.entry_at, decisionBar) <= STALE_TOLERANCE_MIN)
+      .map(c => `${c.symbol}@${c.entry_at}`);
+  }
+
   if (decisionBar && !rehearsal) {
     const stale = out.picks.filter(p => staleBy(p.decisionAt, decisionBar) > STALE_TOLERANCE_MIN);
     if (stale.length) {
@@ -716,7 +730,7 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
     // every minute would bury the one bar that mattered.
     if (!out.picks.length && before) {
       return { ok: true, picks: 0, fires: [], latched: before,
-               dropped: { stale: out.staleBars, latched },
+               dropped: { stale: out.staleBars, latched, rankedOut: out.rankedOut },
                counts: out.counts, cards: list.length, universe: list.length,
                gate, data, riskCfg, rank: decided.rank || {} };
     }
@@ -1057,7 +1071,7 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
     return { ok: true, picks: 0, fires: [], quiet: true,
              counts: out.counts, cards: list.length, universe: list.length,
              gate, data, riskCfg, routing: routeLog,
-             dropped: { stale: out.staleBars, latched },
+             dropped: { stale: out.staleBars, latched, rankedOut: out.rankedOut },
              rank: decided.rank || {} };
   }
   if (!fires.length) {
@@ -1193,7 +1207,7 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
     orders,
     rank: { ...(decided.rank || {}),
             unscorable: (decided.dropped_unscorable || []).map(d => d.symbol) },
-    dropped: { stale: out.staleBars, latched },
+    dropped: { stale: out.staleBars, latched, rankedOut: out.rankedOut },
     data: {
       feed: data.feed,
       mixed: data.mixed,

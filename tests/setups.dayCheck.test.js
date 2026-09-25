@@ -258,3 +258,62 @@ describe('stored, and read back by the Algo page', () => {
     expect(dc.read('2026-09-23').ok).toBe(false);
   });
 });
+
+/*
+ * FOUND ON THE FIRST REAL DAY (2026-09-25), each with the shape it had:
+ *   SECZ  short, not shortable: the backtest sized it to 0 shares and live's
+ *         order was refused — neither traded it, and it read BACKTEST ONLY;
+ *   WIX   signalled at 09:34 and was ranked out of live's top 3 — it read
+ *         "qp found no signal";
+ *   SNX   dropped as stale 'SNX@09:42' — never recognised, the log names it
+ *         with its bar;
+ *   the check was run at 11:14, with trades still open on both sides.
+ */
+describe('the first real day', () => {
+  const skippedBt = {
+    symbol: 'SECZ', side: 'short', entry_ts: ts('09:35'), entry: 15.73, stop: 15.975,
+    exit_ts: ts('10:00'), exit: 15.8, reason: 'SL', legs: [],
+    ctx: { acct_shares: 0, acct_note: 'SECZ cannot be sold short at this broker',
+           signal_px: 15.85, signal_ts: ts('09:34') } };
+
+  test('not taken by either side is not a mismatch — both reasons are given', async () => {
+    const d = deps({ qp: { backtestDay: async () => ({ ok: true, summary: {}, trades: [skippedBt] }) } });
+    d.broker.orders = () => [{ date: DAY, at: Date.parse(iso('09:35:13')), setupId: SETUP.id,
+      destination: 'alp', symbol: 'SECZ', signal: 'SHORT', sent: false,
+      skipped: 'Alpaca will not short SECZ — the asset is not shortable' }];
+    const s = (await dc.build(DAY, d)).setups[0];
+    const t = s.trades.find(x => x.symbol === 'SECZ');
+    expect(t).toMatchObject({ status: 'skipped by both', worst: 'ok' });
+    expect(t.accounts[0].why.join(' ')).toMatch(/backtest: .*cannot be sold short/);
+    expect(t.accounts[0].why.join(' ')).toMatch(/live: .*not shortable/);
+    expect(s.totals).toMatchObject({ backtest: 0, backtestOnly: 0, skippedBoth: 1 });
+  });
+
+  test('live took one the backtest skipped: said as that, not as "no trade"', async () => {
+    const d = deps({ qp: { backtestDay: async () => ({ ok: true, summary: {},
+      trades: [{ ...skippedBt, symbol: 'CCC' }] }) } });
+    const t = (await dc.build(DAY, d)).setups[0].trades.find(x => x.symbol === 'CCC');
+    expect(t.status).toBe('live only');
+    expect(t.accounts[0].why[0]).toMatch(/signalled it too and did not take it: .*cannot be sold short/);
+  });
+
+  test('ranked out of live\'s top N', () => {
+    const runs = [{ bar: '09:34', ok: true, symbols: ['WIX', 'TWST'], rank: { topN: 3 },
+                    picks: [{ ticker: 'TWST' }, { ticker: 'SECZ' }, { ticker: 'BYND' }],
+                    dropped: { rankedOut: ['WIX@09:34', 'KGC@09:34'] } }];
+    expect(dc.whyNotLive('WIX', '09:34', runs, [])[0])
+      .toMatch(/RANKED OUT — live took the top 3 \(TWST, SECZ, BYND\)/);
+  });
+
+  test('a stale drop is recognised by its SYM@HH:MM name', () => {
+    const runs = [{ bar: '09:42', ok: true, symbols: ['SNX'], dropped: { stale: ['SNX@09:41'] } }];
+    expect(dc.whyNotLive('SNX', '09:42', runs, [])[0]).toMatch(/dropped as stale/);
+  });
+
+  test('a check run during the session says so', async () => {
+    const r = await dc.build(DAY, deps({ now: Date.parse(`${DAY}T11:14:00-04:00`) }));
+    expect(r.partial).toBe(true);
+    const after = await dc.build(DAY, deps({ now: Date.parse(`${DAY}T16:10:00-04:00`) }));
+    expect(after.partial).toBe(false);
+  });
+});

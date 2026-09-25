@@ -786,6 +786,24 @@ describe('which setups place orders', () => {
     expect(spy.mock.calls[0][0].decisionBar).toBe('10:00');
   });
 
+  /*
+   * RANKED OUT, NAMED (2026-09-25): a candidate on this bar that is not a pick
+   * lost the ranking. One from an earlier bar is not — it is an old trade.
+   */
+  test('the names that signalled on this bar and lost the ranking are returned', async () => {
+    const pick = { symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                   risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' };
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 3, signalled: 3 },
+      picks: [pick],
+      candidates: [pick, { ...pick, symbol: 'BBB', metric: 2 },
+                   { ...pick, symbol: 'CCC', metric: 5, entry_at: '09:40' }],
+    });
+    const res = await runner.runSetup(
+      { id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' }, { dryRun: true });
+    expect(res.dropped.rankedOut).toEqual(['BBB@10:00']);
+  });
+
   // 2026-09-24: three picks at 5–6 s an order; the third was refused because
   // the price had moved. The questions are asked together BEFORE any order.
   test('the broker questions go out before the first order', async () => {

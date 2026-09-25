@@ -246,12 +246,15 @@ function runOf({
     // name is something you can go and put on a chart.
     dropped: dropped && (
       (dropped.stale || []).length || (dropped.latched || []).length
+      || (dropped.rankedOut || []).length
     ) ? {
       // Found on a bar it could not act on: the price is stale AND the name may
       // not have been on the watchlist yet, which is the gate the backtest applies.
       stale: (dropped.stale || []).length ? dropped.stale : undefined,
       // Already alerted today — the once-per-name latch.
       latched: (dropped.latched || []).length ? dropped.latched : undefined,
+      // Signalled on this bar and cut by the ranking's top N — 'SYM@HH:MM'.
+      rankedOut: (dropped.rankedOut || []).length ? dropped.rankedOut : undefined,
     } : undefined,
     picks: picks.map(p => ({
       ticker: p.ticker,

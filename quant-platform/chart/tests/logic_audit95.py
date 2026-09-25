@@ -116,5 +116,27 @@ print('== 3. one day only ==')
 out = call(dict(SPEC, end='2024-01-10'))
 ok('two days refused', out.get('ok') is False and 'one day' in out.get('error', ''), out)
 
+print('== 4. mid-session: trades still open are ranked like the closed ones ==')
+# Found on the first real day (2026-09-25): the check ran at 11:14, the
+# trades were still open, and the ranking only looked at CLOSED trades — a
+# top-3 setup kept 6 of 8 signals. Any backtest ending mid-trade did the same.
+class MidSession(OneGreen):
+    def load(self, symbol, tf, start, end):
+        df = super().load(symbol, tf, start, end)
+        et = df.index.tz_convert('America/New_York')
+        return df[~((et.strftime('%Y-%m-%d') == DAY) & (et.hour * 60 + et.minute > 11 * 60 + 13))]
+
+
+cs._LOADERS['green95'] = MidSession()
+REG['T9:R1'] = {DAY: [{'ticker': 'AAA'}, {'ticker': 'CCC'}, {'ticker': 'DDD'}]}
+out = call(dict(SPEC, rank_per_day={'metric': 'vwap_extension', 'top_n': 1}))
+ok('answered', out.get('ok'), out.get('error'))
+ok('all four are still open at 11:13', all(t['reason'] == 'open' for t in out['trades']),
+   [t['reason'] for t in out['trades']])
+ok('top 1 keeps ONE of the four open trades', len(out['trades']) == 1,
+   [t['symbol'] for t in out['trades']])
+ok('the other three are counted as ranked out',
+   ((out['summary'].get('coverage') or {}).get('rank_per_day') or {}).get('dropped_by_rank') == 3)
+
 print(f'PASS={PASS} FAIL={FAIL}')
 sys.exit(1 if FAIL else 0)

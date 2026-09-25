@@ -4210,6 +4210,12 @@ function paintDayCheck(d) {
     : (off ? `${off} trade(s) taken by one side only${diff ? ` · ${diff} more with differences` : ''} — open them below`
       : (diff ? `Same trades on both sides · ${diff} with differences in price, time or size`
         : 'Live took exactly the backtest\'s trades, the same way.'));
+  if (r.partial) {
+    sum.className = 'hl-sum warn';
+    sum.textContent = 'Run DURING the session — trades still open have no exit yet on either side, '
+      + `so this is not the day's result. The full check runs by itself at ${d.runsAt || '16:10'} New York. `
+      + sum.textContent;
+  }
   box.innerHTML = all.map(dcSetup).join('') || '<div class="empty">No setup is enabled.</div>';
 }
 async function loadDayCheck(date) {

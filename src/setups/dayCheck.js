@@ -158,6 +158,9 @@ function backtestTrade(t, splitLegs) {
     pnl,
     notOnRegister: !!c._extra,
     note: c.acct_note || null,
+    // SIGNALLED AND NOT TAKEN: sized to no shares — no borrow, no money left,
+    // a stop too wide for one share. The backtest did not trade it either.
+    skipped: shares < 1 ? (c.acct_note || 'sized to 0 shares') : null,
   };
 }
 
@@ -410,12 +413,20 @@ function whyNotLive(symbol, bar, runs, refusals) {
         : `picked at ${bar}; no order row was found in the ledger`);
       continue;
     }
-    if (((r.dropped || {}).stale || []).includes(symbol)) {
+    const named = (list) => (list || []).some(x => x === symbol || String(x).startsWith(`${symbol}@`));
+    if (named((r.dropped || {}).rankedOut)) {
+      const took = (r.picks || []).map(p => p.ticker).filter(Boolean);
+      out.push(`signalled at ${bar} and was RANKED OUT — live took the top `
+        + `${(r.rank && r.rank.topN) || took.length}${took.length ? ` (${took.join(', ')})` : ''}; `
+        + 'the backtest ranked it higher, so the two ranked on different numbers');
+      continue;
+    }
+    if (named((r.dropped || {}).stale)) {
       out.push(`found on an older bar than ${bar} and dropped as stale — the feed was late`
         + (r.feed && r.feed.lagMin ? ` (${r.feed.lagMin} min behind)` : ''));
       continue;
     }
-    if (((r.dropped || {}).latched || []).includes(symbol)) {
+    if (named((r.dropped || {}).latched)) {
       out.push(`already alerted today — the once-per-name latch`);
       continue;
     }
@@ -573,20 +584,32 @@ async function build(date = toETDate(Date.now()), deps = {}) {
 
       const syms = new Set([...btTrades.map(t => t.symbol), ...liveTrades.map(t => t.symbol)]);
       for (const sym of syms) {
-        const b = btTrades.find(t => t.symbol === sym) || null;
+        const found = btTrades.find(t => t.symbol === sym) || null;
+        const skipped = found && found.skipped ? found : null;
+        const b = skipped ? null : found;
         const l = liveTrades.find(t => t.symbol === sym) || null;
         if (!bySymbol.has(sym)) {
-          bySymbol.set(sym, { symbol: sym, side: (b || l).side, accounts: [] });
+          bySymbol.set(sym, { symbol: sym, side: (found || l).side, accounts: [] });
         }
         const row = bySymbol.get(sym);
-        const status = b && l ? 'both' : (b ? 'backtest only' : 'live only');
+        const status = b && l ? 'both' : (b ? 'backtest only'
+          : (l ? 'live only' : 'skipped by both'));
         const item = { account: acct.name, status, bt: b, live: l };
+        if (skipped) item.btSkipped = skipped.skipped;
         if (b && l) item.cmp = compare(b, l);
-        else if (b) {
+        else if (!b && !l) {
+          // Neither traded it. The same outcome — said with both reasons.
+          item.why = [`backtest: signalled, not taken — ${skipped.skipped}`,
+            ...whyNotLive(sym, skipped.decisionBar, runs,
+              refusedHere.filter(o => String(o.symbol).toUpperCase() === sym))
+              .map(w => `live: ${w}`)];
+        } else if (b) {
           item.why = whyNotLive(sym, b.decisionBar, runs,
             refusedHere.filter(o => String(o.symbol).toUpperCase() === sym));
         } else {
-          item.why = whyNotBacktest(sym, bt.summary, bt.ok ? null : bt.error);
+          item.why = skipped
+            ? [`the backtest signalled it too and did not take it: ${skipped.skipped}`]
+            : whyNotBacktest(sym, bt.summary, bt.ok ? null : bt.error);
         }
         row.accounts.push(item);
       }
@@ -594,7 +617,7 @@ async function build(date = toETDate(Date.now()), deps = {}) {
 
     out.trades = [...bySymbol.values()].map((r) => {
       const statuses = new Set(r.accounts.map(a => a.status));
-      const worst = r.accounts.some(a => a.status !== 'both') ? 'bad'
+      const worst = r.accounts.some(a => a.status === 'backtest only' || a.status === 'live only') ? 'bad'
         : r.accounts.reduce((w, a) => (a.cmp && a.cmp.worst === 'bad' ? 'bad'
           : (a.cmp && a.cmp.worst === 'warn' && w !== 'bad' ? 'warn' : w)), 'ok');
       const first = r.accounts[0] || {};
@@ -612,6 +635,7 @@ async function build(date = toETDate(Date.now()), deps = {}) {
       both: out.trades.filter(t => t.status === 'both').length,
       backtestOnly: out.trades.filter(t => t.status === 'backtest only').length,
       liveOnly: out.trades.filter(t => t.status === 'live only').length,
+      skippedBoth: out.trades.filter(t => t.status === 'skipped by both').length,
       // On both sides and not the same: a one-sided trade is counted above.
       mismatched: out.trades.filter(t => t.status === 'both' && t.worst !== 'ok').length,
       pnlBacktest: sum(a => (a.bt ? a.bt.pnl : null)),
@@ -620,6 +644,10 @@ async function build(date = toETDate(Date.now()), deps = {}) {
     report.setups.push(out);
   }
   report.tookMs = Date.now() - started;
+  // RUN BEFORE THE CLOSE: trades still open have no exit yet, on either side,
+  // and the numbers are not the day's. Said on the page, not left to be read.
+  const nowAt = deps.now || Date.now();
+  report.partial = date === toETDate(nowAt) && (mins(etHHMM(nowAt)) || 0) < 16 * 60;
   return report;
 }
 
