@@ -94,6 +94,8 @@ def _tp_kind(tp: dict | None, r_multiple) -> str:
         return 'anchored'
     if t in ('pct', 'points'):
         return t
+    if t == 'atr':
+        return 'atr'
     return 'none'
 
 
@@ -159,6 +161,24 @@ def normalise(strategy: dict) -> dict:
                 'tp': tp,
                 'r_multiple': _num(t.get('r_multiple')),
                 'tp_kind': _tp_kind(tp, t.get('r_multiple')),
+            })
+
+        # ONE TARGET FOR THE WHOLE POSITION, written as risk.tp — the shape
+        # the engine reads when there is no targets list (strategy.py
+        # _risk_dist / _anchor_levels: pct, points, atr, prim). It was never
+        # read here, so such a strategy went out with the screener's default
+        # 2R instead of its own target, or — with an exit rule as well — was
+        # refused for auto-trading as "exits on a rule" (logic_audit94).
+        tp = risk.get('tp') if isinstance(risk.get('tp'), dict) else None
+        if not legs and tp and _tp_kind(tp, None) != 'none' and (
+                tp.get('type') == 'prim' or _num(tp.get('value')) not in (None, 0)):
+            legs.append({
+                'fraction': 1.0,
+                'sl': shared_sl,
+                'sl_kind': _sl_kind(shared_sl),
+                'tp': tp,
+                'r_multiple': None,
+                'tp_kind': _tp_kind(tp, None),
             })
 
     booked = sum(l['fraction'] for l in legs)
@@ -270,6 +290,11 @@ def validate(protocol: dict) -> dict:
             errors.append(f'leg {i} has no target and is not the runner')
         elif leg.get('tp_kind') == 'default_r':
             warnings.append('no target in the strategy — the screener supplies 2R')
+        elif leg.get('tp_kind') == 'atr':
+            order_errors.append(
+                f'leg {i} targets a multiple of the ATR — the backtest measures it '
+                'at the decision bar, and the order cannot be priced from here yet. '
+                'Give it an R, % or points target to auto-trade it')
         elif leg.get('tp_kind') == 'rule':
             order_errors.append(
                 'this strategy exits on a RULE, not at a price — no broker can '

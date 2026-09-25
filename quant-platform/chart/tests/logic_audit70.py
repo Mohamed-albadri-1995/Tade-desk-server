@@ -22,10 +22,12 @@ SHARES. Substituting one for the other gives a number that is arithmetically
 fine about the wrong question — and it is the substitution anyone would reach
 for first, because both of them sound like "make the account smaller".
 
-ORDER MATTERS. Live scales in risk.js and THEN lets the broker fit what is left
-of the buying power, so the ratio goes before both caps here. Reversed, a
-position capped to the account's limit would be scaled a second time and come
-out at 0.9 of a cap that was already the maximum.
+ORDER MATTERS, and this file had it backwards until 2026-09-25. Live caps the
+STANDARD trade (risk.sizeFor applies maxPositionPct of the standard account),
+THEN scales it (risk.scaleTo floors x ratio), THEN fits it into this account's
+money — the standard size x ratio (signalstack.js capitalFor). So a capped
+position comes out at 0.9 of the standard cap, which is the cap of an account
+0.9 the size: not "scaled twice", scaled once like everything else about it.
 
 AND IT IS REPORTED WHEN IT IS 1.0 TOO. A run that says nothing about its ratio
 is indistinguishable from a run at full size, which is exactly the state this
@@ -103,29 +105,27 @@ ok('90k equity leaves the share count at 384, not 345',
 ok('so equity and ratio are genuinely different settings',
    shares_of(smaller) != shares_of(nine))
 
-print('\n── the ratio goes BEFORE the caps, as it does live ────────────────')
+print('\n── the cap on the STANDARD trade, then the ratio — as live ─────────')
 
-# A per-position cap of 25% of 100k = $25,000 / 175.30 = 142 shares. The ratio
-# is applied first, to 384, and 345 is still above the cap — so the cap binds
-# and 142 comes out. If the ratio were applied AFTER, the answer would be
-# floor(142 x 0.9) = 127: a position scaled twice.
+# A per-position cap of 25% of 100k = $25,000 / 175.30 = 142 shares on the
+# standard account. Live caps 384 to 142, then floors 142 x 0.9 = 127: the
+# cap of an account 0.9 the size. Scaling first and capping after gave 142 —
+# more than this account is ever sent.
 capped = run([FTAI], size_ratio=0.9, max_position_pct=25)
-ok('a capped position is capped once, not scaled twice',
-   shares_of(capped) == math.floor(25_000 / 175.30),
+ok('the standard cap, scaled by the ratio: 127 shares',
+   shares_of(capped) == math.floor(math.floor(25_000 / 175.30) * 0.9),
    str(shares_of(capped)))
-ok('and that is not the double-scaled number',
-   shares_of(capped) != math.floor(math.floor(25_000 / 175.30) * 0.9))
 
-print('\n── the portfolio cap still binds after it ─────────────────────────')
+print('\n── the account\'s money is the standard size x its ratio ────────────')
 
-# BOTH NAMES, IN RANK ORDER, on one $100k cash balance — the real 09-15 shape.
-# FTAI takes 345 x 175.30 = $60,478; BLSH asks floor(2040 x 0.9) = 1836, which
-# is $66,151, and only $39,521 is left.
+# BOTH NAMES, IN RANK ORDER — the real 09-15 shape. The account has $90,000
+# (100k x 0.9), as live's capitalFor says. FTAI takes 345 x 175.30 = $60,478;
+# BLSH asks floor(2040 x 0.9) = 1836, and only $29,521 is left.
 both = run([FTAI, BLSH], size_ratio=0.9)
 sh = {t['symbol']: (t.get('ctx') or {}).get('acct_shares') for t in both['all']}
 ok('FTAI keeps its scaled size', sh.get('FTAI') == 345, str(sh))
-ok('BLSH is cut to what the balance leaves, not to 1836',
-   sh.get('BLSH') == math.floor((100_000 - 345 * 175.30) / 36.03), str(sh))
+ok('BLSH is cut to what $90,000 leaves, not to 1836',
+   sh.get('BLSH') == math.floor((90_000 - 345 * 175.30) / 36.03), str(sh))
 ok('and the run says a size was cut by leverage',
    both['summary']['size_capped_by_leverage'] >= 1)
 

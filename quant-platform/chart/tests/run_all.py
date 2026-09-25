@@ -108,6 +108,7 @@ PARTS = [
     ('logic_audit91.py',    'the live decision closes yesterday at 15:50 and ignores premarket, as the desk does'),
     ('logic_audit92.py',    'the manager judges the bar that has just closed, on the decision\'s bars'),
     ('logic_audit93.py',    'the live manager replayed minute by minute closes where the backtest did'),
+    ('logic_audit94.py',    'a strategy\'s single target (risk.tp) is the order\'s target'),
     ('py39_guard.py',       'nothing needs a Python newer than the box (3.9)'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),

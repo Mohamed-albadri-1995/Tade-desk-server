@@ -36,6 +36,7 @@ It does NOT refuse the run. A backtest that cannot reach the broker is still
 worth reading, and refusing would make the tool unusable offline. But it must
 be impossible to read the result as "borrow was checked".
 """
+import math
 import pathlib
 import sys
 
@@ -126,10 +127,12 @@ ok('so nothing is listed as unchecked', not field(gs, 'borrow_unchecked_names'))
 ok('and the run says the check was asked for', field(gs, 'borrow_asked') is True)
 
 # THE CASCADE, which is the whole reason MMED matters beyond MMED. Refusing it
-# leaves its $37k of buying power for the names behind it.
+# leaves its $37k of buying power for the names behind it. The account's money
+# is 100k x 0.9 = $90,000, as live's capitalFor says (2026-09-25; the 1096 in
+# the notes above was live sizing against the whole $100k before then).
 sh = {t['symbol']: (t.get('ctx') or {}).get('acct_shares') for t in good['all']}
 ok('the capital MMED did not spend is left for BLSH',
-   (sh.get('BLSH') or 0) > 900, str(sh))
+   sh.get('BLSH') == math.floor((90_000 - 345 * 175.30) / 36.02), str(sh))
 
 print('\n── asked, and NOT answered ────────────────────────────────────────')
 

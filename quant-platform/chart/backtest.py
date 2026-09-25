@@ -887,8 +887,9 @@ def _account_block(closed: list, spec: dict) -> dict | None:
     # SHARES. The two knobs are not substitutes and reading one as the other
     # gives a number that is arithmetically fine about the wrong thing.
     #
-    # BEFORE BOTH CAPS, because that is where live applies it: risk.js scales,
-    # then the broker fits what is left of the buying power.
+    # AFTER THE PER-TRADE CAP and before the money check, because that is
+    # where live applies it: risk.js caps the standard trade, scales it, and
+    # the broker fits it into this account's money (the standard x ratio).
     try:
         size_ratio = float(spec.get('size_ratio', 1) or 1)
     except (TypeError, ValueError):
@@ -1025,25 +1026,13 @@ def _account_block(closed: list, spec: dict) -> dict | None:
                    else f'{risk_pct}% of equity ({budget:,.0f})')
                 + ' this trade may lose')
             continue
-        # THE ACCOUNT'S RATIO, on the STANDARD count and floored — the same two
-        # operations, in the same order, as src/setups/risk.js:279. Floored
-        # rather than rounded, because rounding up sends more risk than the
-        # trade was sized for, and the bridge refuses a fraction outright.
-        if size_ratio != 1.0:
-            scaled = math.floor(shares * size_ratio)
-            if scaled < 1:
-                # A REAL ANSWER, not an error: the account is too small a share
-                # of the standard to take this name at all. risk.js says the
-                # same thing in the same words, and it must not be filed under
-                # "no stop" — that would send you to change the wrong setting.
-                ratio_unsized += 1
-                t.setdefault('ctx', {})['acct_note'] = (
-                    f'{shares} shares at the standard x {size_ratio} is '
-                    f'{shares * size_ratio:.2f} — under one whole share')
-                continue
-            if scaled < shares:
-                ratio_scaled += 1
-            shares = scaled
+        # THE STANDARD TRADE FIRST, THEN THE ACCOUNT'S SHARE OF IT — the order
+        # src/setups/risk.js uses: sizeFor() caps the STANDARD count by
+        # max_position_pct of the standard account, and scaleTo() floors that
+        # times the ratio. This scaled first and capped the scaled count
+        # against the whole standard account, so with a ratio under 1 and a
+        # cap that bit, the backtest held more than live ever sends: 1000 by
+        # risk, cap 400, ratio 0.9 -> live 360, backtest 400 (logic_audit70).
         # PER-TRADE CAP, applied BEFORE the portfolio one. Order matters: cap
         # this trade first, then measure what is left for the rest of the day.
         # Reversed, the first name would still swallow the balance and the cap
@@ -1063,8 +1052,31 @@ def _account_block(closed: list, spec: dict) -> dict | None:
                     f'one share costs ${entry:,.2f} — more than the '
                     f'{max_pos_pct}% of equity one position may hold')
                 continue
+        # THE ACCOUNT'S RATIO, on the STANDARD count and floored — the same two
+        # operations, in the same order, as src/setups/risk.js:279. Floored
+        # rather than rounded, because rounding up sends more risk than the
+        # trade was sized for, and the bridge refuses a fraction outright.
+        if size_ratio != 1.0:
+            scaled = math.floor(shares * size_ratio)
+            if scaled < 1:
+                # A REAL ANSWER, not an error: the account is too small a share
+                # of the standard to take this name at all. risk.js says the
+                # same thing in the same words, and it must not be filed under
+                # "no stop" — that would send you to change the wrong setting.
+                ratio_unsized += 1
+                t.setdefault('ctx', {})['acct_note'] = (
+                    f'{shares} shares at the standard x {size_ratio} is '
+                    f'{shares * size_ratio:.2f} — under one whole share')
+                continue
+            if scaled < shares:
+                ratio_scaled += 1
+            shares = scaled
         # buying power LEFT after the positions already open (portfolio-wide)
-        room = equity * lev - open_notional
+        # THE ACCOUNT'S MONEY is the standard size times its ratio — what live
+        # sizes against (signalstack.js capitalFor: accountSize x ratio). The
+        # whole standard equity here gave a 0.9 account 11% more room than it
+        # has (logic_audit70).
+        room = equity * size_ratio * lev - open_notional
         max_sh = math.floor(room / entry) if room > 0 else 0
         if max_sh < 1:
             # Not "no stop" and not a risk-budget problem: the balance is
