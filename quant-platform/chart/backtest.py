@@ -511,6 +511,13 @@ def _pairs(spec: dict, strategy: dict | None = None) -> list[tuple[str, str]]:
     if kind in ('register', 'tools'):
         from chart import screener as sc
         register = uni.get('register', 'R1')
+        # NAMES THE LIVE DESK EVALUATED that the register may not hold — the
+        # daily live-vs-backtest check sends them (src/setups/dayCheck.js), so
+        # a trade live took on a name the morning photo missed can still be
+        # compared. Marked `_extra` on the trade, so "not on the register" is
+        # a finding rather than a silent difference in the universe.
+        extras = [str(x).strip().upper() for x in (uni.get('extra_symbols') or [])
+                  if x and str(x).strip()]
 
         if kind == 'tools':
             # The setup's own tools, expanded to one register per tool.
@@ -562,6 +569,14 @@ def _pairs(spec: dict, strategy: dict | None = None) -> list[tuple[str, str]]:
                     if t and t not in day:
                         day[t] = dict(r, _tool=reg.split(':')[0] if ':' in reg else None)
 
+        if extras:
+            for d in sorted(want):
+                day = by_day.setdefault(d, {})
+                for t in extras:
+                    if t not in day:
+                        day[t] = {'_extra': True}
+            if not seen_dates:
+                seen_dates.update(want)
         if not seen_dates:
             raise ValueError(f'no {register} register dates between '
                              f'{spec.get("start")} and {spec.get("end")} for '
@@ -977,7 +992,20 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         entry = float(t['entry'])
         stop = t.get('stop')
         sgn = 1.0 if t['side'] == 'long' else -1.0
-        per_share_risk = (entry - float(stop)) * sgn if stop is not None else None
+        # SIZED AT THE DECISION PRICE, as live sizes it. The desk picks the
+        # share count before its order exists — risk.sizeFor reads the plan's
+        # entry (the decision bar's close) and its stop, the cap and the money
+        # check read the same price — and only the P&L meets the real fill.
+        # Sizing on the fill (the next open under 'desk') gave a different
+        # count whenever the open moved: 110 shares where live sends 99
+        # (chart/tests/logic_audit95). `entry` stays the fill for the P&L.
+        try:
+            size_px = float((t.get('ctx') or {}).get('signal_px') or entry)
+        except (TypeError, ValueError):
+            size_px = entry
+        if not size_px > 0:
+            size_px = entry
+        per_share_risk = (size_px - float(stop)) * sgn if stop is not None else None
         if not per_share_risk or per_share_risk <= 0 or entry <= 0 or equity <= 0:
             unsized += 1
             t.setdefault('ctx', {})['acct_note'] = 'no stop — not sized'
@@ -1042,14 +1070,14 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         # configured account size. Same rule; the sim just knows what the
         # balance actually is at that moment.
         if max_pos_pct:
-            cap_sh = math.floor((equity * max_pos_pct / 100.0) / entry)
+            cap_sh = math.floor((equity * max_pos_pct / 100.0) / size_px)
             if shares > cap_sh:
                 shares = cap_sh
                 pos_capped += 1
             if shares < 1:
                 unsized += 1
                 t.setdefault('ctx', {})['acct_note'] = (
-                    f'one share costs ${entry:,.2f} — more than the '
+                    f'one share costs ${size_px:,.2f} — more than the '
                     f'{max_pos_pct}% of equity one position may hold')
                 continue
         # THE ACCOUNT'S RATIO, on the STANDARD count and floored — the same two
@@ -1077,7 +1105,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         # whole standard equity here gave a 0.9 account 11% more room than it
         # has (logic_audit70).
         room = equity * size_ratio * lev - open_notional
-        max_sh = math.floor(room / entry) if room > 0 else 0
+        max_sh = math.floor(room / size_px) if room > 0 else 0
         if max_sh < 1:
             # Not "no stop" and not a risk-budget problem: the balance is
             # committed to positions still open. This is the count that says
@@ -1085,7 +1113,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
             no_capital += 1
             t.setdefault('ctx', {})['acct_note'] = (
                 f'no buying power left — ${max(0.0, room):,.0f} free will not '
-                f'buy one share at ${entry:,.2f}')
+                f'buy one share at ${size_px:,.2f}')
             continue
         if shares > max_sh:
             shares = max_sh
@@ -1146,7 +1174,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         # most of the cost, so adding them together would read as "no cost".
         _c['acct_slip_usd'] = round(slip, 2)
         _c['acct_equity_before'] = round(equity, 2)
-        _c['acct_notional_usd'] = round(shares * entry, 2)
+        _c['acct_notional_usd'] = round(shares * size_px, 2)
         # R IS WHAT THE ACCOUNT KEPT, DIVIDED BY WHAT IT PUT AT RISK. It was
         # computed from `gross`, so the moment the cost model started charging
         # real dollars the two numbers on the same screen stopped agreeing:
@@ -1165,7 +1193,7 @@ def _account_block(closed: list, spec: dict) -> dict | None:
         # Collapsing them would hide a strategy that works at a better fill.
         _c['acct_r_multiple_gross'] = (round(gross / _risk_usd, 2)
                                        if per_share_risk > 0 else None)
-        _c['acct_open_notional_usd'] = round(open_notional + shares * entry, 2)
+        _c['acct_open_notional_usd'] = round(open_notional + shares * size_px, 2)
         # PROP-FIRM MIN-PROFIT, AT THE ACCOUNT'S OWN SIZE. The rule is per
         # SHARE, so whether a win clears it does not depend on size at all —
         # but the money it costs you does. The TTP block tests it at a flat 100

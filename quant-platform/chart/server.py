@@ -406,6 +406,42 @@ def backtest_get(bid: int, trades: int = 1):
     return JSONResponse({'ok': bool(g), 'backtest': g})
 
 
+_DAY_LOCK = _threading.Lock()
+
+
+@app.post('/api/backtest/day')
+def backtest_day(payload: dict = Body(...)):
+    """One day's backtest, answered in the request and NOT stored.
+
+    For the desk's daily live-vs-backtest check (src/setups/dayCheck.js): every
+    enabled setup, run after the close on today, with the live settings and
+    the live feed. Stored like a normal run it would fill the backtest list
+    with a row per setup per day, and become the "latest backtest" the Parity
+    check compares against — which it is not; that is the user's own run.
+
+    Body = a normal spec. One at a time: a second request while one runs is
+    refused rather than queued, like the backtest itself.
+    """
+    from chart import backtest as bt
+    if not _DAY_LOCK.acquire(blocking=False):
+        return JSONResponse({'ok': False, 'error': 'a daily check is already running'},
+                            status_code=200)
+    try:
+        spec = dict(payload or {})
+        if not spec.get('start') or spec.get('start') != spec.get('end'):
+            return JSONResponse({'ok': False, 'error': 'one day: start and end must be '
+                                                       'the same date'}, status_code=200)
+        out = bt.run(spec)
+        summary = {k: v for k, v in (out.get('summary') or {}).items()
+                   if k != 'equity_curve'}
+        return JSONResponse({'ok': True, 'summary': summary,
+                             'trades': out.get('trades') or []})
+    except Exception as e:                                # noqa: BLE001
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=200)
+    finally:
+        _DAY_LOCK.release()
+
+
 @app.get('/api/desk/backtest-defaults')
 def desk_backtest_defaults():
     """The live desk's settings, in this backtest's own key names.
