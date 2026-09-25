@@ -15,6 +15,11 @@ position at a time, so:
 
 Both run decide.evaluate_symbol exactly as the live desk does, at the decision
 minute, on bars cut at that minute, against the backtest of the same bars.
+
+And, found with them: every pick names the bar it was DECIDED on
+(`decided_at`), which the order records and the manager starts the engine
+from — and today's newest bar is not "the day's last bar" until the session
+reaches 15:50 (the engine liquidated on it and refused a next-open entry).
 """
 import pathlib
 import sys
@@ -120,6 +125,21 @@ try:
     print('== 3. the rules the decision uses are the desk\'s ==')
     ok('entries 09:30-15:50 and everything closed by 15:50',
        D.DESK_RULES == {'rth_entries': True, 'eod_close': True}, D.DESK_RULES)
+    print('== 4. every pick names the bar it was decided on ==')
+    st = strategy(window_start=930, window_end=1130)
+    df = frame({(TODAY, 9 * 60 + 40)})
+    et = df.index.tz_convert(ET)
+    m = [i for i in range(len(df)) if et[i].strftime('%Y-%m-%d %H:%M') == f'{TODAY} 09:40'][0]
+    serve(df.iloc[:m + 1])
+    rows = [r for r in D.evaluate_symbol([st], 'X', TODAY, '1m', 'yahoo', days=2,
+                                         fill='live', view='all') if r.get('entry_at')]
+    ok('live fill: decided on 09:40, the bar it entered at', rows and rows[0].get('decided_at') == '09:40',
+       rows)
+    serve(df.iloc[:m + 2])
+    rows = [r for r in D.evaluate_symbol([st], 'X', TODAY, '1m', 'yahoo', days=2,
+                                         fill='desk', view='all') if r.get('entry_at')]
+    ok('desk fill: entered 09:41, decided on 09:40', rows and rows[0].get('entry_at') == '09:41'
+       and rows[0].get('decided_at') == '09:40', rows)
 finally:
     cs.prepare_bars = real
 

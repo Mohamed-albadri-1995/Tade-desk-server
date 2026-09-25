@@ -855,6 +855,22 @@ describe('the desk acts on the engine\'s verdict', () => {
     await manager.check(AT);
     expect(qp.manage).toHaveBeenCalledWith(expect.objectContaining({ fill: 'live' }));
   });
+
+  // Without a date qp served a frame ending at the last five-minute mark,
+  // from a cache written while its last bar was forming (2026-09-25).
+  test('it asks about TODAY, so qp reads the bar that has just closed', async () => {
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({ close_now: false }));
+    await manager.check(AT);
+    expect(qp.manage).toHaveBeenCalledWith(expect.objectContaining({ asof: DAY }));
+  });
+
+  test('and on the decision\'s bars — view all unless the setup says otherwise', async () => {
+    ledger([{}]);
+    qp.manage.mockResolvedValue(answer({ close_now: false }));
+    await manager.check(AT);
+    expect(qp.manage).toHaveBeenCalledWith(expect.objectContaining({ view: 'all' }));
+  });
 });
 
 describe('closeVerdict — the wording is the reason', () => {

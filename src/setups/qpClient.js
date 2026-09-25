@@ -196,12 +196,13 @@ async function decide({ strategyId, strategies, symbols, date, tf = '1m',
  */
 async function manage({ name, strategyId, symbol, side, entry, entryIso,
                         stopAtEntry = null, tf = '1m', feed = 'yahoo',
-                        fill = 'live', days = 2, asof = null, timeoutMs = 20000 }) {
+                        fill = 'live', view = 'all', days = 2, asof = null,
+                        timeoutMs = 20000 }) {
   // `fill` travels with the question because qp answers it by running the
   // backtest engine on this one position, and the fill model decides which
   // bar that engine books an exit on. See chart/manage.py.
   const body = { symbol, side, entry, entry_iso: entryIso,
-                 stop_at_entry: stopAtEntry, tf, feed, fill, days, asof };
+                 stop_at_entry: stopAtEntry, tf, feed, fill, view, days, asof };
   if (strategyId) body.strategy_id = strategyId; else body.name = name;
 
   const res = await axios.post(`${baseUrl()}/api/strategy/manage`, body, {

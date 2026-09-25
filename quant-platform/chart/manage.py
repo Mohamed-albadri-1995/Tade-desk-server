@@ -48,6 +48,7 @@ different and lesser thing, and the difference belongs in the results.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from chart import strategy as strat
 import tools.compare_server as cs
@@ -141,7 +142,7 @@ def _engine_from_entry(strategy: dict, side: str, bars, ts, ctx, ei: int,
 
 def manage(strategy: dict, symbol: str, side: str, entry: float,
            entry_iso: str | None = None, *, tf: str = '1m', feed: str = 'yahoo',
-           days: int = 2, view: str = 'regular', asof: str | None = None,
+           days: int = 2, view: str = 'all', asof: str | None = None,
            stop_at_entry: float | None = None, drop_last: bool = False,
            fill: str = 'live') -> dict:
     """Should this open position close now, and where is its stop now?
@@ -152,6 +153,26 @@ def manage(strategy: dict, symbol: str, side: str, entry: float,
     started earlier it would inherit a level from before the position existed.
     """
     side = str(side or 'long').lower()
+    # ── THE SAME BARS THE DECISION READ, and fresh ─────────────────────────
+    #
+    # NO DATE MEANT A FIVE-MINUTE-OLD FRAME. The desk asked without `asof`,
+    # and prepare_bars reads that as "not a live day": the window ended at
+    # now floored to FIVE minutes and came from the disk cache, written by the
+    # first call in those five minutes — its last bar still forming. At 10:44
+    # the manager judged the 10:40 bar, half of it; a rule exit or a trailing
+    # stop the backtest booked at 10:41 was acted on up to four bars late.
+    # Today's date is what the decision sends, and it gets the live path: the
+    # window ends on the bar that has just closed, fetched this minute.
+    #
+    # The warm-up and the view are the decision's too: `evaluate` widens the
+    # window for an indicator that needs more history (a 5-day VWAP, a
+    # 1950-bar MA), and reads view 'all'. The manager took exactly two days of
+    # 'regular' bars, so such a stop was a different number from the one the
+    # backtest and the decision computed (chart/tests/logic_audit92).
+    if not asof:
+        asof = pd.Timestamp.now(tz=cs._ET).strftime('%Y-%m-%d')
+    from chart import data_manager as dm
+    days = dm.required_days(strat.referenced_overlays(strategy), tf, days)
     bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
     n = len(bars)
     if n == 0:
@@ -173,7 +194,6 @@ def manage(strategy: dict, symbol: str, side: str, entry: float,
     ei = 0
     if entry_iso:
         try:
-            import pandas as pd
             want = pd.Timestamp(entry_iso)
             if want.tz is None:
                 want = want.tz_localize(cs._ET)

@@ -109,6 +109,19 @@ def _hhmm_of(stamp) -> str | None:
     return f'{m.group(1)}:{m.group(2)}' if m else None
 
 
+def _decided_at(t: dict) -> str | None:
+    """HH:MM of the bar a trade was DECIDED on — the engine's signal bar.
+
+    Not the run's bar and not always entry_at. A pick arriving a minute late
+    (the runner tolerates one bar of feed lag) was decided a bar before the
+    run that placed it, and under a next-open fill entry_at is the bar after
+    the decision. The order recorded the run's bar, so the manager started
+    the backtest engine one bar late on those trades: a held stop frozen on
+    the wrong bar, an exit rule exempt on the wrong bar."""
+    st = t.get('signal_ts')
+    return _hhmm(st) if st is not None else None
+
+
 def _et_date(ts_seconds: int) -> str:
     return (pd.Timestamp(int(ts_seconds), unit='s', tz='UTC')
             .tz_convert(_ET).strftime('%Y-%m-%d'))
@@ -205,6 +218,9 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
                 'signal_px': t.get('signal_px', t.get('entry')),
                 'entry_at': _hhmm(t['entry_ts']),
                 'entry_ts': int(t['entry_ts']),
+                # THE BAR THE DECISION WAS TAKEN ON, which the manager must
+                # start the engine from (see _decided_at).
+                'decided_at': _decided_at(t),
             })
         # A position still open at the end of the window is the live case: the
         # entry has fired and nothing has closed it yet, which at 10:00 is
@@ -233,6 +249,7 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
                     'signal_px': ot.get('signal_px', ot.get('entry')),
                     'entry_at': _hhmm(when),
                     'entry_ts': int(when),
+                    'decided_at': _decided_at(ot),
                     'open': True,
                 })
     return out

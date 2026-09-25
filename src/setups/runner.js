@@ -458,6 +458,9 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
       signal: String(p.side || '').toUpperCase(),
       extension: p.metric,
       decisionAt: p.entry_at,
+      // The bar qp's engine decided this trade on. The manager starts the
+      // engine from it; see chart/decide.py _decided_at.
+      decidedAt: p.decided_at || null,
       exitPlan: p.exit_plan || null,
       decisionVwap: p.stop,        // the stop IS the session VWAP, frozen
       decisionClose: p.entry,
@@ -823,7 +826,11 @@ async function _runSetup(setup, { date, dryRun = false, tickers = null, bar = nu
             // The bar the decision was made on, so anything managing this
             // position afterwards lines up with the simulation's entry bar
             // rather than with the second the POST happened to leave.
-            decisionBar,
+            //
+            // THE PICK'S OWN BAR when qp names it. The run's bar is a minute
+            // later on a pick that arrived within the one-bar feed-lag
+            // tolerance, and the manager then started the engine a bar late.
+            decisionBar: pick.decidedAt || decisionBar,
             // The strategy's OWN exit plan — its scale-out legs and whether its
             // stop trails — straight from qp. Without it every trade was given a
             // single 2R target whatever the strategy said, which for a

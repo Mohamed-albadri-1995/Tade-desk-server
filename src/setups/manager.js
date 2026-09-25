@@ -412,6 +412,15 @@ async function check(at = Date.now(), { dryRun = false } = {}) {
         // backtest engine on this one trade, and the fill decides which bar
         // that engine books the exit on.
         fill: found.setup.fill || 'live',
+        /*
+         * TODAY, AND THE DECISION'S VIEW. Without a date qp served a frame
+         * ending at the last five-minute mark, from a disk cache written while
+         * its last bar was still forming — exits judged up to four bars late
+         * on half a bar. With today's date it reads the bar that has just
+         * closed, fetched this minute, exactly as the decision does.
+         */
+        asof: day,
+        view: found.setup.view || 'all',
       });
 
       // `entry` is the ledger's fill price, not qp's — the session log compares

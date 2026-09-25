@@ -1682,6 +1682,16 @@ def _session_masks(bars, rules: dict | None):
         for i in range(len(bars)):
             if hhmm[i] < cutoff:
                 last_for_day[days_key[i]] = i
+        # A DAY STILL BEING WRITTEN HAS NO LAST BAR YET. The live decision
+        # reads a frame that ends at the bar just closed — at 09:41 the newest
+        # bar of today is 09:41, and marking it "the day's last bar" had the
+        # engine liquidate there and refuse a next-open entry on it
+        # ('eod_bar'). The frame's final day is closed out only once it has
+        # reached the cutoff; every earlier day is complete (an early close
+        # included), as before. chart/tests/logic_audit91.
+        n_bars = len(bars)
+        if n_bars and hhmm[-1] < cutoff:
+            last_for_day.pop(days_key[-1], None)
         for i in last_for_day.values():
             eod[i] = True
     return entry_ok, eod

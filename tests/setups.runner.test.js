@@ -756,6 +756,36 @@ describe('which setups place orders', () => {
     expect(out.fires[0].detail).toMatch(/ORDER FILLED/);
   });
 
+  /*
+   * THE BAR THE ENGINE DECIDED ON goes on the order, not the run's bar. A pick
+   * a minute late (inside the one-bar feed-lag tolerance) was recorded with
+   * the run's bar, and the manager started the engine a bar late (2026-09-25).
+   */
+  test('the order carries the pick\'s own decision bar', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled', quantity: 2, bracket: true });
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2,
+                entry_at: '09:59', decided_at: '09:59' }],
+    });
+    await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' }, {});
+    expect(spy.mock.calls[0][0].decisionBar).toBe('09:59');
+  });
+
+  test('...and the run\'s bar when qp does not name one', async () => {
+    const spy = jest.spyOn(brokerMod, 'placeOrder')
+      .mockResolvedValue({ sent: true, status: 'filled', quantity: 2, bracket: true });
+    qp.decide.mockResolvedValue({
+      ok: true, feed: 'yahoo', counts: { evaluated: 1, signalled: 1 },
+      picks: [{ symbol: 'AAA', side: 'long', metric: 3, entry: 10, stop: 9,
+                risk: 1, risk_pct: 10, target: 12, target_r: 2, entry_at: '10:00' }],
+    });
+    await runner.runSetup({ id: 'S', name: 'S', tools: ['T2'], decisionTime: '10:00' }, {});
+    expect(spy.mock.calls[0][0].decisionBar).toBe('10:00');
+  });
+
   // 2026-09-24: three picks at 5–6 s an order; the third was refused because
   // the price had moved. The questions are asked together BEFORE any order.
   test('the broker questions go out before the first order', async () => {

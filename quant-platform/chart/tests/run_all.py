@@ -106,6 +106,8 @@ PARTS = [
     ('logic_audit89.py',    'the backtest applies the desk\'s limits: one per stock a day, trades per day'),
     ('logic_audit90.py',    'the live decision replayed minute by minute takes the backtest\'s trades'),
     ('logic_audit91.py',    'the live decision closes yesterday at 15:50 and ignores premarket, as the desk does'),
+    ('logic_audit92.py',    'the manager judges the bar that has just closed, on the decision\'s bars'),
+    ('logic_audit93.py',    'the live manager replayed minute by minute closes where the backtest did'),
     ('py39_guard.py',       'nothing needs a Python newer than the box (3.9)'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),
