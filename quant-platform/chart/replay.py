@@ -115,7 +115,10 @@ def replay_day(strategies: list, symbols: list, date: str, *, tf: str = '1m',
             picks.append({'symbol': p['symbol'], 'side': p.get('side'),
                           'bar': p.get('entry_at'), 'decided_at': p.get('decided_at'),
                           'stop': p.get('stop'), 'entry': p.get('entry'),
-                          'strategy': p.get('strategy'), 'at_minute': bar})
+                          'strategy': p.get('strategy'), 'at_minute': bar,
+                          # The legs the order would be sent with — decide's
+                          # exit_plan, the one the runner hands the broker.
+                          'plan': p.get('exit_plan')})
     return {'picks': picks, 'minutes': per_minute, 'symbols': len(full),
             'took_ms': int((time.time() - started) * 1000)}
 
@@ -149,6 +152,110 @@ def compare(replay: list, trades: list) -> dict:
         bs, rs = b.get('stop'), r.get('stop')
         if bs is not None and rs is not None and abs(float(bs) - float(rs)) > 1e-6:
             diffs.append(f'stop {round(float(bs), 4)} vs {round(float(rs), 4)}')
+        # THE SCALE-OUT: the legs live would send against the backtest's.
+        pd_ = _plan_diff(b.get('plan'), r.get('plan'))
+        if pd_:
+            diffs.append(pd_)
         rows.append({'symbol': sym, 'ok': not diffs, 'why': '; '.join(diffs) or None})
     return {'identical': all(r['ok'] for r in rows), 'compared': len(rows),
             'mismatches': [r for r in rows if not r['ok']]}
+
+
+def _legs_of(plan):
+    if not plan:
+        return None
+    return ([(round(float(l.get('fraction') or 0), 6),
+              None if l.get('price') is None else round(float(l['price']), 4))
+             for l in (plan.get('legs') or [])],
+            round(float(plan.get('runner') or 0), 6))
+
+
+def _plan_diff(bt_plan, live_plan):
+    """'' when the two scale-out plans are the same legs at the same prices."""
+    a, b = _legs_of(bt_plan), _legs_of(live_plan)
+    if a is None or b is None:
+        return '' if a == b else 'one side has no exit plan'
+    if a == b:
+        return ''
+    return f'scale-out {a} vs {b}'
+
+
+def _minute_of(ts_s) -> str:
+    return pd.Timestamp(int(ts_s), unit='s', tz='UTC').tz_convert(_ET).strftime('%H:%M')
+
+
+def replay_exits(trades: list, strategies: list, date: str, *, tf: str = '1m',
+                 feed: str = 'yahoo', view: str = 'all', fill: str = 'live') -> dict:
+    """The live MANAGER, asked every minute on the final bars, for each of the
+    backtest's trades — exactly as the desk asks it (src/setups/manager.js):
+    the setup's fill, the bar the trade was decided on, the stop it was sent
+    with. It must bank each target leg on the bar the backtest banked it, and
+    call the rest closed on the bar the backtest closed it, for the same
+    reason. A rule exit is booked at the next open, so it is decided one bar
+    earlier; a 15:50 close is the flattener's, and the manager must not close
+    such a trade before it.
+    """
+    from chart import manage as mg
+    started = time.time()
+    by_name = {s.get('name'): s for s in strategies}
+    frames, rows, legs_compared = {}, [], 0
+    for t in trades:
+        if t.get('reason') == 'open' or t.get('exit_ts') is None:
+            continue
+        c = t.get('ctx') or {}
+        st = by_name.get(c.get('strategy')) or (strategies[0] if strategies else None)
+        if not st:
+            continue
+        sym = t['symbol']
+        if sym not in frames:
+            overlays = strat.referenced_overlays(st)
+            days = dm.required_days(overlays, tf, 2)
+            try:
+                frames[sym] = cs.prepare_bars(sym, tf, days, feed, view, date)
+            except Exception as e:                     # noqa: BLE001
+                rows.append({'symbol': sym, 'ok': False, 'why': f'no bars: {e}'})
+                continue
+        bars, ts, fctx = frames[sym]
+        dec = _mins(_minute_of(c.get('signal_ts') or int(t['entry_ts']) - 60))
+        reason = t.get('reason')
+        exit_min = _mins(_minute_of(t['exit_ts']))
+        want_close = None if reason == 'eod' else (exit_min - 1 if reason == 'exit' else exit_min)
+        want_legs = [_minute_of(g['exit_ts']) for g in (t.get('legs') or [])]
+        last = want_close if want_close is not None else 15 * 60 + 49
+        got_close, banked, err = None, {}, None
+        for m in range(dec + 1, last + 1):
+            upto = (pd.Timestamp(date, tz=_ET) + pd.Timedelta(minutes=m)).tz_convert('UTC')
+            n = int(bars.index.searchsorted(upto, side='right'))
+            if not n:
+                continue
+            a = mg.manage(st, sym, t.get('side') or st.get('side') or 'long', float(t['entry']),
+                          f'{date} {_hhmm(dec)}', tf=tf, feed=feed, view=view, asof=date,
+                          stop_at_entry=t.get('stop'), fill=fill,
+                          frame=(bars.iloc[:n], ts[:n], fctx))
+            if not a.get('ok'):
+                err = a.get('error') or 'manage failed'
+                break
+            for xi in a.get('legs_banked') or []:
+                if xi not in banked and xi < n:
+                    banked[xi] = bars.index[xi].tz_convert(_ET).strftime('%H:%M')
+            if a.get('close_now'):
+                got_close = (_hhmm(m), a.get('close_reason'))
+                break
+        got_legs = [banked[k] for k in sorted(banked)]
+        legs_compared += len(want_legs)
+        diffs = []
+        if err:
+            diffs.append(f'the manager could not answer: {err}')
+        want = None if want_close is None else (_hhmm(want_close), reason)
+        if got_close != want:
+            diffs.append(f"the manager closed {got_close[0] + ' (' + str(got_close[1]) + ')' if got_close else 'never'}"
+                         f"; the backtest {'closes it at 15:50 (the flattener)' if want is None else want[0] + ' (' + str(want[1]) + ')'}")
+        if got_legs != want_legs:
+            diffs.append(f'target legs banked at {got_legs or "none"} by the manager, '
+                         f'{want_legs or "none"} in the backtest')
+        rows.append({'symbol': sym, 'ok': not diffs, 'why': '; '.join(diffs) or None,
+                     'reason': reason, 'legs': len(want_legs)})
+    return {'identical': all(r['ok'] for r in rows), 'compared': len(rows),
+            'legs_compared': legs_compared,
+            'mismatches': [r for r in rows if not r['ok']],
+            'took_ms': int((time.time() - started) * 1000)}

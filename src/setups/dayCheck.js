@@ -431,7 +431,7 @@ function causesOf(item, logicOk) {
         + `${n4(l.decisionPrice)} live, ${n4(b.decisionPrice)} final`
         + (stopOff ? `; the stop with it: ${n4(l.stop)} live, ${n4(b.stop)} final` : ''));
     } else if (stopOff) {
-      add('DATA', `the stop's level came from bars that changed after live read them: `
+      add(data, `the stop's level came from bars that changed after live read them: `
         + `${n4(l.stop)} live, ${n4(b.stop)} final`);
     }
     if (b.entry.qty !== l.entry.qty) {
@@ -443,7 +443,7 @@ function causesOf(item, logicOk) {
       const explained = expected !== null
         && Math.abs(l.entry.qty - expected) <= Math.max(2, expected * 0.02);
       if ((priceOff || stopOff) && explained) {
-        add('DATA', `the size follows the risk per share: ${n4(rpsL)} live, ${n4(rpsB)} final `
+        add(data, `the size follows the risk per share: ${n4(rpsL)} live, ${n4(rpsB)} final `
           + `→ ${l.entry.qty} and ${b.entry.qty} shares`);
       } else if (l.reduced) {
         add('KNOCK-ON', `live's order was cut to the money left: ${l.reduced}`);
@@ -480,7 +480,7 @@ function causesOf(item, logicOk) {
       const px = r('exit price');
       if (r('exit time').level === 'warn') {
         // A different MINUTE is the cause; the price is its consequence.
-        note('DATA', `left at ${r('exit time').live} live, ${r('exit time').bt} in the backtest`
+        note(data, `left at ${r('exit time').live} live, ${r('exit time').bt} in the backtest`
           + (px.level === 'warn' ? ` (${n4(px.live)} against ${n4(px.bt)})` : '')
           + ((lLeg.exit || {}).why ? ' — the manager judged it on the bars live read'
             : ' — the level was reached at a different minute in the bars live read'), name);
@@ -689,6 +689,9 @@ async function build(date = toETDate(Date.now()), deps = {}) {
         // The logic check, once per setup: the live decision replayed on
         // these same final bars (chart/replay.py).
         replay_live: btByRatio.size === 0,
+        // The fill the live MANAGER runs with — the setup's, as manager.js
+        // sends it — for the exit half of the replay.
+        live_fill: setup.fill || 'live',
       };
       let r;
       try { r = { ok: true, ...(await qp.backtestDay(spec)) }; }
@@ -785,8 +788,18 @@ async function build(date = toETDate(Date.now()), deps = {}) {
       minutes: rep.minutes || 0,
       symbols: rep.symbols || 0,
       mismatches: rep.mismatches || [],
+      // AFTER THE ENTRY: the live manager replayed on the same bars for every
+      // trade — target legs banked, and the close, on the backtest's bar and
+      // for its reason (chart/replay.py replay_exits).
+      exits: rep.exits ? {
+        identical: !!rep.exits.identical,
+        compared: rep.exits.compared || 0,
+        legsCompared: rep.exits.legs_compared || 0,
+        mismatches: rep.exits.mismatches || [],
+      } : null,
     } : null;
-    const logicOk = !!(out.logic && out.logic.identical);
+    const logicOk = !!(out.logic && out.logic.identical
+      && (!out.logic.exits || out.logic.exits.identical));
     for (const t of out.trades) {
       for (const a of t.accounts) a.causes = causesOf(a, logicOk);
       t.causes = [...new Set(t.accounts.flatMap(a => a.causes.map(c => c.kind)))];
@@ -795,6 +808,7 @@ async function build(date = toETDate(Date.now()), deps = {}) {
     for (const t of out.trades) for (const k of t.causes) kinds[k] = (kinds[k] || 0) + 1;
     out.verdict = {
       logicIdentical: out.logic ? out.logic.identical : null,
+      exitsIdentical: out.logic && out.logic.exits ? out.logic.exits.identical : null,
       causes: kinds,
       // THE QUESTION ASKED: is every difference latency or the fill?
       onlyDataAndExecution: logicOk

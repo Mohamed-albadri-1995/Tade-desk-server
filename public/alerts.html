@@ -4182,16 +4182,26 @@ function dcLogic(s) {
   if (L.error) return `<div class="dc-logic warn">Logic check could not run: ${esc(L.error)}</div>`;
   const V = s.verdict || {};
   const kinds = Object.entries(V.causes || {}).map(([k, n]) => `${n} ${k}`).join(' · ');
-  if (L.identical) {
-    return `<div class="dc-logic ok">LOGIC IDENTICAL — live's decision, replayed minute by minute on the `
-      + `final bars, took exactly the backtest's trades (${esc(L.compared)} compared, `
-      + `${esc(L.minutes)} minutes × ${esc(L.symbols)} stocks).`
-      + (kinds ? ` Differences today: ${esc(kinds)}.` : ' No differences today.')
-      + (V.onlyDataAndExecution ? ' Every one is data or the fill.' : '') + '</div>';
-  }
-  return `<div class="dc-logic bad">LOGIC DIFFERS — replayed on the same final bars, live's decision `
-    + `did not take the backtest's trades: `
-    + esc((L.mismatches || []).map(m => `${m.symbol}: ${m.why}`).join(' · ')) + '</div>';
+  const E = L.exits;
+  const entries = L.identical
+    ? `<div class="dc-logic ok">ENTRIES IDENTICAL — live's decision, replayed minute by minute on the `
+      + `final bars, took exactly the backtest's trades with the same scale-out legs `
+      + `(${esc(L.compared)} compared, ${esc(L.minutes)} minutes × ${esc(L.symbols)} stocks).</div>`
+    : `<div class="dc-logic bad">ENTRIES DIFFER — replayed on the same final bars, live's decision `
+      + `did not take the backtest's trades: `
+      + esc((L.mismatches || []).map(m => `${m.symbol}: ${m.why}`).join(' · ')) + '</div>';
+  const exits = !E ? '<div class="dc-logic warn">Exit check: not run.</div>'
+    : (E.identical
+      ? `<div class="dc-logic ok">EXITS IDENTICAL — the live manager, replayed every minute on the final `
+        + `bars, banked each target leg and closed each trade on the backtest's bar for the backtest's `
+        + `reason (${esc(E.compared)} trade(s), ${esc(E.legsCompared)} target leg(s)).</div>`
+      : `<div class="dc-logic bad">EXITS DIFFER — replayed on the same final bars, the live manager `
+        + `did not exit as the backtest did: `
+        + esc((E.mismatches || []).map(m => `${m.symbol}: ${m.why}`).join(' · ')) + '</div>');
+  const tail = L.identical && (!E || E.identical)
+    ? `<div class="dc-set">${kinds ? `Differences today: ${esc(kinds)}.` : 'No differences today.'}`
+      + `${V.onlyDataAndExecution ? ' Every one is data or the fill.' : ''}</div>` : '';
+  return entries + exits + tail;
 }
 function dcSetup(s) {
   const T = s.totals || {};
@@ -4256,15 +4266,16 @@ function paintDayCheck(d) {
     : (off ? `${off} trade(s) taken by one side only${diff ? ` · ${diff} more with differences` : ''} — open them below`
       : (diff ? `Same trades on both sides · ${diff} with differences in price, time or size`
         : 'Live took exactly the backtest\'s trades, the same way.'));
-  const logicBad = all.filter(s => s.logic && s.logic.identical === false).map(s => s.name);
+  const logicBad = all.filter(s => s.logic && (s.logic.identical === false
+    || (s.logic.exits && s.logic.exits.identical === false))).map(s => s.name);
   const onlyDE = all.length && all.every(s => s.verdict && s.verdict.onlyDataAndExecution);
   if (logicBad.length) {
     sum.className = 'hl-sum bad';
-    sum.textContent = `LOGIC DIFFERS in ${logicBad.join(', ')} — live's decision on the final bars is `
-      + 'not the backtest\'s. That is a bug to fix, not data. ' + sum.textContent;
+    sum.textContent = `LOGIC DIFFERS in ${logicBad.join(', ')} — live's entries or exits on the final `
+      + 'bars are not the backtest\'s. That is a bug to fix, not data. ' + sum.textContent;
   } else if (onlyDE) {
-    sum.textContent = 'Logic identical in every setup — every difference below is data latency or '
-      + 'the fill. ' + sum.textContent;
+    sum.textContent = 'Entries, scale-outs and exits identical in every setup — every difference '
+      + 'below is data latency or the fill. ' + sum.textContent;
   }
   if (r.partial) {
     sum.className = 'hl-sum warn';

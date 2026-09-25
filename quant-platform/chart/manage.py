@@ -144,7 +144,7 @@ def manage(strategy: dict, symbol: str, side: str, entry: float,
            entry_iso: str | None = None, *, tf: str = '1m', feed: str = 'yahoo',
            days: int = 2, view: str = 'all', asof: str | None = None,
            stop_at_entry: float | None = None, drop_last: bool = False,
-           fill: str = 'live') -> dict:
+           fill: str = 'live', frame=None) -> dict:
     """Should this open position close now, and where is its stop now?
 
     `entry_iso` is the fill time. It matters for two reasons and both are
@@ -173,7 +173,12 @@ def manage(strategy: dict, symbol: str, side: str, entry: float,
         asof = pd.Timestamp.now(tz=cs._ET).strftime('%Y-%m-%d')
     from chart import data_manager as dm
     days = dm.required_days(strat.referenced_overlays(strategy), tf, days)
-    bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
+    # `frame`: bars already in hand — the daily check's replay of the manager
+    # on the final bars (chart/replay.py), without patching the fetch.
+    if frame is not None:
+        bars, ts, ctx = frame
+    else:
+        bars, ts, ctx = cs.prepare_bars(symbol, tf, days, feed, view, asof)
     n = len(bars)
     if n == 0:
         return {'ok': False, 'error': f'no bars for {symbol}'}

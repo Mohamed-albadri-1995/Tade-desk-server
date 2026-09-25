@@ -14,7 +14,12 @@ Checks, through the endpoint, on seeded random days with eight stocks:
   1. OR + VWAP 09:35 with a top-3 ranking and a 3-a-day cap: identical;
   2. Test (a two-hour window, re-entries latched, a 3-a-day cap): identical;
   3. the comparison sees a difference: a pick moved one bar, a stop moved,
-     a missing pick — each is reported, by stock.
+     a missing pick — each is reported, by stock;
+  4. after the entry: the legs live would send are the backtest's legs, and
+     the live manager replayed every minute banks each target leg and closes
+     each trade on the backtest's bar for the backtest's reason;
+  5. a close two minutes late, a leg a minute late, a different scale-out —
+     each is reported.
 """
 import json
 import pathlib
@@ -103,6 +108,57 @@ ok('a pick a bar later and a stop 5 cents off are both reported',
 c = rp.compare(picks[1:], out['trades'])
 ok('a pick live would not have made is reported',
    not c['identical'] and 'backtest took it' in c['mismatches'][0]['why'], c['mismatches'])
+
+print('== 4. after the entry: the scale-out plan and the exits ==')
+# Asked 2026-09-25: "taking the same trades is important, but scaling out and
+# exiting by the same rules is also very important to confirm". The replay's
+# picks carry the legs live would send; the manager is replayed every minute
+# on the same bars for every trade.
+legs_n, exits_n, reasons = 0, 0, set()
+for strats, seed, over in ((ORV, 3, {'rank_per_day': {'metric': 'vwap_extension', 'top_n': 3}}),
+                           (ORV, 9, {'rank_per_day': {'metric': 'vwap_extension', 'top_n': 3}}),
+                           ([TEST], 4, {}), ([TEST], 8, {})):
+    out = run(strats, seed, **over)
+    r = out.get('replay') or {}
+    ex = r.get('exits') or {}
+    ok(f'{strats[0]["name"]} seed {seed}: the same scale-out plan on every trade',
+       r.get('identical') is True, r.get('mismatches'))
+    ok(f'{strats[0]["name"]} seed {seed}: the manager banks the legs and closes on the '
+       f'backtest\'s bar, for its reason', ex.get('identical') is True, ex.get('mismatches'))
+    legs_n += ex.get('legs_compared') or 0
+    exits_n += ex.get('compared') or 0
+    reasons |= {t['reason'] for t in out['trades']}
+ok('exits were compared', exits_n >= 4, exits_n)
+ok('scale-out legs were compared', legs_n >= 1, legs_n)
+ok('stops and rule or trailing exits were among them',
+   {'SL', 'exit'} <= reasons or {'SL', 'trail'} <= reasons, reasons)
+
+print('== 5. the exit check sees a difference ==')
+out = run(ORV, 3, rank_per_day={'metric': 'vwap_extension', 'top_n': 3})
+trades = [dict(t) for t in out['trades'] if t['reason'] not in ('open', 'eod')]
+ok('there is a closed trade to change', trades, [t['reason'] for t in out['trades']])
+late = dict(trades[0], exit_ts=int(trades[0]['exit_ts']) + 120)
+ex = rp.replay_exits([late], ORV, DAY, tf='1m', feed='replay97', view='all')
+ok('a close two minutes later than the manager\'s is reported', not ex['identical'], ex)
+withleg = None
+for seed in (3, 5, 9, 11, 13, 17):
+    o = run(ORV, seed, rank_per_day={'metric': 'vwap_extension', 'top_n': 3})
+    withleg = next((t for t in o['trades'] if t.get('legs') and t['reason'] not in ('open',)), None)
+    if withleg:
+        break
+ok('a trade that banked a target leg was found', withleg is not None)
+if withleg:
+    ex = rp.replay_exits([withleg], ORV, DAY, tf='1m', feed='replay97', view='all')
+    ok('...and its leg is banked on the same bar by the manager', ex['identical'], ex)
+    moved = dict(withleg, legs=[dict(withleg['legs'][0], exit_ts=int(withleg['legs'][0]['exit_ts']) + 60)])
+    ex = rp.replay_exits([moved], ORV, DAY, tf='1m', feed='replay97', view='all')
+    ok('a target leg banked a minute later is reported', not ex['identical']
+       and 'target legs banked' in (ex['mismatches'][0]['why'] or ''), ex)
+plans = [dict(p) for p in out['replay']['picks']]
+plans[0] = dict(plans[0], plan=dict(plans[0]['plan'], runner=0.25))
+c = rp.compare(plans, out['trades'])
+ok('a different scale-out is reported', not c['identical'] and 'scale-out' in c['mismatches'][0]['why'],
+   c['mismatches'])
 
 print(f'PASS={PASS} FAIL={FAIL}')
 sys.exit(1 if FAIL else 0)

@@ -446,3 +446,36 @@ describe('the causes of the real day', () => {
     expect(c.find(x => /money left/.test(x.text)).kind).toBe('KNOCK-ON');
   });
 });
+
+/*
+ * AFTER THE ENTRY TOO (2026-09-25): "scale out and exit on the same rules is
+ * also very important to confirm". The replay carries the live manager's
+ * verdict on every trade; a difference there is never charged to the data.
+ */
+describe('the exit half of the logic check', () => {
+  const REPLAY = (exits) => ({ identical: true, compared: 2, minutes: 120, symbols: 3,
+                               mismatches: [], exits });
+  test('the manager\'s fill is sent, and the exit verdict lands on the setup', async () => {
+    const asked = [];
+    const d = deps({ qp: { backtestDay: async (spec) => { asked.push(spec);
+      return { ...BT, replay: REPLAY({ identical: true, compared: 2, legs_compared: 1, mismatches: [] }) }; } } });
+    const s = (await dc.build(DAY, d)).setups[0];
+    expect(asked[0].live_fill).toBe('live');
+    expect(s.logic.exits).toMatchObject({ identical: true, compared: 2, legsCompared: 1 });
+    expect(s.verdict.exitsIdentical).toBe(true);
+  });
+
+  test('an exit the manager takes differently is LOGIC — the data is not blamed', async () => {
+    const d = deps({ qp: { backtestDay: async () => ({ ...BT, replay: REPLAY({ identical: false,
+      compared: 2, legs_compared: 1,
+      mismatches: [{ symbol: 'AAA', ok: false, why: 'the manager closed 10:31 (exit); the backtest 10:29 (exit)' }] }) }) } });
+    d.broker.orders = () => LEDGER.map(o => (o.symbol === 'AAA' && !o.kind ? { ...o, price: 99.72 } : o));
+    const s = (await dc.build(DAY, d)).setups[0];
+    expect(s.verdict).toMatchObject({ exitsIdentical: false, onlyDataAndExecution: false });
+    const a = s.trades.find(t => t.symbol === 'AAA').accounts[0];
+    // A different close for the same bar is a fact about the bars, whatever
+    // the logic — it stays DATA. Everything DERIVED from them is not.
+    expect(a.causes.filter(c => c.kind === 'DATA').map(c => c.text))
+      .toEqual([expect.stringMatching(/before it was final/)]);
+  });
+});

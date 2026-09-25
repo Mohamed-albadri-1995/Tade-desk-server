@@ -441,6 +441,16 @@ def backtest_day(payload: dict = Body(...)):
         from chart.decide import exit_plan
         strategies = bt._resolve_strategies(spec)
         by_name = {s.get('name'): s for s in strategies}
+        for t in out.get('trades') or []:
+            c = t.get('ctx') or {}
+            st = by_name.get(c.get('strategy')) or next(iter(by_name.values()), None)
+            try:
+                px = float(c.get('signal_px') or t.get('entry'))
+                if st and t.get('stop') is not None:
+                    t['plan'] = exit_plan(st, t.get('side') or 'long', px, float(t['stop']),
+                                          float(spec.get('target_r') or 2.0))
+            except Exception as e:                    # noqa: BLE001 — reported, not fatal
+                t['plan_error'] = str(e)
         # THE LOGIC CHECK: the live decision replayed minute by minute on these
         # same final bars, with the runner's gates (chart/replay.py). Same bars,
         # so a difference here is the decision logic, never the data.
@@ -462,18 +472,14 @@ def backtest_day(payload: dict = Body(...)):
                                   max_per_day=int(rules.get('max_trades_per_day') or 0),
                                   ctx=ctx, target_r=float(spec.get('target_r') or 2.0))
                 replay = {**r, **rp.compare(r['picks'], out.get('trades') or [])}
+                # AND AFTER THE ENTRY: the live manager on the same bars, for
+                # every trade — target legs banked, and the close, bar and reason.
+                replay['exits'] = rp.replay_exits(
+                    out.get('trades') or [], strategies, spec['start'],
+                    tf=spec.get('tf') or '1m', feed=spec.get('feed') or 'yahoo',
+                    view=spec.get('view') or 'all', fill=spec.get('live_fill') or 'live')
             except Exception as e:                    # noqa: BLE001 — reported, not fatal
                 replay = {'error': str(e)}
-        for t in out.get('trades') or []:
-            c = t.get('ctx') or {}
-            st = by_name.get(c.get('strategy')) or next(iter(by_name.values()), None)
-            try:
-                px = float(c.get('signal_px') or t.get('entry'))
-                if st and t.get('stop') is not None:
-                    t['plan'] = exit_plan(st, t.get('side') or 'long', px, float(t['stop']),
-                                          float(spec.get('target_r') or 2.0))
-            except Exception as e:                    # noqa: BLE001 — reported, not fatal
-                t['plan_error'] = str(e)
         return JSONResponse({'ok': True, 'summary': summary,
                              'trades': out.get('trades') or [], 'replay': replay})
     except Exception as e:                                # noqa: BLE001
