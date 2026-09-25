@@ -187,9 +187,20 @@ describe('the execution settings', () => {
     expect(body.spec.universe).toEqual({ kind: 'tools', register: 'R1', tools: ['T2'] });
   });
 
-  test('the daily cap comes across', async () => {
+  /*
+   * THE DESK'S TWO LIMITS, in the keys chart/backtest.py desk_caps reads. The
+   * daily budget used to arrive as max_entries_per_day, which the engine
+   * applies PER STOCK — the backtest re-entered names live never re-enters.
+   */
+  test('the daily cap comes across as the SETUP\'s daily limit', async () => {
     const { body } = await get(`?setup=${encodeURIComponent(ID)}`);
-    expect(body.spec.rules.max_entries_per_day).toBe(1);
+    expect(body.spec.rules.max_trades_per_day).toBe(1);
+    expect(body.spec.rules.max_entries_per_day).toBeUndefined();
+  });
+
+  test('and one entry per stock per day, as the runner latches', async () => {
+    const { body } = await get(`?setup=${encodeURIComponent(ID)}`);
+    expect(body.spec.rules.one_per_symbol_day).toBe(true);
   });
 });
 

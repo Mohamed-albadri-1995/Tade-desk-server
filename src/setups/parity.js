@@ -278,13 +278,25 @@ function compare({ setup, spec, strategy } = {}) {
    * takes the smaller of the two — and a budget below top N is a live-only
    * restriction the backtest never had.
    */
+  const smaller = (a, b) => (a && b ? Math.min(a, b) : (a || b || null));
   const liveTop = p.topN || null;
-  const liveDay = p.maxTradesPerDay && (!liveTop || p.maxTradesPerDay < liveTop)
-    ? p.maxTradesPerDay : (liveTop || 'all');
-  rows.push(row('trades per day (most)', liveDay,
-    (btRank && btRank.top_n) || 'all',
-    "live: the smaller of top N and the desk's daily budget · backtest: its "
-    + 'top N. The per-symbol cap is the strategy\'s and applies on both sides'));
+  const liveDay = smaller(p.maxTradesPerDay || null, liveTop) || 'all';
+  // The backtest has the same two limits since 2026-09-24: its ranking's top
+  // N and the desk's own daily budget (rules.max_trades_per_day, applied by
+  // chart/backtest.py desk_caps).
+  const btRules = bt.rules || {};
+  const btDay = smaller(btRules.max_trades_per_day || null,
+    (btRank && btRank.top_n) || null) || 'all';
+  rows.push(row('trades per day (most)', liveDay, btDay,
+    "the smaller of top N and the setup's daily limit, on both sides"));
+  /*
+   * ONE ENTRY PER STOCK PER DAY. Live always: the runner latches a name once
+   * it has alerted. A backtest without the rule re-enters a stock after a
+   * stop-out (#368: WDAY twice on 2026-09-10) — trades live never takes.
+   */
+  rows.push(row('one entry per stock per day', 'yes',
+    btRules.one_per_symbol_day ? 'yes' : 'no',
+    'the desk never enters the same stock twice in a day'));
 
   // THE UNIVERSE the signals are drawn from.
   const btUni = bt.universe || {};
@@ -500,7 +512,11 @@ function planAdopt({ setup, spec, strategy } = {}) {
      * backtest's own name here would stop the desk firing altogether.
      */
     fill: (bt.fill === 'desk' || bt.fill === 'next_open' || !bt.fill) ? 'live' : bt.fill,
-    maxTradesPerDay: (bt.rules && bt.rules.max_entries_per_day) || null,
+    // The setup's daily limit. A run from before 2026-09-24 carried it in
+    // max_entries_per_day (where the desk used to put it), so that is read
+    // when the new key is absent.
+    maxTradesPerDay: (bt.rules && (bt.rules.max_trades_per_day
+      || bt.rules.max_entries_per_day)) || null,
     /*
      * THE MONEY RULES, WRITTEN HERE RATHER THAN ON THE ACCOUNT.
      *

@@ -151,7 +151,15 @@ router.get('/backtest-defaults', async (req, res) => {
       universe: (s.tools || []).length
         ? { kind: 'tools', register: 'R1', tools: s.tools }
         : null,
-      rules: { max_entries_per_day: s.maxTradesPerDay || null },
+      /*
+       * THE DESK'S TWO LIMITS, as the desk applies them (backtest.desk_caps):
+       * one entry per stock per day — the runner's latch — and at most
+       * maxTradesPerDay trades a day for the whole setup. This used to send
+       * maxTradesPerDay as `max_entries_per_day`, which the engine applies
+       * PER STOCK: the backtest re-entered names live never re-enters, and
+       * took seven trades on a day live stops at three (#367, 2026-09-11).
+       */
+      rules: { one_per_symbol_day: true, max_trades_per_day: s.maxTradesPerDay || null },
     };
   };
 

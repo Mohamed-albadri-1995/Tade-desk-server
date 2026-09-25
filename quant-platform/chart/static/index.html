@@ -973,8 +973,16 @@
             <input id="btMinPs" type="number" step="any" value="0.10" placeholder="0.10"></label>
         </div>
         <div class="frow one">
-          <label class="fld"><span>Max entries / day
-            <b class="q" title="Override the strategy's own attempts/day cap for THIS backtest only. Blank = use whatever the strategy defines (its Discipline field).">?</b></span>
+          <label class="fld"><span>Max trades / day (setup)
+            <b class="q" title="The desk's own limit: after this many trades in a day the setup sends nothing more, whatever fires. Filled from the setup's Max trades / day. Blank = no limit.">?</b></span>
+            <input id="btDayCap" type="number" min="1" step="1" placeholder="blank = no limit"></label>
+        </div>
+        <label style="display:flex;gap:7px;align-items:flex-start;color:var(--text2);font-size:var(--f-xs);line-height:1.5">
+          <input type="checkbox" id="btOnePerSym" checked style="margin-top:2px">
+          One entry per stock per day <span class="muted">(the desk never enters the same stock twice in a day)</span></label>
+        <div class="frow one">
+          <label class="fld"><span>Max entries per stock / day
+            <b class="q" title="The strategy's own attempts per stock per day, for THIS backtest only. Blank = the strategy's Discipline field. The desk takes one per stock per day whatever this says — see the box above.">?</b></span>
             <input id="btMaxDay" type="number" min="1" step="1" placeholder="blank = the strategy's own cap"></label>
         </div>
         <label style="display:flex;gap:7px;align-items:flex-start;color:var(--text2);font-size:var(--f-xs);line-height:1.5">
@@ -1995,7 +2003,7 @@ const BT_DEFAULTS = {
   btTarget: '', btMaxDD: '', btDDBasis: 'start',
   btPreset: 'ttp', btShares: '100',
   btFee: '0.005', btFeeMin: '0.75', btMinPs: '0.10',
-  btMaxDay: '',
+  btMaxDay: '', btDayCap: '', btOnePerSym: true,
   btRules: true, btScanGate: true, btShortable: true,
 };
 /* Named, not numbered. Strategy ids are per-database; the name is what is on
@@ -2071,6 +2079,13 @@ function btDeskFields(spec){
   put('btFill', spec.fill);
   out.btMaxDay = (spec.rules && spec.rules.max_entries_per_day)
     ? String(spec.rules.max_entries_per_day) : '';
+  // THE DESK'S TWO LIMITS, in their own fields — see chart/backtest.py
+  // desk_caps. The setup's trades-per-day used to land in btMaxDay, which the
+  // engine applies PER STOCK: a different rule wearing the same number.
+  out.btDayCap = (spec.rules && spec.rules.max_trades_per_day)
+    ? String(spec.rules.max_trades_per_day) : '';
+  if (spec.rules && typeof spec.rules.one_per_symbol_day === 'boolean')
+    out.btOnePerSym = spec.rules.one_per_symbol_day;
   if(spec.universe && spec.universe.kind === 'tools') out.btUni = spec.universe.register || 'R1';
   return out;
 }
@@ -2698,9 +2713,13 @@ async function btRun(){
     fee_min:parseFloat(document.getElementById('btFeeMin').value)||0,
     min_profit_ps:(document.getElementById('btMinPs').value!==''?parseFloat(document.getElementById('btMinPs').value):null),
     rules:(function(){ const md=parseInt(document.getElementById('btMaxDay').value,10);
+      const dc=parseInt(document.getElementById('btDayCap').value,10);
+      const one=document.getElementById('btOnePerSym').checked;
       const on=document.getElementById('btRules').checked; const cap=Number.isFinite(md)&&md>0;
-      if(!on&&!cap)return null;
-      const r={}; if(on){r.rth_entries=true;r.eod_close=true;} if(cap)r.max_entries_per_day=md; return r; })() };
+      const dcap=Number.isFinite(dc)&&dc>0;
+      if(!on&&!cap&&!dcap&&!one)return null;
+      const r={}; if(on){r.rth_entries=true;r.eod_close=true;} if(cap)r.max_entries_per_day=md;
+      if(dcap)r.max_trades_per_day=dc; if(one)r.one_per_symbol_day=true; return r; })() };
   document.getElementById('btStat').textContent='starting…';
   document.getElementById('btSummary').innerHTML=''; document.getElementById('btTrades').innerHTML='';
   try{

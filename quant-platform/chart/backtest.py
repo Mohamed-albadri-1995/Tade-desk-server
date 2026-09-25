@@ -130,6 +130,58 @@ def _num(v):
         return None
 
 
+def desk_caps(closed: list, opens: list, one_per_symbol: bool = False,
+              max_per_day: int = 0):
+    """The live desk's own limits, applied in TIME order. Returns
+    (closed, opens, info).
+
+    WHAT THE DESK DOES, measured on 2026-09-24 against backtests #367/#368:
+
+      ONE ENTRY PER STOCK PER DAY. src/setups/runner.js latches every name a
+      setup has alerted today ("already alerted today — the window latch
+      held"), and the order guard refuses a second entry in it. The backtest
+      re-entered: WDAY on 2026-09-10 at 09:48 and again at 10:26.
+
+      A SETUP'S TRADES PER DAY. `maxTradesPerDay` refuses every order after the
+      Nth of the day ("this setup's limit of 3 position(s) a day is already
+      used"). The backtest had no such cap — #367 took seven on 2026-09-11 —
+      and the desk's number was passed in as `max_entries_per_day`, which the
+      engine applies PER SYMBOL: a different rule under the same number.
+
+    Both are decided at the moment of entry, in the order the signals fired,
+    before anything is sized — exactly where the desk applies them. Signals at
+    the same instant keep the order the ranking gave them (then ticker), so a
+    run is reproducible. Nothing is applied when neither limit is asked for.
+    """
+    if not one_per_symbol and not max_per_day:
+        return closed, opens, None
+    rows = [(t, 'c') for t in closed] + [(t, 'o') for t in opens]
+    order = {id(t): i for i, t in enumerate(closed)}          # rank order kept
+    rows.sort(key=lambda r: (r[0].get('date') or '', r[0].get('entry_ts') or 0,
+                             order.get(id(r[0]), 10**9), r[0].get('symbol') or ''))
+    seen_sym: dict = {}
+    per_day: dict = {}
+    keep_c, keep_o = [], []
+    dropped_sym = dropped_cap = 0
+    for t, kind in rows:
+        d = t.get('date')
+        key = (d, str(t.get('symbol') or '').upper())
+        if one_per_symbol and seen_sym.get(key):
+            dropped_sym += 1
+            continue
+        if max_per_day and per_day.get(d, 0) >= max_per_day:
+            dropped_cap += 1
+            continue
+        seen_sym[key] = True
+        per_day[d] = per_day.get(d, 0) + 1
+        (keep_c if kind == 'c' else keep_o).append(t)
+    keep_c.sort(key=lambda t: order.get(id(t), 0))
+    return keep_c, keep_o, {'one_per_symbol': bool(one_per_symbol),
+                            'max_per_day': int(max_per_day or 0),
+                            'dropped_same_stock': dropped_sym,
+                            'dropped_day_cap': dropped_cap}
+
+
 def select_by_rank(closed: list, metric, direction, top_n: int = 0):
     """Keep the best `top_n` trades per day by `metric`. Returns (kept, info).
 
@@ -1589,6 +1641,18 @@ def run(spec: dict, progress_cb=None) -> dict:
         closed, cov['rank_per_day'] = select_by_rank(
             closed, rank.get('metric'), rank.get('direction'),
             int(rank.get('top_n') or 0))
+
+    # THE DESK'S OWN LIMITS, after the ranking and before any sizing — the same
+    # place live applies them. See desk_caps.
+    _rules = spec.get('rules') or {}
+    try:
+        _cap = int(_rules.get('max_trades_per_day') or 0)
+    except (TypeError, ValueError):
+        _cap = 0
+    closed, opens, _dc = desk_caps(closed, opens,
+                                   bool(_rules.get('one_per_symbol_day')), _cap)
+    if _dc:
+        cov['desk_caps'] = _dc
 
     # Counters that describe THE TRADES have to describe the trades that
     # SURVIVED. They are tallied inside the per-pair loop, which runs before

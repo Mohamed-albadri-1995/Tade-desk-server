@@ -45,6 +45,8 @@ const SPEC_349 = {
   account_equity: 50000, risk_pct: 0.5,
   rank_per_day: { metric: 'vwap_extension', top_n: 3 },
   universe: { kind: 'tools', register: 'R1', tools: ['T2'] },
+  // The desk's latch, which every run from the desk's defaults carries now.
+  rules: { one_per_symbol_day: true },
 };
 
 const find = (res, what) => res.rows.find(r => r.what === what);
@@ -768,5 +770,24 @@ describe('only real ambiguity is surfaced by the comparison', () => {
     expect(row).toBeTruthy();
     expect(row.status).toBe('differ');
     expect(row.live).toMatch(/BOTH/);
+  });
+});
+
+/*
+ * THE DESK'S TWO LIMITS, compared as the desk applies them (2026-09-24): one
+ * entry per stock per day, and the setup's daily budget. A run without the
+ * latch re-enters stocks live never re-enters, and says so.
+ */
+describe('the desk limits in the comparison', () => {
+  test('a run without the latch is a difference', () => {
+    const res = parity.compare({ setup: SETUP, strategy: STRATEGY, spec: { ...SPEC_349, rules: {} } });
+    expect(find(res, 'one entry per stock per day'))
+      .toMatchObject({ live: 'yes', backtest: 'no', status: 'differ' });
+  });
+
+  test('the run\'s daily budget is read from max_trades_per_day', () => {
+    const res = parity.compare({ setup: SETUP, strategy: STRATEGY,
+      spec: { ...SPEC_349, rank_per_day: null, rules: { one_per_symbol_day: true, max_trades_per_day: 3 } } });
+    expect(find(res, 'trades per day (most)').backtest).toBe(3);
   });
 });
