@@ -177,9 +177,10 @@ describe('the execution settings', () => {
     expect(body.spec.feed).toBe('yahoo');
     expect(body.spec.chosenFeed).toBe('polygon');
     expect(body.spec.feedNote).toMatch(/cannot decide a live bar/);
-    // Matches chart/backtest.py's own default. 'regular' changes every rolling
-    // indicator's warm-up and removes the 09:29 decision bar entirely.
-    expect(body.spec.view).toBe('all');
+    // THE BARS YAHOO HAS: no premarket, live never sees one — so the backtest
+    // reads the regular session only, whatever the preference says
+    // (feeds.sessionViewFor, 2026-09-25).
+    expect(body.spec.view).toBe('regular');
   });
 
   test('the universe is the setup’s own tools', async () => {

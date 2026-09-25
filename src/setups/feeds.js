@@ -183,5 +183,36 @@ function liveFeedFor(chosen) {
   };
 }
 
-module.exports = { alpacaCreds, deskHasAlpaca, liveFeedFor, LIVE_UNUSABLE, DEFAULT_NOTE,
+/*
+ * WHICH BARS THE LIVE FEED ACTUALLY HAS — and so which bars a backtest of the
+ * setup may read.
+ *
+ * Yahoo is fetched for the regular session only (tools/data/yahoo.py,
+ * includePrePost=false): live never sees a premarket bar. Polygon — what the
+ * backtests run on — has them, and under view 'all' the backtest read them:
+ * OR + VWAP's ATR(14) at 09:34 and Test's SMA 9/13 at the open were measured
+ * partly over premarket bars live did not have, and a setup opening at 09:30
+ * could decide on a 09:29 bar live cannot see. A view that says 'all' on a
+ * feed that has no premarket is a promise the live desk cannot keep, so the
+ * setup's view IS 'regular' there, and every backtest built from the desk
+ * (the form's defaults, Parity, the daily Check) reads the same bars live does.
+ *
+ * Asked 2026-09-25 instead of merging premarket from a second source into the
+ * live Yahoo frame: that was tried and gave awful results, and neither live
+ * setup uses a premarket level (levels.pm_high / pm_low, vwap.gap).
+ */
+const HAS_PREMARKET = { yahoo: false, alpaca: true, polygon: true, hybrid: true, hybrid_yahoo: true };
+
+function sessionViewFor(liveFeed, chosenView) {
+  const feed = String(liveFeed || '').toLowerCase();
+  if (HAS_PREMARKET[feed] === false) {
+    return { view: 'regular', forced: (chosenView || 'all') !== 'regular',
+             note: `${feed} has no premarket bars live, so the setup reads the regular `
+               + 'session only — and so does every backtest of it' };
+  }
+  return { view: chosenView || 'all', forced: false, note: null };
+}
+
+module.exports = { alpacaCreds, deskHasAlpaca, liveFeedFor, sessionViewFor, HAS_PREMARKET,
+                   LIVE_UNUSABLE, DEFAULT_NOTE,
                    KEYS_FILE, BROKER_FILE };

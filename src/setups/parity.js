@@ -394,7 +394,10 @@ function compare({ setup, spec, strategy } = {}) {
    * under 'all' than under 'regular' — and a setup whose entry window opens at
    * 09:30 decides from the 09:29 bar, which 'regular' does not contain at all.
    */
-  rows.push(row('view', p.view || s.view || 'all', bt.view || 'all',
+  // THE EFFECTIVE VIEW: what the live feed actually has (catalog sets it from
+  // feeds.sessionViewFor), not the stored preference — 'all' on Yahoo is
+  // 'regular' in fact.
+  rows.push(row('view', s.view || p.view || 'all', bt.view || 'all',
     "'regular' drops the pre-market bars, which changes every rolling "
     + "indicator's warm-up and removes the 09:29 decision bar entirely"));
 

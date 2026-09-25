@@ -413,9 +413,12 @@ async function list() {
       // The preference as stored, and why the live feed differs when it does.
       chosenFeed: live.chosen,
       feedNote: live.note,
-      // Matches chart/backtest.py's own default, so live and backtest evaluate
-      // the same frame unless a preference deliberately says otherwise.
-      view: p.view || 'all',
+      // THE BARS THE LIVE FEED HAS. A preference of 'all' on Yahoo — which is
+      // fetched without premarket — is 'regular' in fact, and a backtest must
+      // be told so (feeds.sessionViewFor).
+      view: feeds.sessionViewFor(live.feed, p.view).view,
+      chosenView: p.view || null,
+      viewNote: feeds.sessionViewFor(live.feed, p.view).note,
       targetR: p.targetR || 2.0,
       /*
        * 'live' IS THE BACKTEST'S DECISION, TAKEN LIVE.

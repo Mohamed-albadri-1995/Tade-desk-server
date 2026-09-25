@@ -31,7 +31,8 @@ const ID = 'OR + VWAP 09:35@09:35';
 
 // Everything the desk runs, stated the same way in the run — so only the
 // thing a test changes can differ.
-const SPEC = { fill: 'desk', tf: '1m', feed: 'polygon', view: 'all',
+// view 'regular': the setup decides on yahoo, which has no premarket bars.
+const SPEC = { fill: 'desk', tf: '1m', feed: 'polygon', view: 'regular',
                account_equity: 25000, risk_usd: 100,
                rank_per_day: { metric: 'rvol', top_n: 2 },
                rules: { max_entries_per_day: 2, one_per_symbol_day: true, rth_entries: true, eod_close: true },
