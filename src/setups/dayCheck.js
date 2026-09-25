@@ -805,7 +805,13 @@ async function build(date = toETDate(Date.now()), deps = {}) {
       t.causes = [...new Set(t.accounts.flatMap(a => a.causes.map(c => c.kind)))];
     }
     const kinds = {};
-    for (const t of out.trades) for (const k of t.causes) kinds[k] = (kinds[k] || 0) + 1;
+    // SKIPPED BY BOTH is agreement, not a difference: the reasons are shown on
+    // the trade, and not counted against the day (2026-09-25: BYND, KGC made
+    // OR + VWAP read "2 KNOCK-ON · 1 BROKER" beside two identical verdicts).
+    for (const t of out.trades) {
+      if (t.status === 'skipped by both') continue;
+      for (const k of t.causes) kinds[k] = (kinds[k] || 0) + 1;
+    }
     out.verdict = {
       logicIdentical: out.logic ? out.logic.identical : null,
       exitsIdentical: out.logic && out.logic.exits ? out.logic.exits.identical : null,

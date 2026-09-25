@@ -287,6 +287,8 @@ describe('the first real day', () => {
     expect(t.accounts[0].why.join(' ')).toMatch(/backtest: .*cannot be sold short/);
     expect(t.accounts[0].why.join(' ')).toMatch(/live: .*not shortable/);
     expect(s.totals).toMatchObject({ backtest: 0, backtestOnly: 0, skippedBoth: 1 });
+    // …and agreement is not counted against the day.
+    expect(s.verdict.causes).toEqual({});
   });
 
   test('live took one the backtest skipped: said as that, not as "no trade"', async () => {
