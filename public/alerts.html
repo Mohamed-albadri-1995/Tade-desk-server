@@ -4184,23 +4184,25 @@ function dcLogic(s) {
   const kinds = Object.entries(V.causes || {}).map(([k, n]) => `${n} ${k}`).join(' · ');
   const E = L.exits;
   const entries = L.identical
-    ? `<div class="dc-logic ok">ENTRIES IDENTICAL — live's decision, replayed minute by minute on the `
-      + `final bars, took exactly the backtest's trades with the same scale-out legs `
-      + `(${esc(L.compared)} compared, ${esc(L.minutes)} minutes × ${esc(L.symbols)} stocks).</div>`
+    ? `<div class="dc-logic ok">SAME ENTRY RULES — given the FINAL bars, live's decision code takes `
+      + `the backtest's trades (${esc(L.compared)} compared, ${esc(L.minutes)} minutes × ${esc(L.symbols)} stocks). `
+      + `This tests the code, not what live did on the bars it actually read.</div>`
     : `<div class="dc-logic bad">ENTRIES DIFFER — replayed on the same final bars, live's decision `
       + `did not take the backtest's trades: `
       + esc((L.mismatches || []).map(m => `${m.symbol}: ${m.why}`).join(' · ')) + '</div>';
   const exits = !E ? '<div class="dc-logic warn">Exit check: not run.</div>'
     : (E.identical
-      ? `<div class="dc-logic ok">EXITS IDENTICAL — the live manager, replayed every minute on the final `
-        + `bars, banked each target leg and closed each trade on the backtest's bar for the backtest's `
-        + `reason (${esc(E.compared)} trade(s), ${esc(E.legsCompared)} target leg(s)).</div>`
+      ? `<div class="dc-logic ok">SAME EXIT RULES — given the FINAL bars, the live manager closes each `
+        + `of the backtest's trades on its bar for its reason (${esc(E.compared)} trade(s)).`
+        + (E.legsCompared ? ` Target legs banked on the same bars: ${esc(E.legsCompared)}.`
+          : ' No target was reached — the scale-out rule was NOT exercised today.') + '</div>'
       : `<div class="dc-logic bad">EXITS DIFFER — replayed on the same final bars, the live manager `
         + `did not exit as the backtest did: `
         + esc((E.mismatches || []).map(m => `${m.symbol}: ${m.why}`).join(' · ')) + '</div>');
   const tail = L.identical && (!E || E.identical)
-    ? `<div class="dc-set">${kinds ? `Differences today: ${esc(kinds)}.` : 'No differences today.'}`
-      + `${V.onlyDataAndExecution ? ' Every one is data or the fill.' : ''}</div>` : '';
+    ? `<div class="dc-set">${kinds ? `What live actually did still differed: ${esc(kinds)}.` : 'Live did exactly what the backtest did.'}`
+      + `${V.onlyDataAndExecution && kinds ? ' None traced to the code; DATA is inferred — the bars live read '
+        + 'at the time were not recorded.' : ''}</div>` : '';
   return entries + exits + tail;
 }
 function dcSetup(s) {
@@ -4274,8 +4276,9 @@ function paintDayCheck(d) {
     sum.textContent = `LOGIC DIFFERS in ${logicBad.join(', ')} — live's entries or exits on the final `
       + 'bars are not the backtest\'s. That is a bug to fix, not data. ' + sum.textContent;
   } else if (onlyDE) {
-    sum.textContent = 'Entries, scale-outs and exits identical in every setup — every difference '
-      + 'below is data latency or the fill. ' + sum.textContent;
+    sum.textContent = 'The code follows the backtest\'s rules on the final bars in every setup. '
+      + 'What live actually did is compared below — its differences are not proven to be data. '
+      + sum.textContent;
   }
   if (r.partial) {
     sum.className = 'hl-sum warn';
