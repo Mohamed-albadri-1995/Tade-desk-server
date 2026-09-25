@@ -2086,6 +2086,10 @@ function btDeskFields(spec){
     ? String(spec.rules.max_trades_per_day) : '';
   if (spec.rules && typeof spec.rules.one_per_symbol_day === 'boolean')
     out.btOnePerSym = spec.rules.one_per_symbol_day;
+  // The desk's session (09:30-15:50 entries, closed by 15:50) — the rules the
+  // live decision runs under.
+  if (spec.rules && typeof spec.rules.eod_close === 'boolean')
+    out.btRules = !!(spec.rules.eod_close && spec.rules.rth_entries);
   if(spec.universe && spec.universe.kind === 'tools') out.btUni = spec.universe.register || 'R1';
   return out;
 }

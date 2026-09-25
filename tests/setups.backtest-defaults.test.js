@@ -202,6 +202,13 @@ describe('the execution settings', () => {
     const { body } = await get(`?setup=${encodeURIComponent(ID)}`);
     expect(body.spec.rules.one_per_symbol_day).toBe(true);
   });
+
+  // The flattener's clock, which chart/decide.py decides under too. A run
+  // without it holds trades overnight that live closes at 15:50.
+  test('and the desk\'s session: entries 09:30-15:50, all closed by 15:50', async () => {
+    const { body } = await get(`?setup=${encodeURIComponent(ID)}`);
+    expect(body.spec.rules).toMatchObject({ rth_entries: true, eod_close: true });
+  });
 });
 
 describe('the ranking', () => {

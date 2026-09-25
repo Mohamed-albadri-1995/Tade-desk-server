@@ -81,6 +81,15 @@ _ET = 'America/New_York'
 # pass: 478 → 96 ms per symbol, identical output (chart/tests/logic_audit86).
 _WORKERS = 8
 
+# THE DESK'S SESSION, which is not a setting: src/alerts/flattener.js closes
+# everything at 15:50 every day, and nothing is entered outside 09:30-15:50.
+# The backtest form applies the same two rules ("prop-firm rules", on by
+# default). Without them the decision's own replay of yesterday kept a trade
+# that never reached its stop or target OPEN overnight — the engine holds one
+# position — so today's signal on that name never fired live while the
+# backtest, which closed it at 15:50, took it (chart/tests/logic_audit91).
+DESK_RULES = {'rth_entries': True, 'eod_close': True}
+
 
 def _hhmm(ts_seconds: int) -> str:
     return (pd.Timestamp(int(ts_seconds), unit='s', tz='UTC')
@@ -153,7 +162,8 @@ def evaluate_symbol(strategies: list, symbol: str, date: str, tf: str,
             # the session by the rth_entries rule, which is a clock gate and
             # does not care which bars are in the frame.
             res = strat.evaluate(s, symbol=symbol, tf=tf, days=days,
-                                 feed=feed, view=view, asof=date, fill=fill)
+                                 feed=feed, view=view, asof=date, fill=fill,
+                                 rules=DESK_RULES)
         except Exception as e:                       # noqa: BLE001 — reported, not raised
             out.append({'symbol': symbol, 'strategy': s.get('name'),
                         'error': str(e)})

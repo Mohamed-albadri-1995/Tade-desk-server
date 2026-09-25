@@ -158,8 +158,13 @@ router.get('/backtest-defaults', async (req, res) => {
        * maxTradesPerDay as `max_entries_per_day`, which the engine applies
        * PER STOCK: the backtest re-entered names live never re-enters, and
        * took seven trades on a day live stops at three (#367, 2026-09-11).
+       *
+       * AND THE DESK'S SESSION: entries 09:30-15:50, everything closed by
+       * 15:50 — the flattener's clock, and what chart/decide.py decides
+       * under (DESK_RULES). A run without it holds trades overnight.
        */
-      rules: { one_per_symbol_day: true, max_trades_per_day: s.maxTradesPerDay || null },
+      rules: { rth_entries: true, eod_close: true,
+        one_per_symbol_day: true, max_trades_per_day: s.maxTradesPerDay || null },
     };
   };
 

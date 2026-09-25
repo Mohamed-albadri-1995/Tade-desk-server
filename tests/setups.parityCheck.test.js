@@ -34,7 +34,7 @@ const ID = 'OR + VWAP 09:35@09:35';
 const SPEC = { fill: 'desk', tf: '1m', feed: 'polygon', view: 'all',
                account_equity: 25000, risk_usd: 100,
                rank_per_day: { metric: 'rvol', top_n: 2 },
-               rules: { max_entries_per_day: 2, one_per_symbol_day: true },
+               rules: { max_entries_per_day: 2, one_per_symbol_day: true, rth_entries: true, eod_close: true },
                universe: { kind: 'tools', tools: ['T11'] } };
 const run = (over = {}) => ({ ok: true, backtest: {
   id: 42, name: 'bt', created_at: 1, spec: { ...SPEC, ...over },

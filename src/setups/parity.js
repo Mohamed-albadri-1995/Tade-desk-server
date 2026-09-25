@@ -297,6 +297,15 @@ function compare({ setup, spec, strategy } = {}) {
   rows.push(row('one entry per stock per day', 'yes',
     btRules.one_per_symbol_day ? 'yes' : 'no',
     'the desk never enters the same stock twice in a day'));
+  /*
+   * THE SESSION. Live always: nothing is entered outside 09:30-15:50 and the
+   * flattener closes everything at 15:50, and the decision is taken under the
+   * same two rules (chart/decide.py DESK_RULES). A backtest without them holds
+   * trades overnight and books exits live never gets.
+   */
+  rows.push(row('entries 09:30–15:50, all closed by 15:50', 'yes',
+    (btRules.rth_entries && btRules.eod_close) ? 'yes' : 'no',
+    'the "prop-firm rules" box in the backtest form'));
 
   // THE UNIVERSE the signals are drawn from.
   const btUni = bt.universe || {};

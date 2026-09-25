@@ -104,6 +104,8 @@ PARTS = [
     ('logic_audit87.py',    'the Alpaca pair the deploy writes is the one qp uses'),
     ('logic_audit88.py',    'min_stop_pct refuses a stop too close to pay its costs, backtest and live'),
     ('logic_audit89.py',    'the backtest applies the desk\'s limits: one per stock a day, trades per day'),
+    ('logic_audit90.py',    'the live decision replayed minute by minute takes the backtest\'s trades'),
+    ('logic_audit91.py',    'the live decision closes yesterday at 15:50 and ignores premarket, as the desk does'),
     ('py39_guard.py',       'nothing needs a Python newer than the box (3.9)'),
     ('../exports/or_vwap_0935.py', 'standalone 09:35 reference implementation selftest'),
     ('e2e_expr.py',         'end-to-end through evaluate() with a stub feed'),

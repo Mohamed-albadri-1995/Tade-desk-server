@@ -46,7 +46,7 @@ const SPEC_349 = {
   rank_per_day: { metric: 'vwap_extension', top_n: 3 },
   universe: { kind: 'tools', register: 'R1', tools: ['T2'] },
   // The desk's latch, which every run from the desk's defaults carries now.
-  rules: { one_per_symbol_day: true },
+  rules: { rth_entries: true, eod_close: true, one_per_symbol_day: true },
 };
 
 const find = (res, what) => res.rows.find(r => r.what === what);
@@ -789,5 +789,19 @@ describe('the desk limits in the comparison', () => {
     const res = parity.compare({ setup: SETUP, strategy: STRATEGY,
       spec: { ...SPEC_349, rank_per_day: null, rules: { one_per_symbol_day: true, max_trades_per_day: 3 } } });
     expect(find(res, 'trades per day (most)').backtest).toBe(3);
+  });
+
+  // Live closes everything at 15:50 and decides under the same rules
+  // (chart/decide.py DESK_RULES); a run without them holds trades overnight.
+  test('a run without the session rules is a difference', () => {
+    const res = parity.compare({ setup: SETUP, strategy: STRATEGY, spec: { ...SPEC_349, rules: {} } });
+    expect(find(res, 'entries 09:30–15:50, all closed by 15:50'))
+      .toMatchObject({ live: 'yes', backtest: 'no', status: 'differ' });
+  });
+
+  test('a run with them matches', () => {
+    const res = parity.compare({ setup: SETUP, strategy: STRATEGY,
+      spec: { ...SPEC_349, rules: { rth_entries: true, eod_close: true } } });
+    expect(find(res, 'entries 09:30–15:50, all closed by 15:50').status).toBe('match');
   });
 });
